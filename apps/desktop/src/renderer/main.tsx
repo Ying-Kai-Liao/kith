@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client'
 import './styles/theme.css'
 import { ChatWindow } from './views/ChatWindow'
+import { WebWindow } from './web/WebWindow'
 import { PairingWindow } from './views/PairingWindow'
 import { SettingsWindow } from './views/settings/SettingsView'
 import { isSettingsPage } from '@shared/settings-pages'
@@ -22,7 +23,8 @@ window.addEventListener('error', (e) => { if (e.error != null) report(e.error, '
 window.addEventListener('unhandledrejection', (e) => report(e.reason, 'unhandledrejection'))
 
 migrateLegacyStorage(localStorage)
-const page = new URLSearchParams(location.search).get('window') ?? 'chat'
+// The browser build is one member-only window (src/renderer/web); `?window=` selects nothing there.
+const page = window.kith.platform === 'web' ? 'web' : (new URLSearchParams(location.search).get('window') ?? 'chat')
 document.title = window.kith.appName
 document.documentElement.dataset.platform = window.kith.platform
 document.documentElement.dataset.window = page
@@ -49,7 +51,7 @@ if (page === 'island') {
   const first = new URLSearchParams(location.search).get('page')
   root.render(
     <AppContext.Provider value={app}>
-      {page === 'pairing' ? <PairingWindow /> : page === 'settings' ? <SettingsWindow initial={isSettingsPage(first) ? first : 'account'} /> : <ChatWindow />}
+      {page === 'web' ? <WebWindow /> : page === 'pairing' ? <PairingWindow /> : page === 'settings' ? <SettingsWindow initial={isSettingsPage(first) ? first : 'account'} /> : <ChatWindow />}
     </AppContext.Provider>,
   )
 }

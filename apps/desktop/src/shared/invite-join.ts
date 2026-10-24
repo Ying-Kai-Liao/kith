@@ -69,11 +69,14 @@ export async function runJoin(link: InviteLink, deps: JoinDeps, report: (s: Join
   }
 
   report(state('joining', link.computerId))
-  let computerId = link.computerId
+  const computerId = link.computerId
   try {
     // Only h1 leaves for the cloud; the token itself stays here and goes to the Mac.
     const joined = await deps.accept(link.inviteId, await inviteProof(link.token))
-    computerId = joined.computerId || computerId
+    // The link's `c` is the only computer this token may go to: the cloud's answer can't steer it elsewhere.
+    if (joined.computerId && joined.computerId !== link.computerId) {
+      return end(failed("This invite doesn't match the computer in its link. Ask for a new one.", link.computerId))
+    }
   } catch (e) {
     return end(failed(acceptText(e as CloudFailureLike), link.computerId))
   }

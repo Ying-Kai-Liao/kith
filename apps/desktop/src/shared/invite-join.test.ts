@@ -36,6 +36,21 @@ test('joins in order and proves the token to the Mac, sending the cloud only h1'
   assert.deepEqual(f.sent.kept, [`cmp_1:${link.token}`])
 })
 
+test('an accept answer naming another computer fails the join before the token goes anywhere', async () => {
+  const f = fake({ accept: async () => ({ computerId: 'cmp_evil' }) })
+  const end = await f.run()
+  assert.equal(end.step, 'failed')
+  assert.equal(end.computerId, 'cmp_1')
+  assert.deepEqual(f.sent.kept, [])
+  assert.deepEqual(f.sent.host, [])
+  assert.deepEqual(f.log, [])
+})
+
+test('an accept answer without a computer id uses the link\'s', async () => {
+  const f = fake({ accept: async () => ({ computerId: '' }) })
+  assert.equal((await f.run()).computerId, 'cmp_1')
+})
+
 test('signs in first when signed out', async () => {
   const f = fake({ signedIn: () => false })
   assert.equal((await f.run()).step, 'done')

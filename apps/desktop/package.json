@@ -14,11 +14,13 @@
     "dev": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/dev.mjs",
     "build": "electron-vite build",
     "build:demo": "vite build --config vite.demo.config.ts && mv ../../web/public/demo/desktop/index.html ../../web/public/demo/desktop.html",
+    "build:web": "vite build --config vite.web.config.ts",
     "tokens": "vite --config vite.tokens.config.ts",
     "components": "vite --config vite.tokens.config.ts --open /components.html",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test --experimental-strip-types src/shared/*.test.ts src/shared/relay-core/*.test.ts src/renderer/lib/*.test.ts src/renderer/components/kith/*.test.ts src/renderer/views/thread/*.test.ts src/renderer/views/call/*.test.ts",
+    "test": "node --test --experimental-strip-types src/shared/*.test.ts src/shared/relay-core/*.test.ts src/renderer/web/*.test.ts src/renderer/lib/*.test.ts src/renderer/components/kith/*.test.ts src/renderer/views/thread/*.test.ts src/renderer/views/call/*.test.ts",
     "test:browser": "node tools/browser-vectors.mjs",
+    "test:web": "node tools/web-e2e.mjs && node tools/web-confirm.mjs",
     "e2e:relay": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/relay-e2e.ts",
     "e2e:relay:host": "node --experimental-strip-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/relay-e2e-host.ts",
     "icons": "swift tools/export-symbols.swift",
@@ -30,6 +32,7 @@
     "dist:win:main": "node tools/account-config.mjs main && node tools/native-host.mjs main && electron-vite build && electron-builder --win"
   },
   "devDependencies": {
+    "@clerk/clerk-js": "6.40.1",
     "@types/node": "^24.0.0",
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19.3.0",

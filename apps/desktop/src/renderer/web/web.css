@@ -1,0 +1,249 @@
+/* The web client's member screens. Phone width first (375px, no horizontal scroll); a second column from 720px up. */
+
+.web-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  width: 100%;
+  background: var(--background);
+  color: var(--text);
+  padding-bottom: env(safe-area-inset-bottom);
+  user-select: text;
+}
+
+.web-center {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: var(--background);
+}
+.web-shell > .web-center {
+  min-height: 0;
+  flex: 1;
+}
+.web-empty {
+  height: 100%;
+}
+
+.web-card {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.web-title {
+  margin: 4px 0 0;
+  font-size: calc(22px * var(--scale));
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.web-title-small {
+  font-size: var(--text-callout);
+  font-weight: 600;
+}
+.web-text {
+  margin: 0;
+  font-size: var(--text-callout);
+  line-height: 1.45;
+  color: var(--secondary);
+  text-wrap: pretty;
+}
+.web-fine {
+  margin: 0;
+  font-size: var(--text-footnote);
+  line-height: 1.4;
+  color: var(--tertiary);
+  text-wrap: pretty;
+}
+.web-error {
+  margin: 0;
+  font-size: var(--text-callout);
+  color: var(--danger);
+}
+.web-buttons {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 6px 0;
+}
+.web-wide {
+  width: 100%;
+  min-height: 44px;
+}
+.web-row-center {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.web-top {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: calc(4px + env(safe-area-inset-top)) 12px 4px 16px;
+  border-bottom: 1px solid var(--kith-line, var(--border));
+}
+.web-brand {
+  font-weight: 650;
+  font-size: calc(17px * var(--scale));
+}
+.web-back,
+.web-account,
+.web-new,
+.web-chat {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.web-back {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin-left: -8px;
+  padding: 0 8px;
+  color: var(--accent);
+}
+.web-account {
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 22px;
+}
+.web-menu {
+  position: absolute;
+  top: 100%;
+  right: 12px;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  min-width: 220px;
+  max-width: calc(100vw - 24px);
+  background: var(--panel, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-l, 12px);
+  box-shadow: var(--shadow-l);
+}
+
+.web-main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.web-list {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 8px 8px 16px;
+}
+.web-thread {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+}
+/* Phone: one pane at a time. */
+.web-main[data-view='thread'] .web-list,
+.web-main[data-view='list'] .web-thread {
+  display: none;
+}
+@media (min-width: 720px) {
+  .web-main .web-list {
+    display: block;
+    flex: none;
+    width: 320px;
+    border-right: 1px solid var(--kith-line, var(--border));
+  }
+  .web-main[data-view='list'] .web-thread {
+    display: block;
+  }
+  .web-main .web-thread {
+    flex: 1;
+  }
+  .web-back {
+    display: none;
+  }
+}
+
+.web-pad {
+  padding: 12px 8px;
+}
+.web-computer {
+  margin-bottom: 12px;
+}
+.web-computer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 4px;
+}
+.web-computer-name {
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  color: var(--secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.web-new {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  padding: 0 8px;
+  color: var(--accent);
+  font-size: var(--text-footnote);
+}
+.web-chat {
+  display: block;
+  width: 100%;
+  min-height: 56px;
+  padding: 0;
+  text-align: left;
+  border-radius: 10px;
+}
+.web-chat:hover,
+.web-chat.selected {
+  background: var(--cs-select, var(--hover));
+}
+.web-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 4px 8px 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: var(--text-footnote);
+  line-height: 1.4;
+}
+.web-notice > span {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.web-notice.error,
+.web-notice.removed {
+  color: var(--danger);
+}
+.web-notice.signIn {
+  color: var(--text);
+}

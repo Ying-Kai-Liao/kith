@@ -117,7 +117,7 @@ export class CloudModel extends Observable {
       // Signed in: make this computer known to the account, then list its computers.
       void (async () => {
         try {
-          await request('POST', 'v1/devices', { name: await deviceName(), platform: { darwin: 'macos', linux: 'linux', win32: 'windows' }[window.kith.platform] }, true)
+          await request('POST', 'v1/devices', { name: await deviceName(), platform: { darwin: 'macos', linux: 'linux', win32: 'windows', web: 'web' }[window.kith.platform] }, true)
         } catch (error) {
           this.fail(error)
         }
@@ -289,5 +289,5 @@ export class CloudModel extends Observable {
 
 /** This computer's name for the account's device list. */
 async function deviceName() {
-  return window.kith.computerName || { darwin: 'Mac', linux: 'Linux', win32: 'Windows' }[window.kith.platform]
+  return window.kith.computerName || { darwin: 'Mac', linux: 'Linux', win32: 'Windows', web: 'Browser' }[window.kith.platform]
 }

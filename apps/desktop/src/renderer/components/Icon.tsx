@@ -1,5 +1,5 @@
-import { useSyncExternalStore, type CSSProperties } from 'react'
-import { fallbackSvg } from './icon-fallbacks'
+import { createElement, useSyncExternalStore, type CSSProperties } from 'react'
+import { fallbackShapes } from './icon-fallbacks'
 
 export type Weight = 'light' | 'regular' | 'medium' | 'semibold' | 'bold' | 'black'
 
@@ -93,7 +93,9 @@ export function Icon({ name, size, weight = 'regular', color, style, className, 
       strokeLinecap="round"
       strokeLinejoin="round"
       style={{ width: `calc(1.2 * ${unit})`, height: `calc(1.2 * ${unit})`, flex: 'none', ...style }}
-      dangerouslySetInnerHTML={{ __html: (title ? `<title>${title}</title>` : '') + fallbackSvg(name) }}
-    />
+    >
+      {title ? <title>{title}</title> : null}
+      {fallbackShapes(name).map(({ tag, attrs }, i) => createElement(tag, { key: i, ...attrs }))}
+    </svg>
   )
 }

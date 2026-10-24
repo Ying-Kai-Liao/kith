@@ -16,5 +16,5 @@
     "types": ["node"],
     "paths": { "@shared/*": ["./src/shared/*"] }
   },
-  "include": ["src", "electron.vite.config.ts", "vite.demo.config.ts", "vite.tokens.config.ts"]
+  "include": ["src", "electron.vite.config.ts", "vite.demo.config.ts", "vite.web.config.ts","vite.tokens.config.ts"]
 }

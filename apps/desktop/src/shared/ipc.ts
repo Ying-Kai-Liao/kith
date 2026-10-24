@@ -132,7 +132,8 @@ export type SpeechEvent =
   | { type: 'error'; message: string }
 
 export interface KithBridge {
-  platform: 'darwin' | 'linux' | 'win32'
+  /** `web`: the member-only browser build (src/renderer/web). */
+  platform: 'darwin' | 'linux' | 'win32' | 'web'
   appName: string
   appScheme: string
   hostPort: number

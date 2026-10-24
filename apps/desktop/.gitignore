@@ -1,6 +1,8 @@
 node_modules/
 out/
 dist/
+# The web client build (npm run build:web).
+dist-web/
 # SF Symbols masks: generated on macOS at build time (npm run icons), never committed.
 src/renderer/public/symbols/
 native/speech-macos/.build/

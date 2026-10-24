@@ -1,0 +1,110 @@
+name: Web deploy
+
+# Member web client -> assets-only Worker kith-web-dev (setup steps: apps/desktop/web-host/README.md).
+# The Cloudflare token exists only as an environment secret of `kith-web-dev`; nothing else ever holds it.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/desktop/**'
+      - '.github/workflows/web-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: web-deploy
+  cancel-in-progress: false
+
+jobs:
+  # No secrets, no environment: builds, checks the headers and dry-runs the deploy. Always safe to run.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+      - name: Build, check headers, dry-run deploy
+        run: sh web-host/check.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dist-web
+          path: apps/desktop/dist-web
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    needs: build
+    # Only main; a manual run from another branch builds but never deploys.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: kith-web-dev
+    permissions:
+      contents: write # the rolling `web-dev` release that carries the hash manifest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check secrets
+        id: gate
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::notice::CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not set on the kith-web-dev environment; skipping deploy."
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.gate.outputs.go == 'true'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: steps.gate.outputs.go == 'true'
+        with:
+          node-version: 22
+      # The exact files the build job checked, not a rebuild.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        if: steps.gate.outputs.go == 'true'
+        with:
+          name: dist-web
+          path: apps/desktop/dist-web
+      - name: Hash manifest
+        if: steps.gate.outputs.go == 'true'
+        working-directory: apps/desktop/dist-web
+        run: |
+          # sha256 of every served file (including _headers); published outside Cloudflare so a swapped file shows.
+          {
+            printf '{"commit":"%s","files":{' "$GITHUB_SHA"
+            find . -type f ! -name manifest.json | sort | sed 's|^\./||' | while read -r f; do
+              printf '"%s":"%s",' "$f" "$(sha256sum "$f" | cut -d' ' -f1)"
+            done | sed 's/,$//'
+            printf '}}\n'
+          } > "$RUNNER_TEMP/manifest.json"
+          python3 -m json.tool "$RUNNER_TEMP/manifest.json" > /dev/null
+      - name: Deploy
+        if: steps.gate.outputs.go == 'true'
+        working-directory: apps/desktop
+        run: npx --yes wrangler@4.152.0 deploy --config web-host/wrangler.jsonc
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: steps.gate.outputs.go == 'true'
+        with:
+          name: web-manifest
+          path: ${{ runner.temp }}/manifest.json
+      # One rolling prerelease: each deploy replaces it, the notes carry the commit.
+      - name: Publish manifest to the web-dev release
+        if: steps.gate.outputs.go == 'true'
+        run: |
+          gh release delete web-dev --cleanup-tag --yes --repo "$GITHUB_REPOSITORY" || true
+          gh release create web-dev "$RUNNER_TEMP/manifest.json" --prerelease --target "$GITHUB_SHA" \
+            --title "Web client (dev) $GITHUB_SHA" \
+            --notes "kith-web-dev deployed from commit $GITHUB_SHA. manifest.json holds the sha256 of every served file." \
+            --repo "$GITHUB_REPOSITORY"

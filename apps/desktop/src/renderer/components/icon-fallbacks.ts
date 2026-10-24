@@ -181,15 +181,28 @@ const map: Record<string, IconNode> = {
   'xmark.circle.fill': L.CircleX,
 }
 
-const cache = new Map<string, string>()
+/** `stroke-linecap` → `strokeLinecap`: React's names for SVG attributes. */
+const camel = (attr: string) => attr.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
 
-export function fallbackSvg(name: string): string {
+export interface FallbackShape {
+  tag: string
+  attrs: Record<string, string | number>
+}
+
+const cache = new Map<string, FallbackShape[]>()
+
+/**
+ * The Lucide shapes for a symbol, as data. Icon.tsx renders them as React elements: no markup string, no innerHTML
+ * (the web client runs with `require-trusted-types-for 'script'`).
+ */
+export function fallbackShapes(name: string): FallbackShape[] {
   const hit = cache.get(name)
-  if (hit !== undefined) return hit
+  if (hit) return hit
   const node = map[name] ?? L.Circle
-  const svg = node
-    .map(([tag, attrs]) => `<${tag} ${Object.entries(attrs).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}="${v}"`).join(' ')}/>`)
-    .join('')
-  cache.set(name, svg)
-  return svg
+  const shapes = node.map(([tag, attrs]) => ({
+    tag,
+    attrs: Object.fromEntries(Object.entries(attrs).filter(([, v]) => v !== undefined).map(([k, v]) => [camel(k), v as string | number])),
+  }))
+  cache.set(name, shapes)
+  return shapes
 }
