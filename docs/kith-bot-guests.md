@@ -341,7 +341,7 @@ createBotInvite {
 } -> {
   botId, inviteId, expiresAt,
   link: "https://<cloud>/b/<computerId>/<inviteId>#t=<token>&k=<hostSignKey>",
-  kithLink: "kith://bot?c=<computerId>&i=<inviteId>&t=<token>&k=<hostSignKey>&r=<cloud>",
+  kithLink: "<scheme>://bot?c=<computerId>&i=<inviteId>&t=<token>&k=<hostSignKey>&r=<cloud>",
   share: "<the share text, 5.2>"
 }
 ```
@@ -375,7 +375,8 @@ https://<cloud-host>/b/<computerId>/<inviteId>#t=<token>&k=<hostSignKey>
 ```
 
 - `<cloud-host>` is the host's configured cloud (`cloud::url`), so a self-hosted cloud works.
-- `kith://bot?...` is the same data for an app or a tool that prefers a scheme (adds `r=<cloud url>`).
+- `<scheme>://bot?...` (`kith://`, or `kith-dev://` on a dev build) is the same data for an app or a tool that prefers a scheme (adds `r=<cloud url>`).
+- Person invites (`createInvite`) return `appLink` (env scheme), `webLink` (`<web origin>/join#c=&i=&t=`, only when the build has a web origin; `KITH_WEB_ORIGIN` overrides it locally) and `link` (= `appLink`). A web device asking for the owner's account is refused by the host.
 - `kith join` accepts either form.
 
 Share text (made by the app from `createBotInvite.share`, so wording lives in one place, the host):

@@ -240,7 +240,17 @@ async fn create_invite_makes_the_person_the_grants_and_the_cloud_record() {
         .unwrap();
     assert_eq!(made["personId"], "sam-lee");
     let link = made["link"].as_str().unwrap();
-    let query = link.strip_prefix("kith://invite?").unwrap();
+    let scheme = crate::environment::Environment::current().url_scheme();
+    let query = link.strip_prefix(&format!("{scheme}://invite?")).unwrap();
+    assert_eq!(made["appLink"], made["link"]);
+    match made["webLink"].as_str() {
+        Some(web) => {
+            let frag = web.split_once("/join#").unwrap().1;
+            assert!(frag.contains("t=") && !frag.contains("r="), "{web}");
+            assert!(!web.contains('?'), "secrets belong in the fragment: {web}");
+        }
+        None => assert!(crate::environment::Environment::current().web_origin().is_none()),
+    }
     let part = |k: &str| query.split('&').find_map(|p| p.strip_prefix(&format!("{k}="))).unwrap().to_owned();
     assert_eq!(part("c"), r.hub.identity.computer_id());
     assert_eq!(part("i"), made["inviteId"].as_str().unwrap());

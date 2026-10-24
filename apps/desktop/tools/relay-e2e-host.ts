@@ -212,8 +212,11 @@ async function main() {
 async function invitee(computerId: string, signKey: string) {
   console.log('\ninvitee:')
   const made = await loopback('createInvite', { name: 'Mia', agents: { house: 'member' } })
-  const link = parseInviteLink(made.link, ['kith'])
+  // A dev host hands out the env scheme (kith-dev://), a main one kith://.
+  const link = parseInviteLink(made.appLink, ['kith', 'kith-dev'])
   check(link && link.computerId === computerId, 'the owner made an invite for the real host')
+  check(made.link === made.appLink, 'link stays the app link')
+  check(typeof made.webLink !== 'string' || /^https?:\/\/[^#]+#/.test(made.webLink), 'webLink keeps the secret in the fragment')
   if (!link) return
 
   const token = await clerkToken('user_inviteee2e')

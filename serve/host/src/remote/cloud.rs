@@ -439,6 +439,13 @@ fn requester(hub: &Hub, owner_uid: Option<&str>, user_id: Option<&str>) -> Resul
     }
 }
 
+/// A web browser is only ever an invitee's device: the owner's own account never gets one (a browser profile is a
+/// weaker place for the owner's keys than an app). The platform is the device's own claim, so this is a policy, not
+/// proof; a missing platform (older requests) counts as native.
+fn is_web(platform: &str) -> bool {
+    platform.eq_ignore_ascii_case("web")
+}
+
 /// Whether a request is the owner's (its code is compared by the owner, so it counts against the hourly budget).
 fn is_owner_request(hub: &Hub, owner_uid: Option<&str>, user_id: Option<&str>) -> bool {
     matches!(requester(hub, owner_uid, user_id), Ok(None))
@@ -514,6 +521,9 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
                     // One unrevealed request per device at a time; this one waits its turn.
                 } else if let Err(why) = requester(hub, owner_uid, s.user_id.as_deref()) {
                     tracing::warn!(request_id = s.request_id, why, "denying an access request from an unknown account");
+                    next.push(Next::Deny(s.request_id.clone()));
+                } else if is_owner_request(hub, owner_uid, s.user_id.as_deref()) && is_web(&s.platform) {
+                    tracing::warn!(request_id = s.request_id, "denying a web device's request for the owner's account");
                     next.push(Next::Deny(s.request_id.clone()));
                 } else if is_owner_request(hub, owner_uid, s.user_id.as_deref()) && budget.len() >= SAS_NONCES_PER_HOUR
                 {
@@ -637,6 +647,12 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
         hub.cloud.requests.locked().iter().find(|r| r.id == id).cloned().ok_or_else(|| anyhow!("unknown request"))?;
     if approve && r.code.is_none() {
         return Err(Conflict("The device hasn't shown its code yet.").into());
+    }
+    if approve && r.person.is_none() && is_web(&r.platform) {
+        drop(decision(hub, &base, id, false).await);
+        hub.cloud.requests.locked().retain(|x| x.id != id);
+        emit_requests(hub);
+        bail!("A web browser can't be the owner's device.");
     }
     if approve
         && let Some(person) = &r.person
@@ -1010,5 +1026,37 @@ mod tests {
         let posts = fake.posts.lock().unwrap();
         assert!(posts.iter().any(|(p, _)| p.contains("mine")), "the owner's own request still gets its code");
         assert_eq!(posts.len(), 9, "members' requests are not rationed: their code is never compared");
+    }
+
+    #[tokio::test]
+    async fn web_devices_are_refused_for_the_owner_but_not_members() {
+        for mode in [Approval::Auto, Approval::Code] {
+            let hub = temp_hub();
+            let fake = Arc::new(FakeCloud::default());
+            let base = fake_cloud(fake.clone()).await;
+            hub.store.kv_set("test_cloud_url", &base).unwrap();
+            set_approval(&hub, mode).unwrap();
+            hub.store
+                .add_membership(&crate::store::Membership {
+                    membership_id: "mem_m".into(),
+                    user_id: "user_m".into(),
+                    person_id: "sam".into(),
+                    invite_id: "inv".into(),
+                    created_at: now_ms(),
+                })
+                .unwrap();
+            let request = |id: &str, user: &str, platform: &str| json!({"requestId": id, "deviceKey": b64(&crypto::random::<32>()), "commit": b64(&[0u8; 32]), "userId": user, "platform": platform});
+            *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_o", "email": "o@example.com"}, "grants": [], "requests": [
+                request("owner_web", "user_o", "web"), request("owner_ios", "user_o", "ios"),
+                request("member_web", "user_m", "web"), request("owner_none", "user_o", "")]});
+            pull(&hub, &base).await.unwrap();
+            let posts = fake.posts.lock().unwrap();
+            assert!(posts.iter().any(|(p, b)| p.ends_with("owner_web/decision") && b["decision"] == "deny"));
+            assert!(!posts.iter().any(|(p, _)| p.contains("owner_web") && !p.ends_with("/decision")));
+            for ok in ["owner_ios", "member_web", "owner_none"] {
+                assert!(!posts.iter().any(|(p, b)| p.contains(ok) && b["decision"] == "deny"), "{ok} is not denied");
+                assert!(posts.iter().any(|(p, _)| p.contains(ok)), "{ok} still gets its nonce");
+            }
+        }
     }
 }

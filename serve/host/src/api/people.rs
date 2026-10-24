@@ -9,6 +9,7 @@ use super::devices::{Caller, NotAllowed, Principal, principal};
 use super::{roles, str_arg};
 use crate::LockExt;
 use crate::agent::bot::Cmd;
+use crate::environment::Environment;
 use crate::hub::Hub;
 use crate::remote::{account, cloud, crypto};
 use crate::store::{Invite, PersonRow, now_ms};
@@ -227,8 +228,12 @@ async fn make_invite(
         }
     }
     hub.store.set_person_made(&person, &made)?;
-    let link = format!("kith://invite?c={}&i={}&t={}", hub.identity.computer_id(), invite_id, token);
-    Ok(json!({"inviteId": invite_id, "link": link, "expiresAt": invite.expires_at, "personId": person}))
+    let (cid, env) = (hub.identity.computer_id(), Environment::current());
+    let app_link = format!("{}://invite?c={cid}&i={invite_id}&t={token}", env.url_scheme());
+    // The secret rides in the fragment so it never reaches the web host's logs; no `r=` (the page knows its cloud).
+    let web_link = env.web_origin().map(|o| format!("{o}/join#c={cid}&i={invite_id}&t={token}"));
+    Ok(json!({"inviteId": invite_id, "link": app_link, "appLink": app_link, "webLink": web_link,
+        "expiresAt": invite.expires_at, "personId": person}))
 }
 
 async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {

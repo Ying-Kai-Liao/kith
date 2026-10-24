@@ -1,4 +1,4 @@
-//! The invite link (section 5.2): an https URL with the secrets in the `#` fragment, or the same data as `kith://bot?...`.
+//! The invite link (section 5.2): an https URL with the secrets in the `#` fragment, or the same data as `kith://bot?...` (`kith-dev://` on a dev build).
 //! The host's signing key travels in the link, so the client can pin it: `computerId` must be the hash of `k`.
 
 use kith_wire::crypto::{computer_id, unb64_n};
@@ -45,7 +45,7 @@ fn cloud_base(u: &Url) -> Result<String, CliError> {
 pub fn parse(link: &str) -> Result<Invite, CliError> {
     let link = link.trim().trim_matches(|c| c == '\'' || c == '"');
     let url = Url::parse(link).map_err(|_| bad("it isn't a URL"))?;
-    let (cloud, computer_id_arg, invite_id, token, k) = if url.scheme() == "kith" {
+    let (cloud, computer_id_arg, invite_id, token, k) = if matches!(url.scheme(), "kith" | "kith-dev") {
         let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
         let get = |key: &str| q.get(key).cloned().ok_or_else(|| bad(&format!("`{key}` is missing")));
         let r = Url::parse(&get("r")?).map_err(|_| bad("`r` isn't a URL"))?;
@@ -124,6 +124,13 @@ mod tests {
         let inv = parse(&link).unwrap();
         assert_eq!(inv.cloud, "https://cloud.example.com");
         assert_eq!(inv.token, "tok");
+    }
+
+    #[test]
+    fn kith_dev_form() {
+        let link =
+            format!("kith-dev://bot?c={}&i=bi_abc123&t=tok&k={}&r=https%3A%2F%2Fcloud.example.com", cid(), b64(&KEY));
+        assert_eq!(parse(&link).unwrap().token, "tok");
     }
 
     #[test]
