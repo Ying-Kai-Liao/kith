@@ -239,10 +239,11 @@ async fn create_invite_makes_the_person_the_grants_and_the_cloud_record() {
         .await
         .unwrap();
     assert_eq!(made["personId"], "sam-lee");
-    let link = made["link"].as_str().unwrap();
+    let link = made["appLink"].as_str().unwrap();
     let scheme = crate::environment::Environment::current().url_scheme();
     let query = link.strip_prefix(&format!("{scheme}://invite?")).unwrap();
-    assert_eq!(made["appLink"], made["link"]);
+    // The shared link is the web one whenever the build has a web origin.
+    assert_eq!(made["link"], if made["webLink"].is_null() { made["appLink"].clone() } else { made["webLink"].clone() });
     match made["webLink"].as_str() {
         Some(web) => {
             let frag = web.split_once("/join#").unwrap().1;

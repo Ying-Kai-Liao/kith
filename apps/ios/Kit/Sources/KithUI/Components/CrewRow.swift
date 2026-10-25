@@ -41,9 +41,11 @@ public struct CrewRowModel: Identifiable, Equatable, Sendable {
     /// Unread messages and nothing waiting on you: a bold name and a small dot instead of a badge.
     public var unread: Bool
     public var state: BotAvatarState
+    /// A bot from outside's chat: "from Grok · Sam's Rex", under the name, so it never reads as your own chat.
+    public var tag: String?
 
     public init(id: String, shape: Shape, name: String, withPerson: String? = nil, trailing: String? = nil,
-                status: String? = nil, count: Int = 0, unread: Bool = false, state: BotAvatarState = .idle) {
+                status: String? = nil, count: Int = 0, unread: Bool = false, state: BotAvatarState = .idle, tag: String? = nil) {
         self.id = id
         self.shape = shape
         self.name = name
@@ -53,6 +55,7 @@ public struct CrewRowModel: Identifiable, Equatable, Sendable {
         self.count = count
         self.unread = unread
         self.state = state
+        self.tag = tag
     }
 }
 
@@ -85,6 +88,7 @@ public struct CrewRow: View {
                     if showsDot { Circle().fill(Palette.ink).frame(width: 8, height: 8) }
                     CountBadge(model.count)
                 }
+                if let tag = model.tag { OriginTag(.bot, label: tag) }
                 if let status = model.status, !status.isEmpty {
                     Text(status).kithText(.body).foregroundStyle(Palette.mutedOnSky).lineLimit(1)
                 }
@@ -101,7 +105,7 @@ public struct CrewRow: View {
     private var showsDot: Bool { model.unread && model.count == 0 }
 
     private var accessibilityText: String {
-        [model.name, model.withPerson.map { "with \($0)" }, model.trailing, model.status,
+        [model.name, model.withPerson.map { "with \($0)" }, model.tag, model.trailing, model.status,
          model.count > 0 ? "\(model.count) waiting" : nil, model.unread ? "unread" : nil].compactMap { $0 }.joined(separator: ", ")
     }
 }

@@ -215,7 +215,7 @@ async function invitee(computerId: string, signKey: string) {
   // A dev host hands out the env scheme (kith-dev://), a main one kith://.
   const link = parseInviteLink(made.appLink, ['kith', 'kith-dev'])
   check(link && link.computerId === computerId, 'the owner made an invite for the real host')
-  check(made.link === made.appLink, 'link stays the app link')
+  check(made.link === (typeof made.webLink === 'string' ? made.webLink : made.appLink), 'link is the web link when there is one, else the app link')
   check(typeof made.webLink !== 'string' || /^https?:\/\/[^#]+#/.test(made.webLink), 'webLink keeps the secret in the fragment')
   if (!link) return
 

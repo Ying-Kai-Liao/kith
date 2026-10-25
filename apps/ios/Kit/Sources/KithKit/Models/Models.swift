@@ -75,6 +75,9 @@ public struct Bot: Codable, Identifiable, Hashable, Sendable {
     public var unread: Int
     public var lastMessage: String?
     public var lastAt: Int64
+    /// Set only on the chat a bot from outside (Grok…) has with an agent: the apps tag it and show it read-only.
+    /// Nil on every other row and from an older host.
+    public var botGuest: BotGuestInfo?
 
     public var isGroup: Bool { kind == "group" }
     public var isWorking: Bool { status == "working" || status == "needsInput" }
@@ -602,5 +605,6 @@ extension Bot {
         unread = try c.decodeIfPresent(Int.self, forKey: .unread) ?? 0
         lastMessage = try c.decodeIfPresent(String.self, forKey: .lastMessage)
         lastAt = try c.decodeIfPresent(Int64.self, forKey: .lastAt) ?? createdAt
+        botGuest = try? c.decodeIfPresent(BotGuestInfo.self, forKey: .botGuest)
     }
 }

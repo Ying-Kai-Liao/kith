@@ -6,6 +6,8 @@ import SwiftUI
 public struct OriginTag: View {
     public enum Origin: String, CaseIterable, Equatable, Sendable {
         case terminal, discord, telegram, slack
+        /// A bot from outside (Grok…): its chat is tagged "from Grok · Sam's Rex".
+        case bot
 
         public var word: String {
             switch self {
@@ -13,10 +15,17 @@ public struct OriginTag: View {
             case .discord: "Discord"
             case .telegram: "Telegram"
             case .slack: "Slack"
+            case .bot: "Bot"
             }
         }
 
-        var symbol: String { self == .terminal ? "terminal" : "bubble.left.and.bubble.right" }
+        var symbol: String {
+            switch self {
+            case .terminal: "terminal"
+            case .bot: "arrow.down.left"
+            default: "bubble.left.and.bubble.right"
+            }
+        }
     }
 
     let origin: Origin

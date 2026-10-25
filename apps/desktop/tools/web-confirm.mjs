@@ -31,15 +31,16 @@ k.account.state = async () => ({ ready: true, configured: true, busy: false, err
 k.cloud.request = async () => ({ ok: true, value: {} })
 k.cloud.acceptInvite = async () => { note('acceptInvite')(); return { ok: true, value: { computerId: 'demo-mac' } } }
 k.invites.takePending = async () => { note('takePending')(); return { computerId: 'demo-mac', inviteId: 'inv_1', token: 'tok_12345678' } }
-k.relay.computers = async () => ({ ok: true, value: [] })
+const empty = new URLSearchParams(location.search).get('empty')
+k.relay.computers = async () => ({ ok: true, value: empty === 'owner' ? [{ computerId: 'own-mac', name: 'My Mac', role: 'owner', platform: 'macos', signKey: '', online: true, access: null }] : [] })
 k.relay.requestAccess = async () => { note('requestAccess')(); return { ok: false, error: { status: 0, code: 'x', message: 'x' } } }
 k.relay.call = async (_c: string, _k: string, method: string, body: unknown) => { if (/proveInvite/.test(method)) note('proveInvite')(); return host.call(method, (body ?? {}) as Record<string, unknown>) }
 k.relay.state = async () => ({ kind: 'ready' })
-let pending: { computerId: string } | null = { computerId: 'demo-mac-computer-id' }
+let pending: { computerId: string } | null = empty ? null : { computerId: 'demo-mac-computer-id' }
 provideWebSession({
   ready: async () => {},
   support: async () => null,
-  pendingLink: async () => pending,
+  pendingLink: async () => pending && { ...pending, appLink: 'kith-dev://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678' },
   discardPending: async () => { calls.push('discardPending'); pending = null },
   signInAgain: async () => {},
 })
@@ -100,7 +101,10 @@ try {
   const text = await waiting.innerText('body')
   check(/Join a computer on Kith\?/.test(text) && /Not now/.test(text), 'the confirm screen asks before joining')
   check((await calls(waiting)).length === 0, 'nothing ran before the click: no takePending, accept, requestAccess or proveInvite')
+  const openApp = waiting.getByRole('link', { name: 'Open in the Kith app' })
+  check((await openApp.getAttribute('href')) === 'kith-dev://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678', 'the app offer is a plain anchor to the kith-dev link')
   await waiting.waitForTimeout(1500)
+  check(waiting.url() === base, 'no auto-redirect')
   check((await calls(waiting)).length === 0, 'and still nothing after waiting')
   await waiting.getByRole('button', { name: 'Join', exact: true }).click()
   await waiting.waitForTimeout(1500)
@@ -115,6 +119,24 @@ try {
   check(dc.includes('discardPending'), 'Not now discards the waiting invite')
   check(!dc.some((c) => ['takePending', 'acceptInvite', 'requestAccess', 'proveInvite'].includes(c)), 'and runs nothing')
   await declined.context().close()
+
+  // A signed-in account with no member computer and no invite: owners are pointed to the app, others to an invite link.
+  for (const [kind, want] of [
+    ['owner', /Kith on the web is for people you invite\. Use the Kith app on your Mac or iPhone; to try the web, open an invite link with another account\./],
+    ['other', /^Open an invite link to join someone's Kith\.$/],
+  ]) {
+    const page = await (await browser.newContext({ viewport: { width: 375, height: 740 }, deviceScaleFactor: 2 })).newPage()
+    await page.goto(`${base}?empty=${kind}`)
+    await page.waitForSelector('[data-screen="empty-account"]', { timeout: 15000 })
+    await page.waitForTimeout(500)
+    const shotE = join(shots, `empty-account-${kind}-375.png`)
+    await page.screenshot({ path: shotE })
+    console.log(`screenshot: ${shotE}`)
+    check(want.test((await page.innerText('[data-screen="empty-account"]')).trim()), `${kind} account sees its own empty text`)
+    check(await page.getByRole('button', { name: 'Sign out' }).isVisible(), `${kind} empty screen offers Sign out`)
+    check(!(await page.innerText('body')).match(/request access/i) && !(await calls(page)).includes('requestAccess'), `${kind} empty screen never requests owner access`)
+    await page.context().close()
+  }
 } finally {
   await browser.close()
   server.close()

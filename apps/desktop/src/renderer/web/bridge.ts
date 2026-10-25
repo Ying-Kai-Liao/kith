@@ -8,7 +8,7 @@ import { WebAccount, type ClerkLike } from './account.ts'
 import { WebCloud } from './cloud.ts'
 import { webConfig } from './config.ts'
 import { detectBrowser, type Unsupported } from './detect.ts'
-import { takeInviteFromHash } from './hash.ts'
+import { appInviteLink, takeInviteFromHash } from './hash.ts'
 import { indexedDbKv, KeyStore, requestPersistence } from './keystore.ts'
 import { WebRelay } from './relay.ts'
 import { refusingKeys } from './refusal.ts'
@@ -90,7 +90,7 @@ provideWebSession({
   pendingLink: async () => {
     if (support) return null
     const link = await keys.pending(currentUser()).catch(() => null)
-    return link ? { computerId: link.computerId } : null
+    return link ? { computerId: link.computerId, appLink: appInviteLink(webConfig.appScheme, link) } : null
   },
   discardPending: () => keys.clearPending().catch(() => {}),
   signInAgain: () => account.endSession(),

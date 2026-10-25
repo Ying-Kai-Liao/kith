@@ -8,6 +8,11 @@ public enum BotViewer: Sendable {
 
 /// One bot's row as plain values: the second line and the actions by state (docs/design: bot guests UI spec 4).
 public struct BotGuestRowModel: Equatable, Sendable {
+    /// A conversation row opens its chat when the store has it; only a chat the store truly lacks leaves the row dead.
+    public static func opens(_ conversation: BotGuestConversation, chats: [String: Bot]) -> Bool {
+        conversation.chatBotId.flatMap { chats[$0] } != nil
+    }
+
     public enum Action: Equatable, Sendable {
         case cancelInvite, newLink, deny, allow, chevron, spinner
     }

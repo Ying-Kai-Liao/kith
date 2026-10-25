@@ -37,6 +37,8 @@ public final class BotStore {
     public internal(set) var connection: Connection = .connecting
     /// The first catch-up has arrived: everything up to the host's rev when this app connected.
     public internal(set) var caughtUp = false
+    /// A thread to open once its chat is on screen (the bot's page sends the owner to a conversation); the chat clears it.
+    public var pendingThread: PendingThread?
     var catchUpRev = Int64.max
     /// The `since` this connection's events stream was opened with; the `hello` that opens its
     /// catch-up reads it (after a mirror reset `rev` no longer says what was requested).
@@ -291,4 +293,15 @@ public struct OutgoingFile: Identifiable, Sendable {
 
     /// Anything larger is refused by the computer.
     public static let maxSize = 100 * 1024 * 1024
+}
+
+/// A thread to open in a chat: the root message of one conversation.
+public struct PendingThread: Equatable, Sendable {
+    public var chat: String
+    public var root: String
+
+    public init(chat: String, root: String) {
+        self.chat = chat
+        self.root = root
+    }
 }

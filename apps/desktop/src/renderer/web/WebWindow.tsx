@@ -14,7 +14,7 @@ import { BotRow } from '../views/BotRow'
 import { GrantedAgentsChat } from '../views/computers/GrantedAgentsChat'
 import { ThreadView } from '../views/thread/ThreadView'
 import type { Unsupported } from './detect'
-import { noticeFor } from './notice'
+import { emptyAccountText, noticeFor } from './notice'
 import { webSession } from './session'
 import './web.css'
 
@@ -141,7 +141,7 @@ function JoinPanel() {
   )
 }
 
-function ConfirmJoin({ computerId, onJoin, onDecline }: { computerId: string; onJoin: () => void; onDecline: () => void }) {
+function ConfirmJoin({ computerId, appLink, onJoin, onDecline }: { computerId: string; appLink?: string; onJoin: () => void; onDecline: () => void }) {
   return (
     <div className="web-center" data-screen="confirm-join">
       <div className="web-card">
@@ -154,6 +154,11 @@ function ConfirmJoin({ computerId, onJoin, onDecline }: { computerId: string; on
           <Button className="web-wide" onClick={onJoin}>Join</Button>
           <Button kind="secondary" className="web-wide" onClick={onDecline}>Not now</Button>
         </div>
+        {appLink ? (
+          <p className="web-fine">
+            Have the Kith app? <a href={appLink} data-action="open-app">Open in the Kith app</a>
+          </p>
+        ) : null}
       </div>
     </div>
   )
@@ -174,7 +179,7 @@ function MemberApp() {
 
   // An invite waiting in IndexedDB (or one that survived a reload mid-join) is offered, never run by itself: a link an
   // agent posted and the person opened while signed in must not join anything without a click.
-  const [offer, setOffer] = useState<{ computerId: string } | null | undefined>(undefined)
+  const [offer, setOffer] = useState<{ computerId: string; appLink?: string } | null | undefined>(undefined)
   useEffect(() => void webSession.pendingLink().then(setOffer), [])
   useEffect(() => {
     inviteJoin.adopt = (id) => app.relayMacs.adopt(id)
@@ -204,6 +209,7 @@ function MemberApp() {
       <Shell>
         <ConfirmJoin
           computerId={offer.computerId}
+          appLink={offer.appLink}
           onJoin={() => {
             setOffer(null)
             void inviteJoin.start()
@@ -246,8 +252,8 @@ function MemberApp() {
           {!macs.loaded ? <div className="web-pad"><Spinner size={16} /></div> : null}
           {macs.loaded && shared.length === 0 ? (
             <div className="web-pad">
-              <p className="web-text">{macs.error ?? 'Nothing is shared with this account yet.'}</p>
-              <p className="web-fine">Open the invite link you were sent to join a computer.</p>
+              <p className="web-text" data-screen="empty-account">{macs.error ?? emptyAccountText(macs.computers)}</p>
+              <Button kind="secondary" onClick={() => setConfirmOut(true)}>Sign out</Button>
             </div>
           ) : null}
           {shared.map((c) => {

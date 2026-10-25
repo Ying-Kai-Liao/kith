@@ -60,6 +60,9 @@
   color: var(--tertiary);
   text-wrap: pretty;
 }
+.web-fine a {
+  color: var(--secondary);
+}
 .web-error {
   margin: 0;
   font-size: var(--text-callout);

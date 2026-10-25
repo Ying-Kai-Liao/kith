@@ -123,10 +123,12 @@ public struct BotDetailView: View {
     }
 
     @ViewBuilder private func conversationRow(_ conversation: BotGuestConversation) -> some View {
-        let opens = conversation.chatBotId.flatMap { store.bots[$0] } != nil
+        let opens = BotGuestRowModel.opens(conversation, chats: store.bots)
         Button {
             guard let accounts, let chat = conversation.chatBotId, opens else { return }
             dismiss()
+            // The chat shows the conversation's notice with its chip; this goes straight to the thread.
+            store.pendingThread = conversation.threadRoot.map { PendingThread(chat: chat, root: $0) }
             accounts.selection = BotReference(accountId: accounts.accountId, computerId: store.computer.id, botId: chat)
         } label: {
             HStack(spacing: 12) {

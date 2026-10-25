@@ -53,6 +53,44 @@ public struct BotGuestLimits: Codable, Hashable, Sendable {
     }
 }
 
+/// Which bot a chat belongs to: the `botGuest` on the chat row (serve/host/src/hub/sync.rs `bot_json`).
+public struct BotGuestInfo: Codable, Hashable, Sendable {
+    public var botId: String
+    public var name: String
+    public var provider: String
+    /// The invited person who made the bot; nil for the computer's owner's own.
+    public var ownerPerson: String?
+    public var ownerName: String?
+
+    public init(botId: String, name: String, provider: String = "grok", ownerPerson: String? = nil, ownerName: String? = nil) {
+        self.botId = botId
+        self.name = name
+        self.provider = provider
+        self.ownerPerson = ownerPerson
+        self.ownerName = ownerName
+    }
+
+    /// "from Grok · Sam's Rex", or "from Grok · Your Rex" for the computer's owner's own bot.
+    public var tag: String {
+        let whose = ownerPerson == nil ? "Your" : "\(ownerName?.isEmpty == false ? ownerName! : "Someone")'s"
+        return "from \(BotGuest.title(provider: provider)) · \(whose) \(name)"
+    }
+
+    /// "Rex asks from Grok. You can read along here."
+    public var readOnlyLine: String { "\(name) asks from \(BotGuest.title(provider: provider)). You can read along here." }
+}
+
+extension Bot {
+    /// A bot from outside's chat: read along only. No composer, no settings, no new session, no delete.
+    public var isReadOnly: Bool { botGuest != nil }
+}
+
+extension BotGuestInfo {
+    /// Whether this person may answer the chat's permission cards: only the computer's owner (a member owner of the bot
+    /// is not a member of the agent, so the host would refuse).
+    public func canAnswer(isOwner: Bool) -> Bool { isOwner }
+}
+
 /// A chat a bot started with one of the owner's agents; only the computer's owner is sent these.
 public struct BotGuestConversation: Codable, Hashable, Sendable, Identifiable {
     public var conversation: String
