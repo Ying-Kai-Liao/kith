@@ -162,6 +162,8 @@ jobs:
         run: kernel/tests/kith-auth-lock-check
       - name: Auth property check
         run: kernel/tests/kith-auth-props
+      - name: Auth revoke check
+        run: kernel/tests/kith-auth-revoke-check
       - name: Cost bots check
         run: kernel/tests/kith-cost-bots-check
       - name: Call check
