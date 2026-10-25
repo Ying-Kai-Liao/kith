@@ -21,6 +21,10 @@
 //! kernel's call at a guest run's launch and returns `{"ok": true, "grants": {"read", "write", "domains"}}`, once per run.
 //! Both are for a guest token only.
 //!
+//! `requestSecret` (`{"token", "method": "requestSecret", "service", "purpose"}`) is the owner run's way to ask for a
+//! service's key (`cards::secret`): it makes a card in the owner's chat and answers at once `{"ok": true, "carded":
+//! true, "message"}` or `{"ok": false, "error"}`. An owner token only (`TokenScope::OwnerAsk`); a guest's is "not authorized".
+//!
 //! Two more read-only methods give a guest the kernel tools its sandbox keeps it from running itself: `memorySearch`
 //! (`kith-memory search`, as the token's person and agent) and `projectId` (`project-id`: the project the run was
 //! launched in, from the token, and `--info` of that one). Guest tokens only, same answer shape as `recall`.
@@ -432,11 +436,13 @@ pub enum Run {
     None,
 }
 
-/// The two guest-only access methods.
+/// The access methods of a run: the two guest-only ones, and `requestSecret` for an owner run.
 #[derive(Debug, PartialEq, Eq)]
 pub enum AccessCall {
     Request(Value),
     Consume,
+    /// An owner run asks for a service's key (`{"service", "purpose"}`): a card in the owner's chat, `cards::secret`.
+    Secret(Value),
 }
 
 /// What a run asks to do: a tool name and its input, as Claude Code's permission prompt tool is given them.
@@ -516,6 +522,21 @@ pub fn authorize(table: &TokenTable, line: &[u8], peer: PeerInfo) -> Result<Auth
                 AccessCall::Request(json!({"kind": req["kind"], "target": req["target"], "reason": req["reason"],
                                            "write": req["write"].as_bool() == Some(true)}))
             };
+            Ok(Authorized { identity, run: Run::None, args: Vec::new(), ask: None, access: Some(call) })
+        }
+        "requestSecret" => {
+            // The owner's run asks the owner for a key; a guest's never does (v1: only the owner's agents hold keys).
+            if identity.scope != TokenScope::OwnerAsk {
+                return Err(Response::refused("not authorized"));
+            }
+            let (Some(service), purpose) = (req["service"].as_str(), req["purpose"].as_str().unwrap_or_default())
+            else {
+                return Err(Response::refused("bad request"));
+            };
+            if service.len() > MAX_ARG_LEN || purpose.len() > MAX_ARG_LEN {
+                return Err(Response::refused("bad request"));
+            }
+            let call = AccessCall::Secret(json!({"service": service, "purpose": purpose}));
             Ok(Authorized { identity, run: Run::None, args: Vec::new(), ask: None, access: Some(call) })
         }
         _ => Err(Response::refused("unknown method")),
@@ -642,6 +663,12 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
                 Response::Line(crate::cards::access::request(&hub, &identity, &req).await)
             }
             (Some(hub), AccessCall::Consume) => Response::Line(crate::cards::access::consume(&hub, &identity).await),
+            (Some(hub), AccessCall::Secret(req)) => {
+                let origin = crate::cards::secret::Origin::run(&identity);
+                let service = req["service"].as_str().unwrap_or_default();
+                let purpose = req["purpose"].as_str().unwrap_or_default();
+                Response::Line(crate::cards::secret::request(&hub, &origin, service, purpose).await)
+            }
             (None, _) => Response::refused("Approvals aren't available right now."),
         },
         // The run's own project id is in its token: nothing to run, and nothing to guess from the host's folder.
@@ -1120,6 +1147,26 @@ mod tests {
         let g = RunGrant::issue(&t, owner).unwrap();
         let env = g.env(Path::new("/s"));
         assert_eq!((env[0].0.as_str(), env[1].0.as_str()), (ASK_TOKEN_ENV, ASK_SOCKET_ENV));
+    }
+
+    #[test]
+    fn only_an_owner_token_can_ask_for_a_key() {
+        let t = open_table();
+        let owner = ask_identity("echo", "s1");
+        let token = t.insert_ask(owner.clone(), 5, Duration::from_secs(60)).unwrap();
+        let line = json!({"token": token, "method": "requestSecret", "service": "github", "purpose": "pull requests"});
+        let job = authorize(&t, line.to_string().as_bytes(), peer(5)).unwrap();
+        assert_eq!(job.identity, owner);
+        assert_eq!(job.access, Some(AccessCall::Secret(json!({"service": "github", "purpose": "pull requests"}))));
+        let no_service = json!({"token": token, "method": "requestSecret"});
+        assert_eq!(authorize(&t, no_service.to_string().as_bytes(), peer(5)), Err(Response::refused("bad request")));
+        let long = json!({"token": token, "method": "requestSecret", "service": "x".repeat(MAX_ARG_LEN + 1)});
+        assert!(authorize(&t, long.to_string().as_bytes(), peer(5)).is_err());
+        // A guest's run (an invited person's or a bot guest's) is not authorized, whatever it sends.
+        let g = RunGrant::issue(&t, id("sam")).unwrap();
+        g.bind_pid(6);
+        let guest = json!({"token": g.token, "method": "requestSecret", "service": "github", "purpose": "x"});
+        assert_eq!(authorize(&t, guest.to_string().as_bytes(), peer(6)), Err(Response::refused("not authorized")));
     }
 
     #[test]

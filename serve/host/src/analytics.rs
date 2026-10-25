@@ -109,6 +109,20 @@ impl Analytics {
         *self.enabled.locked()
     }
 
+    /// The events queued so far (nothing flushes them in tests), taken out of the queue.
+    #[cfg(test)]
+    pub fn drain_events(&self) -> Vec<Value> {
+        let mut out = Vec::new();
+        if let Some(rx) = self.rx.locked().as_mut() {
+            while let Ok(msg) = rx.try_recv() {
+                if let Msg::Event(v) = msg {
+                    out.push(v);
+                }
+            }
+        }
+        out
+    }
+
     pub fn set_enabled(&self, store: &Store, on: bool) -> Result<()> {
         store.kv_set(KV_ENABLED, if on { "1" } else { "0" })?;
         *self.enabled.locked() = on;

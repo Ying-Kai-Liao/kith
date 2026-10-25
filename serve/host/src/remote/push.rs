@@ -105,8 +105,14 @@ fn faces(hub: &Hub, bot: &BotConfig, from: Option<&str>) -> Vec<Value> {
         .collect()
 }
 
+/// The title and body of every alert asked for, for tests that check what a push would say.
+#[cfg(test)]
+pub static SENT: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
 /// `bot` is the chat the alert opens; `from` is the member bot speaking when that chat is a group.
 pub fn notify(hub: &Hub, bot: &BotConfig, from: Option<&str>, title: &str, body: &str, kind: AlertKind) {
+    #[cfg(test)]
+    SENT.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(format!("{title}\n{body}"));
     purge_dead_tickets(hub);
     if bot.notify == Some(false) || bot.hidden || hub.phone_connected() {
         return;

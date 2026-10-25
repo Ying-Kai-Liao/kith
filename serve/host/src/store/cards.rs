@@ -335,6 +335,44 @@ impl Store {
         Ok(Answered::Applied { card, was_live })
     }
 
+    /// Takes the write claim on a secret card: an open card before its deadline has its deadline pushed to `until`, so
+    /// the sweep and a second answer cannot close it while the key is being written. Returns the card as it was (its own
+    /// deadline); None when it is closed or past its deadline. Whoever holds the claim ends it with
+    /// [`Self::card_claim_release`] (the write failed) or [`Self::card_saved`].
+    pub fn card_claim(&self, id: &str, now: i64, until: i64) -> Result<Option<Card>> {
+        let c = self.db.locked();
+        let tx = c.unchecked_transaction()?;
+        let Some(card) = get(&tx, id)?.filter(|c| c.state.open() && c.deadline >= now) else { return Ok(None) };
+        tx.execute("UPDATE cards SET deadline = MAX(deadline, ?2) WHERE id = ?1", params![id, until])?;
+        tx.commit()?;
+        Ok(Some(card))
+    }
+
+    /// The write failed: the card goes back to its own deadline and stays open.
+    pub fn card_claim_release(&self, id: &str, deadline: i64) -> Result<bool> {
+        Ok(self.db.locked().execute(
+            "UPDATE cards SET deadline = ?2 WHERE id = ?1 AND state IN ('pending','live','parked')",
+            params![id, deadline],
+        )? == 1)
+    }
+
+    /// The key is in the Keychain (or the grant is written): the card is answered and spent, and the resume it owes
+    /// stays owed whether or not the asker was still up (`answered_parked`, `used_by_ask`). `keep_until` keeps the owed
+    /// resume alive past a deadline that passed during the write.
+    pub fn card_saved(&self, id: &str, by: &str, now: i64, keep_until: i64) -> Result<Option<Card>> {
+        let c = self.db.locked();
+        let tx = c.unchecked_transaction()?;
+        let done = tx.execute(
+            "UPDATE cards SET state = 'used', used_by_ask = 1, answer = 'saved', allowed = 1, answered_by = ?2,
+                              answered_at = ?3, answered_parked = 1, granted_at = ?3, deadline = MAX(deadline, ?4)
+              WHERE id = ?1 AND state IN ('pending','live','parked')",
+            params![id, by, now, keep_until],
+        )?;
+        let card = if done == 1 { get(&tx, id)? } else { None };
+        tx.commit()?;
+        Ok(card)
+    }
+
     /// A yes spent for a live asker that did not hear it (it was gone, or its wait had ended): the grant is back, as an
     /// answer to a parked card, so the next ask of the session (or the resume) finds it.
     pub fn card_undelivered(&self, id: &str) -> Result<bool> {

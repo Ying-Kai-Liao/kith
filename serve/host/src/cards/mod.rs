@@ -14,6 +14,7 @@
 pub mod access;
 pub mod resource;
 pub mod resume;
+pub mod secret;
 
 use crate::hub::Hub;
 use crate::runauth::{RunIdentity, TokenScope};
@@ -410,6 +411,10 @@ fn close_entry(hub: &Hub, card: &Card, status: &str) {
     {
         e.data["status"] = status.into();
         e.data["parked"] = false.into();
+        // A secret card says how it ended in its own words (the apps draw that, not the status).
+        if e.data["secret"].is_object() {
+            e.data["secret"]["state"] = (if status == "expired" { "expired" } else { "denied" }).into();
+        }
         hub.set_entry(id, &e.data);
     }
 }
