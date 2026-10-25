@@ -153,13 +153,21 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
 
 @Test func theInviteesChatShowsWaitingTextInPlaceOfButtons() {
     let waiting = card("p1", chat: "c")
-    #expect(GuestPrompt.waitingText(for: waiting, activity: "Waiting for Kai") == "Waiting for Kai")
-    #expect(GuestPrompt.waitingText(for: waiting, activity: "Working") == "Waiting for the owner")
-    #expect(GuestPrompt.waitingText(for: waiting, activity: nil) == "Waiting for the owner")
+    #expect(GuestPrompt.waitingText(for: waiting, activity: "Waiting for Kai", isOwner: false) == "Waiting for Kai")
+    #expect(GuestPrompt.waitingText(for: waiting, activity: "Working", isOwner: false) == "Waiting for the owner")
+    #expect(GuestPrompt.waitingText(for: waiting, activity: nil, isOwner: false) == "Waiting for the owner")
     // A member answers their own; an answered card shows its outcome.
-    #expect(GuestPrompt.waitingText(for: card("p2", chat: "c", approver: "member"), activity: nil) == nil)
-    #expect(GuestPrompt.waitingText(for: card("p3", chat: "c", status: "answered"), activity: nil) == nil)
-    #expect(GuestPrompt.waitingText(for: card("p4", chat: "c", approver: nil), activity: nil) == nil)
+    #expect(GuestPrompt.waitingText(for: card("p2", chat: "c", approver: "member"), activity: nil, isOwner: false) == nil)
+    #expect(GuestPrompt.waitingText(for: card("p3", chat: "c", status: "answered"), activity: nil, isOwner: false) == nil)
+    #expect(GuestPrompt.waitingText(for: card("p4", chat: "c", approver: nil), activity: nil, isOwner: false) == nil)
+}
+
+@Test func theOwnersOwnDeviceShowsTheButtonsOnACardForTheOwner() {
+    // A -p run's card (kith ask, a schedule) and a bot guest's card are both approver "owner": on the owner's device
+    // they are his to answer, whatever the activity line says.
+    #expect(GuestPrompt.waitingText(for: card("p1", chat: "c"), activity: "Waiting for Kai", isOwner: true) == nil)
+    #expect(GuestPrompt.waitingText(for: card("p2", chat: "c"), activity: nil, isOwner: true) == nil)
+    #expect(GuestPrompt.waitingText(for: card("p3", chat: "c", approver: "member"), activity: nil, isOwner: true) == nil)
 }
 
 @MainActor @Test func aGuestsPromptMakesNoBotAndNoUnreadChatAndIsOnlyTheOwnersToAnswer() throws {

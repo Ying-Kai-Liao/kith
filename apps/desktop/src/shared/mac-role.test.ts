@@ -55,11 +55,18 @@ test('guest prompts: pending, for the owner, from bots outside the roster', () =
   assert.deepEqual(guestPrompts(entries, new Map([['mine', 1]])).map((p) => p.entryId), ['c4'])
 })
 
+test("the owner's own device shows the buttons on a card addressed to the owner", () => {
+  // A -p run's card (kith ask, a schedule) and a bot guest's card both carry approver 'owner'.
+  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'owner' }), 'Kai', true), null)
+  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'owner' }), null, true), null)
+  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'member' }), null, true), null)
+})
+
 test('an invitee sees "Waiting for <name>" on an owner-approved card only while pending', () => {
-  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'owner' }), 'Kai'), 'Kai')
-  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'owner' }), null), 'the owner')
-  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'member' }), 'Kai'), null)
-  assert.equal(waitingFor(card('a', 'b', { status: 'answered', approver: 'owner' }), 'Kai'), null)
+  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'owner' }), 'Kai', false), 'Kai')
+  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'owner' }), null, false), 'the owner')
+  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'member' }), 'Kai', false), null)
+  assert.equal(waitingFor(card('a', 'b', { status: 'answered', approver: 'owner' }), 'Kai', false), null)
   assert.equal(ownerNameFrom('Waiting for Kai'), 'Kai')
   assert.equal(ownerNameFrom('Needs approval: x'), null)
 })
