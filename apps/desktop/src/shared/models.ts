@@ -304,6 +304,8 @@ export interface EntryData {
   /** notice: when the writer changed, in ms. */
   at?: number
   author?: string
+  /** user, in a bot-guest chat: the outside bot (and the person speaking for it) that wrote this message. */
+  sender?: { botId?: string; name?: string; speaker?: string }
   thread?: ThreadSummary
   /** user, in the main chat: the first message of a task; the task goes on in its thread (see `tasks`). */
   task?: boolean

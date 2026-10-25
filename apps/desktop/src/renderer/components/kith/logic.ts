@@ -105,3 +105,7 @@ export function statusChipOf(kind: StatusKind, detail?: string): ChipModel {
 
 /** "1 reply" / "N replies". */
 export const repliesLabel = (n: number) => `${n} ${n === 1 ? 'reply' : 'replies'}`
+
+/** A bot guest's default picture: Kith's own "G" disc for Grok, the bubble disc for every other or unknown provider. */
+export type BotGuestVariant = 'grok' | 'other'
+export const botGuestVariant = (provider: string | null | undefined): BotGuestVariant => (provider?.trim().toLowerCase() === 'grok' ? 'grok' : 'other')

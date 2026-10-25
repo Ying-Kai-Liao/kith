@@ -3,7 +3,7 @@ import { avatarImage, DEFAULT_IMAGE } from '@shared/crew'
 import { botGuestTag } from '@shared/bot-guest-chat'
 import { folderName, isGroup, isWorking, needsInput, type Bot } from '@shared/models'
 import { Icon } from '../components/Icon'
-import { BotAvatar, CountBadge, OriginTag, SkyPatch } from '../components/kith'
+import { BotAvatar, BotGuestAvatar, CountBadge, OriginTag, SkyPatch } from '../components/kith'
 import type { Face } from '../components/Avatar'
 import { LiveBot } from '../components/Avatar'
 import { messagePreview } from '../lib/message-preview'
@@ -32,14 +32,14 @@ export const BotRow = memo(function BotRow({ bot, store, compact, usingComputer,
   if (compact) {
     return (
       <span className="cs-rail-face">
-        <RowFace bot={bot} members={members} size={36} state={state} />
+        <GuestBadged bot={bot} badge={14}><RowFace bot={bot} members={members} size={36} state={state} /></GuestBadged>
       </span>
     )
   }
   const group = isGroup(bot)
   return (
     <span className="cs-row">
-      <RowFace bot={bot} members={members} size={40} state={state} />
+      <GuestBadged bot={bot} badge={16}><RowFace bot={bot} members={members} size={40} state={state} /></GuestBadged>
       <span className="cs-row-main">
         <span className="cs-row-top">
           {bot.pinned ? <Icon name="pin.fill" size={9} color="var(--kith-muted)" /> : null}
@@ -54,6 +54,20 @@ export const BotRow = memo(function BotRow({ bot, store, compact, usingComputer,
     </span>
   )
 })
+
+/**
+ * A bot-guest chat keeps its agent's face (it is that agent's chat, and the tag below says who asks); the outside bot's
+ * own picture sits on it as a small badge.
+ */
+function GuestBadged({ bot, badge, children }: { bot: Bot; badge: number; children: React.ReactNode }) {
+  if (!bot.botGuest) return <>{children}</>
+  return (
+    <span className="cs-face-guest">
+      {children}
+      <span className="cs-face-guest-badge"><BotGuestAvatar provider={bot.botGuest.provider} size={badge} /></span>
+    </span>
+  )
+}
 
 function RowFace({ bot, members, size, state }: { bot: Bot; members: Bot[]; size: 36 | 40; state: 'working' | 'idle' }) {
   if (isGroup(bot) && members.length >= 2) {

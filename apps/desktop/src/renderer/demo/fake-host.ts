@@ -127,7 +127,7 @@ export class FakeHost {
       const a = r.kind === 'user' ? 'user' : (r.data.author ?? botId)
       if (!authors.includes(a)) authors.push(a)
     }
-    rootEntry.data = { ...rootEntry.data, thread: { count: replies.length, lastAt: replies.at(-1)?.createdAt ?? 0, authors, unread: 0 } }
+    rootEntry.data = { ...rootEntry.data, thread: { ...rootEntry.data.thread, count: replies.length, lastAt: replies.at(-1)?.createdAt ?? 0, authors, unread: 0 } }
     if (emit) this.emitEntry(rootEntry)
   }
 

@@ -10,13 +10,16 @@ const CWD = '/Users/demo/code/pace'
 const pace = { kind: 'project' as const, project: 'pace', path: CWD, name: 'pace', inherited: false }
 
 export type SeedBot = Pick<Bot, 'id' | 'name' | 'description' | 'avatarColor' | 'avatarShape' | 'backend' | 'model'> &
-  Partial<Pick<Bot, 'hqAgent' | 'avatarSource' | 'kind' | 'members' | 'permission' | 'status' | 'activity' | 'unread' | 'folder' | 'workingChat' | 'workingThread'>>
+  Partial<Pick<Bot, 'hqAgent' | 'avatarSource' | 'kind' | 'members' | 'permission' | 'status' | 'activity' | 'unread' | 'folder' | 'workingChat' | 'workingThread' | 'botGuest'>>
 
 export const bots: SeedBot[] = [
   { id: 'pacer', hqAgent: 'pacer', name: 'Pacer', description: 'Owns the pace math', avatarColor: '', avatarShape: 'blob', backend: 'claude', model: 'opus', permission: 'default', status: 'needsInput', activity: 'Needs approval: Edit src/pace.js', unread: 1, folder: pace },
   { id: 'scout', name: 'Scout', description: 'Finds things in the repo and builds them', avatarColor: 'kith:mint', avatarShape: 'blob', backend: 'codex', model: null, unread: 1, status: 'working', activity: 'Running npm test', workingChat: 'scout', workingThread: 's1', folder: pace },
   { id: 'reviewer', name: 'Reviewer', description: 'Reviews every change before it ships', avatarColor: 'kith:violet', avatarShape: 'blob', backend: 'claude', model: 'sonnet', unread: 1, folder: pace },
   { id: 'relay', name: 'Relay', description: 'Writes the release notes', avatarColor: 'kith:sky', avatarShape: 'blob', avatarSource: 'spare:globe', backend: 'codex', model: null, unread: 1 },
+  // Bot-guest chats: an outside bot asking Pacer (read-only here), one Grok and one of another kind.
+  { id: 'pacer-grok', hqAgent: 'pacer', name: 'Pacer', description: 'Owns the pace math', avatarColor: '', avatarShape: 'blob', backend: 'claude', model: 'opus', folder: pace, botGuest: { botId: 'bg_invited', name: 'Rex', provider: 'grok', ownerPerson: null, ownerName: null } },
+  { id: 'pacer-other', hqAgent: 'pacer', name: 'Pacer', description: 'Owns the pace math', avatarColor: '', avatarShape: 'blob', backend: 'claude', model: 'opus', folder: pace, botGuest: { botId: 'bg_active', name: 'Max', provider: 'other', ownerPerson: 'mia', ownerName: 'Mia' } },
   { id: 'ship', kind: 'group', members: ['pacer', 'scout', 'reviewer'], name: 'Ship room', description: 'Getting weeklyTotals out', avatarColor: '', avatarShape: 'blob', backend: '', model: null },
 ]
 
@@ -95,6 +98,16 @@ export const entries: SeedEntry[] = [
   user('g4', 'ship', 17, 'UTC is right, keep it.', 'g3'),
   reply('g5', 'ship', 'scout', 17, 'Got it, UTC stays. I left a comment above `weeklyTotals` so nobody flips it later.', 'g3'),
   reply('g6', 'ship', 'pacer', 15, 'Ship it once my `isoWeek` New Year fix lands. Dec 30, 2024 still comes out as 2024-W01 instead of 2025-W01.'),
+
+  // Outside bots asking Pacer: each conversation is a notice that roots a thread.
+  ...(['pacer-grok', 'pacer-other'] as const).flatMap((chat, i): SeedEntry[] => {
+    const who = i === 0 ? { name: 'Rex', provider: 'grok' } : { name: 'Max', provider: 'other' }
+    return [
+      { id: `${chat}-n`, botId: chat, kind: 'notice', at: 12, data: { text: `${who.name} started a conversation`, thread: { count: 0, lastAt: 0, authors: [], origin: 'bot', originLabel: `from ${i === 0 ? 'Grok' : 'a bot'} · ${who.name}`, originBot: { provider: who.provider, name: who.name } } } },
+      { id: `${chat}-u`, botId: chat, kind: 'user', at: 11, threadId: `${chat}-n`, data: { text: 'What does isoWeek return for Dec 30, 2024?', status: 'sent', sender: { botId: i === 0 ? 'bg_invited' : 'bg_active', name: who.name, ...(i === 0 ? { speaker: 'Alice' } : {}) } } },
+      reply(`${chat}-a`, chat, 'pacer', 11, 'It returns `2024-W01` today, which is wrong: it should be `2025-W01`. A fix is waiting on my side.', `${chat}-n`),
+    ]
+  }),
 
   // Pacer waits for approval.
   user('p1', 'pacer', 9, 'Fix the isoWeek New Year bug you mentioned.', undefined, true),
