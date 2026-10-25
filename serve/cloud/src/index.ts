@@ -73,6 +73,8 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", /^\/v1\/host\/invites$/, api.hostCreateInvite],
   ["POST", new RegExp(`^/v1/host/invites/${ID}/revoke$`), api.hostRevokeInvite],
   ["POST", new RegExp(`^/v1/host/memberships/${ID}/revoke$`), api.hostRevokeMembership],
+  ["POST", /^\/v1\/host\/people\/revoke$/, api.hostRevokePerson],
+  ["POST", /^\/v1\/host\/people\/unrevoke$/, api.hostUnrevokePerson],
   ["POST", new RegExp(`^/v1/invites/${ID}/accept$`), api.acceptInvite],
   ["POST", /^\/v1\/host\/bot-invites$/, api.hostCreateBotInvite],
   ["POST", new RegExp(`^/v1/host/bot-invites/${ID}/revoke$`), api.hostRevokeBotInvite],

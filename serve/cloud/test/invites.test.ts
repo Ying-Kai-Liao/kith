@@ -375,3 +375,70 @@ describe("revoking a membership", () => {
     expect(row?.status).toBe("revoked");
   });
 });
+
+describe("revoking a person on every computer of the owner (R6, R7)", () => {
+  /** An owner with two claimed computers and a friend who joined both. */
+  async function twoMacs() {
+    const { owner, host: a, inviteId, token } = await setup();
+    const b = await newHost();
+    await claim(owner, b);
+    const friend = await newUser("friend");
+    expect((await accept(friend, inviteId, token)).status).toBe(200);
+    const onB = await invite(b);
+    expect((await accept(friend, onB.inviteId, onB.token)).status).toBe(200);
+    return { owner, a, b, friend };
+  }
+  const revoke = (host: TestHost, userId: string) => call("POST", "/v1/host/people/revoke", { key: host.sign, body: { userId } });
+  const unrevoke = (host: TestHost, userId: string) => call("POST", "/v1/host/people/unrevoke", { key: host.sign, body: { userId } });
+
+  it("cuts the account's memberships and grants on every Mac of the owner and lists it as revoked on each", async () => {
+    const { a, b, friend } = await twoMacs();
+    const { grantId } = await grantAccess(friend, b);
+    expect((await revoke(a, friend.userId)).body).toEqual({ ok: true });
+    for (const h of [a, b]) {
+      const s = await state(h);
+      expect(s.revoked).toEqual([friend.userId]);
+      expect(s.memberships).toEqual([]);
+    }
+    expect((await state(b)).grants).toEqual([]);
+    const row = await env.DB.prepare("SELECT status FROM grants WHERE id = ?").bind(grantId).first<Json>();
+    expect(row?.status).toBe("revoked");
+    // Revoking again is a no-op.
+    expect((await revoke(b, friend.userId)).status).toBe(200);
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM revocations WHERE user_id = ?").bind(friend.userId).first<{ n: number }>();
+    expect(n?.n).toBe(1);
+  });
+
+  it("refuses a new invite of the owner's until undone, on any of their Macs", async () => {
+    const { a, b, friend } = await twoMacs();
+    await revoke(a, friend.userId);
+    const fresh = await invite(b);
+    const r = await accept(friend, fresh.inviteId, fresh.token);
+    expect(r.status).toBe(410);
+    expect(JSON.stringify(r.body)).toContain("access to this computer was removed");
+    expect((await unrevoke(b, friend.userId)).body).toEqual({ ok: true });
+    for (const h of [a, b]) expect((await state(h)).revoked).toEqual([]);
+    expect((await accept(friend, fresh.inviteId, fresh.token)).status).toBe(200);
+  });
+
+  it("is per owner: another owner's computers and lists are untouched", async () => {
+    const { a, friend } = await twoMacs();
+    const other = await setup();
+    expect((await accept(friend, other.inviteId, other.token)).status).toBe(200);
+    await revoke(a, friend.userId);
+    const s = await state(other.host);
+    expect(s.revoked).toEqual([]);
+    expect(s.memberships.map((m: Json) => m.userId)).toEqual([friend.userId]);
+  });
+
+  it("refuses the owner, an unknown account, a bad body, and an unclaimed computer", async () => {
+    const { owner, a } = await twoMacs();
+    expect((await revoke(a, owner.userId)).status).toBe(400);
+    expect((await revoke(a, "user_nobody")).status).toBe(404);
+    expect((await call("POST", "/v1/host/people/revoke", { key: a.sign, body: {} })).status).toBe(400);
+    const loose = await newHost();
+    const friend = await newUser("friend");
+    expect((await revoke(loose, friend.userId)).status).toBe(403);
+    expect((await unrevoke(loose, friend.userId)).status).toBe(403);
+  });
+});
