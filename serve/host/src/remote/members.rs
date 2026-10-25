@@ -6,7 +6,7 @@
 use super::account;
 use crate::hub::Hub;
 use crate::store::{Membership, Store, now_ms};
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;
@@ -107,6 +107,13 @@ pub async fn end_access(hub: &Hub, bin: Option<&Path>, person: &str) -> Result<(
         for d in hub.store.devices_of(person)? {
             hub.revoke_device(&d.key)?;
         }
+        // A revoked person keeps their account handle and their bots: an undo, here or on another Mac, finds them by
+        // the handle, and their bots are dormant (kith-auth refuses them through their owner), not ended.
+        if let Some(bin) = bin
+            && revoked_here(bin, person).await
+        {
+            return Ok(());
+        }
         // Their bot guests lose their owner with the last membership.
         crate::api::botguests::revoke_owned_by(hub, person, "person").await;
         if let Some(bin) = bin
@@ -122,6 +129,65 @@ pub async fn end_access(hub: &Hub, bin: Option<&Path>, person: &str) -> Result<(
         tracing::warn!(error = format!("{e:#}"), person, "couldn't keep an invited account's handle");
     }
     Ok(())
+}
+
+/// One person of `kith-auth people --json`, as far as a revoke goes.
+#[derive(Deserialize, Debug)]
+pub struct AuthPerson {
+    pub id: String,
+    #[serde(default)]
+    pub owner: bool,
+    #[serde(default)]
+    pub bot_of: String,
+    /// Their Kith account, the one name a person has on every Mac of the owner; empty for one known only here.
+    #[serde(default)]
+    pub kith: String,
+    /// When they themselves were revoked (not merely the owner of a revoked bot's).
+    #[serde(default)]
+    pub revoked_at: Option<i64>,
+}
+
+pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {
+    let out = account::run(bin, &["people", "--json"]).await?;
+    serde_json::from_str(&out).context("reading kith-auth people --json")
+}
+
+/// The kith-auth person `id`, or None when there is no such person.
+pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
+    Ok(auth_people(bin).await?.into_iter().find(|p| p.id == id))
+}
+
+/// Applies the cloud's list of accounts this computer's owner revoked, on any of their Macs (R6): a person here whose
+/// Kith account is listed gets the revoked state in kith-auth, and one revoked here whose account is no longer listed
+/// gets it cleared (undone on another Mac). A person with no Kith account is this Mac's alone and is left as it is.
+/// Runs before the memberships, so a membership the revoke cut finds its person already revoked (and keeps their handle
+/// and bots for the undo). Returns the people newly revoked here, whose running turns the caller stops. None (a cloud
+/// that predates revoking) changes nothing. An error fails the pull: this host stays out of sync rather than serve on
+/// access it could not apply (I2).
+pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Result<Vec<String>> {
+    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(vec![]) };
+    let mut cut = vec![];
+    for p in auth_people(bin).await?.into_iter().filter(|p| !p.kith.is_empty() && !p.owner && p.bot_of.is_empty()) {
+        let revoked = listed.contains(&p.kith);
+        if revoked == p.revoked_at.is_some() {
+            continue;
+        }
+        let flag = if revoked { "--revoke" } else { "--unrevoke" };
+        locked_run(bin, &["person", &p.id, flag, "--local"])
+            .await
+            .with_context(|| format!("kith-auth person {} {flag}", p.id))?;
+        tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
+        if revoked {
+            cut.push(p.id);
+        }
+    }
+    Ok(cut)
+}
+
+/// Whether `person` is revoked here (their own state). False when kith-auth can't say: the caller then does what it
+/// did before revoking existed.
+async fn revoked_here(bin: &Path, person: &str) -> bool {
+    auth_person(bin, person).await.ok().flatten().is_some_and(|p| p.revoked_at.is_some())
 }
 
 fn pending(store: &Store) -> Vec<String> {

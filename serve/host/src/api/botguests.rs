@@ -726,7 +726,7 @@ async fn bot_method(
         "botStatus" => status(hub, bot, active).await,
         "proveBotInvite" => prove(hub, caller, bot, b).await,
         "botAsk" => ask(hub, caller, bot, b).await,
-        "botThread" => thread(hub, bot, b),
+        "botThread" => thread(hub, bot, b).await,
         "botConversations" => conversations(hub, bot, b),
         "botStop" => stop(hub, bot, b),
         "botLeave" => leave(hub, bot).await,
@@ -868,6 +868,11 @@ fn chat_row_of(hub: &Hub, person: &str, agent: &str) -> Option<String> {
     chats_of(hub, person).into_iter().find(|(_, a)| a.as_deref() == Some(agent)).map(|(id, _)| id)
 }
 
+/// How long a bot ask waits for this host to catch up with the cloud before it is refused (retryable).
+#[cfg(not(test))]
+const SYNC_WAIT: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const SYNC_WAIT: Duration = Duration::from_millis(300);
 /// One ask at a time between "has this been sent already" and "send it", so a retry racing its original can't send
 /// twice.
 static ASK_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -889,6 +894,14 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
         return Err(BotError::err(400, "notSupported", "Rooms aren't available on this computer yet."));
     }
     let no_queue = b["noQueue"] == true;
+    // The cloud may have just recorded a revoke of the bot's owner: no turn starts until this host has applied it.
+    if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
+        return Err(BotError::err(
+            503,
+            "syncing",
+            "This computer is catching up with the Kith cloud. Try again in a moment.",
+        ));
+    }
     let _one = ASK_LOCK.lock().await;
 
     // Which conversation. Another bot's id is a 404, never a 403: no existence leak.
@@ -1066,8 +1079,20 @@ fn own_conversation(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<BotConversat
 }
 
 /// `botThread {conversation, afterSeq?, limit?}`: what a bot may read of its own conversation (docs 5.8).
-fn thread(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
+async fn thread(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
     let conv = own_conversation(hub, bot, b)?;
+    // Reading the thread is how a bot gets its answers: like an ask, only in sync with the cloud and while its owner
+    // may still use the agent, so a turn that outlived a revoke delivers nothing (R5).
+    if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
+        return Err(BotError::err(
+            503,
+            "syncing",
+            "This computer is catching up with the Kith cloud. Try again in a moment.",
+        ));
+    }
+    if !roles::may_use(&bot.person_id, &conv.agent).await {
+        return Err(BotError::err(403, "notGranted", format!("This bot may not use {}.", conv.agent)));
+    }
     let after = b["afterSeq"].as_i64().unwrap_or(0);
     let limit = b["limit"].as_i64().unwrap_or(200).clamp(1, 500);
     let all = hub.store.thread(&conv.chat_bot_id, &conv.thread_root, 500)?;

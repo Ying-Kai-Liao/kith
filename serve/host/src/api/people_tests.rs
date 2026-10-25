@@ -42,7 +42,7 @@ async fn revoking_a_person_whose_agent_folder_is_gone_still_removes_their_device
     assert!(r.hub.store.devices_of("sam").unwrap().is_empty());
     assert_eq!(r.hub.store.memberships().unwrap(), []);
     assert!(r.hub.store.invites().unwrap().iter().all(|i| !i.open(crate::store::now_ms())));
-    assert!(!r.allowed("sam", "money"), "what kith-auth could remove is removed");
+    assert!(!r.allowed("sam", "money"), "revoked in kith-auth, rows or not");
     // Twice is fine.
     assert_eq!(call(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap()["revoked"], true);
 }

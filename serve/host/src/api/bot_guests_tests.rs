@@ -289,12 +289,19 @@ async fn an_invitees_bot_waits_for_the_owner_who_may_always_allow() {
         &[] as &[Value]
     );
 
-    // Revoking Sam ends every bot of his, and Sam can no longer manage them.
+    // Revoking Sam puts every bot of his to sleep, not to an end: each is refused everything, and back on undo.
+    call(&r, &Caller::Local, "setPersonAccess", json!({"personId": "sam", "agents": {"house": "member"}}))
+        .await
+        .unwrap();
+    assert_eq!(call(&r, &j2.caller, "botAsk", ask("before", "d")).await.unwrap()["state"], "running");
     call(&r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
     for b in [&j, &j2] {
-        assert_eq!(r.hub.store.bot_guest(&b.bot).unwrap().state, BotState::Revoked);
-        assert_eq!(principal(&r.hub.store, &b.caller), Principal::Nobody);
+        assert_eq!(r.hub.store.bot_guest(&b.bot).unwrap().state, BotState::Active);
+        let e = call(&r, &b.caller, "botAsk", ask("while revoked", "e")).await.unwrap_err();
+        assert_eq!(code(&e), Some("notGranted"));
     }
+    call(&r, &Caller::Local, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
+    assert_eq!(call(&r, &j2.caller, "botAsk", ask("after", "f")).await.unwrap()["state"], "running");
 }
 
 #[tokio::test]
@@ -765,4 +772,51 @@ async fn a_bot_guests_chat_reaches_the_owner_and_the_bots_owner_tagged() {
     assert_eq!(chat_rows(&after, &sam_chat).len(), 1);
     assert_eq!(chat_rows(&catch_up(&r, &sam).await, &sam_chat).len(), 1);
     g("history", &sam_chat).await.unwrap();
+}
+
+/// revoke-person R7, the bot door: the cloud says something changed (the owner revoked Sam on another Mac), and no ask
+/// of Sam's bot starts a turn until the pull that applies it; after it the bot is dormant, and an undo from another Mac
+/// wakes it.
+#[tokio::test]
+async fn a_bot_ask_waits_for_the_cloud_and_a_revoke_from_another_mac_puts_the_bot_to_sleep() {
+    use crate::remote::{cloud, sync_lease};
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let sam = sam(&r).await;
+    let j = join(&r, &sam, json!({"name": "Scout", "agents": ["house"]})).await;
+    prove(&r, &j).await.unwrap();
+    call(&r, &Caller::Local, "decideBot", json!({"botId": j.bot, "decision": "allow"})).await.unwrap();
+    let first = call(&r, &j.caller, "botAsk", ask("hi", "a")).await.unwrap();
+    assert_eq!(first["state"], "running");
+    let thread = json!({"conversation": first["conversation"]});
+
+    sync_lease::changed(&r.hub);
+    let e = call(&r, &j.caller, "botAsk", ask("now", "b")).await.unwrap_err();
+    assert_eq!(code(&e), Some("syncing"), "no turn on access the host hasn't caught up with: {e:#}");
+    let e = call(&r, &j.caller, "botThread", thread.clone()).await.unwrap_err();
+    assert_eq!(code(&e), Some("syncing"), "and no answer either: {e:#}");
+
+    let pull = |revoked: Value| {
+        r.set_cloud_state(
+            json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "revoked": revoked}),
+        );
+        async {
+            let mark = sync_lease::mark(&r.hub);
+            cloud::pull(&r.hub, &cloud::url(&r.hub.store).unwrap()).await.unwrap();
+            sync_lease::pulled(&r.hub, mark);
+        }
+    };
+    pull(json!(["user_sam"])).await;
+    assert_eq!(r.who("user_sam")["revoked"], true);
+    assert_eq!(r.hub.store.bot_guest(&j.bot).unwrap().state, BotState::Active, "dormant, not ended");
+    let e = call(&r, &j.caller, "botAsk", ask("now", "c")).await.unwrap_err();
+    assert_eq!(code(&e), Some("notGranted"));
+    let e = call(&r, &j.caller, "botThread", thread.clone()).await.unwrap_err();
+    assert_eq!(code(&e), Some("notGranted"), "a turn that outlived the revoke delivers nothing (R5)");
+
+    // Undone on another Mac: the bot answers again (its owner's rows were kept).
+    pull(json!([])).await;
+    assert_eq!(r.who("user_sam")["revoked"], false);
+    assert_eq!(call(&r, &j.caller, "botAsk", ask("again", "d")).await.unwrap()["state"], "running");
+    assert!(call(&r, &j.caller, "botThread", thread).await.is_ok());
 }

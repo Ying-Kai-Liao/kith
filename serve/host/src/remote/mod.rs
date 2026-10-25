@@ -10,3 +10,4 @@ pub mod identity;
 pub mod members;
 pub mod push;
 pub mod relay;
+pub mod sync_lease;

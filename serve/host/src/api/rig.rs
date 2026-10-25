@@ -52,6 +52,8 @@ impl Rig {
         // The resume half runs on its own tasks; the tests that count owed resumes switch it on themselves.
         hub.store.kv_set("cards.resume", "off").unwrap();
         cloud::update_status(&hub, |s| s.owner = Some(Owner { user_id: "user_owner".into(), email: None }));
+        // As on a live relay connection whose pull was applied: bot asks don't wait for a sync.
+        hub.cloud_synced.store(true, std::sync::atomic::Ordering::Release);
         let rig = Self { dir, bin, hub, fake, _guard: guard };
         rig.auth(&["person", "kai", "owner"]);
         rig

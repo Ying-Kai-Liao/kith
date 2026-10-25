@@ -88,6 +88,8 @@ pub struct Hub {
     /// The cloud's `/v1/host/state` was applied on the current relay connection;
     /// account devices are refused until then (§4.3).
     pub cloud_synced: AtomicBool,
+    /// Bumped when the cloud says its state changed: a pull that started before it can't mark this host in sync.
+    pub cloud_changes: std::sync::atomic::AtomicU64,
     pub cloud: crate::remote::cloud::Cloud,
     pub screen: Arc<Screen>,
     /// Setup terminals (installs, sign-ins).
@@ -169,6 +171,7 @@ impl Hub {
             pairing: Mutex::default(),
             connected: Mutex::default(),
             cloud_synced: AtomicBool::new(false),
+            cloud_changes: std::sync::atomic::AtomicU64::new(0),
             cloud: crate::remote::cloud::Cloud::default(),
             screen,
             terms: Arc::default(),
