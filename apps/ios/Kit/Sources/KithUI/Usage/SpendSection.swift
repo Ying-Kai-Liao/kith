@@ -56,6 +56,7 @@ public struct SpendSection: View {
         do {
             let r = try await store.ready().usageReport(period)
             if !Task.isCancelled { report = r; error = nil }
+            if open == nil, let agent = DemoScreens.open("SPEND")?.split(separator: "/").first { open = AgentPick(agent: String(agent)) }
         } catch where isUnknownMethod(error) {
             unsupported = true
         } catch {
@@ -207,6 +208,7 @@ struct AgentSpendSheet: View {
     private func load() async {
         do {
             view = try await store.ready().agentUsage(agent, period: .month)
+            if DemoScreens.open("SPEND")?.hasSuffix("/limit") == true { editing = true }
         } catch {
             self.error = error.localizedDescription
         }
@@ -356,6 +358,8 @@ struct LimitSheet: View {
                         if busy { Spinner(size: 14) }
                     }
                     .frame(minWidth: 44)
+                    .font(.system(size: 15, weight: .semibold))
+                    .padding(.horizontal, 14).frame(height: 34)
                 }
                 .buttonStyle(.ink)
                 .disabled(busy || customOn && typed == nil)

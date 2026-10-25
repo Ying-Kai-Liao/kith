@@ -184,7 +184,7 @@ private struct GuestPromptTarget: Identifiable {
 private struct ChatScreen: View {
     let ref: BotReference
     @Environment(AccountStore.self) private var accounts
-    @State private var sharing = false
+    @State private var sharing = DemoScreens.open("SHARE") != nil
 
     var body: some View {
         if let store = accounts.store(for: ref.computerId) {

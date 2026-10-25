@@ -51,6 +51,7 @@ test('the usage report reads the ledger as it is, with no limit as null', () => 
 test('the forecast says when the chosen limit runs out and how far the next one lasts', () => {
   const f = { perDay: 72, since: '2026-10-23', text: '', reach: { '300': '2026-10-26', '500': '2026-10-29' } }
   assert.equal(limitForecast(f, 289.01, 300, NOW), 'At about $72 a day, $300 runs out today and $500 lasts to about Oct 29.')
+  assert.equal(limitForecast({ ...f, perDay: 0.07, reach: {} }, 35.82, 100, NOW), 'At about $0.07 a day, $100 lasts the month.')
   assert.equal(limitForecast(f, 289.01, null, NOW), 'At about $72 a day, no limit: runs never wait for one.')
   assert.equal(limitForecast(null, 0, null, NOW), 'No limit: runs never wait for one.')
 })

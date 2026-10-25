@@ -42,7 +42,7 @@ struct TaskRow: View {
         return VStack(alignment: .trailing, spacing: 4) {
             ChatRow(entry: root, groupStart: true, chat: bot, openTrace: openTrace)
             HStack(spacing: 4) {
-                if status.isBusy {
+                if atWork(status) {
                     IconButton("Stop this task", systemImage: "stop.fill") { model.stop(bot.id, thread: root.id) }
                 }
                 ThreadChipView(chip, isOpen: open, onToggle: {
@@ -77,7 +77,7 @@ struct TaskRow: View {
                         .buttonStyle(.plain)
                     }
                 }
-                if status.isBusy && !model.isOffline {
+                if atWork(status) && !model.isOffline {
                     WorkingIndicator(bot: bot, thinking: model.currentThinking(bot.id, thread: root.id))
                         .padding(.top, 6)
                 }
@@ -88,5 +88,10 @@ struct TaskRow: View {
         // Its thread is on screen: the bot's answers here are read.
         .readingConversation(bot.id, thread: root.id)
         .transition(.opacity)
+    }
+
+    /// Whether a lane is at work on it: a message parked at its agent's monthly limit needs you with nothing working.
+    private func atWork(_ status: TaskStatus) -> Bool {
+        status == .working || (status == .needsYou && bot.isWorking(in: bot.id, thread: root.id))
     }
 }

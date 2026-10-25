@@ -51,6 +51,8 @@ private let now = calendar.date(from: DateComponents(year: 2026, month: 10, day:
     let f = SpendForecast(perDay: 72, since: "2026-10-23", text: "", reach: ["300": "2026-10-26", "500": "2026-10-29"])
     #expect(Spend.forecast(f, spent: 289.01, chosen: 300, now: now, calendar: calendar) == "At about $72 a day, $300 runs out today and $500 lasts to about Oct 29.")
     #expect(Spend.forecast(f, spent: 289.01, chosen: nil, now: now, calendar: calendar) == "At about $72 a day, no limit: runs never wait for one.")
+    let slow = SpendForecast(perDay: 0.07, since: "2026-10-22", text: "", reach: [:])
+    #expect(Spend.forecast(slow, spent: 35.82, chosen: 100, now: now, calendar: calendar) == "At about $0.07 a day, $100 lasts the month.")
     #expect(Spend.forecast(nil, spent: 0, chosen: nil, now: now, calendar: calendar) == "No limit: runs never wait for one.")
     #expect(Spend.nextMonthStart(now: now, calendar: calendar) == "Nov 1")
 }
@@ -66,6 +68,14 @@ private let now = calendar.date(from: DateComponents(year: 2026, month: 10, day:
     let board = try #require(LimitCardModel(e, board: true))
     #expect(board.title == "architect used its $300 for October. One run is waiting." && board.footer == nil)
     #expect(Spend.question(e) == board.title)
+}
+
+@Test func aTaskParkedAtItsLimitNeedsYouWithNoLaneAtWork() throws {
+    let idle = try JSONDecoder().decode(Bot.self, from: Data(#"{"id":"architect","workingLanes":[]}"#.utf8))
+    let root = try JSONDecoder().decode(Entry.self, from: Data(#"{"id":"t","botId":"architect","kind":"user","seq":0,"rev":1,"turn":1,"createdAt":1,"updatedAt":1,"data":{"task":true}}"#.utf8))
+    #expect(Tasks.status(of: root, bot: idle, replies: [try entry(agentCard)]) == .needsYou)
+    let answered = try entry(agentCard.replacingOccurrences(of: #""status":"pending""#, with: #""status":"answered","selected":"stop""#))
+    #expect(Tasks.status(of: root, bot: idle, replies: [answered]) == .done)
 }
 
 @Test func aPersonsLimitCardNamesThemAndOffersMore() throws {

@@ -46,7 +46,7 @@ struct BotListView: View {
     @AppStorage(CrewOrderMode.storageKey) private var orderStored = CrewOrderMode.automatic.rawValue
 
     // Crew and Board are two pages of one screen: the same sky, top bar and dock.
-    @State private var tab = ["board", "bots-board", "keys-board"].contains(DemoScreens.name) ? CrewBoardTab.board : CrewBoardTab.crew
+    @State private var tab = ["board", "bots-board", "keys-board"].contains(DemoScreens.name) || DemoScreens.open("BOARD") != nil ? CrewBoardTab.board : CrewBoardTab.crew
     @State private var pageWidth: CGFloat = 390
     // The dock.
     @State private var query = DemoScreens.query

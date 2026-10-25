@@ -23,6 +23,9 @@ test('a task is working, waiting on the user, stopped or done', () => {
   assert.equal(taskStatus(idle, root, [entry('s', 'notice', { text: 'Stopped.' }, 't')]), 'stopped')
   assert.equal(taskStatus(idle, root, [entry('s', 'notice', { text: 'Stopped.' }, 't'), entry('r', 'agent', { final: true }, 't')]), 'done')
   assert.equal(taskStatus(idle, root, []), 'done')
+  // A message parked at its agent's limit: no lane works, the card waits.
+  assert.equal(taskStatus(idle, root, [entry('l', 'permission', { status: 'pending', toolKind: 'limit' }, 't')]), 'needsYou')
+  assert.equal(taskStatus(idle, root, [entry('l', 'permission', { status: 'answered', toolKind: 'limit' }, 't')]), 'done')
 })
 
 test('a finished task takes the host\'s status, and an older host falls back to the thread', () => {

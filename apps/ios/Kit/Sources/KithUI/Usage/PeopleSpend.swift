@@ -143,7 +143,9 @@ private struct BudgetRow: View {
                     Text("$").foregroundStyle(Palette.muted)
                     TextField("25", text: $custom).keyboardType(.decimalPad)
                         .accessibilityLabel("Custom limit for \(name)")
-                    Button("Set") { if let typed { set(typed) } }
+                    Button { if let typed { set(typed) } } label: {
+                        Text("Set").font(.system(size: 15, weight: .semibold)).padding(.horizontal, 12).frame(height: 32)
+                    }
                         .buttonStyle(.ink)
                         .disabled(busy || typed == nil || typed == budget)
                 }

@@ -48,7 +48,11 @@ public enum DemoScreens {
     public static var query: String { name == "crew-typing" ? "co" : "" }
     /// The demos that show more than one computer: a Mac that's offline and one that turned the phone away.
     static var showsProblems: Bool { name == "problem" || name == "account-devices" }
+    /// Simulator shots against a real host: `SIMCTL_CHILD_KITH_OPEN_<what>=<value>` opens that screen
+    /// (`SPEND=architect` or `architect/limit`, `BOARD=1`, `SHARE=1`, `USAGE_SCROLL=spend`).
+    public static func open(_ what: String) -> String? { ProcessInfo.processInfo.environment["KITH_OPEN_\(what)"] }
     #else
+    public static func open(_ what: String) -> String? { nil }
     public static var active: Bool { false }
     public static let chatBotId = "coder"
     public static var name: String? { nil }

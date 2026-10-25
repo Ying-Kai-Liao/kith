@@ -207,8 +207,10 @@ export function limitForecast(f: Forecast | null, spent: number, chosen: number 
     const day = f.reach[String(amount)]
     return day ? `${money(amount)} runs out ${dayWords(day, now)}` : `${money(amount)} lasts the month`
   }
+  // A limit that lasts the month is the whole answer; the next preset only matters when this one runs out.
+  const lasts = spent < chosen && !f.reach[String(chosen)]
   const next = LIMIT_PRESETS.find((p) => p > chosen)
-  if (next === undefined) return `${pace}, ${say(chosen)}.`
+  if (lasts || next === undefined) return `${pace}, ${say(chosen)}.`
   const after = say(next).replace(' runs out ', ' lasts to ').replace('lasts to today', 'runs out today').replace('lasts to tomorrow', 'runs out tomorrow')
   return `${pace}, ${say(chosen)} and ${after}.`
 }

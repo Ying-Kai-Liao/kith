@@ -32,6 +32,8 @@ export function taskStatus(bot: Bot, root: Entry, replies: Entry[]): TaskStatus 
   }
   // A session started in a terminal works outside the host's lanes; its thread says so.
   if (isBusyInTerminal(root.data.thread)) return 'working'
+  // A message parked at its agent's monthly limit waits under a card with no lane at work.
+  if (replies.some((e) => e.kind === 'permission' && e.data.status === 'pending' && e.data.toolKind === 'limit')) return 'needsYou'
   // The host says how a finished turn ended; an older host doesn't, so the thread's entries tell. A host "working"
   // or "needsYou" while no lane is working is stale (the host restarted), so it isn't taken.
   const said = root.data.thread?.status

@@ -215,6 +215,8 @@ button.sp-row:hover {
 }
 .sp-preset {
   height: 34px;
+  padding: 0 8px;
+  text-align: center;
   border-radius: 10px;
   border: 0;
   background: var(--kith-panel);

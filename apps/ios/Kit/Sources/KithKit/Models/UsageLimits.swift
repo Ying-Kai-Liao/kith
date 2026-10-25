@@ -296,7 +296,8 @@ public enum Spend {
             if let day = f.reach[key] ?? nil { return "\(money(amount)) runs out \(words(day))" }
             return "\(money(amount)) lasts the month"
         }
-        guard let next = limitPresets.first(where: { $0 > chosen }) else { return "\(pace), \(say(chosen))." }
+        let lasts = spent < chosen && (f.reach[String(Int(chosen))] ?? nil) == nil
+        guard !lasts, let next = limitPresets.first(where: { $0 > chosen }) else { return "\(pace), \(say(chosen))." }
         let after = say(next).replacingOccurrences(of: " runs out ", with: " lasts to ")
             .replacingOccurrences(of: "lasts to today", with: "runs out today")
             .replacingOccurrences(of: "lasts to tomorrow", with: "runs out tomorrow")
