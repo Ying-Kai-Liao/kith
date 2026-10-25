@@ -51,6 +51,8 @@ struct RepliesView: View {
                             .padding(.bottom, 8)
                     } else if root?.data.thread?.isHeldElsewhere == true {
                         ThreadWriterDock(botId: botId, rootId: rootId)
+                    } else if let guest = chat?.botGuest {
+                        ReadOnlyLine(text: guest.readOnlyLine)
                     } else {
                         Composer(botId: botId, thread: rootId)
                     }

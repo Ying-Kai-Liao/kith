@@ -534,7 +534,7 @@ struct DemoBotScreen: View {
                                      link: "https://kith.example/b/demo", kithLink: nil,
                                      share: "Install the Kith client, then join my Kith computer. This link works once and expires in 24 hours.\n\n  curl -fsSL https://example.invalid/install-guest.sh | sh\n  kith join 'https://kith.example/b/demo#t=demo'\n\nAfterwards ask my agents with:  kith ask @ada \"your question\"\nRun `kith --help` for the rest.\n"),
             name: "Rex", provider: "grok"))
-        case "bots-detail", "bots-remove":
+        case "bots-detail", "bots-remove", "botguest-detail":
             if let bot = store.botGuests.bot("bg_act") { BotDetailView(bot: bot, viewer: .owner, store: store, askRemove: screen == "bots-remove") }
         default: EmptyView()
         }

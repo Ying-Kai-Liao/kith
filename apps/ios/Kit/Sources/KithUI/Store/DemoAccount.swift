@@ -29,7 +29,8 @@ public enum DemoScreens {
             BotGuest(botId: "bg_act", name: "Rex Sr", state: .active, ownerPerson: "sam", ownerName: "Sam", agents: ["ada", "remy"],
                      limits: BotGuestLimits(ratePerHour: 60, concurrent: 2), connected: true, createdAt: now - 80 * hour,
                      joinedAt: now - 79 * hour, decidedAt: now - 78 * hour, decidedBy: "kai", lastSeenAt: now - 600_000, personId: "bot-1",
-                     conversations: [BotGuestConversation(conversation: "c1", agent: "ada", chatBotId: nil, threadRoot: nil,
+                     conversations: [BotGuestConversation(conversation: "c1", agent: "ada", chatBotId: DemoScreens.name?.hasPrefix("botguest") == true ? DemoScreens.botGuestChatId : nil,
+                                                          threadRoot: DemoScreens.name?.hasPrefix("botguest") == true ? DemoScreens.botGuestRoot : nil,
                                                           originLabel: "Dinner plans", lastAt: now - hour)]),
             BotGuest(botId: "bg_inv", name: "Nova Bot", state: .invited, agents: ["pip"], createdAt: now - hour),
             BotGuest(botId: "bg_join", name: "Joiner", state: .joining, agents: ["pip"], createdAt: now - hour),
@@ -38,6 +39,9 @@ public enum DemoScreens {
         ]
     }
 
+    /// The `botguest-*` demos: Rex (Sam's Grok bot) asked "personal"; its chat row and one conversation, shaped like a real host's.
+    public static let botGuestChatId = "personal"
+    public static let botGuestRoot = "bg-root"
     /// The bot the `chat` demo opens.
     public static let chatBotId = "coder"
     /// What the Crew dock starts with: `crew-typing` shows it mid-search.
@@ -111,7 +115,10 @@ extension AccountStore {
         for b in bots { store.bots[b.id] = b }
         seedChat(store, now: now)
         seedBoard(store, now: now)
-        if DemoScreens.name?.hasPrefix("bots-") == true { store.botGuests.seedDemo(DemoScreens.demoBots(now: now)) }
+        if DemoScreens.name?.hasPrefix("bots-") == true || DemoScreens.name?.hasPrefix("botguest") == true {
+            store.botGuests.seedDemo(DemoScreens.demoBots(now: now))
+        }
+        if DemoScreens.name?.hasPrefix("botguest") == true { seedBotGuestChat(store, now: now) }
         store.connection = .online
         store.caughtUp = true
         return accounts
@@ -119,6 +126,38 @@ extension AccountStore {
 }
 
 extension AccountStore {
+    /// The chat a bot from outside has with "personal", as a host sends it (`botGuest` on the row, one notice root with a thread).
+    @MainActor
+    static func seedBotGuestChat(_ store: BotStore, now: Int64) {
+        func decode<T: Decodable>(_ json: [String: Any]) -> T? {
+            (try? JSONSerialization.data(withJSONObject: json)).flatMap { try? JSONDecoder().decode(T.self, from: $0) }
+        }
+        let id = DemoScreens.botGuestChatId, root = DemoScreens.botGuestRoot
+        let minute: Int64 = 60_000
+        if let chat: Bot = decode([
+            "id": id, "name": "Personal", "kind": "agent", "hqAgent": id, "rev": 1, "status": "idle", "unread": 1, "pinned": true, "members": [String](),
+            "lastAt": now - 3 * minute, "avatarColor": "kith:sky", "backend": "claude", "cwd": "/Users/kai/kith", "avatarSource": "crew:house",
+            "lastMessage": "You have two things today: dentist at 3 and dinner at 7.",
+            "botGuest": ["botId": "bg_act", "name": "Rex", "provider": "grok", "ownerPerson": "sam", "ownerName": "Sam"],
+        ]) { store.bots[id] = chat }
+        func entry(_ eid: String, _ seq: Int64, _ kind: String, thread: String? = nil, ago: Int64, data: [String: Any]) -> Entry? {
+            var json: [String: Any] = ["id": eid, "seq": seq, "botId": id, "rev": seq, "kind": kind, "turn": seq, "data": data,
+                                       "createdAt": now - ago * minute, "updatedAt": now - ago * minute]
+            if let thread { json["threadId"] = thread }
+            return decode(json)
+        }
+        let list = [
+            entry(root, 1, "notice", ago: 4, data: ["text": "from Grok · Sam's Rex", "style": "info", "conversation": "cv_demo",
+                "thread": ["count": 2, "lastAt": now - 3 * minute, "authors": ["user", id], "unread": 1, "origin": "bot",
+                           "originLabel": "from Grok · Sam's Rex", "originBot": ["provider": "grok", "owner": "sam", "name": "Rex"]]]),
+            entry("bg-q", 2, "user", thread: root, ago: 4, data: ["text": "What is on the calendar today?"]),
+            entry("bg-a", 3, "agent", thread: root, ago: 3, data: ["text": "You have two things today: dentist at 3 and dinner at 7.", "final": true]),
+        ].compactMap { $0 }
+        store.entries[id] = list
+        // A real host would say there is nothing earlier; without this the chat shows its "load earlier" spinner for good.
+        store.historyComplete.insert(id)
+    }
+
     /// Ada's question waits on every screen, so her row badge shows; the `board` demo adds the rest of the Board.
     @MainActor
     static func seedBoard(_ store: BotStore, now: Int64) {

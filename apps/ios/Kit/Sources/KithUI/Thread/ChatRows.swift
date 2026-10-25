@@ -51,6 +51,7 @@ struct ChatRow: View {
                 if chat?.isGroup == true { AuthorLabel(botId: entry.data.author) }
                 PermissionCard(entry: entry, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
                                waiting: heldElsewhere ? "Open in the terminal: answer it there."
+                                   : chat?.botGuest.map({ !$0.canAnswer(isOwner: model.isOwner) }) == true ? "Only the computer's owner answers this."
                                    : GuestPrompt.waitingText(for: entry, activity: chat?.activity),
                                respond: { option in model.respond(entry, option: option) },
                                held: heldModel, stop: { model.stopHolder(for: entry) }, stopped: model.stoppedRuns[entry.id])
@@ -62,7 +63,12 @@ struct ChatRow: View {
             } else if let card = entry.data.handoff {
                 HandoffCardRow(entry: entry, card: card).padding(.top, 10)
             } else {
-                NoticeRow(entry: entry).padding(.top, 10)
+                // Only a notice that carries a thread (a bot from outside's conversation) gets a chip.
+                VStack(alignment: .leading, spacing: 4) {
+                    NoticeRow(entry: entry)
+                    threadChip
+                }
+                .padding(.top, 10)
             }
         }
     }
@@ -79,8 +85,15 @@ struct ChatRow: View {
         return model.allEntries(entry.botId).first { $0.id == root }?.data.thread?.isHeldElsewhere == true
     }
 
+    /// What hangs under an entry: its thread, when it has replies and this view can open threads. Any kind of entry
+    /// (a message, or a notice a bot from outside's conversation hangs on) gets the same chip.
+    static func chipSummary(_ entry: Entry, canOpen: Bool) -> ThreadSummary? {
+        guard canOpen, let summary = entry.data.thread, summary.count > 0 else { return nil }
+        return summary
+    }
+
     @ViewBuilder private var threadChip: some View {
-        if let summary = entry.data.thread, summary.count > 0, let openThread {
+        if let summary = Self.chipSummary(entry, canOpen: openThread != nil), let openThread {
             ThreadChip(summary: summary, yourTurn: ThreadFeed.hasQuestion(model.replies(entry.botId, root: entry.id), held: summary.isHeldElsewhere)) { openThread(entry) }
         }
     }

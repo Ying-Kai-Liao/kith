@@ -150,7 +150,7 @@ public struct ThreadChipView: View {
                             BotAvatar(portrait: t.face.portrait, color: t.face.color, id: t.face.id, size: KithSize.botAvatarThread)
                             Text(t.repliesText).kithText(.secondary).fontWeight(.semibold).foregroundStyle(Palette.ink)
                             if t.newReplies > 0 {
-                                Text("\(t.newReplies) new").kithText(.secondary).fontWeight(.semibold)
+                                Text("\(t.newReplies) new").kithText(.secondary).fontWeight(.semibold).lineLimit(1).fixedSize()
                                     .foregroundStyle(Palette.ink)
                                     .padding(.horizontal, 7).padding(.vertical, 1)
                                     .background(t.tint.b, in: Capsule())

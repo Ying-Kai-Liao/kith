@@ -162,6 +162,14 @@ private struct DebugHooks: ViewModifier {
                     if let computer = app.accounts.computers.first {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: DemoScreens.chatBotId)
                     }
+                case "botguest-chat", "botguest-thread":
+                    if let computer = app.accounts.computers.first {
+                        app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: DemoScreens.botGuestChatId)
+                        if screen == "botguest-thread" {
+                            app.accounts.store(for: computer.id)?.pendingThread = PendingThread(chat: DemoScreens.botGuestChatId, root: DemoScreens.botGuestRoot)
+                        }
+                    }
+                case "botguest-detail": botScreen = screen
                 case "share-chat":
                     if let computer = app.accounts.computers.first {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: "ada")

@@ -48,6 +48,6 @@ import Testing
         #expect(WriterDivider.text(.openedInTerminal(mac: "Mac mini"), time: "10:31") == "Opened in terminal on Mac mini · 10:31")
         #expect(WriterDivider.text(.tookOver, time: "10:02") == "You took over from the terminal · 10:02")
         #expect(WriterDivider.text(.terminalClosed, time: "10:48") == "Terminal closed · 10:48")
-        #expect(OriginTag.Origin.allCases.map(\.word) == ["Terminal", "Discord", "Telegram", "Slack"])
+        #expect(OriginTag.Origin.allCases.map(\.word) == ["Terminal", "Discord", "Telegram", "Slack", "Bot"])
     }
 }

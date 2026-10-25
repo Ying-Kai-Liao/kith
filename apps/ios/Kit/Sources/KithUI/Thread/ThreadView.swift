@@ -53,6 +53,9 @@ public struct ThreadView: View {
                 } else if let held = ThreadFeed.heldTask(in: model.chat(botId)) {
                     // A terminal holds the thread the box would go on with.
                     ThreadWriterDock(botId: botId, rootId: held.id)
+                } else if let guest = bot?.botGuest {
+                    // A bot from outside's conversation: the owner reads along, nothing is sent here.
+                    ReadOnlyLine(text: guest.readOnlyLine)
                 } else {
                     // The phone is in the top bar, so the dock has no call button.
                     Composer(botId: botId)
@@ -191,6 +194,8 @@ public struct ThreadView: View {
 
     var menuItems: [MenuItem] {
         var items = [MenuItem("Full conversation", icon: "list.bullet.rectangle") { showTrace = true }]
+        // Read-only: no settings, routines, new session or delete on a bot from outside's chat.
+        if bot?.isReadOnly == true { return items }
         if let bot, bot.isGroup {
             items.append(MenuItem("Edit group", icon: "person.2") { editingGroup = true })
             items.append(MenuItem(bot.pinned ? "Unpin" : "Pin", icon: "pin") { model.setPinned(bot, !bot.pinned) })
@@ -338,6 +343,11 @@ struct IntroCard: View {
 extension ThreadView {
     public var body: some View {
         conversation
+            .onChange(of: model.pendingThread, initial: true) { _, pending in
+                guard let pending, pending.chat == botId else { return }
+                model.pendingThread = nil
+                openThread = ThreadTarget(id: pending.root)
+            }
             .kithSheet(item: $openThread) { target in
                 RepliesView(botId: botId, rootId: target.id) { closeThread() }
             }
@@ -449,7 +459,11 @@ extension ThreadView {
 
     private var backButton: some View { TopGlassButton("Back", systemImage: "chevron.left") { dismiss() } }
 
-    private var callButton: some View {
+    @ViewBuilder private var callButton: some View {
+        if bot?.isReadOnly != true { callTopButton }
+    }
+
+    private var callTopButton: some View {
         TopGlassButton("Call", systemImage: "phone.fill", action: startCall)
             .disabled(callBlock != nil || calling)
             .opacity(callBlock != nil ? 0.4 : 1)
@@ -517,14 +531,14 @@ extension ThreadView {
                 model.screenRequest = usingComputer ? ScreenRequest(watching: botId) : ScreenRequest()
             }
         }
-        if bot?.isGroup != true, let root = Tasks.current(in: model.chat(botId)), let bot {
+        if bot?.isGroup != true, bot?.isReadOnly != true, let root = Tasks.current(in: model.chat(botId)), let bot {
             Button("Copy resume command", systemImage: "terminal") { Pasteboard.copy(root.resumeCommand(agent: bot.name)) }
         }
         Divider()
-        if let onShare {
+        if let onShare, bot?.isReadOnly != true {
             Button("Share access…", systemImage: "person.badge.plus", action: onShare)
         }
-        Button("Details", systemImage: "info.circle", action: openDetails)
+        if bot?.isReadOnly != true { Button("Details", systemImage: "info.circle", action: openDetails) }
         ForEach(menuItems) { item in
             if item.divider { Divider() }
             Button(role: item.destructive ? .destructive : nil, action: item.action) {
@@ -534,6 +548,7 @@ extension ThreadView {
     }
 
     private func openDetails() {
+        guard bot?.isReadOnly != true else { return }
         if bot?.isGroup == true { editingGroup = true } else { details = DetailsRequest() }
     }
 

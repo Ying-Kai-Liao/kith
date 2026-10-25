@@ -318,6 +318,23 @@ struct BotListView: View {
     }
 
     @ViewBuilder private func menu(_ item: RosterItem, store: BotStore) -> some View {
+        if item.bot.isReadOnly {
+            readOnlyMenu(item, store: store)
+        } else {
+            fullMenu(item, store: store)
+        }
+    }
+
+    /// A bot from outside's chat is read-only. Keeping it tidy is the computer owner's (a member owner has no say on the row).
+    @ViewBuilder private func readOnlyMenu(_ item: RosterItem, store: BotStore) -> some View {
+        let bot = item.bot
+        if accounts.role(for: item.ref.computerId) == .owner {
+            Button("Mark as read", systemImage: "checkmark.message") { store.markAllRead(bot.id) }
+            Button("Hide from list", systemImage: "eye.slash") { store.setHidden(bot, true) }
+        }
+    }
+
+    @ViewBuilder private func fullMenu(_ item: RosterItem, store: BotStore) -> some View {
         let bot = item.bot
         Button(bot.pinned ? "Unpin" : "Pin", systemImage: bot.pinned ? "pin.slash" : "pin") { store.setPinned(bot, !bot.pinned) }
         Menu("Colour", systemImage: "paintpalette") {
