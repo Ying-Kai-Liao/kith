@@ -87,7 +87,7 @@ struct CallOperator {
 
     private func recent(_ count: Int) -> [String: Any] {
         let name = model.bots[botId]?.name ?? "bot"
-        let messages = Tasks.chatAndTasks(model.allEntries(botId)).filter(\.isChat).suffix(min(max(count, 1), 20)).map { e -> [String: String] in
+        let messages = Tasks.chatAndTasks(model.allEntries(botId)).filter(\.isChat).filter { !$0.data.isSecretCard }.suffix(min(max(count, 1), 20)).map { e -> [String: String] in
             let from = switch e.kind {
             case "user": "user"
             case "agent": e.data.author.flatMap { model.bots[$0]?.name } ?? name
@@ -113,6 +113,7 @@ struct CallOperator {
     }
 
     private var pendingApproval: Entry? {
-        Tasks.chatAndTasks(model.allEntries(botId)).last { $0.kind == "permission" && $0.data.status == "pending" }
+        // A key card is never read aloud or answered by voice: the key is typed on the card.
+        Tasks.chatAndTasks(model.allEntries(botId)).last { $0.kind == "permission" && $0.data.status == "pending" && !$0.data.isSecretCard }
     }
 }

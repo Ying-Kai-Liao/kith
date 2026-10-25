@@ -68,6 +68,9 @@ public struct BoardDecision: Identifiable, Equatable, Sendable {
     public var at: Int64
     public var trouble: BoardTrouble?
 
+    /// A key or account card: the Board only points at it (see `BoardModel.secretRow`).
+    public var opensChat: Bool { entry?.data.isSecretCard == true }
+
     /// Bots from outside waiting for the owner's answer go first, then questions, oldest first.
     fileprivate var rank: Int { botRequest == nil ? 1 : 0 }
 }
@@ -202,7 +205,7 @@ public struct BoardModel: Equatable, Sendable {
                 let titles = Dictionary(tasks.map { ($0.id, Tasks.title($0)) }, uniquingKeysWith: { first, _ in first })
 
                 for entry in pending {
-                    var card = Self.decision(for: entry)
+                    var card = entry.data.isSecretCard ? Self.secretRow(entry, agent: bot.name) : Self.decision(for: entry)
                     card.heading = [bot.name, entry.threadId.flatMap { titles[$0] }].compactMap { $0 }.joined(separator: " · ")
                     decisions.append(BoardDecision(
                         id: "\(computer.id)/\(entry.id)", target: target, hostName: computer.hostName, entry: entry,
@@ -291,6 +294,13 @@ public struct BoardModel: Equatable, Sendable {
 
     private static func activity(_ bot: Bot) -> String {
         bot.activity.isEmpty ? "Working…" : bot.activity
+    }
+
+    /// An Access or Key card on the Board: one line that opens the chat at the card. Never an answer or a field here, so the
+    /// key is only ever typed where the agent's card is. No options: the row is the whole control.
+    static func secretRow(_ entry: Entry, agent: String) -> DecisionCardModel {
+        let service = entry.data.secret?.service ?? "a service"
+        return DecisionCardModel(question: "\(agent) needs a key for \(service)", options: [])
     }
 
     /// The chat's permission card as a decision card: what it wants, where, and only the answers it offered.

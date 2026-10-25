@@ -202,3 +202,37 @@ private func board(_ computers: BoardComputer...) -> BoardModel { BoardModel(com
     #expect(model.filtered(by: "zzz").top == nil)
     #expect(model.filtered(by: "  ") == model)
 }
+
+// MARK: - Access and Key cards
+
+private func keyCard(_ id: String, chat: String) -> Entry {
+    entry(id, "permission", chat: chat) {
+        $0.status = "pending"
+        $0.card = "key"
+        $0.secret = SecretRequest(service: "github", vars: ["GITHUB_TOKEN"])
+    }
+}
+
+@Test func aKeyCardIsARowThatOpensTheChatNeverAnAnswer() throws {
+    let model = board(computer(bots: [try bot("x", name: "Ada")], entries: ["x": [keyCard("k1", chat: "x")]]))
+    let row = try #require(model.needsYou.first)
+    #expect(row.opensChat)
+    #expect(row.card.question == "Ada needs a key for github")
+    #expect(row.card.options.isEmpty)
+    #expect(row.target.botId == "x")
+    #expect(model.waiting == 1)
+}
+
+@Test func anOrdinaryCardStillAnswersOnTheBoard() throws {
+    let model = board(computer(bots: [try bot("x")], entries: ["x": [permission("p1", chat: "x")]]))
+    #expect(model.needsYou.first?.opensChat == false)
+    #expect(model.needsYou.first?.card.options.count == 2)
+}
+
+@Test func aKeyCardIsNeverAGuestPrompt() {
+    var key = keyCard("k1", chat: "guest-chat")
+    key.data.approver = "owner"
+    let plain = permission("p1", chat: "guest-chat", approver: "owner")
+    let prompts = GuestPrompt.pending(in: ["guest-chat": [key, plain]], known: [])
+    #expect(prompts.map(\.id) == ["p1"])
+}

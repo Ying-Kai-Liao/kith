@@ -198,6 +198,37 @@ extension AccountStore {
             }
             pip = [entry("p1", "pip", "user", ago: 3, data: ["text": "Can you also add the footer?", "status": "queued"])].compactMap { $0 }
         }
+        // The `keys-*` demos: Access and Key cards in each state. Every name is an obvious fake and no card holds a
+        // value: the host sends names and states only.
+        if let name = DemoScreens.name, name.hasPrefix("keys-") {
+            func secret(_ vars: [String], profile: String? = nil, replaces: Bool = false, state: String = "pending") -> [String: Any] {
+                var out: [String: Any] = ["service": "github", "vars": vars, "purpose": "Open the pull request and read CI.",
+                                          "replaces": replaces, "state": state]
+                if let profile { out["profile"] = profile }
+                return out
+            }
+            let accounts: [[String: Any]] = [["profile": "github/work", "account": "work", "agents": ["coder", "designer"]],
+                                             ["profile": "github/personal", "account": "personal", "agents": ["personal"]]]
+            let deny: [[String: Any]] = [["optionId": "deny", "name": "Not now", "kind": "reject_once"]]
+            func access(_ id: String, ago: Int64, state: String = "pending", status: String = "pending", profile: String? = nil) -> Entry? {
+                entry(id, "ada", "permission", ago: ago, data: ["card": "account", "status": status, "accounts": accounts, "options": deny,
+                                                                "secret": secret(["GITHUB_TOKEN"], profile: profile, state: state)])
+            }
+            func key(_ id: String, ago: Int64, replaces: Bool = false, state: String = "pending", status: String = "pending", profile: String? = nil) -> Entry? {
+                entry(id, "ada", "permission", ago: ago, data: ["card": "key", "status": status, "options": deny,
+                                                                "secret": secret(["GITHUB_TOKEN"], profile: profile, replaces: replaces, state: state)])
+            }
+            let cards: [Entry?] = switch name {
+            case "keys-access": [access("k1", ago: 1)]
+            case "keys-replace": [key("k1", ago: 1, replaces: true, profile: "github/work")]
+            case "keys-states": [access("k1", ago: 9, state: "saved", status: "answered", profile: "github/work"),
+                                 key("k2", ago: 7, state: "saved", status: "answered", profile: "github/personal"),
+                                 key("k3", ago: 5, state: "denied", status: "answered"),
+                                 key("k4", ago: 3, state: "expired", status: "expired")]
+            default: [key("k1", ago: 1)] // "keys-key", and "keys-board" for the Board row
+            }
+            ada = cards.compactMap { $0 }
+        }
         store.entries["ada"] = ada
         store.entries["remy"] = remy
         store.entries["nova"] = nova
