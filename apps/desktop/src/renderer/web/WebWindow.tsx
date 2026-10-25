@@ -14,7 +14,7 @@ import { BotRow } from '../views/BotRow'
 import { GrantedAgentsChat } from '../views/computers/GrantedAgentsChat'
 import { ThreadView } from '../views/thread/ThreadView'
 import type { Unsupported } from './detect'
-import { noticeFor } from './notice'
+import { emptyAccountText, noticeFor } from './notice'
 import { webSession } from './session'
 import './web.css'
 
