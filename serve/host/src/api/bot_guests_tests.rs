@@ -663,3 +663,106 @@ async fn the_ask_cursor_catches_up_the_answer_and_a_failed_turn_is_marked_an_err
     assert_eq!((notice["error"].as_bool(), notice["seq"].as_i64()), (Some(true), Some(failed.rev)));
     assert!(agent.get("error").is_none());
 }
+
+/// What `caller`'s event stream carries on connect (the catch-up), as the apps read it.
+async fn catch_up(r: &Rig, caller: &Caller) -> Vec<Value> {
+    use futures::StreamExt;
+    let stream = super::events_stream(&r.hub, 0, None, caller).unwrap();
+    let evs: Vec<Value> =
+        Box::pin(stream).take_until(tokio::time::sleep(std::time::Duration::from_millis(300))).collect().await;
+    // The running turns go on writing while we listen: keep what was there on connect.
+    let at = evs[0]["rev"].as_i64().unwrap();
+    evs.into_iter().filter(|e| e["rev"].as_i64().is_none_or(|r| r <= at)).collect()
+}
+
+fn chat_rows<'a>(evs: &'a [Value], chat: &str) -> Vec<&'a Value> {
+    evs.iter().filter(|e| e["type"] == "bot" && e["bot"]["id"] == chat).collect()
+}
+
+async fn guard_sam(r: &Rig, m: &str, chat: &str) -> anyhow::Result<()> {
+    roles::guard(&r.hub, "sam", true, m, &json!({"botId": chat, "text": "x"})).await
+}
+
+#[tokio::test]
+async fn a_bot_guests_chat_reaches_the_owner_and_the_bots_owner_tagged() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let sam = sam(&r).await;
+    let mut live = r.hub.events.subscribe();
+
+    // Sam's bot (let in by the owner) and Kai's own bot each ask once.
+    let mine = join(&r, &sam, json!({"name": "Rex", "provider": "grok", "agents": ["house"]})).await;
+    prove(&r, &mine).await.unwrap();
+    call(&r, &Caller::Local, "decideBot", json!({"botId": mine.bot, "decision": "allow"})).await.unwrap();
+    let kais = active_bot(&r).await;
+    let a = call(&r, &mine.caller, "botAsk", ask("sam's question", "m1")).await.unwrap();
+    let b = call(&r, &kais.caller, "botAsk", ask("kai's question", "k1")).await.unwrap();
+    let chat_of =
+        |a: &Value| r.hub.store.bot_conversation_by_id(a["conversation"].as_str().unwrap()).unwrap().chat_bot_id;
+    let (sam_chat, kai_chat) = (chat_of(&a), chat_of(&b));
+
+    // Live: every event of the chat reaches the owner; Sam gets his bot's chat and not Kai's bot's; a stranger none.
+    let mut seen = vec![];
+    while let Ok(ev) = live.try_recv() {
+        seen.push(ev);
+    }
+    let about = |ev: &Value, chat: &str| ev["bot"]["id"] == chat || ev["entry"]["botId"] == chat;
+    let live_for = |who: Option<&str>, chat: &str| {
+        seen.iter()
+            .filter(|ev| about(ev, chat))
+            .filter_map(|ev| roles::event_for(&r.hub.store, who, ev.clone()))
+            .count()
+    };
+    let total = |chat: &str| seen.iter().filter(|ev| about(ev, chat)).count();
+    assert!(total(&sam_chat) > 0 && total(&kai_chat) > 0);
+    for chat in [&sam_chat, &kai_chat] {
+        assert_eq!(live_for(None, chat), total(chat), "the owner misses events of a bot guest's chat");
+    }
+    assert_eq!(live_for(Some("sam"), &sam_chat), total(&sam_chat));
+    assert_eq!(live_for(Some("sam"), &kai_chat), 0);
+    assert_eq!(live_for(Some("kim"), &sam_chat), 0);
+
+    // Catch-up agrees, with the tag on the row and no duplicates.
+    let owner = catch_up(&r, &Caller::Local).await;
+    for (chat, who) in [(&sam_chat, "Rex"), (&kai_chat, "Rex")] {
+        let rows = chat_rows(&owner, chat);
+        assert_eq!(rows.len(), 1, "one row per chat");
+        let tag = &rows[0]["bot"]["botGuest"];
+        assert_eq!((tag["name"].as_str(), tag["provider"].as_str()), (Some(who), Some("grok")), "{tag}");
+        assert!(owner.iter().any(|e| e["type"] == "entry" && e["entry"]["botId"] == chat.as_str()));
+    }
+    assert_eq!(chat_rows(&owner, &sam_chat)[0]["bot"]["botGuest"]["ownerPerson"], "sam");
+    assert_eq!(chat_rows(&owner, &sam_chat)[0]["bot"]["botGuest"]["ownerName"], "Sam");
+    assert!(chat_rows(&owner, &kai_chat)[0]["bot"]["botGuest"]["ownerPerson"].is_null());
+    // A row that is not a bot guest's has no tag.
+    assert!(owner.iter().filter(|e| e["type"] == "bot").all(|e| e["bot"]["id"] == sam_chat.as_str()
+        || e["bot"]["id"] == kai_chat.as_str()
+        || e["bot"].get("botGuest").is_none()));
+
+    let sams = catch_up(&r, &sam).await;
+    assert_eq!(chat_rows(&sams, &sam_chat).len(), 1);
+    assert_eq!(chat_rows(&sams, &kai_chat).len(), 0);
+    assert!(sams.iter().all(|e| e["entry"]["botId"] != kai_chat.as_str()));
+    assert!(!json!(sams).to_string().contains("/Users/"), "nothing of where the agent works");
+
+    // Sam reads his bot's chat and cannot write to it, nor read Kai's bot's.
+    let g = |m: &'static str, chat: &str| {
+        let chat = chat.to_owned();
+        let r = &r;
+        async move { guard_sam(r, m, &chat).await }
+    };
+    for m in ["history", "thread", "kithInfo", "threadProjects"] {
+        g(m, &sam_chat).await.unwrap_or_else(|e| panic!("{m}: {e:#}"));
+        assert!(g(m, &kai_chat).await.is_err(), "{m} on Kai's bot's chat");
+    }
+    for m in ["send", "editMessage", "deleteBot", "setSettings", "takeOver", "respondPermission"] {
+        assert!(g(m, &sam_chat).await.is_err(), "{m} on a bot's chat");
+    }
+
+    // Revoked, the chat stays readable to both.
+    call(&r, &Caller::Local, "revokeBot", json!({"botId": mine.bot})).await.unwrap();
+    let after = catch_up(&r, &Caller::Local).await;
+    assert_eq!(chat_rows(&after, &sam_chat).len(), 1);
+    assert_eq!(chat_rows(&catch_up(&r, &sam).await, &sam_chat).len(), 1);
+    g("history", &sam_chat).await.unwrap();
+}
