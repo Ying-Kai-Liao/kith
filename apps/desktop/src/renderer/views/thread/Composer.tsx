@@ -162,6 +162,8 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
   }
 
   const submit = () => {
+    // Send while recording: the recording ends and what it heard goes with the message.
+    if (dictation.listening) dictation.stop()
     const command = files.length ? null : builtInCommand(bot, draft)
     if (command) return run(command)
     if (!canSend) return
@@ -177,7 +179,8 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
     field.current?.focus()
   }
 
-  const trailing: Trailing = onInterrupt && !draft && !files.length ? 'interrupt' : working && !draft && !files.length ? 'stop' : onCall && !draft && !files.length ? 'call' : 'send'
+  // While recording, the mic is its Stop and this is its Send.
+  const trailing: Trailing = dictation.listening ? 'send' : onInterrupt && !draft && !files.length ? 'interrupt' : working && !draft && !files.length ? 'stop' : onCall && !draft && !files.length ? 'call' : 'send'
   const [symbol, label] = ({
     interrupt: ['stop.fill', 'Interrupt'],
     stop: ['stop.fill', 'Stop'],
@@ -255,6 +258,7 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
                 ref={field}
                 rows={1}
                 value={draft}
+                readOnly={dictation.listening}
                 placeholder={placeholder}
                 spellCheck
                 aria-label={thread ? 'Reply' : 'Message'}
@@ -277,6 +281,7 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
                   }
                 }}
                 onPaste={(e) => {
+                  if (dictation.listening) return
                   const types = [...e.clipboardData.types]
                   const hasFiles = types.includes('Files')
                   // Pasted text is sent marked as pasted: memory never takes it as the user's own words.
@@ -295,12 +300,15 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
             {dictation.available ? (
               <button
                 className={`press composer-mic ${dictation.listening ? 'on' : ''}`}
-                aria-label={dictation.listening ? 'Stop dictating' : 'Dictate'}
-                title={dictation.listening ? 'Stop dictating' : 'Dictate'}
-                aria-pressed={dictation.listening}
-                onClick={dictation.toggle}
+                aria-label={dictation.listening ? 'Stop recording' : 'Dictate'}
+                title={dictation.listening ? 'Stop recording: edit before sending' : 'Dictate'}
+                onClick={() => {
+                  if (!dictation.listening) return dictation.start()
+                  dictation.stop()
+                  field.current?.focus()
+                }}
               >
-                <Icon name={dictation.listening ? 'mic.fill' : 'mic'} size={13} weight="medium" />
+                <Icon name={dictation.listening ? 'stop.fill' : 'mic'} size={dictation.listening ? 11 : 13} weight="medium" />
               </button>
             ) : null}
             <button

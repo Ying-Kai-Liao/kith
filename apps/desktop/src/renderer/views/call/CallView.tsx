@@ -21,6 +21,7 @@ import { OnDeviceEngine } from './OnDeviceEngine'
 import { OpenAIRealtimeEngine } from './OpenAIRealtimeEngine'
 import { countVoiceUsage, fromBase64, onDeviceAvailable, onDeviceUnavailableReason, providerName, toBase64, VoiceEngine, VoiceSettings, type VoiceProvider, type VoiceStatus } from './voice'
 import { watchVoiceCall } from './voice-call'
+import { stopDictation } from '../thread/dictation'
 import './call.css'
 
 /**
@@ -129,6 +130,8 @@ export function CallView({ botId, greet, onSpeaking, interrupt, onEnd }: {
     }
     engine.current = next
     setSession(next)
+    // Every engine takes the microphone: a recording in a composer ends, its words stay in the draft.
+    stopDictation()
     void next.start()
   }
 

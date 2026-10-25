@@ -125,7 +125,8 @@ export interface AccountState {
 }
 
 export type SpeechEvent =
-  | { type: 'partial' | 'final'; text: string }
+  /** `ends`: the recognizer ended a segment (a pause); the next result may start its text over. */
+  | { type: 'partial' | 'final'; text: string; ends?: boolean }
   | { type: 'level'; value: number }
   | { type: 'started' }
   | { type: 'stopped' }
