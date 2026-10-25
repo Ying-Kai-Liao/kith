@@ -170,6 +170,11 @@ private struct DebugHooks: ViewModifier {
                         }
                     }
                 case "botguest-detail": botScreen = screen
+                case "keys-access", "keys-key", "keys-replace", "keys-states":
+                    if let computer = app.accounts.computers.first {
+                        app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: "ada")
+                    }
+                case "keys-list": app.showSettings = true
                 case "share-chat":
                     if let computer = app.accounts.computers.first {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: "ada")

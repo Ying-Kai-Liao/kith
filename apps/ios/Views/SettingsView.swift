@@ -52,6 +52,8 @@ struct SettingsView: View {
 
             if let owner = online.first {
                 PeopleSection(store: owner)
+                // Owner only: `online` holds the computers this account owns.
+                KeysSection(store: owner)
             }
 
             let memberStores = accounts.computers.filter { accounts.role(for: $0.id) == .member }

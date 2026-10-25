@@ -114,6 +114,8 @@ case "${1:-}" in
     setup; kind=$(awk -F'\t' -v v="$2" -v n="$3" '$1==v && $3==n {print $2}' "$HERE/checks.tsv" | head -1)
     [[ -n $kind ]] || { echo "run.sh: no row $2 $3 in checks.tsv" >&2; exit 2; }
     run_tlc "$2" "$kind" "$3"; exit 0 ;;
+  --tools)  # internal: where the pinned Java and TLA+ tools are, for the other models (verification/secrets/run.sh)
+    setup; echo "$JAVA"; echo "$JAR"; exit 0 ;;
   --list)  grep -v '^#' "$HERE/checks.tsv"; exit 0 ;;
 esac
 

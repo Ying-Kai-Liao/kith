@@ -25,6 +25,7 @@
 		A11CE00000000000000000B2 /* InviteJoinView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE00000000000000000A2 /* InviteJoinView.swift */; };
 		A11CE00000000000000000B1 /* PeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE00000000000000000A1 /* PeopleView.swift */; };
 		A11CE0000000000000000F2 /* ShareAgentSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F1 /* ShareAgentSheet.swift */; };
+		A11CE0000000000000000F4 /* KeysView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11CE0000000000000000F3 /* KeysView.swift */; };
 		501377099B6CF42761B230CB /* WelcomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D57A7C09154869DD84BACE19 /* WelcomeView.swift */; };
 		52CF04B855C6AAEC47B75B8F /* KithKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1285DDFA0390A76ECDAAD6C0 /* KithKit */; };
 		54CEEA0734C2940E2D9FAC7D /* AXTree.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4D13418ABB5FD7CFC087677 /* AXTree.swift */; };
@@ -147,6 +148,7 @@
 		A11CE00000000000000000A2 /* InviteJoinView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteJoinView.swift; sourceTree = "<group>"; };
 		A11CE00000000000000000A1 /* PeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PeopleView.swift; sourceTree = "<group>"; };
 		A11CE0000000000000000F1 /* ShareAgentSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareAgentSheet.swift; sourceTree = "<group>"; };
+		A11CE0000000000000000F3 /* KeysView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeysView.swift; sourceTree = "<group>"; };
 		CE63C84233B14A2D63640EAA /* Capture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Capture.swift; sourceTree = "<group>"; };
 		CFEBE2E6A9D0AF0A0D89FFE7 /* UsageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageView.swift; sourceTree = "<group>"; };
 		D0DE72EEAEC947C1D3CA237F /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -272,6 +274,7 @@
 				A11CE00000000000000000A2 /* InviteJoinView.swift */,
 				A11CE00000000000000000A1 /* PeopleView.swift */,
 				A11CE0000000000000000F1 /* ShareAgentSheet.swift */,
+				A11CE0000000000000000F3 /* KeysView.swift */,
 				B3B62ACA7CC342EEB0829556 /* MacProblemCard.swift */,
 				924434E796E089EF8EEF144F /* AccountShareSlot.swift */,
 				3C0992226556C3AB0BCF03FF /* YourDevices.swift */,
@@ -646,6 +649,7 @@
 				A11CE00000000000000000B2 /* InviteJoinView.swift in Sources */,
 				A11CE00000000000000000B1 /* PeopleView.swift in Sources */,
 				A11CE0000000000000000F2 /* ShareAgentSheet.swift in Sources */,
+				A11CE0000000000000000F4 /* KeysView.swift in Sources */,
 				7E5F670CFFA0E4373F44DB41 /* AccountSession.swift in Sources */,
 				2E4AD532B29AD0697482AE49 /* MacProblemCard.swift in Sources */,
 				B34C2F4BBE5AC8FAA1DF4D04 /* AccountShareSlot.swift in Sources */,

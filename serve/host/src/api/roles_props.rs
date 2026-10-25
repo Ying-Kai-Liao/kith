@@ -127,6 +127,8 @@ struct EntrySpec {
     permission: bool,
     /// 0 none, 1 its own chat, 2 another bot, 3 not a string.
     author: usize,
+    /// 0 an ordinary card, 1 a key card, 2 an account card (cards/secret.rs).
+    secret: usize,
 }
 
 const BOTS: usize = 4;
@@ -152,11 +154,8 @@ fn scenario() -> impl Strategy<Value = Scenario> {
         deleted,
         agent,
     });
-    let entry = (0..=BOTS, proptest::bool::weighted(0.7), 0..4usize).prop_map(|(bot, permission, author)| EntrySpec {
-        bot,
-        permission,
-        author,
-    });
+    let entry = (0..=BOTS, proptest::bool::weighted(0.7), 0..4usize, 0..3usize)
+        .prop_map(|(bot, permission, author, secret)| EntrySpec { bot, permission, author, secret });
     (
         0..3usize,
         [[ans(), ans()], [ans(), ans()]],
@@ -277,6 +276,10 @@ impl World {
                 _ => Some(json!(7)),
             };
             let mut data = json!({"options": [{"optionId": "allow"}], "toolKind": "fetch"}); // not code: a member may answer
+            if e.secret > 0 {
+                data["card"] = json!(["", "key", "account"][e.secret]);
+                data["secret"] = json!({"service": "github", "vars": ["GITHUB_TOKEN"], "state": "pending"});
+            }
             if let Some(a) = author {
                 data["author"] = a;
             }
@@ -334,6 +337,7 @@ fn agent_index(name: &str) -> Option<usize> {
 pub(super) fn router_methods() -> Vec<String> {
     let sources = [
         include_str!("bots.rs"),
+        include_str!("cards.rs"),
         include_str!("host.rs"),
         include_str!("folders.rs"),
         include_str!("backups.rs"),
@@ -499,6 +503,9 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
     let chat = if by_entry(method) {
         let entry = world.hub.store.entry(body["entryId"].as_str().unwrap_or_default());
         let Some(entry) = entry else { return Err(fail("guard let an unknown entry through")) };
+        if roles::secret_card(&entry.data) {
+            return Err(fail(format!("{method} let a member through for a key or account card")));
+        }
         if method == "respondPermission" {
             if entry.kind != "permission" {
                 return Err(fail("respondPermission let through for a card that is not a permission request"));
@@ -646,10 +653,12 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
             BotSpec { owner: 1, deleted: true, agent: 1 },
         ],
         entries: vec![
-            EntrySpec { bot: 0, permission: true, author: 1 },
-            EntrySpec { bot: 1, permission: true, author: 0 },
-            EntrySpec { bot: 0, permission: false, author: 1 },
-            EntrySpec { bot: 0, permission: true, author: 2 },
+            EntrySpec { bot: 0, permission: true, author: 1, secret: 0 },
+            EntrySpec { bot: 1, permission: true, author: 0, secret: 0 },
+            EntrySpec { bot: 0, permission: false, author: 1, secret: 0 },
+            EntrySpec { bot: 0, permission: true, author: 2, secret: 0 },
+            EntrySpec { bot: 0, permission: true, author: 1, secret: 1 },
+            EntrySpec { bot: 0, permission: true, author: 0, secret: 2 },
         ],
     };
     let ids = w.load(&sc);
@@ -666,6 +675,12 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
     // Not a prompt of their run: a card of another kind, and a card another bot raised.
     assert!(go("respondPermission", json!({"entryId": ids.entries[2]})).is_err(), "a notice is not a prompt");
     assert!(go("respondPermission", json!({"entryId": ids.entries[3]})).is_err(), "another bot's prompt");
+    // A key or account card, even one that looks like the member's own prompt, is the owner's.
+    for i in [4, 5] {
+        for m in ["respondPermission", "react", "editHandoff", "keepConversation"] {
+            assert!(go(m, json!({"entryId": ids.entries[i]})).is_err(), "{m} on a secret card");
+        }
+    }
     assert!(go("send", json!({"botId": ids.bots[4]})).is_err(), "a deleted chat");
     // Every method off the member list is refused, one by one (a random draw hits a single method too rarely).
     for m in router_methods().iter().filter(|m| !MEMBER_METHODS.contains(&m.as_str())) {
@@ -723,14 +738,16 @@ struct EventSpec {
     key: usize,
     entry_kind: usize,
     who: usize,
+    /// 0 an ordinary entry, 1 a key card, 2 an account card.
+    secret: usize,
 }
 
 const EVENT_TYPES: [&str; 10] =
     ["bot", "entry", "usage", "screens", "cloud", "resync", "terminal", "", "zzz", "botUpdated"];
 
 fn event_spec() -> impl Strategy<Value = EventSpec> {
-    (0..EVENT_TYPES.len(), 0..=BOTS, 0..3usize, 0..2usize, 0..3usize)
-        .prop_map(|(kind, bot, key, entry_kind, who)| EventSpec { kind, bot, key, entry_kind, who })
+    (0..EVENT_TYPES.len(), 0..=BOTS, 0..3usize, 0..2usize, 0..3usize, 0..3usize)
+        .prop_map(|(kind, bot, key, entry_kind, who, secret)| EventSpec { kind, bot, key, entry_kind, who, secret })
 }
 
 /// Everything in an event about a chat that a person must not see, tagged so a leak shows up in the text.
@@ -753,6 +770,10 @@ fn event_value(e: &EventSpec, ids: &Ids, hub: &Hub) -> Value {
         }
         "entry" => {
             let mut entry = json!({"kind": kind, "text": "hi"});
+            if e.secret > 0 {
+                let card = ["", "key", "account"][e.secret];
+                entry["data"] = json!({"card": card, "secret": {"service": "github"}});
+            }
             match e.key {
                 0 => entry["botId"] = json!(chat),
                 1 => entry["bot_id"] = json!(chat),
@@ -780,6 +801,10 @@ fn events_reach_only_the_person_they_are_about() {
             let ev = event_value(&e, &ids, &w.hub);
             let who = [None, Some("p1"), Some("p2")][e.who];
             let out = roles::event_for(&w.hub.store, who, ev.clone());
+            // A key or account card goes to the owner's devices only: no person gets it, whatever chat it names.
+            if who.is_some() && e.secret > 0 && EVENT_TYPES[e.kind] == "entry" {
+                prop_assert!(out.is_none(), "a secret card reached a person: {out:?}");
+            }
             let ty = EVENT_TYPES[e.kind];
             let chat = ids.bots.get(e.bot).unwrap_or(&ids.ghost);
             // The chat an entry event is about is `botId`, else `bot_id` (what the code reads; a non-string `botId` falls through).
@@ -996,6 +1021,9 @@ fn a_bot_guest_may_call_only_its_short_list() {
         "revokeBot",
         "myBots",
         "setBotLimits",
+        "provideSecret",
+        "listKeys",
+        "revokeKey",
         "createBot",
         "updateBot",
         "deleteBot",
@@ -1091,4 +1119,19 @@ fn the_store_health_reaches_a_member_without_its_error_text_and_only_the_owner_h
     assert!(roles::event_for(&w.hub.store, Some("p1"), event.clone()).is_none(), "a member hears no host event");
     assert!(roles::event_for(&w.hub.store, None, event).is_some());
     assert!(w.hub.store_health(false).get("error").is_none(), "the event never carries the error text");
+}
+
+/// Keys are the owner's alone (cards/secret.rs): on no list a guest, member, bot or waiting bot can call from, by name,
+/// in addition to the router walk above.
+#[test]
+fn the_key_methods_are_on_no_guest_list() {
+    let routed = router_methods();
+    for m in ["provideSecret", "listKeys", "revokeKey"] {
+        assert!(routed.iter().any(|r| r == m), "{m} is not found by the router walk");
+        assert!(!MEMBER_METHODS.contains(&m), "{m} on MEMBER_METHODS");
+        assert!(!roles::BOT_METHODS.contains(&m), "{m} on BOT_METHODS");
+        assert!(!roles::BOT_PENDING_METHODS.contains(&m), "{m} on BOT_PENDING_METHODS");
+        assert!(!UNPROVEN_METHODS.contains(&m), "{m} on UNPROVEN_METHODS");
+        assert!(!roles::member_may(m) && !roles::bot_may(m));
+    }
 }

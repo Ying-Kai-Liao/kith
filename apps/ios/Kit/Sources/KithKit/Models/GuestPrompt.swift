@@ -68,7 +68,7 @@ public struct GuestPrompt: Identifiable, Hashable, Sendable {
     public static func pending(in entries: [String: [Entry]], known: Set<String>) -> [GuestPrompt] {
         var waiting: [Entry] = []
         for (chat, list) in entries where !known.contains(chat) {
-            waiting += list.filter { $0.kind == "permission" && $0.data.status == "pending" && $0.data.approver == "owner" }
+            waiting += list.filter { $0.kind == "permission" && $0.data.status == "pending" && $0.data.approver == "owner" && !$0.data.isSecretCard }
         }
         waiting.sort { $0.createdAt != $1.createdAt ? $0.createdAt < $1.createdAt : $0.id < $1.id }
         return waiting.map { GuestPrompt($0) }

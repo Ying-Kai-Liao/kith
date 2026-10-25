@@ -227,3 +227,108 @@ fn the_card_invariants_hold_over_random_histories() {
         .map_err(|e| e.to_string())
         .unwrap();
 }
+
+// ---- secret cards: one write per card, in order (verification/secrets/Secrets.tla is the same model, exhaustively)
+
+#[derive(Debug, Clone)]
+enum SecretOp {
+    /// A device takes the write claim (slot, then the store's claim) and starts writing.
+    Claim { device: usize },
+    /// Its write came back: ok saves the card, a failure releases the claim.
+    Finish { device: usize, ok: bool },
+    /// The owner says no (refused while a write is in flight: the slot is taken).
+    Deny,
+    /// The clock moves, and the sweep runs.
+    Sweep { by: i64 },
+}
+
+fn secret_op() -> impl Strategy<Value = SecretOp> {
+    prop_oneof![
+        4 => (0..2usize).prop_map(|device| SecretOp::Claim { device }),
+        4 => (0..2usize, any::<bool>()).prop_map(|(device, ok)| SecretOp::Finish { device, ok }),
+        1 => Just(SecretOp::Deny),
+        2 => (1..400i64).prop_map(|by| SecretOp::Sweep { by }),
+    ]
+}
+
+/// open -> saved | denied | expired; the key is written at most once and only through a claim taken while the card
+/// was open; a card that is denied or expired is never written afterwards; a failed write leaves the card open with
+/// its own deadline.
+#[test]
+fn a_secret_card_is_written_at_most_once_and_never_after_it_closed() {
+    runner()
+        .run(&proptest::collection::vec(secret_op(), 1..40), |ops| {
+            let s = store();
+            let mut n = ask(0, 0, 1);
+            n.tool = "request_secret".into();
+            let mut now = 100;
+            let card = match s.card_open(&n, now).unwrap() {
+                Opened::New(c) => c,
+                other => panic!("{other:?}"),
+            };
+            s.card_live(&card.id, Some("e"), Some("r")).unwrap();
+            let own_deadline = card.deadline;
+            let (mut claimed, mut writes, mut original): (Option<usize>, usize, i64) = (None, 0, own_deadline);
+            let mut closed_before_write = false;
+            for op in &ops {
+                now += 1;
+                match op {
+                    SecretOp::Claim { device } => {
+                        // The slot: a second device finds it taken.
+                        if claimed.is_some() {
+                            continue;
+                        }
+                        if let Some(c) = s.card_claim(&card.id, now, now + 100_000).unwrap() {
+                            prop_assert!(c.state.open() && c.deadline >= now);
+                            claimed = Some(*device);
+                            original = c.deadline;
+                        }
+                    }
+                    SecretOp::Finish { device, ok } => {
+                        if claimed != Some(*device) {
+                            continue;
+                        }
+                        claimed = None;
+                        if *ok {
+                            let state = s.card(&card.id).unwrap().state;
+                            prop_assert!(state.open(), "a write started on a closed card: {state:?}");
+                            writes += 1;
+                            prop_assert!(s.card_saved(&card.id, "owner", now, now + 1_000).unwrap().is_some());
+                        } else {
+                            s.card_claim_release(&card.id, original).unwrap();
+                        }
+                    }
+                    SecretOp::Deny => {
+                        if claimed.is_none() {
+                            s.card_answer(&card.id, false, "deny", "owner", now, false).unwrap();
+                        }
+                    }
+                    SecretOp::Sweep { by } => {
+                        now += by;
+                        s.cards_sweep(now).unwrap();
+                    }
+                }
+                let c = s.card(&card.id).unwrap();
+                if writes == 0 && !c.state.open() {
+                    closed_before_write = true;
+                }
+                prop_assert!(writes <= 1, "two writes for one card");
+                if closed_before_write {
+                    prop_assert!(writes == 0, "written after the card closed");
+                    prop_assert!(matches!(c.state, CardState::Denied | CardState::Expired), "{c:?}");
+                }
+                if writes == 1 {
+                    prop_assert!(c.state == CardState::Used && c.allowed == Some(true), "saved means spent: {c:?}");
+                }
+                if claimed.is_some() {
+                    prop_assert!(c.state.open(), "the clock or a no closed a card mid-write: {c:?}");
+                }
+                if claimed.is_none() && writes == 0 && c.state.open() {
+                    prop_assert!(c.deadline <= original.max(own_deadline), "a released claim keeps its own deadline");
+                }
+            }
+            Ok(())
+        })
+        .map_err(|e| e.to_string())
+        .unwrap();
+}

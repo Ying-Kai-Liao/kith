@@ -20,7 +20,8 @@ Use send_file(path, name?) to share a generated regular file (any type, up to 10
 pub const FILES_INSTRUCTIONS: &str = "Use send_file(path, name?) to give the user an image or any other regular file (up to 100 MiB) in this chat or thread: \
 images show inline, other files as a download card. A local path in your reply is not a download. \
 Also use it on a call: the user sees the file in the chat, nothing is read aloud. A successful call is final; don't repeat it. \
-Use call_person(reason) only for something that truly needs the user's voice now: it rings their open Kith app, and the answer says ringing, busy, rate-limited or not-allowed. Don't call again to chase it.";
+Use call_person(reason) only for something that truly needs the user's voice now: it rings their open Kith app, and the answer says ringing, busy, rate-limited or not-allowed. Don't call again to chase it. \
+Use request_secret(service, purpose) when you need a service's key: the user gets a private card, you never see the key, and you are told its name once it is saved. Ask once, then end your turn.";
 
 /// Longest message accepted, in bytes.
 const MAX_MESSAGE_BYTES: usize = 32 * 1024;
