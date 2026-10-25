@@ -76,6 +76,9 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var secret: SecretRequest?
     /// permission with `card` `account`: the owner's accounts for that service, each with the agents holding it.
     public var accounts: [SecretAccount]?
+    /// permission: an agent at its monthly limit (an owner's run waits under it) or a person at their budget
+    /// (host `limits.rs`). Nil on every other card.
+    public var limit: LimitCardData?
 
     public init(text: String? = nil, status: String? = nil, clientNonce: String? = nil) {
         self.text = text

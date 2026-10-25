@@ -15,6 +15,8 @@ struct ShareAgentSheet: View {
     @State private var created: CreatedInvite?
     @State private var removing: HostPerson?
     @State private var botSheet: BotSheetTarget?
+    /// What each holder spent here this month and their limit (owner only; nothing shows without it).
+    @State private var spend: PeopleSpend
 
     /// `people` and `created` are for the DEBUG demo screens; the app passes neither.
     init(store: BotStore, agent: String, name: String, people: PeopleStore? = nil, created: CreatedInvite? = nil) {
@@ -23,6 +25,7 @@ struct ShareAgentSheet: View {
         self.name = name
         _people = State(initialValue: people ?? PeopleStore(store: store))
         _created = State(initialValue: created)
+        _spend = State(initialValue: PeopleSpend(store: store, agent: agent))
     }
 
     private var shared: [(person: HostPerson, role: InviteRole)] { AgentShare.sharedWith(agent, in: people.people) }
@@ -56,6 +59,7 @@ struct ShareAgentSheet: View {
         .background(Palette.background)
         .safeAreaInset(edge: .top, spacing: 0) { ModalHeader("Share access to \(name)") }
         .task { await people.load() }
+        .task { await spend.load() }
         .kithDialog("Remove \(removing?.name ?? "")?",
                     isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
                     message: "They lose \(name). Anything else they have stays.") {
@@ -69,13 +73,15 @@ struct ShareAgentSheet: View {
     private var form: some View {
         CardForm {
             CardSection("Shared with", footer: shared.isEmpty && waiting.isEmpty ? "No one has \(name) yet. Invite someone below." : nil) {
+                if spend.people != nil { OwnerSpendRow(spend: spend) }
                 ForEach(shared, id: \.person.personId) { row in
                     HStack(spacing: 12) {
                         SkyPatch(id: row.person.personId, size: 30)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(row.person.name).font(.body.weight(.semibold))
-                            Text("\(row.role.title) · \(state(of: row.person))")
+                            Text([spend.line(for: row.person.personId), row.role.title, state(of: row.person)].compactMap { $0 }.joined(separator: " · "))
                                 .font(.subheadline).foregroundStyle(Palette.secondary)
+                            PersonSpendBar(spend: spend, person: row.person.personId)
                         }
                         Spacer()
                         Button("Remove") { removing = row.person }
@@ -98,6 +104,10 @@ struct ShareAgentSheet: View {
                             .disabled(people.busy)
                     }
                 }
+            }
+            PeopleLimits(spend: spend, holders: shared.map { (id: $0.person.personId, name: $0.person.name) })
+            if let error = spend.error {
+                Text(error).font(.footnote).foregroundStyle(Palette.danger)
             }
             CardSection("Invite someone", footer: "A member can do more with an agent than a guest. Guest is the safer start. They get \(name) only.") {
                 if whoOptions.count > 1 {

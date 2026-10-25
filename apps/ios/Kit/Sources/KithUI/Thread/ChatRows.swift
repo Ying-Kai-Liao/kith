@@ -55,6 +55,12 @@ struct ChatRow: View {
                 if chat?.isGroup == true { AuthorLabel(botId: entry.data.author) }
                 if entry.data.isSecretCard {
                     secretCard(tint: tint)
+                } else if entry.data.limit != nil {
+                    // An agent at its monthly limit (the owner's message waits under it), or a person at theirs.
+                    LimitCardView(entry: entry, tint: tint, answering: model.answering[entry.id],
+                                  waiting: GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
+                                  time: entry.date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)),
+                                  respond: { option in model.respond(entry, option: option) })
                 } else {
                 PermissionCard(entry: entry, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
                                waiting: heldElsewhere ? "Open in the terminal: answer it there."

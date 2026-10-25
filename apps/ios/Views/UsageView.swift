@@ -2,7 +2,8 @@ import KithKit
 import KithUI
 import SwiftUI
 
-/// Usage limits (opened from the State tab): one grouped card per provider, a row per limit with its own bar.
+/// Usage limits (opened from the State tab): one grouped card per provider, a row per limit with its own bar; then, for
+/// the computer's owner, what agents and your own sessions cost at API prices and each agent's monthly limit.
 struct UsageView: View {
     @Environment(BotStore.self) private var model
     @State private var collapsed: Set<String> = []
@@ -19,14 +20,15 @@ struct UsageView: View {
                 if model.usage.providers.isEmpty {
                     VStack(spacing: 8) {
                         Image(systemName: "chart.bar").font(.system(size: 40)).foregroundStyle(Palette.tertiary)
-                        Text("No usage information yet.").font(.title3.weight(.semibold)).foregroundStyle(Palette.text)
+                        Text(model.isOwner ? "No plan limits yet." : "No usage information yet.").font(.title3.weight(.semibold)).foregroundStyle(Palette.text)
                         Text("Your computer reads the limits from Claude Code and Codex.")
                             .font(.subheadline).foregroundStyle(Palette.secondary)
                     }
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
-                    .padding(.top, 60)
+                    .padding(.top, model.isOwner ? 20 : 60)
                 }
+                SpendSection(store: model)
             }
             .padding(16)
         }
