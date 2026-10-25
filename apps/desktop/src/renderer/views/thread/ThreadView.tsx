@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { botGuestReadOnlyLine } from '@shared/bot-guest-chat'
 import { draftOf, isGroup, isWorkingIn, type Bot, type BotDraft, type Entry } from '@shared/models'
 import { currentTask } from '@shared/tasks'
 import { BotAvatar, GroupAvatar } from '../../components/Avatar'
@@ -63,7 +64,9 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
   const [calling, setCalling] = useState(false)
   const [callSpeaking, setCallSpeaking] = useState(false)
   const interruptCall = useRef<(() => void) | null>(null)
-  const callBlocked = callBlockedReason(store)
+  const guestChat = bot?.botGuest ?? null
+  // A bot guest's chat is read-only here (v1): no calls, no composer, no place picker.
+  const callBlocked = guestChat ? 'Read only' : callBlockedReason(store)
   // One call per chat window: a second press (double click, or the details page while in a call) does nothing.
   const startCall = () => {
     if (calling || callBlocked) return
@@ -150,6 +153,14 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
   // "Reply in thread" only ever opens; folding is the chip's job.
   const replyInThread = useCallback((root: { id: string }) => setOpenThread(root.id), [])
   const closeThread = useCallback(() => setOpenThread(null), [])
+  // The bot detail opens a conversation: its chat, then its thread.
+  useEffect(() => {
+    const want = store.pendingThread
+    if (want && want.botId === botId) {
+      store.pendingThread = null
+      setOpenThread(want.root)
+    }
+  }, [store, botId, store.pendingThread])
 
   const presentRoutine = useCallback((id: string | null) => {
     setRoutineId(id)
@@ -229,7 +240,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
             </HStack>
             {store.shownConnection.kind !== 'online' || store.mismatch ? <ConnectionSubtitle /> : null}
           </button>
-          {bot && !isGroup(bot) ? (
+          {bot && !isGroup(bot) && !guestChat ? (
             <div className={`place-chip-row ${calling ? 'hidden-by-call' : ''}`} inert={calling}>
               <PlaceFolderControl botId={botId} folder={bot.folder} messages={store.chat(botId).length} />
             </div>
@@ -239,7 +250,9 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
         <Transcript botId={botId} openId={openThread} closeThread={closeThread} openTrace={openTrace} openThread={openThreadOn} replyInThread={replyInThread} openRoutine={presentRoutine} openBotChat={setBotChat} />
         <div className="composer-dock" ref={dock}>
           <div className="composer-fade" />
-          {store.mismatch ? (
+          {bot && guestChat ? (
+            <Text as="div" size="footnote" tone="secondary" className="composer-read-only">{botGuestReadOnlyLine(guestChat, bot.name)}</Text>
+          ) : store.mismatch ? (
             <div className="composer-update-needed">
               <UpdateNeededCard />
             </div>

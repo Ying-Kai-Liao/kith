@@ -1,8 +1,9 @@
 import { memo } from 'react'
 import { avatarImage, DEFAULT_IMAGE } from '@shared/crew'
+import { botGuestTag } from '@shared/bot-guest-chat'
 import { folderName, isGroup, isWorking, needsInput, type Bot } from '@shared/models'
 import { Icon } from '../components/Icon'
-import { BotAvatar, CountBadge, SkyPatch } from '../components/kith'
+import { BotAvatar, CountBadge, OriginTag, SkyPatch } from '../components/kith'
 import type { Face } from '../components/Avatar'
 import { LiveBot } from '../components/Avatar'
 import { messagePreview } from '../lib/message-preview'
@@ -47,6 +48,7 @@ export const BotRow = memo(function BotRow({ bot, store, compact, usingComputer,
           {count > 0 ? null : <span className="cs-row-right">{bot.unread > 0 ? <i className="cs-unread" aria-label="Unread" /> : null}{rightText(bot, store)}</span>}
           {count > 0 ? <span className="cs-row-right"><CountBadge count={count} /></span> : null}
         </span>
+        {bot.botGuest ? <span className="cs-row-status"><OriginTag origin="bot" label={botGuestTag(bot.botGuest)} /></span> : null}
         <span className={`cs-row-status ${count > 0 || bot.status === 'error' ? 'ink' : ''}`}>{statusLine(bot, store)}</span>
       </span>
     </span>

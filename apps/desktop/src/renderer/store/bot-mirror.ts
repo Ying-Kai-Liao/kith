@@ -51,6 +51,8 @@ export class BotMirror extends Observable {
   lastError: string | null = null
   /** A kit view selected a bot on this store (new chat, editor); the account picks it up. */
   selection: string | null = null
+  /** A thread to open once its chat is on screen (the bot detail's conversation rows); the chat view takes it. */
+  pendingThread: { botId: string; root: string } | null = null
   /** Permission cards whose answer is on its way, with the chosen option. */
   answering = new Map<string, string>()
   /** Per session, how a Stop of the old run holding it stands (the cards of one session share it). Absent while idle. */
@@ -149,6 +151,12 @@ export class BotMirror extends Observable {
   /** Roster order: pinned first, then where the user dragged them, then most recent activity. */
   get roster(): Bot[] {
     return visibleBots([...this.bots.values()], this.granted).filter((b) => !b.hidden).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.position - b.position || b.lastAt - a.lastAt)
+  }
+
+  /** Asks the chat view to open this thread when its chat is (or comes) on screen. */
+  requestThread(botId: string, root: string | null) {
+    this.pendingThread = root ? { botId, root } : null
+    this.changed()
   }
 
   get hiddenBots(): Bot[] {

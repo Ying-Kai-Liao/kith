@@ -72,7 +72,7 @@ export interface ProfileMenuSpec {
 export type ProfileMenuChoice = 'computers' | 'extensions' | 'usage' | 'settings' | 'help' | 'issue' | 'signOut' | 'apple' | 'google' | 'github'
 
 export type WindowCommand =
-  | { kind: 'openBot'; ref: string }
+  | { kind: 'openBot'; ref: string; thread?: string }
   | { kind: 'stopBot'; ref: string }
   | { kind: 'reviewApprovals' }
   /** Bring the window forward to the cards of bots waiting to be let in. */
@@ -192,7 +192,7 @@ export interface KithBridge {
     onKey(cb: (answer: 'allow' | 'deny') => void): () => void
     respond(ref: string, entryId: string, optionId: string): void
     send(ref: string, text: string): void
-    openBot(ref: string): void
+    openBot(ref: string, thread?: string): void
     newBot(): void
     openApp(): void
   }

@@ -49,7 +49,7 @@ export function InlineThread({ botId, rootId, close }: { botId: string; rootId: 
     <div className="inline-thread" ref={self} style={pairStyle(pairOf(author?.avatarColor))}>
       <div className="inline-thread-head">
         <Text size="caption" tone="tertiary" className="inline-thread-label">{count === 0 ? 'No replies yet' : count === 1 ? '1 reply' : `${count} replies`}</Text>
-        {chat && !isGroup(chat) ? <PlaceFolderControl botId={botId} threadId={rootId} folder={store.threadFolder(botId, rootId)} messages={replies.length} /> : null}
+        {chat && !isGroup(chat) && !chat.botGuest ? <PlaceFolderControl botId={botId} threadId={rootId} folder={store.threadFolder(botId, rootId)} messages={replies.length} /> : null}
         <span className="inline-thread-spacer" />
         <button ref={more} className="inline-thread-more" title="Thread actions" aria-label="Thread actions" onClick={() => setMenu(true)}>
           <span aria-hidden>•••</span>

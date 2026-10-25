@@ -541,3 +541,16 @@
   background: var(--accent, #0a84ff);
   flex: none;
 }
+
+.composer-read-only {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 16px 14px;
+  text-align: center;
+}
+.notice-thread-chip {
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+}
