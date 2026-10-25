@@ -1,7 +1,7 @@
 import { alwaysLabel, cardHeading, cardQuestion, type BotGuest } from '@shared/bot-guests'
 import type { GuestPrompt } from '@shared/mac-role'
 import { Spinner } from '../components/Controls'
-import { DecisionCard, NEUTRAL_PAIR } from '../components/kith'
+import { BotGuestAvatar, DecisionCard, NEUTRAL_PAIR } from '../components/kith'
 import { VStack } from '../components/Stack'
 import { Text } from '../components/Text'
 import { useModel } from '../lib/observable'
@@ -61,6 +61,7 @@ function BotRequestCard({ bot, outcome, busy, decide }: { bot: BotGuest; outcome
       kind="permission"
       pair={NEUTRAL_PAIR}
       heading={cardHeading(bot)}
+      leading={<BotGuestAvatar provider={bot.provider} size={26} />}
       title={cardQuestion(bot)}
       outcome={outcome ?? undefined}
       pending={busy}

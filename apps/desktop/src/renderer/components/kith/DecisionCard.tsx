@@ -12,6 +12,8 @@ export interface DecisionOption {
 interface Common {
   /** A muted label above the title: whose it is ("Sam's bot · Grok"). */
   heading?: string
+  /** A picture before the heading (an outside bot's avatar). */
+  leading?: ReactNode
   /** The agent's colour pair: the question buttons tint with it at low strength. */
   pair: Pair
   /** The card's headline: the question, or what the agent wants ("Wants to run a command"). */
@@ -38,7 +40,7 @@ export type DecisionCardProps =
 
 /** A question waiting on you, or a permission prompt. Buttons are tinted with the agent's pair; no amber. */
 export function DecisionCard(props: DecisionCardProps) {
-  const { pair, heading, title, subject, place, details, outcome, held, waiting, pending = null } = props
+  const { pair, heading, leading, title, subject, place, details, outcome, held, waiting, pending = null } = props
   const busy = pending !== null && pending !== false
   const buttons =
     props.kind === 'question'
@@ -50,7 +52,12 @@ export function DecisionCard(props: DecisionCardProps) {
         ]
   return (
     <section className={`kc-decision ${props.kind}`} style={pairStyle(pair)} aria-label={title}>
-      {heading ? <div className="kc-decision-heading kith-text-secondary">{heading}</div> : null}
+      {heading ? (
+        <div className="kc-decision-heading kith-text-secondary">
+          {leading ? <span className="kc-decision-leading">{leading}</span> : null}
+          {heading}
+        </div>
+      ) : null}
       <div className="kc-decision-title kith-text-body">{title}</div>
       {subject ? <div className="kc-decision-subject kith-text-code">{subject}</div> : null}
       {place ? (

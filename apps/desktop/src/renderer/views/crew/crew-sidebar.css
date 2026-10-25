@@ -374,3 +374,18 @@ html:not([data-platform='darwin']) .cs-profile {
   gap: 6px;
   padding: 8px 0 14px;
 }
+
+/* The outside bot's picture on the corner of its agent's face, ringed so it reads against any row. */
+.cs-face-guest {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+.cs-face-guest-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -3px;
+  display: inline-flex;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--background);
+}

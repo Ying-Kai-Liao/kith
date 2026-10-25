@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { botGuestReadOnlyLine, botGuestTag, botOriginLabel, isBotGuestChat, nestBotGuestChats } from './bot-guest-chat.ts'
+import { botGuestReadOnlyLine, botGuestSender, botGuestTag, botOriginLabel, isBotGuestChat, nestBotGuestChats } from './bot-guest-chat.ts'
 import { normalizeBot } from './models.ts'
 
 const guest = { botId: 'bg1', name: 'Rex', provider: 'grok', ownerPerson: null, ownerName: null }
@@ -37,4 +37,17 @@ test('a bot-guest chat sits right after its agent, once', () => {
   const orphan = { id: 'o', hqAgent: 'gone', botGuest: guest }
   assert.deepEqual(nestBotGuestChats([g, a, x, orphan]).map((b) => b.id), ['a', 'g', 'x', 'o'])
   assert.deepEqual(nestBotGuestChats([a, x]).map((b) => b.id), ['a', 'x'])
+})
+
+test("a bot-guest chat shows the outside bot's user-kind entries as the other party", () => {
+  const chat = { botGuest: guest }
+  const msg = (kind: string, sender?: { botId?: string; name?: string; speaker?: string }) => ({ kind, data: { sender } })
+  assert.deepEqual(botGuestSender(chat, msg('user', { botId: 'bg1', name: 'Rex' })), { name: 'Rex' })
+  assert.deepEqual(botGuestSender(chat, msg('user', { botId: 'bg1', name: 'Rex', speaker: 'Alice' })), { name: 'Rex · Alice' })
+  assert.deepEqual(botGuestSender(chat, msg('user', { botId: 'bg1' })), { name: 'Rex' })
+  // Everything else stays as today.
+  assert.equal(botGuestSender(chat, msg('user')), null)
+  assert.equal(botGuestSender(chat, msg('agent', { botId: 'bg1' })), null)
+  assert.equal(botGuestSender({}, msg('user', { botId: 'bg1' })), null)
+  assert.equal(botGuestSender(null, msg('user', { botId: 'bg1' })), null)
 })

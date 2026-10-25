@@ -288,16 +288,6 @@
 .settings-bot-indent {
   padding-left: 20px;
 }
-.settings-bot-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: none;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  background: var(--code-background);
-}
 .settings-bot-waiting::before {
   content: '';
   display: inline-block;

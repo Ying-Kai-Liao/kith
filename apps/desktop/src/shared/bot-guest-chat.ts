@@ -40,3 +40,15 @@ export function botOriginLabel(t: { originLabel?: string; originBot?: { provider
   const b = t.originBot
   return b ? `from ${b.provider ? providerWord(b.provider) : 'a bot'}${b.name ? ` · ${b.name}` : ''}` : undefined
 }
+
+/**
+ * In a bot-guest chat, a user-kind entry the outside bot wrote (it carries `data.sender.botId`) is the other party's
+ * message, not the owner's. Null everywhere else: normal chats, other kinds, entries without a sender.
+ */
+export function botGuestSender(chat: Pick<Bot, 'botGuest'> | null | undefined, entry: { kind: string; data: { sender?: { botId?: string; name?: string; speaker?: string } } }): { name: string } | null {
+  const s = entry.data.sender
+  if (!isBotGuestChat(chat) || entry.kind !== 'user' || !s?.botId) return null
+  const name = s.name?.trim() || chat!.botGuest!.name
+  const speaker = s.speaker?.trim()
+  return { name: speaker ? `${name} · ${speaker}` : name }
+}
