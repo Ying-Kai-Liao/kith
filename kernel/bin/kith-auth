@@ -6,9 +6,23 @@
                                           several agents as a,b,c, or --all for every agent whose needs list it;
                                           several profiles as p1,p2 (the bridge or kith serve: one bot each, telegram/hq,telegram/x)
   kith-auth granted [--for AGENT] <service> the profiles granted, one per line
-  kith-auth revoke <agent> <service>
+  kith-auth revoke <agent> <service> [--profile P]   with --profile, only that profile's grant goes
   kith-auth set <profile> <VAR>             store a secret in the macOS Keychain (prompts; never echoed) and point
                                           the profile at it
+  kith-auth set <profile> --stdin-json [--grant AGENT]   the host's route (a Key card): stdin is one JSON object
+                                          {"VAR": "value", ...}; every VAR must be one the service declares in `secrets`
+                                          (values non-empty, no NUL, at most 1536 bytes: the `security -i` line limit).
+                                          Written to the Keychain through `security -i` fed on a pipe, so a value is never
+                                          on any argv or env, nor in output, auth.json or auth.log. --grant also lets
+                                          AGENT use the service as that profile, besides any grants it already has.
+                                          Prints {"profile","service","vars","granted"}; on failure a fixed message only.
+                                          Profiles are <service>/<account>, account ^[a-z0-9][a-z0-9._-]{0,39}$
+                                          (github/work, github/personal): several accounts per service, granted per agent.
+  kith-auth account-state <agent> <service> --json   read-only, no secret read: {declared, secrets, granted, missing,
+                                          profiles:[{profile, account, owner, agents}]} (missing: the VARs the agent's first
+                                          granted profile lacks, all of them when it has none)
+  kith-auth keys --json                     read-only, never values: [{profile, service, account, owner, vars, agents,
+                                          last_used}]; last_used is the latest hand-out in auth.log
   kith-auth mcp-config <agent>              the --mcp-config JSON for an agent's granted MCP services (bin/kith uses it)
   kith-auth mcp-names <agent>               the same servers by name and real command only: reads auth.json, no secrets, no keychain,
                                           no browser profile (what kith <agent> --info-json lists)
@@ -120,6 +134,7 @@ def agent_dirs():
     return out
 AUTH = Path(os.environ.get('KITH_AUTH') or paths()['KITH_SECRETS'] / 'auth.json')
 LOG = AUTH.with_name('auth.log')   # every secret handed out: when, to whom, for which service; never the value
+SECURITY = os.environ.get('KITH_SECURITY_BIN') or '/usr/bin/security'   # the one tool that reads and writes Keychain items
 
 
 def die(msg, code=1):
@@ -363,7 +378,7 @@ def resolve_ref(ref):
     if kind == 'keychain':
         svc, _, account = rest.partition('#')
         try:   # a locked keychain or an access prompt must not hang a headless run
-            r = subprocess.run(['security', 'find-generic-password', '-s', svc, '-a', account, '-w'],
+            r = subprocess.run([SECURITY, 'find-generic-password', '-s', svc, '-a', account, '-w'],
                                capture_output=True, text=True, timeout=10)
         except subprocess.TimeoutExpired:
             return None
@@ -555,23 +570,179 @@ def cmd_get(args):
     print(value)
 
 
+ACCOUNT_RE = re.compile(r'^[a-z0-9][a-z0-9._-]{0,39}$')
+SERVICE_RE = re.compile(r'^[a-z0-9][a-z0-9._-]{0,39}$')
+VAR_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,63}$')
+AGENT_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+# `security -i` reads one command per line into a buffer of about 4 KiB. The value goes as hex (-X), so no quoting
+# rules apply; 1536 bytes (3072 hex digits) leaves room for the rest of the line.
+MAX_VALUE = 1536
+MAX_STDIN = 64 * 1024
+
+
+def keychain_put(kc, var, value):
+    """Writes (or updates) the Keychain item kc / var through `security -i`: the command, value included, goes on the
+    pipe to its stdin, never on an argv or in an env. `-i` exits 0 whatever happened, so the item is read back and must
+    be there. Nothing of security's output is kept or shown."""
+    line = f'add-generic-password -U -s {kc} -a {var} -X {value.encode().hex()}\n'
+    try:
+        subprocess.run([SECURITY, '-i'], input=line, capture_output=True, text=True, timeout=30)
+        got = subprocess.run([SECURITY, 'find-generic-password', '-s', kc, '-a', var, '-w'],
+                             capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    out = got.stdout.rstrip('\n')
+    return got.returncode == 0 and out in (value.rstrip('\n'), value.encode().hex())   # -w prints hex for odd bytes
+
+
+def split_profile(profile):
+    """(service, account) of a profile named <service>/<account>, or exit with a fixed message."""
+    svc, _, account = profile.partition('/')
+    if not (SERVICE_RE.match(svc) and ACCOUNT_RE.match(account)):
+        die('profiles are named <service>/<account> (account: a-z 0-9 . _ -, at most 40), e.g. github/work', 2)
+    return svc, account
+
+
+def bad_value(value):
+    return not isinstance(value, str) or not value or '\0' in value or len(value.encode()) > MAX_VALUE
+
+
 def cmd_set(profile, var):
-    if '/' not in profile:
-        die('profiles are named <service>/<account>, e.g. notion/library', 2)
-    if var not in service(profile.split('/', 1)[0]).get('secrets', []):
-        die(f'{profile.split("/", 1)[0]} declares no secret {var}')
+    svc, _ = split_profile(profile)
+    if not VAR_RE.match(var) or var not in service(svc).get('secrets', []):
+        die(f'{svc} declares no secret by that name')
     value = getpass.getpass(f'{profile} {var}: ')
     if not value:
         die('nothing entered; unchanged')
+    if bad_value(value):
+        die(f'refused: a key is text with no NUL, at most {MAX_VALUE} bytes; nothing stored')
     kc = f'kith/{profile}'
-    r = subprocess.run(['security', 'add-generic-password', '-U', '-s', kc, '-a', var, '-w', value],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        die(f'keychain: {r.stderr.strip()}')
+    if not keychain_put(kc, var, value):
+        die('the Keychain did not take the key; nothing stored')
     auth = load_auth(write=True)
     auth['profiles'].setdefault(profile, {})[var] = f'keychain:{kc}#{var}'
     save_auth(auth)
     print(f'stored in Keychain as {kc} / {var}; {profile} now reads it from there')
+
+
+def grant_list(g):
+    return [g] if isinstance(g, str) and g else [x for x in g if isinstance(x, str)] if isinstance(g, list) else []
+
+
+def cmd_set_stdin(profile, grant_agent):
+    """set <profile> --stdin-json [--grant AGENT]. Every refusal is a fixed message: it never carries a value, a name
+    taken from the input, or anything security printed."""
+    svc, account = split_profile(profile)
+    if grant_agent is not None and not AGENT_RE.match(grant_agent):
+        die('refused: not an agent name; nothing stored', 2)
+    raw = sys.stdin.buffer.read(MAX_STDIN + 1)
+    try:
+        values = None if len(raw) > MAX_STDIN else json.loads(raw.decode())
+    except (ValueError, UnicodeDecodeError):
+        values = None
+    raw = None
+    if not isinstance(values, dict) or not values:
+        die('refused: stdin must be one JSON object of VAR: value; nothing stored', 2)
+    declared = service(svc, grant_agent).get('secrets', [])
+    for var, value in values.items():
+        if not (VAR_RE.match(var) and var in declared):
+            die(f'refused: a name is not one {svc} declares; nothing stored', 2)
+        if bad_value(value):
+            die(f'refused: each key is text, non-empty, no NUL, at most {MAX_VALUE} bytes; nothing stored', 2)
+    kc = f'kith/{profile}'
+    for var, value in values.items():
+        if not keychain_put(kc, var, value):
+            die('the Keychain did not take the key; auth.json unchanged')
+    names = list(values)
+    values = None
+    auth = load_auth(write=True)
+    refs = auth['profiles'].setdefault(profile, {})
+    for var in names:
+        refs[var] = f'keychain:{kc}#{var}'
+    if grant_agent is not None:
+        have = grant_list(auth['grants'].setdefault(grant_agent, {}).get(svc))
+        if profile not in have:
+            have.append(profile)
+        auth['grants'][grant_agent][svc] = have if len(have) > 1 else have[0]   # one profile stays the plain string
+    save_auth(auth)
+    print(json.dumps({'profile': profile, 'service': svc, 'vars': names, 'granted': grant_agent}))
+
+
+def profile_vars(refs):
+    """The names a profile stores a secret for: entries pointing at a keychain, env-file or env source."""
+    return [k for k, v in refs.items() if isinstance(v, str) and v.split(':', 1)[0] in ('keychain', 'env-file', 'env')
+            and ':' in v]
+
+
+def agents_granted(auth, profile):
+    return sorted(a for a, g in auth['grants'].items() if isinstance(g, dict)
+                  and any(profile in grant_list(p) for p in g.values()))
+
+
+def cmd_account_state(args):
+    if len(args) != 3 or args[2] != '--json':
+        die('account-state <agent> <service> --json', 2)
+    agent, svc = args[:2]
+    auth = load_auth()
+    f = service_file(svc, agent) if SERVICE_RE.match(svc) else None
+    secrets_ = json.loads(f.read_text()).get('secrets', []) if f else []
+    mine = [p for p in grant_list(auth['grants'].get(agent, {}).get(svc))]
+    have = profile_vars(auth['profiles'].get(mine[0], {})) if mine else []
+    profiles = [{'profile': p, 'account': p.partition('/')[2], 'owner': owner_of(auth, p), 'agents': agents_granted(auth, p)}
+                for p in sorted(auth['profiles']) if p.startswith(svc + '/')]
+    print(json.dumps({'declared': bool(f), 'secrets': secrets_, 'granted': mine,
+                      'missing': [v for v in secrets_ if v not in have], 'profiles': profiles}))
+
+
+def last_used():
+    """{profile: latest hand-out time in auth.log}; the log lines are tab separated: time, how, service, profile, ..."""
+    out = {}
+    try:
+        for line in LOG.read_text().splitlines():
+            t = line.split('\t')
+            if len(t) > 3 and t[3] and t[0] > out.get(t[3], ''):
+                out[t[3]] = t[0]
+    except OSError:
+        pass
+    return out
+
+
+def cmd_keys(args):
+    if args != ['--json']:
+        die('keys --json', 2)
+    auth = load_auth()
+    used = last_used()
+    rows = []
+    for p in sorted(auth['profiles']):
+        names = profile_vars(auth['profiles'][p]) if isinstance(auth['profiles'][p], dict) else []
+        if '/' in p and names:
+            svc, _, account = p.partition('/')
+            rows.append({'profile': p, 'service': svc, 'account': account, 'owner': owner_of(auth, p), 'vars': names,
+                         'agents': agents_granted(auth, p), 'last_used': used.get(p)})
+    print(json.dumps(rows))
+
+
+def cmd_revoke(args):
+    if len(args) == 4 and args[2] == '--profile':
+        agent, svc, profile = args[0], args[1], args[3]
+        auth = load_auth(write=True)
+        grants = auth['grants'].get(agent, {})
+        left = [p for p in grant_list(grants.get(svc)) if p != profile]
+        if left:
+            grants[svc] = left if len(left) > 1 else left[0]
+        else:
+            grants.pop(svc, None)
+        if not grants:
+            auth['grants'].pop(agent, None)
+        save_auth(auth)
+        print(f'{agent} may no longer use {svc} as {profile}')
+        return
+    if len(args) != 2:
+        die('revoke <agent> <service> [--profile P]', 2)
+    auth = load_auth(write=True)
+    auth['grants'].get(args[0], {}).pop(args[1], None)
+    save_auth(auth)
+    print(f'{args[0]} may no longer use {args[1]}')
 
 
 # A membership with no preset is a guest's. `default` mode in a one-shot run means only what the agent's own
@@ -1332,13 +1503,16 @@ def main(argv):
         for agent in names:
             print(f'{agent} may use {svc} as {", ".join(profiles)}' + ('' if uses(agent) or agent in ('bridge', 'serve')
                                                                        else f' (not in its needs yet)'))
-    elif cmd == 'revoke' and len(rest) == 2:
-        auth = load_auth(write=True)
-        auth['grants'].get(rest[0], {}).pop(rest[1], None)
-        save_auth(auth)
-        print(f'{rest[0]} may no longer use {rest[1]}')
-    elif cmd == 'set' and len(rest) == 2:
+    elif cmd == 'revoke':
+        cmd_revoke(rest)
+    elif cmd == 'set' and len(rest) == 2 and rest[1] != '--stdin-json':
         cmd_set(*rest)
+    elif cmd == 'set' and len(rest) in (2, 4) and rest[1] == '--stdin-json' and (len(rest) == 2 or rest[2] == '--grant'):
+        cmd_set_stdin(rest[0], rest[3] if len(rest) == 4 else None)
+    elif cmd == 'account-state':
+        cmd_account_state(rest)
+    elif cmd == 'keys':
+        cmd_keys(rest)
     elif cmd == 'env' and len(rest) >= 2:
         agent, svc, pairs = rest[0], rest[1], rest[2:]
         service(svc, agent)
