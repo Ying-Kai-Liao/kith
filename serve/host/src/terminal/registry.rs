@@ -173,11 +173,14 @@ pub fn liveness(reg: &Registry, sessions: Option<&Path>) -> Live {
 }
 
 /// Whether the process `pid` started when the session file says (`procStart`, as `ps -o lstart` prints it). A pid
-/// reused after a crash starts at another time. When either side can't be read the file is believed.
+/// reused after a crash starts at another time. When either side can't be read the file is believed. Claude Code
+/// writes its own session file's start in UTC, the kernel its files' in the Mac's local time: either one matches.
 fn started_as(pid: u32, claimed: Option<&str>) -> bool {
     let Some(claimed) = claimed else { return true };
+    let claimed = normalized(claimed);
     match proc_start(pid) {
-        Some(actual) => normalized(claimed) == actual,
+        Some(actual) if actual == claimed => true,
+        Some(_) => lstart(pid, &[("TZ", "UTC"), ("LC_ALL", "C")]).is_some_and(|utc| utc == claimed),
         None => true,
     }
 }
@@ -188,7 +191,16 @@ fn normalized(text: &str) -> String {
 
 /// The start time of `pid` as `ps` prints it.
 pub fn proc_start(pid: u32) -> Option<String> {
-    let out = std::process::Command::new("ps").args(["-o", "lstart=", "-p", &pid.to_string()]).output().ok()?;
+    lstart(pid, &[])
+}
+
+/// The start time of `pid` as `ps` prints it with `env` set (a time zone, a locale).
+fn lstart(pid: u32, env: &[(&str, &str)]) -> Option<String> {
+    let out = std::process::Command::new("ps")
+        .envs(env.iter().copied())
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output()
+        .ok()?;
     let text = String::from_utf8(out.stdout).ok()?;
     let text = normalized(&text);
     (!text.is_empty()).then_some(text)

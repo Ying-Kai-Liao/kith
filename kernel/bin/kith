@@ -900,32 +900,42 @@ if [[ -n ${KITH_CLAUDE_ARGS:-} ]]; then
 fi
 # They are for this run only: a helper this agent starts with `kith <other>` must not resume this session.
 unset KITH_CLAUDE_ARGS HQ_CLAUDE_ARGS
-if [[ $# -gt 0 ]]; then
-  # A one-shot that resumes a session (KITH_RESUME, or --resume in KITH_CLAUDE_ARGS from kith ask / the bridge) takes its
-  # writer claim first, for this shell's pid: exec keeps the pid, so the claim is claude's own. -c/--resume already took it.
-  csid="" prev=""
+# Every Claude start holds its session's writer claim from before claude starts until it exits, interactive or one-shot,
+# fresh or resumed: the host never writes to a session a run here has open, also not between claude's start and its first
+# hook. The session is the one the run continues (--resume: KITH_RESUME, -r/-c, or the bridge's KITH_CLAUDE_ARGS) or the
+# one it was told to be (--session-id); a fresh run (or a fork) is given its id now, so there is one to claim. Only a bare
+# --continue from a caller names none up front (no caller passes one; kith's own -c is a --resume by now).
+csid=""
+if [[ $harness == claude ]]; then
+  given="" resumed="" fork=0 cont=0 prev=""
   for a in "${args[@]}"; do
-    [[ $prev == --resume ]] && csid=$a
-    [[ $a == --resume=* ]] && csid=${a#--resume=}
+    case $prev in --resume) resumed=$a ;; --session-id) given=$a ;; esac
+    case $a in
+      --resume=*) resumed=${a#--resume=} ;;
+      --session-id=*) given=${a#--session-id=} ;;
+      --fork-session) fork=1 ;;
+      --continue|-c) cont=1 ;;
+    esac
     prev=$a
   done
-  # The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.
-  claim_person=""; [[ $p_owner == 1 ]] || claim_person=$p_id
-  [[ -z $csid || $harness != claude ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  if [[ -n $given ]]; then csid=$given
+  elif [[ -n $resumed && $fork == 0 ]]; then csid=$resumed
+  elif [[ $cont == 0 || $fork == 1 ]]; then csid=$(python3 -c 'import uuid; print(uuid.uuid4())'); args+=(--session-id "$csid")
+  fi
+fi
+# The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.
+claim_person=""; [[ $p_owner == 1 ]] || claim_person=$p_id
+if [[ $# -gt 0 ]]; then
+  # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
+  # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
+  [[ -z $csid ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
   # A permission prompt in this run asks for approval through a card (--permission-prompt-tool) instead of being refused.
   # A guest run was given KITH_RUN_TOKEN/KITH_RUN_SOCKET by the host, an owner run KITH_ASK_*, or gets them here: the
   # host binds the token to this pid (exec keeps it) and to the session the run continues, or a --session-id chosen now.
   # No token, no host, no answer: no prompt tool, asks are refused as before, and the run goes on.
   if [[ $harness == claude ]]; then
     if [[ -z ${KITH_RUN_TOKEN:-} && -z ${KITH_ASK_TOKEN:-} && $p_owner == 1 ]]; then
-      psid=$csid
-      if [[ -z $psid ]]; then
-        case " ${args[*]} " in
-          *" --session-id "*|*" --continue "*|*" -c "*|*" --resume="*) ;;
-          *) psid=$(python3 -c 'import uuid; print(uuid.uuid4())'); args+=(--session-id "$psid") ;;
-        esac
-      fi
-      [[ -z $psid ]] && psid="continue:$PWD"
+      psid=${csid:-continue:$PWD}
       if ask_env=$("$KITH/bin/kith-permit" issue "$agent" "$psid" "$$"); then eval "$ask_env"; fi
     fi
     if [[ -n ${KITH_RUN_TOKEN:-} && -n ${KITH_RUN_SOCKET:-} ]] || [[ -n ${KITH_ASK_TOKEN:-} && -n ${KITH_ASK_SOCKET:-} ]]; then
@@ -942,6 +952,11 @@ if [[ $# -gt 0 ]]; then
   exec claude "${args[@]}" -p "$*"
 fi
 [[ -t 0 && -t 1 ]] || { echo "kith: no terminal for an interactive session; give a task (kith $agent \"...\") or run it in a terminal" >&2; exit 1; }
+# The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
+# claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
+if [[ -n $csid && $csid != "${r_sid:-}" ]]; then
+  python3 "$KITH/bin/kith-sessions" terminal "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+fi
 # An interactive owner run is listed in the apps (the SessionStart hook above) and may be taken over from there, which ends
 # claude: it runs as a child of kith-sessions so the note about getting it back can follow it (signals and the exit code
 # pass through). One-shots above stay exec.

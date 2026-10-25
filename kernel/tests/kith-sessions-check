@@ -97,8 +97,15 @@ cat > "$T/bin/claude" <<'STUB'
 # plugin list: nothing; otherwise record how it was called, fire the SessionStart hook as Claude Code does, wait for a
 # marker if asked, then exit with STUB_EXIT.
 [[ $1 == plugin ]] && { echo '[]'; exit 0; }
-a=$*; printf '%s\n' "$PWD" "${a//$'\n'/ }" "${KITH_RESUMED_FROM:-}" "${KITH_TERMINAL_SESSION:-}" > "$STUB_OUT"
-sid=${STUB_SID:-stub-sid}
+# The session is STUB_SID, else the one claude was told (--session-id, else --resume), as Claude Code does. Line 5: the writer
+# claim on it as claude starts, "<kind>:self" (claude's own pid, exec'd) or "<kind>:parent" (kith-sessions run), else empty.
+sid=${STUB_SID:-}; given="" resumed="" prev=""
+for x in "$@"; do [[ $prev == --session-id ]] && given=$x; [[ $prev == --resume ]] && resumed=$x; prev=$x; done
+sid=${sid:-${given:-${resumed:-stub-sid}}}
+c=$KITH_STATE/live/terminal/$sid.claim; held=""
+[[ -f $c ]] && held=$(python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); p=c["pid"]
+print(c["kind"] + ":" + ("self" if p == int(sys.argv[2]) else "parent" if p == int(sys.argv[3]) else str(p)))' "$c" $$ $PPID)
+a=$*; printf '%s\n' "$PWD" "${a//$'\n'/ }" "${KITH_RESUMED_FROM:-}" "${KITH_TERMINAL_SESSION:-}" "$held" > "$STUB_OUT"
 printf '{"pid":%s,"sessionId":"%s"}' "$$" "$sid" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
 printf '{"session_id":"%s","transcript_path":"%s/p/%s.jsonl","cwd":"%s","source":"startup"}' "$sid" "$CLAUDE_CONFIG_DIR/projects" "$sid" "$PWD" |
   python3 -c 'import json,sys,subprocess; h=json.load(sys.stdin); import os
@@ -404,10 +411,62 @@ out=$(cd "$T/work/a" && KITH_RESUME=os1 STUB_OUT=$T/os-b.out KITH_CLAIM_WAIT=1 "
 is "one-shot resume: second is refused" "$rc" 1
 [[ $out == *"held by oneshot (pid $claimant)"* ]] && ok "one-shot resume: says who holds it" || bad "held-by message" "$out"
 [[ ! -e $T/os-b.out ]] && ok "one-shot resume: second never started claude" || bad "second started claude"
-# a different session is not blocked; a fresh run (no resume) needs no claim
+# a different session is not blocked
 (cd "$T/work/a" && KITH_RESUME=os2 STUB_SID=os2 STUB_OUT=$T/os-c.out "$KERNEL/bin/kith" designer "other" >/dev/null 2>&1); is "one-shot resume: other session runs" "$?" 0
 # the first ends: its claim is stale, a new resume takes it over
 touch "$T/oneshot.go"; wait
+
+# --- every start holds its session's claim from before claude starts until it exits: a fresh run picks its session id up
+# front (--session-id) and claims it, so the host never writes to a session between claude's start and its first hook ------
+sid_of() { sed -n 2p "$1" | tr ' ' '\n' | grep -A1 -x -- '--session-id' | tail -1; }
+rm -rf "$REG"; rm -f "$T/fresh.go"
+(cd "$T/work/a" && STUB_WAIT=$T/fresh.go STUB_OUT=$T/fresh-i.out tty "$KERNEL/bin/kith" designer) & FBG=$!
+for _ in $(seq 100); do [[ -s $T/fresh-i.out ]] && break; sleep 0.1; done
+fsid=$(sid_of "$T/fresh-i.out")
+[[ $fsid =~ ^[0-9a-f-]{36}$ ]] && ok "fresh interactive: claude gets a new --session-id" || bad "fresh interactive: --session-id" "${fsid:-none}"
+is "fresh interactive: claimed (terminal, by the run) before claude started" "$(sed -n 5p "$T/fresh-i.out")" terminal:parent
+for _ in $(seq 50); do [[ -f $REG/$fsid.json ]] && break; sleep 0.1; done
+is "fresh interactive: still held after the hook" "$(field "$REG/$fsid.claim" kind 2>/dev/null)" terminal
+is "fresh interactive: registered under that id" "$([[ -f $REG/$fsid.json ]] && echo yes)" yes
+out=$(cd "$T/work/a" && KITH_RESUME=$fsid STUB_OUT=$T/fresh-x.out KITH_CLAIM_WAIT=0 "$KERNEL/bin/kith" designer "x" 2>&1); rc=$?
+[[ $rc == 1 && $out == *"held by terminal"* && ! -e $T/fresh-x.out ]] && ok "fresh interactive: another writer is refused" || bad "fresh interactive: second writer" "$rc $out"
+touch "$T/fresh.go"; wait $FBG
+[[ ! -e $REG/$fsid.claim ]] && ok "fresh interactive: claim given back when claude exits" || bad "fresh interactive: claim left" "$(cat "$REG/$fsid.claim")"
+# KITH_RESUME on an interactive run (no --resume flag): the session it names is claimed as a terminal's
+(cd "$T/work/a" && KITH_RESUME=ir1 STUB_OUT=$T/fresh-r.out tty "$KERNEL/bin/kith" designer)
+is "interactive KITH_RESUME: claimed before claude started" "$(sed -n 5p "$T/fresh-r.out")" terminal:parent
+[[ "$(sed -n 2p "$T/fresh-r.out")" != *--session-id* ]] && ok "interactive KITH_RESUME: no new --session-id" || bad "resume got a --session-id"
+# a -r/--resume run (the claim resolve took) is the same: held as claude starts
+printf '{"cwd":"%s","type":"user"}\n' "$T/work/a" > "$CLAUDE_CONFIG_DIR/projects/p/ir1.jsonl"
+(cd "$T/work/a" && KITH_SERVE_PORT=$((PORT + 1)) STUB_OUT=$T/fresh-rr.out tty "$KERNEL/bin/kith" designer --resume ir1)
+is "--resume: claimed before claude started" "$(sed -n 5p "$T/fresh-rr.out")" terminal:parent
+# a fresh one-shot of the owner's (kith ask / schedule / helper): claimed (oneshot, claude's own pid) before it starts
+(cd "$T/work/a" && STUB_OUT=$T/fresh-o.out "$KERNEL/bin/kith" designer "fresh task" >/dev/null 2>&1)
+osid=$(sid_of "$T/fresh-o.out")
+[[ $osid =~ ^[0-9a-f-]{36}$ ]] && ok "fresh one-shot: claude gets a new --session-id" || bad "fresh one-shot: --session-id" "${osid:-none}"
+is "fresh one-shot: claimed (oneshot, claude's own pid) before claude started" "$(sed -n 5p "$T/fresh-o.out")" oneshot:self
+is "fresh one-shot: one --session-id" "$(sed -n 2p "$T/fresh-o.out" | tr ' ' '\n' | grep -c -x -- --session-id)" 1
+is "fresh one-shot: ended, the claim is stale (free)" "$(claimcli take "$osid" $$)" taken
+# nothing gives an exec'd one-shot's claim back: the next claim taken removes stale ones, live ones stay
+sleep 30 & live=$!; sh -c 'exit 0' & dead=$!; wait $dead
+printf '{"pid":%s,"procStart":"x","at":"x","kind":"oneshot"}' "$dead" > "$REG/stale-1.claim"
+printf '{"pid":%s,"procStart":"%s","at":"x","kind":"oneshot"}' "$live" "$(LC_ALL=C ps -o lstart= -p $live | xargs)" > "$REG/live-1.claim"
+(cd "$T/work/a" && STUB_OUT=$T/fresh-p.out "$KERNEL/bin/kith" designer "prune" >/dev/null 2>&1)
+is "a stale claim is removed by the next claim, a live one kept" "$([[ -e $REG/stale-1.claim ]] && echo stale)/$([[ -e $REG/live-1.claim ]] && echo live)" /live
+kill $live 2>/dev/null; wait $live 2>/dev/null
+# a session id the caller chose (KITH_CLAUDE_ARGS) is the one claimed, and a held one is refused
+(cd "$T/work/a" && KITH_CLAUDE_ARGS="--session-id given-1" STUB_OUT=$T/fresh-g.out "$KERNEL/bin/kith" designer "given" >/dev/null 2>&1)
+is "given --session-id: claimed before claude started" "$(sed -n 5p "$T/fresh-g.out")" oneshot:self
+is "given --session-id: kept, none added" "$(sid_of "$T/fresh-g.out")/$(sed -n 2p "$T/fresh-g.out" | tr ' ' '\n' | grep -c -x -- --session-id)" given-1/1
+sleep 30 & holder=$!
+printf '{"pid":%s,"procStart":"%s","at":"x","kind":"app"}' "$holder" "$(LC_ALL=C ps -o lstart= -p $holder | xargs)" > "$REG/given-2.claim"
+rm -f "$T/fresh-h.out"
+out=$(cd "$T/work/a" && KITH_CLAUDE_ARGS="--session-id given-2" STUB_OUT=$T/fresh-h.out KITH_CLAIM_WAIT=0 "$KERNEL/bin/kith" designer "x" 2>&1); rc=$?
+[[ $rc == 1 && $out == *"held by app"* && ! -e $T/fresh-h.out ]] && ok "given --session-id held by the host: refused" || bad "given held" "$rc $out"
+rm -f "$T/fresh-h.out"
+(cd "$T/work/a" && KITH_CLAUDE_ARGS="--session-id given-2" STUB_OUT=$T/fresh-h.out tty "$KERNEL/bin/kith" designer)
+[[ ! -e $T/fresh-h.out ]] && ok "interactive on a held session: refused, claude never started" || bad "interactive held started claude"
+kill $holder 2>/dev/null; wait $holder 2>/dev/null
 
 # a run for anyone but the owner is findable by the revoke sweep for its whole life: a session-less proc claim naming the person
 # and the agent, for the pid that execs claude (fresh or resumed); the owner's run leaves none
