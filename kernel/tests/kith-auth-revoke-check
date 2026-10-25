@@ -80,6 +80,10 @@ check "linked, lease live: not held" "[ \"\$(W 42 \"['held']\")\" = False ]"
 printf '{"linked": true, "until": %s}\n' "$((now - 1000))" > "$KITH_SERVE_DIR/cloud-sync.json"
 check "linked, lease run out: held" "[ \"\$(W 42 \"['held']\")\" = True ]"
 check "linked, lease run out: the owner is never held" "[ \"\$(W 1 \"['held']\")\" = False ]"
+check "resolve says held too (the bridge's spawn and delivery re-check)" \
+  "[ \"\$(A resolve house --person sam | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"held\"])')\" = True ]"
+check "resolve: the owner is never held" \
+  "[ \"\$(A resolve house --person kai | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"held\"])')\" = False ]"
 printf '{"linked": true, "until": 0}\n' > "$KITH_SERVE_DIR/cloud-sync.json"
 check "linked, never synced: held" "[ \"\$(W 42 \"['held']\")\" = True ]"
 

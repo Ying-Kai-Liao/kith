@@ -39,8 +39,9 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           reach (own row, everyone row, helper) with its mode, and the account each
                                           service would really use in their runs; ID for one person in full (the
                                           owner's agents too); --matrix: agents × people at a glance; --json:
-                                          [{id, name, owner, bot_of, provider, root}], each bot after its parent;
-                                          bots are listed under their owner
+                                          [{id, name, owner, bot_of, provider, root, revoked (they or their bot's
+                                          owner), revoked_at (their own), kith (account id or '')}], each bot after
+                                          its parent; bots are listed under their owner
   kith-auth person <id> [name=.. lang=.. tz=.. owner] [--rm]   a person; `owner` marks you (one owner); --rm forgets
                                           them (rows, grants and bots go; their memory stays to delete by hand)
   kith-auth person <id> --revoke | --unrevoke   revoke: they stay in kith, reach nothing (the `*` row included),
@@ -81,7 +82,8 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
   kith-auth share <profile> <id>[,..] [--rm]   it stays its owner's, and these people's runs may use it too (through
                                           the agents granted it that they may use)
   kith-auth may <id> <agent> [--via AGENT]  exit 0 if the person may use the agent (--via: called as AGENT's helper)
-  kith-auth resolve <agent> [--person ID] [--via AGENT]   the run's effective person settings, as JSON (bin/kith uses it)
+  kith-auth resolve <agent> [--person ID] [--via AGENT]   the run's effective person settings, as JSON (bin/kith uses it);
+                                          held as in `who` (the bridge waits for the cloud sync before it serves)
 
 Three layers, so sharing an agent never shares an account:
   kernel/services/<name>.json   what a service is: kind (mcp | cli | login), how to start it, which env vars it needs.
@@ -1071,7 +1073,9 @@ def cmd_people(args):
         return print(json.dumps([{'id': pid, 'name': auth['people'][pid].get('name', ''),
                                   'owner': bool(auth['people'][pid].get('owner')),
                                   'bot_of': parent_of(auth, pid) or '', 'provider': auth['people'][pid].get('provider', ''),
-                                  'root': root_of(auth, pid), 'revoked': cut_off(auth, pid)} for pid in ordered(auth)]))
+                                  'root': root_of(auth, pid), 'revoked': cut_off(auth, pid),
+                                  'revoked_at': (auth['people'][pid].get('revoked') or {}).get('at'),
+                                  'kith': auth['people'][pid].get('handles', {}).get('kith', '')} for pid in ordered(auth)]))
     full = bool(args)
     for pid in args or ordered(auth):
         need_person(auth, pid)
@@ -1713,7 +1717,8 @@ def main(argv):
             sys.exit(0 if ok else 1)
         if cmd == 'resolve' and len(rest) == 1:
             person = opts.get('--person') or acting(auth)
-            print(json.dumps(resolve(auth, rest[0], person, opts.get('--via') or None)))
+            # held: as in `who`, this Mac is out of sync with the Kith cloud and person isn't the owner (R8)
+            print(json.dumps({**resolve(auth, rest[0], person, opts.get('--via') or None), 'held': bridge_held(auth, person)}))
             return
         die(f'{cmd}: see kith-auth --help', 2)
     elif cmd == 'access':
