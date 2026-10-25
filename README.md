@@ -452,7 +452,7 @@ Kith is split on purpose. The pieces you build on are open source; the product a
 
 FSL-1.1-MIT is Fair Source, not open source: you can read, run, modify and self-host it for any use except building a competing product or service, and each version becomes plain MIT two years after its release. The nearest `LICENSE` file to a file is the one that applies to it. Portions of the relay derive from Codync (Apache-2.0); see `NOTICE`. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by these licenses.
 
-v0.1.0 and earlier releases were published under MIT/Apache-2.0 and stay under those licenses for anyone who has them.
+Code committed before this change (2026-10-25) was published under MIT/Apache-2.0, and copies taken before then keep those licenses.
 
 ## Credits
 Kith's relay is borrowed from [Codync](https://github.com/leepokai/Codync) (Apache-2.0).
