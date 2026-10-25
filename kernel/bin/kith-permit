@@ -102,6 +102,21 @@ def access_def():
                             'required': ['reason']}}
 
 
+SECRET = 'request_secret'
+
+
+def secret_def():
+    return {'name': SECRET,
+            'description': 'Ask the owner for a key or token of a service you need (one the service declares) and are not '
+                           'allowed to use yet. The owner picks an existing account or types the key into a card; you never see '
+                           'it. The answer comes at your next turn: after this call, end your turn and say what you are '
+                           'waiting for.',
+            'inputSchema': {'type': 'object',
+                            'properties': {'service': {'type': 'string', 'description': 'service name, e.g. github'},
+                                           'purpose': {'type': 'string', 'description': 'what you need it for'}},
+                            'required': ['service', 'purpose']}}
+
+
 BUG = 'report_bug'
 
 
@@ -166,6 +181,17 @@ def request_access(a, env=os.environ):
     return msg if isinstance(msg, str) and msg else 'The approval service gave no clear answer; nothing was requested.'
 
 
+def request_secret(a, env=os.environ):
+    """The text the agent is told for one request_secret call."""
+    if not all(isinstance(a.get(k), str) and a[k].strip() for k in ('service', 'purpose')):
+        return 'Give the service and what you need it for.'
+    reply = call_host('requestSecret', {'service': a['service'].strip(), 'purpose': a['purpose']}, env)
+    if reply is None:
+        return 'No approval channel for this run: no key was requested. Say what you needed and carry on without it.'
+    msg = reply.get('message') or reply.get('error')
+    return msg if isinstance(msg, str) and msg else 'The approval service gave no clear answer; nothing was requested.'
+
+
 def apply(settings_file, env=os.environ):
     """Adds the access this session was given to a guest run's settings file. Never fails the run: no answer is no access."""
     import tempfile
@@ -203,7 +229,8 @@ def handle(msg, env=os.environ):
         ver = (msg.get('params') or {}).get('protocolVersion') or '2024-11-05'
         result = {'protocolVersion': ver, 'capabilities': {'tools': {}}, 'serverInfo': {'name': SERVER, 'version': '1'}}
     elif method == 'tools/list':
-        result = {'tools': [tool_def(), access_def(), bug_def()]}
+        # a key card needs a host to ask, so request_secret is only offered to a run that has a token
+        result = {'tools': [tool_def(), access_def(), bug_def()] + ([secret_def()] if credentials(env)[0] else [])}
     elif method == 'ping':
         result = {}
     elif method == 'tools/call':
@@ -211,6 +238,8 @@ def handle(msg, env=os.environ):
         a = p.get('arguments') or {}
         if p.get('name') == ACCESS:
             result = {'content': [{'type': 'text', 'text': request_access(a, env)}]}
+        elif p.get('name') == SECRET:
+            result = {'content': [{'type': 'text', 'text': request_secret(a, env)}]}
         elif p.get('name') == BUG:
             result = {'content': [{'type': 'text', 'text': report_bug(a, env)}]}
         else:

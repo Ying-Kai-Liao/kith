@@ -103,7 +103,7 @@ def rpc(m):
     return json.loads(p.stdout.readline())
 check('mcp: initialize', rpc({'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {'protocolVersion': '2025-03-26'}})['result']['serverInfo']['name'], 'kithpermit')
 p.stdin.write(json.dumps({'jsonrpc': '2.0', 'method': 'notifications/initialized'}) + '\n'); p.stdin.flush()
-check('mcp: three tools', [t['name'] for t in rpc({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'})['result']['tools']], ['approve', 'request_access', 'report_bug'])
+check('mcp: four tools (request_secret with a token)', [t['name'] for t in rpc({'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'})['result']['tools']], ['approve', 'request_access', 'report_bug', 'request_secret'])
 reply[0] = b'{"ok":true,"carded":true,"message":"Asked Kai. End your turn now."}\n'
 r = rpc({'jsonrpc': '2.0', 'id': 5, 'method': 'tools/call', 'params': {'name': 'request_access', 'arguments': {'path': '/Users/x/Documents', 'reason': 'read the notes'}}})
 check('request_access: the host message is the tool result', r['result']['content'][0]['text'], 'Asked Kai. End your turn now.')
