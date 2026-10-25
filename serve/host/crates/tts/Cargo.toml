@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Speaks text with a local Phonon model for kith serve, over JSON lines on stdio"
-license = "Apache-2.0"
+license = "PolyForm-Noncommercial-1.0.0"
 publish = false
 
 # Its own process so a crash in the model code only fails one request, and so kith serve's binary

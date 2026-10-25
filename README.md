@@ -434,7 +434,7 @@ put its skills in `role/skills/`. New sessions pick it up; `kith share <name>` p
   addresses and the words in `~/.kith/private-words`.
 - Status: early, built for one person's Mac. macOS only (APFS clones, Keychain, launchd); needs Claude Code, git
   and python3 (gh to share agents, uv for the Discord bridge).
-- MIT licence (LICENSE). Linked skills keep their own licences (each agent's skills.json).
+- PolyForm Noncommercial 1.0.0 (LICENSE): free for noncommercial use; commercial use needs a separate licence. Linked skills keep their own licences (each agent's skills.json).
 - Design working files live outside the repo in `~/Workspace/design/<project-id>/`; sync that folder separately.
 
 ## Credits

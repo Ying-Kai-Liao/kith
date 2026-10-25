@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Kith cloud: accounts, computers and the end-to-end encrypted relay (Cloudflare Worker + Durable Object)",
   "private": true,
-  "license": "Apache-2.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "module",
   "scripts": {
     "dev": "wrangler dev --env local",

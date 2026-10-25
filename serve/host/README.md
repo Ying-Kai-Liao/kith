@@ -1,6 +1,6 @@
 # kith-serve
 
-Kith's host: runs coding-agent bots over ACP and serves the Kith apps. Apache-2.0: see `../../NOTICE`, `../../THIRD_PARTY_NOTICES.md` and `LICENSE`.
+Kith's host: runs coding-agent bots over ACP and serves the Kith apps. PolyForm Noncommercial 1.0.0: see `../../NOTICE`, `../../THIRD_PARTY_NOTICES.md` and `LICENSE`.
 
 ## One `kith` binary
 

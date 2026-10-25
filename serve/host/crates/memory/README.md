@@ -52,4 +52,4 @@ The crate re-exports the `rusqlite` it builds against: use that one, because a b
 
 ## License
 
-Apache-2.0
+PolyForm Noncommercial 1.0.0

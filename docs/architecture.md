@@ -71,7 +71,7 @@ Rules that follow from it:
 `<home>/state` (`lib/kith_paths.py`), a git repo of its own. Databases are committed as text dumps (`kith-state dump`).
 Personal details moved out of the packages too (2026-10-14);
 `kith-pkg check --share` guards it. Third-party skills are linked from their repos (skills.json), never copied.
-Published 2026-10-14 with fresh history (MIT).
+Published 2026-10-14 with fresh history (MIT; later versions are PolyForm Noncommercial 1.0.0).
 
 **Code in kernel/** (2026-10-15). The repo is the kith folder; all code and services moved into `kernel/` (bin, lib,
 adapters, PROTOCOL.md, services), so the top level shows the system's parts: `kernel/`, `agents/`, `state/`. One

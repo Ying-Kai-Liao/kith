@@ -7,7 +7,7 @@
     "name": "Ying-Kai Liao"
   },
   "homepage": "https://github.com/Ying-Kai-Liao/kith",
-  "license": "Apache-2.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
   "main": "out/main/index.js",
   "scripts": {

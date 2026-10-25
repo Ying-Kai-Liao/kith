@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Client-only Kith for a cloud bot's VM: joins a Kith computer by invite and asks its agents over the end-to-end relay"
-license = "Apache-2.0"
+license = "PolyForm-Noncommercial-1.0.0"
 publish = false
 
 # Packaged as `kith` inside the Linux tarball; cargo builds it as `kith-guest` so the workspace has no output-name clash

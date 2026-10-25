@@ -13,7 +13,7 @@ mkdir -p "$S"
 cp -R "$ROOT/kernel" "$S/kernel"
 cp -R "$ROOT/.claude-plugin" "$S/.claude-plugin"
 cp "$ROOT/install.sh" "$ROOT/LICENSE" "$ROOT/README.md" "$S/"
-# serve/ is Apache-2.0 and the NOTICE has to travel with every redistribution of the host binary.
+# serve/ is PolyForm Noncommercial 1.0.0 and the NOTICE has to travel with every redistribution of the host binary.
 cp "$ROOT/serve/LICENSE" "$S/LICENSE.serve"
 cp "$ROOT/NOTICE" "$ROOT/THIRD_PARTY_NOTICES.md" "$S/"
 # Tests and caches are for the repo, not the install.
