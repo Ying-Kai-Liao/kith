@@ -16,7 +16,8 @@
   kith-cost limit <agent> [--json|--sh]    where the agent stands against its monthly limit (kith AGENT set limit N):
                                    spent this calendar month, the limit, what happens at it, a forecast. bin/kith
                                    (--sh) and the host (--json) read it; no limit answers at once, without a sync
-  kith-cost members <agent> --json   this calendar month per person on the agent (owner: your own runs), for budgets
+  kith-cost members <agent> --json   this calendar month per person on the agent (owner: your own runs), and each
+                                    person's budget= on it (kith-auth budgets)
   kith-cost sync                     copy new usage from ~/.claude/projects into the ledger
   kith-cost csv [since YYYY-MM-DD]   every request as CSV with its kith agent, for a spreadsheet
   kith-cost tag                      (SessionStart hook in kith runs) record the session as a run of $KITH_AGENT
@@ -517,7 +518,14 @@ def agent_json(c, name, period):
 def members(c, agent):
     rows = c.execute('''select coalesce(person, 'owner'), sum(cost) from hq_req where hq_agent = ? and ts >= ?
                          group by 1''', (agent, utc(month_start()))).fetchall()
-    print(json.dumps({'agent': agent, 'month': period_label('month'), 'people': {p: round(x or 0, 4) for p, x in rows}}))
+    try:   # each person's own budget on the agent (kith-auth member .. budget=), null when it has none
+        out = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth'), 'budgets', agent,
+                              '--json'], capture_output=True, text=True, timeout=20, check=True).stdout
+        budgets = json.loads(out)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        budgets = {}
+    print(json.dumps({'agent': agent, 'month': period_label('month'), 'people': {p: round(x or 0, 4) for p, x in rows},
+                      'budgets': budgets}))
 
 
 def session(c, prefix):

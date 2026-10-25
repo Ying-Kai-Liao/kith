@@ -92,6 +92,9 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             backends::refresh_sign_in().await;
             json!({"backends": backends::list()})
         }
+        "usageReport" | "agentUsage" | "setAgentLimit" | "agentPeople" | "setPersonBudget" => {
+            crate::limits::call(method, &b).await?.ok_or_else(|| anyhow::anyhow!("unknown usage method"))?
+        }
         "usage" => {
             if b["refresh"].as_bool().unwrap_or(false) {
                 usage::refresh(hub).await;

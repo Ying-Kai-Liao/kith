@@ -88,6 +88,7 @@ K house set at-limit ''
 # --- a membership budget: the owner's run is never refused at it; a guest's is (unchanged)
 A person kai owner >/dev/null; A person sam >/dev/null
 A member house kai budget=1 >/dev/null; A member house sam budget=5 >/dev/null
+check "members carries each person's budget" "[ \"\$(C members house --json | J 'd[\"budgets\"][\"sam\"], d[\"people\"][\"sam\"]')\" = '5.0 10.0' ]"
 run KITH_PERSON=kai
 check "owner over a membership budget: runs" "[ \$code = 0 ] && [ \$ran = 1 ]"
 run KITH_PERSON=sam

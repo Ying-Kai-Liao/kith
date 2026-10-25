@@ -379,6 +379,11 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                     crate::cards::secret::respond(hub, entry_id, option_id.as_deref()).await?,
                 ));
             }
+            // A limit card holds messages, not a process: its answer runs them, raises the limit, or keeps them.
+            if e.data["limit"].is_object() {
+                let by = b["asPerson"].as_str().unwrap_or("owner");
+                return Ok(ControlFlow::Break(crate::limits::respond(hub, &e, option_id.as_deref(), by).await?));
+            }
             // A card in a group belongs to the bot that asked.
             let bot = e.data["author"].as_str().unwrap_or(&e.bot_id);
             // In an invited person's chat only what the card offered can be picked, by anyone (the owner included).
