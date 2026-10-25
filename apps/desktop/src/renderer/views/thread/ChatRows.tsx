@@ -21,9 +21,9 @@ import { HandoffNotice } from './HandoffNotice'
 import { AnsweredBy } from './AnsweredBy'
 import { contextLabel } from './context-hint'
 import { callLineSuffix } from './call-line'
-import { ThreadChip as KithThreadChip, pairOf, type Origin, type Place } from '../../components/kith'
+import { BotGuestAvatar, ThreadChip as KithThreadChip, pairOf, type Origin, type Place } from '../../components/kith'
 import { noticeThreadChip } from './notice-thread'
-import { botOriginLabel } from '@shared/bot-guest-chat'
+import { botGuestSender, botOriginLabel } from '@shared/bot-guest-chat'
 import { runLabel, threadOrigin } from '@shared/thread-writer'
 import { avatarImage } from '@shared/crew'
 
@@ -46,8 +46,25 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
 }) {
   const reply = openThread ? () => (replyInThread ?? openThread)(entry) : undefined
   const chip = (entry.kind === 'notice' ? noticeThreadChip(entry) : entry.data.thread && entry.data.thread.count > 0) && entry.data.thread && openThread ? <ThreadChip summary={entry.data.thread} open={() => openThread(entry)} isOpen={openId === entry.id} chat={chat} /> : null
+  const guestSender = botGuestSender(chat, entry)
   switch (entry.kind) {
     case 'user':
+      // The outside bot's own message in its read-only chat: the other party, on the left with its picture.
+      if (guestSender && chat?.botGuest) {
+        return (
+          <VStack align="flex-start" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
+            <HStack gap={8}>
+              <BotGuestAvatar provider={chat.botGuest.provider} size={24} />
+              <Text size="subheadline" weight="medium" tone="secondary">{guestSender.name}</Text>
+            </HStack>
+            <VStack gap={4} className="chat-row-indent">
+              <GuestBotBubble entry={entry} reply={reply} />
+              <ReactionsRow entry={entry} />
+              {chip}
+            </VStack>
+          </VStack>
+        )
+      }
       return (
         <VStack align="flex-end" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
           <UserBubble entry={entry} botWorking={!!chat && isWorking(chat)} reply={reply} />
@@ -233,6 +250,28 @@ function UserStatus({ entry, botWorking, hovering }: { entry: Entry; botWorking:
     default:
       return <Text size="caption" tone="tertiary" className={hovering ? 'user-status-time shown' : 'user-status-time'}>{relativeTime.time(entry.createdAt)}</Text>
   }
+}
+
+/** An outside bot's message: an agent-style bubble on the left (copy and thread, no queue or unsend). */
+function GuestBotBubble({ entry, reply }: { entry: Entry; reply?: () => void }) {
+  const store = useStore()
+  const copy = () => entry.data.text && window.kith.app.copy(entry.data.text)
+  return (
+    <div className="message agent" title={fullDate.format(entry.createdAt)}>
+      <div className="message-body">
+        <Bubble
+          className="bubble agent selectable"
+          reactions={reactionPick(store, entry)}
+          items={() => [
+            { title: 'Copy', icon: 'square.on.square', action: copy },
+            ...(reply ? [{ title: 'Reply in thread', icon: 'arrowshape.turn.up.left', action: reply }] : []),
+          ]}
+        >
+          <MarkdownText text={entry.data.text ?? ''} />
+        </Bubble>
+      </div>
+    </div>
+  )
 }
 
 export function AgentBubble({ entry, openTrace, reply }: { entry: Entry; openTrace: () => void; reply?: () => void }) {

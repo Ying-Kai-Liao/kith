@@ -6,7 +6,7 @@ import {
 } from '@shared/bot-guests'
 import { Button, CardForm, CardSection, Disclosure, SegmentedChoice, Spinner, Switch, ValueRow } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
-import { BotAvatar } from '../../components/kith'
+import { BotAvatar, BotGuestAvatar } from '../../components/kith'
 import { Dialog, ModalHeader, Sheet, SheetPage } from '../../components/Overlay'
 import { HStack, Spacer, VStack } from '../../components/Stack'
 import { Text } from '../../components/Text'
@@ -111,7 +111,7 @@ function BotRow({ bot, view, now, owner, indent, busy, onOpen, onDecide, onCance
   const provider = providerLabel(bot.provider)
   const body = (
     <>
-      <span className="settings-bot-glyph"><Icon name="bubble.left.and.bubble.right" size={13} color="var(--secondary)" /></span>
+      <BotGuestAvatar provider={bot.provider} size={26} />
       <VStack grow className="settings-stack">
         <Text truncate>
           {bot.name}
@@ -163,6 +163,7 @@ function BotDetail({ store, bot, view, onClose }: { store: BotStore; bot: BotGue
     <SheetPage>
       <ModalHeader title={bot.name} subtitle={detailSubtitle(bot, view)} />
       <VStack gap={14} className="settings-invite-body">
+        <HStack justify="center"><BotGuestAvatar provider={bot.provider} size={84} /></HStack>
         <CardSection title="Can ask" footer={`To change this, remove ${bot.name} and invite it again.`}>
           {bot.agents.map((agent) => (
             <div key={agent} className="settings-row"><Text>{agent}</Text></div>

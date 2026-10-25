@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { countLabel, dockAction, dockCallVisible, hashSeed, repliesLabel, resumeCommand, skyPatchOf, statusChipOf, writerBannerOf } from './logic.ts'
+import { botGuestVariant, countLabel, dockAction, dockCallVisible, hashSeed, repliesLabel, resumeCommand, skyPatchOf, statusChipOf, writerBannerOf } from './logic.ts'
 
 test('the sky patch is stable per id, and you are always dawn', () => {
   assert.deepEqual(skyPatchOf('acct_mia'), skyPatchOf('acct_mia'))
@@ -59,4 +59,13 @@ test('small labels', () => {
   assert.equal(repliesLabel(1), '1 reply')
   assert.equal(repliesLabel(5), '5 replies')
   assert.equal(resumeCommand('coder', '4f2a'), 'kith coder --resume 4f2a')
+})
+
+test('a bot guest picture: the G disc for grok, the bubble disc for anything else', () => {
+  assert.equal(botGuestVariant('grok'), 'grok')
+  assert.equal(botGuestVariant('Grok'), 'grok')
+  assert.equal(botGuestVariant('other'), 'other')
+  assert.equal(botGuestVariant('gemini'), 'other')
+  assert.equal(botGuestVariant(''), 'other')
+  assert.equal(botGuestVariant(undefined), 'other')
 })

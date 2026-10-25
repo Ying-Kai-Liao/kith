@@ -1013,3 +1013,25 @@
   padding: 6px 0;
   color: var(--kith-muted);
 }
+
+/* A bot guest's picture: a flat disc, no tile or shadow. */
+.kc-botguest {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.kc-botguest.other {
+  background: var(--code-background);
+}
+.kc-botguest svg {
+  display: block;
+}
+
+.kc-decision-heading:has(.kc-decision-leading) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
