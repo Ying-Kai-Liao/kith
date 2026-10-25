@@ -83,10 +83,13 @@ export function guestPrompts(entries: ReadonlyMap<string, Entry[]>, ownBots: { h
   return out.sort((a, b) => a.createdAt - b.createdAt)
 }
 
-/** Whose answer a pending card in this person's own chat waits for, or null when it is theirs to answer. */
-export function waitingFor(entry: Entry, ownerName: string | null): string | null {
+/**
+ * Whose answer a pending card waits for, or null when it is this account's to answer. A card for the owner is the
+ * owner's own on the owner's device; the host still decides whose answer counts.
+ */
+export function waitingFor(entry: Entry, ownerName: string | null, isOwner: boolean): string | null {
   const d = entry.data
-  if (d.status !== 'pending' || d.approver !== 'owner') return null
+  if (isOwner || d.status !== 'pending' || d.approver !== 'owner') return null
   return ownerName || 'the owner'
 }
 

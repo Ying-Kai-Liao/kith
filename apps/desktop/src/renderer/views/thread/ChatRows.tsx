@@ -118,7 +118,7 @@ function LivePermission({ entry }: { entry: Entry }) {
     const common = { entry, agent: author?.name ?? entry.data.agent ?? 'The agent', pair: pairOf(author?.avatarColor), answering: store.answering.get(entry.id) ?? null, respond: (o: string) => store.respond(entry, o) }
     return entry.data.card === 'account' ? <AccessCard {...common} /> : <KeyCard {...common} save={(account, values) => store.provideSecret(entry, account, values).then(() => undefined)} />
   }
-  return <PermissionCard entry={entry} hostName={store.hostName} answering={store.answering.get(entry.id) ?? null} respond={(o) => store.respond(entry, o)} waiting={waitingFor(entry, ownerName)} pair={pairOf(store.bots.get(entry.data.author ?? entry.botId)?.avatarColor)} held={heldFor(entry, store, ownerName)} />
+  return <PermissionCard entry={entry} hostName={store.hostName} answering={store.answering.get(entry.id) ?? null} respond={(o) => store.respond(entry, o)} waiting={waitingFor(entry, ownerName, store.isOwner)} pair={pairOf(store.bots.get(entry.data.author ?? entry.botId)?.avatarColor)} held={heldFor(entry, store, ownerName)} />
 }
 
 /** An approved card's held row (an old run holds its session): Stop is the owner's, others read who can stop it. */

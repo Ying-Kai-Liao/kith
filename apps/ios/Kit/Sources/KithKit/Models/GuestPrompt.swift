@@ -75,9 +75,10 @@ public struct GuestPrompt: Identifiable, Hashable, Sendable {
     }
 
     /// In the invitee's own chat: a card that waits for the owner shows this and no buttons. The host's activity line
-    /// ("Waiting for Kai") carries the owner's name; without it, "the owner".
-    public static func waitingText(for entry: Entry, activity: String?) -> String? {
-        guard entry.kind == "permission", entry.data.status == "pending", entry.data.approver == "owner" else { return nil }
+    /// ("Waiting for Kai") carries the owner's name; without it, "the owner". On the owner's own device a card for the
+    /// owner is his to answer (nil); the host still decides whose answer counts.
+    public static func waitingText(for entry: Entry, activity: String?, isOwner: Bool) -> String? {
+        guard !isOwner, entry.kind == "permission", entry.data.status == "pending", entry.data.approver == "owner" else { return nil }
         if let activity, activity.hasPrefix("Waiting for ") { return activity }
         return "Waiting for the owner"
     }
