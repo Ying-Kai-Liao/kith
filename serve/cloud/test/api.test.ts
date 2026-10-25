@@ -470,7 +470,7 @@ describe("revocation reaches the relay", () => {
     await grantAccess(u, host);
     expect((await call("POST", "/v1/host/unclaim", { key: host.sign, body: {} })).status).toBe(200);
     const state = await call("GET", "/v1/host/state", { key: host.sign });
-    expect(state.body).toEqual({ owner: null, grants: [], requests: [], memberships: [], botDevices: [] });
+    expect(state.body).toEqual({ owner: null, grants: [], requests: [], memberships: [], botDevices: [], revoked: [] });
     expect((await call("GET", "/v1/computers", { token: u.token })).body.computers).toEqual([]);
   });
 
@@ -513,7 +513,7 @@ describe("Clerk webhook", () => {
     const id = `msg_${ref.b64url(ref.random(8))}`;
     expect((await deliver(id, { type: "user.deleted", data: { id: u.userId } })).status).toBe(200);
     expect((await call("GET", "/v1/me", { token: u.token })).body.error.code).toBe("accountDeleted");
-    expect((await call("GET", "/v1/host/state", { key: host.sign })).body).toEqual({ owner: null, grants: [], requests: [], memberships: [], botDevices: [] });
+    expect((await call("GET", "/v1/host/state", { key: host.sign })).body).toEqual({ owner: null, grants: [], requests: [], memberships: [], botDevices: [], revoked: [] });
     expect((await deliver(id, { type: "user.deleted", data: { id: u.userId } })).status).toBe(200);
     const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM processed_events WHERE event_id = ?").bind(id).first<{ n: number }>();
     expect(n?.n).toBe(1);
