@@ -122,6 +122,7 @@ export const pendingQuestions = (entries: readonly Entry[]) => entries.filter(is
 
 /** What a permission card wants, as the line a row shows. */
 export function decisionQuestion(entry: Entry): string {
+  if (entry.data.card && entry.data.secret) return `Needs a key for ${entry.data.secret.service}`
   switch (entry.data.toolKind) {
     case 'execute':
       return 'Wants to run a command'

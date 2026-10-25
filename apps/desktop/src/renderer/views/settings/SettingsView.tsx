@@ -19,6 +19,7 @@ import { AccountDevices } from './ComputersView'
 import { SkyPatch } from '../../components/kith'
 import { MyBotsPage } from './BotGuestsView'
 import { PeopleView } from './PeopleView'
+import { KeysView } from './KeysView'
 import { LinkChatRow } from './LinkChatRow'
 import { errorText, isMac, thisMac } from './parts'
 import { BackupChains } from './BackupChain'
@@ -39,6 +40,7 @@ const pages: { id: SettingsPage; title: string; icon: string; gapAfter?: boolean
   { id: 'account', title: 'Account', icon: 'person.crop.circle' },
   { id: 'crew', title: 'Crew', icon: 'person.2' },
   { id: 'people', title: 'People', icon: 'person.2' },
+  { id: 'keys', title: 'Keys', icon: 'key' },
   { id: 'bots', title: 'Your bots', icon: 'bubble.left.and.bubble.right' },
   { id: 'voice', title: 'Voice chat', icon: 'waveform' },
   { id: 'usage', title: 'Usage', icon: 'gauge.with.dots.needle.33percent', gapAfter: true },
@@ -49,7 +51,7 @@ const pages: { id: SettingsPage; title: string; icon: string; gapAfter?: boolean
 ]
 
 /** Pages only the owner of the connected Mac has: an invited person keeps Account and what is theirs alone. */
-const ownerOnly: SettingsPage[] = ['people', 'voice', 'usage', 'updates']
+const ownerOnly: SettingsPage[] = ['people', 'keys', 'voice', 'usage', 'updates']
 
 /** This account's part in the connected Mac, from the cloud's computer rows; the owner when it isn't listed (the Mac's own app). */
 export function useComputerRole(): ComputerRole {
@@ -128,6 +130,8 @@ function PageContent({ page }: { page: SettingsPage }) {
       return <AccountSettings />
     case 'people':
       return <PeopleView />
+    case 'keys':
+      return <KeysView />
     case 'bots':
       return <MyBotsPage />
     case 'voice':

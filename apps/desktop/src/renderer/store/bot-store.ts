@@ -306,6 +306,22 @@ export class BotStore extends BotSync {
   }
 
   /**
+   * Sends a typed key from a Key card. The values pass through here and are kept nowhere (no store field, no mirror,
+   * no log); a failure throws the host's own text for the card to show, and the call is never replayed.
+   */
+  provideSecret(entry: Entry, account: string, values: Record<string, string>) {
+    return this.withLink((c) => c.provideSecret(entry.id, account, values))
+  }
+
+  listKeys() {
+    return this.withLink((c) => c.listKeys())
+  }
+
+  revokeKey(agent: string, service: string, profile: string) {
+    return this.withLink((c) => c.revokeKey(agent, service, profile))
+  }
+
+  /**
    * The owner's Stop on a card's held row: ends the old run holding the card's session. One at a time per session (a second
    * click, or the same session's other card, does nothing while it runs). The rows close when the host clears `held` on
    * the entries, not here.

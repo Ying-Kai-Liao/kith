@@ -133,6 +133,8 @@ export function Approval({ model, card }: { model: IslandModel; card: IslandPerm
             <AgentRow color={card.bot.color} name={card.bot.name} subtitle={`${card.bot.backend} ${card.headline.charAt(0).toLowerCase()}${card.headline.slice(1)}`} />
             {card.title ? <div className="island-code">{card.title}</div> : null}
             <div className="island-buttons">
+              {/* A key request has no answer to give here: the field is in the chat. */}
+              {options.length === 0 ? <Button onClick={() => model.openBot(card.ref)}>Open</Button> : null}
               {options.map((o) => (
                 <Button key={o.id} kind={o.kind === 'allow_once' ? 'primary' : 'secondary'} disabled={card.answering !== null} onClick={() => model.respond(card, o.id)}>
                   {card.answering === o.id ? <Spinner size={12} /> : null}

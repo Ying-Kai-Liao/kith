@@ -15,6 +15,8 @@ import { relativeTime } from './chat-items'
 import { MarkdownText } from './Markdown'
 import { ownerNameFrom, waitingFor } from '@shared/mac-role'
 import { PermissionCard, type HeldCardProps } from './PermissionCard'
+import { AccessCard, KeyCard } from './SecretCards'
+import { isSecretCard } from '@shared/secret-card'
 import { confirmMessage, confirmTitle, heldIcon, heldRowOf, stoppedDivider } from '@shared/held-run'
 import { ConnectionRequestCard } from '../marketplace/ConnectionRequestCard'
 import { HandoffNotice } from './HandoffNotice'
@@ -110,6 +112,12 @@ function ContextHint({ contextPercent }: { contextPercent: unknown }) {
 function LivePermission({ entry }: { entry: Entry }) {
   const store = useLiveStore()
   const ownerName = ownerNameFrom(store.bots.get(entry.botId)?.activity)
+  // A key request is its own card; an entry without data.card (or an old one) is the approval card as before.
+  if (isSecretCard(entry)) {
+    const author = store.bots.get(entry.data.author ?? entry.botId)
+    const common = { entry, agent: author?.name ?? entry.data.agent ?? 'The agent', pair: pairOf(author?.avatarColor), answering: store.answering.get(entry.id) ?? null, respond: (o: string) => store.respond(entry, o) }
+    return entry.data.card === 'account' ? <AccessCard {...common} /> : <KeyCard {...common} save={(account, values) => store.provideSecret(entry, account, values).then(() => undefined)} />
+  }
   return <PermissionCard entry={entry} hostName={store.hostName} answering={store.answering.get(entry.id) ?? null} respond={(o) => store.respond(entry, o)} waiting={waitingFor(entry, ownerName)} pair={pairOf(store.bots.get(entry.data.author ?? entry.botId)?.avatarColor)} held={heldFor(entry, store, ownerName)} />
 }
 

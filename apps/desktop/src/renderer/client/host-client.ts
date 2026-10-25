@@ -3,6 +3,7 @@ import type { CallError } from '@shared/ipc'
 import type { RelayCallError } from '@shared/relay'
 import { parseBackups, type Backups } from '@shared/backups'
 import { parseBotGuest, parseBotGuests, parseBotRequest, parseCreatedBotInvite, type BotGuest, type BotProvider, type CreatedBotInvite } from '@shared/bot-guests'
+import { parseKeys, type KeyRow } from '@shared/secret-card'
 import type { StopHolderResult } from '@shared/held-run'
 import {
   parseDiff, parseHistory, parseMemoryList, parseRead, parseSave, parseTidyUps, parseUndo,
@@ -396,6 +397,20 @@ export class HostClient {
   /** An invited person's own chat with a granted agent. */
   startChat(agent: string) {
     return this.call<{ bot: Bot }>('startChat', { agent }, 60_000)
+  }
+
+  // Service keys (kernel/PROTOCOL.md, "Keys"). Owner only. No call here ever returns a value.
+  /** Saves a typed key to the Keychain. `values` is sent once and kept nowhere: not logged, not stored, not replayed. */
+  provideSecret(entryId: string, account: string, values: Record<string, string>): Promise<{ saved: { service: string; vars: string[]; profile: string }; resumed: boolean }> {
+    return this.call('provideSecret', { entryId, account, values }, 30_000)
+  }
+
+  async listKeys(): Promise<KeyRow[]> {
+    return parseKeys(await this.call('listKeys', {}))
+  }
+
+  revokeKey(agent: string, service: string, profile: string) {
+    return this.call<{ ok: boolean }>('revokeKey', { agent, service, profile })
   }
 
   // Bots from outside (serve/host/src/api/botguests.rs). A host before them answers "unknown method".

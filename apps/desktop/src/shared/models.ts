@@ -2,6 +2,7 @@
 // host's camelCase JSON. Timestamps are epoch milliseconds.
 
 import type { GrantedAgent } from './mac-role.ts'
+import type { SecretAccount, SecretRequest } from './secret-card.ts'
 import { normalizeFolder, type PlaceFolder } from './place-folders.ts'
 
 export type { PlaceFolder } from './place-folders.ts'
@@ -296,6 +297,10 @@ export interface EntryData {
   agent?: string
   /** permission, answered: an old run still holds the session this approval resumes in (null/absent otherwise; an older host never sends it). */
   held?: HeldRun | null
+  /** permission: an Access or Key card for a service key (shared/secret-card.ts). Never a value. */
+  card?: 'account' | 'key'
+  secret?: SecretRequest
+  accounts?: SecretAccount[]
   entries?: PlanItem[]
   /** notice: info | error | divider */
   style?: string

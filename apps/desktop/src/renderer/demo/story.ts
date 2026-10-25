@@ -171,3 +171,27 @@ export function usage(now: number): Usage {
     ],
   }
 }
+
+/** Fake key cards for the demo with `?secrets` (an Access card on Reviewer, a Key card on Relay). Names only, never a value. */
+export const secretEntries: SeedEntry[] = [
+  {
+    id: 'k1', botId: 'reviewer', kind: 'permission', at: 3,
+    data: {
+      title: 'Reviewer wants GitHub', status: 'pending', author: 'reviewer', card: 'account',
+      secret: { service: 'github', vars: ['GITHUB_TOKEN'], profile: null, account: null, purpose: 'To read the pull request it is reviewing.', replaces: false, state: 'pending' },
+      accounts: [
+        { profile: 'github/work', account: 'work', agents: ['scout', 'reviewer'] },
+        { profile: 'github/personal', account: 'personal', agents: ['pacer'] },
+      ],
+      options: [{ optionId: 'deny', name: 'Not now', kind: 'reject_once' }],
+    },
+  },
+  {
+    id: 'k2', botId: 'relay', kind: 'permission', at: 2,
+    data: {
+      title: 'Relay needs a Notion key', status: 'pending', author: 'relay', card: 'key',
+      secret: { service: 'notion', vars: ['NOTION_TOKEN'], profile: null, account: null, purpose: 'To publish the release notes page.', replaces: false, state: 'pending' },
+      options: [{ optionId: 'deny', name: 'Not now', kind: 'reject_once' }],
+    },
+  },
+]
