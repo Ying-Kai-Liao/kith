@@ -20,6 +20,10 @@ struct ChatRow: View {
         // The replying agent's colour pair (in a group, the one who wrote it).
         let tint = AgentTint.resolve((entry.data.author.flatMap { model.bots[$0] } ?? chat)?.avatarColor)
         switch entry.kind {
+        case "user" where BotGuestSender.label(entry, inBotGuestChat: chat?.botGuest != nil) != nil:
+            // The outside bot talking: the other party, so leading with its own avatar, not Kai's bubble.
+            BotSenderBubble(entry: entry, name: BotGuestSender.label(entry, inBotGuestChat: true) ?? "", provider: chat?.botGuest?.provider ?? "")
+                .padding(.top, groupStart ? 12 : 4)
         case "user":
             VStack(alignment: .trailing, spacing: 4) {
                 UserBubble(entry: entry, botWorking: chat?.isWorking == true, reply: reply)
@@ -259,6 +263,33 @@ struct AgentBubble: View {
     }
 }
 
+
+/// A message an outside bot wrote in a bot-guest chat: leading, with the bot's avatar and name. Read-only, so no reply menu.
+struct BotSenderBubble: View {
+    let entry: Entry
+    let name: String
+    let provider: String
+    @Environment(BotStore.self) private var model
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            BotGuestAvatar(provider: provider, size: KithSize.botAvatarThread)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name).font(.subheadline.weight(.medium)).foregroundStyle(Palette.muted).lineLimit(1)
+                Text(entry.data.text ?? "")
+                    .kithText(.body)
+                    .foregroundStyle(Palette.ink)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Palette.bubbleAgent, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 40)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("\(name): \(entry.data.text ?? "")"))
+    }
+}
 
 struct NoticeRow: View {
     let entry: Entry

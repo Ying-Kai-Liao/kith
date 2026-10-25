@@ -29,6 +29,9 @@ public struct BotDetailView: View {
     public var body: some View {
         let bot = bot
         CardForm {
+            BotGuestAvatar(provider: bot.provider, size: 48)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
             CardSection("Can ask", footer: "To change this, remove \(bot.name) and invite it again.") {
                 ForEach(bot.agents, id: \.self) { agent in
                     HStack(spacing: 12) {
@@ -118,7 +121,7 @@ public struct BotDetailView: View {
         if let room = store.bots.values.first(where: { $0.hqAgent == agent }) {
             CharacterAvatar(bot: room, size: 24, animated: false)
         } else {
-            BotGlyph()
+            Circle().fill(Palette.ink.opacity(0.06)).frame(width: 24, height: 24)
         }
     }
 

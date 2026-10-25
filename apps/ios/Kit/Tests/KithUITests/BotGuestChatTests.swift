@@ -67,3 +67,27 @@ private func notice(_ thread: String?) throws -> Entry {
     #expect(!BotGuestRowModel.opens(row, chats: [:]))
     #expect(!BotGuestRowModel.opens(BotGuestConversation(conversation: "cv", agent: "personal"), chats: ["c1": chat]))
 }
+
+@Test func theAvatarVariantFollowsTheProvider() {
+    #expect(BotGuestAvatar.variant(provider: "grok") == .grok)
+    #expect(BotGuestAvatar.variant(provider: "Grok") == .grok)
+    #expect(BotGuestAvatar.variant(provider: "other") == .other)
+    #expect(BotGuestAvatar.variant(provider: "someone-new") == .other)
+    #expect(BotGuestAvatar.variant(provider: "") == .other)
+}
+
+private func userEntry(_ data: String, kind: String = "user") throws -> Entry {
+    let json = #"{"id":"e","seq":1,"botId":"c1","rev":1,"kind":"\#(kind)","turn":1,"data":\#(data),"createdAt":1,"updatedAt":1}"#
+    return try JSONDecoder().decode(Entry.self, from: Data(json.utf8))
+}
+
+@Test func aBotsMessageIsTheOtherPartyOnlyInABotGuestChat() throws {
+    let bot = try userEntry(#"{"text":"hi","sender":{"botId":"bg","name":"Rex","speaker":"Alice"}}"#)
+    #expect(BotGuestSender.label(bot, inBotGuestChat: true) == "Rex · Alice")
+    #expect(BotGuestSender.label(bot, inBotGuestChat: false) == nil)
+    let noSpeaker = try userEntry(#"{"text":"hi","sender":{"botId":"bg","name":"Rex"}}"#)
+    #expect(BotGuestSender.label(noSpeaker, inBotGuestChat: true) == "Rex")
+    // An older host sent no sender: renders as before. An agent reply keeps the agent avatar.
+    #expect(BotGuestSender.label(try userEntry(#"{"text":"hi"}"#), inBotGuestChat: true) == nil)
+    #expect(BotGuestSender.label(try userEntry(#"{"text":"hi","sender":{"botId":"bg","name":"Rex"}}"#, kind: "agent"), inBotGuestChat: true) == nil)
+}

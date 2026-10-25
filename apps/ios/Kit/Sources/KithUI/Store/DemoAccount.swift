@@ -134,11 +134,14 @@ extension AccountStore {
         }
         let id = DemoScreens.botGuestChatId, root = DemoScreens.botGuestRoot
         let minute: Int64 = 60_000
+        // `botguest-*-other` shows an outside bot that isn't Grok: the bubble disc.
+        let other = DemoScreens.name?.hasSuffix("-other") == true
+        let provider = other ? "other" : "grok", botName = other ? "Echo" : "Rex", tag = "from \(other ? "Other" : "Grok") · Sam's \(botName)"
         if let chat: Bot = decode([
             "id": id, "name": "Personal", "kind": "agent", "hqAgent": id, "rev": 1, "status": "idle", "unread": 1, "pinned": true, "members": [String](),
             "lastAt": now - 3 * minute, "avatarColor": "kith:sky", "backend": "claude", "cwd": "/Users/kai/kith", "avatarSource": "crew:house",
             "lastMessage": "You have two things today: dentist at 3 and dinner at 7.",
-            "botGuest": ["botId": "bg_act", "name": "Rex", "provider": "grok", "ownerPerson": "sam", "ownerName": "Sam"],
+            "botGuest": ["botId": "bg_act", "name": botName, "provider": provider, "ownerPerson": "sam", "ownerName": "Sam"],
         ]) { store.bots[id] = chat }
         func entry(_ eid: String, _ seq: Int64, _ kind: String, thread: String? = nil, ago: Int64, data: [String: Any]) -> Entry? {
             var json: [String: Any] = ["id": eid, "seq": seq, "botId": id, "rev": seq, "kind": kind, "turn": seq, "data": data,
@@ -147,10 +150,10 @@ extension AccountStore {
             return decode(json)
         }
         let list = [
-            entry(root, 1, "notice", ago: 4, data: ["text": "from Grok · Sam's Rex", "style": "info", "conversation": "cv_demo",
+            entry(root, 1, "notice", ago: 4, data: ["text": tag, "style": "info", "conversation": "cv_demo",
                 "thread": ["count": 2, "lastAt": now - 3 * minute, "authors": ["user", id], "unread": 1, "origin": "bot",
-                           "originLabel": "from Grok · Sam's Rex", "originBot": ["provider": "grok", "owner": "sam", "name": "Rex"]]]),
-            entry("bg-q", 2, "user", thread: root, ago: 4, data: ["text": "What is on the calendar today?"]),
+                           "originLabel": tag, "originBot": ["provider": provider, "owner": "sam", "name": botName]]]),
+            entry("bg-q", 2, "user", thread: root, ago: 4, data: ["text": "What is on the calendar today?", "sender": ["botId": "bg_act", "name": botName, "speaker": "Alice"]]),
             entry("bg-a", 3, "agent", thread: root, ago: 3, data: ["text": "You have two things today: dentist at 3 and dinner at 7.", "final": true]),
         ].compactMap { $0 }
         store.entries[id] = list
