@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { avatarImage, DEFAULT_IMAGE } from '@shared/crew'
 import type { IslandBot, IslandPermission, IslandSummary } from '@shared/island'
 import { folderName, isGroup, isWorking, type Bot, type Entry } from '@shared/models'
+import { isSecretCard, secretSummary } from '@shared/secret-card'
 import { useModels } from '../lib/observable'
 import { refKey, type AppModel, type RosterItem } from '../store/app-model'
 import type { BotStore } from '../store/bot-store'
@@ -72,6 +73,18 @@ function pendingCards({ ref, bot, store }: RosterItem): IslandPermission[] {
     .filter((e) => e.kind === 'permission' && e.data.status === 'pending')
     .map((e) => {
       const author = (e.data.author ? store.bots.get(e.data.author) : undefined) ?? bot
+      // A key request: the island only says so and opens the chat. No options, no field.
+      if (isSecretCard(e)) {
+        return {
+          ref: refKey(ref),
+          entryId: e.id,
+          bot: { name: author.name, image: avatarImage(author) ?? DEFAULT_IMAGE, color: author.avatarColor, backend: store.backendName(author.backend) },
+          headline: 'Needs a key',
+          title: secretSummary(author.name, e.data.secret!.service),
+          options: [],
+          answering: null,
+        }
+      }
       return {
         ref: refKey(ref),
         entryId: e.id,

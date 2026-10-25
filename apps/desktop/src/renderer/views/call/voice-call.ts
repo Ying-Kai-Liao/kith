@@ -1,4 +1,5 @@
 import { isGroup, isWorking, needsInput } from '@shared/models'
+import { isSecretCard } from '@shared/secret-card'
 import { chatAndTasks } from '@shared/tasks'
 import type { BotStore } from '../../store/bot-store'
 
@@ -43,7 +44,8 @@ export function watchVoiceCall(store: BotStore, botId: string, handlers: {
     for (const e of store.allEntries(botId)) {
       if (inGroup && e.kind === 'permission' && !cards.has(e.id)) {
         cards.add(e.id)
-        if (e.data.status === 'pending' && e.rev > startRev) handlers.announce(`${nameOf(e.data.author) ?? 'A bot'} needs your approval in the chat.`)
+        // Key cards are for the eyes alone: nothing about them is said on a call.
+        if (e.data.status === 'pending' && e.rev > startRev && !isSecretCard(e)) handlers.announce(`${nameOf(e.data.author) ?? 'A bot'} needs your approval in the chat.`)
       }
       // A shared file's entry carries only its name and size for the chat's card: never read aloud.
       if (e.data.files?.length) {

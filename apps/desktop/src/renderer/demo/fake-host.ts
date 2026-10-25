@@ -1,5 +1,6 @@
 import type { CallError } from '@shared/ipc'
 import { isChat, normalizeBot, type Bot, type BotDraft, type Entry, type GroupDraft } from '@shared/models'
+import { isAccountName } from '@shared/secret-card'
 import * as story from './story'
 
 // An in-memory kith-serve for the website demo: the methods the renderer calls, with the
@@ -27,6 +28,12 @@ export class FakeHost {
     { personId: 'leo', name: 'Leo', agents: { pacer: 'guest' }, projects: [], joined: false, openInvites: 0, devices: [], autoBots: false },
   ]
   private invites: Record<string, unknown>[] = []
+  /** Saved keys as `listKeys` returns them: names and who holds them, never a value (fake accounts only). */
+  private keys: { profile: string; service: string; account: string; owner: string; vars: string[]; agents: string[]; last_used: string | null }[] = [
+    { profile: 'github/work', service: 'github', account: 'work', owner: 'kai', vars: ['GITHUB_TOKEN'], agents: ['scout', 'reviewer'], last_used: new Date(Date.now() - 3_600_000).toISOString() },
+    { profile: 'github/personal', service: 'github', account: 'personal', owner: 'kai', vars: ['GITHUB_TOKEN'], agents: ['pacer'], last_used: new Date(Date.now() - 3 * 86_400_000).toISOString() },
+    { profile: 'notion/library', service: 'notion', account: 'library', owner: 'kai', vars: ['NOTION_TOKEN'], agents: [], last_used: null },
+  ]
   /** Bots from outside, one in each state (host methods `bots`, `decideBot`, ...). */
   private botGuests: Record<string, unknown>[] = ['invited', 'joining', 'pending', 'active', 'denied', 'revoked'].map((state, i) => ({
     botId: `bg_${state}`, name: ['Rex', 'Pip', 'Ada', 'Max', 'Zed', 'Old'][i], provider: i % 2 ? 'other' : 'grok', state,
@@ -44,6 +51,10 @@ export class FakeHost {
       this.bots.set(b.id, normalizeBot({ ...b, cwd: b.kind === 'group' ? '' : story.cwd, createdAt: now - 86_400_000, permission: b.permission ?? 'auto' }))
     }
     for (const s of story.entries) this.add({ botId: s.botId, threadId: s.threadId ?? null, kind: s.kind, data: s.data }, s.id, now - s.at * 60_000, false)
+    // `?secrets` puts an Access card and a Key card in the demo (screenshots of the key cards).
+    if (typeof location !== 'undefined' && /[?&]secrets\b/.test(location.search)) {
+      for (const s of story.secretEntries) this.add({ botId: s.botId, threadId: null, kind: s.kind, data: s.data }, s.id, now - s.at * 60_000, false)
+    }
     for (const b of this.bots.values()) {
       this.refreshPreview(b)
       b.rev = ++this.rev
@@ -229,6 +240,15 @@ export class FakeHost {
         }
         return {}
       }
+      case 'provideSecret':
+        return this.provideSecret(str('entryId'), str('account'), (b.values ?? {}) as Record<string, unknown>)
+      case 'listKeys':
+        return { keys: this.keys }
+      case 'revokeKey': {
+        const key = this.keys.find((k) => k.profile === str('profile') && k.service === str('service'))
+        if (key) key.agents = key.agents.filter((a) => a !== str('agent'))
+        return { ok: true }
+      }
       case 'respondPermission':
         return this.respond(str('entryId'), str('optionId') || null)
       case 'react': {
@@ -356,9 +376,42 @@ export class FakeHost {
     }
   }
 
+  /** The Access and Key cards: the host's answers to `respondPermission` and `provideSecret`, with its error texts. */
+  private answerSecret(e: Entry, optionId: string | null) {
+    const secret = e.data.secret!
+    if (optionId === 'another') {
+      // The same entry becomes a Key card in place.
+      e.data = { ...e.data, card: 'key', accounts: undefined }
+    } else if (optionId?.startsWith('profile:')) {
+      e.data = { ...e.data, status: 'answered', secret: { ...secret, profile: optionId.slice(8), state: 'saved' } }
+    } else {
+      e.data = { ...e.data, status: 'answered', secret: { ...secret, state: 'denied' } }
+    }
+    this.emitEntry(e)
+    return {}
+  }
+
+  private provideSecret(entryId: string, account: string, values: Record<string, unknown>) {
+    const e = this.entries.find((x) => x.id === entryId)
+    const secret = e?.data.secret
+    if (!e || !secret || e.data.card !== 'key' || secret.state !== 'pending') throw fail('That request is closed')
+    const name = secret.replaces ? (secret.account ?? '') : account
+    if (!isAccountName(name)) throw fail("That account name can't be used")
+    if (secret.vars.some((v) => typeof values[v] !== 'string' || values[v] === '')) throw fail('Enter every field of the key')
+    if (secret.vars.some((v) => (values[v] as string).length > 1536)) throw fail('That key is too long')
+    const profile = `${secret.service}/${name}`
+    // Values are dropped here: only names are kept, as the host keeps only names outside the Keychain.
+    const author = e.data.author ?? e.botId
+    this.keys = [...this.keys.filter((k) => k.profile !== profile), { profile, service: secret.service, account: name, owner: 'kai', vars: secret.vars, agents: [author], last_used: null }]
+    e.data = { ...e.data, status: 'answered', secret: { ...secret, profile, account: name, state: 'saved' } }
+    this.emitEntry(e)
+    return { saved: { service: secret.service, vars: secret.vars, profile }, resumed: true }
+  }
+
   private async respond(entryId: string, optionId: string | null) {
     const e = this.entries.find((x) => x.id === entryId)
     if (!e || e.data.status !== 'pending') return {}
+    if (e.data.card && e.data.secret) return this.answerSecret(e, optionId)
     const option = e.data.options?.find((o) => o.optionId === optionId)
     const allowed = !!option && option.kind.startsWith('allow')
     e.data = { ...e.data, status: optionId ? 'answered' : 'cancelled', selected: optionId ?? undefined }

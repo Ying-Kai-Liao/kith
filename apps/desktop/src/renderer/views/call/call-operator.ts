@@ -1,4 +1,5 @@
 import { isChat, isGroup, type Entry } from '@shared/models'
+import { isSecretCard } from '@shared/secret-card'
 import { chatAndTasks } from '@shared/tasks'
 import type { BotStore } from '../../store/bot-store'
 import { spokenText } from './voice'
@@ -113,6 +114,8 @@ export class CallOperator {
     const n = Math.min(Math.max(count, 1), 20)
     const messages = chatAndTasks(this.store.allEntries(this.botId))
       .filter(isChat)
+      // A key request is never read out, and never answered by voice.
+      .filter((e) => !isSecretCard(e))
       .slice(-n)
       .map((e) => ({
         from: e.kind === 'user' ? 'user' : e.kind === 'agent' ? (e.data.author && this.store.bots.get(e.data.author)?.name) || name : e.kind === 'permission' ? 'approval request' : 'notice',
@@ -135,6 +138,6 @@ export class CallOperator {
   }
 
   private get pendingApproval(): Entry | undefined {
-    return chatAndTasks(this.store.allEntries(this.botId)).findLast((e) => e.kind === 'permission' && e.data.status === 'pending')
+    return chatAndTasks(this.store.allEntries(this.botId)).findLast((e) => e.kind === 'permission' && e.data.status === 'pending' && !isSecretCard(e))
   }
 }
