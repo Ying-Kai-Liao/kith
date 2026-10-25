@@ -18,6 +18,32 @@ public enum ChatDockLayout {
     public static func showsSend(text: String, hasAttachment: Bool) -> Bool {
         isWriting(text: text, hasAttachment: hasAttachment)
     }
+
+    public enum Trailing: Hashable, Sendable {
+        case mic, send, stop, stopRecording
+    }
+
+    /// The buttons after the field, left to right. While recording: its Stop and Send. Otherwise Send while writing
+    /// (after the mic when `micWithText`), the screen's Stop beside the mic while the box is empty, or the mic alone.
+    public static func trailing(text: String, hasAttachment: Bool, recording: Bool, micWithText: Bool, hasStop: Bool) -> [Trailing] {
+        if recording { return [.stopRecording, .send] }
+        if showsSend(text: text, hasAttachment: hasAttachment) { return micWithText ? [.mic, .send] : [.send] }
+        return hasStop ? [.mic, .stop] : [.mic]
+    }
+}
+
+/// The dock's Stop beside the mic while the box is empty: the bot's work, or its voice in a call.
+public struct ChatDockStop {
+    public let title: String
+    /// Red, for cutting a voice off; ink stops work.
+    public let urgent: Bool
+    public let action: () -> Void
+
+    public init(_ title: String, urgent: Bool = false, action: @escaping () -> Void) {
+        self.title = title
+        self.urgent = urgent
+        self.action = action
+    }
 }
 
 /// One more item for the `+` menu, after Photos / Camera / Files (the chat adds Paste and New task).
@@ -42,7 +68,8 @@ public enum ChatDockSendStyle: Sendable {
 }
 
 /// The chat box: a floating Liquid Glass pill (54 pt). `+` opens Photos / Camera / Files; a text field; mic when
-/// empty, send when there is text; a round glass call button to its right that slides away while typing.
+/// empty, send when there is text; a round glass call button to its right that slides away while typing. While
+/// dictation records, the field is read-only and the mic gives way to Stop (keep the words to edit) and Send.
 ///
 /// Binding-based, with no sending logic: the screen owns the text, sends, queues and dictates. `accessory` is a
 /// slot above the field inside the pill for the composer's attachment strip, command list or router line later.
@@ -59,13 +86,14 @@ public struct ChatDock<Accessory: View>: View {
     let onFiles: () -> Void
     let sendStyle: ChatDockSendStyle
     let extraActions: [ChatDockAction]
-    /// Dictation is running: the mic shows filled and red, and a tap stops it.
+    /// Dictation is recording: Stop (`onMic`) and Send replace the mic, and the field can't be edited.
     let micListening: Bool
     /// The chat keeps the mic beside Send while there is text, so dictation can add to a draft.
     let micWithText: Bool
     /// False greys Send (offline and the message can't wait in the relay).
     let canSend: Bool
     let showsPlus: Bool
+    let stop: ChatDockStop?
     let focus: FocusState<Bool>.Binding?
     let accessory: Accessory
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -74,7 +102,7 @@ public struct ChatDock<Accessory: View>: View {
                 onSend: @escaping () -> Void = {}, onMic: @escaping () -> Void = {}, onCall: @escaping () -> Void = {},
                 onPhotos: @escaping () -> Void = {}, onCamera: @escaping () -> Void = {}, onFiles: @escaping () -> Void = {},
                 sendStyle: ChatDockSendStyle = .ink, extraActions: [ChatDockAction] = [], micListening: Bool = false,
-                micWithText: Bool = false, canSend: Bool = true, showsPlus: Bool = true,
+                micWithText: Bool = false, canSend: Bool = true, showsPlus: Bool = true, stop: ChatDockStop? = nil,
                 focus: FocusState<Bool>.Binding? = nil, @ViewBuilder accessory: () -> Accessory) {
         _text = text
         self.placeholder = placeholder
@@ -92,6 +120,7 @@ public struct ChatDock<Accessory: View>: View {
         self.micWithText = micWithText
         self.canSend = canSend
         self.showsPlus = showsPlus
+        self.stop = stop
         self.focus = focus
         self.accessory = accessory()
     }
@@ -111,9 +140,16 @@ public struct ChatDock<Accessory: View>: View {
                         .foregroundStyle(Palette.ink)
                         .lineLimit(1...5)
                         .padding(.vertical, 8)
+                        .disabled(micListening)
                         .modifier(OptionalFocus(binding: focus))
-                    if micWithText, ChatDockLayout.showsSend(text: text, hasAttachment: hasAttachment) { micButton }
-                    trailingButton
+                    ForEach(trailing, id: \.self) { button in
+                        switch button {
+                        case .mic: micButton
+                        case .send: sendButton
+                        case .stop: if let stop { stopButton(stop) }
+                        case .stopRecording: stopRecordingButton
+                        }
+                    }
                 }
                 .padding(.horizontal, 5)
                 .frame(minHeight: KithSize.chatBoxHeight)
@@ -154,8 +190,12 @@ public struct ChatDock<Accessory: View>: View {
         .accessibilityLabel(Text("Add"))
     }
 
-    @ViewBuilder private var trailingButton: some View {
-        if ChatDockLayout.showsSend(text: text, hasAttachment: hasAttachment) {
+    private var trailing: [ChatDockLayout.Trailing] {
+        ChatDockLayout.trailing(text: text, hasAttachment: hasAttachment, recording: micListening, micWithText: micWithText,
+                                hasStop: stop != nil)
+    }
+
+    private var sendButton: some View {
             Button(action: onSend) {
                 switch sendStyle {
                 case .word:
@@ -174,20 +214,37 @@ public struct ChatDock<Accessory: View>: View {
             .disabled(!canSend)
             .opacity(canSend ? 1 : 0.4)
             .accessibilityLabel(Text("Send"))
-        } else {
-            micButton
-        }
     }
 
     private var micButton: some View {
             Button(action: onMic) {
-                Image(systemName: micListening ? "mic.fill" : "mic").font(.system(size: 18))
-                    .foregroundStyle(micListening ? Palette.negative : Palette.muted)
+                Image(systemName: "mic").font(.system(size: 18))
+                    .foregroundStyle(Palette.muted)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text(micListening ? "Stop dictating" : "Dictate"))
+            .accessibilityLabel(Text("Dictate"))
+    }
+
+    /// Ends the recording; the words stay in the box to edit.
+    private var stopRecordingButton: some View {
+        roundStop(tint: Palette.negative, label: "Stop recording", action: onMic)
+    }
+
+    private func stopButton(_ stop: ChatDockStop) -> some View {
+        roundStop(tint: stop.urgent ? Palette.negative : Palette.ink, label: stop.title, action: stop.action)
+    }
+
+    private func roundStop(tint: Color, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: "stop.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(tint)
+                .frame(width: 44, height: 44)
+                .background(tint.opacity(0.12), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text(label))
     }
 }
 
@@ -204,11 +261,12 @@ public extension ChatDock where Accessory == EmptyView {
          onSend: @escaping () -> Void = {}, onMic: @escaping () -> Void = {}, onCall: @escaping () -> Void = {},
          onPhotos: @escaping () -> Void = {}, onCamera: @escaping () -> Void = {}, onFiles: @escaping () -> Void = {},
          sendStyle: ChatDockSendStyle = .ink, extraActions: [ChatDockAction] = [], micListening: Bool = false,
-         micWithText: Bool = false, canSend: Bool = true, showsPlus: Bool = true,
+         micWithText: Bool = false, canSend: Bool = true, showsPlus: Bool = true, stop: ChatDockStop? = nil,
          focus: FocusState<Bool>.Binding? = nil) {
         self.init(text: text, placeholder: placeholder, showsCall: showsCall, hasAttachment: hasAttachment, onSend: onSend,
                   onMic: onMic, onCall: onCall, onPhotos: onPhotos, onCamera: onCamera, onFiles: onFiles,
-                  sendStyle: sendStyle, extraActions: extraActions, micListening: micListening, micWithText: micWithText, canSend: canSend, showsPlus: showsPlus, focus: focus) { EmptyView() }
+                  sendStyle: sendStyle, extraActions: extraActions, micListening: micListening, micWithText: micWithText,
+                  canSend: canSend, showsPlus: showsPlus, stop: stop, focus: focus) { EmptyView() }
     }
 }
 

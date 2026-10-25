@@ -92,6 +92,7 @@ struct CallScreen: View {
         .onAppear {
             startedAt = .now
             CallPresence.active += 1
+            Dictation.stopRecording()
             Analytics.shared.capture(.voiceCallStarted)
             begin(cloud: VoiceSettings.provider)
         }

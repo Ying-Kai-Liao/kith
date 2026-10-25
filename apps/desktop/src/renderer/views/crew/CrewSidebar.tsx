@@ -98,6 +98,7 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
 
   const openHit = (hit: CrewHit | undefined) => {
     if (!hit) return
+    dictation.stop()
     openRef(hit.ref)
     setQuery('')
   }
@@ -115,6 +116,7 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
       e.preventDefault()
       openHit(hits[active] ?? hits[0])
     } else if (e.key === 'Escape') {
+      dictation.stop()
       setQuery('')
     }
   }
@@ -191,16 +193,23 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
             placeholder="Find or ask…"
             aria-label="Find a room, agent or thread"
             spellCheck={false}
+            readOnly={dictation.listening}
             onChange={(e) => change(e.target.value)}
             onKeyDown={onSearchKey}
           />
+          {/* While recording: Stop (the words stay to edit) and, once something is heard, open the top match. */}
+          {dictation.listening ? (
+            <button className="cs-box-mic on" aria-label="Stop recording" title="Stop recording: edit before opening" onClick={() => { dictation.stop(); searchRef.current?.focus() }}>
+              <Icon name="stop.fill" size={11} weight="medium" />
+            </button>
+          ) : null}
           {searching ? (
             <button className="cs-box-send" aria-label="Open the top match" disabled={!hits.length} onClick={() => openHit(hits[active] ?? hits[0])}>
               <Icon name="arrow.up" size={13} weight="bold" />
             </button>
-          ) : window.kith.speech.available ? (
-            <button className={`cs-box-mic ${dictation.listening ? 'on' : ''}`} aria-label={dictation.listening ? 'Stop dictating' : 'Dictate'} aria-pressed={dictation.listening} onClick={dictation.toggle}>
-              <Icon name={dictation.listening ? 'mic.fill' : 'mic'} size={15} weight="medium" />
+          ) : !dictation.listening && window.kith.speech.available ? (
+            <button className="cs-box-mic" aria-label="Dictate" onClick={dictation.start}>
+              <Icon name="mic" size={15} weight="medium" />
             </button>
           ) : null}
         </div>

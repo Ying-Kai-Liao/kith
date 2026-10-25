@@ -131,7 +131,7 @@ struct Composer: View {
                  },
                  onFiles: { pickingFiles = true },
                  extraActions: extraActions, micListening: dictation.listening, micWithText: true, canSend: canSend,
-                 showsPlus: canAttach, focus: $focused) {
+                 showsPlus: canAttach, stop: stop, focus: $focused) {
             accessory
         }
         .animation(Motion.layout, value: files.map(\.id))
@@ -189,7 +189,7 @@ struct Composer: View {
         return items
     }
 
-    /// Above the field, inside the dock: the new-task chip, the files going out, and Stop / Interrupt / Stop dictating.
+    /// Above the field, inside the dock: the new-task chip and the files going out.
     private var accessory: some View {
         VStack(alignment: .leading, spacing: 0) {
             if showsNewTaskChip {
@@ -198,36 +198,21 @@ struct Composer: View {
             if !files.isEmpty {
                 fileChips.transition(.move(edge: .bottom).combined(with: .opacity))
             }
-            if onInterrupt != nil, draft.isEmpty, files.isEmpty {
-                pill("Interrupt", symbol: "stop.fill", tint: Palette.negative) { onInterrupt?() }
-            } else if working, draft.isEmpty, files.isEmpty {
-                pill("Stop", symbol: "stop.fill", tint: Palette.ink) { model.stop(botId, thread: place) }
-            }
-            if dictation.listening {
-                pill("Stop dictating", symbol: "mic.fill", tint: Palette.negative) { dictation.stop() }
-            }
         }
     }
 
-    private func pill(_ title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Label(title, systemImage: symbol)
-                .kithText(.secondary).fontWeight(.semibold)
-                .foregroundStyle(tint)
-                .padding(.horizontal, 12)
-                .frame(minHeight: 36)
-                .background(tint.opacity(0.1), in: Capsule())
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 14)
-        .padding(.top, 8)
-        .accessibilityLabel(title)
+    /// Beside the mic while the box is empty: cut the voice off in a call, or stop the bot's work here.
+    private var stop: ChatDockStop? {
+        if let onInterrupt { return ChatDockStop("Interrupt", urgent: true, action: onInterrupt) }
+        if working { return ChatDockStop("Stop") { model.stop(botId, thread: place) } }
+        return nil
     }
 
+    /// The mic starts recording; while it records the same slot is its Stop, which leaves the words to edit.
     private func toggleDictation() {
         if dictation.listening {
             dictation.stop()
+            focused = true
         } else {
             dictatedAfter = draft
             Task { await dictation.start { said in draft = Dictation.join(dictatedAfter, said) } }
@@ -343,6 +328,8 @@ struct Composer: View {
     }
 
     private func submit() {
+        // Send while recording: the recording ends and what it heard goes with the message.
+        dictation.stop()
         if files.isEmpty, let command = SlashCommands.builtIn(for: bot, draft: draft) { return run(command) }
         guard canSend else { return }
         withAnimation(Motion.reduced(Motion.conversation, reduceMotion)) {
