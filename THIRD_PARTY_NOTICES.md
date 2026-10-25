@@ -11,7 +11,7 @@ Local voice (kith-tts) uses Phonon, Gradium's on-device text to speech: the ptts
 model and voices (https://huggingface.co/gradium/phonon-31m-en and /gradium/phonon-voices, Apache-2.0,
 Copyright Gradium). The model files are downloaded on first use and are not part of this repository.
 
-Kith includes 602 third-party packages and vendored files under the licenses below.
+Kith includes 601 third-party packages and vendored files under the licenses below.
 
 ## 0BSD
 
@@ -71,9 +71,6 @@ PERFORMANCE OF THIS SOFTWARE.
   Copyright Anthony MOI <m.anthony.moi@gmail.com>, Nicolas Patry <patry.nicolas@protonmail.com>
 - swift-argument-parser 1.8.2 (swiftpm)
   https://github.com/apple/swift-argument-parser
-- kith-mem (vendored)
-  https://github.com/Ying-Kai-Liao/kith
-  Bot memory crate, built in this repository and mirrored to its own.
 
 ~~~~~
                                  Apache License

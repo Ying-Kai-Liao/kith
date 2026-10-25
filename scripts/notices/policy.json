@@ -24,7 +24,6 @@
   ],
   "vendored": [
     { "name": "cua-driver", "license": "MIT", "file": "apps/packaging/cua-driver/LICENSE", "url": "https://github.com/trycua/cua", "note": "Computer-use driver shipped beside the app." },
-    { "name": "kith-mem", "license": "Apache-2.0", "file": "serve/host/crates/memory/LICENSE", "url": "https://github.com/Ying-Kai-Liao/kith", "note": "Bot memory crate, built in this repository and mirrored to its own." },
     { "name": "thinking-orbs", "license": "MIT", "file": "apps/ios/Kit/Sources/KithKit/Resources/ThirdPartyNotices/thinking-orbs-LICENSE.txt", "url": "https://github.com/jakubantalik/thinking-orbs", "note": "Ported to SwiftUI (iOS) and React (desktop) as ThinkingOrb." },
     { "name": "inter", "license": "OFL-1.1", "file": "apps/ios/Kit/Sources/KithKit/Resources/ThirdPartyNotices/inter-LICENSE.txt", "url": "https://github.com/rsms/inter", "note": "Typeface of the Kith app (iOS and desktop), bundled as font files (desktop: woff2 in apps/desktop/src/renderer/assets/fonts)." },
     { "name": "nunito", "license": "OFL-1.1", "file": "apps/ios/Kit/Sources/KithKit/Resources/ThirdPartyNotices/nunito-LICENSE.txt", "url": "https://github.com/googlefonts/nunito", "note": "Agent-name typeface of the Kith app (iOS and desktop), bundled as a font file (desktop: woff2 in apps/desktop/src/renderer/assets/fonts)." },

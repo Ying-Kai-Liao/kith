@@ -448,9 +448,8 @@ Kith is split on purpose. The pieces you build on are open source; the product a
 | Docs and specs, top-level scripts | `docs/`, `serve/docs/`, `install.sh`, other `scripts/` | MIT, open source |
 | Host, cloud, relay | `serve/host` (except the crates above and kith-mem), `serve/cloud`, `serve/relay` | FSL-1.1-MIT, Fair Source |
 | Apps (Mac, iOS, web/desktop) | `apps/` | FSL-1.1-MIT, Fair Source |
-| kith-mem (bot memory crate) | `serve/host/crates/memory` | Apache-2.0, open source |
 
-FSL-1.1-MIT is Fair Source, not open source: you can read, run, modify and self-host it for any use except building a competing product or service, and each version becomes plain MIT two years after its release. The nearest `LICENSE` file to a file is the one that applies to it. Portions of the relay derive from Codync (Apache-2.0); see `NOTICE`. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by these licenses.
+FSL-1.1-MIT is Fair Source, not open source: you can read, run, modify and self-host it for any use except building a competing product or service, and each version becomes plain MIT two years after its release. The nearest `LICENSE` file to a file is the one that applies to it. The relay's Codync-derived portions keep their Apache-2.0 attribution in `NOTICE`. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by these licenses.
 
 Code committed before this change (2026-10-25) was published under MIT/Apache-2.0, and copies taken before then keep those licenses.
 

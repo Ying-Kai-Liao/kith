@@ -52,4 +52,4 @@ The crate re-exports the `rusqlite` it builds against: use that one, because a b
 
 ## License
 
-Apache-2.0
+FSL-1.1-MIT (see `LICENSE`).
