@@ -434,8 +434,25 @@ put its skills in `role/skills/`. New sessions pick it up; `kith share <name>` p
   addresses and the words in `~/.kith/private-words`.
 - Status: early, built for one person's Mac. macOS only (APFS clones, Keychain, launchd); needs Claude Code, git
   and python3 (gh to share agents, uv for the Discord bridge).
-- MIT licence (LICENSE). Linked skills keep their own licences (each agent's skills.json).
+- Licensing: see [Licensing](#licensing). Linked skills keep their own licences (each agent's skills.json).
 - Design working files live outside the repo in `~/Workspace/design/<project-id>/`; sync that folder separately.
+
+## Licensing
+
+Kith is split on purpose. The pieces you build on are open source; the product around them is Fair Source.
+
+| Part | Folders | License |
+| --- | --- | --- |
+| Kernel, agent folder format and protocol | `kernel/` (incl. `kernel/PROTOCOL.md`) | MIT, open source |
+| Bot client and wire protocol crates, guest scripts | `serve/host/crates/guest`, `serve/host/crates/wire`, `scripts/install-guest.sh`, `scripts/package-guest.sh`, `scripts/smoke-guest.sh` | MIT, open source |
+| Docs and specs, top-level scripts | `docs/`, `serve/docs/`, `install.sh`, other `scripts/` | MIT, open source |
+| Host, cloud, relay | `serve/host` (except the crates above and kith-mem), `serve/cloud`, `serve/relay` | FSL-1.1-MIT, Fair Source |
+| Apps (Mac, iOS, web/desktop) | `apps/` | FSL-1.1-MIT, Fair Source |
+| kith-mem (bot memory crate) | `serve/host/crates/memory` | Apache-2.0, open source |
+
+FSL-1.1-MIT is Fair Source, not open source: you can read, run, modify and self-host it for any use except building a competing product or service, and each version becomes plain MIT two years after its release. The nearest `LICENSE` file to a file is the one that applies to it. Portions of the relay derive from Codync (Apache-2.0); see `NOTICE`. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by these licenses.
+
+v0.1.0 and earlier releases were published under MIT/Apache-2.0 and stay under those licenses for anyone who has them.
 
 ## Credits
 Kith's relay is borrowed from [Codync](https://github.com/leepokai/Codync) (Apache-2.0).
