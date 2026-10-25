@@ -537,6 +537,10 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
         if method == "respondPermission" && theirs && prompt && member {
             return Ok(());
         }
+        // ...and reading the chat of a bot guest of theirs, which no write method reaches.
+        if theirs && ["history", "thread", "kithInfo", "threadProjects"].contains(&method) {
+            return Ok(());
+        }
         return Err(fail(format!("guard let {me} into a chat of {:?} ({method})", row.config.person)));
     }
     let Some(agent) = row.config.hq_agent.as_deref().and_then(agent_index) else {
@@ -567,6 +571,18 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
     Ok(())
 }
 
+/// A read of the chat of a bot guest the person owns: held by that ownership, not by the agent grant (the chat of an
+/// ended bot stays readable to its owner).
+fn reads_bot_guest_chat(w: &World, me: &str, method: &str, b: &Value) -> bool {
+    ["history", "thread", "kithInfo", "threadProjects"].contains(&method)
+        && b["botId"]
+            .as_str()
+            .and_then(|c| w.hub.store.bot(c).ok().flatten())
+            .and_then(|r| r.config.person)
+            .and_then(|p| w.hub.store.bot_guest_of_person(&p))
+            .is_some_and(|g| g.owner_person.as_deref() == Some(me))
+}
+
 #[test]
 fn guard_never_lets_a_person_past_their_grant() {
     let w = World::new();
@@ -595,7 +611,7 @@ fn guard_never_lets_a_person_past_their_grant() {
                 Ok(()) => {
                     check_guard_ok(&w, &sc, &c, &ids, &b)?;
                     // The same call after the grant is taken away must be refused (kith-auth is asked every call).
-                    if !nothing_to_check(&c.method) {
+                    if !nothing_to_check(&c.method) && !reads_bot_guest_chat(&w, me, &c.method, &b) {
                         let mut gone = sc.clone();
                         gone.grants[c.person] = [Ans::Denied(false), Ans::Denied(false)];
                         w.write_grants(&gone.grants);
@@ -785,20 +801,14 @@ fn events_reach_only_the_person_they_are_about() {
                             let listed = agent.is_some_and(|a| role(a) != 0);
                             prop_assert!(listed, "event about a chat whose agent is not granted reached {p}");
                         } else {
-                            // Not theirs: only the permission prompt of a bot guest of theirs, as a member of its agent.
+                            // Not theirs: only the chat of a bot guest of theirs, whole (read-only for them).
                             let theirs = row
                                 .config
                                 .person
                                 .as_deref()
                                 .and_then(|b| w.hub.store.bot_guest_of_person(b))
                                 .is_some_and(|g| g.owner_person.as_deref() == Some(p));
-                            let prompt = ty == "entry" && v["entry"]["kind"] == "permission";
-                            let member = agent.is_some_and(|a| role(a) == 1);
-                            prop_assert!(
-                                theirs && prompt && member,
-                                "an event about {:?}'s chat reached {p}",
-                                row.config.person
-                            );
+                            prop_assert!(theirs, "an event about {:?}'s chat reached {p}", row.config.person);
                         }
                         // (6) and nothing of where the agent works.
                         prop_assert!(!v.to_string().contains(SECRET), "{v}");
@@ -807,9 +817,10 @@ fn events_reach_only_the_person_they_are_about() {
                 }
                 (Some(_), None) => {}
                 (None, Some(v)) => {
-                    // The owner sees an invitee's chat only as a permission prompt.
+                    // The owner sees an invitee's chat only as a permission prompt; a bot guest's chat whole.
                     if let Some(row) = &row
                         && row.config.person.is_some()
+                        && row.config.person.as_deref().and_then(|b| w.hub.store.bot_guest_of_person(b)).is_none()
                     {
                         prop_assert!(
                             ty == "entry" && v["entry"]["kind"] == "permission",

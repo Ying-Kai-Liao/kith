@@ -51,6 +51,14 @@ impl Hub {
         });
         v["lastMessage"] = preview.map(|p| crate::agent::acp::truncate(&p, 280)).into();
         v["lastAt"] = last.map_or(cfg.created_at, |l| l.at).into();
+        // The chat of a bot guest: the apps tag it and show it read-only. Absent for every other row.
+        if let Some(g) = cfg.person.as_deref().and_then(|p| self.store.bot_guest_of_person(p)) {
+            let owner_name = g.owner_person.as_deref().and_then(|p| self.store.person(p)).map(|p| p.name);
+            v["botGuest"] = json!({
+                "botId": g.bot_id, "name": g.name, "provider": g.provider,
+                "ownerPerson": g.owner_person, "ownerName": owner_name,
+            });
+        }
         v
     }
 

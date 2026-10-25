@@ -319,6 +319,10 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
                 }
             }
         }
+        // Reading the chat of a bot guest they own (docs/kith-bot-guests.md 6.1); every other method, writes included,
+        // falls to `own_bot`, which refuses a chat that is not the person's own.
+        "history" | "thread" | "kithInfo" | "threadProjects"
+            if owned_bot_chat_agent(hub, person, b["botId"].as_str().unwrap_or_default()).is_some() => {}
         _ => own_bot(hub, person, b["botId"].as_str().unwrap_or_default()).await?,
     }
     if method == "setThreadProjects" {
@@ -454,7 +458,10 @@ pub fn event_for(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
     match (who, owner) {
         // The owner answers the permission prompts of an invitee's runs (a guest's always, a member's when they like);
         // nothing else of the chat reaches them.
-        (None, Some(Some(_))) => (kind == "entry" && v["entry"]["kind"] == "permission").then_some(v),
+        // A bot guest's conversation is the owner's to see whole (6.2); only an invitee's chat is held back.
+        (None, Some(Some(p))) => (store.bot_guest_of_person(&p).is_some()
+            || (kind == "entry" && v["entry"]["kind"] == "permission"))
+            .then_some(v),
         (None, _) => Some(v),
         (Some(me), Some(Some(p))) if p == me => {
             let agents = store.person(me).map(|p| p.agents).unwrap_or_default();
@@ -469,13 +476,16 @@ pub fn event_for(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
             }
             Some(v)
         }
-        // A prompt of a bot guest of theirs, which they answer when they are a member of its agent.
-        (Some(me), Some(Some(_))) if kind == "entry" && v["entry"]["kind"] == "permission" => {
-            let chat = bot.as_deref()?;
-            let agent = store.bot(chat).ok().flatten()?.config.hq_agent?;
-            let bot_owner = store.bot_guest_of_person(&bot_person(store, chat)??)?.owner_person;
-            let member = store.person(me).is_some_and(|p| p.agents.get(&agent).is_some_and(|r| r == "member"));
-            (bot_owner.as_deref() == Some(me) && member).then_some(v)
+        // The chat of a bot guest of theirs, read-only for them; its prompts they answer when they are a member of the
+        // agent (checked in `guard`). Nothing of other people's bots.
+        (Some(me), Some(Some(p))) => {
+            let guest = store.bot_guest_of_person(&p)?;
+            (guest.owner_person.as_deref() == Some(me)).then_some(())?;
+            let mut v = shape_bot(v);
+            if kind == "entry" {
+                hide_foreign_summary(me, &mut v["entry"]);
+            }
+            Some(v)
         }
         (Some(_), _) => None,
     }
