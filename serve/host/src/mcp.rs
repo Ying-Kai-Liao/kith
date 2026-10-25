@@ -57,6 +57,7 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
             let mut tools = crate::chat::outbox::tools();
             if let Some(list) = tools.as_array_mut() {
                 list.extend(crate::chat::profile::tools());
+                list.push(crate::cards::secret::tool());
             }
             ("kith-chat", crate::chat::outbox::INSTRUCTIONS, tools)
         }
@@ -66,6 +67,7 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
             let mut files: Vec<Value> =
                 tools.as_array().into_iter().flatten().filter(|t| t["name"] == "send_file").cloned().collect();
             files.push(crate::calls::tool());
+            files.push(crate::cards::secret::tool());
             ("kith-files", crate::chat::outbox::FILES_INSTRUCTIONS, Value::Array(files))
         }
         Server::Team => ("kith-team", crate::chat::team::INSTRUCTIONS, crate::chat::team::tools()),
@@ -95,10 +97,11 @@ pub async fn serve(bot: String, port: u16, server: Server) -> Result<()> {
                 }),
                 "tools/call"
                     if matches!(server, Server::Files)
-                        && !["send_file", "call_person"].contains(&params["name"].as_str().unwrap_or_default()) =>
+                        && !["send_file", "call_person", crate::cards::secret::TOOL]
+                            .contains(&params["name"].as_str().unwrap_or_default()) =>
                 {
                     Ok(
-                        json!({"content": [{"type": "text", "text": "unknown tool: only send_file and call_person"}], "isError": true}),
+                        json!({"content": [{"type": "text", "text": "unknown tool: only send_file, call_person and request_secret"}], "isError": true}),
                     )
                 }
                 "tools/call" => Ok(call(port, &token, &bot, params, server).await),

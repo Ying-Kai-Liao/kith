@@ -160,6 +160,12 @@ pub async fn owner_name(agent: &str) -> Option<String> {
     v["name"].as_str().filter(|n| !n.is_empty()).map(str::to_owned)
 }
 
+/// Whether an entry's `data` is a key or account card (cards/secret.rs): it names an agent, a service and an account,
+/// and is the owner's alone. No other principal is told it exists.
+pub fn secret_card(data: &Value) -> bool {
+    matches!(data["card"].as_str(), Some("key" | "account"))
+}
+
 /// Whether the permission card `data` offered `option` to its chat.
 pub fn offered(data: &Value, option: &str) -> bool {
     data["options"].as_array().is_some_and(|all| all.iter().any(|o| o["optionId"].as_str() == Some(option)))
@@ -277,6 +283,12 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
         "respondPermission" | "react" | "editHandoff" | "keepConversation" => {
             let id = b["entryId"].as_str().unwrap_or_default();
             let entry = hub.store.entry(id).ok_or_else(|| denied("That chat isn't yours."))?;
+            // A key or account card is the owner's whatever else is true of it (it is never in a member's chat).
+            if secret_card(&entry.data)
+                || hub.store.card_by_entry(id).is_some_and(|c| c.tool == crate::cards::secret::TOOL)
+            {
+                return Err(denied("Only the owner can answer this agent's permission requests for you."));
+            }
             // A `claude -p` run's card has no chat turn behind it: the card says whose run it was and who answers,
             // asked of kith-auth now, so a revoke applies (A7). The bot's owner answers for their bot as below.
             if method == "respondPermission"
@@ -394,6 +406,7 @@ pub fn shape(hub: &Hub, person: &str, method: &str, mut v: Value) -> Value {
             }
             // `get_mut`: indexing would add `entries: null` to a `not_shared` answer.
             if let Some(list) = v.get_mut("entries").and_then(Value::as_array_mut) {
+                list.retain(|e| !secret_card(&e["data"]));
                 for e in list {
                     hide_foreign_summary(person, e);
                 }
@@ -439,6 +452,10 @@ fn bot_person(store: &Store, id: &str) -> Option<Option<String>> {
 /// an invitee sees only their own, and no invitee sees usage, screens or the cloud.
 pub fn event_for(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
     let kind = v["type"].as_str().unwrap_or_default().to_owned();
+    // A key or account card goes to the owner's devices and nobody else's.
+    if who.is_some() && kind == "entry" && secret_card(&v["entry"]["data"]) {
+        return None;
+    }
     let bot = match kind.as_str() {
         // A bot guest changed state: the owner of the computer and the bot's own owner hear of it.
         "botUpdated" => {
@@ -518,6 +535,9 @@ fn bot_waits_on(store: &Store, bot: &crate::store::BotGuest) -> String {
 /// attachments and every other notice are dropped. `e` is an [`crate::store::Entry`] as JSON.
 pub fn bot_entry(e: &Value, conversation: &str, waits_on: &str) -> Option<Value> {
     let data = &e["data"];
+    if secret_card(data) {
+        return None;
+    }
     let text = |k: &str| data[k].as_str().unwrap_or_default().to_owned();
     let mut out = json!({
         "id": e["id"], "seq": e["rev"], "turn": e["turn"], "at": e["createdAt"], "conversation": conversation,

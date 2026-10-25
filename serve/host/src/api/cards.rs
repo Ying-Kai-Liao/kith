@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// How long a holder gets to end after SIGTERM before SIGKILL.
 const HOLDER_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
-pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
+pub(super) async fn call(hub: &Arc<Hub>, method: &str, mut b: Value) -> Result<ControlFlow<Value, Value>> {
     Ok(ControlFlow::Break(match method {
         "issueAskToken" => {
             let (agent, session) = (str_arg(&b, "agent")?, str_arg(&b, "session")?);
@@ -63,6 +63,26 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 Stopped::OwnTurn(c) => json!({"stopped": null, "ownTurn": shown(&c)}),
                 Stopped::Ended(c) => json!({"stopped": shown(&c)}),
             }
+        }
+        // Secret cards (cards/secret.rs). Owner only, like every method that is on neither the member nor the bot
+        // list. `provideSecret` carries a key: its values are moved out of the body here and zeroed after the write.
+        "provideSecret" => {
+            let entry_id = str_arg(&b, "entryId")?.to_owned();
+            let account = b["account"].as_str().map(str::to_owned);
+            let mut values = std::collections::BTreeMap::new();
+            if let Some(map) = b["values"].as_object_mut() {
+                for (name, value) in std::mem::take(map) {
+                    if let Value::String(s) = value {
+                        values.insert(name, zeroize::Zeroizing::new(s));
+                    }
+                }
+            }
+            crate::cards::secret::provide(hub, &entry_id, account.as_deref(), values).await?
+        }
+        "listKeys" => crate::cards::secret::list_keys().await?,
+        "revokeKey" => {
+            crate::cards::secret::revoke_key(str_arg(&b, "agent")?, str_arg(&b, "service")?, str_arg(&b, "profile")?)
+                .await?
         }
         "revokeAskToken" => json!({"revoked": crate::runauth::table().revoke_token(str_arg(&b, "token")?)}),
         _ => return Ok(ControlFlow::Continue(b)),

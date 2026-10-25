@@ -47,6 +47,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             if name == "call_person" {
                 let reason = b["arguments"]["reason"].as_str().unwrap_or_default();
                 crate::calls::ring_and_wait(hub, bot, reason, false).await?
+            } else if name == crate::cards::secret::TOOL {
+                crate::cards::secret::chat_request(hub, bot, actor_arg(&b, bot), &b["arguments"]).await?
             } else if crate::chat::profile::TOOLS.contains(&name) {
                 crate::chat::profile::call(hub, bot, name, &b["arguments"]).await?
             } else {
@@ -371,6 +373,12 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let entry_id = str_arg(&b, "entryId")?;
             let e = hub.store.entry(entry_id).ok_or_else(|| anyhow!("unknown card"))?;
             let option_id = b["optionId"].as_str().map(str::to_owned);
+            // A key or account card has its own answers (a grant or a deny), and no process waits on it.
+            if hub.store.card_by_entry(entry_id).is_some_and(|c| c.tool == crate::cards::secret::TOOL) {
+                return Ok(ControlFlow::Break(
+                    crate::cards::secret::respond(hub, entry_id, option_id.as_deref()).await?,
+                ));
+            }
             // A card in a group belongs to the bot that asked.
             let bot = e.data["author"].as_str().unwrap_or(&e.bot_id);
             // In an invited person's chat only what the card offered can be picked, by anyone (the owner included).

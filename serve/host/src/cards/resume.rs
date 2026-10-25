@@ -163,7 +163,8 @@ pub async fn attempt(hub: &Arc<Hub>, id: &str) -> Step {
 /// The words the agent is told: who allowed what, and that it can go on. A used grant is said so (C7).
 async fn note_for(hub: &Hub, group: &[Card]) -> String {
     let who = super::approver_label(hub, &group[0]).await;
-    let parts: Vec<String> = group
+    let (keys, asks): (Vec<&Card>, Vec<&Card>) = group.iter().partition(|c| c.tool == super::secret::TOOL);
+    let parts: Vec<String> = asks
         .iter()
         .map(|c| {
             let what = super::short(&c.shown, 80);
@@ -176,7 +177,18 @@ async fn note_for(hub: &Hub, group: &[Card]) -> String {
             }
         })
         .collect();
-    format!("[Kith] {}; go on.", parts.join("; "))
+    // A saved key is told by name only (never a value); its note stands on its own.
+    let mut note = String::from("[Kith]");
+    if !parts.is_empty() {
+        note.push(' ');
+        note.push_str(&parts.join("; "));
+        note.push_str("; go on.");
+    }
+    for c in keys {
+        note.push(' ');
+        note.push_str(&super::secret::note(hub, &who, c));
+    }
+    note
 }
 
 // ---- door (a): a bot's chat

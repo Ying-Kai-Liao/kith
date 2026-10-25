@@ -856,17 +856,22 @@ fn a_bot_is_sent_only_its_own_conversations() {
                 e.kind = 0;
             }
             e
-        });
+        })
+        // 0 an ordinary entry, 1 a key card, 2 an account card (cards/secret.rs): those never reach a bot.
+        .prop_flat_map(|e| (Just(e), 0..4u8));
     let served = std::cell::Cell::new(0usize);
     runner(400)
-        .run(&ev, |e| {
+        .run(&ev, |(e, secret)| {
             let (bot_id, own_chat, own_thread, conv) = &feed.bots[e.to];
             let (chat_id, thread_id) = (&feed.chats[e.chat], &feed.threads[e.thread]);
-            let data = json!({
+            let mut data = json!({
                 "text": "hello", "status": "pending", "style": "error", "final": true,
                 "tool": SECRET, "args": SECRET, "title": SECRET, "path": SECRET, "cwd": SECRET, "author": SECRET,
                 "options": [SECRET], "attachments": [SECRET], "input": {"command": SECRET},
             });
+            if secret > 0 {
+                data["card"] = json!(["", "key", "account", "account"][usize::from(secret)]);
+            }
             let entry = json!({
                 "id": "e1", "rev": 3, "turn": 1, "createdAt": 5, "kind": ENTRY_KINDS[e.entry_kind], "data": data,
                 "botId": chat_id, "threadId": thread_id,
@@ -879,6 +884,10 @@ fn a_bot_is_sent_only_its_own_conversations() {
                 "entry" => {
                     let own = chat_id == own_chat && thread_id == own_thread;
                     let active = e.to != 2;
+                    if secret > 0 {
+                        prop_assert!(out.is_none(), "a key or account card reached {bot_id}: {out:?}");
+                        return Ok(());
+                    }
                     match out {
                         Some(out) => {
                             prop_assert!(own && active, "{bot_id} was sent {chat_id}/{thread_id}: {out}");
