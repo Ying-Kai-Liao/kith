@@ -24,6 +24,7 @@ import { LinkChatRow } from './LinkChatRow'
 import { errorText, isMac, thisMac } from './parts'
 import { BackupChains } from './BackupChain'
 import { UsageLimits } from './UsageLimits'
+import { SpendSection } from '../usage/SpendSection'
 import { VoiceChatSettingsView } from './VoiceChatSettingsView'
 import { FormSheet } from '../marketplace/pieces'
 import { ComputerAccessView } from '../computer-access/ComputerAccessView'
@@ -289,7 +290,7 @@ function VoiceSettings() {
   )
 }
 
-/** Every computer's usage limits: a group per computer and provider. */
+/** Every computer's plan limits (a group per computer and provider), then what its agents cost at API prices. */
 function UsageSettings() {
   const app = useApp()
   const stores = app.computers.flatMap((c) => app.store(c.id) ?? [])
@@ -306,6 +307,7 @@ function UsageSettings() {
       {withUsage.length === 0 && !many ? (
         <CardSection><Text tone="secondary">No usage information yet.</Text></CardSection>
       ) : null}
+      {stores.filter((s) => s.isOwner).map((store) => <SpendSection key={`spend-${store.computer.id}`} store={store} title={many ? store.hostName : null} />)}
     </>
   )
 }

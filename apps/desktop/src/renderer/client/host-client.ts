@@ -1,4 +1,5 @@
 import { parseCall, type IncomingCall } from '@shared/incoming-call'
+import { parseAgentPeople, parseAgentUsage, parseUsageReport, type AgentPeople, type AgentUsage, type AtLimit, type Period, type UsageReport } from '@shared/usage-limits'
 import type { CallError } from '@shared/ipc'
 import type { RelayCallError } from '@shared/relay'
 import { parseBackups, type Backups } from '@shared/backups'
@@ -387,6 +388,30 @@ export class HostClient {
 
   async audit(since = 0, personId: string | null = null): Promise<AuditRow[]> {
     return parseAudit(await this.call('audit', { since, ...(personId ? { personId } : {}) }))
+  }
+
+  // What things cost at API prices and the monthly limits (serve/host/src/limits.rs). Owner only; an older host
+  // answers "unknown method" and the Usage page shows the plan meter alone.
+  async usageReport(period: Period): Promise<UsageReport> {
+    return parseUsageReport(await this.call('usageReport', { period }, 60_000))
+  }
+
+  async agentUsage(agent: string, period: Period = 'month'): Promise<AgentUsage> {
+    return parseAgentUsage(await this.call('agentUsage', { agent, period }, 60_000))
+  }
+
+  /** `limit` dollars a month, null for none; `at` what happens there. Answers the agent's view. */
+  async setAgentLimit(agent: string, limit: number | null, at: AtLimit): Promise<AgentUsage> {
+    return parseAgentUsage(await this.call('setAgentLimit', { agent, limit, at }, 60_000))
+  }
+
+  async agentPeople(agent: string): Promise<AgentPeople> {
+    return parseAgentPeople(await this.call('agentPeople', { agent }, 60_000))
+  }
+
+  /** A person's budget on one agent, dollars a month; null for none. */
+  async setPersonBudget(agent: string, person: string, budget: number | null): Promise<AgentPeople> {
+    return parseAgentPeople(await this.call('setPersonBudget', { agent, person, budget }, 60_000))
   }
 
   /** The first call of an invited device: shows the invite token from the link. Until it works the Mac refuses everything else. */

@@ -2,6 +2,7 @@
 // stores the app already has. A port of apps/ios/Kit/Sources/KithUI/Store/BoardModel.swift; nothing here is fetched
 // or kept, so a changed store changes the Board. The sidebar only lays these values out.
 import { cardHeading, cardQuestion, type BotGuest } from './bot-guests.ts'
+import { limitOf, limitQuestion } from './usage-limits.ts'
 import type { GuestPrompt } from './mac-role.ts'
 import { isWorkingIn, type Bot, type Entry } from './models.ts'
 import { isBusyInTerminal } from './thread-writer.ts'
@@ -46,6 +47,8 @@ export interface BoardDecision {
   trouble: BoardTrouble | null
   /** A guest's request: outside any chat of this account's own, so it has no room to open. */
   guest: boolean
+  /** An agent's at-limit card (an owner's run waits under it): answered in place on Board, not as a row. */
+  limit?: Entry
 }
 
 /** A task at work, or one finished today. */
@@ -122,6 +125,8 @@ export const pendingQuestions = (entries: readonly Entry[]) => entries.filter(is
 
 /** What a permission card wants, as the line a row shows. */
 export function decisionQuestion(entry: Entry): string {
+  const limit = limitQuestion(entry)
+  if (limit) return limit
   if (entry.data.card && entry.data.secret) return `Needs a key for ${entry.data.secret.service}`
   switch (entry.data.toolKind) {
     case 'execute':
@@ -224,6 +229,7 @@ export function buildBoard(computers: BoardComputer[], now = Date.now()): BoardM
           at: entry.createdAt,
           trouble,
           guest: false,
+          ...(limitOf(entry) ? { limit: entry } : {}),
         })
       }
 
@@ -340,11 +346,11 @@ export interface NeedsYouRow {
   count: number
 }
 
-/** Needs you as sidebar rows. Guests' requests stay out: they have no room to open and are answered in place. */
+/** Needs you as sidebar rows. Guests' requests and limit cards stay out: they are answered in place. */
 export function needsYouRows(decisions: BoardDecision[]): NeedsYouRow[] {
   const rows = new Map<string, NeedsYouRow>()
   for (const d of decisions) {
-    if (d.guest) continue
+    if (d.guest || d.limit) continue
     const key = `${d.target.computerId}/${d.target.botId}/${d.thread ?? ''}`
     const row = rows.get(key)
     if (row) row.count++

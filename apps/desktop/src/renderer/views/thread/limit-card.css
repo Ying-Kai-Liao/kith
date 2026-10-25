@@ -1,0 +1,106 @@
+/* A limit card (LimitCard): a decision card tinted in the agent's pair, a spend line with an ink bar, the answers. */
+.lc {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: var(--kith-radius-card);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--pair-a) 16%, var(--kith-ground)), color-mix(in srgb, var(--pair-b) 16%, var(--kith-ground)));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pair-b) 26%, transparent);
+  color: var(--kith-ink);
+}
+.lc-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-caption);
+  font-weight: 600;
+}
+.lc-heading-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lc-leading {
+  display: inline-flex;
+}
+.lc-time {
+  color: var(--kith-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.lc-title {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.lc-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--text-caption);
+  color: var(--kith-muted);
+}
+.lc-amount {
+  color: var(--kith-ink);
+  font-variant-numeric: tabular-nums;
+}
+.lc-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.lc-spacer {
+  flex: 1;
+}
+.lc-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 14px;
+  border-radius: 16px;
+  border: 0;
+  font: inherit;
+  font-weight: 500;
+  color: var(--kith-ink);
+  cursor: pointer;
+}
+.lc-button.ink {
+  background: var(--kith-ink);
+  color: var(--kith-ground);
+}
+.lc-button.pair {
+  background: var(--kith-ground);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+}
+.lc-button.plain {
+  background: none;
+  padding: 6px 4px;
+}
+.lc-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.lc-button:focus-visible {
+  outline: 2px solid var(--kith-ink);
+  outline-offset: 2px;
+}
+.lc-outcome {
+  color: var(--kith-muted);
+  font-weight: 500;
+  margin-top: 2px;
+}
+.lc-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.lc-footer {
+  text-align: center;
+  font-size: var(--text-caption);
+  color: var(--kith-muted);
+}

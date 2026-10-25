@@ -15,6 +15,8 @@ import { relativeTime } from './chat-items'
 import { MarkdownText } from './Markdown'
 import { ownerNameFrom, waitingFor } from '@shared/mac-role'
 import { PermissionCard, type HeldCardProps } from './PermissionCard'
+import { LimitCard } from './LimitCard'
+import { limitOf } from '@shared/usage-limits'
 import { AccessCard, KeyCard } from './SecretCards'
 import { isSecretCard } from '@shared/secret-card'
 import { confirmMessage, confirmTitle, heldIcon, heldRowOf, stoppedDivider } from '@shared/held-run'
@@ -117,6 +119,23 @@ function LivePermission({ entry }: { entry: Entry }) {
     const author = store.bots.get(entry.data.author ?? entry.botId)
     const common = { entry, agent: author?.name ?? entry.data.agent ?? 'The agent', pair: pairOf(author?.avatarColor), answering: store.answering.get(entry.id) ?? null, respond: (o: string) => store.respond(entry, o) }
     return entry.data.card === 'account' ? <AccessCard {...common} /> : <KeyCard {...common} save={(account, values) => store.provideSecret(entry, account, values).then(() => undefined)} />
+  }
+  if (limitOf(entry)) {
+    const author = store.bots.get(entry.data.author ?? entry.botId)
+    const at = new Date(entry.createdAt)
+    return (
+      <div className="agent-inset">
+        <LimitCard
+          entry={entry}
+          pair={pairOf(author?.avatarColor)}
+          answering={store.answering.get(entry.id) ?? null}
+          respond={(o) => store.respond(entry, o)}
+          waiting={waitingFor(entry, ownerName, store.isOwner)}
+          leading={author ? <BotAvatar bot={author} size={18} animated={false} /> : undefined}
+          time={`${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`}
+        />
+      </div>
+    )
   }
   return <PermissionCard entry={entry} hostName={store.hostName} answering={store.answering.get(entry.id) ?? null} respond={(o) => store.respond(entry, o)} waiting={waitingFor(entry, ownerName, store.isOwner)} pair={pairOf(store.bots.get(entry.data.author ?? entry.botId)?.avatarColor)} held={heldFor(entry, store, ownerName)} />
 }

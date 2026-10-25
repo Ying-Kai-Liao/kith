@@ -14,6 +14,7 @@ import { peopleFor } from '../store/people-store'
 import { InviteBotSheet } from './settings/BotGuestsView'
 import { InviteLinkCard } from './settings/PeopleView'
 import './settings/settings.css'
+import { OwnerSpendRow, PeopleLimits, PersonBar, spendLine, useAgentPeople } from './usage/PeopleBudgets'
 
 /**
  * Whether the Share action shows for a bot: the owner of a connected computer whose host knows people,
@@ -59,6 +60,8 @@ function ShareAgentBody({ store, agent, name }: { store: BotStore; agent: string
   const [invitingBot, setInvitingBot] = useState(false)
   const guests = botGuestsFor(store)
   useModel(guests)
+  // What each holder spent here this month and their limit (owner only; nothing shows without it).
+  const spend = useAgentPeople(store, agent)
   useEffect(() => {
     people.notice = null
     void people.load()
@@ -103,12 +106,14 @@ function ShareAgentBody({ store, agent, name }: { store: BotStore; agent: string
         <VStack gap={6}>
         <Text size="caption" tone="secondary">Shared with</Text>
         <CardSection footer={holders.length === 0 && pending.length === 0 ? `No one has ${name} yet. Invite someone below.` : undefined}>
+          {spend.people ? <OwnerSpendRow people={spend.people} /> : null}
           {holders.map(({ person, role: held }) => (
             <div key={person.personId} className="settings-row">
               <Icon name="person.crop.circle" size={22} color="var(--secondary)" />
               <VStack grow className="settings-stack">
                 <Text truncate>{person.name}</Text>
-                <Text size="caption" tone="secondary">{roleName(held)} · {person.joined ? 'Joined' : open.some((i) => i.personId === person.personId) ? 'Invite not used yet' : 'Waiting to join'}</Text>
+                <Text size="caption" tone="secondary">{[spendLine(spend.people, person.personId), roleName(held), person.joined ? 'Joined' : open.some((i) => i.personId === person.personId) ? 'Invite not used yet' : 'Waiting to join'].filter(Boolean).join(' · ')}</Text>
+                <PersonBar store={store} agent={agent} people={spend.people} personId={person.personId} />
               </VStack>
               <Button kind="secondary" onClick={() => setRemoving(person)} disabled={people.busy}>Remove</Button>
             </div>
@@ -125,6 +130,9 @@ function ShareAgentBody({ store, agent, name }: { store: BotStore; agent: string
           ))}
         </CardSection>
         </VStack>
+
+        <PeopleLimits holders={holders.map(({ person }) => ({ personId: person.personId, name: person.name }))} people={spend.people} setBudget={spend.setBudget} />
+        {spend.error ? <Text size="caption" tone="danger">{spend.error}</Text> : null}
 
         <VStack gap={8}>
           <Text size="caption" tone="secondary">Invite someone</Text>

@@ -1,13 +1,17 @@
 import { alwaysLabel, cardHeading, cardQuestion, type BotGuest } from '@shared/bot-guests'
 import type { GuestPrompt } from '@shared/mac-role'
+import { limitOf } from '@shared/usage-limits'
 import { Spinner } from '../components/Controls'
 import { BotGuestAvatar, DecisionCard, NEUTRAL_PAIR } from '../components/kith'
+import { pairOf } from '../components/kith/pair.ts'
 import { VStack } from '../components/Stack'
 import { Text } from '../components/Text'
 import { useModel } from '../lib/observable'
 import { botGuestsFor } from '../store/bot-guests-store'
 import type { BotStore } from '../store/bot-store'
+import { LimitCard } from './thread/LimitCard'
 import { optionLabel, sortedOptions } from './thread/PermissionCard'
+import { agentBot } from './usage/SpendSection'
 
 /**
  * "Needs your OK": what other people's agents on this Mac ask, for the owner to answer. The data and the answering are
@@ -24,7 +28,17 @@ export function GuestPromptList({ store }: { store: BotStore }) {
     <VStack gap={8} className="guest-prompts" aria-label="Needs your OK">
       <Text size="caption" weight="semibold" tone="secondary">Needs your OK</Text>
       {bots.map(({ bot, outcome }) => <BotRequestCard key={bot.botId} bot={bot} outcome={outcome} busy={guests.working.has(bot.botId)} decide={(d, always) => void guests.decide(bot, d, always)} />)}
-      {prompts.map((p) => (
+      {prompts.map((p) => limitOf(p.entry) ? (
+        // A person at their budget: the owner's card, in the colours of the agent they were talking to.
+        <LimitCard
+          key={p.entryId}
+          entry={p.entry}
+          pair={pairOf(agentBot(store, p.agent)?.avatarColor)}
+          answering={store.answering.get(p.entryId) ?? null}
+          respond={(option) => store.respond(p.entry, option)}
+          personName={p.personName}
+        />
+      ) : (
         <GuestPromptRow key={p.entryId} prompt={p} answering={store.answering.get(p.entryId) ?? null} respond={(option) => store.respond(p.entry, option)} />
       ))}
     </VStack>
