@@ -741,7 +741,7 @@ async fn a_bot_guests_chat_reaches_the_owner_and_the_bots_owner_tagged() {
 
     let sams = catch_up(&r, &sam).await;
     assert_eq!(chat_rows(&sams, &sam_chat).len(), 1);
-    assert!(chat_rows(&sams, &kai_chat).is_empty());
+    assert_eq!(chat_rows(&sams, &kai_chat).len(), 0);
     assert!(sams.iter().all(|e| e["entry"]["botId"] != kai_chat.as_str()));
     assert!(!json!(sams).to_string().contains("/Users/"), "nothing of where the agent works");
 
