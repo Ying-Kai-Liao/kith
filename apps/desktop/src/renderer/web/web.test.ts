@@ -4,9 +4,9 @@ import { test } from 'node:test'
 import { b64url, verify, type Signer } from '../../shared/relay-core/crypto.ts'
 import { WebCloud } from './cloud.ts'
 import { detectSupport } from './detect.ts'
-import { takeInviteFromHash } from './hash.ts'
+import { appInviteLink, takeInviteFromHash } from './hash.ts'
 import { KeyStore, PENDING, type Kv, type Store } from './keystore.ts'
-import { noticeFor } from './notice.ts'
+import { emptyAccountText, noticeFor } from './notice.ts'
 import { WebRelay, DEVICE_RETIRED } from './relay.ts'
 import { KeyRefusal, refusingKeys } from './refusal.ts'
 import { signOutInOrder } from './signout.ts'
@@ -26,6 +26,11 @@ function page(hash: string) {
     history: { replaceState: (_s: unknown, _u: string, url: string) => void replaced.push(url) },
   }
 }
+
+test('the app link is built from the parsed fragment with the build scheme', () => {
+  const link = takeInviteFromHash(page(hashOf('cmp_1', 'inv_1', TOKEN)).location, page('').history)!
+  assert.equal(appInviteLink('kith-dev', link), `kith-dev://invite?c=cmp_1&i=inv_1&t=${TOKEN}`)
+})
 
 test('the invite is read from the fragment and the fragment is dropped from the address bar', () => {
   const p = page(hashOf('cmp_1', 'inv_1', TOKEN))
@@ -382,4 +387,9 @@ test('link outcomes become the words and the action the page shows', () => {
   assert.equal(noticeFor({ kind: 'failed', message: DEVICE_RETIRED, code: 'deviceRetired', final: false }, 'x').kind, 'removed')
   assert.equal(noticeFor({ kind: 'failed', message: 'update', code: 'upgrade', final: true }, 'x').kind, 'error')
   assert.equal(noticeFor({ kind: 'failed', message: "Can't reach", code: 'unreachable', final: false }, 'x').kind, 'info')
+})
+
+test('an empty account is told what the web is for: owners to the app, others to an invite', () => {
+  assert.match(emptyAccountText([{ role: 'owner' }]), /for people you invite.*Kith app/)
+  assert.equal(emptyAccountText([]), "Open an invite link to join someone's Kith.")
 })

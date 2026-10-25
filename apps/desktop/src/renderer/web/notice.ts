@@ -34,3 +34,10 @@ export function noticeFor(state: RelayState | null, computer: string): Notice {
       return state.final ? { kind: 'error', text: state.message } : { kind: 'info', text: state.message }
   }
 }
+
+/** What the list says when nothing is shared with the account: owners are pointed to the app, everyone else to an invite. */
+export function emptyAccountText(computers: readonly { role: string }[]): string {
+  return computers.some((c) => c.role === 'owner')
+    ? 'Kith on the web is for people you invite. Use the Kith app on your Mac or iPhone; to try the web, open an invite link with another account.'
+    : "Open an invite link to join someone's Kith."
+}

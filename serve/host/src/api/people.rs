@@ -232,7 +232,9 @@ async fn make_invite(
     let app_link = format!("{}://invite?c={cid}&i={invite_id}&t={token}", env.url_scheme());
     // The secret rides in the fragment so it never reaches the web host's logs; no `r=` (the page knows its cloud).
     let web_link = env.web_origin().map(|o| format!("{o}/join#c={cid}&i={invite_id}&t={token}"));
-    Ok(json!({"inviteId": invite_id, "link": app_link, "appLink": app_link, "webLink": web_link,
+    // `link` is what the share sheets show: the web link when this build has one, so an invitee needs no app.
+    let link = web_link.as_deref().unwrap_or(&app_link);
+    Ok(json!({"inviteId": invite_id, "link": link, "appLink": app_link, "webLink": web_link,
         "expiresAt": invite.expires_at, "personId": person}))
 }
 

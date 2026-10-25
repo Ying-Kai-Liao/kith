@@ -30,3 +30,12 @@ export function takeInviteFromHash(location: PageLocation, history: PageHistory)
   }
   return parseInviteLink(`kith://invite?${query}`, ['kith'])
 }
+
+/**
+ * The same invite as the app's own link, for a person who has the Kith app: built here from the parts the page already
+ * holds and the build's own scheme, never from anything the cloud sent. It stays on this device until they click it.
+ */
+export function appInviteLink(scheme: string, link: InviteLink): string {
+  const query = new URLSearchParams({ c: link.computerId, i: link.inviteId, t: link.token })
+  return `${scheme}://invite?${query}`
+}
