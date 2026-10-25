@@ -47,6 +47,8 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var targetBotId: String?
     /// The bot that wrote it (a group shows who spoke).
     public var author: String?
+    /// user, in a bot-guest chat: the outside bot that wrote it. Nil for the owner's own messages.
+    public var sender: EntrySender?
     /// On a main-chat message that has a thread: its replies.
     public var thread: ThreadSummary?
     /// user, in the main chat: the first message of a task; the task goes on in its thread (see `Tasks`).
@@ -74,6 +76,13 @@ public struct EntryData: Codable, Hashable, Sendable {
         self.status = status
         self.clientNonce = clientNonce
     }
+}
+
+public struct EntrySender: Codable, Hashable, Sendable {
+    public var botId: String?
+    public var name: String?
+    /// The person speaking through the bot, when it says.
+    public var speaker: String?
 }
 
 /// A memory line from an older host, known only to keep it out of the chat.
