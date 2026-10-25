@@ -40,7 +40,7 @@ cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of th
 
 ## Sync commit
 
-**SYNC_COMMIT** (the revoke-a-person code). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
+**48af5a4eafb8** (the revoke-a-person code, "kith serve: a revoke goes through the cloud first ..."). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
 confirmed that the model still describes the covered code (see "When you change covered code").
 
 ## What is promised, and the harm if not

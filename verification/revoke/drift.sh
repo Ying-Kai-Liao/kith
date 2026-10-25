@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below: the code of the revoke (PR "revoke a person").
-SYNC=SYNC_COMMIT
+SYNC=48af5a4eafb8e5b866afdccc911c3652e41284e3
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
@@ -26,7 +26,7 @@ FILES=(
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done
 
-root=$(git rev-parse --show-toplevel)
+root=$(git -C "$(dirname "$0")" rev-parse --show-toplevel)
 cd "$root"
 git cat-file -e "$SYNC^{commit}" 2>/dev/null || { echo "drift.sh: $SYNC is not in this clone; git fetch origin" >&2; exit 2; }
 if git diff --quiet "$SYNC" -- "${paths[@]}"; then
