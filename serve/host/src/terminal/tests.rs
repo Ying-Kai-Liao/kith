@@ -528,6 +528,27 @@ async fn a_pid_started_at_another_time_is_not_the_session() {
     assert_eq!(registry::liveness(&reg, sessions.as_deref()), Live::Closed, "a reused pid started at another time");
 }
 
+/// Claude Code writes its session file's `procStart` in UTC; `ps` prints the Mac's local time. Away from UTC the two
+/// differ by hours, and every live terminal read as closed. (A host running in UTC, as CI does, passes either way.)
+#[tokio::test]
+async fn a_session_file_with_the_start_in_utc_is_live() {
+    let r = Rig::new();
+    let me = r.sleeper();
+    r.append("s1", &user("2026-10-23T01:00:01Z", "hi"));
+    r.register("s1", "builder", me, None);
+    let reg = registry::read_all(&r.dir.join("state")).pop().unwrap();
+    let out = std::process::Command::new("ps")
+        .env("TZ", "UTC")
+        .env("LC_ALL", "C")
+        .args(["-o", "lstart=", "-p", &me.to_string()])
+        .output()
+        .unwrap();
+    let utc = String::from_utf8(out.stdout).unwrap().split_whitespace().collect::<Vec<_>>().join(" ");
+    let v = json!({"pid": me, "sessionId": "s1", "status": "idle", "procStart": utc});
+    std::fs::write(r.dir.join("sessions").join(format!("{me}.json")), v.to_string()).unwrap();
+    assert_eq!(registry::liveness(&reg, Some(&r.dir.join("sessions"))), Live::Idle);
+}
+
 #[test]
 fn pids_that_cannot_be_a_terminal_are_refused() {
     let base = |pid: u32| {

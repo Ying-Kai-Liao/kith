@@ -9,6 +9,10 @@
   kith-sessions claim SID PID [PERSON [AGENT]]  for a one-shot `claude -p --resume SID`: takes the writer claim for PID (the launcher's shell, which
                                            then execs claude), waiting up to KITH_CLAIM_WAIT s (default 5) while another writer holds it;
                                            then exits 1 with "held by <kind> (pid N)". resolve ... oneshot does the same for -c/-r.
+                                           A fresh one-shot claims the --session-id bin/kith chose for it the same way.
+  kith-sessions terminal SID PID [PERSON [AGENT]]  for an interactive run that resolve did not claim (a fresh one, on the
+                                           --session-id bin/kith chose; KITH_RESUME): the claim, kind terminal, for PID (the
+                                           launcher's shell, which then execs `run`, which gives it back); refused at once when held
   kith-sessions proc PID PERSON AGENT     every non-owner run: a session-less `proc-PID.claim` naming the person, so the revoke sweep
                                            finds the run (and the claude below it) after a host restart
   kith-sessions pick AGENT                 for `kith AGENT -r`: the agent's recent sessions (cost ledger runs with a transcript),
@@ -23,8 +27,9 @@ Registry file (contract with the host, serve/): dir 0700, file 0600, written by 
 Writer claim (contract with the host, serve/host/src/terminal/claim.rs): $KITH_STATE/live/terminal/<sid>.claim, made whole in a
 temp file and linked into place (exclusive), 0600: {"pid","procStart","at","kind"}. Whoever holds it is the one writer of the
 session, before the registry file exists and with the host down. Stale (pid gone, or started at another time) = free, taken over by rename.
-`--resume` claims BEFORE it asks whether the host is busy; a fresh run needs no claim: its session id is new, nobody else can name it
-until the SessionStart hook has written the registry file.
+`--resume` claims BEFORE it asks whether the host is busy. A fresh run is claimed too, from before claude starts: bin/kith picks its
+session id (--session-id) and claims that, so there is no moment between claude's start and its SessionStart hook in which the host
+could take the session for a writer it does not see.
 Live = the pid runs and ~/.claude/sessions/<pid>.json names the same sessionId (the host decides; resolve reuses it).
 Listable = the owner's own run of one of these kinds (the file's "kind", with "label" saying who started a one-shot and
 "procStart" the claude process' start, for the host's liveness when claude keeps no session file):
@@ -233,6 +238,9 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None):
         for _ in range(3):
             try:
                 os.link(tmp, dest)   # exclusive: fails when a claim is there
+                os.close(lock)
+                lock = None
+                prune_stale(dest)
                 return None
             except FileExistsError:
                 pass
@@ -242,8 +250,28 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None):
             dest.unlink(missing_ok=True)   # stale or garbage; nobody else judges it while we hold the lock
         return read_claim(dest) or mine
     finally:
-        os.close(lock)
+        if lock is not None:
+            os.close(lock)
         tmp.unlink(missing_ok=True)
+
+
+def prune_stale(keep):
+    """Remove the session claims whose holder is gone (a one-shot exec'd claude, so nothing of its gives its claim back): a
+    stale claim is free anyway, this only keeps a fresh run's claim from staying behind for good. Each under its lock,
+    re-read, as a taker would judge it. The host's take-over claims and the proc claims are left to their owners."""
+    for f in keep.parent.glob('*.claim'):
+        if f == keep or f.name.startswith('proc-') or f.name.endswith('.takeover.claim'):
+            continue
+        try:
+            lock = os.open(f.with_name(f.name[:-len('.claim')] + '.claim.lock'), os.O_WRONLY | os.O_CREAT, 0o600)
+        except OSError:
+            continue
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if f.exists() and not claim_live(read_claim(f)):
+                f.unlink(missing_ok=True)
+        finally:
+            os.close(lock)
 
 
 def claim_wait():
@@ -268,11 +296,23 @@ def claim_waiting(sid, pid, kind, wait, person=None, agent=None):
 
 
 def claim_oneshot(sid, pid, person=None, agent=None):
-    """`kith-sessions claim SID PID`: for a `claude -p --resume SID` one-shot. PID is the launcher's shell, which then execs
-    claude, so the claim names claude itself and dies with it (a stale claim is free); a killed wrapper cannot free it."""
+    """`kith-sessions claim SID PID`: for a `claude -p` one-shot (--resume SID, or a fresh --session-id SID). PID is the
+    launcher's shell, which then execs claude, so the claim names claude itself and dies with it (a stale claim is free); a
+    killed wrapper cannot free it."""
+    claim_start(sid, pid, 'oneshot', claim_wait(), person, agent)
+
+
+def claim_terminal(sid, pid, person=None, agent=None):
+    """`kith-sessions terminal SID PID`: for an interactive run resolve did not claim. PID is the launcher's shell, which
+    then execs `run`: the claim lasts until claude has exited and `run` gives it back. A held session is refused at once,
+    as a second terminal on a resumed one is."""
+    claim_start(sid, pid, 'terminal', 0, person, agent)
+
+
+def claim_start(sid, pid, kind, wait, person=None, agent=None):
     if not reg_dir():
         sys.exit('kith: KITH_STATE is not set, so the session cannot be claimed')
-    held = claim_waiting(sid, pid, 'oneshot', claim_wait(), person, agent)
+    held = claim_waiting(sid, pid, kind, wait, person, agent)
     if held:
         sys.exit(f'kith: that session is busy: held by {held.get("kind", "terminal")} (pid {held.get("pid")}); try again in a moment')
     taking = read_claim(claim_path(sid, True))
@@ -563,6 +603,8 @@ if __name__ == '__main__':
     elif a[:1] == ['claim'] and len(a) in (3, 4, 5):
         # A fourth word: the person the run is for (kith-auth's answer, set by the launcher); none is the owner. A fifth: its agent.
         claim_oneshot(a[1], int(a[2]), a[3] if len(a) > 3 else None, a[4] if len(a) > 4 else None)
+    elif a[:1] == ['terminal'] and len(a) in (3, 4, 5):
+        claim_terminal(a[1], int(a[2]), a[3] if len(a) > 3 else None, a[4] if len(a) > 4 else None)
     elif a[:1] == ['proc'] and len(a) == 4:
         proc_claim(int(a[1]), a[2], a[3])
     elif a[:1] == ['pick'] and len(a) == 2:
