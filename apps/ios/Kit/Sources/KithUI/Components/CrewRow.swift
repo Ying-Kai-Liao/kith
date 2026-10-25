@@ -43,9 +43,12 @@ public struct CrewRowModel: Identifiable, Equatable, Sendable {
     public var state: BotAvatarState
     /// A bot from outside's chat: "from Grok · Sam's Rex", under the name, so it never reads as your own chat.
     public var tag: String?
+    /// A bot from outside's chat: its provider, for the small badge on the agent's face. Nil on every other row.
+    public var botProvider: String?
 
     public init(id: String, shape: Shape, name: String, withPerson: String? = nil, trailing: String? = nil,
-                status: String? = nil, count: Int = 0, unread: Bool = false, state: BotAvatarState = .idle, tag: String? = nil) {
+                status: String? = nil, count: Int = 0, unread: Bool = false, state: BotAvatarState = .idle, tag: String? = nil,
+                botProvider: String? = nil) {
         self.id = id
         self.shape = shape
         self.name = name
@@ -56,6 +59,7 @@ public struct CrewRowModel: Identifiable, Equatable, Sendable {
         self.unread = unread
         self.state = state
         self.tag = tag
+        self.botProvider = botProvider
     }
 }
 
@@ -69,7 +73,7 @@ public struct CrewRow: View {
 
     public var body: some View {
         HStack(spacing: 14) {
-            CrewRowFace(shape: model.shape, state: model.state)
+            CrewRowFace(shape: model.shape, state: model.state, botProvider: model.botProvider)
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(model.name)
@@ -114,12 +118,21 @@ public struct CrewRow: View {
 struct CrewRowFace: View {
     let shape: CrewRowModel.Shape
     let state: BotAvatarState
+    var botProvider: String?
     private let box: CGFloat = 54
 
     var body: some View {
         switch shape {
         case .agent(let face):
+            // A bot from outside's chat stays the agent's chat: its avatar is a badge, not a replacement.
             bot(face, size: box)
+                .overlay(alignment: .bottomTrailing) {
+                    if let botProvider {
+                        BotGuestAvatar(provider: botProvider, size: 22)
+                            .padding(2).background(Palette.background, in: Circle())
+                            .offset(x: 4, y: 4)
+                    }
+                }
         case .team(let face, let person):
             ZStack(alignment: .bottomLeading) {
                 bot(face, size: box)

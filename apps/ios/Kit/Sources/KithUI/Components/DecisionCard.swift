@@ -22,6 +22,8 @@ public struct DecisionCardModel: Equatable, Sendable {
     /// The command or file the agent wants to touch, in mono.
     public var detail: String?
     public var options: [DecisionOption]
+    /// A bot from outside's request: its provider, for the avatar before the heading.
+    public var botProvider: String?
 
     public init(heading: String? = nil, question: String, detail: String? = nil, options: [DecisionOption]) {
         self.heading = heading
@@ -62,6 +64,7 @@ public struct DecisionCardModel: Equatable, Sendable {
             options.append(DecisionOption(id: "always", title: "Always allow \(who) bots"))
         }
         self.init(heading: bot.requestHeading, question: bot.requestQuestion, options: options)
+        botProvider = bot.provider
     }
 
     /// Short answers sit in one row; anything longer stacks so labels wrap instead of clipping.
@@ -88,7 +91,12 @@ public struct DecisionCard: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let heading = model.heading { Text(heading).kithText(.label).foregroundStyle(Palette.muted) }
+            if let provider = model.botProvider {
+                HStack(spacing: 8) {
+                    BotGuestAvatar(provider: provider)
+                    if let heading = model.heading { Text(heading).kithText(.label).foregroundStyle(Palette.muted) }
+                }
+            } else if let heading = model.heading { Text(heading).kithText(.label).foregroundStyle(Palette.muted) }
             Text(model.question).kithText(.body).fontWeight(.semibold).foregroundStyle(Palette.ink)
             if let detail = model.detail, !detail.isEmpty {
                 Text(detail).kithText(.code).foregroundStyle(Palette.muted).lineLimit(4)

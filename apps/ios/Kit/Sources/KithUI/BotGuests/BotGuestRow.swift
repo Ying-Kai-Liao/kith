@@ -1,7 +1,7 @@
 import KithKit
 import SwiftUI
 
-/// One bot from outside in a list: a bubble glyph (not a living bot's avatar), its name and provider, a line by state, and
+/// One bot from outside in a list: the bot's own avatar (not a living bot's), its name and provider, a line by state, and
 /// the actions that state has.
 public struct BotGuestRow: View {
     let bot: BotGuest
@@ -27,7 +27,7 @@ public struct BotGuestRow: View {
     public var body: some View {
         let model = model
         HStack(spacing: 12) {
-            BotGlyph()
+            BotGuestAvatar(provider: bot.provider)
             VStack(alignment: .leading, spacing: 2) {
                 (Text(model.title).font(.body.weight(.semibold)).foregroundStyle(Palette.text)
                     + Text(" · \(model.provider)").font(.subheadline).foregroundStyle(Palette.secondary))
@@ -73,18 +73,6 @@ public struct BotGuestRow: View {
         case .spinner:
             Spinner(size: 16)
         }
-    }
-}
-
-/// The 26pt circle in front of a bot from outside.
-struct BotGlyph: View {
-    var body: some View {
-        Image(systemName: "bubble.left.and.bubble.right")
-            .font(.system(size: 12, weight: .regular))
-            .foregroundStyle(Palette.muted)
-            .frame(width: 26, height: 26)
-            .background(Palette.ink.opacity(0.06), in: Circle())
-            .accessibilityHidden(true)
     }
 }
 
