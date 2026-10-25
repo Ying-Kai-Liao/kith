@@ -54,6 +54,25 @@ struct BoardView: View {
                         DecisionCard(item.card, answering: live?.botGuests.deciding[bot.botId]) { option in
                             if let guests = live?.botGuests { Task { await guests.decide(bot, option: option) } }
                         }
+                    } else if item.opensChat {
+                        // Never a field here: the key is typed on the agent's own card in the chat.
+                        Button { open(item.target) } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "key").foregroundStyle(Palette.muted)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    if let heading = item.card.heading { Text(heading).kithText(.label).foregroundStyle(Palette.muted) }
+                                    Text(item.card.question).kithText(.body).fontWeight(.semibold).foregroundStyle(Palette.ink)
+                                }
+                                Spacer(minLength: 0)
+                                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(Palette.muted)
+                            }
+                            .padding(14)
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .background(AgentTint.resolve(item.color).b.opacity(0.32), in: RoundedRectangle(cornerRadius: KithRadius.card, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens the chat")
                     } else if let entry = item.entry {
                         DecisionCard(item.card, tint: AgentTint.resolve(item.color), answering: live?.answering[entry.id]) {
                             live?.respond(entry, option: $0)

@@ -171,6 +171,16 @@ extension BotStore {
         }
     }
 
+    /// Sends the key an Access or Key card asked for to the computer's Keychain. Keeps nothing: the values pass through
+    /// this call and are not stored, retried from a queue, logged or echoed into the entry. Throws the host's text so
+    /// the card can show it and stay open. No replay: a key goes once per tap.
+    public func provideSecret(_ entry: Entry, account: String?, values: [String: String]) async throws {
+        #if DEBUG
+        if DemoScreens.active { try await Task.sleep(for: .milliseconds(600)); return }
+        #endif
+        _ = try await withLink { try await $0.provideSecret(entryId: entry.id, account: account, values: values) }
+    }
+
     /// This account owns the computer: only the owner's hello has no member grant list.
     public var isOwner: Bool { hello?.grantedAgents == nil }
 

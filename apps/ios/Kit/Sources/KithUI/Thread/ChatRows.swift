@@ -53,12 +53,16 @@ struct ChatRow: View {
         case "permission":
             VStack(alignment: .leading, spacing: 4) {
                 if chat?.isGroup == true { AuthorLabel(botId: entry.data.author) }
+                if entry.data.isSecretCard {
+                    secretCard(tint: tint)
+                } else {
                 PermissionCard(entry: entry, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
                                waiting: heldElsewhere ? "Open in the terminal: answer it there."
                                    : chat?.botGuest.map({ !$0.canAnswer(isOwner: model.isOwner) }) == true ? "Only the computer's owner answers this."
                                    : GuestPrompt.waitingText(for: entry, activity: chat?.activity),
                                respond: { option in model.respond(entry, option: option) },
                                held: heldModel, stop: { model.stopHolder(for: entry) }, stopped: model.stoppedRuns[entry.id])
+                }
             }
             .padding(.top, 12)
         default:
@@ -73,6 +77,20 @@ struct ChatRow: View {
                     threadChip
                 }
                 .padding(.top, 10)
+            }
+        }
+    }
+
+    /// An Access or Key card. Old data (no `data.card`) never gets here.
+    @ViewBuilder private func secretCard(tint: AgentTint) -> some View {
+        let agent = entry.data.author.flatMap { model.bots[$0]?.name } ?? chat?.name ?? entry.data.agent ?? "The agent"
+        if entry.data.card == "key" {
+            KeyCard(entry: entry, agentName: agent, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
+                    save: { account, values in try await model.provideSecret(entry, account: account, values: values) },
+                    deny: { model.respond(entry, option: "deny") })
+        } else {
+            AccessCard(entry: entry, agentName: agent, tint: tint, answering: model.answering[entry.id]) { option in
+                model.respond(entry, option: option)
             }
         }
     }

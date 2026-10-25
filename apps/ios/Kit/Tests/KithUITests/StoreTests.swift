@@ -586,6 +586,12 @@ extension FakeRemote {
     #expect(json(op.call("answer_approval", arguments: ["option": "allow"]))["answered"] as? String == "Allow once")
     #expect(store.answering["p1"] == "a")
 
+    // A key card is never read aloud nor answered by voice: it is neither the pending approval nor in the recent messages.
+    await fake.emit(#"{"type":"entry","entry":{"id":"k1","seq":6,"botId":"b1","rev":6,"kind":"permission","turn":1,"data":{"status":"pending","card":"key","secret":{"service":"github","vars":["GITHUB_TOKEN"],"replaces":false,"state":"pending"},"options":[{"optionId":"deny","name":"Not now","kind":"reject_once"}]},"createdAt":2,"updatedAt":2}}"#)
+    #expect(await until { store.chat("b1").contains { $0.id == "k1" } })
+    #expect((json(op.call("bot_status", arguments: [:]))["approval"] as? [String: Any])?["request"] as? String == "Run npm test")
+    #expect(json(op.call("answer_approval", arguments: ["option": "Not now"]))["error"] as? String == "No such option.")
+
     let recent = json(op.call("recent_messages", arguments: ["count": 1]))["messages"] as? [[String: String]]
     #expect(recent?.count == 1)
     #expect(recent?.first?["from"] == "approval request")
