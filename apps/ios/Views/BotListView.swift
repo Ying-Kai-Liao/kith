@@ -514,7 +514,7 @@ struct BotListView: View {
                  onPhotos: { pickingPhotos = true },
                  onCamera: { if CameraPicker.isAvailable { pickingCamera = true } else { accounts.lastError = "This device has no camera." } },
                  onFiles: { pickingFiles = true },
-                 sendStyle: leading ? .muted : .word) {
+                 sendStyle: leading ? .muted : .word, micListening: dictation.listening) {
             if !files.isEmpty {
                 HomeAttachmentChips(files: files) { file in
                     withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { files.removeAll { $0.id == file.id } }
