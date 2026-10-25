@@ -7,7 +7,7 @@
     "name": "Ying-Kai Liao"
   },
   "homepage": "https://github.com/Ying-Kai-Liao/kith",
-  "license": "Apache-2.0",
+  "license": "FSL-1.1-MIT",
   "private": true,
   "main": "out/main/index.js",
   "scripts": {

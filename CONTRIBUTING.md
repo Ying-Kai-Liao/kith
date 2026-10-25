@@ -7,3 +7,7 @@ Pull requests run a fast tier of checks (lint, unit tests, typecheck). The slow 
 Maintainers' flow reviewer merges PRs in batches with merge commits: it builds the batch locally on top of the latest main and dispatches the heavy `ci.yml` on the batch branch before pushing to main. There are no intermediate or integration branches.
 
 Never `gh pr merge` directly: that skips the heavy tier. Don't rebase or merge main into a branch just to be up to date; only to resolve a real conflict. Details: [docs/ci.md](docs/ci.md).
+
+## License
+
+Contributions are licensed under MIT (inbound = MIT, no CLA).

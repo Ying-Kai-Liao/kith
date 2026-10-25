@@ -17,5 +17,5 @@
     "wrangler": "^4.75.0"
   },
   "private": true,
-  "license": "Apache-2.0"
+  "license": "FSL-1.1-MIT"
 }
