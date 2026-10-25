@@ -75,7 +75,11 @@ export function ChatWindow() {
             return prefs.usageIconStyle.set(c.style)
           case 'openBot': {
             const ref = parseRef(c.ref)
-            if (ref) app.select(ref)
+            if (ref) {
+              app.select(ref)
+              // A bot detail's conversation: the chat opens with its thread.
+              if (c.thread) app.store(ref.computerId)?.requestThread(ref.botId, c.thread)
+            }
             return
           }
           case 'stopBot': {
@@ -273,7 +277,10 @@ function ChatSplitView() {
 
   const openMarketplace = () => setMarketplace(([selectedStore, app.local, ...onlineStores].find((s) => s?.isOwner)?.computer.id) ?? null)
 
-  const botActions = (bot: Bot, store: BotStore): MenuItem[] => store.isOwner ? [
+  const botActions = (bot: Bot, store: BotStore): MenuItem[] => bot.botGuest ? [
+    // An outside bot's chat: read along and mark read; nothing that edits, restarts or deletes it.
+    { title: 'Mark as Read', icon: 'bell.badge', action: () => store.markAllRead(bot.id) },
+  ] : store.isOwner ? [
     { title: bot.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: () => store.setPinned(bot, !bot.pinned) },
     { title: 'Mark as Read', icon: 'bell.badge', action: () => store.markAllRead(bot.id) },
     ...(canShareAgent(store, bot) ? [{ title: 'Share access…', icon: 'person.crop.circle.badge.plus', action: () => setSharingBot({ bot, store }) }] : []),

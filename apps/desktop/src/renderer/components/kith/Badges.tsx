@@ -41,8 +41,8 @@ export function WriterChip({ working = false, mac, pair }: { working?: boolean; 
   )
 }
 
-export type Origin = 'terminal' | 'discord' | 'telegram' | 'slack'
-const ORIGIN_WORD: Record<Origin, string> = { terminal: 'Terminal', discord: 'Discord', telegram: 'Telegram', slack: 'Slack' }
+export type Origin = 'terminal' | 'discord' | 'telegram' | 'slack' | 'bot'
+const ORIGIN_WORD: Record<Origin, string> = { terminal: 'Terminal', discord: 'Discord', telegram: 'Telegram', slack: 'Slack', bot: 'Bot' }
 
 /** Where a thread started: a muted icon and one word. Never coloured, never truncated. Not shown for app threads. */
 export function OriginTag({ origin, title, label }: { origin: Origin; title?: string; label?: string }) {

@@ -157,7 +157,8 @@ function BotDetail({ store, bot, view, onClose }: { store: BotStore; bot: BotGue
   const [confirm, setConfirm] = useState(false)
   const by = allowedBy(bot, view, ownerOf(store))
   const limits = limitsLine(bot)
-  const open = (chatBotId: string) => window.kith.island.openBot(`${store.computer.id}/${chatBotId}`)
+  // The chat window opens the chat and, with a root, that conversation's thread.
+  const open = (chatBotId: string, root: string | null) => window.kith.island.openBot(`${store.computer.id}/${chatBotId}`, root ?? undefined)
   return (
     <SheetPage>
       <ModalHeader title={bot.name} subtitle={detailSubtitle(bot, view)} />
@@ -176,7 +177,7 @@ function BotDetail({ store, bot, view, onClose }: { store: BotStore; bot: BotGue
         {view === 'owner' && bot.conversations.length > 0 ? (
           <CardSection title="Conversations">
             {bot.conversations.map((c) => (
-              <button key={c.conversation} className="settings-row settings-nav-row" disabled={!c.chatBotId} onClick={() => c.chatBotId && open(c.chatBotId)}>
+              <button key={c.conversation} className="settings-row settings-nav-row" disabled={!c.chatBotId || !store.bots.has(c.chatBotId)} onClick={() => c.chatBotId && open(c.chatBotId, c.threadRoot)}>
                 <VStack grow className="settings-stack">
                   <Text truncate>{c.originLabel || c.agent}</Text>
                   <Text size="caption" tone="secondary">{c.agent}{c.lastAt ? ` · ${ago(c.lastAt, Date.now())}` : ''}</Text>

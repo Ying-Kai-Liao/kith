@@ -96,7 +96,7 @@ const bridge: KithBridge = {
     onKey: (cb) => listen('island:key', cb),
     respond: (ref, entryId, optionId) => ipcRenderer.send('island:respond', ref, entryId, optionId),
     send: (ref, text) => ipcRenderer.send('island:send', ref, text),
-    openBot: (ref) => ipcRenderer.send('island:openBot', ref),
+    openBot: (ref, thread) => ipcRenderer.send('island:openBot', ref, thread),
     newBot: () => ipcRenderer.send('island:newBot'),
     openApp: () => ipcRenderer.send('island:openApp'),
   },

@@ -97,7 +97,7 @@ export class Island {
     ipcMain.on('island:respond', (_e, ref: string, entryId: string, optionId: string) =>
       this.deps.send({ kind: 'respondPermission', ref, entryId, optionId }, false),
     )
-    ipcMain.on('island:openBot', (_e, ref: string) => this.deps.send({ kind: 'openBot', ref }))
+    ipcMain.on('island:openBot', (_e, ref: string, thread?: string) => this.deps.send({ kind: 'openBot', ref, ...(thread ? { thread } : {}) }))
     ipcMain.on('island:send', (_e, ref: string, text: string) => this.deps.send({ kind: 'sendMessage', ref, text }, false))
     ipcMain.on('island:newBot', () => this.deps.send({ kind: 'newChat' }))
     ipcMain.on('island:openApp', () => this.deps.openApp())

@@ -22,6 +22,8 @@ import { AnsweredBy } from './AnsweredBy'
 import { contextLabel } from './context-hint'
 import { callLineSuffix } from './call-line'
 import { ThreadChip as KithThreadChip, pairOf, type Origin, type Place } from '../../components/kith'
+import { noticeThreadChip } from './notice-thread'
+import { botOriginLabel } from '@shared/bot-guest-chat'
 import { runLabel, threadOrigin } from '@shared/thread-writer'
 import { avatarImage } from '@shared/crew'
 
@@ -43,7 +45,7 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
   openId?: string | null
 }) {
   const reply = openThread ? () => (replyInThread ?? openThread)(entry) : undefined
-  const chip = entry.data.thread && entry.data.thread.count > 0 && openThread ? <ThreadChip summary={entry.data.thread} open={() => openThread(entry)} isOpen={openId === entry.id} chat={chat} /> : null
+  const chip = (entry.kind === 'notice' ? noticeThreadChip(entry) : entry.data.thread && entry.data.thread.count > 0) && entry.data.thread && openThread ? <ThreadChip summary={entry.data.thread} open={() => openThread(entry)} isOpen={openId === entry.id} chat={chat} /> : null
   switch (entry.kind) {
     case 'user':
       return (
@@ -76,7 +78,8 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
     default:
       if (entry.data.connectionRequest) return <div className="chat-row group-start"><ConnectionRequestCard entry={entry} /></div>
       if (entry.data.handoff) return <div className="chat-row notice"><HandoffNotice entry={entry} card={entry.data.handoff} /></div>
-      return <div className="chat-row notice"><NoticeRow entry={entry} /></div>
+      // Any notice that roots a thread (a bot guest's conversation) opens it like a message does.
+      return <div className="chat-row notice">{chip && entry.data.thread?.origin === 'bot' ? null : <NoticeRow entry={entry} />}{chip ? <div className="notice-thread-chip">{chip}</div> : null}</div>
   }
 })
 
@@ -132,7 +135,7 @@ export function ThreadChip({ summary, open, isOpen = false, chat }: { summary: T
   const image = author ? avatarImage(author) : null
   // A thread started outside the app (a terminal, a channel) says so; an origin this app doesn't know shows nothing.
   const origin = threadOrigin(summary)
-  const tag: Origin | undefined = origin === 'terminal' || origin === 'discord' || origin === 'telegram' || origin === 'slack' ? origin : undefined
+  const tag: Origin | undefined = origin === 'terminal' || origin === 'bot' || origin === 'discord' || origin === 'telegram' || origin === 'slack' ? origin : undefined
   return (
     <div className={`thread-meta ${chat && isGroup(chat) ? 'start' : ''}`}>
       <KithThreadChip
@@ -146,7 +149,7 @@ export function ThreadChip({ summary, open, isOpen = false, chat }: { summary: T
           pair: pairOf(author?.avatarColor),
           place,
           origin: tag,
-          originLabel: runLabel(summary),
+          originLabel: origin === 'bot' ? botOriginLabel(summary) : runLabel(summary),
           onToggle: open,
           onOpen: open,
         }}

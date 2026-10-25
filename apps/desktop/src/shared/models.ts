@@ -71,6 +71,27 @@ export interface Bot {
   unread: number
   lastMessage?: string | null
   lastAt: number
+  /** A bot guest's conversations with this agent (a per-person copy of the chat); absent on every other row and from an older host. */
+  botGuest?: BotGuestRef
+}
+
+/** Who the outside bot is behind a bot-guest chat (host `bot_json`). */
+export interface BotGuestRef {
+  botId: string
+  name: string
+  provider: string
+  /** The invited person who owns it; null when the computer's owner does. */
+  ownerPerson: string | null
+  ownerName: string | null
+}
+
+function normalizeBotGuest(raw: unknown): BotGuestRef | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const r = raw as Record<string, unknown>
+  const s = (v: unknown) => (typeof v === 'string' && v ? v : null)
+  const botId = s(r.botId)
+  if (!botId) return undefined
+  return { botId, name: s(r.name) ?? 'Bot', provider: s(r.provider) ?? '', ownerPerson: s(r.ownerPerson), ownerName: s(r.ownerName) }
 }
 
 /** A place a bot works in: a chat (its own or a group) and, in a thread, the thread's root. */
@@ -128,6 +149,7 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     unread: raw.unread ?? 0,
     lastMessage: raw.lastMessage ?? null,
     lastAt: raw.lastAt ?? createdAt,
+    ...(raw.botGuest !== undefined && normalizeBotGuest(raw.botGuest) ? { botGuest: normalizeBotGuest(raw.botGuest)! } : {}),
   }
 }
 
