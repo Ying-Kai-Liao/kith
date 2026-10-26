@@ -1,6 +1,7 @@
 """ACP agent that runs out of usage on cue, for the backup-account tests.
 
-The account it runs as comes from KITH_BACKUP (the chain entry the stub kith launched; empty is the agent's own login).
+The account it runs as comes from KITH_BACKUP (the chain entry the stub kith launched; empty is the agent's main account:
+`primary` when that is the default login, else its id from KITH_ACCOUNT_ID).
 `limits.json` in the working folder maps an account (`primary`, `claude:work`, `codex`…) to how its next prompts fail:
 `{"kind": "rate_limit", "resetsAt": <epoch seconds or null>, "via": "error" | "rejected"}`. `rejected` also sends
 Claude's `_claude/rateLimit` update with status `rejected` first, and then fails with no category at all. A prompt
@@ -13,7 +14,9 @@ import sys
 import time
 
 entry = os.environ.get("KITH_BACKUP", "")
-account = entry or "primary"
+# The agent's main account when it isn't the default login (`claude:home`): named as itself.
+main = os.environ.get("KITH_ACCOUNT_ID", "claude")
+account = entry or ("primary" if main in ("", "claude") else main)
 sessions = 0
 
 

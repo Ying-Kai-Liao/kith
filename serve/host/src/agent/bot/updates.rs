@@ -139,7 +139,7 @@ impl Actor {
                     self.limit_seen = Some(acp::Depleted { resets_at });
                 }
                 if info.is_object() {
-                    crate::usage::ingest_claude_rate_limit(&self.hub, info, self.serving.as_deref());
+                    crate::usage::ingest_claude_rate_limit(&self.hub, info, self.answering_account());
                 }
                 if let Some(used) = u["used"].as_u64() {
                     self.track_usage(used, u["size"].as_u64().unwrap_or(0));

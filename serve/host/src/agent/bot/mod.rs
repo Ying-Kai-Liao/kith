@@ -218,6 +218,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         conn_started_as: None,
         serving: None,
         conn_serving: None,
+        conn_account: None,
         conn_room: String::new(),
         backup_sessions: HashMap::new(),
         preface: None,
@@ -432,6 +433,9 @@ struct Actor {
     /// (`None`: the agent's own), and the entry the live process was started for.
     serving: Option<String>,
     conn_serving: Option<String>,
+    /// The account (backup id) the live process runs on, as its launch said: a change of the agent's main account
+    /// starts it again.
+    conn_account: Option<String>,
     /// The room the agent process was started for (`KITH_ROOM`): another room starts it again.
     conn_room: String,
     /// The sessions a backup entry holds for this actor, by (entry, thread root or empty). Kept in memory only: the

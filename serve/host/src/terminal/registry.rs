@@ -36,6 +36,10 @@ pub struct Registry {
     /// When the claude process started (`ps -o lstart`): a one-shot's liveness, since `claude -p` may keep no session file.
     #[serde(default)]
     pub proc_start: Option<String>,
+    /// The login the session was made under (`claude`, `claude:work`): the host loads it only there. Files written
+    /// before sessions had one: the harness's default login.
+    #[serde(default)]
+    pub account: Option<String>,
 }
 
 fn default_kind() -> String {
