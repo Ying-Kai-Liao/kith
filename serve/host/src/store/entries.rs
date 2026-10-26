@@ -183,6 +183,19 @@ impl Store {
         Ok(st.query_map([backend], row_entry)?.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The open limit card of `kind` (agent | person) in a lane, if any: a second held message joins it.
+    pub fn pending_limit_card(&self, bot_id: &str, thread: Option<&str>, kind: &str) -> Option<Entry> {
+        let c = self.db.locked();
+        let mut st = c
+            .prepare(&format!(
+                "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND thread_id IS ?2 AND kind = 'permission'
+                   AND json_extract(data, '$.status') = 'pending' AND json_extract(data, '$.limit.kind') = ?3
+                 ORDER BY seq DESC LIMIT 1"
+            ))
+            .ok()?;
+        st.query_row(rusqlite::params![bot_id, thread, kind], row_entry).ok()
+    }
+
     /// Chat-visible messages (the user's, final replies) in any of `bot_id`'s lanes that
     /// contain every term (case-insensitive for ASCII), newest first, from `from` (a `seq`) back.
     // ponytail: substring scan, no index (CJK needs no tokenizer this way): 0.6 s over 180k messages of one bot.

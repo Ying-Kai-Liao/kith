@@ -44,6 +44,8 @@ public enum Tasks {
         }
         // A session started in a terminal works outside the host's lanes; its thread says so.
         if root.data.thread?.isBusyInTerminal == true { return .working }
+        // A message parked at its agent's monthly limit waits under a card with no lane at work.
+        if replies.contains(where: { $0.kind == "permission" && $0.data.status == "pending" && $0.data.limit != nil }) { return .needsYou }
         // The host says how a finished turn ended; an older host doesn't, so the thread's entries tell. A host
         // "working" or "needsYou" while no lane is working is stale (the host restarted), so it isn't taken.
         switch root.data.thread?.status {

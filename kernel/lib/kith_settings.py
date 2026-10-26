@@ -31,7 +31,19 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
                     agents.<agent>.backups replaces it for that agent; an explicit [] means no backups for it
                     (kith backup list|add|remove edits both)
 
+  limit             agents.<agent>.limit: a monthly limit in dollars at API prices for the agent's runs (kith AGENT set
+                    limit N|none). No key, no limit. A calendar month counts; every run of the agent counts (kith-cost
+                    limit AGENT reads it with what the agent has used)
+  at_limit          agents.<agent>.at_limit: what happens to the owner's run once the agent is at its limit: "ask"
+                    (default: the host parks the run behind a card, Allow this run / Raise / Stop; a terminal or
+                    one-shot run says so and goes on), "tell" (a line, the run goes on) or "hold" (runs wait until the
+                    limit is raised or the month turns). An owner's run is never refused unless "hold" is chosen here.
+                    A guest's runs keep their own budget (kith-auth member AGENT PERSON budget=) and stop at it
+
   kith_settings.py backups [AGENT]   the chain that applies, one id per line
+  kith_settings.py limit AGENT       the agent's limit as JSON: {"limit": N or null, "at": "ask"|"tell"|"hold"}
+  kith_settings.py set limit AGENT N|none          set or forget the agent's monthly limit (kith AGENT set limit)
+  kith_settings.py set at_limit AGENT MODE         ask, tell or hold ('' forgets: ask) (kith AGENT set at-limit)
 """
 import contextlib, fcntl, json, os, re, sys, tempfile
 
@@ -40,7 +52,8 @@ from kith_paths import paths  # noqa: E402  the one place that knows where kith'
 
 FILE = paths()['KITH_MACHINE'] / 'settings.json'
 DEFAULTS = {'permission_mode': 'auto', 'plugins': [], 'backups': [], 'call_model': 'sonnet'}
-CHOICES = {'permission_mode': ('default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions')}
+CHOICES = {'permission_mode': ('default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'),
+           'at_limit': ('ask', 'tell', 'hold')}
 # Modes kith no longer offers, and what a stored one reads as: 'manual' was kith's own word for Claude Code's 'default';
 # 'dontAsk' (refuse whatever no allow rule names) is gone, and its runs start in auto.
 RETIRED = {'manual': 'default', 'dontAsk': 'auto'}
@@ -117,7 +130,48 @@ def read():
         for k, v in d.items():
             if k in CHOICES and v not in CHOICES[k]:
                 return {}, f'{FILE}: {where}{k} {v!r} is not one of {", ".join(CHOICES[k])}'
+        if 'limit' in d and not valid_limit(d['limit']):
+            return {}, f'{FILE}: {where}limit {d["limit"]!r} is not a number of dollars above 0'
     return s, None
+
+
+def valid_limit(v):
+    """A monthly limit: dollars above 0 (a bool is not a number here)."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and 0 < v < 1e7
+
+
+def limit(agent):
+    """(dollars or None, mode): this Mac's monthly limit for the agent and what happens at it (default ask).
+    A file that can't be read sets no limit: a broken settings file never stops a run."""
+    a = read()[0].get('agents', {}).get(agent, {})
+    return (a.get('limit'), a.get('at_limit') or 'ask')
+
+
+def set_limit(agent, value):
+    """Record the agent's monthly limit; 'none', '' or 0 forgets it. Keeps the rest of the file."""
+    v = (value or '').strip().lstrip('$')
+    if v.lower() in ('', 'none', 'off', '0'):
+        amount = None
+    else:
+        try:
+            amount = float(v)
+        except ValueError:
+            raise ValueError(f'limit {value!r} is not a number of dollars (or none)') from None
+        if not valid_limit(amount):
+            raise ValueError(f'limit {value!r} is not a number of dollars above 0')
+        amount = int(amount) if amount == int(amount) else round(amount, 2)
+    with locked():
+        s, why = read()
+        if why:
+            raise ValueError(why)
+        a = s.setdefault('agents', {}).setdefault(agent, {})
+        if amount is None:
+            a.pop('limit', None)
+        else:
+            a['limit'] = amount
+        if not a:
+            s['agents'].pop(agent, None)
+        write(s)
 
 
 def get(key, agent=None):
@@ -266,8 +320,18 @@ def clear_backups(agent):
 
 
 if __name__ == '__main__':
+    if len(sys.argv) == 5 and sys.argv[1] == 'set' and sys.argv[2] == 'limit':   # set limit AGENT N|none
+        try:
+            set_limit(sys.argv[3], sys.argv[4])
+        except ValueError as e:
+            sys.exit(f'kith: {e}')
+        sys.exit(0)
+    if len(sys.argv) == 3 and sys.argv[1] == 'limit':
+        amount, at = limit(sys.argv[2])
+        print(json.dumps({'limit': amount, 'at': at}))
+        sys.exit(0)
     if len(sys.argv) in (4, 5) and sys.argv[1] == 'set':   # set KEY [AGENT] VALUE
-        if sys.argv[2] not in ('permission_mode', 'call_model') or (len(sys.argv) == 4 and sys.argv[2] != 'call_model'):
+        if sys.argv[2] not in ('permission_mode', 'call_model', 'at_limit') or (len(sys.argv) == 4 and sys.argv[2] != 'call_model'):
             sys.exit(f'kith: {sys.argv[2]} is not a setting kith can set per agent')
         try:
             if len(sys.argv) == 4:

@@ -305,6 +305,13 @@ public struct BoardModel: Equatable, Sendable {
 
     /// The chat's permission card as a decision card: what it wants, where, and only the answers it offered.
     static func decision(for entry: Entry) -> DecisionCardModel {
+        // An agent at its monthly limit: "architect used its $300 for October. One run is waiting."
+        if let question = Spend.question(entry) {
+            var card = DecisionCardModel(guest: GuestPrompt(entry))
+            card.question = question
+            card.detail = nil
+            return card
+        }
         let headline = switch entry.data.toolKind {
         case "execute": "Wants to run a command"
         case "edit", "delete", "move": "Wants to change files"

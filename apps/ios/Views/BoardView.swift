@@ -73,6 +73,13 @@ struct BoardView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens the chat")
+                    } else if let entry = item.entry, let limit = entry.data.limit {
+                        // An agent at its limit with a run waiting, or a person at theirs: answered here, in its pair.
+                        LimitCardView(entry: entry,
+                                      tint: AgentTint.resolve(item.color.isEmpty ? live?.agentBot(limit.agent)?.avatarColor : item.color),
+                                      answering: live?.answering[entry.id], board: true) {
+                            live?.respond(entry, option: $0)
+                        }
                     } else if let entry = item.entry {
                         DecisionCard(item.card, tint: AgentTint.resolve(item.color), answering: live?.answering[entry.id]) {
                             live?.respond(entry, option: $0)

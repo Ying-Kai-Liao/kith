@@ -9,6 +9,15 @@
   kith-cost spent <person> [agent]   this calendar month's cost of a person's runs, a bare number (bin/kith checks a
                                    membership's budget= with it)
   kith-cost session <id-prefix>      one session turn by turn, plus its subagents
+  kith-cost usage [period] --json    for the apps: total, agents vs your own sessions, one row per agent with its
+                                   month and its limit (period: today, week = 7 days, month = this calendar month)
+  kith-cost agent <name> [period] --json   one agent for the apps: days of this month, models, costliest runs, its
+                                   limit and a forecast in words
+  kith-cost limit <agent> [--json|--sh]    where the agent stands against its monthly limit (kith AGENT set limit N):
+                                   spent this calendar month, the limit, what happens at it, a forecast. bin/kith
+                                   (--sh) and the host (--json) read it; no limit answers at once, without a sync
+  kith-cost members <agent> --json   this calendar month per person on the agent (owner: your own runs), and each
+                                    person's budget= on it (kith-auth budgets)
   kith-cost sync                     copy new usage from ~/.claude/projects into the ledger
   kith-cost csv [since YYYY-MM-DD]   every request as CSV with its kith agent, for a spreadsheet
   kith-cost tag                      (SessionStart hook in kith runs) record the session as a run of $KITH_AGENT
@@ -307,6 +316,218 @@ def spent(c, person, agent=None):
     print(f'{c.execute(sql, args).fetchone()[0] or 0:.4f}')
 
 
+# ---- the apps' views and the per-agent monthly limit -------------------------------------------------------------
+
+def _settings():
+    import kith_settings  # noqa: E402  lib/, on sys.path above
+    return kith_settings
+
+
+def month_start():
+    return dt.datetime.now().astimezone().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def utc(t):
+    return t.astimezone(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+
+
+def app_since(period):
+    """Where an app's period starts: today, the last 7 days, this calendar month (a limit's month), or all."""
+    now = dt.datetime.now().astimezone()
+    start = {'today': now.replace(hour=0, minute=0, second=0, microsecond=0), 'week': now - dt.timedelta(days=7),
+             'month': month_start()}.get(period)
+    return utc(start) if start else '0'
+
+
+def period_label(period):
+    return {'today': 'Today', 'week': 'Last 7 days', 'month': dt.datetime.now().strftime('%B')}.get(period, 'All time')
+
+
+def short_day(d):
+    return f'{d:%b} {d.day}'
+
+
+def dollars(x):
+    """A sum in words: whole dollars from $10 up, cents below."""
+    return f'${x:,.0f}' if x >= 10 else f'${x:,.2f}'
+
+
+def month_spent(c, agent):
+    return c.execute('select sum(cost) from hq_req where hq_agent = ? and ts >= ?',
+                     (agent, utc(month_start()))).fetchone()[0] or 0.0
+
+
+def month_days(c, agent):
+    """[(date, cost)] for every day of this month up to today, local time."""
+    rows = dict(c.execute("""select substr(datetime(ts,'localtime'),1,10) d, sum(cost) from hq_req
+                             where hq_agent = ? and ts >= ? group by d""", (agent, utc(month_start()))).fetchall())
+    today = dt.date.today()
+    return [(d, rows.get(d.isoformat(), 0.0) or 0.0)
+            for d in (today.replace(day=1) + dt.timedelta(days=i) for i in range(today.day))]
+
+
+def forecast(days, spent, limit, agent):
+    """The pace and what it means, in words: about $X a day since the first day with spend in the last week (this month
+    only), and the day the limit is reached (or the month's end without one). Plus the day each round amount is reached,
+    for the limit sheet."""
+    now = dt.datetime.now().astimezone()
+    today = now.date()
+    end = (today.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1)
+    recent = [(d, x) for d, x in days if (today - d).days < 7]
+    since = next((d for d, x in recent if x > 0), None)
+    per_day = sum(x for d, x in recent if since and d >= since) / ((today - since).days + 1) if since else 0.0
+    left_today = (now.replace(hour=0, minute=0, second=0, microsecond=0) + dt.timedelta(days=1) - now).total_seconds() / 86400
+
+    def reach(amount):
+        """The day `amount` is (or was) reached this month, or None when it lasts the month."""
+        total = 0.0
+        for d, x in days:
+            total += x
+            if total >= amount:
+                return d
+        if per_day <= 0:
+            return None
+        by_tonight = spent + per_day * left_today
+        if by_tonight >= amount:
+            return today
+        d = today + dt.timedelta(days=-(-(amount - by_tonight) // per_day))
+        return d if d <= end else None
+
+    month = today.strftime('%B')
+    if not since:
+        text = f'Nothing spent in the last 7 days.' if spent else f'Nothing spent in {month} yet.'
+        if limit:
+            text += f' {dollars(limit)} is the limit for {month}.'
+    else:
+        pace = f'About {dollars(per_day)} a day since {short_day(since)}'
+        hit = reach(limit) if limit else None
+        if limit and spent >= limit:
+            text = f'{pace}; it reached {dollars(limit)} on {short_day(hit)}.' if hit else f'{pace}; it is at {dollars(limit)}.'
+        elif limit and hit == today:
+            text = f'{pace}, so it reaches {dollars(limit)} today.'
+        elif limit and hit == today + dt.timedelta(days=1):
+            text = f'{pace}, so it reaches {dollars(limit)} tomorrow.'
+        elif limit and hit:
+            text = f'{pace}, so it reaches {dollars(limit)} about {short_day(hit)}.'
+        elif limit:
+            text = f'{pace}, so it stays under {dollars(limit)} in {month}.'
+        else:
+            text = f'{pace}, about {dollars(spent + per_day * ((end - today).days + left_today))} by the end of {month}.'
+    amounts = sorted({50, 100, 200, 300, 400, 500, 750, 1000} | ({limit} if limit else set()))
+    return {'perDay': round(per_day, 2), 'since': since.isoformat() if since else None, 'text': text,
+            'monthEnd': end.isoformat(),
+            'reach': {str(a): (r.isoformat() if (r := reach(a)) else None) for a in amounts}}
+
+
+def raise_to(limit, spent):
+    """The next limit a card offers: $100 more from $100 up, double below; always above what is spent."""
+    step = 100 if limit >= 100 else max(10, limit)
+    to = limit + step
+    while to <= spent:
+        to += step
+    return int(to) if to == int(to) else round(to, 2)
+
+
+def limit_state(c, agent):
+    """Where the agent stands against its monthly limit; None when it has none."""
+    amount, at = _settings().limit(agent)
+    if not amount:
+        return None
+    spent = month_spent(c, agent)
+    runs = c.execute('select count(distinct session) from hq_req where hq_agent = ? and ts >= ?',
+                     (agent, utc(month_start()))).fetchone()[0] or 0
+    month = dt.datetime.now().strftime('%B')
+    return {'agent': agent, 'limit': amount, 'at': at, 'spent': round(spent, 4), 'over': spent >= amount,
+            'month': month, 'runs': runs, 'perRun': round(spent / runs, 2) if runs else 0, 'raiseTo': raise_to(amount, spent),
+            'resets': (month_start().replace(day=28) + dt.timedelta(days=4)).replace(day=1).date().isoformat(),
+            'text': f'{agent} has used ${spent:,.2f} of its {dollars(amount)} for {month} (at API prices)'}
+
+
+def limit_cmd(agent, fmt):
+    """`kith-cost limit AGENT`: answers at once without a limit, else syncs and reads the month."""
+    amount, at = _settings().limit(agent)
+    if not amount:
+        if fmt == '--sh':
+            return
+        print(json.dumps({'agent': agent, 'limit': None, 'at': at, 'over': False}))
+        return
+    c = db()
+    sync(c, quiet=True)
+    st = limit_state(c, agent)
+    st['forecast'] = forecast(month_days(c, agent), st['spent'], amount, agent)
+    if fmt == '--sh':
+        import shlex
+        print(f"l_over={int(st['over'])} l_at={shlex.quote(st['at'])} l_limit={shlex.quote(str(st['limit']))} "
+              f"l_spent={st['spent']:.2f} l_text={shlex.quote(st['text'])}")
+    elif fmt == '--json':
+        print(json.dumps(st))
+    else:
+        print(f"{st['text']}; at the limit: {st['at']}.\n{st['forecast']['text']}")
+
+
+def usage_json(c, period):
+    since = app_since(period)
+    rows = c.execute('''select hq_agent, sum(cost) s, count(distinct session) from hq_req
+                         where hq_agent is not null and ts >= ? group by hq_agent order by s desc''', (since,)).fetchall()
+    total = c.execute('select sum(cost) from req where ts >= ?', (since,)).fetchone()[0] or 0
+    limits = {a: v for a, v in (_settings().read()[0].get('agents') or {}).items() if isinstance(v, dict) and v.get('limit')}
+    out, seen = [], set()
+    for a, cost, runs in rows:
+        seen.add(a)
+        out.append({'agent': a, 'cost': round(cost or 0, 4), 'runs': runs, 'perRun': round((cost or 0) / runs, 2) if runs else 0})
+    out += [{'agent': a, 'cost': 0, 'runs': 0, 'perRun': 0} for a in sorted(limits) if a not in seen]
+    for r in out:
+        lim = limits.get(r['agent'])
+        r['limit'] = lim['limit'] if lim else None
+        r['at'] = (lim or {}).get('at_limit') or 'ask'
+        r['month'] = round(month_spent(c, r['agent']), 4) if lim else None
+    agents_total = sum(r['cost'] for r in out)
+    print(json.dumps({'period': period, 'label': period_label(period), 'since': since, 'prices': 'api',
+                      'total': round(total, 4), 'agents': round(agents_total, 4), 'own': round(max(total - agents_total, 0), 4),
+                      'rows': out}))
+
+
+def agent_json(c, name, period):
+    since = app_since(period)
+    q = lambda sql: c.execute(sql, (name, since)).fetchall()
+    where = 'from hq_req where hq_agent = ? and ts >= ?'
+    cost, runs = q(f'select sum(cost), count(distinct session) {where}')[0]
+    cost = cost or 0
+    models = [{'model': m, 'effort': e, 'cost': round(x or 0, 4), 'runs': n}
+              for m, e, x, n in q(f'''select model, effort, sum(cost) s, count(distinct session)
+                                    {where} group by 1, 2 order by s desc limit 6''')]
+    costliest = [{'session': sid, 'cost': round(x or 0, 4), 'started': first, 'via': via, 'turn': turn}
+                 for sid, x, first, via, turn in q(f'''select session, sum(cost) s, min(datetime(ts,'localtime')), max(via),
+            (select turn from req r2 where r2.session = hq_req.session and turn is not null order by ts limit 1)
+            {where} group by session order by s desc limit 5''')]
+    amount, at = _settings().limit(name)
+    spent = month_spent(c, name)
+    days = month_days(c, name)
+    # The model and effort its newest run used: the lever that matters most.
+    latest = c.execute('''select model, effort from runs where agent = ? and model is not null order by started desc limit 1''',
+                       (name,)).fetchone()
+    print(json.dumps({'agent': name, 'period': period, 'label': period_label(period), 'prices': 'api',
+                      'cost': round(cost, 4), 'runs': runs or 0, 'perRun': round(cost / runs, 2) if runs else 0,
+                      'month': round(spent, 4), 'monthLabel': period_label('month'), 'limit': amount, 'at': at,
+                      'raiseTo': raise_to(amount, spent) if amount else None,
+                      'days': [{'day': d.isoformat(), 'cost': round(x, 4)} for d, x in days],
+                      'latest': {'model': latest[0], 'effort': latest[1]} if latest else None,
+                      'models': models, 'costliest': costliest, 'forecast': forecast(days, spent, amount, name)}))
+
+
+def members(c, agent):
+    rows = c.execute('''select coalesce(person, 'owner'), sum(cost) from hq_req where hq_agent = ? and ts >= ?
+                         group by 1''', (agent, utc(month_start()))).fetchall()
+    try:   # each person's own budget on the agent (kith-auth member .. budget=), null when it has none
+        out = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth'), 'budgets', agent,
+                              '--json'], capture_output=True, text=True, timeout=20, check=True).stdout
+        budgets = json.loads(out)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        budgets = {}
+    print(json.dumps({'agent': agent, 'month': period_label('month'), 'people': {p: round(x or 0, 4) for p, x in rows},
+                      'budgets': budgets}))
+
+
 def session(c, prefix):
     ids = [r[0] for r in c.execute('select distinct session from req where session like ?', (prefix + '%',))]
     if len(ids) != 1:
@@ -331,6 +552,8 @@ def main():
     a = sys.argv[1:] or ['week']
     if a[0] in ('-h', '--help'):
         sys.exit(print(__doc__))
+    if a[0] == 'limit' and len(a) > 1:   # before the ledger: no limit answers without opening it
+        return limit_cmd(a[1], a[2] if len(a) > 2 else '')
     c = db()
     if a[0] == 'tag':
         return tag(c)
@@ -341,6 +564,13 @@ def main():
     sync(c, quiet=True)
     if a[0] == 'session' and len(a) > 1:
         session(c, a[1])
+    elif a[0] == 'usage' and '--json' in a:
+        usage_json(c, next((x for x in a[1:] if x != '--json'), 'month'))
+    elif a[0] == 'agent' and len(a) > 1 and '--json' in a:
+        rest = [x for x in a[2:] if x != '--json']
+        agent_json(c, a[1], rest[0] if rest else 'month')
+    elif a[0] == 'members' and len(a) > 1:
+        members(c, a[1])
     elif a[0] == 'agents':
         agents(c, a[1] if len(a) > 1 else 'month')
     elif a[0] == 'agent' and len(a) > 1:

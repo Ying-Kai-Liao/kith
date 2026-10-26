@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { avatarImage, DEFAULT_IMAGE } from '@shared/crew'
-import { needsYouRows, projectDetail, type BoardModel, type BoardTarget } from '@shared/board'
+import { needsYouRows, projectDetail, type BoardDecision, type BoardModel, type BoardTarget } from '@shared/board'
 import { isGroup, type Bot } from '@shared/models'
 import { Icon } from '../../components/Icon'
 import { BotAvatar, CountBadge } from '../../components/kith'
@@ -8,6 +8,8 @@ import { sameRef, type BotRef } from '../../store/app-model'
 import type { BotStore } from '../../store/bot-store'
 import { useModel } from '../../lib/observable'
 import { GuestPromptList } from '../GuestPromptList'
+import { pairOf } from '../../components/kith/pair.ts'
+import { LimitCard } from '../thread/LimitCard'
 
 /**
  * The Board in the sidebar: Needs you (a row per thread, with its count), Working, Where we left off and Projects.
@@ -29,6 +31,10 @@ export function BoardList({ board, selected, bots, stores, open }: {
     <div className="cs-board">
       <Section title="Needs you" count={board.needsYou.length} show={board.needsYou.length > 0}>
         {stores.map((s) => <GuestPrompts key={s.computer.id} store={s} />)}
+        {board.needsYou.map((d) => {
+          const store = d.limit && stores.find((s) => s.computer.id === d.target.computerId)
+          return d.limit && store ? <LimitPrompt key={d.id} store={store} decision={d} bot={bots(d.target)} /> : null
+        })}
         {needs.map((n) => (
           <BoardRow key={n.key} bot={bots(n.target)} title={n.title} detail={`your turn · ${n.question}`} ink count={n.count} selected={isSelected(n.target)} onClick={() => open(n.target)} />
         ))}
@@ -56,6 +62,22 @@ export function BoardList({ board, selected, bots, stores, open }: {
 function GuestPrompts({ store }: { store: BotStore }) {
   useModel(store)
   return <GuestPromptList store={store} />
+}
+
+/** An agent at its limit with an owner's run waiting: answered here, in the agent's colours. */
+function LimitPrompt({ store, decision, bot }: { store: BotStore; decision: BoardDecision; bot?: Bot }) {
+  useModel(store)
+  const entry = decision.limit!
+  return (
+    <LimitCard
+      entry={entry}
+      pair={pairOf(bot?.avatarColor)}
+      answering={store.answering.get(entry.id) ?? null}
+      respond={(option) => store.respond(entry, option)}
+      leading={bot ? <BotAvatar face={avatarImage(bot) ?? DEFAULT_IMAGE} color={bot.avatarColor} id={bot.id} size={24} animated={false} /> : undefined}
+      board
+    />
+  )
 }
 
 function Section({ title, count, show, children }: { title: string; count: number; show: boolean; children: ReactNode }) {

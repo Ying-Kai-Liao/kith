@@ -174,11 +174,17 @@ agent=$1; shift
 # MODE '' forgets it. Applies to the agent's next run from any entry point.
 # kith AGENT set call-model MODEL: the model its voice-call turns run on ('default' forgets the choice, 'own' keeps the
 # agent's own model).
+# kith AGENT set limit N|none: the agent's monthly limit in dollars at API prices; kith AGENT set at-limit ask|tell|hold:
+# what an owner's run does once the agent is at it (see kith_settings.py; kith-cost limit AGENT shows where it stands).
 if [[ ${1:-} == set ]]; then
   [[ -n $(agent_dir "$agent") ]] || { echo "kith: no agent '$agent' (try: kith ls)" >&2; exit 1; }
   if [[ ${2:-} == call-model && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set call_model "$agent" "$3"; fi
+  if [[ ${2:-} == limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set limit "$agent" "$3"; fi
+  if [[ ${2:-} == at-limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set at_limit "$agent" "$3"; fi
   [[ ${2:-} == permission && $# -eq 3 ]] || { echo "usage: kith $agent set permission MODE   (MODE '' forgets this Mac's choice)
-       kith $agent set call-model MODEL   (MODEL: sonnet, haiku, opus, own for the agent's own model, default to forget)" >&2; exit 2; }
+       kith $agent set call-model MODEL   (MODEL: sonnet, haiku, opus, own for the agent's own model, default to forget)
+       kith $agent set limit N|none       (a monthly limit in dollars at API prices; none forgets it)
+       kith $agent set at-limit MODE      (ask, tell or hold: what your own runs do at the limit; ask by default)" >&2; exit 2; }
   exec python3 "$KITH/lib/kith_settings.py" set permission_mode "$agent" "$3"
 fi
 src_pkg=$(agent_dir "$agent")
@@ -233,7 +239,8 @@ print("p_env_names=%s" % q(" ".join(env)))')"
     if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)' "$spent" "$p_budget"; then
       printf 'kith: %s has used $%.2f of their $%s this month on %s; the owner can raise it (kith auth member %s %s budget=..)\n' \
         "$KITH_PERSON" "$spent" "$p_budget" "$p_budget_agent" "$p_budget_agent" "$KITH_PERSON" >&2
-      exit 3
+      # The owner's own run is never refused at a limit (it says so and goes on); anyone else's stops here.
+      [[ $p_owner == 1 ]] || exit 3
     fi
   fi
   export KITH_PERSON
@@ -337,6 +344,30 @@ fi
 # A program reads stdout as the JSON alone: whatever a helper prints on the way goes to stderr; fd 3 is the real stdout.
 [[ $print -eq 1 ]] && launch=0
 [[ $launch -eq 1 ]] && exec 3>&1 1>&2
+# The agent's monthly limit (kith AGENT set limit N, at API prices): an owner's run is never refused at it. At the limit
+# it asks (a terminal run asks here; a one-shot or the host's launch says so and goes on: the host asks before the
+# turn with a card), tells and goes on, or holds only when this Mac chose hold (kith AGENT set at-limit hold). A spend
+# that can't be read is no reason to stop the owner. Anyone else's runs keep their membership budget above.
+if [[ $p_owner == 1 ]] && lim=$("$KITH/bin/kith-cost" limit "$agent" --sh 2>/dev/null) && [[ -n $lim ]]; then
+  l_over=0 l_at=ask l_text=""
+  eval "$lim"
+  if [[ $l_over == 1 ]]; then
+    case $l_at in
+      hold)
+        echo "kith: $l_text. Its runs are held until you raise the limit (kith $agent set limit N) or the month turns; kith $agent set at-limit ask lets them ask instead." >&2
+        exit 3 ;;
+      ask)
+        if [[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && -t 0 && -t 2 ]]; then
+          printf 'kith: %s. Run anyway? [Y/n] ' "$l_text" >&2
+          read -r l_yes || l_yes=y
+          [[ $l_yes =~ ^[Nn] ]] && { echo "kith: not run. Raise it with kith $agent set limit N." >&2; exit 0; }
+        else
+          echo "kith: $l_text; running anyway (your runs never stop at a limit; kith $agent set limit N raises it)." >&2
+        fi ;;
+      *) echo "kith: $l_text; running anyway." >&2 ;;
+    esac
+  fi
+fi
 # Launch-time lookups are the kernel's own, whoever the run is for: a guest token in the environment would narrow them.
 if [[ -n $project ]]; then
   env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --list | cut -f1 | cut -d' ' -f1 | grep -qx -- "$project" \

@@ -1,6 +1,6 @@
 import { taskLabel } from '@shared/held-run'
 import { useEffect } from 'react'
-import { type Bot, type Entry } from '@shared/models'
+import { isWorkingIn, type Bot, type Entry } from '@shared/models'
 import { taskLastAt, taskOpen, taskStatus, taskTitle, type TaskStatus } from '@shared/tasks'
 import { Spinner } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
@@ -62,7 +62,8 @@ export function TaskRow({ root, bot, newest, now, choice, setChoice, openTrace, 
       </button>
     )
   }
-  const working = status === 'working' || status === 'needsYou'
+  // A message parked at its agent's limit needs you with nothing at work: its card has the Stop.
+  const working = status === 'working' || (status === 'needsYou' && isWorkingIn(bot, bot.id, root.id))
   return (
     <div className="task-open">
       <ReadingTask botId={bot.id} root={root.id} />

@@ -7,7 +7,7 @@ use crate::chat::router::{self, Route};
 use crate::chat::team::RequestStatus;
 use crate::hub::BotStatus;
 use crate::market::requests;
-use crate::store::{Lane, now_ms};
+use crate::store::{EntryKind, Lane, now_ms};
 use anyhow::{Result, anyhow};
 use serde_json::json;
 use std::time::Instant;
@@ -378,6 +378,11 @@ impl Actor {
             }
             let ids: Vec<String> = batch.iter().map(|(id, _)| id.clone()).collect();
             let text = batch.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
+            // The owner's messages to an agent over its monthly limit wait under a card (ask, hold) or go on with a
+            // line (tell); never refused.
+            if self.limit_parks(&lane, &ids).await {
+                continue;
+            }
             // A handoff waiting in the chat starts a new conversation with this message.
             if lane == main {
                 self.handoff = self.take_handoff();
@@ -386,6 +391,30 @@ impl Actor {
                 self.start_failed(&e);
             }
         }
+    }
+
+    /// Whether the owner's messages `ids` wait under a limit card instead of running now: only for an owner's kith
+    /// agent over its monthly limit with ask or hold (`limits`). Tell writes its line once a month and runs.
+    async fn limit_parks(&mut self, lane: &Lane, ids: &[String]) -> bool {
+        if !self.is_hq() || self.cfg.person.is_some() || ids.is_empty() {
+            return false;
+        }
+        // Allowed on the card: this run goes on.
+        if ids.iter().all(|id| self.hub.store.entry(id).is_some_and(|e| e.data["limitAllowed"] == true)) {
+            return false;
+        }
+        let Some(agent) = self.cfg.hq_agent.clone() else { return false };
+        let Some(state) = crate::limits::over(&agent).await else { return false };
+        if state["at"] == "tell" {
+            if crate::limits::tell_due(&agent, state["month"].as_str().unwrap_or_default()) {
+                let text = format!("{}; running anyway.", state["text"].as_str().unwrap_or_default());
+                let turn = self.hub.store.max_turn(&lane.chat);
+                self.hub.add_entry(lane, EntryKind::Notice, turn, &json!({"text": text, "style": NoticeStyle::Info}));
+            }
+            return false;
+        }
+        crate::limits::park(&self.hub, &self.cfg, lane, ids, &state);
+        true
     }
 
     pub(super) fn start_failed(&mut self, e: &anyhow::Error) {
@@ -404,6 +433,14 @@ impl Actor {
         } else if let Some(refused) = e.downcast_ref::<crate::agent::hq::Refused>() {
             // The kernel said no for this person (not a member any more, or over their budget): it says why.
             self.notice(&format!("Couldn't run this agent for you: {refused}"), NoticeStyle::Error);
+            // At their budget: the owner gets a card in this chat to add to it.
+            crate::limits::guest_refused(
+                self.hub.clone(),
+                self.cfg.clone(),
+                self.lane.clone(),
+                self.turn_entries.clone(),
+                &refused.0,
+            );
         } else if e.is::<crate::terminal::HeldByWriter>() {
             // `start_turn` already put the notice in the thread. A card's resume that was behind this turn is owed
             // again (the claim was refused, so its marker goes back) and shows who holds the session.

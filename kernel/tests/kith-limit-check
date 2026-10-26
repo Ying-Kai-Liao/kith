@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# kith-limit-check — an agent's monthly limit (kith AGENT set limit N, at API prices) and the rule that goes with it: an
+# owner's run is never refused at the limit unless this Mac chose hold; a guest's budget is unchanged.
+# Throwaway HOME, KITH_HOME, KITH_STATE, auth.json and ledger; a stub claude that logs that it ran.
+#
+#   kernel/tests/kith-limit-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-limit-check.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/root KITH_AUTH=$T/auth.json KITH_STATE=$T/state
+unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR HQ_HOME \
+  KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_PERSON_WAS KITH_MACHINE HQ_MACHINE KITH_VIA KITH_TERMINAL_SESSION
+mkdir -p "$HOME" "$T/bin" "$KITH_HOME/agents/house/role" "$KITH_STATE/projects" "$KITH_STATE/logs"
+printf -- '---\nname: house\ndescription: t\n---\nYou answer.\n' > "$KITH_HOME/agents/house/role/agent.md"
+cat > "$T/bin/claude" <<'EOF'
+#!/bin/sh
+[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)" && exit 0
+[ "$1 $2" = "plugin list" ] && echo "[]" && exit 0
+case "$*" in *--append-system-prompt*) echo ran >> "$RAN_LOG";; esac
+exit 0
+EOF
+chmod +x "$T/bin/claude"
+printf '#!/bin/sh\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
+export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH RAN_LOG=$T/ran
+
+K() { "$KERNEL/bin/kith" "$@"; }
+C() { python3 "$KERNEL/bin/kith-cost" "$@"; }
+A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
+J() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+# run [env...]: one owner one-shot of house; its exit code in $code, stderr in $T/err, whether claude ran in $ran.
+run() { : > "$RAN_LOG"; (cd "$KITH_HOME/agents/house" && env "$@" "$KERNEL/bin/kith" house "say hi" >/dev/null 2>"$T/err" </dev/null); code=$?; ran=$(wc -l < "$RAN_LOG" | tr -d ' '); }
+
+C sync >/dev/null 2>&1   # makes the ledger
+# $310 this month on house: $300 by the owner over three runs, $10 by sam.
+KERNEL=$KERNEL python3 - <<'PY'
+import datetime as dt, os, sqlite3, sys
+sys.path.insert(0, os.path.join(os.environ['KERNEL'], 'lib'))
+from kith_paths import paths
+c = sqlite3.connect(paths()['KITH_MACHINE'] / 'cost.db')
+now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+for i, (person, cost) in enumerate([(None, 100.0), (None, 120.0), (None, 80.0), ('sam', 10.0)]):
+    c.execute("insert into runs (session, agent, person, via, started) values (?, 'house', ?, 'terminal', ?)", (f's{i}', person, now))
+    c.execute("insert into req values (?, ?, ?, 'p', 'claude-opus-5-5', 'main', 'a turn', 0, 0, 0, 0, ?)", (f'r{i}', f's{i}', now, cost))
+c.commit()
+PY
+
+# --- the limit, its setting and the views the apps read
+check "no limit: limit answers null, not over" "[ \"\$(C limit house --json | J 'd[\"limit\"], d[\"over\"]')\" = 'None False' ]"
+check "no limit: --sh prints nothing" "[ -z \"\$(C limit house --sh)\" ]"
+check "set limit takes dollars" "K house set limit 300"
+check "set limit refuses words" "! K house set limit lots"
+check "set limit refuses 0 below" "! K house set limit -5"
+check "set at-limit refuses a mode it doesn't know" "! K house set at-limit maybe"
+check "the default at the limit is ask" "[ \"\$(C limit house --json | J 'd[\"at\"]')\" = ask ]"
+check "limit counts every run of the agent this month (owner and guests)" "[ \"\$(C limit house --json | J 'd[\"spent\"], d[\"over\"], d[\"runs\"]')\" = '310.0 True 4' ]"
+check "the card offers the next \$100 above" "[ \"\$(C limit house --json | J 'd[\"raiseTo\"]')\" = 400 ]"
+check "the words say at API prices" "C limit house --json | J 'd[\"text\"]' | grep -F 'house has used \$310.00 of its \$300 for' | grep -F 'at API prices'"
+check "--sh is safe to eval" "eval \"\$(C limit house --sh)\" && [ \"\$l_over\" = 1 ] && [ \"\$l_at\" = ask ] && [ \"\$l_limit\" = 300 ]"
+check "the forecast says it reached the limit" "C agent house month --json | J 'd[\"forecast\"][\"text\"]' | grep -F 'reached \$300'"
+check "usage rows carry the limit and the month" "[ \"\$(C usage month --json | J '[(r[\"limit\"], r[\"month\"]) for r in d[\"rows\"] if r[\"agent\"] == \"house\"][0]')\" = '(300, 310.0)' ]"
+check "usage splits agents from your own sessions" "[ \"\$(C usage month --json | J 'd[\"agents\"], d[\"total\"]')\" = '310.0 310.0' ]"
+check "agent view: days of this month, costliest runs, model" "[ \"\$(C agent house month --json | J 'len(d[\"days\"]) == __import__(\"datetime\").date.today().day, d[\"costliest\"][0][\"cost\"], d[\"models\"][0][\"model\"]')\" = 'True 120.0 claude-opus-5-5' ]"
+check "members: this month per person" "[ \"\$(C members house --json | J 'd[\"people\"][\"owner\"], d[\"people\"][\"sam\"]')\" = '300.0 10.0' ]"
+
+# --- an owner's run at the limit is never refused (ask, tell); hold is the owner's own choice
+run
+check "ask: the owner's one-shot runs" "[ \$code = 0 ] && [ \$ran = 1 ]"
+check "ask: it says so and goes on" "grep -F 'running anyway' \"$T/err\""
+K house set at-limit tell
+run
+check "tell: the owner's one-shot runs" "[ \$code = 0 ] && [ \$ran = 1 ]"
+check "tell: it says so" "grep -F 'has used' \"$T/err\""
+K house set at-limit hold
+run
+check "hold (the owner chose it): the run waits, claude never starts" "[ \$code = 3 ] && [ \$ran = 0 ]"
+check "hold: it says how to raise it" "grep -F 'kith house set limit N' \"$T/err\""
+K house set limit 500
+run
+check "raised above what is spent: runs, no note" "[ \$code = 0 ] && [ \$ran = 1 ] && ! grep -F 'has used' \"$T/err\""
+K house set limit none
+run
+check "no limit: runs" "[ \$code = 0 ] && [ \$ran = 1 ]"
+K house set at-limit ''
+
+# --- a membership budget: the owner's run is never refused at it; a guest's is (unchanged)
+A person kai owner >/dev/null; A person sam >/dev/null
+A member house kai budget=1 >/dev/null; A member house sam budget=5 >/dev/null
+check "members carries each person's budget" "[ \"\$(C members house --json | J 'd[\"budgets\"][\"sam\"], d[\"people\"][\"sam\"]')\" = '5.0 10.0' ]"
+run KITH_PERSON=kai
+check "owner over a membership budget: runs" "[ \$code = 0 ] && [ \$ran = 1 ]"
+run KITH_PERSON=sam
+check "guest over their budget: stops (exit 3), claude never starts" "[ \$code = 3 ] && [ \$ran = 0 ]"
+check "guest: the owner can raise it" "grep -F 'budget=' \"$T/err\""
+A member house sam budget=50 >/dev/null
+K house set limit 100; K house set at-limit hold
+run KITH_PERSON=sam
+# (Here a guest's run then stops at the memory check, which needs the built kith binary: the limit must not be why.)
+check "guest under budget: the agent's own limit (the owner's) is not what a guest's run meets" "! grep -F 'held' \"$T/err\" && ! grep -F 'of its \$100' \"$T/err\""
+[ $fail = 0 ] || cat "$T/err"
+exit $fail

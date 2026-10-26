@@ -63,6 +63,8 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           --trusted (a row or preset without it runs in default mode).
                                           budget=20: at most $20 a calendar month of their runs of that agent
                                           (helpers they reach through it included; kith cost people shows it)
+  kith-auth budgets <agent> --json          read-only: {person: dollars a month or null} for each person with a row
+                                          of their own on the agent (the apps' Access > People)
   kith-auth access <agent> <id> read|write|domain <path|host> [--rm]
                                           "always" on an escape card: a place or website a member's (or bot's) boxed runs of
                                           that agent may reach, beyond the box. Not for secrets or the paths a run may never
@@ -1566,6 +1568,9 @@ def main(argv):
         cmd_preset(rest)
     elif cmd == 'member':
         cmd_member(rest)
+    elif cmd == 'budgets' and rest[1:] == ['--json']:
+        rows = load_auth()['members'].get(rest[0], {})
+        print(json.dumps({pid: float(r['budget']) if r.get('budget') else None for pid, r in rows.items() if pid != EVERYONE}))
     elif cmd == 'bot':
         cmd_bot(rest)
     elif cmd == 'bots-cap':

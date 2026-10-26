@@ -4,7 +4,9 @@
 
 STUB_HQ_HOME is the agent's folder. Every call is appended to calls.jsonl there (arguments, KITH_VIA, working
 directory). `house set permission MODE` writes the file `permission` there, which --info-json and --launch-json report
-(an empty MODE removes it), as kith keeps its per-agent choice. A file named `fail` in that folder makes --launch-json fail with its text on stderr.
+(an empty MODE removes it), as kith keeps its per-agent choice. `cost limit house --json` prints `limit.json` there (no
+limit without it); `house set limit N` writes `limit_set` and removes `limit.json`. A file named `fail` in that folder
+makes --launch-json fail with its text on stderr.
 """
 import json
 import os
@@ -119,6 +121,16 @@ elif args == ["cost", "record"]:
     with open(os.path.join(home, "cost.jsonl"), "a", encoding="utf-8") as cost:
         cost.write(json.dumps({"row": json.load(sys.stdin), "agent": os.environ.get("KITH_AGENT"),
                                "via": os.environ.get("KITH_VIA")}) + "\n")
+elif args == ["cost", "limit", "house", "--json"]:
+    # `limit.json` there is where house stands against its monthly limit; without it, no limit.
+    path = os.path.join(home, "limit.json")
+    print(open(path, encoding="utf-8").read() if os.path.exists(path)
+          else json.dumps({"agent": "house", "limit": None, "at": "ask", "over": False}))
+elif args[:3] == ["house", "set", "limit"] and len(args) == 4:
+    # Raising it puts house under the limit again.
+    open(os.path.join(home, "limit_set"), "w", encoding="utf-8").write(args[3])
+    if os.path.exists(os.path.join(home, "limit.json")):
+        os.remove(os.path.join(home, "limit.json"))
 elif args == ["house", "--backups-json"]:
     # `chain.json` is the chain after the agent's own login; without one the agent has no backups.
     path = os.path.join(home, "chain.json")

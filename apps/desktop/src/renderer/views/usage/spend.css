@@ -1,0 +1,300 @@
+/* Usage's cost part (SpendSection): totals, the agents/own split, a row per agent; the agent and limit sheets. */
+.sp {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.sp-total {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.sp-total-amount {
+  letter-spacing: -0.01em;
+}
+/* The total split in two: agents in ink, your own sessions in the line colour. */
+.sp-split {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--kith-line);
+  overflow: hidden;
+}
+.sp-split i {
+  display: block;
+  height: 100%;
+  background: var(--kith-ink);
+  border-radius: 3px;
+}
+.sp-legend {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: var(--text-caption);
+  color: var(--secondary);
+}
+.sp-legend b {
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  margin-left: 4px;
+}
+.sp-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: var(--kith-line);
+  vertical-align: 1px;
+}
+.sp-dot.ink {
+  background: var(--kith-ink);
+}
+.sp-more {
+  border: 0;
+  background: none;
+  color: var(--secondary);
+  font-size: var(--text-caption);
+  cursor: pointer;
+  padding: 0;
+}
+.sp-more:hover {
+  color: var(--text);
+}
+.sp-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+}
+button.sp-row {
+  cursor: pointer;
+}
+button.sp-row:hover {
+  background: color-mix(in srgb, var(--kith-line) 45%, transparent);
+}
+.sp-row + .sp-row {
+  border-top: 1px solid var(--kith-line);
+}
+.sp-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.sp-row-value {
+  white-space: nowrap;
+}
+.sp-row.own {
+  opacity: 0.75;
+}
+.sp-own-icon,
+.sp-face-blank {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--kith-panel);
+  color: var(--secondary);
+}
+/* A limit's bar: thin, in the agent's colours; no bar means no limit. */
+.sp-limit-bar {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--kith-line);
+  overflow: hidden;
+  margin-top: 4px;
+}
+.sp-limit-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+.sp-loading {
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+.sp-sheet-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.sp-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 4px 18px 18px;
+  max-height: 72vh;
+  overflow-y: auto;
+}
+.sp-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.sp-limit-line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sp-days {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* Days as ink bars on a dashed floor. */
+.sp-days-bars {
+  height: 64px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  border-bottom: 1px dashed var(--kith-line);
+}
+.sp-days-bars i {
+  flex: 1;
+  min-width: 2px;
+  background: var(--kith-ink);
+  border-radius: 1px 1px 0 0;
+}
+.sp-limit-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px 6px;
+}
+.sp-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--kith-panel);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.sp-done {
+  min-width: 64px;
+  height: 30px;
+  padding: 0 16px;
+  border-radius: 15px;
+  border: 0;
+  background: var(--kith-ink);
+  color: var(--kith-ground);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+}
+.sp-done:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.sp-limit-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.sp-presets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.sp-preset {
+  height: 34px;
+  padding: 0 8px;
+  text-align: center;
+  border-radius: 10px;
+  border: 0;
+  background: var(--kith-panel);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.sp-preset.on {
+  background: var(--kith-ink);
+  color: var(--kith-ground);
+  box-shadow: none;
+  font-weight: 600;
+}
+.sp-custom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--kith-panel);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+}
+.sp-custom input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  outline: none;
+}
+.sp-custom-unit {
+  color: var(--secondary);
+}
+.sp-check {
+  width: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+/* A person's monthly limit in the share sheet: the stock pop-up, then a custom amount when chosen. */
+.sp-budget {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.sp-budget-custom {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.sp-budget-custom input {
+  width: 64px;
+  height: 28px;
+  border-radius: 8px;
+  border: 0;
+  padding: 0 8px;
+  background: var(--kith-panel);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+  color: var(--text);
+  font: inherit;
+}
+.sp-budget-set {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 0;
+  background: var(--kith-ink);
+  color: var(--kith-ground);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.sp-budget-set:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

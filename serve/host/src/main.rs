@@ -13,6 +13,7 @@ mod environment;
 mod hqmem;
 mod hub;
 mod kernel;
+mod limits;
 mod market;
 mod mcp;
 mod remote;

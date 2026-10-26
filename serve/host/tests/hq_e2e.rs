@@ -657,3 +657,122 @@ async fn an_hq_agent_shares_an_image_with_the_tool_it_is_given() {
         history["entries"].as_array().unwrap().iter().find(|e| e["data"]["files"].is_array()).expect("a file entry");
     assert_eq!(shared["data"]["files"][0]["name"], "pic.png");
 }
+
+/// The history's entries of `kind` that `pick` keeps.
+async fn entries(s: &Setup, bot: &str, pick: impl Fn(&Value) -> bool) -> Vec<Value> {
+    let history = s.host.call("history", json!({"botId": bot})).await;
+    history["entries"].as_array().unwrap().iter().filter(|e| pick(e)).cloned().collect()
+}
+
+/// Waits for an entry `pick` keeps.
+async fn wait_for(s: &Setup, bot: &str, what: &str, pick: impl Fn(&Value) -> bool) -> Value {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        if let Some(e) = entries(s, bot, &pick).await.into_iter().last() {
+            return e;
+        }
+        assert!(Instant::now() < deadline, "no {what}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+fn pending_card(e: &Value) -> bool {
+    e["kind"] == "permission"
+        && e["data"]["status"] == "pending"
+        && e["data"]["limit"]["kind"] == "agent"
+        && e["data"]["limit"]["entryIds"].as_array().is_some_and(|ids| !ids.is_empty())
+}
+
+fn finals(e: &Value) -> bool {
+    e["kind"] == "agent" && e["data"]["final"] == true
+}
+
+#[tokio::test]
+async fn an_owner_message_over_the_limit_waits_under_a_card_and_runs_when_answered() {
+    let s = start().await;
+    let (bot, _) = s.house_chat().await;
+    let over = |at: &str| {
+        let state = json!({"agent": "house", "limit": 300, "at": at, "spent": 300.4, "over": true, "month": "October",
+            "runs": 99, "perRun": 3.03, "raiseTo": 400, "resets": "2026-11-01",
+            "text": "house has used $300.40 of its $300 for October (at API prices)"});
+        std::fs::write(s.home.join("limit.json"), state.to_string()).unwrap();
+    };
+    let send = |text: &str| {
+        let nonce = uuid::Uuid::new_v4().to_string();
+        s.host.call("send", json!({"botId": bot, "text": text, "clientNonce": nonce}))
+    };
+    let replies = entries(&s, &bot, finals).await.len();
+
+    // Ask: the message waits under the card, nothing runs; Allow runs it.
+    over("ask");
+    send("over the limit, ask").await;
+    let card = wait_for(&s, &bot, "limit card", pending_card).await;
+    assert_eq!(card["data"]["title"], "This run is waiting: house has used its $300 for October.");
+    let names: Vec<&str> =
+        card["data"]["options"].as_array().unwrap().iter().map(|o| o["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["Allow this run", "Raise to $400", "Stop"]);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(entries(&s, &bot, finals).await.len(), replies, "nothing ran while the card waits");
+    let held = card["data"]["limit"]["entryIds"][0].as_str().unwrap().to_owned();
+    s.host.call("respondPermission", json!({"entryId": card["id"], "optionId": "allow"})).await;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while entries(&s, &bot, finals).await.len() <= replies {
+        assert!(Instant::now() < deadline, "the allowed message never ran");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let message = entries(&s, &bot, |e| e["id"] == held.as_str()).await.remove(0);
+    assert_eq!(message["data"]["limitAllowed"], true, "the message is kept and marked allowed");
+    let answered = entries(&s, &bot, |e| e["id"] == card["id"]).await.remove(0);
+    assert_eq!(answered["data"]["status"], "answered");
+
+    // Raise: the kernel is told the new limit, then the message runs.
+    let replies = entries(&s, &bot, finals).await.len();
+    send("over the limit, raise").await;
+    let card = wait_for(&s, &bot, "second limit card", pending_card).await;
+    s.host.call("respondPermission", json!({"entryId": card["id"], "optionId": "raise"})).await;
+    assert_eq!(std::fs::read_to_string(s.home.join("limit_set")).unwrap(), "400");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while entries(&s, &bot, finals).await.len() <= replies {
+        assert!(Instant::now() < deadline, "the message never ran after the raise");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // Stop: the message is kept, not run.
+    let replies = entries(&s, &bot, finals).await.len();
+    over("ask");
+    send("over the limit, stop").await;
+    let card = wait_for(&s, &bot, "third limit card", pending_card).await;
+    let held = card["data"]["limit"]["entryIds"][0].as_str().unwrap().to_owned();
+    s.host.call("respondPermission", json!({"entryId": card["id"], "optionId": "stop"})).await;
+    let message = entries(&s, &bot, |e| e["id"] == held.as_str()).await.remove(0);
+    assert_eq!(message["data"]["status"], "cancelled");
+    assert_eq!(message["data"]["text"], "over the limit, stop", "the message is kept");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(entries(&s, &bot, finals).await.len(), replies);
+
+    // Hold: no Allow on the card.
+    over("hold");
+    send("over the limit, hold").await;
+    let card = wait_for(&s, &bot, "hold card", pending_card).await;
+    let ids: Vec<&str> =
+        card["data"]["options"].as_array().unwrap().iter().map(|o| o["optionId"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["raise", "stop"]);
+    let refused = s.host.refused("respondPermission", json!({"entryId": card["id"], "optionId": "allow"})).await;
+    assert!(refused.contains("choices"), "{refused}");
+    s.host.call("respondPermission", json!({"entryId": card["id"], "optionId": "stop"})).await;
+
+    // Tell: it runs, with a line once.
+    over("tell");
+    s.host.reply(&bot, "over the limit, tell").await;
+    let told = entries(&s, &bot, |e| {
+        e["kind"] == "notice" && e["data"]["text"].as_str().is_some_and(|t| t.contains("running anyway"))
+    })
+    .await;
+    assert_eq!(told.len(), 1);
+    s.host.reply(&bot, "over the limit, tell again").await;
+    let told = entries(&s, &bot, |e| {
+        e["kind"] == "notice" && e["data"]["text"].as_str().is_some_and(|t| t.contains("running anyway"))
+    })
+    .await;
+    assert_eq!(told.len(), 1, "the line shows once a month");
+}
