@@ -1,6 +1,7 @@
 import AuthenticationServices
 import ClerkKit
 import KithKit
+import KithUI
 import Foundation
 import Observation
 
