@@ -2,14 +2,16 @@
 
 use std::time::Duration;
 
+use kith_wire::rpc::{BotConversations, BotEntryKind, ConversationState, method};
 use serde_json::{Value, json};
 use tokio::time::{Instant, sleep};
 
+use crate::ask::thread_body;
 use crate::cli::{ReadArgs, StopArgs};
 use crate::config::{State, Store};
 use crate::exit::{CliError, Exit};
 use crate::output::Out;
-use crate::session::{CLIENT_VERSION, Client, Tuning};
+use crate::session::{CLIENT_VERSION, Client, Tuning, answer};
 use crate::thread::{Reply, parse_thread};
 
 const READ_POLL: Duration = Duration::from_secs(2);
@@ -86,22 +88,16 @@ pub async fn threads(store: Store, cloud: Option<&str>, out: &Out, tuning: Tunin
     let mut client = Client::from_store(store, cloud, out, tuning)?;
     let result = async {
         client.ensure_usable().await?;
-        client.call("botConversations", json!({"limit": 100})).await
+        let v = client.call(method::BOT_CONVERSATIONS, json!({"limit": 100})).await?;
+        answer::<BotConversations>(v)
     }
     .await;
     client.close().await;
-    let v = result?;
-    out.event(&json!({"conversations": v["conversations"]}));
+    let listed = result?;
+    out.event(&json!({"conversations": listed.conversations}));
     if !out.json {
-        for c in v["conversations"].as_array().map(Vec::as_slice).unwrap_or_default() {
-            let field = |k: &str| c[k].as_str().unwrap_or_default();
-            out.stdout(&format!(
-                "{}\t@{}\t{}\t{}\n",
-                field("conversation"),
-                field("agent"),
-                field("state"),
-                field("originLabel")
-            ));
+        for c in &listed.conversations {
+            out.stdout(&format!("{}\t@{}\t{}\t{}\n", c.conversation, c.agent, c.state.as_str(), c.origin_label));
         }
     }
     Ok(())
@@ -117,7 +113,7 @@ pub async fn stop(
     let mut client = Client::from_store(store, cloud, out, tuning)?;
     let result = async {
         client.ensure_usable().await?;
-        client.call("botStop", json!({"conversation": args.conversation})).await
+        client.call(method::BOT_STOP, json!({"conversation": args.conversation})).await
     }
     .await;
     client.close().await;
@@ -148,19 +144,20 @@ async fn read_inner(client: &mut Client<'_>, args: &ReadArgs, out: &Out) -> Resu
     let deadline = Instant::now() + Duration::from_secs(args.timeout);
     let mut shown = std::collections::HashSet::new();
     loop {
-        let body = json!({"conversation": args.conversation, "afterSeq": args.after.unwrap_or(0), "limit": 500});
-        let thread = parse_thread(&client.call("botThread", body).await?);
+        let after = args.after.map_or(0, |a| i64::try_from(a).unwrap_or(i64::MAX));
+        let thread = parse_thread(&client.call(method::BOT_THREAD, thread_body(&args.conversation, after)).await?)?;
         if out.json {
-            for e in thread.entries.iter().filter(|e| e.kind != "user") {
+            for e in thread.entries.iter().filter(|e| e.kind != BotEntryKind::User) {
                 if shown.insert((e.id.clone(), e.text.len())) {
                     out.event(&json!({
-                        "type": "entry", "id": e.id, "seq": e.seq, "turn": e.turn, "kind": e.kind, "text": e.text, "final": e.is_final,
+                        "type": "entry", "id": e.id, "seq": e.seq, "turn": e.turn, "kind": e.kind, "text": e.text,
+                        "final": e.r#final.unwrap_or(false),
                     }));
                 }
             }
         }
         if thread.done || !args.wait {
-            let turn = thread.entries.iter().filter_map(|e| e.turn).max().unwrap_or(0);
+            let turn = thread.entries.iter().map(|e| e.turn).max().unwrap_or(0);
             let mut reply = Reply::new(turn, 0);
             for e in &thread.entries {
                 reply.apply(e);
@@ -168,17 +165,14 @@ async fn read_inner(client: &mut Client<'_>, args: &ReadArgs, out: &Out) -> Resu
             out.event(&json!({"type": "done", "conversation": args.conversation, "turn": turn, "text": reply.text(), "done": thread.done}));
             if !out.json {
                 if !thread.done {
-                    out.info(&format!(
-                        "The turn is still {}.",
-                        if thread.state.is_empty() { "running" } else { thread.state.as_str() }
-                    ));
+                    out.info(&format!("The turn is still {}.", thread.state.as_str()));
                 }
                 out.stdout(&format!("{}\n", reply.text()));
             }
             return Ok(());
         }
         if Instant::now() + READ_POLL > deadline {
-            let waiting = thread.state == "waitingApproval";
+            let waiting = thread.state == ConversationState::WaitingApproval;
             return Err(if waiting {
                 CliError::new(Exit::Approval, "waitingApproval", "Still waiting for the owner to approve a step.")
             } else {
@@ -194,7 +188,7 @@ pub async fn leave(store: Store, cloud: Option<&str>, out: &Out, tuning: Tuning)
     let never_proved = client.guest.state == State::Joining;
     let ended = matches!(client.guest.state, State::Revoked | State::Denied);
     if !never_proved && !ended {
-        match client.call("botLeave", json!({})).await {
+        match client.call(method::BOT_LEAVE, json!({})).await {
             Ok(_) => {}
             // Already removed on the computer's side: nothing left to tell it.
             Err(e) if e.code == "revoked" => {}

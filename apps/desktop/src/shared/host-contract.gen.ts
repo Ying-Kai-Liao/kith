@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'e92661788a937ac03d47351c693c335a5f9e7d44fbf3cf0295906327ec952087'
+export const CONTRACT_SHA256 = 'ce851f4736935ee5d980c73e627004cd277ae05da7fa15138eb686a8db369f87'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -71,6 +71,24 @@ export const CitationErrorValues = ['not_shared'] as const
 export type CitationError = (typeof CitationErrorValues)[number]
 /** How a consumer reads a CitationError word: one this version doesn't know is 'not_shared'. */
 export const decodeCitationError = (raw: unknown): CitationError => known(CitationErrorValues, raw, 'not_shared')
+
+/** Where a bot's conversation stands: a turn running, a turn waiting for the owner to approve a step, asks waiting behind a running turn, the last ask stopped, or nothing going on. One this version doesn't know reads as running: a turn is over only when done says so. */
+export const ConversationStateValues = ['running', 'waitingApproval', 'queued', 'stopped', 'idle'] as const
+export type ConversationState = (typeof ConversationStateValues)[number]
+/** How a consumer reads a ConversationState word: one this version doesn't know is 'running'. */
+export const decodeConversationState = (raw: unknown): ConversationState => known(ConversationStateValues, raw, 'running')
+
+/** A transcript entry as a bot sees it: its ask, the agent's words, a notice that ends the turn with an error, or a bare wait for the owner to approve a step. One this version doesn't know is its own kind: a bot skips it. */
+export const BotEntryKindValues = ['user', 'agent', 'notice', 'waiting'] as const
+export type BotEntryKind = (typeof BotEntryKindValues)[number]
+/** How a consumer reads a BotEntryKind word: one this version doesn't know is 'unknown'. */
+export const decodeBotEntryKind = (raw: unknown): BotEntryKind | 'unknown' => known(BotEntryKindValues, raw, 'unknown')
+
+/** The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status. */
+export const BotErrorCodeValues = ['pending', 'notGranted', 'rateLimited', 'busy', 'notFound', 'badRequest', 'tooLong', 'notSupported', 'syncing', 'heldByOtherWriter', 'tooMany'] as const
+export type BotErrorCode = (typeof BotErrorCodeValues)[number]
+/** How a consumer reads a BotErrorCode word: one this version doesn't know is 'unknown'. */
+export const decodeBotErrorCode = (raw: unknown): BotErrorCode | 'unknown' => known(BotErrorCodeValues, raw, 'unknown')
 
 function known<T extends string, U extends string>(values: readonly T[], raw: unknown, otherwise: U): T | U {
   return (values as readonly unknown[]).includes(raw) ? (raw as T) : otherwise
@@ -373,6 +391,87 @@ export interface BotGuestAnswer {
   bot?: BotGuest | null
 }
 
+/** A bot's owner, by the name people know them by. */
+export interface BotOwner {
+  name: string
+}
+
+/** A bot's own state, owner and agents. The agents are the live answer: none until the bot is allowed, and one its owner lost is gone at once. */
+export interface BotSelf {
+  botId: string
+  name: string
+  state: BotGuestState
+  owner: BotOwner
+  agents: GrantedAgent[]
+  limits: BotLimits
+  version: string
+  minClient: string
+}
+
+/** Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only. */
+export interface BotProof {
+  state: BotGuestState
+  botId?: string | null
+  owner?: string | null
+  agents?: string[] | null
+}
+
+/** An ask taken: its conversation, its entry and turn, and whether it runs now or waits (queued: how many asks wait in the conversation). A retry with the same clientNonce answers the same, marked duplicate, and sends nothing. */
+export interface BotAsked {
+  conversation: string
+  entryId: string
+  turn: number
+  seq: number
+  state: ConversationState
+  queued: number
+  duplicate?: boolean | null
+}
+
+/** Who sent an ask: the bot, and the person it spoke for when it said. */
+export interface BotSender {
+  botId: string
+  name: string
+  speaker?: string | null
+}
+
+/** A transcript entry as a bot sees it: never a thought, a tool call, a plan, an attachment, or a permission card's tool. sender is on an ask a bot sent, final on the agent's words, error on a notice. */
+export interface BotEntry {
+  id: string
+  seq: number
+  turn: number
+  at: number
+  conversation: string
+  kind: BotEntryKind
+  text: string
+  sender?: BotSender | null
+  final?: boolean | null
+  error?: boolean | null
+}
+
+/** A bot's conversation since afterSeq. done: the last ask has its final answer, an error notice, or was taken back; turn is the last ask's. */
+export interface BotThread {
+  conversation: string
+  entries: BotEntry[]
+  done: boolean
+  turn?: number | null
+  state: ConversationState
+}
+
+/** One of a bot's conversations, with the external ref it gave it. */
+export interface BotConversation {
+  conversation: string
+  agent: string
+  ref?: string | null
+  originLabel: string
+  lastAt: number
+  state: ConversationState
+}
+
+/** A bot's conversations, newest first. */
+export interface BotConversations {
+  conversations: BotConversation[]
+}
+
 /** What `hello` takes. */
 export type HelloParams = Record<string, never>
 
@@ -573,6 +672,47 @@ export interface ProveInviteParams {
   token: string
 }
 
+/** What `botStatus` takes. */
+export type BotStatusParams = Record<string, never>
+
+/** What `proveBotInvite` takes. */
+export interface ProveBotInviteParams {
+  inviteId: string
+  token: string
+}
+
+/** What `botAsk` takes. */
+export interface BotAskParams {
+  agent?: string | null
+  text: string
+  conversation?: string | null
+  ref?: string | null
+  room?: string | null
+  speaker?: string | null
+  clientNonce: string
+  noQueue?: boolean | null
+}
+
+/** What `botThread` takes. */
+export interface BotThreadParams {
+  conversation: string
+  afterSeq?: number | null
+  limit?: number | null
+}
+
+/** What `botConversations` takes. */
+export interface BotConversationsParams {
+  limit?: number | null
+}
+
+/** What `botStop` takes. */
+export interface BotStopParams {
+  conversation: string
+}
+
+/** What `botLeave` takes. */
+export type BotLeaveParams = Record<string, never>
+
 export interface Types {
   Empty: Empty
   StoreHealth: StoreHealth
@@ -608,6 +748,15 @@ export interface Types {
   BotGuest: BotGuest
   BotGuests: BotGuests
   BotGuestAnswer: BotGuestAnswer
+  BotOwner: BotOwner
+  BotSelf: BotSelf
+  BotProof: BotProof
+  BotAsked: BotAsked
+  BotSender: BotSender
+  BotEntry: BotEntry
+  BotThread: BotThread
+  BotConversation: BotConversation
+  BotConversations: BotConversations
   HelloParams: HelloParams
   KithInfoParams: KithInfoParams
   StartChatParams: StartChatParams
@@ -641,12 +790,19 @@ export interface Types {
   SetBotLimitsParams: SetBotLimitsParams
   ResolveCitationParams: ResolveCitationParams
   ProveInviteParams: ProveInviteParams
+  BotStatusParams: BotStatusParams
+  ProveBotInviteParams: ProveBotInviteParams
+  BotAskParams: BotAskParams
+  BotThreadParams: BotThreadParams
+  BotConversationsParams: BotConversationsParams
+  BotStopParams: BotStopParams
+  BotLeaveParams: BotLeaveParams
 }
 export type TypeName = keyof Types
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
-/** true for an enum whose unknown values are 'unknown': EntryKind, Permission, BotGuestState, MessageVia. */
-type IsOpen<T> = Same<T, EntryKind> | Same<T, Permission> | Same<T, BotGuestState> | Same<T, MessageVia>
+/** true for an enum whose unknown values are 'unknown': EntryKind, Permission, BotGuestState, MessageVia, BotEntryKind, BotErrorCode. */
+type IsOpen<T> = Same<T, EntryKind> | Same<T, Permission> | Same<T, BotGuestState> | Same<T, MessageVia> | Same<T, BotEntryKind> | Same<T, BotErrorCode>
 /**
  * A type as a consumer receives it (see `receive`): a field of an enum whose unknown values are their own state may
  * also be 'unknown'; any other enum's unknown value already reads as the value the contract names. A `json` value
@@ -665,7 +821,7 @@ type ReceivedValue<T> = true extends IsOpen<T>
 
 /** Each method: who may call it, what it takes and what it answers with. */
 export const METHODS = {
-  hello: { who: ['member'], params: 'HelloParams', result: 'Hello' },
+  hello: { who: ['member', 'bot', 'botPending'], params: 'HelloParams', result: 'Hello' },
   kithInfo: { who: ['member'], params: 'KithInfoParams', result: 'KithInfo' },
   startChat: { who: ['member'], params: 'StartChatParams', result: 'BotAnswer' },
   send: { who: ['member'], params: 'SendParams', result: 'EntryAnswer' },
@@ -698,6 +854,13 @@ export const METHODS = {
   setBotLimits: { who: ['member'], params: 'SetBotLimitsParams', result: 'BotGuestAnswer' },
   resolveCitation: { who: ['member'], params: 'ResolveCitationParams', result: 'Citation' },
   proveInvite: { who: ['unproven'], params: 'ProveInviteParams', result: 'Proven' },
+  botStatus: { who: ['bot', 'botPending'], params: 'BotStatusParams', result: 'BotSelf' },
+  proveBotInvite: { who: ['bot', 'botPending'], params: 'ProveBotInviteParams', result: 'BotProof' },
+  botAsk: { who: ['bot'], params: 'BotAskParams', result: 'BotAsked' },
+  botThread: { who: ['bot'], params: 'BotThreadParams', result: 'BotThread' },
+  botConversations: { who: ['bot'], params: 'BotConversationsParams', result: 'BotConversations' },
+  botStop: { who: ['bot'], params: 'BotStopParams', result: 'Empty' },
+  botLeave: { who: ['bot'], params: 'BotLeaveParams', result: 'Empty' },
 } as const
 export type MethodName = keyof typeof METHODS
 
@@ -736,6 +899,13 @@ export interface Params {
   setBotLimits: SetBotLimitsParams
   resolveCitation: ResolveCitationParams
   proveInvite: ProveInviteParams
+  botStatus: BotStatusParams
+  proveBotInvite: ProveBotInviteParams
+  botAsk: BotAskParams
+  botThread: BotThreadParams
+  botConversations: BotConversationsParams
+  botStop: BotStopParams
+  botLeave: BotLeaveParams
 }
 
 /** What each method answers with. */
@@ -773,6 +943,13 @@ export interface Results {
   setBotLimits: BotGuestAnswer
   resolveCitation: Citation
   proveInvite: Proven
+  botStatus: BotSelf
+  proveBotInvite: BotProof
+  botAsk: BotAsked
+  botThread: BotThread
+  botConversations: BotConversations
+  botStop: Empty
+  botLeave: Empty
 }
 
 /** What an invited person may call. */
@@ -780,6 +957,12 @@ export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread
 
 /** What an invited person's unproven device may call. */
 export const UNPROVEN_METHODS = ['proveInvite'] as const satisfies readonly MethodName[]
+
+/** What a bot guest (the pending ones too: see botPending) may call. */
+export const BOT_METHODS = ['hello', 'botStatus', 'proveBotInvite', 'botAsk', 'botThread', 'botConversations', 'botStop', 'botLeave'] as const satisfies readonly MethodName[]
+
+/** What a bot guest that is still joining or waiting for its owner's allow may call. */
+export const BOT_PENDING_METHODS = ['hello', 'botStatus', 'proveBotInvite'] as const satisfies readonly MethodName[]
 
 // ---- checking and receiving ----
 
@@ -807,6 +990,9 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     ProjectsBy: { values: ProjectsByValues, unknown: 'inferred' },
     MessageVia: { values: MessageViaValues, unknown: 'unknown' },
     CitationError: { values: CitationErrorValues, unknown: 'not_shared' },
+    ConversationState: { values: ConversationStateValues, unknown: 'running' },
+    BotEntryKind: { values: BotEntryKindValues, unknown: 'unknown' },
+    BotErrorCode: { values: BotErrorCodeValues, unknown: 'unknown' },
   },
   types: {
     Empty: { fields: {} },
@@ -843,6 +1029,15 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotGuest: { fields: { botId: 'string', name: 'string', provider: 'BotProvider', state: 'BotGuestState', ownerPerson: 'string?', ownerName: 'string?', agents: '[string]', limits: 'BotLimits', connected: 'bool', createdAt: 'int', joinedAt: 'int?', decidedAt: 'int?', decidedBy: 'string?', lastSeenAt: 'int?', revokedAt: 'int?', revokedWhy: 'string?', personId: 'string?', conversations: 'json?' }, mayOmit: ['personId', 'conversations'] },
     BotGuests: { fields: { bots: '[BotGuest]' } },
     BotGuestAnswer: { fields: { bot: 'BotGuest?' } },
+    BotOwner: { fields: { name: 'string' } },
+    BotSelf: { fields: { botId: 'string', name: 'string', state: 'BotGuestState', owner: 'BotOwner', agents: '[GrantedAgent]', limits: 'BotLimits', version: 'string', minClient: 'string' } },
+    BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
+    BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
+    BotSender: { fields: { botId: 'string', name: 'string', speaker: 'string?' } },
+    BotEntry: { fields: { id: 'string', seq: 'int', turn: 'int', at: 'int', conversation: 'string', kind: 'BotEntryKind', text: 'string', sender: 'BotSender?', final: 'bool?', error: 'bool?' }, mayOmit: ['sender', 'final', 'error'] },
+    BotThread: { fields: { conversation: 'string', entries: '[BotEntry]', done: 'bool', turn: 'int?', state: 'ConversationState' } },
+    BotConversation: { fields: { conversation: 'string', agent: 'string', ref: 'string?', originLabel: 'string', lastAt: 'int', state: 'ConversationState' } },
+    BotConversations: { fields: { conversations: '[BotConversation]' } },
     HelloParams: { fields: {} },
     KithInfoParams: { fields: { botId: 'string', refresh: 'bool?' } },
     StartChatParams: { fields: { agent: 'string' } },
@@ -876,6 +1071,13 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     SetBotLimitsParams: { fields: { botId: 'string', ratePerHour: 'int?', concurrent: 'int?' } },
     ResolveCitationParams: { fields: { citation: 'string' } },
     ProveInviteParams: { fields: { inviteId: 'string', token: 'string' } },
+    BotStatusParams: { fields: {} },
+    ProveBotInviteParams: { fields: { inviteId: 'string', token: 'string' } },
+    BotAskParams: { fields: { agent: 'string?', text: 'string', conversation: 'string?', ref: 'string?', room: 'string?', speaker: 'string?', clientNonce: 'string', noQueue: 'bool?' } },
+    BotThreadParams: { fields: { conversation: 'string', afterSeq: 'int?', limit: 'int?' } },
+    BotConversationsParams: { fields: { limit: 'int?' } },
+    BotStopParams: { fields: { conversation: 'string' } },
+    BotLeaveParams: { fields: {} },
   },
 }
 

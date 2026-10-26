@@ -1,6 +1,6 @@
 {
   "contract": "host",
-  "doc": "The host's RPC (kith-serve /api, the relay and the local socket): what the host answers and what desktop, web and iOS send it. This part covers what an invited person (a member) may call; the bot guests' methods and the owner's follow. Times are epoch milliseconds. Additive only: see serve/contract/README.md.",
+  "doc": "The host's RPC (kith-serve /api, the relay and the local socket): what the host answers and what desktop, web and iOS send it. This part covers what an invited person (a member) and a bot guest may call; the owner's methods follow. Times are epoch milliseconds. Additive only: see serve/contract/README.md.",
   "enums": {
     "EntryKind": {
       "doc": "What a transcript entry is. One this version doesn't know is its own kind: an app skips it.",
@@ -59,6 +59,21 @@
       "values": ["not_shared"],
       "unknown": "not_shared",
       "names": { "not_shared": "notShared" }
+    },
+    "ConversationState": {
+      "doc": "Where a bot's conversation stands: a turn running, a turn waiting for the owner to approve a step, asks waiting behind a running turn, the last ask stopped, or nothing going on. One this version doesn't know reads as running: a turn is over only when done says so.",
+      "values": ["running", "waitingApproval", "queued", "stopped", "idle"],
+      "unknown": "running"
+    },
+    "BotEntryKind": {
+      "doc": "A transcript entry as a bot sees it: its ask, the agent's words, a notice that ends the turn with an error, or a bare wait for the owner to approve a step. One this version doesn't know is its own kind: a bot skips it.",
+      "values": ["user", "agent", "notice", "waiting"],
+      "unknown": "unknown"
+    },
+    "BotErrorCode": {
+      "doc": "The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status.",
+      "values": ["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany"],
+      "unknown": "unknown"
     }
   },
   "types": {
@@ -299,12 +314,86 @@
       "mayOmit": ["personId", "conversations"]
     },
     "BotGuests": { "fields": { "bots": "[BotGuest]" } },
-    "BotGuestAnswer": { "doc": "The bot after the change; null once it is gone.", "fields": { "bot": "BotGuest?" } }
+    "BotGuestAnswer": { "doc": "The bot after the change; null once it is gone.", "fields": { "bot": "BotGuest?" } },
+    "BotOwner": { "doc": "A bot's owner, by the name people know them by.", "fields": { "name": "string" } },
+    "BotSelf": {
+      "doc": "A bot's own state, owner and agents. The agents are the live answer: none until the bot is allowed, and one its owner lost is gone at once.",
+      "fields": {
+        "botId": "string",
+        "name": "string",
+        "state": "BotGuestState",
+        "owner": "BotOwner",
+        "agents": "[GrantedAgent]",
+        "limits": "BotLimits",
+        "version": "string",
+        "minClient": "string"
+      }
+    },
+    "BotProof": {
+      "doc": "Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.",
+      "fields": { "state": "BotGuestState", "botId": "string?", "owner": "string?", "agents": "[string]?" },
+      "mayOmit": ["botId", "owner", "agents"]
+    },
+    "BotAsked": {
+      "doc": "An ask taken: its conversation, its entry and turn, and whether it runs now or waits (queued: how many asks wait in the conversation). A retry with the same clientNonce answers the same, marked duplicate, and sends nothing.",
+      "fields": {
+        "conversation": "string",
+        "entryId": "string",
+        "turn": "int",
+        "seq": "int",
+        "state": "ConversationState",
+        "queued": "int",
+        "duplicate": "bool?"
+      },
+      "mayOmit": ["duplicate"]
+    },
+    "BotSender": {
+      "doc": "Who sent an ask: the bot, and the person it spoke for when it said.",
+      "fields": { "botId": "string", "name": "string", "speaker": "string?" }
+    },
+    "BotEntry": {
+      "doc": "A transcript entry as a bot sees it: never a thought, a tool call, a plan, an attachment, or a permission card's tool. sender is on an ask a bot sent, final on the agent's words, error on a notice.",
+      "fields": {
+        "id": "string",
+        "seq": "int",
+        "turn": "int",
+        "at": "int",
+        "conversation": "string",
+        "kind": "BotEntryKind",
+        "text": "string",
+        "sender": "BotSender?",
+        "final": "bool?",
+        "error": "bool?"
+      },
+      "mayOmit": ["sender", "final", "error"]
+    },
+    "BotThread": {
+      "doc": "A bot's conversation since afterSeq. done: the last ask has its final answer, an error notice, or was taken back; turn is the last ask's.",
+      "fields": {
+        "conversation": "string",
+        "entries": "[BotEntry]",
+        "done": "bool",
+        "turn": "int?",
+        "state": "ConversationState"
+      }
+    },
+    "BotConversation": {
+      "doc": "One of a bot's conversations, with the external ref it gave it.",
+      "fields": {
+        "conversation": "string",
+        "agent": "string",
+        "ref": "string?",
+        "originLabel": "string",
+        "lastAt": "int",
+        "state": "ConversationState"
+      }
+    },
+    "BotConversations": { "doc": "A bot's conversations, newest first.", "fields": { "conversations": "[BotConversation]" } }
   },
   "methods": {
     "hello": {
-      "doc": "The connection handshake; answered to a member without paths, addresses, backends or screen state.",
-      "who": ["member"],
+      "doc": "The connection handshake; answered to a member or a bot without paths, addresses, backends or screen state, with the agents they hold.",
+      "who": ["member", "bot", "botPending"],
       "params": {},
       "result": "Hello"
     },
@@ -518,6 +607,57 @@
       "who": ["unproven"],
       "params": { "inviteId": "string", "token": "string" },
       "result": "Proven"
+    },
+    "botStatus": {
+      "doc": "A bot's own state, owner and agents; also while it waits to be allowed.",
+      "who": ["bot", "botPending"],
+      "params": {},
+      "result": "BotSelf"
+    },
+    "proveBotInvite": {
+      "doc": "A bot's new key shows the invite token from its link, which the cloud never saw; until then it can call nothing else. Proving twice is fine.",
+      "who": ["bot", "botPending"],
+      "params": { "inviteId": "string", "token": "string" },
+      "result": "BotProof"
+    },
+    "botAsk": {
+      "doc": "Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room is refused (notSupported).",
+      "who": ["bot"],
+      "params": {
+        "agent": "string?",
+        "text": "string",
+        "conversation": "string?",
+        "ref": "string?",
+        "room": "string?",
+        "speaker": "string?",
+        "clientNonce": "string",
+        "noQueue": "bool?"
+      },
+      "result": "BotAsked"
+    },
+    "botThread": {
+      "doc": "What a bot may read of its own conversation, after afterSeq.",
+      "who": ["bot"],
+      "params": { "conversation": "string", "afterSeq": "int?", "limit": "int?" },
+      "result": "BotThread"
+    },
+    "botConversations": {
+      "doc": "A bot's own conversations, newest first.",
+      "who": ["bot"],
+      "params": { "limit": "int?" },
+      "result": "BotConversations"
+    },
+    "botStop": {
+      "doc": "Stops the running turn of the bot's own conversation, and the asks waiting behind it.",
+      "who": ["bot"],
+      "params": { "conversation": "string" },
+      "result": "Empty"
+    },
+    "botLeave": {
+      "doc": "The bot retires itself, as if its owner removed it.",
+      "who": ["bot"],
+      "params": {},
+      "result": "Empty"
     }
   }
 }

@@ -62,8 +62,14 @@ function load(name) {
 /** `json` is a value the contract leaves open (not typed yet): any JSON. */
 const PRIMS = new Set(["string", "int", "bool", "json"]);
 const RESERVED = "unknown";
-/** Who may call a method: an invited person, or their device before it has shown its invite. */
-const ROLES = new Set(["member", "unproven"]);
+/** Who may call a method, each with the words its list is documented with. */
+const ROLE_WHO = {
+  member: "an invited person",
+  unproven: "an invited person's unproven device",
+  bot: "a bot guest (the pending ones too: see botPending)",
+  botPending: "a bot guest that is still joining or waiting for its owner's allow",
+};
+const ROLES = new Set(Object.keys(ROLE_WHO));
 
 /** `[T]?` → { list: true, of: "T", opt: true }; `{T}` is a map of string keys to T. */
 function parse(spec) {
@@ -130,7 +136,9 @@ const screaming = (s) => snake(s).toUpperCase();
 // Rust keywords a field may be: a raw identifier (serde still uses the contract's name).
 const RUST_KEYWORDS = new Set(
   ("as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut " +
-    "pub ref return self static struct super trait true type unsafe use where while").split(" "),
+    "pub ref return self static struct super trait true type unsafe use where while " +
+    // Reserved for later Rust: still not a plain identifier.
+    "abstract become box do final gen macro override priv try typeof unsized virtual yield").split(" "),
 );
 const rsId = (n) => (RUST_KEYWORDS.has(n) ? `r#${n}` : n);
 /** A name a language must use for an enum value (Swift's `none` reads as Optional.none). */
@@ -276,7 +284,7 @@ function tsMethods(L) {
   for (const [name, m] of Object.entries(C.methods)) L.push(`  ${name}: ${m.result}`);
   L.push("}", "");
   for (const [role, ms] of methodsOf()) {
-    L.push(`/** What ${role === "member" ? "an invited person" : "an invited person's unproven device"} may call. */`);
+    L.push(`/** What ${ROLE_WHO[role]} may call. */`);
     L.push(`export const ${screaming(role)}_METHODS = [${ms.map((m) => `'${m}'`).join(", ")}] as const satisfies readonly MethodName[]`, "");
   }
 }
@@ -427,7 +435,7 @@ function swift() {
     for (const name of Object.keys(C.methods)) B.push(`    case ${swId(name)}`);
     B.push("}", "");
     for (const [role, ms] of methodsOf()) {
-      B.push(`/// What ${role === "member" ? "an invited person" : "an invited person's unproven device"} may call.`);
+      B.push(`/// What ${ROLE_WHO[role]} may call.`);
       B.push(`public static let ${role}Methods: [Method] = [${ms.map((m) => `.${m}`).join(", ")}]`, "");
     }
   }
@@ -607,7 +615,7 @@ function rsMethods(L) {
   }
   L.push("}", "");
   for (const [role, ms] of methodsOf()) {
-    L.push(`/// What ${role === "member" ? "an invited person" : "an invited person's unproven device"} may call.`);
+    L.push(`/// What ${ROLE_WHO[role]} may call.`);
     L.push(`pub const ${screaming(role)}_METHODS: &[&str] = &[${ms.map((m) => `method::${screaming(m)}`).join(", ")}];`, "");
   }
   L.push("/// The contract as data, for `crate::check` (the producer's strict check and the consumer's).");

@@ -1,0 +1,25 @@
+{
+  "method": "botStatus",
+  "type": "BotSelf",
+  "body": {
+    "botId": "bg_0ae28df259e8",
+    "name": "Rex",
+    "state": "active",
+    "owner": {
+      "name": "the owner"
+    },
+    "agents": [
+      {
+        "agent": "house",
+        "name": "house",
+        "role": "guest"
+      }
+    ],
+    "limits": {
+      "ratePerHour": 60,
+      "concurrent": 2
+    },
+    "version": "0.1.0",
+    "minClient": "0.0.0"
+  }
+}

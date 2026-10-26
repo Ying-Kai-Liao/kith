@@ -22,10 +22,12 @@ use futures_util::{SinkExt, StreamExt};
 use kith_guest::cli::Cli;
 use kith_guest::output::Out;
 use kith_guest::session::Tuning;
+use kith_wire::check::Mode;
 use kith_wire::crypto::{
     Labels, Opener, Sealer, b64, channel_keys, computer_id, computer_id_raw, hs1_input, random, request_sig_input,
     sha256, sign, transcript_hash, unb64_n, verify, x25519, x25519_pub,
 };
+use kith_wire::rpc::SCHEMA;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -49,6 +51,8 @@ struct Script {
     drop_after_first_event: bool,
     /// Sign the welcome with this key instead of the host key.
     impostor: bool,
+    /// Refuse the relay upgrade with 403, as the cloud does once a bot's device is removed.
+    refuse_upgrade: bool,
     // ---- what happened ----
     accepts: Vec<Value>,
     calls: Vec<(String, Value)>,
@@ -76,6 +80,7 @@ impl Server {
             fail_calls_with: None,
             drop_after_first_event: false,
             impostor: false,
+            refuse_upgrade: false,
             accepts: vec![],
             calls: vec![],
             connections: 0,
@@ -177,17 +182,39 @@ async fn http(mut stream: TcpStream, fake: &Fake) {
     let _ = stream.shutdown().await;
 }
 
+/// The fake host's answer, held to the host contract as the real host's are (producer check): what `kith` is tested
+/// against is what a host may send.
 fn answer(fake: &Fake, method: &str, body: &Value) -> Result<Value, (u16, &'static str, &'static str)> {
+    let answered = answer_unchecked(fake, method, body);
+    if let Ok(ok) = &answered {
+        let m = SCHEMA.method(method).unwrap_or_else(|| panic!("{method} isn't in the host contract"));
+        assert!(m.who.contains(&"bot"), "{method} isn't a bot's");
+        assert_eq!(SCHEMA.check(m.result, ok, Mode::Producer), Vec::<String>::new(), "{method}: {ok:#}");
+    }
+    if let Err((_, code, _)) = &answered
+        && !code.is_empty()
+    {
+        assert!(SCHEMA.enum_schema("BotErrorCode").unwrap().values.contains(code), "{code}");
+    }
+    answered
+}
+
+fn answer_unchecked(fake: &Fake, method: &str, body: &Value) -> Result<Value, (u16, &'static str, &'static str)> {
     let mut s = fake.script.lock().unwrap();
     s.calls.push((method.to_string(), body.clone()));
     if let Some((status, code)) = s.fail_calls_with {
         return Err((status, code, ""));
     }
-    let status = |state: &str| json!({"botId": "bg_1", "name": "Rex", "state": state, "owner": {"name": "Sam"}, "agents": [{"agent": "house", "name": "House"}]});
+    let status = |state: &str| {
+        json!({"botId": "bg_1", "name": "Rex", "state": state, "owner": {"name": "Sam"},
+            "agents": [{"agent": "house", "name": "House", "role": "member"}],
+            "limits": {"ratePerHour": 60, "concurrent": 2}, "version": "0.1.0", "minClient": "0.1.0"})
+    };
     match method {
         "proveBotInvite" => {
             let ok = body["token"] == TOKEN && body["inviteId"] == INVITE;
-            if ok { Ok(json!({"state": s.bot_state})) } else { Err((403, "", "wrong token")) }
+            let first = json!({"state": s.bot_state, "botId": "bg_1", "owner": "Sam", "agents": ["house"]});
+            if ok { Ok(first) } else { Err((403, "", "wrong token")) }
         }
         "botStatus" => Ok(status(s.bot_state)),
         "botAsk" => {
@@ -198,17 +225,17 @@ fn answer(fake: &Fake, method: &str, body: &Value) -> Result<Value, (u16, &'stat
         }
         "botThread" => {
             let entries = if s.final_sent {
-                json!([{"id": "u1", "seq": 10, "turn": 1, "kind": "user", "text": "q", "final": true},
-                       {"id": "a1", "seq": 11, "turn": 1, "kind": "agent", "text": "Hello there", "final": true}])
+                json!([{"id": "u1", "seq": 10, "turn": 1, "at": 1, "conversation": "cv_1", "kind": "user", "text": "q"},
+                       {"id": "a1", "seq": 11, "turn": 1, "at": 2, "conversation": "cv_1", "kind": "agent", "text": "Hello there", "final": true}])
             } else {
                 json!([])
             };
             Ok(
-                json!({"conversation": "cv_1", "entries": entries, "done": s.final_sent, "state": if s.final_sent { "idle" } else { "running" }}),
+                json!({"conversation": "cv_1", "entries": entries, "done": s.final_sent, "turn": 1, "state": if s.final_sent { "idle" } else { "running" }}),
             )
         }
         "botConversations" => Ok(
-            json!({"conversations": [{"conversation": "cv_1", "agent": "house", "originLabel": "from Grok · Sam's Rex", "state": "idle"}]}),
+            json!({"conversations": [{"conversation": "cv_1", "agent": "house", "ref": null, "originLabel": "from Grok · Sam's Rex", "lastAt": 1_700_000_000_000_i64, "state": "idle"}]}),
         ),
         "botLeave" | "botStop" => Ok(json!({})),
         _ => Err((404, "", "no such method")),
@@ -217,9 +244,13 @@ fn answer(fake: &Fake, method: &str, body: &Value) -> Result<Value, (u16, &'stat
 
 async fn ws(stream: TcpStream, fake: &Fake) {
     let mut seen = String::new();
-    let socket = tokio_tungstenite::accept_hdr_async(
+    let refuse = fake.script.lock().unwrap().refuse_upgrade;
+    let accepted = tokio_tungstenite::accept_hdr_async(
         stream,
         |req: &tokio_tungstenite::tungstenite::handshake::server::Request, resp| {
+            if refuse {
+                return Err(tokio_tungstenite::tungstenite::http::Response::builder().status(403).body(None).unwrap());
+            }
             let host = req.headers().get("host").unwrap().to_str().unwrap().to_string();
             let sig = req.headers().get("kith-sig").map(|v| v.to_str().unwrap().to_string()).unwrap_or_default();
             let pq = req.uri().path_and_query().unwrap().to_string();
@@ -227,8 +258,8 @@ async fn ws(stream: TcpStream, fake: &Fake) {
             Ok(resp)
         },
     )
-    .await
-    .unwrap();
+    .await;
+    let Ok(socket) = accepted else { return };
     let (offline, connection, impostor) = {
         let mut s = fake.script.lock().unwrap();
         s.connections += 1;
@@ -295,7 +326,7 @@ async fn ws(stream: TcpStream, fake: &Fake) {
                     };
                     let entry = |seq: u64, text: &str, fin: bool| {
                         json!({"id": id, "ev": {"type": "entry", "conversation": "cv_1",
-                            "entry": {"id": "a1", "seq": seq, "turn": 1, "kind": "agent", "text": text, "final": fin}}})
+                            "entry": {"id": "a1", "seq": seq, "turn": 1, "at": 2, "conversation": "cv_1", "kind": "agent", "text": text, "final": fin}}})
                     };
                     let mut events = vec![entry(11, "Hello", false)];
                     if !cut {
@@ -477,7 +508,9 @@ async fn a_revoked_bot_hears_exit_6_and_remembers_it() {
     let server = Server::start(|_| {}).await;
     let home = tempfile::tempdir().unwrap();
     assert_eq!(kith(&server, home.path(), &["join", &server.link(), "--wait", "5"]).await.0, 0);
-    server.with(|s| s.fail_calls_with = Some((403, "revoked")));
+    // The cloud refuses a removed bot's device at the relay. (The host has no `revoked` error code: a bot it no longer
+    // knows is refused at the channel, and a call on a channel opened before answers 403.)
+    server.with(|s| s.refuse_upgrade = true);
     let (code, _, err) = kith(&server, home.path(), &["ask", "house", "hi"]).await;
     assert_eq!(code, 6);
     assert!(err.contains("Your access to this computer was removed"), "{err}");

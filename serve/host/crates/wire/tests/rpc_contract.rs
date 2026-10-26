@@ -7,8 +7,9 @@
 
 use kith_wire::check::Mode;
 use kith_wire::rpc::{
-    self, AgentRole, BotAnswer, BotGuestState, BotGuests, BotKind, BotProvider, BotStatus, Citation, CitationError,
-    Device, Entries, EntryKind, Hello, Permission, ProjectsBy, SCHEMA, ThreadProjects,
+    self, AgentRole, BotAnswer, BotConversations, BotEntryKind, BotErrorCode, BotGuestState, BotGuests, BotKind,
+    BotProvider, BotSelf, BotStatus, BotThread, Citation, CitationError, ConversationState, Device, Entries, EntryKind,
+    Hello, Permission, ProjectsBy, SCHEMA, ThreadProjects,
 };
 use serde_json::Value;
 use std::fmt::Write as _;
@@ -98,6 +99,19 @@ fn a_newer_hosts_words_read_as_their_enum_declares() {
 }
 
 #[test]
+fn a_newer_hosts_words_to_a_bot_read_as_their_enum_declares() {
+    let thread: BotThread = fixture("unknown", "bot-thread-new-words.json");
+    assert_eq!(thread.entries[0].kind, BotEntryKind::Unknown, "a bot skips a kind it doesn't know");
+    assert_eq!(thread.state, ConversationState::Running, "a state this version doesn't know is a turn still running");
+    let me: BotSelf = fixture("unknown", "bot-status-new-words.json");
+    assert_eq!((me.state, me.agents[0].role), (BotGuestState::Unknown, AgentRole::Guest));
+    let conversations: BotConversations = fixture("unknown", "bot-conversations-new-state.json");
+    assert_eq!(conversations.conversations[0].state, ConversationState::Running);
+    let code: BotErrorCode = serde_json::from_value(serde_json::json!("overQuota")).unwrap();
+    assert_eq!(code, BotErrorCode::Unknown, "a bot acts on the status of an error it doesn't know");
+}
+
+#[test]
 fn an_older_hosts_answers_leave_out_what_it_didnt_have() {
     let hello: Hello = fixture("compat", "hello-before-granted-agents.json");
     assert_eq!(hello.granted_agents, None);
@@ -106,10 +120,15 @@ fn an_older_hosts_answers_leave_out_what_it_didnt_have() {
 }
 
 #[test]
-fn the_member_lists_name_contract_methods() {
-    for m in rpc::MEMBER_METHODS.iter().chain(rpc::UNPROVEN_METHODS) {
+fn the_member_and_bot_lists_name_contract_methods() {
+    let lists = [rpc::MEMBER_METHODS, rpc::UNPROVEN_METHODS, rpc::BOT_METHODS, rpc::BOT_PENDING_METHODS];
+    for m in lists.into_iter().flatten() {
         assert!(SCHEMA.method(m).is_some(), "{m}");
     }
     assert!(rpc::MEMBER_METHODS.contains(&rpc::method::SEND));
     assert_eq!(rpc::UNPROVEN_METHODS, [rpc::method::PROVE_INVITE]);
+    assert!(!rpc::BOT_METHODS.contains(&rpc::method::SEND), "a bot asks; it never sends as a person");
+    for m in rpc::BOT_PENDING_METHODS {
+        assert!(rpc::BOT_METHODS.contains(m), "{m}: a pending bot may call only what an allowed one may");
+    }
 }

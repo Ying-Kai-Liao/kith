@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use kith_wire::rpc::BotErrorCode as Code;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Exit {
@@ -120,33 +122,39 @@ pub struct HostErr {
 }
 
 impl HostErr {
-    /// The default mapping. Callers that know more (an invite proof, an accept) remap before using it.
+    /// The default mapping. Callers that know more (an invite proof, an accept) remap before using it. The host's `code`
+    /// is the contract's `BotErrorCode`; one this version doesn't know (or none) falls back to the HTTP status.
     pub fn into_cli(self) -> CliError {
         let Self { status, code, message, retry_after } = self;
         let retry = retry_after.map(|s| format!(" (retry in {s} s)")).unwrap_or_default();
-        match code.as_deref() {
-            Some("pending") => {
+        let code =
+            code.map_or(Code::Unknown, |c| serde_json::from_value(serde_json::Value::String(c)).unwrap_or_default());
+        match code {
+            Code::Pending => {
                 CliError::new(Exit::Pending, "pending", "Waiting for the computer's owner to allow this bot")
             }
-            Some("revoked") => CliError::removed(),
-            Some("notGranted") => {
+            Code::NotGranted => {
                 CliError::new(Exit::Removed, "notGranted", non_empty(&message, "That agent isn't granted to this bot"))
             }
-            Some("rateLimited") => {
+            Code::RateLimited => {
                 CliError::new(Exit::Busy, "rateLimited", format!("{}{retry}", non_empty(&message, "Rate limited")))
             }
-            Some("busy") => CliError::new(
+            Code::Busy => CliError::new(
                 Exit::Busy,
                 "busy",
                 format!("{}{retry}", non_empty(&message, "That conversation is busy")),
             ),
-            Some("heldByOtherWriter") => CliError::new(
+            Code::HeldByOtherWriter => CliError::new(
                 Exit::Busy,
                 "heldByOtherWriter",
                 non_empty(&message, "Someone took over this conversation in the Kith app"),
             ),
-            Some("unsupportedVersion" | "upgrade") => CliError::version(),
-            _ => match status {
+            Code::NotFound => CliError::new(Exit::Usage, "notFound", non_empty(&message, "Not found")),
+            Code::BadRequest | Code::TooLong | Code::NotSupported => {
+                CliError::new(Exit::Usage, "badRequest", non_empty(&message, "The computer refused the request"))
+            }
+            // The rest say no more than their status does. No wildcard: a new code in the contract is decided on here.
+            Code::Syncing | Code::TooMany | Code::Unknown => match status {
                 401 | 403 => CliError::new(
                     Exit::Removed,
                     "forbidden",
@@ -202,12 +210,15 @@ mod tests {
     #[test]
     fn host_codes_map_to_exits() {
         assert_eq!(host(403, Some("pending")).into_cli().exit, Exit::Pending);
-        assert_eq!(host(403, Some("revoked")).into_cli().exit, Exit::Removed);
         assert_eq!(host(403, Some("notGranted")).into_cli().exit, Exit::Removed);
         assert_eq!(host(429, Some("rateLimited")).into_cli().exit, Exit::Busy);
         assert_eq!(host(409, Some("busy")).into_cli().exit, Exit::Busy);
         assert_eq!(host(409, Some("heldByOtherWriter")).into_cli().exit, Exit::Busy);
-        assert_eq!(host(400, Some("unsupportedVersion")).into_cli().exit, Exit::Version);
+        assert_eq!(host(404, Some("notFound")).into_cli().exit, Exit::Usage);
+        assert_eq!(host(400, Some("tooLong")).into_cli().exit, Exit::Usage);
+        // A code this version doesn't know reads as its status.
+        assert_eq!(host(426, Some("someNewCode")).into_cli().exit, Exit::Version);
+        assert_eq!(host(503, Some("syncing")).into_cli().exit, Exit::Unexpected);
     }
 
     #[test]
@@ -217,11 +228,6 @@ mod tests {
         assert_eq!(host(429, None).into_cli().exit, Exit::Busy);
         assert_eq!(host(426, None).into_cli().exit, Exit::Version);
         assert_eq!(host(500, None).into_cli().exit, Exit::Unexpected);
-    }
-
-    #[test]
-    fn revoked_says_the_documented_words() {
-        assert_eq!(host(403, Some("revoked")).into_cli().message, "Your access to this computer was removed");
     }
 
     #[test]

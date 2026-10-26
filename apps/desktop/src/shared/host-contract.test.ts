@@ -1,12 +1,12 @@
 // The host RPC contract (serve/contract/host/contract.json) as desktop and web read it: the generated file is the
-// contract's, and the member answers of today's host (fixtures/, written by the host's own test from real calls), an
+// contract's, and the member and bot answers of today's host (fixtures/, written by the host's own test from real calls), an
 // older (compat/) and a newer (unknown/) host all read.
 
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
-import { CONTRACT_SHA256, check, MEMBER_METHODS, METHODS, receive, type MethodName, type TypeName } from './host-contract.gen.ts'
+import { BOT_METHODS, BOT_PENDING_METHODS, CONTRACT_SHA256, check, MEMBER_METHODS, METHODS, receive, type MethodName, type TypeName } from './host-contract.gen.ts'
 import { parseGranted } from './mac-role.ts'
 import { asEntry, normalizeBot } from './models.ts'
 
@@ -66,7 +66,16 @@ test("an older host's answers leave out what it didn't have", () => {
   assert.equal(bot.person, undefined)
 })
 
-test('a left-out list reads as empty, and the member list names contract methods', () => {
+test('a left-out list reads as empty, and the member and bot lists name contract methods', () => {
   assert.deepEqual(receive('Entries', {}).entries, [])
   for (const m of MEMBER_METHODS) assert.ok(METHODS[m].who.includes('member'), m)
+  for (const m of BOT_METHODS) assert.ok(METHODS[m].who.includes('bot'), m)
+  for (const m of BOT_PENDING_METHODS) assert.ok(METHODS[m].who.includes('botPending'), m)
+})
+
+test("a newer host's words to a bot read as the contract says", () => {
+  const thread = receive('BotThread', one('unknown/', 'bot-thread-new-words.json').body)
+  assert.deepEqual([thread.entries[0].kind, thread.state], ['unknown', 'running'])
+  const me = receive('BotSelf', one('unknown/', 'bot-status-new-words.json').body)
+  assert.deepEqual([me.state, me.agents[0].role], ['unknown', 'guest'])
 })

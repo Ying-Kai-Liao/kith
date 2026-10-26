@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "e92661788a937ac03d47351c693c335a5f9e7d44fbf3cf0295906327ec952087";
+pub const CONTRACT_SHA256: &str = "ce851f4736935ee5d980c73e627004cd277ae05da7fa15138eb686a8db369f87";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -304,6 +304,114 @@ impl CitationError {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::NotShared => "not_shared",
+        }
+    }
+}
+
+/// Where a bot's conversation stands: a turn running, a turn waiting for the owner to approve a step, asks waiting behind a running turn, the last ask stopped, or nothing going on. One this version doesn't know reads as running: a turn is over only when done says so.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ConversationState {
+    #[serde(rename = "waitingApproval")]
+    WaitingApproval,
+    #[serde(rename = "queued")]
+    Queued,
+    #[serde(rename = "stopped")]
+    Stopped,
+    #[serde(rename = "idle")]
+    Idle,
+    /// Also what a value this version doesn't know is read as.
+    #[default]
+    #[serde(rename = "running", other)]
+    Running,
+}
+
+impl ConversationState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::WaitingApproval => "waitingApproval",
+            Self::Queued => "queued",
+            Self::Stopped => "stopped",
+            Self::Idle => "idle",
+        }
+    }
+}
+
+/// A transcript entry as a bot sees it: its ask, the agent's words, a notice that ends the turn with an error, or a bare wait for the owner to approve a step. One this version doesn't know is its own kind: a bot skips it.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum BotEntryKind {
+    #[serde(rename = "user")]
+    User,
+    #[serde(rename = "agent")]
+    Agent,
+    #[serde(rename = "notice")]
+    Notice,
+    #[serde(rename = "waiting")]
+    Waiting,
+    /// A value this version doesn't know.
+    #[default]
+    #[serde(rename = "unknown", other)]
+    Unknown,
+}
+
+impl BotEntryKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Agent => "agent",
+            Self::Notice => "notice",
+            Self::Waiting => "waiting",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum BotErrorCode {
+    #[serde(rename = "pending")]
+    Pending,
+    #[serde(rename = "notGranted")]
+    NotGranted,
+    #[serde(rename = "rateLimited")]
+    RateLimited,
+    #[serde(rename = "busy")]
+    Busy,
+    #[serde(rename = "notFound")]
+    NotFound,
+    #[serde(rename = "badRequest")]
+    BadRequest,
+    #[serde(rename = "tooLong")]
+    TooLong,
+    #[serde(rename = "notSupported")]
+    NotSupported,
+    #[serde(rename = "syncing")]
+    Syncing,
+    #[serde(rename = "heldByOtherWriter")]
+    HeldByOtherWriter,
+    #[serde(rename = "tooMany")]
+    TooMany,
+    /// A value this version doesn't know.
+    #[default]
+    #[serde(rename = "unknown", other)]
+    Unknown,
+}
+
+impl BotErrorCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::NotGranted => "notGranted",
+            Self::RateLimited => "rateLimited",
+            Self::Busy => "busy",
+            Self::NotFound => "notFound",
+            Self::BadRequest => "badRequest",
+            Self::TooLong => "tooLong",
+            Self::NotSupported => "notSupported",
+            Self::Syncing => "syncing",
+            Self::HeldByOtherWriter => "heldByOtherWriter",
+            Self::TooMany => "tooMany",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -736,6 +844,115 @@ pub struct BotGuestAnswer {
     pub bot: Option<BotGuest>,
 }
 
+/// A bot's owner, by the name people know them by.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotOwner {
+    pub name: String,
+}
+
+/// A bot's own state, owner and agents. The agents are the live answer: none until the bot is allowed, and one its owner lost is gone at once.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSelf {
+    pub bot_id: String,
+    pub name: String,
+    pub state: BotGuestState,
+    pub owner: BotOwner,
+    pub agents: Vec<GrantedAgent>,
+    pub limits: BotLimits,
+    pub version: String,
+    pub min_client: String,
+}
+
+/// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotProof {
+    pub state: BotGuestState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<Vec<String>>,
+}
+
+/// An ask taken: its conversation, its entry and turn, and whether it runs now or waits (queued: how many asks wait in the conversation). A retry with the same clientNonce answers the same, marked duplicate, and sends nothing.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotAsked {
+    pub conversation: String,
+    pub entry_id: String,
+    pub turn: i64,
+    pub seq: i64,
+    pub state: ConversationState,
+    pub queued: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate: Option<bool>,
+}
+
+/// Who sent an ask: the bot, and the person it spoke for when it said.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotSender {
+    pub bot_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+}
+
+/// A transcript entry as a bot sees it: never a thought, a tool call, a plan, an attachment, or a permission card's tool. sender is on an ask a bot sent, final on the agent's words, error on a notice.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotEntry {
+    pub id: String,
+    pub seq: i64,
+    pub turn: i64,
+    pub at: i64,
+    pub conversation: String,
+    pub kind: BotEntryKind,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<BotSender>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#final: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<bool>,
+}
+
+/// A bot's conversation since afterSeq. done: the last ask has its final answer, an error notice, or was taken back; turn is the last ask's.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotThread {
+    pub conversation: String,
+    pub entries: Vec<BotEntry>,
+    pub done: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn: Option<i64>,
+    pub state: ConversationState,
+}
+
+/// One of a bot's conversations, with the external ref it gave it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotConversation {
+    pub conversation: String,
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<String>,
+    pub origin_label: String,
+    pub last_at: i64,
+    pub state: ConversationState,
+}
+
+/// A bot's conversations, newest first.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotConversations {
+    pub conversations: Vec<BotConversation>,
+}
+
 /// What `hello` takes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct HelloParams {}
@@ -1029,9 +1246,71 @@ pub struct ProveInviteParams {
     pub token: String,
 }
 
+/// What `botStatus` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct BotStatusParams {}
+
+/// What `proveBotInvite` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProveBotInviteParams {
+    pub invite_id: String,
+    pub token: String,
+}
+
+/// What `botAsk` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotAskParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub r#ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speaker: Option<String>,
+    pub client_nonce: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_queue: Option<bool>,
+}
+
+/// What `botThread` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotThreadParams {
+    pub conversation: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_seq: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+}
+
+/// What `botConversations` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotConversationsParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
+}
+
+/// What `botStop` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotStopParams {
+    pub conversation: String,
+}
+
+/// What `botLeave` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct BotLeaveParams {}
+
 /// Each method's name, as called.
 pub mod method {
-    /// The connection handshake; answered to a member without paths, addresses, backends or screen state.
+    /// The connection handshake; answered to a member or a bot without paths, addresses, backends or screen state, with the agents they hold.
     pub const HELLO: &str = "hello";
     /// An agent's card, for a chat that is theirs.
     pub const KITH_INFO: &str = "kithInfo";
@@ -1097,6 +1376,20 @@ pub mod method {
     pub const RESOLVE_CITATION: &str = "resolveCitation";
     /// All an invited person's unproven device may call: showing the invite's token.
     pub const PROVE_INVITE: &str = "proveInvite";
+    /// A bot's own state, owner and agents; also while it waits to be allowed.
+    pub const BOT_STATUS: &str = "botStatus";
+    /// A bot's new key shows the invite token from its link, which the cloud never saw; until then it can call nothing else. Proving twice is fine.
+    pub const PROVE_BOT_INVITE: &str = "proveBotInvite";
+    /// Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room is refused (notSupported).
+    pub const BOT_ASK: &str = "botAsk";
+    /// What a bot may read of its own conversation, after afterSeq.
+    pub const BOT_THREAD: &str = "botThread";
+    /// A bot's own conversations, newest first.
+    pub const BOT_CONVERSATIONS: &str = "botConversations";
+    /// Stops the running turn of the bot's own conversation, and the asks waiting behind it.
+    pub const BOT_STOP: &str = "botStop";
+    /// The bot retires itself, as if its owner removed it.
+    pub const BOT_LEAVE: &str = "botLeave";
 }
 
 /// What an invited person may call.
@@ -1104,6 +1397,12 @@ pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::
 
 /// What an invited person's unproven device may call.
 pub const UNPROVEN_METHODS: &[&str] = &[method::PROVE_INVITE];
+
+/// What a bot guest (the pending ones too: see botPending) may call.
+pub const BOT_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE, method::BOT_ASK, method::BOT_THREAD, method::BOT_CONVERSATIONS, method::BOT_STOP, method::BOT_LEAVE];
+
+/// What a bot guest that is still joining or waiting for its owner's allow may call.
+pub const BOT_PENDING_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE];
 
 /// The contract as data, for `crate::check` (the producer's strict check and the consumer's).
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
@@ -1119,6 +1418,9 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::EnumSchema { name: "ProjectsBy", values: &["pinned", "inferred", "person"], unknown: "inferred" },
         crate::check::EnumSchema { name: "MessageVia", values: &["call"], unknown: "unknown" },
         crate::check::EnumSchema { name: "CitationError", values: &["not_shared"], unknown: "not_shared" },
+        crate::check::EnumSchema { name: "ConversationState", values: &["running", "waitingApproval", "queued", "stopped", "idle"], unknown: "running" },
+        crate::check::EnumSchema { name: "BotEntryKind", values: &["user", "agent", "notice", "waiting"], unknown: "unknown" },
+        crate::check::EnumSchema { name: "BotErrorCode", values: &["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany"], unknown: "unknown" },
     ],
     types: &[
         crate::check::TypeSchema { name: "Empty", fields: &[], may_omit: &[] },
@@ -1155,6 +1457,15 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotGuest", fields: &[("botId", "string"), ("name", "string"), ("provider", "BotProvider"), ("state", "BotGuestState"), ("ownerPerson", "string?"), ("ownerName", "string?"), ("agents", "[string]"), ("limits", "BotLimits"), ("connected", "bool"), ("createdAt", "int"), ("joinedAt", "int?"), ("decidedAt", "int?"), ("decidedBy", "string?"), ("lastSeenAt", "int?"), ("revokedAt", "int?"), ("revokedWhy", "string?"), ("personId", "string?"), ("conversations", "json?")], may_omit: &["personId", "conversations"] },
         crate::check::TypeSchema { name: "BotGuests", fields: &[("bots", "[BotGuest]")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotGuestAnswer", fields: &[("bot", "BotGuest?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotOwner", fields: &[("name", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotSelf", fields: &[("botId", "string"), ("name", "string"), ("state", "BotGuestState"), ("owner", "BotOwner"), ("agents", "[GrantedAgent]"), ("limits", "BotLimits"), ("version", "string"), ("minClient", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
+        crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
+        crate::check::TypeSchema { name: "BotSender", fields: &[("botId", "string"), ("name", "string"), ("speaker", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotEntry", fields: &[("id", "string"), ("seq", "int"), ("turn", "int"), ("at", "int"), ("conversation", "string"), ("kind", "BotEntryKind"), ("text", "string"), ("sender", "BotSender?"), ("final", "bool?"), ("error", "bool?")], may_omit: &["sender", "final", "error"] },
+        crate::check::TypeSchema { name: "BotThread", fields: &[("conversation", "string"), ("entries", "[BotEntry]"), ("done", "bool"), ("turn", "int?"), ("state", "ConversationState")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotConversation", fields: &[("conversation", "string"), ("agent", "string"), ("ref", "string?"), ("originLabel", "string"), ("lastAt", "int"), ("state", "ConversationState")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotConversations", fields: &[("conversations", "[BotConversation]")], may_omit: &[] },
         crate::check::TypeSchema { name: "HelloParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "KithInfoParams", fields: &[("botId", "string"), ("refresh", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "StartChatParams", fields: &[("agent", "string")], may_omit: &[] },
@@ -1188,9 +1499,16 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "SetBotLimitsParams", fields: &[("botId", "string"), ("ratePerHour", "int?"), ("concurrent", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "ResolveCitationParams", fields: &[("citation", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "ProveInviteParams", fields: &[("inviteId", "string"), ("token", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotStatusParams", fields: &[], may_omit: &[] },
+        crate::check::TypeSchema { name: "ProveBotInviteParams", fields: &[("inviteId", "string"), ("token", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotAskParams", fields: &[("agent", "string?"), ("text", "string"), ("conversation", "string?"), ("ref", "string?"), ("room", "string?"), ("speaker", "string?"), ("clientNonce", "string"), ("noQueue", "bool?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotThreadParams", fields: &[("conversation", "string"), ("afterSeq", "int?"), ("limit", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotConversationsParams", fields: &[("limit", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotStopParams", fields: &[("conversation", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotLeaveParams", fields: &[], may_omit: &[] },
     ],
     methods: &[
-        crate::check::MethodSchema { name: "hello", who: &["member"], params: "HelloParams", result: "Hello" },
+        crate::check::MethodSchema { name: "hello", who: &["member", "bot", "botPending"], params: "HelloParams", result: "Hello" },
         crate::check::MethodSchema { name: "kithInfo", who: &["member"], params: "KithInfoParams", result: "KithInfo" },
         crate::check::MethodSchema { name: "startChat", who: &["member"], params: "StartChatParams", result: "BotAnswer" },
         crate::check::MethodSchema { name: "send", who: &["member"], params: "SendParams", result: "EntryAnswer" },
@@ -1223,6 +1541,13 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "setBotLimits", who: &["member"], params: "SetBotLimitsParams", result: "BotGuestAnswer" },
         crate::check::MethodSchema { name: "resolveCitation", who: &["member"], params: "ResolveCitationParams", result: "Citation" },
         crate::check::MethodSchema { name: "proveInvite", who: &["unproven"], params: "ProveInviteParams", result: "Proven" },
+        crate::check::MethodSchema { name: "botStatus", who: &["bot", "botPending"], params: "BotStatusParams", result: "BotSelf" },
+        crate::check::MethodSchema { name: "proveBotInvite", who: &["bot", "botPending"], params: "ProveBotInviteParams", result: "BotProof" },
+        crate::check::MethodSchema { name: "botAsk", who: &["bot"], params: "BotAskParams", result: "BotAsked" },
+        crate::check::MethodSchema { name: "botThread", who: &["bot"], params: "BotThreadParams", result: "BotThread" },
+        crate::check::MethodSchema { name: "botConversations", who: &["bot"], params: "BotConversationsParams", result: "BotConversations" },
+        crate::check::MethodSchema { name: "botStop", who: &["bot"], params: "BotStopParams", result: "Empty" },
+        crate::check::MethodSchema { name: "botLeave", who: &["bot"], params: "BotLeaveParams", result: "Empty" },
     ],
 };
 
@@ -1263,6 +1588,15 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotGuest" => serde_json::from_value::<BotGuest>(value).map(drop),
         "BotGuests" => serde_json::from_value::<BotGuests>(value).map(drop),
         "BotGuestAnswer" => serde_json::from_value::<BotGuestAnswer>(value).map(drop),
+        "BotOwner" => serde_json::from_value::<BotOwner>(value).map(drop),
+        "BotSelf" => serde_json::from_value::<BotSelf>(value).map(drop),
+        "BotProof" => serde_json::from_value::<BotProof>(value).map(drop),
+        "BotAsked" => serde_json::from_value::<BotAsked>(value).map(drop),
+        "BotSender" => serde_json::from_value::<BotSender>(value).map(drop),
+        "BotEntry" => serde_json::from_value::<BotEntry>(value).map(drop),
+        "BotThread" => serde_json::from_value::<BotThread>(value).map(drop),
+        "BotConversation" => serde_json::from_value::<BotConversation>(value).map(drop),
+        "BotConversations" => serde_json::from_value::<BotConversations>(value).map(drop),
         "HelloParams" => serde_json::from_value::<HelloParams>(value).map(drop),
         "KithInfoParams" => serde_json::from_value::<KithInfoParams>(value).map(drop),
         "StartChatParams" => serde_json::from_value::<StartChatParams>(value).map(drop),
@@ -1296,6 +1630,13 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "SetBotLimitsParams" => serde_json::from_value::<SetBotLimitsParams>(value).map(drop),
         "ResolveCitationParams" => serde_json::from_value::<ResolveCitationParams>(value).map(drop),
         "ProveInviteParams" => serde_json::from_value::<ProveInviteParams>(value).map(drop),
+        "BotStatusParams" => serde_json::from_value::<BotStatusParams>(value).map(drop),
+        "ProveBotInviteParams" => serde_json::from_value::<ProveBotInviteParams>(value).map(drop),
+        "BotAskParams" => serde_json::from_value::<BotAskParams>(value).map(drop),
+        "BotThreadParams" => serde_json::from_value::<BotThreadParams>(value).map(drop),
+        "BotConversationsParams" => serde_json::from_value::<BotConversationsParams>(value).map(drop),
+        "BotStopParams" => serde_json::from_value::<BotStopParams>(value).map(drop),
+        "BotLeaveParams" => serde_json::from_value::<BotLeaveParams>(value).map(drop),
         _ => return None,
     })
 }

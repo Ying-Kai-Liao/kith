@@ -16,29 +16,13 @@ use std::sync::Arc;
 /// `every_router_method_is_denied_to_members_unless_listed` walks the router to keep it that way.
 pub use kith_wire::rpc::MEMBER_METHODS;
 
-/// The whole of what a bot guest can call (docs/kith-bot-guests.md 5.7), deny by default like [`MEMBER_METHODS`].
-/// `every_router_method_is_denied_to_bots_unless_listed` walks the router to keep it that way. Not here, on purpose:
-/// `respondPermission` (a bot never answers the prompts of its own run: they go to its owner and the Mac owner),
-/// `startChat`, `send`, `thread`, `history` (too wide for a client that can't be upgraded in lockstep; `botAsk` and
-/// `botThread` are the narrow contract), files, projects, and everything the owner or a member has.
-pub const BOT_METHODS: &[&str] = &[
-    // Shaped like a member's (names and keys only), plus the agents it holds.
-    "hello",
-    // Its own state, owner and agents; also while it waits to be allowed.
-    "botStatus",
-    // Showing the invite token; only while joining.
-    "proveBotInvite",
-    // Asking an agent, in a conversation of its own (made on first use).
-    "botAsk",
-    "botThread",
-    "botConversations",
-    "botStop",
-    // The bot retires itself.
-    "botLeave",
-];
-
-/// What a bot that has not been allowed in yet may call.
-pub const BOT_PENDING_METHODS: &[&str] = &["hello", "botStatus", "proveBotInvite"];
+/// The whole of what a bot guest can call (docs/kith-bot-guests.md 5.7), deny by default like [`MEMBER_METHODS`], and
+/// what one that has not been allowed in yet may call: from the host RPC contract, as `bot` and `botPending`, each
+/// method with its reason. `every_router_method_is_denied_to_bots_unless_listed` walks the router to keep it that way.
+/// Not there, on purpose: `respondPermission` (a bot never answers the prompts of its own run: they go to its owner and
+/// the Mac owner), `startChat`, `send`, `thread`, `history` (too wide for a client that can't be upgraded in lockstep;
+/// `botAsk` and `botThread` are the narrow contract), files, projects, and everything the owner or a member has.
+pub use kith_wire::rpc::{BOT_METHODS, BOT_PENDING_METHODS};
 
 pub fn bot_may(method: &str) -> bool {
     BOT_METHODS.contains(&method)
@@ -487,6 +471,7 @@ fn bot_waits_on(store: &Store, bot: &crate::store::BotGuest) -> String {
 /// notice, and a bare "waiting" for a permission card (never its tool or arguments). Thoughts, tool calls, plans,
 /// attachments and every other notice are dropped. `e` is an [`crate::store::Entry`] as JSON.
 pub fn bot_entry(e: &Value, conversation: &str, waits_on: &str) -> Option<Value> {
+    use kith_wire::rpc::BotEntryKind as Kind;
     let data = &e["data"];
     if secret_card(data) {
         return None;
@@ -497,7 +482,7 @@ pub fn bot_entry(e: &Value, conversation: &str, waits_on: &str) -> Option<Value>
     });
     match e["kind"].as_str()? {
         "user" => {
-            out["kind"] = "user".into();
+            out["kind"] = Kind::User.as_str().into();
             out["text"] = text("text").into();
             if data["sender"].is_object() {
                 let s = &data["sender"];
@@ -505,18 +490,18 @@ pub fn bot_entry(e: &Value, conversation: &str, waits_on: &str) -> Option<Value>
             }
         }
         "agent" => {
-            out["kind"] = "agent".into();
+            out["kind"] = Kind::Agent.as_str().into();
             out["text"] = text("text").into();
             out["final"] = (data["final"] == true).into();
         }
         "notice" if data["style"] == "error" => {
-            out["kind"] = "notice".into();
+            out["kind"] = Kind::Notice.as_str().into();
             out["text"] = text("text").into();
             // The client ends the turn on a notice marked as an error.
             out["error"] = true.into();
         }
         "permission" if data["status"] == "pending" => {
-            out["kind"] = "waiting".into();
+            out["kind"] = Kind::Waiting.as_str().into();
             out["text"] = format!("Waiting for {waits_on} to approve a step").into();
         }
         _ => return None,

@@ -1,0 +1,17 @@
+{
+  "method": "botConversations",
+  "type": "BotConversations",
+  "body": {
+    "conversations": [
+      {
+        "conversation": "cv_TyeJsSuD46jZvycm",
+        "agent": "house",
+        "ref": null,
+        "originLabel": "from Grok · the owner's Rex",
+        "lastAt": 1793005407726,
+        "state": "paused",
+        "newField": true
+      }
+    ]
+  }
+}

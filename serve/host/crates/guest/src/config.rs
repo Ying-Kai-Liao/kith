@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine as _;
 use ed25519_dalek::SigningKey;
 use kith_wire::crypto::{b64, unb64_n};
+use kith_wire::rpc::BotGuestState;
 use serde::{Deserialize, Serialize};
 
 use crate::exit::CliError;
@@ -24,14 +25,15 @@ pub enum State {
 }
 
 impl State {
-    pub fn from_wire(s: &str) -> Option<Self> {
+    /// The host's word for the bot's state (the contract's `BotGuestState`). `None` for one this version doesn't know.
+    pub fn of(s: BotGuestState) -> Option<Self> {
         Some(match s {
-            "joining" | "invited" => Self::Joining,
-            "pending" => Self::Pending,
-            "active" => Self::Active,
-            "denied" => Self::Denied,
-            "revoked" => Self::Revoked,
-            _ => return None,
+            BotGuestState::Joining | BotGuestState::Invited => Self::Joining,
+            BotGuestState::Pending => Self::Pending,
+            BotGuestState::Active => Self::Active,
+            BotGuestState::Denied => Self::Denied,
+            BotGuestState::Revoked => Self::Revoked,
+            BotGuestState::Unknown => return None,
         })
     }
 

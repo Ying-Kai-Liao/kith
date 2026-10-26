@@ -17,6 +17,7 @@ use crate::remote::{account, botsync, cloud, crypto};
 use crate::store::{BotConversation, BotGuest, BotInvite, BotState, Entry, EntryKind, Lane, now_ms};
 use anyhow::{Context, Result, anyhow, bail};
 use kith_wire::cloud::{CreateInvite, path};
+use kith_wire::rpc::{BotErrorCode as Code, ConversationState as State};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -49,12 +50,13 @@ const MIN_CLIENT: &str = "0.0.0";
 #[derive(Debug)]
 pub struct BotError {
     pub status: u16,
-    pub code: &'static str,
+    /// The contract's word for it, which a bot acts on; never `Unknown`.
+    pub code: Code,
     pub message: String,
 }
 
 impl BotError {
-    fn err(status: u16, code: &'static str, message: impl Into<String>) -> anyhow::Error {
+    fn err(status: u16, code: Code, message: impl Into<String>) -> anyhow::Error {
         Self { status, code, message: message.into() }.into()
     }
 }
@@ -128,7 +130,7 @@ fn opt_string(b: &Value, k: &str, max: usize) -> Result<Option<String>> {
         Some(s) if s.chars().count() <= max && !s.chars().any(char::is_control) => Ok(Some(s.to_owned())),
         Some(_) => Err(BotError::err(
             400,
-            "badRequest",
+            Code::BadRequest,
             format!("`{k}` is at most {max} characters, without control characters"),
         )),
     }
@@ -295,7 +297,7 @@ async fn new_bot(hub: &Arc<Hub>, actor: &Actor, bin: &Path, owner_id: &str, b: &
     if hub.store.live_bot_count(actor.owner_person()) >= MAX_LIVE_BOTS {
         return Err(BotError::err(
             409,
-            "tooMany",
+            Code::TooMany,
             format!("At most {MAX_LIVE_BOTS} bots at a time. Remove one first."),
         ));
     }
@@ -692,7 +694,7 @@ pub(super) async fn bot_call(
             Err(NotAllowed("This isn't available to bots on this computer.".into()).into())
         }
         Ok(()) if !active && !roles::BOT_PENDING_METHODS.contains(&method) => {
-            Err(BotError::err(403, "pending", "This bot is waiting for its owner's allow."))
+            Err(BotError::err(403, Code::Pending, "This bot is waiting for its owner's allow."))
         }
         Ok(()) => Ok(()),
     };
@@ -715,6 +717,8 @@ pub(super) async fn bot_call(
             shaped["grantedAgents"] = roles::granted_agents(hub, &bot.person_id).await.into();
         }
     }
+    #[cfg(test)]
+    super::answers_as_the_contract_says(if active { "bot" } else { "botPending" }, method, &shaped);
     Ok(shaped)
 }
 
@@ -832,7 +836,7 @@ fn replay(hub: &Hub, bot: &BotGuest, e: &Entry) -> Result<Value> {
         .as_deref()
         .and_then(|root| hub.store.bot_conversation_of_thread(&e.bot_id, root))
         .filter(|c| c.bot_id == bot.bot_id)
-        .ok_or_else(|| BotError::err(404, "notFound", "No such conversation."))?;
+        .ok_or_else(|| BotError::err(404, Code::NotFound, "No such conversation."))?;
     let (state, queued) = conv_state(hub, &conv);
     Ok(json!({
         "conversation": conv.conversation_id, "entryId": e.id, "turn": e.turn, "seq": e.rev,
@@ -842,7 +846,7 @@ fn replay(hub: &Hub, bot: &BotGuest, e: &Entry) -> Result<Value> {
 
 /// Where a conversation stands: `running`, `waitingApproval`, `queued`, `stopped` or `idle`, and how many asks wait
 /// behind the running one.
-fn conv_state(hub: &Hub, conv: &BotConversation) -> (&'static str, usize) {
+fn conv_state(hub: &Hub, conv: &BotConversation) -> (State, usize) {
     let entries = hub.store.thread(&conv.chat_bot_id, &conv.thread_root, 500).unwrap_or_default();
     let users: Vec<&Entry> = entries.iter().filter(|e| e.kind == EntryKind::User.as_str()).collect();
     let queued = users.iter().filter(|e| e.data["status"] == "queued").count();
@@ -855,15 +859,15 @@ fn conv_state(hub: &Hub, conv: &BotConversation) -> (&'static str, usize) {
         .is_some_and(|row| hub.working_lanes(&row.config).contains(&lane));
     let waiting = entries.iter().any(|e| e.kind == EntryKind::Permission.as_str() && e.data["status"] == "pending");
     let state = if working && waiting {
-        "waitingApproval"
+        State::WaitingApproval
     } else if working {
-        "running"
+        State::Running
     } else if queued > 0 {
-        "queued"
+        State::Queued
     } else if users.last().is_some_and(|e| e.data["status"] == "cancelled") {
-        "stopped"
+        State::Stopped
     } else {
-        "idle"
+        State::Idle
     };
     (state, queued)
 }
@@ -886,24 +890,24 @@ static ASK_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// into a conversation between this bot and one agent, made on first use. The question runs as the bot's own person
 /// (guest, at most its owner's access, checked now), in a thread of the bot's chat with that agent.
 async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Result<Value> {
-    let bad = |m: &str| BotError::err(400, "badRequest", m);
+    let bad = |m: &str| BotError::err(400, Code::BadRequest, m);
     let text = b["text"].as_str().map(str::trim).filter(|t| !t.is_empty()).ok_or_else(|| bad("`text` is required"))?;
     if text.chars().count() > MAX_TEXT {
-        return Err(BotError::err(400, "tooLong", format!("A question is at most {MAX_TEXT} characters.")));
+        return Err(BotError::err(400, Code::TooLong, format!("A question is at most {MAX_TEXT} characters.")));
     }
     let nonce = b["clientNonce"].as_str().filter(|n| (1..=128).contains(&n.chars().count()));
     let nonce = nonce.ok_or_else(|| bad("`clientNonce` (1 to 128 characters) is required"))?;
     let external = opt_string(b, "ref", 128)?;
     let speaker = opt_string(b, "speaker", 128)?;
     if !b["room"].is_null() {
-        return Err(BotError::err(400, "notSupported", "Rooms aren't available on this computer yet."));
+        return Err(BotError::err(400, Code::NotSupported, "Rooms aren't available on this computer yet."));
     }
     let no_queue = b["noQueue"] == true;
     // The cloud may have just recorded a revoke of the bot's owner: no turn starts until this host has applied it.
     if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
         return Err(BotError::err(
             503,
-            "syncing",
+            Code::Syncing,
             "This computer is catching up with the Kith cloud. Try again in a moment.",
         ));
     }
@@ -915,7 +919,7 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
             hub.store
                 .bot_conversation_by_id(id)
                 .filter(|c| c.bot_id == bot.bot_id)
-                .ok_or_else(|| BotError::err(404, "notFound", "No such conversation."))?,
+                .ok_or_else(|| BotError::err(404, Code::NotFound, "No such conversation."))?,
         ),
         None => external.as_deref().and_then(|r| hub.store.bot_conversation_by_ref(&bot.bot_id, r)),
     };
@@ -928,7 +932,7 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     };
     // At most its owner's, now: an owner who lost the agent has taken it from the bot too.
     if !roles::may_use(&bot.person_id, &agent).await {
-        return Err(BotError::err(403, "notGranted", format!("This bot may not use {agent}.")));
+        return Err(BotError::err(403, Code::NotGranted, format!("This bot may not use {agent}.")));
     }
     // A retry of an ask already sent answers the same and sends nothing.
     let chat = known.as_ref().map(|c| c.chat_bot_id.clone()).or_else(|| chat_row_of(hub, &bot.person_id, &agent));
@@ -939,35 +943,39 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     if hub.store.audit_count_since(&bot.person_id, "botAsk", now - HOUR_MS) >= bot.rate_per_hour {
         return Err(BotError::err(
             429,
-            "rateLimited",
+            Code::RateLimited,
             format!("This bot has asked {} times in the last hour. Try again in a few minutes.", bot.rate_per_hour),
         ));
     }
-    let (state, queued) = known.as_ref().map_or(("idle", 0), |c| conv_state(hub, c));
-    let busy = !matches!(state, "idle" | "stopped");
+    let (state, queued) = known.as_ref().map_or((State::Idle, 0), |c| conv_state(hub, c));
+    let busy = !matches!(state, State::Idle | State::Stopped);
     if busy {
-        let pending = queued + usize::from(state != "queued");
+        let pending = queued + usize::from(state != State::Queued);
         if no_queue {
-            return Err(BotError::err(409, "busy", "A turn of this conversation is still running."));
+            return Err(BotError::err(409, Code::Busy, "A turn of this conversation is still running."));
         }
         if pending >= MAX_PENDING {
-            return Err(BotError::err(429, "busy", "This conversation already has five asks waiting."));
+            return Err(BotError::err(429, Code::Busy, "This conversation already has five asks waiting."));
         }
     } else {
         let mut running = 0;
         for c in hub.store.bot_conversations_of(&bot.bot_id, RECENT_CONVERSATIONS)? {
-            running += i64::from(!matches!(conv_state(hub, &c).0, "idle" | "stopped" | "queued"));
+            running += i64::from(!matches!(conv_state(hub, &c).0, State::Idle | State::Stopped | State::Queued));
         }
         if running >= bot.concurrent {
-            return Err(BotError::err(429, "busy", format!("This bot already has {} turns running.", bot.concurrent)));
+            return Err(BotError::err(
+                429,
+                Code::Busy,
+                format!("This bot already has {} turns running.", bot.concurrent),
+            ));
         }
     }
     // One writer per thread: a terminal or a take-over holding the conversation's thread refuses, it doesn't queue (the
     // queue above is for the bot's own turns). A new conversation has no thread yet. `liveWriter` is display only.
     if let Some(c) = &known {
-        crate::terminal::bot_gate(hub, &c.chat_bot_id, &c.thread_root)
-            .await
-            .map_err(|e| BotError::err(409, e.code, "Something else is writing to this conversation right now."))?;
+        crate::terminal::bot_gate(hub, &c.chat_bot_id, &c.thread_root).await.map_err(|_| {
+            BotError::err(409, Code::HeldByOtherWriter, "Something else is writing to this conversation right now.")
+        })?;
     }
 
     let chat = match chat {
@@ -999,7 +1007,7 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     set_writer(hub, &chat, &conv.thread_root, Some("bot"));
     Ok(json!({
         "conversation": conv.conversation_id, "entryId": entry.id, "turn": turn, "seq": entry.rev,
-        "state": if busy { "queued" } else { "running" }, "queued": queued + usize::from(busy && state != "queued"),
+        "state": if busy { State::Queued } else { State::Running }, "queued": queued + usize::from(busy && state != State::Queued),
     }))
 }
 
@@ -1080,7 +1088,7 @@ fn own_conversation(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<BotConversat
     let id = b["conversation"].as_str().filter(|c| !c.is_empty());
     id.and_then(|id| hub.store.bot_conversation_by_id(id))
         .filter(|c| c.bot_id == bot.bot_id)
-        .ok_or_else(|| BotError::err(404, "notFound", "No such conversation."))
+        .ok_or_else(|| BotError::err(404, Code::NotFound, "No such conversation."))
 }
 
 /// `botThread {conversation, afterSeq?, limit?}`: what a bot may read of its own conversation (docs 5.8).
@@ -1091,12 +1099,12 @@ async fn thread(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
     if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
         return Err(BotError::err(
             503,
-            "syncing",
+            Code::Syncing,
             "This computer is catching up with the Kith cloud. Try again in a moment.",
         ));
     }
     if !roles::may_use(&bot.person_id, &conv.agent).await {
-        return Err(BotError::err(403, "notGranted", format!("This bot may not use {}.", conv.agent)));
+        return Err(BotError::err(403, Code::NotGranted, format!("This bot may not use {}.", conv.agent)));
     }
     let after = b["afterSeq"].as_i64().unwrap_or(0);
     let limit = b["limit"].as_i64().unwrap_or(200).clamp(1, 500);
