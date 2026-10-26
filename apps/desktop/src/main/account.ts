@@ -200,7 +200,8 @@ export class AccountService extends EventEmitter {
       const form = new FormData()
       form.append('file', new Blob([bytes], { type }), 'profile')
       const before = this.state.user?.avatarURL
-      await this.request('POST', '/v1/me/profile_image', form)
+      // clerk-js 6.40.1 adds _clerk_session_id to every path but /client and /waitlist.
+      await this.request('POST', '/v1/me/profile_image', form, { _clerk_session_id: this.activeSession!.id })
       await this.refreshClient()
       // Clerk normally issues a new URL for a new image; if it didn't, the old cached picture would stay.
       const user = this.state.user
