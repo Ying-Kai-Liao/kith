@@ -73,13 +73,13 @@ const MAIN_CLOUD: &str = "https://api.kithbot.app";
 /// Where people open shared links for the production cloud (the apex serves the invite pages).
 const MAIN_LINKS: &str = "https://kithbot.app";
 
-fn default_url() -> Option<String> {
+fn default_url() -> String {
     use crate::environment::Environment;
     let url = match Environment::current() {
         Environment::Dev => DEV_RELAY,
-        _ => MAIN_CLOUD,
+        Environment::Main => MAIN_CLOUD,
     };
-    Some(url.to_owned())
+    url.to_owned()
 }
 
 /// The base that shareable pages (`/i/<computer>/<invite>`) live under: the production cloud's apex
@@ -110,7 +110,7 @@ pub fn url(store: &Store) -> Option<String> {
     if cfg!(test) {
         return store.kv_get("test_cloud_url");
     }
-    pick(env_url(), || relay_url_from(&crate::service::data_dir().join("config.json")), default_url)
+    pick(env_url(), || relay_url_from(&crate::service::data_dir().join("config.json")), || Some(default_url()))
 }
 
 /// Why the cloud has no URL, for the status: `None` when it is off on purpose or has one.
