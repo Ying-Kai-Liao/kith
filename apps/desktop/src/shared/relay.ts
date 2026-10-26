@@ -48,3 +48,46 @@ export interface AccessTicket {
 }
 
 export type AccessProgress = 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled'
+
+/**
+ * This account's part in a computer, from the cloud's row. Absent (a cloud from before invites) is the owner; a role this
+ * version doesn't know gets the least, so nothing owner-only shows for it (as on iOS, `ComputerRole`).
+ */
+export function cloudRole(raw: unknown): 'owner' | 'member' {
+  if (raw === undefined || raw === null) return 'owner'
+  return raw === 'owner' ? 'owner' : 'member'
+}
+
+/** The cloud's `access` word; one this version doesn't know is not access. */
+export function cloudAccess(raw: unknown): RelayComputer['access'] {
+  return raw === 'granted' || raw === 'pending' || raw === 'none' ? raw : null
+}
+
+/** One `GET /v1/computers` row, the same for the desktop main process and the web app. Null without a computer id. */
+export function relayComputer(c: Record<string, unknown>): RelayComputer | null {
+  if (typeof c.computerId !== 'string') return null
+  return {
+    computerId: c.computerId,
+    name: typeof c.name === 'string' ? c.name : 'Mac',
+    role: cloudRole(c.role),
+    platform: typeof c.platform === 'string' ? c.platform : '',
+    signKey: typeof c.signKey === 'string' ? c.signKey : '',
+    online: c.online === true,
+    access: cloudAccess(c.access),
+  }
+}
+
+/** The rows of a `GET /v1/computers` answer. */
+export function relayComputers(body: unknown): RelayComputer[] {
+  const rows = (body as { computers?: unknown } | null)?.computers
+  if (!Array.isArray(rows)) return []
+  return rows.flatMap((r) => {
+    const c = r && typeof r === 'object' ? relayComputer(r as Record<string, unknown>) : null
+    return c ? [c] : []
+  })
+}
+
+/** `GET /v1/access-requests/:id`'s `status`. A state this version doesn't know is over as far as it can tell (as on iOS). */
+export function accessProgress(raw: unknown): AccessProgress {
+  return raw === 'pending' || raw === 'approved' || raw === 'denied' || raw === 'cancelled' ? raw : 'expired'
+}
