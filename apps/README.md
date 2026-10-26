@@ -38,7 +38,7 @@ alone. To turn them on, set two variables in the environment of the build (or of
 - `KITH_CLERK_PUBLISHABLE_KEY`: the Kith Clerk app's publishable key (`pk_test_…` / `pk_live_…`), with
   Google, Apple and GitHub enabled and `kith://callback` and `kith-dev://callback` (plus the iOS
   bundle ids' `://callback`) in its native redirect allowlist.
-- `KITH_CLOUD_URL`: the Kith cloud's `https://` address.
+- `KITH_CLOUD_URL`: the Kith cloud's `https://` address (`https://api.kithbot.app` for Main builds).
 
 The desktop build writes them into `resources/account-config.json` (`tools/account-config.mjs`, run by
 `npm run dev` and `dist:*`); the iOS build patches them into the app's `AccountConfig.plist` in the

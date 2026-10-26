@@ -96,6 +96,20 @@ Cloudflare login; the rest are one-line commands. Nothing secret goes in the rep
 
 The rule stays: the cloud can only shorten a device's access, never grant it; the host decides.
 
+### Production on kithbot.app
+
+`--env kith` is the production cloud. It serves two Cloudflare custom domains: `api.kithbot.app` (the API; check with
+`curl https://api.kithbot.app/v1/health`) and the apex `kithbot.app`, which for now serves only the invite pages
+(`https://kithbot.app/i/<computerId>/<inviteId>#t=<token>`, the page that opens Kith; the token stays in the fragment
+and never reaches the cloud). A landing page comes later.
+
+- Clerk webhook endpoint: `https://api.kithbot.app/v1/webhooks/clerk` (events `user.deleted`, `user.updated`).
+- The Clerk production instance runs on kithbot.app (issuer `https://clerk.kithbot.app`). Add the CNAME records Clerk
+  lists in Cloudflare DNS as **DNS only** (grey cloud, not proxied), or Clerk cannot verify or issue certificates.
+- Main app builds use `KITH_CLOUD_URL=https://api.kithbot.app` with the `pk_live_...` publishable key from the Clerk dashboard (never committed). A Main host
+  also defaults to `https://api.kithbot.app` when no URL is set.
+- Deploy: `npx wrangler deploy --env kith`.
+
 ### Kith accounts on kith-dev
 
 The dev worker takes sign-ins from the Kith Clerk development instance (application `Kith`, instance

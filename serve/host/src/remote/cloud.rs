@@ -66,12 +66,27 @@ fn env_url() -> Option<String> {
         .filter(|u| valid_url(&format!("{u}/")))
 }
 
-/// The relay a Dev build uses when nothing else is set (the relay is public). Main has none.
+/// The relay a Dev build uses when nothing else is set (the relay is public).
 const DEV_RELAY: &str = "https://kith-cloud-dev.lykevin890919.workers.dev";
+/// The production cloud a Main build uses when nothing else is set.
+const MAIN_CLOUD: &str = "https://api.kithbot.app";
+/// Where people open shared links for the production cloud (the apex serves the invite pages).
+const MAIN_LINKS: &str = "https://kithbot.app";
 
 fn default_url() -> Option<String> {
-    matches!(crate::environment::Environment::current(), crate::environment::Environment::Dev)
-        .then(|| DEV_RELAY.to_owned())
+    use crate::environment::Environment;
+    let url = match Environment::current() {
+        Environment::Dev => DEV_RELAY,
+        _ => MAIN_CLOUD,
+    };
+    Some(url.to_owned())
+}
+
+/// The base that shareable pages (`/i/<computer>/<invite>`) live under: the production cloud's apex
+/// domain, or any other cloud's own URL.
+pub fn links_base(cloud_url: &str) -> String {
+    let trimmed = cloud_url.trim().trim_end_matches('/');
+    if trimmed == MAIN_CLOUD { MAIN_LINKS.to_owned() } else { trimmed.to_owned() }
 }
 
 /// The first of the environment's URL, the config file's, the build's default.
@@ -86,8 +101,7 @@ fn pick(
 
 /// The cloud base URL in use, or `None` when the cloud is off or no relay URL is set.
 /// `KITH_SERVE_CLOUD=off` > turned off here > `KITH_SERVE_CLOUD_URL` > `relay_url` in
-/// `<data dir>/config.json` > the built-in Dev relay (a Main build has none: the cloud stays off
-/// without a URL). The URL is never saved in the store: on/off is the only stored cloud setting.
+/// `<data dir>/config.json` > the build's built-in cloud (the Dev relay, or api.kithbot.app on Main). The URL is never saved in the store: on/off is the only stored cloud setting.
 /// Unit tests point at a fake cloud through kv `test_cloud_url`, so they never reach a real one.
 pub fn url(store: &Store) -> Option<String> {
     if switched_off(store) {
@@ -878,7 +892,7 @@ mod tests {
         assert_eq!(pick(s("e"), || s("c"), || s("d")), s("e"));
         assert_eq!(pick(None, || s("c"), || s("d")), s("c"));
         assert_eq!(pick(None, || None, || s("d")), s("d"));
-        assert_eq!(pick(None, || None, || None), None, "a Main build has no default");
+        assert_eq!(pick(None, || None, || None), None);
         assert_eq!(
             pick(
                 s("e"),
@@ -888,6 +902,15 @@ mod tests {
             s("e")
         );
         assert!(valid_url(&format!("{DEV_RELAY}/")));
+    }
+
+    #[test]
+    fn main_defaults_to_the_production_cloud_and_links_use_the_apex() {
+        assert!(valid_url(&format!("{MAIN_CLOUD}/")));
+        assert_eq!(links_base("https://api.kithbot.app"), "https://kithbot.app");
+        assert_eq!(links_base("https://api.kithbot.app/"), "https://kithbot.app");
+        assert_eq!(links_base(DEV_RELAY), DEV_RELAY);
+        assert_eq!(links_base("http://127.0.0.1:8787/"), "http://127.0.0.1:8787");
     }
 
     #[derive(Default)]

@@ -19,6 +19,13 @@ export function parseInviteLink(url: string, schemes: readonly string[]): Invite
     return null
   }
   const scheme = parsed.protocol.replace(/:$/, '').toLowerCase()
+  // A pasted page link: https://<host>/i/<computerId>/<inviteId>#t=<token> (the token stays in the fragment).
+  if (scheme === 'https') {
+    const m = /^\/i\/([^/]+)\/([^/]+)\/?$/.exec(parsed.pathname)
+    const t = new URLSearchParams(parsed.hash.replace(/^#/, '')).get('t')
+    if (!m || !t || !ID.test(m[1]) || !ID.test(m[2]) || !TOKEN.test(t)) return null
+    return { computerId: m[1], inviteId: m[2], token: t }
+  }
   if (!schemes.some((s) => s.toLowerCase() === scheme)) return null
   // `kith://invite?...` reads as host "invite"; some platforms deliver `kith:invite?...` or `kith:///invite`.
   const where = (parsed.hostname || parsed.pathname.replace(/^\/+/, '')).toLowerCase().replace(/\/+$/, '')
