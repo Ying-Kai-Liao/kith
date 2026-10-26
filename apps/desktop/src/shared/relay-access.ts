@@ -27,6 +27,8 @@ const nap = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 /** Asks a Mac for this device's access and waits for the answer. Throws the cloud's words when asking itself fails. */
 export async function askForAccess(api: RelayApi, c: { computerId: string; signKey: string }, o: WaitOptions = {}): Promise<AccessOutcome> {
   const res = await api.requestAccess(c.computerId, c.signKey)
+  // The cloud's 409 here is "This device already has access": the answer asking would wait for.
+  if (!res.ok && res.error.status === 409) return 'approved'
   if (!res.ok) throw new Error(res.error.message ?? "Couldn't ask the Mac for access.")
   const ticket = res.value
   o.onCode?.(ticket)
@@ -65,7 +67,7 @@ export function relayJoinDeps(
     ...base,
     async requestAccess(computerId) {
       const c = await find(api, computerId)
-      if (c.access === 'approved') return
+      if (c.access === 'granted') return
       // Right after the cloud accept the Mac may not have heard of the new member yet and turns the request down:
       // asking again a few seconds later is the same request done properly.
       const sleep = wait.sleep ?? nap

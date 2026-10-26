@@ -97,9 +97,49 @@ test('the join over the relay: token kept, then access, then proveInvite as the 
   assert.deepEqual(accepted, [await inviteProof(link.token)])
 })
 
+test('a device the cloud lists as granted joins without asking again', async () => {
+  const log: string[] = []
+  const api = {
+    computers: async () => ({ ok: true, value: [{ computerId: 'cmp_1', name: 'M', role: 'member', platform: '', signKey: 'k', online: true, access: 'granted' }] }),
+    requestAccess: async () => (log.push('request'), { ok: false, error: { status: 409, code: 'conflict', message: 'This device already has access' } }),
+    state: async () => ({ kind: 'ready' }),
+    call: async (_c: string, _k: string, method: string) => (log.push(`host:${method}`), { proven: true }),
+  } as unknown as RelayApi
+  const deps = relayJoinDeps(api, { signedIn: () => true, waitForSignIn: async () => {}, accept: async () => ({ computerId: 'cmp_1' }), keepToken: async () => {} })
+  const end = await runJoin({ computerId: 'cmp_1', inviteId: 'i', token: 'y'.repeat(24) }, deps, () => {})
+  assert.equal(end.step, 'done')
+  assert.deepEqual(log, ['host:proveInvite'])
+})
+
+test('asking again when the cloud says this device already has access counts as approved', async () => {
+  const log: string[] = []
+  const api = {
+    // The list was read before the grant landed: it still says none, and the ask meets the grant.
+    computers: async () => ({ ok: true, value: [{ computerId: 'cmp_1', name: 'M', role: 'member', platform: '', signKey: 'k', online: true, access: 'none' }] }),
+    requestAccess: async () => (log.push('request'), { ok: false, error: { status: 409, code: 'conflict', message: 'This device already has access' } }),
+    state: async () => ({ kind: 'ready' }),
+    call: async (_c: string, _k: string, method: string) => (log.push(`host:${method}`), { proven: true }),
+  } as unknown as RelayApi
+  const deps = relayJoinDeps(api, { signedIn: () => true, waitForSignIn: async () => {}, accept: async () => ({ computerId: 'cmp_1' }), keepToken: async () => {} })
+  const end = await runJoin({ computerId: 'cmp_1', inviteId: 'i', token: 'y'.repeat(24) }, deps, () => {})
+  assert.equal(end.step, 'done')
+  assert.deepEqual(log, ['request', 'host:proveInvite'])
+})
+
+test('other failures to ask still end the join', async () => {
+  const api = {
+    computers: async () => ({ ok: true, value: [{ computerId: 'cmp_1', name: 'M', role: 'member', platform: '', signKey: 'k', online: true, access: 'none' }] }),
+    requestAccess: async () => ({ ok: false, error: { status: 429, code: 'rateLimited', message: 'Too many requests' } }),
+  } as unknown as RelayApi
+  const deps = relayJoinDeps(api, { signedIn: () => true, waitForSignIn: async () => {}, accept: async () => ({ computerId: 'cmp_1' }), keepToken: async () => {} })
+  const end = await runJoin({ computerId: 'cmp_1', inviteId: 'i', token: 'y'.repeat(24) }, deps, () => {})
+  assert.equal(end.step, 'failed')
+  assert.equal(end.message, 'Too many requests')
+})
+
 test('an offline Mac waits instead of failing', async () => {
   const api = {
-    computers: async () => ({ ok: true, value: [{ computerId: 'cmp_1', name: 'M', role: 'member', platform: '', signKey: 'k', online: false, access: 'approved' }] }),
+    computers: async () => ({ ok: true, value: [{ computerId: 'cmp_1', name: 'M', role: 'member', platform: '', signKey: 'k', online: false, access: 'granted' }] }),
   } as unknown as RelayApi
   const deps = relayJoinDeps(api, { signedIn: () => true, waitForSignIn: async () => {}, accept: async () => ({ computerId: 'cmp_1' }), keepToken: async () => {} })
   const end = await runJoin({ computerId: 'cmp_1', inviteId: 'i', token: 'y'.repeat(24) }, deps, () => {})

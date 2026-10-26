@@ -35,8 +35,8 @@ export interface RelayComputer {
   platform: string
   signKey: string
   online: boolean
-  /** `approved` once this device may connect; `none` before (the cloud's word). */
-  access: string | null
+  /** The cloud's word: `granted` once this device may connect, `pending` while it asks, `none` before; null without a device. */
+  access: 'granted' | 'pending' | 'none' | null
 }
 
 /** A pending request for this device to join a Mac; `code` is the six digits the owner checks on the Mac. */
