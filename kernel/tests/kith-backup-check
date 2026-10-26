@@ -26,9 +26,9 @@ case "$1 $2" in
   "auth status") [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.fake-login" ] && { echo '{"loggedIn":true}'; exit 0; }; echo '{"loggedIn":false}'; exit 1 ;;
   "auth login") mkdir -p "$CLAUDE_CONFIG_DIR" && touch "$CLAUDE_CONFIG_DIR/.fake-login"; echo "fake claude login in $CLAUDE_CONFIG_DIR" ;;
   *) # a real run: say which login it is on, and whether its settings carry an apiKeyHelper
-     helper=none; prev=
-     for a in "$@"; do [ "$prev" = --settings ] && [ -f "$a" ] && grep -q apiKeyHelper "$a" && helper=set; prev=$a; done
-     echo "claude-run config=${CLAUDE_CONFIG_DIR:-} provider=$KITH_PROVIDER account=$KITH_ACCOUNT helper=$helper" ;;
+     helper=none; prev=; resume=none
+     for a in "$@"; do [ "$prev" = --settings ] && [ -f "$a" ] && grep -q apiKeyHelper "$a" && helper=set; [ "$prev" = --resume ] && resume=$a; prev=$a; done
+     echo "claude-run config=${CLAUDE_CONFIG_DIR:-} provider=$KITH_PROVIDER account=$KITH_ACCOUNT helper=$helper resume=$resume id=${KITH_ACCOUNT_ID:-}" ;;
 esac
 EOF
 cat > "$T/bin/codex" <<'EOF'
@@ -237,6 +237,92 @@ OUT=$(KITH_PERSON=guest "$KITH" echo --backup claude:work "hi" 2>/dev/null)
 check "a person's run on claude:<name> works" "echo \"\$OUT\" | grep -q 'claude-run config=$M/accounts/claude/work'"
 OUT=$("$KITH" echo "hi" 2>/dev/null)
 check "a plain run is unchanged: no config dir, claude as provider" "echo \"\$OUT\" | grep -q 'claude-run config= provider=claude account= helper=none'"
+
+# --- the main account (kith account use) -------------------------------------------------------------------------------
+rm -f "$SET"
+mkdir -p "$KITH_HOME/agents/cx/role"
+printf -- '---\nname: cx\ndescription: codex test agent\nharness: codex\n---\nYou code.\n' > "$KITH_HOME/agents/cx/role/agent.md"
+OUT=$("$KITH" echo --launch-json 2>/dev/null)
+check "main: none chosen, the default login: account_id claude, no config dir" "is \"(d['account_id'], d['account'], 'CLAUDE_CONFIG_DIR' in d['env'])\" \"('claude', None, False)\""
+OUT=$("$KITH" account use --agent echo --json); check "main: use --json says default" "is \"(d['id'], d['source'], d['ready'])\" \"('claude', 'default', True)\""
+"$KITH" account use codex --agent echo >/dev/null 2>"$T/err"; rc=$?
+check "main: another harness's id is refused for an agent" "[ $rc = 2 ] && grep -q \"can't be the main account of a claude agent\" $T/err && [ ! -e '$SET' ]"
+"$KITH" account use claude:work --agent nobody >/dev/null 2>&1; rc=$?; check "main: unknown agent refused" "[ $rc = 2 ]"
+"$KITH" account use 'bad id' >/dev/null 2>&1; rc=$?; check "main: bad id refused" "[ $rc = 2 ] && [ ! -e '$SET' ]"
+"$KITH" account use claude:work --agent echo >/dev/null 2>&1
+check "main: use writes agents.echo.account" "[ \"\$(st \"d['agents']['echo']['account']\")\" = claude:work ]"
+printf '%s\n' "$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); d["backups"]=["claude:work","codex","codex","claude"]; print(json.dumps(d))' "$SET")" > "$SET"
+OUT=$("$KITH" echo --backups-json)
+check "main: chain[0] is the main account, kind primary; it and repeats are dropped later; plain claude is a backup" "is \"[(c['id'], c['kind']) for c in d['chain']]\" \"[('claude:work', 'primary'), ('codex', 'subscription'), ('claude', 'subscription')]\""
+check "main: the default login as a backup has its real readiness" "is \"(d['chain'][0]['ready'], d['chain'][2]['ready'], d['chain'][2]['why'])\" \"(True, False, 'not logged in')\""
+OUT=$("$KITH" backup list --agent echo --json); check "main: backup list --json carries the main account" "is \"(d['main']['id'], d['main']['source'], d['main']['ready'])\" \"('claude:work', 'agent', True)\""
+OUT=$("$KITH" echo --launch-json 2>/dev/null)
+check "main claude:<name>: launch-json on its config dir, no --backup" "is \"(d['backup'], d['account_id'], d['account'], d['env']['CLAUDE_CONFIG_DIR'], d['env']['KITH_ACCOUNT_ID'], 'apiKeyHelper' in d['settings'])\" \"(None, 'claude:work', 'work', '$M/accounts/claude/work', 'claude:work', False)\""
+OUT=$("$KITH" echo "hi" 2>/dev/null)
+check "main claude:<name>: a terminal/one-shot run uses it" "echo \"\$OUT\" | grep -q 'claude-run config=$M/accounts/claude/work provider=claude account=work helper=none resume=none id=claude:work'"
+OUT=$("$KITH" echo --launch-json --backup codex:deep 2>/dev/null)
+check "main + --backup: the backup wins, its own id" "is \"(d['backup'], d['account_id'], 'CLAUDE_CONFIG_DIR' in d['env'], d['env']['CODEX_HOME'])\" \"('codex:deep', 'codex:deep', False, '$M/accounts/codex/deep')\""
+OUT=$("$KITH" echo --launch-json --backup claude 2>/dev/null); rc=$?
+check "main + --backup claude (the default login) not logged in: exit 4" "[ $rc = 4 ]"
+touch "$HOME/.claude/.fake-login" 2>/dev/null || { mkdir -p "$HOME/.claude"; touch "$HOME/.claude/.fake-login"; }
+OUT=$("$KITH" echo --launch-json --backup claude 2>/dev/null)
+check "main + --backup claude: the default login, no config dir" "is \"(d['backup'], d['account_id'], 'CLAUDE_CONFIG_DIR' in d['env'])\" \"('claude', 'claude', False)\""
+OUT=$(CLAUDE_CONFIG_DIR=$M/accounts/claude/work KITH_ACCOUNT_VAR=CLAUDE_CONFIG_DIR "$KITH" echo --backup claude "hi" 2>/dev/null)
+check "a config dir a kith run set is not inherited by the next run" "echo \"\$OUT\" | grep -q 'claude-run config= provider=claude account= helper=none resume=none id=claude'"
+"$KERNEL/bin/kith-auth" grant echo anthropic anthropic/main >/dev/null 2>&1
+"$KITH" account use claude-api:main --agent echo >/dev/null 2>&1
+OUT=$("$KITH" echo --launch-json 2>/dev/null)
+check "main claude-api:<profile>: apiKeyHelper, default config dir" "is \"(d['account_id'], d['account'], 'kith-auth' in d['settings']['apiKeyHelper'], 'CLAUDE_CONFIG_DIR' in d['env'])\" \"('claude-api:main', 'main', True, False)\""
+"$KERNEL/bin/kith-auth" revoke echo anthropic >/dev/null 2>&1
+"$KITH" echo --launch-json >/dev/null 2>"$T/err"; rc=$?
+check "main claude-api without a grant: exit 4, says how to fix or reset" "[ $rc = 4 ] && grep -q 'kith auth set anthropic/main' $T/err && grep -q 'kith account use --reset --agent echo' $T/err"
+"$KITH" account use claude:nobody --agent echo >/dev/null 2>&1
+"$KITH" echo "hi" >/dev/null 2>"$T/err"; rc=$?
+check "main account that doesn't exist: exit 4, nothing started" "[ $rc = 4 ] && grep -q 'kith account add claude nobody' $T/err"
+OUT=$("$KITH" echo --backups-json); check "main not ready shows in the chain" "is \"(d['chain'][0]['id'], d['chain'][0]['ready'], d['chain'][0]['why'])\" \"('claude:nobody', False, 'no account nobody')\""
+"$KITH" account use --reset --agent echo >/dev/null 2>&1
+check "use --reset drops the agent's choice" "[ \"\$(st \"'account' in d['agents'].get('echo', {})\")\" = False ]"
+OUT=$(CLAUDE_CONFIG_DIR=/elsewhere "$KITH" echo "hi" 2>/dev/null)
+check "on the default login, a config dir set outside kith is left alone" "echo \"\$OUT\" | grep -q 'claude-run config=/elsewhere .*id=claude$'"
+# global: applies to agents of its harness family only
+"$KITH" account use claude:work >/dev/null 2>&1
+OUT=$("$KITH" echo --launch-json 2>/dev/null); check "global main: a claude agent uses it" "is \"d['account_id']\" claude:work"
+OUT=$("$KITH" cx --launch-json 2>/dev/null); check "global claude main: a codex agent keeps codex" "is \"(d['harness'], d['account_id'], 'CODEX_HOME' in d['env'])\" \"('codex', 'codex', False)\""
+OUT=$("$KITH" account use --agent cx --json); check "use --json for the codex agent: default" "is \"(d['id'], d['source'])\" \"('codex', 'default')\""
+"$KITH" account use codex:deep --agent cx >/dev/null 2>&1
+OUT=$("$KITH" cx --launch-json 2>/dev/null); check "main codex:<name>: CODEX_HOME" "is \"(d['account_id'], d['account'], d['env']['CODEX_HOME'])\" \"('codex:deep', 'deep', '$M/accounts/codex/deep')\""
+OUT=$("$KITH" cx --backups-json); check "codex agent chain: its main first, the global claude:work chain entry stays a backup" "is \"[c['id'] for c in d['chain']][:2]\" \"['codex:deep', 'claude:work']\""
+"$KITH" account use claude-api:main --agent cx >/dev/null 2>&1; rc=$?; check "claude-api refused for a codex agent" "[ $rc = 2 ]"
+"$KITH" account use --reset >/dev/null 2>&1
+check "use --reset without --agent drops the global choice" "[ \"\$(st \"'account' in d\")\" = False ]"
+
+# --- a session is resumed only under the account it was made under ------------------------------------------------------
+"$KITH" account use claude:work --agent echo >/dev/null 2>&1
+printf '{"session_id":"sess-def"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT_ID=claude KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"sess-work"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=work KITH_ACCOUNT_ID=claude:work KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
+printf '{"session_id":"sess-old"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=work KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
+check "ledger: account_id per session; an older row reads as provider:account" "[ \"\$(python3 '$KERNEL/lib/kith_accounts.py' session-account sess-def),\$(python3 '$KERNEL/lib/kith_accounts.py' session-account sess-work),\$(python3 '$KERNEL/lib/kith_accounts.py' session-account sess-old),\$(python3 '$KERNEL/lib/kith_accounts.py' session-account nope)\" = 'claude,claude:work,claude:work,' ]"
+OUT=$(KITH_RESUME=sess-work "$KITH" echo "hi" 2>/dev/null)
+check "KITH_RESUME of a session made under the main account: resumed" "echo \"\$OUT\" | grep -q 'resume=sess-work id=claude:work'"
+OUT=$(KITH_RESUME=sess-def "$KITH" echo "hi" 2>"$T/err")
+check "KITH_RESUME of a session made under another account: a new session, and it says so" "echo \"\$OUT\" | grep -q 'resume=none id=claude:work' && grep -q 'made under claude, not claude:work; starting a new one' $T/err"
+OUT=$(KITH_RESUME=sess-unknown "$KITH" echo "hi" 2>/dev/null)
+check "KITH_RESUME of a session the ledger doesn't know: taken as it is" "echo \"\$OUT\" | grep -q 'resume=sess-unknown'"
+OUT=$(KITH_RESUME=sess-def "$KITH" echo --backup claude "hi" 2>/dev/null)
+check "KITH_RESUME on the backup it was made under: resumed" "echo \"\$OUT\" | grep -q 'resume=sess-def id=claude'"
+mkdir -p "$HOME/.claude/projects/p" "$T/work"
+printf '{"type":"user","cwd":"%s","message":{"content":"hi"}}\n' "$T/work" > "$HOME/.claude/projects/p/sess-def.jsonl"
+OUT=$(cd "$T" && "$KITH" echo --resume sess-def "go on" 2>"$T/err"); rc=$?
+check "--resume of a session made under another account runs under that one, and says so" "[ $rc = 0 ] && echo \"\$OUT\" | grep -q 'claude-run config= provider=claude account= helper=none resume=sess-def id=claude' && grep -q 'made under claude, so it runs under claude' $T/err"
+printf '{"session_id":"sess-gone"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=gone KITH_ACCOUNT_ID=claude:gone KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
+cp "$HOME/.claude/projects/p/sess-def.jsonl" "$HOME/.claude/projects/p/sess-gone.jsonl"
+OUT=$(cd "$T" && "$KITH" echo --resume sess-gone "go on" 2>"$T/err"); rc=$?
+check "--resume of a session whose account can't run: exit 4, names the account and its fix" "[ $rc = 4 ] && grep -q 'made under claude:gone' $T/err && grep -q 'kith account add claude gone' $T/err"
+mkdir -p "$M/accounts/claude/work/projects/q"
+printf '{"type":"user","cwd":"%s","message":{"content":"hi"}}\n' "$T/work" > "$M/accounts/claude/work/projects/q/sess-work.jsonl"
+"$KITH" account use --reset --agent echo >/dev/null 2>&1
+OUT=$(cd "$T" && "$KITH" echo --resume sess-work "go on" 2>/dev/null); rc=$?
+check "--resume finds a transcript in an extra account's folder and runs it there" "[ $rc = 0 ] && echo \"\$OUT\" | grep -q 'config=$M/accounts/claude/work .*resume=sess-work id=claude:work'"
 
 echo
 if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
