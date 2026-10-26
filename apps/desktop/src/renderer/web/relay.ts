@@ -1,5 +1,6 @@
 import type { KithBridge } from '../../shared/ipc.ts'
 import type { AccessProgress, AccessTicket, CloudResult, RelayCallError, RelayComputer, RelayState } from '../../shared/relay.ts'
+import { accessProgress, relayComputers } from '../../shared/relay.ts'
 import { requestAccess } from '../../shared/relay-core/access.ts'
 import type { Signer } from '../../shared/relay-core/crypto.ts'
 import { browserDial } from '../../shared/relay-core/dial.ts'
@@ -129,19 +130,7 @@ export class WebRelay {
       if (!ensured.ok) return ensured
       const res = await this.d.cloud.request('GET', 'v1/computers', undefined, true)
       if (!res.ok) return res
-      const rows = ((res.value as { computers?: Record<string, unknown>[] }).computers ?? []).filter((c) => typeof c.computerId === 'string')
-      return {
-        ok: true,
-        value: rows.map((c) => ({
-          computerId: c.computerId as string,
-          name: typeof c.name === 'string' ? c.name : 'Mac',
-          role: c.role === 'member' ? 'member' : 'owner',
-          platform: typeof c.platform === 'string' ? c.platform : '',
-          signKey: typeof c.signKey === 'string' ? c.signKey : '',
-          online: c.online === true,
-          access: c.access === 'granted' || c.access === 'pending' || c.access === 'none' ? c.access : null,
-        })),
-      }
+      return { ok: true, value: relayComputers(res.value) }
     },
 
     call: async (computerId, signKey, method, body, timeoutMs) => {
@@ -216,8 +205,7 @@ export class WebRelay {
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId)) return failure(400, 'badRequest', 'Bad request id.')
       const res = await this.d.cloud.request('GET', `v1/access-requests/${requestId}`, undefined, false)
       if (!res.ok) return res
-      const s = (res.value as { status?: string }).status
-      return { ok: true, value: s === 'pending' || s === 'approved' || s === 'denied' || s === 'cancelled' ? s : 'expired' }
+      return { ok: true, value: accessProgress((res.value as { status?: unknown }).status) }
     },
 
     cancelAccess: async (computerId, requestId) => {

@@ -2,6 +2,7 @@ import { hostname } from 'node:os'
 import { BrowserWindow, ipcMain, type WebContents } from 'electron'
 import type { CloudAccess } from '../cloud'
 import type { AccessProgress, AccessTicket, CloudResult, RelayCallError, RelayComputer, RelayState } from '../../shared/relay'
+import { accessProgress, relayComputers } from '../../shared/relay'
 import { requestAccess } from '../../shared/relay-core/access.ts'
 import { RelayError, RelayLink } from '../../shared/relay-core/link.ts'
 import { dialWebSocket, probeUpgrade } from './dial'
@@ -72,19 +73,7 @@ export function registerRelay(cloud: CloudAccess) {
     if (!ensured.ok) return ensured
     const res = await cloud.request('GET', 'v1/computers', undefined, true)
     if (!res.ok) return res
-    const rows = ((res.value as { computers?: Record<string, unknown>[] }).computers ?? []).filter((c) => typeof c.computerId === 'string')
-    return {
-      ok: true,
-      value: rows.map((c) => ({
-        computerId: c.computerId as string,
-        name: typeof c.name === 'string' ? c.name : 'Mac',
-        role: c.role === 'member' ? 'member' : 'owner',
-        platform: typeof c.platform === 'string' ? c.platform : '',
-        signKey: typeof c.signKey === 'string' ? c.signKey : '',
-        online: c.online === true,
-        access: c.access === 'granted' || c.access === 'pending' || c.access === 'none' ? c.access : null,
-      })),
-    }
+    return { ok: true, value: relayComputers(res.value) }
   })
 
   ipcMain.handle('relay:call', async (_e, computerId: string, signKey: string, method: string, body: unknown, timeoutMs: number) => {
@@ -180,8 +169,7 @@ export function registerRelay(cloud: CloudAccess) {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId)) return failure(400, 'badRequest', 'Bad request id.')
     const res = await cloud.request('GET', `v1/access-requests/${requestId}`, undefined, false)
     if (!res.ok) return res
-    const s = (res.value as { status?: string }).status
-    return { ok: true, value: s === 'pending' || s === 'approved' || s === 'denied' || s === 'cancelled' ? s : 'expired' }
+    return { ok: true, value: accessProgress((res.value as { status?: unknown }).status) }
   })
 
   /** Stops waiting for a Mac's nonce (if we still are) and withdraws the request. */

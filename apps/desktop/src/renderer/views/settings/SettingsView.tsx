@@ -3,6 +3,7 @@ import { islandLabel } from '@shared/island'
 import { parseAppearance } from '@shared/appearance'
 import { isSettingsPage, resolveSettingsPage, type SettingsPage } from '@shared/settings-pages'
 import { pagesFor, type ComputerRole } from '@shared/people'
+import { cloudRole } from '@shared/relay'
 import { Button, CardSection, ChoicePicker, IconButton, ProgressBar, SegmentedChoice, Switch, ValueRow } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { ModalHeader, Sheet } from '../../components/Overlay'
@@ -58,7 +59,8 @@ const ownerOnly: SettingsPage[] = ['people', 'keys', 'voice', 'usage', 'updates'
 export function useComputerRole(): ComputerRole {
   const app = useApp()
   const id = app.local?.computer.id
-  return app.cloud.computers.find((c) => c.computerId === id)?.role === 'member' ? 'member' : 'owner'
+  const row = app.cloud.computers.find((c) => c.computerId === id)
+  return row ? cloudRole(row.role) : 'owner'
 }
 
 /** The Settings window (⌘,): a sidebar of pages and a small centred title over grouped cards. */
