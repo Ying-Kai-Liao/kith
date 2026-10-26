@@ -1,6 +1,7 @@
 import Foundation
 
-/// An invite link, `kith://invite?c=<computerId>&i=<inviteId>&t=<token>`.
+/// An invite link, `kith://invite?c=<computerId>&i=<inviteId>&t=<token>` or the page link people paste,
+/// `https://<host>/i/<computerId>/<inviteId>#t=<token>` (the token only ever in the fragment).
 /// `token` is the secret from the link: it goes to the owner's computer only, never to the cloud and never into a log.
 public struct InviteLink: Hashable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     public let computerId: ComputerID
@@ -29,12 +30,31 @@ public struct InviteLink: Hashable, Sendable, CustomStringConvertible, CustomDeb
 
     /// The link's three parts, or nil when the URL isn't an invite or a part is missing or odd.
     public init?(_ url: URL, scheme: String) {
-        guard url.scheme?.lowercased() == scheme.lowercased(), url.host()?.lowercased() == "invite",
-              let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { return nil }
-        func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
-        guard let c = value("c"), let i = value("i"), let t = value("t"),
-              Self.isID(c), Self.isID(i), Self.isToken(t) else { return nil }
+        guard let parts = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let urlScheme = url.scheme?.lowercased() else { return nil }
+        let c, i, t: String
+        if urlScheme == "https" {
+            // A page link, as on desktop: any host, `/i/<c>/<i>` with an optional trailing slash, token from `#t=` only.
+            let path = parts.path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+            guard path.count == 4 || (path.count == 5 && path[4].isEmpty), path[0].isEmpty, path[1] == "i",
+                  let fragment = parts.percentEncodedFragment,
+                  let token = URLComponents(string: "?" + fragment)?.queryItems?.first(where: { $0.name == "t" })?.value
+            else { return nil }
+            (c, i, t) = (path[2], path[3], token)
+        } else {
+            guard urlScheme == scheme.lowercased(), url.host()?.lowercased() == "invite",
+                  let items = parts.queryItems else { return nil }
+            func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+            guard let cc = value("c"), let ii = value("i"), let tt = value("t") else { return nil }
+            (c, i, t) = (cc, ii, tt)
+        }
+        guard Self.isID(c), Self.isID(i), Self.isToken(t) else { return nil }
         self.init(computerId: c, inviteId: i, token: t)
+    }
+
+    /// Whether `url` is shaped like a page invite link (`https://<host>/i/...`), valid or not.
+    public static func isPageLink(_ url: URL) -> Bool {
+        url.scheme?.lowercased() == "https" && (url.path == "/i" || url.path.hasPrefix("/i/"))
     }
 
     /// h1: lowercase hex of sha256 of the token's UTF-8 bytes. The cloud only ever sees this.

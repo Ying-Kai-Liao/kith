@@ -378,9 +378,16 @@ private struct ScanPage: View {
     private func pair(_ text: String) {
         // The scanner fires once per code; this also covers a paste or a second code while one is in flight.
         guard !pairing, done == nil else { return }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A pasted or scanned https invite link joins that computer, as opening it from outside the app does.
+        if let url = URL(string: trimmed), InviteLink.isPageLink(url) {
+            pasted = ""
+            app.open(url)
+            return
+        }
         let p: Pairing
         do {
-            p = try Pairing.parse(text.trimmingCharacters(in: .whitespacesAndNewlines))
+            p = try Pairing.parse(trimmed)
         } catch {
             show(error)
             return

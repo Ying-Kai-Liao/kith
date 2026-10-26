@@ -323,6 +323,15 @@ final class AppStore {
             Task { await account.handle(url) }
             return
         }
+        if InviteLink.isPageLink(url) {
+            // Only `/i/...` paths are ours; any other https link stays ignored.
+            guard let invite = InviteLink(url, scheme: AppEnvironment.current.urlScheme) else {
+                accounts.lastError = "That invite link isn't valid. Ask for a new one."
+                return
+            }
+            joinInvite(invite)
+            return
+        }
         guard let scheme = url.scheme, AppEnvironment.current.accepts(scheme: scheme) else { return }
         switch url.host() {
         case "invite":
