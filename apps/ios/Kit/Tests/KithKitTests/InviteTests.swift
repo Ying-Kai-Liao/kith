@@ -47,6 +47,30 @@ private func link(_ query: String, scheme: String = "kith") -> URL { URL(string:
     #expect(InviteLink(link("c=comp&i=inv_1&t=\(t)", scheme: "https"), scheme: "kith") == nil)
 }
 
+@Test func aPastedPageLinkGivesTheSamePartsTokenFromTheFragmentOnly() throws {
+    for url in ["https://kithbot.app/i/comp_1/inv_abc#t=\(fakeToken)", "https://other.example/i/comp_1/inv_abc/#t=\(fakeToken)",
+                "HTTPS://kithbot.app/i/comp_1/inv_abc#t=\(fakeToken)"] {
+        let parsed = try #require(InviteLink(URL(string: url)!, scheme: "kith"), "\(url)")
+        #expect(parsed.computerId == "comp_1")
+        #expect(parsed.inviteId == "inv_abc")
+        #expect(parsed.token == fakeToken)
+    }
+    for url in [
+        "https://kithbot.app/i/comp_1/inv_abc",
+        "https://kithbot.app/i/comp_1/inv_abc?t=\(fakeToken)",
+        "https://kithbot.app/i/comp_1#t=\(fakeToken)",
+        "https://kithbot.app/i/comp_1/#t=\(fakeToken)",
+        "https://kithbot.app/x/comp_1/inv_abc#t=\(fakeToken)",
+        "https://kithbot.app/i/comp_1/inv_abc/extra#t=\(fakeToken)",
+        "http://kithbot.app/i/comp_1/inv_abc#t=\(fakeToken)",
+        "https://kithbot.app/i/comp_1/inv_abc#t=short",
+    ] {
+        #expect(InviteLink(URL(string: url)!, scheme: "kith") == nil, "\(url)")
+    }
+    #expect(InviteLink.isPageLink(URL(string: "https://kithbot.app/i/comp_1/inv_abc")!))
+    #expect(!InviteLink.isPageLink(URL(string: "https://example.com/other")!))
+}
+
 @Test func aLinkNeverPrintsItsToken() {
     let parsed = InviteLink(computerId: "comp", inviteId: "inv_1", token: fakeToken)
     #expect(!"\(parsed)".contains(fakeToken))
