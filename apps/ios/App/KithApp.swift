@@ -121,6 +121,7 @@ private struct DebugHooks: ViewModifier {
             // Design token gallery for screenshots: launch with -kithTokenGallery.
             if ProcessInfo.processInfo.arguments.contains("-kithTokenGallery") { KithTokenGallery() }
             if ProcessInfo.processInfo.arguments.contains("-kithComponentGallery") { KithComponentGallery() }
+            if let mode = ProfileImagePickerPreview.mode { ProfileImagePickerPreview.view(mode).background(Palette.background) }
             // First-run and pairing shots sit over the demo account's home: `-kithDemoScreens pairing-<welcome|scan|install|success|error>`.
             if let screen = DemoScreens.name, screen.hasPrefix("pairing-") {
                 Group {
