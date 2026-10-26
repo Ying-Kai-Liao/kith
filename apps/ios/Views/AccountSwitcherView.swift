@@ -28,6 +28,7 @@ struct AccountSwitcherView: View {
     @Environment(AccountStore.self) private var accounts
     @State private var confirmSignOut = false
     @State private var addingAccount = false
+    @State private var changingPhoto = false
 
     var body: some View {
         CardForm {
@@ -88,17 +89,25 @@ struct AccountSwitcherView: View {
     @ViewBuilder private var profile: some View {
         if account.isSignedIn {
             VStack(spacing: 10) {
-                if let url = account.avatarURL {
-                    AccountAvatar(url: url, email: account.email, size: 76)
-                } else {
-                    SkyPatch(id: account.userID ?? "you", size: 76, isYou: true)
+                Button { changingPhoto = true } label: {
+                    if let url = account.avatarURL {
+                        AccountAvatar(url: url, email: account.email, size: 76)
+                    } else {
+                        SkyPatch(id: account.userID ?? "you", size: 76, isYou: true)
+                    }
                 }
+                .buttonStyle(PressScale())
+                .accessibilityLabel("Change photo")
                 Text(account.email ?? "")
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(Palette.text)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                Button("Change photo") { changingPhoto = true }
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(Palette.accent)
             }
+            .sheet(isPresented: $changingPhoto) { ProfileImagePicker() }
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
         } else {
             VStack(spacing: 10) {

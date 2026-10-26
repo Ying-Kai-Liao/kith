@@ -195,15 +195,21 @@ private struct AccountCard: View {
     @Environment(AccountSession.self) private var account
     @Environment(AccountStore.self) private var accounts
     @AppStorage("hiddenComputers") private var hiddenComputers = ""
+    @State private var changingPhoto = false
 
     var body: some View {
         Button(action: open) {
             HStack(spacing: 12) {
-                if let url = account.avatarURL {
-                    AccountAvatar(url: url, email: account.email, size: 44)
-                } else {
-                    SkyPatch(id: account.userID ?? "you", size: 44, isYou: true)
+                Button { changingPhoto = true } label: {
+                    if let url = account.avatarURL {
+                        AccountAvatar(url: url, email: account.email, size: 44)
+                    } else {
+                        SkyPatch(id: account.userID ?? "you", size: 44, isYou: true)
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(!account.isSignedIn)
+                .accessibilityLabel("Change photo")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.body.weight(.semibold)).foregroundStyle(Palette.text).lineLimit(1).truncationMode(.middle)
                     Text(subtitle).font(.subheadline).foregroundStyle(Palette.secondary).lineLimit(1)
@@ -217,6 +223,7 @@ private struct AccountCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .sheet(isPresented: $changingPhoto) { ProfileImagePicker() }
         .accessibilityLabel("Account")
         .accessibilityValue("\(title), \(subtitle)")
     }

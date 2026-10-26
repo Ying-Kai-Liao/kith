@@ -48,6 +48,23 @@ final class AccountSession {
         return url
     }
 
+    /// Each external account's own picture (Google, GitHub) that can become the profile image.
+    var providerImages: [ProfileImageSource] {
+        ProfileImageSource.sources(from: (clerk?.user?.externalAccounts ?? []).map { ($0.provider, $0.imageUrl) })
+    }
+
+    /// Sets the active account's profile image in Clerk, then reloads the user so every avatar updates.
+    func setProfileImage(_ data: Data) async -> Bool {
+        guard let user = clerk?.user, isSignedIn else { return false }
+        do {
+            _ = try await user.setProfileImage(imageData: data)
+            _ = try await user.reload()
+            return true
+        } catch {
+            return false
+        }
+    }
+
     init() {
         let env = ProcessInfo.processInfo.environment
         let config = Bundle.main.url(forResource: "AccountConfig", withExtension: "plist")
