@@ -1,0 +1,28 @@
+{
+  "method": "hello",
+  "type": "Hello",
+  "body": {
+    "hostId": "host",
+    "computerId": "Re5Y1JCDFlTeJXMecdJmUw",
+    "signKey": "26Tr1E45mQHRjIeyZRivTBh9yvGJ2N1ap_4nnnrHnP0",
+    "boxKey": "dxQN9y4yApibLDuYlR4V7qDwRPK5cOSUqdT_FiR5a3U",
+    "name": "Mac",
+    "version": "0.1.0",
+    "protocol": 1,
+    "minProtocol": 1,
+    "os": "macos",
+    "rev": 2,
+    "store": {
+      "writable": true,
+      "unsaved": 0,
+      "dropped": 0
+    },
+    "grantedAgents": [
+      {
+        "agent": "house",
+        "name": "house",
+        "role": "member"
+      }
+    ]
+  }
+}

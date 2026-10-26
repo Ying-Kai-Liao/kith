@@ -1,0 +1,11 @@
+{
+  "method": "upload",
+  "type": "Uploaded",
+  "body": {
+    "attachment": {
+      "id": "6f1c0e2a-5b7d-4c1e-9a3f-2d8b4e6a0c11",
+      "name": "note.txt",
+      "size": 2
+    }
+  }
+}

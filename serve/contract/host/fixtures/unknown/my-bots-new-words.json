@@ -1,0 +1,32 @@
+{
+  "method": "myBots",
+  "type": "BotGuests",
+  "body": {
+    "bots": [
+      {
+        "botId": "b1",
+        "name": "Rex",
+        "provider": "gemini",
+        "state": "paused",
+        "ownerPerson": "sam",
+        "ownerName": "Sam",
+        "agents": [
+          "house"
+        ],
+        "limits": {
+          "ratePerHour": 30,
+          "concurrent": 1
+        },
+        "connected": false,
+        "createdAt": 1792998619785,
+        "joinedAt": null,
+        "decidedAt": null,
+        "decidedBy": null,
+        "lastSeenAt": null,
+        "revokedAt": null,
+        "revokedWhy": null,
+        "newField": "x"
+      }
+    ]
+  }
+}

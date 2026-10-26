@@ -1,0 +1,8 @@
+{
+  "method": "readUpload",
+  "type": "UploadChunk",
+  "body": {
+    "data": "aGk=",
+    "size": 2
+  }
+}

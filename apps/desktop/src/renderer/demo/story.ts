@@ -1,4 +1,5 @@
 import type { Bot, EntryData, Usage } from '@shared/models'
+import type { EntryKind } from '@shared/host-contract.gen'
 
 // The website demo's story: four bots on a small `pace` project (an isoWeek / weeklyTotals bug),
 // the "Ship room" group, a thread and a pending approval. Same story as web/public/screens.
@@ -28,7 +29,7 @@ export const cwd = CWD
 export interface SeedEntry {
   id: string
   botId: string
-  kind: string
+  kind: EntryKind
   /** Minutes ago. */
   at: number
   data: EntryData

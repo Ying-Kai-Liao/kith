@@ -1,0 +1,8 @@
+{
+  "method": "kithInfo",
+  "type": "KithInfo",
+  "body": {
+    "info": null,
+    "fetchedAt": 1792998621227
+  }
+}

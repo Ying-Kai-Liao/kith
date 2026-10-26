@@ -4,7 +4,7 @@ import type { Entry } from './models.ts'
 import { isAccountName, isSecretCard, keysByService, parseKeys, secretOutcome, secretSummary, valueProblem, type SecretRequest } from './secret-card.ts'
 
 const secret: SecretRequest = { service: 'github', vars: ['GITHUB_TOKEN'], profile: null, account: null, purpose: '', replaces: false, state: 'pending' }
-const entry = (data: Entry['data'], kind = 'permission') => ({ kind, data })
+const entry = (data: Entry['data'], kind: Entry['kind'] = 'permission') => ({ kind, data })
 
 test('account names follow the host rule', () => {
   for (const ok of ['work', 'a', 'a.b-c_d', '0x']) assert.equal(isAccountName(ok), true, ok)

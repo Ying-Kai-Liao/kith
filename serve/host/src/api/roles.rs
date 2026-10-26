@@ -11,58 +11,10 @@ use anyhow::Result;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-/// The whole of what an invited person can call. A new method is refused for them until it is added here, with a
-/// reason; `every_router_method_is_denied_to_members_unless_listed` walks the router to keep it that way.
-pub const MEMBER_METHODS: &[&str] = &[
-    // The connection handshake; answered without paths, addresses, backends or screen state.
-    "hello",
-    // An agent's card, for a chat that is theirs.
-    "kithInfo",
-    // Their own chats, one per granted agent. `startChat` makes it; the rest are the chat methods that name a chat.
-    "startChat",
-    "send",
-    "thread",
-    "history",
-    "newSession",
-    "unsend",
-    "markRead",
-    "stop",
-    // Files go through the chat's own upload folder.
-    "upload",
-    "readUpload",
-    "react",
-    // The agent's permission cards in their own chat; answered only by a member of that agent (see `guard`): a guest's
-    // go to the owner.
-    "respondPermission",
-    "editHandoff",
-    "keepConversation",
-    // Only the project folders the owner shared with them.
-    "projects",
-    // The project of their own chat's thread: read it, or correct it (to projects shared with them; see `guard`).
-    "threadProjects",
-    "setThreadProjects",
-    // The code that links their own Telegram, Discord or Slack account to their person.
-    "linkCode",
-    // Answering an incoming call from their own agent; the handler checks the call is theirs.
-    "callAccept",
-    "callDecline",
-    "callGreet",
-    // The app logs the end of a call it took (frees the person for the next one).
-    "logCall",
-    // The same for the call's line in the chat: `startCall` writes it, `endCall` fills in its length (only a call line
-    // of their own chat). Named by `botId`, so `guard` covers them with `own_bot` in its default arm.
-    "startCall",
-    "endCall",
-    // Their own bot guests (docs/kith-bot-guests.md): inviting one from what they hold, seeing and removing their own.
-    // Each handler checks the bot is theirs; deciding on a bot and the per-person toggle stay the owner's.
-    "createBotInvite",
-    "revokeBotInvite",
-    "revokeBot",
-    "myBots",
-    "setBotLimits",
-    // A `kith://thread/<id>#entry=<seq>` link: the thread when it is theirs, else a stable `not_shared`.
-    "resolveCitation",
-];
+/// The whole of what an invited person can call, from the host RPC contract (serve/contract/host/contract.json, each
+/// method with its reason). A new method is refused for them until the contract lists it for `member`;
+/// `every_router_method_is_denied_to_members_unless_listed` walks the router to keep it that way.
+pub use kith_wire::rpc::MEMBER_METHODS;
 
 /// The whole of what a bot guest can call (docs/kith-bot-guests.md 5.7), deny by default like [`MEMBER_METHODS`].
 /// `every_router_method_is_denied_to_bots_unless_listed` walks the router to keep it that way. Not here, on purpose:
@@ -92,8 +44,9 @@ pub fn bot_may(method: &str) -> bool {
     BOT_METHODS.contains(&method)
 }
 
-/// All an unproven device of an invited person may call: showing the invite token (see `people::prove_invite`).
-pub const UNPROVEN_METHODS: &[&str] = &["proveInvite"];
+/// All an unproven device of an invited person may call: showing the invite token (see `people::prove_invite`). From
+/// the contract, as `unproven`.
+pub use kith_wire::rpc::UNPROVEN_METHODS;
 
 pub fn member_may(method: &str) -> bool {
     MEMBER_METHODS.contains(&method)

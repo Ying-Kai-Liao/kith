@@ -1,4 +1,6 @@
+import type { LinkCode } from '@shared/host-contract.gen'
 import {
+  asEntry,
   isWorking,
   normalizeBot,
   needsInput,
@@ -115,8 +117,8 @@ export class BotStore extends BotSync {
   /** Takes back a message that still waits for its turn; the host marks it cancelled. */
   unsend(entry: Entry) {
     this.perform(async (c) => {
-      const res = await c.call<{ entry: Entry }>('unsend', { botId: entry.botId, entryId: entry.id })
-      this.upsert(res.entry)
+      const res = await c.callHost('unsend', { botId: entry.botId, entryId: entry.id })
+      if (res.entry) this.upsert(asEntry(res.entry))
       this.changed()
     })
   }
@@ -149,11 +151,11 @@ export class BotStore extends BotSync {
 
   /** Stops the bot in its chat, or in the thread on `thread`; its other places keep working. */
   stop(botId: string, thread: string | null = null) {
-    this.perform((c) => c.call('stop', thread ? { botId, threadId: thread } : { botId }), true)
+    this.perform((c) => c.callHost('stop', thread ? { botId, threadId: thread } : { botId }), true)
   }
 
   newSession(botId: string) {
-    this.perform((c) => c.call('newSession', { botId }))
+    this.perform((c) => c.callHost('newSession', { botId }))
   }
 
   /** The call the person just accepted, until its chat opens and starts the voice call (see `ThreadView`). */
@@ -205,7 +207,7 @@ export class BotStore extends BotSync {
    * computer older than this (or a failure); `finishCall` then writes the old end-of-call line.
    */
   startCall(botId: string): Promise<string | null> {
-    return this.withLink((c) => c.call<{ entry: { id: string } }>('startCall', { botId }))
+    return this.withLink((c) => c.callHost('startCall', { botId }))
       .then((r) => r.entry.id)
       .catch(() => null)
   }
@@ -218,11 +220,11 @@ export class BotStore extends BotSync {
       return
     }
     // A computer older than endCall just doesn't learn the call ended; there is no line to write.
-    await this.withLink((c) => c.call('endCall', { botId, entryId, seconds }), true).catch(() => {})
+    await this.withLink((c) => c.callHost('endCall', { botId, entryId, seconds }), true).catch(() => {})
   }
 
   logCall(botId: string, seconds: number) {
-    this.perform((c) => c.call('logCall', { botId, seconds }))
+    this.perform((c) => c.callHost('logCall', { botId, seconds }))
   }
 
   screenTakeover(on: boolean) {
@@ -252,7 +254,7 @@ export class BotStore extends BotSync {
 
   /** A one-time code the person sends to their Kith bot as `/link CODE`; asking again gives a fresh one. */
   linkCode() {
-    return this.withLink((c) => c.call<LinkCode>('linkCode', {}))
+    return this.withLink((c) => c.callHost('linkCode', {}))
   }
 
   /** Fire-and-forget; the host holds it until this computer answers and drops it on a no. */
@@ -275,8 +277,8 @@ export class BotStore extends BotSync {
     this.changed()
     const previous = list[i]!.data.reactions
     this.perform(async (c) => {
-      const res = await c.call<{ entry: Entry }>('react', { entryId: entry.id, emoji })
-      this.upsert(res.entry)
+      const res = await c.callHost('react', { entryId: entry.id, emoji })
+      this.upsert(asEntry(res.entry))
       this.changed()
     }, false, () => {
       const now = this.entries.get(entry.botId)
@@ -294,7 +296,7 @@ export class BotStore extends BotSync {
     this.changed()
     void (async () => {
       try {
-        await this.withLink((c) => c.call('respondPermission', { entryId: entry.id, optionId: option }), true)
+        await this.withLink((c) => c.callHost('respondPermission', { entryId: entry.id, optionId: option }), true)
         // The card's own update follows on the events stream; hold the spinner until then.
         await sleep(2000)
       } catch (error) {
@@ -349,7 +351,7 @@ export class BotStore extends BotSync {
   /** Saves the user's version of a handoff that hasn't been sent; whether it did. */
   async editHandoff(entry: Entry, text: string) {
     try {
-      await this.withLink((c) => c.call('editHandoff', { entryId: entry.id, text }), true)
+      await this.withLink((c) => c.callHost('editHandoff', { entryId: entry.id, text }), true)
       return true
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error)
@@ -365,7 +367,7 @@ export class BotStore extends BotSync {
     this.changed()
     void (async () => {
       try {
-        await this.withLink((c) => c.call('keepConversation', { entryId: entry.id }), true)
+        await this.withLink((c) => c.callHost('keepConversation', { entryId: entry.id }), true)
       } catch (error) {
         this.lastError = error instanceof Error ? error.message : String(error)
       }
@@ -380,7 +382,7 @@ export class BotStore extends BotSync {
     if (!bot || bot.unread <= 0) return
     this.bots.set(botId, { ...bot, unread: 0 })
     this.changed()
-    this.perform((c) => c.call('markRead', { botId, threadId: null, all: true }), true)
+    this.perform((c) => c.callHost('markRead', { botId, threadId: null, all: true }), true)
   }
 
   private patchBot(bot: Bot, change: Partial<BotDraft>) {
@@ -622,8 +624,5 @@ function cacheAttachment(id: string, data: Uint8Array) {
 
 export { isWorking, needsInput }
 
-/** `linkCode`: the code and when it stops working (epoch milliseconds). */
-export interface LinkCode {
-  code: string
-  expiresAt: number
-}
+/** `linkCode`: the code and when it stops working (epoch milliseconds); the host RPC contract's. */
+export type { LinkCode }

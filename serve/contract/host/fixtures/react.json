@@ -1,0 +1,25 @@
+{
+  "method": "react",
+  "type": "EntryAnswer",
+  "body": {
+    "entry": {
+      "id": "247ca8d2-4373-4f3d-8041-25285b10c02c",
+      "seq": 2,
+      "botId": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+      "threadId": null,
+      "rev": 7,
+      "kind": "agent",
+      "turn": 1,
+      "data": {
+        "text": "hello",
+        "final": true,
+        "author": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+        "reactions": [
+          "👍"
+        ]
+      },
+      "createdAt": 1792998619793,
+      "updatedAt": 1792998620503
+    }
+  }
+}

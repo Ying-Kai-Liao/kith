@@ -405,7 +405,7 @@ export class BotSync extends BotMirror {
       const client = this.live
       if (!client) return
       try {
-        await client.call('markRead', { botId, threadId: thread, all: false })
+        await client.callHost('markRead', { botId, threadId: thread, all: false })
       } catch {
         // The visible scope is acknowledged again when the link recovers.
       }
