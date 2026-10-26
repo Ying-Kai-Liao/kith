@@ -30,6 +30,11 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
                     order ("claude:work", "claude-api:main", "codex"; see lib/kith_accounts.py). Empty by default.
                     agents.<agent>.backups replaces it for that agent; an explicit [] means no backups for it
                     (kith backup list|add|remove edits both)
+  account           the main account: the login an agent's runs use when no backup answers, as one entry id of the
+                    agent's own harness family (claude, claude:<name>, claude-api:<profile>; codex, codex:<name>).
+                    Missing = the harness's default login (what ran before). agents.<agent>.account replaces it for that
+                    agent. A global id of another family than an agent's harness does not apply to that agent.
+                    The backup chain sits on top of it (kith account use edits both; lib/kith_accounts.py)
 
   limit             agents.<agent>.limit: a monthly limit in dollars at API prices for the agent's runs (kith AGENT set
                     limit N|none). No key, no limit. A calendar month counts; every run of the agent counts (kith-cost
@@ -41,6 +46,7 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
                     A guest's runs keep their own budget (kith-auth member AGENT PERSON budget=) and stop at it
 
   kith_settings.py backups [AGENT]   the chain that applies, one id per line
+  kith_settings.py account [AGENT]   the main account set for the agent (else the global one), '' when none is
   kith_settings.py limit AGENT       the agent's limit as JSON: {"limit": N or null, "at": "ask"|"tell"|"hold"}
   kith_settings.py set limit AGENT N|none          set or forget the agent's monthly limit (kith AGENT set limit)
   kith_settings.py set at_limit AGENT MODE         ask, tell or hold ('' forgets: ask) (kith AGENT set at-limit)
@@ -51,7 +57,7 @@ sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from kith_paths import paths  # noqa: E402  the one place that knows where kith's folders are
 
 FILE = paths()['KITH_MACHINE'] / 'settings.json'
-DEFAULTS = {'permission_mode': 'auto', 'plugins': [], 'backups': [], 'call_model': 'sonnet'}
+DEFAULTS = {'permission_mode': 'auto', 'plugins': [], 'backups': [], 'call_model': 'sonnet', 'account': ''}
 CHOICES = {'permission_mode': ('default', 'acceptEdits', 'plan', 'auto', 'bypassPermissions'),
            'at_limit': ('ask', 'tell', 'hold')}
 # Modes kith no longer offers, and what a stored one reads as: 'manual' was kith's own word for Claude Code's 'default';
@@ -127,6 +133,8 @@ def read():
         b = d.get('backups', [])
         if not isinstance(b, list) or not all(isinstance(i, str) for i in b):
             return {}, f'{FILE}: {where}backups is not a list of entry ids'
+        if 'account' in d and not (isinstance(d['account'], str) and d['account']):
+            return {}, f'{FILE}: {where}account is not an entry id'
         for k, v in d.items():
             if k in CHOICES and v not in CHOICES[k]:
                 return {}, f'{FILE}: {where}{k} {v!r} is not one of {", ".join(CHOICES[k])}'
@@ -319,6 +327,43 @@ def clear_backups(agent):
             write(s)
 
 
+def account(agent=None):
+    """(id or '', where): the main account set for the agent ('agent'), else the global one ('global'); '' = default login.
+    The caller checks the id against the agent's harness (lib/kith_accounts.py main_id)."""
+    s = read()[0]
+    own = s.get('agents', {}).get(agent, {}) if agent else {}
+    if own.get('account'):
+        return own['account'], 'agent'
+    return s.get('account') or '', 'global'
+
+
+def set_account(agent, entry):
+    """Record the main account: one agent's, or with agent None the global one. Keeps the rest of the file."""
+    with locked():
+        s, why = read()
+        if why:
+            raise ValueError(why)
+        if agent:
+            s.setdefault('agents', {}).setdefault(agent, {})['account'] = entry
+        else:
+            s['account'] = entry
+        write(s)
+
+
+def clear_account(agent):
+    """Forget one agent's main account (it follows the global one again), or with agent None the global one."""
+    with locked():
+        s, why = read()
+        if why:
+            raise ValueError(why)
+        d = s.get('agents', {}).get(agent) if agent else s
+        if d is not None and 'account' in d:
+            del d['account']
+            if agent and not d:
+                s['agents'].pop(agent, None)
+            write(s)
+
+
 if __name__ == '__main__':
     if len(sys.argv) == 5 and sys.argv[1] == 'set' and sys.argv[2] == 'limit':   # set limit AGENT N|none
         try:
@@ -348,6 +393,9 @@ if __name__ == '__main__':
         sys.exit(0)
     if sys.argv[1] == 'backups':
         print('\n'.join(backups(*sys.argv[2:])[0]))
+        sys.exit(0)
+    if sys.argv[1] == 'account':
+        print(account(*sys.argv[2:])[0])
         sys.exit(0)
     v = get(*sys.argv[1:])
     print('\n'.join(v) if isinstance(v, list) else v)

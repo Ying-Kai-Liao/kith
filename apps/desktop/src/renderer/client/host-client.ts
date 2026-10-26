@@ -322,6 +322,11 @@ export class HostClient {
     return parseBackups(await this.call('backupsSet', { agent, chain }, 90_000))
   }
 
+  /** Chooses the main account (`kith account use`): `agent` null is the computer's; `account` null goes back to the default (the computer's for an agent, each harness's login for the computer). Answers like `backups`. */
+  async accountSet(agent: string | null, account: string | null): Promise<Backups> {
+    return parseBackups(await this.call('accountSet', { agent, account }, 90_000))
+  }
+
   async kithMemorySearch(botId: string, query: string, limit = 30): Promise<KithSearchResult> {
     return parseSearchResult(await this.call('kithMemorySearch', { botId, query, limit }, 30_000))
   }

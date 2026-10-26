@@ -128,3 +128,36 @@ async fn two_quick_sets_leave_the_last_one() {
     let got = s.host.call("backupsSet", json!({"agent": null, "chain": ["claude", "codex"]})).await;
     assert_eq!(got["global"], json!(["claude", "codex"]));
 }
+
+#[tokio::test]
+async fn each_agents_main_account_reads_above_the_chain_and_account_set_chooses_it() {
+    let s = start().await;
+    let got = s.host.call("backups", json!({})).await;
+    assert_eq!(got["main"]["global"], Value::Null, "no global choice");
+    let house = &got["main"]["agents"]["house"];
+    assert_eq!((house["id"].clone(), house["source"].clone()), (json!("claude"), json!("default")), "{got}");
+    assert_eq!((house["ready"].clone(), house["harness"].clone()), (json!(true), json!("claude")));
+
+    let got = s.host.call("accountSet", json!({"agent": "house", "account": "claude:work"})).await;
+    let house = &got["main"]["agents"]["house"];
+    assert_eq!((house["id"].clone(), house["source"].clone()), (json!("claude:work"), json!("agent")));
+    assert_eq!(std::fs::read_to_string(s.home.join("main")).unwrap(), "claude:work");
+
+    let got = s.host.call("accountSet", json!({"agent": "house", "account": null})).await;
+    assert_eq!(got["main"]["agents"]["house"]["source"], "default");
+    assert!(!s.home.join("main").exists(), "back to the default login");
+
+    for body in [
+        json!({"agent": "house", "account": "--reset"}),
+        json!({"agent": "house", "account": "Bad id"}),
+        json!({"agent": "house", "account": 3}),
+        json!({"agent": "-x", "account": "claude"}),
+    ] {
+        let (ok, _) = s.host.post("accountSet", &body).await;
+        assert!(!ok, "{body}");
+    }
+    // kith's own refusal (the id doesn't fit the agent's harness) reaches the app.
+    let (ok, _) = s.host.post("accountSet", &json!({"agent": "house", "account": "codex"})).await;
+    assert!(!ok);
+    assert!(!s.home.join("main").exists());
+}

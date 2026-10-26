@@ -1,6 +1,7 @@
 //! The backup chain for the apps: which entries kith will move a bot's turns to when its own account runs out, whether
 //! each can run, and when one that ran out is back. `backups` reads it (a paired phone may too); `backupsSet` writes
-//! it, one call that replaces a whole list. Logins stay in the terminal: an entry that isn't ready carries the one
+//! it, one call that replaces a whole list. Above the chain is each agent's main account, the one its turns start on
+//! (`kith account use`); `accountSet` chooses it. Logins stay in the terminal: an entry that isn't ready carries the one
 //! command to run (`fix`), and no token or environment value is ever read here (kith's JSON has none).
 //! Not the bot's own harness (`BotConfig.backend`) and not usage bars (`usage.rs`).
 
@@ -28,6 +29,10 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             set(hub, &b).await?;
             read(hub).await?
         }
+        "accountSet" => {
+            set_main(hub, &b).await?;
+            read(hub).await?
+        }
         _ => return Ok(ControlFlow::Continue(b)),
     }))
 }
@@ -42,8 +47,9 @@ fn json_of(out: &str, what: &str) -> Result<Value> {
     serde_json::from_str(out.trim()).with_context(|| format!("`{what}` didn't print JSON"))
 }
 
-/// `kith backup list [--agent A] --json`: (source, rows).
-async fn chain(bin: &Path, agent: Option<&str>) -> Result<(String, Vec<Value>)> {
+/// `kith backup list [--agent A] --json`: (source, rows, main account). The main account is null from a kith before
+/// main accounts.
+async fn chain(bin: &Path, agent: Option<&str>) -> Result<(String, Vec<Value>, Value)> {
     let mut args = vec!["backup", "list", "--json"];
     if let Some(agent) = agent {
         args.extend(["--agent", agent]);
@@ -51,7 +57,22 @@ async fn chain(bin: &Path, agent: Option<&str>) -> Result<(String, Vec<Value>)> 
     let out = hq::run(bin, &args, None, READ_TIMEOUT).await?;
     let doc = json_of(&out, "kith backup list --json")?;
     let rows = doc["backups"].as_array().ok_or_else(|| anyhow!("`kith backup list --json` printed no `backups`"))?;
-    Ok((doc["source"].as_str().unwrap_or("global").to_owned(), rows.clone()))
+    Ok((doc["source"].as_str().unwrap_or("global").to_owned(), rows.clone(), doc["main"].clone()))
+}
+
+/// An agent's main account as the apps get it: its id, where the choice comes from (`agent`, `global`, or `default`
+/// for the harness's own login), the agent's harness (which ids it may take) and, when it can't run, why and the
+/// command that fixes it.
+fn main_row(main: &Value) -> Option<Value> {
+    let id = main["id"].as_str()?;
+    Some(json!({
+        "id": id,
+        "source": main["source"].as_str().unwrap_or("default"),
+        "harness": main["harness"].as_str(),
+        "ready": main["ready"] != false,
+        "why": main["why"].as_str(),
+        "fix": main["fix"].as_str(),
+    }))
 }
 
 fn ids(rows: &[Value]) -> Vec<Value> {
@@ -82,9 +103,10 @@ async fn read(hub: &Hub) -> Result<Value> {
             async move { (name.clone(), chain(bin, Some(&name)).await) }
         })),
     );
-    let (_, global) = global?;
+    let (_, global, global_main) = global?;
     // An agent that follows the global order isn't listed; one whose chain failed to read is left out too.
     let mut per_agent = Map::new();
+    let mut mains = Map::new();
     let mut rows: BTreeMap<String, Value> = BTreeMap::new();
     for row in &global {
         if let Some(id) = row["id"].as_str() {
@@ -92,9 +114,11 @@ async fn read(hub: &Hub) -> Result<Value> {
         }
     }
     for (name, got) in own {
-        if let Ok((source, list)) = got
-            && source == "agent"
-        {
+        let Ok((source, list, main)) = got else { continue };
+        if let Some(main) = main_row(&main) {
+            mains.insert(name.clone(), main);
+        }
+        if source == "agent" {
             for row in &list {
                 if let Some(id) = row["id"].as_str() {
                     rows.entry(id.to_owned()).or_insert_with(|| row.clone());
@@ -137,7 +161,8 @@ async fn read(hub: &Hub) -> Result<Value> {
             })
         })
         .collect();
-    Ok(json!({"global": ids(&global), "agents": per_agent, "entries": entries}))
+    let main = json!({"global": global_main["id"].as_str(), "agents": mains});
+    Ok(json!({"global": ids(&global), "agents": per_agent, "entries": entries, "main": main}))
 }
 
 fn valid_id(id: &str) -> bool {
@@ -147,6 +172,44 @@ fn valid_id(id: &str) -> bool {
             && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
     };
     word(harness, |c| c.is_ascii_lowercase()) && name.is_none_or(|n| word(n, |c| c.is_ascii_alphanumeric()))
+}
+
+/// `accountSet {agent: string|null, account: string|null}`: the main account of one agent or (agent null) of every
+/// agent of that harness. `account: null` goes back to the global choice (with an agent) or to each harness's default
+/// login (without). kith checks that the id fits the agent's harness.
+async fn set_main(hub: &Hub, b: &Value) -> Result<()> {
+    let agent = match &b["agent"] {
+        Value::Null => None,
+        Value::String(a) if valid_id(a) && !a.contains(':') => Some(a.as_str()),
+        _ => bail!("`agent` must be an agent name or null"),
+    };
+    let mut args = vec!["account", "use"];
+    match &b["account"] {
+        Value::Null => args.push("--reset"),
+        Value::String(id) if valid_id(id) => args.push(id),
+        other => bail!("`account` must be an account id kith would take, or null: {other}"),
+    }
+    if let Some(agent) = agent {
+        args.extend(["--agent", agent]);
+    }
+    let bin = kith().await?;
+    let _one_at_a_time = WRITES.lock().await;
+    // kith asks the account's harness whether it is logged in, for its note.
+    hq::run(&bin, &args, None, READ_TIMEOUT).await?;
+    // The next turn starts on the new account. The chains are asked for again now, not left to the next turn: a bot
+    // whose session is warm only learns its main account changed from its chain, and an unknown chain changes nothing.
+    let agents = hub.backups.known_agents();
+    hub.backups.forget_chains();
+    futures::future::join_all(agents.iter().map(|agent| {
+        let bin = &bin;
+        async move {
+            if let Ok(chain) = hq::backups(bin, agent).await {
+                hub.backups.end_refresh(agent, Some(chain));
+            }
+        }
+    }))
+    .await;
+    Ok(())
 }
 
 /// `backupsSet {agent: string|null, chain: [ids]|null}`: the whole list for one agent or (agent null) for every agent.

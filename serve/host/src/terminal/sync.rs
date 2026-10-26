@@ -288,6 +288,7 @@ fn mapped(hub: &Hub, reg: &Registry) -> Option<Thread> {
 /// Makes `reg`'s session the one of an existing thread. A forked session becomes the thread's lane session, in the
 /// folder it ran in, so the host carries on from where the terminal left it.
 fn adopt(hub: &Hub, t: &Thread, reg: &Registry, forked: bool) {
+    crate::agent::hq::tag_session(&hub.store, &reg.session_id, reg.account.as_deref());
     let result = (|| -> Result<()> {
         hub.store.kv_set(&sid_key(&reg.session_id), &t.key())?;
         if forked {
@@ -375,6 +376,8 @@ fn create_thread(hub: &Hub, env: &Env, reg: &Registry, bot: &BotConfig) -> Resul
         hub.set_entry(&root.id, &withdrawn);
         return Err(error);
     }
+    // Loaded only under the login that made it (see `agent::hq::Launch::may_load`).
+    crate::agent::hq::tag_session(&hub.store, &reg.session_id, reg.account.as_deref());
     // The rest is repaired by a later scan if it fails (see `repair_lane`).
     let saved = hub
         .store
