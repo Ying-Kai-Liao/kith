@@ -1,4 +1,5 @@
 import type { SignInProvider } from './account-config'
+import type { LinkedPhoto, ProfileImageSource } from './profile-image'
 import type { SharedFile } from './models'
 import type { SSHBridge } from './ssh'
 import type { ScreenAgentState } from './computer-access'
@@ -120,7 +121,8 @@ export interface AccountState {
   configured: boolean
   busy: boolean
   error: string | null
-  user: { userId: string; email: string | null; avatarURL: string | null } | null
+  /** `photos`: the linked sign-in accounts' own photos, for the profile image picker. */
+  user: { userId: string; email: string | null; avatarURL: string | null; photos: LinkedPhoto[] } | null
   cloudURL: string | null
 }
 
@@ -158,6 +160,8 @@ export interface KithBridge {
     onChange(cb: (s: AccountState) => void): () => void
     signIn(provider: SignInProvider): Promise<void>
     signOut(): Promise<void>
+    /** Sets the Clerk profile image from bytes or an https URL. Resolves to a sentence to show when it failed, else null; the new image arrives through onChange. */
+    setProfileImage(source: ProfileImageSource): Promise<string | null>
     /** The signed-in session's JWT for the Kith cloud. */
     token(): Promise<string>
   }

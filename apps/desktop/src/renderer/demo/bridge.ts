@@ -54,6 +54,7 @@ const bridge: KithBridge = {
     onChange: none,
     signIn: unavailable,
     signOut: async () => {},
+    setProfileImage: async () => 'Changing your photo is unavailable in the demo.',
     token: unavailable,
   },
   speech: { available: false, locales: () => [], start() {}, stop() {}, onEvent: none },

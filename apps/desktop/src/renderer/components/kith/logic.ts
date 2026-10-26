@@ -30,6 +30,32 @@ export function skyPatchOf(id: string, you = false): SkyPick {
   }
 }
 
+/** The eight Kith default profile pictures, the same on iOS: crops of the sky art. Keep these exact. */
+export const SKY_PRESETS: readonly SkyPick[] = [
+  { tone: 'dawn', x: 20, y: 30 },
+  { tone: 'dawn', x: 70, y: 60 },
+  { tone: 'clear', x: 15, y: 20 },
+  { tone: 'clear', x: 60, y: 40 },
+  { tone: 'clear', x: 85, y: 75 },
+  { tone: 'dusk', x: 25, y: 50 },
+  { tone: 'dusk', x: 75, y: 30 },
+  { tone: 'dusk', x: 50, y: 85 },
+]
+
+/** The tone washes of `.kc-sky-*` in kith.css as canvas stops (top to bottom), so a rendered preset matches the CSS patch. */
+export const SKY_TONE_STOPS: Record<SkyTone, readonly (readonly [number, string])[]> = {
+  dawn: [[0, 'rgba(255,190,150,0)'], [0.7, 'rgba(255,170,130,0.55)'], [1, 'rgba(240,130,110,0.7)']],
+  clear: [[0, 'rgba(120,190,255,0.1)'], [1, 'rgba(255,255,255,0.12)']],
+  dusk: [[0, 'rgba(90,100,190,0.5)'], [0.65, 'rgba(200,120,160,0.45)'], [1, 'rgba(255,170,110,0.5)']],
+}
+
+/** Where `.kc-sky` puts the image on an `out`-pixel square: background-size 420% auto, positioned by x/y percent. */
+export function skyCropRect(imgW: number, imgH: number, pick: SkyPick, out: number) {
+  const w = out * 4.2
+  const h = (w * imgH) / imgW
+  return { x: (out - w) * (pick.x / 100), y: (out - h) * (pick.y / 100), w, h }
+}
+
 /** The CountBadge text: nothing for 0 (or less), `99+` above 99. */
 export function countLabel(n: number): string | null {
   if (!Number.isFinite(n) || n <= 0) return null

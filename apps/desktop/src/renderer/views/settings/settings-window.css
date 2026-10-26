@@ -344,3 +344,57 @@
   background: var(--kith-ink);
   color: var(--kith-ground);
 }
+
+/* Change photo: tiles for the linked photos, the Kith skies and an upload. */
+.photo-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 16px 16px;
+}
+.photo-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 56px);
+  gap: 14px;
+}
+.photo-tile {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  overflow: hidden;
+}
+.photo-tile:disabled {
+  opacity: 0.5;
+}
+.photo-tile:focus-visible {
+  outline: 2px solid var(--kith-ink);
+  outline-offset: 2px;
+}
+.photo-tile-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.photo-tile-busy {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.25);
+}
+.settings-identity-change {
+  padding: 0;
+  border-radius: 50%;
+  flex: none;
+}
+.settings-identity-change:focus-visible {
+  outline: 2px solid var(--kith-ink);
+  outline-offset: 2px;
+}

@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { Spinner } from '../components/Controls'
 import { GitHubMark } from '../components/GitHubMark'
 import { Icon } from '../components/Icon'
+import { SkyPatch } from '../components/kith'
 import type { MenuItem } from '../components/Overlay'
 import { HStack, IconSlot, VStack } from '../components/Stack'
 import { Text } from '../components/Text'
@@ -18,7 +19,7 @@ export function ProfileAvatar() {
       {user?.avatarURL ? (
         <img src={user.avatarURL} alt="" className="profile-avatar-image" />
       ) : (
-        <Icon name="person.fill" size={15} weight="medium" color="var(--secondary)" />
+        <SkyPatch id={user?.userId ?? 'you'} you size={28} />
       )}
       {isBusy ? (
         <HStack as="span" justify="center" className="profile-avatar-busy">

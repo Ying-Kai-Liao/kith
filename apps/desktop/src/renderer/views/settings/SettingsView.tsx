@@ -20,6 +20,7 @@ import { AccountDevices } from './ComputersView'
 import { SkyPatch } from '../../components/kith'
 import { MyBotsPage } from './BotGuestsView'
 import { PeopleView } from './PeopleView'
+import { ProfileImagePicker } from './ProfileImagePicker'
 import { KeysView } from './KeysView'
 import { LinkChatRow } from './LinkChatRow'
 import { errorText, isMac, thisMac } from './parts'
@@ -159,13 +160,21 @@ const showAppleSignIn = false
 function AccountSettings() {
   const account = useAccount()
   const role = useComputerRole()
+  const [picking, setPicking] = useState(false)
+  const avatar = account.user?.avatarURL ? (
+    <img src={account.user.avatarURL} alt="" className="settings-identity-avatar" />
+  ) : (
+    <SkyPatch id={account.user?.userId ?? 'you'} you={!account.user} size={48} />
+  )
   return (
     <>
       <div className="settings-identity">
-        {account.user?.avatarURL ? (
-          <img src={account.user.avatarURL} alt="" className="settings-identity-avatar" />
+        {account.isSignedIn ? (
+          <button className="settings-identity-change" aria-label="Change photo" title="Change photo" onClick={() => setPicking(true)}>
+            {avatar}
+          </button>
         ) : (
-          <SkyPatch id={account.user?.userId ?? 'you'} you={!account.user} size={48} />
+          avatar
         )}
         <VStack grow className="settings-stack">
           <Text truncate weight="semibold">{account.isSignedIn ? (account.user?.email ?? 'Signed in') : 'Not signed in'}</Text>
@@ -174,9 +183,12 @@ function AccountSettings() {
           </Text>
         </VStack>
         {account.isSignedIn ? (
-          <Button kind="secondary" onClick={() => void account.signOut()} disabled={account.isBusy}>
-            {account.isBusy ? 'Please wait…' : 'Sign out'}
-          </Button>
+          <>
+            <Button kind="secondary" onClick={() => setPicking(true)} disabled={account.isBusy}>Change photo</Button>
+            <Button kind="secondary" onClick={() => void account.signOut()} disabled={account.isBusy}>
+              {account.isBusy ? 'Please wait…' : 'Sign out'}
+            </Button>
+          </>
         ) : (
           <>
             {showAppleSignIn ? <Button kind="secondary" onClick={() => void account.signIn('apple')} disabled={account.isBusy}>Apple</Button> : null}
@@ -187,6 +199,9 @@ function AccountSettings() {
       </div>
       {account.errorMessage ? <Text as="div" size="caption" tone="attention">{account.errorMessage}</Text> : null}
       <AccountDevices owner={role === 'owner'} />
+      <Sheet className="settings-sheet" open={picking && account.isSignedIn} onClose={() => setPicking(false)} width={420} dismissOnDim>
+        <ProfileImagePicker onClose={() => setPicking(false)} />
+      </Sheet>
     </>
   )
 }
