@@ -121,6 +121,7 @@ private struct DebugHooks: ViewModifier {
             // Design token gallery for screenshots: launch with -kithTokenGallery.
             if ProcessInfo.processInfo.arguments.contains("-kithTokenGallery") { KithTokenGallery() }
             if ProcessInfo.processInfo.arguments.contains("-kithComponentGallery") { KithComponentGallery() }
+            if let mode = ProfileImagePickerPreview.mode { ProfileImagePickerPreview.view(mode).background(Palette.background) }
             // First-run and pairing shots sit over the demo account's home: `-kithDemoScreens pairing-<welcome|scan|install|success|error>`.
             if let screen = DemoScreens.name, screen.hasPrefix("pairing-") {
                 Group {
@@ -321,6 +322,15 @@ final class AppStore {
         let url = LegacyCompat.canonical(link).url
         if url.scheme == Bundle.main.bundleIdentifier {
             Task { await account.handle(url) }
+            return
+        }
+        if InviteLink.isPageLink(url) {
+            // Only `/i/...` paths are ours; any other https link stays ignored.
+            guard let invite = InviteLink(url, scheme: AppEnvironment.current.urlScheme) else {
+                accounts.lastError = "That invite link isn't valid. Ask for a new one."
+                return
+            }
+            joinInvite(invite)
             return
         }
         guard let scheme = url.scheme, AppEnvironment.current.accepts(scheme: scheme) else { return }

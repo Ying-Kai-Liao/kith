@@ -63,6 +63,7 @@ const bridge: KithBridge = {
     onChange: (cb) => listen('account:change', cb),
     signIn: (provider) => ipcRenderer.invoke('account:signIn', provider),
     signOut: () => ipcRenderer.invoke('account:signOut'),
+    setProfileImage: (source) => ipcRenderer.invoke('account:setProfileImage', source),
     token: () => ipcRenderer.invoke('account:token'),
   },
   speech: {
