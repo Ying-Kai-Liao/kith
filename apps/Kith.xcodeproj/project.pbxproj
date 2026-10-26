@@ -10,6 +10,7 @@
 		00F78E3DAAF66E8E0933D091 /* ActivityGalleryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3DE9A4EEB369C4F75C9448 /* ActivityGalleryView.swift */; };
 		01A1F820EFEE49A8FCCFC3F3 /* BotListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0582B6169BFC36E4BCD51C0D /* BotListView.swift */; };
 		A1C0DE0000000000000000B2 /* ProfileMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0DE0000000000000000A2 /* ProfileMenu.swift */; };
+		A1C0DE0000000000000000F8 /* ProfileImagePicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0DE0000000000000000F7 /* ProfileImagePicker.swift */; };
 		A1C0DE0000000000000000B1 /* HomeDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0DE0000000000000000A1 /* HomeDock.swift */; };
 		A1C0DE0000000000000000B9 /* BoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0DE0000000000000000A9 /* BoardView.swift */; };
 		0631979397E0D6822747E03A /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E13F8EA6C7B0DA4D899FEE /* RootView.swift */; };
@@ -106,6 +107,7 @@
 /* Begin PBXFileReference section */
 		0582B6169BFC36E4BCD51C0D /* BotListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotListView.swift; sourceTree = "<group>"; };
 		A1C0DE0000000000000000A2 /* ProfileMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileMenu.swift; sourceTree = "<group>"; };
+		A1C0DE0000000000000000F7 /* ProfileImagePicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileImagePicker.swift; sourceTree = "<group>"; };
 		A1C0DE0000000000000000A1 /* HomeDock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDock.swift; sourceTree = "<group>"; };
 		A1C0DE0000000000000000A9 /* BoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoardView.swift; sourceTree = "<group>"; };
 		0829A4FCADAC108E8C2DB2F1 /* Widgets.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Widgets.entitlements; sourceTree = "<group>"; };
@@ -282,6 +284,7 @@
 				DD3DE9A4EEB369C4F75C9448 /* ActivityGalleryView.swift */,
 				0582B6169BFC36E4BCD51C0D /* BotListView.swift */,
 				A1C0DE0000000000000000A2 /* ProfileMenu.swift */,
+				A1C0DE0000000000000000F7 /* ProfileImagePicker.swift */,
 				A1C0DE0000000000000000A1 /* HomeDock.swift */,
 				A1C0DE0000000000000000A9 /* BoardView.swift */,
 				6BC00039A6C2C0D3F39A5F67 /* ComputerStatus.swift */,
@@ -658,6 +661,7 @@
 				00F78E3DAAF66E8E0933D091 /* ActivityGalleryView.swift in Sources */,
 				01A1F820EFEE49A8FCCFC3F3 /* BotListView.swift in Sources */,
 				A1C0DE0000000000000000B2 /* ProfileMenu.swift in Sources */,
+				A1C0DE0000000000000000F8 /* ProfileImagePicker.swift in Sources */,
 				A1C0DE0000000000000000B1 /* HomeDock.swift in Sources */,
 				A1C0DE0000000000000000B9 /* BoardView.swift in Sources */,
 				7C20764DC05D499075BC5E8C /* KithApp.swift in Sources */,

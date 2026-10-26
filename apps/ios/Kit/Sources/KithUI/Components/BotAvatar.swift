@@ -96,8 +96,12 @@ struct WorkingDots: View {
 }
 
 /// The tone of a person's sky patch.
-public enum SkyTone: CaseIterable, Sendable {
+public enum SkyTone: CaseIterable, Sendable, CustomStringConvertible {
     case dawn, clear, dusk
+
+    public var description: String {
+        switch self { case .dawn: "dawn"; case .clear: "clear"; case .dusk: "dusk" }
+    }
 
     var colours: [Color] {
         switch self {
@@ -126,22 +130,36 @@ public enum SkyTone: CaseIterable, Sendable {
     }
 }
 
-/// The default picture for a person: a piece of the Kith sky (a cloud crop over a dawn, clear or dusk tone,
-/// seeded by the account id). A picture, not a label: no letter.
-public struct SkyPatch: View {
-    let id: String
-    let size: CGFloat
-    let isYou: Bool
+/// One of the Kith sky pictures a person can pick as their own. Tone and crop mirror desktop's `SkyPick`.
+public struct SkyPreset: Identifiable, Equatable, Sendable {
+    public let tone: SkyTone
+    /// Crop position in percent of the sky image.
+    public let x: Int, y: Int
+    public var id: String { "\(tone)-\(x)-\(y)" }
 
-    public init(id: String, size: CGFloat = KithSize.botAvatar, isYou: Bool = false) {
-        self.id = id
-        self.size = size
-        self.isYou = isYou
+    public static let all: [SkyPreset] = [
+        .init(tone: .dawn, x: 20, y: 30), .init(tone: .dawn, x: 70, y: 60),
+        .init(tone: .clear, x: 15, y: 20), .init(tone: .clear, x: 60, y: 40), .init(tone: .clear, x: 85, y: 75),
+        .init(tone: .dusk, x: 25, y: 50), .init(tone: .dusk, x: 75, y: 30), .init(tone: .dusk, x: 50, y: 85),
+    ]
+
+    var crop: (x: Double, y: Double) { (Double(x) / 100, Double(y) / 100) }
+
+    /// A square picture of the preset, ready to upload.
+    @MainActor public func renderedJPEG(side: CGFloat = 512) -> Data? {
+        let renderer = ImageRenderer(content: SkyArt(tone: tone, crop: crop, size: side))
+        renderer.scale = 1
+        return renderer.uiImage?.jpegData(compressionQuality: 0.9)
     }
+}
 
-    public var body: some View {
-        let tone = SkyTone.tone(for: id, isYou: isYou)
-        let crop = SkyTone.crop(for: id)
+/// The square sky picture behind `SkyPatch` and the uploaded presets.
+struct SkyArt: View {
+    let tone: SkyTone
+    let crop: (x: Double, y: Double)
+    let size: CGFloat
+
+    var body: some View {
         ZStack {
             LinearGradient(colors: tone.colours, startPoint: .top, endPoint: .bottom)
             Image("sky-home-day", bundle: KithUIFonts.resources)
@@ -151,6 +169,34 @@ public struct SkyPatch: View {
                 .opacity(0.14)
         }
         .frame(width: size, height: size)
+        .clipped()
+    }
+}
+
+/// The default picture for a person: a piece of the Kith sky (a cloud crop over a dawn, clear or dusk tone,
+/// seeded by the account id). A picture, not a label: no letter.
+public struct SkyPatch: View {
+    let id: String
+    let size: CGFloat
+    let isYou: Bool
+    var preset: SkyPreset?
+
+    public init(id: String, size: CGFloat = KithSize.botAvatar, isYou: Bool = false) {
+        self.id = id
+        self.size = size
+        self.isYou = isYou
+    }
+
+    public init(preset: SkyPreset, size: CGFloat = KithSize.botAvatar) {
+        self.id = preset.id
+        self.size = size
+        self.isYou = false
+        self.preset = preset
+    }
+
+    public var body: some View {
+        SkyArt(tone: preset?.tone ?? SkyTone.tone(for: id, isYou: isYou),
+               crop: preset?.crop ?? SkyTone.crop(for: id), size: size)
         .clipShape(Circle())
         .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: size >= 40 ? 1.5 : 1))
         .kithBotShadow()
