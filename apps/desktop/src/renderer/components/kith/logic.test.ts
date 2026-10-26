@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { botGuestVariant, countLabel, dockAction, dockCallVisible, hashSeed, repliesLabel, resumeCommand, skyPatchOf, statusChipOf, writerBannerOf } from './logic.ts'
+import { botGuestVariant, countLabel, dockAction, dockCallVisible, hashSeed, SKY_PRESETS, skyCropRect, repliesLabel, resumeCommand, skyPatchOf, statusChipOf, writerBannerOf } from './logic.ts'
 
 test('the sky patch is stable per id, and you are always dawn', () => {
   assert.deepEqual(skyPatchOf('acct_mia'), skyPatchOf('acct_mia'))
@@ -68,4 +68,16 @@ test('a bot guest picture: the G disc for grok, the bubble disc for anything els
   assert.equal(botGuestVariant('gemini'), 'other')
   assert.equal(botGuestVariant(''), 'other')
   assert.equal(botGuestVariant(undefined), 'other')
+})
+
+test('the eight sky presets match the iOS list', () => {
+  assert.deepEqual(
+    SKY_PRESETS.map((p) => `${p.tone} ${p.x} ${p.y}`),
+    ['dawn 20 30', 'dawn 70 60', 'clear 15 20', 'clear 60 40', 'clear 85 75', 'dusk 25 50', 'dusk 75 30', 'dusk 50 85'],
+  )
+})
+
+test('the canvas crop follows the CSS background-size and -position rules', () => {
+  const r = skyCropRect(2000, 1000, { tone: 'clear', x: 50, y: 0 }, 100)
+  assert.deepEqual({ x: r.x, y: r.y + 0, w: r.w, h: r.h }, { x: -160, y: 0, w: 420, h: 210 })
 })

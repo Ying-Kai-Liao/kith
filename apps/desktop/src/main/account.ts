@@ -5,6 +5,7 @@ import { fromRenderer } from './ipc-guard'
 import { app, ipcMain, safeStorage, type BrowserWindow } from 'electron'
 import { providerName, providerStrategy, resolveAccountConfig, type AccountConfig, type SignInProvider } from '../shared/account-config'
 import type { AccountState } from '../shared/ipc'
+import { linkedPhotos, profileImageProblem, type ProfileImageSource } from '../shared/profile-image'
 import { authenticate } from './auth'
 import { buildConfig, identity } from './environment'
 
@@ -34,6 +35,7 @@ interface ClerkUser {
   image_url?: string
   primary_email_address_id?: string | null
   email_addresses?: { id: string; email_address: string }[]
+  external_accounts?: { provider?: string; image_url?: string }[]
 }
 
 interface ClerkSession {
@@ -94,6 +96,7 @@ export class AccountService extends EventEmitter {
     ipcMain.handle('account:state', () => this.state)
     ipcMain.handle('account:signIn', (_e, provider: SignInProvider) => this.signIn(provider))
     ipcMain.handle('account:signOut', () => this.signOut())
+    ipcMain.handle('account:setProfileImage', fromRenderer((_e, source: ProfileImageSource) => this.setProfileImage(source)))
     ipcMain.handle('account:token', fromRenderer(() => this.sessionToken()))
     this.on('change', () => {
       for (const w of windows()) w.webContents.send('account:change', this.state)
@@ -135,15 +138,18 @@ export class AccountService extends EventEmitter {
     } catch {}
   }
 
-  private async request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: Record<string, string | boolean>, query?: Record<string, string>): Promise<T> {
+  private async request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: Record<string, string | boolean> | FormData, query?: Record<string, string>): Promise<T> {
     if (!this.base) throw new ClerkError(0, "Sign-in isn't configured in this build.")
     const url = new URL(`${this.base}${path}`)
     url.searchParams.set('_is_native', 'true')
     for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, v)
     const headers: Record<string, string> = { 'x-device-type': process.platform === 'darwin' ? 'macos' : process.platform, 'x-app-version': app.getVersion(), 'x-bundle-id': identity.appId }
     if (this.deviceToken) headers.Authorization = this.deviceToken
-    let payload: string | undefined
-    if (body) {
+    let payload: string | FormData | undefined
+    if (body instanceof FormData) {
+      // fetch sets the multipart Content-Type with its boundary.
+      payload = body
+    } else if (body) {
       headers['Content-Type'] = 'application/x-www-form-urlencoded'
       payload = new URLSearchParams(Object.entries(body).map(([k, v]) => [k, String(v)])).toString()
     }
@@ -166,7 +172,43 @@ export class AccountService extends EventEmitter {
     const user = session?.user
     const email = user?.email_addresses?.find((e) => e.id === user.primary_email_address_id)?.email_address ?? user?.email_addresses?.[0]?.email_address ?? null
     const image = user?.image_url && user.image_url.startsWith('https://') ? user.image_url : null
-    this.set({ user: user ? { userId: user.id, email, avatarURL: image } : null })
+    this.set({ user: user ? { userId: user.id, email, avatarURL: image, photos: linkedPhotos(user.external_accounts) } : null })
+  }
+
+  /** Sets the profile image (POST /v1/me/profile_image, multipart `file`), then reloads the client so every avatar updates. Resolves to a sentence on failure. */
+  async setProfileImage(source: ProfileImageSource): Promise<string | null> {
+    if (!this.activeSession) return 'Sign in again to change your photo.'
+    try {
+      let bytes: ArrayBuffer
+      let type: string
+      if (source.kind === 'url') {
+        // Only https, and only what the account itself listed: the renderer can't make main fetch arbitrary hosts.
+        const allowed = this.state.user?.photos.some((p) => p.imageURL === source.url)
+        if (!source.url.startsWith('https://') || !allowed) return "That photo isn't available."
+        const res = await fetch(source.url, { signal: AbortSignal.timeout(20_000) })
+        if (!res.ok) return "Couldn't download that photo."
+        bytes = await res.arrayBuffer()
+        type = (res.headers.get('content-type') ?? '').split(';')[0]!.trim()
+        // Providers sometimes label a photo octet-stream; Clerk sniffs the bytes, so call it by the common case.
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(type)) type = 'image/jpeg'
+      } else {
+        bytes = source.bytes
+        type = source.type
+      }
+      const problem = profileImageProblem({ type, size: bytes.byteLength })
+      if (problem) return problem
+      const form = new FormData()
+      form.append('file', new Blob([bytes], { type }), 'profile')
+      const before = this.state.user?.avatarURL
+      await this.request('POST', '/v1/me/profile_image', form)
+      await this.refreshClient()
+      // Clerk normally issues a new URL for a new image; if it didn't, the old cached picture would stay.
+      const user = this.state.user
+      if (user?.avatarURL && user.avatarURL === before) this.set({ user: { ...user, avatarURL: `${user.avatarURL}${user.avatarURL.includes('?') ? '&' : '?'}v=${Date.now()}` } })
+      return null
+    } catch (error) {
+      return error instanceof ClerkError && error.status > 0 ? error.message : "Couldn't change your photo. Check your connection and try again."
+    }
   }
 
   private get activeSession(): ClerkSession | null {

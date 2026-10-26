@@ -153,6 +153,7 @@ const bridge: KithBridge = {
     onChange: (cb) => account.onChange(cb),
     signIn: (provider) => account.signIn(provider),
     signOut,
+    setProfileImage: (source) => account.setProfileImage(source),
     token: () => account.token(),
   },
   speech: { available: false, locales: () => [], start() {}, stop() {}, onEvent: none },

@@ -1,5 +1,6 @@
 import { providerName, providerStrategy, type SignInProvider } from '../../shared/account-config.ts'
 import type { AccountState } from '../../shared/ipc.ts'
+import { linkedPhotos, profileImageProblem, type ProfileImageSource } from '../../shared/profile-image.ts'
 
 /**
  * The Kith account in the browser, through Clerk's JS SDK bundled from npm (`@clerk/clerk-js/no-rhc`, Clerk's build
@@ -16,6 +17,9 @@ export interface ClerkLike {
     imageUrl?: string
     primaryEmailAddress?: { emailAddress: string } | null
     emailAddresses?: { emailAddress: string }[]
+    externalAccounts?: { provider?: string; imageUrl?: string }[]
+    setProfileImage(params: { file: Blob | File | null }): Promise<unknown>
+    reload?(): Promise<unknown>
   } | null
   readonly session?: {
     id: string
@@ -70,7 +74,36 @@ export class WebAccount {
     const signedIn = !!user && session?.status !== 'ended' && session?.status !== 'removed' && session?.status !== 'revoked' && session?.status !== 'expired'
     const email = user?.primaryEmailAddress?.emailAddress ?? user?.emailAddresses?.[0]?.emailAddress ?? null
     const image = user?.imageUrl && user.imageUrl.startsWith('https://') ? user.imageUrl : null
-    this.set({ user: signedIn && user ? { userId: user.id, email, avatarURL: image } : null })
+    const photos = linkedPhotos(user?.externalAccounts?.map((a) => ({ provider: a.provider, image_url: a.imageUrl })))
+    this.set({ user: signedIn && user ? { userId: user.id, email, avatarURL: image, photos } : null })
+  }
+
+  /** `user.setProfileImage({ file })`, then a reload so the new imageUrl reaches every avatar. Resolves to a sentence on failure. */
+  async setProfileImage(source: ProfileImageSource): Promise<string | null> {
+    const user = this.d.clerk.user
+    if (!user) return 'Sign in again to change your photo.'
+    try {
+      let blob: Blob
+      if (source.kind === 'url') {
+        const allowed = this.state.user?.photos.some((p) => p.imageURL === source.url)
+        if (!source.url.startsWith('https://') || !allowed) return "That photo isn't available."
+        const res = await fetch(source.url)
+        if (!res.ok) return "Couldn't download that photo."
+        blob = await res.blob()
+        if (!['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)) blob = new Blob([blob], { type: 'image/jpeg' })
+      } else {
+        blob = new Blob([source.bytes], { type: source.type })
+      }
+      const problem = profileImageProblem(blob)
+      if (problem) return problem
+      await user.setProfileImage({ file: blob })
+      await user.reload?.()
+      this.apply()
+      return null
+    } catch (error) {
+      const message = (error as { errors?: { longMessage?: string }[] })?.errors?.[0]?.longMessage
+      return message ?? "Couldn't change your photo. Check your connection and try again."
+    }
   }
 
   private set(change: Partial<AccountState>) {

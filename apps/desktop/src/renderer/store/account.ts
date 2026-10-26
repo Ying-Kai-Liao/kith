@@ -1,4 +1,5 @@
 import type { SignInProvider } from '../../shared/account-config'
+import type { LinkedPhoto, ProfileImageSource } from '../../shared/profile-image'
 import { Observable, useModel } from '../lib/observable'
 
 export type { SignInProvider }
@@ -7,6 +8,7 @@ export interface AccountInfo {
   userId: string
   email: string | null
   avatarURL: string | null
+  photos: LinkedPhoto[]
 }
 
 /**
@@ -47,6 +49,11 @@ export class AccountSession extends Observable {
 
   async signOut() {
     await window.kith.account.signOut()
+  }
+
+  /** Resolves to a sentence to show when the image couldn't be set, else null. Every avatar follows through the account state. */
+  setProfileImage(source: ProfileImageSource) {
+    return window.kith.account.setProfileImage(source)
   }
 
   sessionToken() {
