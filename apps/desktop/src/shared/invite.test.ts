@@ -18,6 +18,20 @@ test('an invite link gives its three parts', () => {
   assert.ok(parseInviteLink('KITH://INVITE?c=a&i=b&t=12345678', schemes))
 })
 
+test('a pasted page link gives the same parts, token from the fragment only', () => {
+  const want = { computerId: 'cmp_1', inviteId: 'inv_ab12', token: TOKEN }
+  assert.deepEqual(parseInviteLink(`https://kithbot.app/i/cmp_1/inv_ab12#t=${TOKEN}`, schemes), want)
+  assert.deepEqual(parseInviteLink(`https://other.example/i/cmp_1/inv_ab12/#t=${TOKEN}`, schemes), want)
+  for (const url of [
+    'https://kithbot.app/i/cmp_1/inv_ab12',
+    `https://kithbot.app/i/cmp_1/inv_ab12?t=${TOKEN}`,
+    `https://kithbot.app/i/cmp_1#t=${TOKEN}`,
+    `https://kithbot.app/x/cmp_1/inv_ab12#t=${TOKEN}`,
+    `http://kithbot.app/i/cmp_1/inv_ab12#t=${TOKEN}`,
+    'https://kithbot.app/i/cmp_1/inv_ab12#t=short',
+  ]) assert.equal(parseInviteLink(url, schemes), null, url)
+})
+
 test('bad or missing parts are rejected', () => {
   for (const url of [
     'kith://invite?c=a&i=b',

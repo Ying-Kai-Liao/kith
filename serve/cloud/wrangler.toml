@@ -60,16 +60,14 @@ durable_objects.bindings = [{ name = "RELAY", class_name = "ComputerRelay" }]
 ratelimits = [{ name = "REGISTER_LIMITER", namespace_id = "1003", simple = { limit = 10, period = 60 } }, { name = "TURN_LIMITER", namespace_id = "1013", simple = { limit = 12, period = 60 } }, { name = "HOOK_LIMITER", namespace_id = "1023", simple = { limit = 60, period = 60 } }, { name = "BOT_JOIN_LIMITER", namespace_id = "1033", simple = { limit = 10, period = 60 } }]
 
 # kith: Kith's production cloud with accounts (own Clerk application, own D1). Setup steps: README.md, "Kith accounts".
-# Kai fills the two TODO values below; CLERK_SECRET_KEY and CLERK_WEBHOOK_SECRET are secrets (`wrangler secret put ... --env kith`),
+# CLERK_SECRET_KEY and CLERK_WEBHOOK_SECRET are secrets (`wrangler secret put ... --env kith`),
 # never written here. Until they are set the account routes answer 401 and QR pairing still works.
 [env.kith]
 name = "kith-cloud"
-routes = []
-workers_dev = true
-# TODO(Kai): the issuer (Frontend API URL) of the Kith Clerk application, e.g. https://<name>.clerk.accounts.dev
-vars = { CLERK_ISSUER = "https://clerk.invalid" }
-# TODO(Kai): replace database_id with the id `wrangler d1 create kith` prints.
-d1_databases = [{ binding = "DB", database_name = "kith", database_id = "00000000-0000-0000-0000-000000000000", migrations_dir = "migrations" }]
+routes = [{ pattern = "api.kithbot.app", custom_domain = true }, { pattern = "kithbot.app", custom_domain = true }]
+workers_dev = false
+vars = { CLERK_ISSUER = "https://clerk.kithbot.app" }
+d1_databases = [{ binding = "DB", database_name = "kith", database_id = "1afedb14-ed5c-488c-af33-901e9aa0d123", migrations_dir = "migrations" }]
 durable_objects.bindings = [{ name = "RELAY", class_name = "ComputerRelay" }]
 ratelimits = [{ name = "REGISTER_LIMITER", namespace_id = "2001", simple = { limit = 10, period = 60 } }, { name = "TURN_LIMITER", namespace_id = "2011", simple = { limit = 12, period = 60 } }, { name = "HOOK_LIMITER", namespace_id = "2021", simple = { limit = 60, period = 60 } }, { name = "BOT_JOIN_LIMITER", namespace_id = "2031", simple = { limit = 10, period = 60 } }]
 triggers = { crons = ["*/15 * * * *"] }
