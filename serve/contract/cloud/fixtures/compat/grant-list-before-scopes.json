@@ -1,0 +1,11 @@
+{
+  "type": "GrantList",
+  "body": {
+    "grants": [
+      {
+        "grantId": "grt_7g8h",
+        "deviceId": "dev_1a2b"
+      }
+    ]
+  }
+}

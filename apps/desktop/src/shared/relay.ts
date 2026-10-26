@@ -1,6 +1,16 @@
 // What crosses the bridge for reaching a Mac over the Kith cloud relay (main/relay/): the end-to-end encrypted
 // channel itself stays in the main process, the window only sees calls, streams, a state and these shapes.
 
+import {
+  decodeAccessState,
+  decodeComputerAccess,
+  decodeComputerRole,
+  receive,
+  type AccessState,
+  type ComputerAccess,
+  type ComputerRole,
+} from './cloud-contract.gen.ts'
+
 export interface CloudFailure {
   status: number
   code: string
@@ -31,12 +41,12 @@ export interface RelayCallError {
 export interface RelayComputer {
   computerId: string
   name: string
-  role: 'owner' | 'member'
+  role: ComputerRole
   platform: string
   signKey: string
   online: boolean
-  /** The cloud's word: `granted` once this device may connect, `pending` while it asks, `none` before; null without a device. */
-  access: 'granted' | 'pending' | 'none' | null
+  /** The cloud's word (ComputerAccess in the cloud contract; one this version doesn't know reads as none); null without a device. */
+  access: ComputerAccess | null
 }
 
 /** A pending request for this device to join a Mac; `code` is the six digits the owner checks on the Mac. */
@@ -47,20 +57,20 @@ export interface AccessTicket {
   computerId: string
 }
 
-export type AccessProgress = 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled'
+/** An access request's state (AccessState in the cloud contract), or one this version doesn't know. */
+export type AccessProgress = AccessState | 'unknown'
 
 /**
  * This account's part in a computer, from the cloud's row. Absent (a cloud from before invites) is the owner; a role this
- * version doesn't know gets the least, so nothing owner-only shows for it (as on iOS, `ComputerRole`).
+ * version doesn't know reads as member (the contract's ComputerRole), so nothing owner-only shows for it.
  */
-export function cloudRole(raw: unknown): 'owner' | 'member' {
-  if (raw === undefined || raw === null) return 'owner'
-  return raw === 'owner' ? 'owner' : 'member'
+export function cloudRole(raw: unknown): ComputerRole {
+  return raw === undefined || raw === null ? 'owner' : decodeComputerRole(raw)
 }
 
-/** The cloud's `access` word; one this version doesn't know is not access. */
+/** The cloud's `access` word; one this version doesn't know reads as none (the contract's ComputerAccess). */
 export function cloudAccess(raw: unknown): RelayComputer['access'] {
-  return raw === 'granted' || raw === 'pending' || raw === 'none' ? raw : null
+  return raw === undefined || raw === null ? null : decodeComputerAccess(raw)
 }
 
 /** One `GET /v1/computers` row, the same for the desktop main process and the web app. Null without a computer id. */
@@ -79,7 +89,7 @@ export function relayComputer(c: Record<string, unknown>): RelayComputer | null 
 
 /** The rows of a `GET /v1/computers` answer. */
 export function relayComputers(body: unknown): RelayComputer[] {
-  const rows = (body as { computers?: unknown } | null)?.computers
+  const rows: unknown[] = receive('ComputerList', body).computers
   if (!Array.isArray(rows)) return []
   return rows.flatMap((r) => {
     const c = r && typeof r === 'object' ? relayComputer(r as Record<string, unknown>) : null
@@ -87,7 +97,7 @@ export function relayComputers(body: unknown): RelayComputer[] {
   })
 }
 
-/** `GET /v1/access-requests/:id`'s `status`. A state this version doesn't know is over as far as it can tell (as on iOS). */
+/** `GET /v1/access-requests/:id`'s `status`; one this version doesn't know (or none) is the explicit 'unknown'. */
 export function accessProgress(raw: unknown): AccessProgress {
-  return raw === 'pending' || raw === 'approved' || raw === 'denied' || raw === 'cancelled' ? raw : 'expired'
+  return decodeAccessState(raw)
 }

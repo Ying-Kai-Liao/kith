@@ -1,0 +1,317 @@
+{
+  "contract": "cloud",
+  "doc": "The Kith cloud's HTTP API (/v1): what the cloud answers and what desktop, web, iOS, the host and the guest send it. Times are epoch milliseconds. Additive only: see serve/contract/README.md.",
+  "enums": {
+    "ComputerRole": {
+      "doc": "What this account is on a computer. Absent (a cloud from before invites) means owner.",
+      "values": ["owner", "member"],
+      "unknown": "member"
+    },
+    "ComputerAccess": {
+      "doc": "Whether the signed device may reach the computer: granted once its access request was approved, pending while it asks, none before. Never 'approved': that is an access request's state.",
+      "values": ["granted", "pending", "none"],
+      "unknown": "none",
+      "names": { "none": "noAccess" }
+    },
+    "AccessState": {
+      "doc": "Where an access request stands. One this version doesn't know is its own state: the request is over as far as the app can tell, never approved.",
+      "values": ["pending", "approved", "denied", "expired", "cancelled"],
+      "unknown": "unknown"
+    },
+    "DevicePlatform": {
+      "doc": "What a device registers as. The cloud refuses one it doesn't know.",
+      "values": ["ios", "macos", "linux", "windows", "android", "web"],
+      "unknown": "unknown"
+    },
+    "HostPlatform": {
+      "doc": "What a computer registers as (the host's std::env::consts::OS). The cloud refuses one it doesn't know.",
+      "values": ["macos", "linux", "windows"],
+      "unknown": "unknown"
+    },
+    "Decision": {
+      "doc": "The host's answer to an access request. The cloud refuses one it doesn't know.",
+      "values": ["approve", "deny"],
+      "unknown": "unknown"
+    }
+  },
+  "types": {
+    "EmptyAnswer": { "doc": "An answer with nothing in it.", "fields": {} },
+    "OkAnswer": { "doc": "An answer that only says it worked.", "fields": { "ok": "bool" } },
+    "Health": { "fields": { "ok": "bool", "version": "string" } },
+    "Me": { "fields": { "userId": "string", "email": "string?", "createdAt": "int" } },
+
+    "RegisterDevice": { "doc": "Body of POST /v1/devices.", "fields": { "name": "string", "platform": "DevicePlatform" } },
+    "RegisteredDevice": {
+      "fields": { "deviceId": "string", "deviceKey": "string", "name": "string", "platform": "string", "createdAt": "int" }
+    },
+    "DeviceRegistered": { "fields": { "device": "RegisteredDevice" } },
+    "CloudDevice": {
+      "doc": "One of the account's devices (GET /v1/devices).",
+      "fields": {
+        "deviceId": "string",
+        "deviceKey": "string",
+        "name": "string",
+        "platform": "string?",
+        "createdAt": "int?",
+        "lastUsedAt": "int?",
+        "revoked": "bool?"
+      }
+    },
+    "DeviceList": { "fields": { "devices": "[CloudDevice]" } },
+
+    "ClaimChallenge": { "fields": { "claimId": "string", "nonce": "string", "expiresAt": "int" } },
+    "CompleteClaim": {
+      "doc": "Body of POST /v1/claims/{claimId}/complete: what the host signed for the claim.",
+      "fields": {
+        "signKey": "string",
+        "boxKey": "string",
+        "sig": "string",
+        "computerId": "string",
+        "name": "string",
+        "platform": "HostPlatform",
+        "device": "string?",
+        "version": "string"
+      }
+    },
+    "CloudComputer": {
+      "doc": "A computer in the account (GET /v1/computers). Its boxKey is for display only; signKey is trusted only after the SAS matched.",
+      "fields": {
+        "computerId": "string",
+        "name": "string",
+        "platform": "string?",
+        "device": "string?",
+        "signKey": "string",
+        "boxKey": "string?",
+        "version": "string?",
+        "online": "bool?",
+        "lastSeenAt": "int?",
+        "claimedAt": "int?",
+        "access": "ComputerAccess?",
+        "role": "ComputerRole?"
+      }
+    },
+    "ComputerClaimed": { "fields": { "computer": "CloudComputer" } },
+    "ComputerList": { "fields": { "computers": "[CloudComputer]" } },
+    "RenameComputer": { "fields": { "name": "string" } },
+    "ComputerRenamed": { "fields": { "computer": "CloudComputer" } },
+
+    "CreateAccessRequest": { "doc": "The device's SAS commit (base64url, 32 bytes).", "fields": { "commit": "string" } },
+    "AccessRequestCreated": { "fields": { "requestId": "string", "expiresAt": "int" } },
+    "AccessStatus": {
+      "doc": "GET /v1/access-requests/{requestId}.",
+      "fields": {
+        "requestId": "string",
+        "computerId": "string?",
+        "status": "AccessState",
+        "expiresAt": "int?",
+        "hostNonce": "string?",
+        "grantId": "string?"
+      },
+      "mayOmit": ["hostNonce", "grantId"]
+    },
+    "Reveal": { "doc": "The device's SAS nonce (base64url, 32 bytes).", "fields": { "nonce": "string" } },
+    "CloudGrant": {
+      "doc": "A device's access to a computer (GET /v1/computers/{computerId}/grants).",
+      "fields": {
+        "grantId": "string",
+        "deviceId": "string",
+        "deviceName": "string?",
+        "platform": "string?",
+        "scopes": "[string]?",
+        "createdAt": "int?"
+      }
+    },
+    "GrantList": { "fields": { "grants": "[CloudGrant]" } },
+
+    "HostRegister": {
+      "fields": { "boxKey": "string", "name": "string", "platform": "HostPlatform", "device": "string?", "version": "string" }
+    },
+    "HostRegistered": { "fields": { "computerId": "string", "owned": "bool" } },
+    "Owner": { "doc": "The account a computer belongs to.", "fields": { "userId": "string", "email": "string?" } },
+    "HostGrant": {
+      "doc": "An active grant on this computer. userId is the account that owns the device (absent from an older cloud: the owner's).",
+      "fields": {
+        "grantId": "string",
+        "deviceKey": "string",
+        "deviceName": "string?",
+        "platform": "string?",
+        "scopes": "[string]?",
+        "userId": "string?"
+      }
+    },
+    "HostAccessRequest": {
+      "doc": "A pending access request, as the host sees it.",
+      "fields": {
+        "requestId": "string",
+        "userId": "string?",
+        "deviceKey": "string",
+        "deviceName": "string",
+        "platform": "string",
+        "email": "string?",
+        "commit": "string",
+        "hostNonce": "string?",
+        "deviceNonce": "string?",
+        "createdAt": "int",
+        "expiresAt": "int"
+      },
+      "mayOmit": ["hostNonce", "deviceNonce"]
+    },
+    "Membership": {
+      "doc": "An invited account's active membership of this computer.",
+      "fields": { "membershipId": "string", "userId": "string", "inviteId": "string", "email": "string?" }
+    },
+    "BotDevice": {
+      "doc": "An active bot device of this computer.",
+      "fields": {
+        "botDeviceId": "string",
+        "inviteId": "string",
+        "deviceKey": "string",
+        "name": "string",
+        "provider": "string?",
+        "createdAt": "int"
+      }
+    },
+    "HostState": {
+      "doc": "GET /v1/host/state. memberships, botDevices and revoked are absent from a cloud that predates them: then the host leaves what it knows alone.",
+      "fields": {
+        "owner": "Owner?",
+        "grants": "[HostGrant]",
+        "requests": "[HostAccessRequest]",
+        "memberships": "[Membership]?",
+        "botDevices": "[BotDevice]?",
+        "revoked": "[string]?"
+      }
+    },
+    "ScreenIceRequest": { "fields": { "deviceKey": "string" } },
+    "IceServer": {
+      "doc": "One WebRTC ICE server. Credentials are memory-only and must not be logged.",
+      "fields": { "urls": "[string]", "username": "string?", "credential": "string?" },
+      "mayOmit": ["username", "credential"]
+    },
+    "IceConfig": { "fields": { "iceServers": "[IceServer]", "expiresAt": "int" } },
+    "HostNonce": { "doc": "The host's SAS nonce (base64url, 32 bytes).", "fields": { "nonce": "string" } },
+    "HostDecision": { "fields": { "decision": "Decision" } },
+    "Decided": {
+      "doc": "approved carries the grant the host adds the device with.",
+      "fields": { "status": "AccessState", "grantId": "string?" },
+      "mayOmit": ["grantId"]
+    },
+    "CreateInvite": { "fields": { "inviteId": "string", "tokenHash": "string", "expiresAt": "int" } },
+    "PersonRevoke": { "fields": { "userId": "string" } },
+    "AcceptInvite": { "doc": "token is h1 (the invite link's proof), never the token itself.", "fields": { "token": "string" } },
+    "InviteAccepted": { "fields": { "computerId": "string", "membershipId": "string?" } },
+    "AcceptBotInvite": { "fields": { "token": "string", "name": "string", "provider": "string?" } },
+    "BotInviteAccepted": { "fields": { "computerId": "string", "botDeviceId": "string" } }
+  },
+  "routes": {
+    "health": { "method": "GET", "path": "v1/health", "auth": "none", "response": "Health" },
+    "oauthLegacyCallback": { "method": "GET", "path": "v1/oauth/callback", "auth": "none", "kind": "redirect" },
+    "oauthLegacyDevCallback": { "method": "GET", "path": "v1/oauth/callback/dev", "auth": "none", "kind": "redirect" },
+    "oauthKithCallback": { "method": "GET", "path": "v1/oauth/callback/kith", "auth": "none", "kind": "redirect" },
+    "oauthKithDevCallback": { "method": "GET", "path": "v1/oauth/callback/kith-dev", "auth": "none", "kind": "redirect" },
+    "me": { "method": "GET", "path": "v1/me", "auth": "user", "response": "Me" },
+    "registerDevice": {
+      "method": "POST", "path": "v1/devices", "auth": "user+sig", "request": "RegisterDevice", "response": "DeviceRegistered"
+    },
+    "listDevices": { "method": "GET", "path": "v1/devices", "auth": "user", "response": "DeviceList" },
+    "retireDevice": { "method": "POST", "path": "v1/devices/retire", "auth": "sig", "response": "EmptyAnswer" },
+    "revokeDevice": { "method": "DELETE", "path": "v1/devices/{deviceId}", "auth": "user", "response": "EmptyAnswer" },
+    "createClaim": { "method": "POST", "path": "v1/claims", "auth": "user", "response": "ClaimChallenge" },
+    "completeClaim": {
+      "method": "POST", "path": "v1/claims/{claimId}/complete", "auth": "user", "request": "CompleteClaim", "response": "ComputerClaimed"
+    },
+    "listComputers": { "method": "GET", "path": "v1/computers", "auth": "user, sig optional", "response": "ComputerList" },
+    "renameComputer": {
+      "method": "PATCH", "path": "v1/computers/{computerId}", "auth": "user", "request": "RenameComputer", "response": "ComputerRenamed"
+    },
+    "removeComputer": { "method": "DELETE", "path": "v1/computers/{computerId}", "auth": "user", "response": "EmptyAnswer" },
+    "createAccessRequest": {
+      "method": "POST", "path": "v1/computers/{computerId}/access-requests", "auth": "user+sig",
+      "request": "CreateAccessRequest", "response": "AccessRequestCreated"
+    },
+    "listGrants": { "method": "GET", "path": "v1/computers/{computerId}/grants", "auth": "user", "response": "GrantList" },
+    "revokeGrant": { "method": "DELETE", "path": "v1/computers/{computerId}/grants/{grantId}", "auth": "user", "response": "EmptyAnswer" },
+    "getAccessRequest": { "method": "GET", "path": "v1/access-requests/{requestId}", "auth": "user", "response": "AccessStatus" },
+    "revealAccessRequest": {
+      "method": "POST", "path": "v1/access-requests/{requestId}/reveal", "auth": "user+sig", "request": "Reveal", "response": "EmptyAnswer"
+    },
+    "cancelAccessRequest": { "method": "DELETE", "path": "v1/access-requests/{requestId}", "auth": "user", "response": "EmptyAnswer" },
+    "hostRegister": {
+      "method": "POST", "path": "v1/host/register", "auth": "host", "request": "HostRegister", "response": "HostRegistered"
+    },
+    "hostState": { "method": "GET", "path": "v1/host/state", "auth": "host", "response": "HostState" },
+    "hostScreenIce": {
+      "method": "POST", "path": "v1/host/screen-ice", "auth": "host", "request": "ScreenIceRequest", "response": "IceConfig"
+    },
+    "hostNonce": {
+      "method": "POST", "path": "v1/host/access-requests/{requestId}/nonce", "auth": "host", "request": "HostNonce", "response": "EmptyAnswer"
+    },
+    "hostDecision": {
+      "method": "POST", "path": "v1/host/access-requests/{requestId}/decision", "auth": "host",
+      "request": "HostDecision", "response": "Decided"
+    },
+    "hostRevokeGrant": { "method": "POST", "path": "v1/host/grants/{grantId}/revoke", "auth": "host", "response": "EmptyAnswer" },
+    "hostUnclaim": { "method": "POST", "path": "v1/host/unclaim", "auth": "host", "response": "EmptyAnswer" },
+    "hostCreateInvite": { "method": "POST", "path": "v1/host/invites", "auth": "host", "request": "CreateInvite", "response": "OkAnswer" },
+    "hostRevokeInvite": { "method": "POST", "path": "v1/host/invites/{inviteId}/revoke", "auth": "host", "response": "OkAnswer" },
+    "hostRevokeMembership": {
+      "method": "POST", "path": "v1/host/memberships/{membershipId}/revoke", "auth": "host", "response": "OkAnswer"
+    },
+    "hostRevokePerson": { "method": "POST", "path": "v1/host/people/revoke", "auth": "host", "request": "PersonRevoke", "response": "OkAnswer" },
+    "hostUnrevokePerson": {
+      "method": "POST", "path": "v1/host/people/unrevoke", "auth": "host", "request": "PersonRevoke", "response": "OkAnswer"
+    },
+    "acceptInvite": {
+      "method": "POST", "path": "v1/invites/{inviteId}/accept", "auth": "user", "request": "AcceptInvite", "response": "InviteAccepted"
+    },
+    "hostCreateBotInvite": {
+      "method": "POST", "path": "v1/host/bot-invites", "auth": "host", "request": "CreateInvite", "response": "OkAnswer"
+    },
+    "hostRevokeBotInvite": { "method": "POST", "path": "v1/host/bot-invites/{inviteId}/revoke", "auth": "host", "response": "OkAnswer" },
+    "hostRevokeBotDevice": { "method": "POST", "path": "v1/host/bot-devices/{botDeviceId}/revoke", "auth": "host", "response": "OkAnswer" },
+    "acceptBotInvite": {
+      "method": "POST", "path": "v1/bot-invites/{inviteId}/accept", "auth": "sig",
+      "request": "AcceptBotInvite", "response": "BotInviteAccepted"
+    },
+    "relayHost": { "method": "GET", "path": "v1/relay/host", "query": "v=1", "auth": "host", "kind": "websocket" },
+    "relayDevice": {
+      "doc": "Any segment reaches the handler so a malformed computerId gets its 400.",
+      "method": "GET", "path": "v1/relay/device/{computerId:any}", "query": "v=1", "auth": "sig", "kind": "websocket"
+    },
+    "clerkWebhook": { "method": "POST", "path": "v1/webhooks/clerk", "auth": "webhook", "response": "EmptyAnswer" },
+    "routineHook": { "method": "POST", "path": "v1/hooks/{computerId}/{hookId}", "auth": "none", "kind": "forward" },
+    "invitePage": {
+      "doc": "The open-in-Kith page behind https://kithbot.app/i/<computer>/<invite>#t=<token>.",
+      "method": "GET", "path": "i/{computerId}/{inviteId}", "auth": "none", "kind": "page"
+    }
+  },
+  "errors": {
+    "doc": "The code in an error answer, {error:{code,message},requestId}, and its HTTP status. unauthorized (a bad hook key), paused (a paused hook), badDeliveryId and full (its queue) come from the computer's relay, on /v1/hooks only.",
+    "codes": {
+      "badRequest": 400,
+      "badDeliveryId": 400,
+      "unauthenticated": 401,
+      "badSignature": 401,
+      "unauthorized": 401,
+      "forbidden": 403,
+      "accountDeleted": 403,
+      "notFound": 404,
+      "unknownComputer": 404,
+      "alreadyClaimed": 409,
+      "conflict": 409,
+      "tooMany": 409,
+      "inviteUsed": 409,
+      "paused": 409,
+      "claimExpired": 410,
+      "requestExpired": 410,
+      "inviteExpired": 410,
+      "inviteRevoked": 410,
+      "tooLarge": 413,
+      "upgradeRequired": 426,
+      "rateLimited": 429,
+      "full": 429,
+      "internal": 500,
+      "screenRelayUnavailable": 503
+    }
+  }
+}

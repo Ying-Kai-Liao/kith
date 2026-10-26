@@ -130,6 +130,7 @@ private func link(_ query: String, scheme: String = "kith") -> URL { URL(string:
                   {"computerId":"c","name":"Old cloud","signKey":"k"},
                   {"computerId":"d","name":"New role","signKey":"k","role":"supervisor"}]}
     """#.utf8)).computers
+    // A role this version doesn't know reads as member (the contract's ComputerRole), so it gets member's rights.
     #expect(rows.map(\.role) == [.owner, .member, nil, .member])
     #expect(rows.map(\.isMember) == [false, true, false, true])
     let accepted = try JSONDecoder().decode(InviteAccepted.self, from: Data(#"{"computerId":"b","membershipId":"mem_1"}"#.utf8))

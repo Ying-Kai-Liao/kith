@@ -14,6 +14,7 @@ chacha20poly1305 = "0.11.0"
 ed25519-dalek = "3.0.0"
 getrandom = "0.4"
 hkdf = "0.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
 sha2 = "0.11.0"
 x25519-dalek = { version = "3.0.0", features = ["static_secrets"] }

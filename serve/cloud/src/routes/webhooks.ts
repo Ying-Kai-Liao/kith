@@ -4,8 +4,9 @@
 import { Webhook } from "svix";
 import type { Env } from "../index";
 import { ApiError, audit, notify, ownsComputers, revokeGrants, revokeMemberAccess, type Ctx } from "./common";
+import type { Responses } from "../contract.gen";
 
-export async function clerkWebhook(c: Ctx) {
+export async function clerkWebhook(c: Ctx): Promise<Responses["clerkWebhook"]> {
   if (!c.env.CLERK_WEBHOOK_SECRET) throw new ApiError("internal", "Webhook secret not configured");
   const payload = new TextDecoder().decode(c.raw);
   const h = (name: string) => c.req.headers.get(name) ?? "";

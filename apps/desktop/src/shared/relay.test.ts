@@ -7,16 +7,16 @@ test("a computer's role: absent is the owner (older cloud), a role this version 
   assert.equal(cloudRole('member'), 'member')
   assert.equal(cloudRole(undefined), 'owner')
   assert.equal(cloudRole(null), 'owner')
-  // The same as iOS (ComputerRole decodes an unknown role as member): never owner-only screens by accident.
+  // The contract's ComputerRole reads a role it doesn't know as member, on every side: never owner-only screens by accident.
   assert.equal(cloudRole('admin'), 'member')
   assert.equal(cloudRole(''), 'member')
   assert.equal(cloudRole(1), 'member')
 })
 
-test("the cloud's access words, and one this version doesn't know is not access", () => {
+test("the cloud's access words, and one this version doesn't know is none", () => {
   for (const w of ['granted', 'pending', 'none'] as const) assert.equal(cloudAccess(w), w)
   // The #328 word: the cloud never sends it, and it must never read as access.
-  assert.equal(cloudAccess('approved'), null)
+  assert.equal(cloudAccess('approved'), 'none')
   assert.equal(cloudAccess(undefined), null)
 })
 
@@ -39,8 +39,9 @@ test('GET /v1/computers rows map the same for desktop and web', () => {
   assert.deepEqual(relayComputers(null), [])
 })
 
-test('access request status: the five words, anything else is over', () => {
+test("access request status: the five words, anything else is the explicit 'unknown'", () => {
   for (const w of ['pending', 'approved', 'denied', 'expired', 'cancelled'] as const) assert.equal(accessProgress(w), w)
-  assert.equal(accessProgress('granted'), 'expired')
-  assert.equal(accessProgress(undefined), 'expired')
+  // 'granted' is a computer's access word, not a request's (#328): never read as one of the five.
+  assert.equal(accessProgress('granted'), 'unknown')
+  assert.equal(accessProgress(undefined), 'unknown')
 })

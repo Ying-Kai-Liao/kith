@@ -1,6 +1,7 @@
 import { hostname } from 'node:os'
 import { BrowserWindow, ipcMain, type WebContents } from 'electron'
 import type { CloudAccess } from '../cloud'
+import { paths, receive, type DevicePlatform, type Requests } from '../../shared/cloud-contract.gen.ts'
 import type { AccessProgress, AccessTicket, CloudResult, RelayCallError, RelayComputer, RelayState } from '../../shared/relay'
 import { accessProgress, relayComputers } from '../../shared/relay'
 import { requestAccess } from '../../shared/relay-core/access.ts'
@@ -13,7 +14,7 @@ import { dialWebSocket, probeUpgrade } from './dial'
  * streams and a state through `window.kith.relay`.
  */
 
-const PLATFORMS: Record<string, string> = { darwin: 'macos', win32: 'windows', linux: 'linux' }
+const PLATFORMS: Partial<Record<NodeJS.Platform, DevicePlatform>> = { darwin: 'macos', win32: 'windows', linux: 'linux' }
 
 const failure = (status: number, code: string, message: string): CloudResult<never> => ({ ok: false, error: { status, code, message } })
 
@@ -44,7 +45,7 @@ export function registerRelay(cloud: CloudAccess) {
     }
     let done = registered.get(device.userId)
     if (!done) {
-      done = cloud.request('POST', 'v1/devices', { name: hostname(), platform: PLATFORMS[process.platform] ?? 'linux' }, true)
+      done = cloud.request('POST', paths.registerDevice(), { name: hostname(), platform: PLATFORMS[process.platform] ?? 'linux' } satisfies Requests['registerDevice'], true)
       registered.set(device.userId, done)
     }
     const res = await done
@@ -71,7 +72,7 @@ export function registerRelay(cloud: CloudAccess) {
   ipcMain.handle('relay:computers', async (): Promise<CloudResult<RelayComputer[]>> => {
     const ensured = await ensureDevice()
     if (!ensured.ok) return ensured
-    const res = await cloud.request('GET', 'v1/computers', undefined, true)
+    const res = await cloud.request('GET', paths.listComputers(), undefined, true)
     if (!res.ok) return res
     return { ok: true, value: relayComputers(res.value) }
   })
@@ -167,9 +168,9 @@ export function registerRelay(cloud: CloudAccess) {
 
   ipcMain.handle('relay:accessStatus', async (_e, requestId: string): Promise<CloudResult<AccessProgress>> => {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId)) return failure(400, 'badRequest', 'Bad request id.')
-    const res = await cloud.request('GET', `v1/access-requests/${requestId}`, undefined, false)
+    const res = await cloud.request('GET', paths.getAccessRequest(requestId), undefined, false)
     if (!res.ok) return res
-    return { ok: true, value: accessProgress((res.value as { status?: unknown }).status) }
+    return { ok: true, value: accessProgress(receive('AccessStatus', res.value).status) }
   })
 
   /** Stops waiting for a Mac's nonce (if we still are) and withdraws the request. */
@@ -177,6 +178,6 @@ export function registerRelay(cloud: CloudAccess) {
     const waiting = asking.get(computerId)
     if (waiting) waiting.cancelled = true
     const id = requestId ?? waiting?.requestId
-    if (id && /^[A-Za-z0-9_-]{1,128}$/.test(id)) await cloud.request('DELETE', `v1/access-requests/${id}`, undefined, false)
+    if (id && /^[A-Za-z0-9_-]{1,128}$/.test(id)) await cloud.request('DELETE', paths.cancelAccessRequest(id), undefined, false)
   })
 }

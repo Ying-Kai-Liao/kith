@@ -1,0 +1,16 @@
+{
+  "type": "ComputerList",
+  "body": {
+    "computers": [
+      {
+        "computerId": "cmp_7f3a9c",
+        "name": "Kai’s Mac",
+        "platform": "macos",
+        "signKey": "dGhpcyBpcyBhIHRlc3Qga2V5IG9mIDMyIGJ5dGVzIQ",
+        "boxKey": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+        "online": true,
+        "lastSeenAt": 1793000000000
+      }
+    ]
+  }
+}

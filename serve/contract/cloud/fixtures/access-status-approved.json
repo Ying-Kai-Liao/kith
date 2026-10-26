@@ -1,0 +1,11 @@
+{
+  "type": "AccessStatus",
+  "body": {
+    "requestId": "req_5e6f",
+    "computerId": "cmp_7f3a9c",
+    "status": "approved",
+    "expiresAt": 1793000600000,
+    "hostNonce": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+    "grantId": "grt_7g8h"
+  }
+}

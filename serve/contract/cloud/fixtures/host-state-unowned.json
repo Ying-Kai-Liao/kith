@@ -1,0 +1,11 @@
+{
+  "type": "HostState",
+  "body": {
+    "owner": null,
+    "grants": [],
+    "requests": [],
+    "memberships": [],
+    "botDevices": [],
+    "revoked": []
+  }
+}

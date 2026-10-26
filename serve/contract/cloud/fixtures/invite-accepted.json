@@ -1,0 +1,7 @@
+{
+  "type": "InviteAccepted",
+  "body": {
+    "computerId": "cmp_7f3a9c",
+    "membershipId": "mem_1q2w"
+  }
+}

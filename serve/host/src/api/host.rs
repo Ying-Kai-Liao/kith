@@ -150,7 +150,7 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             let ice = if b["relay"].as_bool().unwrap_or(false) {
                 crate::remote::cloud::screen_ice(hub, caller.device_key()).await?
             } else {
-                crate::screen::IceConfig::default()
+                crate::screen::local_ice()
             };
             let result = hub.screen.prepare(caller.device_key(), ice)?;
             let session = result["session"].as_str().context("missing screen session")?.to_owned();

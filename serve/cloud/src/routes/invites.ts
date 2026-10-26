@@ -3,6 +3,7 @@
 
 import { randomId, sha256, utf8 } from "../auth";
 import { ApiError, audit, body, host, notify, revokeMembership, str, user, type Ctx } from "./common";
+import type { Responses } from "../contract.gen";
 
 /** The host makes 24 h invites; a longer ask is a bug or a hostile host, not clock skew. */
 const MAX_INVITE_TTL_MS = 48 * 3600_000;
@@ -27,7 +28,7 @@ interface MembershipRow {
 
 const hex = (bytes: Uint8Array) => Array.from(bytes, (x) => x.toString(16).padStart(2, "0")).join("");
 
-export async function hostCreateInvite(c: Ctx) {
+export async function hostCreateInvite(c: Ctx): Promise<Responses["hostCreateInvite"]> {
   const comp = await host(c);
   const b = body(c);
   const inviteId = str(b, "inviteId", 64);
@@ -55,7 +56,7 @@ export async function hostCreateInvite(c: Ctx) {
   return { ok: true };
 }
 
-export async function hostRevokeInvite(c: Ctx, [inviteId]: string[]) {
+export async function hostRevokeInvite(c: Ctx, [inviteId]: string[]): Promise<Responses["hostRevokeInvite"]> {
   const comp = await host(c);
   const row = await c.env.DB.prepare("SELECT * FROM invites WHERE invite_id = ? AND computer_id = ?")
     .bind(inviteId, comp.id)
@@ -73,7 +74,7 @@ export async function hostRevokeInvite(c: Ctx, [inviteId]: string[]) {
   return { ok: true };
 }
 
-export async function hostRevokeMembership(c: Ctx, [membershipId]: string[]) {
+export async function hostRevokeMembership(c: Ctx, [membershipId]: string[]): Promise<Responses["hostRevokeMembership"]> {
   const comp = await host(c);
   const m = await c.env.DB.prepare("SELECT * FROM memberships WHERE membership_id = ? AND computer_id = ?")
     .bind(membershipId, comp.id)
@@ -107,7 +108,7 @@ async function revokeTarget(c: Ctx): Promise<{ owner: string; userId: string }> 
  * `GET /v1/host/state` lists it under `revoked` and the Mac sets the person's revoked state in its own kith-auth.
  * Revoking again is a no-op that still tells the Macs.
  */
-export async function hostRevokePerson(c: Ctx) {
+export async function hostRevokePerson(c: Ctx): Promise<Responses["hostRevokePerson"]> {
   const { owner, userId } = await revokeTarget(c);
   // The row first: an accept that races this either lands before (and its membership is cut below) or sees the row.
   await c.env.DB.batch([
@@ -125,7 +126,7 @@ export async function hostRevokePerson(c: Ctx) {
 }
 
 /** Undo of a person revoke: the row goes and every Mac of the owner is told; each clears the state in kith-auth. */
-export async function hostUnrevokePerson(c: Ctx) {
+export async function hostUnrevokePerson(c: Ctx): Promise<Responses["hostUnrevokePerson"]> {
   const { owner, userId } = await revokeTarget(c);
   await c.env.DB.batch([
     c.env.DB.prepare("DELETE FROM revocations WHERE owner_user_id = ? AND user_id = ?").bind(owner, userId),
@@ -145,7 +146,7 @@ export async function revokedOf(c: Ctx, ownerUserId: string | null): Promise<str
 }
 
 /** The account joins the computer whose Mac made this invite. Single use; the same account may repeat it. */
-export async function acceptInvite(c: Ctx, [inviteId]: string[]) {
+export async function acceptInvite(c: Ctx, [inviteId]: string[]): Promise<Responses["acceptInvite"]> {
   const u = await user(c);
   const token = str(body(c), "token", 200);
   const inv = await c.env.DB.prepare("SELECT * FROM invites WHERE invite_id = ?").bind(inviteId).first<InviteRow>();

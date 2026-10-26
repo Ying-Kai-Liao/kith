@@ -68,6 +68,7 @@ pub(super) async fn joined(r: &Rig, preset: &str) -> Caller {
         membership_id: "mem_sam".into(),
         user_id: "user_sam".into(),
         invite_id: made["inviteId"].as_str().unwrap().to_owned(),
+        ..Default::default()
     }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     r.device("sam-phone", Some("sam"))

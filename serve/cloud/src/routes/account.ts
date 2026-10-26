@@ -26,6 +26,7 @@ import {
   type Ctx,
   type RequestRow,
 } from "./common";
+import { type ComputerAccess, type ComputerRole, DevicePlatformValues, HostPlatformValues, type Responses } from "../contract.gen";
 
 const CLAIM_TTL_MS = 5 * 60_000;
 const REQUEST_TTL_MS = 10 * 60_000;
@@ -40,7 +41,7 @@ export const claimCanonical = (
   family: LabelFamily = "kith",
 ) => [`${family}/claim/v1`, claimId, nonce, userId, computerId, boxKey].join("\n");
 
-export async function me(c: Ctx) {
+export async function me(c: Ctx): Promise<Responses["me"]> {
   const u = await user(c);
   return { userId: u.userId, email: u.email, createdAt: u.createdAt };
 }
@@ -64,12 +65,12 @@ const deviceView = (d: DeviceRow) => ({
   createdAt: d.created_at,
 });
 
-export async function registerDevice(c: Ctx) {
+export async function registerDevice(c: Ctx): Promise<Responses["registerDevice"]> {
   const u = await user(c);
   const s = await signed(c);
   const b = body(c);
   const name = str(b, "name");
-  const platform = oneOf(b, "platform", ["ios", "macos", "linux", "windows", "android", "web"] as const);
+  const platform = oneOf(b, "platform", DevicePlatformValues);
   // A key that signed its own retirement (even before the cloud saw it) never registers again.
   if (await c.env.DB.prepare("SELECT 1 FROM retired_keys WHERE sign_pub = ?").bind(s.kid).first()) {
     throw new ApiError("forbidden", "This device key was retired; create a new one");
@@ -125,7 +126,7 @@ export async function registerDevice(c: Ctx) {
   return { device: deviceView(saved) };
 }
 
-export async function listDevices(c: Ctx) {
+export async function listDevices(c: Ctx): Promise<Responses["listDevices"]> {
   const u = await user(c);
   const { results } = await c.env.DB.prepare("SELECT * FROM devices WHERE owner_user_id = ? ORDER BY created_at")
     .bind(u.userId)
@@ -135,7 +136,7 @@ export async function listDevices(c: Ctx) {
   };
 }
 
-export async function revokeDevice(c: Ctx, [deviceId]: string[]) {
+export async function revokeDevice(c: Ctx, [deviceId]: string[]): Promise<Responses["revokeDevice"]> {
   const u = await user(c);
   const d = await c.env.DB.prepare("SELECT id, revoked_at FROM devices WHERE id = ? AND owner_user_id = ?")
     .bind(deviceId, u.userId)
@@ -170,7 +171,7 @@ async function revokeDeviceRow(env: Env, deviceId: string, actor: string, now: n
  * holding the key is revoked and its sockets closed. The key is also written to `retired_keys`, so a register that was
  * signed before sign-out and lands after it (or for a key the cloud never saw) is refused.
  */
-export async function retireDevice(c: Ctx) {
+export async function retireDevice(c: Ctx): Promise<Responses["retireDevice"]> {
   if (c.env.REGISTER_LIMITER) {
     const ip = c.req.headers.get("CF-Connecting-IP") ?? "unknown";
     if (!(await c.env.REGISTER_LIMITER.limit({ key: "retire|" + ip })).success) throw new ApiError("rateLimited");
@@ -184,7 +185,7 @@ export async function retireDevice(c: Ctx) {
   return {};
 }
 
-export async function createClaim(c: Ctx) {
+export async function createClaim(c: Ctx): Promise<Responses["createClaim"]> {
   const u = await user(c);
   const claimId = randomId("clm_");
   const nonce = randomId();
@@ -195,7 +196,7 @@ export async function createClaim(c: Ctx) {
   return { claimId, nonce, expiresAt };
 }
 
-export async function completeClaim(c: Ctx, [claimId]: string[]) {
+export async function completeClaim(c: Ctx, [claimId]: string[]): Promise<Responses["completeClaim"]> {
   const u = await user(c);
   const b = body(c);
   const signKey = key(b, "signKey", 32);
@@ -203,7 +204,7 @@ export async function completeClaim(c: Ctx, [claimId]: string[]) {
   const sig = fromB64url(b.sig, 64);
   const computerId = str(b, "computerId", 22);
   const name = str(b, "name");
-  const platform = oneOf(b, "platform", ["macos", "linux", "windows"] as const);
+  const platform = oneOf(b, "platform", HostPlatformValues);
   const device = optStr(b, "device", 32);
   const version = str(b, "version", 32);
   if (!sig) throw new ApiError("badRequest", "Invalid sig");
@@ -253,7 +254,7 @@ export async function completeClaim(c: Ctx, [claimId]: string[]) {
   return { computer: computerView(row!) };
 }
 
-export async function listComputers(c: Ctx) {
+export async function listComputers(c: Ctx): Promise<Responses["listComputers"]> {
   const u = await user(c);
   let deviceId: string | null = null;
   if (c.req.headers.has("Kith-Sig") || c.req.headers.has(LEGACY_SIG_HEADER)) {
@@ -277,11 +278,11 @@ export async function listComputers(c: Ctx) {
      ORDER BY c.claimed_at`,
   )
     .bind(deviceId, u.userId, c.now)
-    .all<ComputerRow & { access: string | null; role: "owner" | "member" }>();
+    .all<ComputerRow & { access: ComputerAccess | null; role: ComputerRole }>();
   return { computers: results.map(computerView) };
 }
 
-export async function renameComputer(c: Ctx, [id]: string[]) {
+export async function renameComputer(c: Ctx, [id]: string[]): Promise<Responses["renameComputer"]> {
   const u = await user(c);
   const name = str(body(c), "name");
   await ownedComputer(c, id!, u.userId);
@@ -289,14 +290,14 @@ export async function renameComputer(c: Ctx, [id]: string[]) {
   return { computer: computerView(await ownedComputer(c, id!, u.userId)) };
 }
 
-export async function removeComputer(c: Ctx, [id]: string[]) {
+export async function removeComputer(c: Ctx, [id]: string[]): Promise<Responses["removeComputer"]> {
   const u = await user(c);
   await ownedComputer(c, id!, u.userId);
   await unclaim(c.env, id!, u.userId, c.now);
   return {};
 }
 
-export async function createAccessRequest(c: Ctx, [computerId]: string[]) {
+export async function createAccessRequest(c: Ctx, [computerId]: string[]): Promise<Responses["createAccessRequest"]> {
   const u = await user(c);
   const dev = await device(c, u.userId);
   const commit = key(body(c), "commit", 32);
@@ -327,7 +328,7 @@ export async function createAccessRequest(c: Ctx, [computerId]: string[]) {
   return { requestId, expiresAt };
 }
 
-export async function getAccessRequest(c: Ctx, [id]: string[]) {
+export async function getAccessRequest(c: Ctx, [id]: string[]): Promise<Responses["getAccessRequest"]> {
   const u = await user(c);
   const r = await c.env.DB.prepare("SELECT * FROM access_requests WHERE id = ? AND user_id = ?")
     .bind(id, u.userId)
@@ -343,7 +344,7 @@ export async function getAccessRequest(c: Ctx, [id]: string[]) {
   };
 }
 
-export async function revealAccessRequest(c: Ctx, [id]: string[]) {
+export async function revealAccessRequest(c: Ctx, [id]: string[]): Promise<Responses["revealAccessRequest"]> {
   const u = await user(c);
   const dev = await device(c, u.userId);
   const nonce = key(body(c), "nonce", 32);
@@ -367,7 +368,7 @@ export async function revealAccessRequest(c: Ctx, [id]: string[]) {
   return {};
 }
 
-export async function cancelAccessRequest(c: Ctx, [id]: string[]) {
+export async function cancelAccessRequest(c: Ctx, [id]: string[]): Promise<Responses["cancelAccessRequest"]> {
   const u = await user(c);
   const row = await c.env.DB.prepare("SELECT * FROM access_requests WHERE id = ? AND user_id = ?")
     .bind(id, u.userId)
@@ -382,7 +383,7 @@ export async function cancelAccessRequest(c: Ctx, [id]: string[]) {
   return {};
 }
 
-export async function listGrants(c: Ctx, [id]: string[]) {
+export async function listGrants(c: Ctx, [id]: string[]): Promise<Responses["listGrants"]> {
   const u = await user(c);
   await ownedComputer(c, id!, u.userId);
   const { results } = await c.env.DB.prepare(
@@ -403,7 +404,7 @@ export async function listGrants(c: Ctx, [id]: string[]) {
   };
 }
 
-export async function revokeGrant(c: Ctx, [id, grantId]: string[]) {
+export async function revokeGrant(c: Ctx, [id, grantId]: string[]): Promise<Responses["revokeGrant"]> {
   const u = await user(c);
   await ownedComputer(c, id!, u.userId);
   const exists = await c.env.DB.prepare("SELECT 1 FROM grants WHERE id = ? AND computer_id = ?").bind(grantId, id).first();

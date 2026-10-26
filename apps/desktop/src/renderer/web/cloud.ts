@@ -1,3 +1,4 @@
+import { paths } from '../../shared/cloud-contract.gen.ts'
 import type { CloudFailure, CloudResult } from '../../shared/relay.ts'
 import { signatureHeader, type Signer } from '../../shared/relay-core/crypto.ts'
 
@@ -84,7 +85,7 @@ export class WebCloud {
 
   /** `POST /v1/devices/retire` (§4.2 step 2): signed by the key alone, no login, and it ignores `halt` because it is the last word. */
   async retire(signer: Signer): Promise<CloudResult<unknown>> {
-    const url = new URL('v1/devices/retire', `${this.d.cloudURL.replace(/\/$/, '')}/`)
+    const url = new URL(paths.retireDevice(), `${this.d.cloudURL.replace(/\/$/, '')}/`)
     try {
       const sig = await signatureHeader(signer, { method: 'POST', authority: url.host, pathAndQuery: url.pathname, body: new Uint8Array() })
       return await this.fetchJson(url, 'POST', { 'Kith-Sig': sig }, undefined, AbortSignal.timeout(this.d.timeoutMs ?? 8_000))

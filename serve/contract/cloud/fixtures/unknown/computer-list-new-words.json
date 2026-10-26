@@ -1,0 +1,24 @@
+{
+  "type": "ComputerList",
+  "body": {
+    "computers": [
+      {
+        "role": "admin",
+        "computerId": "cmp_7f3a9c",
+        "name": "Kai’s Mac",
+        "platform": "macos",
+        "device": "MacBookPro18,3",
+        "signKey": "dGhpcyBpcyBhIHRlc3Qga2V5IG9mIDMyIGJ5dGVzIQ",
+        "boxKey": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+        "version": "0.1.0",
+        "online": true,
+        "lastSeenAt": 1793000000000,
+        "claimedAt": 1792000000000,
+        "access": "approved",
+        "newField": {
+          "nested": true
+        }
+      }
+    ]
+  }
+}

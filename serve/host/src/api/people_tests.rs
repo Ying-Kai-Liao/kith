@@ -20,6 +20,7 @@ async fn joined(r: &Rig) {
         membership_id: "mem_sam".into(),
         user_id: "user_sam".into(),
         invite_id: made["inviteId"].as_str().unwrap().to_owned(),
+        ..Default::default()
     }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     // A second, still open invite for the same person.

@@ -11,41 +11,23 @@ import {
   verifySig,
   type SignedRequest,
 } from "../auth";
+import { ERROR_STATUS, type AccessState, type CloudComputer, type ComputerAccess, type ComputerRole, type ErrorCode } from "../contract.gen";
 import type { Env } from "../index";
 
 const MAX_BODY = 64 * 1024;
 
 // ---- errors ----
 
-const STATUS: Record<string, number> = {
-  badRequest: 400,
-  unauthenticated: 401,
-  badSignature: 401,
-  forbidden: 403,
-  accountDeleted: 403,
-  notFound: 404,
-  unknownComputer: 404,
-  alreadyClaimed: 409,
-  conflict: 409,
-  claimExpired: 410,
-  requestExpired: 410,
-  inviteExpired: 410,
-  inviteRevoked: 410,
-  upgradeRequired: 426,
-  tooLarge: 413,
-  rateLimited: 429,
-  internal: 500,
-};
-
+// Codes and statuses are the cloud contract's (serve/contract/cloud/contract.json): a code it doesn't name won't compile.
 export class ApiError extends Error {
   readonly status: number;
   constructor(
-    readonly code: string,
+    readonly code: ErrorCode,
     message?: string,
     status?: number,
   ) {
     super(message ?? code);
-    this.status = status ?? STATUS[code] ?? 500;
+    this.status = status ?? ERROR_STATUS[code];
   }
 }
 
@@ -201,7 +183,7 @@ export async function memberComputer(c: Ctx, id: string, userId: string): Promis
 
 // ---- shared pieces ----
 
-export function computerView(r: ComputerRow & { access?: string | null; role?: "owner" | "member" }) {
+export function computerView(r: ComputerRow & { access?: ComputerAccess | null; role?: ComputerRole }): CloudComputer {
   return {
     role: r.role ?? "owner",
     computerId: r.id,
@@ -347,11 +329,11 @@ export interface RequestRow {
   id: string;
   computer_id: string;
   device_id: string;
-  status: string;
+  status: AccessState;
   host_nonce: string | null;
   device_nonce: string | null;
   expires_at: number;
   grant_id: string | null;
 }
 
-export const effectiveStatus = (r: RequestRow, now: number) => (r.status === "pending" && r.expires_at <= now ? "expired" : r.status);
+export const effectiveStatus = (r: RequestRow, now: number): AccessState => (r.status === "pending" && r.expires_at <= now ? "expired" : r.status);

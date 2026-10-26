@@ -1,0 +1,69 @@
+{
+  "type": "HostState",
+  "note": "A newer cloud's answer with fields this version doesn't know, at the top and inside rows: every consumer ignores them.",
+  "body": {
+    "owner": {
+      "userId": "user_2abc",
+      "email": "kai@example.com",
+      "plan": "team"
+    },
+    "grants": [
+      {
+        "grantId": "grt_7g8h",
+        "deviceKey": "dGhpcmQgdGVzdCBrZXkgb2YgdGhpcnR5LXR3byBieQ",
+        "deviceName": "Kai’s iPhone",
+        "platform": "ios",
+        "scopes": [
+          "chat"
+        ],
+        "userId": "user_2abc",
+        "expiresAt": 1795000000000
+      }
+    ],
+    "requests": [
+      {
+        "requestId": "req_5e6f",
+        "userId": "user_3def",
+        "deviceKey": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+        "deviceName": "Sam’s Pixel",
+        "platform": "android",
+        "email": "sam@example.com",
+        "commit": "dGhpcyBpcyBhIHRlc3Qga2V5IG9mIDMyIGJ5dGVzIQ",
+        "hostNonce": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+        "createdAt": 1793000000000,
+        "expiresAt": 1793000600000,
+        "origin": {
+          "kind": "invite",
+          "inviteId": "inv_3e4r"
+        }
+      }
+    ],
+    "memberships": [
+      {
+        "membershipId": "mem_1q2w",
+        "userId": "user_3def",
+        "inviteId": "inv_3e4r",
+        "email": null
+      }
+    ],
+    "botDevices": [
+      {
+        "botDeviceId": "bot_5t6y",
+        "inviteId": "inv_7u8i",
+        "deviceKey": "dGhpcyBpcyBhIHRlc3Qga2V5IG9mIDMyIGJ5dGVzIQ",
+        "name": "ci-bot",
+        "provider": null,
+        "createdAt": 1792500000000
+      }
+    ],
+    "revoked": [
+      "user_9xyz"
+    ],
+    "pausedUntil": null,
+    "schedules": [
+      {
+        "id": "sch_1"
+      }
+    ]
+  }
+}

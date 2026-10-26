@@ -1,0 +1,12 @@
+{
+  "type": "DeviceRegistered",
+  "body": {
+    "device": {
+      "deviceId": "dev_1a2b",
+      "deviceKey": "dGhpcmQgdGVzdCBrZXkgb2YgdGhpcnR5LXR3byBieQ",
+      "name": "Kai’s iPhone",
+      "platform": "ios",
+      "createdAt": 1790000000000
+    }
+  }
+}

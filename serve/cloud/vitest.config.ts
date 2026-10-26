@@ -21,6 +21,8 @@ export default defineConfig(async () => ({
           // The web-device tests mock Clerk's Backend API; the key only has to be present.
           CLERK_SECRET_KEY: "sk_test_unit",
           WEB_ORIGINS: "https://web.test,https://web2.test",
+          // Every JSON answer is checked against serve/contract/cloud/contract.json (src/index.ts strictProblems).
+          KITH_CONTRACT_STRICT: "1",
           CLERK_WEBHOOK_SECRET: `whsec_${randomBytes(24).toString("base64")}`,
         },
       },

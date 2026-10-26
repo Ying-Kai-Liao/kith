@@ -1,0 +1,25 @@
+{
+  "type": "DeviceList",
+  "body": {
+    "devices": [
+      {
+        "deviceId": "dev_1a2b",
+        "deviceKey": "dGhpcmQgdGVzdCBrZXkgb2YgdGhpcnR5LXR3byBieQ",
+        "name": "Kai’s iPhone",
+        "platform": "ios",
+        "createdAt": 1790000000000,
+        "lastUsedAt": 1793000000000,
+        "revoked": false
+      },
+      {
+        "deviceId": "dev_3c4d",
+        "deviceKey": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+        "name": "Old iPad",
+        "platform": "ios",
+        "createdAt": 1780000000000,
+        "lastUsedAt": null,
+        "revoked": true
+      }
+    ]
+  }
+}

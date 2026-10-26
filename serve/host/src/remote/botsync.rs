@@ -7,7 +7,7 @@ use crate::api::botguests;
 use crate::hub::Hub;
 use crate::remote::crypto;
 use crate::store::{BotState, Device, DeviceSource, Scope, Store, now_ms};
-use serde::Deserialize;
+use kith_wire::cloud::path;
 use serde_json::json;
 
 /// kv: cloud bot devices (`bd_...`) this host ended and the cloud has not yet confirmed as revoked (JSON array).
@@ -20,15 +20,8 @@ pub const JOIN_MS: i64 = 10 * 60 * 1000;
 /// A request nobody answers in this long is a no (Kai's standing answer to open question 6).
 pub const PENDING_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
-/// One active bot device of `GET /v1/host/state`.
-#[allow(clippy::struct_field_names, reason = "wire names")]
-#[derive(Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Listed {
-    pub bot_device_id: String,
-    pub invite_id: String,
-    pub device_key: String,
-}
+/// One active bot device of `GET /v1/host/state`: the cloud contract's `BotDevice`.
+pub use kith_wire::cloud::BotDevice as Listed;
 
 /// Applies the cloud's bot list. `None` (an older cloud that doesn't list bots) changes nothing. Never fails the pull:
 /// a problem is logged and the next pull tries again.
@@ -191,15 +184,20 @@ pub async fn revoke_invite_in_cloud(hub: &Hub, invite_id: &str) {
     retry_revokes(hub).await;
 }
 
+/// A contract path made from one id.
+type IdPath = fn(&str) -> String;
+
 pub async fn retry_revokes(hub: &Hub) {
-    for (key, path) in [(PENDING_REVOKES, "bot-devices"), (PENDING_INVITE_REVOKES, "bot-invites")] {
+    let paths: [(&str, IdPath); 2] =
+        [(PENDING_REVOKES, path::host_revoke_bot_device), (PENDING_INVITE_REVOKES, path::host_revoke_bot_invite)];
+    for (key, path) in paths {
         let ids = list(&hub.store, key);
         if ids.is_empty() {
             continue;
         }
         let mut left = vec![];
         for id in ids {
-            match super::cloud::post(hub, &format!("/v1/host/{path}/{id}/revoke"), &json!({})).await {
+            match super::cloud::post(hub, &path(&id), &json!({})).await {
                 Ok(_) => {}
                 // Gone there already, or (an invite) accepted meanwhile: the device is what to revoke then.
                 Err(e) if super::cloud::refused_with(&e, 404) || super::cloud::refused_with(&e, 409) => {}

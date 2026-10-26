@@ -26,7 +26,12 @@ async fn sam(r: &Rig) -> Caller {
     let made =
         call(r, &Caller::Local, "createInvite", json!({"name": "Sam", "agents": {"house": "member"}})).await.unwrap();
     let invite = made["inviteId"].as_str().unwrap().to_owned();
-    let listed = [Member { membership_id: "mem_sam".into(), user_id: "user_sam".into(), invite_id: invite }];
+    let listed = [Member {
+        membership_id: "mem_sam".into(),
+        user_id: "user_sam".into(),
+        invite_id: invite,
+        ..Default::default()
+    }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     r.device("sam-phone", Some("sam"))
 }
@@ -47,8 +52,12 @@ async fn join(r: &Rig, owner: &Caller, body: Value) -> Joined {
     let made = call(r, owner, "createBotInvite", body).await.unwrap();
     let key = b64(&crypto::random::<32>());
     let invite = made["inviteId"].as_str().unwrap().to_owned();
-    let listed =
-        Listed { bot_device_id: format!("bd_{}", &key[..8]), invite_id: invite.clone(), device_key: key.clone() };
+    let listed = Listed {
+        bot_device_id: format!("bd_{}", &key[..8]),
+        invite_id: invite.clone(),
+        device_key: key.clone(),
+        ..Listed::default()
+    };
     // The cloud lists every bot device it has, so the ones already admitted stay in the list.
     let mut all: Vec<Listed> = r
         .hub
@@ -58,7 +67,12 @@ async fn join(r: &Rig, owner: &Caller, body: Value) -> Joined {
         .into_iter()
         .filter(|g| g.state.live())
         .filter_map(|g| g.cloud_device)
-        .map(|bot_device_id| Listed { bot_device_id, invite_id: String::new(), device_key: String::new() })
+        .map(|bot_device_id| Listed {
+            bot_device_id,
+            invite_id: String::new(),
+            device_key: String::new(),
+            ..Default::default()
+        })
         .collect();
     all.push(listed);
     botsync::apply(&r.hub, &all).await.unwrap();
@@ -109,13 +123,15 @@ async fn a_bot_joins_proves_asks_and_is_revoked() {
         bot_device_id: "bd_x".into(),
         invite_id: "bi_unknown".into(),
         device_key: b64(&crypto::random::<32>()),
+        ..Default::default()
     };
     botsync::apply(&r.hub, &[stranger]).await.unwrap();
     assert_eq!(r.hub.store.devices().unwrap().len(), 0);
 
     let key = b64(&crypto::random::<32>());
     let inv = made["inviteId"].as_str().unwrap().to_owned();
-    let listed = Listed { bot_device_id: "bd_1".into(), invite_id: inv.clone(), device_key: key.clone() };
+    let listed =
+        Listed { bot_device_id: "bd_1".into(), invite_id: inv.clone(), device_key: key.clone(), ..Default::default() };
     botsync::apply(&r.hub, std::slice::from_ref(&listed)).await.unwrap();
     botsync::apply(&r.hub, &[listed]).await.unwrap();
     let bot = Caller::Device { key: key.clone(), scopes: vec![Scope::Control] };
@@ -446,7 +462,12 @@ async fn rotation_replaces_the_key_in_one_step() {
     let inv = made["inviteId"].as_str().unwrap().to_owned();
     botsync::apply(
         &r.hub,
-        &[Listed { bot_device_id: "bd_new".into(), invite_id: inv.clone(), device_key: key.clone() }],
+        &[Listed {
+            bot_device_id: "bd_new".into(),
+            invite_id: inv.clone(),
+            device_key: key.clone(),
+            ..Default::default()
+        }],
     )
     .await
     .unwrap();
@@ -798,7 +819,7 @@ async fn a_bot_ask_waits_for_the_cloud_and_a_revoke_from_another_mac_puts_the_bo
 
     let pull = |revoked: Value| {
         r.set_cloud_state(
-            json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "revoked": revoked}),
+            json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": revoked}),
         );
         async {
             let mark = sync_lease::mark(&r.hub);

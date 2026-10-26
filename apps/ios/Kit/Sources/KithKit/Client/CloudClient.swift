@@ -3,7 +3,7 @@ import Foundation
 /// An error from the Kith cloud: `{"error":{"code","message"}}`.
 public struct CloudError: LocalizedError, Sendable, Equatable {
     public var status: Int
-    /// `notFound`, `conflict`, `requestExpired`, … (spec §8.3).
+    /// The cloud's code (`CloudErrorCode`), or one this app made (`badInvite`, `http503`, …).
     public var code: String
     public var message: String?
 
@@ -13,11 +13,14 @@ public struct CloudError: LocalizedError, Sendable, Equatable {
         self.message = message
     }
 
+    /// The code as the cloud contract names it; `.unknown` for one this version doesn't know or one this app made.
+    public var cloudCode: CloudErrorCode { CloudErrorCode(code: code) }
+
     public var errorDescription: String? {
-        switch code {
-        case "requestExpired": "The request expired. Ask again."
-        case "accountDeleted": "This account was deleted."
-        case "rateLimited": "Too many requests. Try again in a little while."
+        switch cloudCode {
+        case .requestExpired: "The request expired. Ask again."
+        case .accountDeleted: "This account was deleted."
+        case .rateLimited: "Too many requests. Try again in a little while."
         default: message ?? "Kith cloud error (\(code))"
         }
     }
@@ -52,14 +55,12 @@ public struct CloudClient: Sendable {
 
 
     /// Registers this device key with the account (Clerk + proof of the key).
-    public func registerDevice(name: String, platform: String) async throws {
-        struct Res: Decodable {}
-        let _: Res = try await request("POST", "v1/devices", body: ["name": name, "platform": platform], signed: true)
+    public func registerDevice(name: String, platform: DevicePlatform) async throws {
+        let _: DeviceRegistered = try await request("POST", CloudPath.registerDevice, body: RegisterDevice(name: name, platform: platform), signed: true)
     }
 
     public func devices() async throws -> [CloudDevice] {
-        struct Res: Decodable { var devices: [CloudDevice] }
-        let res: Res = try await request("GET", "v1/devices")
+        let res: DeviceList = try await request("GET", CloudPath.listDevices)
         return res.devices
     }
 
@@ -67,24 +68,22 @@ public struct CloudClient: Sendable {
 
     /// With a device identity, each computer says whether this device has access.
     public func computers() async throws -> [CloudComputer] {
-        struct Res: Decodable { var computers: [CloudComputer] }
-        let res: Res = try await request("GET", "v1/computers", signed: identity != nil)
+        let res: ComputerList = try await request("GET", CloudPath.listComputers, signed: identity != nil)
         return res.computers
     }
 
     /// Removes the computer from the account; every device's access to it through the account ends.
     public func removeComputer(_ id: ComputerID) async throws {
-        try await send("DELETE", "v1/computers/\(id)")
+        try await send("DELETE", CloudPath.removeComputer(id))
     }
 
     public func grants(_ id: ComputerID) async throws -> [CloudGrant] {
-        struct Res: Decodable { var grants: [CloudGrant] }
-        let res: Res = try await request("GET", "v1/computers/\(id)/grants")
+        let res: GrantList = try await request("GET", CloudPath.listGrants(id))
         return res.grants
     }
 
     public func revokeGrant(_ id: ComputerID, grantId: String) async throws {
-        try await send("DELETE", "v1/computers/\(id)/grants/\(grantId)")
+        try await send("DELETE", CloudPath.revokeGrant(id, grantId))
     }
 
     // MARK: access requests (§4.2 B, commit-then-reveal SAS)
@@ -100,36 +99,40 @@ public struct CloudClient: Sendable {
         let family = LabelFamily.forHost(version: hostVersion)
         let nD = Data.random(32)
         let commit = RelayCrypto.sasCommit(family, deviceKey: identity.deviceKey, deviceNonce: nD).base64URL
-        struct Created: Decodable { var requestId: String; var expiresAt: Int64 }
-        let created: Created = try await request("POST", "v1/computers/\(id)/access-requests", body: ["commit": commit], signed: true)
+        let created: AccessRequestCreated = try await request("POST", CloudPath.createAccessRequest(id), body: CreateAccessRequest(commit: commit), signed: true)
 
         var hostNonce: Data?
         while hostNonce == nil {
             let status = try await accessStatus(created.requestId)
-            guard status.status == .pending else {
-                throw CloudError(status: 0, code: status.status == .expired ? "requestExpired" : status.status.rawValue, message: "The computer didn't take the request.")
+            switch status.status {
+            case .pending: break
+            // A state this version doesn't know is over as far as it can tell: never read as approved.
+            case .expired, .unknown:
+                throw CloudError(status: 0, code: CloudErrorCode.requestExpired.rawValue, message: "The computer didn't take the request.")
+            case .approved, .denied, .cancelled:
+                throw CloudError(status: 0, code: status.status.rawValue, message: "The computer didn't take the request.")
             }
             if let raw = status.hostNonce {
                 guard let n = Data(base64URL: raw), n.count == 32 else { throw CloudError(status: 0, code: "badNonce", message: nil) }
                 hostNonce = n
             } else {
                 guard Int64(Date.now.timeIntervalSince1970 * 1000) < created.expiresAt else {
-                    throw CloudError(status: 410, code: "requestExpired", message: nil)
+                    throw CloudError(status: 410, code: CloudErrorCode.requestExpired.rawValue, message: nil)
                 }
                 try await Task.sleep(for: pollInterval)
             }
         }
-        try await send("POST", "v1/access-requests/\(created.requestId)/reveal", body: ["nonce": nD.base64URL], signed: true)
+        try await send("POST", CloudPath.revealAccessRequest(created.requestId), body: Reveal(nonce: nD.base64URL), signed: true)
         let code = RelayCrypto.sasCode(family, hostSignKey: hostKey, deviceKey: identity.deviceKey, deviceNonce: nD, hostNonce: hostNonce ?? Data())
         return AccessTicket(requestId: created.requestId, expiresAt: created.expiresAt, code: code, computerId: id, signKey: signKey, labels: family)
     }
 
     public func accessStatus(_ requestId: String) async throws -> AccessStatus {
-        try await request("GET", "v1/access-requests/\(requestId)")
+        try await request("GET", CloudPath.getAccessRequest(requestId))
     }
 
     public func cancelAccess(_ requestId: String) async throws {
-        try await send("DELETE", "v1/access-requests/\(requestId)")
+        try await send("DELETE", CloudPath.cancelAccessRequest(requestId))
     }
 
     // MARK: invites
@@ -140,7 +143,7 @@ public struct CloudClient: Sendable {
         guard InviteLink.isID(inviteId), InviteLink.isProof(proof) else {
             throw CloudError(status: 0, code: "badInvite", message: "This invite link isn't valid.")
         }
-        return try await request("POST", "v1/invites/\(inviteId)/accept", body: ["token": proof])
+        return try await request("POST", CloudPath.acceptInvite(inviteId), body: AcceptInvite(token: proof))
     }
 
     // MARK: claims (§4.2 A)
