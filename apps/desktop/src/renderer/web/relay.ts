@@ -139,7 +139,7 @@ export class WebRelay {
           platform: typeof c.platform === 'string' ? c.platform : '',
           signKey: typeof c.signKey === 'string' ? c.signKey : '',
           online: c.online === true,
-          access: typeof c.access === 'string' ? c.access : null,
+          access: c.access === 'granted' || c.access === 'pending' || c.access === 'none' ? c.access : null,
         })),
       }
     },

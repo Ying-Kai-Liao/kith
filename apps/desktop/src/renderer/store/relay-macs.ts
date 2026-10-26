@@ -111,7 +111,7 @@ export class RelayMacs extends Observable {
     for (const id of this.chosen.get()) {
       const c = this.row(id)
       // Not on the list any more (removed from the account): nothing to connect to, nothing cached to keep.
-      if (c && c.access === 'approved') wanted.set(id, c)
+      if (c && c.access === 'granted') wanted.set(id, c)
     }
     for (const id of [...this.attached.keys()]) if (!wanted.has(id)) this.unattach(id)
     for (const [id, c] of wanted) if (this.attached.get(id) !== c.signKey) this.attach(c)
@@ -172,7 +172,7 @@ export class RelayMacs extends Observable {
     const c = this.row(id)
     if (!c || this.asking.has(id)) return
     if (!this.chosen.get().includes(id)) this.chosen.set([...this.chosen.get(), id])
-    if (c.access === 'approved') {
+    if (c.access === 'granted') {
       // A store that gave up on "access removed" is replaced by a fresh one.
       if (this.store(id)?.connection.kind === 'unauthorized') this.unattach(id)
       void window.kith.relay.restart(id)
