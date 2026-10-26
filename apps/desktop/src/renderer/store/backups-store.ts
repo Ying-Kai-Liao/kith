@@ -6,7 +6,7 @@ import { Observable } from '../lib/observable'
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error))
 
 /**
- * One computer's backup chain (`backups`, `backupsSet`). A view makes it when Settings or a bot's details
+ * One computer's backup chain and main accounts (`backups`, `backupsSet`, `accountSet`). A view makes it when Settings or a bot's details
  * open; nothing polls. A reorder shows at once and goes to the host after the one before it, so two quick
  * reorders end on the last; what the host answers to the last one is what stays.
  */
@@ -69,6 +69,27 @@ export class BackupsStore extends Observable {
       } catch (error) {
         this.error = message(error)
         // The host keeps what it had: show that, not the order that failed to save.
+        if (request === this.request) await this.reread()
+      } finally {
+        this.saves--
+        this.changed()
+      }
+    }
+    return (this.queue = this.queue.then(send))
+  }
+
+  /** The main account of `agent` (null: the computer's); `account` null goes back to the default. Shows on the host's answer. */
+  setMain(agent: string | null, account: string | null): Promise<void> {
+    const request = ++this.request
+    this.error = null
+    this.saves++
+    this.changed()
+    const send = async () => {
+      try {
+        const got = await (await this.client()).accountSet(agent, account)
+        if (request === this.request) this.backups = got
+      } catch (error) {
+        this.error = message(error)
         if (request === this.request) await this.reread()
       } finally {
         this.saves--

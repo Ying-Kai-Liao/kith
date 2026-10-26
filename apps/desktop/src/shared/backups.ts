@@ -1,6 +1,7 @@
 // The backup chain: the accounts and providers Kith moves a bot's turns to when its own account runs out of usage.
-// The host's `backups` answers with the order and each entry's state; `backupsSet` replaces a whole order. The app
-// only shows state and the one command that fixes an entry: logging in is the user's step in the terminal.
+// The host's `backups` answers with the order and each entry's state; `backupsSet` replaces a whole order. Above the
+// chain is each agent's main account, the one its turns start on (`accountSet` chooses it). The app only shows state
+// and the one command that fixes an entry: logging in is the user's step in the terminal.
 
 export interface BackupEntry {
   /** `claude`, `claude:work`, `claude-api:main`, `codex`, `codex:deep`. */
@@ -20,6 +21,19 @@ export interface BackupEntry {
   reason: string | null
 }
 
+/** The account an agent's turns start on: chain entry 0. Its stored session belongs to it. */
+export interface MainAccount {
+  /** An entry id of the agent's harness: `claude`, `claude:work`, `claude-api:main`, `codex`, `codex:deep`. */
+  id: string
+  /** `agent` (its own choice), `global` (the computer's) or `default` (the harness's own login). */
+  source: string
+  /** The agent's harness, which decides the ids it can take. */
+  harness: string | null
+  ready: boolean
+  why: string | null
+  fix: string | null
+}
+
 export interface Backups {
   /** Entry ids, in order. */
   global: string[]
@@ -27,9 +41,11 @@ export interface Backups {
   agents: Record<string, string[]>
   /** Every entry known: in an order, or an account that could be added. */
   entries: BackupEntry[]
+  /** The computer's main account (null: each harness's own login) and every agent's, whatever it comes from. */
+  main: { global: string | null; agents: Record<string, MainAccount> }
 }
 
-export const emptyBackups: Backups = { global: [], agents: {}, entries: [] }
+export const emptyBackups: Backups = { global: [], agents: {}, entries: [], main: { global: null, agents: {} } }
 
 type Raw = Record<string, unknown>
 const isObject = (v: unknown): v is Raw => !!v && typeof v === 'object' && !Array.isArray(v)
@@ -55,7 +71,16 @@ export function parseBackups(raw: unknown): Backups {
       reason: str(e.reason),
     }]
   })
-  return { global: ids(r.global), agents, entries }
+  const m = isObject(r.main) ? r.main : {}
+  const mains: Record<string, MainAccount> = {}
+  if (isObject(m.agents)) {
+    for (const [name, e] of Object.entries(m.agents)) {
+      const id = isObject(e) ? str(e.id) : null
+      if (!isObject(e) || !id) continue
+      mains[name] = { id, source: str(e.source) ?? 'default', harness: str(e.harness), ready: e.ready !== false, why: str(e.why), fix: str(e.fix) }
+    }
+  }
+  return { global: ids(r.global), agents, entries, main: { global: str(m.global), agents: mains } }
 }
 
 /** Entries always offered for adding: a provider's own login, and the other kinds when the user has made one. */
@@ -118,6 +143,32 @@ export function addable(backups: Backups, chain: string[]): string[] {
   const ready = (id: string) => (backups.entries.find((e) => e.id === id)?.ready ? 0 : 1)
   return all.sort((a, b) => ready(a) - ready(b))
 }
+
+/** The harness an entry runs on as a main account: `claude-api:main` is a Claude one. */
+export const familyOf = (id: string) => (id.split(':')[0] ?? id).replace(/-api$/, '')
+
+/**
+ * What can be an agent's main account: the known entries of its harness (another harness stays a backup's job),
+ * ready first. Without a harness (the computer's setting, for every agent) any entry; an agent of another harness
+ * keeps its own login.
+ */
+export function mainChoices(backups: Backups, harness: string | null): string[] {
+  const known = [...new Set([...backups.entries.map((e) => e.id), ...QUICK_ADD])]
+  const fits = known.filter((id) => !harness || familyOf(id) === harness)
+  const ready = (id: string) => (backups.entries.find((e) => e.id === id)?.ready ? 0 : 1)
+  return fits.sort((a, b) => ready(a) - ready(b))
+}
+
+/** Where an agent's main account comes from, in words. */
+export function mainSourceText(m: MainAccount): string {
+  if (m.source === 'agent') return "this bot's own choice"
+  if (m.source === 'global') return "the computer's main account"
+  return 'the default login'
+}
+
+/** The main account as a chain entry: its state and fix come from the main row, which knows the agent. */
+export const mainEntry = (backups: Backups, m: MainAccount): BackupEntry =>
+  ({ ...entryFor(backups, m.id), ready: m.ready, why: m.why, fix: m.fix, harness: m.harness })
 
 /** The command that makes an unknown plain provider ready, for an entry the host hasn't described yet. */
 export const loginCommand = (e: BackupEntry) => e.fix ?? (e.id === 'codex' ? 'codex login' : e.id === 'claude' ? 'claude auth login' : null)

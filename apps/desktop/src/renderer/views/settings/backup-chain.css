@@ -13,3 +13,6 @@
 .backups-code { font-family: var(--mono); font-size: var(--text-caption); padding: 1px 6px; border-radius: var(--radius-s); border: 1px solid var(--border); user-select: all; overflow-wrap: anywhere; }
 .backups-note { line-height: 1.45; }
 .backups-choice { display: flex; flex-direction: column; gap: 10px; }
+/* The main account: the row above the chain that turns start on. */
+.backups-main { padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-l); }
+.backups-main-spacer { flex: 1; }
