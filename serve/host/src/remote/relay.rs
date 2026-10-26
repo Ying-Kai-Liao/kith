@@ -15,6 +15,7 @@ use crate::hub::Hub;
 use crate::remote::channel::{self, ChannelKind, Out, Transport};
 use crate::remote::cloud;
 use crate::remote::crypto::{self, b64};
+use crate::remote::sync_lease;
 use crate::store::DeviceSource;
 use anyhow::{Context, Result, anyhow, bail};
 use futures::{SinkExt as _, StreamExt as _};
@@ -73,10 +74,10 @@ pub async fn run(hub: Arc<Hub>) {
             }
         } else {
             // No cloud: account devices can't be renewed, so they aren't honored either.
-            hub.cloud_synced.store(false, Ordering::Release);
+            sync_lease::unlinked(&hub);
             config.changed().await
         };
-        hub.cloud_synced.store(false, Ordering::Release);
+        sync_lease::set(&hub, false);
         if restart.is_err() {
             return;
         }
@@ -175,8 +176,8 @@ async fn session(hub: &Arc<Hub>, base: &str) -> Result<Option<u16>> {
     let (ws, _) = timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(req))
         .await
         .map_err(|_| anyhow!("timed out connecting to the relay"))??;
-    // Account devices wait for this connection's state pull (§4.3).
-    hub.cloud_synced.store(false, Ordering::Release);
+    // Account devices wait for this connection's state pull (§4.3), and so does the bridge for anyone but the owner.
+    sync_lease::set(hub, false);
     cloud::update_status(hub, |s| {
         s.connected = true;
         s.last_error = None;
@@ -241,6 +242,8 @@ async fn session(hub: &Arc<Hub>, base: &str) -> Result<Option<u16>> {
                     bail!("the relay stopped answering");
                 }
                 s.sink.send(Message::Text(PING.into())).await?;
+                // Heard within the silence limit: the bridge may keep serving.
+                sync_lease::renew(hub);
                 // The state pull failed on this connection: account devices stay out until one works.
                 if !hub.cloud_synced.load(Ordering::Acquire) && s.pulls.is_empty() {
                     s.pull();
@@ -259,8 +262,9 @@ async fn session(hub: &Arc<Hub>, base: &str) -> Result<Option<u16>> {
 
 /// A state pull on the current connection; success lets account devices in.
 async fn pull_state(hub: Arc<Hub>, base: String) {
+    let mark = sync_lease::mark(&hub);
     match cloud::pull(&hub, &base).await {
-        Ok(()) => hub.cloud_synced.store(true, Ordering::Release),
+        Ok(()) => sync_lease::pulled(&hub, mark),
         Err(e) => {
             tracing::warn!(error = format!("{e:#}"), "couldn't get the cloud state");
             cloud::update_status(&hub, |s| s.last_error = Some(format!("{e:#}")));
@@ -391,7 +395,12 @@ impl Session {
                 let ack = hook_item(&self.hub, &v);
                 self.send(&ack).await?;
             }
-            "cloud.changed" => self.pull(),
+            // Out of sync before the next frame: a revoke the cloud just recorded holds for every item, ask and
+            // bridge message after this one, until the pull has applied it (R7, R8).
+            "cloud.changed" => {
+                sync_lease::changed(&self.hub);
+                self.pull();
+            }
             "acl.ok" => {
                 self.retried = false;
                 if !self.ready {

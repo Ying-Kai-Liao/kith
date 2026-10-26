@@ -84,6 +84,66 @@ export async function hostRevokeMembership(c: Ctx, [membershipId]: string[]) {
   return { ok: true };
 }
 
+/** Every computer the account `ownerUserId` owns, for a change that holds on all of them. */
+async function ownerComputers(c: Ctx, ownerUserId: string): Promise<string[]> {
+  const rows = await c.env.DB.prepare("SELECT id FROM computers WHERE owner_user_id = ?").bind(ownerUserId).all<{ id: string }>();
+  return rows.results.map((r) => r.id);
+}
+
+/** The account a host names in a person revoke or undo: one that exists and isn't the computer's owner. */
+async function revokeTarget(c: Ctx): Promise<{ owner: string; userId: string }> {
+  const comp = await host(c);
+  const userId = str(body(c), "userId", 64);
+  if (!comp.owner_user_id) throw new ApiError("forbidden", "Sign in on the computer to revoke people");
+  if (userId === comp.owner_user_id) throw new ApiError("badRequest", "The owner can't be revoked");
+  const known = await c.env.DB.prepare("SELECT 1 FROM accounts WHERE user_id = ?").bind(userId).first();
+  if (!known) throw new ApiError("notFound", "No such account");
+  return { owner: comp.owner_user_id, userId };
+}
+
+/**
+ * The owner revoked a person (R6, R7): the account loses its memberships on every computer the owner has (the relay
+ * blocks its devices there), may not join one again until undone, and every one of those Macs is told to pull, where
+ * `GET /v1/host/state` lists it under `revoked` and the Mac sets the person's revoked state in its own kith-auth.
+ * Revoking again is a no-op that still tells the Macs.
+ */
+export async function hostRevokePerson(c: Ctx) {
+  const { owner, userId } = await revokeTarget(c);
+  // The row first: an accept that races this either lands before (and its membership is cut below) or sees the row.
+  await c.env.DB.batch([
+    c.env.DB.prepare("INSERT OR IGNORE INTO revocations(owner_user_id, user_id, revoked_at) VALUES (?, ?, ?)").bind(owner, userId, c.now),
+    audit(c.env, `owner:${owner}`, "person.revoke", userId, "ok", c.now),
+  ]);
+  for (const computerId of await ownerComputers(c, owner)) {
+    const active = await c.env.DB.prepare("SELECT 1 FROM memberships WHERE computer_id = ? AND user_id = ? AND revoked_at IS NULL")
+      .bind(computerId, userId)
+      .first();
+    if (active) await revokeMembership(c.env, computerId, userId, `owner:${owner}`, userId, c.now);
+    else await notify(c.env, computerId);
+  }
+  return { ok: true };
+}
+
+/** Undo of a person revoke: the row goes and every Mac of the owner is told; each clears the state in kith-auth. */
+export async function hostUnrevokePerson(c: Ctx) {
+  const { owner, userId } = await revokeTarget(c);
+  await c.env.DB.batch([
+    c.env.DB.prepare("DELETE FROM revocations WHERE owner_user_id = ? AND user_id = ?").bind(owner, userId),
+    audit(c.env, `owner:${owner}`, "person.unrevoke", userId, "ok", c.now),
+  ]);
+  for (const computerId of await ownerComputers(c, owner)) await notify(c.env, computerId);
+  return { ok: true };
+}
+
+/** The accounts the owner of `computerId` revoked, for its host state. */
+export async function revokedOf(c: Ctx, ownerUserId: string | null): Promise<string[]> {
+  if (!ownerUserId) return [];
+  const rows = await c.env.DB.prepare("SELECT user_id FROM revocations WHERE owner_user_id = ? ORDER BY user_id")
+    .bind(ownerUserId)
+    .all<{ user_id: string }>();
+  return rows.results.map((r) => r.user_id);
+}
+
 /** The account joins the computer whose Mac made this invite. Single use; the same account may repeat it. */
 export async function acceptInvite(c: Ctx, [inviteId]: string[]) {
   const u = await user(c);
@@ -96,6 +156,11 @@ export async function acceptInvite(c: Ctx, [inviteId]: string[]) {
     .first<{ owner_user_id: string | null }>();
   if (!comp?.owner_user_id) throw new ApiError("inviteRevoked", "This invite is no longer valid");
   if (comp.owner_user_id === u.userId) throw new ApiError("forbidden", "This is your own computer");
+  const revoked = await c.env.DB.prepare("SELECT 1 FROM revocations WHERE owner_user_id = ? AND user_id = ?")
+    .bind(comp.owner_user_id, u.userId)
+    .first();
+  // The owner removed this account's access: no invite of theirs brings it back until they undo it.
+  if (revoked) throw new ApiError("inviteRevoked", "Your access to this computer was removed");
 
   const mine = () =>
     c.env.DB.prepare("SELECT membership_id, revoked_at FROM memberships WHERE invite_id = ? AND user_id = ?")
@@ -121,7 +186,9 @@ export async function acceptInvite(c: Ctx, [inviteId]: string[]) {
   const [won] = await c.env.DB.batch([
     c.env.DB.prepare(
       `UPDATE invites SET accepted_by = ?1, accepted_at = ?2
-       WHERE invite_id = ?3 AND accepted_by IS NULL AND revoked_at IS NULL AND expires_at > ?2`,
+       WHERE invite_id = ?3 AND accepted_by IS NULL AND revoked_at IS NULL AND expires_at > ?2
+         AND NOT EXISTS(SELECT 1 FROM revocations r JOIN computers c ON c.owner_user_id = r.owner_user_id
+                        WHERE c.id = invites.computer_id AND r.user_id = ?1)`,
     ).bind(u.userId, c.now, inviteId),
     c.env.DB.prepare(
       `INSERT INTO memberships(membership_id, computer_id, user_id, invite_id, created_at)
@@ -132,6 +199,10 @@ export async function acceptInvite(c: Ctx, [inviteId]: string[]) {
   if (won!.meta.changes === 0) {
     const latest = await c.env.DB.prepare("SELECT * FROM invites WHERE invite_id = ?").bind(inviteId).first<InviteRow>();
     if (latest?.revoked_at) throw new ApiError("inviteRevoked", "This invite was cancelled");
+    const cut = await c.env.DB.prepare("SELECT 1 FROM revocations WHERE owner_user_id = ? AND user_id = ?")
+      .bind(comp.owner_user_id, u.userId)
+      .first();
+    if (cut) throw new ApiError("inviteRevoked", "Your access to this computer was removed");
     if (latest?.accepted_by === u.userId) {
       // Our own double click landed first.
       const m = await mine();

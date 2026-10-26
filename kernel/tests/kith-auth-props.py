@@ -1,5 +1,5 @@
-"""Generated-input properties of kith-auth's access rules (people, memberships, bot persons, person removal, the
-bots cap), run in-process against a throwaway auth.json. Method: .claude/skills/invitee-access/SKILL.md.
+"""Generated-input properties of kith-auth's access rules (people, memberships, bot persons, person removal and
+revoke, the bots cap), run in-process against a throwaway auth.json. Method: .claude/skills/invitee-access/SKILL.md.
 Started by kernel/tests/kith-auth-props, which pins hypothesis; run that, not this."""
 import contextlib
 import importlib.machinery
@@ -13,7 +13,9 @@ from pathlib import Path
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 T = Path(tempfile.mkdtemp(prefix='kith-auth-props.'))
-os.environ.update(KITH_AUTH=str(T / 'auth.json'), HOME=str(T / 'home'), KITH_HOME=str(T / 'kith'))
+# a kith serve dir with no cloud-sync.json: a Mac never linked to the Kith cloud, so revoke writes here at once
+os.environ.update(KITH_AUTH=str(T / 'auth.json'), HOME=str(T / 'home'), KITH_HOME=str(T / 'kith'),
+                  KITH_SERVE_DIR=str(T / 'serve'), KITH_SERVE_PORT='1')
 for k in ('KITH_STATE', 'HQ_STATE', 'KITH_PERSON', 'KITH_AGENT', 'HQ_HOME'):
     os.environ.pop(k, None)
 (T / 'home').mkdir()
@@ -69,6 +71,8 @@ OPS = st.one_of(
     st.tuples(st.just('bot'), st.sampled_from(BOTS), st.sampled_from([OWNER] + PEOPLE + BOTS)),
     st.tuples(st.just('bot-rm'), st.sampled_from(BOTS)),
     st.tuples(st.just('cap'), st.sampled_from(['off', '50', '0', 'x'])),
+    st.tuples(st.just('revoke'), st.sampled_from([OWNER] + PEOPLE + BOTS)),
+    st.tuples(st.just('unrevoke'), st.sampled_from(PEOPLE)),
 )
 
 
@@ -98,6 +102,8 @@ def apply(op):
         return run('bot', op[1], '--of', op[2])
     if kind == 'bot-rm':
         return run('bot', op[1], '--rm')
+    if kind in ('revoke', 'unrevoke'):
+        return run('person', op[1], f'--{kind}')
     return run('bots-cap', op[1])
 
 
@@ -116,6 +122,10 @@ def state_properties():
                 continue
             if who not in a['people']:
                 assert r['allowed'] is False, f'{who} is not a person but may use {agent}: {r}'
+                continue
+            if ka.cut_off(a, who):
+                # (R1, R2, I6) revoked, or a bot of someone revoked: nothing, whatever rows they hold, `*` included.
+                assert r['allowed'] is False, f'{who} is revoked (or their owner is) but may use {agent}: {r}'
                 continue
             parent = a['people'][who].get('bot_of')
             if not parent:
@@ -166,6 +176,18 @@ def test_access_never_exceeds_the_grant(ops):
             for b in bot_ids(a):
                 if a['people'][b]['bot_of'] == who and who != OWNER:
                     assert not allowed(agent, b), f'bot {b} keeps {agent} after its owner {who} lost it'
+        if op[0] in ('revoke', 'unrevoke'):
+            # (R4) revoke and undo touch no row, so undo gives back exactly what they had; the owner and bots can't be
+            # revoked (a bot goes dormant with its owner).
+            for table in ('members', 'grants', 'presets', 'profiles'):
+                assert a[table] == before[table], f'{op[0]} {op[1]} changed {table}'
+            who = op[1]
+            assert ok == (who in before['people'] and who != OWNER and not before['people'][who].get('bot_of')), \
+                f'{op}: accepted {ok}'
+            if ok and op[0] == 'unrevoke':
+                assert a['people'] == {
+                    k: ({x: y for x, y in v.items() if x != 'revoked'} if k == who else v)
+                    for k, v in before['people'].items()}, f'undo {who} changed more than the revoked state'
         if op[0] == 'cap' and ok:
             assert a.get('owner_bots_budget', '') == ('' if op[1] == 'off' else op[1])
         if op[0] == 'cap' and not ok:

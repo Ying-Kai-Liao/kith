@@ -1,0 +1,38 @@
+# variant	kind	property	expected
+# --- the code as built: every rule holds -------------------------------------
+code	INVARIANT	TypeOK	pass
+code	INVARIANT	SyncAgrees	pass
+code	INVARIANT	R2	pass
+code	INVARIANT	R4	pass
+code	INVARIANT	BotBelowOwner	pass
+code	PROPERTY	R1	pass
+code	PROPERTY	R5	pass
+code	PROPERTY	R5c	pass
+code	PROPERTY	R6	pass
+code	PROPERTY	R6c	pass
+code	PROPERTY	R6cDown	pass
+code	PROPERTY	R6cWake	pass
+code	PROPERTY	NeverBridgeInCloudDown	pass
+# --- why R9: a terminal revoke that works offline breaks R6 -----------------
+terminal-offline	PROPERTY	R6	fail
+app-only	PROPERTY	R6	pass
+# --- the breaks each guard is there for (each must fail) --------------------
+broken-star	PROPERTY	R1	fail
+broken-star	INVARIANT	R2	fail
+broken-delete-rows	INVARIANT	R4	fail
+broken-no-deliver-recheck	PROPERTY	R5	fail
+broken-bot-ignores-owner	INVARIANT	BotBelowOwner	fail
+broken-no-relay-check	PROPERTY	R6c	fail
+broken-no-relay-check	PROPERTY	R5c	fail
+broken-bridge-no-sync	PROPERTY	R6c	fail
+broken-bridge-no-sync	PROPERTY	R6cDown	fail
+broken-bridge-no-sync	PROPERTY	R6cWake	fail
+broken-bridge-no-sync	PROPERTY	R5c	fail
+broken-bridge-no-sync	PROPERTY	NeverBridgeInCloudDown	fail
+# --- probes: things that should happen do (a probe "fails" = it is reachable) -
+code	INVARIANT	NeverBridgeServed	fail
+code	PROPERTY	NeverAppAfterUndo	fail
+code	INVARIANT	NoBridgeRefusal	fail
+app-only	PROPERTY	NeverQueuedServed	fail
+app-only	PROPERTY	NeverWakeHold	fail
+app-only	PROPERTY	NeverHeldServed	fail

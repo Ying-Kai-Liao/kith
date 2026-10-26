@@ -2,6 +2,7 @@
 
 import { b64url, computerIdFor, fromB64url, randomId, sha256 } from "../auth";
 import { activeBotDevices } from "./botguests";
+import { revokedOf } from "./invites";
 import {
   ApiError,
   audit,
@@ -169,6 +170,8 @@ export async function hostState(c: Ctx) {
     memberships: members.results.map((m) => ({ membershipId: m.membership_id, userId: m.user_id, inviteId: m.invite_id, email: m.email })),
     // Older hosts ignore it. The host honours only bots whose invite it made and still has open.
     botDevices: await activeBotDevices(c, comp.id),
+    // Accounts this computer's owner revoked, on any of their computers (R6). Older hosts ignore it.
+    revoked: await revokedOf(c, comp.owner_user_id),
   };
 }
 

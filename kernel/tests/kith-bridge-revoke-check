@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""kith-bridge-revoke-check — the bridge's side of revoking a person (designs/revoke-person), without chat platforms
+or agents: a fake connection, a stub `kith`, `who` and `resolve` as kith-auth would answer, a throwaway HOME.
+
+  kernel/tests/kith-bridge-revoke-check     a few seconds; prints each check, exits 1 when one fails
+
+What it shows:
+  1. a revoked person is told their access was removed, and nothing runs
+  2. while this Mac is out of sync with the Kith cloud (`who` says held), a guest's message waits, and runs once the
+     sync is back (R8); still held after KITH_BRIDGE_HOLD it is answered "send it again", and nothing runs; the owner
+     is never held
+  3. a turn whose person lost the agent while it waited is not started, and one that lost it while it ran delivers
+     nothing: neither its answer nor its kith-send posts (R5)
+  4. a turn whose Mac went out of sync while it ran delivers once the sync is back, and nothing if it stays out
+"""
+import asyncio
+import json
+import os
+import sys
+import tempfile
+import time
+from pathlib import Path
+
+KERNEL = Path(__file__).resolve().parent.parent
+TMP = Path(tempfile.mkdtemp(prefix='kith-bridge-revoke-'))
+(TMP / '.kith').mkdir()
+os.environ.update(HOME=str(TMP), KITH_HOME=str(TMP / 'kith'), KITH_BRIDGE_DEBOUNCE='0', KITH_BRIDGE_ROUTER='off',
+                  KITH_BRIDGE_DM_DEFAULT='echo')
+pkg = TMP / 'kith' / 'agents' / 'echo' / 'role'
+pkg.mkdir(parents=True)
+(pkg / 'agent.md').write_text('---\nname: echo\ndescription: answers at once\n---\n')
+
+TASKS = TMP / 'tasks.jsonl'   # every task the stub kith was given
+MID = TMP / 'revoke-mid'      # the stub makes this while it runs a task that says revoke-mid
+HELD = TMP / 'held-mid'       # ... and this for hold-mid: resolve then says held for sam
+STUB = TMP / 'kith-stub'
+STUB.write_text(f'''#!/usr/bin/env python3
+import json, os, sys
+task = sys.argv[2]
+open({str(TASKS)!r}, 'a').write(json.dumps(task) + '\\n')
+box = os.environ.get('KITH_BRIDGE_OUTBOX')
+if box:
+    open(os.path.join(box, '1.json'), 'w').write(json.dumps({{'text': 'progress'}}))
+if 'revoke-mid' in task:
+    open({str(MID)!r}, 'w').write('')
+if 'hold-mid' in task:
+    open({str(HELD)!r}, 'w').write('')
+print(json.dumps({{'result': 'answer', 'session_id': 's1'}}))
+''')
+STUB.chmod(0o755)
+
+sys.path.insert(0, str(KERNEL / 'lib'))
+from kith_bridge import core  # noqa: E402
+
+WHO = {}            # uid -> what `kith-auth who` says
+ALLOW = {'left': None}   # resolve allows sam this many more times (None: always, unless MID exists)
+
+
+def who(platform, uid):
+    return WHO.get(str(uid), {'person': None, 'owner': False, 'was': []})
+
+
+def resolve(person, agent):
+    if person == 'kai':
+        return {'allowed': True, 'owner': True, 'held': False}
+    if MID.exists():
+        return {'allowed': False, 'why': 'access removed', 'held': False}
+    if ALLOW['left'] is not None:
+        if ALLOW['left'] <= 0:
+            return {'allowed': False, 'why': 'access removed', 'held': False}
+        ALLOW['left'] -= 1
+    return {'allowed': True, 'held': HELD.exists()}
+
+
+core.KITH_BIN = str(STUB)
+core.jev_config = lambda: {}
+core.Core.who = staticmethod(who)
+core.Core.resolve = staticmethod(resolve)
+
+
+class Fake(core.Adapter):
+    platform = 'telegram'
+
+    def __init__(self, c):
+        super().__init__('tg', {}, c)
+        self.replies, self.posts, self.n = [], [], 0
+
+    async def reply(self, m, text):
+        self.replies.append(text)
+
+    async def open_thread(self, m, agent, title):
+        self.n += 1
+        return f'tg:t{self.n}', {'chat': m.room}
+
+    async def post(self, conv, agent, text, ctx=None):
+        self.posts.append(text)
+
+    async def send_files(self, conv, agent, files, caption=''):
+        self.posts.append(caption)
+
+    async def ask(self, m, pid, options):
+        self.replies.append('ask')
+
+
+fails = 0
+
+
+def check(name, ok):
+    global fails
+    print(('ok   ' if ok else 'FAIL ') + name)
+    fails += 0 if ok else 1
+
+
+def ran():
+    return len(TASKS.read_text().splitlines()) if TASKS.exists() else 0
+
+
+async def idle(c, limit=10):
+    end = time.time() + limit
+    await asyncio.sleep(0.2)
+    while (c.busy or any(c.inbox.values())) and time.time() < end:
+        await asyncio.sleep(0.1)
+
+
+async def main():
+    c = core.Core()
+    ad = Fake(c)
+    sam = {'person': 'sam', 'owner': False, 'was': [], 'revoked': False, 'held': False}
+
+    def msg(uid, text):
+        return core.Incoming(uid=uid, text='@echo ' + text, room=f'tg:{uid}', origin={}, private=True)
+
+    WHO['42'] = dict(sam)
+    WHO['1'] = {'person': 'kai', 'owner': True, 'was': [], 'revoked': False, 'held': False}
+    await c.handle(ad, msg('42', 'hello'))
+    await idle(c)
+    check('before: sam is answered', ad.posts[-2:] == ['progress', 'answer'] and ran() == 1)
+
+    # 1. revoked
+    WHO['42'] = {**sam, 'revoked': True}
+    ad.replies.clear()
+    await c.handle(ad, msg('42', 'hello again'))
+    await idle(c)
+    check('revoked: told their access was removed', ad.replies == [core.REMOVED])
+    check('revoked: nothing runs', ran() == 1)
+
+    # 2. held, then in sync again
+    WHO['42'] = {**sam, 'held': True}
+    ad.replies.clear()
+    posts = len(ad.posts)
+    await c.handle(ad, msg('42', 'while held'))
+    await asyncio.sleep(0.5)
+    check('held: nothing runs and nothing is said yet', ran() == 1 and not ad.replies and len(ad.posts) == posts)
+    WHO['42'] = dict(sam)
+    await asyncio.sleep(2.5)
+    await idle(c)
+    check('held: runs once the sync is back', ran() == 2 and ad.posts[-1] == 'answer')
+
+    # held, and a revoke from another Mac arrives with the sync: told, nothing runs
+    WHO['42'] = {**sam, 'held': True}
+    ad.replies.clear()
+    await c.handle(ad, msg('42', 'held then revoked'))
+    WHO['42'] = {**sam, 'revoked': True}
+    await asyncio.sleep(2.5)
+    await idle(c)
+    check('held, then revoked by the sync: told, nothing runs', ad.replies == [core.REMOVED] and ran() == 2)
+
+    # held for too long
+    core.HOLD = 1
+    WHO['42'] = {**sam, 'held': True}
+    ad.replies.clear()
+    await c.handle(ad, msg('42', 'held for good'))
+    await asyncio.sleep(2.5)
+    await idle(c)
+    check('held too long: asked to send it again, nothing runs',
+          len(ad.replies) == 1 and 'again' in ad.replies[0] and ran() == 2)
+
+    # the owner is never held (who never says held for them, and the bridge doesn't ask)
+    WHO['1'] = {**WHO['1'], 'held': True}
+    await c.handle(ad, msg('1', 'owner while held'))
+    await idle(c)
+    check('the owner is served while guests are held', ran() == 3 and ad.posts[-1] == 'answer')
+
+    # 3. lost while waiting: allowed when it came in, refused when the turn would start
+    WHO['42'] = dict(sam)
+    ALLOW['left'] = 1
+    posts = len(ad.posts)
+    await c.handle(ad, msg('42', 'lost while waiting'))
+    await idle(c)
+    check('lost before the turn starts: nothing is spawned or posted', ran() == 3 and len(ad.posts) == posts)
+    ALLOW['left'] = None
+
+    # lost while it ran
+    posts = len(ad.posts)
+    await c.handle(ad, msg('42', 'revoke-mid'))
+    await idle(c)
+    check('lost during the turn: it ran', ran() == 4)
+    check('lost during the turn: neither its answer nor its kith-send posts are delivered', len(ad.posts) == posts)
+    MID.unlink()
+
+    # 4. out of sync at delivery: the answer waits for the sync, then goes out
+    core.HOLD = 10
+    posts = len(ad.posts)
+
+    async def back():
+        while not HELD.exists():
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(1.5)
+        check('held at delivery: nothing is posted while out of sync', len(ad.posts) == posts)
+        HELD.unlink()
+    waiter = asyncio.create_task(back())
+    await c.handle(ad, msg('42', 'hold-mid'))
+    await idle(c, 20)
+    await waiter
+    check('held at delivery: delivered once the sync is back', ran() == 5 and ad.posts[posts:] == ['progress', 'answer'])
+
+    # ... and stays out: nothing is delivered
+    core.HOLD = 1
+    posts = len(ad.posts)
+    await c.handle(ad, msg('42', 'hold-mid'))
+    await idle(c, 20)
+    check('held at delivery for too long: nothing is delivered', ran() == 6 and len(ad.posts) == posts)
+    HELD.unlink()
+
+
+asyncio.run(main())
+sys.exit(1 if fails else 0)

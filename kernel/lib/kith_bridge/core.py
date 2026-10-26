@@ -50,6 +50,10 @@ AUTH_BIN, KITH_BIN = str(KERNEL / 'bin' / 'kith-auth'), str(KERNEL / 'bin' / 'ki
 LIVE_BIN = str(KERNEL / 'bin' / 'kith-live')
 KEEP = 5000   # threads and reply links kept in the state: the newest few thousand are enough to come back to
 LATE = 120    # seconds: a message older than this when it arrives was sent while the bridge was away
+REMOVED = 'Your access to kith on this computer was removed.'
+# While kith serve is out of sync with the Kith cloud (`who` says held: asleep, offline, or a change not yet applied),
+# anyone but the owner waits: the message is handled once the sync is back, or answered "try again" after this long.
+HOLD = float(os.environ.get('KITH_BRIDGE_HOLD', '120'))
 
 
 def log(*a):
@@ -425,6 +429,13 @@ class Core:
                 await ad.reply(m, 'This account is not linked to kith yet. Ask the owner for a code, then send '
                                   '/link CODE here.')
             return
+        if w.get('revoked'):   # their handle is kept so they hear why (revoke-person)
+            if m.private or m.addressed or th:
+                await ad.reply(m, REMOVED)
+            return
+        if w.get('held') and not w.get('owner'):   # a revoke on another Mac may not have reached this one yet (R8)
+            asyncio.create_task(self.held(ad, m))
+            return
         if th and not self.owns(th, w):   # its sessions hold what the agents saw for them
             await ad.reply(m, f'This thread is {th.get("person") or "the owner"}\'s. Start your own outside it.')
             return
@@ -496,6 +507,20 @@ class Core:
             await ad.ask(m, pid, mine)
             return
         await self.begin(ad, m, person, agent, task, key)
+
+    async def held(self, ad, m):
+        """Handles m once this Mac is in sync with the Kith cloud again; tells them to retry when it stays out."""
+        end = time.time() + HOLD
+        while time.time() < end:
+            await asyncio.sleep(2)
+            w = await asyncio.to_thread(self.who, ad.platform, m.uid)
+            if not w.get('held'):
+                await self.handle(ad, m)
+                return
+        log(f'{ad.conn}: held a message from {m.uid} for {HOLD:.0f}s: still out of sync with the Kith cloud')
+        if m.private or m.addressed or m.thread in self.st['threads']:
+            await ad.reply(m, 'Kith on this computer is catching up with your other computers. Send it again in a '
+                              'minute.')
 
     async def picked(self, ad, pid, agent, uid):
         """A button under "Who should take this?" -> False when it isn't this person's question (or it's gone)."""
@@ -693,7 +718,10 @@ class Core:
         th = self.st['threads'][key]
         conv, person = th['conv'], th.get('person', '')
         session = th.setdefault('sessions', {}).get(agent)
-        r = await asyncio.to_thread(self.resolve, person, agent) if person else {'owner': True}
+        r = await self.access(person, agent)
+        if not r.get('allowed'):   # access went while this waited in the inbox: nothing is spawned (R5)
+            log(f'{wk}: {person} may no longer use {agent}; not starting the turn')
+            return 'done'
         env = dict(os.environ, KITH_VIA=ad.platform, KITH_OUTPUT='json')
         if os.environ.get('KITH_BRIDGE_PERMISSION_MODE'):   # unset: the agent's mode, else kith's default (bin/kith)
             env['KITH_PERMISSION_MODE'] = os.environ['KITH_BRIDGE_PERMISSION_MODE']
@@ -715,20 +743,23 @@ class Core:
         busy['proc'] = proc
         if busy.get('ended'):            # Stop was pressed before the process existed
             kill(proc)
-        pump = asyncio.create_task(self.pump(ad, conv, outbox))
+        pump = asyncio.create_task(self.pump(ad, conv, outbox, person, agent))
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=3600)
         except asyncio.TimeoutError:
             kill(proc)
             out, err = b'', b'timed out after 60 min'
         pump.cancel()
-        await self.flush(ad, conv, outbox)
+        await self.flush(ad, conv, outbox, person, agent)
         try:
             outbox.rmdir()
         except OSError:
             pass
         if busy.get('ended'):
             return busy['ended']
+        if not await self.still(person, agent):   # revoked while it ran: the late answer is not delivered (R5)
+            log(f'{wk}: {person} lost {agent} during the turn; its answer is dropped')
+            return 'done'
         pct = None
         try:
             res = json.loads(out.decode())
@@ -745,14 +776,38 @@ class Core:
         await ad.post(conv, agent, text, show)
         return 'done'
 
-    async def pump(self, ad, conv, outbox):
+    async def pump(self, ad, conv, outbox, person='', agent=''):
         while True:
             await asyncio.sleep(1)
-            await self.flush(ad, conv, outbox)
+            await self.flush(ad, conv, outbox, person, agent)
 
-    async def flush(self, ad, conv, outbox):
-        """Posts what the run's kith-send calls left in its outbox, oldest first."""
-        for f in sorted(outbox.glob('*.json')):
+    async def access(self, person, agent):
+        """kith-auth's resolve for person and agent, asked while this Mac is in sync with the Kith cloud (R5, R8): while
+        it says held, this waits (up to HOLD); still held then, it is refused, as a revoke on another Mac may not have
+        reached this one (I2). The owner's own thread (person '') always may."""
+        if not person:
+            return {'owner': True, 'allowed': True}
+        end = time.time() + HOLD
+        while True:
+            r = await asyncio.to_thread(self.resolve, person, agent)
+            if not r.get('held'):
+                return r
+            if time.time() >= end:
+                return {**r, 'allowed': False, 'why': 'out of sync with the Kith cloud'}
+            await asyncio.sleep(2)
+
+    async def still(self, person, agent):
+        """Whether person may still use agent, in sync with the cloud (the owner's own thread, person '', always may)."""
+        return bool((await self.access(person, agent)).get('allowed'))
+
+    async def flush(self, ad, conv, outbox, person='', agent=''):
+        """Posts what the run's kith-send calls left in its outbox, oldest first; nothing once person lost agent."""
+        files = sorted(outbox.glob('*.json'))
+        if files and agent and not await self.still(person, agent):
+            for f in files:
+                f.unlink(missing_ok=True)
+            return
+        for f in files:
             try:
                 item = json.loads(f.read_text())
                 f.unlink()

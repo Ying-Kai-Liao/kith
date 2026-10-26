@@ -494,13 +494,15 @@ async fn changing_and_revoking_a_persons_access() {
     assert_eq!(call(&r, &Caller::Local, "revokeInvite", json!({"inviteId": id})).await.unwrap()["revoked"], false);
     assert!(r.posts().iter().any(|(p, _)| p == &format!("/v1/host/invites/{id}/revoke")));
 
-    // Revoking the person: agents, devices, binding and the cloud membership; the person and their memory stay.
+    // Revoking the person: devices and the cloud membership go and kith-auth refuses them; the person, their rows,
+    // their memory and their account handle stay (the bridge tells them, and an undo finds them).
     let other = r.device("sam-tablet", Some("sam"));
     call(&r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
     call(&r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
     assert!(!r.allowed("sam", "money") && r.auth_ok(&["people", "sam"]));
     assert!(r.hub.store.devices_of("sam").unwrap().is_empty());
-    assert!(r.who("user_sam")["person"].is_null());
+    assert_eq!(r.who("user_sam")["person"], "sam");
+    assert_eq!(r.who("user_sam")["revoked"], true);
     assert_eq!(r.hub.store.memberships().unwrap(), []);
     assert!(r.posts().iter().any(|(p, _)| p == &format!("/v1/host/memberships/{membership}/revoke")));
     assert!(call(&r, &sam, "hello", json!({})).await.is_err() && call(&r, &other, "hello", json!({})).await.is_err());

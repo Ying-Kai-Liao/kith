@@ -384,10 +384,9 @@ impl State {
                 self.call(&Caller::Local, "revokePerson", json!({"personId": WHO[person]}))
                     .await
                     .map_err(|e| format!("revokePerson failed: {e:#}"))?;
+                // Their bots go dormant, not ended (revoke-person): still let in, but `holds` is false for a removed
+                // owner, so each ask is refused `notGranted` and nothing is listed as theirs.
                 self.removed[person] = true;
-                for b in self.bots.iter_mut().filter(|b| b.owner == person) {
-                    b.state = St::Ended;
-                }
             }
             Op::Call { bot, method } if n > 0 => {
                 let bi = bot % n;

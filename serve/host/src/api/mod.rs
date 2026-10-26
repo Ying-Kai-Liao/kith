@@ -28,6 +28,8 @@ mod people_tests;
 mod proof_tests;
 mod remote;
 #[cfg(test)]
+mod revoke_tests;
+#[cfg(test)]
 pub(crate) mod rig;
 pub mod roles;
 #[cfg(test)]

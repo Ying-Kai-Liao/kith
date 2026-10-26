@@ -152,8 +152,12 @@ Host-signed (`Kith-Sig`, like the other `/v1/host/*` routes; each writes an `aud
   id and hash is a no-op; the same id with another hash is 409. The computer must be claimed.
 - `POST /v1/host/invites/:inviteId/revoke`: marks an unaccepted invite revoked (409 once accepted; use the membership).
 - `POST /v1/host/memberships/:membershipId/revoke`: ends the membership and revokes that account's grants on the computer.
+- `POST /v1/host/people/revoke` `{userId}`: the owner revoked a person (an account, never the owner's own). Ends the account's
+  memberships and grants on every computer the owner has, refuses its invites to any of them until undone, and tells each of
+  them to pull. Repeating it is a no-op. `POST /v1/host/people/unrevoke` `{userId}` undoes it and tells them again.
 - `GET /v1/host/state` adds `memberships: [{membershipId, userId, inviteId, email}]` (active only), `userId` on each grant (the
-  account owning the device) and on each access request.
+  account owning the device) and on each access request, and `revoked: [userId]` (the accounts this computer's owner revoked);
+  the Mac sets each one's revoked state in its own kith-auth.
 
 Account (Clerk):
 

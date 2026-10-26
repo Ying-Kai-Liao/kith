@@ -139,7 +139,10 @@ async fn person_ids_are_checked_and_only_our_own_grants_are_taken_back() {
     assert!(!r.allowed("kim", "house"), "the one this host made goes");
     call(&r, &Caller::Local, "setPersonAccess", only(json!({}))).await.unwrap();
     assert!(r.allowed("kim", "money"), "the owner's own membership is left in place");
+    // A revoke beats the owner's own rows too (R2), and keeps them for the undo (R4).
     call(&r, &Caller::Local, "revokePerson", json!({"personId": "kim"})).await.unwrap();
+    assert!(!r.allowed("kim", "money"));
+    call(&r, &Caller::Local, "unrevokePerson", json!({"personId": "kim"})).await.unwrap();
     assert!(r.allowed("kim", "money"));
 }
 

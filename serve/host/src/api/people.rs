@@ -34,9 +34,10 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         "createInvite" => create_invite(hub, &b).await?,
         "invites" => json!({"invites": hub.store.invites()?}),
         "revokeInvite" => revoke_invite(hub, str_arg(&b, "inviteId")?).await?,
-        "people" => people(hub)?,
+        "people" => people(hub).await?,
         "setPersonAccess" => set_person_access(hub, &b).await?,
-        "revokePerson" => revoke_person(hub, str_arg(&b, "personId")?).await?,
+        "revokePerson" => revoke_person(hub, str_arg(&b, "personId")?, true).await?,
+        "unrevokePerson" => revoke_person(hub, str_arg(&b, "personId")?, false).await?,
         "audit" => json!({"audit": hub.store.audit_list(b["since"].as_i64().unwrap_or(0), b["personId"].as_str())?}),
         "startChat" => start_chat(hub, caller, &b).await?,
         "proveInvite" => prove_invite(hub, caller, &b)?,
@@ -252,8 +253,19 @@ async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {
     Ok(json!({"revoked": revoked, "cloud": in_cloud}))
 }
 
-fn people(hub: &Arc<Hub>) -> Result<Value> {
+async fn people(hub: &Arc<Hub>) -> Result<Value> {
     let now = now_ms();
+    // Who is revoked (kith-auth's word, so a revoke from another Mac shows too); nobody when kith-auth can't say.
+    let revoked: Vec<String> = match account::bin().await {
+        Some(bin) => crate::remote::members::auth_people(&bin)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|p| p.revoked_at.is_some())
+            .map(|p| p.id)
+            .collect(),
+        None => vec![],
+    };
     let connected = hub.connected.locked().clone();
     let memberships = hub.store.memberships()?;
     let invites = hub.store.invites()?;
@@ -279,6 +291,7 @@ fn people(hub: &Arc<Hub>) -> Result<Value> {
                 "joined": joined.is_some(), "userId": joined.map(|m| m.user_id.clone()),
                 "membershipId": joined.map(|m| m.membership_id.clone()),
                 "openInvites": waiting, "devices": devices, "createdAt": p.created_at, "autoBots": p.auto_bots,
+                "revoked": revoked.contains(&p.person_id),
             })
         })
         .collect();
@@ -343,48 +356,77 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     Ok(out)
 }
 
-async fn revoke_person(hub: &Arc<Hub>, id: &str) -> Result<Value> {
-    let person = invited_person(hub, id)?;
-    let bin = account::bin().await;
-    // What the host itself holds goes first and can't fail on kith-auth: a person whose agent folder is gone must
-    // still lose their devices, invites and memberships.
-    for invite in hub.store.invites()?.into_iter().filter(|i| i.person_id == id && i.open(now_ms())) {
-        revoke_invite(hub, &invite.invite_id).await?;
+/// `revokePerson {personId}` / `unrevokePerson {personId}`: the owner's revoke and its undo (designs/revoke-person).
+/// Revoke is one fact, the person's revoked state in kith-auth, which refuses them (and their bots) before any row;
+/// no row is touched, so undo gives back exactly what they had (R1, R2, R4). A person with a Kith account is revoked
+/// through the cloud first, which holds it on every Mac of the owner and refuses their app there (R6, R7); when the
+/// cloud can't be reached the change is refused, never made here alone (R9). A person known only on this Mac (by a
+/// Telegram or Discord handle) is revoked here only. Also what `kith-auth person <id> --revoke` calls on a Mac linked
+/// to the cloud. Owner history (memory, threads, costs) is never touched (R3).
+async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> {
+    let bin = auth_bin().await?;
+    let who = crate::remote::members::auth_person(&bin, id)
+        .await?
+        .ok_or_else(|| anyhow!("`{id}` isn't a person on this computer"))?;
+    if who.owner {
+        bail!("You can't revoke yourself.");
     }
-    for m in hub.store.memberships()?.into_iter().filter(|m| m.person_id == id) {
-        hub.store.remove_membership(&m.membership_id)?;
-        crate::remote::members::revoke_in_cloud(hub, &m.membership_id).await;
+    if !who.bot_of.is_empty() {
+        bail!("`{id}` is a bot of {}'s; revoke {} and it goes quiet with them.", who.bot_of, who.bot_of);
     }
-    crate::remote::members::end_access(hub, bin.as_deref(), id).await?;
-    // Their bots go with them, even when no membership was left to end (docs/kith-bot-guests.md 7.5).
-    super::botguests::revoke_owned_by(hub, id, "person").await;
-    hub.store.set_person_agents(id, &BTreeMap::new())?;
-    // Then kith-auth, best effort: what it refuses stays in `made`, so revoking again retries it.
-    let mut warnings: Vec<String> = Vec::new();
-    let mut left: Vec<String> = Vec::new();
+    let everywhere = !who.kith.is_empty() && cloud::url(&hub.store).is_some();
+    if everywhere {
+        let (path, what) =
+            if revoke { ("/v1/host/people/revoke", "revoked") } else { ("/v1/host/people/unrevoke", "restored") };
+        cloud::post(hub, path, &json!({"userId": who.kith})).await.map_err(|e| {
+            anyhow!(
+                "{id} wasn't {what}: a change to someone's access has to reach your other computers through the Kith \
+                 cloud, and it couldn't be reached ({e:#}). Try again once this computer is online."
+            )
+        })?;
+    }
     {
         let _w = AUTH_WRITES.lock().await;
-        for agent in &person.made {
-            let done = match &bin {
-                Some(bin) => account::run(bin, &["member", agent, id, "--rm"]).await.map(drop),
-                None => Err(anyhow!("kith-auth wasn't found")),
-            };
-            if let Err(e) = done {
-                warnings.push(format!("couldn't take {agent} away from {id}: {e:#}"));
-                left.push(agent.clone());
-            }
+        account::run(&bin, &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"]).await?;
+    }
+    if revoke {
+        // What the host itself holds goes too, as before revoking was undoable: open invites, memberships (in the
+        // cloud too) and with them devices. Rows in kith-auth stay, so undo needs no record of them.
+        for invite in hub.store.invites()?.into_iter().filter(|i| i.person_id == id && i.open(now_ms())) {
+            revoke_invite(hub, &invite.invite_id).await?;
+        }
+        for m in hub.store.memberships()?.into_iter().filter(|m| m.person_id == id) {
+            hub.store.remove_membership(&m.membership_id)?;
+            crate::remote::members::revoke_in_cloud(hub, &m.membership_id).await;
+        }
+        crate::remote::members::end_access(hub, Some(&bin), id).await?;
+        cut_off(hub, id).await;
+    }
+    Ok(json!({"revoked": revoke, "everywhere": everywhere}))
+}
+
+/// After `person` was revoked here (by the owner or from the cloud): every turn of theirs and of their bots stops, and
+/// their devices go; their cards are withdrawn (R5).
+pub(crate) async fn cut_off(hub: &Hub, person: &str) {
+    for d in hub.store.devices_of(person).unwrap_or_default() {
+        if let Err(e) = hub.revoke_device(&d.key) {
+            tracing::warn!(error = format!("{e:#}"), person, "couldn't remove a revoked person's device");
         }
     }
-    hub.store.set_person_made(id, &left)?;
-    stop_runs(hub, id, false).await;
-    for w in &warnings {
-        tracing::warn!(person = id, "{w}");
+    super::botguests::enforce(hub, person).await;
+    stop_runs(hub, person, false).await;
+    // Their bots' runs a restarted host no longer knows, found by their claims.
+    let bots: Vec<String> = hub
+        .store
+        .bot_guests()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|g| g.state.live() && g.owner_person.as_deref() == Some(person))
+        .map(|g| g.person_id)
+        .collect();
+    if !bots.is_empty() {
+        super::botguests::sweep_claims(hub, bots, false).await;
     }
-    let mut out = json!({"revoked": true});
-    if !warnings.is_empty() {
-        out["warnings"] = json!(warnings);
-    }
-    Ok(out)
 }
 
 /// Stops the turns `person` has running: chats of their bots and runs of their linked chat accounts. With

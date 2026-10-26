@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# kith-auth-revoke-check — revoking a person: they reach nothing (the `*` row and helpers included) and their bots go
+# dormant; undo gives back every row as it was; the bridge's `who` says revoked, and held while a cloud-linked Mac is
+# out of sync; on a cloud-linked Mac a revoke or undo goes through kith serve and is refused when it can't reach it.
+# The rules' properties under random sequences: kith-auth-props. Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-auth-revoke-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-revoke.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT HQ_HOME
+mkdir -p "$HOME" "$KITH_SERVE_DIR"
+for a in house garden; do
+  mkdir -p "$KITH_HOME/agents/$a/role"
+  printf -- '---\nname: %s\ndescription: test\n---\nbody\n' "$a" > "$KITH_HOME/agents/$a/role/agent.md"
+done
+A() { python3 "$KERNEL/bin/kith-auth" "$@"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+J() { python3 -c "import json,sys; d=json.load(open('$KITH_AUTH')); print($1)"; }
+W() { A who telegram "$1" | python3 -c "import json,sys; print(json.load(sys.stdin)$2)"; }
+
+A person kai owner >/dev/null
+A person sam name=Sam >/dev/null
+A member house sam preset=member helpers=garden budget=7 >/dev/null
+A member garden '*' >/dev/null
+A handle sam telegram 42 >/dev/null
+A bot sambot --of sam >/dev/null
+A member house sambot >/dev/null
+ROWS=$(J "json.dumps([d['members'], d.get('grants', {})], sort_keys=True)")
+
+check "before: sam uses house" "A may sam house"
+check "before: sam uses garden through the everyone row" "A may sam garden"
+check "before: sam's bot uses house" "A may sambot house"
+
+A person sam --revoke >/dev/null
+check "revoked: house is refused" "! A may sam house"
+check "revoked: the everyone row is refused" "! A may sam garden"
+check "revoked: a helper of house is refused" "! A may sam garden --via house"
+check "revoked: their bot is dormant" "! A may sambot house"
+check "revoked: may says why" "{ A may sam house || true; } | grep -q 'access was removed'"
+check "revoked: resolve is not allowed" "[ \"\$(A resolve house --person sam | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"allowed\"])')\" = False ]"
+check "revoked: access lists nothing" "[ -z \"\$(A access sam --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin) or \"\")')\" ]"
+check "revoked: rows are kept" "[ \"\$(J \"json.dumps([d['members'], d.get('grants', {})], sort_keys=True)\")\" = '$ROWS' ]"
+check "revoked: their handle is kept (the bridge tells them)" "[ \"\$(W 42 \"['person']\")\" = sam ]"
+check "revoked: who says revoked" "[ \"\$(W 42 \"['revoked']\")\" = True ]"
+check "revoked: people --json says revoked, bot too" "[ \"\$(A people --json | python3 -c 'import json,sys; print(sorted(p[\"id\"] for p in json.load(sys.stdin) if p[\"revoked\"]))')\" = \"['sam', 'sambot']\" ]"
+check "revoked: people shows it" "A people sam | grep -q 'access removed'"
+check "revoked: an invite is refused" "! A invite sam"
+check "revoking again is fine" "A person sam --revoke"
+check "the owner can not be revoked" "! A person kai --revoke"
+check "a bot can not be revoked on its own" "! A person sambot --revoke"
+check "someone who is not a person can not be revoked" "! A person ghost --revoke"
+check "the owner still uses house" "A may kai house"
+
+A person sam --unrevoke >/dev/null
+check "undo: house is back" "A may sam house"
+check "undo: the everyone row is back" "A may sam garden"
+check "undo: the helper is back" "A may sam garden --via house"
+check "undo: the bot is back" "A may sambot house"
+check "undo: rows are exactly as before" "[ \"\$(J \"json.dumps([d['members'], d.get('grants', {})], sort_keys=True)\")\" = '$ROWS' ]"
+check "undo: no revoked state left" "[ \"\$(J \"'revoked' in d['people']['sam']\")\" = False ]"
+check "undo: who says not revoked" "[ \"\$(W 42 \"['revoked']\")\" = False ]"
+
+# a link code made before the revoke binds nothing after it
+CODE=$(A invite sam | head -1)
+A person sam --revoke >/dev/null
+check "a link code made before the revoke is refused" "! A link discord 77 $CODE"
+check "and binds nothing" "[ \"\$(J \"'discord' in d['people']['sam'].get('handles', {})\")\" = False ]"
+A person sam --unrevoke >/dev/null
+
+# the bridge's hold (R8): a linked Mac serves non-owners only while kith serve's lease on the cloud sync is live
+A handle kai telegram 1 >/dev/null
+check "never linked: nobody held" "[ \"\$(W 42 \"['held']\")\" = False ]"
+now=$(python3 -c 'import time; print(int(time.time() * 1000))')
+printf '{"linked": true, "until": %s}\n' "$((now + 60000))" > "$KITH_SERVE_DIR/cloud-sync.json"
+check "linked, lease live: not held" "[ \"\$(W 42 \"['held']\")\" = False ]"
+printf '{"linked": true, "until": %s}\n' "$((now - 1000))" > "$KITH_SERVE_DIR/cloud-sync.json"
+check "linked, lease run out: held" "[ \"\$(W 42 \"['held']\")\" = True ]"
+check "linked, lease run out: the owner is never held" "[ \"\$(W 1 \"['held']\")\" = False ]"
+check "resolve says held too (the bridge's spawn and delivery re-check)" \
+  "[ \"\$(A resolve house --person sam | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"held\"])')\" = True ]"
+check "resolve: the owner is never held" \
+  "[ \"\$(A resolve house --person kai | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"held\"])')\" = False ]"
+printf '{"linked": true, "until": 0}\n' > "$KITH_SERVE_DIR/cloud-sync.json"
+check "linked, never synced: held" "[ \"\$(W 42 \"['held']\")\" = True ]"
+
+# R9: on a linked Mac the plain verb goes through kith serve; with kith serve unreachable it is refused, nothing written
+check "linked, kith serve down: revoke is refused" "! A person sam --revoke"
+check "and says why" "{ A person sam --revoke 2>&1 || true; } | grep -q 'Kith cloud'"
+check "and writes nothing" "[ \"\$(J \"'revoked' in d['people']['sam']\")\" = False ]"
+check "linked: --local (kith serve's writer) writes here" "A person sam --revoke --local && [ \"\$(J \"'revoked' in d['people']['sam']\")\" = True ]"
+check "linked, kith serve down: undo is refused" "! A person sam --unrevoke && [ \"\$(J \"'revoked' in d['people']['sam']\")\" = True ]"
+check "linked: --local undo" "A person sam --unrevoke --local && A may sam house"
+exit $fail

@@ -1,0 +1,9 @@
+\* The code as built (see RevokeDoors.tla for what each switch means). A variant's .set file overrides lines here.
+RelayChecks = TRUE
+BridgeSyncFirst = TRUE
+OwnerCli = TRUE
+CliNeedsCloud = TRUE
+StarIgnoresRevoke = FALSE
+NoDeliverRecheck = FALSE
+RevokeDeletesRows = FALSE
+BotIgnoresOwner = FALSE
