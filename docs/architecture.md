@@ -197,7 +197,8 @@ Others are turned away from it, because its session holds what the agent saw for
   outputs and every other person's, by path; `kith-memory` searches only their part. Rename moves the folders;
   removal keeps them.
 - `kith doctor` checks the tables: rows and grants naming no one, missing agents, logins shared with everyone, free
-  shells, the old Discord settings. `kith auth people [ID]
+  shells, the old Discord settings, and Reason Network wired into Claude Code (its daemon lists every Claude Code
+  session, agent runs included, as one its team peers can prompt, past kith-auth). `kith auth people [ID]
 [--matrix]` shows everything: each person's accounts, owned profiles, the agents they reach and how, and the
 account each service would really use in their runs.
 
