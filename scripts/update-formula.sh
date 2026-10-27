@@ -3,8 +3,8 @@
 #
 #   scripts/update-formula.sh <version> <SHA256SUMS> [formula]     formula defaults to packaging/homebrew/kith.rb
 #
-# The release workflow runs it and attaches the filled kith.rb to the release; copy that file into the tap repo
-# as Formula/kith.rb (see packaging/homebrew/README.md). The URLs in the formula are built from `version`.
+# The release workflow runs it, attaches the filled kith.rb to the release and commits it to the tap repo
+# with scripts/update-tap.sh (see packaging/homebrew/README.md). The URLs in the formula are built from `version`.
 # Same inputs, same output.
 set -eu
 [ $# -ge 2 ] || { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }

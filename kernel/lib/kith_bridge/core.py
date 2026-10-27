@@ -281,7 +281,8 @@ class Incoming:
     private: bool = False       # a direct message with the bot
     addressed: bool = False     # the bot or an agent was mentioned, or the bot's message replied to
     room_agent: str | None = None   # the agent whose own room this is (Discord's agent channels)
-    admin: bool = False         # the server's owner (Discord), taken as kith's owner until kith knows their account
+    admin: bool = False         # the owner of the server KITH_DISCORD_GUILD names (Discord), taken as kith's owner
+                                # until kith knows their account; any other server's owner is not
     quoted: str = ''            # the text of a message replied to that isn't kith's
     files: list = field(default_factory=list)   # local paths of the files sent with it
     ref: object = None          # the adapter's own handle on the message (reactions)

@@ -103,6 +103,7 @@ struct PeopleView: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    if !guests.mine.isEmpty { BotsCapRow(store: store) }
                     EndedBots(bots: BotGuestStore.ended(guests.mine), viewer: .owner, store: store)
                 }
             }

@@ -9,6 +9,7 @@
 #   kith serve restart              stop, then start --no-build
 #   kith serve status               the host's own status, and the relay in use
 #   kith serve relay [URL]          show or set the relay URL (~/.kith/serve/config.json); restart for it to take effect
+#   kith serve cloud [...]          the host's cloud status and settings (--confirm-owner ACCOUNT accepts an owner change)
 #
 # Data dir ~/.kith/serve, port 19224, launchd label dev.kith.serve, logs inside the data dir. The host's own
 # subcommands (install, stop, status) do the launchd work. `kith serve ...` is the same command.
@@ -202,6 +203,7 @@ case ${1:-help} in
   restart) shift; "$SELF" stop; cmd_start --no-build "$@" ;;
   status)  cmd_status ;;
   relay)   shift; cmd_relay "$@" ;;
+  cloud)   shift; [ -x "$BIN" ] || { echo "kith serve: not installed" >&2; exit 1; }; "$BIN" cloud --port $PORT "$@" ;;
   # Where this install's host lives, for kith-sessions: one rule, the one above.
   endpoint) echo "$DATA $PORT" ;;
   help|-h|--help) usage ;;

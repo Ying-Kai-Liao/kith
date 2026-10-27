@@ -1,0 +1,669 @@
+#!/usr/bin/env python3
+"""kith-wake — the kernel's wake queue: the one owner of wakes (F12 rule 1).
+
+  kith-wake enqueue SESSION --id ID --agent AGENT [--person P] [--room R] [--door run|host] [--why WHY] -- TEXT
+                                  ask for a turn of SESSION; prints queued, merged or duplicate
+  kith-wake withdraw SESSION [--id ID]   Stop: drop what SESSION is still owed (not what a running turn already holds)
+  kith-wake take --holder PID [--session SESSION] [--sid CLAUDE_SID]
+                                  the host starts a host-door turn: prints it as JSON (exit 1 when nothing is owed)
+  kith-wake done RUN              the turn RUN ended: what it carried is answered
+  kith-wake back RUN [--held]     the turn RUN did not start: what it carried is owed again (--held: a writer had it)
+  kith-wake drain                 deliver what run-door sessions are owed and recover turns whose deliverer died (the tick)
+  kith-wake wait --on WHAT [--timeout 6h] [--why WHY] [--session S] [--agent A] [NOTE]
+                                  wake this session once WHAT happened: ci:OWNER/REPO#PR (its checks finished, or it was
+                                  merged or closed), pid:N (the process exited), at:TIME (+30m, or local 2026-10-27T15:00)
+  kith-wake ls [--json]           what is owed (and, without --json, what is waited for)
+
+A wake request is one thing that happened for a session: a card answered, a waiter fired, a reply came. Requests for one
+session merge into one item and one turn (S5). Every request carries an id; one whose id is already queued, answered or
+withdrawn is dropped (rule 13), so a late duplicate never starts a second turn.
+
+Doors: `run` — the kernel resumes the owner's ended session itself, `kith AGENT --resume SESSION "<note>"`, once the
+session's writer claim (#324's live/terminal/<sid>.claim, bin/kith-sessions) is free; a terminal holding it keeps the wake queued until it
+lets go, so a reply to a terminal's session waits for it instead of being typed in. `host` — the host runs the turn
+(a bot chat, a channel thread, a person's session: only the host can give a person's run its token); it takes the item
+here and says done or back. Either way the queue is the record and the only one.
+
+The model is designs/2026-10-25-all-together/model/Lifecycle.tla. W2, an event wakes its session exactly once, also
+across a restart: a request leaves the queue only when its turn ends (TurnCommit), never when the turn starts
+(TurnStart); the files outlive a host or Mac restart; every note starts with "[kith wake RUN]", and a turn whose
+deliverer died is answered when that marker is in the session's transcript (the session saw it) and owed again when it
+is not. W3, never two writers: a turn starts only on a session nobody holds, and what comes in meanwhile merges into
+the next turn. A woken turn runs as the person the session serves (decisions 2026-10-26), whoever caused the wake.
+
+A waiter is code, not a model: the tick checks it and, when what it waits for happened or its timeout passed, it becomes
+one wake request (WaiterResult) and is gone. A CI wake's id names the PR's head commit, so two waiters on one PR wake the
+session once. Waiters come from the owner's terminal and one-shot runs for now: a host chat's or a guest's session wakes
+through the host, which doesn't take wakes yet, and a guest's `ci:` would reach GitHub as the owner (rule 10).
+
+Files: $KITH_STATE/sessions/queue/<hash>.json one item per session, queue/answered.json the ids answered or withdrawn
+(kept KEEP_DAYS), sessions/waits/<id>.json one per waiter, sessions/log.jsonl every enqueue, turn, wait and drop. Logs of
+run-door turns: <logs>/wake/RUN.log.
+"""
+import argparse, datetime as dt, fcntl, hashlib, json, os, re, shutil, subprocess, sys, time, uuid
+from contextlib import contextmanager
+from pathlib import Path
+
+BIN = Path(__file__).resolve().parent
+sys.path.insert(0, str(BIN.parent / 'lib'))
+from kith_paths import paths  # noqa: E402
+
+KEEP_DAYS = 7
+MAX_TRIES = 5                     # a run-door turn that fails this often without reaching the session ends as failed
+FIRST_RETRY, MAX_RETRY = 5, 600   # seconds, doubling
+WAIT_TIMEOUT = '6h'               # a waiter always has one (v2 design §7)
+CI_POLL = 50                      # seconds between two looks at a PR's checks (the tick is a minute)
+RUN_VIAS = ('terminal', 'ask', 'schedule', 'wake')   # runs whose ended session the run door resumes
+# What bin/kith-sessions resolve says when a writer holds the session: owed again, not a failed try.
+HELD = re.compile(r'open in another|being taken over|answering in that thread|session is busy')
+
+
+def state():
+    s = os.environ.get('KITH_STATE')
+    return Path(s) if s else paths()['KITH_STATE']
+
+
+def qdir():
+    d = state() / 'sessions' / 'queue'
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return d
+
+
+def now():
+    return time.time()
+
+
+def stamp(t=None):
+    return dt.datetime.fromtimestamp(t or now(), dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+@contextmanager
+def locked(d=None, wait=True):
+    """Every change to the queue under one lock: there are few items and they change rarely. The waiters have their own
+    (d=wdir()), taken before the queue's when both are. wait=False yields False when someone else holds it."""
+    fd = os.open((d or qdir()) / '.lock', os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+        except BlockingIOError:
+            yield False
+            return
+        yield True
+    finally:
+        os.close(fd)
+
+
+def item_path(session):
+    return qdir() / (hashlib.sha256(session.encode()).hexdigest()[:32] + '.json')
+
+
+def write_atomic(path, data):
+    tmp = path.with_name(f'.{path.name}.{os.getpid()}.tmp')
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, 'w') as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, path)
+
+
+def read_json(path, default):
+    try:
+        v = json.loads(path.read_text())
+        return v if isinstance(v, type(default)) else default
+    except (OSError, ValueError):
+        return default
+
+
+def items():
+    for f in sorted(qdir().glob('*.json')):
+        if f.name != 'answered.json':
+            it = read_json(f, {})
+            if it.get('session'):
+                yield f, it
+
+
+def save(path, it):
+    if it['requests']:
+        write_atomic(path, it)
+    else:
+        path.unlink(missing_ok=True)
+
+
+def answered():
+    """id -> {how, at}; pruned past KEEP_DAYS on every read under the lock."""
+    a = read_json(qdir() / 'answered.json', {})
+    cut = now() - KEEP_DAYS * 86400
+    return {k: v for k, v in a.items() if isinstance(v, dict) and v.get('t', 0) >= cut}
+
+
+def mark_answered(ids, how):
+    a = answered()
+    for i in ids:
+        a[i] = {'how': how, 't': now()}
+    write_atomic(qdir() / 'answered.json', a)
+
+
+def log(event, **kw):
+    try:
+        with open(state() / 'sessions' / 'log.jsonl', 'a') as f:
+            f.write(json.dumps({'at': stamp(), 'event': event, **kw}, ensure_ascii=False) + '\n')
+    except OSError:
+        pass
+
+
+# --- liveness: the same rule as bin/kith-sessions (a pid that runs, started when its claim says) -----------------------
+
+def proc_start(pid):
+    try:
+        out = subprocess.run(['ps', '-o', 'lstart=', '-p', str(pid)], capture_output=True, text=True, timeout=3,
+                             env={**os.environ, 'LC_ALL': 'C'}).stdout
+    except Exception:  # noqa: BLE001
+        return None
+    return ' '.join(out.split()) or None
+
+
+def alive(pid, started=None):
+    try:
+        os.kill(int(pid), 0)
+    except PermissionError:
+        pass
+    except (OSError, TypeError, ValueError):
+        return False
+    actual = proc_start(pid)
+    return not (started and actual) or ' '.join(started.split()) == actual
+
+
+def writer_live(sid):
+    """Whether a live writer holds SESSION's claim (or the host's take-over claim): the one-writer claim the turn would need (S1/R1)."""
+    d = state() / 'live' / 'terminal'
+    for name in (f'{sid}.claim', f'{sid}.takeover.claim'):
+        c = read_json(d / name, {})
+        if c and alive(c.get('pid'), c.get('procStart')):
+            return c
+    return None
+
+
+def transcript_has(sid, marker):
+    """Whether the Claude session sid's transcript holds marker, under every Claude login on this Mac."""
+    if not sid or '/' in sid:
+        return False
+    roots = [Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude'), Path.home() / '.claude']
+    try:
+        roots += sorted((paths()['KITH_MACHINE'] / 'accounts' / 'claude').glob('*'))
+    except Exception:  # noqa: BLE001
+        pass
+    needle = marker.encode()
+    for r in dict.fromkeys(roots):
+        for t in (r / 'projects').glob(f'*/{sid}.jsonl'):
+            try:
+                with open(t, 'rb') as f:
+                    if any(needle in line for line in f):
+                        return True
+            except OSError:
+                continue
+    return False
+
+
+# --- the queue --------------------------------------------------------------------------------------------------------
+
+def enqueue(session, rid, agent, text, person=None, room=None, door='run', why='', kick=True):
+    """WaiterResult / OtherEvent in the model: one more wake owed to session. Returns queued, merged or duplicate."""
+    if door == 'run' and person:
+        raise SystemExit('kith-wake: a person\'s session wakes through the host (--door host): only it can issue their run token')
+    with locked():
+        path = item_path(session)
+        it = read_json(path, {})
+        # Rule 13: an id already queued, answered or withdrawn is dropped, whoever sends it again.
+        if rid in answered() or any(r['id'] == rid for _, other in items() for r in other['requests']):
+            log('duplicate', session=session, id=rid)
+            return 'duplicate'
+        if it and (it.get('person') or None) != (person or None):
+            raise SystemExit(f'kith-wake: {session} is {it.get("person") or "the owner"}\'s session, not {person or "the owner"}\'s')
+        if it and it.get('agent') != agent:
+            raise SystemExit(f'kith-wake: {session} belongs to {it.get("agent")}, not {agent}')
+        merged = bool(it)
+        if not it:
+            it = {'v': 1, 'session': session, 'agent': agent, 'person': person or None, 'room': room or None,
+                  'door': door, 'requests': [], 'turn': None, 'tries': 0, 'next': 0}
+        it['requests'].append({'id': rid, 'why': why, 'text': text, 'at': stamp(), 'run': None})
+        it['next'] = 0
+        save(path, it)
+        log('enqueue', session=session, id=rid, door=door, merged=merged)
+    if kick and door == 'run':
+        spawn_drain()
+    return 'merged' if merged else 'queued'
+
+
+def withdraw(session, rid=None):
+    """Stop: the requests session is still owed are dropped and their ids kept, so a late copy doesn't come back, and
+    (without rid) its waiters go too. A request a running turn already carries stays with that turn (it was delivered)."""
+    waits = 0 if rid else unwait(session)
+    with locked():
+        path = item_path(session)
+        it = read_json(path, {})
+        gone = [r for r in it.get('requests', []) if r['run'] is None and rid in (None, r['id'])]
+        if not gone:
+            return waits
+        it['requests'] = [r for r in it['requests'] if r not in gone]
+        mark_answered([r['id'] for r in gone], 'withdrawn')
+        save(path, it)
+        log('withdraw', session=session, ids=[r['id'] for r in gone])
+        return len(gone) + waits
+
+
+def note_for(run, requests):
+    head = f'[kith wake {run}]'
+    if len(requests) == 1:
+        r = requests[0]
+        return f'{head} {r["why"] + ": " if r["why"] else ""}{r["text"]}'
+    lines = [f'{head} {len(requests)} things happened while this session was idle:']
+    lines += [f'{n}. {r["why"] + ": " if r["why"] else ""}{r["text"]}' for n, r in enumerate(requests, 1)]
+    return '\n'.join(lines)
+
+
+def start_turn(path, it, holder, sid=None):
+    """TurnStart: the owed requests go into one turn held by holder. Needs queue > 0; the caller has checked the
+    session is free (W3). Nothing leaves the queue here (W2)."""
+    run = uuid.uuid4().hex[:12]
+    owed = [r for r in it['requests'] if r['run'] is None]
+    for r in owed:
+        r['run'] = run
+    it['turn'] = {'run': run, 'pid': holder, 'procStart': proc_start(holder), 'at': stamp(),
+                  'sid': sid or (it['session'] if it['door'] == 'run' else None)}
+    save(path, it)
+    log('turn', session=it['session'], run=run, ids=[r['id'] for r in owed])
+    return {'run': run, 'session': it['session'], 'agent': it['agent'], 'person': it['person'], 'room': it['room'],
+            'door': it['door'], 'ids': [r['id'] for r in owed], 'note': note_for(run, owed)}
+
+
+def find_run(run):
+    for path, it in items():
+        if (it.get('turn') or {}).get('run') == run:
+            return path, it
+    return None, None
+
+
+def commit(run, how='answered'):
+    """TurnCommit: what turn run carried is answered and leaves the queue; what came in meanwhile stays owed."""
+    with locked():
+        path, it = find_run(run)
+        if not it:
+            return False
+        ids = [r['id'] for r in it['requests'] if r['run'] == run]
+        it['requests'] = [r for r in it['requests'] if r['run'] != run]
+        it['turn'], it['tries'], it['next'] = None, 0, 0
+        mark_answered(ids, how)
+        save(path, it)
+        log('done', session=it['session'], run=run, ids=ids, how=how)
+        return True
+
+
+def give_back(run, held=False, why=''):
+    """The turn did not reach the session: its requests are owed again. A held writer is not a failed try; a failed try
+    waits a doubling pause, and after MAX_TRIES the requests end as failed (logged) instead of looping."""
+    with locked():
+        path, it = find_run(run)
+        if not it:
+            return False
+        return release(path, it, held, why)
+
+
+def release(path, it, held, why):
+    run = it['turn']['run']
+    carried = [r for r in it['requests'] if r['run'] == run]
+    it['turn'] = None
+    if not held:
+        it['tries'] = it.get('tries', 0) + 1
+        if it['tries'] >= MAX_TRIES:
+            ids = [r['id'] for r in carried]
+            mark_answered(ids, 'failed')
+            it['requests'] = [r for r in it['requests'] if r not in carried]
+            it['tries'], it['next'] = 0, 0
+            log('failed', session=it['session'], run=run, ids=ids, why=why)
+            save(path, it)
+            return True
+        it['next'] = now() + min(MAX_RETRY, FIRST_RETRY * 2 ** (it['tries'] - 1))
+    for r in carried:
+        r['run'] = None
+    save(path, it)
+    log('back', session=it['session'], run=run, held=held, why=why)
+    return True
+
+
+def recover(path, it):
+    """Restart / HostBack: a turn whose holder is gone either reached the session (its marker is in the transcript:
+    answered, so it is not delivered twice) or did not (owed again). A session whose writer is still live is left alone:
+    the turn may still be running in a claude the dead holder started."""
+    t = it.get('turn')
+    if not t or alive(t.get('pid'), t.get('procStart')):
+        return
+    if t.get('sid') and writer_live(t['sid']):
+        return
+    if t.get('sid') and transcript_has(t['sid'], f'[kith wake {t["run"]}]'):
+        ids = [r['id'] for r in it['requests'] if r['run'] == t['run']]
+        it['requests'] = [r for r in it['requests'] if r['run'] != t['run']]
+        it['turn'], it['tries'], it['next'] = None, 0, 0
+        mark_answered(ids, 'recovered')
+        save(path, it)
+        log('done', session=it['session'], run=t['run'], ids=ids, how='recovered')
+    else:
+        release(path, it, False, 'its deliverer died before the session saw it')
+
+
+def take(holder, session=None, sid=None):
+    """The host starts a host-door turn for holder (its own pid): the first owed session, or session."""
+    with locked():
+        for path, it in items():
+            recover(path, it)
+        for path, it in items():
+            if it['door'] != 'host' or it.get('turn') or (session and it['session'] != session):
+                continue
+            if it.get('next', 0) > now() or not any(r['run'] is None for r in it['requests']):
+                continue
+            return start_turn(path, it, holder, sid)
+    return None
+
+
+# --- the run door -----------------------------------------------------------------------------------------------------
+
+def spawn_drain():
+    if os.environ.get('KITH_WAKE_NO_KICK'):
+        return
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve()), 'drain'], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def drain():
+    """The tick: fire waiters whose thing happened, recover dead turns of every door, then start each run-door session
+    that is owed and free."""
+    poll_waits()
+    due = []
+    with locked():
+        for path, it in items():
+            recover(path, it)
+        for _, it in items():
+            if it['door'] == 'run' and not it.get('turn') and it.get('next', 0) <= now() \
+                    and any(r['run'] is None for r in it['requests']) and not writer_live(it['session']):
+                due.append(it['session'])
+    for session in due:
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), 'deliver', session], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    return due
+
+
+def logs_dir():
+    d = Path(os.environ.get('KITH_LOGS') or paths()['KITH_LOGS']) / 'wake'
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def deliver(session):
+    """One run-door turn, held by this process: it takes the item (so there is no moment the turn has a holder that is
+    gone), runs `kith AGENT --resume SESSION NOTE`, and commits when it ends."""
+    with locked():
+        path = item_path(session)
+        it = read_json(path, {})
+        if not it or it.get('turn') or it['door'] != 'run' or writer_live(session) \
+                or not any(r['run'] is None for r in it['requests']):
+            return None
+        turn = start_turn(path, it, os.getpid())
+    kith = os.environ.get('KITH_WAKE_KITH') or str(BIN / 'kith')
+    env = {**os.environ, 'KITH_VIA': 'wake', 'KITH_CLAIM_WAIT': '0'}
+    for k in ('KITH_PERSON', 'KITH_ROOM', 'KITH_RESUME', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'):
+        env.pop(k, None)
+    out = logs_dir() / f'{turn["run"]}.log'
+    with open(out, 'w') as f:
+        rc = subprocess.run([kith, turn['agent'], '--resume', session, turn['note']], stdin=subprocess.DEVNULL,
+                            stdout=f, stderr=subprocess.STDOUT, env=env).returncode
+    said = out.read_text(errors='replace')[-4000:]
+    if rc == 0 or transcript_has(session, f'[kith wake {turn["run"]}]'):
+        commit(turn['run'], 'answered' if rc == 0 else f'answered, exit {rc}')
+    else:
+        last = said.strip().splitlines()[-1] if said.strip() else ''
+        give_back(turn['run'], held=bool(HELD.search(said)), why=f'exit {rc}: {last}')
+    return rc
+
+
+# --- waiters: code that watches for one thing and turns it into one wake --------------------------------------------
+
+def wdir():
+    d = state() / 'sessions' / 'waits'
+    d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return d
+
+
+def waits():
+    for f in sorted(wdir().glob('*.json')):
+        w = read_json(f, {})
+        if w.get('session'):
+            yield f, w
+
+
+def seconds(s):
+    m = re.fullmatch(r'(\d+)([smhd])', s.strip())
+    if not m:
+        raise SystemExit(f'kith-wake: {s!r} is not a duration (30s, 10m, 6h, 2d)')
+    return int(m[1]) * {'s': 1, 'm': 60, 'h': 3600, 'd': 86400}[m[2]]
+
+
+def parse_on(on):
+    """WHAT → the waiter's fields; refuses what can't be watched."""
+    kind, _, arg = on.partition(':')
+    if kind == 'ci':
+        m = re.fullmatch(r'([\w.-]+/[\w.-]+)#(\d+)', arg)
+        if not m:
+            raise SystemExit('kith-wake: ci:OWNER/REPO#PR, e.g. ci:Ying-Kai-Liao/kith#345')
+        return {'kind': 'ci', 'repo': m[1], 'pr': int(m[2])}
+    if kind == 'pid':
+        if not arg.isdigit() or not alive(arg):
+            raise SystemExit(f'kith-wake: pid {arg} is not running')
+        return {'kind': 'pid', 'pid': int(arg), 'procStart': proc_start(arg)}
+    if kind == 'at':
+        if arg.startswith('+'):
+            t = now() + seconds(arg[1:])
+        else:
+            try:
+                t = dt.datetime.fromisoformat(arg).timestamp()   # naive: this Mac's local time
+            except ValueError:
+                raise SystemExit(f'kith-wake: at:{arg} is not a time (+30m, or 2026-10-27T15:00)') from None
+        return {'kind': 'at', 'at': t}
+    raise SystemExit(f'kith-wake: can\'t wait on {on!r}: ci:OWNER/REPO#PR, pid:N or at:TIME')
+
+
+def wait(on, session, agent, why='', note='', timeout=WAIT_TIMEOUT):
+    """Set a waiter for session. One session waiting twice on the same thing keeps the first waiter."""
+    if os.environ.get('KITH_PERSON'):
+        raise SystemExit('kith-wake: a guest\'s session can\'t set waiters yet')
+    via = os.environ.get('KITH_VIA') or 'terminal'
+    if via not in RUN_VIAS:
+        raise SystemExit(f'kith-wake: a {via} session wakes through the host, which doesn\'t take wakes yet')
+    if not session or not agent:
+        raise SystemExit('kith-wake: no session to wake: run it in a kith agent\'s session, or pass --session and --agent')
+    w = parse_on(on)
+    with locked(wdir()):
+        for _, old in waits():
+            if old['session'] == session and old['on'] == on:
+                return old
+        wid = uuid.uuid4().hex[:12]
+        w.update({'v': 1, 'id': wid, 'on': on, 'session': session, 'agent': agent, 'why': why, 'note': note,
+                  'created': now(), 'checked': 0, 'seen': None,
+                  'until': w['at'] if w['kind'] == 'at' else now() + seconds(timeout)})
+        write_atomic(wdir() / f'{wid}.json', w)
+    log('wait', session=session, wait=wid, on=on, until=stamp(w['until']))
+    return w
+
+
+def unwait(session):
+    with locked(wdir()):
+        gone = [f for f, w in waits() if w['session'] == session]
+        for f in gone:
+            f.unlink(missing_ok=True)
+    if gone:
+        log('unwait', session=session, waits=[f.stem for f in gone])
+    return len(gone)
+
+
+def gh(*args):
+    exe = os.environ.get('KITH_WAKE_GH') or shutil.which('gh') \
+        or next((p for p in ('/opt/homebrew/bin/gh', '/usr/local/bin/gh') if os.path.exists(p)), 'gh')
+    r = subprocess.run([exe, *args], capture_output=True, text=True, timeout=20)
+    try:
+        return json.loads(r.stdout)
+    except ValueError:
+        return None
+
+
+def ci_result(w):
+    """The PR's checks, or None while they run. Finished means the same head commit had no pending check on two looks in
+    a row: just after a push, GitHub may not have listed the new runs yet."""
+    pr, repo = str(w['pr']), w['repo']
+    view = gh('pr', 'view', pr, '--repo', repo, '--json', 'headRefOid,state') or {}
+    sha = view.get('headRefOid')
+    if not sha:
+        return None
+    if view.get('state') in ('MERGED', 'CLOSED'):
+        return sha, f'{repo}#{pr} was {view["state"].lower()}'
+    checks = gh('pr', 'checks', pr, '--repo', repo, '--json', 'name,bucket')
+    if not checks or any(c.get('bucket') == 'pending' for c in checks):
+        w['seen'] = None
+        return None
+    if w.get('seen') != sha:
+        w['seen'] = sha
+        return None
+    ran = [c for c in checks if c.get('bucket') != 'skipping']
+    bad = [c['name'] for c in ran if c.get('bucket') in ('fail', 'cancel')]
+    if bad:
+        return sha, f'{len(bad)} of {len(ran)} checks failed: {", ".join(bad)}'
+    return sha, f'all {len(ran)} checks passed'
+
+
+def what(w):
+    return {'ci': f'the checks of {w.get("repo")}#{w.get("pr")} finish', 'pid': f'pid {w.get("pid")} exits',
+            'at': f'it is {stamp(w.get("at"))}'}[w['kind']]
+
+
+def fired(w):
+    """(wake id, why, text) when w's thing happened or its timeout passed, else None."""
+    if w['kind'] == 'pid' and not alive(w['pid'], w.get('procStart')):
+        return f'wait:{w["id"]}', w['why'] or f'pid {w["pid"]} exited', 'the process you waited for has exited'
+    if w['kind'] == 'at' and now() >= w['at']:
+        return f'wait:{w["id"]}', w['why'] or 'time', f'it is {stamp(w["at"])}, the time you asked to be woken'
+    if w['kind'] == 'ci' and now() - w.get('checked', 0) >= float(os.environ.get('KITH_WAKE_POLL', CI_POLL)):
+        w['checked'] = now()
+        got = ci_result(w)
+        if got:
+            sha, said = got
+            # One wake per PR head and session, however many waiters asked.
+            return (f'ci:{w["repo"]}#{w["pr"]}@{sha[:12]}/{w["session"]}',
+                    w['why'] or f'CI finished on {w["repo"]}#{w["pr"]} at {sha[:7]}', said)
+    if now() >= w['until']:
+        return f'wait:{w["id"]}', w['why'] or f'waiting until {what(w)}', \
+            f'gave up: it had not happened by {stamp(w["until"])} (the waiter\'s timeout)'
+    return None
+
+
+def poll_waits():
+    """WaiterResult: every waiter whose thing happened becomes one wake request. One poller at a time; a crash between
+    the request and the waiter's removal fires it again, and the request's id drops the copy."""
+    with locked(wdir(), wait=False) as mine:
+        if not mine:
+            return
+        for f, w in waits():
+            try:
+                got = fired(w)
+            except Exception as e:  # noqa: BLE001 — one waiter failing (gh down) must not stop the others
+                log('wait-error', session=w['session'], wait=w['id'], error=str(e))
+                continue
+            if not got:
+                write_atomic(f, w)
+                continue
+            rid, why, text = got
+            if w.get('note'):
+                text += f'\nYour note when you set the wait: {w["note"]}'
+            try:
+                enqueue(w['session'], rid, w['agent'], text, why=why, kick=False)
+            except SystemExit as e:   # the session's item belongs to someone else: drop the waiter, say why
+                log('wait-error', session=w['session'], wait=w['id'], error=str(e))
+            f.unlink(missing_ok=True)
+
+
+# --- command line -----------------------------------------------------------------------------------------------------
+
+def main(argv):
+    p = argparse.ArgumentParser(prog='kith-wake', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest='cmd', required=True)
+    e = sub.add_parser('enqueue')
+    e.add_argument('session')
+    e.add_argument('--id', required=True)
+    e.add_argument('--agent', required=True)
+    e.add_argument('--person')
+    e.add_argument('--room')
+    e.add_argument('--door', choices=('run', 'host'), default='run')
+    e.add_argument('--why', default='')
+    e.add_argument('text', nargs='+')
+    w = sub.add_parser('withdraw')
+    w.add_argument('session')
+    w.add_argument('--id')
+    t = sub.add_parser('take')
+    t.add_argument('--holder', type=int, required=True)
+    t.add_argument('--session')
+    t.add_argument('--sid')
+    d = sub.add_parser('done')
+    d.add_argument('run')
+    b = sub.add_parser('back')
+    b.add_argument('run')
+    b.add_argument('--held', action='store_true')
+    sub.add_parser('drain')
+    dv = sub.add_parser('deliver')
+    dv.add_argument('session')
+    wt = sub.add_parser('wait')
+    wt.add_argument('--on', required=True)
+    wt.add_argument('--timeout', default=WAIT_TIMEOUT)
+    wt.add_argument('--why', default='')
+    wt.add_argument('--session', default=os.environ.get('CLAUDE_CODE_SESSION_ID'))
+    wt.add_argument('--agent', default=os.environ.get('KITH_AGENT'))
+    wt.add_argument('note', nargs='*')
+    ls = sub.add_parser('ls')
+    ls.add_argument('--json', action='store_true')
+    a = p.parse_args(argv)
+
+    if a.cmd == 'enqueue':
+        print(enqueue(a.session, a.id, a.agent, ' '.join(a.text), a.person, a.room, a.door, a.why))
+    elif a.cmd == 'withdraw':
+        print(f'withdrew {withdraw(a.session, a.id)}')
+    elif a.cmd == 'take':
+        turn = take(a.holder, a.session, a.sid)
+        if not turn:
+            return 1
+        print(json.dumps(turn, ensure_ascii=False))
+    elif a.cmd == 'done':
+        return 0 if commit(a.run) else 1
+    elif a.cmd == 'back':
+        return 0 if give_back(a.run, a.held) else 1
+    elif a.cmd == 'drain':
+        for s in drain():
+            print(f'delivering {s}')
+    elif a.cmd == 'deliver':
+        rc = deliver(a.session)
+        return 0 if rc is None else rc
+    elif a.cmd == 'wait':
+        w = wait(a.on, a.session, a.agent, a.why, ' '.join(a.note), a.timeout)
+        when = f'at {stamp(w["until"])}' if w['kind'] == 'at' else \
+            f'when {what(w)}, or at {stamp(w["until"])} if that hasn\'t happened'
+        print(f'waiting {w["id"]}: this session gets a turn {when}; while a terminal holds it, the turn waits for '
+              f'the terminal to close')
+    elif a.cmd == 'ls':
+        rows = [it for _, it in items()]
+        if a.json:
+            print(json.dumps(rows, ensure_ascii=False, indent=1))
+            return 0
+        for it in rows:
+            who = it['person'] or 'owner'
+            state_ = f'turn {it["turn"]["run"]}' if it.get('turn') else 'owed'
+            print(f'{it["session"]}  {it["agent"]}  {who}  {it["door"]}  {state_}  {len(it["requests"])} request(s)')
+        for _, w in waits():
+            print(f'{w["session"]}  {w["agent"]}  waiting {w["id"]} on {w["on"]} until {stamp(w["until"])}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
