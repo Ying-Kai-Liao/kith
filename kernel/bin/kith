@@ -31,7 +31,8 @@
 #   kith versions|pin|unpin|rollback <agent> [VERSION]   agent package versions (kith-pkg)
 #   kith new <name> "<description>"                      start a new agent (kith-new)
 #   kith install <github-link> [--as NAME]               add an agent; each agent is its own git repo
-#   kith update|push|commit <agent>|--all                pull from, push to or commit the agent's repo
+#   kith update                                          update kith itself: git pull, brew upgrade or install.sh again, by how it was installed; desktop app: the download link (kith-self-update)
+#   kith update|push|commit <agent>|--all                pull from, push to or commit the agent's repo; update --all: kith first, then every agent
 #   kith history <agent> | kith restore <agent> <commit>   every good version is committed; restore any of them
 #   kith share <agent> [--public [--fresh]]              put it on GitHub; --fresh: a public copy without its history
 #   kith market [words]                                  agents people shared: pick any by number to install
@@ -78,7 +79,7 @@ set -euo pipefail
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
-[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,47p' "$0" | sed 's/^#   //'; exit 0; }
+[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,55p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
 [[ $1 == migrate ]] && exec "$KITH/bin/kith-migrate" "${@:2}"
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
@@ -89,7 +90,11 @@ export KITH_ROOT=$KITH
 eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
 
 case $1 in
-  versions|pin|unpin|install|update|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
+  update)             # no agent: kith itself; --all: kith first, then the agents (a failed kith update still lets the agents update, but the exit is non-zero)
+                      [[ $# -eq 1 ]] && exec "$KITH/bin/kith-self-update"
+                      if [[ $2 == --all ]]; then rc=0; "$KITH/bin/kith-self-update" || rc=$?; "$KITH/bin/kith-pkg" "$@" || rc=$?; exit $rc; fi
+                      exec "$KITH/bin/kith-pkg" "$@" ;;
+  versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
   rollback)           shift; exec "$KITH/bin/kith-pkg" pin "$@" ;;
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
   cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;

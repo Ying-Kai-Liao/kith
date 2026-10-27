@@ -81,6 +81,18 @@ def folders():
             warn(f'{old} is left from the older layout: its contents belong in {dot}')
 
 
+def kith_version():
+    # kith-self-update --check says one line when kith is behind; offline, no remote or slow means nothing, never a problem
+    try:
+        r = subprocess.run([str(Path(__file__).resolve().parent / 'kith-self-update'), '--check'], capture_output=True, text=True, timeout=12,
+                           env={**os.environ, 'KITH_ROOT': str(KITH)})
+    except (OSError, subprocess.TimeoutExpired):
+        return
+    if r.stdout.strip():
+        section('kith')
+        warn(r.stdout.strip())
+
+
 def migration():
     """Where kith migrate stands, and what is left on an hq name that is not an alias."""
     section('migration')
@@ -412,7 +424,7 @@ def main(argv):
     if '-h' in argv or '--help' in argv:
         print(__doc__.strip())
         return
-    for check in (folders, migration, tools, repos_and_agents, services, people, plugin, jobs, serve):
+    for check in (folders, kith_version, migration, tools, repos_and_agents, services, people, plugin, jobs, serve):
         try:
             check()
         except Exception as e:   # one broken check never hides the others

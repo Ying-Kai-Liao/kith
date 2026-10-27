@@ -68,7 +68,7 @@ Step by step, with the Mac app and the iPhone app: [docs/install.md](docs/instal
 [docs/invited.md](docs/invited.md).
 
 The download installs the `kith` binary and the kernel under `~/.kith`, then runs the same `install.sh`; run it again to
-upgrade. `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` (a local file) are in the script's header. Homebrew:
+upgrade, or run `kith update`, which updates kith by however you installed it (git checkout, Homebrew or this download; the desktop app: <https://kithbot.app/download/mac>). `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` (a local file) are in the script's header. Homebrew:
 `packaging/homebrew/kith.rb` (for the tap [`Ying-Kai-Liao/homebrew-kith`](https://github.com/Ying-Kai-Liao/homebrew-kith)). Releases are built by `.github/workflows/release.yml`
 on a `v*` tag.
 
@@ -109,7 +109,8 @@ version that passes its checks is committed there automatically, so its history 
 kith install <owner>/<repo>                      # or a github.com URL; .../tree/<ref>/<folder> for one agent in a bigger repo
 kith install <link> --as <name>                  # under another name
 kith install <link> --yes                        # without the question (the summary is always printed)
-kith update <agent>|--all                        # pull upstream (fast-forward only; your edits are never overwritten)
+kith update                                      # kith itself (git pull --ff-only, brew upgrade or the installer, by how you installed it)
+kith update <agent>|--all                        # an agent: pull upstream (--all: kith first, then every agent) (fast-forward only; your edits are never overwritten)
 kith history <agent>                             # every committed version
 kith restore <agent> <commit>                    # bring one back, as a new commit (undo with another restore)
 kith share <agent> [--public]                    # put it on GitHub as <you>/kith-agent-<name>, private unless --public
