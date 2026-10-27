@@ -12,14 +12,15 @@ private var apnsEnvironment: String {
     Bundle.main.object(forInfoDictionaryKey: "KithAPNSEnvironment") as? String ?? "production"
 }
 
-/// Turns an APNs token into a relay ticket (see relay/src/index.ts).
-private func relayTicket(token: Data, kind: String) async throws -> String {
-    struct Body: Encodable { var token: String; var env: String; var kind: String; var bundleId: String }
+/// Turns an APNs token into a relay ticket (see serve/relay/src/index.ts). The ticket works only for pushes
+/// signed by `computerId`, and expires; this phone mints a fresh one each time it registers with the computer.
+private func relayTicket(token: Data, kind: String, computerId: ComputerID) async throws -> String {
+    struct Body: Encodable { var token: String; var env: String; var kind: String; var bundleId: String; var computerId: String }
     struct Res: Decodable { var ticket: String }
     var req = URLRequest(url: URL(string: "\(SharedStore.relayURL)/register")!)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.httpBody = try JSONEncoder().encode(Body(token: token.map { String(format: "%02x", $0) }.joined(), env: apnsEnvironment, kind: kind, bundleId: Bundle.main.bundleIdentifier ?? "com.yingkailiao.kith.ios"))
+    req.httpBody = try JSONEncoder().encode(Body(token: token.map { String(format: "%02x", $0) }.joined(), env: apnsEnvironment, kind: kind, bundleId: Bundle.main.bundleIdentifier ?? "com.yingkailiao.kith.ios", computerId: computerId))
     req.timeoutInterval = 15
     let (data, response) = try await URLSession.shared.data(for: req)
     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
@@ -136,7 +137,7 @@ final class PushRegistrar {
         registrations[id] = Task { [weak store] in
             do {
                 let identity = try DeviceIdentity.load(context: storage)
-                let ticket = try await relayTicket(token: token, kind: "alert")
+                let ticket = try await relayTicket(token: token, kind: "alert", computerId: id)
                 try Task.checkCancellation()
                 guard let client = store?.client else { return }
                 try await client.registerDevice(ticket: ticket, relay: SharedStore.relayURL, name: UIDevice.current.name,
@@ -274,7 +275,7 @@ final class LiveActivities {
             do {
                 try Task.checkCancellation()
                 guard activity.activityState == .active || activity.activityState == .stale else { return }
-                let ticket = try await relayTicket(token: token, kind: "liveactivity")
+                let ticket = try await relayTicket(token: token, kind: "liveactivity", computerId: activity.attributes.computerId)
                 try Task.checkCancellation()
                 try await client.registerActivity(botId: activity.attributes.botId, ticket: ticket)
                 return

@@ -64,6 +64,9 @@ Kith was called hq until 2026-10-22. The `hq` command (and `hq-<tool>`) still wo
 keeps using it until `kith migrate` moves it to `~/.kith`, and `~/hq` stays a link to the same folder as `~/kith`.
 Old `HQ_*` variables, `dev.hq.*` jobs and `hq-agent` repos are still read.
 
+Step by step, with the Mac app and the iPhone app: [docs/install.md](docs/install.md). Invited to someone else's Kith:
+[docs/invited.md](docs/invited.md).
+
 The download installs the `kith` binary and the kernel under `~/.kith`, then runs the same `install.sh`; run it again to
 upgrade. `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` (a local file) are in the script's header. Homebrew:
 `packaging/homebrew/kith.rb` (for the tap [`Ying-Kai-Liao/homebrew-kith`](https://github.com/Ying-Kai-Liao/homebrew-kith)). Releases are built by `.github/workflows/release.yml`

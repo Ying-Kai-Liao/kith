@@ -36,13 +36,20 @@ public protocol InviteJoinDeps {
     /// Keeps the token for this computer so a reconnect can prove again. Throws when it can't be stored.
     func keep(_ invite: StoredInvite, for computer: ComputerID) throws
     /// Asks the computer for access (`POST /v1/computers/<c>/access-requests`); asking twice is harmless.
-    /// False while the computer is offline: it is asked again when it is back.
+    /// False while the computer is offline: it is asked again when it is back. The request's six digits are in
+    /// `AccountStore.pendingAccess` until it is answered: the join shows them (`InviteJoin.codeLine`) while it waits.
     func requestAccess(_ computer: ComputerID) async throws -> Bool
-    /// The connection to that computer once access is granted, or nil while it is offline.
+    /// The connection to that computer once access is granted (it waits for the answer), or nil while it is offline.
     func connect(_ computer: ComputerID) async throws -> (any InviteHost)?
 }
 
 public enum InviteJoin {
+    /// The words for a waiting device's six digits, the same as on desktop: in Code mode the computer's owner
+    /// compares them before letting the device in, a member's too.
+    public static func codeLine(_ code: String) -> String {
+        "Your code: \(code.prefix(3)) \(code.suffix(3)). The computer's owner may ask for these digits."
+    }
+
     static func words(_ error: Error, fallback: String) -> String {
         let text = error.localizedDescription
         return text.isEmpty ? fallback : text

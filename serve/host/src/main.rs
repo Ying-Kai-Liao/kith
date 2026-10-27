@@ -125,6 +125,10 @@ enum Sub {
         /// the cloud, can then add a device).
         #[arg(long, value_parser = ["code", "auto"])]
         approval: Option<String>,
+        /// Accept the owner the cloud now names for this computer: its account id as shown under
+        /// `owner change`, or `none`.
+        #[arg(long, value_name = "ACCOUNT")]
+        confirm_owner: Option<String>,
     },
     /// Install and start the host as a background service (launchd / systemd --user).
     Install {
@@ -383,9 +387,13 @@ async fn main() -> Result<()> {
             }
         },
         Sub::Access { port, action } => access(port, action.unwrap_or(AccessAction::List)).await,
-        Sub::Cloud { port, enable, disable, approval } => {
+        Sub::Cloud { port, enable, disable, approval, confirm_owner } => {
             if let Some(approval) = approval {
                 local_call(port, "setApproval", json!({ "approval": approval })).await?;
+            }
+            if let Some(account) = confirm_owner {
+                let user_id = (account != "none").then_some(account);
+                local_call(port, "confirmOwner", json!({ "userId": user_id })).await?;
             }
             let status = if enable || disable {
                 local_call(port, "setCloud", json!({"enabled": !disable})).await?
@@ -403,6 +411,20 @@ async fn main() -> Result<()> {
                 text("approval"),
                 text("lastError"),
             );
+            let change = &status["ownerChange"];
+            if change.is_object() {
+                let to = &change["owner"];
+                let account = to["userId"].as_str().unwrap_or("none");
+                let says = match (to["userId"].as_str(), to["email"].as_str()) {
+                    (None, _) => "has left its account".to_owned(),
+                    (Some(id), Some(email)) => format!("now belongs to {email} ({id})"),
+                    (Some(id), None) => format!("now belongs to {id}"),
+                };
+                println!(
+                    "owner change: the cloud says this computer {says}. Nothing that depends on the owner is \
+                     applied until you confirm here: kith-serve cloud --confirm-owner {account}"
+                );
+            }
             Ok(())
         }
         Sub::Install { port } => {

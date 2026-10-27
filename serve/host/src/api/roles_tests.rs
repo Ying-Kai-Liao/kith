@@ -385,7 +385,7 @@ async fn memberships_bind_only_to_our_open_invites_and_leave_with_the_cloud() {
 }
 
 #[tokio::test]
-async fn a_pull_binds_the_member_and_approves_their_device_without_the_owner() {
+async fn a_pull_binds_the_member_and_their_device_waits_for_the_owner_to_compare_its_code() {
     let r = Rig::new().await;
     let made =
         call(&r, &Caller::Local, "createInvite", json!({"name": "Sam", "agents": {"house": "member"}})).await.unwrap();
@@ -416,11 +416,13 @@ async fn a_pull_binds_the_member_and_approves_their_device_without_the_owner() {
             .to_owned();
     assert_eq!(r.hub.cloud.requests_json()[0]["personId"], "sam");
 
-    // Approval mode stays "code", and the member's device still gets in on the matching reveal.
+    // Approval mode stays "code": the matching reveal alone doesn't let the member's device in, the owner's compare does.
     assert_eq!(cloud::approval(&r.hub.store), cloud::Approval::Code);
     r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "memberships": memberships, "grants": [],
         "requests": [request("req_sam", "user_sam", Some(nonce), Some(nd))]}));
     cloud::pull(&r.hub, &base).await.unwrap();
+    assert!(r.hub.store.device(&b64(&dk)).is_none(), "waits for the owner");
+    cloud::decide(&r.hub, "req_sam", true).await.unwrap();
     let device = r.hub.store.device(&b64(&dk)).expect("approved");
     assert_eq!((device.person_id.as_deref(), device.grant_id.as_deref()), (Some("sam"), Some("grt_new")));
     let caller = Caller::Device { key: device.key.clone(), scopes: device.scopes.clone() };
