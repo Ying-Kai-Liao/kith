@@ -40,7 +40,13 @@ cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of th
 
 ## Sync commit
 
-**48af5a4eafb8** (the revoke-a-person code, "kith serve: a revoke goes through the cloud first ..."). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
+**3eb9f9a50c25** (2026-10-28: origin/main `b241d7bb` plus the channels' revoke checks, which took over the retired
+bridge's doors: the revoked reply, the held wait, the turn-start and delivery re-checks). First written at `48af5a4eafb8`
+(the revoke-a-person code, "kith serve: a revoke goes through the cloud first ..."). Between the two, the covered files
+changed by contract and type refactors (cloud HTTP and host RPC), the grants ledger, `bots-cap --json` and budgets, the
+host's owner pin in `pull` (revoked is still applied before memberships), the claim refactor in `kernel/bin/kith`, and
+the bridge's retirement; no revoke step. Each new channel check was broken in a scratch edit and its test failed. The
+same sha is in `drift.sh` (`SYNC=`). Move it only after you have
 confirmed that the model still describes the covered code (see "When you change covered code").
 
 ## What is promised, and the harm if not
