@@ -1,4 +1,4 @@
-//! A contract as data (`rpc::SCHEMA`, made by serve/contract/gen.mjs) and the check of a JSON value against one of
+//! A contract as data (`rpc::SCHEMA` and `kernel::SCHEMA`, made by serve/contract/gen.mjs) and the check of a JSON value against one of
 //! its types. The same check as the TypeScript `check` the generator writes:
 //!
 //! - [`Mode::Producer`] (what the host must send): every field is there (null where it may be, absent only where the
@@ -9,7 +9,7 @@
 
 use serde_json::Value;
 
-/// A contract: its enums, its types and its methods.
+/// A contract: its enums, its types and its methods (none for one that isn't RPC).
 #[derive(Debug)]
 pub struct Schema {
     pub enums: &'static [EnumSchema],
@@ -79,6 +79,13 @@ impl Schema {
     pub fn check(&self, ty: &str, value: &Value, mode: Mode) -> Vec<String> {
         let mut out = Vec::new();
         self.check_type(ty, value, mode, ty, &mut out);
+        out
+    }
+
+    /// The problems with `value` as a whole spec (`T`, `[T]`, `{T}`), such as what a kernel command prints.
+    pub fn check_spec(&self, spec: &str, value: &Value, mode: Mode) -> Vec<String> {
+        let mut out = Vec::new();
+        self.check_value(spec, value, mode, parse(spec).of, &mut out);
         out
     }
 
@@ -207,6 +214,19 @@ mod tests {
         let entry = json!({"id": "e", "seq": 1, "botId": "b", "threadId": null, "rev": 0, "kind": "agent", "turn": 1,
             "data": {"anything": [1, "two"]}, "createdAt": 1, "updatedAt": 1});
         assert_eq!(problems("Entry", &entry, Mode::Producer), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_spec_checks_each_item_of_a_list() {
+        let s: &Schema = &crate::kernel::SCHEMA;
+        let agents = json!([{"name": "a", "description": "", "home": "/h", "model": null, "effort": null, "harness": "claude"},
+            {"name": "b", "description": "", "home": "/h", "model": null, "effort": null, "harness": "gemini"}]);
+        assert_eq!(
+            s.check_spec("[Agent]", &agents, Mode::Producer),
+            [r#"Agent[1].harness: "gemini" is not a Harness"#]
+        );
+        assert_eq!(s.check_spec("[Agent]", &agents, Mode::Consumer), Vec::<String>::new());
+        assert_eq!(s.check_spec("[Agent]", &json!({}), Mode::Consumer), ["Agent: not a list"]);
     }
 
     #[test]

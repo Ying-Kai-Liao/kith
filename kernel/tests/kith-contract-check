@@ -1,0 +1,234 @@
+#!/usr/bin/env python3
+"""kith-contract-check — what the kernel prints for the host is what serve/contract/kernel/contract.json says.
+
+Runs the real `kith ls --json`, `kith project ls --json` and `kith <agent> --launch-json` (the owner's run and an
+invited person's) in a throwaway HOME/KITH_HOME/KITH_STATE/KITH_AUTH with a stand-in claude, never the real ~/.kith.
+
+- The producer's strict check: every field the contract names is there (null where it may be), every enum value is a
+  known one, and nothing the contract doesn't name is printed. A new field or word goes into the contract first.
+- The shared fixtures (serve/contract/kernel/fixtures/, read by the host's tests in serve/host/crates/wire) have the
+  shape of what the kernel prints now. When it changes, write them again:
+
+      KITH_WRITE_FIXTURES=1 kernel/tests/kith-contract-check
+
+  which writes this run's output with the temp folder as /tmp/kith, the kernel folder as /kernel and long strings
+  cut to 300 characters. compat/ and unknown/ beside them are written by hand (an older kernel, a newer one).
+"""
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+HERE = Path(os.path.abspath(__file__)).parent
+KERNEL = HERE.parent
+CONTRACT_DIR = KERNEL.parent / 'serve' / 'contract' / 'kernel'
+FIXTURES = CONTRACT_DIR / 'fixtures'
+C = json.loads((CONTRACT_DIR / 'contract.json').read_text())
+WRITE = os.environ.get('KITH_WRITE_FIXTURES') == '1'
+fails = 0
+
+
+def expect(name, problems):
+    global fails
+    if problems:
+        fails += 1
+        print('FAIL %s' % name)
+        for p in problems[:20]:
+            print('     %s' % p)
+    else:
+        print('ok   %s' % name)
+
+
+# ---- the contract's check (as serve/host/crates/wire/src/check.rs, producer mode) ----
+
+def parse(spec):
+    opt = spec.endswith('?')
+    s = spec[:-1] if opt else spec
+    lst, mp = s.startswith('[') and s.endswith(']'), s.startswith('{') and s.endswith('}')
+    return opt, lst, mp, s[1:-1] if lst or mp else s
+
+
+def check_type(ty, v, at, out):
+    t = C['types'].get(ty)
+    if t is None:
+        out.append('%s: no type %s in the contract' % (at, ty))
+        return
+    if not isinstance(v, dict):
+        out.append('%s: not an object' % at)
+        return
+    for name, spec in t['fields'].items():
+        if v.get(name) is None:
+            if not parse(spec)[0]:
+                out.append('%s.%s: missing' % (at, name))
+            elif name not in v and name not in t.get('mayOmit', []):
+                out.append('%s.%s: missing (print null)' % (at, name))
+        else:
+            check_value(spec, v[name], '%s.%s' % (at, name), out)
+    for k in v:
+        if k not in t['fields']:
+            out.append('%s.%s: not in the contract' % (at, k))
+
+
+def check_value(spec, v, at, out):
+    _, lst, mp, of = parse(spec)
+    if lst:
+        if not isinstance(v, list):
+            out.append('%s: not a list' % at)
+        else:
+            for i, x in enumerate(v):
+                check_value(of, x, '%s[%d]' % (at, i), out)
+        return
+    if mp:
+        if not isinstance(v, dict):
+            out.append('%s: not a map' % at)
+        else:
+            for k, x in v.items():
+                check_value(of, x, '%s.%s' % (at, k), out)
+        return
+    if of == 'json':
+        return
+    if of == 'string':
+        ok = isinstance(v, str)
+    elif of == 'int':
+        ok = isinstance(v, int) and not isinstance(v, bool)
+    elif of == 'bool':
+        ok = isinstance(v, bool)
+    elif of in C['enums']:
+        ok = isinstance(v, str)
+        if ok and v not in C['enums'][of]['values']:
+            out.append('%s: %s is not a %s' % (at, json.dumps(v), of))
+    else:
+        check_type(of, v, at, out)
+        return
+    if not ok:
+        out.append('%s: not %s' % (at, {'int': 'an integer', 'bool': 'a bool'}.get(of, 'a string')))
+
+
+def check(spec, v):
+    out = []
+    check_value(spec, v, parse(spec)[3], out)
+    return out
+
+
+def shape(spec, v, at, out):
+    """The fields there and which are null, guided by the spec; what's inside json and maps varies by run."""
+    if v is None:
+        out.add(at + ' null')
+        return
+    _, lst, mp, of = parse(spec)
+    if lst:
+        for x in v:
+            shape(of, x, at + '[]', out)
+    elif of in C['types'] and not mp and isinstance(v, dict):
+        for k, x in v.items():
+            shape(C['types'][of]['fields'].get(k, 'json'), x, '%s.%s' % (at, k), out)
+    else:
+        out.add(at)
+
+
+# ---- a throwaway kernel home ----
+
+T = Path(tempfile.mkdtemp(prefix='kith-contract-check.')).resolve()
+try:
+    for d in ('home', 'fakebin', 'kith/state', 'work/alpha', 'work/beta', 'homes/alpha'):
+        (T / d).mkdir(parents=True, exist_ok=True)
+    for name, head in (('echo', 'model: opus\neffort: high\n'), ('relay', 'harness: codex\n')):
+        role = T / 'kith' / 'agents' / name / 'role'
+        role.mkdir(parents=True)
+        (role / 'agent.md').write_text('---\nname: %s\ndescription: test agent\n%s---\nYou echo.\n' % (name, head))
+    claude = T / 'fakebin' / 'claude'
+    claude.write_text('#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"\n'
+                      '[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n')
+    claude.chmod(0o755)
+    stub = T / 'fakebin' / 'kith-bin'   # the host's binary, which the memory hooks run: here, by its path only
+    stub.write_text('#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "<PHASE>"\nexit 0\n')
+    stub.chmod(0o755)
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(('KITH_', 'HQ_', 'CLAUDE_')) and k not in ('ANTHROPIC_API_KEY', 'OPENAI_API_KEY')}
+    env.update(HOME=str(T / 'home'), KITH_HOME=str(T / 'kith'), KITH_STATE=str(T / 'kith' / 'state'),
+               KITH_AUTH=str(T / 'auth.json'), KITH_BIN=str(stub), PATH='%s:%s' % (T / 'fakebin', os.environ.get('PATH', '/usr/bin:/bin')))
+    kith = str(KERNEL / 'bin' / 'kith')
+
+    def run(args, cwd=T, **extra):
+        p = subprocess.run(args, cwd=cwd, env={**env, **extra}, capture_output=True, text=True, timeout=120)
+        if p.returncode != 0:
+            sys.exit('kith-contract-check: %s failed (%d): %s' % (' '.join(args[1:]), p.returncode, p.stderr.strip()))
+        return p.stdout
+
+    run([kith, 'project', 'add', 'alpha', str(T / 'work' / 'alpha'), '--home', str(T / 'homes' / 'alpha')])
+    run([kith, 'project', 'add', 'beta', str(T / 'work' / 'beta'), '--in', 'alpha'])
+    auth = str(KERNEL / 'bin' / 'kith-auth')
+    run([auth, 'person', 'kai', 'owner'])
+    run([auth, 'person', 'sam'])
+    run([auth, 'member', 'echo', 'sam', 'preset=member'])
+
+    cmds = C['commands']
+    alpha = T / 'work' / 'alpha'
+    cases = [  # fixture, command, its arguments, where it runs, extra env
+        ('ls', 'ls', cmds['ls']['args'], T, {}),
+        ('project-ls', 'projectLs', cmds['projectLs']['args'], T, {}),
+        ('launch', 'launch', ['echo', '--launch-json', '-p', 'alpha'], alpha, {}),
+        ('launch-as-person', 'launch', ['echo', '--launch-json'], alpha, {'KITH_PERSON': 'sam', 'KITH_VIA': 'serve'}),
+    ]
+
+    # Paths in the fixtures: the temp folder, the kernel folder (also as a hook's shell word) and Xcode's, however
+    # the kernel spelled them.
+    swaps = {(str(T), '/tmp/kith'), (os.path.realpath(T), '/tmp/kith')}
+    for k in (str(KERNEL), os.path.realpath(KERNEL)):
+        swaps |= {(k, '/kernel'), (k.replace(' ', '\\ '), '/kernel')}
+    try:
+        dev = subprocess.run(['xcode-select', '-p'], capture_output=True, text=True, timeout=5).stdout.strip()
+    except OSError:
+        dev = ''
+    if '.app/' in dev:
+        swaps.add((dev[:dev.index('.app/') + 4], '/Applications/Xcode.app'))
+    swaps = sorted(swaps, key=lambda s: -len(s[0]))
+
+    def scrub(v):
+        if isinstance(v, str):
+            for a, b in swaps:
+                v = v.replace(a, b)
+            return v if len(v) <= 300 else v[:300] + '…'
+        if isinstance(v, list):
+            return [scrub(x) for x in v]
+        if isinstance(v, dict):
+            return {scrub(k): scrub(x) for k, x in v.items()}
+        return v
+
+    for fixture, command, args, cwd, extra in cases:
+        spec = cmds[command]['result']
+        body = json.loads(run([kith, *args], cwd=cwd, **extra))
+        expect('%s: what the kernel prints is the contract\'s %s' % (fixture, spec), check(spec, body))
+        path = FIXTURES / ('%s.json' % fixture)
+        if WRITE:
+            FIXTURES.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps({'command': command, 'type': spec, 'body': scrub(body)}, indent=2,
+                                       ensure_ascii=False) + '\n')
+            print('     wrote %s' % path.relative_to(KERNEL.parent))
+            continue
+        try:
+            saved = json.loads(path.read_text())
+        except (OSError, ValueError):
+            saved = None
+        if saved is None or saved.get('command') != command or saved.get('type') != spec:
+            expect('%s: the fixture is there' % fixture, ['no %s for %s: KITH_WRITE_FIXTURES=1 %s' % (path, command, sys.argv[0])])
+            continue
+        now, then = set(), set()
+        shape(spec, body, '', now)
+        shape(spec, saved['body'], '', then)
+        diff = ['%s %s' % ('+' if s in now else '-', s or '(top)') for s in sorted(now ^ then)]
+        if diff:
+            diff.append('the kernel prints another shape now: KITH_WRITE_FIXTURES=1 %s' % sys.argv[0])
+        expect('%s: the fixture has the shape the kernel prints' % fixture, diff)
+
+    # The person's run is theirs; the owner's has the project. (What the fixtures are for, checked here once.)
+    person = json.loads(run([kith, 'echo', '--launch-json'], cwd=alpha, KITH_PERSON='sam'))
+    expect('the person\'s launch names the person and the member mode',
+           [] if (person['cost_tag'].get('person'), person['permission_mode']) == ('sam', 'acceptEdits')
+           else ['person %r, mode %r' % (person['cost_tag'].get('person'), person['permission_mode'])])
+finally:
+    shutil.rmtree(T, ignore_errors=True)
+sys.exit(1 if fails else 0)

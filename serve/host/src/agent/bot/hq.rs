@@ -415,7 +415,7 @@ impl Actor {
         let mut started_as = (launch.env(), launch.cwd(&self.cfg).to_owned());
         if person.is_some() {
             // The membership's mode is set when a session starts: a changed one starts the process again.
-            started_as.0.push(("permission_mode".into(), launch.permission_mode.clone().unwrap_or_default()));
+            started_as.0.push(("permission_mode".into(), launch.permission_mode.map_or("", |m| m.as_str()).to_owned()));
         }
         if self.conn.is_some()
             && (self.conn_started_as.as_ref() != Some(&started_as) || self.conn_serving != self.serving)
@@ -503,7 +503,8 @@ impl Actor {
                         conn.session_started(&sid, &res);
                         self.note_options(&sid, &res, Listing::Session);
                         if !launch.is_codex() {
-                            self.set_claude_mode(&sid, &res, launch.permission_mode.as_deref()).await;
+                            self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str))
+                                .await;
                         }
                         self.turn_session = Some(sid);
                         // The agent's own account came back to a session that missed what a backup answered.
@@ -537,9 +538,9 @@ impl Actor {
         self.note_options(&sid, &res, Listing::Session);
         self.hq_set_session(slot, &sid);
         if launch.is_codex() {
-            self.set_codex_mode(&sid, &res, launch.permission_mode.as_deref()).await;
+            self.set_codex_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
         } else {
-            self.set_claude_mode(&sid, &res, launch.permission_mode.as_deref()).await;
+            self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
         }
         self.session_fresh = true;
         self.turn_session = Some(sid);
@@ -604,7 +605,7 @@ mod tests {
     use super::*;
 
     fn launch(provider: &str, account: &str) -> hq::Launch {
-        serde_json::from_value(json!({"harness": provider, "env": {"KITH_ACCOUNT": account}})).unwrap()
+        hq::printed_launch(json!({"harness": provider, "env": {"KITH_ACCOUNT": account}}))
     }
 
     fn keys() -> Vec<(String, String)> {

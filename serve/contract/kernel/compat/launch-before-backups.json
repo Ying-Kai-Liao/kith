@@ -1,0 +1,51 @@
+{
+  "command": "launch",
+  "type": "Launch",
+  "body": {
+    "version": 1,
+    "agent": "echo",
+    "agent_version": "3c920a46f5",
+    "cwd": "/tmp/kith/work/alpha",
+    "env": {
+      "KITH_AGENT": "echo",
+      "KITH_PROJECT": "alpha",
+      "KITH_VIA": "terminal"
+    },
+    "system_prompt": "You echo.",
+    "settings": {
+      "permissions": {
+        "defaultMode": "auto"
+      }
+    },
+    "mcp_servers": {},
+    "add_dirs": [
+      "/kernel",
+      "/tmp/kith/kith/state",
+      "/tmp/kith/kith/agents",
+      "/tmp/kith/homes/alpha",
+      "/tmp/kith/work/beta",
+      "/tmp/kith/kith/agents/echo"
+    ],
+    "allowed_tools": [
+      "Bash(/kernel/bin/project-id)"
+    ],
+    "disable_slash_commands": true,
+    "model": "opus",
+    "effort": "high",
+    "project": "alpha",
+    "permission_mode": "auto",
+    "cost_tag": {
+      "agent": "echo",
+      "version": "3c920a46f5",
+      "model": "opus",
+      "effort": "high",
+      "via": "terminal",
+      "project": "alpha",
+      "person": null
+    },
+    "claude_args": [
+      "--append-system-prompt",
+      "You echo."
+    ]
+  }
+}

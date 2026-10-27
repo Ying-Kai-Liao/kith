@@ -63,6 +63,7 @@ jobs:
           filters: |
             kernel:
               - 'kernel/**'
+              - 'serve/contract/kernel/**'
               - '.github/workflows/ci.yml'
             licenses:
               - '**/Cargo.lock'
@@ -160,6 +161,8 @@ jobs:
         run: kernel/tests/kith-launchd-check
       - name: Project check
         run: kernel/tests/kith-project-check
+      - name: Contract check (what the host reads, serve/contract/kernel)
+        run: kernel/tests/kith-contract-check
       - name: Serve check
         run: kernel/tests/kith-serve-check
       - name: Info check

@@ -2,7 +2,7 @@
 //! every [`EVERY`] and when the app asks (`syncHqBots`).
 
 use super::Hub;
-use crate::agent::hq::{self, HqAgent};
+use crate::agent::hq::{self, AgentExt as _, HqAgent};
 use crate::store::BotConfig;
 use anyhow::Result;
 use serde_json::{Value, json};
@@ -83,7 +83,7 @@ impl Hub {
         let rows = self.store.bots()?;
         for agent in agents {
             if !agent.runnable() {
-                tracing::debug!(agent = %agent.name, harness = %agent.harness, "hq agent is not a Claude agent; no bot");
+                tracing::debug!(agent = %agent.name, harness = ?agent.harness, "hq agent is not a Claude agent; no bot");
                 continue;
             }
             if !Path::new(&agent.home).is_dir() {
@@ -177,7 +177,8 @@ mod tests {
             name: name.into(),
             description: description.into(),
             home: home.to_string_lossy().into_owned(),
-            harness: "claude".into(),
+            harness: Some(hq::Harness::Claude),
+            ..HqAgent::default()
         }
     }
 
@@ -254,22 +255,24 @@ mod tests {
 
     #[tokio::test]
     async fn only_claude_agents_get_bots() {
-        // What `hq ls --json` prints: an agent from an older hq has no harness, which means Claude.
+        // What `hq ls --json` prints: an agent from an older hq has no harness, which means Claude; one this version
+        // doesn't know is never started.
         let listed: Vec<HqAgent> = serde_json::from_str(
-            r#"[{"name":"a","home":"/x"},{"name":"b","home":"/x","harness":"claude"},{"name":"c","home":"/x","harness":"codex"}]"#,
+            r#"[{"name":"a","description":"","home":"/x"},{"name":"b","description":"","home":"/x","harness":"claude"},
+               {"name":"c","description":"","home":"/x","harness":"codex"},{"name":"d","description":"","home":"/x","harness":"gemini"}]"#,
         )
         .unwrap();
-        assert_eq!(listed.iter().map(HqAgent::runnable).collect::<Vec<_>>(), [true, true, false]);
+        assert_eq!(listed.iter().map(HqAgent::runnable).collect::<Vec<_>>(), [true, true, false, false]);
 
         let (hub, dir) = hub();
         let mut codex = agent(&dir, "coder", "");
-        codex.harness = "codex".into();
+        codex.harness = Some(hq::Harness::Codex);
         let house = agent(&dir, "house", "");
         let done = hub.apply_hq_agents(&[codex.clone(), house.clone()]).unwrap();
         assert_eq!(done.created, ["house"], "no bot that would fail on every message");
         // An agent that switches to another harness is taken off the roster like one that left hq.
         let mut moved = house;
-        moved.harness = "codex".into();
+        moved.harness = Some(hq::Harness::Codex);
         let done = hub.apply_hq_agents(&[codex, moved]).unwrap();
         assert_eq!(done.hidden, ["house"]);
     }
@@ -284,7 +287,7 @@ mod tests {
             name: "ghost".into(),
             description: String::new(),
             home: "/no/such/folder".into(),
-            harness: "claude".into(),
+            ..HqAgent::default()
         };
         let done = hub.apply_hq_agents(&[house, ghost]).unwrap();
         assert_eq!(done, Synced::default());

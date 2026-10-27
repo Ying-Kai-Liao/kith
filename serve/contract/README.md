@@ -7,6 +7,7 @@ spells the word by hand.
 | --- | --- | --- | --- |
 | Cloud HTTP API | `cloud/contract.json` | `serve/cloud` | desktop + web, iOS (KithKit), host (`remote/`), guest crate |
 | Host RPC (an invited person's and a bot guest's methods so far) | `host/contract.json` | `serve/host` (`api/`) | desktop + web, iOS (KithKit), guest crate (the bot's side) |
+| Kernel -> host JSON (`kith ls --json`, `kith project ls --json`, `kith <agent> --launch-json`) | `kernel/contract.json` | `kernel/bin/kith` | host (`agent/hq.rs` and its callers) |
 
 `node serve/contract/gen.mjs` writes each side's types from the contract. It is plain Node with no dependencies. CI
 runs it with `--check`, which fails when a generated file differs from what the contract makes:
@@ -19,6 +20,7 @@ runs it with `--check`, which fails when a generated file differs from what the 
 | `serve/host/crates/wire/src/cloud.rs` | host and guest: serde types, `path::`, `ErrorCode` |
 | `apps/desktop/src/shared/host-contract.gen.ts` | desktop and web: types, `METHODS`, `Params`/`Results`, `MEMBER_METHODS`, `receive`, `decodeX`; `HostClient.callHost` |
 | `apps/ios/Kit/Sources/KithKit/Models/HostContract.gen.swift` | iOS: `HostContract` types and `Method` (`HostClient.call(.name, …)`) |
+| `serve/host/crates/wire/src/kernel.rs` | the host: serde types for what the kernel prints, `command::` (each command's arguments), `COMMANDS`, `SCHEMA` |
 | `serve/host/crates/wire/src/rpc.rs` | the host: serde types, `method::`, `MEMBER_METHODS`/`UNPROVEN_METHODS`/`BOT_METHODS`/`BOT_PENDING_METHODS` (`api/roles.rs`), `SCHEMA` for `check.rs`; the guest crate reads the bot answers with these types |
 
 ## What holds
@@ -59,6 +61,11 @@ the lists of what an invited person may call, their device before it has proven 
 allowed, and a bot guest still joining or waiting for that allow; the owner may call every method. `params` becomes the
 type `<Method>Params`.
 
+A command (`kernel/contract.json`) is `{ "doc", "args": [...], "options": { name: flag }, "result": "<type>" | "[<type>]" }`.
+An arg `"{name}"` is a parameter of the generated `command::<name>()`; each option adds `flag value` when given. The
+kernel contract also sets `"fieldCase": "snake"`: its field names are printed as written (`system_prompt`), not
+camelCase.
+
 ## Changing the contract
 
 Changes are additive only.
@@ -82,3 +89,9 @@ The host's `fixtures/` are written by the host from real calls of an invited per
 answer's shape no longer matches its fixture. A fixture is named after its method, except where two callers get the
 same method: `hello-as-bot.json` is the `hello` a bot gets. The guest crate reads the bot fixtures with its own
 functions (`crates/guest/tests/contract_fixtures.rs`).
+
+The kernel's `fixtures/` are written by the kernel's own check from real runs in a throwaway home
+(`KITH_WRITE_FIXTURES=1 kernel/tests/kith-contract-check`): `kith ls --json`, `kith project ls --json`, and
+`kith <agent> --launch-json` for the owner and for an invited person, with the temp folder as `/tmp/kith`. Without the
+variable it runs the producer check on what the kernel prints now and fails when the shape no longer matches a fixture.
+Each kernel fixture names its `command`; the host reads all three folders in `crates/wire/tests/kernel_contract.rs`.

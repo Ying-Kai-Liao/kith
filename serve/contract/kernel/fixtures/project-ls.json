@@ -1,0 +1,30 @@
+{
+  "command": "projectLs",
+  "type": "Projects",
+  "body": {
+    "projects": [
+      {
+        "id": "alpha",
+        "paths": [
+          "/tmp/kith/work/alpha"
+        ],
+        "home": "/tmp/kith/homes/alpha",
+        "remotes": [],
+        "parent": null,
+        "memory": "/tmp/kith/kith/state/projects/alpha",
+        "exists": true
+      },
+      {
+        "id": "beta",
+        "paths": [
+          "/tmp/kith/work/beta"
+        ],
+        "home": null,
+        "remotes": [],
+        "parent": "alpha",
+        "memory": "/tmp/kith/kith/state/projects/beta",
+        "exists": true
+      }
+    ]
+  }
+}
