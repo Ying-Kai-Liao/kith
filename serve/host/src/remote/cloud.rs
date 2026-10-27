@@ -1033,7 +1033,7 @@ mod tests {
         let grant = |g: &str, k: &str, u: &str| json!({"grantId": g, "deviceKey": k, "userId": u});
         let renewed = |key: &str| hub.store.device(key).unwrap().lease_until.unwrap() > now_ms() + LEASE_MS - 5000;
         *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_kai"},
-            "grants": [grant("grt_a", "phone", "user_kai"), grant("grt_b", "lost", "user_kai")]});
+            "grants": [grant("grt_a", "phone", "user_kai"), grant("grt_b", "lost", "user_kai")], "requests": []});
         pull(&hub, &base).await.unwrap();
         assert!(renewed("phone"), "the first pull pins the owner it names");
 
@@ -1068,9 +1068,9 @@ mod tests {
         let fake = Arc::new(FakeCloud::default());
         let base = fake_cloud(fake.clone()).await;
         hub.store.kv_set("test_cloud_url", &base).unwrap();
-        *fake.state.lock().unwrap() = json!({"owner": null, "grants": []});
+        *fake.state.lock().unwrap() = json!({"owner": null, "grants": [], "requests": []});
         pull(&hub, &base).await.unwrap();
-        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_kai"}, "grants": []});
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_kai"}, "grants": [], "requests": []});
         pull(&hub, &base).await.unwrap();
         assert!(hub.cloud.status().owner_change.is_some(), "an unclaimed computer isn't claimed by the cloud alone");
         crate::remote::owner::signed_for(&hub.store, "user_kai").unwrap();
