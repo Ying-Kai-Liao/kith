@@ -237,6 +237,7 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
     echo "r read-project ls '$T/proj'"
     echo "r read-project-git ls '$T/proj/.git'"
     echo "r read-kernel ls '$KERNEL/bin'"
+    echo "r guest-sandbox python3 '$KERNEL/lib/kith_paths.py' --guest-sandbox"
     echo "r write-own-slice touch '$SLICE/new.txt'"
     echo "r write-hooks touch '$SLICE/clone/.git/hooks/pre-commit'"
     echo "r write-claude-dir touch '$SLICE/clone/.claude/settings.json'"
@@ -258,7 +259,7 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
   rexpect() { local got; got=$(sed -n "s/^$1 //p" "$SLICE/probe.out" 2>/dev/null); expect "real: $1 $2" "${got:-none}" "$2"; }
   for n in read-ssh read-keychains read-home read-backup read-other-slice read-state-secrets \
            write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other; do rexpect $n denied; done
-  for n in read-package read-own-slice read-project read-project-git read-kernel write-own-slice sock-host sock-run; do rexpect $n ok; done
+  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run; do rexpect $n ok; done
   rm -f "$REAL_HOME/.zshrc-probe-should-not-exist"
 
   # --- escape cards (F11 step 2b): a denied folder is readable after a yes-once grant, in the next launch only ----------------

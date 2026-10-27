@@ -248,6 +248,11 @@ print("p_env_names=%s" % q(" ".join(env)))')"
   fi
   export KITH_PERSON
 fi
+# A guest's shell that drops KITH_PERSON (or names the owner in it) is not the owner: its OS sandbox says so, and a run
+# started from in there is no one's.
+if [[ $p_owner == 1 ]] && python3 "$KITH/lib/kith_paths.py" --guest-sandbox; then
+  echo "kith: this is inside a guest's run, which can't start a run as the owner" >&2; exit 3
+fi
 mkdir -p "$home/memory/projects" "$home/memory/sessions" "$home/memory/shared"
 # Whose memory this run uses. The owner's is the agent's memory/ itself; anyone else's is memory/people/<id>/, with
 # their outputs in files/people/<id>/ and who they are in <state>/people/<id>.md (the owner's: user.md). memory/shared/
