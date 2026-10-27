@@ -94,6 +94,23 @@ check "owner over a membership budget: runs" "[ \$code = 0 ] && [ \$ran = 1 ]"
 run KITH_PERSON=sam
 check "guest over their budget: stops (exit 3), claude never starts" "[ \$code = 3 ] && [ \$ran = 0 ]"
 check "guest: the owner can raise it" "grep -F 'budget=' \"$T/err\""
+
+# --- the owner's bots share one monthly cap across agents (kith-auth bots-cap)
+A bot bot-k --of kai name=Rex >/dev/null; A member house bot-k >/dev/null; A bots-cap 2 >/dev/null
+KERNEL=$KERNEL python3 - <<'PY'
+import datetime as dt, os, sqlite3, sys
+sys.path.insert(0, os.path.join(os.environ['KERNEL'], 'lib'))
+from kith_paths import paths
+c = sqlite3.connect(paths()['KITH_MACHINE'] / 'cost.db')
+now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S')
+c.execute("insert into runs (session, agent, person, via, started) values ('sb', 'house', 'bot-k', 'telegram', ?)", (now,))
+c.execute("insert into req values ('rb', 'sb', ?, 'p', 'claude-opus-5-5', 'main', 'a turn', 0, 0, 0, 0, 3.0)", (now,))
+c.commit()
+PY
+run KITH_PERSON=bot-k
+check "owner's bot over the bots cap: stops (exit 3), claude never starts" "[ \$code = 3 ] && [ \$ran = 0 ]"
+check "owner's bot: the words name the bots cap, not a membership" "grep -F 'your bots have used \$3.00 of their \$2' \"$T/err\" && grep -F 'kith auth bots-cap' \"$T/err\""
+A bots-cap off >/dev/null
 A member house sam budget=50 >/dev/null
 K house set limit 100; K house set at-limit hold
 run KITH_PERSON=sam

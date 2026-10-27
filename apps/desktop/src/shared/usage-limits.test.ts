@@ -10,6 +10,7 @@ import {
   money,
   ofLimit,
   parseAgentPeople,
+  parseBotsCap,
   parseUsageReport,
   personSpend,
 } from './usage-limits.ts'
@@ -102,6 +103,23 @@ test("a guest's card names them and the agent, and its answers say what happened
   assert.equal(limitOutcome({ ...guest, data: { ...guest.data, status: 'answered', selected: 'add' } }), 'Added $10')
   assert.equal(limitOutcome({ ...agentCard(), data: { ...agentCard().data, status: 'answered', selected: 'raise' } }), 'Raised to $400')
   assert.equal(limitOutcome({ ...agentCard(), data: { ...agentCard().data, status: 'answered', selected: 'stop' } }), 'Stopped · your message is kept')
+})
+
+test("the owner's bots' card speaks for all of them, and the cap reads as none when off", () => {
+  const bots = card({
+    status: 'pending',
+    toolKind: 'limit',
+    approver: 'owner',
+    agent: 'house',
+    title: "Your bots reached their $50 for October. Rex's last message wasn't run.",
+    options: [{ optionId: 'add', name: 'Add $10', kind: 'limit' }, { optionId: 'leave', name: 'Leave it', kind: 'limit' }],
+    limit: { kind: 'bots', agent: 'house', person: 'bot-k', spent: 50.2, limit: 50, month: 'October', addTo: 60, raiseTo: 100 },
+  } as Entry['data'])
+  const m = limitCardModel(bots)!
+  assert.equal(m.heading, 'Your bots · monthly cap')
+  assert.equal(m.right, '$50.20 of $50')
+  assert.equal(limitQuestion(bots), 'Your bots reached their $50 for October.')
+  assert.deepEqual(parseBotsCap({ month: 'October', cap: null, spent: 3, bots: { 'bot-k': 3 } }), { month: 'October', cap: null, spent: 3 })
 })
 
 test("a person's spend reads against their budget; none is no limit", () => {

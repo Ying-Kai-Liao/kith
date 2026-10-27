@@ -696,7 +696,10 @@ bot-...`, gets the guest mode and denies, and **fails closed**: no answer, no ru
 - Cap: `bin/kith` L194-203 asks `kith-auth resolve`, gets `budget` (the owner's cap on that agent) and `was` (the
   owner's id, the owner's old ids, the owner's other bots), and refuses with exit 3 when
   `kith-cost spent bot-.. <agent>` (sums those ids) reaches the cap. `kernel/bin/kith` is **not** edited.
-- Kai as owner has no cap (`budget` empty), so his bots have none. See open question 1.
+- Kai's own bots share one optional cap across every agent, `kith auth bots-cap N|off` (`owner_bots_budget`; off by
+  default). When it is set, `resolve` gives his bots that `budget` with an empty `budget_agent`, and `bin/kith` says
+  "your bots have used $X of their $N this month together". The owner's app shows it under Your bots (Monthly cap) and
+  gets a limit card of kind `bots` (Add $10 / Raise / Leave it) in the stopped bot's chat. See open question 1.
 - `kith-cost people`: groups by the root of the `bot_of` chain. Output:
 
   ```
@@ -845,7 +848,7 @@ bot owner, the cloud operator or a cloud breach, a Grok-app user.
   replaces `device_key` and revokes the old one in the same step. The owner does this when a VM is rebuilt or suspected.
   `kith join --rekey` is `join` that keeps the local name.
 - **Rate limits** (7.7) cap what a stolen key can do per hour and per second; the owner's monthly cap caps the dollars for an
-  invitee. For Kai's own bots there is no dollar cap (open question 1).
+  invitee. Kai's own bots have the optional bots' monthly cap (open question 1, settled).
 - **Ephemeral VMs.** If the VM's disk is wiped every session, the key is lost and the bot must rejoin. `kith join
   --print-credentials` prints one base64 line that the owner can store as a secret in the provider and pass as
   `KITH_GUEST_CREDENTIALS` in later sessions; this is the same key, with the same theft risk, in the provider's secret store.
@@ -1176,7 +1179,8 @@ Kai has a Grok bot account and offered to test. When P1-P5 are deployed to `kith
 
 1. **A dollar cap on Kai's own bots?** The rule is "no per-bot cap; the bot spends from its owner's monthly cap", and Kai has no
    cap. A prompt-injected or looping bot of Kai's could therefore spend without a ceiling (only call-rate limits, 60 an hour by
-   default). Recommended: give the Mac owner an optional "bots' monthly cap" setting, off by default but shown. Kai decides.
+   default). Recommended: give the Mac owner an optional "bots' monthly cap" setting, off by default but shown.
+   **Settled 2026-10-27:** built that way (`kith auth bots-cap`, the Monthly cap row under Your bots, a `bots` limit card).
 2. **Should Kai see invitee-owned bots' conversations?** Designed yes (settled: visible to owner and Kai), an exception to "the
    owner never sees an invitee's chats". The invitee is told when making the invite. Confirm this is wanted.
 3. **What a linked Grok account gets.** Recommended: the person's access capped at guest mode (`default`, asks before tools) per

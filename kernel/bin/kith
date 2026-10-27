@@ -240,8 +240,13 @@ print("p_env_names=%s" % q(" ".join(env)))')"
       echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost gave '$spent'); not running without the budget check" >&2; exit 3
     fi
     if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)' "$spent" "$p_budget"; then
-      printf 'kith: %s has used $%.2f of their $%s this month on %s; the owner can raise it (kith auth member %s %s budget=..)\n' \
-        "$KITH_PERSON" "$spent" "$p_budget" "$p_budget_agent" "$p_budget_agent" "$KITH_PERSON" >&2
+      if [[ -z $p_budget_agent ]]; then   # the owner's bots, capped together on every agent (kith-auth bots-cap)
+        printf 'kith: your bots have used $%.2f of their $%s this month together (%s was stopped); the owner can raise it (kith auth bots-cap ..)\n' \
+          "$spent" "$p_budget" "$KITH_PERSON" >&2
+      else
+        printf 'kith: %s has used $%.2f of their $%s this month on %s; the owner can raise it (kith auth member %s %s budget=..)\n' \
+          "$KITH_PERSON" "$spent" "$p_budget" "$p_budget_agent" "$p_budget_agent" "$KITH_PERSON" >&2
+      fi
       # The owner's own run is never refused at a limit (it says so and goes on); anyone else's stops here.
       [[ $p_owner == 1 ]] || exit 3
     fi

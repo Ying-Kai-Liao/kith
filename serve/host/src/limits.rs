@@ -109,8 +109,26 @@ pub async fn call(method: &str, b: &Value) -> Result<Option<Value>> {
             }
             kith_json(&["cost", "members", agent, "--json"], READ).await?
         }
+        // The owner's bots: their monthly cap together on every agent (null when off) and this month's spend.
+        "botsCap" => kith_json(&["cost", "bots", "--json"], READ).await?,
+        // That cap (`cap` dollars a month, null for none), as `kith-auth bots-cap`; answers botsCap.
+        "setBotsCap" => {
+            set_bots_cap(&match &b["cap"] {
+                Value::Null => "off".to_owned(),
+                Value::Number(n) if n.as_f64().is_some_and(|v| v > 0.0 && v < 1e7) => n.to_string(),
+                _ => bail!("`cap` is dollars a month, or null for none"),
+            })
+            .await?;
+            kith_json(&["cost", "bots", "--json"], READ).await?
+        }
         _ => return Ok(None),
     }))
+}
+
+async fn set_bots_cap(value: &str) -> Result<()> {
+    let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found"))?;
+    let _w = crate::api::people::AUTH_WRITES.lock().await;
+    crate::remote::account::run(&bin, &["bots-cap", value]).await.map(drop)
 }
 
 /// Where an agent stands against its limit when an owner's turn would start; None when it has none, is under it,
@@ -221,6 +239,9 @@ pub fn guest_refused(hub: std::sync::Arc<Hub>, bot: BotConfig, lane: Lane, ids: 
     if !refused.contains("has used $") || !valid_agent(&agent) {
         return;
     }
+    if refused.contains("your bots have used $") {
+        return bots_refused(hub, bot, lane, ids, agent);
+    }
     tokio::spawn(async move {
         let people = match kith_json(&["cost", "members", &agent, "--json"], READ).await {
             Ok(v) => v,
@@ -246,6 +267,53 @@ pub fn guest_refused(hub: std::sync::Arc<Hub>, bot: BotConfig, lane: Lane, ids: 
         let body = card["title"].as_str().unwrap_or_default();
         push::notify(&hub, &owner, Some(&bot.id), &format!("{name} reached their limit"), body, AlertKind::NeedsInput);
     });
+}
+
+/// One of the owner's bots stopped at the bots' cap: the same card as a guest's, raising the cap for all of them.
+fn bots_refused(hub: std::sync::Arc<Hub>, bot: BotConfig, lane: Lane, ids: Vec<String>, agent: String) {
+    let Some(person) = bot.person.clone() else { return };
+    tokio::spawn(async move {
+        let state = match kith_json(&["cost", "bots", "--json"], READ).await {
+            Ok(v) => v,
+            Err(e) => return tracing::warn!(error = format!("{e:#}"), "couldn't read the bots' cap for the card"),
+        };
+        let cap = dollars(&state["cap"]);
+        if cap <= 0.0 {
+            return;
+        }
+        if let Some(mut open) = open_card(&hub, &lane, "bots") {
+            add_ids(&mut open.data, &ids);
+            hub.set_entry(&open.id, &open.data);
+            return;
+        }
+        let name = hub.store.person(&person).map_or_else(|| person.clone(), |p| p.name);
+        let card = bots_card(&bot.id, &agent, &person, &name, dollars(&state["spent"]), cap, state["month"].as_str(), &ids);
+        if hub.add_entry(&lane, EntryKind::Permission, hub.store.max_turn(&lane.chat), &card).is_none() {
+            return;
+        }
+        let mut owner = bot.clone();
+        owner.person = None;
+        let body = card["title"].as_str().unwrap_or_default();
+        push::notify(&hub, &owner, Some(&bot.id), "Your bots reached their cap", body, AlertKind::NeedsInput);
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn bots_card(
+    bot: &str,
+    agent: &str,
+    person: &str,
+    name: &str,
+    spent: f64,
+    cap: f64,
+    month: Option<&str>,
+    ids: &[String],
+) -> Value {
+    let mut card = guest_card(bot, agent, person, name, spent, cap, month, ids);
+    let month = month.unwrap_or("this month");
+    card["title"] = format!("Your bots reached their {} for {month}. {name}'s last message wasn't run.", money(cap)).into();
+    card["limit"]["kind"] = "bots".into();
+    card
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -319,6 +387,14 @@ pub async fn respond(hub: &Hub, entry: &Entry, option: Option<&str>, by: &str) -
             crate::remote::account::run(&bin, &["member", agent, person, &budget]).await?;
             true
         }
+        (Some("bots"), "add" | "raise") => {
+            let to = dollars(if option == "add" { &l["addTo"] } else { &l["raiseTo"] });
+            if to <= 0.0 {
+                bail!("the card has no amount to raise to");
+            }
+            set_bots_cap(&to.to_string()).await?;
+            true
+        }
         (_, "stop" | "leave") => false,
         _ => bail!("That isn't one of the choices on this card."),
     };
@@ -389,6 +465,16 @@ mod tests {
         assert_eq!(card["title"], "Mia reached their $20 for October. Their last message wasn't run.");
         let names: Vec<&str> = card["options"].as_array().unwrap().iter().filter_map(|o| o["name"].as_str()).collect();
         assert_eq!(names, ["Add $10", "Raise to $40", "Leave it"]);
+    }
+
+    #[test]
+    fn a_bots_card_raises_the_cap_for_all_the_owners_bots() {
+        let card = bots_card("b1", "house", "bot-k", "Rex", 50.2, 50.0, Some("October"), &["e1".into()]);
+        assert_eq!(card["title"], "Your bots reached their $50 for October. Rex's last message wasn't run.");
+        assert_eq!(card["limit"]["kind"], "bots");
+        assert_eq!((card["limit"]["addTo"].as_f64(), card["limit"]["raiseTo"].as_f64()), (Some(60.0), Some(100.0)));
+        let names: Vec<&str> = card["options"].as_array().unwrap().iter().filter_map(|o| o["name"].as_str()).collect();
+        assert_eq!(names, ["Add $10", "Raise to $100", "Leave it"]);
     }
 
     #[test]
