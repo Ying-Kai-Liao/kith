@@ -92,8 +92,12 @@ extension ChannelTransport {
 
     /// `GET {cloud}/v1/relay/device/{computerId}?v=1[&pair=<offerId>]`, signed with the device key.
     private func relayRequest(_ cloud: URL) throws -> URLRequest {
-        var comps = URLComponents(url: cloud.appending(path: "v1/relay/device/\(computer.id)"), resolvingAgainstBaseURL: false)
-        var query = "v=1"
+        // The contract's path carries its query (`?v=1`); the pairing offer is added to it.
+        guard let route = URLComponents(string: CloudPath.relayDevice(computer.id)), let routeQuery = route.percentEncodedQuery else {
+            throw HostError.unreachable
+        }
+        var comps = URLComponents(url: cloud.appending(path: route.path), resolvingAgainstBaseURL: false)
+        var query = routeQuery
         if let pairingCode, let code = Data(base64URL: pairingCode) { query += "&pair=\(RelayCrypto.offerId(computer.labelFamily, code: code))" }
         comps?.percentEncodedQuery = query
         guard let url = comps?.url else { throw HostError.unreachable }

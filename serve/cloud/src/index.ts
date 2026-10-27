@@ -5,6 +5,7 @@
 import * as api from "./api";
 import { webOrigins } from "./auth";
 import { ApiError, type Ctx } from "./api";
+import { check, ROUTES, type Responses, type RouteName } from "./contract.gen";
 import * as legacy from "./legacy-compat";
 import * as pages from "./routes/pages";
 import * as download from "./routes/download";
@@ -35,64 +36,87 @@ export interface Env {
   WEB_ORIGINS?: string;
   /** Seconds a web socket stays open before the DO closes it with 4100 (default 3600). */
   WEB_SOCKET_MAX_AGE?: string;
+  /** Tests only: check every JSON answer against the cloud contract (strictProblems). */
+  KITH_CONTRACT_STRICT?: string;
 }
 
-type Handler = (c: Ctx, params: string[]) => Promise<unknown>;
+/**
+ * What each route answers with: a JSON route's handler must return its contract type (or a Response carrying it), so a
+ * field or value the contract doesn't name is a compile error. Paths, methods and types: serve/contract/cloud/contract.json.
+ */
+type Handlers = {
+  [K in RouteName]: (c: Ctx, params: string[]) => Promise<K extends keyof Responses ? Responses[K] | Response : Response>;
+};
 
 /** Above every route's own limit (64 KB bodies); the routes check theirs. */
 const MAX_REQUEST = 128 * 1024;
 
-const ID = "([A-Za-z0-9_-]{1,64})";
-const routes: [string, RegExp, Handler][] = [
-  ["GET", /^\/v1\/health$/, api.health],
-  ["GET", /^\/v1\/oauth\/callback$/, legacy.oauthLegacyCallback],
-  ["GET", /^\/v1\/oauth\/callback\/dev$/, legacy.oauthLegacyDevCallback],
-  ["GET", /^\/v1\/oauth\/callback\/kith$/, api.oauthKithCallback],
-  ["GET", /^\/v1\/oauth\/callback\/kith-dev$/, api.oauthKithDevCallback],
-  ["GET", /^\/v1\/me$/, api.me],
-  ["POST", /^\/v1\/devices$/, api.registerDevice],
-  ["GET", /^\/v1\/devices$/, api.listDevices],
-  ["POST", /^\/v1\/devices\/retire$/, api.retireDevice],
-  ["DELETE", new RegExp(`^/v1/devices/${ID}$`), api.revokeDevice],
-  ["POST", /^\/v1\/claims$/, api.createClaim],
-  ["POST", new RegExp(`^/v1/claims/${ID}/complete$`), api.completeClaim],
-  ["GET", /^\/v1\/computers$/, api.listComputers],
-  ["PATCH", new RegExp(`^/v1/computers/${ID}$`), api.renameComputer],
-  ["DELETE", new RegExp(`^/v1/computers/${ID}$`), api.removeComputer],
-  ["POST", new RegExp(`^/v1/computers/${ID}/access-requests$`), api.createAccessRequest],
-  ["GET", new RegExp(`^/v1/computers/${ID}/grants$`), api.listGrants],
-  ["DELETE", new RegExp(`^/v1/computers/${ID}/grants/${ID}$`), api.revokeGrant],
-  ["GET", new RegExp(`^/v1/access-requests/${ID}$`), api.getAccessRequest],
-  ["POST", new RegExp(`^/v1/access-requests/${ID}/reveal$`), api.revealAccessRequest],
-  ["DELETE", new RegExp(`^/v1/access-requests/${ID}$`), api.cancelAccessRequest],
-  ["POST", /^\/v1\/host\/register$/, api.hostRegister],
-  ["GET", /^\/v1\/host\/state$/, api.hostState],
-  ["POST", /^\/v1\/host\/screen-ice$/, api.hostScreenIce],
-  ["POST", new RegExp(`^/v1/host/access-requests/${ID}/nonce$`), api.hostNonce],
-  ["POST", new RegExp(`^/v1/host/access-requests/${ID}/decision$`), api.hostDecision],
-  ["POST", new RegExp(`^/v1/host/grants/${ID}/revoke$`), api.hostRevokeGrant],
-  ["POST", /^\/v1\/host\/unclaim$/, api.hostUnclaim],
-  ["POST", /^\/v1\/host\/invites$/, api.hostCreateInvite],
-  ["POST", new RegExp(`^/v1/host/invites/${ID}/revoke$`), api.hostRevokeInvite],
-  ["POST", new RegExp(`^/v1/host/memberships/${ID}/revoke$`), api.hostRevokeMembership],
-  ["POST", /^\/v1\/host\/people\/revoke$/, api.hostRevokePerson],
-  ["POST", /^\/v1\/host\/people\/unrevoke$/, api.hostUnrevokePerson],
-  ["POST", new RegExp(`^/v1/invites/${ID}/accept$`), api.acceptInvite],
-  ["POST", /^\/v1\/host\/bot-invites$/, api.hostCreateBotInvite],
-  ["POST", new RegExp(`^/v1/host/bot-invites/${ID}/revoke$`), api.hostRevokeBotInvite],
-  ["POST", new RegExp(`^/v1/host/bot-devices/${ID}/revoke$`), api.hostRevokeBotDevice],
-  ["POST", new RegExp(`^/v1/bot-invites/${ID}/accept$`), api.acceptBotInvite],
-  ["GET", /^\/v1\/relay\/host$/, api.relayHost],
+const handlers: Handlers = {
+  health: api.health,
+  oauthLegacyCallback: legacy.oauthLegacyCallback,
+  oauthLegacyDevCallback: legacy.oauthLegacyDevCallback,
+  oauthKithCallback: api.oauthKithCallback,
+  oauthKithDevCallback: api.oauthKithDevCallback,
+  me: api.me,
+  registerDevice: api.registerDevice,
+  listDevices: api.listDevices,
+  retireDevice: api.retireDevice,
+  revokeDevice: api.revokeDevice,
+  createClaim: api.createClaim,
+  completeClaim: api.completeClaim,
+  listComputers: api.listComputers,
+  renameComputer: api.renameComputer,
+  removeComputer: api.removeComputer,
+  createAccessRequest: api.createAccessRequest,
+  listGrants: api.listGrants,
+  revokeGrant: api.revokeGrant,
+  getAccessRequest: api.getAccessRequest,
+  revealAccessRequest: api.revealAccessRequest,
+  cancelAccessRequest: api.cancelAccessRequest,
+  hostRegister: api.hostRegister,
+  hostState: api.hostState,
+  hostScreenIce: api.hostScreenIce,
+  hostNonce: api.hostNonce,
+  hostDecision: api.hostDecision,
+  hostRevokeGrant: api.hostRevokeGrant,
+  hostUnclaim: api.hostUnclaim,
+  hostCreateInvite: api.hostCreateInvite,
+  hostRevokeInvite: api.hostRevokeInvite,
+  hostRevokeMembership: api.hostRevokeMembership,
+  hostRevokePerson: api.hostRevokePerson,
+  hostUnrevokePerson: api.hostUnrevokePerson,
+  acceptInvite: api.acceptInvite,
+  hostCreateBotInvite: api.hostCreateBotInvite,
+  hostRevokeBotInvite: api.hostRevokeBotInvite,
+  hostRevokeBotDevice: api.hostRevokeBotDevice,
+  acceptBotInvite: api.acceptBotInvite,
+  relayHost: api.relayHost,
   // Any segment reaches the handler so a malformed computerId gets its 400 (§7.1).
-  ["GET", /^\/v1\/relay\/device\/([^/]+)$/, api.relayDevice],
-  ["POST", /^\/v1\/webhooks\/clerk$/, api.clerkWebhook],
-  ["POST", new RegExp(`^/v1/hooks/${ID}/${ID}$`), api.routineHook],
+  relayDevice: api.relayDevice,
+  clerkWebhook: api.clerkWebhook,
+  routineHook: api.routineHook,
   // The open-in-Kith page behind https://kithbot.app/i/<computer>/<invite>#t=<token>.
-  ["GET", new RegExp(`^/i/${ID}/${ID}$`), pages.invitePage],
+  invitePage: pages.invitePage,
   // The desktop download page and its one-click kithbot.app links (302 to the latest GitHub release).
-  ["GET", /^\/download$/, download.downloadPage],
-  ["GET", /^\/download\/(.+)$/, download.downloadRedirect],
-];
+  downloadPage: download.downloadPage,
+  downloadRedirect: download.downloadRedirect,
+};
+
+const routes = (Object.keys(ROUTES) as RouteName[]).map((name) => ({ name, ...ROUTES[name], handler: handlers[name] }));
+
+/**
+ * With KITH_CONTRACT_STRICT (the tests), every JSON answer is checked against its route's contract type as the cloud
+ * must send it: a missing key, a value the contract doesn't name or an extra field is a 500 that names it.
+ */
+async function strictProblems(route: (typeof routes)[number], out: unknown): Promise<string[]> {
+  if (!("response" in route)) return [];
+  let body = out;
+  if (out instanceof Response) {
+    if (out.status < 200 || out.status >= 300 || !out.headers.get("Content-Type")?.includes("application/json")) return [];
+    body = await out.clone().json();
+  }
+  return check(route.response, body, "producer").map((p) => `${route.name}: ${p}`);
+}
 
 /** Only an origin listed in WEB_ORIGINS gets CORS; never a wildcard, and none at all when the var is unset. */
 const allowedOrigin = (req: Request, env: Env): string | null => {
@@ -113,14 +137,18 @@ async function handle(req: Request, env: Env, exec: ExecutionContext): Promise<R
   const requestId = req.headers.get("cf-ray") ?? crypto.randomUUID();
   try {
     const url = new URL(req.url);
-    for (const [method, pattern, handler] of routes) {
-      const m = pattern.exec(url.pathname);
-      if (!m || req.method !== method) continue;
+    for (const route of routes) {
+      const m = route.pattern.exec(url.pathname);
+      if (!m || req.method !== route.method) continue;
       // Every route takes small bodies; refuse a big one before reading it.
       if (Number(req.headers.get("content-length") ?? 0) > MAX_REQUEST) throw new ApiError("tooLarge");
       const raw = new Uint8Array(await req.arrayBuffer());
       if (raw.length > MAX_REQUEST) throw new ApiError("tooLarge");
-      const out = await handler({ req, env, exec, url, raw, now: Date.now() }, m.slice(1));
+      const out = await route.handler({ req, env, exec, url, raw, now: Date.now() }, m.slice(1));
+      if (env.KITH_CONTRACT_STRICT) {
+        const problems = await strictProblems(route, out);
+        if (problems.length) throw new ApiError("internal", `Not the contract: ${problems.join("; ")}`);
+      }
       return out instanceof Response ? out : Response.json(out);
     }
     throw new ApiError("notFound");

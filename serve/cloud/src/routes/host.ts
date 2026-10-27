@@ -19,15 +19,16 @@ import {
   type Ctx,
   type RequestRow,
 } from "./common";
+import { DecisionValues, HostPlatformValues, type Responses } from "../contract.gen";
 
 const SCOPES = '["control","screen"]';
 
-export async function hostRegister(c: Ctx) {
+export async function hostRegister(c: Ctx): Promise<Responses["hostRegister"]> {
   const s = await signed(c);
   const b = body(c);
   const boxKey = key(b, "boxKey", 32);
   const name = str(b, "name");
-  const platform = oneOf(b, "platform", ["macos", "linux", "windows"] as const);
+  const platform = oneOf(b, "platform", HostPlatformValues);
   const device = optStr(b, "device", 32);
   const version = str(b, "version", 32);
   const id = await computerIdFor(fromB64url(s.kid, 32)!);
@@ -61,7 +62,7 @@ export async function hostScreenIce(c: Ctx): Promise<Response> {
   ).bind(comp.owner_user_id).first();
   if (!owner) throw new ApiError("forbidden", "Sign in on the computer to use remote screen relay.");
   if (!c.env.TURN_KEY_ID || !c.env.TURN_KEY_API_TOKEN || !c.env.TURN_LIMITER) {
-    throw new ApiError("screenRelayUnavailable", "Remote screen relay is not configured on this cloud.", 503);
+    throw new ApiError("screenRelayUnavailable", "Remote screen relay is not configured on this cloud.");
   }
   const limit = await c.env.TURN_LIMITER.limit({ key: comp.owner_user_id! });
   if (!limit.success) throw new ApiError("rateLimited", "Too many screen connections. Try again in a minute.");
@@ -96,11 +97,11 @@ export async function hostScreenIce(c: Ctx): Promise<Response> {
     return Response.json({ iceServers, expiresAt: c.now + ttl * 1000 }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     // Provider bodies and credential-bearing errors must never reach logs or clients.
-    throw new ApiError("screenRelayUnavailable", "Remote screen relay is temporarily unavailable. Try again shortly.", 503);
+    throw new ApiError("screenRelayUnavailable", "Remote screen relay is temporarily unavailable. Try again shortly.");
   }
 }
 
-export async function hostState(c: Ctx) {
+export async function hostState(c: Ctx): Promise<Responses["hostState"]> {
   const comp = await host(c);
   const owner = comp.owner_user_id
     ? await c.env.DB.prepare("SELECT user_id, email FROM accounts WHERE user_id = ? AND status = 'active'")
@@ -183,7 +184,7 @@ async function hostRequest(c: Ctx, computerId: string, id: string): Promise<Requ
   return r;
 }
 
-export async function hostNonce(c: Ctx, [id]: string[]) {
+export async function hostNonce(c: Ctx, [id]: string[]): Promise<Responses["hostNonce"]> {
   const comp = await host(c);
   const nonce = key(body(c), "nonce", 32);
   const r = await c.env.DB.prepare(
@@ -200,9 +201,9 @@ export async function hostNonce(c: Ctx, [id]: string[]) {
   return {};
 }
 
-export async function hostDecision(c: Ctx, [id]: string[]) {
+export async function hostDecision(c: Ctx, [id]: string[]): Promise<Responses["hostDecision"]> {
   const comp = await host(c);
-  const decision = oneOf(body(c), "decision", ["approve", "deny"] as const);
+  const decision = oneOf(body(c), "decision", DecisionValues);
   const row = await hostRequest(c, comp.id, id!);
   if (effectiveStatus(row, c.now) === "expired") throw new ApiError("requestExpired");
   if (decision === "deny") {
@@ -253,7 +254,7 @@ export async function hostDecision(c: Ctx, [id]: string[]) {
   return { status: "approved", grantId };
 }
 
-export async function hostRevokeGrant(c: Ctx, [grantId]: string[]) {
+export async function hostRevokeGrant(c: Ctx, [grantId]: string[]): Promise<Responses["hostRevokeGrant"]> {
   const comp = await host(c);
   const exists = await c.env.DB.prepare("SELECT 1 FROM grants WHERE id = ? AND computer_id = ?").bind(grantId, comp.id).first();
   if (!exists) throw new ApiError("notFound");
@@ -262,7 +263,7 @@ export async function hostRevokeGrant(c: Ctx, [grantId]: string[]) {
   return {};
 }
 
-export async function hostUnclaim(c: Ctx) {
+export async function hostUnclaim(c: Ctx): Promise<Responses["hostUnclaim"]> {
   const comp = await host(c);
   if (comp.owner_user_id) await unclaim(c.env, comp.id, `computer:${comp.id}`, c.now);
   return {};

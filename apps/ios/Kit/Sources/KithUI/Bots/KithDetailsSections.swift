@@ -200,13 +200,13 @@ struct KithDetailsSections<About: View, Routines: View>: View {
 
     // MARK: access
 
-    /// The agent's "always" answers to escape cards, each with a Remove; only when there is one (the owner's own).
+    /// The agent's part of the grants ledger, each with a Remove; only when there is one (the owner's own).
     @ViewBuilder private var access: some View {
         if !store.grants.isEmpty {
             CardSection("Access", footer: store.grantError.map { "Not removed: \($0)" }
-                        ?? "Allowed always from a permission card. A removed one is gone from their next run.") {
+                        ?? "Kept until removed. A removed one is gone from their next run.") {
                 ForEach(store.grants) { grant in
-                    SheetRow(icon: grant.kind == "domain" ? "globe" : "folder", title: grant.text, detail: grant.holder) {
+                    SheetRow(icon: grant.kind == "domain" ? "globe" : grant.kind == "service" ? "key" : "folder", title: grant.text, detail: grant.holder) {
                         if store.removingGrant == grant {
                             ProgressView().controlSize(.small)
                         } else {

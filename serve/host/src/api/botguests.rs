@@ -16,6 +16,7 @@ use crate::hub::Hub;
 use crate::remote::{account, botsync, cloud, crypto};
 use crate::store::{BotConversation, BotGuest, BotInvite, BotState, Entry, EntryKind, Lane, now_ms};
 use anyhow::{Context, Result, anyhow, bail};
+use kith_wire::cloud::{CreateInvite, path};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -233,8 +234,12 @@ async fn create_bot_invite(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result
     let posted = match hub.store.put_bot_invite(&invite) {
         Ok(()) => {
             // The cloud sees sha256(proof) only, so it can neither accept nor prove the invite by itself.
-            let body = json!({"inviteId": invite_id, "tokenHash": hex(&crypto::sha256(&[proof.as_bytes()])), "expiresAt": invite.expires_at});
-            cloud::post(hub, "/v1/host/bot-invites", &body).await.map(drop)
+            let body = CreateInvite {
+                invite_id: invite_id.clone(),
+                token_hash: hex(&crypto::sha256(&[proof.as_bytes()])),
+                expires_at: invite.expires_at,
+            };
+            cloud::post(hub, path::HOST_CREATE_BOT_INVITE, &body).await.map(drop)
         }
         Err(e) => Err(e),
     };

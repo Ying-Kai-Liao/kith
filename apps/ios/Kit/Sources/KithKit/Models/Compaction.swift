@@ -24,11 +24,11 @@ extension HostClient {
     /// Saves the user's version of a handoff that hasn't been sent.
     public func editHandoff(entryId: String, text: String) async throws {
         struct Body: Encodable { var entryId: String; var text: String }
-        let _: Empty = try await call("editHandoff", Body(entryId: entryId, text: text))
+        let _: Empty = try await call(.editHandoff, Body(entryId: entryId, text: text))
     }
 
     /// Carries on with the old conversation instead of starting over.
     public func keepConversation(entryId: String) async throws {
-        let _: Empty = try await call("keepConversation", ["entryId": entryId])
+        let _: Empty = try await call(.keepConversation, ["entryId": entryId])
     }
 }

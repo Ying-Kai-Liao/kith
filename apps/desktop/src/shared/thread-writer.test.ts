@@ -7,7 +7,7 @@ import {
 } from './thread-writer.ts'
 
 const base: ThreadSummary = { count: 2, lastAt: 5, authors: ['b'] }
-const entry = (id: string, kind: string, data: Entry['data'], threadId: string | null = null): Entry =>
+const entry = (id: string, kind: Entry['kind'], data: Entry['data'], threadId: string | null = null): Entry =>
   ({ id, seq: 0, botId: 'b', threadId, rev: 1, kind, turn: 1, data, createdAt: 0, updatedAt: 0 })
 
 test('an app thread has no writer fields and is not held', () => {

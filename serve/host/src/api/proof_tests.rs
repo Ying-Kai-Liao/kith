@@ -22,6 +22,7 @@ async fn joined(r: &Rig, roles: Value) -> Caller {
         membership_id: "mem_sam".into(),
         user_id: "user_sam".into(),
         invite_id: made["inviteId"].as_str().unwrap().to_owned(),
+        ..Default::default()
     }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     r.device("sam-phone", Some("sam"))
@@ -34,7 +35,12 @@ async fn an_unproven_device_can_only_prove_and_only_a_few_times() {
         call(&r, &Caller::Local, "createInvite", json!({"name": "Sam", "agents": {"house": "member"}})).await.unwrap();
     let invite = made["inviteId"].as_str().unwrap().to_owned();
     let t = made["link"].as_str().unwrap().rsplit("t=").next().unwrap().to_owned();
-    let listed = [Listed { membership_id: "mem_sam".into(), user_id: "user_sam".into(), invite_id: invite.clone() }];
+    let listed = [Listed {
+        membership_id: "mem_sam".into(),
+        user_id: "user_sam".into(),
+        invite_id: invite.clone(),
+        ..Default::default()
+    }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     let phone = r.unproven_device("new-phone", Some("sam"));
     for m in ["hello", "history", "startChat", "linkCode", "people", "settings"] {
@@ -163,8 +169,14 @@ async fn a_deleted_template_makes_no_chat_and_a_second_account_keeps_the_handle(
         membership_id: "mem_two".into(),
         user_id: "user_two".into(),
         invite_id: made["inviteId"].as_str().unwrap().to_owned(),
+        ..Default::default()
     };
-    let first = Listed { membership_id: "mem_sam".into(), user_id: "user_sam".into(), invite_id: "inv_x".into() };
+    let first = Listed {
+        membership_id: "mem_sam".into(),
+        user_id: "user_sam".into(),
+        invite_id: "inv_x".into(),
+        ..Default::default()
+    };
     let bin = Some(r.bin.as_path());
     members::apply(&r.hub, bin, &[first, second.clone()], Some("user_owner")).await.unwrap();
     assert_eq!(r.who("user_two")["person"], "sam");

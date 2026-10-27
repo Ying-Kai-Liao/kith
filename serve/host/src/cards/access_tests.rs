@@ -203,6 +203,44 @@ async fn a_yes_once_widens_the_next_activation_only_and_a_parallel_consume_has_o
 }
 
 #[tokio::test]
+async fn an_app_chats_activation_reserves_a_once_grant_and_a_failed_load_leaves_it_for_the_next() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    let docs = place(&r, "docs");
+    request(&r.hub, &sam("1:1:house:sam", "r1"), &ask_for(&docs)).await;
+    let card = open_cards(&r).pop().unwrap();
+    reply(&r, &card, "allow");
+
+    // The launch is handed the grant, and nothing is taken yet: the session/load that follows fails.
+    let failed = access::Reservation::open("rsv-load-1", Vec::new());
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-load-1")).await["grants"]["read"], json!([docs]));
+    // While it is reserved, no other launch of the session gets it (L3): not a one-shot, not another app activation.
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-oneshot")).await["grants"]["read"], json!([]));
+    let other = access::Reservation::open("rsv-load-2", Vec::new());
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-load-2")).await["grants"]["read"], json!([]));
+    drop(other);
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved);
+    drop(failed);
+
+    // The next activation still gets it, and its commit takes it.
+    let next = access::Reservation::open("rsv-load-3", Vec::new());
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-load-3")).await["grants"]["read"], json!([docs]));
+    let holds = next.commit(&r.hub.store);
+    assert_eq!(holds, std::slice::from_ref(&card.id));
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Used);
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-after")).await["grants"]["read"], json!([]));
+
+    // The loaded session keeps it on its later turns: the launch of each is handed it again, and only to that session.
+    let turn = access::Reservation::open("rsv-turn-2", holds.clone());
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-turn-2")).await["grants"]["read"], json!([docs]));
+    assert_eq!(turn.commit(&r.hub.store), holds);
+    let elsewhere = access::Reservation::open("rsv-elsewhere", holds);
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam-other", "rsv-elsewhere")).await["grants"]["read"], json!([]));
+    drop(elsewhere);
+}
+
+#[tokio::test]
 async fn an_expired_or_denied_card_grants_nothing() {
     let r = Rig::new().await;
     r.owner_bot("house");
@@ -355,23 +393,24 @@ async fn a_kept_always_has_no_outcome_note() {
     assert_eq!((data["selected"].as_str(), data["outcome"].is_null()), (Some("always"), true), "{data}");
 }
 
-/// The owner's list of an agent's always grants (`kithAccessGrants`), and taking one away (`kithRemoveAccessGrant`):
-/// the next run of that person no longer gets it, and the others stay.
+/// The grants ledger (`accessLedger`), narrowed to an agent or a person, and taking one entry away by its key
+/// (`removeGrant`): the next run of that person no longer gets it, and the others stay.
 #[tokio::test]
-async fn the_owner_lists_an_agents_always_grants_and_a_removed_one_is_gone_from_the_next_run() {
+async fn the_owner_reads_the_grants_ledger_and_a_removed_grant_is_gone_from_the_next_run() {
     let r = Rig::new().await;
-    let bot = r.owner_bot("house");
+    r.owner_bot("house");
     let _sam = joined(&r, "guest").await;
     let (docs, notes) = (place(&r, "docs"), place(&r, "notes"));
     let before = now_ms();
     assert!(r.auth_ok(&["access", "house", "sam", "read", &docs]));
     assert!(r.auth_ok(&["access", "house", "sam", "write", &notes]));
     assert!(r.auth_ok(&["access", "house", "sam", "domain", "pypi.org"]));
+    assert!(r.auth_ok(&["grant", "house@sam", "notion", "notion/sam"]));
     let call = |method: &'static str, body: Value| {
         let hub = r.hub.clone();
         async move { crate::api::dispatch(&hub, &crate::api::devices::Caller::Local, method, body).await }
     };
-    let listed = call("kithAccessGrants", json!({"botId": bot})).await.unwrap();
+    let listed = call("accessLedger", json!({"agent": "house"})).await.unwrap();
     let grants = listed["grants"].as_array().unwrap();
     let mut seen: Vec<_> = grants
         .iter()
@@ -383,45 +422,60 @@ async fn the_owner_lists_an_agents_always_grants_and_a_removed_one_is_gone_from_
         sorted_tuples(vec![
             ("sam", "domain", "pypi.org"),
             ("sam", "read", docs.as_str()),
+            ("sam", "service", "notion/sam"),
             ("sam", "write", notes.as_str())
         ])
     );
-    assert!(grants.iter().all(|g| g["name"] == "Sam"), "{listed}");
-    assert!(grants.iter().all(|g| g["since"].as_i64().is_some_and(|t| t >= before)), "{listed}");
+    assert!(grants.iter().all(|g| g["name"] == "Sam" && g["agent"] == "house"), "{listed}");
+    let key = |g: &Value| format!("{}:house:sam:{}", g["kind"].as_str().unwrap(), g["target"].as_str().unwrap());
+    assert!(grants.iter().all(|g| g["key"] == key(g).as_str()), "{listed}");
+    let access = grants.iter().filter(|g| g["kind"] != "service");
+    assert!(access.clone().all(|g| g["since"].as_i64().is_some_and(|t| t >= before)), "{listed}");
+    assert_eq!(call("accessLedger", json!({"person": "sam"})).await.unwrap(), listed);
+    assert_eq!(call("accessLedger", json!({})).await.unwrap(), listed);
+    assert_eq!(call("accessLedger", json!({"agent": "nowhere"})).await.unwrap(), json!({"grants": []}));
 
-    let left = call("kithRemoveAccessGrant", json!({"botId": bot, "person": "sam", "kind": "read", "target": docs}))
-        .await
-        .unwrap();
-    assert_eq!(left["grants"].as_array().unwrap().len(), 2, "{left}");
-    let next = consume(&r.hub, &sam("1:1:house:sam", "after")).await;
+    let docs_key = format!("read:house:sam:{docs}");
+    let gone = call("removeGrant", json!({"kind": "read", "key": docs_key})).await.unwrap();
+    assert_eq!(gone["removed"]["target"], docs.as_str(), "{gone}");
+    let next = consume(&r.hub, &sam("1:1:house:sam", "ledger-next")).await;
     assert_eq!(next["grants"]["read"], json!([]), "{next}");
     assert_eq!(
         (next["grants"]["write"].clone(), next["grants"]["domains"].clone()),
         (json!([notes]), json!(["pypi.org"]))
     );
+    let gone = call("removeGrant", json!({"kind": "service", "key": "service:house:sam:notion/sam"})).await.unwrap();
+    assert_eq!(gone["removed"]["kind"], "service", "{gone}");
+    assert_eq!(r.auth(&["granted", "--for", "house@sam", "notion"]).trim(), "");
 
     for bad in [
-        json!({"botId": bot, "person": "sam", "kind": "exec", "target": notes}),
-        json!({"botId": bot, "person": "--rm", "kind": "write", "target": notes}),
-        json!({"botId": bot, "person": "sam", "kind": "write"}),
+        json!({"kind": "read", "key": docs_key}),
+        json!({"kind": "exec", "key": format!("write:house:sam:{notes}")}),
+        json!({"kind": "domain", "key": format!("write:house:sam:{notes}")}),
+        json!({"kind": "write"}),
     ] {
-        assert!(call("kithRemoveAccessGrant", bad.clone()).await.is_err(), "{bad}");
+        assert!(call("removeGrant", bad.clone()).await.is_err(), "{bad}");
     }
-    assert_eq!(call("kithAccessGrants", json!({"botId": bot})).await.unwrap()["grants"].as_array().unwrap().len(), 2);
+    for bad in [json!({"person": "--rm"}), json!({"agent": ""}), json!({"agent": 3})] {
+        assert!(call("accessLedger", bad.clone()).await.is_err(), "{bad}");
+    }
+    assert_eq!(call("accessLedger", json!({"agent": "house"})).await.unwrap()["grants"].as_array().unwrap().len(), 2);
 }
 
-/// A member can't see or take back anyone's always grants (both are owner-only).
+/// A member can't read the ledger or take a grant back (both are owner-only).
 #[tokio::test]
-async fn a_member_cant_list_or_remove_always_grants() {
+async fn a_member_cant_read_the_ledger_or_remove_a_grant() {
     let r = Rig::new().await;
-    let bot = r.owner_bot("house");
+    r.owner_bot("house");
     let sam_phone = joined(&r, "guest").await;
+    assert!(r.auth_ok(&["access", "house", "sam", "domain", "pypi.org"]));
     for (method, body) in [
-        ("kithAccessGrants", json!({"botId": bot})),
-        ("kithRemoveAccessGrant", json!({"botId": bot, "person": "sam", "kind": "domain", "target": "pypi.org"})),
+        ("accessLedger", json!({"person": "sam"})),
+        ("removeGrant", json!({"kind": "domain", "key": "domain:house:sam:pypi.org"})),
     ] {
         assert!(crate::api::dispatch(&r.hub, &sam_phone, method, body).await.is_err(), "{method}");
     }
+    assert!(r.auth(&["ledger", "--json"]).contains("pypi.org"), "still there");
 }
 
 fn sorted_tuples<'a>(mut v: Vec<(&'a str, &'a str, &'a str)>) -> Vec<(&'a str, &'a str, &'a str)> {

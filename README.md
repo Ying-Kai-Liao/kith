@@ -60,7 +60,7 @@ kith backup                            # everything to private GitHub repos: sta
 Desktop app, one click: <https://kithbot.app/download>, or directly <https://kithbot.app/download/mac> (macOS, Apple silicon and Intel)
 and <https://kithbot.app/download/linux> (Linux x64, AppImage).
 
-Kith was called hq until 2026-10-22. The `hq` command (and `hq-<tool>`) still works as an alias, a Mac with an existing `~/.hq`
+Kith was called hq until 2026-10-22. The `hq` command still works as an alias (so do `hq-send`, `hq-auth`, `hq-pkg`, `hq-state`, `hq-new`, `hq-cost`, `hq-who`, `hq-serve` and `hq-doctor`, which older agents call), a Mac with an existing `~/.hq`
 keeps using it until `kith migrate` moves it to `~/.kith`, and `~/hq` stays a link to the same folder as `~/kith`.
 Old `HQ_*` variables, `dev.hq.*` jobs and `hq-agent` repos are still read.
 
@@ -174,7 +174,7 @@ each agent's role (agents.json) into `agents/<name>/role`. It names any agent th
 **Not in any repo**, so redo them by hand on a new Mac:
 - an agent you never shared: `agents.json` records it without a link, so `install.sh` skips it;
 - grants and profiles (`~/.kith/secrets/auth.json`), secrets (Keychain), `~/.kith/secrets/env`: `kith auth grant`, `kith auth set`;
-- LaunchAgents (`~/Library/LaunchAgents/dev.kith.*.plist`): `kith schedule --install`, `kith-bridge --install`, each
+- LaunchAgents (`~/Library/LaunchAgents/dev.kith.*.plist`): `kith schedule --install`, `kith serve start`, each
   tool's own `install` command. The jobs themselves are in the agents repo.
 - what agents made (`agents/<name>/files/`): on disk only; back it up with the rest of the Mac.
 
@@ -206,7 +206,6 @@ kernel/                    the code
   bin/kith-auth              shared services: which agent may use which, as which account
   bin/kith-state             commit what was lived: state and agents repos (sqlite dumped as text), then each role
   bin/kith-ask               ask an agent and get its answer back; continue the conversation (-c)
-  bin/kith-live              live agents (session: live): start, find and message their one session
   bin/kith-remote            agents on your other machines over ssh: kith remote add, kith ask agent@machine
   bin/kith-memory            search the agents' memory and shared notes
   bin/kith-sched             scheduled agent jobs (cron, launchd)
@@ -350,18 +349,6 @@ continues the same conversation from the same directory, `--as NAME` names one t
 continued conversation keeps its model, effort and harness (`-H`). `--json` gives answer, session and cost for programs; `kith ask ls`
 lists the conversations. A Claude Code session can use it to work with a specialist over several turns in the
 specialist's own tools, where an `kith:<name>` subagent would run in the caller's. Tagged `via=ask` in the cost ledger.
-
-## Live agents
-An agent with `session: live` in its agent.md (coder) runs as one long-lived session that takes jobs one at a time:
-`kith live start coder` starts it in its home folder, in an Orca tab, a tmux session (`kith-coder`) or this terminal.
-`kith live where coder` finds it from its own process, however it was started. While it runs in Orca or tmux, the
-owner's chat messages to it and `kith ask coder "…"` are typed into it (`kith-live send`, a header the kernel writes
-with `reply=`) instead of starting a run; `kith ask` returns at once with an id and `kith ask --wait <id>` prints the
-answers, which the agent sends with `kith-send --to <reply>`. It is never an `kith:<name>` subagent, resource-manager
-never closes it, and anyone but the owner is refused. When it isn't running, a message runs it once as usual.
-`kith live login on coder` starts it whenever you log in (LaunchAgent dev.kith.live, through kith-uv like the other jobs):
-it waits for Orca, else uses tmux, and leaves a session that already runs alone (`agents.coder.live_at_login`
-in ~/.kith/settings.json; `kith init` asks).
 
 ## Agents on your other machines
 An agent lives on the machine that has its tools. On a laptop, `install.sh` asks whether your agents run on another

@@ -7,6 +7,7 @@ import type { AccountService } from './account'
 import { isInviteProof } from '../shared/invite'
 import { signatureHeader as kithSig, type Signer } from '../shared/relay-core/crypto.ts'
 import type { CloudFailure, CloudResult } from '../shared/relay'
+import { paths, type Requests } from '../shared/cloud-contract.gen.ts'
 
 /**
  * The Kith cloud's user-facing `/v1` API (§8.4) with this install's device key (§3.2): an
@@ -107,7 +108,7 @@ export function registerCloud(account: AccountService): CloudAccess {
     if (!/^[A-Za-z0-9_-]{1,128}$/.test(inviteId) || !isInviteProof(h1)) {
       return { ok: false, error: { status: 400, code: 'badInvite', message: 'This invite link looks wrong. Ask for a new one.' } }
     }
-    return send('POST', `v1/invites/${inviteId}/accept`, { token: h1 }, false)
+    return send('POST', paths.acceptInvite(inviteId), { token: h1 } satisfies Requests['acceptInvite'], false)
   })
   return {
     request: send,

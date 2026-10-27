@@ -1,0 +1,11 @@
+{
+  "method": "threadProjects",
+  "type": "ThreadProjects",
+  "body": {
+    "projects": [
+      "p1"
+    ],
+    "by": "team",
+    "pinned": false
+  }
+}

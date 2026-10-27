@@ -40,7 +40,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 
@@ -241,6 +241,11 @@ impl RunGrant {
         self.table.bind(&self.key, pid);
     }
 
+    /// The run's id: what its requests are known by (a once grant reserved for its launch, the cards it parks).
+    pub fn run_id(&self) -> &str {
+        &self.run_id
+    }
+
     /// The environment the run gets. The only place the token leaves this module.
     pub fn env(&self, socket: &Path) -> [(String, String); 2] {
         let (token, sock) = match self.scope {
@@ -319,31 +324,6 @@ pub fn grant_for(
 /// can't overlap, whatever a person id or a session id looks like.
 fn session_of(person: &str, session: &str) -> String {
     format!("run:g:{}:{person}:{session}", person.len())
-}
-
-/// Yeses on escape cards (F2), by the card's session. A yes can't widen a process that is running, and an app chat's
-/// process is kept between turns: it is started again before the next turn of that conversation. Each yes takes the
-/// next number; a process keeps the number from before its launch ([`access_mark`]) and is owed a restart by any yes
-/// after.
-static ACCESS_YES: LazyLock<Mutex<(u64, HashMap<String, u64>)>> = LazyLock::new(Mutex::default);
-
-/// A yes on the escape card of `session` (the card's own). Called once the grant is stored, so a launch that reads the
-/// mark after this also gets the grant.
-pub fn access_granted(session: &str) {
-    let mut yes = ACCESS_YES.locked();
-    yes.0 += 1;
-    let n = yes.0;
-    yes.1.insert(session.to_owned(), n);
-}
-
-/// Where the yeses stand. Taken before a launch, so a yes that lands while the kernel builds it counts as after it.
-pub fn access_mark() -> u64 {
-    ACCESS_YES.locked().0
-}
-
-/// Whether `person`'s conversation `session` (as given to [`grant_for`]) had a yes on an escape card after `mark`.
-pub fn access_since(person: &str, session: &str, mark: u64) -> bool {
-    ACCESS_YES.locked().1.get(&session_of(person, session)).is_some_and(|&n| n > mark)
 }
 
 /// The identity of an owner run of `agent` under `session` (cards only, see [`TokenScope::OwnerAsk`]).
@@ -907,22 +887,6 @@ mod tests {
 
     fn peer(pid: u32) -> PeerInfo {
         PeerInfo { pid: Some(pid) }
-    }
-
-    #[test]
-    fn a_yes_on_an_escape_card_is_owed_by_processes_launched_before_it() {
-        let session = "acp:chat-f2:";
-        let before = access_mark();
-        assert!(!access_since("sam", session, before), "no yes yet");
-        access_granted(&session_of("sam", session));
-        assert!(access_since("sam", session, before), "the process from before the yes starts again");
-        assert!(!access_since("ana", session, before), "another person's conversation is not touched");
-        assert!(!access_since("sam", "acp:chat-f2:t1", before), "nor another thread of the chat");
-        let after = access_mark();
-        assert!(!access_since("sam", session, after), "one restart: the process launched after it has the grant");
-        // A later yes (also one that lands while that launch runs: it was marked before) is owed again.
-        access_granted(&session_of("sam", session));
-        assert!(access_since("sam", session, after));
     }
 
     #[test]

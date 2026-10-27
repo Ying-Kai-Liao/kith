@@ -215,7 +215,8 @@ async fn run_link(screen: Arc<Screen>, stream: UnixStream) {
 mod tests {
     use super::*;
     use crate::screen::tests::retina;
-    use crate::screen::viewer::{IceConfig, IceServer};
+    use crate::screen::viewer::{IceConfig, local_ice};
+    use kith_wire::cloud::IceServer;
     use tokio::sync::broadcast;
 
     #[tokio::test]
@@ -244,7 +245,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
-        let local = screen.prepare("local", IceConfig::default()).unwrap();
+        let local = screen.prepare("local", local_ice()).unwrap();
         let res = screen.offer("local", "offer", local["session"].as_str().unwrap(), None).await.unwrap();
         assert_eq!(res["sdp"], "answer to offer");
         assert_eq!(screen.state()["viewers"], 1);
@@ -258,7 +259,7 @@ mod tests {
                 username: Some("u".into()),
                 credential: Some("p".into()),
             }],
-            ..IceConfig::default()
+            ..local_ice()
         };
         screen.takeover(true);
         let prepared = screen.prepare("phone", config).unwrap();

@@ -17,6 +17,7 @@ use crate::LockExt;
 use anyhow::{Result, ensure};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
+use std::collections::HashSet;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -424,30 +425,46 @@ impl Store {
         .pop()
     }
 
-    /// The once grants of access cards for `session`, taken for the activation that is about to start: each is marked
-    /// used in this step, so of two takers racing for one grant exactly one gets it (L3). Bound to the card's session (C8)
-    /// and not past the deadline. The card stays owed its resume (`used_by_ask`): a later message may have taken the grant
-    /// first, and the resume then runs without it (C7).
-    pub fn card_access_consume(&self, session: &str, now: i64) -> Result<Vec<Card>> {
-        let c = self.db.locked();
-        let tx = c.unchecked_transaction()?;
-        let mut taken = Vec::new();
-        for card in list(
-            &tx,
+    /// The once grants of access cards for `session` an activation may take: approved and not used yet, bound to the
+    /// card's session (C8) and not past the deadline. Nothing is marked: an app chat's activation reserves them and
+    /// takes them with [`Store::card_access_commit`] once its session started with them.
+    pub fn card_access_once(&self, session: &str, now: i64) -> Result<Vec<Card>> {
+        Ok(list(
+            &self.db.locked(),
             "WHERE session = ?1 AND tool = 'request_access' AND scope = 'once' AND state = 'approved'
                AND allowed = 1 AND granted_at IS NOT NULL AND deadline >= ?2 ORDER BY answered_at",
             params![session, now],
-        )? {
+        )?)
+    }
+
+    /// Marks the once grants `ids` used, each in one compare-and-set, so of two takers racing for one grant exactly one
+    /// gets it (L3). Returns the ids this call took. The card stays owed its resume (`used_by_ask`): a later message may
+    /// have taken the grant first, and the resume then runs without it (C7).
+    pub fn card_access_commit(&self, ids: &[String]) -> Result<Vec<String>> {
+        let c = self.db.locked();
+        let tx = c.unchecked_transaction()?;
+        let mut taken = Vec::new();
+        for id in ids {
             let won = tx.execute(
                 "UPDATE cards SET state = 'used', used_by_ask = 1 WHERE id = ?1 AND state = 'approved'",
-                [&card.id],
+                [id],
             )?;
             if won == 1 {
-                taken.push(Card { state: CardState::Used, ..card });
+                taken.push(id.clone());
             }
         }
         tx.commit()?;
         Ok(taken)
+    }
+
+    /// The once grants of access cards for `session`, taken in one step for the activation that is about to start (the
+    /// kernel's one-shot, which takes them after its claim and before exec): [`Store::card_access_once`] less `reserved`
+    /// (held by an app chat's activation that has not started yet), each marked used by [`Store::card_access_commit`].
+    pub fn card_access_consume(&self, session: &str, now: i64, reserved: &HashSet<String>) -> Result<Vec<Card>> {
+        let open: Vec<Card> =
+            self.card_access_once(session, now)?.into_iter().filter(|c| !reserved.contains(&c.id)).collect();
+        let won = self.card_access_commit(&open.iter().map(|c| c.id.clone()).collect::<Vec<_>>())?;
+        Ok(open.into_iter().filter(|c| won.contains(&c.id)).map(|c| Card { state: CardState::Used, ..c }).collect())
     }
 
     /// The agents `person` has open cards or unused grants for.

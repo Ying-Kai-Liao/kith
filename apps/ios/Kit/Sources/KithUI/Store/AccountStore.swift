@@ -89,6 +89,7 @@ public final class AccountStore {
 
     /// What this account is on a computer. Owner unless the cloud or a kept invite token says member.
     public func role(for id: ComputerID) -> ComputerRole {
+        // A role this version doesn't know already reads as member (the contract's ComputerRole): nothing owner-only shows.
         if let role = cloudComputers.first(where: { $0.computerId == id })?.role { return role }
         return memberComputers.contains(id) ? .member : .owner
     }
@@ -254,7 +255,7 @@ public final class AccountStore {
 
     private func askForAccess() async {
         let waiting = cloudComputers.filter { c in
-            c.isOnline && c.access != "granted" && !asked.contains(c.computerId)
+            c.isOnline && c.access != .granted && !asked.contains(c.computerId)
                 && pendingAccess[c.computerId] == nil && stores[c.computerId] == nil
         }
         for computer in waiting {
@@ -302,7 +303,8 @@ public final class AccountStore {
                 Analytics.shared.capture(.computerPaired, ["via": "account", "computer": Analytics.computerTag(computer.id)])
                 await refreshCloud()
                 return
-            case .denied, .expired, .cancelled:
+            // A state this version doesn't know is over as far as it can tell: never read as approved.
+            case .denied, .expired, .cancelled, .unknown:
                 setPending(ticket.computerId, nil)
                 lastError = status.status == .denied ? "\(target.name) declined the request." : "The request expired. Ask again."
                 return

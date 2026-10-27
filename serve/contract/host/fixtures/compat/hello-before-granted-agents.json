@@ -1,0 +1,21 @@
+{
+  "method": "hello",
+  "type": "Hello",
+  "body": {
+    "hostId": "host",
+    "computerId": "AAAAAAAAAAAAAAAAAAAAAA",
+    "signKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "boxKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+    "name": "Mac",
+    "version": "0.1.0",
+    "protocol": 1,
+    "minProtocol": 1,
+    "os": "macos",
+    "rev": 2,
+    "store": {
+      "writable": true,
+      "unsaved": 0,
+      "dropped": 0
+    }
+  }
+}

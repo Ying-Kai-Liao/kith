@@ -23,9 +23,6 @@ const waiting = new Map<string, (report: string) => void>()
 const EFFORTS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 const agentEffort = new Map<string, string>()
 const runningEffort = new Map<string, string>()
-// Agents that run as one long-lived session (`session: live` in agent.md): never a subagent here, since a subagent
-// runs with the caller's settings and permission mode, outside the agent's own session. Reached with `kith ask`.
-const liveAgents = new Set<string>()
 
 function frontmatter(text: string): { fields: Record<string, string>; body: string } {
   const m = /^---\n([\s\S]*?)\n---\n?/.exec(text)
@@ -104,16 +101,6 @@ async function projectContext($: EngineInterface, kith: string, cwd: string): Pr
     (parents.length
       ? ' Open the parent\'s files only when the task needs more than this project; `kith project` shows the rest.'
       : ' `kith project` shows the rest.')
-  )
-}
-
-// A live agent takes work as a message to its session: the caller runs kith ask, which delivers it there.
-function liveAsk(kith: string, agent: string, task: string, project: string): string {
-  const q = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
-  return (
-    `kith:${agent} runs as one live session (session: live), not as a subagent. Send it the task with the Bash tool:\n\n` +
-    `${q(`${kith}/bin/kith`)} ask ${agent}${project ? ` -p ${project}` : ''} ${q(task)}\n\n` +
-    'and relay what it answers.'
   )
 }
 
@@ -230,11 +217,6 @@ export const register: Register = (on, options) => {
       // The pinned agent.md, so model and effort change with the version like everything else.
       const pinned = pkg && (await $.fs.exists(`${pkg.dir}/agent.md`)) ? `${pkg.dir}/agent.md` : file
       const { fields, body } = frontmatter(await $.fs.read(pinned))
-      if (fields.session === 'live') {
-        liveAgents.add(name)
-        continue
-      }
-      liveAgents.delete(name)
       if (EFFORTS.has(fields.effort ?? '')) agentEffort.set(name, fields.effort)
       else agentEffort.delete(name)
       const rendered = pkg && (await $.fs.exists(`${pkg.dir}/prompt.md`)) ? await $.fs.read(`${pkg.dir}/prompt.md`) : ''
@@ -465,7 +447,6 @@ export const register: Register = (on, options) => {
     }
     const task = rest.join(' ')
     if (!task) return { text: `kith: what should ${agent} do? /kith ${agent} [-p project] <task>` }
-    if (liveAgents.has(agent)) return { context: [liveAsk(kith, agent, task, project)] }
     return {
       context: [
         `The user asked to delegate this to the kith specialist \`kith:${agent}\`. Call the Agent tool with ` +
@@ -479,9 +460,6 @@ export const register: Register = (on, options) => {
 
   on('tool.call', { tool: 'mcp__kith__invoke' }, async ($, e) => {
     const input = e as unknown as { agent: string; task: string; project?: string }
-    if (liveAgents.has(input.agent)) {
-      return { result: liveAsk(await kithRoot($, (options.kith_path || options.hq_path)), input.agent, input.task, input.project ?? '') }
-    }
     const prompt = (input.project ? `<kith project="${input.project}"/>\n` : '') + input.task
     const started = await $.agent.spawn({
       subagentType: `kith:${input.agent}`,

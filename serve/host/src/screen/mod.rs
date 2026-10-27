@@ -43,7 +43,7 @@ pub use computer::{computer, computer_tools};
 pub use helper::serve_helpers;
 #[cfg(target_os = "linux")]
 pub use helper::supervise_linux_helper;
-pub use viewer::{IceConfig, watch_viewer};
+pub use viewer::{IceConfig, local_ice, watch_viewer};
 
 use crate::LockExt;
 use anyhow::{Result, anyhow, bail};

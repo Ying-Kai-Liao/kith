@@ -20,7 +20,6 @@ use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
-use tokio::task::JoinHandle;
 
 /// A message older than this when it arrives was sent while the host was away.
 const LATE_SECONDS: f64 = 120.0;
@@ -105,8 +104,6 @@ pub struct Core {
     pub(super) judge: Judge,
     pub(super) backups: Arc<Backups>,
     pub(super) inner: Mutex<Inner>,
-    /// Connections whose live-agent outboxes are being posted.
-    pub(super) pumps: Mutex<HashMap<String, JoinHandle<()>>>,
     /// The running adapter of each connection (set when it resumes), so a card's wake can start a worker on it.
     pub(super) ads: Mutex<HashMap<String, Arc<dyn Adapter>>>,
     /// Wake notes handed to a thread (see `wake`) -> the cards they answer, until the turn that carries them has run.
@@ -130,7 +127,6 @@ impl Core {
             judge: deps.judge,
             backups: deps.backups,
             inner: Mutex::new(Inner { st, path, busy: HashMap::new(), history: HashMap::new(), works: HashMap::new() }),
-            pumps: Mutex::new(HashMap::new()),
             ads: Mutex::new(HashMap::new()),
             wakes: Mutex::new(Vec::new()),
             hinted: Mutex::new(HashSet::new()),
@@ -245,7 +241,6 @@ impl Core {
             replies = imported.replies,
             inbox = imported.inbox,
             pending = imported.pending,
-            live = imported.live,
             "channels: imported a connection's state from the bridge"
         );
         Some(imported)
@@ -543,99 +538,16 @@ impl Core {
             }
             i.save();
         });
-        if self.agents.is_live(agent) {
-            if !access.owner {
-                return ad.reply(m, &format!("{agent} takes work from the owner only.")).await;
-            }
-            if self.live(ad, &key, agent, m, &task).await {
-                return Ok(());
-            }
-        }
         self.deliver(ad, &key, agent, m, task).await;
         Ok(())
-    }
-
-    // ---- live agents ----
-
-    /// Types the owner's message into the agent's live session -> false when none runs (it then runs once).
-    async fn live(self: &Arc<Self>, ad: &Arc<dyn Adapter>, key: &str, agent: &str, m: &Incoming, task: &str) -> bool {
-        let box_id = short(key);
-        self.with(|i| {
-            i.st.live.insert(box_id.clone(), json!(key));
-            i.save();
-        });
-        let _ = std::fs::create_dir_all(self.paths.live_outbox(&box_id));
-        let mid = short(&format!("{key}:{}:{}", m.origin, now()));
-        let reply = format!("bridge:{box_id}");
-        let args = ["send", agent, "--reply", &reply, "--id", &mid, "--", task];
-        let sent = hq::output(&self.paths.live_bin, &args).await;
-        match sent {
-            Some(o) if o.status.success() => {}
-            other => {
-                let err = other.map(|o| String::from_utf8_lossy(&o.stderr).trim().to_owned()).unwrap_or_default();
-                let tail: String = err.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
-                tracing::warn!("live {agent} {key}: not delivered ({tail}); running it once");
-                return false;
-            }
-        }
-        tracing::info!("live {agent} {key}: delivered {mid}");
-        let conv = self.conv_of(key);
-        if let Err(e) =
-            ad.post(&conv, "kith", &format!("Sent to {agent}'s live session. Its answers come here."), None).await
-        {
-            tracing::warn!("live {agent} {key}: can't post the note: {e:#}");
-        }
-        self.ensure_pump(ad);
-        true
     }
 
     pub(super) fn conv_of(&self, key: &str) -> Value {
         self.with(|i| i.st.threads.get(key).and_then(|t| t.get("conv").cloned()).unwrap_or(Value::Null))
     }
 
-    /// Posts what live sessions left for this connection's threads (`hq-send --to bridge:<box>`), every second.
-    pub(super) fn ensure_pump(self: &Arc<Self>, ad: &Arc<dyn Adapter>) {
-        let conn = ad.conn().to_owned();
-        let mut pumps = self.pumps.locked();
-        if pumps.get(&conn).is_some_and(|h| !h.is_finished()) {
-            return;
-        }
-        let (core, ad) = (self.clone(), ad.clone());
-        pumps.insert(
-            conn.clone(),
-            tokio::spawn(async move {
-                let prefix = format!("{conn}:");
-                loop {
-                    tokio::time::sleep(core.settings.poll).await;
-                    let boxes: Vec<(String, String)> = core.with(|i| {
-                        i.st.live
-                            .iter()
-                            .filter_map(|(b, k)| Some((b.clone(), k.as_str()?.to_owned())))
-                            .filter(|(_, k)| k.starts_with(&prefix))
-                            .collect()
-                    });
-                    for (box_id, key) in boxes {
-                        let Some(thread_conv) = core
-                            .with(|i| i.st.threads.get(&key).map(|t| t.get("conv").cloned().unwrap_or(Value::Null)))
-                        else {
-                            core.with(|i| i.st.live.shift_remove(&box_id)); // the thread was pruned
-                            continue;
-                        };
-                        let folder = core.paths.live_outbox(&box_id);
-                        if folder.is_dir() {
-                            super::run::flush(&ad, &thread_conv, &folder).await;
-                        }
-                    }
-                }
-            }),
-        );
-    }
-
-    /// Stops a connection's background work (its live pump) when its grant is revoked.
+    /// Forgets a connection's running adapter when its grant is revoked.
     pub fn forget(&self, conn: &str) {
         self.ads.locked().remove(conn);
-        if let Some(pump) = self.pumps.locked().remove(conn) {
-            pump.abort();
-        }
     }
 }

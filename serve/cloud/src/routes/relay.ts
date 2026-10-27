@@ -2,6 +2,7 @@
 // to the computer's Durable Object.
 
 import { COMPUTER_ID, computerIdFor, fromB64url, verifyClerkToken, verifySig, type SignedRequest } from "../auth";
+import { isErrorCode, type ErrorCode } from "../contract.gen";
 import { LEGACY_SIG_HEADER } from "../legacy-compat";
 import { HOOK_ID, HOOK_MAX_BODY } from "../hooks";
 import { ApiError, webSessionLive, type Ctx } from "./common";
@@ -40,8 +41,9 @@ async function forward(
   }
   const res = await c.env.RELAY.get(c.env.RELAY.idFromName(computerId)).fetch(new Request("https://do/relay", { headers }));
   if (res.status === 101) return res;
-  const err = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
-  throw new ApiError(err?.error?.code ?? "internal", undefined, res.status);
+  const err = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null;
+  const code = err?.error?.code;
+  throw new ApiError(isErrorCode(code) ? code : "internal", undefined, res.status);
 }
 
 export async function relayHost(c: Ctx): Promise<Response> {
@@ -66,7 +68,7 @@ function subprotocols(c: Ctx): { sig: string; jwt: string | null } | null {
   return { sig: bytes ? new TextDecoder().decode(bytes) : "", jwt };
 }
 
-const CLOSE_FOR: Record<string, number> = {
+const CLOSE_FOR: Partial<Record<ErrorCode, number>> = {
   unknownComputer: 4404,
   upgradeRequired: 4426,
   unauthenticated: 4401,
@@ -77,7 +79,7 @@ const CLOSE_FOR: Record<string, number> = {
 };
 
 /** A browser can't read an HTTP status off a refused upgrade, so it is accepted and closed with a code instead. */
-function refusal(code: string): Response {
+function refusal(code: ErrorCode): Response {
   const { 0: client, 1: server } = new WebSocketPair();
   server.accept();
   server.close(CLOSE_FOR[code] ?? 1011, code);

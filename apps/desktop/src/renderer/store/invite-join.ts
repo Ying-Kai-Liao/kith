@@ -1,3 +1,4 @@
+import { receive } from '@shared/cloud-contract.gen'
 import type { InviteLink } from '@shared/invite'
 import { runJoin, type JoinDeps, type JoinState } from '@shared/invite-join'
 import { scopedKey } from '@shared/mac-role'
@@ -15,7 +16,7 @@ export function appJoinDeps(waitForSignIn: () => Promise<void>, cancelled: () =>
       async accept(inviteId, h1) {
         const res = await window.kith.cloud.acceptInvite(inviteId, h1)
         if (!res.ok) throw res.error
-        return res.value as { computerId: string; membershipId?: string }
+        return receive('InviteAccepted', res.value)
       },
       keepToken: (computerId, inviteId, token) => window.kith.invites.keep(scopedKey(account.user?.userId ?? '', computerId), inviteId, token),
     },

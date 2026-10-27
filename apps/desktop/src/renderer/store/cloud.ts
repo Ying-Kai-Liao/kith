@@ -1,3 +1,17 @@
+import {
+  paths,
+  receive,
+  ROUTES,
+  type CloudComputer as WireComputer,
+  type CloudDevice as WireDevice,
+  type CloudGrant as WireGrant,
+  type DevicePlatform,
+  type Received,
+  type Requests,
+  type Responses,
+  type RouteName,
+  type Types,
+} from '@shared/cloud-contract.gen'
 import type { CloudStatus, ClaimSignature } from '@shared/models'
 import { Observable } from '../lib/observable'
 import { pref } from '../lib/prefs'
@@ -5,44 +19,13 @@ import { account } from './account'
 import type { AppModel } from './app-model'
 import type { BotStore } from './bot-store'
 
-// Wire types of the Kith cloud (`/v1`, cloud/src/api.ts); times are epoch milliseconds.
+// The Kith cloud's words (types, paths, error codes) come from its contract: serve/contract/cloud/contract.json, through
+// shared/cloud-contract.gen.ts. Times are epoch milliseconds.
 
-/** A computer in the account (`GET /v1/computers`). */
-export interface CloudComputer {
-  computerId: string
-  name: string
-  platform?: string | null
-  device?: string | null
-  signKey: string
-  boxKey?: string | null
-  version?: string | null
-  online?: boolean | null
-  lastSeenAt?: number | null
-  claimedAt?: number | null
-  /** `none` · `pending` · `granted`. */
-  access?: string | null
-  /** This account's part in the computer: its owner, or invited to it. Absent from an older cloud (then owner). */
-  role?: 'owner' | 'member'
-}
-
-export interface CloudDevice {
-  deviceId: string
-  deviceKey: string
-  name: string
-  platform?: string | null
-  createdAt?: number | null
-  lastUsedAt?: number | null
-  revoked?: boolean | null
-}
-
-export interface CloudGrant {
-  grantId: string
-  deviceId: string
-  deviceName?: string | null
-  platform?: string | null
-  scopes?: string[] | null
-  createdAt?: number | null
-}
+/** A computer in the account (`GET /v1/computers`), as this version reads it: an enum word it doesn't know is what the contract says it means. */
+export type CloudComputer = Received<WireComputer>
+export type CloudDevice = Received<WireDevice>
+export type CloudGrant = Received<WireGrant>
 
 export class CloudError extends Error {
   constructor(
@@ -64,11 +47,22 @@ export class CloudError extends Error {
   }
 }
 
-async function request<T>(method: string, path: string, body?: unknown, signed = false): Promise<T> {
-  const res = await window.kith.cloud.request(method, path, body, signed)
+type Answer<R extends RouteName> = R extends keyof Responses ? Received<Responses[R]> : unknown
+type Body<R extends RouteName> = R extends keyof Requests ? Requests[R] : undefined
+
+/**
+ * One cloud route by its contract name: the method and path are the contract's, the body is its request type, and the
+ * answer is read as its response type (`receive`, so a word this version doesn't know is what the contract says it means).
+ */
+async function call<R extends RouteName>(route: R, args: Parameters<(typeof paths)[R]>, body?: Body<R>, signed = false): Promise<Answer<R>> {
+  const r: { method: string; response?: keyof Types } = ROUTES[route]
+  const path = (paths[route] as (...a: string[]) => string)(...args)
+  const res = await window.kith.cloud.request(r.method, path, body, signed)
   if (!res.ok) throw new CloudError(res.error.status, res.error.code, res.error.message)
-  return res.value as T
+  return (r.response ? receive(r.response, res.value) : res.value) as Answer<R>
 }
+
+const PLATFORM: Record<typeof window.kith.platform, DevicePlatform> = { darwin: 'macos', linux: 'linux', win32: 'windows', web: 'web' }
 
 /** Host identities whose cloud default has been applied (or found already on). */
 const cloudDefaultApplied = pref<string[]>('cloudDefaultApplied', [])
@@ -117,7 +111,7 @@ export class CloudModel extends Observable {
       // Signed in: make this computer known to the account, then list its computers.
       void (async () => {
         try {
-          await request('POST', 'v1/devices', { name: await deviceName(), platform: { darwin: 'macos', linux: 'linux', win32: 'windows', web: 'web' }[window.kith.platform] }, true)
+          await call('registerDevice', [], { name: await deviceName(), platform: PLATFORM[window.kith.platform] }, true)
         } catch (error) {
           this.fail(error)
         }
@@ -131,7 +125,7 @@ export class CloudModel extends Observable {
   async refresh() {
     if (!this.userId) return
     try {
-      const res = await request<{ computers: CloudComputer[] }>('GET', 'v1/computers', undefined, true)
+      const res = await call('listComputers', [], undefined, true)
       this.computers = res.computers
       this.changed()
     } catch (error) {
@@ -199,9 +193,10 @@ export class CloudModel extends Observable {
     try {
       const client = await store.ready()
       if (!store.cloud?.enabled) await this.enableCloud(store)
-      const challenge = await request<{ claimId: string; nonce: string }>('POST', 'v1/claims', {})
+      const challenge = await call('createClaim', [], undefined)
       const signed = await client.call<ClaimSignature>('claimSign', { claimId: challenge.claimId, nonce: challenge.nonce, userId: user })
-      await request('POST', `v1/claims/${challenge.claimId}/complete`, signed)
+      // The host's signed fields, passed on as it made them (its RPC types come with the host RPC contract).
+      await call('completeClaim', [challenge.claimId], signed as Requests['completeClaim'])
       await this.refresh()
       if (store === this.app.local) await this.forgetEarlierIdentities(store.computer.id)
       return true
@@ -252,7 +247,7 @@ export class CloudModel extends Observable {
 
   async removeFromAccount(computerId: string) {
     try {
-      await request('DELETE', `v1/computers/${computerId}`)
+      await call('removeComputer', [computerId])
       await this.refresh()
     } catch (error) {
       this.fail(error)
@@ -267,23 +262,23 @@ export class CloudModel extends Observable {
   }
 
   devices() {
-    return request<{ devices: CloudDevice[] }>('GET', 'v1/devices').then((r) => r.devices)
+    return call('listDevices', []).then((r) => r.devices)
   }
 
   revokeDevice(deviceId: string) {
-    return request('DELETE', `v1/devices/${deviceId}`)
+    return call('revokeDevice', [deviceId])
   }
 
   grants(computerId: string) {
-    return request<{ grants: CloudGrant[] }>('GET', `v1/computers/${computerId}/grants`).then((r) => r.grants)
+    return call('listGrants', [computerId]).then((r) => r.grants)
   }
 
   revokeGrant(computerId: string, grantId: string) {
-    return request('DELETE', `v1/computers/${computerId}/grants/${grantId}`)
+    return call('revokeGrant', [computerId, grantId])
   }
 
   async renameComputer(computerId: string, name: string) {
-    await request('PATCH', `v1/computers/${computerId}`, { name })
+    await call('renameComputer', [computerId], { name })
     await this.refresh()
   }
 }

@@ -1,13 +1,14 @@
 import type { Entry } from './models.ts'
+import { decodeAgentRole, type AgentRole } from './host-contract.gen.ts'
 
 /** What this account is on one Mac. Per agent it is member or guest (the owner's kith-auth preset); the Mac shows the best of them. */
 export type MacRole = 'owner' | 'member' | 'guest'
 
-/** One agent an invited person may use, from the member `hello`. */
+/** One agent an invited person may use, from the member `hello` (the host RPC contract's `GrantedAgent`). */
 export interface GrantedAgent {
   agent: string
   name: string | null
-  role: 'member' | 'guest'
+  role: AgentRole
 }
 
 /** The member `hello`'s list; null when absent (an owner's hello, or a host before roles), and unreadable rows are dropped. */
@@ -16,7 +17,7 @@ export function parseGranted(raw: unknown): GrantedAgent[] | null {
   const out: GrantedAgent[] = []
   for (const row of raw as Record<string, unknown>[]) {
     if (!row || typeof row.agent !== 'string' || !row.agent) continue
-    out.push({ agent: row.agent, name: typeof row.name === 'string' && row.name ? row.name : null, role: row.role === 'member' ? 'member' : 'guest' })
+    out.push({ agent: row.agent, name: typeof row.name === 'string' && row.name ? row.name : null, role: decodeAgentRole(row.role) })
   }
   return out
 }

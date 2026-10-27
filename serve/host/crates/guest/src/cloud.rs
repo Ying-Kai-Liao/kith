@@ -4,8 +4,9 @@
 use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
+use kith_wire::cloud::{AcceptBotInvite, BotInviteAccepted, ErrorCode, path};
 use kith_wire::crypto::sha256;
-use serde_json::{Value, json};
+use serde_json::Value;
 use url::Url;
 
 use crate::exit::{CliError, Exit};
@@ -24,11 +25,8 @@ pub fn token_proof(token: &str) -> String {
     hex(&sha256(&[token.as_bytes()]))
 }
 
-#[derive(Debug, PartialEq, Eq)]
-pub struct Accepted {
-    pub computer_id: String,
-    pub bot_device_id: String,
-}
+/// The cloud's answer to an accept: the cloud contract's `BotInviteAccepted`.
+pub type Accepted = BotInviteAccepted;
 
 /// Maps the cloud's `{error:{code,message}}` answer to what the bot should do about it.
 pub fn accept_error(status: u16, body: &str) -> CliError {
@@ -36,12 +34,12 @@ pub fn accept_error(status: u16, body: &str) -> CliError {
     let code = parsed["error"]["code"].as_str().unwrap_or_default();
     let message = parsed["error"]["message"].as_str().unwrap_or_default();
     let say = |fallback: &str| if message.is_empty() { fallback.to_string() } else { message.to_string() };
-    match (status, code) {
-        (_, "inviteExpired") => CliError::invite(say("This invite has expired. Ask for a new one.")),
+    match (status, ErrorCode::from_code(code)) {
+        (_, ErrorCode::InviteExpired) => CliError::invite(say("This invite has expired. Ask for a new one.")),
         // A bot whose access was ended and then repeats its accept hears this, and it is not about the invite.
-        (_, "inviteRevoked") if message.contains("removed") => CliError::removed(),
-        (_, "inviteRevoked") => CliError::invite(say("This invite was cancelled. Ask for a new one.")),
-        (_, "inviteUsed") => CliError::invite(say("This invite was already used. Ask for a new one.")),
+        (_, ErrorCode::InviteRevoked) if message.contains("removed") => CliError::removed(),
+        (_, ErrorCode::InviteRevoked) => CliError::invite(say("This invite was cancelled. Ask for a new one.")),
+        (_, ErrorCode::InviteUsed) => CliError::invite(say("This invite was already used. Ask for a new one.")),
         (404, _) => CliError::invite(say("This invite doesn't exist.")),
         (403, _) => CliError::invite(say("This invite link isn't valid.")),
         (409, _) => CliError::invite(say("The computer can't take another bot right now.")),
@@ -62,12 +60,10 @@ pub async fn accept(
     provider: Option<&str>,
 ) -> Result<Accepted, Fail> {
     let base = Url::parse(cloud).map_err(|e| Fail::Final(CliError::unexpected(format!("bad cloud address: {e}"))))?;
-    let path = format!("/v1/bot-invites/{invite_id}/accept");
+    let path = path::accept_bot_invite(invite_id);
     let url = base.join(&path).map_err(|e| Fail::Final(CliError::unexpected(e.to_string())))?.to_string();
-    let mut body = json!({"token": token_proof(token), "name": name});
-    if let Some(p) = provider {
-        body["provider"] = json!(p);
-    }
+    let body =
+        AcceptBotInvite { token: token_proof(token), name: name.to_owned(), provider: provider.map(str::to_owned) };
     let body = serde_json::to_vec(&body).map_err(|e| Fail::Final(CliError::unexpected(e.to_string())))?;
     let sig = signature_header(key, "POST", &authority(&base), &path, &body);
 
@@ -100,15 +96,13 @@ pub async fn accept(
             _ => Fail::Final(accept_error(status, &text)),
         });
     }
-    let v: Value = serde_json::from_str(&text).map_err(|_| Fail::Network("the cloud's answer wasn't JSON".into()))?;
-    let (Some(c), Some(d)) = (v["computerId"].as_str(), v["botDeviceId"].as_str()) else {
-        return Err(Fail::Network("the cloud's answer was incomplete".into()));
-    };
-    if c != computer_id {
+    let accepted: Accepted =
+        serde_json::from_str(&text).map_err(|_| Fail::Network("the cloud's answer was incomplete".into()))?;
+    if accepted.computer_id != computer_id {
         // The invite belongs to another computer than the link says.
         return Err(Fail::Final(CliError::identity()));
     }
-    Ok(Accepted { computer_id: c.to_string(), bot_device_id: d.to_string() })
+    Ok(accepted)
 }
 
 #[cfg(test)]

@@ -161,7 +161,19 @@ check "access: someone who is not a person, or has no row of their own, is refus
 check "access: a bot of the owner may hold any, a bot of an invitee only what the invitee holds" "A access house bot-k2 read '$TR/docs/sub' && A access house bot-a read '$TR/docs/sub' && ! A access house bot-a read '$TR/elsewhere' && ! A access house bot-a domain example.org"
 check "access: a bot of an invitee loses it when the invitee does" "A access house ann read '$TR/docs' --rm && [ \"\$(R bot-a 'd[\"access\"][\"read\"]')\" = '[]' ]"
 check "access: --rm takes one entry away" "A access house ann domain pypi.org --rm && [ \"\$(R ann 'd[\"access\"][\"domains\"]')\" = '[]' ]"
-check "access: --json lists each grant with its person and when it was given" "A access house --json | J \"sorted((g['kind'], g['target'], g['name'], isinstance(g['since'], int)) for g in d if g['person'] == 'ann') == [('read', '$TR/docs2', '', True), ('write', '$TR/more', '', True)] and ('bot-k2', 'Kbot') in [(g['person'], g['name']) for g in d]\" | grep -qx True"
+check "ledger: each grant with its key, person and when it was given" "A ledger --json | J \"sorted((g['kind'], g['target'], g['name'], isinstance(g['since'], int), g['key'] == g['kind'] + ':house:ann:' + g['target']) for g in d if g['person'] == 'ann') == [('read', '$TR/docs2', '', True, True), ('write', '$TR/more', '', True, True)] and ('bot-k2', 'Kbot') in [(g['person'], g['name']) for g in d]\" | grep -qx True"
+A grant house@ann notion notion/ann >/dev/null 2>&1
+A grant house@kai notion notion/kai >/dev/null 2>&1
+A member garden ann >/dev/null 2>&1
+A access garden ann domain example.com >/dev/null 2>&1
+check "ledger: a person's own service grant is in it, the owner's isn't" "A ledger --json | J \"[(g['kind'], g['agent'], g['person'], g['target'], g['key']) for g in d if g['kind'] == 'service'] == [('service', 'house', 'ann', 'notion/ann', 'service:house:ann:notion/ann')]\" | grep -qx True"
+check "ledger: --agent keeps one agent's" "A ledger --agent garden --json | J \"[(g['person'], g['kind'], g['target']) for g in d] == [('ann', 'domain', 'example.com')]\" | grep -qx True"
+check "ledger: --person keeps one person's, on every agent" "A ledger --person ann --json | J \"sorted({g['agent'] for g in d}) == ['garden', 'house'] and all(g['person'] == 'ann' for g in d) and len(d) == 4\" | grep -qx True"
+check "ledger: --person and --agent together" "A ledger --person bot-k2 --agent house --json | J \"[(g['person'], g['kind']) for g in d] == [('bot-k2', 'read')]\" | grep -qx True"
+check "ledger: --agent of an agent with none is empty" "[ \"\$(A ledger --agent nowhere --json)\" = '[]' ]"
+check "ledger: --rm <key> takes that one away, and the rest stay" "A ledger --rm 'service:house:ann:notion/ann' && A ledger --rm 'domain:garden:ann:example.com' && A ledger --person ann --json | J \"sorted(g['kind'] for g in d) == ['read', 'write']\" | grep -qx True && [ \"\$(A granted --for house@ann notion)\" = '' ]"
+check "ledger: --rm of a key it doesn't hold fails, a malformed key too" "! A ledger --rm 'domain:garden:ann:example.com' && ! A ledger --rm 'exec:house:ann:/bin' && ! A ledger --rm 'read:house'"
 check "access: --rm takes away a path that no longer exists" "mkdir -p '$TR/gone' && A access house ann read '$TR/gone' && rmdir '$TR/gone' && A access house ann read '$TR/gone' --rm && [ \"\$(R ann \"'$TR/gone' in d['access']['read']\")\" = False ]"
+check "ledger: --rm takes away a path that no longer exists, by its key" "mkdir -p '$TR/gone' && A access house ann read '$TR/gone' && rmdir '$TR/gone' && A ledger --rm 'read:house:ann:$TR/gone' && [ \"\$(R ann \"'$TR/gone' in d['access']['read']\")\" = False ]"
 check "access: removing the person removes it" "A person ann --rm >/dev/null 2>&1; ! A access house ann read '$TR/docs'"
 exit $fail

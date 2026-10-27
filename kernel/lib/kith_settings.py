@@ -20,8 +20,7 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
                     keeps its own choice. Without it, runs turn on kith@kith only
   agents            per agent, what this Mac chose over the agent's own settings: {"<agent>": {"permission_mode":
                     MODE}}. An agent's defaultMode is its author's suggestion; the mode chosen here (kith install asks)
-                    wins over it, and only the caller's wins over this; {"live_at_login": true} for a live agent
-                    (session: live) whose session starts when you log in to this Mac (kith live login)
+                    wins over it, and only the caller's wins over this
   call_model        the model a turn spoken in a voice call runs on (same session, only the model differs): a model name
                     Claude Code takes ("sonnet", "haiku", "opus"), or "own" for the agent's own model. Default "sonnet":
                     a call wants a quick reply. agents.<agent>.call_model replaces it for that agent. Schedules, channels

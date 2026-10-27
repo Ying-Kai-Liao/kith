@@ -10,12 +10,14 @@ import {
   parseDiff, parseHistory, parseMemoryList, parseRead, parseSave, parseTidyUps, parseUndo,
   type HqMemoryDiff, type HqMemoryList, type HqMemoryRead, type HqMemoryVersion, type HqSaveResult, type HqTidyUp, type HqUndoResult,
 } from '@shared/hq-memory'
-import { isUnsupportedHost, parseAccessGrants, parseKithInfoResult, parseSearchResult, type AccessGrant, type KithInfoResult, type KithSearchResult } from '@shared/kith-info'
+import { isUnsupportedHost, parseAccessLedger, parseKithInfoResult, parseSearchResult, type AccessGrant, type KithInfoResult, type KithSearchResult } from '@shared/kith-info'
 import { isAccessRemoved, parseGranted } from '@shared/mac-role'
 import { parseAudit, parseCreatedInvite, parseInvites, parsePeople, type AuditRow, type CreatedInvite, type PendingInvite, type Person, type Role } from '@shared/people'
 import { threadWriterCode, threadWriterMessage, type TakeOverResult, type ThreadWriterCode } from '@shared/thread-writer'
 import type { PlaceFolder, PlaceSelection, ProjectInfo, RecentFolder, StartingFolder } from '@shared/place-folders'
+import { METHODS, receive, type MethodName, type Params, type Received, type Results } from '@shared/host-contract.gen'
 import {
+  asEntry,
   normalizeBot,
   normalizeScreen,
   type AccessRequest,
@@ -219,6 +221,15 @@ export class HostClient {
     return this.transport.call(method, body, timeoutMs) as Promise<T>
   }
 
+  /**
+   * A method of the host RPC contract (serve/contract/host): what it takes is the contract's, and its answer is read as
+   * the contract says (`receive`: a word this app doesn't know reads as its enum declares, a left-out list is empty).
+   */
+  async callHost<M extends MethodName>(method: M, params: Params[M], timeoutMs = 20_000): Promise<Received<Results[M]>> {
+    const raw = await this.transport.call(method, params, timeoutMs)
+    return receive(METHODS[method].result, raw) as Received<Results[M]>
+  }
+
   /** A method renamed with tidy-ups: a host from before the rename answers "unknown method" to the new name, so try `old` once. */
   async callRenamed<T>(method: string, old: string, body: unknown = {}, timeoutMs = 20_000): Promise<T> {
     try {
@@ -240,29 +251,30 @@ export class HostClient {
 
   /** Answering an incoming call (`id` from its event); the first device to answer wins, the others get an error. */
   callAccept(id: string) {
-    return this.call<{ botId: string; threadId: string | null }>('callAccept', { id })
+    return this.callHost('callAccept', { id })
   }
 
   callDecline(id: string) {
-    return this.call<object>('callDecline', { id })
+    return this.callHost('callDecline', { id })
   }
 
   /** The accepted call is live: the agent speaks first. */
   callGreet(id: string) {
-    return this.call<object>('callGreet', { id })
+    return this.callHost('callGreet', { id })
   }
 
   hello() {
     return this.call<Hello>('hello').then((h) => ({ ...h, backends: h.backends ?? [], screen: normalizeScreen(h.screen) ?? undefined, grantedAgents: parseGranted(h.grantedAgents) }))
   }
 
-  async history(botId: string, beforeSeq: number, limit = 100) {
-    return (await this.call<{ entries: Entry[] }>('history', { botId, beforeSeq, limit })).entries
+  async history(botId: string, beforeSeq: number, limit = 100): Promise<Entry[]> {
+    return (await this.callHost('history', { botId, beforeSeq, limit })).entries.map(asEntry)
   }
 
   /** `folder`: where the thread works; absent from a host without place folders. */
-  async thread(botId: string, rootId: string) {
-    return this.call<{ entries: Entry[]; folder?: unknown }>('thread', { botId, rootId })
+  async thread(botId: string, rootId: string): Promise<{ entries: Entry[]; folder?: unknown }> {
+    const got = await this.callHost('thread', { botId, rootId })
+    return { ...got, entries: got.entries.map(asEntry) }
   }
 
   async botConversation(botId: string, peerId: string) {
@@ -272,7 +284,7 @@ export class HostClient {
   /** `pasted`: what the user pasted rather than typed, which memory never takes as their own words. */
   async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null) {
     try {
-      return (await this.call<{ entry: Entry }>('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}) })).entry
+      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}) })).entry)
     } catch (e) {
       throw typedWriterError(e)
     }
@@ -299,7 +311,7 @@ export class HostClient {
 
   /** A Kith bot's details from `kith <agent> --info-json`; `refresh` runs kith now instead of taking the host's 30 s copy. A host before this call answers 404. */
   async kithInfo(botId: string, refresh = false): Promise<KithInfoResult> {
-    return parseKithInfoResult(await this.call('kithInfo', { botId, ...(refresh ? { refresh: true } : {}) }, 60_000))
+    return parseKithInfoResult(await this.callHost('kithInfo', { botId, ...(refresh ? { refresh: true } : {}) }, 60_000))
   }
 
   /** Writes an hq bot's permission mode through to hq (`kith <agent> set permission`) and returns hq's info read back. */
@@ -327,14 +339,14 @@ export class HostClient {
     return parseBackups(await this.call('accountSet', { agent, account }, 90_000))
   }
 
-  /** A Kith agent's "always" access grants (what, for whom, since when). Owner only: a member gets 403; a host before this call 404. */
-  async kithAccessGrants(botId: string): Promise<AccessGrant[]> {
-    return parseAccessGrants(await this.call('kithAccessGrants', { botId }, 30_000))
+  /** The grants ledger: every lasting grant for anyone but the owner, of one agent and/or one person. Owner only: a member gets 403; a host before it 404. */
+  async accessLedger(filter: { agent?: string; person?: string }): Promise<AccessGrant[]> {
+    return parseAccessLedger(await this.call('accessLedger', filter, 30_000))
   }
 
-  /** Takes one away, so that person's next run no longer gets it; answers the list read back. */
-  async kithRemoveAccessGrant(botId: string, g: Pick<AccessGrant, 'person' | 'kind' | 'target'>): Promise<AccessGrant[]> {
-    return parseAccessGrants(await this.call('kithRemoveAccessGrant', { botId, person: g.person, kind: g.kind, target: g.target }, 30_000))
+  /** Takes one ledger entry away by its key, so that person's next run no longer gets it. */
+  async removeGrant(g: Pick<AccessGrant, 'kind' | 'key'>): Promise<void> {
+    await this.call('removeGrant', { kind: g.kind, key: g.key }, 30_000)
   }
 
   async kithMemorySearch(botId: string, query: string, limit = 30): Promise<KithSearchResult> {
@@ -440,7 +452,7 @@ export class HostClient {
 
   /** The first call of an invited device: shows the invite token from the link. Until it works the Mac refuses everything else. */
   proveInvite(inviteId: string, token: string) {
-    return this.call('proveInvite', { inviteId, token })
+    return this.callHost('proveInvite', { inviteId, token })
   }
 
   /** An invited person's own chat with a granted agent. */
@@ -465,7 +477,7 @@ export class HostClient {
   // Bots from outside (serve/host/src/api/botguests.rs). A host before them answers "unknown method".
   /** Makes a bot and its invite; `botId` makes a fresh invite for a bot you already have. `share` is secret: show it, never keep it. */
   async createBotInvite(input: { name: string; provider: BotProvider; agents: string[]; botId?: string }): Promise<CreatedBotInvite> {
-    return parseCreatedBotInvite(await this.call('createBotInvite', input, 60_000))
+    return parseCreatedBotInvite(await this.callHost('createBotInvite', input, 60_000))
   }
 
   /** Every bot, with its conversations. The computer's owner only. */
@@ -475,7 +487,7 @@ export class HostClient {
 
   /** The caller's own bots, ended ones too. */
   async myBots(): Promise<BotGuest[]> {
-    return parseBotGuests(await this.call('myBots'))
+    return parseBotGuests(await this.callHost('myBots', {}))
   }
 
   /** The computer's owner only. `alwaysForOwner` also lets this person's later bots in without asking. */
@@ -488,7 +500,7 @@ export class HostClient {
   }
 
   revokeBot(botId: string) {
-    return this.call('revokeBot', { botId })
+    return this.callHost('revokeBot', { botId })
   }
 
   async recentFolders() {
@@ -511,7 +523,7 @@ export class HostClient {
     let offset = 0
     do {
       const end = Math.min(offset + HostClient.uploadChunk, data.length)
-      await this.call('upload', { botId, uploadId, name, data: toBase64(data.subarray(offset, end)), offset, done: end === data.length }, 60_000)
+      await this.callHost('upload', { botId, uploadId, name, data: toBase64(data.subarray(offset, end)), offset, done: end === data.length }, 60_000)
       offset = end
     } while (offset < data.length)
   }
@@ -520,7 +532,7 @@ export class HostClient {
     const parts: Uint8Array[] = []
     let size = 0
     for (;;) {
-      const res = await this.call<{ data: string; size: number }>('readUpload', { botId, uploadId, offset: size }, 60_000)
+      const res = await this.callHost('readUpload', { botId, uploadId, offset: size }, 60_000)
       const chunk = fromBase64(res.data)
       if (!chunk.length) break
       parts.push(chunk)

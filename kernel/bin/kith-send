@@ -4,11 +4,9 @@
 #   kith-send "text"                         a message
 #   kith-send --caption "text" FILE...       images show inline, anything else (html, pdf) as files
 #   kith-send --as image "🎨 generating…"    post as another agent (helpers reporting into the owner's thread)
-#   kith-send --to TARGET "text"|--caption…  answer a message a live session got (its header's reply=): ask:<id> (the
-#                                          caller's `kith ask --wait <id>`), bridge:<box> (the chat thread it came
-#                                          from), dm (Telegram, as below)
+#   kith-send --to TARGET "text"|--caption…  ask:<id> (the caller's `kith ask --wait <id>` reads it), dm (Telegram, as below)
 #
-# Inside a Discord task (kith serve (formerly kith-bridge) sets KITH_DISCORD_WEBHOOK_URL + KITH_DISCORD_THREAD_ID) it posts into that thread,
+# Inside a Discord task (kith serve sets KITH_DISCORD_WEBHOOK_URL + KITH_DISCORD_THREAD_ID) it posts into that thread,
 # named after the agent. A tool that names a Telegram chat (KITH_TELEGRAM_BOT_TOKEN + KITH_TELEGRAM_CHAT_ID in its
 # environment) posts there. Inside any other chat task (Telegram, Slack, a Discord DM) it leaves the message in the
 # run's outbox (KITH_BRIDGE_OUTBOX) and kith serve posts it into the thread. Otherwise it goes to Telegram:
@@ -35,35 +33,26 @@ caption=""
 [[ ${1:-} == --caption ]] && { caption=$2; shift 2; }
 [[ $# -gt 0 ]] || { echo 'usage: kith-send [--as AGENT] [--to TARGET] "text" | kith-send [--as AGENT] [--to TARGET] --caption "text" FILE...' >&2; exit 2; }
 
-# A live session's answer goes where its message said (reply=), whatever this process's environment holds.
+# An answer to an id goes to that id's file, whatever this process's environment holds.
 if [[ -n $to ]]; then
   case $to in
-    ask:*|bridge:*)
-      id=${to#*:}
+    ask:*)
+      id=${to#ask:}
       [[ $id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "kith-send: bad target $to" >&2; exit 2; }
-      [[ $to == ask:* ]] && dest="$KITH_MACHINE/live/ask/$id.jsonl" || dest="$KITH_MACHINE/bridge/outbox/live-$id"
       [[ -f $1 ]] && kind=files || kind=text
-      python3 - "$dest" "$agent" "$kind" "$caption" "$@" <<'PY'
+      python3 - "$KITH_MACHINE/live/ask/$id.jsonl" "$agent" "$kind" "$caption" "$@" <<'PY'
 import json, os, sys, time
 dest, who, kind, caption, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
 item = {'as': who, 'files': [os.path.abspath(f) for f in rest], 'caption': caption} if kind == 'files' \
     else {'as': who, 'text': ' '.join(rest)}
 item['at'] = time.time()
-if dest.endswith('.jsonl'):   # kith ask --wait reads it line by line
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    with open(dest, 'a') as f:
-        f.write(json.dumps(item, ensure_ascii=False) + '\n')
-else:                         # the bridge's outbox for that thread: whole files only
-    os.makedirs(dest, exist_ok=True)
-    name = os.path.join(dest, f'{time.time_ns()}.json')
-    with open(name + '.tmp', 'w') as f:
-        json.dump(item, f)
-    os.rename(name + '.tmp', name)
+os.makedirs(os.path.dirname(dest), exist_ok=True)
+with open(dest, 'a') as f:   # kith ask --wait reads it line by line
+    f.write(json.dumps(item, ensure_ascii=False) + '\n')
 PY
       echo "sent to $to as $as"; exit 0 ;;
     dm) unset KITH_DISCORD_WEBHOOK_URL KITH_DISCORD_THREAD_ID KITH_BRIDGE_OUTBOX HQ_DISCORD_WEBHOOK_URL HQ_DISCORD_THREAD_ID HQ_BRIDGE_OUTBOX ;;
-    here) echo "kith-send: reply=here means answer in the terminal, not with kith-send" >&2; exit 2 ;;
-    *) echo "kith-send: unknown target $to (ask:<id>, bridge:<box>, dm)" >&2; exit 2 ;;
+    *) echo "kith-send: unknown target $to (ask:<id>, dm)" >&2; exit 2 ;;
   esac
 fi
 

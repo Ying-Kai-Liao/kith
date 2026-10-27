@@ -1,4 +1,5 @@
 import type { HostCaller, JoinDeps } from './invite-join.ts'
+import type { AccessState } from './cloud-contract.gen.ts'
 import type { AccessProgress, AccessTicket, CloudResult, RelayComputer, RelayState } from './relay.ts'
 
 /** The part of `window.kith.relay` that asking a Mac for access and talking to it needs; injected so the order is testable. */
@@ -11,7 +12,8 @@ export interface RelayApi {
   call(computerId: string, signKey: string, method: string, body: unknown, timeoutMs: number): Promise<unknown>
 }
 
-export type AccessOutcome = 'approved' | 'denied' | 'expired' | 'cancelled'
+/** How asking ended: every access-request state but pending (AccessState in the cloud contract). */
+export type AccessOutcome = Exclude<AccessState, 'pending'>
 
 export interface WaitOptions {
   /** The six digits are ready: the device shows them while it waits (in Code mode the Mac's owner compares them, a member's too). */
@@ -41,13 +43,25 @@ export async function askForAccess(api: RelayApi, c: { computerId: string; signK
     }
     if (now() >= ticket.expiresAt) return 'expired'
     const status = await api.accessStatus(ticket.requestId)
-    if (status.ok && status.value !== 'pending') return status.value
+    if (status.ok) {
+      const state = status.value
+      // A state this version doesn't know is over as far as it can tell (as on iOS): never read as approved.
+      if (state === 'unknown') return 'expired'
+      if (state !== 'pending') return state
+    }
     await sleep(o.intervalMs ?? 2000)
   }
 }
 
-export const accessText = (o: AccessOutcome) =>
-  o === 'denied' ? 'The Mac said no.' : o === 'expired' ? 'The request ran out of time. Try again.' : o === 'cancelled' ? 'Cancelled.' : ''
+// One line per outcome: a state added to the contract doesn't compile here until it has its words.
+const ACCESS_TEXT: Record<AccessOutcome, string> = {
+  approved: '',
+  denied: 'The Mac said no.',
+  expired: 'The request ran out of time. Try again.',
+  cancelled: 'Cancelled.',
+}
+
+export const accessText = (o: AccessOutcome) => ACCESS_TEXT[o]
 
 async function find(api: RelayApi, computerId: string): Promise<RelayComputer> {
   const list = await api.computers()

@@ -1,0 +1,7 @@
+{
+  "type": "BotInviteAccepted",
+  "body": {
+    "computerId": "cmp_7f3a9c",
+    "botDeviceId": "bot_5t6y"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "method": "logCall",
+  "type": "MaybeEntry",
+  "body": {
+    "entry": {
+      "id": "5128bca8-f0af-415a-ba77-990f13235016",
+      "seq": 3,
+      "botId": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+      "threadId": null,
+      "rev": 8,
+      "kind": "notice",
+      "turn": 1,
+      "data": {
+        "text": "Voice chat",
+        "callSeconds": 42
+      },
+      "createdAt": 1792998621729,
+      "updatedAt": 1792998621729
+    }
+  }
+}

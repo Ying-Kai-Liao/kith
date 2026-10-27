@@ -36,7 +36,7 @@ struct YourDevicesSection: View {
                                 openScreen: { openScreen(store) },
                                 openMarketplace: { closeSheets { app.marketplace = store.computer.id } },
                                 openVoice: { voicePage = computer.id },
-                                revoke: cloudComputer(computer.id).flatMap { c in c.access == "granted" ? { confirmRevoke = c } : nil },
+                                revoke: cloudComputer(computer.id).flatMap { c in c.access == .granted ? { confirmRevoke = c } : nil },
                                 remove: { confirmForget = computer })
                 }
             }
@@ -138,7 +138,7 @@ struct ComputerPageDestination: View {
     var body: some View {
         if let store = accounts.store(for: id) {
             let cloud = accounts.cloudComputers.first { $0.computerId == id }
-            ComputerPage(store: store, revokeTarget: cloud.flatMap { $0.access == "granted" ? $0 : nil },
+            ComputerPage(store: store, revokeTarget: cloud.flatMap { $0.access == .granted ? $0 : nil },
                          openScreen: { closeSheets { store.screenRequest = ScreenRequest() } },
                          openMarketplace: { closeSheets { app.marketplace = store.computer.id } })
         }
@@ -290,7 +290,7 @@ private struct AccountComputerRow: View {
             Spacer(minLength: 8)
             if ticket != nil {
                 Button("Code", action: ask).buttonStyle(.secondary)
-            } else if computer.access == "granted" {
+            } else if computer.access == .granted {
                 Button("Revoke", role: .destructive, action: revoke).buttonStyle(.secondary)
             } else {
                 Button("Ask for access", action: ask).buttonStyle(.secondary)
@@ -303,9 +303,10 @@ private struct AccountComputerRow: View {
         let online = computer.isOnline ? "Online" : "Offline"
         if let ticket { return "Waiting for your OK on the computer · \(ticket.code)" }
         return switch computer.access {
-        case "granted": "Approved for an earlier install of Kith. Revoke it, then ask again."
-        case "pending": "\(online) · A request is waiting"
-        default: "no access yet"
+        case .granted: "Approved for an earlier install of Kith. Revoke it, then ask again."
+        case .pending: "\(online) · A request is waiting"
+        // none (also what a word this version doesn't know reads as) or no device: not access.
+        case .noAccess, nil: "no access yet"
         }
     }
 }

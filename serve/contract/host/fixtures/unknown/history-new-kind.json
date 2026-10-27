@@ -1,0 +1,43 @@
+{
+  "method": "history",
+  "type": "Entries",
+  "body": {
+    "entries": [
+      {
+        "id": "f2a80932-d0f5-462d-b9ec-995efb025a66",
+        "seq": 1,
+        "botId": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+        "threadId": null,
+        "rev": 5,
+        "kind": "poll",
+        "turn": 1,
+        "data": {
+          "text": "hi",
+          "author": "sam",
+          "thread": null
+        },
+        "createdAt": 1792998619792,
+        "updatedAt": 1792998619792,
+        "newField": true
+      },
+      {
+        "id": "247ca8d2-4373-4f3d-8041-25285b10c02c",
+        "seq": 2,
+        "botId": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+        "threadId": null,
+        "rev": 6,
+        "kind": "agent",
+        "turn": 1,
+        "data": {
+          "text": "hello",
+          "final": true,
+          "author": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+          "thread": null
+        },
+        "createdAt": 1792998619793,
+        "updatedAt": 1792998619793
+      }
+    ],
+    "newField": "x"
+  }
+}

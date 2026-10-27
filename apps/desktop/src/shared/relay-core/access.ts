@@ -1,3 +1,4 @@
+import { paths, receive, type Requests } from '../cloud-contract.gen.ts'
 import type { AccessTicket, CloudResult } from '../relay.ts'
 import { b64url, computerIdOf, randomBytes, sasCode, sasCommit, unb64url, type Signer } from './crypto.ts'
 
@@ -30,17 +31,20 @@ export async function requestAccess(ask: AccessAsk): Promise<CloudResult<AccessT
     return failure(0, 'badSignKey', "This computer's key doesn't match its ID.")
   }
   const nD = randomBytes(32)
-  const made = await ask.request('POST', `v1/computers/${ask.computerId}/access-requests`, { commit: b64url(sasCommit(ask.signer.publicKey, nD)) }, true)
+  const commit: Requests['createAccessRequest'] = { commit: b64url(sasCommit(ask.signer.publicKey, nD)) }
+  const made = await ask.request('POST', paths.createAccessRequest(ask.computerId), commit, true)
   if (!made.ok) return made
-  const { requestId, expiresAt } = made.value as { requestId: string; expiresAt: number }
+  const { requestId, expiresAt } = receive('AccessRequestCreated', made.value)
   ask.created?.(requestId)
   let hostNonce: Uint8Array | null = null
   while (!hostNonce) {
     if (ask.cancelled()) return failure(0, 'cancelled', 'The request was cancelled.')
-    const status = await ask.request('GET', `v1/access-requests/${requestId}`, undefined, false)
+    const status = await ask.request('GET', paths.getAccessRequest(requestId), undefined, false)
     if (!status.ok) return status
-    const s = status.value as { status?: string; hostNonce?: string }
-    if (s.status !== 'pending') return failure(0, s.status === 'expired' ? 'requestExpired' : (s.status ?? 'denied'), "The computer didn't take the request.")
+    const s = receive('AccessStatus', status.value)
+    // A state this version doesn't know (or none) is over, as an expired request is.
+    const over = s.status === 'expired' || s.status === 'unknown' || s.status === undefined ? 'requestExpired' : s.status
+    if (s.status !== 'pending') return failure(0, over, "The computer didn't take the request.")
     if (s.hostNonce) {
       hostNonce = unb64url(s.hostNonce)
       if (!hostNonce || hostNonce.length !== 32) return failure(0, 'badNonce', 'The computer sent something unreadable.')
@@ -49,7 +53,8 @@ export async function requestAccess(ask: AccessAsk): Promise<CloudResult<AccessT
       await new Promise((r) => setTimeout(r, ask.pollMs ?? 2000))
     }
   }
-  const revealed = await ask.request('POST', `v1/access-requests/${requestId}/reveal`, { nonce: b64url(nD) }, true)
+  const reveal: Requests['revealAccessRequest'] = { nonce: b64url(nD) }
+  const revealed = await ask.request('POST', paths.revealAccessRequest(requestId), reveal, true)
   if (!revealed.ok) return revealed
   return { ok: true, value: { requestId, expiresAt, computerId: ask.computerId, code: sasCode(hostKey, ask.signer.publicKey, nD, hostNonce) } }
 }

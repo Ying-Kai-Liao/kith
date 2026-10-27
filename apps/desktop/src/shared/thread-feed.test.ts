@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import type { Entry } from './models.ts'
 import { threadFeed, toolRowOf, VISIBLE_STEPS } from './thread-feed.ts'
 
-const entry = (id: string, kind: string, data: Entry['data'] = {}): Entry =>
+const entry = (id: string, kind: Entry['kind'], data: Entry['data'] = {}): Entry =>
   ({ id, seq: 0, botId: 'b', threadId: 'r', rev: 1, kind, turn: 1, data, createdAt: 0, updatedAt: 0 })
 
 test('a long run of tool calls folds into its newest steps and a count', () => {

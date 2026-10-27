@@ -14,6 +14,7 @@
 
 use super::{Layout, Target, Who, now_ms, put, read, record_undo, sync, write};
 use anyhow::{Result, anyhow, bail};
+use hmac::{KeyInit as _, Mac as _};
 use kith_mem::files::{self, File, Version};
 use kith_mem::rusqlite::{Connection, params};
 use kith_mem::store::{self, Author, Entry, State};
@@ -55,7 +56,8 @@ pub(super) fn migrate(conn: &Connection) -> Result<()> {
         -- Retags of notes (promotion). `applied`: a narrowing tidying applied; `pending`: a widening waiting for the
         -- person in `person` ('' is the owner); `approved`: that person said yes and it was written; `declined`:
         -- kept private; `stale`: the note or the readers changed before the answer. `kith_facets.py` reads the
-        -- applied and approved rows to honour a wider audience in a note's frontmatter, so a row is the proof.
+        -- applied and approved rows to honour a wider audience in a note's frontmatter, so a row is the proof, and
+        -- `sig` (see [`signature`]) shows the host wrote it.
         CREATE TABLE IF NOT EXISTS hq_promotions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             agent TEXT NOT NULL,
@@ -71,10 +73,27 @@ pub(super) fn migrate(conn: &Connection) -> Result<()> {
             decided_by TEXT,
             created_at INTEGER NOT NULL,
             decided_at INTEGER,
-            dream INTEGER
+            dream INTEGER,
+            sig TEXT
         );
         CREATE INDEX IF NOT EXISTS hq_promotions_agent ON hq_promotions (agent, status);",
     )?;
+    let signed =
+        conn.query_row("SELECT 1 FROM pragma_table_info('hq_promotions') WHERE name = 'sig'", [], |_| Ok(())).is_ok();
+    if !signed {
+        conn.execute_batch("ALTER TABLE hq_promotions ADD COLUMN sig TEXT")?;
+        // Rows granted before approvals were signed are trusted once, as they stand at the upgrade. With no key to sign
+        // them they stay unsigned and grant nothing: their notes read as the folder default.
+        let ids = conn
+            .prepare("SELECT id FROM hq_promotions WHERE status IN ('applied', 'approved')")?
+            .query_map([], |r| r.get::<_, i64>(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        if !ids.is_empty() && approval_key(conn, true).is_some() {
+            for id in ids {
+                sign(conn, id)?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -265,19 +284,98 @@ fn roster() -> Roster {
     Roster::default()
 }
 
-/// Whether change `id` is a retag of `file` to `audience` that was applied or approved and not undone.
+/// Whether change `id` is a retag of `file` to `audience` that was applied or approved, not undone, and signed by
+/// the host: a row written into the database by hand grants nothing.
 pub(super) fn granted(conn: &Connection, agent: &str, file: &str, id: i64, audience: &str) -> bool {
-    conn.query_row(
-        "SELECT 1 FROM hq_promotions p JOIN memory_dreams d ON d.id = p.dream
-         WHERE p.id = ?1 AND p.agent = ?2 AND p.file = ?3 AND p.audience = ?4
-           AND p.status IN ('applied', 'approved') AND d.undone = 0
-           AND NOT EXISTS (SELECT 1 FROM hq_promotions q JOIN memory_dreams e ON e.id = q.dream
-                           WHERE q.agent = p.agent AND q.file = p.file AND q.id > p.id
-                             AND q.status IN ('applied', 'approved') AND e.undone = 0)",
-        params![id, agent, file, audience],
-        |_| Ok(()),
-    )
-    .is_ok()
+    let sig: Option<String> = conn
+        .query_row(
+            "SELECT p.sig FROM hq_promotions p JOIN memory_dreams d ON d.id = p.dream
+             WHERE p.id = ?1 AND p.agent = ?2 AND p.file = ?3 AND p.audience = ?4
+               AND p.status IN ('applied', 'approved') AND d.undone = 0
+               AND NOT EXISTS (SELECT 1 FROM hq_promotions q JOIN memory_dreams e ON e.id = q.dream
+                               WHERE q.agent = p.agent AND q.file = p.file AND q.id > p.id
+                                 AND q.status IN ('applied', 'approved') AND e.undone = 0)",
+            params![id, agent, file, audience],
+            |r| r.get(0),
+        )
+        .ok()
+        .flatten();
+    let (Some(sig), Some(key)) = (sig, approval_key(conn, false)) else { return false };
+    let Some(sig) = unhex(&sig) else { return false };
+    mac(&key, id, agent, file, audience).is_some_and(|m| m.verify_slice(&sig).is_ok())
+}
+
+/// The key that signs granted retags: `secrets/memory-approvals.key` beside the database, in the state folder, where
+/// no guest run reads. Only the host makes it (`create`); the kernel's twin (`kith_facets.py`) only reads it.
+fn approval_key(conn: &Connection, create: bool) -> Option<Vec<u8>> {
+    let db = Path::new(conn.path().filter(|p| !p.is_empty())?);
+    let path = db.parent()?.join("secrets").join("memory-approvals.key");
+    if create && !path.exists() {
+        make_key(&path).ok()?;
+    }
+    std::fs::read(&path).ok().filter(|k| k.len() == 32)
+}
+
+fn make_key(path: &Path) -> Result<()> {
+    use std::io::Write as _;
+    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+    let dir = path.parent().ok_or_else(|| anyhow!("no folder for the key"))?;
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?;
+    let mut key = [0u8; 32];
+    getrandom::fill(&mut key).map_err(|_| anyhow!("random key unavailable"))?;
+    let tmp = dir.join(format!(".memory-approvals.{}.tmp", uuid::Uuid::new_v4()));
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    f.write_all(&key)?;
+    f.sync_all()?;
+    // Linked into place whole, so two processes making it at once keep one key and none reads half of one.
+    let linked = std::fs::hard_link(&tmp, path);
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Err(e) if e.kind() != std::io::ErrorKind::AlreadyExists => Err(e.into()),
+        _ => Ok(()),
+    }
+}
+
+/// The HMAC over what a grant is checked against (twin of `signature` in `kernel/lib/kith_facets.py`). Each text is
+/// prefixed with its length in bytes, so no two rows sign the same message.
+fn mac(key: &[u8], id: i64, agent: &str, file: &str, audience: &str) -> Option<hmac::Hmac<sha2::Sha256>> {
+    use std::fmt::Write as _;
+    let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key).ok()?;
+    let mut msg = format!("kith-promotion-v1\n{id}");
+    for field in [agent, file, audience] {
+        let _ = write!(msg, "\n{}:{field}", field.len());
+    }
+    mac.update(msg.as_bytes());
+    Some(mac)
+}
+
+pub(super) fn signature(key: &[u8], id: i64, agent: &str, file: &str, audience: &str) -> Option<String> {
+    use std::fmt::Write as _;
+    let bytes = mac(key, id, agent, file, audience)?.finalize().into_bytes();
+    let mut s = String::with_capacity(64);
+    for b in bytes {
+        let _ = write!(s, "{b:02x}");
+    }
+    Some(s)
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    if s.len() != 64 {
+        return None;
+    }
+    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(s.get(i..i + 2)?, 16).ok()).collect()
+}
+
+/// Signs row `id` once it is applied or approved: what [`granted`] checks.
+fn sign(conn: &Connection, id: i64) -> Result<()> {
+    let key = approval_key(conn, true).ok_or_else(|| anyhow!("no key to sign the approval with"))?;
+    let (agent, file, audience): (String, String, String) =
+        conn.query_row("SELECT agent, file, audience FROM hq_promotions WHERE id = ?1", [id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?;
+    let sig = signature(&key, id, &agent, &file, &audience).ok_or_else(|| anyhow!("bad key"))?;
+    conn.execute("UPDATE hq_promotions SET sig = ?1 WHERE id = ?2", params![sig, id])?;
+    Ok(())
 }
 
 /// The markdown files under the agent's `memory/`, relative, sorted, without hidden ones or links.
@@ -637,6 +735,7 @@ pub fn apply(conn: &Connection, m: &Material, plan: &Plan) -> Result<Applied> {
             }
             Ok(Judgement::Allowed(retag)) => {
                 let change = insert_row(conn, &m.agent, p, &current, &retag, "applied", "")?;
+                sign(conn, change)?;
                 let after = retagged(&text, &retag, change, "tidy");
                 if put_file(&mut out, &target, Some(&text), &after)? {
                     conn.execute("UPDATE hq_promotions SET dream = ?1 WHERE id = ?2", params![ensure_run()?, change])?;
@@ -846,18 +945,21 @@ pub fn answer(conn: &Connection, layout: &Layout, agent: &str, id: i64, approve:
     }
     let who = if by.is_empty() { "owner" } else { by };
     // The row is `approved` before the file says so: the kernel trusts the row, and a write that fails leaves it
-    // pending again.
+    // pending again. With no key to sign it, the approval would grant nothing: it stays waiting.
+    approval_key(conn, true).ok_or_else(|| anyhow!("no key to sign the approval with"))?;
     decide("approved")?;
+    sign(conn, id)?;
     // The note must still be what the approval was judged on.
     if read(&target.path).as_deref() != Some(text.as_str()) {
-        conn.execute("UPDATE hq_promotions SET status = 'stale' WHERE id = ?1", [id])?;
+        conn.execute("UPDATE hq_promotions SET status = 'stale', sig = NULL WHERE id = ?1", [id])?;
         return Ok(Answered { status: "stale", run: None });
     }
     let written = match write(conn, &target, Who::Tidy(agent), &retagged(&text, &retag, id, who))? {
         Ok(w) => w,
         Err(refusal) => {
             conn.execute(
-                "UPDATE hq_promotions SET status = 'pending', decided_by = NULL, decided_at = NULL WHERE id = ?1",
+                "UPDATE hq_promotions SET status = 'pending', decided_by = NULL, decided_at = NULL, sig = NULL
+                 WHERE id = ?1",
                 [id],
             )?;
             bail!("{}: {}", target.label(), refusal.message());

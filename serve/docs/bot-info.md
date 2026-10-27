@@ -103,22 +103,31 @@ For a kith bot the host never stores or passes its own model, effort, Fast mode 
 as they were, `kith <agent> --launch-json` is called without `-m`, `-e` or `--permission-mode`): hq is the source.
 Old bots may still carry a stale copy in the host's config; it is ignored, not cleared.
 
-## `kithAccessGrants { botId }` and `kithRemoveAccessGrant { botId, person, kind, target }`
+## `accessLedger { person?, agent? }` and `removeGrant { kind, key }`: the grants ledger
 
 ```json
-{ "grants": [ { "person": "sam", "name": "Sam", "kind": "read" | "write" | "domain", "target": "/Users/kai/docs" | "pypi.org", "since": 1760000000000 | null } ] }
+{ "grants": [ { "key": "read:house:sam:/Users/kai/docs", "kind": "read" | "write" | "domain" | "service",
+                "agent": "house", "person": "sam", "name": "Sam", "target": "/Users/kai/docs" | "pypi.org" | "notion/sam",
+                "since": 1760000000000 | null, "approved_by": null } ] }
 ```
 
-The agent's standing "always" answers to escape cards (`serve/host/src/cards/access.rs`): what each person may reach
-beyond the box in every run (`kith-auth access <agent> --json`, read from `auth.json`). `person` `*` is a grant on the
-everyone row (written by hand); `since` is null for a grant written before kith-auth kept times. The Details page shows
-them as an Access list, each with Remove.
+Every lasting grant for anyone but the owner, as kith-auth keeps it (`kith-auth ledger [--person p] [--agent a] --json`,
+read from `auth.json`; `serve/host/src/api/people.rs`). Kinds `read`, `write` and `domain` are the "always" answers to
+escape cards (`serve/host/src/cards/access.rs`): what that person may reach beyond the box in every run of that agent.
+Kind `service` is a person's own service grant (`<agent>@<person>`, target the service profile); the owner's are not
+listed. `person` `*` is a grant on the everyone row (written by hand). `since` is null for a grant written before
+kith-auth kept times, and for every service grant; `approved_by` is null (not recorded yet). Both filters are optional
+and combine; the per-bot Details page passes `agent` and shows the answer as an Access list, each with Remove. Bot
+auto-allow is not in the ledger: it stays the host's per-person toggle (`setAutoAllowBots`).
 
-`kithRemoveAccessGrant` takes one away (`kith-auth access <agent> <person> <kind> <target> --rm`, matched as listed) and
-answers with the list read back. A run launched after it no longer gets the grant (`consumeAccess` asks kith-auth at every
-launch); a run already going keeps the sandbox it started with. A grant still listed after the removal, an unknown
-`kind`, or a `person`/`target` that starts with `-` is HTTP 400. Both are owner-only (not in `MEMBER_METHODS`): a member
-gets 403. A paired phone needs the Control scope, as for every call.
+`key` is the one name for a row, made by kith-auth: `<kind>:<agent>:<person>:<target>`. Kind, agent and person never
+hold a `:`, so the target is everything after the third one. `removeGrant` takes that row away
+(`kith-auth ledger --rm <key>`) and answers `{ "removed": <the entry> }`. No sweep follows, because nothing outlives a
+run for a grant: a run launched after it no longer gets it (`consumeAccess` and `kith-auth granted` are asked at every
+launch); a run already going keeps the sandbox it started with. A key the ledger doesn't hold, a `kind` that isn't one
+of the four or doesn't match the key's, a filter that isn't a plain id (empty, starting with `-`, not a string), or a
+grant still listed after the removal is HTTP 400. Both are owner-only (not in `MEMBER_METHODS`): a member gets 403. A
+paired phone needs the Control scope, as for every call.
 
 An "always" that kith-auth refuses (the person uses the agent through the everyone row and has no membership of their
 own, or a bot asks for more than its owner holds) stays a once grant. The card says so: its entry gets

@@ -1,0 +1,7 @@
+{
+  "method": "myBots",
+  "type": "BotGuests",
+  "body": {
+    "bots": []
+  }
+}

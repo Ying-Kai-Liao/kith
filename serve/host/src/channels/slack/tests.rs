@@ -1,5 +1,5 @@
 //! The Slack adapter against a fake Slack (axum: Web API, file URLs and a Socket Mode websocket), the real core and
-//! the stub hq (`tests/fixtures/channels_stub.py`). Ports the Slack checks of `kernel/tests/kith-bridge-check`.
+//! the stub hq (`tests/fixtures/channels_stub.py`). Ported from the retired Python bridge's checks.
 
 #![cfg(unix)]
 
@@ -381,7 +381,7 @@ impl Rig {
         let (bin, stub) = (dir.join("bin"), dir.join("stub"));
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(&stub).unwrap();
-        for tool in ["kith", "kith-auth", "kith-live"] {
+        for tool in ["kith", "kith-auth"] {
             std::os::unix::fs::symlink(stub_script(), bin.join(tool)).unwrap();
         }
         for (name, card) in [
@@ -406,7 +406,6 @@ impl Rig {
         let paths = Paths {
             hq_bin: bin.join("kith"),
             auth_bin: bin.join("kith-auth"),
-            live_bin: bin.join("kith-live"),
             machine: dir.join("machine"),
             agent_roots: vec![dir.join("agents")],
             data: dir.join("data"),

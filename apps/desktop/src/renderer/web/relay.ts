@@ -1,3 +1,4 @@
+import { paths, receive, type Requests } from '../../shared/cloud-contract.gen.ts'
 import type { KithBridge } from '../../shared/ipc.ts'
 import type { AccessProgress, AccessTicket, CloudResult, RelayCallError, RelayComputer, RelayState } from '../../shared/relay.ts'
 import { accessProgress, relayComputers } from '../../shared/relay.ts'
@@ -83,7 +84,7 @@ export class WebRelay {
     }
     let done = this.registered.get(key)
     if (!done) {
-      done = this.d.cloud.request('POST', 'v1/devices', { name: this.d.deviceName, platform: 'web' }, true)
+      done = this.d.cloud.request('POST', paths.registerDevice(), { name: this.d.deviceName, platform: 'web' } satisfies Requests['registerDevice'], true)
       this.registered.set(key, done)
     }
     const res = await done
@@ -128,7 +129,7 @@ export class WebRelay {
     computers: async (): Promise<CloudResult<RelayComputer[]>> => {
       const ensured = await this.ensureDevice()
       if (!ensured.ok) return ensured
-      const res = await this.d.cloud.request('GET', 'v1/computers', undefined, true)
+      const res = await this.d.cloud.request('GET', paths.listComputers(), undefined, true)
       if (!res.ok) return res
       return { ok: true, value: relayComputers(res.value) }
     },
@@ -203,16 +204,16 @@ export class WebRelay {
 
     accessStatus: async (requestId): Promise<CloudResult<AccessProgress>> => {
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId)) return failure(400, 'badRequest', 'Bad request id.')
-      const res = await this.d.cloud.request('GET', `v1/access-requests/${requestId}`, undefined, false)
+      const res = await this.d.cloud.request('GET', paths.getAccessRequest(requestId), undefined, false)
       if (!res.ok) return res
-      return { ok: true, value: accessProgress((res.value as { status?: unknown }).status) }
+      return { ok: true, value: accessProgress(receive('AccessStatus', res.value).status) }
     },
 
     cancelAccess: async (computerId, requestId) => {
       const waiting = this.asking.get(computerId)
       if (waiting) waiting.cancelled = true
       const id = requestId ?? waiting?.requestId
-      if (id && /^[A-Za-z0-9_-]{1,128}$/.test(id)) await this.d.cloud.request('DELETE', `v1/access-requests/${id}`, undefined, false)
+      if (id && /^[A-Za-z0-9_-]{1,128}$/.test(id)) await this.d.cloud.request('DELETE', paths.cancelAccessRequest(id), undefined, false)
     },
   }
 }
