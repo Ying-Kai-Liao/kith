@@ -24,12 +24,12 @@
       {
         "requestId": "req_5e6f",
         "userId": "user_3def",
-        "deviceKey": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+        "deviceKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
         "deviceName": "Sam’s Pixel",
         "platform": "android",
         "email": "sam@example.com",
-        "commit": "dGhpcyBpcyBhIHRlc3Qga2V5IG9mIDMyIGJ5dGVzIQ",
-        "hostNonce": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+        "commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "hostNonce": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
         "createdAt": 1793000000000,
         "expiresAt": 1793000600000,
         "origin": {
@@ -50,7 +50,7 @@
       {
         "botDeviceId": "bot_5t6y",
         "inviteId": "inv_7u8i",
-        "deviceKey": "dGhpcyBpcyBhIHRlc3Qga2V5IG9mIDMyIGJ5dGVzIQ",
+        "deviceKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "name": "ci-bot",
         "provider": null,
         "createdAt": 1792500000000
