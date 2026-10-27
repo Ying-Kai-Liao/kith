@@ -6,6 +6,7 @@
     <key>KithAppGroup</key><string>$(KITH_APP_GROUP)</string>
     <key>KithURLScheme</key><string>$(KITH_URL_SCHEME)</string>
     <key>KithAPNSEnvironment</key><string>$(KITH_APNS_ENVIRONMENT)</string>
+    <key>KithPushRelayHost</key><string>$(KITH_PUSH_RELAY_HOST)</string>
 	<key>KithKeychainGroup</key>
 	<string>$(AppIdentifierPrefix)$(KITH_KEYCHAIN_GROUP)</string>
 	<key>CFBundleURLTypes</key>

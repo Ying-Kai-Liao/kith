@@ -104,8 +104,49 @@ public struct PeopleLimits: View {
     }
 }
 
+/// "Limit for your bots": what the owner's bots may spend together on every agent before they stop and you get a card.
+/// Off by default; nothing shows for a non-owner or an older host.
+public struct BotsCapRow: View {
+    let store: BotStore
+    @State private var cap: BotsCap?
+    @State private var error: String?
+    @State private var busy = false
+
+    public init(store: BotStore) { self.store = store }
+
+    public var body: some View {
+        Group {
+            if let cap {
+                BudgetRow(name: "your bots", line: error ?? "\(cap.line) · all agents", budget: cap.cap, busy: busy) { b in
+                    Task { await set(b) }
+                }
+            }
+        }
+        .task {
+            guard store.isOwner else { return }
+            do {
+                cap = try await store.ready().botsCap()
+            } catch where isUnknownMethod(error) {
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func set(_ b: Double?) async {
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            cap = try await store.ready().setBotsCap(b)
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
 /// "Limit for Mia · Each month $20": the stock pop-up with a custom amount.
-private struct BudgetRow: View {
+struct BudgetRow: View {
     let name: String
     let line: String
     let budget: Double?
