@@ -6,7 +6,7 @@
   kith ask <agent> -C DIR "task"        ... in DIR
   kith ask <agent> -c "follow-up"       continue the last conversation with that agent from this directory
   kith ask ls                           the conversations kept, newest first
-  kith ask <agent>@<machine> "task"     an agent on another machine of yours, over ssh (kith remote --help)
+  kith ask <agent>@<machine> "task"     an agent on another machine of yours, over ssh; the owner's runs only (kith remote --help)
   kith ask --bg <agent> [options] "task"  the same run in the background: prints an id at once and returns
   kith ask --wait ID [--timeout S]      the answers to ID since you last looked (waits up to S seconds, default 600,
                                       for the first; exit 3 when none came). For a --bg run: waits for the run to

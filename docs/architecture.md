@@ -170,8 +170,9 @@ runs and restarts on its own. `core.py` holds what is the same everywhere; an ad
   default, keys and bots shared; `"*"` shares one on purpose. A run for anyone else never gets someone else's
   profile, whatever the grants say.
 
-A run's person is `KITH_PERSON`: set only by entry points (the bridge from the sender's account, a schedule), unset
-means the owner, inherited by every helper. `bin/kith` resolves it before anything else and fails closed. For anyone but
+A run's person is `KITH_PERSON`: set only by entry points (the bridge from the sender's account, a schedule from the
+person whose run added the job, checked against kith-auth when it is due), unset means the owner, inherited by every
+helper. `kith ask agent@machine` is refused for anyone but the owner: the other machine has no id for them yet. `bin/kith` resolves it before anything else and fails closed. For anyone but
 the owner, the membership's mode replaces the caller's, and the run:
 - stays on Claude Code;
 - sees only the kernel, the agent's own folder, its pinned package and the current project;
