@@ -254,9 +254,8 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None):
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, 'w') as f:
         json.dump(mine, f)
-    lock = os.open(dest.with_name(f'{sid}.claim.lock'), os.O_WRONLY | os.O_CREAT, 0o600)
+    lock = lock_claim(dest.with_name(f'{sid}.claim.lock'))
     try:
-        fcntl.flock(lock, fcntl.LOCK_EX)
         for _ in range(3):
             try:
                 os.link(tmp, dest)   # exclusive: fails when a claim is there
@@ -277,21 +276,48 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None):
         tmp.unlink(missing_ok=True)
 
 
+def lock_claim(path):
+    """Open and flock the claim lock at path; returns the descriptor, held. prune_stale removes a lock file while it holds
+    it, so a lock taken on a file that is no longer the one at path (removed, or made again) is let go and taken anew:
+    whoever holds the descriptor this returns holds the lock every other taker sees (the host's take checks the same)."""
+    while True:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            held = os.fstat(fd)
+            try:
+                now_there = os.stat(path)
+            except FileNotFoundError:
+                now_there = None
+        except BaseException:
+            os.close(fd)
+            raise
+        if now_there and (now_there.st_dev, now_there.st_ino) == (held.st_dev, held.st_ino):
+            return fd
+        os.close(fd)
+
+
 def prune_stale(keep):
     """Remove the session claims whose holder is gone (a one-shot exec'd claude, so nothing of its gives its claim back): a
     stale claim is free anyway, this only keeps a fresh run's claim from staying behind for good. Each under its lock,
-    re-read, as a taker would judge it. The host's take-over claims and the proc claims are left to their owners."""
-    for f in keep.parent.glob('*.claim'):
-        if f == keep or f.name.startswith('proc-') or f.name.endswith('.takeover.claim'):
+    re-read, as a taker would judge it. A lock file whose claim is gone (pruned here, or given back) goes too, removed
+    while held: a taker that opened it before then finds it gone once it gets the lock and takes the new one (lock_claim),
+    and a live claim's lock is never removed. The host's take-over claims and the proc claims are left to their owners."""
+    sids = {f.name[:-len('.claim')] for f in keep.parent.glob('*.claim')}
+    sids |= {f.name[:-len('.claim.lock')] for f in keep.parent.glob('*.claim.lock')}
+    for sid in sorted(sids):
+        if sid == keep.name[:-len('.claim')] or sid.startswith(('proc-', '.')) or sid.endswith('.takeover'):
             continue
+        f, lock_path = keep.with_name(f'{sid}.claim'), keep.with_name(f'{sid}.claim.lock')
         try:
-            lock = os.open(f.with_name(f.name[:-len('.claim')] + '.claim.lock'), os.O_WRONLY | os.O_CREAT, 0o600)
+            lock = lock_claim(lock_path)
         except OSError:
             continue
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX)
             if f.exists() and not claim_live(read_claim(f)):
                 f.unlink(missing_ok=True)
+            if not f.exists():
+                lock_path.unlink(missing_ok=True)   # still ours: lock_claim checked it is the file at this path
         finally:
             os.close(lock)
 
@@ -367,9 +393,8 @@ def release_claims(pid):
     d = reg_dir()
     for f in (d.glob('*.claim') if d and d.is_dir() else ()):
         # Under the claim lock, re-reading: a taker may have replaced the claim since the glob.
-        lock = os.open(f.with_name(f.name[:-len('.claim')] + '.claim.lock'), os.O_WRONLY | os.O_CREAT, 0o600)
+        lock = lock_claim(f.with_name(f.name[:-len('.claim')] + '.claim.lock'))
         try:
-            fcntl.flock(lock, fcntl.LOCK_EX)
             c = read_claim(f)
             if c and c.get('pid') == pid:
                 f.unlink(missing_ok=True)

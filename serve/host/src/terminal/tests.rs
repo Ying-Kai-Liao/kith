@@ -732,6 +732,41 @@ async fn racing_takers_of_a_stale_claim_leave_exactly_one_owner() {
     assert_eq!(pids.iter().zip(&wins).find(|(_, w)| **w).map(|(p, _)| *p), Some(owner));
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn a_taker_waiting_on_a_claim_lock_the_kernel_prunes_takes_the_new_lock_not_the_removed_one() {
+    use std::os::fd::AsRawFd as _;
+    let flock = |p: &Path| {
+        let f = std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(p).unwrap();
+        // SAFETY: the descriptor is open for the life of `f`.
+        assert_eq!(unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) }, 0);
+        f
+    };
+    let r = Rig::new();
+    let (state, live) = (r.state(), r.sleeper());
+    let path = claim::path(&state, "s1", false);
+    let lock = path.with_file_name("s1.claim.lock");
+    std::fs::write(&path, json!({"pid": DEAD, "procStart": "x", "at": "t"}).to_string()).unwrap();
+    let pruner = flock(&lock);
+    let taker = std::thread::spawn({
+        let state = state.clone();
+        move || claim::take(&state, "s1", Kind::Terminal, std::process::id(), false).unwrap()
+    });
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    // What kith-sessions' prune_stale does under the lock: the stale claim and its lock file go. A kernel taker then makes
+    // the lock anew and holds it while it writes its claim.
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_file(&lock).unwrap();
+    let kernel = flock(&lock);
+    drop(pruner);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(!taker.is_finished(), "the waiting taker went ahead under the removed lock");
+    std::fs::write(&path, json!({"pid": live, "procStart": null, "at": "t"}).to_string()).unwrap();
+    drop(kernel);
+    assert!(taker.join().unwrap().is_err(), "the kernel taker's live claim holds");
+    assert_eq!(claim::read(&path).map(|c| c.pid), Some(live));
+}
+
 #[tokio::test]
 async fn a_host_turns_own_claim_does_not_stop_the_hosts_sends() {
     let r = Rig::new();

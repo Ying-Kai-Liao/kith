@@ -5,8 +5,10 @@
 //! `{"pid": <claimer>, "procStart": "<ps lstart>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot", "takeover": bool}`
 //!
 //! A claim whose pid is gone, or whose pid now started at another time, is stale and is replaced under a lock file
-//! (`<sid>.claim.lock`, flock). A claimer is a long-lived process: `kith <agent> --resume` claims for the shell
-//! that then `exec`s into `kith-sessions run`, so the pid stays the same until claude has exited.
+//! (`<sid>.claim.lock`, flock; the kernel's prune removes a stale claim's lock with it, while it holds it, and every taker
+//! checks after the flock that its lock is still the file at that path). A claimer is a long-lived process:
+//! `kith <agent> --resume` claims for the shell that then `exec`s into `kith-sessions run`, so the pid stays the same
+//! until claude has exited.
 //!
 //! The file is made whole in a temp file (`O_CREAT|O_EXCL`) and linked into place (`link` fails when the name exists), so
 //! no reader ever sees an empty claim.
@@ -329,21 +331,29 @@ fn children_of(pid: u32, depth: usize) -> Vec<u32> {
     all
 }
 
-/// An advisory lock on a file, held until dropped.
+/// An advisory lock on a file, held until dropped. The kernel's `prune_stale` removes a stale claim's lock file while it
+/// holds it, so a lock taken on a file that is no longer the one at `path` (removed, or made again) is let go and taken
+/// anew: whoever holds a `Lock` holds the one every other taker sees (the kernel's `lock_claim` checks the same).
 struct Lock(#[allow(dead_code)] std::fs::File);
 
 impl Lock {
     fn exclusive(path: &Path) -> std::io::Result<Self> {
         #[cfg(unix)]
-        {
+        loop {
             use std::os::fd::AsRawFd as _;
-            use std::os::unix::fs::OpenOptionsExt as _;
+            use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _};
             let file = std::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(path)?;
             // SAFETY: the descriptor is open for the life of `file`.
             if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } != 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            Ok(Self(file))
+            let held = file.metadata()?;
+            match std::fs::metadata(path) {
+                Ok(there) if (there.dev(), there.ino()) == (held.dev(), held.ino()) => return Ok(Self(file)),
+                Ok(_) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e),
+            }
         }
         #[cfg(not(unix))]
         {
