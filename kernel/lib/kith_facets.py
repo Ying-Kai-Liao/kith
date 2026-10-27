@@ -4,7 +4,7 @@ Facets come from the file's YAML frontmatter, else from the folder the file live
 A file with no facets, or facets this reads wrongly, is owner-only and project-less: the most private reading, so old
 data never widens. Python twin of the mapping table in the design doc; the host reads memory_entries.room itself later.
 """
-import os, re, sqlite3, sys
+import hashlib, hmac, os, re, sqlite3, sys
 from pathlib import Path
 
 ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
@@ -118,26 +118,40 @@ def within(new, old, rooms=None):
     return n <= o
 
 
+def signature(key, change, agent, rel, audience):
+    """The host's HMAC over a granted row (twin of `signature` in serve/host/src/hqmem/tidy.rs)."""
+    msg = 'kith-promotion-v1\n%d' % change
+    for field in (agent, rel, audience):
+        msg += '\n%d:%s' % (len(field.encode()), field)
+    return hmac.new(key, msg.encode(), hashlib.sha256).hexdigest()
+
+
 def grant_from_db(agent, rel):
     """A `grant(change_id, audience)` for the note `rel` of `agent`: true only for a row Tidy's host wrote in
     <state>/memory.db (hq_promotions) for this very note and audience, applied or approved, whose tidy-up has not been
-    undone. Any error (no database, old schema) is no grant: fail closed."""
+    undone, and signed with the host's key in <state>/secrets (so a row written into the database by hand grants
+    nothing). Any error (no database, old schema, no key) is no grant: fail closed."""
     def grant(change, audience):
         try:
             sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
             from kith_paths import paths
-            db = sqlite3.connect('file:%s?mode=ro' % (paths()['KITH_STATE'] / 'memory.db'), uri=True, timeout=2)
+            state = paths()['KITH_STATE']
+            key = (state / 'secrets' / 'memory-approvals.key').read_bytes()
+            if len(key) != 32:
+                return False
+            db = sqlite3.connect('file:%s?mode=ro' % (state / 'memory.db'), uri=True, timeout=2)
             try:
-                return db.execute(
-                    "SELECT 1 FROM hq_promotions p JOIN memory_dreams d ON d.id = p.dream "
+                row = db.execute(
+                    "SELECT p.sig FROM hq_promotions p JOIN memory_dreams d ON d.id = p.dream "
                     "WHERE p.id = ? AND p.agent = ? AND p.file = ? AND p.audience = ? "
                     "AND p.status IN ('applied', 'approved') AND d.undone = 0 "
                     "AND NOT EXISTS (SELECT 1 FROM hq_promotions q JOIN memory_dreams e ON e.id = q.dream "
                     "WHERE q.agent = p.agent AND q.file = p.file AND q.id > p.id "
                     "AND q.status IN ('applied', 'approved') AND e.undone = 0)",
-                    (change, agent, rel, audience)).fetchone() is not None
+                    (change, agent, rel, audience)).fetchone()
             finally:
                 db.close()
+            return bool(row and row[0]) and hmac.compare_digest(row[0], signature(key, change, agent, rel, audience))
         except Exception:
             return False
     return grant

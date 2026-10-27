@@ -49,19 +49,29 @@ check "frontmatter can narrow the audience" "[ \"\$(F \"print(k.facets_for('peop
 check "frontmatter cannot widen the audience" "[ \"\$(F \"print(k.facets_for('MEMORY.md','echo','---\\naudience: shared\\n---\\nx')['audience'])\")\" = owner ]"
 check "junk facets read as owner-only" "[ \"\$(F \"print(k.facets_for('x.md','echo','---\\naudience: person:../x\\n---\\n')['audience'])\")\" = owner ]"
 
-# promotion: a wider audience in the frontmatter counts only with a recorded, approved, not undone change
-python3 - "$KITH_STATE/memory.db" <<'PY'
-import sqlite3, sys
-db = sqlite3.connect(sys.argv[1])
+# promotion: a wider audience in the frontmatter counts only with a recorded, approved, not undone change that the
+# host signed with its key in <state>/secrets (row 8 is written without the key; row 9 is signed with another key)
+python3 - "$KITH_STATE" "$KERNEL/lib" <<'PY'
+import os, sqlite3, sys
+sys.path.insert(0, sys.argv[2])
+import kith_facets as k
+key, other = os.urandom(32), os.urandom(32)
+with open(os.path.join(sys.argv[1], 'secrets', 'memory-approvals.key'), 'wb') as f:
+    f.write(key)
+db = sqlite3.connect(os.path.join(sys.argv[1], 'memory.db'))
 db.executescript("""
 CREATE TABLE memory_dreams (id INTEGER PRIMARY KEY, bot TEXT, at INTEGER, undone INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE hq_promotions (id INTEGER PRIMARY KEY, agent TEXT, file TEXT, audience TEXT, status TEXT, dream INTEGER);
+CREATE TABLE hq_promotions (id INTEGER PRIMARY KEY, agent TEXT, file TEXT, audience TEXT, status TEXT, dream INTEGER, sig TEXT);
 INSERT INTO memory_dreams VALUES (1, 'echo', 0, 0), (2, 'echo', 0, 1);
-INSERT INTO hq_promotions VALUES (1, 'echo', 'MEMORY.md', 'shared', 'approved', 1),
-  (2, 'echo', 'MEMORY.md', 'shared', 'pending', NULL), (3, 'echo', 'MEMORY.md', 'shared', 'approved', 2),
-  (4, 'other', 'MEMORY.md', 'shared', 'approved', 1), (5, 'echo', 'people/sam/n.md', 'room:grp1', 'applied', 1),
-  (6, 'echo', 'sup.md', 'shared', 'approved', 1), (7, 'echo', 'sup.md', 'owner', 'applied', 1);
 """)
+rows = [(1, 'echo', 'MEMORY.md', 'shared', 'approved', 1), (2, 'echo', 'MEMORY.md', 'shared', 'pending', None),
+        (3, 'echo', 'MEMORY.md', 'shared', 'approved', 2), (4, 'other', 'MEMORY.md', 'shared', 'approved', 1),
+        (5, 'echo', 'people/sam/n.md', 'room:grp1', 'applied', 1), (6, 'echo', 'sup.md', 'shared', 'approved', 1),
+        (7, 'echo', 'sup.md', 'owner', 'applied', 1), (8, 'echo', 'forged.md', 'shared', 'approved', 1),
+        (9, 'echo', 'forged2.md', 'shared', 'approved', 1)]
+for r in rows:
+    sig = None if r[0] == 8 else k.signature(other if r[0] == 9 else key, *r[:4])
+    db.execute('INSERT INTO hq_promotions VALUES (?, ?, ?, ?, ?, ?, ?)', r + (sig,))
 db.commit()
 PY
 wide() { F "print(k.facets_for('${3:-MEMORY.md}','echo','---\\naudience: $2\\napproved_change: $1\\n---\\nx')['audience'])"; }
@@ -74,6 +84,13 @@ check "a change approved for another audience does not" "[ \"\$(wide 1 room:grp1
 check "a change for another note does not" "[ \"\$(wide 1 shared people/sam/other.md)\" = person:sam ]"
 check "an approval a newer change superseded does not come back" "[ \"\$(wide 6 shared sup.md)\" = owner ]"
 check "an applied narrowing is read" "[ \"\$(wide 5 room:grp1 people/sam/n.md)\" = room:grp1 ]"
+check "an approved row the host did not sign does not" "[ \"\$(wide 8 shared forged.md)\" = owner ]"
+check "a row signed with another key does not" "[ \"\$(wide 9 shared forged2.md)\" = owner ]"
+# the same answer as the host's signature (serve/host/src/hqmem/promote_tests.rs)
+check "the signature is the host's" "[ \"\$(F \"print(k.signature(bytes(range(32)), 7, 'echo', 'people/sam/ü.md', 'room:grp1'))\")\" = 8f50a51b1e41ae8cb8f5488e7dff393bba6b281b275075cf6c122932aa9c9c7f ]"
+mv "$KITH_STATE/secrets/memory-approvals.key" "$T/key.bak"
+check "with no key nothing is granted" "[ \"\$(wide 1 shared)\" = owner ]"
+mv "$T/key.bak" "$KITH_STATE/secrets/memory-approvals.key"
 check "the hand-edited wider frontmatter is still ignored" "[ \"\$(F \"print(k.facets_for('MEMORY.md','echo','---\\naudience: shared\\n---\\nx')['audience'])\")\" = owner ]"
 # the audience order (twin of crates/memory/src/tidy/promote.rs): from to allowed
 W() { F "print(k.within('$2', '$1', {'duo': ['owner', 'sam'], 'trio': ['sam', 'eve']}))"; }

@@ -260,9 +260,15 @@ Rules:
    have changed in between).
 5. Approval proof: a wider audience in a note's frontmatter counts only when `approved_change` names a row in
    `<state>/memory.db` (`hq_promotions`) for that agent, note and audience that is applied or approved, not undone and
-   not superseded by a newer change. Runs have Read/Edit denied on `memory.db*`. Limit: this covers the path, not the
-   note's later content, and a run's shell can still write the database; signing approvals (an HMAC key under
-   `$KITH_SECRETS`) is the follow-up that closes that.
+   not superseded by a newer change, and whose `sig` is the host's HMAC-SHA256 over the row's id, agent, note and
+   audience. The key is `<state>/secrets/memory-approvals.key` (32 random bytes, mode 0600, `$KITH_SECRETS/` in the
+   current layout), which only the host creates; `kith_facets.py` only reads it. A row with no key or no valid
+   signature grants nothing, so a row written into the database by hand, or a waiting question flipped to
+   `approved`, reads as the folder default. Rows granted before signing existed are signed once when the host first
+   opens the upgraded database. Runs have Read/Edit denied on `memory.db*`, and a guest run's sandbox denies the
+   state folder's `secrets/`. Limits: this covers the path, not the note's later content; an owner run's shell runs
+   unsandboxed as the same user and can read the key; and `memory_dreams.undone` is not signed, so a shell that can
+   write the database can bring back an approval that was undone.
 
 ## Forget
 
