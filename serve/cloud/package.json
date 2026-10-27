@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "wrangler dev --env local",
     "deploy:dev": "wrangler deploy --env kith-dev",
-    "deploy:main": "wrangler deploy --env kith",
+    "build:web": "cd ../../apps/desktop && KITH_WEB_BASE=/join/ KITH_WEB_OUT_DIR=../../serve/cloud/site/join KITH_WEB_CLOUD_URL=https://api.kithbot.app KITH_WEB_CLERK_PUBLISHABLE_KEY=pk_live_Y2xlcmsua2l0aGJvdC5hcHAk npm run build:web",
+    "deploy:main": "npm run build:web && wrangler deploy --env kith",
     "typecheck": "tsc && tsc -p test/e2e",
     "test": "vitest run",
     "e2e": "node --experimental-strip-types --no-warnings test/e2e/relay.e2e.ts",

@@ -72,7 +72,7 @@ ratelimits = [{ name = "REGISTER_LIMITER", namespace_id = "1003", simple = { lim
 name = "kith-cloud"
 routes = [{ pattern = "api.kithbot.app", custom_domain = true }, { pattern = "kithbot.app", custom_domain = true }]
 workers_dev = false
-vars = { CLERK_ISSUER = "https://clerk.kithbot.app" }
+vars = { CLERK_ISSUER = "https://clerk.kithbot.app", WEB_ORIGINS = "https://kithbot.app" }
 d1_databases = [{ binding = "DB", database_name = "kith", database_id = "1afedb14-ed5c-488c-af33-901e9aa0d123", migrations_dir = "migrations" }]
 durable_objects.bindings = [{ name = "RELAY", class_name = "ComputerRelay" }]
 ratelimits = [{ name = "REGISTER_LIMITER", namespace_id = "2001", simple = { limit = 10, period = 60 } }, { name = "TURN_LIMITER", namespace_id = "2011", simple = { limit = 12, period = 60 } }, { name = "HOOK_LIMITER", namespace_id = "2021", simple = { limit = 60, period = 60 } }, { name = "BOT_JOIN_LIMITER", namespace_id = "2031", simple = { limit = 10, period = 60 } }]
