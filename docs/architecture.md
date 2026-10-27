@@ -204,8 +204,11 @@ account each service would really use in their runs.
 Not a sandbox: everything runs as one macOS user, so a run with a free shell can unset `KITH_PERSON` and become the
 owner. Guests get no free shell; never give one to someone you wouldn't give the Mac.
 
-Known gap: an agent called as an `kith:<name>` subagent shares the calling session's MCP servers, so grants only
-apply to full `kith <agent>` runs.
+An agent called as a `kith:<name>` subagent shares the calling session's MCP servers, so the plugin gives every helper
+a PreToolUse hook (`kith-auth helper-mcp`): a kith MCP service's tool that the helper's own role isn't granted for the
+run's person is asked in the owner's session (a role limit the owner can pass) and denied in anyone else's, and a
+check that fails refuses the same way. Servers that are no kith service (the plugin's own, an agent's mcp.json) are
+not grant-bound and pass. A guest's run starts no shared services anyway (`bin/kith` gives it kithpermit only).
 
 ## Planned
 

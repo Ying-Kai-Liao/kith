@@ -26,6 +26,9 @@
   kith-auth mcp-config <agent>              the --mcp-config JSON for an agent's granted MCP services (bin/kith uses it)
   kith-auth mcp-names <agent>               the same servers by name and real command only: reads auth.json, no secrets, no keychain,
                                           no browser profile (what kith <agent> --info-json lists)
+  kith-auth helper-mcp <agent> ask|deny     PreToolUse hook of a kith:<agent> helper: a kith MCP service's tool the agent
+                                          isn't granted for this run's person gets ask (owner's session) or deny (anyone
+                                          else's); other tools pass
   kith-auth exec [--for AGENT] <service> -- CMD...   run CMD with that service's secrets in its environment only
   kith-auth get  [--for AGENT] [--profile P] <service> <VAR>   print one secret, for an agent's own tool to call;
                                           --profile picks one of several granted profiles
@@ -620,6 +623,34 @@ def cmd_mcp_names(agent):
         if spec.get('kind') == 'mcp' and granted(auth, agent, svc)[0]:
             servers[svc] = {'command': spec['mcp']['command']}
     print(json.dumps({'mcpServers': servers}))
+
+
+def cmd_helper_mcp(agent, decision):
+    """PreToolUse hook of a kith:<agent> helper (the Claude Code plugin registers it). A helper runs in its caller's
+    session with the caller's MCP servers, so a tool of a kith MCP service (kernel/services, or any agent's services/)
+    that the helper's own role isn't granted for this run's person gets `decision`: ask in the owner's session, deny in
+    anyone else's. Other servers pass. Fails closed: when the grant can't be checked, the tool gets `decision` too."""
+    name = 'this tool'
+    try:
+        name = json.load(sys.stdin)['tool_name']
+        if not name.startswith('mcp__'):
+            return
+        server = name[len('mcp__'):].split('__', 1)[0]
+        files = {}
+        for d in [SERVICES, *(p / 'services' for p in agent_dirs().values())]:
+            for f in sorted(d.glob('*.json')) if d.is_dir() else []:
+                files.setdefault(re.sub(r'[^A-Za-z0-9_-]', '_', f.stem), f)   # how Claude Code names the server
+        f = files.get(server)
+        if not f or json.loads(f.read_text()).get('kind') != 'mcp':
+            return
+        if granted(load_auth(), agent, f.stem)[0]:
+            return
+        why = f'{agent} has no grant for {f.stem} in this run (kith-auth grant {agent} {f.stem} <profile>)'
+    except (Exception, SystemExit):
+        why = f"can't check whether {agent} may use {name}"
+    print(json.dumps({'hookSpecificOutput': {
+        'hookEventName': 'PreToolUse', 'permissionDecision': decision,
+        'permissionDecisionReason': f'kith: {why}; the tool is its caller\'s, not the helper\'s'}}))
 
 
 def cmd_exec(args):
@@ -1732,6 +1763,8 @@ def main(argv):
         cmd_mcp_config(rest[0])
     elif cmd == 'mcp-names' and len(rest) == 1:
         cmd_mcp_names(rest[0])
+    elif cmd == 'helper-mcp' and len(rest) == 2 and rest[1] in ('ask', 'deny'):
+        cmd_helper_mcp(*rest)
     elif cmd == 'exec':
         cmd_exec(rest)
     elif cmd == 'get':

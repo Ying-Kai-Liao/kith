@@ -178,6 +178,8 @@ jobs:
         run: kernel/tests/kith-auth-props
       - name: Auth revoke check
         run: kernel/tests/kith-auth-revoke-check
+      - name: Helper MCP grants check
+        run: kernel/tests/kith-helper-mcp-check
       - name: Bridge revoke check
         run: kernel/tests/kith-bridge-revoke-check
       - name: Cost bots check

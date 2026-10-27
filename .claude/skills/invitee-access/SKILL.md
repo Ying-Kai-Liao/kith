@@ -140,4 +140,5 @@ Not shown failing (no single change reaches them): breaks of `enforce` (it stops
 - The cloud side of bot invites (token hashing, the listing of devices, TypeScript in serve/cloud) is out of scope.
 - That owner devices and `Local` never reach `guard` (`dispatch` branches on `principal`): covered by `a_caller_is_the_owner_or_a_person` in `roles_tests.rs`, not generated.
 - The handlers behind allowed methods (`upload`, `readUpload`, `react`, `history` payloads) beyond the shaping in `roles.rs`.
+- A `kith:<name>` helper's MCP tools (it shares its caller's servers): `kith-auth helper-mcp`, the PreToolUse hook the plugin gives every helper (ask in the owner's session, deny in anyone else's, refuse when the check fails), is pinned by examples in `kernel/tests/kith-helper-mcp-check` and its registration in `kernel/tests/kith-hooks.test.ts`, not generated. That Claude Code runs a helper's own hooks (agent registration `hooks`) is assumed, as for `kith-helper-allow`.
 - Cloud invite token hashing (serve/cloud, TypeScript), memory audiences (kith-context, design stage), one-writer threads (kith-formal-verify-threads).
