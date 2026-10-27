@@ -47,6 +47,7 @@ jobs:
       licenses: ${{ steps.f.outputs.licenses }}
       threads: ${{ steps.f.outputs.threads }}
       revoke: ${{ steps.f.outputs.revoke }}
+      secrets: ${{ steps.f.outputs.secrets }}
       ios: ${{ steps.h.outputs.ios }}
       desktop: ${{ steps.h.outputs.desktop }}
       relay: ${{ steps.h.outputs.relay }}
@@ -103,6 +104,19 @@ jobs:
               - 'serve/host/src/remote/**'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
+              - '.github/workflows/ci.yml'
+            # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
+            secrets:
+              - 'verification/secrets/**'
+              - 'verification/threads/run.sh'
+              - '.claude/skills/secret-cards/**'
+              - 'serve/host/src/cards/secret.rs'
+              - 'serve/host/src/cards/mod.rs'
+              - 'serve/host/src/store/cards.rs'
+              - 'serve/host/src/api/cards.rs'
+              - 'serve/host/src/api/bots.rs'
+              - 'serve/host/src/api/roles.rs'
+              - 'kernel/bin/kith-auth'
               - '.github/workflows/ci.yml'
       # 'every': a file must match the whole list, so each filter is one brace pattern plus a markdown
       # exclusion. A docs-only change then runs no heavy job. The only markdown that ships is
@@ -248,6 +262,25 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/revoke/run.sh
+
+  # The same for a secret card (one writer per card, never after it closed): verification/secrets/checks.tsv.
+  secret-cards:
+    needs: changes
+    if: needs.changes.outputs.secrets == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check
+        run: verification/secrets/run.sh
 
   # Format and clippy on the whole host workspace. The tests are in host-build, host-test and host-crates.
   host:
@@ -681,7 +714,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() }}
-    needs: [changes, kernel, host, host-build, host-test, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, host-build, host-test, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
