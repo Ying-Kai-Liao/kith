@@ -46,14 +46,14 @@ export interface SkyLook {
 
 /** The eight Kith default profile pictures, the same on iOS (ProfileImageTests pins both). Keep these exact. */
 export const SKY_PRESETS: readonly SkyLook[] = [
-  { name: 'night', top: '#0B1538', bottom: '#2C468F', zoom: 3, x: 0, y: 0, cloud: 45 },
-  { name: 'golden', top: '#F29A2E', bottom: '#FFDD94', zoom: 3, x: 100, y: 0, cloud: 60 },
-  { name: 'dusk', top: '#5A3FA8', bottom: '#F08A6A', zoom: 4, x: 90, y: 10, cloud: 55 },
-  { name: 'dawn', top: '#4F86E0', bottom: '#F5A878', zoom: 4, x: 5, y: 15, cloud: 60 },
-  { name: 'noon', top: '#1F5FD0', bottom: '#6DB8F5', zoom: 4, x: 62, y: 25, cloud: 70 },
-  { name: 'overcast', top: '#6F7A87', bottom: '#C9D0D6', zoom: 2, x: 40, y: 0, cloud: 85 },
-  { name: 'twilight', top: '#1C2468', bottom: '#C8509A', zoom: 4, x: 10, y: 30, cloud: 50 },
-  { name: 'mint', top: '#2E9E8A', bottom: '#D3F2DE', zoom: 4, x: 55, y: 5, cloud: 65 },
+  { name: 'night', top: '#050A24', bottom: '#1B2F7A', zoom: 3, x: 0, y: 0, cloud: 30 },
+  { name: 'golden', top: '#E8801A', bottom: '#FFD27A', zoom: 3, x: 100, y: 0, cloud: 55 },
+  { name: 'dusk', top: '#4A2F98', bottom: '#F07A5A', zoom: 4, x: 90, y: 10, cloud: 50 },
+  { name: 'dawn', top: '#6FA0E8', bottom: '#F8B890', zoom: 4, x: 5, y: 15, cloud: 55 },
+  { name: 'noon', top: '#0F4FC8', bottom: '#4FA8F2', zoom: 3, x: 80, y: 40, cloud: 60 },
+  { name: 'overcast', top: '#58626E', bottom: '#AEB6BE', zoom: 2, x: 40, y: 0, cloud: 75 },
+  { name: 'twilight', top: '#141C5E', bottom: '#C8409A', zoom: 4, x: 10, y: 30, cloud: 45 },
+  { name: 'mint', top: '#1E8A78', bottom: '#BDEBD0', zoom: 3, x: 85, y: 70, cloud: 60 },
 ]
 
 /** Where the sky art sits on an `out`-pixel square, by the CSS background-size / -position rules. */

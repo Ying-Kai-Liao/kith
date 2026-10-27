@@ -145,14 +145,14 @@ public struct SkyPreset: Identifiable, Equatable, Sendable {
     public var id: String { name }
 
     public static let all: [SkyPreset] = [
-        .init(name: "night", top: 0x0B1538, bottom: 0x2C468F, zoom: 3, x: 0, y: 0, cloud: 45),
-        .init(name: "golden", top: 0xF29A2E, bottom: 0xFFDD94, zoom: 3, x: 100, y: 0, cloud: 60),
-        .init(name: "dusk", top: 0x5A3FA8, bottom: 0xF08A6A, zoom: 4, x: 90, y: 10, cloud: 55),
-        .init(name: "dawn", top: 0x4F86E0, bottom: 0xF5A878, zoom: 4, x: 5, y: 15, cloud: 60),
-        .init(name: "noon", top: 0x1F5FD0, bottom: 0x6DB8F5, zoom: 4, x: 62, y: 25, cloud: 70),
-        .init(name: "overcast", top: 0x6F7A87, bottom: 0xC9D0D6, zoom: 2, x: 40, y: 0, cloud: 85),
-        .init(name: "twilight", top: 0x1C2468, bottom: 0xC8509A, zoom: 4, x: 10, y: 30, cloud: 50),
-        .init(name: "mint", top: 0x2E9E8A, bottom: 0xD3F2DE, zoom: 4, x: 55, y: 5, cloud: 65),
+        .init(name: "night", top: 0x050A24, bottom: 0x1B2F7A, zoom: 3, x: 0, y: 0, cloud: 30),
+        .init(name: "golden", top: 0xE8801A, bottom: 0xFFD27A, zoom: 3, x: 100, y: 0, cloud: 55),
+        .init(name: "dusk", top: 0x4A2F98, bottom: 0xF07A5A, zoom: 4, x: 90, y: 10, cloud: 50),
+        .init(name: "dawn", top: 0x6FA0E8, bottom: 0xF8B890, zoom: 4, x: 5, y: 15, cloud: 55),
+        .init(name: "noon", top: 0x0F4FC8, bottom: 0x4FA8F2, zoom: 3, x: 80, y: 40, cloud: 60),
+        .init(name: "overcast", top: 0x58626E, bottom: 0xAEB6BE, zoom: 2, x: 40, y: 0, cloud: 75),
+        .init(name: "twilight", top: 0x141C5E, bottom: 0xC8409A, zoom: 4, x: 10, y: 30, cloud: 45),
+        .init(name: "mint", top: 0x1E8A78, bottom: 0xBDEBD0, zoom: 3, x: 85, y: 70, cloud: 60),
     ]
 
     /// A square picture of the preset, ready to upload.
