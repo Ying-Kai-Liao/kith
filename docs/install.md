@@ -13,7 +13,7 @@ What works today, before Kith is in the paid Apple Developer Program:
 | Part | Status |
 |---|---|
 | `kith` command | Released for macOS (Apple silicon and Intel). Checksums are signed with minisign. |
-| Mac app | No download yet. Build it yourself. A build is unsigned until Kith can notarize it. |
+| Mac app | No download yet: the release workflow builds it but publishes only a signed, notarized app. Build it yourself for now. |
 | iPhone app | Not on the App Store or TestFlight. Build it from Xcode onto your own phone. |
 
 ## The `kith` command
@@ -49,9 +49,10 @@ Other ways to install it:
 
 ## The Mac app
 
-There is no download yet. The app's config asks for a Developer ID signature and notarization
-(`apps/desktop/electron-builder.yml`), and both need the paid Apple Developer Program. Until Kith has it, build the
-app yourself, the same way CI does (`.github/workflows/ci.yml`, job `desktop`). You need Node 24, Rust (the toolchain
+There is no download yet. A release publishes the app (`kith-macos.dmg`, linked from
+<https://kithbot.app/download/mac>) only once it is signed with a Developer ID and notarized
+([releasing.md](releasing.md)), and both need the paid Apple Developer Program. Until Kith has it, build the app
+yourself, the same way CI does (`.github/workflows/ci.yml`, job `desktop`). You need Node 24, Rust (the toolchain
 pinned in `serve/rust-toolchain.toml`) and Xcode's command line tools:
 
 ```sh
