@@ -186,6 +186,7 @@ impl Actor {
                 conn.loaded.remove(sid);
                 conn.fast_options.remove(sid);
                 conn.usage.remove(sid);
+                conn.profiles.remove(sid);
                 self.applied_system.remove(sid);
             }
             Err(error) => {

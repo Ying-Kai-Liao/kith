@@ -4,10 +4,11 @@
 
 use super::fast_mode::Listing;
 use super::launch::{launch_commands, start_agent};
-use super::{Actor, NoticeStyle};
+use super::{Actor, NoticeStyle, Profile};
 use crate::agent::acp::Incoming;
 use crate::agent::backups::{Backups, ChainEntry, NoAccount, Pick};
 use crate::agent::{folder, hq, project};
+use crate::cards::access::Reservation;
 use crate::hub::Hub;
 use crate::store::{EntryKind, Lane};
 use anyhow::{Result, anyhow, bail};
@@ -344,9 +345,9 @@ impl Actor {
         let person = self.cfg.person.clone();
         // The conversation this place's process serves: its run token's session, which an escape card is raised under.
         let conversation = format!("acp:{}:{}", self.lane.chat, self.lane.thread.as_deref().unwrap_or_default());
-        let access_mark = crate::runauth::access_mark();
+        let lane = self.lane.clone();
         let mut warm;
-        let (mut launch, backup) = loop {
+        let (mut launch, backup, mut reservation) = loop {
             let backup = match self.hub.backups.pick(&agent, &chain, &skip) {
                 Pick::Primary => None,
                 Pick::Backup(entry) => Some(entry.id),
@@ -364,6 +365,20 @@ impl Actor {
                 self.turn_session = current;
                 return Ok(());
             }
+            // A person's activation takes the session's writer claim first: the once grants are reserved under it and
+            // the session loads under it (access-arch rule 4). A process that isn't running has no pid to claim for
+            // yet: its claim is taken before the load below.
+            if person.is_some()
+                && self.conn.is_some()
+                && let Some(sid) = &current
+            {
+                self.claim_for_turn(sid, &lane).await?;
+            }
+            // The once grants the loaded session was given before stay with it.
+            let carried = match (&current, &self.conn) {
+                (Some(sid), Some(conn)) if warm => conn.profiles.get(sid).map(|p| p.holds.clone()).unwrap_or_default(),
+                _ => Vec::new(),
+            };
             if prepared.is_none() {
                 if self.hub.store.kv_read(&format!("agent-env:{}", self.cfg.backend))?.is_some() {
                     crate::market::vault::unlock(self.hub.clone()).await?;
@@ -382,10 +397,12 @@ impl Actor {
             let Some((bin, target)) = &prepared else { unreachable!("prepared above") };
             let room = self.run_room();
             // A person's launch carries what their conversation was given beyond the box (a yes on an escape card, an
-            // "always"), asked for with a token of its own: one per launch, since a run takes its access once.
+            // "always"), asked for with a token of its own: one per launch, since a run takes its access once. Its once
+            // grants are reserved, and taken when the session started or loaded with them.
             let access = person.as_deref().and_then(|p| {
                 crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, target.project.as_deref())
             });
+            let reservation = access.as_ref().map(|(grant, _)| Reservation::open(grant.run_id(), carried));
             match hq::launch(
                 bin,
                 &agent,
@@ -412,7 +429,7 @@ impl Actor {
                     {
                         launch.with_files_server(&exe.to_string_lossy(), self.hub.port, &self.rt);
                     }
-                    break (launch, backup);
+                    break (launch, backup, reservation);
                 }
                 // hq won't run this entry (not signed in, not allowed for this person): the next one answers.
                 // The kernel said no to this person (not a member, over budget): no other account changes that.
@@ -433,19 +450,8 @@ impl Actor {
         self.call_models = (backup.is_none() && person.is_none() && !launch.is_codex()).then(|| {
             super::call_model::CallModels { own: launch.model.clone(), launch_call: launch.call_model.clone() }
         });
-        // A backup has no session of the agent's to load: it starts one and is told the conversation.
-        let mut current = self.hq_session(slot).filter(|_| backup.is_none());
-        // A session is loaded only under the account that made it: after a change of the main account the agent starts
-        // a new one, told the conversation, rather than fail to load (or load) another login's.
-        let mut moved = false;
-        if let Some(sid) = &current {
-            let made = hq::session_account(&self.hub.store, sid);
-            if !made.as_ref().is_ok_and(|made| launch.may_load(made.as_deref())) {
-                tracing::info!(session = %sid, made = ?made.ok().flatten(), now = ?launch.account_id, "session made under another account; starting a new one");
-                current = None;
-                moved = true;
-            }
-        }
+        // What a person's session runs with (M6): compared with what each loaded session was given at every turn.
+        let digest = person.as_ref().map(|_| launch.profile_digest());
         // The process carries kith's env (KITH_PROJECT, the cost tag) and its folder: a place that needs others gets a
         // process of its own, started again here (the sessions it held load again on their next turn).
         let mut started_as = (launch.env(), launch.cwd(&self.cfg).to_owned());
@@ -453,25 +459,59 @@ impl Actor {
             // The membership's mode is set when a session starts: a changed one starts the process again.
             started_as.0.push(("permission_mode".into(), launch.permission_mode.clone().unwrap_or_default()));
         }
-        // A yes on an escape card since the process was launched: it runs without the grant, which this launch carries.
-        let owed =
-            person.as_deref().is_some_and(|p| crate::runauth::access_since(p, &conversation, self.conn_access_mark));
         if self.conn.is_some()
-            && (self.conn_started_as.as_ref() != Some(&started_as) || self.conn_serving != self.serving || owed)
+            && (self.conn_started_as.as_ref() != Some(&started_as) || self.conn_serving != self.serving)
             && let Some(c) = self.conn.take()
         {
             c.acp.kill().await;
         }
-        if warm && self.conn.is_some() {
-            self.turn_session = self.hq_session(slot);
-            return Ok(());
+        // A warm session whose profile changed (a yes on an escape card, a grant taken away, a demotion) is loaded again
+        // with this launch before its turn: that session alone, in the same process, so the other threads' sessions
+        // and their background work go on. A narrowing never waits: the turn after it runs on the new profile (M7).
+        let mut reload = None;
+        if warm && let Some(conn) = self.conn.as_mut() {
+            let sid = self.hq_session(slot);
+            let changed = match (&digest, &sid) {
+                (Some(digest), Some(sid)) => conn.profiles.get(sid).is_none_or(|p| &p.digest != digest),
+                _ => false,
+            };
+            if !changed {
+                if let (Some(reservation), Some(sid)) = (reservation.take(), &sid) {
+                    let holds = reservation.commit(&self.hub.store);
+                    if let Some(profile) = conn.profiles.get_mut(sid) {
+                        profile.holds = holds;
+                    }
+                }
+                self.turn_session = sid;
+                return Ok(());
+            }
+            if let Some(sid) = &sid {
+                tracing::info!(bot = %self.cfg.id, session = %sid, "the session's profile changed; loading it again");
+                conn.loaded.remove(sid);
+            }
+            reload = sid;
+        }
+        // A backup has no session of the agent's to load: it starts one and is told the conversation. A reload is of the
+        // session this process holds, on the account it runs on.
+        let mut current = reload.clone().or_else(|| self.hq_session(slot).filter(|_| backup.is_none()));
+        // A session is loaded only under the account that made it: after a change of the main account the agent starts
+        // a new one, told the conversation, rather than fail to load (or load) another login's.
+        let mut moved = false;
+        if reload.is_none()
+            && let Some(sid) = &current
+        {
+            let made = hq::session_account(&self.hub.store, sid);
+            if !made.as_ref().is_ok_and(|made| launch.may_load(made.as_deref())) {
+                tracing::info!(session = %sid, made = ?made.ok().flatten(), now = ?launch.account_id, "session made under another account; starting a new one");
+                current = None;
+                moved = true;
+            }
         }
         if self.conn.is_none() {
             self.conn_started_as = Some(started_as);
             self.conn_serving.clone_from(&self.serving);
             self.conn_account.clone_from(&launch.account_id);
             self.conn_room = self.run_room();
-            self.conn_access_mark = access_mark;
             let provider = if launch.is_codex() { "codex" } else { self.cfg.backend.as_str() };
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
             // Anyone but the owner asks the host who they are (`kith recall` over the run socket), with a token that
@@ -529,6 +569,8 @@ impl Actor {
         if let Some(sid) = current {
             if self.conn.as_ref().is_some_and(|c| c.sessions.load) {
                 self.hub.set_runtime(&self.rt, |r| r.activity = "Resuming session…".into());
+                // The writer claim comes before the load (access-arch rule 4).
+                self.claim_for_turn(&sid, &lane).await?;
                 let params = self.hq_params(&launch, Some(&sid));
                 let res = self.session_request("session/load", params).await;
                 let Some(conn) = self.conn.as_mut() else { return res.map(drop) };
@@ -542,6 +584,11 @@ impl Actor {
                     Ok(res) => {
                         conn.loaded.insert(sid.clone(), Instant::now());
                         conn.session_started(&sid, &res);
+                        // Loaded with them: the once grants are taken, before the first turn (M4).
+                        if let Some(digest) = &digest {
+                            let holds = reservation.take().map(|r| r.commit(&self.hub.store)).unwrap_or_default();
+                            conn.profiles.insert(sid.clone(), Profile { digest: digest.clone(), holds });
+                        }
                         self.note_options(&sid, &res, Listing::Session);
                         if !launch.is_codex() {
                             self.set_claude_mode(&sid, &res, launch.permission_mode.as_deref()).await;
@@ -576,6 +623,10 @@ impl Actor {
         let sid = res["sessionId"].as_str().ok_or_else(|| anyhow!("agent returned no sessionId"))?.to_owned();
         conn.loaded.insert(sid.clone(), Instant::now());
         conn.session_started(&sid, &res);
+        if let Some(digest) = &digest {
+            let holds = reservation.take().map(|r| r.commit(&self.hub.store)).unwrap_or_default();
+            conn.profiles.insert(sid.clone(), Profile { digest: digest.clone(), holds });
+        }
         // The model and effort are hq's (launch-json): the host sets neither again. The permission mode is set once,
         // below, because the adapter starts every session in "default".
         self.note_options(&sid, &res, Listing::Session);

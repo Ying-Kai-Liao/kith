@@ -358,9 +358,15 @@ impl Actor {
 
     /// While a turn runs (in a thread or the main chat), the agent process holds the session: a writer claim for its pid keeps a terminal
     /// out, also after a host crash leaves the process behind (the claim is live as long as the process is).
-    async fn claim_for_turn(&mut self, sid: &str, lane: &Lane) -> Result<()> {
+    ///
+    /// An app chat's session takes it before it loads (`ensure_hq_session`): that claim is the turn's.
+    pub(super) async fn claim_for_turn(&mut self, sid: &str, lane: &Lane) -> Result<()> {
+        let pid = self.conn.as_ref().and_then(|c| c.acp.pid());
+        if pid.is_some() && self.turn_claim.as_ref().is_some_and(|(held, by)| held == sid && Some(*by) == pid) {
+            return Ok(());
+        }
         self.release_turn_claim();
-        let Some(pid) = self.conn.as_ref().and_then(|c| c.acp.pid()) else {
+        let Some(pid) = pid else {
             return Ok(());
         };
         let state = self.hub.terminal.env().state;
