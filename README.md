@@ -64,7 +64,7 @@ Old `HQ_*` variables, `dev.hq.*` jobs and `hq-agent` repos are still read.
 The download installs the `kith` binary and the kernel under `~/.kith`, then runs the same `install.sh`; run it again to
 upgrade. `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` (a local file) are in the script's header. Homebrew:
 `packaging/homebrew/kith.rb` (for the tap [`Ying-Kai-Liao/homebrew-kith`](https://github.com/Ying-Kai-Liao/homebrew-kith)). Releases are built by `.github/workflows/release.yml`
-on a `v*` tag.
+on a `v*` tag (docs/releasing.md).
 
 A Linux VM that only needs to join a computer and ask its agents (a cloud bot) installs the static client-only `kith`, no root:
 `curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | sh`, then `kith join <link>`

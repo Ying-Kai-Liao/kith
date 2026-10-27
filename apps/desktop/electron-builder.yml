@@ -24,8 +24,13 @@ extraResources:
 protocols:
   - name: Kith
     schemes: [kith, com.yingkailiao.kith]
-# No update feed until Kith publishes its own (src/shared/update-feed.ts).
-publish: null
+# The app's own updates (src/shared/update-feed.ts): electron-updater reads app-update.yml, generated from this block,
+# and finds latest-mac.yml on the latest non-prerelease Release of the repo. electron-builder never uploads itself: the
+# release workflow runs it with --publish never and attaches the files. Dev builds set publish: null.
+publish:
+  provider: github
+  owner: Ying-Kai-Liao
+  repo: kith
 
 mac:
   category: public.app-category.developer-tools
