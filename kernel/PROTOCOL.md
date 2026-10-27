@@ -66,7 +66,7 @@ part for everyone you work for, `{{SHARED_MEMORY}}/`: lessons about your craft o
    intersection of the sets, and a note with no record (older, written by a shell, or in an unknown room) counts as the
    owner's alone: it loads only where nobody but the owner is present. A Tidy promotion that changes the note's audience
    with the owner's approval takes it out of this rule, as it already widens it.
-   Recall reads who you work for from the run's environment, so a non-owner run's shell could still bypass it (the same gap as file reads); a host-held token is the follow-up.
+   A non-owner run's recall goes to the host with its run token, which says who you work for; inside that run's sandbox an unset `KITH_PERSON` is no one, never the owner.
 3. **Freshness check** (only when the task touches the codebase). `codebase.md` starts with a `commit:` line. Compare
    it with `git rev-parse HEAD`.
    - Same commit: trust the map. Don't re-explore the codebase.

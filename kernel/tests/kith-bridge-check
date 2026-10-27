@@ -15,6 +15,8 @@ What it shows:
   3. a Discord gateway that goes silent, and a Telegram poll that hangs, are replaced by a new connection that works
   4. a bridge whose event loop or thread pool is stuck exits with code 70 (launchd's KeepAlive starts it again);
      a healthy one doesn't
+  5. before the owner's Discord account is linked, only the owner of the server KITH_DISCORD_GUILD names stands in
+     for kith's owner: not another server's owner, and no one when no server is named
 """
 import asyncio
 import importlib.machinery
@@ -300,6 +302,39 @@ async def scenario():
     await down(tasks)
 
 
+async def owner_stands_in(conn, setting):
+    """Whether a `conn` adapter, with KITH_DISCORD_GUILD at `setting`, takes the owner of the server it works in
+    (#echo's server, owner 42) as kith's owner."""
+    if setting is None:
+        os.environ.pop('KITH_DISCORD_GUILD', None)
+    else:
+        os.environ['KITH_DISCORD_GUILD'] = setting
+    dc = CheckDiscord(conn, {'DISCORD_BOT_TOKEN': 'x'}, core.Core())
+    t = asyncio.create_task(dc.start())
+    try:
+        await until(lambda: getattr(dc, 'guild', None) is not None)   # set by start's on_ready
+        probe = SimpleNamespace(id=1, content='hi', channel=ECHO, author=SimpleNamespace(id=42, bot=False),
+                                reference=None, attachments=[], created_at=datetime.now(timezone.utc))
+        return (await dc.incoming(probe)).admin
+    finally:
+        t.cancel()
+        await asyncio.gather(t, return_exceptions=True)
+        os.environ.pop('KITH_DISCORD_GUILD', None)
+
+
+async def owners():
+    for conn, setting, want, why in [
+        ('discord/hq', 'check', True, 'the named server (by name)'),
+        ('discord/hq', '7', True, 'the named server (by id)'),
+        ('discord/work', 'check', True, 'the named server, on another connection'),
+        ('discord/work', 'other', False, 'a server other than the named one'),
+        ('discord/hq', None, False, 'no server named'),
+    ]:
+        got = await owner_stands_in(conn, setting)
+        check(f'{conn}, {why}: its owner {"stands" if want else "does not stand"} in for kith\'s owner', got == want,
+              got)
+
+
 def stuck(name, body, want):
     """kith-bridge's real watchdog in a process of its own, with a loop that gets stuck as `body` says."""
     code = (f'import asyncio, importlib.machinery, importlib.util, time\n'
@@ -320,6 +355,7 @@ def stuck(name, body, want):
 
 def main():
     asyncio.run(scenario())
+    asyncio.run(owners())
     stuck('event loop blocked', 'time.sleep(30)', 70)
     stuck('thread pool full', 'loop = asyncio.get_running_loop()\n'
           '    [loop.run_in_executor(None, time.sleep, 30) for _ in range(64)]\n    await asyncio.sleep(30)', 70)

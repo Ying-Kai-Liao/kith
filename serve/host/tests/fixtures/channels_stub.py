@@ -2,7 +2,7 @@
 """One stand-in for kith, kith-auth and kith-live in the channels' tests: it acts as whichever name it is called by.
 
 The test makes symlinks <rig>/bin/kith, kith-auth and kith-live to this file; the rig's files are in <rig>/stub/:
-  people.json   {"<platform>:<uid>": {person, owner, was}}      what `kith-auth who` says
+  people.json   {"<platform>:<uid>": {person, owner, was}}      what `kith-auth who` says ("*": for anyone else)
   access.json   {"<person>": {"owner": bool, "agents": [..]}}   what `kith-auth resolve` says
   codes.json    {"<CODE>": "<person>"}                          what `kith-auth link` accepts
   granted.json  {"<platform>": ["<profile>", ..]}               what `kith-auth granted` lists
@@ -55,7 +55,9 @@ def fail(text):
 if me == "kith-auth":
     cmd = args[0] if args else ""
     if cmd == "who":
-        print(json.dumps(load("people", {}).get(f"{args[1]}:{args[2]}", {"person": None, "owner": False, "was": []})))
+        people = load("people", {})
+        nobody = people.get("*", {"person": None, "owner": False, "was": []})
+        print(json.dumps(people.get(f"{args[1]}:{args[2]}", nobody)))
     elif cmd == "resolve":
         agent, person = args[1], args[args.index("--person") + 1]
         entry = load("access", {}).get(person)

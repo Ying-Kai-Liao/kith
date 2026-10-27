@@ -342,6 +342,9 @@ impl Actor {
         let mut skip: HashSet<String> = self.turn_tried.clone();
         let mut prepared = None;
         let person = self.cfg.person.clone();
+        // The conversation this place's process serves: its run token's session, which an escape card is raised under.
+        let conversation = format!("acp:{}:{}", self.lane.chat, self.lane.thread.as_deref().unwrap_or_default());
+        let access_mark = crate::runauth::access_mark();
         let mut warm;
         let (mut launch, backup) = loop {
             let backup = match self.hub.backups.pick(&agent, &chain, &skip) {
@@ -378,6 +381,11 @@ impl Actor {
             }
             let Some((bin, target)) = &prepared else { unreachable!("prepared above") };
             let room = self.run_room();
+            // A person's launch carries what their conversation was given beyond the box (a yes on an escape card, an
+            // "always"), asked for with a token of its own: one per launch, since a run takes its access once.
+            let access = person.as_deref().and_then(|p| {
+                crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, target.project.as_deref())
+            });
             match hq::launch(
                 bin,
                 &agent,
@@ -387,6 +395,7 @@ impl Actor {
                 person.as_deref(),
                 &room,
                 &self.run_members(),
+                access.as_ref(),
             )
             .await
             {
@@ -444,8 +453,11 @@ impl Actor {
             // The membership's mode is set when a session starts: a changed one starts the process again.
             started_as.0.push(("permission_mode".into(), launch.permission_mode.map_or("", |m| m.as_str()).to_owned()));
         }
+        // A yes on an escape card since the process was launched: it runs without the grant, which this launch carries.
+        let owed =
+            person.as_deref().is_some_and(|p| crate::runauth::access_since(p, &conversation, self.conn_access_mark));
         if self.conn.is_some()
-            && (self.conn_started_as.as_ref() != Some(&started_as) || self.conn_serving != self.serving)
+            && (self.conn_started_as.as_ref() != Some(&started_as) || self.conn_serving != self.serving || owed)
             && let Some(c) = self.conn.take()
         {
             c.acp.kill().await;
@@ -459,14 +471,15 @@ impl Actor {
             self.conn_serving.clone_from(&self.serving);
             self.conn_account.clone_from(&launch.account_id);
             self.conn_room = self.run_room();
+            self.conn_access_mark = access_mark;
             let provider = if launch.is_codex() { "codex" } else { self.cfg.backend.as_str() };
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
             // Anyone but the owner asks the host who they are (`kith recall` over the run socket), with a token that
             // is theirs alone; the owner's process gets none.
-            let session = format!("acp:{}:{}", self.lane.chat, self.lane.thread.as_deref().unwrap_or_default());
             let mut grant = person.as_deref().and_then(|p| {
                 let room = launch.env.get("KITH_ROOM").map(String::as_str);
-                crate::runauth::grant_for(p, &agent, room, &session, launch.env.get("KITH_PROJECT").map(String::as_str))
+                let project = launch.env.get("KITH_PROJECT").map(String::as_str);
+                crate::runauth::grant_for(p, &agent, room, &conversation, project)
             });
             if let Some((_, vars)) = &grant {
                 env.extend(vars.iter().cloned());

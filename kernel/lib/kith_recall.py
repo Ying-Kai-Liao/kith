@@ -10,7 +10,7 @@ import contextlib, fcntl, hashlib, json, os, re, sqlite3, subprocess, sys, time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
-from kith_paths import paths  # noqa: E402
+from kith_paths import guest_sandbox, paths  # noqa: E402
 import kith_facets  # noqa: E402
 import kith_trajectory  # noqa: E402
 
@@ -313,13 +313,14 @@ def _member_audiences(pid, agent):
 
 
 def _caller():
-    """{who, agent, audiences}: from the environment only. audiences None = everything of the agent (the owner); a list =
-    the exact audience values the caller may see; [] = nothing (fails closed)."""
+    """{who, agent, audiences}: from the environment, except that inside a guest's sandbox nobody is the owner (a guest
+    run asks the host with its token instead). audiences None = everything of the agent (the owner); a list = the exact
+    audience values the caller may see; [] = nothing (fails closed)."""
     agent = os.environ.get('KITH_AGENT') or ''
     person = os.environ.get('KITH_PERSON') or ''
     nobody = {'who': person or '-', 'agent': agent, 'audiences': []}
     if not person:   # an owner run sets KITH_AGENT (kernel/bin/kith); neither set is not a known caller
-        return {'who': 'owner', 'agent': agent, 'audiences': None} if agent else nobody
+        return {'who': 'owner', 'agent': agent, 'audiences': None} if agent and not guest_sandbox() else nobody
     rows = _rows(_auth('people', '--json'))
     if rows.get(person, {}).get('bot_of'):
         # guest level of the root owner: shared craft only, never the owner's or a person's, and only for an agent
@@ -332,7 +333,7 @@ def _caller():
     if not r or not r.get('allowed') or not agent or not re.fullmatch(r'[a-z][a-z0-9-]*', pid):
         return nobody
     if r.get('owner'):
-        return {'who': 'owner', 'agent': agent, 'audiences': None}
+        return nobody if guest_sandbox() else {'who': 'owner', 'agent': agent, 'audiences': None}
     rooms = [x for x in r.get('rooms', []) if isinstance(x, str) and kith_facets.ID.match(x)]
     return {**nobody, 'who': pid, 'present': [pid],
             'audiences': ['shared', 'person:' + pid, *('room:' + x for x in rooms)]}

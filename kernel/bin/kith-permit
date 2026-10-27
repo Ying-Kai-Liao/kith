@@ -3,8 +3,9 @@
 
   kith-permit                          stdio MCP server with one tool, approve(tool_name, input, tool_use_id)
   kith-permit issue AGENT SESSION PID  ask the host for an owner ask token bound to PID; prints export lines for sh
-  kith-permit apply SETTINGS_FILE      a guest run's launch, after its session claim: ask the host for the access this session
-                                       was given (a yes on an escape card, an "always") and add it to the settings file
+  kith-permit apply SETTINGS_FILE      a guest run's launch, after its session claim (or a --launch-json run's, whose settings
+                                       go to the host): ask the host for the access this session was given (a yes on an
+                                       escape card, an "always") and add it to the settings file
 
 A second tool, request_access(path|domain, reason), is the way out of the guest sandbox (F11 step 2b): after an EPERM the run
 asks for the place instead of working around it, and ends its turn. The host gets

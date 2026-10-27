@@ -45,7 +45,8 @@ pub struct Incoming {
     pub addressed: bool,
     /// The agent whose own room this is (Discord's agent channels).
     pub room_agent: Option<String>,
-    /// The server's owner (Discord), taken as hq's owner until hq knows their account.
+    /// The owner of the server `channels.discord_guild` names (Discord), taken as hq's owner until hq knows their
+    /// account. Any other server's owner is not.
     pub admin: bool,
     /// The text of a message replied to that isn't hq's.
     pub quoted: String,

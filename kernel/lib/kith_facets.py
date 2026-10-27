@@ -440,6 +440,10 @@ def main(argv):
     # unknown (shared only); KITH_ROOM_OWNER_ONLY (the host's, owner runs only) is a known empty set.
     ids = env_members(a.kind)
     members = None if ids is None else [{'kind': 'person', 'id': m, 'rooms': [room]} for m in ids]
+    # Room membership lives with the host, not kith-auth: a person its member list names is in this group room, like
+    # every other member above (the ledger still decides which notes reach them). A bot guest's KITH_ROOM is not trusted.
+    if a.kind == 'person' and ids and a.person in ids and ID.match(room) and room not in reader['rooms']:
+        reader['rooms'].append(room)
     ledger = read_ledger(a.agent, room) if room not in ('', '?') and ID.match(room) else {}
     out = load_memory(a.agent, a.home, a.person_file, reader, room, [a.project] if a.project else [], cap, members, ledger)
     attrs = ' loaded="%d"%s%s' % (out['loaded'], ' more="%d"' % out['more'] if out['more'] else '',
