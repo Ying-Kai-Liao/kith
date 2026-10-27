@@ -54,6 +54,22 @@ fn shape(v: &Value) -> Value {
     }
 }
 
+/// The rig's fresh ids and keys swapped for fixed stand-ins: a fixture keeps their shape, and secret scanners flag
+/// the real ones.
+fn with_stand_in_keys(body: &Value) -> Value {
+    let mut body = body.clone();
+    for (field, stand_in) in [
+        ("computerId", "AAAAAAAAAAAAAAAAAAAAAA"),
+        ("signKey", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+        ("boxKey", "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE"),
+    ] {
+        if let Some(v) = body.get_mut(field) {
+            *v = json!(stand_in);
+        }
+    }
+    body
+}
+
 /// Each member method an invited person calls, with what it answered (one answer per method).
 async fn member_answers(r: &Rig, sam: &Caller) -> BTreeMap<&'static str, Value> {
     let mut got = BTreeMap::new();
@@ -111,7 +127,7 @@ async fn the_member_methods_answer_as_the_contract_and_its_fixtures_say() {
         assert_eq!(problems, Vec::<String>::new(), "{method}");
         let path = dir.join(format!("{method}.json"));
         if write {
-            let fixture = json!({"method": method, "type": m.result, "body": body});
+            let fixture = json!({"method": method, "type": m.result, "body": with_stand_in_keys(body)});
             std::fs::write(&path, serde_json::to_string_pretty(&fixture).unwrap() + "\n").unwrap();
             continue;
         }
