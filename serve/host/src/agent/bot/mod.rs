@@ -220,6 +220,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         conn_serving: None,
         conn_account: None,
         conn_room: String::new(),
+        conn_access_mark: 0,
         backup_sessions: HashMap::new(),
         preface: None,
         attempt_prompt: None,
@@ -438,6 +439,9 @@ struct Actor {
     conn_account: Option<String>,
     /// The room the agent process was started for (`KITH_ROOM`): another room starts it again.
     conn_room: String,
+    /// Where escape-card yeses stood before the live process's launch (`runauth::access_mark`): a yes after it starts
+    /// the process again, so the next turn runs with the grant.
+    conn_access_mark: u64,
     /// The sessions a backup entry holds for this actor, by (entry, thread root or empty). Kept in memory only: the
     /// stored sessions are the agent's own, which come back when its limit lifts.
     backup_sessions: HashMap<(String, String), String>,

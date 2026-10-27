@@ -549,6 +549,27 @@ async fn a_session_file_with_the_start_in_utc_is_live() {
     assert_eq!(registry::liveness(&reg, Some(&r.dir.join("sessions"))), Live::Idle);
 }
 
+/// The owner's Mac runs in Chinese (zh-Hant): `ps` there prints `二 10月/27 22:19:44 2026`, which never equals the
+/// C-locale start Claude and the kernel write, and every live one-shot read as closed. The start is read in the C
+/// locale whatever the caller's is, local time and UTC alike.
+#[test]
+fn the_start_time_is_read_in_the_c_locale_under_any_caller_locale() {
+    let me = std::process::id();
+    let zh = || {
+        let mut ps = std::process::Command::new("ps");
+        ps.env("LANG", "zh_TW.UTF-8").env("LC_ALL", "zh_TW.UTF-8").env("LC_TIME", "zh_TW.UTF-8");
+        ps
+    };
+    for utc in [false, true] {
+        let start = registry::lstart_via(zh(), me, utc).expect("ps knows the process");
+        assert!(
+            chrono::NaiveDateTime::parse_from_str(&start, "%a %b %d %H:%M:%S %Y").is_ok(),
+            "C-locale lstart, got {start:?}"
+        );
+    }
+    assert_eq!(registry::lstart_via(zh(), me, false), registry::proc_start(me));
+}
+
 #[test]
 fn pids_that_cannot_be_a_terminal_are_refused() {
     let base = |pid: u32| {

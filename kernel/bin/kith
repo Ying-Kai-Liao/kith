@@ -110,6 +110,7 @@ case $1 in
   bug)                shift; exec "$KITH/bin/kith-bug" "${@:---help}" ;;
   project)            shift; exec "$KITH/bin/kith-project" "$@" ;;
   schedule)           shift; exec "$KITH/bin/kith-sched" "${@:-ls}" ;;
+  wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   serve)              shift; exec "$KITH/bin/kith-serve" "${@:-help}" ;;
 esac
@@ -247,6 +248,11 @@ print("p_env_names=%s" % q(" ".join(env)))')"
     fi
   fi
   export KITH_PERSON
+fi
+# A guest's shell that drops KITH_PERSON (or names the owner in it) is not the owner: its OS sandbox says so, and a run
+# started from in there is no one's.
+if [[ $p_owner == 1 ]] && python3 "$KITH/lib/kith_paths.py" --guest-sandbox; then
+  echo "kith: this is inside a guest's run, which can't start a run as the owner" >&2; exit 3
 fi
 mkdir -p "$home/memory/projects" "$home/memory/sessions" "$home/memory/shared"
 # Whose memory this run uses. The owner's is the agent's memory/ itself; anyone else's is memory/people/<id>/, with
@@ -928,6 +934,12 @@ fi
 # launch-json hands the settings and the MCP servers over inline (--settings and --mcp-config take JSON as well as a file).
 settings_arg="$runs/$$.settings.json" mcp_arg="$runs/$$.mcp.json"
 if [[ $launch -eq 1 ]]; then
+  # F11 step 2b for the host's launch (an app chat's run): the grants go into the settings it is handed, as in the exec
+  # path's apply below. A once grant is pending only after a yes, and after a yes the host starts its process again with
+  # this launch.
+  if [[ $p_owner == 0 && -n ${KITH_RUN_TOKEN:-} && -n ${KITH_RUN_SOCKET:-} ]]; then
+    python3 "$KITH/bin/kith-permit" apply "$runs/$$.settings.json" || true
+  fi
   settings_arg=$(cat "$runs/$$.settings.json")
   mcp_arg=$(merged_mcp)
 fi

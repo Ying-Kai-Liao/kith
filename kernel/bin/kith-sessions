@@ -616,9 +616,20 @@ def run(agent, cmd):
     try:
         release_claims(os.getpid())
         taken_note(agent, child)
+        wake_owed()
     except Exception as e:  # noqa: BLE001
         print(f'kith-sessions: {e}', file=sys.stderr)
     return os.waitstatus_to_exitcode(st)   # a signal death comes back as -n
+
+
+def wake_owed():
+    """A terminal held its session while wakes for it queued (a reply, a card, a waiter): now that it let go, the kernel's
+    wake queue may deliver them without waiting for the next tick."""
+    d = reg_dir()
+    if d and any((d.parent.parent / 'sessions' / 'queue').glob('*.json')):
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / 'kith-wake'), 'drain'],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
 
 
 def taken_note(agent, pid):
