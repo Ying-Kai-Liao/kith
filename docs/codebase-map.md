@@ -77,7 +77,7 @@ Paths in this table are inside `kernel/`, except `install.sh` and `.claude-plugi
 |---|---|---|---|
 | `bin/kith` | bash | Runs one agent: resolves the pinned package, fills placeholders, adds memory and project, settings + cost-tag hook, granted MCP servers, model/effort, then `exec claude`. Also the front door for `versions`, `install`, `auth`, `cost`… | you, `kith-bridge`, agents calling helpers |
 | `bin/kith-pkg` | python | Packages: fingerprint → check → snapshot into `~/.kith/store` (clones or hard links), gc; pin/rollback; auto-commit each good version to the agent's repo; install/update/share/search/restore; fetch third-party skills; `check --share` privacy scan | `bin/kith`, the adapter (`resolve --all --json`), `install.sh` |
-| `bin/kith-auth` | python | Services and grants: which agent may use which service as which account; builds `--mcp-config`; hands out secrets (`get`, `exec`) and logs them | `bin/kith`, agents' tools |
+| `bin/kith-auth` | python | Services and grants: which agent may use which service as which account; builds `--mcp-config`; hands out secrets (`get`, `exec`) and logs them; keeps the "always" answers to escape cards (`access`; `access <agent> --json` lists them with when each was given, for the apps' Access list) | `bin/kith`, agents' tools, the host |
 | `bin/kith-cost` | python | Cost ledger: syncs request usage from `~/.claude/projects` into `cost.db`; `tag` records each kith session (SessionStart hook); reports by agent, version, model, effort | you, launchd `dev.kith.cost`, the hook `bin/kith` adds |
 | `bin/kith-sessions` | python | Continue anywhere: `record` (SessionStart hook) lists a `kith <agent>` terminal session in `$KITH_STATE/live/terminal/<sid>.json` for the host; `resolve` backs `kith <agent> --resume <thread>`; `run` is the claude child that prints the take-over note | the hook and the launch tail of `bin/kith` |
 | `bin/kith-ask` | python | One-shot `kith <agent>` with `--output-format json`: prints the answer, keeps agent + directory (or `--as NAME`) → session in `~/.kith/ask.json` so `-c` resumes it with the same project/model/effort; `KITH_VIA=ask` | you, scripts, Claude Code sessions |
@@ -145,7 +145,8 @@ bridge, `KITH_VIA=discord`, `telegram` or `slack`, `KITH_BRIDGE_OUTBOX`, `KITH_P
    and model; efforts are noted.
 2. Spawn: project from `<kith project>` or `project-id`, its parents (`project-id --info`), plus fresh `MEMORY.md`, go in front of the task. Every session in a project with a parent, home or children gets one `kith project:` line in its system prompt (`prompt.compose`).
 3. Each request: the agent's effort. Stop: one nudge if the session file wasn't written.
-   Runs on the caller's settings and MCP servers, not the agent's (known gap).
+   Runs on the caller's settings and MCP servers, not the agent's. A kith service's MCP tool the agent itself isn't
+   granted (`kith-auth helper-mcp`, a PreToolUse hook) is asked in the owner's session and denied in anyone else's.
 
 **An agent changes** (you edit it, ask it to, or it writes a learned skill into `{{PACKAGE}}`)
 → the next run's fingerprint differs → `kith-pkg` checks it → snapshot + commit to `agents/<name>` →

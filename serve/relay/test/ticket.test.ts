@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import worker, { sealTicket, openTicket, apnsTopic, latestTicketIndices } from "../src/index.ts";
 
 const key = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32))));
-const env = { TICKET_KEY: key } as any;
+const env = { TICKET_KEY: key, LEGACY_TICKETS_UNTIL: "2999-01-01" } as any;
 const ticket = await sealTicket(env, { t: "ab".repeat(32), e: "sandbox", k: "alert" });
 assert.deepEqual(await openTicket(env, ticket), { t: "ab".repeat(32), e: "sandbox", k: "alert" });
 const other = { TICKET_KEY: btoa(String.fromCharCode(...new Uint8Array(32))) } as any;

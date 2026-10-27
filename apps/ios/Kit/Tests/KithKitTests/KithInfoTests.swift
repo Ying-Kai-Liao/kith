@@ -159,3 +159,26 @@ private func houseInfo() throws -> KithInfo {
     #expect(HqSetting.callModelLabel("gpt-x") == "gpt-x")
     #expect(HqSetting.rows(nil)[1].editable == false)
 }
+
+@Test func accessGrantsDecodeAndSayWhatTheyAllow() throws {
+    let answer = try decode(AccessGrants.self, """
+    {"grants": [
+      {"person": "sam", "name": "Sam", "kind": "read", "target": "/Users/kai/docs", "since": 1790000000000},
+      {"person": "*", "name": "", "kind": "domain", "target": "pypi.org", "since": null},
+      {"person": "sam", "kind": "write", "target": "/Users/kai/notes"},
+      {"person": "sam", "kind": "exec", "target": "/bin"},
+      {"person": "sam", "kind": "read"}
+    ]}
+    """)
+    #expect(answer.grants.map(\.text) == ["Read /Users/kai/docs", "Connect to pypi.org", "Read and write /Users/kai/notes"])
+    #expect(answer.grants[0].holder.hasPrefix("Sam · since "))
+    #expect(answer.grants[1].holder == "Everyone")
+    #expect(answer.grants[2].holder == "sam")
+    #expect(try decode(AccessGrants.self, "{}").grants.isEmpty)
+}
+
+@Test func aPermissionEntryCarriesTheHostsOutcome() throws {
+    let data = try decode(EntryData.self, #"{"status": "answered", "selected": "allow", "outcome": "Allowed once only: it can't be kept for always (x)"}"#)
+    #expect(data.outcome == "Allowed once only: it can't be kept for always (x)")
+    #expect(try decode(EntryData.self, #"{"status": "answered"}"#).outcome == nil)
+}

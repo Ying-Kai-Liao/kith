@@ -122,6 +122,8 @@ struct PermissionCard: View {
     private var outcome: String {
         switch d.status {
         case "answered":
+            // An "always" kith-auth couldn't keep stayed a once grant; the host says so in its own words.
+            if let said = d.outcome, !said.isEmpty { return said }
             let chosen = d.options?.first { $0.optionId == d.selected }
             return switch chosen?.kind {
             case "allow_once": "Allowed once"
