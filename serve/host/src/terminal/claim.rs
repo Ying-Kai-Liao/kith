@@ -216,8 +216,12 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
         if claim.pid == me {
             continue;
         }
-        // The holder got SIGKILL: its claim is stale (a zombie not yet reaped still counts as running).
-        let _ = std::fs::remove_file(path);
+        // The holder got SIGKILL: its claim is stale (a zombie not yet reaped still counts as running). Given back under the
+        // claim lock and only if it is still the holder's: a run waiting on the session may have taken it in the meantime,
+        // and a plain remove would delete that run's claim, leaving two writers.
+        if let Some(sid) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".claim")) {
+            release(state, sid.strip_suffix(".takeover").unwrap_or(sid), claim.pid, claim.takeover);
+        }
         ended.push(claim.pid);
     }
     ended
