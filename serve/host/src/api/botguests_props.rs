@@ -74,8 +74,8 @@ struct MBot {
     invite: String,
     /// Whether an ask of it has gone through, so the first one is known to meet no limit.
     served: bool,
-    /// Conversations it has made.
-    convs: Vec<String>,
+    /// Conversations it has made, with the agent each one is with.
+    convs: Vec<(String, usize)>,
 }
 
 struct State {
@@ -578,7 +578,7 @@ impl State {
                             self.removed[owner]
                         );
                         self.bots[bi].served = true;
-                        self.bots[bi].convs.push(v["conversation"].as_str().unwrap().to_owned());
+                        self.bots[bi].convs.push((v["conversation"].as_str().unwrap().to_owned(), ai));
                         SERVED.fetch_add(1, Ordering::Relaxed);
                     }
                     (St::Active, Err(e)) if may => {
@@ -595,6 +595,35 @@ impl State {
                         WHO[owner],
                         AGENTS[ai]
                     ),
+                }
+            }
+            // (14) Reading its own conversation is how a bot gets its answers: like an ask, only while it is in, and
+            // only while its owner still holds that conversation's agent and the bot was given it (R5: a turn that
+            // outlived a revoke delivers nothing).
+            for (conv, ai) in self.bots[bi].convs.clone() {
+                let res = self.call(&self.bots[bi].caller, "botThread", json!({"conversation": conv})).await;
+                let may = self.bots[bi].agents[ai] && self.holds(owner, ai);
+                match (state, &res) {
+                    (St::Ended, Err(e)) => check!(e.is::<Forbidden>(), "an ended bot's botThread: {e:#}"),
+                    (St::Pending, Err(e)) => {
+                        check!(error_code(e) == Some("pending"), "a pending bot's botThread: {e:#}");
+                    }
+                    (St::Active, Ok(v)) => check!(
+                        may && v["conversation"] == json!(conv),
+                        "bot {id} of {} read its {} conversation; given {:?}, owner holds {:?}, removed {}",
+                        WHO[owner],
+                        AGENTS[ai],
+                        self.bots[bi].agents,
+                        self.roles[owner],
+                        self.removed[owner]
+                    ),
+                    (St::Active, Err(e)) => check!(
+                        !may && error_code(e) == Some("notGranted"),
+                        "bot {id} of {} reading its {} conversation (may = {may}) got: {e:#}",
+                        WHO[owner],
+                        AGENTS[ai]
+                    ),
+                    (_, Ok(_)) => return Err(format!("bot {id} is {state:?} and still read its conversation")),
                 }
             }
             if state == St::Active {
@@ -620,7 +649,7 @@ impl State {
                     .bots
                     .iter()
                     .enumerate()
-                    .find_map(|(j, o)| (j != bi).then(|| o.convs.first().cloned()).flatten());
+                    .find_map(|(j, o)| (j != bi).then(|| o.convs.first().map(|c| c.0.clone())).flatten());
                 if let Some(conv) = other {
                     let nonce = self.next_nonce();
                     let ask = json!({"conversation": conv, "text": "mine now", "clientNonce": nonce});

@@ -245,7 +245,8 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
             }
             // A `claude -p` run's card has no chat turn behind it: the card says whose run it was and who answers,
             // asked of kith-auth now, so a revoke applies (A7). The bot's owner answers for their bot under the same
-            // rule, with the bot's own folders as the bounds.
+            // rule, with the bot's own folders as the bounds; never its escape card, whose once nothing bounds by what
+            // the owner holds.
             if method == "respondPermission"
                 && let Some(card) = hub.store.card_by_entry(id).filter(|c| c.source == "run")
             {
@@ -255,6 +256,7 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
                     .store
                     .bot_guest_of_person(&card.person)
                     .is_some_and(|b| b.owner_person.as_deref() == Some(person))
+                    && card.tool != crate::cards::access::TOOL
                     && within(&grant_roots(&card.person, &card.agent), &card.tool, &input);
                 return if entry.kind == "permission"
                     && (theirs || their_bot)

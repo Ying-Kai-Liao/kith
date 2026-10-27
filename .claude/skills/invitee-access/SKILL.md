@@ -1,6 +1,6 @@
 ---
 name: invitee-access
-description: Property tests that an invited person and a bot guest never get more than they were granted. Use when a change touches serve/host/src/api/roles.rs (guard, member_may, MEMBER_METHODS, BOT_METHODS, BOT_PENDING_METHODS, bot_may, shape, event_for, event_for_bot, bot_entry, shape_bot, hello_for, own_bot, approves_own, may_use, granted_agents), serve/host/src/api/botguests.rs (the five member handlers, end_bot, revoke_owned_by, enforce, bot_call, ask, the ten-bot limit), the bot principal in api/devices.rs (bot_principal), remote/botsync.rs, a router method in serve/host/src/api/ (a new method must stay off the member list unless justified), dispatch/member_call in api/mod.rs, people/proveInvite, event fan-out in api/events.rs, or kernel/bin/kith-auth (resolve, may, person --rm, member, bot, bots-cap).
+description: Property tests that an invited person and a bot guest never get more than they were granted. Use when a change touches serve/host/src/api/roles.rs (guard, member_may, MEMBER_METHODS, BOT_METHODS, BOT_PENDING_METHODS, bot_may, shape, event_for, event_for_bot, bot_entry, shape_bot, hello_for, own_bot, owned_bot_chat_agent, approves_own, runs_code, stored_member_approver, may_use, may_use_checked, granted_agents), serve/host/src/api/botguests.rs (the five member handlers, end_bot, revoke_owned_by, enforce, bot_call, ask, the ten-bot limit), the bot principal in api/devices.rs (bot_principal), remote/botsync.rs, a router method in serve/host/src/api/ (a new method must stay off the member list unless justified), dispatch/member_call in api/mod.rs, people/proveInvite, event fan-out in api/events.rs, who answers a card (cards::approver_of, the run-card branch of guard, cards/access.rs escape cards), or kernel/bin/kith-auth (resolve, resolve_bot, may, person --rm/--revoke, member and its env/mode checks, bot, bots-cap, access, forget).
 ---
 
 # Invitee access never exceeds the grant
@@ -20,12 +20,14 @@ Host, `serve/host/src/api/roles_props.rs`:
 5. The same call after the grant is removed is refused (kith-auth is asked every call). Harm: a revoked person keeps access.
 6. `event_for`: a person gets only `bot`/`entry`/`resync` events of their own chats whose agent is still in their person row, never usage, screens or cloud events, and no `cwd`/`command`/`folder`; the owner sees an invitee's chat only as permission prompts. Harm: leaks of other people's chats and of the Mac.
 7. `shape` (hello, projects, history, thread, kithInfo), `shape_bot`, `hello_for` leave no folder, cwd, command, path or error text (also on a real `bot_json`). Harm: file paths of the Mac shown to a guest.
-8. kith-auth fails closed: `may_use` is true only for `allowed: true` and not owner; failure, empty or garbage output, `"true"` or `1` for allowed, truncated JSON are all a no; `approves_own` is true only for preset exactly `member`; `granted_agents` never lists an agent kith-auth denies. Harm: a broken kith-auth opens every door.
+8. kith-auth fails closed: `may_use` is true only for `allowed: true` and not owner; `may_use_checked` is `Some(true)` exactly when `may_use` is true and `None` (never a yes) when kith-auth gave no answer or named the owner; `approves_own` never allows `Bash`; failure, empty or garbage output, `"true"` or `1` for allowed, truncated JSON are all a no; `approves_own` is true only for preset exactly `member`; `granted_agents` never lists an agent kith-auth denies. Harm: a broken kith-auth opens every door.
 9. Calls that must pass do pass (`guard_lets_a_granted_member_use_their_own_chat`), so "refuse everything" cannot satisfy the rest.
+21. The card of a `claude -p` run (a card-store row with source `run`) is answered by a person only when kith-auth says member now, the tool does not run code, and either the run was theirs and the host stored them as its approver, or the run was their bot guest's (docs/kith-bot-guests.md 7.6). For their bot's card, only what they could answer for a run of their own: not a file outside the bot's grant folders (F11 step 2a, `cards::approver_of` makes such a card the owner's) and not an escape card (`request_access`, F11 step 2b: its yes widens the bot's next activation). Harm: a member widens their bot's sandbox past what they hold, or allows a guest's shell.
+22. In a chat (their own, or their bot guest's), `respondPermission` never passes for a tool that runs code (`runs_code`: kind `execute`, `Bash`, `mcp__*`, an unnamed tool of an unknown kind; `BashOutput`/`KillShell` are not code), nor for an entry stored with the owner as approver; and `respondPermission`, `react`, `editHandoff`, `keepConversation` never pass for a key or account card, whether the entry says so or its card-store row's tool is `request_secret`. Harm: a member allows the owner's shell on the Mac, or answers a key request.
 
 Bot guests, host, `serve/host/src/api/botguests_props.rs` (the real `dispatch` against a real kith-auth in a temp folder, a temp store and a fake cloud: the `Rig` of `bot_guests_tests`; generated sequences of up to 8 operations, judged by a small model of who holds what):
 
-14. A bot is served (`botAsk`) only while it is allowed in, was given the agent, and its owner holds that agent now. Harm: a bot reaches an agent its owner never had or no longer has.
+14. A bot is served (`botAsk`) only while it is allowed in, was given the agent, and its owner holds that agent now; reading a conversation of its own (`botThread`) follows the same rule (pending: `pending`; ended: forbidden; active without the grant: `notGranted`). Harm: a bot reaches an agent its owner never had or no longer has, or reads answers of a turn that outlived a revoke.
 15. A bot reaches only `BOT_METHODS`; one that waits for its owner's allow (`BotPending`) only `BOT_PENDING_METHODS` (hello, botStatus, proveBotInvite); an ended bot nothing. Checked by name for every router method, and by random calls. Harm: a bot calls a member's or the owner's method.
 16. Taking the owner's agent (shrinking the grant, to zero too), removing the person, `revokeBot` or `botLeave` cut the bot at its next call, and the same call after that is refused again (also for a double revoke). The store state, the principal of the bot's key and `botStatus` follow the model. Harm: a removed person's bot keeps working.
 17. The five member handlers (`createBotInvite` also for an existing bot, `revokeBotInvite`, `revokeBot`, `myBots`, `setBotLimits`) act only on the caller's own live bots, and `createBotInvite` only gives agents the caller holds; a person lowers limits to the defaults at most; `myBots` lists the caller's own bots and no others. Harm: a person manages another's bot or hands a bot more than they hold.
@@ -39,31 +41,42 @@ kith-auth, `kernel/tests/kith-auth-props.py` (generated command sequences on a t
 11. A bot is allowed only with a row of its own (the `*` row never reaches it) and while its owner is allowed right now; it runs as `guest`; for an invitee's bot, deny is a superset of the owner's, helpers are a subset, budget equals the owner's; the owner's bots take `owner_bots_budget` when set.
 12. Removing a person removes their bots and every membership; they and their bots fail `resolve` at the next call. Taking an agent from a person takes it from their bots.
 13. A refused `bots-cap` leaves the cap as it was.
+23. (`access`, the always half of an escape card; C2) `kith-auth access AGENT WHO KIND VALUE` writes exactly when WHO is a person (not the owner, not removed or revoked) who holds the agent now through a row of their own, and, for a bot of an invitee, only for a place its owner holds now (a folder at or below one the owner holds, write covering read; a domain the owner lists); it writes only that row, a refusal writes nothing, and `--rm` takes the place away. A bot's resolved access never reaches past its owner's at the moment of the resolve, whatever its row still lists; a person allowed through the everyone row carries no access. Harm: an always answer widens a bot past its owner, or the everyone row widens everyone.
+24. (F11 step 1) An allowed resolve never runs in a free-shell mode (`bypassPermissions`, `auto`) without `--trusted`, also when auth.json was hand-edited to say so. Harm: a guest's run gets a shell with no prompts.
+25. (membership env) `member ... env.NAME=` refuses a name that changes how the run starts or which kith it talks to (`PATH`, `KITH_HOME`, `DYLD_INSERT_LIBRARIES`), writing nothing, and no allowed resolve carries one, hand edits included. Harm: a membership row runs the agent through another binary or another kith.
+26. (forget) A new person or bot starts with nothing: no membership, grant or invite left behind by an earlier removal of the same id or a hand edit. Harm: an id handed out again inherits the old person's rights.
 
 ## Coverage record
 
-Sync commit: `5ced9454` (origin/main when written; the covered files below are unchanged since `7b6622a0`, the commit the breaks were run on). If `git diff 5ced9454 -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
+Sync commit: `60d2031e3cd6446d5a1f0de8132077507a8a91f9` (2026-10-28: origin/main `b241d7bb` plus the `guard` fix for finding 1 below; `roles_props`, `botguests_props` and `kernel/tests/kith-auth-props.py` pass there). If `git diff 60d2031e -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
+
+How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechecked against `ed2ceb63`, where the properties and generators were brought up to the code (21-26 and the rows below are new) and property 21 failed on the code for the escape card and for Read/Edit outside the bot's folders. `6fc50729` (on main) bounded the bot owner's answer by the bot's grant folders, which fixed the Read/Edit cases; `60d2031e` refuses the bot owner its bot's escape card, which fixed the last one.
 
 | File | Functions | Properties |
 |---|---|---|
 | serve/host/src/api/roles.rs | `guard`, `member_may`, `MEMBER_METHODS`, `UNPROVEN_METHODS` | 1, 2, 3, 4, 5, 9 |
-| | `own_bot`, `may_use`, `resolve` (private), `approves_own`, `granted_agents` | 1, 3, 5, 8 |
+| | `own_bot`, `may_use`, `may_use_checked`, `resolve` (private), `approves_own`, `granted_agents` | 1, 3, 5, 8 |
+| | `runs_code`, `stored_member_approver`, `owned_bot_chat_agent`, the run-card branch of `guard`, `secret_card` | 21, 22 |
+| | `within`, `grant_roots` (the approver a card is stored with; the test home has no grant folders, so every named file is outside) | 21 (through `cards::approver_of`'s rule, written in the test) |
+| serve/host/src/cards/access.rs | `TOOL` (`request_access`): an escape card on a run card | 21 |
+| serve/host/src/api/calls.rs, api/cards.rs | their router methods (in the by-name sweeps of `roles_props`, `roles_tests`, `bot_guests_tests`) | 1, 15 |
 | | `event_for`, `bot_person` | 6 |
 | | `shape`, `shape_bot`, `hello_for` | 7 |
 | serve/host/src/api/roles.rs (bots) | `BOT_METHODS`, `BOT_PENDING_METHODS`, `bot_may` | 15 |
 | | `event_for_bot`, `bot_entry` | 18 (and `a_bot_guest_is_shown_words_only`) |
 | serve/host/src/api/botguests.rs | `call`, `create_bot_invite`, `new_bot` (limit, agents held), `revoke_bot_invite`, `revoke_bot`, `my_bots`, `set_bot_limits`, `Actor::manages` | 17, 19 |
 | | `end_bot`, `revoke_owned_by`, `enforce` (via `revokePerson`, `setPersonAccess`, `revokeBot`, `botLeave`) | 16 |
-| | `bot_call`, `bot_method`, `ask` (grant check at call time, conversation ownership), `status` | 14, 15, 16, 20 |
+| | `bot_call`, `bot_method`, `ask`, `thread` (grant check at call time, conversation ownership), `status` | 14, 15, 16, 20 |
 | serve/host/src/api/devices.rs | `bot_principal` | 15, 16 |
 | serve/host/src/store/botguests.rs | `live_bot_count`, `bot_guest_of_device`, `end_bot_guest` (through the handlers) | 16, 19 |
 | serve/host/src/agent/folder.rs | `Change::from_args` (used as the oracle for send) | 4 |
 | serve/host/src/api/mod.rs | `member_call` (guard before route) | read, not run: see not covered |
 | kernel/bin/kith-auth | `resolve`, `resolve_bot`, `may`, `bot_may`, `bot_row`, `cmd_person --rm`, `cmd_member`, `cmd_bot`, `cmd_bots_cap` | 10-13 |
+| | `cmd_access` (C2), the access cap in `resolve_bot`, `check_env_key`, the `--trusted` free-shell rule, `forget`, `cmd_person --revoke/--unrevoke` | 12, 23-26 |
 
 ## Run
 
-- Host, only these tests: `cd serve/host && cargo test --bin kith roles_props botguests_props` (roles_props about 10 s of run time, botguests_props about 1.5 minutes because every case runs kith-auth as a subprocess; `PROPTEST_CASES=1000` for more, which is slow for the bot sequences). They run in the normal host `cargo test` in CI. The Mac is often loaded: prefer CI for the first compile.
+- Host, only these tests: `cd serve/host && cargo test --bin kith -- roles_props botguests_props` (`--bin kith` builds the test binary once; without it cargo also builds the other targets; roles_props about 10 s of run time, botguests_props about 1.5 minutes because every case runs kith-auth as a subprocess; `PROPTEST_CASES=1000` for more, which is slow for the bot sequences). They run in the normal host `cargo test` in CI. The Mac is often loaded: prefer CI for the first compile.
 - kith-auth: `kernel/tests/kith-auth-props` (seconds; `PROPS_EXAMPLES=3000` for more). Needs `uv`. CI runs it as the "Auth property check" step of the kernel job, right after "Auth check".
 
 ## Bounds and assumptions
@@ -133,6 +146,30 @@ Each break below was a one-line change in the product code behind a thread-local
 | 47, 48, 49, 50 | `revokeBotInvite`, `setBotLimits`, `revokeBot`, `createBotInvite{botId}` skip the owner check | same (17) |
 
 Not shown failing (no single change reaches them): breaks of `enforce` (it stops running turns, which the rig has none of; the next call is cut by the kith-auth check in `ask`, broken in 34), of `bot_principal`'s state arms alone (the device is removed, the store query skips ended bots: three walls, break 44 takes all three down), and of the second wall `bot_method`'s default arm (break 29 takes both down). Break 33 and 45, 46 were dropped for the same reason or as not observable.
+
+### kith-auth breaks (2026-10-28, `kernel/tests/kith-auth-props.py` against a patched copy of `kernel/bin/kith-auth`, 300 generated examples, no shrinking)
+
+Each is a one-text change to a copy of kith-auth in a scratch folder (the repo copy untouched); M0 is the unchanged copy, which passed. All of them failed `test_access_never_exceeds_the_grant` or the sequence property. Earlier generators let M1, M2, M6, M7 and M9 pass (no team of a person, their bot and memberships before the access calls; no `access` after a revoke or by the owner; no hand-edited free-shell mode after people existed): the TEAM opening, the pre-op of ACCESS and the second hand-edit list are why they fail now.
+
+| # | The break | Caught by (shrunk case) |
+|---|---|---|
+| M1 | `resolve_bot` gives a bot its own `access` row uncapped | a bot reaches `write /work/c` its owner does not hold (23) |
+| M2 | `cmd_access` skips the "its owner holds it now" check for a bot | `access house bot-a read /work/a/b` accepted (23) |
+| M4 | `cmd_bot` does not `forget` a new bot | "new bot-b starts with an invite" (26) |
+| M4b | `cmd_person` does not `forget` a new person | "new sam starts with a membership" (26) |
+| M6 | `cmd_access` skips `may` (a revoked or removed person) | `access house amy write /work/c` accepted (23) |
+| M7 | `cmd_access` skips `need_person` and the owner refusal | `access garden kai domain b.example` accepted for the owner (23) |
+| M8 | `check_env_key` accepts `PATH` | `member garden kai env.PATH=x` accepted (25) |
+| M9 | `mode_of` ignores `--trusted` | "sam runs house in auto without --trusted" (24) |
+
+### Host breaks of the 2026-10-28 additions
+
+Not run as breaks: property 21's run-card branch failed on the real code before `6fc50729` and `60d2031e` (finding 1 below, fixed), which shows the check can fail; the chat-card rules of 22 (`runs_code`, the stored approver, the card-store `request_secret` tool) are pinned by the hand-written cases 12-15 of `guard_lets_a_granted_member_use_their_own_chat`, and the `botThread` half of 14 has had no break run against it yet.
+
+## Open findings
+
+1. **Fixed 2026-10-28** (Read/Edit by `6fc50729`, the escape card by `60d2031e`: `their_bot` now also requires `within(grant_roots(bot person, agent), tool, input)` and a tool other than `request_access`; entries 16-18 refused). Kept for the record: **a bot guest's owner answered their bot's run cards past the bot's box** (property 21, `guard`'s run-card branch in `roles.rs`; seen failing 2026-10-28 at `ed2ceb63`). For a card whose run was their bot guest's, `guard` checks only `their_bot`, not code, and `approves_own(owner, agent, tool)`; it never looks at the approver the host stored (always `owner` for a bot's run: `cards::approver_of` asks `approves_own` of the bot, a guest), at `within`/`grant_roots`, or at the escape tool. Failing case, `guard_lets_a_granted_member_use_their_own_chat` entries 16-18: p1 is a member of a1 and owns bot guest `bot-c…g5`; that bot's `claude -p` run raised a run card (approver `owner`) for `request_access` (`read /Users/someone/Documents`), for `Read /etc/hosts`, and for `Edit /Users/someone/notes.txt`; `guard(p1, respondPermission, entry)` returns `Ok` for each. Harm: p1 could not answer any of these for their own run (they are stored as the owner's), but answers them for their bot: a yes to the escape card is applied as a once grant at the bot's next activation (`cards::access::answered`; even an "always" that kith-auth refuses becomes a once), so the bot's sandbox opens a folder or domain p1 does not hold; a yes to Read/Edit outside the grants removes the permission layer of F11 step 2a for the bot (the sandbox profile is the remaining layer). Introduced by `ccdd3f72` (run cards and the `their_bot` branch, 2026-10-24) and left as is by `b5da4481` (F11 step 2a: out-of-grant cards go to the owner) and the escape cards of `cards/access.rs`. The random draw of `guard_never_lets_a_person_past_their_grant` reaches this case too rarely (respondPermission, a run card of the bot person, its owner calling, a tool past the box: about 1 in 10^5 cases) and passed at 96 cases; the hand-written cases (added in `e9a1a46f`) are what fail. Fix in `guard`, not here: for `their_bot`, also require what the run's own member would need (the tool not `request_access`, and `within(grant_roots(bot person, agent), tool, input)`), or route these cards to the owner only.
+2. **Liveness, not safety:** since `a46dab48` the ACP cards in a bot guest's chat store approver `owner`, so `stored_member_approver` refuses the bot's owner for every chat card of their bot, against docs/kith-bot-guests.md 7.6 ("An invitee owner's bot: Sam answers only when `approves_own(sam, agent)`"). Fails closed (the Mac owner still answers): `updates.rs` stores `approves_own(bot person, …)`, always `owner` for a bot, and `a46dab48` made the bot-chat branch of `guard` require a stored `member`. Not covered by a property that must pass.
 
 ## Not yet covered
 
