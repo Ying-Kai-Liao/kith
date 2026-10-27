@@ -95,10 +95,16 @@ linux:
   # Required by the deb target (package.json has no author email).
   maintainer: Ying-Kai Liao <Ying-Kai-Liao@users.noreply.github.com>
   target: [AppImage, deb, tar.gz]
-  artifactName: kith-linux-${arch}.${ext}
+  artifactName: kith-linux-${env.KITH_LINUX_ARCH}.${ext}
   desktop:
     entry:
       StartupWMClass: Kith
+# Fixed, version-free names with one arch spelling (${arch} would give x86_64 for the AppImage and amd64 for the deb);
+# the release workflow sets KITH_LINUX_ARCH to x64 or arm64.
+appImage:
+  artifactName: kith-linux-${env.KITH_LINUX_ARCH}.${ext}
+deb:
+  artifactName: kith-linux-${env.KITH_LINUX_ARCH}.${ext}
 
 win:
   icon: resources/icon.png

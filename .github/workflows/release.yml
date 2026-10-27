@@ -258,6 +258,7 @@ jobs:
     env:
       KITH_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsua2l0aGJvdC5hcHAk
       KITH_CLOUD_URL: https://api.kithbot.app
+      KITH_LINUX_ARCH: ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
