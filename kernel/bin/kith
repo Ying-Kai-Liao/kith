@@ -847,8 +847,9 @@ done < <(printf '%s\n' "$KITH" "$kith_real" "$KITH_HOME/kernel" | awk '!seen[$0]
 # The way out of the guest sandbox is a request, not a prompt: asking is always allowed (the host makes the card, F11 2b).
 [[ $p_owner == 0 ]] && allowed+=("mcp__kithpermit__request_access" "mcp__kithpermit__report_bug")
 # Each agent carries only its own tools: the shared services it needs and is granted (kith-auth), its own mcp.json
-# for servers no one else uses, and no global skills unless capabilities.yaml says global_skills: true. Its own
-# skills are files it reads on demand. A broken auth.json costs the agent its services, not the run.
+# for servers no one else uses, and no global skills unless capabilities.yaml says global_skills: true (or the owner is at
+# their own terminal, below). Its own skills are files it reads on demand. A broken auth.json costs the agent its
+# services, not the run.
 "$KITH/bin/kith-auth" mcp-config "$agent" > "$runs/$$.mcp.json" \
   || { echo "kith: $agent: no shared services this run (kith-auth failed)" >&2; echo '{"mcpServers": {}}' > "$runs/$$.mcp.json"; }
 
@@ -910,6 +911,10 @@ print(json.dumps({
 }
 # Codex (or another harness the launch JSON covers): the same facts, without Claude's settings.
 if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi
+# An interactive run of the owner's in their own terminal: no task, a tty on both ends, not started by another run (and not
+# by the host, a schedule or an ask, which set KITH_VIA). That covers `kith AGENT`, -r, -r ID and -c.
+terminal=0
+[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && -t 0 && -t 1 ]] && terminal=1
 # Every run with someone else's profile is findable by the revoke sweep (kith-sessions proc): its pid is the one that execs
 # claude below, so the claim lives as long as claude (or, for an interactive run, the launcher claude runs under).
 [[ $p_owner == 1 || $launch -eq 1 ]] || python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || true
@@ -917,7 +922,7 @@ if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi
 if [[ $harness != claude ]]; then
   printf '%s\n' "$prompt" > "$runs/$$.prompt.md"
   run_dirs=$(for ((i = 1; i < ${#dirs[@]}; i += 2)); do printf '%s\n' "${dirs[i]}"; done)
-  grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null && gs=1 || gs=0
+  { [[ $terminal -eq 1 ]] || grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null; } && gs=1 || gs=0
   run_mcp="$runs/$$.mcp.json"; [[ -f $pkg/mcp.json ]] && run_mcp+=$'\n'"$pkg/mcp.json"
   export KITH_RUN_PROMPT="$runs/$$.prompt.md" KITH_RUN_DIRS="$PWD"$'\n'"$run_dirs" KITH_RUN_MCP=$run_mcp KITH_RUN_GLOBAL_SKILLS=$gs
   hargs=(--)
@@ -945,9 +950,12 @@ if [[ $launch -eq 1 ]]; then
 fi
 [[ $p_owner == 0 ]] && mcp_arg=$(permit_mcp)
 args=(--append-system-prompt "$prompt" "${dirs[@]}" --settings "$settings_arg" --allowedTools "${allowed[@]}")
-args+=(--strict-mcp-config --mcp-config "$mcp_arg")
+# The owner at their own terminal gets Claude Code whole (/plugin, /mcp, their skills and MCP servers, the agent's granted
+# servers on top); only runs between agents, the host's launches and everyone else's runs go lean.
+[[ $terminal -eq 1 ]] || args+=(--strict-mcp-config)
+args+=(--mcp-config "$mcp_arg")
 [[ $launch -eq 0 && $p_owner == 1 && -f $pkg/mcp.json ]] && args+=(--mcp-config "$pkg/mcp.json")
-grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null || args+=(--disable-slash-commands)
+[[ $terminal -eq 1 ]] || grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null || args+=(--disable-slash-commands)
 [[ -n $KITH_MODEL ]] && args+=(--model "$KITH_MODEL")
 [[ -n $KITH_EFFORT ]] && args+=(--effort "$KITH_EFFORT")
 [[ $out_format == json ]] && args+=(--output-format json)
