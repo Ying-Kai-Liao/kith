@@ -16,15 +16,17 @@ session merge into one item and one turn (S5). Every request carries an id; one 
 withdrawn is dropped (rule 13), so a late duplicate never starts a second turn.
 
 Doors: `run` — the kernel resumes the owner's ended session itself, `kith AGENT --resume SESSION "<note>"`, once the
-session's writer claim (the F5 lease, bin/kith-sessions) is free; a terminal holding it keeps the wake queued until it
+session's writer claim (#324's live/terminal/<sid>.claim, bin/kith-sessions) is free; a terminal holding it keeps the wake queued until it
 lets go, so a reply to a terminal's session waits for it instead of being typed in. `host` — the host runs the turn
 (a bot chat, a channel thread, a person's session: only the host can give a person's run its token); it takes the item
 here and says done or back. Either way the queue is the record and the only one.
 
-At most once, never lost (W1-W3 in designs/2026-10-25-all-together/model/Lifecycle.tla): a request leaves the queue only
-when its turn ends (TurnCommit), never when the turn starts (TurnStart); the files outlive a host or Mac restart. Every
-note starts with "[kith wake RUN]": a turn whose deliverer died is answered when that marker is in the session's
-transcript (the session saw it) and owed again when it is not.
+The model is designs/2026-10-25-all-together/model/Lifecycle.tla. W2, an event wakes its session exactly once, also
+across a restart: a request leaves the queue only when its turn ends (TurnCommit), never when the turn starts
+(TurnStart); the files outlive a host or Mac restart; every note starts with "[kith wake RUN]", and a turn whose
+deliverer died is answered when that marker is in the session's transcript (the session saw it) and owed again when it
+is not. W3, never two writers: a turn starts only on a session nobody holds, and what comes in meanwhile merges into
+the next turn. A woken turn runs as the person the session serves (decisions 2026-10-26), whoever caused the wake.
 
 Files: $KITH_STATE/sessions/queue/<hash>.json one item per session, queue/answered.json the ids answered or withdrawn
 (kept KEEP_DAYS), sessions/log.jsonl every enqueue, turn and drop. Logs of run-door turns: <logs>/wake/RUN.log.
@@ -154,7 +156,7 @@ def alive(pid, started=None):
 
 
 def writer_live(sid):
-    """Whether a live writer holds SESSION's claim (or the host's take-over claim): the lease the turn would need."""
+    """Whether a live writer holds SESSION's claim (or the host's take-over claim): the one-writer claim the turn would need (S1/R1)."""
     d = state() / 'live' / 'terminal'
     for name in (f'{sid}.claim', f'{sid}.takeover.claim'):
         c = read_json(d / name, {})
@@ -241,7 +243,7 @@ def note_for(run, requests):
 
 
 def start_turn(path, it, holder, sid=None):
-    """TurnStart: the owed requests go into one turn held by holder. Needs queue > 0 (W1); the caller has checked the
+    """TurnStart: the owed requests go into one turn held by holder. Needs queue > 0; the caller has checked the
     session is free (W3). Nothing leaves the queue here (W2)."""
     run = uuid.uuid4().hex[:12]
     owed = [r for r in it['requests'] if r['run'] is None]

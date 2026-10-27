@@ -87,6 +87,14 @@ is "once the terminal is gone, drain delivers" "$(python3 "$W" drain)" "deliveri
 for _ in $(seq 50); do [[ $(owed s2) == 0 ]] && break; sleep 0.1; done
 is "the reply reached the session" "$(owed s2)/$(how reply:1)" "0/answered"
 
+# --- a restart between enqueue and delivery (W2): the request is in the files, delivered once ------------------------
+python3 "$W" enqueue s4 --id restart:1 --agent designer -- after the restart >/dev/null
+calls=$(wc -l < "$KITH_STATE/stub-calls" | tr -d ' ')
+is "after a restart, the first drain delivers it" "$(python3 "$W" drain)" "delivering s4"
+for _ in $(seq 50); do [[ $(owed s4) == 0 ]] && break; sleep 0.1; done
+is "the next drain doesn't deliver it again" "$(python3 "$W" drain)/$(how restart:1)" "/answered"
+is "one turn ran" "$(( $(wc -l < "$KITH_STATE/stub-calls" | tr -d ' ') - calls ))" 1
+
 # --- refused and failed turns ---------------------------------------------------------------------------------------
 python3 "$W" enqueue s3 --id w:1 --agent designer -- one >/dev/null
 STUB_MODE=held python3 "$W" deliver s3
