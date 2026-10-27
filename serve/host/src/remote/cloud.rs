@@ -712,7 +712,8 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
         platform: r.platform,
         source: DeviceSource::Account,
         grant_id: Some(grant.to_owned()),
-        scopes: vec![Scope::Control, Scope::Screen],
+        // A member never shares this computer's screen, so their device isn't granted it.
+        scopes: if r.person.is_some() { vec![Scope::Control] } else { vec![Scope::Control, Scope::Screen] },
         lease_until: Some(now_ms() + LEASE_MS),
         created_at: now_ms(),
         last_seen_at: None,
@@ -994,6 +995,7 @@ mod tests {
         decide(&hub, "req_ok", true).await.unwrap();
         let d = hub.store.device(&b64(&dk)).unwrap();
         assert_eq!((d.source, d.grant_id.as_deref()), (DeviceSource::Account, Some("grt_new")));
+        assert_eq!(d.scopes, [Scope::Control, Scope::Screen], "the owner's device can share the screen");
         assert_eq!(hub.cloud.requests_json().len(), 0);
     }
 
@@ -1057,6 +1059,7 @@ mod tests {
         decide(&hub, "req_m", true).await.unwrap();
         let d = hub.store.device(&b64(&dk)).unwrap();
         assert_eq!((d.source, d.person_id.as_deref()), (DeviceSource::Account, Some("sam")));
+        assert_eq!(d.scopes, [Scope::Control], "a member's device never carries the screen");
     }
 
     #[tokio::test]
@@ -1077,6 +1080,7 @@ mod tests {
         pull(&hub, &base).await.unwrap();
         let d = hub.store.device(&b64(&dk)).unwrap();
         assert_eq!((d.source, d.person_id.as_deref()), (DeviceSource::Account, Some("sam")), "approved on its own");
+        assert_eq!(d.scopes, [Scope::Control]);
     }
 
     #[tokio::test]
