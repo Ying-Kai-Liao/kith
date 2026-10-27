@@ -77,24 +77,33 @@ fn post(hub: &Hub, url: String, body: Value) {
                     }
                 }
             }
-            Ok(r) if r.status() == reqwest::StatusCode::GONE => {
-                if let Some(t) = body["ticket"].as_str() {
-                    GONE.locked().push(t.to_owned());
+            Ok(r) => {
+                let status = r.status().as_u16();
+                let reply = r.json::<Value>().await.ok();
+                match body["ticket"].as_str() {
+                    Some(t) if ticket_is_gone(status, reply.as_ref()) => GONE.locked().push(t.to_owned()),
+                    _ => tracing::warn!(%url, status, "relay rejected push"),
                 }
             }
-            Ok(r) => tracing::warn!(%url, status = %r.status(), "relay rejected push"),
             Err(error) => tracing::warn!(%url, %error, "relay unreachable"),
         }
     });
 }
 
-/// Tickets the relay says to forget: expired, a dead device token (410), or superseded by a newer one.
+/// The relay refused this ticket for good: expired or a dead device token (410), or invalid or registered for
+/// another computer (403 with `gone`). A 403 without `gone` (say, a bad signature) is this host's fault: keep it.
+fn ticket_is_gone(status: u16, reply: Option<&Value>) -> bool {
+    status == 410 || (status == 403 && reply.is_some_and(|r| r["gone"] == true))
+}
+
+/// Tickets the relay says to forget: refused for good (see [`ticket_is_gone`]) or superseded by a newer one.
 fn gone_in_batch(notifications: &[Value], reply: &Value) -> Vec<String> {
     let mut gone = Vec::new();
     for result in reply["results"].as_array().into_iter().flatten() {
         let Some(index) = result["index"].as_u64().and_then(|index| usize::try_from(index).ok()) else { continue };
         let Some(ticket) = notifications.get(index).and_then(|item| item["ticket"].as_str()) else { continue };
-        if result["status"] == 410 || result["superseded"] == true {
+        let status = result["status"].as_u64().and_then(|s| u16::try_from(s).ok()).unwrap_or(0);
+        if ticket_is_gone(status, Some(result)) || result["superseded"] == true {
             gone.push(ticket.to_owned());
         } else if result["status"] != 200 {
             tracing::warn!(status = ?result["status"], "relay rejected a batched notification");
@@ -253,14 +262,25 @@ mod tests {
     }
 
     #[test]
-    fn expired_dead_and_superseded_tickets_are_forgotten_refused_ones_kept() {
-        let notifications: Vec<Value> =
-            ["ok", "expired", "superseded", "other-computer", "limited"].iter().map(|t| json!({"ticket": t})).collect();
+    fn tickets_refused_for_good_are_forgotten_others_kept() {
+        let notifications: Vec<Value> = ["ok", "expired", "superseded", "other-computer", "unsigned", "limited"]
+            .iter()
+            .map(|t| json!({"ticket": t}))
+            .collect();
         let reply = json!({"results": [
-            {"index": 0, "status": 200}, {"index": 1, "status": 410},
-            {"index": 2, "status": 200, "superseded": true}, {"index": 3, "status": 403}, {"index": 4, "status": 429},
+            {"index": 0, "status": 200}, {"index": 1, "status": 410, "gone": true},
+            {"index": 2, "status": 200, "superseded": true}, {"index": 3, "status": 403, "gone": true},
+            {"index": 4, "status": 403}, {"index": 5, "status": 429},
         ]});
-        assert_eq!(gone_in_batch(&notifications, &reply), ["expired", "superseded"]);
+        assert_eq!(gone_in_batch(&notifications, &reply), ["expired", "superseded", "other-computer"]);
+        // A single /push: the same rule, on the answer's status and body.
+        assert!(ticket_is_gone(410, None));
+        assert!(ticket_is_gone(403, Some(&json!({"error": "ticket belongs to another computer", "gone": true}))));
+        assert!(!ticket_is_gone(403, Some(&json!({"error": "invalid signature"}))));
+        assert!(!ticket_is_gone(403, None));
+        assert!(!ticket_is_gone(429, Some(&json!({"error": "too many pushes"}))));
+        assert!(!ticket_is_gone(502, Some(&json!({"error": "PERMISSION_DENIED", "gone": false}))));
+        assert!(!ticket_is_gone(502, Some(&json!({"gone": true}))));
     }
 
     #[test]
