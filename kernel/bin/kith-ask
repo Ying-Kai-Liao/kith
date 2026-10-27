@@ -24,8 +24,10 @@ That makes it the way for a script, another harness or a Claude Code session to 
 several turns, in the agent's own tools instead of the caller's.
 
 Permission mode: KITH_ASK_PERMISSION_MODE when set, else the agent's settings.json defaultMode, else kith's default (auto;
-~/.kith/settings.json changes it). No one can approve a prompt, so a tool that needs one is refused, the same as any
-one-shot run.
+~/.kith/settings.json changes it). A tool that needs approval asks through a card in the apps, the same as any
+one-shot run: the owner answers it (or a member, for their own run's files). A yes within the window (90 s by default)
+lets the run go on; later, the run is told to end its turn and a yes resumes its session. With no host running there is
+no card and the tool is refused.
 Without --bg the call blocks until the agent has finished (minutes for a real job). With --bg it returns an id at
 once: the run goes on detached, its answer and errors are kept in ~/.kith/ask-bg/, and `kith ask --wait ID` collects
 them. Everything else (-c, -p, --json, ...) means the same.
