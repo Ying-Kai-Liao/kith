@@ -14,7 +14,7 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/kith-wake-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_LOGS=$T/logs CLAUDE_CONFIG_DIR=$T/claude KITH_WAKE_NO_KICK=1
-unset KITH_PERSON KITH_AGENT KITH_ROOM KITH_RESUME HQ_HOME HQ_STATE
+unset KITH_PERSON KITH_AGENT KITH_ROOM KITH_RESUME KITH_VIA CLAUDE_CODE_SESSION_ID HQ_HOME HQ_STATE
 mkdir -p "$HOME" "$KITH_STATE/live/terminal" "$CLAUDE_CONFIG_DIR/projects/p"
 W=$KERNEL/bin/kith-wake
 TR=$CLAUDE_CONFIG_DIR/projects/p
@@ -138,6 +138,82 @@ again=$(python3 "$W" take --holder $$ --session acp:c3:t1 2>/dev/null)
 [[ -z $again ]] && ok "a dead turn the session never saw waits its pause" || bad "no pause after a dead turn" "$again"
 is "and is still owed, not lost" "$(owed acp:c3:t1)/$(how card:10)" "1/"
 is "its dead turn was let go" "$(python3 "$W" ls --json | python3 -c 'import json,sys; print([(i["turn"], i["tries"]) for i in json.load(sys.stdin) if i["session"]=="acp:c3:t1"])')" "[(None, 1)]"
+
+# --- waiters (WaiterResult): code, no model, one wake each -----------------------------------------------------------
+cat > "$T/gh" <<'STUB'
+#!/bin/sh
+# stub gh: pr view|checks N --repo R --json …, answered from files the test writes
+case $2 in view) cat "$KITH_STATE/gh-view" ;; checks) cat "$KITH_STATE/gh-checks" ;; esac
+STUB
+chmod +x "$T/gh"
+export KITH_WAKE_GH=$T/gh KITH_WAKE_POLL=0
+WD=$KITH_STATE/sessions/waits
+enqueued() {   # enqueued <id>: how many times a request with this id went into the queue
+  python3 -c 'import json,sys; print(sum(1 for l in open(sys.argv[1]) if (e := json.loads(l))["event"] == "enqueue" and e["id"] == sys.argv[2]))' \
+    "$KITH_STATE/sessions/log.jsonl" "$1"
+}
+nwaits() { find "$WD" -name '*.json' 2>/dev/null | wc -l | tr -d ' '; }
+wid() { basename "$(find "$WD" -name '*.json' | head -1)" .json; }
+settle() { for _ in $(seq 50); do [[ $(owed "$1") == 0 ]] && return; sleep 0.1; done; }
+wait_() { python3 "$W" wait "$@" >/dev/null 2>&1; echo $?; }
+
+is "wait: no session to wake is refused" "$(wait_ --on at:+1m --agent coder)" 1
+is "wait: a guest's session is refused (rule 10)" "$(KITH_PERSON=anna wait_ --on at:+1m --session g1 --agent coder)" 1
+is "wait: a host chat's session is refused until the host takes wakes" "$(KITH_VIA=serve wait_ --on at:+1m --session g1 --agent coder)" 1
+is "wait: something it can't watch is refused" "$(wait_ --on ci:nope --session g1 --agent coder)" 1
+is "wait: a pid that isn't running is refused" "$(wait_ --on pid:$(dead_pid) --session g1 --agent coder)" 1
+
+echo '{"headRefOid":"aaaa1111bbbb2222cccc","state":"OPEN"}' > "$KITH_STATE/gh-view"
+echo '[{"name":"ci","bucket":"pending"},{"name":"lint","bucket":"pass"}]' > "$KITH_STATE/gh-checks"
+CLAUDE_CODE_SESSION_ID=w1 KITH_AGENT=coder python3 "$W" wait --on ci:o/r#5 -- check the result | /usr/bin/grep -q '^waiting ' \
+  && ok "wait: the session and agent come from the run" || bad "wait from the run's env"
+python3 "$W" wait --on ci:o/r#5 --session w1 --agent coder >/dev/null
+is "waiting twice on one thing keeps one waiter" "$(nwaits)" 1
+python3 "$W" drain >/dev/null
+is "checks running: no wake" "$(enqueued 'ci:o/r#5@aaaa1111bbbb/w1')/$(nwaits)" "0/1"
+echo '[{"name":"ci","bucket":"pass"},{"name":"lint","bucket":"pass"},{"name":"ios","bucket":"skipping"}]' > "$KITH_STATE/gh-checks"
+python3 "$W" drain >/dev/null
+is "checks done on the first look: not yet (GitHub may not list a new push's runs)" "$(enqueued 'ci:o/r#5@aaaa1111bbbb/w1')" 0
+python3 "$W" drain >/dev/null
+is "done on two looks at one head: one wake, the waiter gone" "$(enqueued 'ci:o/r#5@aaaa1111bbbb/w1')/$(nwaits)" "1/0"
+settle w1
+note=$(cat "$KITH_STATE/stub-note")
+[[ $note == *"CI finished on o/r#5 at aaaa111: all 2 checks passed"*"Your note when you set the wait: check the result" ]] \
+  && ok "the woken turn says what happened and the note" || bad "ci note" "$note"
+python3 "$W" wait --on ci:o/r#5 --session w1 --agent coder >/dev/null
+python3 "$W" drain >/dev/null; python3 "$W" drain >/dev/null
+is "another waiter on the same PR head doesn't wake the session twice" "$(enqueued 'ci:o/r#5@aaaa1111bbbb/w1')/$(nwaits)" "1/0"
+
+echo '{"headRefOid":"dddd2222eeee3333ffff","state":"OPEN"}' > "$KITH_STATE/gh-view"
+echo '[{"name":"ci","bucket":"fail"},{"name":"lint","bucket":"pass"}]' > "$KITH_STATE/gh-checks"
+python3 "$W" wait --on ci:o/r#6 --session w2 --agent coder >/dev/null
+python3 "$W" drain >/dev/null; python3 "$W" drain >/dev/null; settle w2
+[[ $(cat "$KITH_STATE/stub-note") == *"1 of 2 checks failed: ci" ]] && ok "a failed check is named" || bad "failed note" "$(cat "$KITH_STATE/stub-note")"
+echo '{"headRefOid":"dddd2222eeee3333ffff","state":"MERGED"}' > "$KITH_STATE/gh-view"
+python3 "$W" wait --on ci:o/r#7 --session w3 --agent coder >/dev/null
+python3 "$W" drain >/dev/null; settle w3
+[[ $(cat "$KITH_STATE/stub-note") == *"o/r#7 was merged" ]] && ok "a merged PR wakes at once" || bad "merged note" "$(cat "$KITH_STATE/stub-note")"
+
+sleep 30 & p=$!
+python3 "$W" wait --on pid:$p --session w4 --agent coder >/dev/null; w=$(wid)
+python3 "$W" drain >/dev/null
+is "pid: no wake while it runs" "$(enqueued "wait:$w")" 0
+kill $p 2>/dev/null; wait $p 2>/dev/null
+python3 "$W" drain >/dev/null
+is "pid: one wake when it exits" "$(enqueued "wait:$w")/$(nwaits)" "1/0"
+settle w4
+python3 "$W" wait --on at:+0s --session w5 --agent coder >/dev/null; w=$(wid)
+python3 "$W" drain >/dev/null
+is "at: one wake when the time comes" "$(enqueued "wait:$w")" 1
+settle w5
+echo '[{"name":"ci","bucket":"pending"}]' > "$KITH_STATE/gh-checks"
+echo '{"headRefOid":"dddd2222eeee3333ffff","state":"OPEN"}' > "$KITH_STATE/gh-view"
+python3 "$W" wait --on ci:o/r#8 --timeout 0s --session w6 --agent coder >/dev/null; w=$(wid)
+python3 "$W" drain >/dev/null; settle w6
+is "timeout: the waiter gives up with one wake" "$(enqueued "wait:$w")/$(nwaits)" "1/0"
+[[ $(cat "$KITH_STATE/stub-note") == *"gave up"* ]] && ok "and says it gave up" || bad "timeout note" "$(cat "$KITH_STATE/stub-note")"
+python3 "$W" wait --on at:+1h --session w7 --agent coder >/dev/null
+is "Stop drops the session's waiters" "$(python3 "$W" withdraw w7)/$(nwaits)" "withdrew 1/0"
 
 # --- the tick drains ----------------------------------------------------------------------------------------------
 /usr/bin/grep -q "'kith-wake'\|bin/kith-wake" "$KERNEL/bin/kith-sched" && ok "kith-sched tick runs the drain" || bad "tick has no drain"
