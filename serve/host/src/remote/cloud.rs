@@ -90,9 +90,14 @@ fn default_url() -> String {
 
 /// The base that shareable pages (`/i/<computer>/<invite>`) live under: the production cloud's apex
 /// domain, or any other cloud's own URL.
+/// Whether `cloud_url` is the production cloud (a Dev host can be pointed at it with `kith serve relay`).
+pub fn is_main_cloud(cloud_url: &str) -> bool {
+    cloud_url.trim().trim_end_matches('/') == MAIN_CLOUD
+}
+
 pub fn links_base(cloud_url: &str) -> String {
     let trimmed = cloud_url.trim().trim_end_matches('/');
-    if trimmed == MAIN_CLOUD { MAIN_LINKS.to_owned() } else { trimmed.to_owned() }
+    if is_main_cloud(trimmed) { MAIN_LINKS.to_owned() } else { trimmed.to_owned() }
 }
 
 /// The first of the environment's URL, the config file's, the build's default.
@@ -954,6 +959,12 @@ mod tests {
             s("e")
         );
         assert!(valid_url(&format!("{DEV_RELAY}/")));
+    }
+
+    #[test]
+    fn only_the_production_cloud_counts_as_main() {
+        assert!(is_main_cloud(MAIN_CLOUD) && is_main_cloud(&format!(" {MAIN_CLOUD}/ ")));
+        assert!(!is_main_cloud(DEV_RELAY) && !is_main_cloud("http://127.0.0.1:8792"));
     }
 
     #[test]

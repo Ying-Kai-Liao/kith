@@ -239,9 +239,14 @@ async fn make_invite(
     let (cid, env) = (hub.identity.computer_id(), Environment::current());
     let app_link = format!("{}://invite?c={cid}&i={invite_id}&t={token}", env.url_scheme());
     // The secret rides in the fragment so it never reaches the web host's logs; no `r=` (the page knows its cloud).
-    let web_link = env.web_origin().map(|o| format!("{o}/join#c={cid}&i={invite_id}&t={token}"));
+    // The Dev web client talks to the dev cloud: a host on the production cloud never hands it out, or the invitee's
+    // page looks for the invite where it isn't and keeps waiting.
+    let cloud_url = cloud::url(&hub.store);
+    let on_main = cloud_url.as_deref().is_some_and(cloud::is_main_cloud);
+    let web_link =
+        env.web_origin().filter(|_| !on_main).map(|o| format!("{o}/join#c={cid}&i={invite_id}&t={token}"));
     // The cloud's page opens the app (or says how to get it); the token stays in the fragment here too.
-    let page_link = cloud::url(&hub.store).map(|u| format!("{}/i/{cid}/{invite_id}#t={token}", cloud::links_base(&u)));
+    let page_link = cloud_url.map(|u| format!("{}/i/{cid}/{invite_id}#t={token}", cloud::links_base(&u)));
     // `link` is what the share sheets show: the web link (a Dev web client), else the page link, else the app link.
     let link = web_link.as_deref().or(page_link.as_deref()).unwrap_or(&app_link);
     Ok(json!({"inviteId": invite_id, "link": link, "appLink": app_link, "kithLink": app_link, "webLink": web_link,
