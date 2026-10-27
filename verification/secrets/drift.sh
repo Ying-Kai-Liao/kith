@@ -8,9 +8,9 @@
 # set SYNC below to the commit you checked (and in .claude/skills/secret-cards/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below: origin/main after the secret cards
-# (host d8713608, kernel 7863e2e9) and the limit cards (adcfb2f7, a branch after the secret routing) were merged.
-SYNC=ed2ceb6356599bbf65756709b3b91966c9ff8cc5
+# The commit at which the model was last confirmed to describe the files below (origin/main, 2026-10-28; first at
+# ed2ceb63, after the secret cards and the limit cards were merged).
+SYNC=b241d7bbd3372fb6bd31bf1024c10b179ef2645b
 
 FILES=(
   serve/host/src/cards/secret.rs    # provide, respond, deny, grant, Slot, write_key, open_card, list_keys, revoke_key

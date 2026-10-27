@@ -46,9 +46,12 @@ kernel/tests/kith-auth-secret-check           # kith-auth: set --stdin-json, acc
 
 ## Sync commit
 
-**ed2ceb6356599bbf65756709b3b91966c9ff8cc5** (origin/main after the secret cards, host d8713608 and kernel 7863e2e9,
-and the limit cards, adcfb2f7, which only add a branch after the secret routing in `respondPermission`). The same sha
-is in `drift.sh` (`SYNC=`). Move it only after you have confirmed that the model still describes the covered code (see
+**b241d7bbd3372fb6bd31bf1024c10b179ef2645b** (origin/main on 2026-10-28; first written at ed2ceb63, after the secret
+cards, host d8713608 and kernel 7863e2e9, and the limit cards, adcfb2f7, which only add a branch after the secret
+routing in `respondPermission`). Between the two, the covered files changed only around access cards (the escape
+card's once grants in `store/cards.rs`, `cards::answer` writing the entry first), the grants ledger and other
+commands of kith-auth, and the bot's file bound in `guard`; no step of a secret card. The same sha is in `drift.sh`
+(`SYNC=`). Move it only after you have confirmed that the model still describes the covered code (see
 "When you change covered code").
 
 ## What is promised, and the harm if not
