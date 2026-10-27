@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { providerPhotoLabel, profileImageProblem, type ProfileImageSource } from '@shared/profile-image'
 import { Button, Spinner } from '../../components/Controls'
-import { SKY_PRESETS, SKY_TONE_STOPS, skyCropRect, type SkyPick } from '../../components/kith/logic'
+import { SKY_PRESETS, skyCropRect, type SkyLook } from '../../components/kith/logic'
 import { ModalHeader, SheetPage } from '../../components/Overlay'
 import { Text } from '../../components/Text'
 import { useModel } from '../../lib/observable'
@@ -10,23 +10,43 @@ import skyImage from '../../assets/sky/sky-header-day.webp'
 
 const SIZE = 512
 
-/** A preset as a square PNG: the same crop and tone wash as the `.kc-sky` patch, drawn on a canvas. */
-async function renderSky(pick: SkyPick): Promise<ProfileImageSource> {
+/** A preset on a square canvas: the palette gradient, then the cloud crop over it. Tiles and the upload both come from this. */
+async function drawSky(look: SkyLook, size: number): Promise<HTMLCanvasElement> {
   const img = new Image()
   img.src = skyImage
   await img.decode()
   const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = SIZE
+  canvas.width = canvas.height = size
   const ctx = canvas.getContext('2d')!
-  const r = skyCropRect(img.naturalWidth, img.naturalHeight, pick, SIZE)
+  const base = ctx.createLinearGradient(0, 0, 0, size)
+  base.addColorStop(0, look.top)
+  base.addColorStop(1, look.bottom)
+  ctx.fillStyle = base
+  ctx.fillRect(0, 0, size, size)
+  const r = skyCropRect(img.naturalWidth, img.naturalHeight, look, size, look.zoom)
+  ctx.globalAlpha = look.cloud / 100
   ctx.drawImage(img, r.x, r.y, r.w, r.h)
-  const wash = ctx.createLinearGradient(0, 0, 0, SIZE)
-  for (const [at, color] of SKY_TONE_STOPS[pick.tone]) wash.addColorStop(at, color)
-  ctx.fillStyle = wash
-  ctx.fillRect(0, 0, SIZE, SIZE)
+  return canvas
+}
+
+async function renderSky(look: SkyLook): Promise<ProfileImageSource> {
+  const canvas = await drawSky(look, SIZE)
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
   if (!blob) throw new Error('render')
   return { kind: 'bytes', bytes: await blob.arrayBuffer(), type: 'image/png' }
+}
+
+/** The tile for a preset: the same canvas drawing the upload uses, shown at tile size. */
+function SkyTile({ look }: { look: SkyLook }) {
+  const [src, setSrc] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    void drawSky(look, 168).then((c) => live && setSrc(c.toDataURL()))
+    return () => {
+      live = false
+    }
+  }, [look])
+  return <span className="photo-tile-sky" style={src ? { backgroundImage: `url(${src})` } : undefined} aria-hidden />
 }
 
 /** Settings → Account → Change photo: a linked account's own photo, one of the Kith skies, or a file. */
@@ -84,8 +104,8 @@ export function ProfileImagePicker({ onClose }: { onClose: () => void }) {
       <section className="photo-section">
         <Text size="caption" tone="secondary" weight="semibold">Kith defaults</Text>
         <div className="photo-grid">
-          {SKY_PRESETS.map((pick, i) =>
-            tile(`sky-${i}`, `Sky ${i + 1}`, () => renderSky(pick), <span className={`kc-sky kc-sky-${pick.tone}`} style={{ width: 56, height: 56, '--sky-x': `${pick.x}%`, '--sky-y': `${pick.y}%` } as React.CSSProperties} aria-hidden />),
+          {SKY_PRESETS.map((look) =>
+            tile(`sky-${look.name}`, `Sky ${look.name}`, () => renderSky(look), <SkyTile look={look} />),
           )}
         </div>
       </section>
