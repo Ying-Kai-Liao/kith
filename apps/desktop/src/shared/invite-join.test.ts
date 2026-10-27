@@ -36,6 +36,14 @@ test('joins in order and proves the token to the Mac, sending the cloud only h1'
   assert.deepEqual(f.sent.kept, [`cmp_1:${link.token}`])
 })
 
+test('while it asks, the join shows the six digits the Mac\'s owner may compare, and drops them once in', async () => {
+  const f = fake({ requestAccess: async (_c, onCode) => onCode?.('123456') })
+  assert.equal((await f.run()).step, 'done')
+  const asking = f.steps.filter((s) => s.step === 'asking')
+  assert.deepEqual(asking.map((s) => s.code), [null, '123456'])
+  assert.ok(f.steps.filter((s) => s.step !== 'asking').every((s) => s.code === null))
+})
+
 test('an accept answer naming another computer fails the join before the token goes anywhere', async () => {
   const f = fake({ accept: async () => ({ computerId: 'cmp_evil' }) })
   const end = await f.run()

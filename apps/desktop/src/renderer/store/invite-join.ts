@@ -20,7 +20,7 @@ export function appJoinDeps(waitForSignIn: () => Promise<void>, cancelled: () =>
       },
       keepToken: (computerId, inviteId, token) => window.kith.invites.keep(scopedKey(account.user?.userId ?? '', computerId), inviteId, token),
     },
-    // An invited person's request is approved by the Mac with no digits to compare.
+    // The six digits reach the join's state through runJoin's onCode: in Code mode the owner compares them.
     { cancelled },
   )
 }
