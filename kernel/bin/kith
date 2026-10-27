@@ -388,7 +388,8 @@ held=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --child
 # Body without frontmatter, then long-term memory: the load filter of docs/memory-context.md (lib/kith_facets.py, the
 # same one the host's runs get through KITH_ROOM). The owner's run: about them, the agent's memory, then the shared part
 # when there is one. Anyone else's: about them, the shared part and their own. In a group room only what everyone there
-# may see; a bot guest (bot-<hex>) is shared craft and its own room's notes.
+# may see; a bot guest (bot-<hex>) is shared craft and its own room's notes. A person the host's KITH_ROOM_MEMBERS names
+# is in that room (kith_facets.py; kith-auth keeps no room membership, so p_rooms is empty today).
 load_kind=person; [[ $p_owner == 1 ]] && load_kind=owner; [[ ${p_id:-} == bot-* ]] && load_kind=guest
 load_out=$(python3 "$KITH/lib/kith_facets.py" load --agent "$agent" --home "$home" --person-file "$person_file" \
   --kind "$load_kind" --person "${p_id:-}" --rooms "$p_rooms" --room "${KITH_ROOM:-}" --project "$project" \
