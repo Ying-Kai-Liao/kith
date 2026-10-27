@@ -325,3 +325,7 @@ jobs:
             dist/kith-linux-*
             dist/latest*.yml
           generate_release_notes: true
+          append_body: true
+          body: |
+            Download the desktop app: [Mac](https://kithbot.app/download/mac) | [Linux AppImage](https://kithbot.app/download/linux) | [all downloads](https://kithbot.app/download)
+

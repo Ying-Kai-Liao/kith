@@ -21,6 +21,18 @@ Asset names have no version, so `https://github.com/Ying-Kai-Liao/kith/releases/
 | `kith-linux-arm64.AppImage`, `.deb`, `.tar.gz` | Linux, arm64 |
 | `latest-mac.yml`, `latest-linux*.yml`, `*.blockmap` | the update feed (electron-updater) |
 
+The public links on kithbot.app (https://kithbot.app/download) redirect to those files:
+
+| Link | File |
+|---|---|
+| `/download/mac` | `kith-macos.dmg` |
+| `/download/mac/zip` | `kith-macos.zip` |
+| `/download/linux`, `/download/linux/appimage` | `kith-linux-x64.AppImage` |
+| `/download/linux/deb` | `kith-linux-x64.deb` |
+| `/download/linux/tar.gz` | `kith-linux-x64.tar.gz` |
+
+Auto-update reads the feed from GitHub directly.
+
 ### Releasing the desktop app: one-time secrets
 
 The Mac app is signed with a Developer ID Application certificate (team `7FUM8A8H72`) and notarized with an App Store
