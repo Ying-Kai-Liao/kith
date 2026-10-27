@@ -29,7 +29,7 @@ export async function downloadRedirect(_c: Ctx, [key]: string[]): Promise<Respon
 /** Static, so one CSP hash covers it. Only shows the main button for the visitor's OS; the lists stay as they are. */
 export const DOWNLOAD_SCRIPT = `(function(){
 var n=navigator,p=((n.userAgentData&&n.userAgentData.platform)||"")+" "+(n.userAgent||"");
-var os=/Android|iPhone|iPad|iPod/i.test(p)?"":/Mac/i.test(p)?"mac":/Linux|X11/i.test(p)?"linux":"";
+var os=/Android|iPhone|iPad|iPod/i.test(p)?"":/Mac/i.test(p)?(n.maxTouchPoints>1?"":"mac"):/Linux|X11/i.test(p)?"linux":"";
 if(!os){document.getElementById("unavailable").hidden=false;return;}
 document.getElementById("main").hidden=false;
 document.getElementById("main-"+os).hidden=false;
