@@ -92,6 +92,7 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: the denies stay on top of the allowlist (index not allowed)" "$(q "$S" "not any(a == '$T/real state/index' or a == '$T/real state' for a in fs['allowRead'])")" True
   expect "$who: global config of the owner is not read" "$(q "$S" 's["env"]["GIT_CONFIG_GLOBAL"]')" /dev/null
   expect "$who: the link to the state folder is itself readable" "$(q "$S" "'$T/linked state' in fs['allowRead']")" True
+  expect "$who: the owner's uv caches are not readable, its own one is" "$(q "$S" "not any(a in fs['allowRead'] for a in ['$HOME/.cache/uv', '$HOME/Library/Caches/uv']) and s['env']['UV_CACHE_DIR'] in fs['allowRead']")" True
   expect "$who: rule W: denyWrite has the run-later paths at any depth, by both spellings, and the secrets" "$(q "$S" "all(x in fs['denyWrite'] for x in ['$KITH_HOME/agents/echo/files/people/$who/.git/hooks', '$KITH_HOME/agents/echo/files/people/$who/**/.git/hooks', '$KITH_HOME/agents/echo/files/people/$who/**/.git/hooks/**', '$KITH_HOME/agents/echo/files/people/$who/CLAUDE.md', '$KITH_HOME/agents/echo/files/people/$who/**/.claude', '$HOME/.zshrc', '$HOME/Library/LaunchAgents', '$HOME/.local/bin', '/opt/homebrew', '$T/real state/secrets', '$T/real state/serve'])")" True
   expect "$who: denyWrite never covers a folder the run writes in" "$(q "$S" "not any(w == a or a.startswith(w + '/') for w in fs['denyWrite'] for a in aw)")" True
   expect "$who: the file tools get the same list as Edit denies (deny beats allow), and the read-only folders are closed to Edit" "$(q "$S" "all(any(r == x for r in s['permissions']['deny']) for x in ['Edit(/$KITH_HOME/agents/echo/files/people/$who/**/.git/hooks/**)', 'Edit(/$KITH_HOME/agents/echo/files/people/$who/CLAUDE.md)', 'Edit(/$HOME/.zshrc)', 'Edit(/$KERNEL/**)', 'Edit(/$KITH_STATE/people/**)'])")" True
@@ -252,14 +253,17 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
     echo "r sock-run python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/run s.sock')\""
     echo "r sock-other python3 -c \"import socket; s=socket.socket(socket.AF_UNIX); s.connect('$T/other.sock')\""
     echo "r net-curl curl -sS -m 5 https://example.com"
+    echo "r read-owner-uv-cache ls '$REAL_HOME/.cache/uv'"   # the owner's uv cache (uv's default place)
+    echo "r uv-run uv run --no-project python -c pass"
+    echo "r uv-own-cache test \"\$(uv cache dir)\" = '$SLICE/.uv-cache'"
   } > "$SLICE/probe.sh"
   (cd "$T/proj" && KITH_MODEL=${KITH_REAL_MODEL:-haiku} KITH_PERSON=guest KITH_RUN_SOCKET="$T/run s.sock" KITH_RUN_TOKEN=probe HOME=$REAL_HOME PATH=${PATH#"$T/bin:"} \
      perl -e 'alarm 240; exec @ARGV' "$KITH" echo "Run exactly this one Bash command and then reply done: bash '$SLICE/probe.sh'" < /dev/null > "$T/real.out" 2> "$T/real.err")
   echo "probe output:"; cat "$SLICE/probe.out.err" | cut -c1-200 | grep -v "xcode\|xcrun\|developer\|^See\|^If dev\|^Use" ; cat "$SLICE/probe.out" 2>/dev/null || { echo "(no probe output)"; tail -5 "$T/real.err"; tail -5 "$T/real.out"; }
   rexpect() { local got; got=$(sed -n "s/^$1 //p" "$SLICE/probe.out" 2>/dev/null); expect "real: $1 $2" "${got:-none}" "$2"; }
   for n in read-ssh read-keychains read-home read-backup read-other-slice read-state-secrets \
-           write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other; do rexpect $n denied; done
-  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run; do rexpect $n ok; done
+           write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other read-owner-uv-cache; do rexpect $n denied; done
+  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run uv-run uv-own-cache; do rexpect $n ok; done
   rm -f "$REAL_HOME/.zshrc-probe-should-not-exist"
 
   # --- escape cards (F11 step 2b): a denied folder is readable after a yes-once grant, in the next launch only ----------------

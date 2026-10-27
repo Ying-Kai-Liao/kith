@@ -394,7 +394,8 @@ held=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --child
 # Body without frontmatter, then long-term memory: the load filter of docs/memory-context.md (lib/kith_facets.py, the
 # same one the host's runs get through KITH_ROOM). The owner's run: about them, the agent's memory, then the shared part
 # when there is one. Anyone else's: about them, the shared part and their own. In a group room only what everyone there
-# may see; a bot guest (bot-<hex>) is shared craft and its own room's notes.
+# may see; a bot guest (bot-<hex>) is shared craft and its own room's notes. A person the host's KITH_ROOM_MEMBERS names
+# is in that room (kith_facets.py; kith-auth keeps no room membership, so p_rooms is empty today).
 load_kind=person; [[ $p_owner == 1 ]] && load_kind=owner; [[ ${p_id:-} == bot-* ]] && load_kind=guest
 load_out=$(python3 "$KITH/lib/kith_facets.py" load --agent "$agent" --home "$home" --person-file "$person_file" \
   --kind "$load_kind" --person "${p_id:-}" --rooms "$p_rooms" --room "${KITH_ROOM:-}" --project "$project" \
@@ -762,9 +763,10 @@ allow = []
 for d in os.environ["READ_DIRS"].split("\n"):
     if d:
         allow += both(os.path.abspath(d))
-# what a kernel helper needs to start: uv, the pythons it manages, the kith program itself
-for d in (os.environ.get("UV_CACHE_DIR"), os.path.join(os.environ.get("XDG_CACHE_HOME") or home + "/.cache", "uv"),
-          home + "/Library/Caches/uv", home + "/.local/share/uv", home + "/.local/bin"):
+# what a kernel helper needs to start: uv, the pythons it manages, the kith program itself. The run has a uv cache of
+# its own (UV_CACHE_DIR above); the shared one of the owner (~/.cache/uv, ~/Library/Caches/uv) stays closed, like
+# the rest of the home folder.
+for d in (os.environ.get("UV_CACHE_DIR"), home + "/.local/share/uv", home + "/.local/bin"):
     if d:
         allow += both(d)
 try:   # the developer shims of macOS look the toolchain up here, which can sit on another volume
