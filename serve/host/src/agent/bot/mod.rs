@@ -220,7 +220,6 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         conn_serving: None,
         conn_account: None,
         conn_room: String::new(),
-        conn_access_mark: 0,
         backup_sessions: HashMap::new(),
         preface: None,
         attempt_prompt: None,
@@ -318,8 +317,18 @@ pub(crate) struct Conn {
     model_options: HashMap<String, (String, String)>,
     /// Sessions whose switch to the call model the agent refused: not asked again.
     call_refused: HashSet<String>,
+    /// An invited person's sessions, by what each was started or loaded with (see `hq::Launch::profile_digest`).
+    profiles: HashMap<String, Profile>,
     /// An invited person's or bot guest's run token: revoked when this process's `Conn` is dropped.
     pub(crate) run_grant: Option<crate::runauth::RunGrant>,
+}
+
+/// What a person's session runs with: a launch with another digest loads the session again before its turn.
+#[derive(Debug, Clone, Default)]
+struct Profile {
+    digest: String,
+    /// The once grants on escape cards it was loaded with, kept while it stays loaded (see `cards::access::Reservation`).
+    holds: Vec<String>,
 }
 
 impl Conn {
@@ -439,9 +448,6 @@ struct Actor {
     conn_account: Option<String>,
     /// The room the agent process was started for (`KITH_ROOM`): another room starts it again.
     conn_room: String,
-    /// Where escape-card yeses stood before the live process's launch (`runauth::access_mark`): a yes after it starts
-    /// the process again, so the next turn runs with the grant.
-    conn_access_mark: u64,
     /// The sessions a backup entry holds for this actor, by (entry, thread root or empty). Kept in memory only: the
     /// stored sessions are the agent's own, which come back when its limit lifts.
     backup_sessions: HashMap<(String, String), String>,

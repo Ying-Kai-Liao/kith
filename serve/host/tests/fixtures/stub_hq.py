@@ -7,7 +7,9 @@ STUB_HQ_HOME is the agent's folder. Every call is appended to calls.jsonl there 
 directory). `house set permission MODE` writes the file `permission` there, which --info-json and --launch-json report
 (an empty MODE removes it), as kith keeps its per-agent choice. `cost limit house --json` prints `limit.json` there (no
 limit without it); `house set limit N` writes `limit_set` and removes `limit.json`. A file named `fail` in that folder
-makes --launch-json fail with its text on stderr.
+makes --launch-json fail with its text on stderr. For an invited person's launch (KITH_PERSON set), `grants.json` there
+(`{"read": [...]}`) stands in for what the real kernel's `kith-permit apply` puts in the settings: the folders their
+conversation was given, as `sandbox.filesystem.allowRead`.
 """
 import json
 import os
@@ -181,13 +183,17 @@ elif args[:2] == ["house", "--launch-json"]:
     account = account_id.split(":")[1] if ":" in account_id else None
     model = args[args.index("-m") + 1] if "-m" in args else "haiku"
     project = args[args.index("-p") + 1] if "-p" in args else None
+    settings = {"hooks": {"SessionStart": []}}
+    grants = os.path.join(home, "grants.json")
+    if os.environ.get("KITH_PERSON") and os.path.exists(grants):
+        settings["sandbox"] = {"filesystem": {"allowRead": json.load(open(grants, encoding="utf-8"))["read"]}}
     print(json.dumps({
         "version": 1, "agent": "house", "agent_version": "v1", "harness": harness, "cwd": home,
         "backup": backup, "provider": harness, "account": account, "account_id": account_id,
         "env": {"KITH_AGENT": "house", "HQ_AGENT": "house", "KITH_VIA": os.environ.get("KITH_VIA", ""), "HQ_VIA": os.environ.get("KITH_VIA", ""), "KITH_MODEL": model, "HQ_MODEL": model,
                 "KITH_PROVIDER": harness, "KITH_ACCOUNT": account or "", "KITH_ACCOUNT_ID": account_id, "KITH_BACKUP": backup or ""},
         "system_prompt": "You are house, the household keeper.",
-        "settings": {"hooks": {"SessionStart": []}},
+        "settings": settings,
         "mcp_servers": {"pantry": {"command": "pantry-mcp", "args": [], "env": {}}},
         "add_dirs": [home + "/data"], "allowed_tools": ["Read"], "disable_slash_commands": True,
         "model": model, "effort": None, "project": project, "call_model": call_model()[1] or None,

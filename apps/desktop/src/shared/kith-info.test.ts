@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
-  accessGrantHolder, accessGrantText, cronWords, formatUsd, isUnsupportedHost, lastRunText, packageNotes, parseAccessGrants, parseKithInfo, parseKithInfoResult,
+  accessGrantHolder, accessGrantText, cronWords, formatUsd, isUnsupportedHost, lastRunText, packageNotes, parseAccessLedger, parseKithInfo, parseKithInfoResult,
   parseSearchResult, rolePrompt, shortVersion, splitRoleSections, topModels,
 } from './kith-info.ts'
 
@@ -111,18 +111,26 @@ test('rolePrompt joins the intro and every section, Not yours included', () => {
   assert.equal(rolePrompt({ intro: ' ', sections: [] }), null)
 })
 
-test('access grants: the host list parsed, and what each lets them do in words', () => {
-  const grants = parseAccessGrants({ grants: [
-    { person: 'sam', name: 'Sam', kind: 'read', target: '/Users/kai/docs', since: 1_790_000_000_000 },
-    { person: '*', name: '', kind: 'domain', target: 'pypi.org', since: null },
-    { person: 'sam', kind: 'exec', target: '/bin' },
-    { person: 'sam', kind: 'write' },
+test('access ledger: the host list parsed, and what each lets them do in words', () => {
+  const grants = parseAccessLedger({ grants: [
+    { key: 'read:house:sam:/Users/kai/docs', kind: 'read', agent: 'house', person: 'sam', name: 'Sam', target: '/Users/kai/docs', since: 1_790_000_000_000, approved_by: null },
+    { key: 'domain:house:*:pypi.org', kind: 'domain', agent: 'house', person: '*', name: '', target: 'pypi.org', since: null },
+    { key: 'service:house:sam:notion/sam', kind: 'service', agent: 'house', person: 'sam', name: 'Sam', target: 'notion/sam', since: null },
+    { key: 'exec:house:sam:/bin', kind: 'exec', agent: 'house', person: 'sam', target: '/bin' },
+    { kind: 'write', agent: 'house', person: 'sam', target: '/x' },
+    { key: 'write:house:sam:', kind: 'write', person: 'sam' },
   ] })
-  assert.deepEqual(grants.map((g) => [g.person, g.kind, g.target]), [['sam', 'read', '/Users/kai/docs'], ['*', 'domain', 'pypi.org']])
+  assert.deepEqual(grants.map((g) => [g.key, g.person, g.kind, g.target]), [
+    ['read:house:sam:/Users/kai/docs', 'sam', 'read', '/Users/kai/docs'],
+    ['domain:house:*:pypi.org', '*', 'domain', 'pypi.org'],
+    ['service:house:sam:notion/sam', 'sam', 'service', 'notion/sam'],
+  ])
+  assert.equal(grants[0].agent, 'house')
   assert.equal(accessGrantText(grants[0]), 'Read /Users/kai/docs')
   assert.equal(accessGrantText({ kind: 'write', target: '/x' }), 'Read and write /x')
   assert.equal(accessGrantText(grants[1]), 'Connect to pypi.org')
+  assert.equal(accessGrantText(grants[2]), 'Use notion/sam')
   assert.match(accessGrantHolder(grants[0]), /^Sam · since /)
   assert.equal(accessGrantHolder(grants[1]), 'Everyone')
-  assert.deepEqual(parseAccessGrants(null), [])
+  assert.deepEqual(parseAccessLedger(null), [])
 })

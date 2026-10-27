@@ -433,16 +433,18 @@ public extension HostClient {
         return try await call("kithSetCallModel", Body(botId: botId, model: model), timeout: 60)
     }
 
-    /// A Kith agent's "always" access grants (what, for whom, since when). Owner only: a member gets 403, an older host 404.
-    func kithAccessGrants(botId: String) async throws -> AccessGrants {
-        struct Body: Encodable { var botId: String }
-        return try await call("kithAccessGrants", Body(botId: botId), timeout: 30)
+    /// The grants ledger: every lasting grant for anyone but the owner, of one agent and/or one person. Owner only: a
+    /// member gets 403, an older host 404.
+    func accessLedger(agent: String? = nil, person: String? = nil) async throws -> AccessLedger {
+        struct Body: Encodable { var agent: String?; var person: String? }
+        return try await call("accessLedger", Body(agent: agent, person: person), timeout: 30)
     }
 
-    /// Takes one away, so that person's next run no longer gets it; the answer is the list read back.
-    func kithRemoveAccessGrant(botId: String, grant: AccessGrant) async throws -> AccessGrants {
-        struct Body: Encodable { var botId: String; var person: String; var kind: String; var target: String }
-        return try await call("kithRemoveAccessGrant", Body(botId: botId, person: grant.person, kind: grant.kind, target: grant.target), timeout: 30)
+    /// Takes one ledger entry away by its key, so that person's next run no longer gets it.
+    func removeGrant(_ grant: AccessGrant) async throws {
+        struct Body: Encodable { var kind: String; var key: String }
+        struct Removed: Decodable {}
+        let _: Removed = try await call("removeGrant", Body(kind: grant.kind, key: grant.key), timeout: 30)
     }
 
     /// The backup chain (serve/host/src/api/backups.rs); this app only reads it. A host before it answers 404.

@@ -552,10 +552,11 @@ pub async fn project_add(id: &str, path: &str) -> Result<()> {
 /// deny rules, model, budget, memory folder) and fails closed: a refusal comes back as [`Refused`], never as a run of
 /// the owner's. `None` is the owner's run.
 ///
-/// `access`: that person's grant for this launch alone ([`crate::runauth::grant_for`] for the conversation the process
+/// `access`: that person's grant for this launch alone ([`crate::runauth::grant_for`] for the conversation the session
 /// will serve). With it the kernel asks the host for what the conversation was given beyond its box (a yes on an escape
-/// card, an "always") and puts it in the settings. This launch is the activation that spends a once grant: a caller
-/// that keeps a process from before the yes starts it again with these settings ([`crate::runauth::access_since`]).
+/// card, an "always") and puts it in the settings. An app chat's session gets them in its `session/new` or
+/// `session/load` (settings are per session), and the once grants are reserved for it while it starts
+/// ([`crate::cards::access::Reservation`]): the agent process itself is never started again for a grant.
 #[allow(clippy::too_many_arguments)]
 pub async fn launch(
     bin: &Path,
@@ -790,6 +791,23 @@ impl Launch {
             options.insert("effort".into(), effort.into());
         }
         json!({"systemPrompt": {"append": self.system_prompt}, "claudeCode": {"options": options}})
+    }
+
+    /// What an invited person's session runs with, as one digest of what [`Launch::meta`] gives it: the settings with
+    /// the mode (the sandbox and the permission rules, so also the grants of escape cards and of "always" the kernel
+    /// put in them), the extra folders, the allowed tools and bypass switched off. Not the prompt, the servers or the
+    /// model. A session loaded with another digest is loaded again with this launch before its turn (`agent::bot::hq`).
+    pub fn profile_digest(&self) -> String {
+        use sha2::{Digest as _, Sha256};
+        use std::fmt::Write as _;
+        let meta = self.meta();
+        let o = &meta["claudeCode"]["options"];
+        let profile =
+            json!([o["settings"], o["additionalDirectories"], o["allowedTools"], o["allowDangerouslySkipPermissions"]]);
+        Sha256::digest(profile.to_string().as_bytes()).iter().fold(String::with_capacity(64), |mut out, byte| {
+            let _ = write!(out, "{byte:02x}");
+            out
+        })
     }
 
     /// Adds the host's `kith-files` server (`send_file`) to the agent's own: an hq agent's launch carries none of the

@@ -86,7 +86,7 @@ final class KithInfoStore {
         await loadGrants()
     }
 
-    /// The agent's "always" access grants (`kithAccessGrants`). Stays empty for a member (the host answers 403), an older
+    /// The agent's part of the grants ledger (`accessLedger`). Stays empty for a member (the host answers 403), an older
     /// host (404) or a failed read: the Access section shows only when there is one.
     private(set) var grants: [AccessGrant] = []
     /// The grant being removed, and why the last removal failed (the row stays).
@@ -97,18 +97,20 @@ final class KithInfoStore {
         #if DEBUG
         if DemoAgent.response(for: botId) != nil { return }
         #endif
-        guard let answer = try? await client().kithAccessGrants(botId: botId) else { return }
+        guard let agent = info?.agent, !agent.isEmpty,
+              let answer = try? await client().accessLedger(agent: agent) else { return }
         grants = answer.grants
     }
 
-    /// Takes one away; the next run of that person no longer gets it. What shows afterwards is the host's list, read back.
+    /// Takes one away; the next run of that person no longer gets it.
     func remove(_ grant: AccessGrant) async {
         guard removingGrant == nil else { return }
         removingGrant = grant
         grantError = nil
         defer { removingGrant = nil }
         do {
-            grants = try await client().kithRemoveAccessGrant(botId: botId, grant: grant).grants
+            try await client().removeGrant(grant)
+            grants.removeAll { $0.key == grant.key }
         } catch {
             grantError = error.localizedDescription
         }

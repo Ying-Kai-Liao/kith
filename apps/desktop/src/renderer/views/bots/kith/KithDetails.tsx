@@ -62,7 +62,7 @@ export function KithDetails({ kith, about, routines }: {
       {info.errors.projects !== undefined || info.projects.length ? <Projects info={info} failed={unread('projects')} /> : null}
       <ModelAndPermissions info={info} />
       <AgentBackups agent={info.agent} />
-      <AccessGrants botId={kith.botId} />
+      <AccessGrants agent={info.agent} />
       <Lists info={info} />
       <div className="sheet-footer kith-refresh">
         {kith.refreshError ? <span className="kith-failed" role="alert">Refresh failed: {kith.refreshError}</span>

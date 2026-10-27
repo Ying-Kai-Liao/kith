@@ -10,7 +10,7 @@ import {
   parseDiff, parseHistory, parseMemoryList, parseRead, parseSave, parseTidyUps, parseUndo,
   type HqMemoryDiff, type HqMemoryList, type HqMemoryRead, type HqMemoryVersion, type HqSaveResult, type HqTidyUp, type HqUndoResult,
 } from '@shared/hq-memory'
-import { isUnsupportedHost, parseAccessGrants, parseKithInfoResult, parseSearchResult, type AccessGrant, type KithInfoResult, type KithSearchResult } from '@shared/kith-info'
+import { isUnsupportedHost, parseAccessLedger, parseKithInfoResult, parseSearchResult, type AccessGrant, type KithInfoResult, type KithSearchResult } from '@shared/kith-info'
 import { isAccessRemoved, parseGranted } from '@shared/mac-role'
 import { parseAudit, parseCreatedInvite, parseInvites, parsePeople, type AuditRow, type CreatedInvite, type PendingInvite, type Person, type Role } from '@shared/people'
 import { threadWriterCode, threadWriterMessage, type TakeOverResult, type ThreadWriterCode } from '@shared/thread-writer'
@@ -339,14 +339,14 @@ export class HostClient {
     return parseBackups(await this.call('accountSet', { agent, account }, 90_000))
   }
 
-  /** A Kith agent's "always" access grants (what, for whom, since when). Owner only: a member gets 403; a host before this call 404. */
-  async kithAccessGrants(botId: string): Promise<AccessGrant[]> {
-    return parseAccessGrants(await this.call('kithAccessGrants', { botId }, 30_000))
+  /** The grants ledger: every lasting grant for anyone but the owner, of one agent and/or one person. Owner only: a member gets 403; a host before it 404. */
+  async accessLedger(filter: { agent?: string; person?: string }): Promise<AccessGrant[]> {
+    return parseAccessLedger(await this.call('accessLedger', filter, 30_000))
   }
 
-  /** Takes one away, so that person's next run no longer gets it; answers the list read back. */
-  async kithRemoveAccessGrant(botId: string, g: Pick<AccessGrant, 'person' | 'kind' | 'target'>): Promise<AccessGrant[]> {
-    return parseAccessGrants(await this.call('kithRemoveAccessGrant', { botId, person: g.person, kind: g.kind, target: g.target }, 30_000))
+  /** Takes one ledger entry away by its key, so that person's next run no longer gets it. */
+  async removeGrant(g: Pick<AccessGrant, 'kind' | 'key'>): Promise<void> {
+    await this.call('removeGrant', { kind: g.kind, key: g.key }, 30_000)
   }
 
   async kithMemorySearch(botId: string, query: string, limit = 30): Promise<KithSearchResult> {

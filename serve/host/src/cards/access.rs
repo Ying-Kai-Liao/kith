@@ -8,7 +8,9 @@
 //!
 //! - **once**: the card is approved and parked with its session (C8). The session resumes through the doors of
 //!   `resume.rs`; at launch the kernel calls `consumeAccess` (after it took the session's writer claim, before exec), which
-//!   marks the grant used in one compare-and-set (L3) and returns it for the profile. One grant, one activation.
+//!   marks the grant used in one compare-and-set (L3) and returns it for the profile. One grant, one activation. An app
+//!   chat's launch [reserves](Reservation) the grant instead: it is taken when the session started or loaded with it,
+//!   and stays for the next activation when that failed.
 //! - **always**: a kith-auth write (`kith-auth access`, under the auth.json lock, refused for secrets, rule W and for
 //!   anyone but a member). `consumeAccess` then reads it back from kith-auth every time, so a revoke ends it (A7).
 //!
@@ -17,12 +19,13 @@
 //! that no longer resolves to itself (a link moved), or that resolves into the secrets or rule W, is dropped; the kernel
 //! checks once more when it builds the profile (`kernel/lib/kith_guard.py`).
 
-use super::{Card, resource};
+use super::{Card, CardState, resource};
+use crate::LockExt;
 use crate::hub::Hub;
 use crate::runauth::{RunIdentity, TokenScope};
-use crate::store::now_ms;
+use crate::store::{Store, now_ms};
 use serde_json::{Value, json};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -33,6 +36,78 @@ const MAX_REASON: usize = 500;
 
 /// Runs that already took their grants.
 static CONSUMED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+
+/// The open [`Reservation`]s, by the run id of the launch they are for.
+static RESERVED: LazyLock<Mutex<HashMap<String, Held>>> = LazyLock::new(Mutex::default);
+
+#[derive(Default)]
+struct Held {
+    /// Once grants the session was loaded with before and keeps while it stays loaded: taken already.
+    carried: Vec<String>,
+    /// Once grants this launch's `consumeAccess` handed out, taken at [`Reservation::commit`].
+    reserved: Vec<String>,
+}
+
+/// The once grants of an app chat's activation (`agent/bot/hq.rs`), in the order access-arch rule 4 gives: the launch's
+/// `consumeAccess` reserves them instead of taking them, the session starts or loads with the profile they are in,
+/// and [`Reservation::commit`] takes them before the first turn (M4). Dropped without a commit (no session started or
+/// loaded, the process didn't start) the grants stay for the next activation. A reserved grant is no other launch's meanwhile.
+///
+/// A session that stays loaded keeps the once grants it was loaded with: `carried` are handed out again to the launch
+/// of each later turn, so its profile stays the same until something else changes it.
+pub struct Reservation {
+    run_id: String,
+}
+
+impl Reservation {
+    /// The reservation for the launch whose run grant has `run_id`; `carried` are the once grants its session holds.
+    pub fn open(run_id: &str, carried: Vec<String>) -> Self {
+        RESERVED.locked().insert(run_id.to_owned(), Held { carried, reserved: Vec::new() });
+        Self { run_id: run_id.to_owned() }
+    }
+
+    /// The session started with what the launch was given: its reserved grants are taken. Returns the once grants the
+    /// session now holds (carried and reserved), to carry into the next turn's launch.
+    pub fn commit(self, store: &Store) -> Vec<String> {
+        let Some(held) = RESERVED.locked().remove(&self.run_id) else { return Vec::new() };
+        if let Err(error) = store.card_access_commit(&held.reserved) {
+            tracing::warn!(error = format!("{error:#}"), "couldn't take the reserved once grants");
+        }
+        let mut holds = held.carried;
+        holds.extend(held.reserved);
+        holds
+    }
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        RESERVED.locked().remove(&self.run_id);
+    }
+}
+
+/// The once grants `who`'s launch is handed: reserved for it when its activation holds a [`Reservation`] (with the
+/// ones its session carries), else taken now. Never one another launch has reserved.
+fn once_grants(hub: &Hub, who: &RunIdentity) -> anyhow::Result<Vec<Card>> {
+    let now = now_ms();
+    let mut open = RESERVED.locked();
+    let taken: HashSet<String> = open.values().flat_map(|h| h.reserved.iter().cloned()).collect();
+    let Some(held) = open.get_mut(&who.run_id) else {
+        return hub.store.card_access_consume(&who.session, now, &taken);
+    };
+    let mut cards: Vec<Card> = held
+        .carried
+        .iter()
+        .filter_map(|id| hub.store.card(id))
+        .filter(|c| c.session == who.session && c.tool == TOOL && c.state == CardState::Used)
+        .collect();
+    for card in hub.store.card_access_once(&who.session, now)? {
+        if !taken.contains(&card.id) {
+            held.reserved.push(card.id.clone());
+            cards.push(card);
+        }
+    }
+    Ok(cards)
+}
 
 fn refused(why: impl Into<String>) -> Value {
     json!({"ok": false, "error": why.into()})
@@ -229,7 +304,7 @@ pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str
         return;
     }
     // A yes that arrived while the asking process was still up was spent as a live one; nobody is waiting for it.
-    if card.state == crate::store::CardState::Used && hub.store.card_undelivered(&card.id).unwrap_or(false) {
+    if card.state == CardState::Used && hub.store.card_undelivered(&card.id).unwrap_or(false) {
         tracing::debug!(card = card.id, "access yes returned to its session");
     }
     if option_id != Some("always") {
@@ -284,43 +359,6 @@ async fn write_always(card: &Card) -> Result<(), String> {
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()) }
 }
 
-/// The always grants of `agent` (`kith-auth access <agent> --json`), for the owner's list in the apps: each is
-/// `{person, name, kind: read|write|domain, target, since}` (`since` in ms, null for one kith-auth kept no time for).
-pub async fn standing(agent: &str) -> anyhow::Result<Vec<Value>> {
-    let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow::anyhow!("kith-auth can't be reached"))?;
-    let out = crate::channels::hq::output(&bin, &["access", agent, "--json"])
-        .await
-        .ok_or_else(|| anyhow::anyhow!("kith-auth didn't answer"))?;
-    if !out.status.success() {
-        anyhow::bail!("couldn't read the always grants: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(serde_json::from_slice(&out.stdout)?)
-}
-
-/// Takes one always grant away (`kith-auth access … --rm`), as `standing` listed it, and reads the list back. The next
-/// launch of a run asks kith-auth again (`consume`), so it no longer gets it; a run already going keeps its box.
-pub async fn take_away(agent: &str, person: &str, kind: &str, target: &str) -> anyhow::Result<Vec<Value>> {
-    if !matches!(kind, "read" | "write" | "domain") {
-        anyhow::bail!("`kind` must be read, write or domain");
-    }
-    if [person, target].iter().any(|a| a.is_empty() || a.starts_with('-')) {
-        anyhow::bail!("`person` and `target` must be one of the listed grants");
-    }
-    let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow::anyhow!("kith-auth can't be reached"))?;
-    let out = crate::channels::hq::output(&bin, &["access", agent, person, kind, target, "--rm"])
-        .await
-        .ok_or_else(|| anyhow::anyhow!("kith-auth didn't answer"))?;
-    if !out.status.success() {
-        anyhow::bail!("couldn't remove it: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let left = standing(agent).await?;
-    let same = |g: &Value| g["person"] == person && g["kind"] == kind && g["target"] == target;
-    if left.iter().any(same) {
-        anyhow::bail!("kith-auth still lists it; it wasn't removed");
-    }
-    Ok(left)
-}
-
 /// What a launch gets: once grants of the session (consumed here, atomically) and the membership's always entries (read from
 /// kith-auth now). Each is checked again; nothing is returned for a run the host doesn't know, a second ask of one run,
 /// or a person who no longer may use the agent (A7).
@@ -346,7 +384,7 @@ pub async fn consume(hub: &Arc<Hub>, who: &RunIdentity) -> Value {
         }
         _ => {}
     };
-    match hub.store.card_access_consume(&who.session, now_ms()) {
+    match once_grants(hub, who) {
         Ok(cards) => {
             for c in cards {
                 if let Some((mode, target)) = parts(&c.resource) {

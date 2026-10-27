@@ -451,29 +451,35 @@ public struct KithSearchHit: Decodable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// One "always" answer to an escape card that kith-auth keeps (`kithAccessGrants`, serve/docs/bot-info.md): `person` may
-/// `kind` (read, write, domain) `target` beyond the box in every run, until it is removed. `since` is nil for one
-/// kith-auth kept no time for.
+/// One entry of the grants ledger (`accessLedger`, serve/docs/bot-info.md): `person` may `kind` `target` on `agent` in
+/// every run, until it is removed. read, write and domain are an escape card's "always" (a folder, a website); service is
+/// a person's own account for a service (`target` is its profile). `key` is kith-auth's for this entry, what `removeGrant`
+/// takes. `since` is nil for one kith-auth kept no time for.
 public struct AccessGrant: Decodable, Hashable, Sendable, Identifiable {
+    public var key: String
+    public var kind: String
+    public var agent: String
     public var person: String
     public var name: String
-    public var kind: String
     public var target: String
     public var since: Double?
-    public var id: String { "\(person)\n\(kind)\n\(target)" }
+    public var id: String { key }
 
-    public init(person: String, name: String = "", kind: String, target: String, since: Double? = nil) {
+    public init(key: String, kind: String, agent: String = "", person: String, name: String = "", target: String, since: Double? = nil) {
+        self.key = key
+        self.kind = kind
+        self.agent = agent
         self.person = person
         self.name = name
-        self.kind = kind
         self.target = target
         self.since = since
     }
 
-    /// What it lets them do: "Read ~/docs", "Read and write ~/notes", "Connect to pypi.org".
+    /// What it lets them do: "Read ~/docs", "Read and write ~/notes", "Connect to pypi.org", "Use notion/sam".
     public var text: String {
         switch kind {
         case "domain": "Connect to \(target)"
+        case "service": "Use \(target)"
         case "write": "Read and write \(target)"
         default: "Read \(target)"
         }
@@ -488,19 +494,24 @@ public struct AccessGrant: Decodable, Hashable, Sendable, Identifiable {
     }
 }
 
-/// The host's `kithAccessGrants` and `kithRemoveAccessGrant` answer; a grant this app can't read is left out.
-public struct AccessGrants: Decodable, Sendable {
+/// The host's `accessLedger` answer; an entry this app can't read is left out.
+public struct AccessLedger: Decodable, Sendable {
     public var grants: [AccessGrant]
 
     private enum CodingKeys: String, CodingKey { case grants }
-    private struct Raw: Decodable { var person: String; var name: String?; var kind: String; var target: String; var since: Double? }
+    private struct Raw: Decodable {
+        var key: String?; var kind: String; var agent: String?; var person: String; var name: String?; var target: String; var since: Double?
+    }
 
     public init(grants: [AccessGrant] = []) { self.grants = grants }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let raw: [Raw] = c.list(.grants)
-        grants = raw.filter { ["read", "write", "domain"].contains($0.kind) && !$0.person.isEmpty && !$0.target.isEmpty }
-            .map { AccessGrant(person: $0.person, name: $0.name ?? "", kind: $0.kind, target: $0.target, since: $0.since) }
+        grants = raw.compactMap { r in
+            guard let key = r.key, !key.isEmpty, ["read", "write", "domain", "service"].contains(r.kind),
+                  !r.person.isEmpty, !r.target.isEmpty else { return nil }
+            return AccessGrant(key: key, kind: r.kind, agent: r.agent ?? "", person: r.person, name: r.name ?? "", target: r.target, since: r.since)
+        }
     }
 }

@@ -84,8 +84,14 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           write (rule W); not for the owner or someone with no row of their own; a bot gets
                                           no more than its owner holds. Listed as `access` in `resolve`. --rm takes one
                                           away as it is written, whatever has changed since.
-  kith-auth access <agent> --json           read-only: every such always of the agent's rows, [{person, name, kind,
-                                          target, since}] (since: ms, null when written before the time was kept)
+  kith-auth ledger [--person ID] [--agent AGENT] [--json]   read-only: the grants ledger, every lasting grant for anyone
+                                          but the owner: the access above (kind read|write|domain) and a person's own
+                                          service grants (<agent>@<person>, kind service, target the profile). --json:
+                                          [{key, kind, agent, person, name, target, since, approved_by}] (since: ms or
+                                          null; approved_by: null, not recorded yet)
+  kith-auth ledger --rm <key>               takes that one entry away, as listed; exit 1 when the ledger has no such key.
+                                          key = <kind>:<agent>:<person>:<target> (kind, agent and person never hold a
+                                          ':', so the target is all that follows the third)
   kith-auth owner <profile> <id>|-|default  the profile is that person's (their logins, their calendar); - = shared;
                                           default: logins and browser profiles are the owner's, keys and bots shared
   kith-auth share <profile> <id>[,..] [--rm]   it stays its owner's, and these people's runs may use it too (through
@@ -953,8 +959,6 @@ def held(have, kind, value):
 def cmd_access(args):
     """The always half of an escape card. One command is one transaction under the auth.json lock (C2: someone removed, or
     never a member, is refused in the same step that would write)."""
-    if len(args) == 2 and args[1] == '--json':
-        return list_access(args[0])
     if len(args) not in (4, 5) or args[2] not in ACCESS_KINDS or (len(args) == 5 and args[4] != '--rm'):
         die('access <agent> <id> read|write|domain <path|host> [--rm]', 2)
     agent, pid, kind, value = args[:4]
@@ -1017,21 +1021,93 @@ def remove_access(agent, pid, kind, value):
     print(f'{pid} no longer has {kind} {value} beyond the box for {agent}')
 
 
-def list_access(agent):
-    """Every always of the agent's rows, for the apps' list of them: who, what and since when."""
-    auth = load_auth()
+LEDGER_KINDS = (*ACCESS_KINDS, 'service')
+
+
+def ledger_key(kind, agent, pid, target):
+    """The one key of a ledger entry (`ledger --rm` takes it back): kind, agent and person never hold a ':' (AGENT_RE,
+    person ids), so the target, a path, host or profile, is everything after the third."""
+    return f'{kind}:{agent}:{pid}:{target}'
+
+
+def ledger(auth):
+    """The grants ledger: every grant that outlives one run, for anyone but the owner. The always answers of escape cards
+    (a membership row's access, the `*` row's included) and a person's own service grants (`<agent>@<person>`)."""
     out = []
-    for pid, row in auth['members'].get(agent, {}).items():
-        if not isinstance(row, dict):
+
+    def add(kind, agent, pid, target, since=None):
+        out.append({'key': ledger_key(kind, agent, pid, target), 'kind': kind, 'agent': agent, 'person': pid,
+                    'name': auth['people'].get(pid, {}).get('name', ''), 'target': target,
+                    'since': since if isinstance(since, int) else None, 'approved_by': None})
+    for agent, rows in auth['members'].items():
+        for pid, row in rows.items() if isinstance(rows, dict) else ():
+            if not isinstance(row, dict):
+                continue
+            since = row.get('access_since') if isinstance(row.get('access_since'), dict) else {}
+            held_now = access_of(row)
+            for kind, field in ACCESS_KINDS.items():
+                for v in held_now[field]:
+                    add(kind, agent, pid, v, since.get(f'{kind}:{v}'))
+    for k, svcs in auth['grants'].items():
+        agent, at, pid = k.partition('@')
+        if not at or not isinstance(svcs, dict) or is_owner(auth, canonical(auth, pid)):
             continue
-        since = row.get('access_since') if isinstance(row.get('access_since'), dict) else {}
-        held_now = access_of(row)
-        for kind, field in ACCESS_KINDS.items():
-            for v in held_now[field]:
-                at = since.get(f'{kind}:{v}')
-                out.append({'person': pid, 'name': auth['people'].get(pid, {}).get('name', ''), 'kind': kind,
-                            'target': v, 'since': at if isinstance(at, int) else None})
-    print(json.dumps(out))
+        for g in svcs.values():
+            for profile in grant_list(g):
+                add('service', agent, pid, profile)
+    return sorted(out, key=lambda e: (e['agent'], e['person'], e['kind'], e['target']))
+
+
+def remove_grant(key):
+    """`ledger --rm <key>`: that one entry goes, as it is written (a path that moved since must still go). Nothing
+    removed is an error, never a success."""
+    kind, agent, pid, target = (key.split(':', 3) + [''] * 4)[:4]
+    if kind not in LEDGER_KINDS or not (agent and pid and target):
+        die(f'not a ledger key: {key} (<kind>:<agent>:<person>:<target>)', 2)
+    auth = load_auth(write=True)
+    gone = False
+    if kind == 'service':
+        svcs = auth['grants'].get(f'{agent}@{pid}')
+        for svc, g in list(svcs.items()) if isinstance(svcs, dict) else ():
+            have = grant_list(g)
+            if target in have:
+                gone = True
+                left = [p for p in have if p != target]
+                if left:
+                    svcs[svc] = left if len(left) > 1 else left[0]
+                else:
+                    svcs.pop(svc)
+        if gone and not svcs:
+            auth['grants'].pop(f'{agent}@{pid}')
+    else:
+        row = auth['members'].get(agent, {}).get(pid)
+        have = row.get('access') if isinstance(row, dict) and isinstance(row.get('access'), dict) else {}
+        listed = have.get(ACCESS_KINDS[kind])
+        if isinstance(listed, list) and target in listed:
+            gone = True
+            listed.remove(target)
+            if isinstance(row.get('access_since'), dict):
+                row['access_since'].pop(f'{kind}:{target}', None)
+    if not gone:
+        die(f'the ledger has no {key} (removed already?)')
+    save_auth(auth)
+    print(f'{pid} no longer has {kind} {target} for {agent}')
+
+
+def cmd_ledger(args):
+    if len(args) == 2 and args[0] == '--rm':
+        return remove_grant(args[1])
+    opts, rest = take_opts(args, {'--person', '--agent'})
+    if rest not in ([], ['--json']) or any(not v or v.startswith('-') for v in opts.values()):
+        die('ledger [--person ID] [--agent AGENT] [--json] | ledger --rm <key>', 2)
+    auth = load_auth()
+    person = canonical(auth, opts['--person']) if '--person' in opts else None
+    rows = [e for e in ledger(auth) if person in (None, e['person']) and opts.get('--agent') in (None, e['agent'])]
+    if rest:
+        print(json.dumps(rows))
+        return
+    for e in rows:
+        print(f"{e['agent']}  {e['person']}  {e['kind']} {e['target']}")
 
 
 def mode_of(row, p):
@@ -1805,6 +1881,8 @@ def main(argv):
         die(f'{cmd}: see kith-auth --help', 2)
     elif cmd == 'access':
         cmd_access(rest)
+    elif cmd == 'ledger':
+        cmd_ledger(rest)
     elif cmd == 'mcp-config' and len(rest) == 1:
         cmd_mcp_config(rest[0])
     elif cmd == 'mcp-names' and len(rest) == 1:

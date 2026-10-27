@@ -1,5 +1,5 @@
 {
-  "description": "A Discord bot for kith-bridge (one bot in one server); the bridge asks kith-auth for its token. KITH_DISCORD_BOT_TOKEN in ~/.kith/secrets/env still works as discord/hq",
+  "description": "A Discord bot for kith serve's chat channels (one bot in one server); the host asks kith-auth for its token",
   "kind": "cli",
   "secrets": ["DISCORD_BOT_TOKEN"]
 }
