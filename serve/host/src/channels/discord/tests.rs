@@ -76,7 +76,6 @@ fn paths(dir: &Path) -> Paths {
     Paths {
         hq_bin: bin.join("kith"),
         auth_bin: bin.join("kith-auth"),
-        live_bin: bin.join("kith-live"),
         machine: dir.join("machine"),
         agent_roots: vec![dir.join("agents")],
         data: dir.join("data"),
@@ -112,7 +111,7 @@ impl Rig {
         let (bin, stub) = (dir.join("bin"), dir.join("stub"));
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(&stub).unwrap();
-        for tool in ["kith", "kith-auth", "kith-live"] {
+        for tool in ["kith", "kith-auth"] {
             std::os::unix::fs::symlink(stub_script(), bin.join(tool)).unwrap();
         }
         for (name, card) in [
@@ -539,7 +538,7 @@ async fn threads_and_webhooks_from_the_bridge_keep_working() {
         "threads": {"discord/hq:300": {"person": "kai", "owner": "house", "last": "house", "room": "discord/hq:200",
                                         "sessions": {"house": "bridge-session"},
                                         "conv": {"thread": 300, "channel": 200, "key": "discord/hq:300"}}},
-        "rooms": {}, "replies": {}, "inbox": {}, "pending": {}, "live": {}
+        "rooms": {}, "replies": {}, "inbox": {}, "pending": {}
     });
     let file = r.dir.join("machine/bridge/state.json");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();

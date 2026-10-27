@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""One stand-in for kith, kith-auth and kith-live in the channels' tests: it acts as whichever name it is called by.
+"""One stand-in for kith and kith-auth in the channels' tests: it acts as whichever name it is called by.
 
-The test makes symlinks <rig>/bin/kith, kith-auth and kith-live to this file; the rig's files are in <rig>/stub/:
+The test makes symlinks <rig>/bin/kith and kith-auth to this file; the rig's files are in <rig>/stub/:
   people.json   {"<platform>:<uid>": {person, owner, was}}      what `kith-auth who` says ("*": for anyone else)
   access.json   {"<person>": {"owner": bool, "agents": [..]}}   what `kith-auth resolve` says
   codes.json    {"<CODE>": "<person>"}                          what `kith-auth link` accepts
   granted.json  {"<platform>": ["<profile>", ..]}               what `kith-auth granted` lists
   secrets.json  {"<profile>": {"<VAR>": "<value>"}}             what `kith-auth get` prints
-  live.json     {"running": bool}                               whether `kith-live send` finds a session
   chain.json    the backup chain `kith <agent> --backups-json` prints (default: the primary alone)
   depleted.json {"<primary|entry id>": <epoch the limit lifts or null>}  accounts a run on which ends on a usage limit
   unavailable.json ["<entry id>", ..]                                    entries `kith --backup` refuses with exit 4
@@ -89,10 +88,6 @@ if me == "kith-auth":
         print(value)
     else:
         fail("kith-auth: unknown command")
-elif me == "kith-live":
-    log({"tool": "kith-live", "args": args})
-    if not load("live", {"running": True}).get("running"):
-        fail("no live session for that agent")
 elif me == "kith":
     agent = args[0]
     if args[1] == "--backups-json":

@@ -431,26 +431,6 @@ def starter():
         say('-', 'no agents yet', 'kith new <name> "<what it does>"' if not starters else 'kith market finds more')
 
 
-def live_at_login():
-    """Live agents (session: live) installed here: offer to start each one's session when you log in."""
-    sys.path.insert(0, str(LIB))
-    import kith_settings
-    listed = json.loads(run(str(KITH / 'bin' / 'kith-pkg'), 'list', '--json').stdout or '{}')
-    live = [n for n in sorted(listed) if run(str(KITH / 'bin' / 'kith-live'), 'is', n).returncode == 0]
-    can = bool(shutil.which('orca') or shutil.which('tmux'))
-    for name in live:
-        if kith_settings.get('live_at_login', name):
-            say('✓', f'{name} starts when you log in', f'kith live login off {name} stops it')
-        elif can and offer(f'Start {name} when you log in?', default=True,
-                           note=f'{name} runs as one session that takes jobs; at login it starts in Orca, else tmux.'):
-            r = run(str(KITH / 'bin' / 'kith-live'), 'login', 'on', name)
-            say('✓' if r.returncode == 0 else '✗', f'{name} starts when you log in' if r.returncode == 0 else name,
-                f'kith live login off {name} stops it' if r.returncode == 0 else (r.stderr or r.stdout).strip()[-200:])
-        else:
-            say('-', f'{name} starts when you run it', f'kith live start {name}; at login: kith live login on {name}'
-                + ('' if can else ' (needs Orca or tmux)'))
-
-
 def find_agents():
     """The market's new agents, to install by number (kith market). Each install shows what the agent may do first."""
     if ASK:
@@ -530,7 +510,6 @@ def main(argv):
              f'From inside a git repo, the agent works on your code and sends its change back as a branch.')
         return
     starter()
-    live_at_login()
     section('Agents people shared')
     find_agents()
     if 'updated: never' not in (STATE / 'user.md').read_text():

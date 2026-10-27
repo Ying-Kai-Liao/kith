@@ -453,13 +453,10 @@ impl Core {
         if started { Vec::new() } else { done.into_iter().flatten().collect() }
     }
 
-    /// Messages that waited for this connection when the host last stopped, and live sessions' answers.
+    /// Messages that waited for this connection when the host last stopped.
     pub fn resume(self: &Arc<Self>, ad: &Arc<dyn Adapter>) {
         self.ads.locked().insert(ad.conn().to_owned(), ad.clone());
         let prefix = format!("{}:", ad.conn());
-        if self.with(|i| i.st.live.values().any(|k| k.as_str().is_some_and(|k| k.starts_with(&prefix)))) {
-            self.ensure_pump(ad);
-        }
         let waiting: Vec<(String, String)> = self.with(|i| {
             let mut out = Vec::new();
             let works: Vec<String> =
