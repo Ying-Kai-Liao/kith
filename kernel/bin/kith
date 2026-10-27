@@ -927,7 +927,8 @@ fi
 settings_arg="$runs/$$.settings.json" mcp_arg="$runs/$$.mcp.json"
 if [[ $launch -eq 1 ]]; then
   # F11 step 2b for the host's launch (an app chat's run): the grants go into the settings it is handed, as in the exec
-  # path's apply below. The host starts the process right after and asks for a launch only when it will use it.
+  # path's apply below. A once grant is pending only after a yes, and after a yes the host starts its process again with
+  # this launch.
   if [[ $p_owner == 0 && -n ${KITH_RUN_TOKEN:-} && -n ${KITH_RUN_SOCKET:-} ]]; then
     python3 "$KITH/bin/kith-permit" apply "$runs/$$.settings.json" || true
   fi
