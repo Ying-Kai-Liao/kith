@@ -2,8 +2,10 @@
 """One stand-in for kith and kith-auth in the channels' tests: it acts as whichever name it is called by.
 
 The test makes symlinks <rig>/bin/kith and kith-auth to this file; the rig's files are in <rig>/stub/:
-  people.json   {"<platform>:<uid>": {person, owner, was}}      what `kith-auth who` says ("*": for anyone else)
+  people.json   {"<platform>:<uid>": {person, owner, was, revoked}}  what `kith-auth who` says ("*": for anyone else)
   access.json   {"<person>": {"owner": bool, "agents": [..]}}   what `kith-auth resolve` says
+  held.json     true while this computer is out of sync with the Kith cloud: `who` and `resolve` say held for anyone
+                but the owner
   codes.json    {"<CODE>": "<person>"}                          what `kith-auth link` accepts
   granted.json  {"<platform>": ["<profile>", ..]}               what `kith-auth granted` lists
   secrets.json  {"<profile>": {"<VAR>": "<value>"}}             what `kith-auth get` prints
@@ -13,7 +15,8 @@ The test makes symlinks <rig>/bin/kith and kith-auth to this file; the rig's fil
   calls.jsonl   every call, one JSON object per line
 
 `kith <agent> <task>` answers {"result": "echo:<task>", "session_id": "sess-<agent>-<n>"}. A task that starts with
-SLOW sleeps until killed, SLEEP for 1.5 s; one containing SEND leaves two posts in KITH_BRIDGE_OUTBOX; FAIL exits 1;
+SLOW sleeps until killed, SLEEP for 1.5 s; one containing REVOKE takes the agent from KITH_PERSON first (as a revoke
+while it runs would); SEND leaves two posts in KITH_BRIDGE_OUTBOX; FAIL exits 1;
 BIGCTX reports a context 60% full, BGHOLD leaves a process holding its output open. `kith <agent> --backup ID <task>`
 runs on that chain entry; `kith <agent> --backups-json` prints the chain.
 """
@@ -56,7 +59,9 @@ if me == "kith-auth":
     if cmd == "who":
         people = load("people", {})
         nobody = people.get("*", {"person": None, "owner": False, "was": []})
-        print(json.dumps(people.get(f"{args[1]}:{args[2]}", nobody)))
+        entry = people.get(f"{args[1]}:{args[2]}", nobody)
+        held = bool(load("held", False)) and bool(entry.get("person")) and not entry.get("owner")
+        print(json.dumps({**entry, "held": held}))
     elif cmd == "resolve":
         agent, person = args[1], args[args.index("--person") + 1]
         entry = load("access", {}).get(person)
@@ -65,7 +70,8 @@ if me == "kith-auth":
         else:
             owner = bool(entry.get("owner"))
             allowed = owner or agent in entry.get("agents", [])
-            print(json.dumps({"allowed": allowed, "why": f"{person} may not use {agent}", "owner": owner}))
+            held = bool(load("held", False)) and not owner
+            print(json.dumps({"allowed": allowed, "why": f"{person} may not use {agent}", "owner": owner, "held": held}))
     elif cmd == "link":
         platform, uid, code = args[1:4]
         person = load("codes", {}).get(code)
@@ -119,6 +125,11 @@ elif me == "kith":
         bg = subprocess.Popen(["sleep", "60"], stdin=subprocess.DEVNULL)
         with open(os.path.join(stub, "bg.pid"), "w", encoding="utf-8") as f:
             f.write(str(bg.pid))
+    if "REVOKE" in task:
+        access = load("access", {})
+        mine = access.get(env.get("KITH_PERSON"), {})
+        mine["agents"] = [a for a in mine.get("agents", []) if a != agent]
+        save("access", access)
     if "SEND" in task:
         outbox = env["KITH_BRIDGE_OUTBOX"]
         for item in ({"as": "image", "text": "tool says hi"},

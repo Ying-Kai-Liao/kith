@@ -1,7 +1,7 @@
 //! Whether this Mac is in sync with the Kith cloud, for this host and for the kernel. In the host it is
 //! `hub.cloud_synced`: account devices and bot asks wait for it. For the kernel it is `<data dir>/cloud-sync.json`
-//! `{linked, until}`, which `kith-auth who` reads to tell the bridge whom to hold: with `linked` set, the bridge serves
-//! anyone but the owner only while `until` (ms) is ahead (revoke-person R8). The lease runs while the relay
+//! `{linked, until}`, which `kith-auth who` reads to tell the host's chat channels whom to hold: with `linked` set,
+//! they serve anyone but the owner only while `until` (ms) is ahead (revoke-person R8). The lease runs while the relay
 //! connection is live and a pull of the cloud state succeeded on it; it ends at once when the cloud says something
 //! changed (until the pull that applies it), when the connection drops, and by itself `LEASE` after the relay was
 //! last heard, so a Mac that slept or lost the network holds guests until it has pulled again.
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-/// How long one pull, or one ping heard while synced, keeps the bridge serving: past the relay's silence limit plus
+/// How long one pull, or one ping heard while synced, keeps the channels serving: past the relay's silence limit plus
 /// one ping, so a live connection renews it in time and a dead one lets it run out.
 pub const LEASE: Duration = Duration::from_secs(120);
 
@@ -89,7 +89,7 @@ fn write(path: &Path, linked: bool, until: i64) {
         .and_then(|()| std::fs::write(&tmp, body))
         .and_then(|()| std::fs::rename(&tmp, path));
     if let Err(e) = done {
-        // The bridge then reads the last lease, which runs out by itself: it holds guests rather than serve them.
+        // The channels then read the last lease, which runs out by itself: they hold guests rather than serve them.
         tracing::warn!(error = %e, "couldn't write the cloud sync lease");
     }
 }

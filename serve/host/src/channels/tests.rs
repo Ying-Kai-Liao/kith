@@ -101,6 +101,8 @@ impl Opts {
             debounce: Duration::from_millis(100),
             hold: Duration::from_millis(400),
             poll: Duration::from_millis(40),
+            sync_hold: Duration::from_secs(5),
+            sync_poll: Duration::from_millis(50),
             ..Settings::default()
         };
         Self { settings, jev: None, gate: GateSettings::unlimited(), gate_task: false }
@@ -955,4 +957,100 @@ async fn a_person_who_is_invited_again_runs_again() {
     r.put("access", &json!({"kai": {"owner": true}, "guest": {"owner": false, "agents": ["shop"]}}));
     r.send(&Rig::msg("2", "@shop back")).await;
     until("the guest's answer", || !r.fake.posts().is_empty()).await;
+}
+
+/// The guest's messages and turns wait while this computer is out of sync with the Kith cloud (what kith-auth says).
+fn hold_guest(r: &Rig, held: bool) {
+    r.put("held", &json!(held));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_revoked_person_is_told_their_access_was_removed_and_nothing_runs() {
+    let r = Rig::new();
+    r.put(
+        "people",
+        &json!({"fake:1": {"person": "kai", "owner": true, "was": []},
+                "fake:2": {"person": "guest", "owner": false, "was": [], "revoked": true}}),
+    );
+    r.send(&Rig::msg("2", "@shop hi")).await;
+    let mut chatter = Rig::msg("2", "lunch?");
+    chatter.addressed = false;
+    r.send(&chatter).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(r.fake.replies(), ["Your access to kith on this computer was removed."]);
+    assert!(r.calls("kith").is_empty(), "nothing ran");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_message_sent_while_out_of_sync_waits_and_runs_once_in_sync() {
+    let r = Rig::new();
+    hold_guest(&r, true);
+    r.send(&Rig::msg("2", "@shop milk please")).await;
+    r.send(&Rig::msg("1", "@house owner task")).await;
+    until("the owner's answer", || !r.fake.posts().is_empty()).await;
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let calls = r.calls("kith");
+    assert_eq!(calls.len(), 1, "only the owner's run, never held: {calls:?}");
+    assert!(calls[0]["person"].is_null());
+    assert!(r.fake.replies().is_empty(), "{:?}", r.fake.replies());
+    hold_guest(&r, false);
+    until("the guest's answer", || r.fake.posts().iter().any(|(a, t)| a == "shop" && *t == echo("milk please"))).await;
+    r.idle().await;
+    assert_eq!(r.calls("kith")[1]["person"], "guest");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_message_held_past_the_limit_is_asked_again_and_nothing_runs() {
+    let mut opts = Opts::new();
+    opts.settings.sync_hold = Duration::from_millis(500);
+    let r = Rig::with(opts);
+    hold_guest(&r, true);
+    r.send(&Rig::msg("2", "@shop milk please")).await;
+    until("the reply", || !r.fake.replies().is_empty()).await;
+    assert_eq!(
+        r.fake.replies(),
+        ["Kith on this computer is catching up with your other computers. Send it again in a minute."]
+    );
+    r.idle().await;
+    assert!(r.calls("kith").is_empty(), "nothing ran");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_turn_that_would_start_out_of_sync_waits_and_is_refused_after_the_limit() {
+    let gate = GateSettings { max_running: 1, ..GateSettings::unlimited() };
+    let mut opts = Opts { gate, gate_task: true, ..Opts::new() };
+    opts.settings.sync_hold = Duration::from_millis(500);
+    let r = Rig::with(opts);
+    let permit = r.core.gate.enter("test:holder").granted().await;
+    r.send(&Rig::msg("2", "@shop guest waits")).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Taken while in sync; the sync is lost before its turn starts.
+    hold_guest(&r, true);
+    drop(permit);
+    r.idle().await;
+    assert!(r.calls("kith").is_empty(), "no run while out of sync");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_answer_is_not_delivered_once_access_is_lost_during_the_turn() {
+    let r = Rig::new();
+    r.send(&Rig::msg("2", "@shop REVOKE then answer")).await;
+    r.idle().await;
+    assert_eq!(r.calls("kith").len(), 1, "the turn ran");
+    assert!(r.fake.posts().is_empty(), "nothing delivered: {:?}", r.fake.posts());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn what_the_agent_sends_is_not_delivered_once_access_is_lost_during_the_turn() {
+    let r = Rig::new();
+    r.send(&Rig::msg("2", "@shop REVOKE SEND things")).await;
+    r.idle().await;
+    assert_eq!(r.calls("kith").len(), 1, "the turn ran");
+    let events = r.fake.events();
+    assert!(
+        !events.iter().any(|e| matches!(e, Event::Post { agent, .. } | Event::Files { agent, .. } if agent == "image")),
+        "{events:?}"
+    );
+    let outboxes = std::fs::read_dir(r.dir.join("data/outbox")).map_or(0, Iterator::count);
+    assert_eq!(outboxes, 0, "the run's outbox is removed, posts and all");
 }

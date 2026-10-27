@@ -1,6 +1,6 @@
 ---
 name: revoke-access
-description: Model-checks (TLA+/TLC) that a revoked person, and their bots, reach nothing on any of the owner's Macs, and that undo restores exactly what they had. Use when a change touches kernel/bin/kith-auth may(), cut_off, bot_may, bridge_held or cmd_person/revoke_person, serve/host/src/api/people.rs revoke_person or cut_off, serve/host/src/remote/{members,cloud,relay,sync_lease}.rs, the bot ask/thread gates in api/botguests.rs, the bridge's access checks in kernel/lib/kith_bridge/core.py (handle, held, access, run, flush), or the cloud's person revoke in serve/cloud/src/routes/invites.ts. Also use to answer "can a revoked person still get through?".
+description: Model-checks (TLA+/TLC) that a revoked person, and their bots, reach nothing on any of the owner's Macs, and that undo restores exactly what they had. Use when a change touches kernel/bin/kith-auth may(), cut_off, bot_may, bridge_held or cmd_person/revoke_person, serve/host/src/api/people.rs revoke_person or cut_off, serve/host/src/remote/{members,cloud,relay,sync_lease}.rs, the bot ask/thread gates in api/botguests.rs, the chat channels' access checks in serve/host/src/channels/ (core.rs handle/held/take/access, queue.rs work, run.rs Recheck/finish/flush, hq.rs who/resolve_in_sync), or the cloud's person revoke in serve/cloud/src/routes/invites.ts. Also use to answer "can a revoked person still get through?".
 ---
 
 # Revoke access: a revoked person reaches nothing, anywhere
@@ -34,6 +34,7 @@ The tests of each step on the code (all in CI):
 kernel/tests/kith-auth-revoke-check      # kith-auth: may/bot_may/who/resolve, rows kept, undo exact, R9 refusal
 python3 kernel/tests/kith-auth-props.py  # random op sequences incl. revoke/unrevoke (may() vs a reference)
 cd serve/host && cargo test revoke        # host: api/revoke_tests.rs, bot_guests_tests.rs (sync gate, dormant bots)
+cd serve/host && cargo test --bin kith channels   # host: channels/tests.rs (revoked reply, held wait, delivery re-check)
 cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of the owner, accept refused
 ```
 
@@ -77,24 +78,22 @@ cost (a guest's message is held while nothing is revoked) is real.
 | the relay refuses their bot's traffic | not in the relay (the cloud doesn't know a bot's owner account): the host's ordered socket stands in. `relay.rs` on `cloud.changed` calls `sync_lease::changed` before reading the next frame; `botguests.rs` `ask` and `thread` wait for `sync_lease::wait`, then `roles::may_use` | `RelayOK` (bot door) |
 | each Mac applies the cloud's record | `remote/cloud.rs` `pull`: `members::apply_revoked` (kith-auth `--local`), then `people::cut_off`, then the memberships; `relay.rs` `pull_state` with `sync_lease::mark`/`pulled` | `CloudDeliver` |
 | in sync | `remote/sync_lease.rs`: `hub.cloud_synced` (host) and `cloud-sync.json {linked, until}` (kernel, read by kith-auth `bridge_held` for `who`/`resolve` `held`) | `InSync` |
-| the bridge takes a message | host `channels/` (see the note below); was `core.py` `handle`: `revoked` -> "Your access ... was removed"; `held` (non-owner) -> `held()` waits for the sync | `BridgeRecv` (drop / hold / start) |
-| the bridge's turn starts | `core.py` `run` -> `access()` (resolve in sync, else wait up to `HOLD`, then refuse) | the start in `BridgeRecv`; `HelperGate` (bridge) |
-| a helper spawn | `bin/kith` -> kith-auth `resolve` (`may()`), every spawn | `Helper` |
-| delivery | bridge: `core.py` `still()` before the answer, `flush()` before each kith-send post (both via `access()`); bot: `botThread` gate; app: the device is revoked here and blocked by the relay | `Deliver` |
+| the bridge (chat channels) takes a message | `serve/host/src/channels/core.rs` `handle`: `who` (`hq.rs` `who`, with `revoked`/`held`); `held` (non-owner) -> `held()` in the background asks `who` every `sync_poll` up to `sync_hold` (2 s / 120 s), then "Kith on this computer is catching up ..."; in sync -> `take`: `revoked` -> "Your access to kith on this computer was removed." and nothing else | `BridgeRecv` (drop / hold / start) |
+| the bridge's turn starts | `channels/queue.rs` `work`, right before the batch is taken: `Core::access` -> `hq::resolve_in_sync` (resolve; while `held`, wait up to `sync_hold`, then refuse "out of sync with the Kith cloud"); the owner is not re-checked | the start in `BridgeRecv`; `HelperGate` (bridge) |
+| a helper spawn | `bin/kith` -> kith-auth `resolve` (`may()`), every spawn; only `allowed` is read, not `held` (see findings) | `Helper` |
+| delivery | bridge: `channels/run.rs` `Recheck::still` (via `resolve_in_sync`) at the start of `finish` (the answer) and in `flush` before posting the outbox (refused: the outbox files are deleted, nothing posted); the owner is never re-checked; bot: `botThread` gate; app: the device is revoked here and blocked by the relay | `Deliver` |
 | stop a running turn once the revoke lands | `people.rs` `cut_off`: devices revoked, `botguests::enforce`, `stop_runs`, `sweep_claims` | `Stop` |
 | network up / cloud down / offline | the relay connection (`relay.rs` loop: `set(false)` on every (re)connect until a pull succeeds, `renew` on each ping) | `SetNet` |
 
 A check and the act it guards are separate actions in the model (`Start`, `Helper`, `Deliver`). In the code the
-bridge checks in `handle`, queues in the inbox, and starts in `run`: that is why `run` re-checks (in sync), and the
-answer and each post re-check again.
+channels check in `handle`, queue in the inbox, and start in `queue.rs` `work`: that is why `work` re-checks (in
+sync), and the answer and each outbox flush re-check again.
 
 **The bridge door is now the host's chat channels** (`serve/host/src/channels/`). The Python bridge
-(`kernel/bin/kith-bridge`, `kernel/lib/kith_bridge/core.py`, its `kith-bridge-revoke-check`) that held the
-`core.py` rows above was removed 2026-10-27; the host replaced it on 2026-10-22. As of that date the channels
-re-check `resolve` at spawn for invitees (`queue.rs`), but have no `revoked` reply, no `held` wait while out of sync
-and no re-check at delivery, so `BridgeRecv`'s hold and `Deliver`'s bridge re-check are not in the code (`R5`, `R6c`,
-`R8` are open for this door). `drift.sh` lists the channels as changed until they are ported and the model
-re-confirmed.
+(`kernel/bin/kith-bridge`, `kernel/lib/kith_bridge/core.py`, its `kith-bridge-revoke-check`) was removed 2026-10-27;
+its three checks (the revoked reply, the held wait, the delivery re-check) were ported to the channels as the rows
+above say, with the same semantics, so the model's `BridgeRecv`, `HelperGate` (bridge) and `Deliver` are unchanged.
+The model's "bridge" is this door.
 
 ## Bounds and assumptions
 

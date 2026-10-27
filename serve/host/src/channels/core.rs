@@ -20,11 +20,16 @@ use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 /// A message older than this when it arrives was sent while the host was away.
 const LATE_SECONDS: f64 = 120.0;
 /// How long "who should take this?" waits for a button.
 const ASK_EXPIRES: f64 = 86400.0;
+/// What a revoked person is told when they write.
+const REMOVED: &str = "Your access to kith on this computer was removed.";
+/// What someone is told when their message waited `sync_hold` and this computer is still out of sync with the cloud.
+const CATCHING_UP: &str = "Kith on this computer is catching up with your other computers. Send it again in a minute.";
 
 pub fn now() -> f64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
@@ -317,6 +322,50 @@ impl Core {
             return ad.reply(m, &said).await;
         }
         let (person, w) = self.person(ad, m).await;
+        if person.is_some() && w.held && !w.owner && !w.revoked {
+            // A revoke made on another computer may not have reached this one yet (revoke-person R8): the message
+            // waits for the sync in the background, as the adapter's loop can't.
+            let (core, ad, m) = (self.clone(), ad.clone(), m.clone());
+            tokio::spawn(async move { core.held(&ad, &m).await });
+            return Ok(());
+        }
+        self.take(ad, m, person, &w).await
+    }
+
+    /// Takes the message once this computer is in sync with the Kith cloud again (`who` is asked every `sync_poll`);
+    /// still out of sync after `sync_hold`, the sender is asked to send it again and nothing runs.
+    async fn held(self: &Arc<Self>, ad: &Arc<dyn Adapter>, m: &Incoming) {
+        let end = Instant::now() + self.settings.sync_hold;
+        while Instant::now() < end {
+            tokio::time::sleep(self.settings.sync_poll).await;
+            let (person, w) = self.person(ad, m).await;
+            if !w.held {
+                if let Err(e) = self.take(ad, m, person, &w).await {
+                    tracing::warn!("{}: message failed: {e:#}", ad.conn());
+                }
+                return;
+            }
+        }
+        tracing::info!("{}: held a message from {}: still out of sync with the Kith cloud", ad.conn(), m.uid);
+        let known = m.thread.as_ref().is_some_and(|t| self.has_thread(t));
+        if (m.private || m.addressed || known)
+            && let Err(e) = ad.reply(m, CATCHING_UP).await
+        {
+            tracing::warn!("{}: message failed: {e:#}", ad.conn());
+        }
+    }
+
+    /// A message whose sender `who` answered for in sync with the Kith cloud (or for the owner): one not linked, revoked
+    /// or in someone else's thread is answered so; the rest goes on to an agent.
+    async fn take(
+        self: &Arc<Self>,
+        ad: &Arc<dyn Adapter>,
+        m: &Incoming,
+        person: Option<String>,
+        w: &Who,
+    ) -> Result<()> {
+        let text = m.text.as_str();
+        let (name, arg) = text::command(text).unwrap_or_default();
         let key = m.thread.clone().filter(|t| self.with(|i| i.st.threads.contains_key(t)));
         let th = key.as_ref().and_then(|k| self.with(|i| i.st.threads.get(k).cloned()));
         let Some(person) = person else {
@@ -329,8 +378,15 @@ impl Core {
             }
             return Ok(());
         };
+        if w.revoked {
+            // Their handle is kept so they hear why; nothing else happens.
+            if m.private || m.addressed || th.is_some() {
+                ad.reply(m, REMOVED).await?;
+            }
+            return Ok(());
+        }
         if let Some(th) = &th
-            && !Self::owns(th, &w)
+            && !Self::owns(th, w)
         {
             // Its sessions hold what the agents saw for them.
             let owner = th.get("person").and_then(Value::as_str).filter(|p| !p.is_empty()).unwrap_or("the owner");
@@ -493,6 +549,12 @@ impl Core {
         let person = w.person.clone().unwrap_or_default();
         self.begin(ad, &m, &person, agent, text(&pend, "task"), thread).await?;
         Ok(true)
+    }
+
+    /// `kith-auth resolve` for person and agent, answered in sync with the Kith cloud (`hq::resolve_in_sync`, waiting
+    /// up to `sync_hold`).
+    pub(super) async fn access(&self, person: &str, agent: &str) -> Access {
+        hq::resolve_in_sync(&self.paths, person, agent, self.settings.sync_hold, self.settings.sync_poll).await
     }
 
     async fn begin(
