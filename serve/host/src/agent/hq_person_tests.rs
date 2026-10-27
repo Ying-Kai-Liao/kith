@@ -7,8 +7,11 @@
 use super::hq::{self, Refused};
 use crate::channels::hq::TEST_ENV;
 use crate::remote::account::ONE_AT_A_TIME;
+use crate::runauth::{PeerInfo, RunGrant, RunIdentity, TokenScope, TokenTable};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 
 struct Kernel {
     dir: PathBuf,
@@ -64,6 +67,14 @@ impl Kernel {
     }
 
     async fn launch(&self, person: Option<&str>) -> anyhow::Result<hq::Launch> {
+        self.launch_with(person, None).await
+    }
+
+    async fn launch_with(
+        &self,
+        person: Option<&str>,
+        access: Option<&(RunGrant, [(String, String); 2])>,
+    ) -> anyhow::Result<hq::Launch> {
         hq::launch(
             &self.kith,
             "house",
@@ -73,6 +84,7 @@ impl Kernel {
             person,
             "1:1:house:owner",
             &hq::Members::Unknown,
+            access,
         )
         .await
     }
@@ -138,4 +150,84 @@ async fn the_kernel_refusing_reaches_the_person_and_never_runs_as_the_owner() {
     k.auth(&["member", "house", "sam", "--rm"]);
     assert!(k.launch(Some("sam")).await.unwrap_err().is::<Refused>());
     k.launch(None).await.unwrap();
+}
+
+/// A run socket that answers `consumeAccess` with `grants`, once, and only for a token of `table` asked from the
+/// process it was bound to or below it (the host's own check, with real process ancestry). Every method it was asked
+/// is logged.
+fn access_socket(table: Arc<TokenTable>, grants: Value) -> (PathBuf, Arc<Mutex<Vec<String>>>) {
+    // Short: a unix socket path has about a hundred bytes.
+    let path = PathBuf::from(format!("/tmp/kf2-{}.sock", &uuid::Uuid::new_v4().simple().to_string()[..8]));
+    let listener = tokio::net::UnixListener::bind(&path).unwrap();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let seen = log.clone();
+    tokio::spawn(async move {
+        let mut grants = Some(grants);
+        while let Ok((stream, _)) = listener.accept().await {
+            let peer =
+                PeerInfo { pid: stream.peer_cred().ok().and_then(|c| c.pid()).and_then(|p| u32::try_from(p).ok()) };
+            let mut stream = BufReader::new(stream);
+            let mut line = String::new();
+            stream.read_line(&mut line).await.unwrap();
+            let req: Value = serde_json::from_str(&line).unwrap();
+            let known = table.resolve(req["token"].as_str().unwrap_or_default(), peer).is_some();
+            seen.lock().unwrap().push(format!(
+                "{}{}",
+                req["method"].as_str().unwrap_or_default(),
+                if known { "" } else { " (unknown)" }
+            ));
+            let out = match grants.take().filter(|_| known && req["method"] == "consumeAccess") {
+                Some(g) => serde_json::json!({"ok": true, "grants": g}),
+                None => serde_json::json!({"ok": false, "error": "not authorized"}),
+            };
+            stream.get_mut().write_all(format!("{out}\n").as_bytes()).await.unwrap();
+        }
+    });
+    (path, log)
+}
+
+#[tokio::test]
+async fn a_persons_launch_with_access_carries_what_their_conversation_was_given() {
+    let k = Kernel::new().await;
+    k.auth(&["member", "house", "sam", "preset=guest"]);
+    let docs = std::fs::canonicalize(&k.dir).unwrap().join("docs");
+    std::fs::create_dir_all(&docs).unwrap();
+    let docs = docs.to_string_lossy().into_owned();
+    // The host's real check: the token resolves only for the kernel process the launch started, or below it.
+    let table = Arc::new(TokenTable::new());
+    let (sock, log) =
+        access_socket(table.clone(), serde_json::json!({"read": [docs], "write": [], "domains": ["pypi.org"]}));
+    let issue = || {
+        let identity = RunIdentity {
+            person: "sam".into(),
+            agent: "house".into(),
+            room: None,
+            run_id: uuid::Uuid::new_v4().simple().to_string(),
+            scope: TokenScope::Guest,
+            session: "run:g:3:sam:acp:chat:".into(),
+            project: None,
+        };
+        let grant = RunGrant::issue(&table, identity).unwrap();
+        let env = grant.env(&sock);
+        (grant, env)
+    };
+
+    let plain = k.launch(Some("sam")).await.unwrap();
+    assert!(log.lock().unwrap().is_empty(), "no access token, nothing asked");
+    assert!(!plain.settings["sandbox"]["filesystem"]["allowRead"].to_string().contains(&docs));
+
+    let given = k.launch_with(Some("sam"), Some(&issue())).await.unwrap();
+    assert_eq!(*log.lock().unwrap(), ["consumeAccess"], "asked once, by the bound kernel process");
+    let read = &given.settings["sandbox"]["filesystem"]["allowRead"];
+    assert!(read.as_array().unwrap().iter().any(|d| d == docs.as_str()), "{read}");
+    assert!(given.settings["permissions"]["additionalDirectories"].to_string().contains(&docs));
+    assert_eq!(given.settings["sandbox"]["network"]["allowedDomains"], serde_json::json!(["pypi.org"]));
+    assert!(!given.env.contains_key(crate::runauth::TOKEN_ENV), "the launch's token never reaches the agent process");
+
+    // The owner's launch is never asked for access, whatever it is handed.
+    log.lock().unwrap().clear();
+    let owner = k.launch_with(None, Some(&issue())).await.unwrap();
+    assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
+    assert!(!owner.settings.to_string().contains(&docs));
+    let _ = std::fs::remove_file(&sock);
 }
