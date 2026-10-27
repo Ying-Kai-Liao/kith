@@ -22,7 +22,8 @@ run. Runs for anyone but the owner get KITH_PERSON, so bin/kith applies their me
 telegram_chat.py, slack_chat.py next to it.
 
 Config (env or ~/.kith/secrets/env): KITH_DISCORD_BOT_TOKEN, KITH_DISCORD_GUILD (server name or ID when the bot is in
-several), KITH_BRIDGE_PERMISSION_MODE (the owner's runs, on any harness; unset: the agent's settings.json defaultMode,
+several; its owner counts as kith's owner until the owner's Discord account is linked, and with it unset no server
+owner does), KITH_BRIDGE_PERMISSION_MODE (the owner's runs, on any harness; unset: the agent's settings.json defaultMode,
 else kith's default, auto),
 KITH_BRIDGE_DM_DEFAULT (the agent the owner's new DMs go to; default personal), KITH_BRIDGE_DEBOUNCE (seconds to wait
 for more messages before a run starts; default 2), KITH_BRIDGE_ROUTER (jev or off; default jev when a Jev key is

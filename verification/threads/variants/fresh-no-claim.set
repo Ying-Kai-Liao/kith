@@ -1,0 +1,3 @@
+\* A Claude start resolve did not claim (fresh, KITH_RESUME, a one-shot) runs without a writer claim, as before #324.
+ClaudeForks = FALSE
+FreshClaims = FALSE
