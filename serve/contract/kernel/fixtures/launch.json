@@ -4,7 +4,7 @@
   "body": {
     "version": 1,
     "agent": "echo",
-    "agent_version": "3c920a46f5",
+    "agent_version": "e2de8954b7",
     "harness": "claude",
     "cwd": "/tmp/kith/work/alpha",
     "env": {
@@ -32,22 +32,23 @@
       "HQ_STORE": "/tmp/kith/kith/state/store",
       "KITH_ROOT": "/kernel",
       "KITH_AGENT": "echo",
-      "KITH_AGENT_DIR": "/tmp/kith/kith/state/store/echo@3c920a46f5",
+      "KITH_AGENT_DIR": "/tmp/kith/kith/state/store/echo@e2de8954b7",
       "KITH_AGENT_HOME": "/tmp/kith/kith/agents/echo",
-      "KITH_AGENT_VERSION": "3c920a46f5",
+      "KITH_AGENT_VERSION": "e2de8954b7",
       "KITH_MODEL": "opus",
       "KITH_EFFORT": "high",
       "KITH_PROJECT": "alpha",
       "KITH_VIA": "terminal",
       "KITH_PROVIDER": "claude",
       "KITH_ACCOUNT": "",
+      "KITH_ACCOUNT_ID": "claude",
       "KITH_OWNER": "1",
       "CLAUDE_CODE_ARTIFACT": "1",
       "HQ_ROOT": "/kernel",
       "HQ_AGENT": "echo",
-      "HQ_AGENT_DIR": "/tmp/kith/kith/state/store/echo@3c920a46f5",
+      "HQ_AGENT_DIR": "/tmp/kith/kith/state/store/echo@e2de8954b7",
       "HQ_AGENT_HOME": "/tmp/kith/kith/agents/echo",
-      "HQ_AGENT_VERSION": "3c920a46f5",
+      "HQ_AGENT_VERSION": "e2de8954b7",
       "HQ_MODEL": "opus",
       "HQ_EFFORT": "high",
       "HQ_PROJECT": "alpha",
@@ -186,7 +187,7 @@
     "permission_mode": "auto",
     "cost_tag": {
       "agent": "echo",
-      "version": "3c920a46f5",
+      "version": "e2de8954b7",
       "model": "opus",
       "effort": "high",
       "via": "terminal",
@@ -238,6 +239,7 @@
     ],
     "backup": null,
     "provider": "claude",
-    "account": null
+    "account": null,
+    "account_id": "claude"
   }
 }

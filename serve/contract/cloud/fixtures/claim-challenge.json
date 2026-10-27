@@ -2,7 +2,7 @@
   "type": "ClaimChallenge",
   "body": {
     "claimId": "clm_9z8y",
-    "nonce": "dGhpcyBpcyBhIHRlc3Qga2V5IG9mIDMyIGJ5dGVzIQ",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     "expiresAt": 1793000300000
   }
 }

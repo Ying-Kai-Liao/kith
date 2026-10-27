@@ -6,6 +6,7 @@
 #   kith backup [--yes|--check|--nightly [off]]   everything to private GitHub repos, making the missing ones; --check says what isn't; --nightly at 03:00 (kith-state)
 #   kith backup list|add|remove ...                      the backup chain kith serve moves to when the agent's own harness runs out of usage (kith-account)
 #   kith account add|list|remove ...                     extra Claude / Codex logins for that chain, one folder each (kith-account)
+#   kith account use <id> [--agent A] | --reset           the main account an agent's runs use; the chain sits on top of it
 #   kith ls [--json]                list agents (--json: name, description, home, model, effort, harness, for programs)
 #   kith who <words>                which agent owns this work: skills, tools, "Not yours" lines searched (kith-who)
 #   kith <agent> [-p ID] [-m MODEL] [-e EFFORT] [-H HARNESS] [--permission-mode MODE|--bypass] [task...]  interactive without a task, one-shot with one
@@ -19,7 +20,9 @@
 #                                 with everything the run needs (env, cwd, system_prompt, settings, MCP servers, directories,
 #                                 claude_args to give claude as-is). Claude and Codex (Codex: settings and claude_args null); ignores
 #                                 KITH_CLAUDE_ARGS/KITH_OUTPUT/KITH_RESUME. --backup ID launches that backup chain entry instead (exit 4 when it
-#                                 can't run); "backup", "provider" and "account" say which login the run is on.
+#                                 can't run); "backup", "provider", "account" and "account_id" say which login the run is on.
+#                                 Without --backup a run is on the agent's main account (kith account use), the default login
+#                                 unless one is chosen; a session is resumed only under the account it was made under.
 #   kith <agent> --backup ID [task]  a normal run (interactive or one-shot) on that backup chain entry: claude:<name> and claude-api:<profile>
 #                                 on Claude Code, codex[:<name>] on Codex; exit 4 when it can't run. KITH_PROVIDER/KITH_ACCOUNT say which.
 #   kith <agent> --backups-json     for a program: the agent's backup chain as one JSON object, each entry with whether it is ready
@@ -411,17 +414,47 @@ elif [[ $pkg == "$src_pkg" ]]; then runs=$(mktemp -d); else runs=$pkg/.runs; mkd
 field() { awk -v k="$1" 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {exit} fm && $1 == k":" {sub(/^[^:]*:[ \t]*/, ""); print; exit}' "$pkg/agent.md" 2>/dev/null || true; }
 own=$(field harness); own=${own:-claude}; [[ $own == claude-code ]] && own=claude
 harness=${KITH_HARNESS:-$own}; [[ $harness == claude-code ]] && harness=claude
-# A backup chain entry (--backup ID, with --launch-json or for a normal run) replaces the harness and login; the agent's
-# own stays the primary.
-if [[ -n $backup ]]; then
-  be=$(python3 "$KITH/lib/kith_accounts.py" launch-env "$agent" "$backup") || exit 4
+# Which login answers: a backup chain entry (--backup ID, with --launch-json or for a normal run) replaces the harness
+# and login; else the agent's main account (kith account use; lib/kith_accounts.py) on its own harness, the default
+# login when none is chosen. Both go through the same launch-env. The config dir a run of kith's set (KITH_ACCOUNT_VAR)
+# is not inherited: a helper agent runs on its own main account.
+case ${KITH_ACCOUNT_VAR:-} in CLAUDE_CONFIG_DIR|CODEX_HOME) unset "$KITH_ACCOUNT_VAR" ;; esac
+unset KITH_ACCOUNT_VAR HQ_ACCOUNT_VAR
+account_id=$harness
+use_account() {   # use_account ID: the entry's env, or exit 4 with one line
+  local be
+  be=$(python3 "$KITH/lib/kith_accounts.py" launch-env "$agent" "$1") || exit 4
   eval "$be"
-  harness=$backup_harness acct=$backup_account
-  [[ -n $backup_cfg_var ]] && export "$backup_cfg_var=$backup_cfg_dir"
-  [[ $harness == "$own" ]] || KITH_MODEL=""   # agent.md's model names a model of its own harness
+  harness=$backup_harness acct=$backup_account account_id=$1
+}
+if [[ -n $backup ]]; then
+  use_account "$backup"
+elif [[ $harness == "$own" ]]; then
+  be=$(python3 "$KITH/lib/kith_accounts.py" main-env "$agent" "$pkg/agent.md") || exit 4
+  eval "$be"
+  acct=$backup_account account_id=$main_id
 fi
+# A session is resumed only under the account it was made under (the cost ledger's account_id; one it doesn't know is
+# taken as it is). --resume runs under that account; a session handed on (KITH_RESUME: a channel, kith ask -c) starts anew.
+if [[ -n ${r_sid:-} || -n ${KITH_RESUME:-} ]]; then
+  r_check=${r_sid:-$KITH_RESUME}
+  made=$(python3 "$KITH/lib/kith_accounts.py" session-account "$r_check" 2>/dev/null || true)
+  if [[ -n $made && $made != "$account_id" ]]; then
+    if [[ -n ${r_sid:-} && -z $backup ]]; then
+      echo "kith: that session was made under $made, so it runs under $made (main account for $agent: $account_id)" >&2
+      use_account "$made"   # not runnable: exit 4 with what makes it ready
+    elif [[ -n ${r_sid:-} ]]; then
+      echo "kith: that session was made under $made, not $backup: kith $agent --resume $resume_thread --backup $made" >&2; exit 4
+    else
+      echo "kith: session $KITH_RESUME was made under $made, not $account_id; starting a new one" >&2
+      unset KITH_RESUME HQ_RESUME
+    fi
+  fi
+fi
+[[ -n $backup && $harness != "$own" ]] && KITH_MODEL=""   # agent.md's model names a model of its own harness
+if [[ -n $backup_cfg_var ]]; then export "$backup_cfg_var=$backup_cfg_dir" KITH_ACCOUNT_VAR=$backup_cfg_var; fi
 # Which harness and login answer this run, for the cost ledger (kith-cost reads them from the hook and from `record`)
-export KITH_PROVIDER=$harness KITH_ACCOUNT=$acct
+export KITH_PROVIDER=$harness KITH_ACCOUNT=$acct KITH_ACCOUNT_ID=$account_id
 # agent.md's model names a model of its own harness: on another one (-H), that harness's default unless -m says.
 [[ $harness == "$own" ]] && KITH_MODEL=${KITH_MODEL:-$(field model)}
 [[ -n $p_model ]] && KITH_MODEL=$p_model   # the person's membership picks the model over the agent's and the caller's
@@ -842,7 +875,7 @@ emit_launch() {
   [[ $harness == claude ]] && settings=$(cat "$runs/$$.settings.json")
   grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null && no_slash=false || no_slash=true
   [[ $harness == claude ]] || allowed_tools=""
-  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
+  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
     BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib \
     python3 -c '
@@ -865,7 +898,7 @@ print(json.dumps({
     "cost_tag": {"agent": e("KITH_AGENT"), "version": e("KITH_AGENT_VERSION"), "model": nz("KITH_MODEL"), "effort": nz("KITH_EFFORT"),
                  "via": e("KITH_VIA"), "project": nz("KITH_PROJECT"), "person": nz("KITH_PERSON")},
     "claude_args": sys.argv[1:] if claude else None,
-    "backup": nz("BACKUP"), "provider": nz("KITH_PROVIDER"), "account": nz("KITH_ACCOUNT")}))' "$@" >&3
+    "backup": nz("BACKUP"), "provider": nz("KITH_PROVIDER"), "account": nz("KITH_ACCOUNT"), "account_id": nz("KITH_ACCOUNT_ID")}))' "$@" >&3
 }
 # Codex (or another harness the launch JSON covers): the same facts, without Claude's settings.
 if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi

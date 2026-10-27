@@ -18,10 +18,10 @@
     "requests": [
       {
         "requestId": "req_5e6f",
-        "deviceKey": "YW5vdGhlciB0ZXN0IGtleSBvZiAzMiBieXRlcyBubw",
+        "deviceKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
         "deviceName": "iPad",
         "platform": "ios",
-        "commit": "dGhpcyBpcyBhIHRlc3Qga2V5IG9mIDMyIGJ5dGVzIQ",
+        "commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "createdAt": 1793000000000,
         "expiresAt": 1793000600000
       }

@@ -56,3 +56,21 @@ private func decode<T: Decodable>(_ type: T.Type, _ json: String) throws -> T {
     #expect(try decode(EntryData.self, #"{"text":"hi","contextPercent":120}"#).contextPercent == 120)
     #expect(try decode(EntryData.self, #"{"text":"old message"}"#).contextPercent == nil)
 }
+
+@Test func mainAccountsDecodeAboveTheChainAndOldHostsHaveNone() throws {
+    let b = try decode(Backups.self, """
+    {"global":["codex"],"entries":[],
+     "main":{"global":"claude:work","agents":{
+        "house":{"id":"claude:work","source":"global","harness":"claude","ready":true},
+        "deep":{"id":"codex:deep","source":"agent","ready":false,"why":"not logged in","fix":"kith account login codex deep"},
+        "bad":{"source":"agent"}, "worse":5}}}
+    """)
+    #expect(b.mainGlobal == "claude:work")
+    #expect(Set(b.mains.keys) == ["house", "deep"], "an odd agent row drops out alone")
+    #expect(b.mains["house"]?.state == "ready")
+    #expect(b.mains["deep"]?.state == "not logged in" && b.mains["deep"]?.fix == "kith account login codex deep")
+    #expect(b.ownMains.map(\.agent) == ["deep"], "only an agent's own choice is listed under the computer's")
+    let old = try decode(Backups.self, #"{"global":["codex"],"entries":[]}"#)
+    #expect(old.mainGlobal == nil && old.mains.isEmpty)
+    #expect(try decode(Backups.self, #"{"main":{"global":null,"agents":{}}}"#).mainGlobal == nil)
+}

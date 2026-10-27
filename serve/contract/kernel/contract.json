@@ -45,7 +45,7 @@
       }
     },
     "Launch": {
-      "doc": "`kith <agent> --launch-json`: how to start the agent, for claude and codex. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run.",
+      "doc": "`kith <agent> --launch-json`: how to start the agent, for claude and codex. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.",
       "fields": {
         "version": "int",
         "agent": "string",
@@ -68,7 +68,8 @@
         "claude_args": "[string]?",
         "backup": "string?",
         "provider": "Harness?",
-        "account": "string?"
+        "account": "string?",
+        "account_id": "string?"
       }
     },
     "CostTag": {

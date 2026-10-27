@@ -72,12 +72,24 @@ test('a bot guest picture: the G disc for grok, the bubble disc for anything els
 
 test('the eight sky presets match the iOS list', () => {
   assert.deepEqual(
-    SKY_PRESETS.map((p) => `${p.tone} ${p.x} ${p.y}`),
-    ['dawn 20 30', 'dawn 70 60', 'clear 15 20', 'clear 60 40', 'clear 85 75', 'dusk 25 50', 'dusk 75 30', 'dusk 50 85'],
+    SKY_PRESETS.map((p) => `${p.name} ${p.top} ${p.bottom} ${p.zoom} ${p.x} ${p.y} ${p.cloud}`),
+    [
+      'night #050A24 #1B2F7A 3 0 0 30',
+      'golden #E8801A #FFD27A 3 100 0 55',
+      'dusk #4A2F98 #F07A5A 4 90 10 50',
+      'dawn #6FA0E8 #F8B890 4 5 15 55',
+      'noon #0F4FC8 #4FA8F2 3 80 40 60',
+      'overcast #58626E #AEB6BE 2 40 0 75',
+      'twilight #141C5E #C8409A 4 10 30 45',
+      'mint #1E8A78 #BDEBD0 3 85 70 60',
+    ],
   )
+  assert.equal(new Set(SKY_PRESETS.map((p) => p.name)).size, 8)
 })
 
 test('the canvas crop follows the CSS background-size and -position rules', () => {
-  const r = skyCropRect(2000, 1000, { tone: 'clear', x: 50, y: 0 }, 100)
+  const r = skyCropRect(2000, 1000, { x: 50, y: 0 }, 100)
   assert.deepEqual({ x: r.x, y: r.y + 0, w: r.w, h: r.h }, { x: -160, y: 0, w: 420, h: 210 })
+  const z = skyCropRect(2000, 1000, { x: 100, y: 0 }, 100, 3)
+  assert.deepEqual({ x: z.x, y: z.y + 0, w: z.w, h: z.h }, { x: -200, y: 0, w: 300, h: 150 })
 })

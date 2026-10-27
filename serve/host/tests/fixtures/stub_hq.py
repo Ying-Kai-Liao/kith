@@ -25,6 +25,18 @@ def call_model():
     return chosen or "sonnet", ("" if chosen == "own" else chosen or "sonnet")
 
 
+def main_account():
+    """The agent's main account (`kith account use`), kept in the file `main` there; without it, the default login."""
+    path = os.path.join(home, "main")
+    return (open(path, encoding="utf-8").read().strip() if os.path.exists(path) else "") or "claude"
+
+
+def main_json():
+    path = os.path.join(home, "main")
+    chosen = open(path, encoding="utf-8").read().strip() if os.path.exists(path) else ""
+    return {"id": main_account(), "source": "agent" if chosen else "default", "harness": "claude", "ready": True}
+
+
 def permission(default):
     path = os.path.join(home, "permission")
     return open(path, encoding="utf-8").read().strip() if os.path.exists(path) else default
@@ -61,6 +73,17 @@ elif args[:3] == ["house", "set", "call-model"] and len(args) == 4:
             os.remove(path)
     else:
         open(path, "w", encoding="utf-8").write(args[3])
+elif args[:2] == ["account", "use"]:
+    # `account use ID --agent house` / `account use --reset --agent house`: the main account, in `main`.
+    path = os.path.join(home, "main")
+    if "--reset" in args:
+        if os.path.exists(path):
+            os.remove(path)
+    elif args[2].split(":")[0] not in ("claude", "claude-api"):
+        print(f"{args[2]} can't be the main account of a claude agent", file=sys.stderr)
+        sys.exit(2)
+    else:
+        open(path, "w", encoding="utf-8").write(args[2])
 elif args[:2] in (["backup", "list"], ["account", "list"]) or args[:3] in (["account", "backup", "set"], ["account", "backup", "reset"]):
     # The chain settings (`chain_settings.json`: {"backups": [...], "agents": {name: [...]}}) and the extra accounts
     # (`accounts.json`: [{"id", "logged_in", "why"?}]). An id listed in `not_ready.json` ({id: why}) is not ready.
@@ -81,7 +104,9 @@ elif args[:2] in (["backup", "list"], ["account", "list"]) or args[:3] in (["acc
                 row["why"] = bad[i]
                 row["fix"] = "kith account add " + i.replace(":", " ")
             rows.append(row)
-        print(json.dumps({"agent": opt, "source": "agent" if opt and opt in st["agents"] else "global", "backups": rows}))
+        main = main_json() if opt else {"id": None, "source": "global", "harness": None}
+        print(json.dumps({"agent": opt, "source": "agent" if opt and opt in st["agents"] else "global", "backups": rows,
+                          "main": main}))
     else:
         if args[2] == "reset":
             st["agents"].pop(opt, None)
@@ -136,7 +161,10 @@ elif args == ["house", "--backups-json"]:
     # `chain.json` is the chain after the agent's own login; without one the agent has no backups.
     path = os.path.join(home, "chain.json")
     chain = json.load(open(path, encoding="utf-8")) if os.path.exists(path) else []
-    primary = {"id": "claude", "harness": "claude", "account": None, "kind": "primary", "ready": True}
+    main = main_account()
+    primary = {"id": main, "harness": "claude", "account": main.split(":")[1] if ":" in main else None,
+               "kind": "primary", "ready": True}
+    chain = [e for e in chain if e["id"] != main]
     print(json.dumps({"version": 1, "agent": "house", "chain": [primary] + chain}))
 elif args[:2] == ["house", "--launch-json"]:
     fail = os.path.join(home, "fail")
@@ -149,14 +177,15 @@ elif args[:2] == ["house", "--launch-json"]:
         print(f"{backup} is not logged in", file=sys.stderr)
         sys.exit(4)
     harness = "codex" if backup and backup.split(":")[0] == "codex" else "claude"
-    account = backup.split(":")[1] if backup and ":" in backup else None
+    account_id = backup or main_account()
+    account = account_id.split(":")[1] if ":" in account_id else None
     model = args[args.index("-m") + 1] if "-m" in args else "haiku"
     project = args[args.index("-p") + 1] if "-p" in args else None
     print(json.dumps({
         "version": 1, "agent": "house", "agent_version": "v1", "harness": harness, "cwd": home,
-        "backup": backup, "provider": harness, "account": account,
+        "backup": backup, "provider": harness, "account": account, "account_id": account_id,
         "env": {"KITH_AGENT": "house", "HQ_AGENT": "house", "KITH_VIA": os.environ.get("KITH_VIA", ""), "HQ_VIA": os.environ.get("KITH_VIA", ""), "KITH_MODEL": model, "HQ_MODEL": model,
-                "KITH_PROVIDER": harness, "KITH_ACCOUNT": account or "", "KITH_BACKUP": backup or ""},
+                "KITH_PROVIDER": harness, "KITH_ACCOUNT": account or "", "KITH_ACCOUNT_ID": account_id, "KITH_BACKUP": backup or ""},
         "system_prompt": "You are house, the household keeper.",
         "settings": {"hooks": {"SessionStart": []}},
         "mcp_servers": {"pantry": {"command": "pantry-mcp", "args": [], "env": {}}},

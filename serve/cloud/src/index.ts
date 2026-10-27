@@ -8,6 +8,7 @@ import { ApiError, type Ctx } from "./api";
 import { check, ROUTES, type Responses, type RouteName } from "./contract.gen";
 import * as legacy from "./legacy-compat";
 import * as pages from "./routes/pages";
+import * as download from "./routes/download";
 import type { ComputerRelay } from "./relay";
 
 export { ComputerRelay } from "./relay";
@@ -96,6 +97,9 @@ const handlers: Handlers = {
   routineHook: api.routineHook,
   // The open-in-Kith page behind https://kithbot.app/i/<computer>/<invite>#t=<token>.
   invitePage: pages.invitePage,
+  // The desktop download page and its one-click kithbot.app links (302 to the latest GitHub release).
+  downloadPage: download.downloadPage,
+  downloadRedirect: download.downloadRedirect,
 };
 
 const routes = (Object.keys(ROUTES) as RouteName[]).map((name) => ({ name, ...ROUTES[name], handler: handlers[name] }));

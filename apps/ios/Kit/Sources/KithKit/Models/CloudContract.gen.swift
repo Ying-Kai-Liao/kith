@@ -5,7 +5,7 @@ import Foundation
 
 /// The cloud contract these types were made from.
 public enum CloudContract {
-    public static let sha256 = "169a384c4a69611bd2c4b170f48c4f838ab815df67dd6b59ac7ed800f427108e"
+    public static let sha256 = "a259a1658e8b06bac0dc162c422adf8e0f163178de432184e2d6c870894e4482"
 }
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
@@ -667,6 +667,8 @@ public enum CloudPath {
     public static let clerkWebhook = "v1/webhooks/clerk"
     public static func routineHook(_ computerId: String, _ hookId: String) -> String { "v1/hooks/\(computerId)/\(hookId)" }
     public static func invitePage(_ computerId: String, _ inviteId: String) -> String { "i/\(computerId)/\(inviteId)" }
+    public static let downloadPage = "download"
+    public static func downloadRedirect(_ key: String) -> String { "download/\(key)" }
 }
 
 /// The code in an error answer, {error:{code,message},requestId}, and its HTTP status. unauthorized (a bad hook key), paused (a paused hook), badDeliveryId and full (its queue) come from the computer's relay, on /v1/hooks only.

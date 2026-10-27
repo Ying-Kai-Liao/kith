@@ -283,6 +283,14 @@
     "invitePage": {
       "doc": "The open-in-Kith page behind https://kithbot.app/i/<computer>/<invite>#t=<token>.",
       "method": "GET", "path": "i/{computerId}/{inviteId}", "auth": "none", "kind": "page"
+    },
+    "downloadPage": {
+      "doc": "The desktop download page at https://kithbot.app/download.",
+      "method": "GET", "path": "download", "auth": "none", "kind": "page"
+    },
+    "downloadRedirect": {
+      "doc": "A one-click download link (mac, mac/zip, linux/deb, …): a 302 to the latest GitHub release's asset.",
+      "method": "GET", "path": "download/{key:rest}", "auth": "none", "kind": "redirect"
     }
   },
   "errors": {
