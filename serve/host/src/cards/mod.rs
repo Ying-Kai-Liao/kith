@@ -365,10 +365,6 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
     if card.tool == access::TOOL {
         // No process waits on an escape card: the yes is applied at the session's next activation (see `access`).
         access::answered(hub, &card, allow, option_id);
-        // A process of that conversation that is kept warm (an app chat's) starts again before its next turn (F2).
-        if allow {
-            crate::runauth::access_granted(&card.session);
-        }
     } else if was_live && card.source == "run" {
         let verdict = if allow { Verdict::Allow } else { Verdict::Deny("The approver said no.".into()) };
         // A yes to a live asker was spent in the answer itself (no parallel ask can take it too); if nobody was

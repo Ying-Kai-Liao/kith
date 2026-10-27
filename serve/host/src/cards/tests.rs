@@ -559,33 +559,3 @@ async fn a_turn_that_ends_with_a_question_open_parks_it() {
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Parked);
     assert_eq!(r.hub.store.entry(&entry.id).unwrap().data["status"], "pending", "still answerable");
 }
-
-#[tokio::test]
-async fn a_yes_on_an_escape_card_owes_its_conversation_a_restart_and_a_no_does_not() {
-    let r = Rig::new().await;
-    r.owner_bot("house");
-    let _sam = joined(&r, "guest").await;
-    // An app chat's run: its token's session is the person and the chat (`runauth::grant_for`).
-    let chat = format!("acp:f2-{}:", uuid::Uuid::new_v4().simple());
-    let who = RunIdentity { session: format!("run:g:3:sam:{chat}"), ..guest_run("sam", "1:1:house:sam") };
-    let ask = |name: &str| {
-        let p = std::fs::canonicalize(&r.dir).unwrap().join(name);
-        std::fs::create_dir_all(&p).unwrap();
-        json!({"kind": "path", "target": p, "reason": "to read the notes", "write": false})
-    };
-    let mark = crate::runauth::access_mark();
-    let answer_last = |option: &str| {
-        let card = r.hub.store.cards_open(None).pop().unwrap();
-        let out = answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(option), "owner").unwrap();
-        assert!(matches!(out, Outcome::Recorded { .. }), "{out:?}");
-    };
-
-    assert_eq!(access::request(&r.hub, &who, &ask("no")).await["carded"], true);
-    answer_last("deny");
-    assert!(!crate::runauth::access_since("sam", &chat, mark), "a no changes nothing");
-
-    assert_eq!(access::request(&r.hub, &who, &ask("yes")).await["carded"], true);
-    answer_last("allow");
-    assert!(crate::runauth::access_since("sam", &chat, mark), "the warm process from before the yes starts again");
-    assert!(!crate::runauth::access_since("sam", &format!("{chat}t1"), mark), "another thread's is not touched");
-}

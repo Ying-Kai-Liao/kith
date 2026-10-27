@@ -203,6 +203,44 @@ async fn a_yes_once_widens_the_next_activation_only_and_a_parallel_consume_has_o
 }
 
 #[tokio::test]
+async fn an_app_chats_activation_reserves_a_once_grant_and_a_failed_load_leaves_it_for_the_next() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    let docs = place(&r, "docs");
+    request(&r.hub, &sam("1:1:house:sam", "r1"), &ask_for(&docs)).await;
+    let card = open_cards(&r).pop().unwrap();
+    reply(&r, &card, "allow");
+
+    // The launch is handed the grant, and nothing is taken yet: the session/load that follows fails.
+    let failed = access::Reservation::open("rsv-load-1", Vec::new());
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-load-1")).await["grants"]["read"], json!([docs]));
+    // While it is reserved, no other launch of the session gets it (L3): not a one-shot, not another app activation.
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-oneshot")).await["grants"]["read"], json!([]));
+    let other = access::Reservation::open("rsv-load-2", Vec::new());
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-load-2")).await["grants"]["read"], json!([]));
+    drop(other);
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved);
+    drop(failed);
+
+    // The next activation still gets it, and its commit takes it.
+    let next = access::Reservation::open("rsv-load-3", Vec::new());
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-load-3")).await["grants"]["read"], json!([docs]));
+    let holds = next.commit(&r.hub.store);
+    assert_eq!(holds, std::slice::from_ref(&card.id));
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Used);
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-after")).await["grants"]["read"], json!([]));
+
+    // The loaded session keeps it on its later turns: the launch of each is handed it again, and only to that session.
+    let turn = access::Reservation::open("rsv-turn-2", holds.clone());
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-turn-2")).await["grants"]["read"], json!([docs]));
+    assert_eq!(turn.commit(&r.hub.store), holds);
+    let elsewhere = access::Reservation::open("rsv-elsewhere", holds);
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam-other", "rsv-elsewhere")).await["grants"]["read"], json!([]));
+    drop(elsewhere);
+}
+
+#[tokio::test]
 async fn an_expired_or_denied_card_grants_nothing() {
     let r = Rig::new().await;
     r.owner_bot("house");

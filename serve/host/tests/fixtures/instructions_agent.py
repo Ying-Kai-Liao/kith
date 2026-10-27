@@ -4,9 +4,10 @@
 shows them in `usage_update`; `codex` and `claude` answer `initialize` the way those adapters do, so the host asks
 them to compact. A prompt containing COMPACT_NOW, or one that is a `/compact` command, compacts; one containing
 `USAGE <n>` (optionally `SIZE <m>`) reports that much context in use. Every request is appended to
-`requests.jsonl` in the working directory.
+`requests.jsonl` in the working directory, with the process id that got it.
 """
 import json
+import os
 import re
 import sys
 
@@ -49,7 +50,7 @@ for line in sys.stdin:
     method = request.get("method")
     params = request.get("params", {})
     with open("requests.jsonl", "a", encoding="utf-8") as log:
-        log.write(json.dumps({"method": method, "params": params}) + "\n")
+        log.write(json.dumps({"method": method, "params": params, "pid": os.getpid()}) + "\n")
     if method == "initialize":
         capabilities = {"loadSession": mode == "claude", "sessionCapabilities": {}}
         if mode == "standard":
