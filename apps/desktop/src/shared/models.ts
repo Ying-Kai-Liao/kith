@@ -525,6 +525,8 @@ export interface CloudStatus {
   owner?: CloudOwner | null
   /** The cloud names another owner (`owner` null: none); held until confirmed on this computer. */
   ownerChange?: { owner?: CloudOwner | null } | null
+  /** `owner` is the cloud's first answer (this Mac knew no account of its own); shown until confirmed here. */
+  ownerFromCloud?: boolean | null
   lastError?: string | null
   approval?: AccountApproval | null
 }
