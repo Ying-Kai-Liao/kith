@@ -757,9 +757,10 @@ allow = []
 for d in os.environ["READ_DIRS"].split("\n"):
     if d:
         allow += both(os.path.abspath(d))
-# what a kernel helper needs to start: uv, the pythons it manages, the kith program itself
-for d in (os.environ.get("UV_CACHE_DIR"), os.path.join(os.environ.get("XDG_CACHE_HOME") or home + "/.cache", "uv"),
-          home + "/Library/Caches/uv", home + "/.local/share/uv", home + "/.local/bin"):
+# what a kernel helper needs to start: uv, the pythons it manages, the kith program itself. The run has a uv cache of
+# its own (UV_CACHE_DIR above); the shared one of the owner (~/.cache/uv, ~/Library/Caches/uv) stays closed, like
+# the rest of the home folder.
+for d in (os.environ.get("UV_CACHE_DIR"), home + "/.local/share/uv", home + "/.local/bin"):
     if d:
         allow += both(d)
 try:   # the developer shims of macOS look the toolchain up here, which can sit on another volume
