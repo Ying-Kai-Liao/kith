@@ -18,10 +18,16 @@
 (* Two switches show the checks are not vacuous: Exclusive FALSE lets a    *)
 (* second device claim too; ClaimBlocksClose FALSE lets the sweep and a    *)
 (* no close a card whose key is being written.                             *)
+(*                                                                         *)
+(* A third, FailWritesNothing, is an assumption, not a guard: the model    *)
+(* takes a failed write to have written nothing. FALSE lets a write that   *)
+(* the host counts as failed (kith-auth exits non-zero after a Keychain    *)
+(* item went in, or runs past TOOL_TIMEOUT and is killed after writing)    *)
+(* still have written; the rows for it show what that assumption hides.    *)
 (***************************************************************************)
 EXTENDS Naturals
 
-CONSTANTS Exclusive, ClaimBlocksClose
+CONSTANTS Exclusive, ClaimBlocksClose, FailWritesNothing
 
 Devices == {"d1", "d2"}
 
@@ -67,6 +73,18 @@ Fail(d) ==
     /\ claim' = IF claim = d THEN "none" ELSE claim
     /\ UNCHANGED <<card, late, writes, wroteOpen>>
 
+\* Only when FailWritesNothing is FALSE: the Keychain changed, but the host was told the write failed (released, open).
+\* Bounded (writes < 2) so the retries stay finite.
+FailAfterWrite(d) ==
+    /\ ~FailWritesNothing
+    /\ pc[d] = "writing"
+    /\ writes < 2
+    /\ writes' = writes + 1
+    /\ wroteOpen' = (wroteOpen /\ card = "open")
+    /\ pc' = [pc EXCEPT ![d] = "idle"]
+    /\ claim' = IF claim = d THEN "none" ELSE claim
+    /\ UNCHANGED <<card, late>>
+
 \* card_saved only answers a card that is still open.
 Finish(d) ==
     /\ pc[d] = "wrote"
@@ -92,7 +110,7 @@ Deny ==
 
 Next ==
     \/ Tick \/ Sweep \/ Deny
-    \/ \E d \in Devices : Claim(d) \/ Write(d) \/ Fail(d) \/ Finish(d)
+    \/ \E d \in Devices : Claim(d) \/ Write(d) \/ Fail(d) \/ FailAfterWrite(d) \/ Finish(d)
 
 Spec == Init /\ [][Next]_vars
 
