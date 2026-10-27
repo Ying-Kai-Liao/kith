@@ -147,24 +147,33 @@ export function parseKithInfoResult(raw: unknown): KithInfoResult {
   return { info: parseKithInfo(r.info), error: str(r.error), fetchedAt: num(r.fetchedAt) }
 }
 
-/** One "always" answer to an escape card that kith-auth keeps (`kithAccessGrants`): `person` may `kind` `target` beyond
- *  the box in every run, until it is removed. `since` is null for one kith-auth kept no time for. */
-export interface AccessGrant { person: string; name: string; kind: 'read' | 'write' | 'domain'; target: string; since: number | null }
+/** One entry of the grants ledger (`accessLedger`, serve/docs/bot-info.md): `person` may `kind` `target` on `agent` in
+ *  every run, until it is removed. read/write/domain are an escape card's "always" (a folder, a website); service is a
+ *  person's own account for a service (`target` is its profile). `key` is kith-auth's for this entry, what `removeGrant`
+ *  takes. `since` is null for one kith-auth kept no time for. */
+export interface AccessGrant {
+  key: string; kind: 'read' | 'write' | 'domain' | 'service'; agent: string; person: string; name: string; target: string; since: number | null
+}
 
-export function parseAccessGrants(raw: unknown): AccessGrant[] {
+const GRANT_KINDS = ['read', 'write', 'domain', 'service'] as const
+
+export function parseAccessLedger(raw: unknown): AccessGrant[] {
   const r = isObject(raw) ? raw : {}
   return objects(r.grants).flatMap((g) => {
-    const kind = str(g.kind)
+    const kind = GRANT_KINDS.find((k) => k === g.kind)
+    const key = str(g.key)
     const person = str(g.person)
     const target = str(g.target)
-    if ((kind !== 'read' && kind !== 'write' && kind !== 'domain') || !person || !target) return []
-    return [{ person, name: str(g.name) ?? '', kind, target, since: num(g.since) }]
+    if (!kind || !key || !person || !target) return []
+    return [{ key, kind, agent: str(g.agent) ?? '', person, name: str(g.name) ?? '', target, since: num(g.since) }]
   })
 }
 
-/** What a grant lets them do, in words: "Read ~/docs", "Read and write ~/notes", "Connect to pypi.org". */
+/** What a grant lets them do, in words: "Read ~/docs", "Read and write ~/notes", "Connect to pypi.org", "Use notion/sam". */
 export function accessGrantText(g: Pick<AccessGrant, 'kind' | 'target'>): string {
-  return g.kind === 'domain' ? `Connect to ${g.target}` : `${g.kind === 'write' ? 'Read and write' : 'Read'} ${g.target}`
+  if (g.kind === 'domain') return `Connect to ${g.target}`
+  if (g.kind === 'service') return `Use ${g.target}`
+  return `${g.kind === 'write' ? 'Read and write' : 'Read'} ${g.target}`
 }
 
 /** Who holds it and since when: "Sam · since 3 Oct". The everyone row (`*`) is "Everyone". */
