@@ -1012,7 +1012,13 @@ mod tests {
     }
 
     /// A member's request from `dk` (committed to `nd`), with the host's and the device's nonces once they are out.
-    fn member_request(id: &str, dk: [u8; 32], nd: [u8; 32], host_nonce: Option<&str>, device_nonce: Option<[u8; 32]>) -> Value {
+    fn member_request(
+        id: &str,
+        dk: [u8; 32],
+        nd: [u8; 32],
+        host_nonce: Option<&str>,
+        device_nonce: Option<[u8; 32]>,
+    ) -> Value {
         json!({"requestId": id, "deviceKey": b64(&dk), "deviceName": "Sam's iPhone", "platform": "ios", "userId": "user_m",
             "email": "sam@example.com", "commit": b64(&crypto::sas_commit(crypto::Labels::Kith, &dk, &nd)),
             "hostNonce": host_nonce, "deviceNonce": device_nonce.map(|n| b64(&n))})
