@@ -223,20 +223,23 @@ async fn a_persons_launch_with_access_carries_what_their_conversation_was_given(
 
     let plain = k.launch(Some("sam")).await.unwrap();
     assert!(log.lock().unwrap().is_empty(), "no access token, nothing asked");
-    assert!(!plain.settings["sandbox"]["filesystem"]["allowRead"].to_string().contains(&docs));
+    assert!(!plain.settings.as_ref().unwrap()["sandbox"]["filesystem"]["allowRead"].to_string().contains(&docs));
 
     let given = k.launch_with(Some("sam"), Some(&issue())).await.unwrap();
     assert_eq!(*log.lock().unwrap(), ["consumeAccess"], "asked once, by the bound kernel process");
-    let read = &given.settings["sandbox"]["filesystem"]["allowRead"];
+    let read = &given.settings.as_ref().unwrap()["sandbox"]["filesystem"]["allowRead"];
     assert!(read.as_array().unwrap().iter().any(|d| d == docs.as_str()), "{read}");
-    assert!(given.settings["permissions"]["additionalDirectories"].to_string().contains(&docs));
-    assert_eq!(given.settings["sandbox"]["network"]["allowedDomains"], serde_json::json!(["pypi.org"]));
+    assert!(given.settings.as_ref().unwrap()["permissions"]["additionalDirectories"].to_string().contains(&docs));
+    assert_eq!(
+        given.settings.as_ref().unwrap()["sandbox"]["network"]["allowedDomains"],
+        serde_json::json!(["pypi.org"])
+    );
     assert!(!given.env.contains_key(crate::runauth::TOKEN_ENV), "the launch's token never reaches the agent process");
 
     // The owner's launch is never asked for access, whatever it is handed.
     log.lock().unwrap().clear();
     let owner = k.launch_with(None, Some(&issue())).await.unwrap();
     assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
-    assert!(!owner.settings.to_string().contains(&docs));
+    assert!(!owner.settings.as_ref().unwrap().to_string().contains(&docs));
     let _ = std::fs::remove_file(&sock);
 }
