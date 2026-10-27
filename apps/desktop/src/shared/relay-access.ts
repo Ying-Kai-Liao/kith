@@ -57,6 +57,9 @@ async function find(api: RelayApi, computerId: string): Promise<RelayComputer> {
   return c
 }
 
+/** A refusal this long after asking came from the Mac's owner, not from a Mac that hadn't heard of the member yet. */
+const OWNER_ANSWER_MS = 15_000
+
 /** The invitee's side of a join over the relay: the cloud accept is the caller's; this asks the Mac and reaches it. */
 export function relayJoinDeps(
   api: RelayApi,
@@ -69,11 +72,14 @@ export function relayJoinDeps(
       const c = await find(api, computerId)
       if (c.access === 'granted') return
       // Right after the cloud accept the Mac may not have heard of the new member yet and turns the request down:
-      // asking again a few seconds later is the same request done properly.
+      // asking again a few seconds later is the same request done properly. That refusal comes at once; a later
+      // one is the owner saying no after comparing the code, and is final.
       const sleep = wait.sleep ?? nap
+      const now = wait.now ?? Date.now
       for (let attempt = 1; ; attempt++) {
         let outcome: AccessOutcome | null = null
         let failure: Error | null = null
+        const asked = now()
         try {
           outcome = await askForAccess(api, c, { ...wait, onCode: (t) => (wait.onCode?.(t), onCode?.(t.code)) })
         } catch (e) {
@@ -81,7 +87,8 @@ export function relayJoinDeps(
         }
         if (outcome === 'approved') return
         const turnedDown = outcome === 'denied' || (failure !== null && /didn't take/i.test(failure.message))
-        if (!turnedDown || attempt >= 4 || wait.cancelled?.()) throw failure ?? new Error(accessText(outcome!))
+        const byOwner = now() - asked >= OWNER_ANSWER_MS
+        if (!turnedDown || byOwner || attempt >= 4 || wait.cancelled?.()) throw failure ?? new Error(accessText(outcome!))
         await sleep(4000)
       }
     },
