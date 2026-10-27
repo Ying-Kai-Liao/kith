@@ -6,6 +6,12 @@ compatibility_flags = ["nodejs_compat"]
 # The top level is only what the tests and `wrangler dev` run on (a local D1, no routes, no Clerk instance).
 # Nothing deploys from it: use `wrangler deploy --env kith` or `--env kith-dev`.
 
+# The home page's images and fonts (site/img, site/fonts), served before the Worker runs; site/_headers sets their
+# caching. The Worker doesn't use the binding; the tests read the assets through it.
+[assets]
+directory = "./site"
+binding = "ASSETS"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ComputerRelay"]

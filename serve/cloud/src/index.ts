@@ -9,6 +9,7 @@ import { check, ROUTES, type Responses, type RouteName } from "./contract.gen";
 import * as legacy from "./legacy-compat";
 import * as pages from "./routes/pages";
 import * as download from "./routes/download";
+import * as landing from "./routes/landing";
 import type { ComputerRelay } from "./relay";
 
 export { ComputerRelay } from "./relay";
@@ -16,6 +17,8 @@ export { ComputerRelay } from "./relay";
 export interface Env {
   DB: D1Database;
   RELAY: DurableObjectNamespace<ComputerRelay>;
+  /** The home page's images and fonts (site/). Requests for them never reach the Worker; the tests read them here. */
+  ASSETS: Fetcher;
   /** Workers Rate Limiting binding for new computer registrations. */
   REGISTER_LIMITER?: RateLimit;
   /** Server-only Cloudflare Realtime TURN key and credential-issuing token. */
@@ -97,6 +100,8 @@ const handlers: Handlers = {
   routineHook: api.routineHook,
   // The open-in-Kith page behind https://kithbot.app/i/<computer>/<invite>#t=<token>.
   invitePage: pages.invitePage,
+  // The home page at https://kithbot.app/; its images and fonts are static assets (wrangler.toml [assets]).
+  homePage: landing.landingPage,
   // The desktop download page and its one-click kithbot.app links (302 to the latest GitHub release).
   downloadPage: download.downloadPage,
   downloadRedirect: download.downloadRedirect,

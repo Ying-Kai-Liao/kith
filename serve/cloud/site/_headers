@@ -1,0 +1,7 @@
+# Images and fonts of the home page (src/routes/landing.html). Give a changed file a new name: browsers keep these for 30 days.
+/img/*
+  Cache-Control: public, max-age=2592000
+  X-Content-Type-Options: nosniff
+/fonts/*
+  Cache-Control: public, max-age=2592000
+  X-Content-Type-Options: nosniff

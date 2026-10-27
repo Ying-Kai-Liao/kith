@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'a259a1658e8b06bac0dc162c422adf8e0f163178de432184e2d6c870894e4482'
+export const CONTRACT_SHA256 = '3508398770f9ec4df5154235c1c9ff6db1e22c3faa7f17261fa87878a6b6a113'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -432,6 +432,7 @@ export const ROUTES = {
   clerkWebhook: { method: 'POST', path: 'v1/webhooks/clerk', pattern: /^\/v1\/webhooks\/clerk$/, kind: 'json', response: 'EmptyAnswer' },
   routineHook: { method: 'POST', path: 'v1/hooks/{computerId}/{hookId}', pattern: /^\/v1\/hooks\/([A-Za-z0-9_-]{1,64})\/([A-Za-z0-9_-]{1,64})$/, kind: 'forward' },
   invitePage: { method: 'GET', path: 'i/{computerId}/{inviteId}', pattern: /^\/i\/([A-Za-z0-9_-]{1,64})\/([A-Za-z0-9_-]{1,64})$/, kind: 'page' },
+  homePage: { method: 'GET', path: '', pattern: /^\/$/, kind: 'page' },
   downloadPage: { method: 'GET', path: 'download', pattern: /^\/download$/, kind: 'page' },
   downloadRedirect: { method: 'GET', path: 'download/{key:rest}', pattern: /^\/download\/(.+)$/, kind: 'redirect' },
 } as const
@@ -540,6 +541,7 @@ export const paths = {
   clerkWebhook: () => `v1/webhooks/clerk`,
   routineHook: (computerId: string, hookId: string) => `v1/hooks/${computerId}/${hookId}`,
   invitePage: (computerId: string, inviteId: string) => `i/${computerId}/${inviteId}`,
+  homePage: () => ``,
   downloadPage: () => `download`,
   downloadRedirect: (key: string) => `download/${key}`,
 }

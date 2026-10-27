@@ -5,7 +5,7 @@ import Foundation
 
 /// The cloud contract these types were made from.
 public enum CloudContract {
-    public static let sha256 = "a259a1658e8b06bac0dc162c422adf8e0f163178de432184e2d6c870894e4482"
+    public static let sha256 = "3508398770f9ec4df5154235c1c9ff6db1e22c3faa7f17261fa87878a6b6a113"
 }
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
@@ -667,6 +667,7 @@ public enum CloudPath {
     public static let clerkWebhook = "v1/webhooks/clerk"
     public static func routineHook(_ computerId: String, _ hookId: String) -> String { "v1/hooks/\(computerId)/\(hookId)" }
     public static func invitePage(_ computerId: String, _ inviteId: String) -> String { "i/\(computerId)/\(inviteId)" }
+    public static let homePage = ""
     public static let downloadPage = "download"
     public static func downloadRedirect(_ key: String) -> String { "download/\(key)" }
 }

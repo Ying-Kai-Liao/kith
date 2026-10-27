@@ -284,6 +284,10 @@
       "doc": "The open-in-Kith page behind https://kithbot.app/i/<computer>/<invite>#t=<token>.",
       "method": "GET", "path": "i/{computerId}/{inviteId}", "auth": "none", "kind": "page"
     },
+    "homePage": {
+      "doc": "The home page at https://kithbot.app/. Its images and fonts are static assets (/img/*, /fonts/*), not routes.",
+      "method": "GET", "path": "", "auth": "none", "kind": "page"
+    },
     "downloadPage": {
       "doc": "The desktop download page at https://kithbot.app/download.",
       "method": "GET", "path": "download", "auth": "none", "kind": "page"
