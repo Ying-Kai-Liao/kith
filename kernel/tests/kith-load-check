@@ -97,7 +97,7 @@ W post rooms/grp1/MEMORY.md KITH_OWNER=1 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam
 echo 'grp1 solo note' > "$M/rooms/grp1/solo.md"; W post rooms/grp1/solo.md KITH_OWNER=1 KITH_ROOM=grp1 KITH_ROOM_OWNER_ONLY=1
 echo 'grp1 old note' > "$M/rooms/grp1/old.md"   # written before the ledger: no record
 check "room members: a member of the room loads the room note" "LM KITH_ROOM_MEMBERS=sam | grep -q 'grp1 room note'"
-check "room members: a reader outside the room (a stranger) gets shared only" "! RM= LM KITH_ROOM_MEMBERS=sam | grep -q 'grp1 room note'"
+check "room members: a reader the member list does not name (a stranger) gets shared only" "! RM= LM KITH_ROOM_MEMBERS=eve | grep -q 'grp1 room note'"
 check "room members: none given stays shared only" "! LM KITH_ROOM_MEMBERS= | grep -q 'grp1 room note'"
 
 # owner-only groups and the ledger
@@ -138,6 +138,16 @@ check "a note that claims its own members in frontmatter gains nothing" \
 check "the hook is silent and never fails on bad input" "echo 'not json' | python3 \"$LEDGER\" post --agent echo --home \"$KITH_HOME/agents/echo\"; [ \$? = 0 ]"
 check "a write outside rooms/ is not recorded" \
   "W post MEMORY.md KITH_OWNER=1 KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam; python3 -c \"import json,sys; sys.exit(0 if all(k.startswith('rooms/grp1/') for k in json.load(open('$KITH_STATE/room-ledger/echo/grp1.json'))) else 1)\""
+
+# A member's own run in the group (bin/kith, kith-auth resolve): the host's member list is where room membership lives
+GM=$(P KITH_PERSON=sam KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam)
+check "a member's own group run loads the room notes written while they were there" "grep -q 'grp1 room note' <<<\"\$GM\""
+check "a member's own group run: notes outside the ledger rules stay out" \
+  "! grep -qE 'grp1 (solo|old|shell|blind|forged) note' <<<\"\$GM\" && ! grep -qE 'owner memory|about the owner' <<<\"\$GM\""
+check "a member's own group run: a note written with someone else there stays out" \
+  "! grep -q 'grp1 late note' <<<\"\$(P KITH_PERSON=sam KITH_ROOM=grp1 KITH_ROOM_MEMBERS=sam,eve)\""
+check "a person the member list does not name is not in the room" "! P KITH_PERSON=sam KITH_ROOM=grp1 KITH_ROOM_MEMBERS=eve | grep -q 'grp1 room note'"
+check "a member's run with the members unknown stays shared only" "! P KITH_PERSON=sam KITH_ROOM=grp1 | grep -q 'grp1 room note'"
 
 # the filter itself: members known, caps, ordering, guests
 export OWNER='{"kind":"owner"}' SAMR='{"kind":"person","id":"sam","rooms":["grp1"]}' GUEST='{"kind":"guest","id":"bot-ab12","rooms":["grp1"]}' STRAY='{"kind":"guest","id":"bot-ab12"}' EVE='{"kind":"person","id":"eve"}'

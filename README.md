@@ -57,14 +57,24 @@ kith new reading "tracks what I read"  # or start one yourself
 kith doctor                            # check everything, with what to fix
 kith backup                            # everything to private GitHub repos: state, memories, your agents
 ```
+Desktop app, one click: <https://kithbot.app/download>, or directly <https://kithbot.app/download/mac> (macOS, Apple silicon and Intel)
+and <https://kithbot.app/download/linux> (Linux x64, AppImage).
+
 Kith was called hq until 2026-10-22. The `hq` command (and `hq-<tool>`) still works as an alias, a Mac with an existing `~/.hq`
 keeps using it until `kith migrate` moves it to `~/.kith`, and `~/hq` stays a link to the same folder as `~/kith`.
 Old `HQ_*` variables, `dev.hq.*` jobs and `hq-agent` repos are still read.
+
+Step by step, with the Mac app and the iPhone app: [docs/install.md](docs/install.md). Invited to someone else's Kith:
+[docs/invited.md](docs/invited.md).
 
 The download installs the `kith` binary and the kernel under `~/.kith`, then runs the same `install.sh`; run it again to
 upgrade. `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` (a local file) are in the script's header. Homebrew:
 `packaging/homebrew/kith.rb` (for the tap [`Ying-Kai-Liao/homebrew-kith`](https://github.com/Ying-Kai-Liao/homebrew-kith)). Releases are built by `.github/workflows/release.yml`
 on a `v*` tag.
+
+The Mac app (`apps/`, a dmg) carries all of this inside: the host (`Contents/Resources/kith-serve`, run as a launchd job)
+and the release layout (`Contents/Resources/kith/bin/kith` with its kernel), so it needs no separate install; see
+[apps/README.md](apps/README.md).
 
 A Linux VM that only needs to join a computer and ask its agents (a cloud bot) installs the static client-only `kith`, no root:
 `curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | sh`, then `kith join <link>`
@@ -433,7 +443,7 @@ Kith is split on purpose. The pieces you build on are open source; the product a
 | Kernel, agent folder format and protocol | `kernel/` (incl. `kernel/PROTOCOL.md`) | MIT, open source |
 | Bot client and wire protocol crates, guest scripts | `serve/host/crates/guest`, `serve/host/crates/wire`, `scripts/install-guest.sh`, `scripts/package-guest.sh`, `scripts/smoke-guest.sh` | MIT, open source |
 | Docs and specs, top-level scripts | `docs/`, `serve/docs/`, `install.sh`, other `scripts/` | MIT, open source |
-| Host, cloud, relay | `serve/host` (except the crates above and kith-mem), `serve/cloud`, `serve/relay` | FSL-1.1-MIT, Fair Source |
+| Host, cloud, relay | `serve/host` (except the crates above), `serve/cloud`, `serve/relay` | FSL-1.1-MIT, Fair Source |
 | Apps (Mac, iOS, web/desktop) | `apps/` | FSL-1.1-MIT, Fair Source |
 
 FSL-1.1-MIT is Fair Source, not open source: you can read, run, modify and self-host it for any use except building a competing product or service, and each version becomes plain MIT two years after its release. The nearest `LICENSE` file to a file is the one that applies to it. The relay's Codync-derived portions keep their Apache-2.0 attribution in `NOTICE`. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by these licenses.

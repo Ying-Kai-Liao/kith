@@ -225,6 +225,7 @@ function ManagedComputerCard({ store, onPair }: { store: BotStore; onPair: () =>
   const [confirmRevoke, setConfirmRevoke] = useState<AuthorizedDevice | null>(null)
   const [confirmUnclaim, setConfirmUnclaim] = useState(false)
   const [confirmAutoApproval, setConfirmAutoApproval] = useState(false)
+  const [confirmOwnerChange, setConfirmOwnerChange] = useState(false)
   const cloud = store.cloud
   const autoApproval = cloud?.approval === 'auto'
   const online = store.connection.kind === 'online'
@@ -284,6 +285,28 @@ function ManagedComputerCard({ store, onPair }: { store: BotStore; onPair: () =>
     </HStack>
   )
 
+  const change = cloud?.ownerChange ?? null
+  const newOwner = change?.owner ?? null
+  const changeText = newOwner ? `Kith's cloud says ${name} now belongs to ${newOwner.email ?? newOwner.userId}.` : `Kith's cloud says ${name} has left its account.`
+  const ownerChangeLine = change ? (
+    <HStack key="ownerChange" gap={8} className="settings-row">
+      <VStack grow className="settings-stack">
+        <span>Owner change waiting</span>
+        <Text size="caption" tone="attention">{changeText} Nothing that depends on the owner changes until you confirm it here.</Text>
+      </VStack>
+      <Button kind="secondary" onClick={() => setConfirmOwnerChange(true)} disabled={busy || !online}>Review</Button>
+    </HStack>
+  ) : null
+  const confirmOwner = () =>
+    run(async () => {
+      try {
+        await (await store.ready()).call('confirmOwner', { userId: newOwner?.userId ?? null }, 30_000)
+        await app.cloud.refresh()
+      } catch (e) {
+        store.setError(errorText(e))
+      }
+    })
+
   const deviceNames = devices?.map((d) => d.name).join(', ')
   return (
     <>
@@ -313,6 +336,7 @@ function ManagedComputerCard({ store, onPair }: { store: BotStore; onPair: () =>
             <Icon name="chevron.right" size={11} color="var(--secondary)" />
           </button>,
           accountLine,
+          ...(ownerChangeLine ? [ownerChangeLine] : []),
           ...(owner
             ? [
                 <Switch
@@ -403,6 +427,13 @@ function ManagedComputerCard({ store, onPair }: { store: BotStore; onPair: () =>
         message="Devices that were approved through the account lose access. Devices paired with a QR code keep it."
         actions={[{ title: 'Remove from account', destructive: true, action: () => run(() => app.cloud.unclaim(store)) }]}
         onClose={() => setConfirmUnclaim(false)}
+      />
+      <Dialog
+        open={confirmOwnerChange}
+        title="Accept the new owner?"
+        message={`${changeText} Accept only if you made this change: the new account's devices can then be let in, and devices approved through ${owner?.email ?? 'the old account'} lose access.`}
+        actions={[{ title: newOwner ? 'Accept new owner' : 'Accept leaving', destructive: true, action: confirmOwner }]}
+        onClose={() => setConfirmOwnerChange(false)}
       />
     </>
   )

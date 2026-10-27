@@ -9,6 +9,8 @@
 For your own machines only: it is plain ssh (over Tailscale, a LAN, anything your ssh config reaches), so it adds no
 server, port or token. Whoever can ssh in as you could run kith there anyway. The agent runs on its machine, with that
 machine's memory, accounts and tools; only the task, your code and its answer and files travel. Never state.
+The other machine runs it as its owner, so a run for anyone else (KITH_PERSON, not the owner) is refused until there
+is a person id that holds across machines.
 
 Code handoff, when you ask from inside a git repo (--no-code skips it):
   1. Your working tree, uncommitted and untracked files included (not ignored ones), is snapshotted as a commit
@@ -306,6 +308,20 @@ def serve_run(req):
 
 # --- commands ---------------------------------------------------------------------------------------------------------
 
+def for_someone_else(agent):
+    """The person this run is for when that isn't the owner (KITH_PERSON, checked with kith-auth), else None. Fails
+    closed: when kith-auth can't answer, the person."""
+    person = os.environ.get('KITH_PERSON')
+    if not person:
+        return None
+    try:
+        r = json.loads(subprocess.run([str(KITH / 'bin/kith-auth'), 'resolve', agent, '--person', person],
+                                      capture_output=True, text=True, timeout=30, check=True).stdout)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return person
+    return None if r.get('owner') else person
+
+
 def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip()); return 0
@@ -318,6 +334,10 @@ def main(argv):
     if cmd == '_run': return serve_run(json.loads(base64.b64decode(rest[0])))
     if cmd == 'ask':  # from kith-ask, for AGENT@MACHINE
         agent, host = rest[0].split('@', 1)
+        who = for_someone_else(agent)
+        if who:
+            sys.exit("kith ask: %s is only for the owner for now: this run is for %s, and %s has no id for them yet, so "
+                     "the run there would have the owner's rights. Ask %s on this Mac instead." % (rest[0], who, host, agent))
         cont, name, as_json, no_code, opts, words, i = False, None, False, False, {}, [], 0
         args = rest[1:]
         while i < len(args):

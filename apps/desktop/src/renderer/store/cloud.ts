@@ -182,7 +182,8 @@ export class CloudModel extends Observable {
     const store = this.app.local
     if (!user || !store || store.connection.kind !== 'online') return null
     const status = store.cloud
-    if (!status?.enabled || status.owner || keptOut(user).get().includes(store.computer.id)) return null
+    // A held owner change is the user's to confirm, never something to claim over.
+    if (!status?.enabled || status.owner || status.ownerChange || keptOut(user).get().includes(store.computer.id)) return null
     return store
   }
 

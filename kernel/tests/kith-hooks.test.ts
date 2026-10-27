@@ -1,7 +1,7 @@
 // kith-hooks.test — the Claude Code plugin (adapters/claude-code/hooks/register.tsx), driven with a fake engine:
 //   a helper's report is never replaced (SubagentStop never blocks; a stale session file gets a stub written from the
 //   helper's last message), mcp__kith__invoke returns the report, a helper in the owner's session registers with its own
-//   permissions and one in a guest's does not.
+//   permissions and one in a guest's does not, every helper checks MCP tools against its own grants.
 //
 //   bun test kernel/tests/kith-hooks.test.ts
 import { expect, test } from 'bun:test'
@@ -146,7 +146,24 @@ test('a helper in the owner session has its own permissions; in a guest session 
   const guest = setup({ KITH_PERSON: 'guest' })
   await guest.fire('session.start', { cwd: guest.root })
   expect(guest.registered[0].permissionMode).toBeUndefined()
-  expect(guest.registered[0].hooks).toBeUndefined()
+  expect(guest.registered[0].hooks.PreToolUse.map((h: any) => h.matcher)).toEqual(['mcp__.*'])
+})
+
+// The caller's MCP servers are the helper's too: its own grants decide (kith-auth helper-mcp), asked in the owner's session.
+test('every helper checks MCP tools against its own grants: ask for the owner, deny for anyone else', async () => {
+  const gate = (t: ReturnType<typeof setup>) => {
+    const h = t.registered[0].hooks.PreToolUse.find((x: any) => x.matcher === 'mcp__.*')
+    return h.hooks[0].command as string
+  }
+  const owner = setup()
+  await owner.fire('session.start', { cwd: owner.root })
+  expect(gate(owner)).toBe(`'${join(owner.root, 'kernel')}/bin/kith-auth' helper-mcp 'builder' ask`)
+  const guest = setup({ KITH_PERSON: 'mia', KITH_OWNER: '0' })
+  await guest.fire('session.start', { cwd: guest.root })
+  expect(gate(guest)).toEndWith(` helper-mcp 'builder' deny`)
+  const bad = setup({ KITH_PERSON: '../x', KITH_OWNER: '0' })
+  await bad.fire('session.start', { cwd: bad.root })
+  expect(gate(bad)).toEndWith(' deny')
 })
 
 test('KITH_OWNER decides: an owner run whose KITH_PERSON names the owner still gets the helper permissions', async () => {
@@ -155,7 +172,8 @@ test('KITH_OWNER decides: an owner run whose KITH_PERSON names the owner still g
   expect(owner.registered[0].permissionMode).toBe('default')
   const guest = setup({ KITH_PERSON: 'guest', KITH_OWNER: '0' })
   await guest.fire('session.start', { cwd: guest.root })
-  expect(guest.registered[0].hooks).toBeUndefined()
+  expect(guest.registered[0].permissionMode).toBeUndefined()
+  expect(guest.registered[0].hooks.PreToolUse).toHaveLength(1)
 })
 
 test('mcp__kith__invoke returns at SubagentStop when no turn.complete came', async () => {

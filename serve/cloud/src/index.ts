@@ -7,6 +7,7 @@ import { webOrigins } from "./auth";
 import { ApiError, type Ctx } from "./api";
 import * as legacy from "./legacy-compat";
 import * as pages from "./routes/pages";
+import * as download from "./routes/download";
 import type { ComputerRelay } from "./relay";
 
 export { ComputerRelay } from "./relay";
@@ -88,6 +89,9 @@ const routes: [string, RegExp, Handler][] = [
   ["POST", new RegExp(`^/v1/hooks/${ID}/${ID}$`), api.routineHook],
   // The open-in-Kith page behind https://kithbot.app/i/<computer>/<invite>#t=<token>.
   ["GET", new RegExp(`^/i/${ID}/${ID}$`), pages.invitePage],
+  // The desktop download page and its one-click kithbot.app links (302 to the latest GitHub release).
+  ["GET", /^\/download$/, download.downloadPage],
+  ["GET", /^\/download\/(.+)$/, download.downloadRedirect],
 ];
 
 /** Only an origin listed in WEB_ORIGINS gets CORS; never a wildcard, and none at all when the var is unset. */

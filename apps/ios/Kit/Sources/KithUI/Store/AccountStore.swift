@@ -341,11 +341,23 @@ public final class AccountStore {
         return true
     }
 
-    /// Waits for the computer to take this device (a member needs no code), then for the connection.
-    /// nil when it isn't reachable within `patience`; throws when the computer turns this device away.
+    /// Waits for the computer to take this device, then for the connection. While the request is pending it waits as
+    /// long as an owner's device does: until the cloud says it was approved, declined or expired (in Code mode the
+    /// owner compares this device's code first, a member's too). The connection then gets `patience`.
+    /// nil when it isn't reachable within that; throws when the computer turns this device away.
     public func connection(to id: ComputerID, patience: Duration = .seconds(45)) async throws -> HostClient? {
-        let deadline = ContinuousClock.now + patience
+        var deadline = ContinuousClock.now + patience
+        var wasAsking = false
         while ContinuousClock.now < deadline, !retired {
+            if pendingAccess[id] != nil {
+                // Still asking: the request's own answer ends the wait, as `awaitApproval` does for an owner.
+                wasAsking = true
+                deadline = ContinuousClock.now + patience
+            } else if stores[id] == nil, wasAsking {
+                // The request ended without the computer taking this device: declined, expired or cancelled.
+                let name = cloudComputers.first { $0.computerId == id }?.name ?? "The computer"
+                throw HostError.unauthorized("\(name) didn't let this device in. Ask its owner, then open the link again.")
+            }
             if let store = stores[id] {
                 switch store.connection {
                 case .online:

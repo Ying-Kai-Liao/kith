@@ -3,19 +3,23 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | sh
 #
-# Puts one static binary at ~/.local/bin/kith; then `kith join <link>`. Run it again to upgrade. Needs sh, tar and curl (or wget).
-# The checksum comes from the same release, so it catches a corrupt or swapped download, not a compromised release.
+# Puts one static binary at ~/.local/bin/kith; then `kith join <link>`. Run it again to upgrade. Needs sh, tar and curl (or wget),
+# and minisign or OpenSSL 3 to check the release's signature.
+# The release's SHA256SUMS is signed in CI (SHA256SUMS.minisig) with the key whose public half is KITH_PUBKEY below (the
+# same as packaging/minisign.pub), so a release whose files and checksums were both swapped is refused.
 #
 # Environment:
 #   KITH_VERSION          a release to install (1.2.3 or v1.2.3); default the latest
 #   KITH_GUEST_PREFIX     where to install (bin/kith goes under it); default ~/.local
 #   KITH_REPO             GitHub repo to download from; default Ying-Kai-Liao/kith
+#   KITH_ALLOW_UNSIGNED   1 installs a release with no signature (or no tool to check it) on the checksum alone
 #   KITH_INSTALL_TARBALL  a local kith-guest-<version>-linux-<arch>.tar.gz to install instead of downloading (tests,
 #                         offline); verified against KITH_INSTALL_SHA256 or the .sha256 file beside it, if there is one
 set -eu
 
 REPO=${KITH_REPO:-Ying-Kai-Liao/kith}
 PREFIX=${KITH_GUEST_PREFIX:-$HOME/.local}
+KITH_PUBKEY=RWQhm3bB3gz4f+YdOeWnGIzSXYL09VomfCiTphj+KFfDr1HQE2l4Ufdi
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install-guest: %s\n' "$*" >&2; exit 1; }
@@ -41,6 +45,37 @@ else die "curl (or wget) is needed"; fi
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/kith-install.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
 
+# b64bytes <base64> <skip> <count> <out>: bytes skip+1..skip+count of the decoded base64.
+b64bytes() { printf '%s' "$1" | base64 -d | tail -c +$(($2 + 1)) | head -c "$3" > "$4"; }
+
+# verify_sig <file> <file.minisig>: checks a minisign signature against KITH_PUBKEY, with minisign or else OpenSSL 3
+# (a minisign signature is Ed25519 over the file's BLAKE2b-512, or over the file itself for the legacy "Ed" kind).
+# Returns 1 for a bad signature and 2 when there is no tool to check it.
+verify_sig() {
+  if have minisign; then
+    minisign -Vq -P "$KITH_PUBKEY" -m "$1" -x "$2" >/dev/null 2>&1 || return 1
+    return 0
+  fi
+  have openssl && openssl version 2>/dev/null | grep -q '^OpenSSL [3-9]' || return 2
+  d=$WORK/sig
+  mkdir -p "$d"
+  sig=$(sed -n 2p "$2")
+  b64bytes "$sig" 0 2 "$d/alg"
+  b64bytes "$sig" 2 8 "$d/keyid.sig"
+  b64bytes "$sig" 10 64 "$d/sig"
+  b64bytes "$KITH_PUBKEY" 2 8 "$d/keyid.pub"
+  b64bytes "$KITH_PUBKEY" 10 32 "$d/pk"
+  cmp -s "$d/keyid.sig" "$d/keyid.pub" || return 1
+  # The Ed25519 key as a DER SubjectPublicKeyInfo: the fixed 12-byte prefix, then the 32 key bytes.
+  { printf '\060\052\060\005\006\003\053\145\160\003\041\000'; cat "$d/pk"; } > "$d/pk.der"
+  case $(cat "$d/alg") in
+    ED) openssl dgst -blake2b512 -binary "$1" > "$d/msg" ;;
+    Ed) cp "$1" "$d/msg" ;;
+    *) return 1 ;;
+  esac
+  openssl pkeyutl -verify -pubin -keyform DER -inkey "$d/pk.der" -rawin -in "$d/msg" -sigfile "$d/sig" >/dev/null 2>&1
+}
+
 if [ -n "${KITH_INSTALL_TARBALL:-}" ]; then
   TARBALL=$KITH_INSTALL_TARBALL
   [ -f "$TARBALL" ] || die "$TARBALL not found"
@@ -65,6 +100,20 @@ else
   TARBALL=$WORK/$ASSET
   fetch "$BASE/$ASSET" "$TARBALL" || die "download failed: $BASE/$ASSET"
   fetch "$BASE/SHA256SUMS" "$WORK/SHA256SUMS" || die "download failed: $BASE/SHA256SUMS"
+  unsigned() {
+    [ "${KITH_ALLOW_UNSIGNED:-}" = 1 ] || die "$1; not installing (KITH_ALLOW_UNSIGNED=1 installs it on the checksum alone)"
+    say "warning: $1; installing on the checksum alone (KITH_ALLOW_UNSIGNED=1)"
+  }
+  if fetch "$BASE/SHA256SUMS.minisig" "$WORK/SHA256SUMS.minisig"; then
+    rc=0; verify_sig "$WORK/SHA256SUMS" "$WORK/SHA256SUMS.minisig" || rc=$?
+    case $rc in
+      0) say "signature ok" ;;
+      2) unsigned "minisign or OpenSSL 3 is needed to check the release signature" ;;
+      *) die "SHA256SUMS of v$VERSION is not signed by the kith release key; not installing" ;;
+    esac
+  else
+    unsigned "release v$VERSION has no signature ($BASE/SHA256SUMS.minisig)"
+  fi
   WANT=$(awk -v f="$ASSET" '$2 == f || $2 == "*" f { print $1 }' "$WORK/SHA256SUMS")
   [ -n "$WANT" ] || die "no checksum for $ASSET in SHA256SUMS"
 fi

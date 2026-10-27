@@ -4,7 +4,7 @@
 
 mod fake;
 
-use self::fake::{BOT, DM, Fd, GENERAL, OWNER, Post};
+use self::fake::{BOT, DM, Fd, GENERAL, GUILD, OWNER, Post};
 use super::api::time_snowflake;
 use super::{Config, Discord};
 use crate::LockExt;
@@ -684,6 +684,64 @@ async fn several_servers_need_the_setting_and_a_matching_name_or_id_picks_one() 
         r2.ready().await;
         assert_eq!(r2.ad.rt.locked().guild.as_ref().map(|g| g.id.clone()).as_deref(), Some("101"));
         r2.stop();
+    }
+}
+
+/// A rig for connection `conn` with `channels.discord_guild` at `setting`; `linked`: whether kith knows the owner's
+/// Discord account (otherwise kith-auth knows kai as the owner and nobody's handle). The server is "Home", `OWNER`'s.
+async fn owner_rig(conn: &str, setting: Option<&str>, linked: bool) -> Rig {
+    let guild = setting.map(str::to_owned);
+    let mut r = Rig::with(move |c| c.guild = guild).await;
+    if !linked {
+        let people =
+            json!({"*": {"person": null, "owner": false, "was": [], "owner_id": "kai", "owner_linked": false}});
+        std::fs::write(r.dir.join("stub/people.json"), people.to_string()).unwrap();
+    }
+    r.ad = Discord::new(conn, "test-token", r.core.clone(), r.cfg.clone());
+    r.started().await
+}
+
+/// Whether the server's owner is taken as kith's owner: what the adapter says about their message, and who kith
+/// says they are when they ask in a DM.
+async fn owner_stands_in(r: &Rig) -> (bool, String) {
+    let msg = json!({"id": "9001", "channel_id": GENERAL, "guild_id": GUILD, "author": {"id": OWNER}, "content": "hi"});
+    let admin = r.ad.incoming(&msg).await.unwrap().expect("a message in the server").admin;
+    r.fd.say(DM, OWNER, "/whoami", &json!({}), true, None);
+    let said = || r.fd.st.locked().posts_in(DM).into_iter().map(|p| p.content).find(|c| !c.contains("working"));
+    until("an answer in the DM", || said().is_some()).await;
+    (admin, said().unwrap())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn only_the_named_servers_owner_is_taken_as_the_owner_before_linking() {
+    for (conn, setting, stands_in) in [
+        // The server channels.discord_guild names (by name or id): its owner is kith's owner until linked.
+        (CONN, Some("home"), true),
+        (CONN, Some(GUILD), true),
+        ("discord/work", Some("Home"), true),
+        // Another server than the one named: its owner is no one to kith.
+        ("discord/work", Some("Work Place"), false),
+        // Nothing named: no server's owner is.
+        (CONN, None, false),
+        (CONN, Some(""), false),
+    ] {
+        let r = owner_rig(conn, setting, false).await;
+        let (admin, said) = owner_stands_in(&r).await;
+        assert_eq!(admin, stands_in, "{conn} {setting:?}");
+        if stands_in {
+            assert!(said.starts_with("You are kai in kith."), "{conn} {setting:?}: {said}");
+        } else {
+            assert!(said.contains("not linked to kith"), "{conn} {setting:?}: {said}");
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_linked_owner_is_the_owner_whatever_server_is_named() {
+    for (conn, setting) in [(CONN, Some("home")), ("discord/work", Some("Work Place")), (CONN, None)] {
+        let r = owner_rig(conn, setting, true).await;
+        let (_, said) = owner_stands_in(&r).await;
+        assert!(said.starts_with("You are kai in kith."), "{conn} {setting:?}: {said}");
     }
 }
 

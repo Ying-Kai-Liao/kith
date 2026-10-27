@@ -104,6 +104,7 @@ struct KithDetailsSections<About: View, Routines: View>: View {
         routines(info.schedules, info.errors["schedules"] != nil)
         projects(info)
         harness(info)
+        access
         capabilities(info)
     }
 
@@ -193,6 +194,27 @@ struct KithDetailsSections<About: View, Routines: View>: View {
         if let harness = info.harness {
             CardSection("Harness", footer: "Set in the agent's package") {
                 SheetRow(icon: "cpu", title: harness)
+            }
+        }
+    }
+
+    // MARK: access
+
+    /// The agent's "always" answers to escape cards, each with a Remove; only when there is one (the owner's own).
+    @ViewBuilder private var access: some View {
+        if !store.grants.isEmpty {
+            CardSection("Access", footer: store.grantError.map { "Not removed: \($0)" }
+                        ?? "Allowed always from a permission card. A removed one is gone from their next run.") {
+                ForEach(store.grants) { grant in
+                    SheetRow(icon: grant.kind == "domain" ? "globe" : "folder", title: grant.text, detail: grant.holder) {
+                        if store.removingGrant == grant {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            IconButton("Remove", systemImage: "trash") { Task { await store.remove(grant) } }
+                                .disabled(store.removingGrant != nil)
+                        }
+                    }
+                }
             }
         }
     }

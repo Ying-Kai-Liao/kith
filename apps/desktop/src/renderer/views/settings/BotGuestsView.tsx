@@ -4,6 +4,8 @@ import {
   allowedBy, ago, botLine, botTitle, detailSubtitle, inTime, isLiveBot, limitsLine, providerLabel,
   type BotGuest, type BotProvider, type CreatedBotInvite,
 } from '@shared/bot-guests'
+import { isUnsupportedHost } from '@shared/kith-info'
+import { money, ofLimit, type BotsCap } from '@shared/usage-limits'
 import { Button, CardForm, CardSection, Disclosure, SegmentedChoice, Spinner, Switch, ValueRow } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { BotAvatar, BotGuestAvatar } from '../../components/kith'
@@ -14,6 +16,7 @@ import { useModel, useModels } from '../../lib/observable'
 import { botGuestsFor } from '../../store/bot-guests-store'
 import type { BotStore } from '../../store/bot-store'
 import { useApp } from '../../store/context'
+import { BudgetPicker } from '../usage/PeopleBudgets'
 import './settings.css'
 
 /** An agent a bot can be given. */
@@ -330,10 +333,42 @@ export function OwnBotsSection({ store, bots, onInvite }: { store: BotStore; bot
   return (
     <CardSection title="Your bots" footer="Bots from Grok and other apps can ask the agents you pick. They never act as you.">
       <BotList store={store} bots={bots} view="owner" />
+      {bots.length > 0 ? <BotsCapRow store={store} /> : null}
       <div className="settings-row">
         <Button kind="secondary" onClick={onInvite}>Invite a bot</Button>
       </div>
     </CardSection>
+  )
+}
+
+/** "Monthly cap": what your bots may spend together on every agent before they stop and you get a card; off by default. */
+function BotsCapRow({ store }: { store: BotStore }) {
+  const [state, setState] = useState<BotsCap | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let live = true
+    void store.ready().then((c) => c.botsCap()).then(
+      (s) => { if (live) setState(s) },
+      (e: unknown) => { if (live && !isUnsupportedHost(e)) setError(e instanceof Error ? e.message : String(e)) },
+    )
+    return () => { live = false }
+  }, [store])
+  if (!state) return error ? <div className="settings-row"><Text size="footnote" tone="danger">{error}</Text></div> : null
+  const set = (cap: number | null) => {
+    setBusy(true)
+    setError(null)
+    void store.ready().then((c) => c.setBotsCap(cap)).then(setState, (e: unknown) => setError(e instanceof Error ? e.message : String(e))).finally(() => setBusy(false))
+  }
+  const spent = state.cap ? ofLimit(state.spent, state.cap, true) : `${money(state.spent, true)} this month`
+  return (
+    <div className="settings-row">
+      <VStack grow className="settings-stack">
+        <Text truncate>Monthly cap</Text>
+        <Text size="caption" tone={error ? 'danger' : 'secondary'}>{error ?? `${spent} · all agents, at API prices`}</Text>
+      </VStack>
+      <BudgetPicker name="your bots" budget={state.cap} busy={busy} set={set} />
+    </div>
   )
 }
 
