@@ -125,10 +125,10 @@ enum Sub {
         /// the cloud, can then add a device).
         #[arg(long, value_parser = ["code", "auto"])]
         approval: Option<String>,
-        /// Accept the owner the cloud now names for this computer: its account id as shown under
-        /// `owner change`, or `none`.
-        #[arg(long, value_name = "ACCOUNT")]
-        confirm_owner: Option<String>,
+        /// Accept the owner the cloud now names for this computer (or one set from the cloud): asks
+        /// you to type the account at this terminal, and refuses when stdin is not a terminal.
+        #[arg(long)]
+        confirm_owner: bool,
     },
     /// Install and start the host as a background service (launchd / systemd --user).
     Install {
@@ -391,9 +391,8 @@ async fn main() -> Result<()> {
             if let Some(approval) = approval {
                 local_call(port, "setApproval", json!({ "approval": approval })).await?;
             }
-            if let Some(account) = confirm_owner {
-                let user_id = (account != "none").then_some(account);
-                local_call(port, "confirmOwner", json!({ "userId": user_id })).await?;
+            if confirm_owner {
+                confirm_owner_here(port).await?;
             }
             let status = if enable || disable {
                 local_call(port, "setCloud", json!({"enabled": !disable})).await?
@@ -411,19 +410,8 @@ async fn main() -> Result<()> {
                 text("approval"),
                 text("lastError"),
             );
-            let change = &status["ownerChange"];
-            if change.is_object() {
-                let to = &change["owner"];
-                let account = to["userId"].as_str().unwrap_or("none");
-                let says = match (to["userId"].as_str(), to["email"].as_str()) {
-                    (None, _) => "has left its account".to_owned(),
-                    (Some(id), Some(email)) => format!("now belongs to {email} ({id})"),
-                    (Some(id), None) => format!("now belongs to {id}"),
-                };
-                println!(
-                    "owner change: the cloud says this computer {says}. Nothing that depends on the owner is \
-                     applied until you confirm here: kith-serve cloud --confirm-owner {account}"
-                );
+            if let Some((_, says)) = owner_to_confirm(&status) {
+                println!("{says} Confirm at this terminal: kith-serve cloud --confirm-owner");
             }
             Ok(())
         }
@@ -638,6 +626,53 @@ async fn shutdown_signal() {
         () = ctrl_c => {}
         () = term => {}
     }
+}
+
+/// What `cloudStatus` waits on a person here to confirm: the account to type (`none`: no owner) and what to tell them.
+fn owner_to_confirm(status: &serde_json::Value) -> Option<(String, String)> {
+    let named = |o: &serde_json::Value| match (o["userId"].as_str(), o["email"].as_str()) {
+        (Some(id), Some(email)) => format!("{email} ({id})"),
+        (id, _) => id.unwrap_or("none").to_owned(),
+    };
+    let change = &status["ownerChange"];
+    if change.is_object() {
+        let to = &change["owner"];
+        let says = match to["userId"].as_str() {
+            None => "has left its account".to_owned(),
+            Some(_) => format!("now belongs to {}", named(to)),
+        };
+        let account = to["userId"].as_str().unwrap_or("none").to_owned();
+        return Some((
+            account,
+            format!(
+                "owner change: the cloud says this computer {says}. Nothing that depends on the owner is applied \
+                 until it is confirmed on this computer."
+            ),
+        ));
+    }
+    let owner = &status["owner"];
+    let account = owner["userId"].as_str().filter(|_| status["ownerFromCloud"] == true)?.to_owned();
+    let says = format!(
+        "owner set from the cloud: this computer knew no account of its own when it took {} as its owner.",
+        named(owner)
+    );
+    Some((account, says))
+}
+
+/// `kith-serve cloud --confirm-owner`: only a person typing at a terminal confirms who owns this computer.
+async fn confirm_owner_here(port: u16) -> Result<()> {
+    use std::io::IsTerminal;
+    remote::owner::require_terminal(std::io::stdin().is_terminal())?;
+    let status = local_call(port, "cloudStatus", json!({})).await?;
+    let Some((account, says)) = owner_to_confirm(&status) else {
+        anyhow::bail!("There is no owner change to confirm on this computer.");
+    };
+    println!("{says}");
+    remote::owner::typed_confirmation(&account, &mut std::io::stdin().lock(), &mut std::io::stdout())?;
+    let user_id = (account != "none").then_some(account);
+    local_call(port, "confirmOwner", json!({ "userId": user_id })).await?;
+    println!("Confirmed.");
+    Ok(())
 }
 
 /// Calls the running host's local API (`~/.kith/serve/token` over loopback).

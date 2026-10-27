@@ -65,6 +65,7 @@ pub async fn run(hub: Arc<Hub>) {
             if url.is_none() {
                 s.owner = None;
                 s.owner_change = None;
+                s.owner_from_cloud = false;
                 s.last_error = cloud::unset_reason(&hub.store);
             }
         });

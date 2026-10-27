@@ -61,7 +61,8 @@ pub(super) const LOCAL_ONLY: &[&str] = &[
     "connectorCall",
     "claimSign",
     "unclaim",
-    // Who owns this computer is decided on it, never by the cloud alone.
+    // Who owns this computer is decided on it, never by the cloud alone. Local is one token for the app and every
+    // helper on this computer, so a local process holding it can call this too; `kith-serve cloud` asks for a terminal.
     "confirmOwner",
     "devices",
     "revokeDevice",

@@ -158,19 +158,34 @@ async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
 
 #[tokio::test]
 async fn a_revoke_applies_while_the_cloud_names_another_owner() {
+    use crate::remote::crypto::{self, b64};
     let r = Rig::new().await;
     joined(&r).await;
     let base = cloud::url(&r.hub.store).unwrap();
-    // Pins the owner; no `memberships`, so sam stays bound to their account.
-    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "grants": [], "revoked": []}));
+    // A host claimed before pins: what it knows of its owner is the account it bound to kai.
+    r.hub.store.kv_set(crate::remote::account::APPLIED, "user_owner").unwrap();
+    cloud::set_approval(&r.hub, cloud::Approval::Auto).unwrap();
+    r.device("kai-phone", None);
+    let lease = |key: &str| r.hub.store.device(key).unwrap().lease_until.unwrap();
+    let before = lease("kai-phone");
+    let (dk, nd): ([u8; 32], [u8; 32]) = (crypto::random(), crypto::random());
+    let request = json!({"requestId": "req_1", "deviceKey": b64(&dk), "userId": "user_mallory",
+        "commit": b64(&crypto::sas_commit(crypto::Labels::Kith, &dk, &nd))});
+    r.set_cloud_state(json!({"owner": {"userId": "user_mallory"}, "requests": [request], "revoked": ["user_sam"],
+        "grants": [{"grantId": "grt_kai-phone", "deviceKey": "kai-phone", "userId": "user_mallory"}]}));
     cloud::pull(&r.hub, &base).await.unwrap();
-    r.set_cloud_state(
-        json!({"owner": {"userId": "user_mallory"}, "memberships": [], "grants": [], "revoked": ["user_sam"]}),
-    );
-    cloud::pull(&r.hub, &base).await.unwrap();
-    assert!(r.hub.cloud.status().owner_change.is_some());
+
+    let status = r.hub.cloud.status();
+    assert_eq!(status.owner.unwrap().user_id, "user_owner", "pinned from what this Mac knew, not from the cloud");
+    assert_eq!(status.owner_change.unwrap().owner.unwrap().user_id, "user_mallory");
+    assert!(!status.owner_from_cloud);
+    // The revoke in the same pull applies.
     assert_eq!(r.who("user_sam")["revoked"], true);
     assert!(!r.allowed("sam", "house"));
+    // Nothing that depends on the owner does.
+    assert_eq!(lease("kai-phone"), before, "the owner's device is neither renewed nor removed");
+    assert_eq!(r.hub.cloud.requests_json(), Vec::<Value>::new(), "no access request is taken up");
+    assert!(r.posts().iter().all(|(p, _)| !p.contains("access-requests")), "nor answered");
 }
 
 #[tokio::test]
