@@ -145,7 +145,8 @@ bridge, `KITH_VIA=discord`, `telegram` or `slack`, `KITH_BRIDGE_OUTBOX`, `KITH_P
    and model; efforts are noted.
 2. Spawn: project from `<kith project>` or `project-id`, its parents (`project-id --info`), plus fresh `MEMORY.md`, go in front of the task. Every session in a project with a parent, home or children gets one `kith project:` line in its system prompt (`prompt.compose`).
 3. Each request: the agent's effort. Stop: one nudge if the session file wasn't written.
-   Runs on the caller's settings and MCP servers, not the agent's (known gap).
+   Runs on the caller's settings and MCP servers, not the agent's. A kith service's MCP tool the agent itself isn't
+   granted (`kith-auth helper-mcp`, a PreToolUse hook) is asked in the owner's session and denied in anyone else's.
 
 **An agent changes** (you edit it, ask it to, or it writes a learned skill into `{{PACKAGE}}`)
 → the next run's fingerprint differs → `kith-pkg` checks it → snapshot + commit to `agents/<name>` →
