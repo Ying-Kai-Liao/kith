@@ -144,9 +144,20 @@ pub struct CloudStatus {
     pub url: Option<String>,
     pub registered: bool,
     pub connected: bool,
+    /// The owner this computer is pinned to (`remote::owner`).
     pub owner: Option<Owner>,
     pub last_error: Option<String>,
     pub approval: Approval,
+    /// The cloud names another owner than `owner`: nothing that depends on the owner is applied until someone on
+    /// this computer confirms it (`confirmOwner`).
+    pub owner_change: Option<OwnerChange>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnerChange {
+    /// The cloud's owner; None when it says this computer has none.
+    pub owner: Option<Owner>,
 }
 
 /// How account devices get in (`setApproval`, local only).
@@ -399,12 +410,28 @@ struct StateRequest {
     expires_at: i64,
 }
 
-/// `GET /v1/host/state` and apply it: renew or remove account devices, answer access requests.
+/// `GET /v1/host/state` and apply it: renew or remove account devices, answer access requests. While the cloud names
+/// another owner than the pinned one, only what removes access is applied.
 pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     let _one = hub.cloud.pulling.lock().await;
     let state: State = serde_json::from_value(call(hub, base, Method::GET, "/v1/host/state", None).await?)
         .context("reading the cloud state")?;
-    let owner_uid = state.owner.as_ref().map(|o| o.user_id.clone());
+    let (owner, change) = match super::owner::check(&hub.store, state.owner.as_ref())? {
+        super::owner::Check::Trusted(owner) => (owner, None),
+        super::owner::Check::Held { pinned, cloud } => {
+            let change = OwnerChange { owner: cloud };
+            if hub.cloud.status().owner_change.as_ref() != Some(&change) {
+                tracing::warn!(
+                    pinned = pinned.as_ref().map(|o| o.user_id.as_str()),
+                    cloud = change.owner.as_ref().map(|o| o.user_id.as_str()),
+                    "the cloud names another owner for this computer; waiting for a confirmation here"
+                );
+            }
+            (pinned, Some(change))
+        }
+    };
+    let held = change.is_some();
+    let owner_uid = owner.as_ref().map(|o| o.user_id.clone());
     // Before the memberships: a membership the revoke cut then ends on a person already revoked (R6). A failure fails
     // the pull, so this host stays out of sync instead of serving on access it couldn't apply.
     let bin = super::account::bin().await;
@@ -414,24 +441,33 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     // Before the grants: a member's device is kept only while its account is bound to its person.
     super::members::sync(hub, state.memberships.as_deref(), owner_uid.as_deref()).await;
     super::botsync::sync(hub, state.bot_devices.as_deref()).await;
-    apply_grants(hub, &state.grants, owner_uid.as_deref())?;
-    update_status(hub, |s| s.owner = state.owner);
-    super::account::sync(hub, owner_uid.as_deref()).await;
-    sync_requests(hub, base, state.requests, owner_uid.as_deref()).await;
-    let auto = approval(&hub.store) == Approval::Auto;
-    // A member of this computer was invited by its owner, so their devices don't wait for a comparison.
-    let ready: Vec<String> = hub
-        .cloud
-        .requests
-        .locked()
-        .iter()
-        .filter(|r| r.code.is_some() && (auto || r.person.is_some()))
-        .map(|r| r.id.clone())
-        .collect();
-    // The SAS exchange still runs (the device's commit must match); only the user's comparison is skipped.
-    for id in ready {
-        if let Err(e) = decide(hub, &id, true).await {
-            tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't auto-approve an access request");
+    if held {
+        revoke_ungranted(hub, &state.grants)?;
+    } else {
+        apply_grants(hub, &state.grants, owner_uid.as_deref())?;
+    }
+    update_status(hub, |s| {
+        s.owner = owner;
+        s.owner_change = change;
+    });
+    if !held {
+        super::account::sync(hub, owner_uid.as_deref()).await;
+        sync_requests(hub, base, state.requests, owner_uid.as_deref()).await;
+        let auto = approval(&hub.store) == Approval::Auto;
+        // A member of this computer was invited by its owner, so their devices don't wait for a comparison.
+        let ready: Vec<String> = hub
+            .cloud
+            .requests
+            .locked()
+            .iter()
+            .filter(|r| r.code.is_some() && (auto || r.person.is_some()))
+            .map(|r| r.id.clone())
+            .collect();
+        // The SAS exchange still runs (the device's commit must match); only the user's comparison is skipped.
+        for id in ready {
+            if let Err(e) = decide(hub, &id, true).await {
+                tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't auto-approve an access request");
+            }
         }
     }
     retry_revokes(hub, base).await;
@@ -500,6 +536,18 @@ pub fn apply_grants(hub: &Hub, grants: &[Grant], owner_uid: Option<&str>) -> Res
     }
     for (g, _) in grants.iter().zip(known).filter(|(_, k)| !k) {
         tracing::warn!(grant_id = g.grant_id, "unknown grant from cloud ignored");
+    }
+    Ok(())
+}
+
+/// While the owner is held: an account device whose grant is gone is removed, and nothing is renewed.
+fn revoke_ungranted(hub: &Hub, grants: &[Grant]) -> Result<()> {
+    for d in hub.store.devices()? {
+        let listed = grants.iter().any(|g| Some(&g.grant_id) == d.grant_id.as_ref() && g.device_key == d.key);
+        if d.source == DeviceSource::Account && !listed {
+            tracing::info!(device = d.key, "account device's grant is gone from the cloud");
+            hub.revoke_device(&d.key)?;
+        }
     }
     Ok(())
 }
@@ -779,7 +827,24 @@ pub async fn unclaim(hub: &Hub) -> Result<()> {
     let base = base(hub)?;
     call(hub, &base, Method::POST, "/v1/host/unclaim", Some(&json!({}))).await?;
     tracing::info!("left the account");
+    super::owner::pin(&hub.store, None)?;
     pull(hub, &base).await
+}
+
+/// `confirmOwner` (local only): someone on this computer accepts the owner the cloud names, `user_id` (None: no
+/// owner) as they saw it, so a change that happened since is not confirmed with it.
+pub async fn confirm_owner(hub: &Hub, user_id: Option<&str>) -> Result<CloudStatus> {
+    let base = base(hub)?;
+    let Some(change) = hub.cloud.status().owner_change else {
+        bail!("The Kith cloud names no other owner for this computer.");
+    };
+    if change.owner.as_ref().map(|o| o.user_id.as_str()) != user_id {
+        return Err(Conflict("The cloud's owner changed again; check it and confirm again.").into());
+    }
+    super::owner::pin(&hub.store, change.owner.as_ref())?;
+    tracing::info!(owner = user_id, "the owner was confirmed on this computer");
+    pull(hub, &base).await?;
+    Ok(hub.cloud.status())
 }
 
 /// `setCloud`: turns the cloud on or off; the relay restarts.
@@ -970,7 +1035,7 @@ mod tests {
         assert!(early.is::<Conflict>(), "approve before the reveal is refused");
         assert_eq!(hub.cloud.status().owner.unwrap().user_id, "user_1");
 
-        *fake.state.lock().unwrap() = json!({"owner": null, "grants": [], "requests": [
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_1"}, "grants": [], "requests": [
             request("req_ok", Some(nh("req_ok")), Some(nd)),
             request("req_bad", Some(nh("req_bad")), Some(wrong)),
         ]});
@@ -987,6 +1052,64 @@ mod tests {
         let d = hub.store.device(&b64(&dk)).unwrap();
         assert_eq!((d.source, d.grant_id.as_deref()), (DeviceSource::Account, Some("grt_new")));
         assert_eq!(hub.cloud.requests_json().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn the_cloud_alone_cannot_change_the_owner() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        set_approval(&hub, Approval::Auto).unwrap();
+        hub.store.put_device(&account_device("phone", "grt_a")).unwrap();
+        hub.store.put_device(&account_device("lost", "grt_b")).unwrap();
+        let grant = |g: &str, k: &str, u: &str| json!({"grantId": g, "deviceKey": k, "userId": u});
+        let renewed = |key: &str| hub.store.device(key).unwrap().lease_until.unwrap() > now_ms() + LEASE_MS - 5000;
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_kai"},
+            "grants": [grant("grt_a", "phone", "user_kai"), grant("grt_b", "lost", "user_kai")]});
+        pull(&hub, &base).await.unwrap();
+        assert!(renewed("phone"), "the first pull pins the owner it names");
+
+        hub.store.put_device(&account_device("phone", "grt_a")).unwrap();
+        let (dk, nd): ([u8; 32], [u8; 32]) = (crypto::random(), crypto::random());
+        let request = json!({"requestId": "req_1", "deviceKey": b64(&dk), "userId": "user_mallory",
+            "commit": b64(&crypto::sas_commit(crypto::Labels::Kith, &dk, &nd))});
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_mallory"},
+            "grants": [grant("grt_a", "phone", "user_mallory")], "requests": [request]});
+        pull(&hub, &base).await.unwrap();
+        let status = hub.cloud.status();
+        assert_eq!(status.owner.unwrap().user_id, "user_kai", "the owner stays the pinned one");
+        assert_eq!(status.owner_change.unwrap().owner.unwrap().user_id, "user_mallory", "the apps see the change");
+        assert!(hub.store.device("phone").is_some(), "the cloud's owner doesn't remove the owner's devices");
+        assert!(!renewed("phone"), "nor renews them");
+        assert!(hub.store.device("lost").is_none(), "a grant gone from the cloud is still revoked");
+        assert!(fake.posts.lock().unwrap().is_empty(), "no access request is answered");
+        assert!(hub.cloud.requests_json().is_empty());
+
+        let stale = confirm_owner(&hub, Some("user_kai")).await.unwrap_err();
+        assert!(stale.is::<Conflict>(), "only the owner the cloud names now is confirmed");
+        let status = confirm_owner(&hub, Some("user_mallory")).await.unwrap();
+        assert_eq!((status.owner.unwrap().user_id, status.owner_change), ("user_mallory".to_owned(), None));
+        assert!(renewed("phone"), "confirmed here: the state applies again");
+        assert_eq!(fake.posts.lock().unwrap().len(), 1, "and the request gets its nonce");
+        assert!(confirm_owner(&hub, Some("user_mallory")).await.is_err(), "nothing left to confirm");
+    }
+
+    #[tokio::test]
+    async fn a_claim_signed_here_moves_the_owner_without_a_confirmation() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        *fake.state.lock().unwrap() = json!({"owner": null, "grants": []});
+        pull(&hub, &base).await.unwrap();
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_kai"}, "grants": []});
+        pull(&hub, &base).await.unwrap();
+        assert!(hub.cloud.status().owner_change.is_some(), "an unclaimed computer isn't claimed by the cloud alone");
+        crate::remote::owner::signed_for(&hub.store, "user_kai").unwrap();
+        pull(&hub, &base).await.unwrap();
+        let status = hub.cloud.status();
+        assert_eq!((status.owner.unwrap().user_id, status.owner_change), ("user_kai".to_owned(), None));
     }
 
     #[tokio::test]
