@@ -161,5 +161,7 @@ check "access: someone who is not a person, or has no row of their own, is refus
 check "access: a bot of the owner may hold any, a bot of an invitee only what the invitee holds" "A access house bot-k2 read '$TR/docs/sub' && A access house bot-a read '$TR/docs/sub' && ! A access house bot-a read '$TR/elsewhere' && ! A access house bot-a domain example.org"
 check "access: a bot of an invitee loses it when the invitee does" "A access house ann read '$TR/docs' --rm && [ \"\$(R bot-a 'd[\"access\"][\"read\"]')\" = '[]' ]"
 check "access: --rm takes one entry away" "A access house ann domain pypi.org --rm && [ \"\$(R ann 'd[\"access\"][\"domains\"]')\" = '[]' ]"
+check "access: --json lists each grant with its person and when it was given" "A access house --json | J \"sorted((g['kind'], g['target'], g['name'], isinstance(g['since'], int)) for g in d if g['person'] == 'ann') == [('read', '$TR/docs2', '', True), ('write', '$TR/more', '', True)] and ('bot-k2', 'Kbot') in [(g['person'], g['name']) for g in d]\" | grep -qx True"
+check "access: --rm takes away a path that no longer exists" "mkdir -p '$TR/gone' && A access house ann read '$TR/gone' && rmdir '$TR/gone' && A access house ann read '$TR/gone' --rm && [ \"\$(R ann \"'$TR/gone' in d['access']['read']\")\" = False ]"
 check "access: removing the person removes it" "A person ann --rm >/dev/null 2>&1; ! A access house ann read '$TR/docs'"
 exit $fail
