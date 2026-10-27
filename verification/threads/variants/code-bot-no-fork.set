@@ -1,2 +1,3 @@
 BotEnabled = TRUE
 BotGate = "live"
+ClaudeForks = FALSE

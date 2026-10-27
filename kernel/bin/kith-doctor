@@ -6,7 +6,7 @@
 Links and folders, whether `kith migrate` has moved this Mac off the hq names (and what is left on them), the tools kith needs, one backup line (state, memories and each agent: on GitHub,
 behind, or on this Mac only), kith's default permission mode, each agent's checks, services and grants, the people
 setup (memberships, grants and profiles naming no one, shared logins, free shells), the Claude Code plugin (and the
-plugins this Mac turns on for every agent), and the background jobs: loaded, running, and not stuck (a job whose
+plugins this Mac turns on for every agent, and Reason Network wired into Claude Code), and the background jobs: loaded, running, and not stuck (a job whose
 the uv launcher (kith-uv, or hq-uv before the rename) never starts its script has usually lost Full Disk Access).
 """
 import json, os, plistlib, re, shutil, subprocess, sys
@@ -303,12 +303,26 @@ def plugin():
         src = None
     if src and Path(os.path.realpath(src)) != Path(os.path.realpath(P['KITH_HOME'])):
         warn(f'the plugin\'s marketplace is {src}, not the kith folder: run install.sh')
+    reason_network()
     every = kith_settings.get('plugins')
     if every:
         note(f'every agent also gets: {", ".join(every)} (plugins in {kith_settings.FILE})')
     for p in every:
         if p not in installed:
             warn(f'{p} is in plugins but not installed: claude plugin install {p}')
+
+
+def reason_network():
+    """Reason's `setup` wiring Claude Code (user-scope MCP server `reason-network`) makes its daemon list every Claude Code
+    session on this Mac, kith's agent runs included, as one its team peers can wake and prompt: past kith-auth, people's
+    memory and the cost ledger."""
+    try:
+        servers = json.loads((HOME / '.claude.json').read_text()).get('mcpServers') or {}
+    except (OSError, ValueError, AttributeError):
+        return
+    if 'reason-network' in servers:
+        warn('Reason Network is wired into Claude Code (~/.claude.json mcpServers): its team peers can prompt kith\'s '
+             'agent runs directly, past kith-auth. reason network setup --remove (or untick Claude Code in setup)')
 
 
 def jobs():

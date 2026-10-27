@@ -184,7 +184,7 @@ fn started_as(pid: u32, claimed: Option<&str>) -> bool {
     let claimed = normalized(claimed);
     match proc_start(pid) {
         Some(actual) if actual == claimed => true,
-        Some(_) => lstart(pid, &[("TZ", "UTC"), ("LC_ALL", "C")]).is_some_and(|utc| utc == claimed),
+        Some(_) => lstart(pid, true).is_some_and(|utc| utc == claimed),
         None => true,
     }
 }
@@ -193,18 +193,25 @@ fn normalized(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The start time of `pid` as `ps` prints it.
+/// The start time of `pid` as `ps` prints it in the C locale and the Mac's time zone, whitespace squeezed: the text the
+/// kernel writes (`kith-sessions`), and claims hold.
 pub fn proc_start(pid: u32) -> Option<String> {
-    lstart(pid, &[])
+    lstart(pid, false)
 }
 
-/// The start time of `pid` as `ps` prints it with `env` set (a time zone, a locale).
-fn lstart(pid: u32, env: &[(&str, &str)]) -> Option<String> {
-    let out = std::process::Command::new("ps")
-        .envs(env.iter().copied())
-        .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
+/// The start time of `pid` as `ps` prints it in the C locale, in UTC when `utc`.
+fn lstart(pid: u32, utc: bool) -> Option<String> {
+    lstart_via(std::process::Command::new("ps"), pid, utc)
+}
+
+/// [`lstart`] through `ps` (a command that may carry the caller's locale). The C locale always: in another one `ps`
+/// prints the date in its language (`二 10月/27 22:19:44 2026`), which never equals what Claude or the kernel wrote.
+pub(super) fn lstart_via(mut ps: std::process::Command, pid: u32, utc: bool) -> Option<String> {
+    ps.env("LC_ALL", "C");
+    if utc {
+        ps.env("TZ", "UTC");
+    }
+    let out = ps.args(["-o", "lstart=", "-p", &pid.to_string()]).output().ok()?;
     let text = String::from_utf8(out.stdout).ok()?;
     let text = normalized(&text);
     (!text.is_empty()).then_some(text)
