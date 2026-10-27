@@ -284,43 +284,6 @@ async fn write_always(card: &Card) -> Result<(), String> {
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()) }
 }
 
-/// The always grants of `agent` (`kith-auth access <agent> --json`), for the owner's list in the apps: each is
-/// `{person, name, kind: read|write|domain, target, since}` (`since` in ms, null for one kith-auth kept no time for).
-pub async fn standing(agent: &str) -> anyhow::Result<Vec<Value>> {
-    let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow::anyhow!("kith-auth can't be reached"))?;
-    let out = crate::channels::hq::output(&bin, &["access", agent, "--json"])
-        .await
-        .ok_or_else(|| anyhow::anyhow!("kith-auth didn't answer"))?;
-    if !out.status.success() {
-        anyhow::bail!("couldn't read the always grants: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(serde_json::from_slice(&out.stdout)?)
-}
-
-/// Takes one always grant away (`kith-auth access … --rm`), as `standing` listed it, and reads the list back. The next
-/// launch of a run asks kith-auth again (`consume`), so it no longer gets it; a run already going keeps its box.
-pub async fn take_away(agent: &str, person: &str, kind: &str, target: &str) -> anyhow::Result<Vec<Value>> {
-    if !matches!(kind, "read" | "write" | "domain") {
-        anyhow::bail!("`kind` must be read, write or domain");
-    }
-    if [person, target].iter().any(|a| a.is_empty() || a.starts_with('-')) {
-        anyhow::bail!("`person` and `target` must be one of the listed grants");
-    }
-    let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow::anyhow!("kith-auth can't be reached"))?;
-    let out = crate::channels::hq::output(&bin, &["access", agent, person, kind, target, "--rm"])
-        .await
-        .ok_or_else(|| anyhow::anyhow!("kith-auth didn't answer"))?;
-    if !out.status.success() {
-        anyhow::bail!("couldn't remove it: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    let left = standing(agent).await?;
-    let same = |g: &Value| g["person"] == person && g["kind"] == kind && g["target"] == target;
-    if left.iter().any(same) {
-        anyhow::bail!("kith-auth still lists it; it wasn't removed");
-    }
-    Ok(left)
-}
-
 /// What a launch gets: once grants of the session (consumed here, atomically) and the membership's always entries (read from
 /// kith-auth now). Each is checked again; nothing is returned for a run the host doesn't know, a second ask of one run,
 /// or a person who no longer may use the agent (A7).

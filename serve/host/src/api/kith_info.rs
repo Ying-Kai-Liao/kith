@@ -2,8 +2,7 @@
 //! memory folder, and a search of that memory. The contract is in `serve/docs/bot-info.md` (beside `place-folders.md`,
 //! which `folders.rs` points to).
 //! The reads are open to a paired phone (none is in `LOCAL_ONLY`); `kithSetPermission` writes through to hq, like `updateBot`
-//! it needs the Control scope. The agent's standing "always" access grants are listed and taken away here too
-//! (`kithAccessGrants`, `kithRemoveAccessGrant`). Not Kith's own bot memory (`memory`).
+//! it needs the Control scope. Not Kith's own bot memory (`memory`).
 
 use super::str_arg;
 use crate::agent::hq;
@@ -60,18 +59,6 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 Ok(info) => json!({"info": info, "fetchedAt": got.fetched_at}),
                 Err(e) => json!({"info": null, "error": e, "fetchedAt": got.fetched_at}),
             }
-        }
-        // The "always" answers to the agent's escape cards that kith-auth keeps (`cards::access`): what, for whom, since
-        // when. Owner-only (not in `MEMBER_METHODS`): a member's own grants aren't theirs to list or take back.
-        "kithAccessGrants" => {
-            let name = kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?;
-            json!({"grants": crate::cards::access::standing(&name).await?})
-        }
-        // Takes one away; the next run of that person no longer gets it. The answer is the list read back.
-        "kithRemoveAccessGrant" => {
-            let name = kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?;
-            let (person, kind, target) = (str_arg(&b, "person")?, str_arg(&b, "kind")?, str_arg(&b, "target")?);
-            json!({"grants": crate::cards::access::take_away(&name, person, kind, target).await?})
         }
         "kithMemoryFile" => {
             let name = kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?;

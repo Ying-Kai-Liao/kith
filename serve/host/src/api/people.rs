@@ -1,6 +1,6 @@
-//! Inviting people to this computer, and the owner's view of them: invites, people, what each may use, revoking, the
-//! audit log. The owner-only methods are simply absent from `roles::MEMBER_METHODS`; `startChat` is the one method here
-//! an invited person calls.
+//! Inviting people to this computer, and the owner's view of them: invites, people, what each may use, the grants ledger,
+//! revoking, the audit log. The owner-only methods are simply absent from `roles::MEMBER_METHODS`; `startChat` is the
+//! one method here an invited person calls.
 //!
 //! kith-auth is the truth about who may use which agent; this module only calls it. The cloud is told about the invite
 //! and learns of memberships back through `remote::members`.
@@ -38,6 +38,8 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         "setPersonAccess" => set_person_access(hub, &b).await?,
         "revokePerson" => revoke_person(hub, str_arg(&b, "personId")?, true).await?,
         "unrevokePerson" => revoke_person(hub, str_arg(&b, "personId")?, false).await?,
+        "accessLedger" => json!({"grants": access_ledger(&b).await?}),
+        "removeGrant" => remove_grant(str_arg(&b, "kind")?, str_arg(&b, "key")?).await?,
         "audit" => json!({"audit": hub.store.audit_list(b["since"].as_i64().unwrap_or(0), b["personId"].as_str())?}),
         "startChat" => start_chat(hub, caller, &b).await?,
         "proveInvite" => prove_invite(hub, caller, &b)?,
@@ -474,6 +476,56 @@ async fn stop_runs(hub: &Hub, person: &str, only_denied: bool) {
         );
         super::botguests::sweep_claims(hub, ids, true).await;
     }
+}
+
+/// The kinds of entry in kith-auth's grants ledger: an escape card's "always" (a folder to read or write, a website) and
+/// a person's own service grant.
+const LEDGER_KINDS: &[&str] = &["read", "write", "domain", "service"];
+
+/// `accessLedger {person?, agent?}`: the grants ledger (`kith-auth ledger --json`), every grant that outlives one run for
+/// anyone but the owner, narrowed to one person, one agent, or both. Each entry is `{key, kind, agent, person, name,
+/// target, since, approved_by}`; `key` is kith-auth's (`<kind>:<agent>:<person>:<target>`) and what `removeGrant` takes.
+async fn access_ledger(b: &Value) -> Result<Vec<Value>> {
+    let mut args = vec!["ledger", "--json"];
+    for (field, flag) in [("person", "--person"), ("agent", "--agent")] {
+        match &b[field] {
+            Value::Null => {}
+            Value::String(v) if !v.is_empty() && !v.starts_with('-') => args.extend([flag, v.as_str()]),
+            _ => bail!("`{field}` is an id, or left out"),
+        }
+    }
+    ledger(&args).await
+}
+
+async fn ledger(args: &[&str]) -> Result<Vec<Value>> {
+    let bin = account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found on this computer"))?;
+    let out = account::run(&bin, args).await.map_err(|e| anyhow!("couldn't read the grants ledger: {e:#}"))?;
+    serde_json::from_str(&out).context("kith-auth's ledger wasn't JSON")
+}
+
+/// `removeGrant {kind, key}`: takes one ledger entry away (`kith-auth ledger --rm <key>`) and answers `{removed}`, the
+/// entry as it was listed. A key the ledger doesn't hold, one of another kind, or one kith-auth still lists afterwards
+/// is refused. No sweep follows, as none exists for a grant: every launch reads the ledger afresh (`consumeAccess` for
+/// access, kith-auth itself for a service), so the person's next run lacks it, and a run already going keeps what it
+/// started with.
+async fn remove_grant(kind: &str, key: &str) -> Result<Value> {
+    if !LEDGER_KINDS.contains(&kind) {
+        bail!("`kind` is read, write, domain or service");
+    }
+    let listed = ledger(&["ledger", "--json"]).await?;
+    let entry = listed.into_iter().find(|e| e["key"] == key).ok_or_else(|| anyhow!("There's no such grant."))?;
+    if entry["kind"] != kind {
+        bail!("That grant isn't a `{kind}` one.");
+    }
+    let bin = account::bin().await.ok_or_else(|| anyhow!("kith-auth wasn't found on this computer"))?;
+    {
+        let _w = AUTH_WRITES.lock().await;
+        account::run(&bin, &["ledger", "--rm", key]).await.map_err(|e| anyhow!("couldn't remove it: {e:#}"))?;
+    }
+    if ledger(&["ledger", "--json"]).await?.iter().any(|e| e["key"] == key) {
+        bail!("kith-auth still lists it; it wasn't removed");
+    }
+    Ok(json!({"removed": entry}))
 }
 
 /// Wrong tries a device may make at `proveInvite` per window.
