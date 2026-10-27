@@ -521,7 +521,10 @@ export interface CloudStatus {
   url?: string | null
   registered?: boolean | null
   connected?: boolean | null
+  /** The owner this computer pinned; the cloud alone can't change it. */
   owner?: CloudOwner | null
+  /** The cloud names another owner (`owner` null: none); held until confirmed on this computer. */
+  ownerChange?: { owner?: CloudOwner | null } | null
   lastError?: string | null
   approval?: AccountApproval | null
 }
