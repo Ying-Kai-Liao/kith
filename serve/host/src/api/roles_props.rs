@@ -152,6 +152,7 @@ struct CardSpec {
 /// read back from `roles`: `code` (step 1: runs code, or the host can't see into it), `outside` (step 2a: it names a file
 /// outside every grant folder of the run; the test home has none, so every named file is outside), `escape` (step 2b: an
 /// escape card, whose yes widens the run's next activation), `secret` (a key or account request, cards/secret.rs).
+#[expect(clippy::struct_excessive_bools, reason = "four independent labels of one tool, read as the F11 rules")]
 struct Tool {
     name: &'static str,
     kind: &'static str,

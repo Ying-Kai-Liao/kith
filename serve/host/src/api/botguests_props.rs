@@ -606,7 +606,7 @@ impl State {
                 match (state, &res) {
                     (St::Ended, Err(e)) => check!(e.is::<Forbidden>(), "an ended bot's botThread: {e:#}"),
                     (St::Pending, Err(e)) => {
-                        check!(error_code(e) == Some("pending"), "a pending bot's botThread: {e:#}")
+                        check!(error_code(e) == Some("pending"), "a pending bot's botThread: {e:#}");
                     }
                     (St::Active, Ok(v)) => check!(
                         may && v["conversation"] == json!(conv),
