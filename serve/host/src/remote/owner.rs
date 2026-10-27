@@ -56,11 +56,6 @@ pub fn check(store: &Store, cloud: Option<&Owner>) -> Result<Check> {
     Ok(Check::Trusted(cloud.cloned()))
 }
 
-/// The owner this computer is pinned to, or None (no owner, or not pinned yet).
-pub fn pinned(store: &Store) -> Option<Owner> {
-    store.kv_get(PIN).and_then(|raw| serde_json::from_str(&raw).ok().flatten())
-}
-
 /// Pins `owner` (None: no owner). Called for a local confirmation or an agreed claim only.
 pub fn pin(store: &Store, owner: Option<&Owner>) -> Result<()> {
     store.kv_set(PIN, &serde_json::to_string(&owner)?)
@@ -89,6 +84,10 @@ mod tests {
 
     fn owner(id: &str) -> Owner {
         Owner { user_id: id.into(), email: None }
+    }
+
+    fn pinned(store: &Store) -> Option<Owner> {
+        store.kv_get(PIN).and_then(|raw| serde_json::from_str(&raw).ok().flatten())
     }
 
     #[test]
