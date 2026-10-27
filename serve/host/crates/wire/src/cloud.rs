@@ -3,7 +3,7 @@
 //!
 //! Paths here start with a slash, as the host and the guest sign them.
 
-#![allow(clippy::doc_markdown, clippy::struct_field_names, reason = "generated from the contract")]
+#![allow(clippy::doc_markdown, clippy::struct_field_names, clippy::struct_excessive_bools, reason = "generated from the contract")]
 
 use serde::{Deserialize, Serialize};
 

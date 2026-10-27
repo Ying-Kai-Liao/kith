@@ -6,7 +6,7 @@ import { normalizeBot, type Bot, type Entry } from './models.ts'
 const NOW = Date.parse('2026-10-24T12:00:00')
 const min = (n: number) => NOW - n * 60_000
 
-const entry = (id: string, botId: string, kind: string, data: Entry['data'], at: number, threadId: string | null = null): Entry =>
+const entry = (id: string, botId: string, kind: Entry['kind'], data: Entry['data'], at: number, threadId: string | null = null): Entry =>
   ({ id, seq: 0, botId, threadId, rev: 1, kind, turn: 1, data, createdAt: at, updatedAt: at })
 const task = (id: string, botId: string, text: string, at: number) => entry(id, botId, 'user', { text, task: true }, at)
 const ask = (id: string, botId: string, at: number, threadId: string | null = null, extra: Entry['data'] = {}) =>

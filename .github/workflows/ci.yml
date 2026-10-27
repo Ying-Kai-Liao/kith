@@ -415,8 +415,8 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: serve/cloud/package-lock.json
-      # serve/contract/cloud/contract.json is the one place the cloud API's words are spelled; the TS, Swift and Rust
-      # files made from it must be current (serve/contract/README.md).
+      # serve/contract/{cloud,host}/contract.json are the one place the cloud API's and the host RPC's words are spelled;
+      # the TS, Swift and Rust files made from them must be current (serve/contract/README.md).
       - name: Contract files are current
         run: node ../contract/gen.mjs --check
       - run: npm ci --no-audit --no-fund

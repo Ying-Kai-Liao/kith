@@ -14,7 +14,7 @@ public extension HostClient {
     /// The caller's own bots, ended ones too.
     func myBots() async throws -> [BotGuest] {
         struct Res: Decodable { var bots: [BotGuest] }
-        let res: Res = try await call("myBots")
+        let res: Res = try await call(.myBots)
         return res.bots
     }
 
@@ -23,7 +23,7 @@ public extension HostClient {
     func createBotInvite(name: String?, provider: String?, agents: [String], botId: String? = nil) async throws -> CreatedBotInvite {
         struct Body: Encodable { var name: String?; var provider: String?; var agents: [String]; var botId: String? }
         // Writes kith-auth and the cloud: slower than a read, and not safe to repeat.
-        return try await call("createBotInvite", Body(name: name, provider: provider, agents: agents, botId: botId), timeout: 60)
+        return try await call(.createBotInvite, Body(name: name, provider: provider, agents: agents, botId: botId), timeout: 60)
     }
 
     /// "allow" or "deny" a waiting bot; answering twice is fine. `alwaysForOwner` also lets that person's bots join on
@@ -45,7 +45,7 @@ public extension HostClient {
 
     /// Ends the bot: it can't ask any more and what it is running stops. Removing twice is fine.
     func revokeBot(botId: String) async throws {
-        let _: Empty = try await call("revokeBot", ["botId": botId], timeout: 60)
+        let _: Empty = try await call(.revokeBot, ["botId": botId], timeout: 60)
     }
 }
 

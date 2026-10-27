@@ -1,0 +1,22 @@
+{
+  "method": "unsend",
+  "type": "MaybeEntry",
+  "body": {
+    "entry": {
+      "id": "6629ea06-db20-4d93-a5aa-c722f46eb622",
+      "seq": 4,
+      "botId": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+      "threadId": null,
+      "rev": 9,
+      "kind": "user",
+      "turn": 2,
+      "data": {
+        "text": "later",
+        "status": "cancelled",
+        "author": "sam"
+      },
+      "createdAt": 1792998622186,
+      "updatedAt": 1792998622186
+    }
+  }
+}

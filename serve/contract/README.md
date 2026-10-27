@@ -6,6 +6,7 @@ spells the word by hand.
 | Boundary | Contract | Producer | Consumers |
 | --- | --- | --- | --- |
 | Cloud HTTP API | `cloud/contract.json` | `serve/cloud` | desktop + web, iOS (KithKit), host (`remote/`), guest crate |
+| Host RPC (an invited person's methods so far) | `host/contract.json` | `serve/host` (`api/`) | desktop + web, iOS (KithKit) |
 
 `node serve/contract/gen.mjs` writes each side's types from the contract. It is plain Node with no dependencies. CI
 runs it with `--check`, which fails when a generated file differs from what the contract makes:
@@ -16,6 +17,9 @@ runs it with `--check`, which fails when a generated file differs from what the 
 | `apps/desktop/src/shared/cloud-contract.gen.ts` | desktop main + renderer and web: types, `paths`, `receive`, `decodeX` |
 | `apps/ios/Kit/Sources/KithKit/Models/CloudContract.gen.swift` | iOS: `Codable` types, `CloudPath`, `CloudErrorCode` |
 | `serve/host/crates/wire/src/cloud.rs` | host and guest: serde types, `path::`, `ErrorCode` |
+| `apps/desktop/src/shared/host-contract.gen.ts` | desktop and web: types, `METHODS`, `Params`/`Results`, `MEMBER_METHODS`, `receive`, `decodeX`; `HostClient.callHost` |
+| `apps/ios/Kit/Sources/KithKit/Models/HostContract.gen.swift` | iOS: `HostContract` types and `Method` (`HostClient.call(.name, …)`) |
+| `serve/host/crates/wire/src/rpc.rs` | the host: serde types, `method::`, `MEMBER_METHODS`/`UNPROVEN_METHODS` (`api/roles.rs`), `SCHEMA` for `check.rs` |
 
 ## What holds
 
@@ -24,7 +28,9 @@ runs it with `--check`, which fails when a generated file differs from what the 
 - **W2: a change is seen on every side.** Each generated file carries the contract's sha256 as `CONTRACT_SHA256`. Each
   side's tests hash `contract.json` and fail when the generated file is stale. A renamed or removed value is then a
   compile error wherever it was used. In tests, the cloud checks every JSON answer against its route's type
-  (`KITH_CONTRACT_STRICT`), so a handler can't send a field or value the contract doesn't name.
+  (`KITH_CONTRACT_STRICT`), so a handler can't send a field or value the contract doesn't name. The host does the same
+  for every answer to an invited person (`member_call`, under `cfg(test)`, with `kith_wire::check`), and its own enums
+  are held to the contract's words by `api::contract_tests`.
 - **W3: an unknown value is handled explicitly.** Each enum says in `contract.json` what a value it doesn't know means
   for a consumer (`"unknown"`), and every side's decoder reads it that way. It never decodes to an error.
   - When `"unknown"` names one of the enum's values, that is the least one, and a word this version doesn't know reads
@@ -39,12 +45,17 @@ runs it with `--check`, which fails when a generated file differs from what the 
 
 ## Field specs
 
-`"string"`, `"int"` (ms timestamps are ints), `"bool"`, an enum or type name, `"[T]"` for a list. A trailing `?` means a
+`"string"`, `"int"` (ms timestamps are ints), `"bool"`, an enum or type name, `"[T]"` for a list, `"{T}"` for a map
+from strings to `T`, and `"json"` for a value the contract leaves open (an entry's `data`, for now). A trailing `?` means a
 consumer must accept the field being absent or null. The producer still sends the key, with `null` when there is no
 value, unless the type lists the field in `mayOmit`.
 
 An enum is `{ "values": [...], "unknown": "<one of values>" | "unknown" }`, plus an optional `names` for a value a
-language can't use as a name (Swift's `none`).
+language can't use as a name (Swift's `none`) or wouldn't spell that way (`macmini` is `macMini`).
+
+A method (`host/contract.json`) is `{ "doc", "who": ["member" | "unproven"], "params": { fields }, "result": "<type>" }`.
+`who` makes the lists of what an invited person, and their device before it has proven its invite, may call; the owner
+may call every method. `params` becomes the type `<Method>Params`.
 
 ## Changing the contract
 
@@ -60,5 +71,10 @@ Changes are additive only.
 Never rename or remove a field, value, route or code. Apps already shipped still send and expect the old word. A
 removal needs a new route version (`v2/...`) that runs alongside the old one until no supported app uses it.
 
-Fixtures are `{ "type": "<contract type>", "body": <answer> }`. Those in `fixtures/` are what the cloud sends today and
-pass the producer check. Those in `compat/` and `unknown/` only need to pass the consumer check.
+Fixtures are `{ "type": "<contract type>", "body": <answer> }` (a host fixture also names its `method`). Those in
+`fixtures/` are what the producer sends today and pass the producer check. Those in `compat/` and `unknown/` only need to
+pass the consumer check.
+
+The host's `fixtures/` are written by the host from real calls of an invited person
+(`KITH_WRITE_FIXTURES=1 cargo test api::contract_tests`, in `serve/host`); without the variable that test fails when an
+answer's shape no longer matches its fixture.

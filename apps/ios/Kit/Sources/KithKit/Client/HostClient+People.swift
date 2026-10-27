@@ -52,13 +52,13 @@ public extension HostClient {
     /// An invited person's own chat with a granted agent (the host makes it the first time).
     func startChat(agent: String) async throws -> Bot {
         struct Res: Decodable { var bot: Bot }
-        let res: Res = try await call("startChat", ["agent": agent], timeout: 60)
+        let res: Res = try await call(.startChat, ["agent": agent], timeout: 60)
         return res.bot
     }
 
     /// Shows the invite token from the link to the computer. Until it succeeds, the computer refuses everything else.
     func proveInvite(inviteId: String, token: String) async throws {
-        let _: Empty = try await call("proveInvite", ["inviteId": inviteId, "token": token])
+        let _: Empty = try await call(.proveInvite, ["inviteId": inviteId, "token": token])
     }
 }
 

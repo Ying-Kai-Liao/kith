@@ -374,9 +374,10 @@ type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
 type IsOpen<T> = Same<T, AccessState> | Same<T, DevicePlatform> | Same<T, HostPlatform> | Same<T, Decision>
 /**
  * A type as a consumer receives it (see `receive`): a field of an enum whose unknown values are their own state may
- * also be 'unknown'; any other enum's unknown value already reads as the value the contract names.
+ * also be 'unknown'; any other enum's unknown value already reads as the value the contract names. A `json` value
+ * (`unknown`) is received as it came.
  */
-export type Received<T> = ReceivedValue<NonNullable<T>> | Extract<T, null | undefined>
+export type Received<T> = unknown extends T ? T : ReceivedValue<NonNullable<T>> | Extract<T, null | undefined>
 type ReceivedValue<T> = true extends IsOpen<T>
   ? T | 'unknown'
   : T extends readonly (infer U)[]
@@ -647,15 +648,16 @@ const parseSpec = (spec: string) => {
   const opt = spec.endsWith('?')
   const s = opt ? spec.slice(0, -1) : spec
   const list = s.startsWith('[')
-  return { opt, list, of: list ? s.slice(1, -1) : s }
+  const map = s.startsWith('{')
+  return { opt, list, map, of: list || map ? s.slice(1, -1) : s }
 }
 
 /**
  * The problems with `value` as the contract type `type`; none is an empty list.
- * - 'producer' (what the cloud must send): every field is there (null where it may be, absent only where mayOmit says),
- *   every enum value is a known one (never 'unknown'), and nothing the contract doesn't name is sent.
+ * - 'producer' (what the cloud or the host must send): every field is there (null where it may be, absent only where
+ *   mayOmit says), every enum value is a known one (never 'unknown'), and nothing the contract doesn't name is sent.
  * - 'consumer' (what an app must read): optional fields may be absent or null, unknown enum values and extra fields are
- *   fine. An older cloud's answers (fixtures/compat/) and a newer one's (fixtures/unknown/) must pass.
+ *   fine. An older producer's answers (fixtures/compat/) and a newer one's (fixtures/unknown/) must pass.
  */
 export function check(type: string, value: unknown, mode: 'producer' | 'consumer' = 'consumer', at: string = type): string[] {
   const t = SCHEMA.types[type]
@@ -677,8 +679,10 @@ export function check(type: string, value: unknown, mode: 'producer' | 'consumer
 }
 
 function checkValue(spec: string, v: unknown, mode: 'producer' | 'consumer', at: string): string[] {
-  const { list, of } = parseSpec(spec)
+  const { list, map, of } = parseSpec(spec)
   if (list) return Array.isArray(v) ? v.flatMap((x, i) => checkValue(of, x, mode, `${at}[${i}]`)) : [`${at}: not a list`]
+  if (map) return isObj(v) ? Object.entries(v).flatMap(([k, x]) => checkValue(of, x, mode, `${at}.${k}`)) : [`${at}: not a map`]
+  if (of === 'json') return []
   if (of === 'string') return typeof v === 'string' ? [] : [`${at}: not a string`]
   if (of === 'int') return Number.isSafeInteger(v) ? [] : [`${at}: not an integer`]
   if (of === 'bool') return typeof v === 'boolean' ? [] : [`${at}: not a bool`]
@@ -692,7 +696,7 @@ function checkValue(spec: string, v: unknown, mode: 'producer' | 'consumer', at:
 
 /**
  * Reads an answer as a consumer: every enum value this version doesn't know becomes what the contract says it means
- * (its enum's `unknown`), and a list the answer left out is empty. Everything else, extra fields too, is passed
+ * (its enum's `unknown`), and a list or map the answer left out is empty. Everything else, extra fields too, is passed
  * through as it came.
  */
 export function receive<K extends TypeName>(type: K, raw: unknown): Received<Types[K]> {
@@ -704,10 +708,11 @@ function receiveType(type: string, raw: unknown): Obj {
   if (!t || !isObj(raw)) return {}
   const out: Obj = { ...raw }
   for (const [name, spec] of Object.entries(t.fields)) {
-    const { opt, list } = parseSpec(spec)
+    const { opt, list, map } = parseSpec(spec)
     const v = raw[name]
     if (v === undefined || v === null) {
       if (list && !opt) out[name] = []
+      if (map && !opt) out[name] = {}
       continue
     }
     out[name] = receiveValue(spec, v)
@@ -716,8 +721,9 @@ function receiveType(type: string, raw: unknown): Obj {
 }
 
 function receiveValue(spec: string, v: unknown): unknown {
-  const { list, of } = parseSpec(spec)
+  const { list, map, of } = parseSpec(spec)
   if (list) return Array.isArray(v) ? v.map((x) => receiveValue(of, x)) : v
+  if (map) return isObj(v) ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, receiveValue(of, x)])) : v
   const e = SCHEMA.enums[of]
   if (e) return e.values.includes(v as string) ? v : e.unknown
   if (SCHEMA.types[of]) return isObj(v) ? receiveType(of, v) : v

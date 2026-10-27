@@ -2,12 +2,14 @@
 // host's camelCase JSON. Timestamps are epoch milliseconds.
 
 import type { GrantedAgent } from './mac-role.ts'
+import { decodeBotStatus, type BotStatus, type Entry as ContractEntry, type Received } from './host-contract.gen.ts'
 import type { SecretAccount, SecretRequest } from './secret-card.ts'
 import { normalizeFolder, type PlaceFolder } from './place-folders.ts'
 
 export type { PlaceFolder } from './place-folders.ts'
 
-export type BotStatus = 'idle' | 'working' | 'needsInput' | 'error'
+/** What a bot is doing, from the host RPC contract (serve/contract/host): a word this app doesn't know is `idle`. */
+export type { BotStatus } from './host-contract.gen.ts'
 
 export interface Bot {
   id: string
@@ -62,7 +64,7 @@ export interface Bot {
   tasks: boolean
   createdAt: number
   rev: number
-  status: BotStatus | string
+  status: BotStatus
   activity: string
   startedAt?: number | null
   workingChat?: string | null
@@ -141,7 +143,7 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     tasks: raw.kind !== 'group' && raw.tasks !== false,
     createdAt,
     rev: raw.rev ?? 0,
-    status: raw.status ?? 'idle',
+    status: decodeBotStatus(raw.status),
     activity: raw.activity ?? '',
     startedAt: raw.startedAt ?? null,
     workingChat: raw.workingChat ?? null,
@@ -324,19 +326,19 @@ export interface EntryData {
   callLive?: boolean
 }
 
-export interface Entry {
-  id: string
-  seq: number
-  botId: string
-  threadId?: string | null
-  rev: number
-  /** user | agent | thought | tool | plan | permission | notice */
-  kind: string
-  turn: number
+/**
+ * One line of a transcript: the host RPC contract's `Entry` (serve/contract/host) as received, a kind this app doesn't
+ * know being `'unknown'`, with its data read as this app knows it (the contract leaves each kind's data open).
+ */
+export interface Entry extends Omit<Received<ContractEntry>, 'data'> {
   data: EntryData
-  createdAt: number
-  updatedAt: number
 }
+
+/** An entry as the contract has it, its open data taken as this app's `EntryData` (an absent or odd one is empty). */
+export const asEntry = (e: Received<ContractEntry>): Entry => ({
+  ...e,
+  data: (e.data && typeof e.data === 'object' && !Array.isArray(e.data) ? e.data : {}) as EntryData,
+})
 
 /** Chat-visible (Grok Bot model): user messages, final replies, approval cards, notices. */
 export function isChat(e: Entry): boolean {

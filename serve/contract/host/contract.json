@@ -1,0 +1,523 @@
+{
+  "contract": "host",
+  "doc": "The host's RPC (kith-serve /api, the relay and the local socket): what the host answers and what desktop, web and iOS send it. This part covers what an invited person (a member) may call; the bot guests' methods and the owner's follow. Times are epoch milliseconds. Additive only: see serve/contract/README.md.",
+  "enums": {
+    "EntryKind": {
+      "doc": "What a transcript entry is. One this version doesn't know is its own kind: an app skips it.",
+      "values": ["user", "agent", "thought", "tool", "plan", "permission", "notice"],
+      "unknown": "unknown"
+    },
+    "BotKind": {
+      "doc": "A roster row: an agent bot, or a group chat of bots and the user.",
+      "values": ["agent", "group"],
+      "unknown": "agent"
+    },
+    "BotStatus": {
+      "doc": "What a bot is doing right now. One this version doesn't know reads as idle: no spinner.",
+      "values": ["idle", "working", "needsInput", "error"],
+      "unknown": "idle"
+    },
+    "Permission": {
+      "doc": "A bot's permission mode: Claude Code's own, passed to the agent unchanged. One this version doesn't know is its own state: the app shows no mode as picked.",
+      "values": ["default", "acceptEdits", "plan", "auto", "bypassPermissions"],
+      "unknown": "unknown",
+      "names": { "default": "ask" }
+    },
+    "AgentRole": {
+      "doc": "What an invited person is in an agent they hold: a member (the member preset) or a guest. One this version doesn't know is guest, the least.",
+      "values": ["member", "guest"],
+      "unknown": "guest"
+    },
+    "Device": {
+      "doc": "What kind of computer the host runs on (the apps' computer icon). One this version doesn't know is a desktop.",
+      "values": ["laptop", "macmini", "macstudio", "imac", "macpro", "desktop", "linux"],
+      "unknown": "desktop",
+      "names": { "macmini": "macMini", "macstudio": "macStudio", "imac": "iMac", "macpro": "macPro" }
+    },
+    "BotProvider": {
+      "doc": "Whose bot a bot guest is. The host stores other for anything else, and so does a consumer.",
+      "values": ["grok", "muse", "dots", "codex", "cursor", "other"],
+      "unknown": "other"
+    },
+    "BotGuestState": {
+      "doc": "Where a bot guest is in its life (denied and revoked are final). One this version doesn't know is its own state: the bot is not active.",
+      "values": ["invited", "joining", "pending", "active", "denied", "revoked"],
+      "unknown": "unknown"
+    },
+    "ProjectsBy": {
+      "doc": "Who set a thread's project set: the bot's settings (pinned), the host's inference, or the person's correction. One this version doesn't know reads as inferred.",
+      "values": ["pinned", "inferred", "person"],
+      "unknown": "inferred"
+    },
+    "MessageVia": {
+      "doc": "How a message was made, when not typed: spoken in a voice call. The host reads any other value, or none, as typed.",
+      "values": ["call"],
+      "unknown": "unknown"
+    },
+    "CitationError": {
+      "doc": "Why a citation link didn't open. The same answer whether the thread is someone else's, missing, forgotten or the link malformed.",
+      "values": ["not_shared"],
+      "unknown": "not_shared",
+      "names": { "not_shared": "notShared" }
+    }
+  },
+  "types": {
+    "Empty": { "doc": "An answer with nothing in it.", "fields": {} },
+
+    "StoreHealth": {
+      "doc": "Whether the host can save: writable is false while the disk is full or read-only; entries wait in memory meanwhile.",
+      "fields": { "writable": "bool", "unsaved": "int", "dropped": "int", "error": "string?" },
+      "mayOmit": ["error"]
+    },
+    "GrantedAgent": {
+      "doc": "An agent an invited person holds, for the apps' New chat.",
+      "fields": { "agent": "string", "name": "string?", "role": "AgentRole" }
+    },
+    "Hello": {
+      "doc": "The connection handshake. A member gets the names and keys only, and the agents they hold; the fields marked owner's are the owner's alone and are typed with the owner's methods.",
+      "fields": {
+        "hostId": "string",
+        "computerId": "string",
+        "signKey": "string",
+        "boxKey": "string",
+        "name": "string",
+        "version": "string",
+        "protocol": "int",
+        "minProtocol": "int",
+        "os": "string",
+        "rev": "int",
+        "store": "StoreHealth",
+        "grantedAgents": "[GrantedAgent]?",
+        "cloud": "string?",
+        "device": "Device?",
+        "home": "string?",
+        "backends": "json?",
+        "screen": "json?",
+        "analytics": "json?",
+        "urls": "json?"
+      },
+      "mayOmit": ["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls"]
+    },
+
+    "KithCard": {
+      "doc": "An agent's card as a member sees it: only what it says about itself.",
+      "fields": { "name": "string?", "description": "string?", "avatar": "json?" },
+      "mayOmit": ["name", "description", "avatar"]
+    },
+    "KithInfo": {
+      "doc": "An agent's card (null for a chat that isn't a Kith agent's). The owner's card is the whole of `kith --info-json`, and error is the owner's.",
+      "fields": { "info": "KithCard?", "fetchedAt": "int", "error": "string?" },
+      "mayOmit": ["error"]
+    },
+
+    "WorkingLane": {
+      "doc": "A place a bot works in: a chat (its own or a group) and, in a thread, the thread's root.",
+      "fields": { "chat": "string", "thread": "string?" }
+    },
+    "BotGuestRef": {
+      "doc": "The outside bot behind a bot guest's chat.",
+      "fields": {
+        "botId": "string",
+        "name": "string",
+        "provider": "BotProvider",
+        "ownerPerson": "string?",
+        "ownerName": "string?"
+      }
+    },
+    "Bot": {
+      "doc": "A roster row: an agent bot or a group. A member never gets cwd, command or folder (where it works on the owner's computer); a group has no folder, sharedMemory or memoryRev.",
+      "fields": {
+        "id": "string",
+        "kind": "BotKind",
+        "members": "[string]",
+        "name": "string",
+        "description": "string",
+        "avatarColor": "string",
+        "avatarShape": "string",
+        "avatarSource": "string",
+        "backend": "string",
+        "command": "string?",
+        "cwd": "string?",
+        "permission": "Permission",
+        "model": "string?",
+        "modelOptions": "{string}",
+        "fastMode": "bool",
+        "pinned": "bool",
+        "position": "int",
+        "hidden": "bool",
+        "notify": "bool?",
+        "connectors": "[string]",
+        "skills": "[string]",
+        "computer": "bool",
+        "sharedMemory": "bool?",
+        "harnessMemory": "bool?",
+        "rowShowsSummary": "bool",
+        "autoName": "bool",
+        "tasks": "bool?",
+        "hqAgent": "string?",
+        "project": "string?",
+        "person": "string?",
+        "createdAt": "int",
+        "managedWorkspace": "bool",
+        "folder": "json?",
+        "memoryRev": "int?",
+        "workingLanes": "[WorkingLane]",
+        "rev": "int",
+        "deleted": "bool",
+        "status": "BotStatus",
+        "activity": "string",
+        "startedAt": "int?",
+        "workingChat": "string?",
+        "workingThread": "string?",
+        "fastModeSupport": "string",
+        "fastModeIssue": "string?",
+        "unread": "int",
+        "lastMessage": "string?",
+        "lastAt": "int",
+        "botGuest": "BotGuestRef?"
+      },
+      "mayOmit": ["command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "project", "person", "botGuest"]
+    },
+    "BotAnswer": { "fields": { "bot": "Bot" } },
+
+    "Entry": {
+      "doc": "One line of a chat's transcript. Its data is the kind's own and is not in this contract yet.",
+      "fields": {
+        "id": "string",
+        "seq": "int",
+        "botId": "string",
+        "threadId": "string?",
+        "rev": "int",
+        "kind": "EntryKind",
+        "turn": "int",
+        "data": "json",
+        "createdAt": "int",
+        "updatedAt": "int"
+      }
+    },
+    "Entries": {
+      "doc": "A page of a chat or a thread. folder is where it works on this computer: the owner's alone.",
+      "fields": { "entries": "[Entry]", "folder": "json?" },
+      "mayOmit": ["folder"]
+    },
+    "EntryAnswer": { "doc": "The entry a call wrote.", "fields": { "entry": "Entry" } },
+    "MaybeEntry": { "doc": "The entry a call changed; null when it wasn't saved.", "fields": { "entry": "Entry?" } },
+    "CallEnded": {
+      "doc": "A call's line with its length; absent for a call that never connected.",
+      "fields": { "entry": "Entry?" },
+      "mayOmit": ["entry"]
+    },
+    "Attachment": { "doc": "A sent file.", "fields": { "id": "string", "name": "string?", "size": "int" } },
+    "Uploaded": { "doc": "The file, once its last chunk is in; null before.", "fields": { "attachment": "Attachment?" } },
+    "UploadChunk": { "doc": "A chunk of a sent file: base64 data, and the file's whole size.", "fields": { "data": "string", "size": "int" } },
+    "PermissionAnswered": {
+      "doc": "closed: the card was already answered or is gone, so this answer changed nothing.",
+      "fields": { "closed": "bool?" },
+      "mayOmit": ["closed"]
+    },
+
+    "Project": {
+      "doc": "A project folder. A member gets its id and name; its folders on this computer (path, paths, parent, exists) are the owner's.",
+      "fields": {
+        "id": "string",
+        "name": "string?",
+        "path": "string?",
+        "paths": "[string]?",
+        "parent": "string?",
+        "exists": "bool?"
+      },
+      "mayOmit": ["name", "path", "paths", "parent", "exists"]
+    },
+    "Projects": {
+      "doc": "The projects shared with a member (the owner's: all of them). error says why there are none; the owner's.",
+      "fields": { "projects": "[Project]", "error": "string?" },
+      "mayOmit": ["error"]
+    },
+    "ThreadProjects": {
+      "doc": "The project set a thread runs under now; empty when it has none. pinned: the bot's settings fix it.",
+      "fields": { "projects": "[string]", "by": "ProjectsBy", "pinned": "bool" }
+    },
+    "ThreadProjectsSet": {
+      "doc": "The thread's project set after a correction; changed is false when it already was that.",
+      "fields": { "projects": "[string]", "by": "ProjectsBy", "changed": "bool" }
+    },
+    "CitedThread": { "fields": { "id": "string", "botId": "string", "rootId": "string?" } },
+    "Citation": {
+      "doc": "A kith://thread/<id>#entry=<seq> link opened: the thread, the cited entry's seq and id (at), and its entries; or only error.",
+      "fields": {
+        "thread": "CitedThread?",
+        "seq": "int?",
+        "at": "string?",
+        "entries": "[Entry]?",
+        "error": "CitationError?"
+      },
+      "mayOmit": ["thread", "seq", "at", "entries", "error"]
+    },
+
+    "LinkCode": {
+      "doc": "The code that links a Telegram, Discord or Slack account to the caller's person.",
+      "fields": { "code": "string", "expiresAt": "int" }
+    },
+    "CallAccepted": { "doc": "The chat the accepted call belongs to.", "fields": { "botId": "string" } },
+    "Proven": { "fields": { "proven": "bool" } },
+
+    "BotInviteCreated": {
+      "doc": "A bot guest's invite: the link (web and kith://), and share, the text to paste into the bot.",
+      "fields": {
+        "botId": "string",
+        "inviteId": "string",
+        "expiresAt": "int",
+        "link": "string",
+        "kithLink": "string",
+        "share": "string"
+      }
+    },
+    "Revoked": { "doc": "revoked is false when it already was.", "fields": { "revoked": "bool" } },
+    "BotLimits": { "fields": { "ratePerHour": "int", "concurrent": "int" } },
+    "BotGuest": {
+      "doc": "A bot guest. personId and conversations are the computer owner's.",
+      "fields": {
+        "botId": "string",
+        "name": "string",
+        "provider": "BotProvider",
+        "state": "BotGuestState",
+        "ownerPerson": "string?",
+        "ownerName": "string?",
+        "agents": "[string]",
+        "limits": "BotLimits",
+        "connected": "bool",
+        "createdAt": "int",
+        "joinedAt": "int?",
+        "decidedAt": "int?",
+        "decidedBy": "string?",
+        "lastSeenAt": "int?",
+        "revokedAt": "int?",
+        "revokedWhy": "string?",
+        "personId": "string?",
+        "conversations": "json?"
+      },
+      "mayOmit": ["personId", "conversations"]
+    },
+    "BotGuests": { "fields": { "bots": "[BotGuest]" } },
+    "BotGuestAnswer": { "doc": "The bot after the change; null once it is gone.", "fields": { "bot": "BotGuest?" } }
+  },
+  "methods": {
+    "hello": {
+      "doc": "The connection handshake; answered to a member without paths, addresses, backends or screen state.",
+      "who": ["member"],
+      "params": {},
+      "result": "Hello"
+    },
+    "kithInfo": {
+      "doc": "An agent's card, for a chat that is theirs.",
+      "who": ["member"],
+      "params": { "botId": "string", "refresh": "bool?" },
+      "result": "KithInfo"
+    },
+    "startChat": {
+      "doc": "Their own chat with an agent they hold, one per agent: made on first use.",
+      "who": ["member"],
+      "params": { "agent": "string" },
+      "result": "BotAnswer"
+    },
+    "send": {
+      "doc": "A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member.",
+      "who": ["member"],
+      "params": {
+        "botId": "string",
+        "text": "string",
+        "clientNonce": "string?",
+        "threadId": "string?",
+        "attachments": "[string]?",
+        "pasted": "[string]?",
+        "newTask": "bool?",
+        "via": "MessageVia?",
+        "project": "string?",
+        "folder": "string?",
+        "clear": "bool?"
+      },
+      "result": "EntryAnswer"
+    },
+    "thread": {
+      "doc": "A thread's replies (its newest 500); the root is in the main chat.",
+      "who": ["member"],
+      "params": { "botId": "string", "rootId": "string" },
+      "result": "Entries"
+    },
+    "history": {
+      "doc": "A page of the main chat, newest first before beforeSeq.",
+      "who": ["member"],
+      "params": { "botId": "string", "beforeSeq": "int?", "limit": "int?" },
+      "result": "Entries"
+    },
+    "newSession": {
+      "doc": "The agent starts a new session.",
+      "who": ["member"],
+      "params": { "botId": "string" },
+      "result": "Empty"
+    },
+    "unsend": {
+      "doc": "Takes back a message that still waits for its turn.",
+      "who": ["member"],
+      "params": { "botId": "string", "entryId": "string" },
+      "result": "MaybeEntry"
+    },
+    "markRead": {
+      "doc": "Marks the chat read, or the thread threadId; all marks every place.",
+      "who": ["member"],
+      "params": { "botId": "string", "threadId": "string?", "all": "bool?" },
+      "result": "Empty"
+    },
+    "stop": {
+      "doc": "Stops the turn where the user pressed it: the chat, or the thread threadId; all stops the bot everywhere.",
+      "who": ["member"],
+      "params": { "botId": "string", "threadId": "string?", "all": "bool?" },
+      "result": "Empty"
+    },
+    "upload": {
+      "doc": "One chunk of a file for a later send, through the chat's own upload folder: base64 data at offset.",
+      "who": ["member"],
+      "params": {
+        "botId": "string",
+        "uploadId": "string",
+        "name": "string",
+        "data": "string",
+        "offset": "int?",
+        "done": "bool?"
+      },
+      "result": "Uploaded"
+    },
+    "readUpload": {
+      "doc": "A sent file, back in chunks (chat previews on other devices).",
+      "who": ["member"],
+      "params": { "botId": "string", "uploadId": "string", "offset": "int?" },
+      "result": "UploadChunk"
+    },
+    "react": {
+      "doc": "Toggles one emoji on an entry of their own chat.",
+      "who": ["member"],
+      "params": { "entryId": "string", "emoji": "string" },
+      "result": "EntryAnswer"
+    },
+    "respondPermission": {
+      "doc": "Answers an agent's permission card in their own chat; only a member of that agent may (a guest's go to the owner).",
+      "who": ["member"],
+      "params": { "entryId": "string", "optionId": "string?" },
+      "result": "PermissionAnswered"
+    },
+    "editHandoff": {
+      "doc": "Edits a handoff card's text while it is a draft.",
+      "who": ["member"],
+      "params": { "entryId": "string", "text": "string" },
+      "result": "MaybeEntry"
+    },
+    "keepConversation": {
+      "doc": "Keeps the conversation a handoff card offered to move on from.",
+      "who": ["member"],
+      "params": { "entryId": "string" },
+      "result": "MaybeEntry"
+    },
+    "projects": {
+      "doc": "Only the project folders the owner shared with them.",
+      "who": ["member"],
+      "params": { "refresh": "bool?" },
+      "result": "Projects"
+    },
+    "threadProjects": {
+      "doc": "The project of their own chat's thread (threadId; the main chat without it).",
+      "who": ["member"],
+      "params": { "botId": "string", "threadId": "string?" },
+      "result": "ThreadProjects"
+    },
+    "setThreadProjects": {
+      "doc": "Corrects their own chat's thread's project set, to projects shared with them; an empty list is no project.",
+      "who": ["member"],
+      "params": { "botId": "string", "threadId": "string?", "projects": "[string]" },
+      "result": "ThreadProjectsSet"
+    },
+    "linkCode": {
+      "doc": "The code that links their own Telegram, Discord or Slack account to their person.",
+      "who": ["member"],
+      "params": {},
+      "result": "LinkCode"
+    },
+    "callAccept": {
+      "doc": "Answers an incoming call from their own agent; the host checks the call is theirs.",
+      "who": ["member"],
+      "params": { "id": "string" },
+      "result": "CallAccepted"
+    },
+    "callDecline": {
+      "doc": "Declines an incoming call from their own agent.",
+      "who": ["member"],
+      "params": { "id": "string" },
+      "result": "Empty"
+    },
+    "callGreet": {
+      "doc": "The call is up: the agent says what it called about.",
+      "who": ["member"],
+      "params": { "id": "string" },
+      "result": "Empty"
+    },
+    "logCall": {
+      "doc": "The app logs the end of a call it took as a line in the chat (frees the person for the next call).",
+      "who": ["member"],
+      "params": { "botId": "string", "seconds": "int" },
+      "result": "MaybeEntry"
+    },
+    "startCall": {
+      "doc": "A call that just connected: its line goes in the chat now; endCall fills in its length.",
+      "who": ["member"],
+      "params": { "botId": "string" },
+      "result": "EntryAnswer"
+    },
+    "endCall": {
+      "doc": "The call's end: its length on its line (entryId), or, for a call that never connected, only freeing the person.",
+      "who": ["member"],
+      "params": { "botId": "string", "entryId": "string?", "seconds": "int" },
+      "result": "CallEnded"
+    },
+    "createBotInvite": {
+      "doc": "Invites a bot guest from what they hold (docs/kith-bot-guests.md), or a new invite for their bot botId.",
+      "who": ["member"],
+      "params": { "botId": "string?", "name": "string?", "provider": "string?", "agents": "[string]?" },
+      "result": "BotInviteCreated"
+    },
+    "revokeBotInvite": {
+      "doc": "Revokes an invite of one of their bots.",
+      "who": ["member"],
+      "params": { "inviteId": "string" },
+      "result": "Revoked"
+    },
+    "revokeBot": {
+      "doc": "Removes one of their bots.",
+      "who": ["member"],
+      "params": { "botId": "string" },
+      "result": "Revoked"
+    },
+    "myBots": {
+      "doc": "Their own bot guests, newest first.",
+      "who": ["member"],
+      "params": {},
+      "result": "BotGuests"
+    },
+    "setBotLimits": {
+      "doc": "One of their bots' limits; a limit left out stays.",
+      "who": ["member"],
+      "params": { "botId": "string", "ratePerHour": "int?", "concurrent": "int?" },
+      "result": "BotGuestAnswer"
+    },
+    "resolveCitation": {
+      "doc": "A kith://thread/<id>#entry=<seq> link: the thread when it is theirs, else a stable not_shared.",
+      "who": ["member"],
+      "params": { "citation": "string" },
+      "result": "Citation"
+    },
+    "proveInvite": {
+      "doc": "All an invited person's unproven device may call: showing the invite's token.",
+      "who": ["unproven"],
+      "params": { "inviteId": "string", "token": "string" },
+      "result": "Proven"
+    }
+  }
+}

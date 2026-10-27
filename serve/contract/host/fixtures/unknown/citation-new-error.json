@@ -1,0 +1,7 @@
+{
+  "method": "resolveCitation",
+  "type": "Citation",
+  "body": {
+    "error": "expired"
+  }
+}

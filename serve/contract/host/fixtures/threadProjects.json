@@ -1,0 +1,9 @@
+{
+  "method": "threadProjects",
+  "type": "ThreadProjects",
+  "body": {
+    "projects": [],
+    "by": "inferred",
+    "pinned": false
+  }
+}

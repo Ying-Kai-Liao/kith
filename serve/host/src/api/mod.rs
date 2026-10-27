@@ -11,6 +11,8 @@ mod botguests_props;
 mod bots;
 mod calls;
 mod cards;
+#[cfg(test)]
+mod contract_tests;
 pub mod devices;
 #[cfg(test)]
 mod error_tests;
@@ -286,5 +288,19 @@ async fn member_call(
     if method == "hello" && shaped.is_object() {
         shaped["grantedAgents"] = roles::granted_agents(hub, person).await.into();
     }
+    #[cfg(test)]
+    answers_as_the_contract_says(method, &shaped);
     Ok(shaped)
+}
+
+/// Under test, every answer an invited person gets is what the host RPC contract (serve/contract/host/contract.json)
+/// says its method answers with: the strict producer check, so a field or word the contract doesn't name fails the
+/// test that sent it.
+#[cfg(test)]
+fn answers_as_the_contract_says(method: &str, answer: &Value) {
+    use kith_wire::{check::Mode, rpc::SCHEMA};
+    let m =
+        SCHEMA.method(method).unwrap_or_else(|| panic!("{method} answered a member but is not in the host contract"));
+    let problems = SCHEMA.check(m.result, answer, Mode::Producer);
+    assert_eq!(problems, Vec::<String>::new(), "{method} answered a member outside the host contract:\n{answer:#}");
 }

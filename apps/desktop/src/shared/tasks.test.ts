@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { normalizeBot, type Entry } from './models.ts'
 import { TASK_IDLE_MS, chatAndTasks, currentTask, placeTasks, taskOpen, taskStatus, taskTitle } from './tasks.ts'
 
-const entry = (id: string, kind: string, data: Entry['data'], threadId: string | null = null): Entry =>
+const entry = (id: string, kind: Entry['kind'], data: Entry['data'], threadId: string | null = null): Entry =>
   ({ id, seq: 0, botId: 'b', threadId, rev: 1, kind, turn: 1, data, createdAt: 0, updatedAt: 0 })
 
 test('the newest task is the current one; a plain message or a thread reply is no task', () => {

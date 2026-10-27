@@ -100,6 +100,12 @@ public struct HostClient: Sendable {
         return try Self.decoder.decode(T.self, from: data)
     }
 
+    /// A method of the host RPC contract (serve/contract/host): its name is the contract's, so a renamed or dropped
+    /// method fails to build here. The answer decodes as `T`, held to the host's real answers by `HostContractTests`.
+    public func call<T: Decodable>(_ method: HostContract.Method, _ body: some Encodable = Empty(), timeout: TimeInterval = 20) async throws -> T {
+        try await call(method.rawValue, body, timeout: timeout)
+    }
+
     /// Catch-up since `since`, then live updates.
     public func events(since: Int64, client: String) -> AsyncThrowingStream<HostEvent, Error> {
         map(transport.stream(.events(since: since, client: client)), Self.parseEvent)
@@ -180,12 +186,12 @@ public struct HostClient: Sendable {
 // MARK: - Typed calls
 
 public extension HostClient {
-    func hello() async throws -> Hello { try await call("hello") }
+    func hello() async throws -> Hello { try await call(.hello) }
 
     func history(botId: String, beforeSeq: Int64, limit: Int = 100) async throws -> [Entry] {
         struct Body: Encodable { var botId: String; var beforeSeq: Int64; var limit: Int }
         struct Res: Decodable { var entries: [Entry] }
-        let res: Res = try await call("history", Body(botId: botId, beforeSeq: beforeSeq, limit: limit))
+        let res: Res = try await call(.history, Body(botId: botId, beforeSeq: beforeSeq, limit: limit))
         return res.entries
     }
 
@@ -196,7 +202,7 @@ public extension HostClient {
 
     /// A thread's replies and the folder it works in (nil from an older host).
     func threadPage(botId: String, rootId: String) async throws -> (entries: [Entry], folder: PlaceFolder?) {
-        let res: ThreadPage = try await call("thread", ["botId": botId, "rootId": rootId])
+        let res: ThreadPage = try await call(.thread, ["botId": botId, "rootId": rootId])
         return (res.entries, res.folder)
     }
 
@@ -248,20 +254,20 @@ public extension HostClient {
     /// The main chat, one thread (`threadId`), or everything (`all`).
     func markRead(_ id: String, threadId: String? = nil, all: Bool = false) async throws {
         struct Body: Encodable { var botId: String; var threadId: String?; var all: Bool }
-        let _: Empty = try await call("markRead", Body(botId: id, threadId: threadId, all: all))
+        let _: Empty = try await call(.markRead, Body(botId: id, threadId: threadId, all: all))
     }
 
     /// Toggles the user's `emoji` reaction on a chat message.
     func react(entryId: String, emoji: String) async throws -> Entry {
         struct Res: Decodable { var entry: Entry }
-        let res: Res = try await call("react", ["entryId": entryId, "emoji": emoji])
+        let res: Res = try await call(.react, ["entryId": entryId, "emoji": emoji])
         return res.entry
     }
 
     /// Takes back a message that still waits for its turn; the host marks it cancelled.
     func unsend(botId: String, entryId: String) async throws -> Entry {
         struct Res: Decodable { var entry: Entry }
-        let res: Res = try await call("unsend", ["botId": botId, "entryId": entryId])
+        let res: Res = try await call(.unsend, ["botId": botId, "entryId": entryId])
         return res.entry
     }
 
@@ -281,7 +287,7 @@ public extension HostClient {
                         pasted: pasted?.isEmpty == false ? pasted : nil, newTask: newTask ? true : nil,
                         project: start?.projectId, folder: start?.folderPath, via: via)
         do {
-            let res: Res = try await call("send", body)
+            let res: Res = try await call(.send, body)
             return res.entry
         } catch {
             // A thread another writer holds: the app shows "Working in terminal", not a failed send.
@@ -299,7 +305,7 @@ public extension HostClient {
         repeat {
             let end = min(offset + Self.uploadChunk, data.count)
             let chunk = data.subdata(in: offset..<end).base64EncodedString()
-            let _: Empty = try await call("upload", Body(botId: botId, uploadId: id, name: name, data: chunk, offset: offset, done: end == data.count), timeout: 60)
+            let _: Empty = try await call(.upload, Body(botId: botId, uploadId: id, name: name, data: chunk, offset: offset, done: end == data.count), timeout: 60)
             offset = end
         } while offset < data.count
     }
@@ -310,7 +316,7 @@ public extension HostClient {
         struct Res: Decodable { var data: String; var size: Int }
         var out = Data()
         repeat {
-            let res: Res = try await call("readUpload", Body(botId: botId, uploadId: id, offset: out.count), timeout: 60)
+            let res: Res = try await call(.readUpload, Body(botId: botId, uploadId: id, offset: out.count), timeout: 60)
             guard let chunk = Data(base64Encoded: res.data), !chunk.isEmpty else { break }
             out.append(chunk)
             if out.count >= res.size { break }
@@ -320,50 +326,50 @@ public extension HostClient {
 
     /// Answers an incoming call (`id` from its event). The first device to answer wins; the others get an error.
     func callAccept(_ id: String) async throws {
-        let _: Empty = try await call("callAccept", ["id": id])
+        let _: Empty = try await call(.callAccept, ["id": id])
     }
 
     func callDecline(_ id: String) async throws {
-        let _: Empty = try await call("callDecline", ["id": id])
+        let _: Empty = try await call(.callDecline, ["id": id])
     }
 
     /// The accepted call is live: the agent speaks first.
     func callGreet(_ id: String) async throws {
-        let _: Empty = try await call("callGreet", ["id": id])
+        let _: Empty = try await call(.callGreet, ["id": id])
     }
 
     func logCall(_ botId: String, seconds: Int) async throws {
         struct Body: Encodable { var botId: String; var seconds: Int }
-        let _: Empty = try await call("logCall", Body(botId: botId, seconds: seconds))
+        let _: Empty = try await call(.logCall, Body(botId: botId, seconds: seconds))
     }
 
     /// A voice call connected: its line goes in the chat now. Throws on a computer older than this method.
     func startCall(_ botId: String) async throws -> String {
         struct Res: Decodable { var entry: Entry }
-        let res: Res = try await call("startCall", ["botId": botId])
+        let res: Res = try await call(.startCall, ["botId": botId])
         return res.entry.id
     }
 
     /// The call's end: its length goes on the line `entryId` (none: the call never connected). Safe to repeat.
     func endCall(_ botId: String, entryId: String?, seconds: Int) async throws {
         struct Body: Encodable { var botId: String; var entryId: String?; var seconds: Int }
-        let _: Empty = try await call("endCall", Body(botId: botId, entryId: entryId, seconds: seconds))
+        let _: Empty = try await call(.endCall, Body(botId: botId, entryId: entryId, seconds: seconds))
     }
 
     /// Stops the bot where the user pressed it: its chat, or the thread on `thread`.
     func stop(_ botId: String, thread: String?) async throws {
         var body = ["botId": botId]
         body["threadId"] = thread
-        let _: Empty = try await call("stop", body)
+        let _: Empty = try await call(.stop, body)
     }
 
     func newSession(_ botId: String) async throws {
-        let _: Empty = try await call("newSession", ["botId": botId])
+        let _: Empty = try await call(.newSession, ["botId": botId])
     }
 
     func respondPermission(entryId: String, optionId: String?) async throws {
         struct Body: Encodable { var entryId: String; var optionId: String? }
-        let _: Empty = try await call("respondPermission", Body(entryId: entryId, optionId: optionId))
+        let _: Empty = try await call(.respondPermission, Body(entryId: entryId, optionId: optionId))
     }
 
     /// Push tickets are bound to this device's key; `pushKey` lets the host seal notification text (§6.7).
@@ -404,7 +410,7 @@ public extension HostClient {
     /// A one-time code to send a Kith bot as `/link CODE`, tying that chat account to this person.
     /// An older host answers with `HostError.http(404, …)`; asking again gives a fresh code.
     func linkCode() async throws -> LinkCode {
-        try await call("linkCode")
+        try await call(.linkCode)
     }
 
     // MARK: kith bot details (serve/docs/bot-info.md)
@@ -412,7 +418,7 @@ public extension HostClient {
     func kithInfo(botId: String, refresh: Bool = false) async throws -> KithInfoResponse {
         struct Body: Encodable { var botId: String; var refresh: Bool? }
         // The host waits up to 45 s for kith.
-        return try await call("kithInfo", Body(botId: botId, refresh: refresh ? true : nil), timeout: 60)
+        return try await call(.kithInfo, Body(botId: botId, refresh: refresh ? true : nil), timeout: 60)
     }
 
     /// Writes an hq bot's permission mode through to hq (`kith <agent> set permission`); the answer is hq's info read back.
@@ -458,7 +464,7 @@ public extension HostClient {
 
     func projects(refresh: Bool = false) async throws -> ProjectList {
         struct Body: Encodable { var refresh: Bool? }
-        return try await call("projects", Body(refresh: refresh ? true : nil), timeout: 30)
+        return try await call(.projects, Body(refresh: refresh ? true : nil), timeout: 30)
     }
 
     func recentFolders() async throws -> [RecentFolder] {
