@@ -154,12 +154,29 @@ pub async fn approves_own(person: &str, agent: &str, tool: &str, kind: &str) -> 
 }
 
 /// Whether every file a file tool names lies inside `roots` (real paths, links followed, `..` applied). A path that can't be
-/// resolved, or a relative one, is outside. A tool that names no file (Grep with no path searches the working directory)
-/// is inside: the sandbox already holds it to the run's folders.
+/// resolved, or a relative one, is outside, and so is a file tool that names none (Grep with no path searches the working
+/// directory, which may be anywhere). A tool that isn't a file tool names no files and is inside.
 pub fn within(roots: &[std::path::PathBuf], tool: &str, input: &Value) -> bool {
-    crate::cards::resource::named_paths(tool, input).into_iter().all(|raw| {
-        crate::cards::resource::resolve(raw).is_some_and(|real| roots.iter().any(|root| real.starts_with(root)))
-    })
+    let named = crate::cards::resource::named_paths(tool, input);
+    if named.is_empty() {
+        return !crate::cards::resource::is_file_tool(tool);
+    }
+    named.into_iter().all(|raw| inside(roots, raw))
+}
+
+/// `within` for an app chat's (ACP) tool call. One with no tool name that reads, edits or searches is judged by the files
+/// its `locations` name, and with none it is outside.
+pub fn acp_within(roots: &[std::path::PathBuf], name: &str, kind: &str, call: &Value) -> bool {
+    if !name.is_empty() || !matches!(kind, "read" | "edit" | "search") {
+        return within(roots, name, &call["rawInput"]);
+    }
+    let paths: Vec<&str> =
+        call["locations"].as_array().into_iter().flatten().filter_map(|l| l["path"].as_str()).collect();
+    !paths.is_empty() && paths.into_iter().all(|raw| inside(roots, raw))
+}
+
+fn inside(roots: &[std::path::PathBuf], raw: &str) -> bool {
+    crate::cards::resource::resolve(raw).is_some_and(|real| roots.iter().any(|root| real.starts_with(root)))
 }
 
 /// What a run for someone but the owner holds grants to, as real paths: its person's memory and files folders for
@@ -243,15 +260,18 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
                 return Err(denied("Only the owner can answer this agent's permission requests for you."));
             }
             // A `claude -p` run's card has no chat turn behind it: the card says whose run it was and who answers,
-            // asked of kith-auth now, so a revoke applies (A7). The bot's owner answers for their bot as below.
+            // asked of kith-auth now, so a revoke applies (A7). The bot's owner answers for their bot under the same
+            // rule, with the bot's own folders as the bounds.
             if method == "respondPermission"
                 && let Some(card) = hub.store.card_by_entry(id).filter(|c| c.source == "run")
             {
                 let theirs = card.approver == "member" && card.person == person;
+                let input = serde_json::from_str::<Value>(&card.input).unwrap_or_default();
                 let their_bot = hub
                     .store
                     .bot_guest_of_person(&card.person)
-                    .is_some_and(|b| b.owner_person.as_deref() == Some(person));
+                    .is_some_and(|b| b.owner_person.as_deref() == Some(person))
+                    && within(&grant_roots(&card.person, &card.agent), &card.tool, &input);
                 return if entry.kind == "permission"
                     && (theirs || their_bot)
                     && !runs_code(&card.tool, kind_of(&entry))

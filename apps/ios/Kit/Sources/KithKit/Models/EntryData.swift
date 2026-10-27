@@ -27,6 +27,9 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var locations: [Location]?
     public var options: [PermissionOption]?
     public var selected: String?
+    /// permission, answered: the host's words for what became of the answer when it isn't the option's own (an "always"
+    /// kith-auth couldn't keep stayed a once grant). Shown in place of the option's outcome.
+    public var outcome: String?
     public var command: String?
     public var detail: String?
     public var cwd: String?

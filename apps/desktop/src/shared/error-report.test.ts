@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { errorReport, parseStack } from './error-report.ts'
+import { errorReport, mainCrashed, parseStack } from './error-report.ts'
 
 test('a report keeps the error class and its frames, never the message', () => {
   const error = new TypeError('cannot read /Users/kevin/secret.txt')
@@ -19,4 +19,12 @@ test('a report keeps the error class and its frames, never the message', () => {
 test('a thrown non-error has a type but nothing else', () => {
   assert.deepEqual(errorReport('hello world', 'desktop-main', 'uncaught'), { process: 'desktop-main', type: 'NonError', mechanism: 'uncaught', frames: [] })
   assert.deepEqual(parseStack('Error: x\n    at node:internal/process/task_queues:105:5'), [{ function: '<anonymous>', file: 'node:internal/process/task_queues', line: 105, column: 5 }])
+})
+
+test('a dump counts as a main-process crash only when the app never quit after the launch before it', () => {
+  const launched = 1_000
+  assert.equal(mainCrashed(launched, [1_500]), true)
+  assert.equal(mainCrashed(null, [1_500]), false, 'the app quit: its windows reported their own crashes')
+  assert.equal(mainCrashed(launched, []), false, 'killed or powered off: no dump')
+  assert.equal(mainCrashed(launched, [500]), false, 'an older dump')
 })

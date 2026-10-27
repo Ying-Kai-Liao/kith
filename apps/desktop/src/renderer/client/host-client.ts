@@ -1,5 +1,5 @@
 import { parseCall, type IncomingCall } from '@shared/incoming-call'
-import { parseAgentPeople, parseAgentUsage, parseUsageReport, type AgentPeople, type AgentUsage, type AtLimit, type Period, type UsageReport } from '@shared/usage-limits'
+import { parseAgentPeople, parseAgentUsage, parseBotsCap, parseUsageReport, type AgentPeople, type AgentUsage, type AtLimit, type BotsCap, type Period, type UsageReport } from '@shared/usage-limits'
 import type { CallError } from '@shared/ipc'
 import type { RelayCallError } from '@shared/relay'
 import { parseBackups, type Backups } from '@shared/backups'
@@ -10,7 +10,7 @@ import {
   parseDiff, parseHistory, parseMemoryList, parseRead, parseSave, parseTidyUps, parseUndo,
   type HqMemoryDiff, type HqMemoryList, type HqMemoryRead, type HqMemoryVersion, type HqSaveResult, type HqTidyUp, type HqUndoResult,
 } from '@shared/hq-memory'
-import { isUnsupportedHost, parseKithInfoResult, parseSearchResult, type KithInfoResult, type KithSearchResult } from '@shared/kith-info'
+import { isUnsupportedHost, parseAccessGrants, parseKithInfoResult, parseSearchResult, type AccessGrant, type KithInfoResult, type KithSearchResult } from '@shared/kith-info'
 import { isAccessRemoved, parseGranted } from '@shared/mac-role'
 import { parseAudit, parseCreatedInvite, parseInvites, parsePeople, type AuditRow, type CreatedInvite, type PendingInvite, type Person, type Role } from '@shared/people'
 import { threadWriterCode, threadWriterMessage, type TakeOverResult, type ThreadWriterCode } from '@shared/thread-writer'
@@ -339,6 +339,16 @@ export class HostClient {
     return parseBackups(await this.call('accountSet', { agent, account }, 90_000))
   }
 
+  /** A Kith agent's "always" access grants (what, for whom, since when). Owner only: a member gets 403; a host before this call 404. */
+  async kithAccessGrants(botId: string): Promise<AccessGrant[]> {
+    return parseAccessGrants(await this.call('kithAccessGrants', { botId }, 30_000))
+  }
+
+  /** Takes one away, so that person's next run no longer gets it; answers the list read back. */
+  async kithRemoveAccessGrant(botId: string, g: Pick<AccessGrant, 'person' | 'kind' | 'target'>): Promise<AccessGrant[]> {
+    return parseAccessGrants(await this.call('kithRemoveAccessGrant', { botId, person: g.person, kind: g.kind, target: g.target }, 30_000))
+  }
+
   async kithMemorySearch(botId: string, query: string, limit = 30): Promise<KithSearchResult> {
     return parseSearchResult(await this.call('kithMemorySearch', { botId, query, limit }, 30_000))
   }
@@ -429,6 +439,15 @@ export class HostClient {
   /** A person's budget on one agent, dollars a month; null for none. */
   async setPersonBudget(agent: string, person: string, budget: number | null): Promise<AgentPeople> {
     return parseAgentPeople(await this.call('setPersonBudget', { agent, person, budget }, 60_000))
+  }
+
+  /** The owner's bots together: their monthly cap on every agent (null for none) and this month's spend. */
+  async botsCap(): Promise<BotsCap> {
+    return parseBotsCap(await this.call('botsCap', {}, 60_000))
+  }
+
+  async setBotsCap(cap: number | null): Promise<BotsCap> {
+    return parseBotsCap(await this.call('setBotsCap', { cap }, 60_000))
   }
 
   /** The first call of an invited device: shows the invite token from the link. Until it works the Mac refuses everything else. */

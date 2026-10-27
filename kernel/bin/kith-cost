@@ -18,6 +18,8 @@
                                    (--sh) and the host (--json) read it; no limit answers at once, without a sync
   kith-cost members <agent> --json   this calendar month per person on the agent (owner: your own runs), and each
                                     person's budget= on it (kith-auth budgets)
+  kith-cost bots --json              this calendar month's cost of the Mac owner's bots together, per bot, and their
+                                   cap (kith-auth bots-cap)
   kith-cost sync                     copy new usage from ~/.claude/projects into the ledger
   kith-cost csv [since YYYY-MM-DD]   every request as CSV with its kith agent, for a spreadsheet
   kith-cost tag                      (SessionStart hook in kith runs) record the session as a run of $KITH_AGENT
@@ -530,6 +532,19 @@ def members(c, agent):
                       'budgets': budgets}))
 
 
+def bots_json(c):
+    """The Mac owner's bots this calendar month, all agents, against their cap together (kith-auth bots-cap)."""
+    out = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth'), 'bots-cap', '--json'],
+                         capture_output=True, text=True, timeout=20, check=True).stdout
+    cap = json.loads(out)
+    ids = cap['bots']
+    rows = c.execute(f'''select person, sum(cost) from hq_req where ts >= ? and person in ({",".join("?" * len(ids))})
+                         group by 1''', (utc(month_start()), *ids)).fetchall() if ids else []
+    spent = sum(x or 0 for _, x in rows)
+    print(json.dumps({'month': period_label('month'), 'cap': cap['cap'], 'spent': round(spent, 4),
+                      'bots': {p: round(x or 0, 4) for p, x in rows}}))
+
+
 def session(c, prefix):
     ids = [r[0] for r in c.execute('select distinct session from req where session like ?', (prefix + '%',))]
     if len(ids) != 1:
@@ -573,6 +588,8 @@ def main():
         agent_json(c, a[1], rest[0] if rest else 'month')
     elif a[0] == 'members' and len(a) > 1:
         members(c, a[1])
+    elif a[0] == 'bots' and '--json' in a:
+        bots_json(c)
     elif a[0] == 'agents':
         agents(c, a[1] if len(a) > 1 else 'month')
     elif a[0] == 'agent' and len(a) > 1:

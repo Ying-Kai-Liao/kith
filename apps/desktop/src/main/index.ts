@@ -25,7 +25,7 @@ import { Island } from './island'
 import { registerIncomingCall } from './incoming-call'
 import { fromRenderer } from './ipc-guard'
 import { isRendererURL, isSafeExternalURL } from '../shared/navigation'
-import { registerErrorReports } from './error-reports'
+import { registerCrashDumps, registerErrorReports } from './error-reports'
 import { openSettingsWindow, registerProfileMenu } from './settings-window'
 import type { SettingsPage } from '../shared/settings-pages'
 
@@ -254,6 +254,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
   registerSchemes()
+  registerCrashDumps(host)
   app.on('second-instance', (_e, argv) => {
     const url = urlFromArgv(argv)
     if (url) handleURL(url)
