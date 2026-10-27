@@ -103,6 +103,28 @@ For a kith bot the host never stores or passes its own model, effort, Fast mode 
 as they were, `kith <agent> --launch-json` is called without `-m`, `-e` or `--permission-mode`): hq is the source.
 Old bots may still carry a stale copy in the host's config; it is ignored, not cleared.
 
+## `kithAccessGrants { botId }` and `kithRemoveAccessGrant { botId, person, kind, target }`
+
+```json
+{ "grants": [ { "person": "sam", "name": "Sam", "kind": "read" | "write" | "domain", "target": "/Users/kai/docs" | "pypi.org", "since": 1760000000000 | null } ] }
+```
+
+The agent's standing "always" answers to escape cards (`serve/host/src/cards/access.rs`): what each person may reach
+beyond the box in every run (`kith-auth access <agent> --json`, read from `auth.json`). `person` `*` is a grant on the
+everyone row (written by hand); `since` is null for a grant written before kith-auth kept times. The Details page shows
+them as an Access list, each with Remove.
+
+`kithRemoveAccessGrant` takes one away (`kith-auth access <agent> <person> <kind> <target> --rm`, matched as listed) and
+answers with the list read back. A run launched after it no longer gets the grant (`consumeAccess` asks kith-auth at every
+launch); a run already going keeps the sandbox it started with. A grant still listed after the removal, an unknown
+`kind`, or a `person`/`target` that starts with `-` is HTTP 400. Both are owner-only (not in `MEMBER_METHODS`): a member
+gets 403. A paired phone needs the Control scope, as for every call.
+
+An "always" that kith-auth refuses (the person uses the agent through the everyone row and has no membership of their
+own, or a bot asks for more than its owner holds) stays a once grant. The card says so: its entry gets
+`"outcome": "Allowed once only: it can't be kept for always (<kith-auth's reason>)"` and `selected` the once option, and
+the apps show `outcome` in place of the option's own words.
+
 ## Memory files and tidy-ups (a kith agent's bot)
 
 The files are the truth: `agents/<name>/memory/**` and the shared user layer (`user.md`, `people/`, `projects/` in the

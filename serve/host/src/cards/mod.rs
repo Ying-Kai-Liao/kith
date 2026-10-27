@@ -354,6 +354,13 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
         return Ok(Outcome::Closed);
     };
     let status = if option_id.is_some() { "answered" } else { "cancelled" };
+    // The entry shows the answer first, so what follows from it (an "always" that stays once) is written on top.
+    if let Some(mut e) = hub.store.entry(entry_id) {
+        e.data["status"] = status.into();
+        e.data["selected"] = option_id.into();
+        e.data["parked"] = false.into();
+        hub.set_entry(entry_id, &e.data);
+    }
     let mut forward = false;
     if card.tool == access::TOOL {
         // No process waits on an escape card: the yes is applied at the session's next activation (see `access`).
@@ -369,12 +376,6 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
         forward = true;
     } else if allow {
         follow_up(hub, &card);
-    }
-    if let Some(mut e) = hub.store.entry(entry_id) {
-        e.data["status"] = status.into();
-        e.data["selected"] = option_id.into();
-        e.data["parked"] = false.into();
-        hub.set_entry(entry_id, &e.data);
     }
     Ok(Outcome::Recorded { forward })
 }
