@@ -60,13 +60,16 @@ const routeKind = (r) => r.kind ?? "json";
 /** An enum whose unknown values are a state of their own (`unknown`), not read as one of its values. */
 const isOpen = (e) => e.unknown === RESERVED;
 const openEnums = Object.keys(C.enums).filter((n) => isOpen(C.enums[n]));
-/** `v1/computers/{computerId}/grants` → [{ lit: "v1/computers/" }, { param: "computerId", any: false }, { lit: "/grants" }] */
+/**
+ * `v1/computers/{computerId}/grants` → [{ lit: "v1/computers/" }, { param: "computerId", match: undefined }, { lit: "/grants" }].
+ * `{p:any}` takes any one segment, `{p:rest}` the rest of the path, slashes included.
+ */
 function segments(path) {
   const out = [];
   let last = 0;
-  for (const m of path.matchAll(/\{(\w+)(:any)?\}/g)) {
+  for (const m of path.matchAll(/\{(\w+)(?::(any|rest))?\}/g)) {
     if (m.index > last) out.push({ lit: path.slice(last, m.index) });
-    out.push({ param: m[1], any: !!m[2] });
+    out.push({ param: m[1], match: m[2] });
     last = m.index + m[0].length;
   }
   if (last < path.length) out.push({ lit: path.slice(last) });
@@ -154,7 +157,7 @@ function typescript() {
   L.push("export const ROUTES = {");
   for (const [name, r] of Object.entries(C.routes)) {
     const re = segments(r.path)
-      .map((s) => (s.lit ? s.lit.replace(/[/.]/g, (c) => `\\${c}`) : s.any ? "([^/]+)" : "([A-Za-z0-9_-]{1,64})"))
+      .map((s) => (s.lit ? s.lit.replace(/[/.]/g, (c) => `\\${c}`) : s.match === "rest" ? "(.+)" : s.match === "any" ? "([^/]+)" : "([A-Za-z0-9_-]{1,64})"))
       .join("");
     const extra = [r.request && `request: '${r.request}'`, r.response && `response: '${r.response}'`].filter(Boolean);
     L.push(

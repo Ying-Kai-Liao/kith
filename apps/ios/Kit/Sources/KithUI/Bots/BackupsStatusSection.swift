@@ -48,6 +48,7 @@ public struct BackupsComputerSection: View {
                 CardSection(title, footer: footer) { Text(message).foregroundStyle(Palette.danger) }
             case .loaded(let backups):
                 CardSection(title, footer: footer) {
+                    MainAccountRow(backups: backups)
                     if backups.global.isEmpty {
                         Text("No backups. Add one on the computer.").foregroundStyle(Palette.secondary)
                     }
@@ -62,7 +63,7 @@ public struct BackupsComputerSection: View {
 
     private var title: String { labeled ? "Backups on \(store.hostName)" : "Backups" }
     private var footer: String {
-        "When an agent's own account runs out of usage, its turns move down this list until the limit lifts. Change the order on the computer."
+        "Turns start on the main account. When it runs out of usage, they move down this list until the limit lifts. Change both on the computer."
     }
 
     private func load() async {
@@ -71,6 +72,39 @@ public struct BackupsComputerSection: View {
         } catch {
             let text = error.localizedDescription
             phase = text.lowercased().contains("unknown method") ? .unsupported : .failed(text)
+        }
+    }
+}
+
+/// The account turns start on, above the chain: the computer's, then each agent that has one of its own.
+private struct MainAccountRow: View {
+    let backups: Backups
+
+    var body: some View {
+        let entry = backups.mainGlobal.map { backups.entry($0) }
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Text("Main account").foregroundStyle(Palette.secondary)
+                Text(backups.mainGlobal ?? "default login").lineLimit(1)
+                Spacer(minLength: 8)
+                if let entry {
+                    Text(entry.state()).font(.footnote).foregroundStyle(Palette.secondary).multilineTextAlignment(.trailing)
+                }
+            }
+            ForEach(backups.ownMains, id: \.agent) { own in
+                HStack(spacing: 8) {
+                    Text(own.agent).font(.footnote).foregroundStyle(Palette.tertiary).lineLimit(1)
+                    Text(own.main.id).font(.footnote).lineLimit(1)
+                    Spacer(minLength: 8)
+                    Text(own.main.state).font(.footnote).foregroundStyle(Palette.secondary)
+                }
+                if !own.main.ready, let fix = own.main.fix {
+                    Text("On the computer: \(fix)")
+                        .font(.footnote.monospaced())
+                        .foregroundStyle(Palette.secondary)
+                        .textSelection(.enabled)
+                }
+            }
         }
     }
 }

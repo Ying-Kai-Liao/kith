@@ -105,6 +105,10 @@ pub struct Launch {
     /// The model a turn spoken in a voice call runs on (see `bot::call_model`); none keeps the agent's own.
     #[serde(default)]
     pub call_model: Option<String>,
+    /// The login the run is on, as a backup id (`claude`, `claude:work`, `claude-api:main`, `codex`): the agent's main
+    /// account, or the `--backup` entry. None from a kernel before main accounts.
+    #[serde(default)]
+    pub account_id: Option<String>,
     /// An invited person's run (see [`Launch::confine_to`]): bypass mode is switched off for the whole session.
     #[serde(skip)]
     pub confined: bool,
@@ -150,6 +154,32 @@ impl Launch {
     /// `_meta`.
     pub fn is_codex(&self) -> bool {
         self.harness == "codex"
+    }
+
+    /// Whether a session made under `made` may be loaded by this run: only under the account that made it. A session
+    /// with no tag is from before sessions had one, when every run was on the harness's default login. A kernel that
+    /// doesn't say which account it runs on loads it as it always did.
+    pub fn may_load(&self, made: Option<&str>) -> bool {
+        let Some(now) = self.account_id.as_deref().filter(|a| !a.is_empty()) else { return true };
+        let default = if self.is_codex() { "codex" } else { "claude" };
+        made.unwrap_or(default) == now
+    }
+}
+
+fn session_account_key(sid: &str) -> String {
+    format!("session-account:{sid}")
+}
+
+/// The account a session was made under, as the host tagged it when it stored the session (see [`tag_session`]).
+pub fn session_account(store: &crate::store::Store, sid: &str) -> Result<Option<String>> {
+    Ok(store.kv_read(&session_account_key(sid))?.filter(|a| !a.is_empty()))
+}
+
+/// Remembers that `sid` was made under `account`: it is loaded only there again (see [`Launch::may_load`]).
+pub fn tag_session(store: &crate::store::Store, sid: &str, account: Option<&str>) {
+    let Some(account) = account.filter(|a| !a.is_empty()) else { return };
+    if let Err(error) = store.kv_set(&session_account_key(sid), account) {
+        tracing::warn!(error = format!("{error:#}"), "couldn't tag the session with its account");
     }
 }
 
@@ -814,6 +844,36 @@ mod tests {
             "claude_args": ["--model", "haiku"],
         }))
         .unwrap()
+    }
+
+    #[test]
+    fn a_session_loads_only_under_the_account_that_made_it() {
+        let on = |harness: &str, account: Option<&str>| -> Launch {
+            serde_json::from_value(json!({"harness": harness, "account_id": account})).unwrap()
+        };
+        let work = on("claude", Some("claude:work"));
+        assert!(work.may_load(Some("claude:work")));
+        assert!(!work.may_load(Some("claude")), "made on the default login");
+        assert!(!work.may_load(Some("claude-api:main")));
+        assert!(!work.may_load(None), "untagged: made before tags, on the default login");
+        let default = on("claude", Some("claude"));
+        assert!(default.may_load(None) && default.may_load(Some("claude")));
+        assert!(!default.may_load(Some("claude:work")), "the main account went back to the default login");
+        assert!(on("codex", Some("codex")).may_load(None) && !on("codex", Some("codex:home")).may_load(None));
+        // A kernel that doesn't say which account it runs on loads what it always loaded.
+        assert!(on("claude", None).may_load(Some("claude:work")) && on("claude", None).may_load(None));
+    }
+
+    #[test]
+    fn a_session_keeps_the_account_it_was_tagged_with() {
+        let store = crate::store::Store::open(Path::new(":memory:")).unwrap();
+        assert_eq!(session_account(&store, "s1").unwrap(), None);
+        tag_session(&store, "s1", Some("claude:work"));
+        tag_session(&store, "s2", None);
+        tag_session(&store, "s3", Some(""));
+        assert_eq!(session_account(&store, "s1").unwrap().as_deref(), Some("claude:work"));
+        assert_eq!(session_account(&store, "s2").unwrap(), None, "no account said: no tag");
+        assert_eq!(session_account(&store, "s3").unwrap(), None);
     }
 
     #[test]

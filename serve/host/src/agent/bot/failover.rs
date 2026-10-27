@@ -119,18 +119,31 @@ impl Actor {
             .collect()
     }
 
-    /// A backup's new session knows nothing of the conversation: the latest messages go ahead of the user's.
-    pub(super) fn backup_preface(&self) -> Option<String> {
+    /// The latest messages of the lane, for a new session that knows nothing of them, after `why`.
+    fn latest_preface(&self, why: &str) -> Option<String> {
         let mut lines = self.lane_lines(<[Entry]>::to_vec);
         let skip = lines.len().saturating_sub(PREFACE_MESSAGES);
         let lines = lines.split_off(skip);
         (!lines.is_empty()).then(|| {
             format!(
-                "[Kith] You are picking this conversation up on a backup account: the usual one is out of usage. \
-                 The latest messages, oldest first:\n{}\nContinue from the user's message below.",
+                "[Kith] {why} The latest messages, oldest first:\n{}\nContinue from the user's message below.",
                 lines.join("\n")
             )
         })
+    }
+
+    /// A backup's new session knows nothing of the conversation: the latest messages go ahead of the user's.
+    pub(super) fn backup_preface(&self) -> Option<String> {
+        self.latest_preface("You are picking this conversation up on a backup account: the usual one is out of usage.")
+    }
+
+    /// The agent's main account changed, and a session is only loaded under the account that made it: the new one is
+    /// told the latest messages, as a backup's is.
+    pub(super) fn account_preface(&self) -> Option<String> {
+        self.latest_preface(
+            "You are picking this conversation up on another account: the agent's main account changed, and its \
+             earlier session belongs to the old one.",
+        )
     }
 
     /// The agent's own account, back after its limit, loads its old session, which missed what the backup answered:

@@ -47,10 +47,12 @@ fn codex_mode(permission: &str) -> Option<&'static str> {
     }
 }
 
-/// The environment of the agent process. The keys the host holds for Claude are the primary's login and win over
-/// `CLAUDE_CONFIG_DIR` and `apiKeyHelper`, so a backup that has a login of its own gets none of them.
+/// The environment of the agent process. The keys the host holds for Claude are the default login's and win over
+/// `CLAUDE_CONFIG_DIR` and `apiKeyHelper`, so a run on a login of its own gets none of them: a Claude backup, and any
+/// run on a named account or API profile (`KITH_ACCOUNT`), the agent's main account included.
 fn process_env(saved: Vec<(String, String)>, launch: &hq::Launch, backup: bool) -> Vec<(String, String)> {
-    let own_login = backup && (!launch.is_codex() || launch.env.get("KITH_ACCOUNT").is_some_and(|a| !a.is_empty()));
+    let named = launch.env.get("KITH_ACCOUNT").is_some_and(|a| !a.is_empty());
+    let own_login = named || (backup && !launch.is_codex());
     let mut env = if own_login { Vec::new() } else { saved };
     env.extend(launch.env());
     env
@@ -210,6 +212,19 @@ impl Actor {
         }
     }
 
+    /// The account answering now, for its usage numbers: the backup entry, else the main account when it is one of
+    /// its own (`claude:work`); `None` is the harness's default login.
+    pub(super) fn answering_account(&self) -> Option<&str> {
+        self.serving.as_deref().or_else(|| self.conn_account.as_deref().filter(|a| a.contains(':')))
+    }
+
+    /// Whether the live process runs on the account the chain now puts first. Only the agent's own sessions ask: a
+    /// backup entry's process is its entry's. A chain not yet known, or a kernel that doesn't say, changes nothing.
+    fn conn_on_main(&self, chain: &[ChainEntry]) -> bool {
+        self.serving.is_some()
+            || chain.first().is_none_or(|main| self.conn_account.as_ref().is_none_or(|a| *a == main.id))
+    }
+
     fn hq_set_session(&mut self, slot: Option<&str>, sid: &str) {
         match self.serving.clone() {
             None => self.set_session(slot, Some(sid)),
@@ -341,7 +356,8 @@ impl Actor {
             warm = matches!((&current, &self.conn), (Some(sid), Some(conn)) if conn.loaded.contains_key(sid))
                 && self.conn_serving == self.serving
                 && self.conn_room == self.run_room();
-            if warm && person.is_none() {
+            // A process on another account than the main one is started again below: its launch says so.
+            if warm && person.is_none() && self.conn_on_main(&chain) {
                 self.turn_session = current;
                 return Ok(());
             }
@@ -409,7 +425,18 @@ impl Actor {
             super::call_model::CallModels { own: launch.model.clone(), launch_call: launch.call_model.clone() }
         });
         // A backup has no session of the agent's to load: it starts one and is told the conversation.
-        let current = self.hq_session(slot).filter(|_| backup.is_none());
+        let mut current = self.hq_session(slot).filter(|_| backup.is_none());
+        // A session is loaded only under the account that made it: after a change of the main account the agent starts
+        // a new one, told the conversation, rather than fail to load (or load) another login's.
+        let mut moved = false;
+        if let Some(sid) = &current {
+            let made = hq::session_account(&self.hub.store, sid);
+            if !made.as_ref().is_ok_and(|made| launch.may_load(made.as_deref())) {
+                tracing::info!(session = %sid, made = ?made.ok().flatten(), now = ?launch.account_id, "session made under another account; starting a new one");
+                current = None;
+                moved = true;
+            }
+        }
         // The process carries kith's env (KITH_PROJECT, the cost tag) and its folder: a place that needs others gets a
         // process of its own, started again here (the sessions it held load again on their next turn).
         let mut started_as = (launch.env(), launch.cwd(&self.cfg).to_owned());
@@ -430,6 +457,7 @@ impl Actor {
         if self.conn.is_none() {
             self.conn_started_as = Some(started_as);
             self.conn_serving.clone_from(&self.serving);
+            self.conn_account.clone_from(&launch.account_id);
             self.conn_room = self.run_room();
             let provider = if launch.is_codex() { "codex" } else { self.cfg.backend.as_str() };
             let mut env = process_env(crate::agent::auth::env(&self.hub.store, provider)?, &launch, backup.is_some());
@@ -526,6 +554,9 @@ impl Actor {
                 self.set_session(slot, None);
             }
         }
+        if moved {
+            self.notice("The agent's main account changed — starting a fresh session.", NoticeStyle::Divider);
+        }
         let params = self.hq_params(&launch, None);
         let res = self.session_request("session/new", params).await?;
         let Some(conn) = self.conn.as_mut() else { bail!("agent not running") };
@@ -535,6 +566,9 @@ impl Actor {
         // The model and effort are hq's (launch-json): the host sets neither again. The permission mode is set once,
         // below, because the adapter starts every session in "default".
         self.note_options(&sid, &res, Listing::Session);
+        if backup.is_none() {
+            hq::tag_session(&self.hub.store, &sid, launch.account_id.as_deref());
+        }
         self.hq_set_session(slot, &sid);
         if launch.is_codex() {
             self.set_codex_mode(&sid, &res, launch.permission_mode.as_deref()).await;
@@ -557,6 +591,8 @@ impl Actor {
                     None => profile,
                 });
             }
+        } else if moved {
+            self.preface = self.account_preface();
         } else {
             self.preface = self.recovery_preface();
         }
@@ -633,6 +669,21 @@ mod tests {
             names(&process_env(vec![("OPENAI_API_KEY".into(), "k".into())], &launch("codex", ""), true))
                 .contains(&"OPENAI_API_KEY")
         );
+    }
+
+    #[test]
+    fn a_main_account_of_its_own_runs_without_the_default_logins_saved_keys() {
+        // The agent's main account is `claude:work` (or an API profile): its own login, not the host's keys.
+        for account in ["work", "main"] {
+            let env = process_env(keys(), &launch("claude", account), false);
+            assert!(
+                !names(&env).iter().any(|k| ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"].contains(k)),
+                "the main account {account} kept a host key: {:?}",
+                names(&env)
+            );
+        }
+        // The default login as the main account keeps them, as it always did.
+        assert!(names(&process_env(keys(), &launch("claude", ""), false)).contains(&"CLAUDE_CODE_OAUTH_TOKEN"));
     }
 
     #[test]

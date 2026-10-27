@@ -248,6 +248,11 @@ impl Backups {
         self.chain_state(agent).map(|(_, c)| c)
     }
 
+    /// The agents whose chain hq gave.
+    pub fn known_agents(&self) -> Vec<String> {
+        self.inner.locked().chains.keys().cloned().collect()
+    }
+
     /// The chains hq gave are out of date (the user changed the order): the next turn asks again.
     pub fn forget_chains(&self) {
         self.inner.locked().chains.clear();

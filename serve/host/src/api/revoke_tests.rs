@@ -145,7 +145,9 @@ async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
     cloud::pull(&r.hub, &base).await.unwrap();
     assert_eq!(r.who("user_sam")["revoked"], true);
 
-    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": []}));
+    r.set_cloud_state(
+        json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": []}),
+    );
     cloud::pull(&r.hub, &base).await.unwrap();
     assert!(r.allowed("sam", "house"));
     assert_eq!(rows(&r), before);

@@ -57,6 +57,9 @@ kith new reading "tracks what I read"  # or start one yourself
 kith doctor                            # check everything, with what to fix
 kith backup                            # everything to private GitHub repos: state, memories, your agents
 ```
+Desktop app, one click: <https://kithbot.app/download>, or directly <https://kithbot.app/download/mac> (macOS, Apple silicon and Intel)
+and <https://kithbot.app/download/linux> (Linux x64, AppImage).
+
 Kith was called hq until 2026-10-22. The `hq` command (and `hq-<tool>`) still works as an alias, a Mac with an existing `~/.hq`
 keeps using it until `kith migrate` moves it to `~/.kith`, and `~/hq` stays a link to the same folder as `~/kith`.
 Old `HQ_*` variables, `dev.hq.*` jobs and `hq-agent` repos are still read.
