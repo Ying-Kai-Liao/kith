@@ -1,0 +1,33 @@
+{
+  "method": "botThread",
+  "type": "BotThread",
+  "body": {
+    "conversation": "cv_TyeJsSuD46jZvycm",
+    "entries": [
+      {
+        "id": "aa51751c-9c39-410b-8979-115d90a48799",
+        "seq": 14,
+        "turn": 1,
+        "at": 1793005407724,
+        "conversation": "cv_TyeJsSuD46jZvycm",
+        "kind": "poll",
+        "text": "Pick one",
+        "newField": true
+      },
+      {
+        "id": "2408c3b6-cb5b-423e-90de-c32878d1ff56",
+        "seq": 15,
+        "turn": 1,
+        "at": 1793005407728,
+        "conversation": "cv_TyeJsSuD46jZvycm",
+        "kind": "agent",
+        "text": "Milk and eggs.",
+        "final": true
+      }
+    ],
+    "done": false,
+    "turn": 1,
+    "state": "paused",
+    "newField": "x"
+  }
+}

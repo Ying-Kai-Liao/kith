@@ -15,7 +15,7 @@ use crate::exit::{CliError, Exit};
 use crate::link;
 use crate::output::Out;
 use crate::relay::{Fail, now_ms};
-use crate::session::{Backoff, BotStatus, Client, Patience, Tuning};
+use crate::session::{Backoff, Client, Patience, Tuning};
 
 fn default_name() -> String {
     let host = gethostname::gethostname().to_string_lossy().trim().to_string();
@@ -32,17 +32,10 @@ pub fn joined_line(g: &Guest) -> String {
     format!("Joined {owner} computer as \"{}\". Agents: {agents}.", g.name)
 }
 
-fn waiting_line(st: Option<&BotStatus>) -> String {
-    let who = st.and_then(|s| s.approver.as_deref()).filter(|a| !a.is_empty()).unwrap_or("the computer's owner");
-    format!("Waiting for {who} to allow this bot")
-}
+const WAITING_LINE: &str = "Waiting for the computer's owner to allow this bot";
 
 /// Polls `botStatus` until the owner has answered or `deadline` passes.
-async fn await_admission(
-    client: &mut Client<'_>,
-    deadline: Instant,
-    mut last: Option<BotStatus>,
-) -> Result<(), CliError> {
+async fn await_admission(client: &mut Client<'_>, deadline: Instant) -> Result<(), CliError> {
     loop {
         match client.guest.state {
             State::Active => return Ok(()),
@@ -51,11 +44,11 @@ async fn await_admission(
         }
         let poll = client.tuning.poll;
         if Instant::now() + poll > deadline {
-            return Err(CliError::new(Exit::Pending, "pending", waiting_line(last.as_ref())));
+            return Err(CliError::new(Exit::Pending, "pending", WAITING_LINE));
         }
-        client.info(&waiting_line(last.as_ref()));
+        client.info(WAITING_LINE);
         sleep(poll).await;
-        last = Some(client.refresh_status().await?);
+        client.refresh_status().await?;
     }
 }
 
@@ -195,20 +188,20 @@ async fn finish(client: &mut Client<'_>, deadline: Instant, wait: u64) -> Result
             e
         }
     })?;
-    let status = if client.guest.state == State::Joining {
-        client.prove().await?
+    if client.guest.state == State::Joining {
+        client.prove().await?;
     } else {
         // Joined before (the same link again): ask for the current state.
         match client.refresh_status().await {
-            Ok(st) => st,
+            Ok(_) => {}
             // The cached state is the answer when the computer can't be asked right now.
             Err(e) if matches!(e.exit, Exit::Offline | Exit::Network) && client.guest.state == State::Active => {
                 return Ok(());
             }
             Err(e) => return Err(e),
         }
-    };
-    await_admission(client, deadline, Some(status)).await
+    }
+    await_admission(client, deadline).await
 }
 
 #[cfg(test)]

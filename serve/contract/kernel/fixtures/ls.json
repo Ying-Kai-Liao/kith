@@ -1,0 +1,22 @@
+{
+  "command": "ls",
+  "type": "[Agent]",
+  "body": [
+    {
+      "name": "echo",
+      "description": "test agent",
+      "home": "/tmp/kith/kith/agents/echo",
+      "model": "opus",
+      "effort": "high",
+      "harness": "claude"
+    },
+    {
+      "name": "relay",
+      "description": "test agent",
+      "home": "/tmp/kith/kith/agents/relay",
+      "model": null,
+      "effort": null,
+      "harness": "codex"
+    }
+  ]
+}

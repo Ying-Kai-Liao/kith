@@ -4,7 +4,7 @@ import Testing
 @testable import KithKit
 
 // The host RPC contract (serve/contract/host/contract.json) as KithKit reads it: the generated file is the contract's,
-// the member answers of today's host (fixtures/, written by the host's own test from real calls), an older (compat/)
+// the member and bot answers of today's host (fixtures/, written by the host's own test from real calls), an older (compat/)
 // and a newer (unknown/) host all decode, both as the contract's types and as the app's own.
 
 private let contractDir = URL(fileURLWithPath: #filePath)
@@ -102,6 +102,18 @@ func everyHostAnswerDecodes(_ sub: String) throws {
     #expect(hello.grantedAgents == nil)
 }
 
-@Test func everyContractMethodIsAMembersOrAnUnprovenDevices() {
-    #expect(Set(HostContract.Method.allCases) == Set(HostContract.memberMethods + HostContract.unprovenMethods))
+@Test func everyContractMethodIsAMembersAnUnprovenDevicesOrABots() {
+    let all = HostContract.memberMethods + HostContract.unprovenMethods + HostContract.botMethods
+    #expect(Set(HostContract.Method.allCases) == Set(all))
+    #expect(Set(HostContract.botPendingMethods).isSubset(of: Set(HostContract.botMethods)))
+}
+
+@Test func aNewerHostsWordsToABotReadAsTheContractSays() throws {
+    let d = JSONDecoder()
+    let thread = try d.decode(HostContract.BotThread.self, from: fixture("unknown/", "bot-thread-new-words.json"))
+    #expect(thread.entries.first?.kind == .unknown)
+    #expect(thread.state == .running)
+    let me = try d.decode(HostContract.BotSelf.self, from: fixture("unknown/", "bot-status-new-words.json"))
+    #expect(me.state == .unknown)
+    #expect(me.agents.first?.role == .guest)
 }

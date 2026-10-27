@@ -1,0 +1,15 @@
+{
+  "command": "ls",
+  "type": "[Agent]",
+  "body": [
+    {
+      "name": "echo",
+      "description": "test agent",
+      "home": "/tmp/kith/kith/agents/echo",
+      "model": null,
+      "effort": null,
+      "harness": "gemini",
+      "color": "teal"
+    }
+  ]
+}

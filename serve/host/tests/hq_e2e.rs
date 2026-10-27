@@ -99,7 +99,7 @@ impl Setup {
     fn register_projects(&self) {
         let one = |id: &str| {
             let path = self.dir(id).to_string_lossy().into_owned();
-            json!({"id": id, "paths": [path], "home": path, "remotes": [], "parent": null, "memory": null, "exists": true})
+            json!({"id": id, "paths": [path], "home": path, "remotes": [], "parent": null, "memory": "/state/projects", "exists": true})
         };
         let list = json!({"projects": [one("alpha"), one("beta")]});
         std::fs::write(self.home.join("projects.json"), list.to_string()).unwrap();
@@ -416,7 +416,7 @@ async fn the_bots_default_project_resets_only_the_places_that_follow_it() {
 async fn a_project_without_a_folder_here_falls_back_with_a_notice_and_still_passes_p() {
     let s = start().await;
     let gone = s.dir("gone");
-    let entry = json!({"id": "lost", "paths": [gone], "home": null, "remotes": [], "parent": null, "memory": null, "exists": false});
+    let entry = json!({"id": "lost", "paths": [gone], "home": null, "remotes": [], "parent": null, "memory": "/state/projects/lost", "exists": false});
     std::fs::write(s.home.join("projects.json"), json!({"projects": [entry]}).to_string()).unwrap();
     let (id, _) = s.house_chat().await;
     s.host.call("setPlaceFolder", json!({"botId": id, "project": "lost"})).await;

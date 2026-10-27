@@ -104,12 +104,21 @@ async fn a_members_run_is_theirs_and_the_owners_is_not() {
 
     let mine = k.launch(Some("sam")).await.unwrap();
     assert_eq!(mine.env.get("KITH_PERSON").map(String::as_str), Some("sam"), "the agent process runs as sam");
-    assert_eq!(mine.permission_mode.as_deref(), Some("acceptEdits"), "the member preset's mode, not the template's");
+    assert_eq!(
+        mine.permission_mode,
+        Some(hq::PermissionMode::AcceptEdits),
+        "the member preset's mode, not the template's"
+    );
     assert!(mine.system_prompt.contains("memory/people/sam"), "sam's memory folder, not the owner's");
     assert!(mine.system_prompt.contains("files/people/sam") || mine.add_dirs.iter().any(|d| d.contains("people/sam")));
 
     // The cost line: the launch's tag and the agent's env both name the person (the cost hooks read KITH_PERSON).
-    let raw = k.command(&k.kith).args(["house", "--launch-json"]).env("KITH_PERSON", "sam").output().unwrap();
+    let raw = k
+        .command(&k.kith)
+        .args(kith_wire::kernel::command::launch("house", None, None))
+        .env("KITH_PERSON", "sam")
+        .output()
+        .unwrap();
     let raw: Value = serde_json::from_slice(&raw.stdout).unwrap();
     assert_eq!(raw["cost_tag"]["person"], "sam");
 
@@ -122,13 +131,13 @@ async fn a_members_run_is_theirs_and_the_owners_is_not() {
 async fn a_guest_gets_the_default_mode_and_never_a_free_shell() {
     let k = Kernel::new().await;
     k.auth(&["member", "house", "sam", "preset=guest"]);
-    assert_eq!(k.launch(Some("sam")).await.unwrap().permission_mode.as_deref(), Some("default"));
+    assert_eq!(k.launch(Some("sam")).await.unwrap().permission_mode, Some(hq::PermissionMode::Default));
 
     // Even a membership an owner marked trusted can't hand an invitee a free shell through the host.
     k.auth(&["member", "house", "sam", "mode=bypassPermissions", "--trusted"]);
     let l = k.launch(Some("sam")).await.unwrap();
-    assert_eq!(l.permission_mode.as_deref(), Some("default"), "bypassPermissions is the owner's alone");
-    assert_ne!(l.settings["permissions"]["defaultMode"], "bypassPermissions");
+    assert_eq!(l.permission_mode, Some(hq::PermissionMode::Default), "bypassPermissions is the owner's alone");
+    assert_ne!(l.settings.as_ref().unwrap()["permissions"]["defaultMode"], "bypassPermissions");
 }
 
 #[tokio::test]
@@ -214,20 +223,23 @@ async fn a_persons_launch_with_access_carries_what_their_conversation_was_given(
 
     let plain = k.launch(Some("sam")).await.unwrap();
     assert!(log.lock().unwrap().is_empty(), "no access token, nothing asked");
-    assert!(!plain.settings["sandbox"]["filesystem"]["allowRead"].to_string().contains(&docs));
+    assert!(!plain.settings.as_ref().unwrap()["sandbox"]["filesystem"]["allowRead"].to_string().contains(&docs));
 
     let given = k.launch_with(Some("sam"), Some(&issue())).await.unwrap();
     assert_eq!(*log.lock().unwrap(), ["consumeAccess"], "asked once, by the bound kernel process");
-    let read = &given.settings["sandbox"]["filesystem"]["allowRead"];
+    let read = &given.settings.as_ref().unwrap()["sandbox"]["filesystem"]["allowRead"];
     assert!(read.as_array().unwrap().iter().any(|d| d == docs.as_str()), "{read}");
-    assert!(given.settings["permissions"]["additionalDirectories"].to_string().contains(&docs));
-    assert_eq!(given.settings["sandbox"]["network"]["allowedDomains"], serde_json::json!(["pypi.org"]));
+    assert!(given.settings.as_ref().unwrap()["permissions"]["additionalDirectories"].to_string().contains(&docs));
+    assert_eq!(
+        given.settings.as_ref().unwrap()["sandbox"]["network"]["allowedDomains"],
+        serde_json::json!(["pypi.org"])
+    );
     assert!(!given.env.contains_key(crate::runauth::TOKEN_ENV), "the launch's token never reaches the agent process");
 
     // The owner's launch is never asked for access, whatever it is handed.
     log.lock().unwrap().clear();
     let owner = k.launch_with(None, Some(&issue())).await.unwrap();
     assert!(log.lock().unwrap().is_empty(), "{:?}", log.lock().unwrap());
-    assert!(!owner.settings.to_string().contains(&docs));
+    assert!(!owner.settings.as_ref().unwrap().to_string().contains(&docs));
     let _ = std::fs::remove_file(&sock);
 }

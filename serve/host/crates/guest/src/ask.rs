@@ -4,6 +4,7 @@
 use std::io::{IsTerminal, Read};
 use std::time::Duration;
 
+use kith_wire::rpc::{BotAskParams, BotAsked, BotThreadParams, ConversationState, method};
 use serde_json::{Value, json};
 use tokio::time::Instant;
 
@@ -11,7 +12,7 @@ use crate::cli::AskArgs;
 use crate::config::Store;
 use crate::exit::{CliError, Exit};
 use crate::output::Out;
-use crate::session::{Client, Ev, Tuning};
+use crate::session::{Client, Ev, Tuning, answer, params};
 use crate::thread::{Reply, entry_of_event, parse_thread, suffix};
 
 const MAX_CHARS: usize = 16_000;
@@ -61,24 +62,27 @@ pub fn agent_name(arg: &str) -> Result<&str, CliError> {
 
 /// What gets sent for one ask. `nonce` is the idempotency key.
 pub fn ask_body(args: &AskArgs, agent: &str, text: &str, nonce: &str) -> Value {
-    let mut body = json!({"agent": agent, "text": text, "clientNonce": nonce});
-    for (key, value) in
-        [("conversation", &args.thread), ("ref", &args.r#ref), ("room", &args.room), ("speaker", &args.speaker)]
-    {
-        if let Some(v) = value {
-            body[key] = json!(v);
-        }
-    }
-    if args.no_queue {
-        body["noQueue"] = json!(true);
-    }
-    body
+    params(&BotAskParams {
+        agent: Some(agent.to_string()),
+        text: text.to_string(),
+        conversation: args.thread.clone(),
+        r#ref: args.r#ref.clone(),
+        room: args.room.clone(),
+        speaker: args.speaker.clone(),
+        client_nonce: nonce.to_string(),
+        no_queue: args.no_queue.then_some(true),
+    })
+}
+
+/// What `botThread` is sent: the conversation after `after`, up to 500 entries.
+pub fn thread_body(conversation: &str, after: i64) -> Value {
+    params(&BotThreadParams { conversation: conversation.to_string(), after_seq: Some(after), limit: Some(500) })
 }
 
 struct Asked {
     conversation: String,
-    turn: u64,
-    seq: u64,
+    turn: i64,
+    seq: i64,
 }
 
 struct Printer<'a> {
@@ -151,17 +155,16 @@ impl LowerFirst for String {
 async fn catch_up(
     client: &mut Client<'_>,
     conversation: &str,
-    since: u64,
+    since: i64,
     reply: &mut Reply,
-    state: &mut String,
+    state: &mut ConversationState,
 ) -> Result<bool, CliError> {
-    let v = client.call("botThread", json!({"conversation": conversation, "afterSeq": since, "limit": 500})).await?;
-    let thread = parse_thread(&v);
+    let thread = parse_thread(&client.call(method::BOT_THREAD, thread_body(conversation, since)).await?)?;
     for e in &thread.entries {
         reply.apply(e);
     }
-    state.clone_from(&thread.state);
-    if thread.state == "stopped" && !thread.done && !reply.has_final() {
+    *state = thread.state;
+    if thread.state == ConversationState::Stopped && !thread.done && !reply.has_final() {
         reply.failed.get_or_insert_with(|| "The turn was stopped.".to_string());
     }
     Ok(thread.done)
@@ -177,7 +180,7 @@ async fn follow(
     let deadline = Instant::now() + timeout;
     let mut reply = Reply::new(asked.turn, asked.seq);
     let mut printer = Printer { out, stream, printed: String::new(), told_waiting: None };
-    let mut state = String::new();
+    let mut state = ConversationState::Idle;
     client.open_events(asked.seq).await?;
     // The answer may already be partly there: events resume from the cursor, but reading is cheap and certain.
     let mut done = catch_up(client, &asked.conversation, asked.seq, &mut reply, &mut state).await?;
@@ -193,7 +196,7 @@ async fn follow(
         }
         let now = Instant::now();
         if now >= deadline {
-            let waiting = reply.waiting.is_some() || state == "waitingApproval";
+            let waiting = reply.waiting.is_some() || state == ConversationState::WaitingApproval;
             let hint = format!(
                 "The turn keeps running on the computer. Pick it up with: kith read {} --wait",
                 asked.conversation
@@ -244,19 +247,17 @@ pub async fn run(args: AskArgs, store: Store, cloud: Option<&str>, out: &Out, tu
 async fn ask(client: &mut Client<'_>, args: &AskArgs, agent: &str, text: &str, out: &Out) -> Result<(), CliError> {
     client.ensure_usable().await?;
     let nonce = args.idempotency_key.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let resp = client.call("botAsk", ask_body(args, agent, text, &nonce)).await?;
-    let (Some(conversation), Some(turn)) = (resp["conversation"].as_str(), resp["turn"].as_u64()) else {
-        return Err(CliError::version());
-    };
-    let asked = Asked { conversation: conversation.to_string(), turn, seq: resp["seq"].as_u64().unwrap_or(0) };
+    let resp: BotAsked = answer(client.call(method::BOT_ASK, ask_body(args, agent, text, &nonce)).await?)?;
+    let conversation = resp.conversation.as_str();
     out.info(&format!("conversation: {conversation}"));
     out.event(&json!({
-        "type": "conversation", "conversation": conversation, "entryId": resp["entryId"], "turn": turn,
-        "state": resp["state"],
+        "type": "conversation", "conversation": conversation, "entryId": resp.entry_id, "turn": resp.turn,
+        "state": resp.state,
     }));
-    if let Some(n) = resp["queued"].as_u64().filter(|n| *n > 0) {
-        out.info(&format!("queued behind {n} other ask(s) in this conversation"));
+    if resp.queued > 0 {
+        out.info(&format!("queued behind {} other ask(s) in this conversation", resp.queued));
     }
+    let asked = Asked { conversation: resp.conversation.clone(), turn: resp.turn, seq: resp.seq };
     let stream = if args.wait { false } else { args.stream || std::io::stdout().is_terminal() };
     follow(client, out, stream, &asked, Duration::from_secs(args.timeout)).await
 }

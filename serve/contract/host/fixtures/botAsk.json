@@ -1,0 +1,12 @@
+{
+  "method": "botAsk",
+  "type": "BotAsked",
+  "body": {
+    "conversation": "cv_TyeJsSuD46jZvycm",
+    "entryId": "aa51751c-9c39-410b-8979-115d90a48799",
+    "turn": 1,
+    "seq": 6,
+    "state": "running",
+    "queued": 0
+  }
+}

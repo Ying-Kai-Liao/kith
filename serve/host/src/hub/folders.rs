@@ -4,7 +4,7 @@
 use super::Hub;
 use crate::agent::bot::{self, Cmd};
 use crate::agent::folder::{self, Change, Pick};
-use crate::agent::hq;
+use crate::agent::hq::{self, ProjectExt as _};
 use crate::store::{BotConfig, Lane, lane_key};
 use anyhow::{Result, anyhow, bail};
 use serde_json::Value;

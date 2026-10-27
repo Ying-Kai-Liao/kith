@@ -5,6 +5,8 @@
 use crate::LockExt as _;
 use crate::store::BotConfig;
 use anyhow::{Context, Result, anyhow, bail};
+use kith_wire::kernel::{self, command};
+pub use kith_wire::kernel::{Agent as HqAgent, Harness, PermissionMode, Project};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
@@ -51,71 +53,49 @@ fn found() -> Option<PathBuf> {
         .or_else(|| crate::kernel::entry_in(&crate::kernel::current_kernel()?))
 }
 
-/// One line of `kith ls --json`.
-#[derive(Deserialize, Debug, Clone, PartialEq)]
-pub struct HqAgent {
-    pub name: String,
-    #[serde(default)]
-    pub description: String,
-    /// The agent's folder, where its bot works.
-    pub home: String,
-    /// The agent's harness; hq before it listed one means Claude.
-    #[serde(default = "claude")]
-    pub harness: String,
+/// What the host does with an agent of `kith ls --json` (the kernel contract's `Agent`).
+pub trait AgentExt {
+    /// Whether the host can run it: `kith <agent> --launch-json` covers Claude agents only. A kernel from before it
+    /// listed a harness ran every agent on Claude; one this version doesn't know is never started.
+    fn runnable(&self) -> bool;
 }
 
-fn claude() -> String {
-    "claude".into()
-}
-
-impl HqAgent {
-    /// Whether the host can run it: `kith <agent> --launch-json` covers Claude agents only.
-    pub fn runnable(&self) -> bool {
-        self.harness == "claude"
+impl AgentExt for HqAgent {
+    fn runnable(&self) -> bool {
+        self.harness.unwrap_or(Harness::Claude) == Harness::Claude
     }
 }
 
-/// What `kith <agent> --launch-json` printed, the parts the host uses.
-#[derive(Deserialize, Debug, Clone, Default)]
+/// What `kith <agent> --launch-json` printed (the kernel contract's `Launch`, read through `Deref`), and whether the
+/// host made it an invited person's.
+#[derive(Debug, Clone, Default)]
 pub struct Launch {
-    #[serde(default)]
-    pub harness: String,
-    #[serde(default)]
-    pub cwd: String,
-    #[serde(default)]
-    pub env: std::collections::BTreeMap<String, String>,
-    #[serde(default)]
-    pub system_prompt: String,
-    #[serde(default)]
-    pub settings: Value,
-    #[serde(default)]
-    pub mcp_servers: Value,
-    #[serde(default)]
-    pub add_dirs: Vec<String>,
-    #[serde(default)]
-    pub allowed_tools: Vec<String>,
-    #[serde(default)]
-    pub disable_slash_commands: bool,
-    #[serde(default)]
-    pub model: Option<String>,
-    #[serde(default)]
-    pub effort: Option<String>,
-    #[serde(default)]
-    pub permission_mode: Option<String>,
-    /// The model a turn spoken in a voice call runs on (see `bot::call_model`); none keeps the agent's own.
-    #[serde(default)]
-    pub call_model: Option<String>,
-    /// The login the run is on, as a backup id (`claude`, `claude:work`, `claude-api:main`, `codex`): the agent's main
-    /// account, or the `--backup` entry. None from a kernel before main accounts.
-    #[serde(default)]
-    pub account_id: Option<String>,
+    pub printed: kernel::Launch,
     /// An invited person's run (see [`Launch::confine_to`]): bypass mode is switched off for the whole session.
-    #[serde(skip)]
     pub confined: bool,
 }
 
+impl<'de> Deserialize<'de> for Launch {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Self, D::Error> {
+        kernel::Launch::deserialize(d).map(|printed| Self { printed, confined: false })
+    }
+}
+
+impl std::ops::Deref for Launch {
+    type Target = kernel::Launch;
+    fn deref(&self) -> &kernel::Launch {
+        &self.printed
+    }
+}
+
+impl std::ops::DerefMut for Launch {
+    fn deref_mut(&mut self) -> &mut kernel::Launch {
+        &mut self.printed
+    }
+}
+
 /// The modes an invited person's run is never started in: a free shell on this Mac, as the owner.
-const FREE_SHELL: &[&str] = &["bypassPermissions"];
+const FREE_SHELL: &[PermissionMode] = &[PermissionMode::BypassPermissions];
 
 impl Launch {
     /// Makes this launch `person`'s and nobody else's: the process gets `KITH_PERSON` (the kernel's own env already
@@ -123,7 +103,7 @@ impl Launch {
     /// resolves the mode from the membership; this is the host's own check that nothing above it says otherwise.
     fn confine_to(&mut self, person: &str) -> Result<()> {
         if self.is_codex() {
-            bail!("{} runs on Codex; runs for anyone but the owner need Claude Code", self.harness);
+            bail!("{} runs on Codex; runs for anyone but the owner need Claude Code", self.agent);
         }
         if let Some(seen) = self.env.get("KITH_PERSON").filter(|p| p.as_str() != person) {
             bail!("the kernel launched this run for {seen}, not {person}");
@@ -131,21 +111,25 @@ impl Launch {
         for (k, v) in crate::kernel::both("PERSON", person) {
             self.env.insert(k, v);
         }
-        let safe = |m: &str| !m.is_empty() && !FREE_SHELL.contains(&m);
-        if !self.permission_mode.as_deref().is_some_and(safe) {
-            self.permission_mode = Some("default".into());
+        if self.permission_mode.is_none_or(|m| FREE_SHELL.contains(&m)) {
+            self.permission_mode = Some(PermissionMode::Default);
         }
-        if self.settings["permissions"]["defaultMode"].as_str().is_some_and(|m| !safe(m)) {
-            self.settings["permissions"]["defaultMode"] = "default".into();
+        // Claude Code's own settings, which the kernel passes on: their mode is Claude's word, read as the contract's.
+        let settings = self.printed.settings.get_or_insert_with(|| json!({}));
+        if !settings.is_object() {
+            *settings = json!({});
+        }
+        if !settings["permissions"].is_object() {
+            settings["permissions"] = json!({});
+        }
+        // Kept only when it is a mode this version knows and not a free shell; one it doesn't know might be either.
+        let known = |m: &str| serde_json::from_value::<PermissionMode>(Value::from(m)).is_ok_and(|p| p.as_str() == m);
+        let free = |m: &str| FREE_SHELL.iter().any(|f| f.as_str() == m);
+        if settings["permissions"]["defaultMode"].as_str().is_some_and(|m| !known(m) || free(m)) {
+            settings["permissions"]["defaultMode"] = PermissionMode::Default.as_str().into();
         }
         // Not even a card can switch the session into bypass later (see `meta`).
-        if !self.settings.is_object() {
-            self.settings = json!({});
-        }
-        if !self.settings["permissions"].is_object() {
-            self.settings["permissions"] = json!({});
-        }
-        self.settings["permissions"]["disableBypassPermissionsMode"] = "disable".into();
+        settings["permissions"]["disableBypassPermissionsMode"] = "disable".into();
         self.confined = true;
         Ok(())
     }
@@ -153,7 +137,7 @@ impl Launch {
     /// Whether this launch runs Codex (a backup entry), whose sessions take ACP's own parameters instead of Claude's
     /// `_meta`.
     pub fn is_codex(&self) -> bool {
-        self.harness == "codex"
+        self.harness == Some(Harness::Codex)
     }
 
     /// Whether a session made under `made` may be loaded by this run: only under the account that made it. A session
@@ -310,32 +294,26 @@ async fn run_bound(
 }
 
 pub async fn list(bin: &Path) -> Result<Vec<HqAgent>> {
-    let out = run(bin, &["ls", "--json"], None, LIST_TIMEOUT).await?;
+    let out = run(bin, &command::ls(), None, LIST_TIMEOUT).await?;
     serde_json::from_str(out.trim()).context("`kith ls --json` didn't print a JSON list of agents")
 }
 
-/// One registered hq project, from `kith project ls --json`.
-#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
-pub struct Project {
-    pub id: String,
-    #[serde(default)]
-    pub paths: Vec<String>,
-    /// The project's home folder, when it has one.
-    #[serde(default)]
-    pub home: Option<String>,
-    #[serde(default)]
-    pub parent: Option<String>,
-}
-
-impl Project {
+/// What the host does with a project of `kith project ls --json` (the kernel contract's `Project`).
+pub trait ProjectExt {
     /// The folder to work in: the home if it is a directory here, else the first path that is. None when this
     /// computer has none of them.
-    pub fn folder(&self) -> Option<String> {
+    fn folder(&self) -> Option<String>;
+
+    /// Every path the project is registered under, for matching a folder to its project.
+    fn all_paths(&self) -> impl Iterator<Item = &String>;
+}
+
+impl ProjectExt for Project {
+    fn folder(&self) -> Option<String> {
         self.home.iter().chain(&self.paths).find(|p| Path::new(p).is_dir()).cloned()
     }
 
-    /// Every path the project is registered under, for matching a folder to its project.
-    pub fn all_paths(&self) -> impl Iterator<Item = &String> {
+    fn all_paths(&self) -> impl Iterator<Item = &String> {
         self.home.iter().chain(&self.paths)
     }
 }
@@ -353,12 +331,6 @@ fn remember_projects(list: &[Project]) {
 /// The last project list hq gave, however old; empty before the first. For code that can't wait for hq.
 pub fn cached_projects() -> Vec<Project> {
     PROJECTS.locked().as_ref().map(|(_, l)| l.clone()).unwrap_or_default()
-}
-
-/// What `kith project ls --json` prints.
-#[derive(Deserialize)]
-struct Listing {
-    projects: Vec<Project>,
 }
 
 /// The projects without making a chat load wait on hq: the last list however old (refreshed behind the call when it
@@ -391,8 +363,8 @@ pub async fn projects(fresh: bool) -> Result<Vec<Project>> {
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
         bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
     };
-    let out = run(&bin, &["project", "ls", "--json"], None, LIST_TIMEOUT).await?;
-    let list = serde_json::from_str::<Listing>(out.trim())
+    let out = run(&bin, &command::project_ls(), None, LIST_TIMEOUT).await?;
+    let list = serde_json::from_str::<kernel::Projects>(out.trim())
         .context("`kith project ls --json` didn't print a JSON list of projects")?
         .projects;
     remember_projects(&list);
@@ -597,13 +569,7 @@ pub async fn launch(
     members: &Members,
     access: Option<&(crate::runauth::RunGrant, [(String, String); 2])>,
 ) -> Result<Launch> {
-    let mut args = vec![agent, "--launch-json"];
-    if let Some(backup) = backup {
-        args.extend(["--backup", backup]);
-    }
-    if let Some(project) = project {
-        args.extend(["-p", project]);
-    }
+    let args = command::launch(agent, backup, project);
     // The room the run is for: the kernel loads memory for it and `kith recall` from the run applies its rules.
     let mut env = room_env(room, members);
     let access = access.filter(|_| person.is_some());
@@ -625,9 +591,15 @@ pub async fn launch(
         launch.confine_to(person)?;
     }
     // A backup entry may run on another harness the host knows (Codex); the agent's own login is Claude.
-    let runs = if backup.is_some() { ["claude", "codex"].as_slice() } else { ["claude"].as_slice() };
-    if !launch.harness.is_empty() && !runs.contains(&launch.harness.as_str()) {
-        bail!("{agent} runs on {}; the host starts {} agents only", launch.harness, runs.join(" and "));
+    // A harness this version doesn't know is never started.
+    let runs =
+        if backup.is_some() { [Harness::Claude, Harness::Codex].as_slice() } else { [Harness::Claude].as_slice() };
+    if let Some(harness) = launch.harness
+        && !runs.contains(&harness)
+    {
+        let on = if harness == Harness::Unknown { "a harness this host doesn't know" } else { harness.as_str() };
+        let runs: Vec<&str> = runs.iter().map(|h| h.as_str()).collect();
+        bail!("{agent} runs on {on}; the host starts {} agents only", runs.join(" and "));
     }
     Ok(launch)
 }
@@ -783,15 +755,15 @@ impl Launch {
     /// `extraArgs` `disable-slash-commands`; model and effort → `model`, `effort` (hq already applied the user's pick).
     pub fn meta(&self) -> Value {
         let mut settings = match &self.settings {
-            Value::Object(_) => self.settings.clone(),
+            Some(s @ Value::Object(_)) => s.clone(),
             _ => json!({}),
         };
-        if let Some(mode) = self.permission_mode.as_deref().filter(|m| !m.is_empty()) {
+        if let Some(mode) = self.permission_mode {
             // hq's own settings may already say; its explicit mode wins, as `--permission-mode` does.
             if !settings["permissions"].is_object() {
                 settings["permissions"] = json!({});
             }
-            settings["permissions"]["defaultMode"] = mode.into();
+            settings["permissions"]["defaultMode"] = mode.as_str().into();
         }
         let mut options = Map::new();
         options.insert("settings".into(), settings);
@@ -864,6 +836,23 @@ impl Launch {
     }
 }
 
+/// A launch with the fields the kernel always prints and `over` on top, for tests: a launch without them isn't the
+/// contract's (see `kith_wire::kernel::Launch`).
+#[cfg(test)]
+pub(crate) fn printed_launch(over: Value) -> Launch {
+    let mut v = json!({
+        "version": 1, "agent": "house", "agent_version": "1", "cwd": "", "env": {}, "system_prompt": "",
+        "mcp_servers": {}, "add_dirs": [], "allowed_tools": [], "disable_slash_commands": false,
+        "cost_tag": {"agent": "house", "version": "1", "via": "serve"},
+    });
+    if let Value::Object(over) = over {
+        for (k, x) in over {
+            v[k] = x;
+        }
+    }
+    serde_json::from_value(v).expect("a launch the contract reads")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -878,7 +867,7 @@ mod tests {
 
     fn launch() -> Launch {
         serde_json::from_value(json!({
-            "version": 1, "agent": "house", "harness": "claude", "cwd": "/agents/house",
+            "version": 1, "agent": "house", "agent_version": "3", "harness": "claude", "cwd": "/agents/house",
             "env": {"KITH_AGENT": "house", "KITH_VIA": "serve"},
             "system_prompt": "You are house.",
             "settings": {"hooks": {"SessionStart": []}},
@@ -888,6 +877,7 @@ mod tests {
             "disable_slash_commands": true,
             "model": "haiku", "effort": "low", "permission_mode": "auto",
             "claude_args": ["--model", "haiku"],
+            "cost_tag": {"agent": "house", "version": "3", "model": "haiku", "effort": "low", "via": "serve"},
         }))
         .unwrap()
     }
@@ -895,7 +885,7 @@ mod tests {
     #[test]
     fn a_session_loads_only_under_the_account_that_made_it() {
         let on = |harness: &str, account: Option<&str>| -> Launch {
-            serde_json::from_value(json!({"harness": harness, "account_id": account})).unwrap()
+            printed_launch(json!({"harness": harness, "account_id": account}))
         };
         let work = on("claude", Some("claude:work"));
         assert!(work.may_load(Some("claude:work")));
@@ -970,7 +960,7 @@ mod tests {
         let here = std::env::temp_dir().to_string_lossy().into_owned();
         let project: Project = serde_json::from_value(json!({
             "id": "hq", "paths": ["/nowhere/a", here], "home": "/nowhere/home", "remotes": [], "parent": null,
-            "memory": null, "exists": true,
+            "memory": "/mem/hq", "exists": true,
         }))
         .unwrap();
         assert_eq!(project.folder(), Some(here.clone()));
@@ -1010,7 +1000,7 @@ mod tests {
 
     #[test]
     fn a_sparse_launch_still_makes_a_session() {
-        let sparse: Launch = serde_json::from_value(json!({"version": 1, "system_prompt": "p"})).unwrap();
+        let sparse = printed_launch(json!({"system_prompt": "p"}));
         let params = sparse.session_params(&bot(None), None);
         assert_eq!(params["cwd"], "/agents/house", "the bot's folder");
         let o = &params["_meta"]["claudeCode"]["options"];
@@ -1024,31 +1014,34 @@ mod tests {
 
     #[test]
     fn an_invitees_launch_carries_the_person_and_never_a_free_shell() {
-        let mut l: Launch = serde_json::from_value(json!({
+        let mut l = printed_launch(json!({
             "harness": "claude", "permission_mode": "bypassPermissions",
             "settings": {"permissions": {"defaultMode": "bypassPermissions"}},
-        }))
-        .unwrap();
+        }));
         l.confine_to("sam").unwrap();
-        assert_eq!(l.permission_mode.as_deref(), Some("default"));
-        assert_eq!(l.settings["permissions"]["defaultMode"], "default");
+        assert_eq!(l.permission_mode, Some(PermissionMode::Default));
+        assert_eq!(l.settings.as_ref().unwrap()["permissions"]["defaultMode"], "default");
         assert_eq!(l.env.get("KITH_PERSON").map(String::as_str), Some("sam"));
         assert_eq!(l.env.get("HQ_PERSON").map(String::as_str), Some("sam"));
         // No mode at all is the least, not the agent's.
-        let mut none: Launch = serde_json::from_value(json!({"harness": "claude"})).unwrap();
+        let mut none = printed_launch(json!({"harness": "claude"}));
         none.confine_to("sam").unwrap();
-        assert_eq!(none.permission_mode.as_deref(), Some("default"));
+        assert_eq!(none.permission_mode, Some(PermissionMode::Default));
+        // A settings mode this version doesn't know is not left for Claude Code to read as it likes.
+        let mut odd = printed_launch(json!({"settings": {"permissions": {"defaultMode": "delegate"}}}));
+        odd.confine_to("sam").unwrap();
+        assert_eq!(odd.settings.as_ref().unwrap()["permissions"]["defaultMode"], "default");
         // Another person's launch, or Codex, is not theirs to run.
-        let mut other: Launch = serde_json::from_value(json!({"env": {"KITH_PERSON": "kim"}})).unwrap();
+        let mut other = printed_launch(json!({"env": {"KITH_PERSON": "kim"}}));
         assert!(other.confine_to("sam").is_err());
-        let mut codex: Launch = serde_json::from_value(json!({"harness": "codex"})).unwrap();
+        let mut codex = printed_launch(json!({"harness": "codex"}));
         assert!(codex.confine_to("sam").is_err());
         // The session itself can't be moved into bypass later (an exit-plan card, a settings rule).
-        assert_eq!(l.settings["permissions"]["disableBypassPermissionsMode"], "disable");
+        assert_eq!(l.settings.as_ref().unwrap()["permissions"]["disableBypassPermissionsMode"], "disable");
         let meta = l.meta();
         assert_eq!(meta["claudeCode"]["options"]["allowDangerouslySkipPermissions"], false);
         assert_eq!(meta["claudeCode"]["options"]["settings"]["permissions"]["disableBypassPermissionsMode"], "disable");
-        let owner: Launch = serde_json::from_value(json!({"harness": "claude"})).unwrap();
+        let owner = printed_launch(json!({"harness": "claude"}));
         assert!(owner.meta()["claudeCode"]["options"].get("allowDangerouslySkipPermissions").is_none());
     }
 

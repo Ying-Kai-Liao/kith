@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "e92661788a937ac03d47351c693c335a5f9e7d44fbf3cf0295906327ec952087"
+    public static let sha256 = "ce851f4736935ee5d980c73e627004cd277ae05da7fa15138eb686a8db369f87"
 }
 
 extension HostContract {
@@ -157,6 +157,57 @@ extension HostContract {
         /// A value this version doesn't know is `.notShared`.
         public init(from decoder: Decoder) throws {
             self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .notShared
+        }
+    }
+
+    /// Where a bot's conversation stands: a turn running, a turn waiting for the owner to approve a step, asks waiting behind a running turn, the last ask stopped, or nothing going on. One this version doesn't know reads as running: a turn is over only when done says so.
+    public enum ConversationState: String, Codable, Hashable, Sendable {
+        case running
+        case waitingApproval
+        case queued
+        case stopped
+        case idle
+
+        /// A value this version doesn't know is `.running`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .running
+        }
+    }
+
+    /// A transcript entry as a bot sees it: its ask, the agent's words, a notice that ends the turn with an error, or a bare wait for the owner to approve a step. One this version doesn't know is its own kind: a bot skips it.
+    public enum BotEntryKind: String, Codable, Hashable, Sendable {
+        case user
+        case agent
+        case notice
+        case waiting
+        /// A value this version doesn't know.
+        case unknown
+
+        /// A value this version doesn't know is `.unknown`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        }
+    }
+
+    /// The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status.
+    public enum BotErrorCode: String, Codable, Hashable, Sendable {
+        case pending
+        case notGranted
+        case rateLimited
+        case busy
+        case notFound
+        case badRequest
+        case tooLong
+        case notSupported
+        case syncing
+        case heldByOtherWriter
+        case tooMany
+        /// A value this version doesn't know.
+        case unknown
+
+        /// A value this version doesn't know is `.unknown`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
         }
     }
 
@@ -765,6 +816,159 @@ extension HostContract {
         }
     }
 
+    /// A bot's owner, by the name people know them by.
+    public struct BotOwner: Codable, Hashable, Sendable {
+        public var name: String
+
+        public init(name: String) {
+            self.name = name
+        }
+    }
+
+    /// A bot's own state, owner and agents. The agents are the live answer: none until the bot is allowed, and one its owner lost is gone at once.
+    public struct BotSelf: Codable, Hashable, Sendable {
+        public var botId: String
+        public var name: String
+        public var state: BotGuestState
+        public var owner: BotOwner
+        public var agents: [GrantedAgent]
+        public var limits: BotLimits
+        public var version: String
+        public var minClient: String
+
+        public init(botId: String, name: String, state: BotGuestState, owner: BotOwner, agents: [GrantedAgent], limits: BotLimits, version: String, minClient: String) {
+            self.botId = botId
+            self.name = name
+            self.state = state
+            self.owner = owner
+            self.agents = agents
+            self.limits = limits
+            self.version = version
+            self.minClient = minClient
+        }
+    }
+
+    /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
+    public struct BotProof: Codable, Hashable, Sendable {
+        public var state: BotGuestState
+        public var botId: String?
+        public var owner: String?
+        public var agents: [String]?
+
+        public init(state: BotGuestState, botId: String? = nil, owner: String? = nil, agents: [String]? = nil) {
+            self.state = state
+            self.botId = botId
+            self.owner = owner
+            self.agents = agents
+        }
+    }
+
+    /// An ask taken: its conversation, its entry and turn, and whether it runs now or waits (queued: how many asks wait in the conversation). A retry with the same clientNonce answers the same, marked duplicate, and sends nothing.
+    public struct BotAsked: Codable, Hashable, Sendable {
+        public var conversation: String
+        public var entryId: String
+        public var turn: Int64
+        public var seq: Int64
+        public var state: ConversationState
+        public var queued: Int64
+        public var duplicate: Bool?
+
+        public init(conversation: String, entryId: String, turn: Int64, seq: Int64, state: ConversationState, queued: Int64, duplicate: Bool? = nil) {
+            self.conversation = conversation
+            self.entryId = entryId
+            self.turn = turn
+            self.seq = seq
+            self.state = state
+            self.queued = queued
+            self.duplicate = duplicate
+        }
+    }
+
+    /// Who sent an ask: the bot, and the person it spoke for when it said.
+    public struct BotSender: Codable, Hashable, Sendable {
+        public var botId: String
+        public var name: String
+        public var speaker: String?
+
+        public init(botId: String, name: String, speaker: String? = nil) {
+            self.botId = botId
+            self.name = name
+            self.speaker = speaker
+        }
+    }
+
+    /// A transcript entry as a bot sees it: never a thought, a tool call, a plan, an attachment, or a permission card's tool. sender is on an ask a bot sent, final on the agent's words, error on a notice.
+    public struct BotEntry: Codable, Hashable, Sendable {
+        public var id: String
+        public var seq: Int64
+        public var turn: Int64
+        public var at: Int64
+        public var conversation: String
+        public var kind: BotEntryKind
+        public var text: String
+        public var sender: BotSender?
+        public var final: Bool?
+        public var error: Bool?
+
+        public init(id: String, seq: Int64, turn: Int64, at: Int64, conversation: String, kind: BotEntryKind, text: String, sender: BotSender? = nil, final: Bool? = nil, error: Bool? = nil) {
+            self.id = id
+            self.seq = seq
+            self.turn = turn
+            self.at = at
+            self.conversation = conversation
+            self.kind = kind
+            self.text = text
+            self.sender = sender
+            self.final = final
+            self.error = error
+        }
+    }
+
+    /// A bot's conversation since afterSeq. done: the last ask has its final answer, an error notice, or was taken back; turn is the last ask's.
+    public struct BotThread: Codable, Hashable, Sendable {
+        public var conversation: String
+        public var entries: [BotEntry]
+        public var done: Bool
+        public var turn: Int64?
+        public var state: ConversationState
+
+        public init(conversation: String, entries: [BotEntry], done: Bool, turn: Int64? = nil, state: ConversationState) {
+            self.conversation = conversation
+            self.entries = entries
+            self.done = done
+            self.turn = turn
+            self.state = state
+        }
+    }
+
+    /// One of a bot's conversations, with the external ref it gave it.
+    public struct BotConversation: Codable, Hashable, Sendable {
+        public var conversation: String
+        public var agent: String
+        public var ref: String?
+        public var originLabel: String
+        public var lastAt: Int64
+        public var state: ConversationState
+
+        public init(conversation: String, agent: String, ref: String? = nil, originLabel: String, lastAt: Int64, state: ConversationState) {
+            self.conversation = conversation
+            self.agent = agent
+            self.ref = ref
+            self.originLabel = originLabel
+            self.lastAt = lastAt
+            self.state = state
+        }
+    }
+
+    /// A bot's conversations, newest first.
+    public struct BotConversations: Codable, Hashable, Sendable {
+        public var conversations: [BotConversation]
+
+        public init(conversations: [BotConversation]) {
+            self.conversations = conversations
+        }
+    }
+
     /// What `hello` takes.
     public struct HelloParams: Codable, Hashable, Sendable {
         public init() {
@@ -1135,6 +1339,83 @@ extension HostContract {
         }
     }
 
+    /// What `botStatus` takes.
+    public struct BotStatusParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
+    /// What `proveBotInvite` takes.
+    public struct ProveBotInviteParams: Codable, Hashable, Sendable {
+        public var inviteId: String
+        public var token: String
+
+        public init(inviteId: String, token: String) {
+            self.inviteId = inviteId
+            self.token = token
+        }
+    }
+
+    /// What `botAsk` takes.
+    public struct BotAskParams: Codable, Hashable, Sendable {
+        public var agent: String?
+        public var text: String
+        public var conversation: String?
+        public var ref: String?
+        public var room: String?
+        public var speaker: String?
+        public var clientNonce: String
+        public var noQueue: Bool?
+
+        public init(agent: String? = nil, text: String, conversation: String? = nil, ref: String? = nil, room: String? = nil, speaker: String? = nil, clientNonce: String, noQueue: Bool? = nil) {
+            self.agent = agent
+            self.text = text
+            self.conversation = conversation
+            self.ref = ref
+            self.room = room
+            self.speaker = speaker
+            self.clientNonce = clientNonce
+            self.noQueue = noQueue
+        }
+    }
+
+    /// What `botThread` takes.
+    public struct BotThreadParams: Codable, Hashable, Sendable {
+        public var conversation: String
+        public var afterSeq: Int64?
+        public var limit: Int64?
+
+        public init(conversation: String, afterSeq: Int64? = nil, limit: Int64? = nil) {
+            self.conversation = conversation
+            self.afterSeq = afterSeq
+            self.limit = limit
+        }
+    }
+
+    /// What `botConversations` takes.
+    public struct BotConversationsParams: Codable, Hashable, Sendable {
+        public var limit: Int64?
+
+        public init(limit: Int64? = nil) {
+            self.limit = limit
+        }
+    }
+
+    /// What `botStop` takes.
+    public struct BotStopParams: Codable, Hashable, Sendable {
+        public var conversation: String
+
+        public init(conversation: String) {
+            self.conversation = conversation
+        }
+    }
+
+    /// What `botLeave` takes.
+    public struct BotLeaveParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
     /// Each method's name, as called.
     public enum Method: String, CaseIterable, Sendable {
         case hello
@@ -1170,6 +1451,13 @@ extension HostContract {
         case setBotLimits
         case resolveCitation
         case proveInvite
+        case botStatus
+        case proveBotInvite
+        case botAsk
+        case botThread
+        case botConversations
+        case botStop
+        case botLeave
     }
 
     /// What an invited person may call.
@@ -1177,6 +1465,12 @@ extension HostContract {
 
     /// What an invited person's unproven device may call.
     public static let unprovenMethods: [Method] = [.proveInvite]
+
+    /// What a bot guest (the pending ones too: see botPending) may call.
+    public static let botMethods: [Method] = [.hello, .botStatus, .proveBotInvite, .botAsk, .botThread, .botConversations, .botStop, .botLeave]
+
+    /// What a bot guest that is still joining or waiting for its owner's allow may call.
+    public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
 
     /// Decodes `data` as the contract type `name`; false when the contract has no such type. For the fixtures' tests.
     public static func decode(_ name: String, _ data: Data) throws -> Bool {
@@ -1216,6 +1510,15 @@ extension HostContract {
         case "BotGuest": _ = try d.decode(BotGuest.self, from: data)
         case "BotGuests": _ = try d.decode(BotGuests.self, from: data)
         case "BotGuestAnswer": _ = try d.decode(BotGuestAnswer.self, from: data)
+        case "BotOwner": _ = try d.decode(BotOwner.self, from: data)
+        case "BotSelf": _ = try d.decode(BotSelf.self, from: data)
+        case "BotProof": _ = try d.decode(BotProof.self, from: data)
+        case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
+        case "BotSender": _ = try d.decode(BotSender.self, from: data)
+        case "BotEntry": _ = try d.decode(BotEntry.self, from: data)
+        case "BotThread": _ = try d.decode(BotThread.self, from: data)
+        case "BotConversation": _ = try d.decode(BotConversation.self, from: data)
+        case "BotConversations": _ = try d.decode(BotConversations.self, from: data)
         case "HelloParams": _ = try d.decode(HelloParams.self, from: data)
         case "KithInfoParams": _ = try d.decode(KithInfoParams.self, from: data)
         case "StartChatParams": _ = try d.decode(StartChatParams.self, from: data)
@@ -1249,6 +1552,13 @@ extension HostContract {
         case "SetBotLimitsParams": _ = try d.decode(SetBotLimitsParams.self, from: data)
         case "ResolveCitationParams": _ = try d.decode(ResolveCitationParams.self, from: data)
         case "ProveInviteParams": _ = try d.decode(ProveInviteParams.self, from: data)
+        case "BotStatusParams": _ = try d.decode(BotStatusParams.self, from: data)
+        case "ProveBotInviteParams": _ = try d.decode(ProveBotInviteParams.self, from: data)
+        case "BotAskParams": _ = try d.decode(BotAskParams.self, from: data)
+        case "BotThreadParams": _ = try d.decode(BotThreadParams.self, from: data)
+        case "BotConversationsParams": _ = try d.decode(BotConversationsParams.self, from: data)
+        case "BotStopParams": _ = try d.decode(BotStopParams.self, from: data)
+        case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         default: return false
         }
         return true

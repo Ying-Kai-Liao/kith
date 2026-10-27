@@ -6,7 +6,7 @@
 //! A group's members each work in their own pick for the group's lane, else their own default: a group has no
 //! folder of its own.
 
-use crate::agent::hq::{self, Project};
+use crate::agent::hq::{self, Project, ProjectExt as _};
 use crate::agent::workspace;
 use crate::store::{BotConfig, Lane, Store, lane_key};
 use anyhow::{Context as _, Result, anyhow, bail};
@@ -408,7 +408,7 @@ mod tests {
             id: id.into(),
             home: home.map(str::to_owned),
             paths: paths.iter().map(|p| (*p).to_owned()).collect(),
-            parent: None,
+            ..Project::default()
         }
     }
 

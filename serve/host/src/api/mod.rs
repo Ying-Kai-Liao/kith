@@ -86,7 +86,7 @@ pub fn error_status(e: &anyhow::Error) -> (StatusCode, String) {
 /// A stable machine word for a failed call from a bot guest (`err.code`, docs/kith-bot-guests.md 5.6); None for
 /// everyone else's errors, and apps ignore it.
 pub fn error_code(e: &anyhow::Error) -> Option<&'static str> {
-    e.downcast_ref::<botguests::BotError>().map(|bot| bot.code)
+    e.downcast_ref::<botguests::BotError>().map(|bot| bot.code.as_str())
 }
 
 fn str_arg<'a>(b: &'a Value, k: &str) -> Result<&'a str> {
@@ -289,18 +289,18 @@ async fn member_call(
         shaped["grantedAgents"] = roles::granted_agents(hub, person).await.into();
     }
     #[cfg(test)]
-    answers_as_the_contract_says(method, &shaped);
+    answers_as_the_contract_says(if proven { "member" } else { "unproven" }, method, &shaped);
     Ok(shaped)
 }
 
-/// Under test, every answer an invited person gets is what the host RPC contract (serve/contract/host/contract.json)
-/// says its method answers with: the strict producer check, so a field or word the contract doesn't name fails the
-/// test that sent it.
+/// Under test, every answer an invited person or a bot gets is what the host RPC contract
+/// (serve/contract/host/contract.json) says its method answers `who` with: the strict producer check, so a field or
+/// word the contract doesn't name fails the test that sent it.
 #[cfg(test)]
-fn answers_as_the_contract_says(method: &str, answer: &Value) {
+pub(super) fn answers_as_the_contract_says(who: &str, method: &str, answer: &Value) {
     use kith_wire::{check::Mode, rpc::SCHEMA};
-    let m =
-        SCHEMA.method(method).unwrap_or_else(|| panic!("{method} answered a member but is not in the host contract"));
+    let m = SCHEMA.method(method).filter(|m| m.who.contains(&who));
+    let m = m.unwrap_or_else(|| panic!("{method} answered a {who} but the host contract doesn't open it to one"));
     let problems = SCHEMA.check(m.result, answer, Mode::Producer);
-    assert_eq!(problems, Vec::<String>::new(), "{method} answered a member outside the host contract:\n{answer:#}");
+    assert_eq!(problems, Vec::<String>::new(), "{method} answered a {who} outside the host contract:\n{answer:#}");
 }

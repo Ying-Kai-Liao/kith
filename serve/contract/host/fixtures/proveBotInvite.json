@@ -1,0 +1,12 @@
+{
+  "method": "proveBotInvite",
+  "type": "BotProof",
+  "body": {
+    "state": "active",
+    "botId": "bg_0ae28df259e8",
+    "owner": "the owner",
+    "agents": [
+      "house"
+    ]
+  }
+}

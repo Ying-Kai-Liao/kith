@@ -1,6 +1,6 @@
 //! The host RPC contract (serve/contract/host/contract.json) against the host itself: an invited person calls the
-//! member methods for real, and what they get back is the contract's (the producer check in `member_call`) and is what
-//! the shared fixtures in serve/contract/host/fixtures/ are made of. The apps read those fixtures in their own tests,
+//! member methods and a bot guest the bot methods for real, and what they get back is the contract's (the producer
+//! check in `member_call` and `bot_call`) and is what the shared fixtures in serve/contract/host/fixtures/ are made of. The apps read those fixtures in their own tests,
 //! so a change to what the host sends is seen there.
 //!
 //! `KITH_WRITE_FIXTURES=1 cargo test api::contract_tests` writes the fixtures again from today's answers; otherwise the
@@ -11,8 +11,10 @@
 use super::devices::Caller;
 use super::rig::Rig;
 use super::{dispatch, roles};
+use crate::remote::botsync;
+use crate::remote::crypto::{self, b64};
 use crate::remote::members::{self, Listed};
-use crate::store::{EntryKind, Lane};
+use crate::store::{EntryKind, Lane, Scope};
 use kith_wire::check::Mode;
 use kith_wire::rpc::{self, SCHEMA};
 use serde_json::{Value, json};
@@ -111,38 +113,93 @@ async fn member_answers(r: &Rig, sam: &Caller) -> BTreeMap<&'static str, Value> 
     got
 }
 
-#[tokio::test]
-async fn the_member_methods_answer_as_the_contract_and_its_fixtures_say() {
-    let r = Rig::new().await;
-    r.owner_bot("house");
-    let sam = sam(&r).await;
-    let answers = member_answers(&r, &sam).await;
+/// A bot guest of the owner's (`Rex`, with `house`), joined the way the cloud lists it, then proven, asking, read back,
+/// stopped and leaving. Each answer is filed by its fixture's name; the bot's `hello` is `hello-as-bot`.
+async fn bot_answers(r: &Rig) -> BTreeMap<&'static str, (&'static str, Value)> {
+    let mut got = BTreeMap::new();
+    let made =
+        call(r, &Caller::Local, "createBotInvite", json!({"name": "Rex", "provider": "grok", "agents": ["house"]}))
+            .await;
+    let key = b64(&crypto::random::<32>());
+    let invite = made["inviteId"].as_str().unwrap().to_owned();
+    let listed = botsync::Listed {
+        bot_device_id: "bd_rex".into(),
+        invite_id: invite.clone(),
+        device_key: key.clone(),
+        ..Default::default()
+    };
+    botsync::apply(&r.hub, &[listed]).await.unwrap();
+    let rex = Caller::Device { key, scopes: vec![Scope::Control] };
+    let token = made["link"].as_str().unwrap().split("#t=").nth(1).unwrap().split('&').next().unwrap().to_owned();
+    let proof = call(r, &rex, "proveBotInvite", json!({"inviteId": invite, "token": token})).await;
+    got.insert("proveBotInvite", ("proveBotInvite", proof));
+    got.insert("hello-as-bot", ("hello", call(r, &rex, "hello", json!({})).await));
+    got.insert("botStatus", ("botStatus", call(r, &rex, "botStatus", json!({})).await));
+    let ask = json!({"agent": "house", "ref": "grok:8841", "text": "what's on the list?", "clientNonce": "n1", "speaker": "Alice"});
+    let asked = call(r, &rex, "botAsk", ask).await;
+    let conv = asked["conversation"].as_str().unwrap().to_owned();
+    let user = r.hub.store.entry(asked["entryId"].as_str().unwrap()).unwrap();
+    got.insert("botAsk", ("botAsk", asked));
+    // The answer, a step waiting for the owner, and a failed turn's notice: one entry of every kind a bot sees.
+    let row = r.hub.store.bot_conversation_by_id(&conv).unwrap();
+    let lane = Lane::in_thread(&row.chat_bot_id, &row.thread_root);
+    r.hub.add_entry(&lane, EntryKind::Agent, user.turn, &json!({"text": "Milk and eggs.", "final": true})).unwrap();
+    r.hub.add_entry(&lane, EntryKind::Permission, user.turn, &json!({"status": "pending", "tool": "Bash"})).unwrap();
+    let crashed = json!({"text": "The agent crashed", "style": "error"});
+    r.hub.add_entry(&lane, EntryKind::Notice, user.turn, &crashed).unwrap();
+    got.insert("botThread", ("botThread", call(r, &rex, "botThread", json!({"conversation": conv})).await));
+    got.insert("botConversations", ("botConversations", call(r, &rex, "botConversations", json!({})).await));
+    got.insert("botStop", ("botStop", call(r, &rex, "botStop", json!({"conversation": conv})).await));
+    got.insert("botLeave", ("botLeave", call(r, &rex, "botLeave", json!({})).await));
+    got
+}
+
+/// Each answer passes the producer check and has its fixture's shape; `KITH_WRITE_FIXTURES=1` writes them instead.
+fn answers_are_their_fixtures(who: &str, answers: &BTreeMap<&str, (&str, Value)>) {
     let write = std::env::var_os("KITH_WRITE_FIXTURES").is_some();
     let dir = fixtures_dir();
-    for (method, body) in &answers {
+    for (name, (method, body)) in answers {
         let m = SCHEMA.method(method).unwrap();
-        assert!(m.who.contains(&"member"), "{method}");
-        // `member_call` already ran the producer check; this one names the method when it fails here.
+        assert!(m.who.contains(&who), "{method} isn't open to a {who}");
+        // `member_call` and `bot_call` already ran the producer check; this one names the method when it fails here.
         let problems = SCHEMA.check(m.result, body, Mode::Producer);
         assert_eq!(problems, Vec::<String>::new(), "{method}");
-        let path = dir.join(format!("{method}.json"));
+        let path = dir.join(format!("{name}.json"));
         if write {
             let fixture = json!({"method": method, "type": m.result, "body": with_stand_in_keys(body)});
             std::fs::write(&path, serde_json::to_string_pretty(&fixture).unwrap() + "\n").unwrap();
             continue;
         }
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|_| {
-            panic!("no fixture for {method}: KITH_WRITE_FIXTURES=1 cargo test api::contract_tests")
-        });
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("no fixture {name}: KITH_WRITE_FIXTURES=1 cargo test api::contract_tests"));
         let fixture: Value = serde_json::from_str(&text).unwrap();
         assert_eq!((fixture["method"].as_str(), fixture["type"].as_str()), (Some(*method), Some(m.result)));
         assert_eq!(
             shape(&fixture["body"]),
             shape(body),
-            "{method} answers in a new shape: KITH_WRITE_FIXTURES=1 cargo test api::contract_tests, and see that every \
+            "{name} answers in a new shape: KITH_WRITE_FIXTURES=1 cargo test api::contract_tests, and see that every \
              app still reads it"
         );
     }
+}
+
+#[tokio::test]
+async fn the_member_methods_answer_as_the_contract_and_its_fixtures_say() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let sam = sam(&r).await;
+    let answers = member_answers(&r, &sam).await.into_iter().map(|(m, v)| (m, (m, v))).collect();
+    answers_are_their_fixtures("member", &answers);
+}
+
+#[tokio::test]
+async fn the_bot_methods_answer_as_the_contract_and_its_fixtures_say() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let answers = bot_answers(&r).await;
+    let methods: std::collections::BTreeSet<_> = answers.values().map(|(m, _)| *m).collect();
+    assert_eq!(methods, rpc::BOT_METHODS.iter().copied().collect(), "a fixture for every bot method");
+    answers_are_their_fixtures("bot", &answers);
 }
 
 #[test]
@@ -156,6 +213,18 @@ fn the_member_lists_are_the_contracts() {
     }
     for m in SCHEMA.methods {
         assert_eq!(m.who.contains(&"member"), rpc::MEMBER_METHODS.contains(&m.name), "{}", m.name);
+    }
+}
+
+#[test]
+fn the_bot_lists_are_the_contracts() {
+    for m in SCHEMA.methods {
+        assert_eq!(m.who.contains(&"bot"), rpc::BOT_METHODS.contains(&m.name), "{}", m.name);
+        assert_eq!(m.who.contains(&"botPending"), rpc::BOT_PENDING_METHODS.contains(&m.name), "{}", m.name);
+        assert_eq!(roles::bot_may(m.name), m.who.contains(&"bot"), "{}", m.name);
+    }
+    for m in rpc::BOT_PENDING_METHODS {
+        assert!(rpc::BOT_METHODS.contains(m), "a pending bot's method is a bot's: {m}");
     }
 }
 

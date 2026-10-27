@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
 use kith_wire::crypto::{computer_id, random, unb64_n};
-use serde::Deserialize;
+use kith_wire::rpc::{self, BotProof, BotSelf, ProveBotInviteParams, method};
 use serde_json::{Value, json};
 use tokio::time::{Instant, sleep};
 
@@ -66,30 +66,14 @@ pub enum Patience {
     Until(Instant),
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BotStatus {
-    #[serde(default)]
-    pub bot_id: String,
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
-    pub state: String,
-    #[serde(default)]
-    pub owner: Owner,
-    #[serde(default)]
-    pub agents: Vec<AgentRef>,
-    #[serde(default)]
-    pub min_client: Option<String>,
-    /// Who decides on a pending bot, when the host says (the Mac's owner).
-    #[serde(default)]
-    pub approver: Option<String>,
+/// An answer of the host's, read as the contract's type. One this version can't read is a version mismatch.
+pub fn answer<T: serde::de::DeserializeOwned>(v: Value) -> Result<T, CliError> {
+    serde_json::from_value(v).map_err(|_| CliError::version())
 }
 
-#[derive(Debug, Default, Deserialize)]
-pub struct Owner {
-    #[serde(default)]
-    pub name: String,
+/// The contract's params for a method, as the JSON a call sends.
+pub fn params<T: serde::Serialize>(p: &T) -> Value {
+    serde_json::to_value(p).unwrap_or_default()
 }
 
 /// `1.2.3` < `1.10.0`; anything unparsable counts as 0.
@@ -115,7 +99,7 @@ pub struct Client<'a> {
     chan: Option<Channel>,
     connected_before: bool,
     sub: Option<u64>,
-    sub_since: u64,
+    sub_since: i64,
     pub tuning: Tuning,
 }
 
@@ -260,12 +244,12 @@ impl<'a> Client<'a> {
     // ---- events ----
 
     /// Starts `sub: "events"` from `since`.
-    pub async fn open_events(&mut self, since: u64) -> Result<(), CliError> {
+    pub async fn open_events(&mut self, since: i64) -> Result<(), CliError> {
         self.sub_since = since;
         self.resubscribe().await
     }
 
-    pub fn advance_events(&mut self, seq: u64) {
+    pub fn advance_events(&mut self, seq: i64) {
         self.sub_since = self.sub_since.max(seq);
     }
 
@@ -313,13 +297,12 @@ impl<'a> Client<'a> {
     // ---- status and joining ----
 
     /// `botStatus`, written to the cached config. Works while pending.
-    pub async fn refresh_status(&mut self) -> Result<BotStatus, CliError> {
-        let v = self.call("botStatus", json!({})).await?;
-        let st: BotStatus = serde_json::from_value(v).map_err(|_| CliError::version())?;
-        if st.min_client.as_deref().is_some_and(|min| version_lt(CLIENT_VERSION, min)) {
+    pub async fn refresh_status(&mut self) -> Result<BotSelf, CliError> {
+        let st: BotSelf = answer(self.call(method::BOT_STATUS, params(&rpc::BotStatusParams {})).await?)?;
+        if version_lt(CLIENT_VERSION, &st.min_client) {
             return Err(CliError::version());
         }
-        let state = State::from_wire(&st.state).ok_or_else(CliError::version)?;
+        let state = State::of(st.state).ok_or_else(CliError::version)?;
         if !st.bot_id.is_empty() {
             self.guest.bot_id = Some(st.bot_id.clone());
         }
@@ -327,7 +310,11 @@ impl<'a> Client<'a> {
             self.guest.name.clone_from(&st.name);
         }
         self.guest.owner = Some(st.owner.name.clone()).filter(|o| !o.is_empty());
-        self.guest.agents.clone_from(&st.agents);
+        self.guest.agents = st
+            .agents
+            .iter()
+            .map(|a| AgentRef { agent: a.agent.clone(), name: a.name.clone().unwrap_or_default() })
+            .collect();
         self.guest.state = state;
         if state != State::Joining {
             self.guest.token = None;
@@ -337,14 +324,17 @@ impl<'a> Client<'a> {
     }
 
     /// Shows the invite token to the computer (`proveBotInvite`), once, then reads the bot's status.
-    pub async fn prove(&mut self) -> Result<BotStatus, CliError> {
+    pub async fn prove(&mut self) -> Result<BotSelf, CliError> {
         let Some(token) = self.guest.token.clone() else {
             return Err(CliError::invite(
                 "Joining isn't finished and this VM no longer holds the invite. Ask for a new invite link.",
             ));
         };
         let proved = self
-            .call("proveBotInvite", json!({"inviteId": self.guest.invite_id, "token": token}))
+            .call(
+                method::PROVE_BOT_INVITE,
+                params(&ProveBotInviteParams { invite_id: self.guest.invite_id.clone(), token }),
+            )
             .await
             .map_err(|e| match e.code {
                 // The computer refusing the proof is a problem with the invite, not with the bot's access.
@@ -353,7 +343,8 @@ impl<'a> Client<'a> {
                 }
                 _ => e,
             })?;
-        let state = proved["state"].as_str().and_then(State::from_wire).ok_or_else(CliError::version)?;
+        let proved: BotProof = answer(proved)?;
+        let state = State::of(proved.state).ok_or_else(CliError::version)?;
         self.guest.state = state;
         self.guest.token = None;
         self.save()?;

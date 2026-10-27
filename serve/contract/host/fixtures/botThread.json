@@ -1,0 +1,65 @@
+{
+  "method": "botThread",
+  "type": "BotThread",
+  "body": {
+    "conversation": "cv_TyeJsSuD46jZvycm",
+    "entries": [
+      {
+        "id": "aa51751c-9c39-410b-8979-115d90a48799",
+        "seq": 14,
+        "turn": 1,
+        "at": 1793005407724,
+        "conversation": "cv_TyeJsSuD46jZvycm",
+        "kind": "user",
+        "text": "what's on the list?",
+        "sender": {
+          "botId": "bg_0ae28df259e8",
+          "name": "Rex",
+          "speaker": "Alice"
+        }
+      },
+      {
+        "id": "2408c3b6-cb5b-423e-90de-c32878d1ff56",
+        "seq": 9,
+        "turn": 1,
+        "at": 1793005407728,
+        "conversation": "cv_TyeJsSuD46jZvycm",
+        "kind": "agent",
+        "text": "Milk and eggs.",
+        "final": true
+      },
+      {
+        "id": "6fa5930e-d02b-4ce6-9601-b4c128e9ebe8",
+        "seq": 11,
+        "turn": 1,
+        "at": 1793005407730,
+        "conversation": "cv_TyeJsSuD46jZvycm",
+        "kind": "waiting",
+        "text": "Waiting for the owner to approve a step"
+      },
+      {
+        "id": "56153272-338d-4c3d-ac7d-803c47ea32e4",
+        "seq": 12,
+        "turn": 1,
+        "at": 1793005407731,
+        "conversation": "cv_TyeJsSuD46jZvycm",
+        "kind": "notice",
+        "text": "The agent crashed",
+        "error": true
+      },
+      {
+        "id": "60312411-956f-4da3-afb0-7f607c9fd4bf",
+        "seq": 18,
+        "turn": 1,
+        "at": 1793005407748,
+        "conversation": "cv_TyeJsSuD46jZvycm",
+        "kind": "notice",
+        "text": "Couldn't start the agent: kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)",
+        "error": true
+      }
+    ],
+    "done": true,
+    "turn": 1,
+    "state": "idle"
+  }
+}

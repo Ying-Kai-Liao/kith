@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """A stand-in for the `kith` CLI: `ls --json` lists one agent, `<agent> --launch-json` describes how to start it,
 `project ls --json` lists the projects in `projects.json` (`{"projects": [...]}`) and `project add <id> <path>` adds one.
+What it prints for those three is the kernel contract's (serve/contract/kernel/contract.json), as the real kith's is.
 
 STUB_HQ_HOME is the agent's folder. Every call is appended to calls.jsonl there (arguments, KITH_VIA, working
 directory). `house set permission MODE` writes the file `permission` there, which --info-json and --launch-json report
@@ -56,7 +57,7 @@ elif args[:2] == ["project", "add"]:
         print(f"project {args[2]} already exists", file=sys.stderr)
         sys.exit(1)
     projects.append({"id": args[2], "paths": [args[3]], "home": args[3], "remotes": [], "parent": None,
-                     "memory": None, "exists": True})
+                     "memory": os.path.join(home, "state", "projects", args[2]), "exists": True})
     json.dump({"projects": projects}, open(path, "w", encoding="utf-8"))
 elif args[:3] == ["house", "set", "permission"] and len(args) == 4:
     path = os.path.join(home, "permission")
@@ -181,6 +182,7 @@ elif args[:2] == ["house", "--launch-json"]:
     account_id = backup or main_account()
     account = account_id.split(":")[1] if ":" in account_id else None
     model = args[args.index("-m") + 1] if "-m" in args else "haiku"
+    project = args[args.index("-p") + 1] if "-p" in args else None
     settings = {"hooks": {"SessionStart": []}}
     grants = os.path.join(home, "grants.json")
     if os.environ.get("KITH_PERSON") and os.path.exists(grants):
@@ -194,7 +196,11 @@ elif args[:2] == ["house", "--launch-json"]:
         "settings": settings,
         "mcp_servers": {"pantry": {"command": "pantry-mcp", "args": [], "env": {}}},
         "add_dirs": [home + "/data"], "allowed_tools": ["Read"], "disable_slash_commands": True,
-        "model": model, "effort": None, "call_model": call_model()[1] or None, "permission_mode": permission("default"), "cost_tag": {}, "claude_args": [],
+        "model": model, "effort": None, "project": project, "call_model": call_model()[1] or None,
+        "permission_mode": permission("default") or None,
+        "cost_tag": {"agent": "house", "version": "v1", "model": model, "effort": None, "via": os.environ.get("KITH_VIA") or "cli",
+                     "project": project, "person": os.environ.get("KITH_PERSON") or None},
+        "claude_args": [],
     }))
 else:
     print("unknown agent", file=sys.stderr)

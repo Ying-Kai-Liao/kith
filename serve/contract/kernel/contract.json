@@ -1,0 +1,106 @@
+{
+  "contract": "kernel",
+  "doc": "What the kernel prints for the host to read: `kith ls --json`, `kith project ls --json` (kernel/bin/kith-project) and `kith <agent> --launch-json` (kernel/bin/kith). Field names are the kernel's own snake_case. A model or effort is the harness's own word, which the host passes on as it came. Additive only: see serve/contract/README.md.",
+  "fieldCase": "snake",
+  "enums": {
+    "Harness": {
+      "doc": "The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.",
+      "values": ["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode"],
+      "unknown": "unknown"
+    },
+    "PermissionMode": {
+      "doc": "The Claude Code permission mode a run starts in (kernel/lib/kith_settings.py CHOICES); a Codex run gets the host's translation. One this version doesn't know starts the run in default, which asks before every change.",
+      "values": ["default", "acceptEdits", "plan", "auto", "bypassPermissions"],
+      "unknown": "default"
+    }
+  },
+  "types": {
+    "Agent": {
+      "doc": "One agent in `kith ls --json`. `home` is its folder, where its bot works. A kernel from before `harness` was listed runs every agent on Claude.",
+      "fields": {
+        "name": "string",
+        "description": "string",
+        "home": "string",
+        "model": "string?",
+        "effort": "string?",
+        "harness": "Harness?"
+      }
+    },
+    "Projects": {
+      "doc": "`kith project ls --json`: every registered project, sorted by id.",
+      "fields": {
+        "projects": "[Project]"
+      }
+    },
+    "Project": {
+      "doc": "One registered project: its paths (absolute), its home folder when it has one, its git remotes, the project it sits in, its shared memory folder, and whether a folder of it is on this Mac.",
+      "fields": {
+        "id": "string",
+        "paths": "[string]",
+        "home": "string?",
+        "remotes": "[string]",
+        "parent": "string?",
+        "memory": "string",
+        "exists": "bool"
+      }
+    },
+    "Launch": {
+      "doc": "`kith <agent> --launch-json`: how to start the agent, for claude and codex. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.",
+      "fields": {
+        "version": "int",
+        "agent": "string",
+        "agent_version": "string",
+        "harness": "Harness?",
+        "cwd": "string",
+        "env": "{string}",
+        "system_prompt": "string",
+        "settings": "json?",
+        "mcp_servers": "json",
+        "add_dirs": "[string]",
+        "allowed_tools": "[string]",
+        "disable_slash_commands": "bool",
+        "model": "string?",
+        "effort": "string?",
+        "project": "string?",
+        "call_model": "string?",
+        "permission_mode": "PermissionMode?",
+        "cost_tag": "CostTag",
+        "claude_args": "[string]?",
+        "backup": "string?",
+        "provider": "Harness?",
+        "account": "string?",
+        "account_id": "string?"
+      }
+    },
+    "CostTag": {
+      "doc": "What the cost ledger files a run's usage under. `via` is where the run came from (terminal, serve, a channel).",
+      "fields": {
+        "agent": "string",
+        "version": "string",
+        "model": "string?",
+        "effort": "string?",
+        "via": "string",
+        "project": "string?",
+        "person": "string?"
+      }
+    }
+  },
+  "commands": {
+    "ls": {
+      "doc": "The agents on this Mac.",
+      "args": ["ls", "--json"],
+      "result": "[Agent]"
+    },
+    "projectLs": {
+      "doc": "The registered projects.",
+      "args": ["project", "ls", "--json"],
+      "result": "Projects"
+    },
+    "launch": {
+      "doc": "How to start `agent` (run in the folder the run works in; `KITH_PERSON` makes it an invited person's run). `backup` launches a backup chain entry instead of the agent's own login; `project` loads that project's context.",
+      "args": ["{agent}", "--launch-json"],
+      "options": { "backup": "--backup", "project": "-p" },
+      "result": "Launch"
+    }
+  }
+}
