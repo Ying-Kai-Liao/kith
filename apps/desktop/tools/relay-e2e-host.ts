@@ -318,4 +318,6 @@ try {
 } finally {
   await Promise.all(children.map(stop))
   rmSync(tmp, { recursive: true, force: true })
+  // A check that throws leaves relay links open, and they would keep the process (and the CI job) alive until its timeout.
+  process.exit()
 }
