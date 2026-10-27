@@ -229,6 +229,19 @@ pub(crate) async fn run_env(
     person: Option<&str>,
     extra: &[(String, String)],
 ) -> Result<String> {
+    run_bound(bin, args, cwd, budget, person, extra, None).await
+}
+
+/// [`run_env`] whose process holds `grant` (its token and socket are in `extra`), bound to it once it has started.
+async fn run_bound(
+    bin: &Path,
+    args: &[&str],
+    cwd: Option<&str>,
+    budget: Duration,
+    person: Option<&str>,
+    extra: &[(String, String)],
+    grant: Option<&crate::runauth::RunGrant>,
+) -> Result<String> {
     let shown = format!("kith {}", args.join(" "));
     // The kernel's own rule for a person id; anything else never reaches its environment.
     if let Some(person) = person
@@ -244,7 +257,8 @@ pub(crate) async fn run_env(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
-        // The kernel's own commands never carry a run token: that is for the run, not for `kith --launch-json`.
+        // The kernel's own commands never carry the host's run token: that is for the run. A person's launch may be
+        // handed one of its own in `extra` (see `launch`), bound to the kernel process below.
         .env_remove(crate::runauth::TOKEN_ENV)
         .env_remove(crate::runauth::SOCKET_ENV);
     // Tests give the kernel its temp folders here: the process environment is shared with every other test.
@@ -265,6 +279,9 @@ pub(crate) async fn run_env(
         command.current_dir(cwd);
     }
     let mut child = command.spawn().with_context(|| format!("starting {}", bin.display()))?;
+    if let (Some(grant), Some(pid)) = (grant, child.id()) {
+        grant.bind_pid(pid);
+    }
     let (mut out, mut err) = (child.stdout.take().expect("piped"), child.stderr.take().expect("piped"));
     let work = async {
         let (mut stdout, mut stderr) = (String::new(), String::new());
@@ -562,6 +579,11 @@ pub async fn project_add(id: &str, path: &str) -> Result<()> {
 /// `person`: an invited person's kith-auth id when the run is theirs. The kernel then resolves their membership (mode,
 /// deny rules, model, budget, memory folder) and fails closed: a refusal comes back as [`Refused`], never as a run of
 /// the owner's. `None` is the owner's run.
+///
+/// `access`: that person's grant for this launch alone ([`crate::runauth::grant_for`] for the conversation the process
+/// will serve). With it the kernel asks the host for what the conversation was given beyond its box (a yes on an escape
+/// card, an "always") and puts it in the settings. This launch is the activation that spends a once grant: a caller
+/// that keeps a process from before the yes starts it again with these settings ([`crate::runauth::access_since`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn launch(
     bin: &Path,
@@ -572,6 +594,7 @@ pub async fn launch(
     person: Option<&str>,
     room: &str,
     members: &Members,
+    access: Option<&(crate::runauth::RunGrant, [(String, String); 2])>,
 ) -> Result<Launch> {
     let mut args = vec![agent, "--launch-json"];
     if let Some(backup) = backup {
@@ -581,7 +604,12 @@ pub async fn launch(
         args.extend(["-p", project]);
     }
     // The room the run is for: the kernel loads memory for it and `kith recall` from the run applies its rules.
-    let out = run_env(bin, &args, Some(cwd), LAUNCH_TIMEOUT, person, &room_env(room, members)).await?;
+    let mut env = room_env(room, members);
+    let access = access.filter(|_| person.is_some());
+    if let Some((_, vars)) = access {
+        env.extend(vars.iter().cloned());
+    }
+    let out = run_bound(bin, &args, Some(cwd), LAUNCH_TIMEOUT, person, &env, access.map(|(g, _)| g)).await?;
     let mut launch: Launch = serde_json::from_str(out.trim())
         .with_context(|| format!("`kith {agent} --launch-json` didn't print a launch object"))?;
     // Only the host hands a run its token (see `runauth`), whatever the kernel's answer says.

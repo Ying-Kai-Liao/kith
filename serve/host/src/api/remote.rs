@@ -114,6 +114,10 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             let approval = serde_json::from_value(b["approval"].clone()).context("`approval` is code or auto")?;
             serde_json::to_value(crate::remote::cloud::set_approval(hub, approval)?)?
         }
+        "confirmOwner" => {
+            let user_id = b["userId"].as_str();
+            serde_json::to_value(crate::remote::cloud::confirm_owner(hub, user_id).await?)?
+        }
         "linkCode" => crate::remote::account::link_code(hub, caller).await?,
         "claimSign" => claim_sign(hub, &b).await?,
         _ => return Ok(ControlFlow::Continue(b)),
@@ -154,6 +158,7 @@ async fn claim_sign(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         Ok(v)
     };
     let (claim_id, nonce, user_id) = (field("claimId")?, field("nonce")?, field("userId")?);
+    crate::remote::owner::signed_for(&hub.store, user_id)?;
     let computer_id = hub.identity.computer_id();
     let box_key = hub.identity.box_pub_b64();
     let input = crypto::claim_input(crypto::Labels::Kith, claim_id, nonce, user_id, &computer_id, &box_key);

@@ -39,3 +39,15 @@ export function parseStack(stack: string): ReportFrame[] {
   }
   return frames.reverse()
 }
+
+/** What a native crash of the app's main process is reported as, on the launch after it. */
+export const NATIVE_CRASH: ErrorReport = { process: 'desktop-main', type: 'NativeCrash', mechanism: 'minidump', frames: [] }
+
+/**
+ * Whether the main process crashed last time: the app never quit (its running marker, written at
+ * launch, is still there) and Crashpad wrote a dump after that launch. A window or helper that
+ * crashed was reported when it happened; a kill or power loss writes no dump.
+ */
+export function mainCrashed(markerTime: number | null, dumpTimes: number[]): boolean {
+  return markerTime !== null && dumpTimes.some((t) => t >= markerTime)
+}

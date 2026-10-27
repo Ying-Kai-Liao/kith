@@ -136,11 +136,165 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  # The desktop app. Mac: universal, Developer ID signed and notarized (docs/releasing.md lists the five secrets).
+  # On a tag, missing secrets fail the job: an unsigned app is never published. A dispatch signs when the secrets
+  # exist and builds unsigned otherwise; only a tag publishes. Asset names carry no version so
+  # releases/latest/download/<name> always resolves; electron-updater reads latest-mac.yml from the same release.
+  desktop-mac:
+    if: ${{ !inputs.guest_only }}
+    runs-on: macos-26
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/desktop
+    env:
+      KITH_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsua2l0aGJvdC5hcHAk
+      KITH_CLOUD_URL: https://api.kithbot.app
+      APPLE_TEAM_ID: 7FUM8A8H72
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then v=${GITHUB_REF_NAME#v}
+          elif [ -n "$INPUT_VERSION" ]; then v=$INPUT_VERSION
+          else v=$(node -p "require('./package.json').version"); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Signing
+        id: sign
+        env:
+          MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          missing=""
+          for n in MAC_CERT_P12_BASE64 MAC_CERT_PASSWORD APPLE_API_KEY_P8 APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            [ -n "$(printenv "$n")" ] || missing="$missing $n"
+          done
+          if [ -z "$missing" ]; then
+            printf '%s' "$APPLE_API_KEY_P8" > "$RUNNER_TEMP/AuthKey.p8"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+            echo "::add-mask::$APPLE_API_KEY_ID"
+            echo "Signing and notarizing."
+          elif [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "::error::Missing secrets:$missing. A tag never publishes an unsigned app (docs/releasing.md)."
+            exit 1
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Building unsigned; missing secrets:${missing:- none}"
+          fi
+      # rustup reads serve/rust-toolchain.toml from here; tools/native-host.mjs builds with it.
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup toolchain install && rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          key: desktop-mac-release
+      - name: Native pieces
+        run: |
+          mkdir -p build/native
+          # SF Symbols masks and the DMG background are generated at build time, never committed.
+          npm run icons
+          swift ../packaging/dmg/background.swift build/dmg-background.tiff
+      - name: Build the Mac app (signed)
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERT_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
+          npm run dist:mac:main -- --publish never -c.extraMetadata.version=${{ steps.v.outputs.version }}
+      - name: Build the Mac app (unsigned dry run)
+        if: steps.sign.outputs.signed != 'true'
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm run dist:mac:main -- --publish never -c.mac.notarize=false -c.extraMetadata.version=${{ steps.v.outputs.version }}
+      - name: Show the result
+        run: |
+          ls -la dist
+          app=dist/mac-universal/Kith.app
+          lipo -archs "$app/Contents/MacOS/Kith"
+          for f in kith-serve kith-speech kith/bin/kith; do echo "$f: $(lipo -archs "$app/Contents/Resources/$f")"; done
+          codesign -dv "$app" 2>&1 | grep -E 'Signature|Authority|TeamIdentifier|flags' || true
+          cat dist/latest-mac.yml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kith-desktop-macos
+          path: |
+            apps/desktop/dist/kith-macos.dmg
+            apps/desktop/dist/kith-macos.dmg.blockmap
+            apps/desktop/dist/kith-macos.zip
+            apps/desktop/dist/kith-macos.zip.blockmap
+            apps/desktop/dist/latest-mac.yml
+          if-no-files-found: error
+
+  # Linux: the installed kith-serve is used (no bundled host), so there is nothing native to build first.
+  desktop-linux:
+    if: ${{ !inputs.guest_only }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: ubuntu-latest }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    defaults:
+      run:
+        working-directory: apps/desktop
+    env:
+      KITH_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsua2l0aGJvdC5hcHAk
+      KITH_CLOUD_URL: https://api.kithbot.app
+      KITH_LINUX_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then v=${GITHUB_REF_NAME#v}
+          elif [ -n "$INPUT_VERSION" ]; then v=$INPUT_VERSION
+          else v=$(node -p "require('./package.json').version"); fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build the Linux app
+        run: npm run dist:linux:main -- --${{ matrix.arch }} --publish never -c.extraMetadata.version=${{ steps.v.outputs.version }}
+      - name: Show the result
+        run: ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kith-desktop-linux-${{ matrix.arch }}
+          path: |
+            apps/desktop/dist/kith-linux-*.AppImage
+            apps/desktop/dist/kith-linux-*.deb
+            apps/desktop/dist/kith-linux-*.tar.gz
+            apps/desktop/dist/latest-linux*.yml
+          if-no-files-found: error
+
   publish:
     # The Linux client never blocks the Mac release at first: publish runs when the Mac build passed (flip to
     # requiring build-guest once it has been stable for a few releases).
-    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.build.result == 'success' }}
-    needs: [build, build-guest]
+    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.build.result == 'success' && needs.desktop-mac.result == 'success' && needs.desktop-linux.result == 'success' }}
+    needs: [build, build-guest, desktop-mac, desktop-linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -151,15 +305,56 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Checksums
-        run: cd dist && cat kith-*.tar.gz.sha256 > SHA256SUMS && cat SHA256SUMS
+        run: |
+          cd dist
+          cat kith-*.tar.gz.sha256 > SHA256SUMS
+          for f in kith-macos.dmg kith-macos.zip kith-linux-*.AppImage kith-linux-*.deb kith-linux-*.tar.gz; do
+            [ -f "$f" ] && sha256sum "$f" >> SHA256SUMS
+          done
+          cat SHA256SUMS
       - name: Homebrew formula
-        # The filled formula goes on the release; copying it into the tap repo is a manual step
-        # (packaging/homebrew/README.md).
+        # The filled formula goes on the release, and the tap step below copies it into the tap repo.
         run: sh scripts/update-formula.sh "${GITHUB_REF_NAME#v}" dist/SHA256SUMS > dist/kith.rb && cat dist/kith.rb
+      - name: Sign SHA256SUMS
+        # install-guest.sh checks this signature against the public key it carries (KITH_PUBKEY, the same as
+        # packaging/minisign.pub), so a swapped release can't pass with its own checksums. The key is the
+        # MINISIGN_SECRET_KEY secret (an unencrypted minisign secret key file).
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::Repo secret MINISIGN_SECRET_KEY is missing, so SHA256SUMS can't be signed and install-guest.sh would refuse this release. Add it (packaging/README.md), then re-run this job."
+            exit 1
+          fi
+          sudo apt-get install -y -qq minisign >/dev/null
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/minisign.key"
+          minisign -S -s "$RUNNER_TEMP/minisign.key" -m dist/SHA256SUMS -t "kith $GITHUB_REF_NAME SHA256SUMS"
+          rm -f "$RUNNER_TEMP/minisign.key"
+          minisign -V -p packaging/minisign.pub -m dist/SHA256SUMS
+          minisign -V -P "$(sed -n 's/^KITH_PUBKEY=//p' scripts/install-guest.sh)" -m dist/SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
+            dist/SHA256SUMS.minisig
             dist/kith.rb
+            dist/kith-macos.*
+            dist/kith-linux-*
+            dist/latest*.yml
           generate_release_notes: true
+          append_body: true
+          body: |
+            Download the desktop app: [Mac](https://kithbot.app/download/mac) | [Linux AppImage](https://kithbot.app/download/linux) | [all downloads](https://kithbot.app/download)
+
+      - name: Update the Homebrew tap
+        # Writes this release's kith.rb to Formula/kith.rb in Ying-Kai-Liao/homebrew-kith. HOMEBREW_TAP_TOKEN is a
+        # fine-grained token with Contents read/write on that repo only (packaging/homebrew/README.md).
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::Repo secret HOMEBREW_TAP_TOKEN is missing, so the tap still has the previous formula. Add it (packaging/homebrew/README.md) and re-run this job, or copy kith.rb from this release to Formula/kith.rb by hand."
+            exit 0
+          fi
+          sh scripts/update-tap.sh "${GITHUB_REF_NAME#v}" dist/kith.rb

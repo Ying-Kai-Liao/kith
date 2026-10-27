@@ -48,4 +48,11 @@ A member house bot-s2 >/dev/null; A member house sam budget=20 >/dev/null
 WAS=$(A resolve house --person bot-s2 | python3 -c 'import json,sys; print(",".join(json.load(sys.stdin)["was"]))')
 check "a bot's resolved was makes spent count its owner and its sibling bots (kith checks it that way)" \
   "[ \"\$(KITH_PERSON_WAS=\$WAS C spent bot-s2 house)\" = 12.0000 ]"
+J() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
+check "bots --json without a cap: the owner's bots only" \
+  "[ \"\$(C bots --json | J 'd[\"cap\"], d[\"spent\"], sorted(d[\"bots\"])')\" = \"None 3.0 ['bot-k']\" ]"
+A bots-cap 5 >/dev/null
+check "bots-cap --json gives the cap and the owner's bot ids" \
+  "[ \"\$(A bots-cap --json | J 'd[\"cap\"], d[\"bots\"]')\" = \"5.0 ['bot-k']\" ]"
+check "bots --json sets the spend against the cap" "[ \"\$(C bots --json | J 'd[\"cap\"], d[\"spent\"]')\" = '5.0 3.0' ]"
 exit $fail

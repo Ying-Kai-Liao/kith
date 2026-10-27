@@ -38,6 +38,13 @@ const PAIRING_MAX_AGE: Duration = Duration::from_secs(120);
 const DIRECT_PING: Duration = Duration::from_secs(15);
 const MAX_REQUESTS: usize = 32;
 const MAX_SUBS: usize = 4;
+/// How long an account device's re-check waits for the pull that follows a cloud change before it refuses the device:
+/// any change (a bot revoked, a person added) ends the sync lease until that pull, and refusing at once would close
+/// every account device's channel, and fail its call in flight, on each one.
+#[cfg(not(test))]
+const SYNC_WAIT: Duration = Duration::from_secs(10);
+#[cfg(test)]
+const SYNC_WAIT: Duration = Duration::from_millis(300);
 
 /// WebSocket close codes (§7.6).
 mod close {
@@ -396,7 +403,16 @@ impl Channel {
 
     /// Re-checks the device; on failure sends `reject` and says how to close.
     async fn recheck(&mut self) -> Result<(), CloseWith> {
-        match devices::authorize(&self.hub, &self.key) {
+        let mut checked = devices::authorize(&self.hub, &self.key);
+        // Out of sync only until the pull runs: wait for it, then judge the device on the state it applied (a device it
+        // removed is refused then, never served on the old state).
+        if matches!(checked, Err(RejectCode::LeaseExpired))
+            && !self.hub.cloud_synced.load(std::sync::atomic::Ordering::Acquire)
+            && crate::remote::sync_lease::wait(&self.hub, SYNC_WAIT).await
+        {
+            checked = devices::authorize(&self.hub, &self.key);
+        }
+        match checked {
             Ok(d) => {
                 let before = std::mem::replace(&mut self.who, Principal::Nobody);
                 self.set_device(&d);
@@ -960,6 +976,46 @@ mod tests {
         assert_eq!(p.call(1, "screenOffer", json!({})).await["err"]["status"], 403, "no screen scope");
         let (code, reject) = p.recv().await.unwrap_err();
         assert_eq!((code, reject["code"].as_str()), (4001, Some("leaseExpired")), "closed when the lease ran out");
+    }
+
+    #[tokio::test]
+    async fn a_cloud_change_holds_account_devices_until_the_pull_instead_of_closing_them() {
+        let hub = temp_hub();
+        let key = SigningKey::from_bytes(&crypto::random());
+        let device = Device {
+            key: crypto::b64(key.verifying_key().as_bytes()),
+            name: "Phone".into(),
+            platform: "ios".into(),
+            source: DeviceSource::Account,
+            grant_id: Some("grt_x".into()),
+            scopes: vec![Scope::Control],
+            lease_until: Some(now_ms() + 60_000),
+            created_at: now_ms(),
+            last_seen_at: None,
+            person_id: None,
+        };
+        hub.store.put_device(&device).unwrap();
+        hub.store.kv_set("test_cloud_url", "http://127.0.0.1:9").unwrap(); // linked: there is a pull to wait for
+        hub.cloud_synced.store(true, std::sync::atomic::Ordering::Release);
+        let mut p = Phone::direct(&hub, key);
+        assert!(matches!(p.hello(&hub, false).await, Out::Msg(v) if v["t"] == "welcome"));
+
+        // The cloud says something changed (a bot revoked, say); the pull that applies it lands shortly after.
+        crate::remote::sync_lease::changed(&hub);
+        hub.auth_changed();
+        let mark = crate::remote::sync_lease::mark(&hub);
+        let pulled = hub.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            crate::remote::sync_lease::pulled(&pulled, mark);
+        });
+        assert!(p.call(1, "hello", json!({})).await["ok"].is_object(), "still served once the pull applied the change");
+
+        // A pull that never comes still refuses the device.
+        crate::remote::sync_lease::changed(&hub);
+        hub.auth_changed();
+        let (code, reject) = p.recv().await.unwrap_err();
+        assert_eq!((code, reject["code"].as_str()), (4001, Some("leaseExpired")), "no pull, no service");
     }
 
     #[tokio::test]

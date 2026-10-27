@@ -8,6 +8,7 @@ pub mod cloud;
 pub mod crypto;
 pub mod identity;
 pub mod members;
+pub mod owner;
 pub mod push;
 pub mod relay;
 pub mod sync_lease;

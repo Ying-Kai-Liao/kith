@@ -1,6 +1,6 @@
-ClaimOnResolve = TRUE
+ClaudeForks = FALSE
 TakeoverAtomic = TRUE
 SyncLaneAtStart = TRUE
-ForgetOnImport = TRUE
+SendQueuedUnderLock = TRUE
 BotEnabled = TRUE
 BotGate = "live"

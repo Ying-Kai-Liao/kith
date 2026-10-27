@@ -260,5 +260,28 @@ done
 chmod 700 "$KITH_STATE/index"; chmod 600 "$KITH_STATE/index"/* 2>/dev/null; rm -rf "$KITH_STATE/index"; mv "$T/index.keep" "$KITH_STATE/index"
 check "owner path unchanged once the index is readable again" "[ \"\$(aud KITH_AGENT=echo)\" = 'owner person:eve person:sam room:grp1 shared' ]"
 
+# inside a guest's sandbox nobody is the owner, whatever the shell left in the environment. The real sandbox closes the home
+# folder (kith-guest-sandbox-check, KITH_REAL_SANDBOX=1); here sandbox-exec closes it alone, so the index stays readable and
+# only the identity gates stand between the shell and the owner's rows. macOS only.
+check "outside a guest's sandbox: not one" "! python3 \"$KERNEL/lib/kith_paths.py\" --guest-sandbox"
+if command -v sandbox-exec >/dev/null && [ "$(uname)" = Darwin ]; then
+  KR=$(cd "$KERNEL" && pwd -P)
+  RH=$(python3 -c 'import os, pwd; print(os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir))')
+  printf '(version 1)\n(allow default)\n(deny file-read* (subpath "%s"))\n(allow file-read* (subpath "%s") (subpath "%s"))\n' "$RH" "$T" "$KR" > "$T/guest.sb"
+  SB() { sandbox-exec -f "$T/guest.sb" "$@"; }
+  saud() { SB env "$@" "$KR/bin/kith-recall" zebra -n 50 --json | python3 -c 'import json,sys; print(" ".join(sorted(set(h["audience"] for h in json.load(sys.stdin)))))'; }
+  check "sandboxed: kith_paths says so" "SB python3 \"$KR/lib/kith_paths.py\" --guest-sandbox"
+  check "sandboxed, KITH_PERSON dropped: recall is nobody's" "[ \"\$(SB env KITH_AGENT=echo \"$KR/bin/kith-recall\" zebra --json)\" = '[]' ]"
+  check "sandboxed, KITH_PERSON names the owner: recall is nobody's" "[ \"\$(SB env KITH_AGENT=echo KITH_PERSON=kai \"$KR/bin/kith-recall\" zebra --json)\" = '[]' ]"
+  check "sandboxed invitee: their own audience, as before" "[ \"\$(saud KITH_AGENT=echo KITH_PERSON=sam)\" = 'person:sam shared' ]"
+  check "sandboxed, KITH_PERSON dropped: summarise is the owner's only" "! SB env KITH_AGENT=echo \"$KR/bin/kith-recall\" summarise --thread x 2>$T/e && grep -q 'only the owner' $T/e"
+  check "outside: the owner's kith-memory search finds the owner text" "env KITH_AGENT=echo \"$KR/bin/kith-memory\" search zebra -n 50 | grep -qE 'alpha|eve private'"
+  check "sandboxed, KITH_PERSON dropped: kith-memory search finds no owner text" "SB env KITH_AGENT=echo \"$KR/bin/kith-memory\" search zebra -n 50 >$T/o 2>&1; ! grep -qE 'alpha|eve private' $T/o"
+  check "sandboxed, KITH_PERSON names the owner: kith-memory search finds no owner text" "SB env KITH_AGENT=echo KITH_PERSON=kai \"$KR/bin/kith-memory\" search zebra -n 50 >$T/o 2>&1; ! grep -qE 'alpha|eve private' $T/o"
+  check "sandboxed: kith-auth acts for no one, not the owner" "SB env KITH_AGENT=echo \"$KR/bin/kith-auth\" resolve echo | grep -q '\"owner\": false' && SB env KITH_PERSON=kai \"$KR/bin/kith-auth\" resolve echo | grep -q '\"owner\": false'"
+  check "outside: kith-auth still acts for the owner" "\"$KR/bin/kith-auth\" resolve echo | grep -q '\"owner\": true'"
+  check "sandboxed, KITH_PERSON dropped: no owner run starts" "! SB \"$KR/bin/kith\" echo --launch-json >/dev/null 2>$T/e && grep -q \"inside a guest's run\" $T/e"
+fi
+
 echo
 if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
