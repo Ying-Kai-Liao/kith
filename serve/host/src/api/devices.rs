@@ -61,6 +61,8 @@ pub(super) const LOCAL_ONLY: &[&str] = &[
     "connectorCall",
     "claimSign",
     "unclaim",
+    // Who owns this computer is decided on it, never by the cloud alone.
+    "confirmOwner",
     "devices",
     "revokeDevice",
     "accessRequests",

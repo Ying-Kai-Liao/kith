@@ -180,6 +180,7 @@ struct UserBubble: View {
     let entry: Entry
     let botWorking: Bool
     var reply: (() -> Void)?
+    @State private var selecting = false
     @Environment(BotStore.self) private var model
 
     var body: some View {
@@ -203,13 +204,17 @@ struct UserBubble: View {
                 .padding(.vertical, 10)
                 .background(Palette.bubbleUser, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
                 .contextActions(reactions: model.reactionPick(entry)) {
-                    var items = [MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) }]
+                    var items = [
+                        MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) },
+                        MenuItem("Select Text", icon: "selection.pin.in.out") { selecting = true },
+                    ]
                     if let reply { items.append(MenuItem("Reply in thread", icon: "arrowshape.turn.up.left", action: reply)) }
                     if entry.data.status == "queued" {
                         items.append(MenuItem("Unsend", icon: "arrow.uturn.backward") { model.unsend(entry) })
                     }
                     return items
                 }
+                .kithSheet(isPresented: $selecting) { SelectTextSheet(text: entry.data.text ?? "") }
     }
 
     @ViewBuilder private var status: some View {
@@ -257,6 +262,7 @@ struct AgentBubble: View {
     let entry: Entry
     let openTrace: () -> Void
     var reply: (() -> Void)?
+    @State private var selecting = false
     @Environment(BotStore.self) private var model
 
     var body: some View {
@@ -276,11 +282,13 @@ struct AgentBubble: View {
                 .contextActions(reactions: model.reactionPick(entry)) {
                     var items = [
                         MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) },
+                        MenuItem("Select Text", icon: "selection.pin.in.out") { selecting = true },
                         MenuItem("Show what it did", icon: "list.bullet", action: openTrace),
                     ]
-                    if let reply { items.insert(MenuItem("Reply in thread", icon: "arrowshape.turn.up.left", action: reply), at: 1) }
+                    if let reply { items.insert(MenuItem("Reply in thread", icon: "arrowshape.turn.up.left", action: reply), at: 2) }
                     return items
                 }
+                .kithSheet(isPresented: $selecting) { SelectTextSheet(text: MarkdownText.plain(entry.data.text ?? "")) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, 40)

@@ -75,3 +75,10 @@ private let push = Data("push-key".utf8)
     #expect(String(decoding: encoded, as: UTF8.self) == "[\"\(LegacyCompat.labelPrefix)\",\"kith\"]")
     #expect(try JSONDecoder().decode([LabelFamily].self, from: encoded) == [.legacy, .kith])
 }
+
+@Test func thePushRelayIsTheBuildsHostElseTheOldOne() {
+    #expect(SharedStore.relayURL(host: "kith-relay.example.workers.dev") == "https://kith-relay.example.workers.dev")
+    #expect(SharedStore.relayURL(host: nil) == LegacyCompat.relayURL)
+    #expect(SharedStore.relayURL(host: " ") == LegacyCompat.relayURL)
+    #expect(SharedStore.relayURL(host: "$(KITH_PUSH_RELAY_HOST)") == LegacyCompat.relayURL)
+}

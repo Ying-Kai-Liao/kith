@@ -34,8 +34,8 @@ public enum LegacyCompat {
 
     // MARK: Live URL
 
-    /// The APNs push relay. It still runs under its old name until the Kith relay is deployed.
-    /// TODO: switch to the kith-relay worker once it is live (decision q25), then delete this line.
+    /// The APNs push relay under its old name, used when the build names none (`KITH_PUSH_RELAY_HOST`).
+    /// Delete once the builds point at kith-relay (decision q25).
     public static let relayURL = "https://codync-relay.kevin2005ha.workers.dev"
 
     // MARK: Stored data

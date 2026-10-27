@@ -1,0 +1,3 @@
+\* A host turn runs even when another holds the session's claim (turn.rs claim_for_turn not refusing).
+ClaudeForks = FALSE
+HostStartCAS = FALSE
