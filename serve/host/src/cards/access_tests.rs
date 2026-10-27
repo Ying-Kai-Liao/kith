@@ -377,7 +377,7 @@ async fn the_owner_lists_an_agents_always_grants_and_a_removed_one_is_gone_from_
         .iter()
         .map(|g| (g["person"].as_str().unwrap(), g["kind"].as_str().unwrap(), g["target"].as_str().unwrap()))
         .collect();
-    seen.sort();
+    seen.sort_unstable();
     assert_eq!(
         seen,
         sorted_tuples(vec![
@@ -425,7 +425,7 @@ async fn a_member_cant_list_or_remove_always_grants() {
 }
 
 fn sorted_tuples<'a>(mut v: Vec<(&'a str, &'a str, &'a str)>) -> Vec<(&'a str, &'a str, &'a str)> {
-    v.sort();
+    v.sort_unstable();
     v
 }
 
