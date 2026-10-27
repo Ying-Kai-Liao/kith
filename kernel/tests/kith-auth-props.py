@@ -1,13 +1,15 @@
 """Generated-input properties of kith-auth's access rules (people, memberships, bot persons, person removal and
-revoke, the bots cap), run in-process against a throwaway auth.json. Method: .claude/skills/invitee-access/SKILL.md.
+revoke, the bots cap, access beyond the box, membership env and modes), run in-process against a throwaway auth.json. Method: .claude/skills/invitee-access/SKILL.md.
 Started by kernel/tests/kith-auth-props, which pins hypothesis; run that, not this."""
 import contextlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 from hypothesis import HealthCheck, given, settings, strategies as st
@@ -36,6 +38,14 @@ PEOPLE = ['sam', 'amy']
 BOTS = ['bot-a', 'bot-b']
 EVERYONE = '*'
 ALL = [OWNER] + PEOPLE + BOTS + ['ghost']
+# access beyond the box (the always half of an escape card): absolute paths outside every secret and rule-W place,
+# one inside another so a write grant of the folder covers a read below it, and plain host names
+BEYOND = [('read', '/work/a'), ('read', '/work/a/b'), ('write', '/work/a'), ('write', '/work/c'),
+          ('domain', 'a.example'), ('domain', 'b.example')]
+KINDS = {'read': 'read', 'write': 'write', 'domain': 'domains'}
+FREE_SHELL = {'bypassPermissions', 'auto'}
+# env a membership may set, and names that would change how the run starts or which kith it talks to
+ENV_OK, ENV_BAD = ['FOO'], ['PATH', 'KITH_HOME', 'DYLD_INSERT_LIBRARIES']
 
 
 def run(*argv):
@@ -62,28 +72,55 @@ def allowed(agent, who):
     return ka.resolve(auth(), agent, who)['allowed'] is True
 
 
+# auth.json as an older kith-auth, or a hand edit, may leave it: a row, a grant or an invite for an id that is no person
+# (yet), and a free-shell mode written without --trusted
+HAND = ['row', 'row-auto', 'grant', 'invite']
+SETTINGS = ['', '', 'preset=guest', 'preset=member', 'helpers=garden', 'deny=Bash', 'budget=7', 'mode=auto',
+            'mode=bypassPermissions'] + [f'env.{k}=x' for k in ENV_OK + ENV_BAD]
 OPS = st.one_of(
     st.tuples(st.just('person'), st.sampled_from(PEOPLE)),
     st.tuples(st.just('person-rm'), st.sampled_from(PEOPLE)),
-    st.tuples(st.just('member'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS + [EVERYONE]),
-              st.sampled_from(['', 'preset=guest', 'preset=member', 'helpers=garden', 'deny=Bash', 'budget=7'])),
+    st.tuples(st.just('member'), st.sampled_from(AGENTS), st.sampled_from([OWNER] + PEOPLE + BOTS + [EVERYONE]),
+              st.sampled_from(SETTINGS)),
     st.tuples(st.just('member-rm'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS + [EVERYONE])),
     st.tuples(st.just('bot'), st.sampled_from(BOTS), st.sampled_from([OWNER] + PEOPLE + BOTS)),
     st.tuples(st.just('bot-rm'), st.sampled_from(BOTS)),
     st.tuples(st.just('cap'), st.sampled_from(['off', '50', '0', 'x'])),
     st.tuples(st.just('revoke'), st.sampled_from([OWNER] + PEOPLE + BOTS)),
     st.tuples(st.just('unrevoke'), st.sampled_from(PEOPLE)),
+    st.tuples(st.just('access'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(BEYOND)),
+    st.tuples(st.just('access-rm'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(BEYOND)),
+    st.tuples(st.just('hand'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS + ['ghost']), st.sampled_from(HAND)),
 )
 
 
-MEMBER = OPS_MEMBER = st.tuples(st.just('member'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS),
-                                st.sampled_from(['', 'preset=guest', 'helpers=garden', 'deny=Bash', 'budget=7', 'preset=member']))
+# the owner may have a row too (kith-auth takes one): nothing beyond the box is ever written to it
+MEMBER = st.tuples(st.just('member'), st.sampled_from(AGENTS), st.sampled_from([OWNER] + PEOPLE + BOTS),
+                   st.sampled_from(SETTINGS))
+# a person with a bot, both members of one agent: random commands alone rarely build the pair the bot rules are about
+TEAM = st.tuples(st.sampled_from(AGENTS), st.sampled_from(PEOPLE), st.sampled_from(BOTS)).map(
+    lambda t: [('person', t[1]), ('bot', t[2], t[1]), ('member', t[0], t[1], ''), ('member', t[0], t[2], '')])
+# maybe the person is cut off first (revoked, or their row taken), so a row of their own no longer means they may use
+# the agent now; a place for the person (or not), then the same place for each bot: a bot's grant sticks only under an
+# owner who holds it; then, maybe, the person loses it again, which must take it from their bot at the next resolve
+ACCESS = st.tuples(st.sampled_from(AGENTS), st.sampled_from(PEOPLE), st.sampled_from(BEYOND), st.booleans(),
+                   st.booleans(), st.sampled_from(['', '', 'revoke', 'member-rm'])).map(
+    lambda t: {'': [], 'revoke': [('revoke', t[1])], 'member-rm': [('member-rm', t[0], t[1])]}[t[5]]
+    + [('access', t[0], who, t[2]) for who in ([t[1]] if t[3] else []) + BOTS]
+    + ([('access-rm', t[0], t[1], t[2])] if t[4] else []))
 # A table first (people, their bots, rows with settings), then anything: random commands alone rarely build one.
 SEQUENCES = st.tuples(
+    st.lists(st.tuples(st.just('hand'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(HAND)),
+             max_size=2),
     st.lists(st.tuples(st.just('person'), st.sampled_from(PEOPLE)), max_size=2),
     st.lists(st.tuples(st.just('bot'), st.sampled_from(BOTS), st.sampled_from([OWNER] + PEOPLE)), max_size=2),
     st.lists(MEMBER, max_size=7),
+    st.lists(TEAM, max_size=2).map(lambda xs: [op for x in xs for op in x]),
+    # hand edits again, now that people exist (the ones above are wiped by the person or bot they come before)
+    st.lists(st.tuples(st.just('hand'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(HAND)),
+             max_size=2),
     st.sampled_from([[], [('cap', '50')]]),
+    st.lists(ACCESS, max_size=3).map(lambda xs: [op for x in xs for op in x]),
     st.lists(OPS, max_size=8),
 ).map(lambda parts: [op for part in parts for op in part])
 
@@ -104,11 +141,33 @@ def apply(op):
         return run('bot', op[1], '--rm')
     if kind in ('revoke', 'unrevoke'):
         return run('person', op[1], f'--{kind}')
+    if kind == 'hand':
+        _, agent, who, what = op
+        a = json.loads(ka.AUTH.read_text())
+        if what == 'grant':
+            a.setdefault('grants', {})[f'{agent}@{who}'] = {'mail': ['work']}
+        elif what == 'invite':
+            a.setdefault('invites', {})[f'HAND{who.upper()}'] = {'person': who, 'expires': time.time() + 600}
+        else:
+            a.setdefault('members', {}).setdefault(agent, {})[who] = {'mode': 'auto'} if what == 'row-auto' else {}
+        ka.AUTH.write_text(json.dumps(a))
+        return True
+    if kind in ('access', 'access-rm'):
+        return run('access', op[1], op[2], op[3][0], op[3][1], *(['--rm'] if kind == 'access-rm' else []))
     return run('bots-cap', op[1])
 
 
 def bot_ids(a):
     return [p for p, v in a['people'].items() if v.get('bot_of')]
+
+
+def covered(have, kind, value):
+    """Whether an access dict reaches value: a domain it lists; a path at or below a held folder (write covers read).
+    Written here, not taken from kith-auth, so the cap is checked against the rule and not against itself."""
+    if kind == 'domains':
+        return value in have.get('domains', [])
+    roots = have.get('write', []) + (have.get('read', []) if kind == 'read' else [])
+    return any(value == r or value.startswith(r.rstrip('/') + '/') for r in roots)
 
 
 def state_properties():
@@ -128,9 +187,18 @@ def state_properties():
                 assert r['allowed'] is False, f'{who} is revoked (or their owner is) but may use {agent}: {r}'
                 continue
             parent = a['people'][who].get('bot_of')
+            if r['allowed'] is True:
+                # (F11 step 1) a free shell (bypassPermissions, auto) only with --trusted, which these commands never set.
+                assert r['mode'] not in FREE_SHELL, f'{who} runs {agent} in {r["mode"]} without --trusted'
+                # (membership env) nothing that changes how the run starts or which kith it talks to.
+                bad = [k for k in r['env'] if k not in ENV_OK]
+                assert not bad, f'{who} on {agent} carries env {bad}'
             if not parent:
                 # (grant) a person is allowed only through a membership row of theirs or the everyone row.
                 assert r['allowed'] is False or who in rows or EVERYONE in rows, f'{who} allowed on {agent} with no row: {r}'
+                if r['allowed'] is True and who not in rows:
+                    # (escape always) access beyond the box is a person's own: the everyone row never carries it.
+                    assert not any(r['access'].values()), f'{who} reaches {r["access"]} on {agent} through the everyone row'
                 continue
             if r['allowed'] is not True:
                 continue
@@ -144,6 +212,11 @@ def state_properties():
                 assert set(pr['deny']) <= set(r['deny']), f'bot {who} lost a deny of its owner: {r["deny"]} vs {pr["deny"]}'
                 assert set(r['helpers']) <= set(pr['helpers']), f'bot {who} has helpers its owner lacks'
                 assert r['budget'] == pr['budget'], f'bot {who} spends from {r["budget"]!r}, its owner from {pr["budget"]!r}'
+                # (escape always) a bot reaches beyond the box only where its owner does, right now: an owner who loses
+                # a place takes it from their bot at the next resolve, whatever the bot's row still lists.
+                for k, vals in r['access'].items():
+                    for v in vals:
+                        assert covered(pr['access'], k, v), f'bot {who} reaches {k} {v} on {agent}; its owner {pr["access"]}'
             else:
                 # (c) the owner's bots together are capped by owner_bots_budget, when set.
                 assert r['budget'] == (a.get('owner_bots_budget') or ''), f'owner bot {who}: budget {r["budget"]!r}'
@@ -171,8 +244,8 @@ def test_access_never_exceeds_the_grant(ops):
                 assert not any(allowed(ag, x) for ag in AGENTS), f'{x} still gets in after {op[1]} was removed'
         if op[0] == 'member-rm' and ok and op[2] != EVERYONE:
             _, agent, who = op
-            covered = EVERYONE in a['members'].get(agent, {}) and who not in bot_ids(a)
-            assert covered or not allowed(agent, who), f'{who} still uses {agent} after the row was removed'
+            everyone = EVERYONE in a['members'].get(agent, {}) and who not in bot_ids(a)
+            assert everyone or not allowed(agent, who), f'{who} still uses {agent} after the row was removed'
             for b in bot_ids(a):
                 if a['people'][b]['bot_of'] == who and who != OWNER:
                     assert not allowed(agent, b), f'bot {b} keeps {agent} after its owner {who} lost it'
@@ -188,6 +261,37 @@ def test_access_never_exceeds_the_grant(ops):
                 assert a['people'] == {
                     k: ({x: y for x, y in v.items() if x != 'revoked'} if k == who else v)
                     for k, v in before['people'].items()}, f'undo {who} changed more than the revoked state'
+        if op[0] in ('person', 'bot') and ok and op[1] not in before['people']:
+            # (forget) a new person or bot starts with nothing, whatever an earlier removal of that id left behind.
+            x = op[1]
+            assert all(x not in rows for rows in a['members'].values()), f'new {x} starts with a membership'
+            assert not any('@' in k and k.rsplit('@', 1)[1] == x for k in a['grants']), f'new {x} starts with a grant'
+            assert all(i.get('person') != x for i in a['invites'].values()), f'new {x} starts with an invite'
+        if op[0] == 'member' and op[3].startswith('env.') and op[3][4:].split('=')[0] in ENV_BAD:
+            assert not ok and a['members'] == before['members'], f'{op}: a forbidden env name was accepted'
+        if op[0] == 'access':
+            # (C2) the always half of an escape card writes only for a person (not the owner, not someone removed or
+            # revoked) who holds the agent now through a row of their own; for a bot of an invitee, only what that
+            # invitee holds. Exactly then, and it writes only that row.
+            _, agent, who, (kind, value) = op
+            rows = before['members'].get(agent, {})
+            p = before['people'].get(who)
+            parent = (p or {}).get('bot_of')
+            want = (p is not None and not p.get('owner') and who in rows and ka.resolve(before, agent, who)['allowed'] is True
+                    and (not parent or before['people'].get(parent, {}).get('owner')
+                         or covered(ka.resolve(before, agent, parent).get('access', {}), KINDS[kind], value)))
+            assert ok == want, f'{op}: accepted {ok}, expected {want}'
+            if ok:
+                assert value in a['members'][agent][who]['access'][KINDS[kind]], f'{op}: accepted but not written'
+                others = {g: {x: r for x, r in rs.items() if not (g == agent and x == who)} for g, rs in a['members'].items()}
+                olds = {g: {x: r for x, r in rs.items() if not (g == agent and x == who)} for g, rs in before['members'].items()}
+                assert others == olds, f'{op}: changed another row'
+            else:
+                assert a == before, f'{op}: refused but wrote'
+        if op[0] == 'access-rm' and ok:
+            _, agent, who, (kind, value) = op
+            row = a['members'].get(agent, {}).get(who, {})
+            assert value not in (row.get('access') or {}).get(KINDS[kind], []), f'{op}: still listed'
         if op[0] == 'cap' and ok:
             assert a.get('owner_bots_budget', '') == ('' if op[1] == 'off' else op[1])
         if op[0] == 'cap' and not ok:
