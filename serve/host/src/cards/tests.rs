@@ -278,7 +278,7 @@ async fn a_members_own_card_for_code_goes_to_the_owner() {
     let own = roles::grant_roots("sam", "house");
     assert_eq!(own.len(), 3, "memory, files and shared memory of house for sam");
     let mine = format!("{}/f11-x", own[1].display());
-    let cases: [(&'static str, Value, &str); 8] = [
+    let cases: [(&'static str, Value, &str); 9] = [
         ("Bash", ls(), "owner"),
         ("mcp__x__y", json!({"a": 1}), "owner"),
         ("BashOutput", json!({"bash_id": "1"}), "member"),
@@ -288,13 +288,26 @@ async fn a_members_own_card_for_code_goes_to_the_owner() {
         // Outside the run's grants (F11 step 2a): the owner's, though Edit is not code.
         ("Edit", json!({"file_path": "/tmp/f11-x", "old_string": "a", "new_string": "b"}), "owner"),
         ("Read", json!({"file_path": format!("{}/../../../other/x", own[1].display())}), "owner"),
+        // A file tool that names no path searches wherever the run stands (P6).
+        ("Grep", json!({"pattern": "x"}), "owner"),
     ];
     let inside = |tool: &str, input: Value| roles::within(&own, tool, &input);
     assert!(inside("Edit", json!({"file_path": mine})));
-    assert!(inside("Grep", json!({"pattern": "x"})), "no path named: the working directory, which the sandbox holds");
+    assert!(!inside("Grep", json!({"pattern": "x"})), "no path named: the working directory, which may be anywhere");
+    assert!(!inside("Glob", json!({"pattern": "*.md"})), "a relative pattern names no folder");
+    assert!(inside("WebFetch", json!({"url": "https://example.com"})), "not a file tool");
     assert!(!inside("Edit", json!({"file_path": format!("{}/../x", own[1].display())})), "dotdot is applied");
     assert!(!inside("Read", json!({"file_path": "relative/x"})));
     assert!(!inside("Glob", json!({"pattern": "/etc/**/*.conf"})), "a pattern is bound by the folder it starts in");
+    // An app chat's (ACP) call: the claudeCode tool name and rawInput when there is one, else the locations.
+    let acp = |name: &str, kind: &str, call: Value| roles::acp_within(&own, name, kind, &call);
+    assert!(acp("Edit", "edit", json!({"rawInput": {"file_path": mine}})));
+    assert!(!acp("Edit", "edit", json!({"rawInput": {"file_path": "/tmp/f11-x"}, "locations": [{"path": mine}]})));
+    assert!(!acp("Grep", "search", json!({"rawInput": {"pattern": "x"}})), "P6 for app chats too");
+    assert!(acp("", "read", json!({"locations": [{"path": mine}]})));
+    assert!(!acp("", "read", json!({"locations": [{"path": mine}, {"path": "/etc/hosts"}]})), "every location");
+    assert!(!acp("", "edit", json!({"rawInput": {"file_path": mine}})), "no tool name and no locations: outside");
+    assert!(acp("", "fetch", json!({})), "a kind that touches no file");
     for (tool, input, approver) in cases {
         let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), tool, input);
         let card = shown(&r.hub).await;
@@ -325,6 +338,59 @@ async fn a_members_own_card_for_code_goes_to_the_owner() {
     let call = ask(&r.hub, owner_run("s1"), "Bash", ls());
     assert_eq!(shown(&r.hub).await.approver, "owner");
     call.abort();
+}
+
+/// P5: a member answers their bot's run cards under the member rule, with the bot's own folders as the bounds: a file
+/// outside them stays the owner's.
+#[tokio::test]
+async fn a_bots_owner_answers_its_run_cards_only_inside_the_bots_folders() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    joined(&r, "member").await;
+    window(&r.hub, 20);
+    let bot = "bot-0000aaaa";
+    r.hub
+        .store
+        .put_bot_guest(&crate::store::BotGuest {
+            bot_id: "bg_rex".into(),
+            person_id: bot.into(),
+            owner_person: Some("sam".into()),
+            name: "Rex".into(),
+            provider: "grok".into(),
+            agents: vec!["house".into()],
+            state: crate::store::BotState::Active,
+            device_key: None,
+            cloud_device: None,
+            rate_per_hour: 0,
+            concurrent: 0,
+            created_at: 0,
+            joined_at: None,
+            decided_at: None,
+            decided_by: None,
+            last_seen_at: None,
+            revoked_at: None,
+            revoked_why: None,
+        })
+        .unwrap();
+    let roots = roles::grant_roots(bot, "house");
+    let inside = format!("{}/p5-x", roots.last().expect("house's shared memory").display());
+    let cases = [
+        (json!({"file_path": inside, "old_string": "a", "new_string": "b"}), true),
+        (json!({"file_path": "/tmp/p5-x", "old_string": "a", "new_string": "b"}), false),
+    ];
+    for (input, may) in cases {
+        let call = ask(&r.hub, guest_run(bot, "1:1:house:bot"), "Edit", input);
+        let card = shown(&r.hub).await;
+        assert_eq!(card.approver, "owner", "a bot's own run never answers itself");
+        let said = roles::guard(&r.hub, "sam", true, "respondPermission", &json!({"entryId": card.entry_id})).await;
+        if may {
+            said.unwrap_or_else(|e| panic!("inside the bot's folders: {e:#}"));
+        } else {
+            assert!(said.unwrap_err().is::<crate::api::devices::NotAllowed>(), "outside the bot's folders");
+        }
+        answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+        assert!(call.await.unwrap().allow);
+    }
 }
 
 #[tokio::test]

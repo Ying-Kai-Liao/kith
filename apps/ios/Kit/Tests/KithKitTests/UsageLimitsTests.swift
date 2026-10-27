@@ -87,6 +87,14 @@ private let now = calendar.date(from: DateComponents(year: 2026, month: 10, day:
     #expect(Spend.question(e) == "Mia reached their $20 for October.")
 }
 
+@Test func theOwnersBotsCardSpeaksForAllOfThem() throws {
+    let e = try entry(#"{"status":"pending","toolKind":"limit","approver":"owner","title":"Your bots reached their $50 for October.","options":[{"optionId":"add","name":"Add $10","kind":"limit"},{"optionId":"leave","name":"Leave it","kind":"limit"}],"limit":{"kind":"bots","agent":"house","person":"bot-k","spent":50.2,"limit":50,"month":"October","addTo":60,"raiseTo":100}}"#)
+    let m = try #require(LimitCardModel(e))
+    #expect(m.heading == "Your bots · monthly cap")
+    #expect(m.right == "$50.20 of $50")
+    #expect(Spend.question(e) == "Your bots reached their $50 for October.")
+}
+
 @Test func anAnsweredLimitCardSaysWhatWasChosen() throws {
     #expect(Spend.outcome(try entry(agentCard.replacingOccurrences(of: #""status":"pending""#, with: #""status":"answered","selected":"raise""#))) == "Raised to $400")
     #expect(Spend.outcome(try entry(agentCard.replacingOccurrences(of: #""status":"pending""#, with: #""status":"answered","selected":"stop""#))) == "Stopped · your message is kept")

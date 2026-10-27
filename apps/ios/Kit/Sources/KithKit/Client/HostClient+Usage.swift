@@ -52,4 +52,22 @@ public extension HostClient {
         }
         return try await call("setPersonBudget", Body(agent: agent, person: person, budget: budget), timeout: 60)
     }
+
+    /// The owner's bots together: their monthly cap on every agent and this month's spend.
+    func botsCap() async throws -> BotsCap {
+        try await call("botsCap", [String: String](), timeout: 60)
+    }
+
+    /// That cap, dollars a month; nil for none.
+    func setBotsCap(_ cap: Double?) async throws -> BotsCap {
+        struct Body: Encodable {
+            var cap: Double?
+            func encode(to encoder: Encoder) throws {
+                var c = encoder.container(keyedBy: CodingKeys.self)
+                try c.encode(cap, forKey: .cap)
+            }
+            enum CodingKeys: String, CodingKey { case cap }
+        }
+        return try await call("setBotsCap", Body(cap: cap), timeout: 60)
+    }
 }

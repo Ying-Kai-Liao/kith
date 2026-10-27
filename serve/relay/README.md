@@ -20,7 +20,7 @@ npx wrangler secret put FCM_SERVICE_ACCOUNT   # optional: Firebase service-accou
 npm run deploy
 ```
 
-`wrangler deploy` prints the new `https://kith-relay.<account>.workers.dev` URL. Until the apps are switched to it, `SharedStore.relayURL` in the iOS app keeps pointing at the previous Worker; once `kith-relay` is live, change that one URL and ship the app.
+`wrangler deploy` prints the new `https://kith-relay.<account>.workers.dev` URL. Until the apps are switched to it, the iOS app keeps pointing at the previous Worker; once `kith-relay` has a public URL and the APNs secrets, set `KITH_PUSH_RELAY_HOST` in `apps/project.yml` and `apps/Kith.xcodeproj` to its host and ship the app (phones re-register with it on launch).
 
 Secrets are set per Worker, so `kith-relay` starts with none of the old Worker's: set all of the above (the APNs key and `TICKET_KEY` can be new, but a new `TICKET_KEY` means every phone re-registers on launch).
 Rotating `TICKET_KEY` invalidates every ticket; phones re-register on launch.
