@@ -172,9 +172,7 @@ A thread is one Claude session and two writers corrupt it, so a check alone is n
 (`src/terminal/claim.rs`; the kernel's `bin/kith-sessions` writes the same file). `<state>/live/terminal/<session>.claim` is
 made whole in a temp file and linked into place (exclusive, 0600): `{"pid", "procStart", "at", "kind": terminal|app|bot,
 "takeover"}`. A claim whose pid is dead, or started at another time (`ps -o lstart=` in the C locale), is stale and is replaced under
-a `flock` on `<session>.claim.lock`. It works with the host down. A kernel take prunes the stale claims next to it, each
-with its lock file (removed while held, never a live claim's); so every taker, here and in the kernel, checks after the
-`flock` that the file it locked is still the one at that path, and takes the new one if not.
+a `flock` on `<session>.claim.lock`. It works with the host down.
 
 - `kith <agent> --resume` claims the session for the launcher's shell, THEN asks `resolveThread`; `hostBusy` counts a
   running turn and a queued send, read under the thread's lock. A busy answer releases the claim and refuses. The run

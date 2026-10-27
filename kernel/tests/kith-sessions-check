@@ -398,45 +398,6 @@ PY
 )
 is "release_claims: own claim removed, foreign claim kept, under the lock" "$rel" "False True True"
 
-# a take prunes the stale claims next to it, each with its lock file (and a lock whose claim was given back); a live
-# claim keeps its lock, and the host's take-over and proc claims are left alone
-PR=$T/pr; mkdir -p "$PR"
-pruned=$(KITH_STATE=$PR python3 - "$SK" <<'PY'
-import importlib.machinery, importlib.util, json, os, sys
-l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(m)
-d = m.reg_dir(); d.mkdir(parents=True, exist_ok=True)
-(d / 'stale.claim').write_text(json.dumps({'pid': 2000000000, 'procStart': 'x'}))
-(d / 'live.claim').write_text(json.dumps({'pid': os.getppid()}))
-(d / 'proc-2000000000.claim').write_text(json.dumps({'pid': 2000000000}))
-for n in ('stale', 'live', 'given-back', 'x.takeover', 'proc-2000000000'):
-    (d / f'{n}.claim.lock').touch()
-print(m.take_claim('new', os.getppid()) is None, sorted(f.name for f in d.iterdir()))
-PY
-)
-is "prune: the stale claim and its lock go, the given-back lock too; live, take-over and proc stay" "$pruned" \
-  "True ['live.claim', 'live.claim.lock', 'new.claim', 'new.claim.lock', 'proc-2000000000.claim', 'proc-2000000000.claim.lock', 'x.takeover.claim.lock']"
-
-# a taker waiting on a lock that is pruned under it takes the lock now at that path, not the removed one
-LW=$T/lw; mkdir -p "$LW"
-waited=$(python3 - "$SK" "$LW/s.claim.lock" <<'PY'
-import importlib.machinery, importlib.util, os, sys, threading, time
-l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(m)
-path = sys.argv[2]
-pruner = m.lock_claim(path)
-got = []
-waiter = threading.Thread(target=lambda: got.append(m.lock_claim(path)))
-waiter.start(); time.sleep(0.2)
-os.unlink(path)                 # what prune_stale does while it holds the lock
-taker = m.lock_claim(path)      # a new taker makes the lock anew
-os.close(pruner); time.sleep(0.3)
-blocked = waiter.is_alive()     # the waiter woke on the removed file, saw it gone, and now waits on the new one
-os.close(taker); waiter.join(5)
-st, held = os.stat(path), os.fstat(got[0])
-print(blocked, (st.st_dev, st.st_ino) == (held.st_dev, held.st_ino))
-PY
-)
-is "lock_claim: a waiter on a pruned lock waits for the new one and then holds the file at the path" "$waited" "True True"
-
 # --- one-shot resumes take the writer claim (KITH_RESUME is how kith ask -c and the bridge name the session) ----------------
 rm -rf "$REG"; : > "$T/oneshot.go"; rm -f "$T/oneshot.go"
 (cd "$T/work/a" && KITH_RESUME=os1 STUB_SID=os1 STUB_WAIT=$T/oneshot.go STUB_OUT=$T/os-a.out KITH_CLAIM_WAIT=1 "$KERNEL/bin/kith" designer "first" >/dev/null 2>&1) &
