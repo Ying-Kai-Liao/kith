@@ -43,6 +43,9 @@ mac:
       arch: universal
   # The zip (update feed) takes this name; the DMG sets its own.
   artifactName: kith-macos.${ext}
+  # kith-tts is arm64 only and identical in both halves of the universal merge, which @electron/universal
+  # refuses unless it is named here.
+  x64ArchFiles: Contents/Resources/kith-tts
   hardenedRuntime: true
   # The computer-use driver keeps its maker's Developer ID signature (packaging/cua-driver).
   signIgnore:
@@ -89,6 +92,8 @@ linux:
   icon: resources/icon.png
   executableName: kith
   synopsis: Your coding agents as teammates
+  # Required by the deb target (package.json has no author email).
+  maintainer: Ying-Kai Liao <Ying-Kai-Liao@users.noreply.github.com>
   target: [AppImage, deb, tar.gz]
   artifactName: kith-linux-${arch}.${ext}
   desktop:
