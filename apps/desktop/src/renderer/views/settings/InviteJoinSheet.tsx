@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import type { JoinStep } from '@shared/invite-join'
+import { CODE_HINT, type JoinStep } from '@shared/invite-join'
 import { Button, Spinner } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { ModalHeader, Sheet, SheetPage } from '../../components/Overlay'
@@ -9,6 +9,7 @@ import { useModel } from '../../lib/observable'
 import { useAccount } from '../../store/account'
 import { useApp } from '../../store/context'
 import { inviteJoin } from '../../store/invite-join'
+import { spaced } from '../../store/mac-list'
 
 const progress: Record<JoinStep, string> = {
   signingIn: 'Sign in to join',
@@ -45,6 +46,11 @@ export function InviteJoinSheet() {
             <Text size="callout" weight="semibold">{state ? progress[state.step] : progress.signingIn}</Text>
           </HStack>
           {state?.message ? <Text size="callout" tone={state.step === 'failed' ? 'danger' : 'secondary'} className="settings-centered">{state.message}</Text> : null}
+          {state?.step === 'asking' && state.code ? (
+            <Text size="callout" tone="secondary" className="settings-centered">
+              Your code: <Text mono weight="semibold" tone="text">{spaced(state.code)}</Text>. {CODE_HINT}
+            </Text>
+          ) : null}
           {!state || state.step === 'signingIn' ? (
             <>
               <Text size="callout" tone="secondary" className="settings-centered">Sign in with the account you want to use on this Mac.</Text>
