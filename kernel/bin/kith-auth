@@ -58,7 +58,8 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           bot person: never more than its owner's access, checked live; its cost is
                                           on the owner's line); --rm removes it and its memberships
   kith-auth bots-cap <amount|off>           optional monthly cap on all the Mac owner's bots together (default off);
-                                          other owners' bots spend from that owner's own budget=
+                                          other owners' bots spend from that owner's own budget= (--json: the cap
+                                          and the owner's bot ids, for kith-cost bots)
   kith-auth handle <id> <platform> <user-id> | --rm   the person's account on a platform (numeric id, not a username)
   kith-auth invite <id> [minutes]           a one-time code (default 15 minutes); they send /link CODE to the bridge (kith serve)
   kith-auth link <platform> <user-id> <code>   bind that account to the code's person (the bridge calls it)
@@ -135,7 +136,7 @@ KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
 SERVICES = KITH / 'services'
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
-from kith_paths import paths, sync_env  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import guest_sandbox, paths, sync_env  # noqa: E402  the one place that knows where kith's folders are
 STATE_ROOT, AGENTS = paths()['KITH_STATE'], paths()['KITH_AGENTS']  # <home>/state, <home>/agents
 
 
@@ -248,8 +249,10 @@ def owner(auth):
 
 def acting(auth):
     """The person this run works for: KITH_PERSON, set by the entry point (the bridge, a schedule) and inherited by
-    every helper; unset is the owner."""
-    return canonical(auth, os.environ.get('KITH_PERSON') or owner(auth) or '')
+    every helper; unset is the owner. Never the owner inside a guest's sandbox, whatever its shell left in KITH_PERSON:
+    then it is no one ('-')."""
+    person = canonical(auth, os.environ.get('KITH_PERSON') or owner(auth) or '')
+    return '-' if is_owner(auth, person) and guest_sandbox() else person
 
 
 def is_owner(auth, person):
@@ -1570,6 +1573,12 @@ def cmd_bot(args):
 
 
 def cmd_bots_cap(args):
+    if args == ['--json']:   # for kith-cost bots: the cap and every id the owner's bots spend under
+        auth = load_auth()
+        cap = auth.get('owner_bots_budget')
+        mine = bots_of(auth, owner(auth)) if owner(auth) else []
+        ids = [x for b in mine for x in [b] + auth['people'][b].get('was', [])]
+        return print(json.dumps({'cap': float(cap) if cap else None, 'bots': list(dict.fromkeys(ids))}))
     if len(args) > 1:
         die('bots-cap <amount|off>', 2)
     auth = load_auth(write=True)

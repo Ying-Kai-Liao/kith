@@ -110,6 +110,7 @@ case $1 in
   bug)                shift; exec "$KITH/bin/kith-bug" "${@:---help}" ;;
   project)            shift; exec "$KITH/bin/kith-project" "$@" ;;
   schedule)           shift; exec "$KITH/bin/kith-sched" "${@:-ls}" ;;
+  wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   serve)              shift; exec "$KITH/bin/kith-serve" "${@:-help}" ;;
 esac
@@ -240,13 +241,23 @@ print("p_env_names=%s" % q(" ".join(env)))')"
       echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost gave '$spent'); not running without the budget check" >&2; exit 3
     fi
     if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)' "$spent" "$p_budget"; then
-      printf 'kith: %s has used $%.2f of their $%s this month on %s; the owner can raise it (kith auth member %s %s budget=..)\n' \
-        "$KITH_PERSON" "$spent" "$p_budget" "$p_budget_agent" "$p_budget_agent" "$KITH_PERSON" >&2
+      if [[ -z $p_budget_agent ]]; then   # the owner's bots, capped together on every agent (kith-auth bots-cap)
+        printf 'kith: your bots have used $%.2f of their $%s this month together (%s was stopped); the owner can raise it (kith auth bots-cap ..)\n' \
+          "$spent" "$p_budget" "$KITH_PERSON" >&2
+      else
+        printf 'kith: %s has used $%.2f of their $%s this month on %s; the owner can raise it (kith auth member %s %s budget=..)\n' \
+          "$KITH_PERSON" "$spent" "$p_budget" "$p_budget_agent" "$p_budget_agent" "$KITH_PERSON" >&2
+      fi
       # The owner's own run is never refused at a limit (it says so and goes on); anyone else's stops here.
       [[ $p_owner == 1 ]] || exit 3
     fi
   fi
   export KITH_PERSON
+fi
+# A guest's shell that drops KITH_PERSON (or names the owner in it) is not the owner: its OS sandbox says so, and a run
+# started from in there is no one's.
+if [[ $p_owner == 1 ]] && python3 "$KITH/lib/kith_paths.py" --guest-sandbox; then
+  echo "kith: this is inside a guest's run, which can't start a run as the owner" >&2; exit 3
 fi
 mkdir -p "$home/memory/projects" "$home/memory/sessions" "$home/memory/shared"
 # Whose memory this run uses. The owner's is the agent's memory/ itself; anyone else's is memory/people/<id>/, with
@@ -388,7 +399,8 @@ held=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --child
 # Body without frontmatter, then long-term memory: the load filter of docs/memory-context.md (lib/kith_facets.py, the
 # same one the host's runs get through KITH_ROOM). The owner's run: about them, the agent's memory, then the shared part
 # when there is one. Anyone else's: about them, the shared part and their own. In a group room only what everyone there
-# may see; a bot guest (bot-<hex>) is shared craft and its own room's notes.
+# may see; a bot guest (bot-<hex>) is shared craft and its own room's notes. A person the host's KITH_ROOM_MEMBERS names
+# is in that room (kith_facets.py; kith-auth keeps no room membership, so p_rooms is empty today).
 load_kind=person; [[ $p_owner == 1 ]] && load_kind=owner; [[ ${p_id:-} == bot-* ]] && load_kind=guest
 load_out=$(python3 "$KITH/lib/kith_facets.py" load --agent "$agent" --home "$home" --person-file "$person_file" \
   --kind "$load_kind" --person "${p_id:-}" --rooms "$p_rooms" --room "${KITH_ROOM:-}" --project "$project" \
@@ -756,9 +768,10 @@ allow = []
 for d in os.environ["READ_DIRS"].split("\n"):
     if d:
         allow += both(os.path.abspath(d))
-# what a kernel helper needs to start: uv, the pythons it manages, the kith program itself
-for d in (os.environ.get("UV_CACHE_DIR"), os.path.join(os.environ.get("XDG_CACHE_HOME") or home + "/.cache", "uv"),
-          home + "/Library/Caches/uv", home + "/.local/share/uv", home + "/.local/bin"):
+# what a kernel helper needs to start: uv, the pythons it manages, the kith program itself. The run has a uv cache of
+# its own (UV_CACHE_DIR above); the shared one of the owner (~/.cache/uv, ~/Library/Caches/uv) stays closed, like
+# the rest of the home folder.
+for d in (os.environ.get("UV_CACHE_DIR"), home + "/.local/share/uv", home + "/.local/bin"):
     if d:
         allow += both(d)
 try:   # the developer shims of macOS look the toolchain up here, which can sit on another volume
@@ -839,8 +852,9 @@ done < <(printf '%s\n' "$KITH" "$kith_real" "$KITH_HOME/kernel" | awk '!seen[$0]
 # The way out of the guest sandbox is a request, not a prompt: asking is always allowed (the host makes the card, F11 2b).
 [[ $p_owner == 0 ]] && allowed+=("mcp__kithpermit__request_access" "mcp__kithpermit__report_bug")
 # Each agent carries only its own tools: the shared services it needs and is granted (kith-auth), its own mcp.json
-# for servers no one else uses, and no global skills unless capabilities.yaml says global_skills: true. Its own
-# skills are files it reads on demand. A broken auth.json costs the agent its services, not the run.
+# for servers no one else uses, and no global skills unless capabilities.yaml says global_skills: true (or the owner is at
+# their own terminal, below). Its own skills are files it reads on demand. A broken auth.json costs the agent its
+# services, not the run.
 "$KITH/bin/kith-auth" mcp-config "$agent" > "$runs/$$.mcp.json" \
   || { echo "kith: $agent: no shared services this run (kith-auth failed)" >&2; echo '{"mcpServers": {}}' > "$runs/$$.mcp.json"; }
 
@@ -902,6 +916,10 @@ print(json.dumps({
 }
 # Codex (or another harness the launch JSON covers): the same facts, without Claude's settings.
 if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi
+# An interactive run of the owner's in their own terminal: no task, a tty on both ends, not started by another run (and not
+# by the host, a schedule or an ask, which set KITH_VIA). That covers `kith AGENT`, -r, -r ID and -c.
+terminal=0
+[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && -t 0 && -t 1 ]] && terminal=1
 # Every run with someone else's profile is findable by the revoke sweep (kith-sessions proc): its pid is the one that execs
 # claude below, so the claim lives as long as claude (or, for an interactive run, the launcher claude runs under).
 [[ $p_owner == 1 || $launch -eq 1 ]] || python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || true
@@ -909,7 +927,7 @@ if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi
 if [[ $harness != claude ]]; then
   printf '%s\n' "$prompt" > "$runs/$$.prompt.md"
   run_dirs=$(for ((i = 1; i < ${#dirs[@]}; i += 2)); do printf '%s\n' "${dirs[i]}"; done)
-  grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null && gs=1 || gs=0
+  { [[ $terminal -eq 1 ]] || grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null; } && gs=1 || gs=0
   run_mcp="$runs/$$.mcp.json"; [[ -f $pkg/mcp.json ]] && run_mcp+=$'\n'"$pkg/mcp.json"
   export KITH_RUN_PROMPT="$runs/$$.prompt.md" KITH_RUN_DIRS="$PWD"$'\n'"$run_dirs" KITH_RUN_MCP=$run_mcp KITH_RUN_GLOBAL_SKILLS=$gs
   hargs=(--)
@@ -926,14 +944,23 @@ fi
 # launch-json hands the settings and the MCP servers over inline (--settings and --mcp-config take JSON as well as a file).
 settings_arg="$runs/$$.settings.json" mcp_arg="$runs/$$.mcp.json"
 if [[ $launch -eq 1 ]]; then
+  # F11 step 2b for the host's launch (an app chat's run): the grants go into the settings it is handed, as in the exec
+  # path's apply below. A once grant is pending only after a yes, and after a yes the host starts its process again with
+  # this launch.
+  if [[ $p_owner == 0 && -n ${KITH_RUN_TOKEN:-} && -n ${KITH_RUN_SOCKET:-} ]]; then
+    python3 "$KITH/bin/kith-permit" apply "$runs/$$.settings.json" || true
+  fi
   settings_arg=$(cat "$runs/$$.settings.json")
   mcp_arg=$(merged_mcp)
 fi
 [[ $p_owner == 0 ]] && mcp_arg=$(permit_mcp)
 args=(--append-system-prompt "$prompt" "${dirs[@]}" --settings "$settings_arg" --allowedTools "${allowed[@]}")
-args+=(--strict-mcp-config --mcp-config "$mcp_arg")
+# The owner at their own terminal gets Claude Code whole (/plugin, /mcp, their skills and MCP servers, the agent's granted
+# servers on top); only runs between agents, the host's launches and everyone else's runs go lean.
+[[ $terminal -eq 1 ]] || args+=(--strict-mcp-config)
+args+=(--mcp-config "$mcp_arg")
 [[ $launch -eq 0 && $p_owner == 1 && -f $pkg/mcp.json ]] && args+=(--mcp-config "$pkg/mcp.json")
-grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null || args+=(--disable-slash-commands)
+[[ $terminal -eq 1 ]] || grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null || args+=(--disable-slash-commands)
 [[ -n $KITH_MODEL ]] && args+=(--model "$KITH_MODEL")
 [[ -n $KITH_EFFORT ]] && args+=(--effort "$KITH_EFFORT")
 [[ $out_format == json ]] && args+=(--output-format json)

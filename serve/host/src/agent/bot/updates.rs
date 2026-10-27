@@ -187,8 +187,14 @@ impl Actor {
         if let Some((person, agent)) = &whose {
             let name = tool["_meta"]["claudeCode"]["toolName"].as_str().unwrap_or_default();
             let kind = tool["kind"].as_str().unwrap_or("other");
-            approver =
-                Some(if crate::api::roles::approves_own(person, agent, name, kind).await { "member" } else { "owner" });
+            // A file outside the run's grants is the owner's to allow, as for a -p run's card.
+            let inside =
+                crate::api::roles::acp_within(&crate::api::roles::grant_roots(person, agent), name, kind, tool);
+            approver = Some(if inside && crate::api::roles::approves_own(person, agent, name, kind).await {
+                "member"
+            } else {
+                "owner"
+            });
         }
         let mut detail = json!({"output": "", "diffs": []});
         merge_tool_content(&mut detail, &tool["content"]);

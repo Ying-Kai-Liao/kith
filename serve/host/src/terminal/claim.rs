@@ -15,7 +15,7 @@
 //! `take(state, sid, Kind::Bot, std::process::id(), false)` BEFORE it checks the registry and `hostBusy`, and `release`
 //! when its turn is over.
 
-use super::registry::{dir, pid_runs, safe_id};
+use super::registry::{dir, pid_runs, proc_start, safe_id};
 use serde::{Deserialize, Serialize};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -61,7 +61,7 @@ impl Claim {
         if !pid_runs(self.pid) {
             return false;
         }
-        match (&self.proc_start, start_of(self.pid)) {
+        match (&self.proc_start, proc_start(self.pid)) {
             (Some(claimed), Some(actual)) => claimed.split_whitespace().collect::<Vec<_>>().join(" ") == actual,
             _ => true,
         }
@@ -115,7 +115,7 @@ pub fn take_as(
     std::fs::create_dir_all(parent)?;
     let mine = Claim {
         pid,
-        proc_start: start_of(pid),
+        proc_start: proc_start(pid),
         at: chrono::Utc::now().to_rfc3339(),
         kind,
         takeover,
@@ -216,8 +216,12 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
         if claim.pid == me {
             continue;
         }
-        // The holder got SIGKILL: its claim is stale (a zombie not yet reaped still counts as running).
-        let _ = std::fs::remove_file(path);
+        // The holder got SIGKILL: its claim is stale (a zombie not yet reaped still counts as running). Given back under the
+        // claim lock and only if it is still the holder's: a run waiting on the session may have taken it in the meantime,
+        // and a plain remove would delete that run's claim, leaving two writers.
+        if let Some(sid) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".claim")) {
+            release(state, sid.strip_suffix(".takeover").unwrap_or(sid), claim.pid, claim.takeover);
+        }
         ended.push(claim.pid);
     }
     ended
@@ -350,18 +354,6 @@ impl Lock {
             Ok(Self(std::fs::OpenOptions::new().write(true).create(true).truncate(false).open(path)?))
         }
     }
-}
-
-/// The start time of `pid` as `ps` prints it in the C locale (the kernel's side writes the same text; the caller's locale
-/// would print another one), whitespace squeezed.
-fn start_of(pid: u32) -> Option<String> {
-    let out = std::process::Command::new("ps")
-        .env("LC_ALL", "C")
-        .args(["-o", "lstart=", "-p", &pid.to_string()])
-        .output()
-        .ok()?;
-    let text = String::from_utf8(out.stdout).ok()?.split_whitespace().collect::<Vec<_>>().join(" ");
-    (!text.is_empty()).then_some(text)
 }
 
 /// Gives the claim back; only the claimer's own file is removed.

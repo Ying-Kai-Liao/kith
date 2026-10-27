@@ -1,4 +1,4 @@
-# Homebrew formula for kith. Copy it into the tap repo Ying-Kai-Liao/homebrew-kith as Formula/kith.rb:
+# Homebrew formula for kith. The release workflow fills it and commits it to the tap repo Ying-Kai-Liao/homebrew-kith as Formula/kith.rb:
 #
 #   brew install Ying-Kai-Liao/kith/kith
 #

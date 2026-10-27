@@ -100,7 +100,8 @@ impl Report {
             "mechanism": {"type": token(&self.mechanism, "generic"), "handled": false, "synthetic": false},
             "stacktrace": {"type": "raw", "frames": frames},
         });
-        let level = if self.kind == "Panic" { "fatal" } else { "error" };
+        // A panic, or the desktop app's main process gone (reported on its next launch).
+        let level = if matches!(self.kind.as_str(), "Panic" | "NativeCrash") { "fatal" } else { "error" };
         let process = serde_json::to_value(self.process).unwrap_or_default();
         let p = json!({"$exception_list": [exception], "$exception_level": level, "process": process});
         p.as_object().cloned().unwrap_or_default()
@@ -200,6 +201,14 @@ mod tests {
         assert_eq!(e["stacktrace"]["frames"][1]["lang"], "javascript");
         assert_eq!(p["process"], "desktop-renderer");
         assert_eq!(p["$exception_level"], "error");
+    }
+
+    #[test]
+    fn a_native_crash_of_the_desktop_app_is_fatal() {
+        let body = json!({"process": "desktop-main", "type": "NativeCrash", "mechanism": "minidump", "frames": []});
+        let p = Report::deserialize(&body).expect("a crash report").properties();
+        assert_eq!(p["$exception_list"][0]["mechanism"]["type"], "minidump");
+        assert_eq!(p["$exception_level"], "fatal");
     }
 
     #[test]

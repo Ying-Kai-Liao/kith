@@ -161,7 +161,19 @@ public struct AgentPeople: Decodable, Hashable, Sendable {
     }
 }
 
-/// The limit a card carries (serve/host/src/limits.rs agent_card / guest_card).
+/// The owner's bots together, on every agent (`botsCap`): their monthly cap, nil for none, and what they spent.
+public struct BotsCap: Codable, Hashable, Sendable {
+    public var month: String
+    public var cap: Double?
+    public var spent: Double
+
+    /// "$3.00 of $50", or what they spent when there is no cap.
+    public var line: String {
+        cap.map { Spend.of(spent, $0, cents: true) } ?? "\(Spend.money(spent, cents: true)) this month"
+    }
+}
+
+/// The limit a card carries (serve/host/src/limits.rs agent_card / guest_card / bots_card).
 public struct LimitCardData: Codable, Hashable, Sendable {
     public var kind: String
     public var agent: String
@@ -175,6 +187,8 @@ public struct LimitCardData: Codable, Hashable, Sendable {
     public var at: String?
 
     public var isPerson: Bool { kind == "person" }
+    /// The owner's bots together at their monthly cap (limits.rs bots_card).
+    public var isBots: Bool { kind == "bots" }
 }
 
 /// A limit card's values: all the words, and which answer is drawn how.
@@ -202,7 +216,12 @@ public struct LimitCardModel: Equatable, Sendable {
         }
         right = Spend.of(l.spent, l.limit, cents: true)
         fullness = Spend.fullness(l.spent, l.limit)
-        if l.isPerson {
+        if l.isBots {
+            heading = "Your bots · monthly cap"
+            title = d.title ?? "Your bots reached their cap."
+            left = "\(l.month), all agents, at API prices"
+            footer = nil
+        } else if l.isPerson {
             let name = personName ?? d.personName ?? l.person ?? "Someone"
             heading = "\(name) · limit on \(l.agent)"
             title = d.title ?? "\(name) reached their limit."
@@ -327,6 +346,7 @@ public enum Spend {
     /// Board's line for a waiting limit card.
     public static func question(_ entry: Entry) -> String? {
         guard let l = entry.data.limit else { return nil }
+        if l.isBots { return "Your bots reached their \(money(l.limit)) for \(l.month)." }
         if !l.isPerson { return "\(l.agent) used its \(money(l.limit)) for \(l.month). One run is waiting." }
         return "\(entry.data.personName ?? l.person ?? "Someone") reached their \(money(l.limit)) for \(l.month)."
     }
