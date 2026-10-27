@@ -14,7 +14,7 @@ export interface RelayApi {
 export type AccessOutcome = 'approved' | 'denied' | 'expired' | 'cancelled'
 
 export interface WaitOptions {
-  /** The six digits are ready: an owner's own device shows them to compare with the Mac, a member's is approved without. */
+  /** The six digits are ready: the device shows them while it waits (in Code mode the Mac's owner compares them, a member's too). */
   onCode?: (ticket: AccessTicket) => void
   cancelled?: () => boolean
   intervalMs?: number
@@ -65,7 +65,7 @@ export function relayJoinDeps(
 ): JoinDeps {
   return {
     ...base,
-    async requestAccess(computerId) {
+    async requestAccess(computerId, onCode) {
       const c = await find(api, computerId)
       if (c.access === 'granted') return
       // Right after the cloud accept the Mac may not have heard of the new member yet and turns the request down:
@@ -75,7 +75,7 @@ export function relayJoinDeps(
         let outcome: AccessOutcome | null = null
         let failure: Error | null = null
         try {
-          outcome = await askForAccess(api, c, wait)
+          outcome = await askForAccess(api, c, { ...wait, onCode: (t) => (wait.onCode?.(t), onCode?.(t.code)) })
         } catch (e) {
           failure = e instanceof Error ? e : new Error(String(e))
         }

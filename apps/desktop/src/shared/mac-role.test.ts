@@ -95,6 +95,8 @@ test('the join over the relay: token kept, then access, then proveInvite as the 
   assert.equal(end.step, 'done')
   assert.deepEqual(log, ['keep', 'request', 'host:proveInvite'])
   assert.deepEqual(accepted, [await inviteProof(link.token)])
+  // A member's device shows its digits too: in Code mode the Mac's owner compares them before approving.
+  assert.deepEqual(steps.filter((s) => s.code !== null).map((s) => [s.step, s.code]), [['asking', '123456']])
 })
 
 test('a device the cloud lists as granted joins without asking again', async () => {
