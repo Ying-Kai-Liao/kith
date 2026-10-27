@@ -1,5 +1,5 @@
 import { parseCall, type IncomingCall } from '@shared/incoming-call'
-import { parseAgentPeople, parseAgentUsage, parseUsageReport, type AgentPeople, type AgentUsage, type AtLimit, type Period, type UsageReport } from '@shared/usage-limits'
+import { parseAgentPeople, parseAgentUsage, parseBotsCap, parseUsageReport, type AgentPeople, type AgentUsage, type AtLimit, type BotsCap, type Period, type UsageReport } from '@shared/usage-limits'
 import type { CallError } from '@shared/ipc'
 import type { RelayCallError } from '@shared/relay'
 import { parseBackups, type Backups } from '@shared/backups'
@@ -417,6 +417,15 @@ export class HostClient {
   /** A person's budget on one agent, dollars a month; null for none. */
   async setPersonBudget(agent: string, person: string, budget: number | null): Promise<AgentPeople> {
     return parseAgentPeople(await this.call('setPersonBudget', { agent, person, budget }, 60_000))
+  }
+
+  /** The owner's bots together: their monthly cap on every agent (null for none) and this month's spend. */
+  async botsCap(): Promise<BotsCap> {
+    return parseBotsCap(await this.call('botsCap', {}, 60_000))
+  }
+
+  async setBotsCap(cap: number | null): Promise<BotsCap> {
+    return parseBotsCap(await this.call('setBotsCap', { cap }, 60_000))
   }
 
   /** The first call of an invited device: shows the invite token from the link. Until it works the Mac refuses everything else. */
