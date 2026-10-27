@@ -1,5 +1,5 @@
 {
-  "description": "A Slack app for kith-bridge in Socket Mode: the bot token (xoxb-) and the app-level token (xapp-, connections:write); one profile per workspace",
+  "description": "A Slack app for kith serve's chat channels in Socket Mode: the bot token (xoxb-) and the app-level token (xapp-, connections:write); one profile per workspace",
   "kind": "cli",
   "secrets": ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"]
 }

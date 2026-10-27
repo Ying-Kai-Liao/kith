@@ -1,5 +1,5 @@
 //! The Telegram adapter against a fake Bot API (axum), the real core and the stub hq
-//! (`tests/fixtures/channels_stub.py`). Ports the Telegram checks of `kernel/tests/kith-bridge-check`.
+//! (`tests/fixtures/channels_stub.py`). Ported from the retired Python bridge's checks.
 
 #![cfg(unix)]
 
@@ -684,7 +684,7 @@ async fn files_come_in_and_go_out() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn bridge_state_continues_where_the_bridge_stopped() {
     let rig = Rig::new().await;
-    // The bridge's file, as hq-bridge wrote it: offset 41, a task in chat 100 started by message 5, answered by 7.
+    // The bridge's file, as the retired Python bridge wrote it: offset 41, a task in chat 100 started by message 5, answered by 7.
     let bridge = json!({
         "version": 2,
         "conns": {"telegram/hq": {"offset": 41}},

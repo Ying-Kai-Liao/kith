@@ -95,7 +95,7 @@ jobs:
               - 'verification/threads/run.sh'
               - '.claude/skills/revoke-access/**'
               - 'kernel/bin/kith-auth'
-              - 'kernel/lib/kith_bridge/core.py'
+              - 'serve/host/src/channels/**'
               - 'serve/host/src/api/people.rs'
               - 'serve/host/src/api/botguests.rs'
               - 'serve/host/src/remote/**'
@@ -154,8 +154,6 @@ jobs:
       - name: bash -n kernel/bin/kith
         run: bash -n kernel/bin/kith
       - uses: astral-sh/setup-uv@v5
-      - name: Bridge check
-        run: kernel/tests/kith-bridge-check
       - name: Launchd check
         run: kernel/tests/kith-launchd-check
       - name: Project check
@@ -178,8 +176,6 @@ jobs:
         run: kernel/tests/kith-auth-props
       - name: Auth revoke check
         run: kernel/tests/kith-auth-revoke-check
-      - name: Bridge revoke check
-        run: kernel/tests/kith-bridge-revoke-check
       - name: Cost bots check
         run: kernel/tests/kith-cost-bots-check
       - name: Call check

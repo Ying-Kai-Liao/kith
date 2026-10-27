@@ -6,7 +6,7 @@
 #   kith-send --as image "🎨 generating…"    post as another agent (helpers reporting into the owner's thread)
 #   kith-send --to TARGET "text"|--caption…  ask:<id> (the caller's `kith ask --wait <id>` reads it), dm (Telegram, as below)
 #
-# Inside a Discord task (kith serve (formerly kith-bridge) sets KITH_DISCORD_WEBHOOK_URL + KITH_DISCORD_THREAD_ID) it posts into that thread,
+# Inside a Discord task (kith serve sets KITH_DISCORD_WEBHOOK_URL + KITH_DISCORD_THREAD_ID) it posts into that thread,
 # named after the agent. A tool that names a Telegram chat (KITH_TELEGRAM_BOT_TOKEN + KITH_TELEGRAM_CHAT_ID in its
 # environment) posts there. Inside any other chat task (Telegram, Slack, a Discord DM) it leaves the message in the
 # run's outbox (KITH_BRIDGE_OUTBOX) and kith serve posts it into the thread. Otherwise it goes to Telegram:

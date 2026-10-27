@@ -1,5 +1,5 @@
 //! The Slack adapter against a fake Slack (axum: Web API, file URLs and a Socket Mode websocket), the real core and
-//! the stub hq (`tests/fixtures/channels_stub.py`). Ports the Slack checks of `kernel/tests/kith-bridge-check`.
+//! the stub hq (`tests/fixtures/channels_stub.py`). Ported from the retired Python bridge's checks.
 
 #![cfg(unix)]
 
