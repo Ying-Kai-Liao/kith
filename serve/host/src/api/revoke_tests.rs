@@ -161,7 +161,8 @@ async fn a_revoke_applies_while_the_cloud_names_another_owner() {
     let r = Rig::new().await;
     joined(&r).await;
     let base = cloud::url(&r.hub.store).unwrap();
-    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "revoked": []}));
+    // Pins the owner; no `memberships`, so sam stays bound to their account.
+    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "grants": [], "revoked": []}));
     cloud::pull(&r.hub, &base).await.unwrap();
     r.set_cloud_state(
         json!({"owner": {"userId": "user_mallory"}, "memberships": [], "grants": [], "revoked": ["user_sam"]}),

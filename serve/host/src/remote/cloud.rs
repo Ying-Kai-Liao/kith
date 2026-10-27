@@ -1084,7 +1084,7 @@ mod tests {
         assert!(!renewed("phone"), "nor renews them");
         assert!(hub.store.device("lost").is_none(), "a grant gone from the cloud is still revoked");
         assert!(fake.posts.lock().unwrap().is_empty(), "no access request is answered");
-        assert!(hub.cloud.requests_json().is_empty());
+        assert_eq!(hub.cloud.requests_json(), Vec::<serde_json::Value>::new());
 
         let stale = confirm_owner(&hub, Some("user_kai")).await.unwrap_err();
         assert!(stale.is::<Conflict>(), "only the owner the cloud names now is confirmed");
