@@ -926,6 +926,11 @@ fi
 # launch-json hands the settings and the MCP servers over inline (--settings and --mcp-config take JSON as well as a file).
 settings_arg="$runs/$$.settings.json" mcp_arg="$runs/$$.mcp.json"
 if [[ $launch -eq 1 ]]; then
+  # F11 step 2b for the host's launch (an app chat's run): the grants go into the settings it is handed, as in the exec
+  # path's apply below. The host starts the process right after and asks for a launch only when it will use it.
+  if [[ $p_owner == 0 && -n ${KITH_RUN_TOKEN:-} && -n ${KITH_RUN_SOCKET:-} ]]; then
+    python3 "$KITH/bin/kith-permit" apply "$runs/$$.settings.json" || true
+  fi
   settings_arg=$(cat "$runs/$$.settings.json")
   mcp_arg=$(merged_mcp)
 fi
