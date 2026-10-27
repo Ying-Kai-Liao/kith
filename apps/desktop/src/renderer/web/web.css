@@ -53,6 +53,13 @@
   color: var(--secondary);
   text-wrap: pretty;
 }
+/* A waiting device's six digits, which the computer's owner may ask for. */
+.web-code {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
 .web-fine {
   margin: 0;
   font-size: var(--text-footnote);

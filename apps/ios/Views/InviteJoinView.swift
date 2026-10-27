@@ -100,6 +100,10 @@ struct InviteJoinView: View {
                     Text(progress).foregroundStyle(Palette.secondary)
                 }
                 .font(.subheadline)
+                if let code {
+                    Text(InviteJoin.codeLine(code))
+                        .font(.subheadline.monospacedDigit()).foregroundStyle(Palette.text).multilineTextAlignment(.center)
+                }
             case .waiting:
                 Text(state.message ?? "").font(.subheadline).foregroundStyle(Palette.secondary).multilineTextAlignment(.center)
                 Text("You can close this. Kith finishes joining by itself when the computer is reachable.")
@@ -131,6 +135,12 @@ struct InviteJoinView: View {
         .task { model.start() }
     }
 
+    /// This device's six digits while its request is pending (the step is `asking`, then `connecting` while it waits).
+    private var code: String? {
+        guard state.step == .asking || state.step == .connecting else { return nil }
+        return state.computerId.flatMap { accounts.pendingAccess[$0]?.code }
+    }
+
     private func roleLine(_ id: ComputerID) -> String {
         accounts.role(for: id) == .member ? "\(name), member" : name
     }
@@ -158,6 +168,7 @@ struct InviteJoinView: View {
         switch state.step {
         case .joining: "Using your invite…"
         case .asking: "Asking \(name) for access…"
+        case .connecting where code != nil: "Asking \(name) for access…"
         case .connecting: "Connecting to \(name)…"
         default: "Checking your invite with \(name)…"
         }

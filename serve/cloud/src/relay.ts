@@ -7,6 +7,7 @@
 
 import { DurableObject } from "cloudflare:workers";
 import { b64url, fromB64url, NONCE_TTL_MS, randomId, utf8, verifyEd25519, webOrigins } from "./auth";
+import { ERROR_STATUS, type ErrorCode } from "./contract.gen";
 import { authorized, deliveryId, forwarded, HOOK_ID, HOOK_MAX_BODY, parseHooks } from "./hooks";
 import type { Env } from "./index";
 
@@ -84,7 +85,8 @@ export interface Acl {
 
 type Msg = Record<string, unknown> & { t: string };
 
-const errorResponse = (status: number, code: string) => Response.json({ error: { code } }, { status });
+// The cloud contract's codes and statuses (serve/contract/cloud/contract.json): /v1/relay and /v1/hooks answer with these.
+const errorResponse = (code: ErrorCode) => Response.json({ error: { code } }, { status: ERROR_STATUS[code] });
 
 /** Parses and shape-checks a signed ACL's JSON; `null` when malformed. */
 export function parseAcl(bytes: Uint8Array): Acl | null {
@@ -154,7 +156,7 @@ export class ComputerRelay extends DurableObject<Env> {
   // ---- entry points ----
 
   override async fetch(req: Request): Promise<Response> {
-    if (req.headers.get("X-Kith-Internal") !== "1") return errorResponse(404, "notFound");
+    if (req.headers.get("X-Kith-Internal") !== "1") return errorResponse("notFound");
     const { pathname } = new URL(req.url);
     if (pathname === "/relay") return this.relay(req);
     if (pathname === "/internal/block" && req.method === "POST") return this.block(req);
@@ -163,28 +165,28 @@ export class ComputerRelay extends DurableObject<Env> {
       this.toHosts({ t: "cloud.changed" });
       return Response.json({});
     }
-    return errorResponse(404, "notFound");
+    return errorResponse("notFound");
   }
 
   private async relay(req: Request): Promise<Response> {
     const h = (name: string) => req.headers.get(name) ?? "";
-    if (h("Upgrade").toLowerCase() !== "websocket") return errorResponse(426, "upgradeRequired");
+    if (h("Upgrade").toLowerCase() !== "websocket") return errorResponse("upgradeRequired");
     const role = h("X-Kith-Role");
     const key = h("X-Kith-Key");
     const nonce = h("X-Kith-Nonce");
-    if (!fromB64url(key, 32) || !fromB64url(nonce, 16)) return errorResponse(400, "badRequest");
+    if (!fromB64url(key, 32) || !fromB64url(nonce, 16)) return errorResponse("badRequest");
     const now = Date.now();
     if (this.sql.exec("SELECT 1 FROM nonces WHERE kid = ? AND nonce = ?", key, nonce).toArray().length) {
-      return errorResponse(401, "badSignature");
+      return errorResponse("badSignature");
     }
     this.sql.exec("INSERT INTO nonces(kid, nonce, exp) VALUES (?, ?, ?)", key, nonce, now + NONCE_TTL_MS);
     if (role === "host") return this.acceptHost(key, h("X-Kith-Computer"), now);
     if (role === "device") {
       // Sockets carrying a session JWT must come from a listed web origin (the Worker has already checked the login).
-      if (h("X-Kith-Web") && !webOrigins(this.env).includes(h("X-Kith-Origin"))) return errorResponse(403, "forbidden");
+      if (h("X-Kith-Web") && !webOrigins(this.env).includes(h("X-Kith-Origin"))) return errorResponse("forbidden");
       return this.acceptDevice(key, h("X-Kith-Pair"), now, !!h("X-Kith-Subproto"), !!h("X-Kith-Web"));
     }
-    return errorResponse(400, "badRequest");
+    return errorResponse("badRequest");
   }
 
   private async acceptHost(kid: string, computerId: string, now: number): Promise<Response> {
@@ -193,7 +195,7 @@ export class ComputerRelay extends DurableObject<Env> {
       this.setMeta("signKey", kid);
       this.setMeta("computerId", computerId);
     } else if (signKey !== kid) {
-      return errorResponse(403, "forbidden");
+      return errorResponse("forbidden");
     }
     // A new host connection replaces the old one (§7.2).
     for (const old of this.ctx.getWebSockets("host")) {
@@ -209,29 +211,29 @@ export class ComputerRelay extends DurableObject<Env> {
 
   private async acceptDevice(dk: string, offer: string, now: number, subproto = false, web = false): Promise<Response> {
     const acl = this.acl();
-    if (!acl) return errorResponse(404, "unknownComputer");
+    if (!acl) return errorResponse("unknownComputer");
     // A pairing needs the host's one-time code, so the host decides; a block only stops ACL access.
-    if (!offer && this.sql.exec("SELECT 1 FROM blocked WHERE dk = ?", dk).toArray().length) return errorResponse(403, "forbidden");
+    if (!offer && this.sql.exec("SELECT 1 FROM blocked WHERE dk = ?", dk).toArray().length) return errorResponse("forbidden");
     const sockets = this.devices();
     const bot = !offer && acl.devices.some((d) => d.dk === dk && d.kind === "bot");
     // A bot may never use a pairing offer, even one that is open for somebody else.
-    if (offer && acl.devices.some((d) => d.dk === dk && d.kind === "bot")) return errorResponse(403, "forbidden");
+    if (offer && acl.devices.some((d) => d.dk === dk && d.kind === "bot")) return errorResponse("forbidden");
     if (bot) {
       const bots = sockets.filter(([, a]) => a.bot);
       if (bots.length >= MAX_BOT_SOCKETS || bots.filter(([, a]) => a.dk === dk).length >= MAX_BOT_SOCKETS_PER_DK) {
-        return errorResponse(429, "rateLimited");
+        return errorResponse("rateLimited");
       }
     } else if (sockets.filter(([, a]) => !a.bot).length >= MAX_DEVICE_SOCKETS) {
-      return errorResponse(429, "rateLimited");
+      return errorResponse("rateLimited");
     }
     let deadline = now + ALARM_MS;
     if (offer) {
       const o = acl.offers.find((o) => o.id === offer && o.exp > now);
-      if (!o) return errorResponse(403, "forbidden");
-      if (sockets.filter(([, a]) => a.pair).length >= MAX_PAIRING_SOCKETS) return errorResponse(429, "rateLimited");
+      if (!o) return errorResponse("forbidden");
+      if (sockets.filter(([, a]) => a.pair).length >= MAX_PAIRING_SOCKETS) return errorResponse("rateLimited");
       deadline = Math.min(deadline, now + PAIRING_TTL_MS, o.exp);
     } else if (!acl.devices.some((d) => d.dk === dk)) {
-      return errorResponse(403, "forbidden");
+      return errorResponse("forbidden");
     }
     const { 0: client, 1: server } = new WebSocketPair();
     this.ctx.acceptWebSocket(server, ["device"]);
@@ -254,7 +256,7 @@ export class ComputerRelay extends DurableObject<Env> {
   /** `POST /internal/block {"devices":[{dk, grantId}]}` (§3.4). */
   private async block(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => null)) as { devices?: { dk?: unknown; grantId?: unknown }[] } | null;
-    if (!Array.isArray(body?.devices)) return errorResponse(400, "badRequest");
+    if (!Array.isArray(body?.devices)) return errorResponse("badRequest");
     const now = Date.now();
     const dks = new Set<string>();
     for (const d of body.devices) {
@@ -285,20 +287,20 @@ export class ComputerRelay extends DurableObject<Env> {
   private async hook(req: Request): Promise<Response> {
     const id = req.headers.get("X-Kith-Hook") ?? "";
     const body = new Uint8Array(await req.arrayBuffer());
-    if (!HOOK_ID.test(id)) return errorResponse(400, "badRequest");
-    if (body.length > HOOK_MAX_BODY) return errorResponse(413, "tooLarge");
+    if (!HOOK_ID.test(id)) return errorResponse("badRequest");
+    if (body.length > HOOK_MAX_BODY) return errorResponse("tooLarge");
     const hook = this.sql.exec<{ key: string; enabled: number }>("SELECT key, enabled FROM hooks WHERE id = ?", id).toArray()[0];
-    if (!hook || !(await authorized(hook.key, req.headers, body))) return errorResponse(401, "unauthorized");
-    if (!hook.enabled) return errorResponse(409, "paused");
+    if (!hook || !(await authorized(hook.key, req.headers, body))) return errorResponse("unauthorized");
+    if (!hook.enabled) return errorResponse("paused");
     const delivery = deliveryId(req.headers);
-    if (delivery === null) return errorResponse(400, "badDeliveryId");
+    if (delivery === null) return errorResponse("badDeliveryId");
     const now = Date.now();
     const dup = this.sql.exec("SELECT 1 FROM hookbox WHERE hook = ? AND delivery = ?", id, delivery).toArray().length > 0;
     if (dup) return Response.json({ delivery, queued: true, duplicate: true }, { status: 202 });
     const mine = this.sql.exec<{ n: number }>("SELECT COUNT(*) AS n FROM hookbox WHERE hook = ?", id).one().n;
     const all = this.sql.exec<{ n: number; b: number }>("SELECT COUNT(*) AS n, COALESCE(SUM(size), 0) AS b FROM hookbox").one();
     if (mine >= HOOK_PER_HOOK || all.n >= HOOK_PER_COMPUTER || all.b + body.length > HOOK_MAX_BYTES) {
-      return Response.json({ error: { code: "full" } }, { status: 429, headers: { "Retry-After": "60" } });
+      return Response.json({ error: { code: "full" satisfies ErrorCode } }, { status: 429, headers: { "Retry-After": "60" } });
     }
     this.sql.exec(
       "INSERT INTO hookbox(hook, delivery, headers, body, size, at, exp, state) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')",

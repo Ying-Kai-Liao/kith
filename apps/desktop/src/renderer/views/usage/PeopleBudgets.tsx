@@ -66,7 +66,7 @@ const CUSTOM = 'custom'
 const NONE = 'none'
 
 /** "Each month $20": a person's limit on this agent, the stock pop-up with a custom amount. */
-function BudgetPicker({ name, budget, busy, set }: { name: string; budget: number | null; busy: boolean; set: (b: number | null) => void }) {
+export function BudgetPicker({ name, budget, busy, set }: { name: string; budget: number | null; busy: boolean; set: (b: number | null) => void }) {
   const preset = budget === null ? NONE : (BUDGET_PRESETS as readonly number[]).includes(budget) ? String(budget) : CUSTOM
   const [choice, setChoice] = useState(preset)
   const [custom, setCustom] = useState(budget && preset === CUSTOM ? String(budget) : '')

@@ -19,6 +19,8 @@
 .kith-stat small { color: var(--secondary); }
 .kith-model { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
 .kith-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.kith-access-row { align-items: center; }
+.kith-access-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 
 .kith-schedule { display: flex; flex-direction: column; gap: 4px; }
 .kith-task { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

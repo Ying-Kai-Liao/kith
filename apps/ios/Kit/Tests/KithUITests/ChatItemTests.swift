@@ -39,6 +39,21 @@ import Testing
     ])
 }
 
+/// "Select Text" shows a reply as it reads: no Markdown marks, list items on their own lines.
+@Test func selectTextShowsAReplyWithoutMarkdownMarks() {
+    let plain = MarkdownText.plain("""
+    ## Done
+    It's **fixed** in `main.swift`, see [the PR](https://example.com).
+    - one
+      - two
+    ---
+    ```
+    swift test
+    ```
+    """)
+    #expect(plain == "Done\n\nIt's fixed in main.swift, see the PR.\n\n• one\n    ◦ two\n\nswift test")
+}
+
 @Test func messagesWithoutClientNoncesHaveDistinctRowAndSeparatorIdentities() {
     let entries = ["", "", nil].enumerated().map { index, nonce in
         Entry(id: "incoming-\(index)", seq: Int64(index), botId: "b", rev: Int64(index), kind: "user", turn: 1,

@@ -23,6 +23,7 @@ async fn joined(r: &Rig) -> Caller {
         membership_id: "mem_sam".into(),
         user_id: "user_sam".into(),
         invite_id: made["inviteId"].as_str().unwrap().to_owned(),
+        ..Default::default()
     }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     r.device("sam-phone", Some("sam"))
@@ -132,7 +133,7 @@ async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
     let base = cloud::url(&r.hub.store).unwrap();
     // The cloud cut the membership and lists the account as revoked.
     r.set_cloud_state(
-        json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "revoked": ["user_sam"]}),
+        json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": ["user_sam"]}),
     );
     cloud::pull(&r.hub, &base).await.unwrap();
     assert!(!r.allowed("sam", "house"));
@@ -144,16 +145,35 @@ async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
     cloud::pull(&r.hub, &base).await.unwrap();
     assert_eq!(r.who("user_sam")["revoked"], true);
 
-    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "revoked": []}));
+    r.set_cloud_state(
+        json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": []}),
+    );
     cloud::pull(&r.hub, &base).await.unwrap();
     assert!(r.allowed("sam", "house"));
     assert_eq!(rows(&r), before);
 
     // A cloud that predates revoking (no `revoked`) changes nothing.
     r.auth(&["person", "sam", "--revoke", "--local"]);
-    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": []}));
+    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": []}));
     cloud::pull(&r.hub, &base).await.unwrap();
     assert_eq!(r.who("user_sam")["revoked"], true);
+}
+
+#[tokio::test]
+async fn a_revoke_applies_while_the_cloud_names_another_owner() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let base = cloud::url(&r.hub.store).unwrap();
+    // Pins the owner; no `memberships`, so sam stays bound to their account.
+    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "grants": [], "revoked": [], "requests": []}));
+    cloud::pull(&r.hub, &base).await.unwrap();
+    r.set_cloud_state(
+        json!({"owner": {"userId": "user_mallory"}, "memberships": [], "grants": [], "revoked": ["user_sam"], "requests": []}),
+    );
+    cloud::pull(&r.hub, &base).await.unwrap();
+    assert!(r.hub.cloud.status().owner_change.is_some());
+    assert_eq!(r.who("user_sam")["revoked"], true);
+    assert!(!r.allowed("sam", "house"));
 }
 
 #[tokio::test]

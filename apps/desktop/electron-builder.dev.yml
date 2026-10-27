@@ -33,6 +33,10 @@ linux:
   desktop:
     entry:
       StartupWMClass: Kith Dev
+appImage:
+  artifactName: kith-dev-linux-${arch}.${ext}
+deb:
+  artifactName: kith-dev-linux-${arch}.${ext}
 win:
   artifactName: kith-dev-windows-x64.${ext}
   extraResources:

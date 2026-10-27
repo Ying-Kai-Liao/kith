@@ -1,3 +1,4 @@
+import type { InviteAccepted } from './cloud-contract.gen.ts'
 import { inviteProof, type InviteLink } from './invite.ts'
 
 /** The invitee's side of a link, as steps the app can show. Every dependency is injected so the order is testable. */
@@ -10,7 +11,12 @@ export interface JoinState {
   message: string | null
   /** The Mac the invite is for, once known. */
   computerId: string | null
+  /** While `asking`: this device's six digits, which the computer's owner may ask for (Code mode compares them). */
+  code: string | null
 }
+
+/** The words beside a waiting device's six digits; iOS shows the same. */
+export const CODE_HINT = "The computer's owner may ask for these digits."
 
 export interface CloudFailureLike {
   status: number
@@ -25,16 +31,16 @@ export interface JoinDeps {
   /** Resolves once the account is signed in (the person picks Apple, Google or GitHub on the sheet). */
   waitForSignIn(): Promise<void>
   /** POST /v1/invites/<id>/accept with `{token: h1}`. Throws `CloudFailureLike`. */
-  accept(inviteId: string, h1: string): Promise<{ computerId: string; membershipId?: string }>
-  /** POST /v1/computers/<c>/access-requests; asking again for the same Mac must be harmless. */
-  requestAccess(computerId: string): Promise<void>
+  accept(inviteId: string, h1: string): Promise<InviteAccepted>
+  /** POST /v1/computers/<c>/access-requests; asking again for the same Mac must be harmless. `onCode` gets each request's six digits. */
+  requestAccess(computerId: string, onCode?: (code: string) => void): Promise<void>
   /** The connection to that Mac, or null while it is offline. Throws when this app can't connect at all. */
   connect(computerId: string): Promise<HostCaller | null>
   /** Kept per computer in the secure store, so a reconnect can prove again. */
   keepToken(computerId: string, inviteId: string, token: string): Promise<void>
 }
 
-const state = (step: JoinStep, computerId: string | null = null, message: string | null = null): JoinState => ({ step, message, computerId })
+const state = (step: JoinStep, computerId: string | null = null, message: string | null = null): JoinState => ({ step, message, computerId, code: null })
 const failed = (message: string, computerId: string | null = null) => state('failed', computerId, message)
 
 export const messageOf = (e: unknown, fallback: string) =>
@@ -89,7 +95,8 @@ export async function runJoin(link: InviteLink, deps: JoinDeps, report: (s: Join
 
   report(state('asking', computerId))
   try {
-    await deps.requestAccess(computerId)
+    // In Code mode the Mac's owner compares these digits before letting this device in: show them while it waits.
+    await deps.requestAccess(computerId, (code) => report({ ...state('asking', computerId), code }))
   } catch (e) {
     return end(failed(messageOf(e, "Couldn't ask the Mac for access."), computerId))
   }

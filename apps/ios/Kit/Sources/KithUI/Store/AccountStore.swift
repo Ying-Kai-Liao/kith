@@ -89,6 +89,7 @@ public final class AccountStore {
 
     /// What this account is on a computer. Owner unless the cloud or a kept invite token says member.
     public func role(for id: ComputerID) -> ComputerRole {
+        // A role this version doesn't know already reads as member (the contract's ComputerRole): nothing owner-only shows.
         if let role = cloudComputers.first(where: { $0.computerId == id })?.role { return role }
         return memberComputers.contains(id) ? .member : .owner
     }
@@ -254,7 +255,7 @@ public final class AccountStore {
 
     private func askForAccess() async {
         let waiting = cloudComputers.filter { c in
-            c.isOnline && c.access != "granted" && !asked.contains(c.computerId)
+            c.isOnline && c.access != .granted && !asked.contains(c.computerId)
                 && pendingAccess[c.computerId] == nil && stores[c.computerId] == nil
         }
         for computer in waiting {
@@ -302,7 +303,8 @@ public final class AccountStore {
                 Analytics.shared.capture(.computerPaired, ["via": "account", "computer": Analytics.computerTag(computer.id)])
                 await refreshCloud()
                 return
-            case .denied, .expired, .cancelled:
+            // A state this version doesn't know is over as far as it can tell: never read as approved.
+            case .denied, .expired, .cancelled, .unknown:
                 setPending(ticket.computerId, nil)
                 lastError = status.status == .denied ? "\(target.name) declined the request." : "The request expired. Ask again."
                 return
@@ -341,11 +343,23 @@ public final class AccountStore {
         return true
     }
 
-    /// Waits for the computer to take this device (a member needs no code), then for the connection.
-    /// nil when it isn't reachable within `patience`; throws when the computer turns this device away.
+    /// Waits for the computer to take this device, then for the connection. While the request is pending it waits as
+    /// long as an owner's device does: until the cloud says it was approved, declined or expired (in Code mode the
+    /// owner compares this device's code first, a member's too). The connection then gets `patience`.
+    /// nil when it isn't reachable within that; throws when the computer turns this device away.
     public func connection(to id: ComputerID, patience: Duration = .seconds(45)) async throws -> HostClient? {
-        let deadline = ContinuousClock.now + patience
+        var deadline = ContinuousClock.now + patience
+        var wasAsking = false
         while ContinuousClock.now < deadline, !retired {
+            if pendingAccess[id] != nil {
+                // Still asking: the request's own answer ends the wait, as `awaitApproval` does for an owner.
+                wasAsking = true
+                deadline = ContinuousClock.now + patience
+            } else if stores[id] == nil, wasAsking {
+                // The request ended without the computer taking this device: declined, expired or cancelled.
+                let name = cloudComputers.first { $0.computerId == id }?.name ?? "The computer"
+                throw HostError.unauthorized("\(name) didn't let this device in. Ask its owner, then open the link again.")
+            }
             if let store = stores[id] {
                 switch store.connection {
                 case .online:

@@ -32,7 +32,12 @@ fn denied(e: &anyhow::Error) -> bool {
 async fn joined(r: &Rig, roles: Value) -> (Caller, String) {
     let made = call(r, &Caller::Local, "createInvite", json!({"name": "Sam", "agents": roles})).await.unwrap();
     let invite = made["inviteId"].as_str().unwrap().to_owned();
-    let listed = [Listed { membership_id: "mem_sam".into(), user_id: "user_sam".into(), invite_id: invite }];
+    let listed = [Listed {
+        membership_id: "mem_sam".into(),
+        user_id: "user_sam".into(),
+        invite_id: invite,
+        ..Default::default()
+    }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     (r.device("sam-phone", Some("sam")), "mem_sam".into())
 }
@@ -338,6 +343,7 @@ async fn memberships_bind_only_to_our_open_invites_and_leave_with_the_cloud() {
         membership_id: id.into(),
         user_id: user.into(),
         invite_id: inv.into(),
+        ..Default::default()
     };
     let bin = Some(r.bin.as_path());
 
@@ -385,7 +391,7 @@ async fn memberships_bind_only_to_our_open_invites_and_leave_with_the_cloud() {
 }
 
 #[tokio::test]
-async fn a_pull_binds_the_member_and_approves_their_device_without_the_owner() {
+async fn a_pull_binds_the_member_and_their_device_waits_for_the_owner_to_compare_its_code() {
     let r = Rig::new().await;
     let made =
         call(&r, &Caller::Local, "createInvite", json!({"name": "Sam", "agents": {"house": "member"}})).await.unwrap();
@@ -416,11 +422,13 @@ async fn a_pull_binds_the_member_and_approves_their_device_without_the_owner() {
             .to_owned();
     assert_eq!(r.hub.cloud.requests_json()[0]["personId"], "sam");
 
-    // Approval mode stays "code", and the member's device still gets in on the matching reveal.
+    // Approval mode stays "code": the matching reveal alone doesn't let the member's device in, the owner's compare does.
     assert_eq!(cloud::approval(&r.hub.store), cloud::Approval::Code);
     r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "memberships": memberships, "grants": [],
         "requests": [request("req_sam", "user_sam", Some(nonce), Some(nd))]}));
     cloud::pull(&r.hub, &base).await.unwrap();
+    assert!(r.hub.store.device(&b64(&dk)).is_none(), "waits for the owner");
+    cloud::decide(&r.hub, "req_sam", true).await.unwrap();
     let device = r.hub.store.device(&b64(&dk)).expect("approved");
     assert_eq!((device.person_id.as_deref(), device.grant_id.as_deref()), (Some("sam"), Some("grt_new")));
     let caller = Caller::Device { key: device.key.clone(), scopes: device.scopes.clone() };
@@ -434,10 +442,11 @@ async fn a_pull_binds_the_member_and_approves_their_device_without_the_owner() {
     call(&r, &caller, "hello", json!({})).await.unwrap();
 
     // Grants: renewed for the bound account, removed for any other.
-    let grant = |user: Option<&str>| cloud::Grant {
+    let grant = |user: Option<&str>| kith_wire::cloud::HostGrant {
         grant_id: "grt_new".into(),
         device_key: device.key.clone(),
         user_id: user.map(str::to_owned),
+        ..kith_wire::cloud::HostGrant::default()
     };
     cloud::apply_grants(&r.hub, &[grant(Some("user_sam"))], Some("user_owner")).unwrap();
     assert!(r.hub.store.device(&device.key).is_some());
@@ -445,10 +454,11 @@ async fn a_pull_binds_the_member_and_approves_their_device_without_the_owner() {
     assert!(r.hub.store.device(&device.key).is_none(), "a grant naming another account isn't honoured");
     // An owner's device needs the owner's account (or a cloud that doesn't say).
     let owner_phone = r.device("owner-phone", None);
-    let og = |user: Option<&str>| cloud::Grant {
+    let og = |user: Option<&str>| kith_wire::cloud::HostGrant {
         grant_id: "grt_owner-phone".into(),
         device_key: "owner-phone".into(),
         user_id: user.map(str::to_owned),
+        ..kith_wire::cloud::HostGrant::default()
     };
     cloud::apply_grants(&r.hub, &[og(None)], Some("user_owner")).unwrap();
     cloud::apply_grants(&r.hub, &[og(Some("user_owner"))], Some("user_owner")).unwrap();

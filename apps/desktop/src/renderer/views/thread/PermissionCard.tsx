@@ -8,6 +8,7 @@ import { FALLBACK_PAIR } from '../../components/kith/pair.ts'
 import { Icon } from '../../components/Icon'
 import { HStack, VStack } from '../../components/Stack'
 import { Text } from '../../components/Text'
+import { permissionOutcome } from './permission-outcome.ts'
 import './permission-card.css'
 
 /** What the agent wants, from the tool's kind (also the notch island's headline). */
@@ -75,7 +76,7 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
     subject: d.title ?? '',
     place: `Runs on ${hostName}${cwd}`,
     waiting,
-    outcome: pending ? undefined : outcome(entry),
+    outcome: pending ? undefined : permissionOutcome(entry),
     held: held?.model ? <HeldRow model={held.model} onStop={() => setConfirming(true)} /> : undefined,
     pending: answering,
     details: hasDetail ? (
@@ -130,31 +131,6 @@ export interface HeldCardProps {
   stop: () => void
   /** The divider after the owner stopped the old run from this card. */
   stopped: { text: string; icon: string } | null
-}
-
-function outcome(entry: Entry) {
-  const d = entry.data
-  switch (d.status) {
-    case 'answered': {
-      const chosen = d.options?.find((o) => o.optionId === d.selected)
-      switch (chosen?.kind) {
-        case 'allow_once':
-          return 'Allowed once'
-        case 'allow_always':
-          return 'Always allowed'
-        case 'reject_once':
-          return 'Denied'
-        case 'reject_always':
-          return 'Never allowed'
-        default:
-          return chosen?.name ?? 'Answered'
-      }
-    }
-    case 'cancelled':
-      return 'Cancelled'
-    default:
-      return 'Expired — the agent moved on'
-  }
 }
 
 export function CodeBox({ text }: { text: string }) {

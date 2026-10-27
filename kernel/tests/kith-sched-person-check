@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# kith-sched-person-check — a scheduled job runs as the person whose run added it, checked at fire time: a revoke (or a
+# Mac out of sync with the Kith cloud) stops it; a job with no person runs as the owner, as before. `kith ask
+# agent@mac` from anyone but the owner is refused. Runs from a copy of the kernel with a stub bin/kith that records
+# who it ran for, so no real agent runs. Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-sched-person-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-person.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_SCHED_PERMISSION_MODE
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_SERVE_DIR" "$T/k/bin" "$KITH_HOME/agents/house/role"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+ln -s "$KERNEL/lib" "$T/k/lib"
+for b in kith-sched kith-ask kith-remote kith-auth; do cp "$KERNEL/bin/$b" "$T/k/bin/$b"; done
+cat > "$T/k/bin/kith" <<'STUB'
+#!/bin/sh
+# stub: records who the run is for (owner when KITH_PERSON is unset)
+echo "${KITH_PERSON:-owner}" > "$KITH_STATE/ran-$KITH_SCHED_JOB"
+STUB
+chmod +x "$T/k/bin/kith"
+S() { python3 "$T/k/bin/kith-sched" "$@"; }
+A() { python3 "$T/k/bin/kith-auth" "$@"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+ran() {   # ran JOB: who the stub ran it for, waiting a little for the detached run; '' when it didn't run
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$KITH_STATE/ran-$1" ] && break; sleep 0.3; done
+  cat "$KITH_STATE/ran-$1" 2>/dev/null; rm -f "$KITH_STATE/ran-$1"
+}
+person_of() { python3 -c "import json,sys; print(next(j.get('person','') for j in json.load(open('$KITH_HOME/agents/house/jobs.json')) if j['id']=='$1'))"; }
+
+A person kai owner >/dev/null
+A person sam name=Sam >/dev/null
+A person ann name=Ann >/dev/null
+A member house sam >/dev/null
+A member house ann >/dev/null
+
+S add house "0 8 * * *" "owner's task" --id mine >/dev/null
+KITH_PERSON=sam S add house "0 8 * * *" "sam's task" --id sams >/dev/null
+KITH_PERSON=kai S add house "0 8 * * *" "owner as a person" --id kais >/dev/null
+check "a job added from the owner's run records no person" "[ -z \"\$(person_of mine)\" ]"
+check "a job added from a guest's run records them" "[ \"\$(person_of sams)\" = sam ]"
+
+S run house sams >/dev/null 2>&1
+check "the guest's job runs for them" "[ \"\$(ran sams)\" = sam ]"
+S run house mine >/dev/null 2>&1
+check "a job with no person runs as the owner" "[ \"\$(ran mine)\" = owner ]"
+S run house kais >/dev/null 2>&1
+check "a job the owner added as a person runs for that person" "[ \"\$(ran kais)\" = kai ]"
+
+KITH_PERSON=ann S run house sams >/dev/null 2>&1
+check "another guest can't start it by hand" "[ -z \"\$(ran sams)\" ]"
+KITH_PERSON=ann S run house mine >/dev/null 2>&1
+check "an owner's job started by a guest runs for the guest" "[ \"\$(ran mine)\" = ann ]"
+KITH_PERSON=kai S run house sams >/dev/null 2>&1
+check "the owner (as a person) can start it by hand" "[ \"\$(ran sams)\" = sam ]"
+
+now=$(python3 -c 'import time; print(int(time.time() * 1000))')
+printf '{"linked": true, "until": %s}\n' "$((now - 1000))" > "$KITH_SERVE_DIR/cloud-sync.json"
+S run house sams > "$T/out" 2>&1
+check "out of sync with the cloud: the guest's job is skipped" "[ -z \"\$(ran sams)\" ]"
+check "and says why" "grep -q 'out of sync' $T/out"
+S run house mine >/dev/null 2>&1
+check "out of sync: the owner's job still runs" "[ \"\$(ran mine)\" = owner ]"
+rm "$KITH_SERVE_DIR/cloud-sync.json"
+
+A person sam --revoke >/dev/null
+S run house sams > "$T/out" 2>&1
+check "revoked: the job does not run" "[ -z \"\$(ran sams)\" ]"
+check "revoked: it says why" "grep -q 'access was removed' $T/out"
+# the tick: every job due now; the revoked one is skipped with a line in the log, the others start
+python3 - "$KITH_HOME/agents/house/jobs.json" <<'PY'
+import json, sys
+f = sys.argv[1]; jobs = json.load(open(f))
+for j in jobs: j['cron'] = '* * * * *'
+json.dump(jobs, open(f, 'w'))
+PY
+S tick > "$T/tick" 2>&1
+check "tick: the revoked person's job is skipped" "[ -z \"\$(ran sams)\" ]"
+check "tick: the skip is logged" "grep -q 'skipped house/sams' $T/tick"
+check "tick: the owner's job runs" "[ \"\$(ran mine)\" = owner ]"
+A person sam --unrevoke >/dev/null
+S run house sams >/dev/null 2>&1
+check "undo: the job runs for them again" "[ \"\$(ran sams)\" = sam ]"
+
+python3 - "$KITH_AUTH" <<'PY'
+import json, sys
+f = sys.argv[1]; d = json.load(open(f)); d['people'].pop('sam', None); d['members']['house'].pop('sam', None)
+json.dump(d, open(f, 'w'))
+PY
+S run house sams >/dev/null 2>&1
+check "a person kith no longer knows: the job does not run" "[ -z \"\$(ran sams)\" ]"
+
+# kith ask agent@mac: the other Mac has no id for anyone but the owner, so a guest's ask is refused before ssh
+KITH_PERSON=ann python3 "$T/k/bin/kith-ask" house@mini "hi" > "$T/out" 2>&1; rc=$?
+check "kith ask @mac from a guest's run is refused" "[ $rc -ne 0 ] && grep -q 'only for the owner' $T/out"
+python3 "$T/k/bin/kith-ask" house@mini "hi" > "$T/out" 2>&1
+check "kith ask @mac from the owner's run is not refused" "! grep -q 'only for the owner' $T/out"
+KITH_PERSON=kai python3 "$T/k/bin/kith-ask" house@mini "hi" > "$T/out" 2>&1
+check "kith ask @mac from the owner as a person is not refused" "! grep -q 'only for the owner' $T/out"
+
+exit $fail

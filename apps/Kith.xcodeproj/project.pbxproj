@@ -748,6 +748,7 @@
 				KITH_SCREEN_BUNDLE_ID = com.yingkailiao.kith.dev.screen;
 				KITH_SCREEN_NAME = KithDevScreen;
 				KITH_LEGACY_URL_SCHEME = "codync-dev";
+				KITH_PUSH_RELAY_HOST = codync-relay.kevin2005ha.workers.dev;
 				KITH_URL_SCHEME = "kith-dev";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 24;
@@ -856,6 +857,7 @@
 				KITH_SCREEN_BUNDLE_ID = com.yingkailiao.kith.screen;
 				KITH_SCREEN_NAME = KithScreen;
 				KITH_LEGACY_URL_SCHEME = codync;
+				KITH_PUSH_RELAY_HOST = codync-relay.kevin2005ha.workers.dev;
 				KITH_URL_SCHEME = kith;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 24;
@@ -1114,6 +1116,7 @@
 				KITH_SCREEN_BUNDLE_ID = com.yingkailiao.kith.screen;
 				KITH_SCREEN_NAME = KithScreen;
 				KITH_LEGACY_URL_SCHEME = codync;
+				KITH_PUSH_RELAY_HOST = codync-relay.kevin2005ha.workers.dev;
 				KITH_URL_SCHEME = kith;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 24;
@@ -1275,6 +1278,7 @@
 				KITH_SCREEN_BUNDLE_ID = com.yingkailiao.kith.dev.screen;
 				KITH_SCREEN_NAME = KithDevScreen;
 				KITH_LEGACY_URL_SCHEME = "codync-dev";
+				KITH_PUSH_RELAY_HOST = codync-relay.kevin2005ha.workers.dev;
 				KITH_URL_SCHEME = "kith-dev";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 24;

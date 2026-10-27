@@ -19,7 +19,8 @@ pub struct Settings {
     pub context_show: Option<f64>,
     /// `permission_mode`: the owner's runs; unset leaves it to the agent's settings, then hq's default.
     pub permission_mode: Option<String>,
-    /// `discord_guild`: the server (name or id) the Discord bot uses when it is in several.
+    /// `discord_guild`: the server (name or id) the Discord bot uses when it is in several; its owner is taken as
+    /// kith's owner until the owner's Discord account is linked (unset: no server owner is).
     pub discord_guild: Option<String>,
     /// How long a message that looks unfinished waits for the rest (not configurable).
     pub hold: Duration,

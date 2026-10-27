@@ -2,3 +2,10 @@ name = "kith-relay"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Until this date, tickets minted before tickets named their computer and expired, and unsigned pushes from
+# hosts that predate signed pushes, keep working (and /register without computerId still mints one). After it,
+# the relay refuses them and hosts forget them. Set it about 30 days after the iOS app that sends computerId
+# and the host that signs pushes are released, not 30 days after this Worker's deploy.
+LEGACY_TICKETS_UNTIL = "2026-12-01T00:00:00Z"

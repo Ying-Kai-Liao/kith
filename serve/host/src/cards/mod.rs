@@ -354,10 +354,21 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
         return Ok(Outcome::Closed);
     };
     let status = if option_id.is_some() { "answered" } else { "cancelled" };
+    // The entry shows the answer first, so what follows from it (an "always" that stays once) is written on top.
+    if let Some(mut e) = hub.store.entry(entry_id) {
+        e.data["status"] = status.into();
+        e.data["selected"] = option_id.into();
+        e.data["parked"] = false.into();
+        hub.set_entry(entry_id, &e.data);
+    }
     let mut forward = false;
     if card.tool == access::TOOL {
         // No process waits on an escape card: the yes is applied at the session's next activation (see `access`).
         access::answered(hub, &card, allow, option_id);
+        // A process of that conversation that is kept warm (an app chat's) starts again before its next turn (F2).
+        if allow {
+            crate::runauth::access_granted(&card.session);
+        }
     } else if was_live && card.source == "run" {
         let verdict = if allow { Verdict::Allow } else { Verdict::Deny("The approver said no.".into()) };
         // A yes to a live asker was spent in the answer itself (no parallel ask can take it too); if nobody was
@@ -369,12 +380,6 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
         forward = true;
     } else if allow {
         follow_up(hub, &card);
-    }
-    if let Some(mut e) = hub.store.entry(entry_id) {
-        e.data["status"] = status.into();
-        e.data["selected"] = option_id.into();
-        e.data["parked"] = false.into();
-        hub.set_entry(entry_id, &e.data);
     }
     Ok(Outcome::Recorded { forward })
 }

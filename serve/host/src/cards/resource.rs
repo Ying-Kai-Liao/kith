@@ -378,9 +378,13 @@ fn glob_base(pattern: &str) -> Option<&str> {
     })
 }
 
+pub fn is_file_tool(tool: &str) -> bool {
+    FILE_TOOLS.contains(&tool)
+}
+
 /// The absolute addresses a file tool's input names (and the folder a Glob pattern starts in), as the run spelled them.
 pub fn named_paths<'a>(tool: &str, input: &'a Value) -> Vec<&'a str> {
-    if !FILE_TOOLS.contains(&tool) {
+    if !is_file_tool(tool) {
         return Vec::new();
     }
     let base = (tool == "Glob").then(|| input["pattern"].as_str().and_then(glob_base)).flatten();

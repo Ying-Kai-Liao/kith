@@ -104,20 +104,27 @@ async function projectContext($: EngineInterface, kith: string, cwd: string): Pr
   )
 }
 
+const q = (v: string) => `'${v.replaceAll("'", `'\\''`)}'`
+
+// A helper shares its caller's MCP servers, so every helper checks a kith service's tool against its own grant
+// (kith-auth helper-mcp): without one, `ask` in the owner's session (a role limit the owner can pass), `deny` in anyone else's.
+function mcpGate(kith: string, name: string, decision: 'ask' | 'deny') {
+  return { matcher: 'mcp__.*', hooks: [{ type: 'command', command: [q(`${kith}/bin/kith-auth`), 'helper-mcp', q(name), decision].join(' ') }] }
+}
+
 // What a helper keeps of its own when it runs in the owner's session: its role's permission mode (as bin/kith picks it:
 // KITH_PERMISSION_MODE, the agent's settings, else kith's default), and a PreToolUse that allows writes to `dirs`.
 async function ownPermissions($: EngineInterface, kith: string, name: string, dirs: string[]) {
   const mode = await $.process.run(['/usr/bin/python3', `${kith}/lib/kith_settings.py`, 'permission_mode', name], { timeoutMs: 10_000 })
   const raw = mode.exitCode === 0 ? mode.stdout.trim() : ''
   const permissionMode = ({ manual: 'default', dontAsk: 'auto' } as Record<string, string>)[raw] ?? raw
-  const q = (v: string) => `'${v.replaceAll("'", `'\\''`)}'`
   return {
     ...(permissionMode ? { permissionMode } : {}),
     hooks: {
       PreToolUse: [{
         matcher: 'Write|Edit|MultiEdit|NotebookEdit',
         hooks: [{ type: 'command', command: [q(`${kith}/bin/kith-helper-allow`), ...dirs.map(q)].join(' ') }],
-      }],
+      }, mcpGate(kith, name, 'ask')],
     },
   }
 }
@@ -199,7 +206,7 @@ export const register: Register = (on, options) => {
     const packages = await resolvePackages($, kith)
     // A subagent inherits the caller's permissions. For the owner's session the helper gets its own role's instead
     // (its permission mode, and its own memory, files and notes writable). A run for anyone else (KITH_PERSON, set by
-    // bin/kith) stays capped by the caller: nothing is widened for a guest.
+    // bin/kith) stays capped by the caller: nothing is widened for a guest. Either way its MCP tools go through mcpGate.
     // bin/kith says whether the run is the owner's (KITH_OWNER; KITH_PERSON can name the owner too); without it, no person means owner.
     runWho = await runPerson($)
     const isOwner = runWho === ''
@@ -226,7 +233,7 @@ export const register: Register = (on, options) => {
               `${dir}/skills/learned`, ...(agentsReal ? [`${agentsReal}/${name}/role/skills/learned`] : []),
               `${state || kith}/projects`, ...(stateReal ? [`${stateReal}/projects`] : []),
             ])
-          : {}),
+          : { hooks: { PreToolUse: [mcpGate(kith, name, 'deny')] } }),
       })
     }
     await $.command.register({

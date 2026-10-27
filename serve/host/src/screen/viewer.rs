@@ -4,32 +4,17 @@ use super::{Control, KV_ENABLED, Screen, Viewer};
 use crate::LockExt;
 use crate::hub::Hub;
 use anyhow::{Context, Result, anyhow, bail};
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// WebRTC ICE servers. Credentials are memory-only and must not be logged.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct IceServer {
-    pub urls: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub username: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credential: Option<String>,
-}
+/// WebRTC ICE servers, as the cloud's `POST /v1/host/screen-ice` answers them (the cloud contract's). Credentials
+/// are memory-only and must not be logged.
+pub use kith_wire::cloud::IceConfig;
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IceConfig {
-    pub ice_servers: Vec<IceServer>,
-    pub expires_at: i64,
-}
-
-impl Default for IceConfig {
-    fn default() -> Self {
-        Self { ice_servers: vec![], expires_at: crate::store::now_ms() + 3_600_000 }
-    }
+/// A session on this network: no relay servers, good for an hour.
+pub fn local_ice() -> IceConfig {
+    IceConfig { ice_servers: vec![], expires_at: crate::store::now_ms() + 3_600_000 }
 }
 
 impl Screen {
@@ -187,6 +172,7 @@ pub async fn watch_viewer(hub: Arc<Hub>, session: String, owner: String) {
 mod tests {
     use super::*;
     use crate::screen::helper::Link;
+    use kith_wire::cloud::IceServer;
     use std::sync::Mutex;
     use std::sync::atomic::AtomicI64;
     use tokio::sync::{broadcast, mpsc};
@@ -204,7 +190,7 @@ mod tests {
                 username: Some("u".into()),
                 credential: Some("secret".into()),
             }],
-            ..IceConfig::default()
+            ..local_ice()
         };
         let prepared = screen.prepare("phone", config).unwrap();
         let id = prepared["session"].as_str().unwrap();
@@ -214,14 +200,14 @@ mod tests {
         assert_eq!(screen.state()["viewers"], 0);
         assert!(!screen.state().to_string().contains("secret"));
         for _ in 0..3 {
-            screen.prepare("phone", IceConfig::default()).unwrap();
+            screen.prepare("phone", local_ice()).unwrap();
         }
-        assert!(screen.prepare("phone", IceConfig::default()).is_err());
+        assert!(screen.prepare("phone", local_ice()).is_err());
         for viewer in screen.sessions.locked().values_mut() {
             viewer.pending_until = 0;
         }
-        assert!(screen.prepare("phone", IceConfig::default()).is_ok());
+        assert!(screen.prepare("phone", local_ice()).is_ok());
         *screen.enabled.locked() = Some(false);
-        assert!(screen.prepare("phone", IceConfig::default()).is_err());
+        assert!(screen.prepare("phone", local_ice()).is_err());
     }
 }

@@ -134,6 +134,18 @@ export function parseAgentPeople(raw: unknown): AgentPeople {
   }
 }
 
+/** The owner's bots together, on every agent: their monthly cap (null for none) and what they spent (`botsCap`). */
+export interface BotsCap {
+  month: string
+  cap: number | null
+  spent: number
+}
+
+export function parseBotsCap(raw: unknown): BotsCap {
+  const d = obj(raw)
+  return { month: str(d.month), cap: numOrNull(d.cap), spent: num(d.spent) }
+}
+
 /** "$6,667" from $10 up, "$2.92" below, or with `cents` always ("$289.01"). */
 export function money(x: number, cents = false): string {
   if (!cents && Math.abs(x) >= 10) return `$${Math.round(x).toLocaleString('en-US')}`
@@ -230,9 +242,9 @@ export function runTitle(turn: string): string {
   return line.length > 60 ? `${line.slice(0, 59)}…` : line
 }
 
-/** The limit a card carries (serve/host/src/limits.rs agent_card / guest_card). */
+/** The limit a card carries (serve/host/src/limits.rs agent_card / guest_card / bots_card). */
 export interface LimitCardData {
-  kind: 'agent' | 'person'
+  kind: 'agent' | 'person' | 'bots'
   agent: string
   person?: string
   spent: number
@@ -246,7 +258,7 @@ export interface LimitCardData {
 
 export function limitOf(entry: Entry): LimitCardData | null {
   const l = obj((entry.data as Record<string, unknown>).limit)
-  if (l.kind !== 'agent' && l.kind !== 'person') return null
+  if (l.kind !== 'agent' && l.kind !== 'person' && l.kind !== 'bots') return null
   return {
     kind: l.kind,
     agent: str(l.agent),
@@ -294,6 +306,17 @@ export function limitCardModel(entry: Entry, personName?: string, board = false)
       footer: null,
     }
   }
+  if (l.kind === 'bots') {
+    return {
+      heading: 'Your bots · monthly cap',
+      title: d.title ?? 'Your bots reached their cap.',
+      left: `${l.month}, all agents, at API prices`,
+      right: ofLimit(l.spent, l.limit, true),
+      fullness: fullness(l.spent, l.limit),
+      options,
+      footer: null,
+    }
+  }
   return {
     heading: `${l.agent} · Monthly limit`,
     // On Board the card stands away from its chat, so it says which run: the one waiting.
@@ -330,6 +353,7 @@ export function limitOutcome(entry: Entry): string {
 export function limitQuestion(entry: Entry): string | null {
   const l = limitOf(entry)
   if (!l) return null
+  if (l.kind === 'bots') return `Your bots reached their ${money(l.limit)} for ${l.month}.`
   return l.kind === 'agent' ? `${l.agent} used its ${money(l.limit)} for ${l.month}. One run is waiting.` : `${entry.data.personName || l.person} reached their ${money(l.limit)} for ${l.month}.`
 }
 

@@ -1,3 +1,4 @@
+import { paths } from '../cloud-contract.gen.ts'
 import type { RelayState } from '../relay.ts'
 import { FrameOpener, FrameSealer, Handshake, TooLarge, computerIdOf, fromText, signatureHeader, text as utf8, unb64url, type Signer } from './crypto.ts'
 
@@ -335,7 +336,7 @@ export class RelayLink {
   /** `GET {cloud}/v1/relay/device/{computerId}?v=1`, signed with the device key. */
   private async upgrade(): Promise<{ url: string; auth: DialAuth }> {
     const base = new URL(this.o.cloudURL)
-    const pathAndQuery = `/v1/relay/device/${this.o.computerId}?v=1`
+    const pathAndQuery = `/${paths.relayDevice(this.o.computerId)}`
     const sig = await signatureHeader(this.o.signer, { method: 'GET', authority: base.host, pathAndQuery })
     const ws = new URL(pathAndQuery, base)
     ws.protocol = base.protocol === 'http:' ? 'ws:' : 'wss:'

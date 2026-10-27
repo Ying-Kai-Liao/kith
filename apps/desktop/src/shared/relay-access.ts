@@ -1,4 +1,5 @@
 import type { HostCaller, JoinDeps } from './invite-join.ts'
+import type { AccessState } from './cloud-contract.gen.ts'
 import type { AccessProgress, AccessTicket, CloudResult, RelayComputer, RelayState } from './relay.ts'
 
 /** The part of `window.kith.relay` that asking a Mac for access and talking to it needs; injected so the order is testable. */
@@ -11,10 +12,11 @@ export interface RelayApi {
   call(computerId: string, signKey: string, method: string, body: unknown, timeoutMs: number): Promise<unknown>
 }
 
-export type AccessOutcome = 'approved' | 'denied' | 'expired' | 'cancelled'
+/** How asking ended: every access-request state but pending (AccessState in the cloud contract). */
+export type AccessOutcome = Exclude<AccessState, 'pending'>
 
 export interface WaitOptions {
-  /** The six digits are ready: an owner's own device shows them to compare with the Mac, a member's is approved without. */
+  /** The six digits are ready: the device shows them while it waits (in Code mode the Mac's owner compares them, a member's too). */
   onCode?: (ticket: AccessTicket) => void
   cancelled?: () => boolean
   intervalMs?: number
@@ -41,13 +43,25 @@ export async function askForAccess(api: RelayApi, c: { computerId: string; signK
     }
     if (now() >= ticket.expiresAt) return 'expired'
     const status = await api.accessStatus(ticket.requestId)
-    if (status.ok && status.value !== 'pending') return status.value
+    if (status.ok) {
+      const state = status.value
+      // A state this version doesn't know is over as far as it can tell (as on iOS): never read as approved.
+      if (state === 'unknown') return 'expired'
+      if (state !== 'pending') return state
+    }
     await sleep(o.intervalMs ?? 2000)
   }
 }
 
-export const accessText = (o: AccessOutcome) =>
-  o === 'denied' ? 'The Mac said no.' : o === 'expired' ? 'The request ran out of time. Try again.' : o === 'cancelled' ? 'Cancelled.' : ''
+// One line per outcome: a state added to the contract doesn't compile here until it has its words.
+const ACCESS_TEXT: Record<AccessOutcome, string> = {
+  approved: '',
+  denied: 'The Mac said no.',
+  expired: 'The request ran out of time. Try again.',
+  cancelled: 'Cancelled.',
+}
+
+export const accessText = (o: AccessOutcome) => ACCESS_TEXT[o]
 
 async function find(api: RelayApi, computerId: string): Promise<RelayComputer> {
   const list = await api.computers()
@@ -57,6 +71,9 @@ async function find(api: RelayApi, computerId: string): Promise<RelayComputer> {
   return c
 }
 
+/** A refusal this long after asking came from the Mac's owner, not from a Mac that hadn't heard of the member yet. */
+const OWNER_ANSWER_MS = 15_000
+
 /** The invitee's side of a join over the relay: the cloud accept is the caller's; this asks the Mac and reaches it. */
 export function relayJoinDeps(
   api: RelayApi,
@@ -65,23 +82,27 @@ export function relayJoinDeps(
 ): JoinDeps {
   return {
     ...base,
-    async requestAccess(computerId) {
+    async requestAccess(computerId, onCode) {
       const c = await find(api, computerId)
       if (c.access === 'granted') return
       // Right after the cloud accept the Mac may not have heard of the new member yet and turns the request down:
-      // asking again a few seconds later is the same request done properly.
+      // asking again a few seconds later is the same request done properly. That refusal comes at once; a later
+      // one is the owner saying no after comparing the code, and is final.
       const sleep = wait.sleep ?? nap
+      const now = wait.now ?? Date.now
       for (let attempt = 1; ; attempt++) {
         let outcome: AccessOutcome | null = null
         let failure: Error | null = null
+        const asked = now()
         try {
-          outcome = await askForAccess(api, c, wait)
+          outcome = await askForAccess(api, c, { ...wait, onCode: (t) => (wait.onCode?.(t), onCode?.(t.code)) })
         } catch (e) {
           failure = e instanceof Error ? e : new Error(String(e))
         }
         if (outcome === 'approved') return
         const turnedDown = outcome === 'denied' || (failure !== null && /didn't take/i.test(failure.message))
-        if (!turnedDown || attempt >= 4 || wait.cancelled?.()) throw failure ?? new Error(accessText(outcome!))
+        const byOwner = now() - asked >= OWNER_ANSWER_MS
+        if (!turnedDown || byOwner || attempt >= 4 || wait.cancelled?.()) throw failure ?? new Error(accessText(outcome!))
         await sleep(4000)
       }
     },

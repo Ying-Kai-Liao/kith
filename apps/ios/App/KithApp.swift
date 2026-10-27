@@ -418,7 +418,7 @@ final class AppStore {
             // Signed in: make this iPhone known to the account, then list its computers.
             Task { [weak accounts] in
                 do {
-                    try await cloud.registerDevice(name: UIDevice.current.name, platform: "ios")
+                    try await cloud.registerDevice(name: UIDevice.current.name, platform: .ios)
                 } catch let error as CloudError where !error.isTransient {
                     accounts?.lastError = error.localizedDescription
                 } catch {

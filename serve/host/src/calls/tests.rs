@@ -21,6 +21,7 @@ async fn sam(r: &Rig) -> (Caller, String) {
         membership_id: "mem_sam".into(),
         user_id: "user_sam".into(),
         invite_id: made["inviteId"].as_str().unwrap().into(),
+        ..Default::default()
     }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     let phone = r.device("sam-phone", Some("sam"));

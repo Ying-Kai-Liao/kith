@@ -3,6 +3,7 @@ import { Clerk } from '@clerk/clerk-js/no-rhc'
 import type { AccountState, CallError, HostSnapshot, KithBridge, UpdateState } from '../../shared/ipc.ts'
 import { isInviteProof } from '../../shared/invite.ts'
 import { isSafeExternalURL } from '../../shared/navigation.ts'
+import { paths, type Requests } from '../../shared/cloud-contract.gen.ts'
 import type { CloudFailure } from '../../shared/relay.ts'
 import { WebAccount, type ClerkLike } from './account.ts'
 import { WebCloud } from './cloud.ts'
@@ -191,7 +192,7 @@ const bridge: KithBridge = {
     request: async (method, path, body, signed) => {
       await ready
       // Anything that registers this device is the one registration of this tab (desktop's CloudModel does it on sign-in).
-      if (method === 'POST' && path.replace(/^\//, '') === 'v1/devices') {
+      if (method === 'POST' && path.replace(/^\//, '') === paths.registerDevice()) {
         const res = await relay.ensureDevice()
         return res.ok ? { ok: true, value: {} } : res
       }
@@ -203,7 +204,7 @@ const bridge: KithBridge = {
       await ready
       const device = await relay.ensureDevice()
       if (!device.ok) return device
-      return cloud.request('POST', `v1/invites/${inviteId}/accept`, { token: h1 }, false)
+      return cloud.request('POST', paths.acceptInvite(inviteId), { token: h1 } satisfies Requests['acceptInvite'], false)
     },
   },
   relay: relay.bridge,

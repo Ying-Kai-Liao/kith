@@ -8,6 +8,10 @@ use crate::hub::Hub;
 use crate::remote::crypto::{self, b64};
 use crate::store::{Device, DeviceSource, Scope, Store, now_ms};
 use anyhow::{Context, Result, anyhow, bail};
+use kith_wire::cloud::{
+    Decided, Decision, EmptyAnswer, HostAccessRequest, HostDecision, HostGrant, HostNonce, HostPlatform, HostRegister,
+    HostRegistered, HostState, IceConfig, ScreenIceRequest, path,
+};
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -32,6 +36,8 @@ pub fn approval(store: &Store) -> Approval {
 
 /// When this host sent its recent SAS nonces (kv, JSON array of ms).
 const SAS_NONCES: &str = "sas_nonces";
+/// The same for members' requests whose code is compared (Code mode), kept apart so they can't use up the owner's.
+const MEMBER_SAS_NONCES: &str = "member_sas_nonces";
 /// Every host nonce is one guess at the phone's code for whoever controls the cloud, revealed
 /// or not: at most this many per hour keeps a 6-digit SAS out of reach of a search.
 const SAS_NONCES_PER_HOUR: usize = 5;
@@ -128,13 +134,8 @@ fn valid_url(u: &str) -> bool {
         && (parsed.scheme() == "https" || (parsed.scheme() == "http" && local))
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct Owner {
-    pub user_id: String,
-    #[serde(default)]
-    pub email: Option<String>,
-}
+/// The account this computer belongs to: the cloud contract's (serve/contract/cloud/contract.json).
+pub use kith_wire::cloud::Owner;
 
 /// `cloudStatus` and the `cloud` event.
 #[derive(Serialize, Clone, Debug, Default, PartialEq, Eq)]
@@ -144,9 +145,20 @@ pub struct CloudStatus {
     pub url: Option<String>,
     pub registered: bool,
     pub connected: bool,
+    /// The owner this computer is pinned to (`remote::owner`).
     pub owner: Option<Owner>,
     pub last_error: Option<String>,
     pub approval: Approval,
+    /// The cloud names another owner than `owner`: nothing that depends on the owner is applied until someone on
+    /// this computer confirms it (`confirmOwner`).
+    pub owner_change: Option<OwnerChange>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OwnerChange {
+    /// The cloud's owner; None when it says this computer has none.
+    pub owner: Option<Owner>,
 }
 
 /// How account devices get in (`setApproval`, local only).
@@ -314,17 +326,36 @@ async fn call(hub: &Hub, base: &str, method: Method, path: &str, body: Option<&V
     Ok(v)
 }
 
+/// One signed `/v1/host/*` call with a contract body, read as the contract's answer.
+async fn send<B: Serialize, T: serde::de::DeserializeOwned>(hub: &Hub, base: &str, path: &str, body: &B) -> Result<T> {
+    let v = call(hub, base, Method::POST, path, Some(&serde_json::to_value(body)?)).await?;
+    serde_json::from_value(v).with_context(|| format!("reading the cloud's answer to {path}"))
+}
+
+/// What this computer registers as: its OS, in the contract's words (the same as `std::env::consts::OS`).
+fn host_platform() -> HostPlatform {
+    match std::env::consts::OS {
+        "macos" => HostPlatform::Macos,
+        "linux" => HostPlatform::Linux,
+        "windows" => HostPlatform::Windows,
+        _ => HostPlatform::Unknown,
+    }
+}
+
 /// `POST /v1/host/register`: makes this computer known to the cloud (no account needed).
 pub async fn register(hub: &Hub, base: &str) -> Result<()> {
-    let body = json!({
-        "boxKey": hub.identity.box_pub_b64(),
-        "name": crate::service::host_name(),
-        "platform": std::env::consts::OS,
-        "device": tokio::task::spawn_blocking(crate::service::device).await?,
-        "version": env!("CARGO_PKG_VERSION"),
-    });
-    let v = call(hub, base, Method::POST, "/v1/host/register", Some(&body)).await?;
-    if v["computerId"].as_str() != Some(hub.identity.computer_id().as_str()) {
+    let body = HostRegister {
+        box_key: hub.identity.box_pub_b64(),
+        name: crate::service::host_name(),
+        platform: host_platform(),
+        // The device word is the host RPC's too: it stays a string in the cloud contract.
+        device: serde_json::to_value(tokio::task::spawn_blocking(crate::service::device).await?)?
+            .as_str()
+            .map(str::to_owned),
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+    };
+    let v: HostRegistered = send(hub, base, path::HOST_REGISTER, &body).await?;
+    if v.computer_id != hub.identity.computer_id() {
         bail!("the cloud registered a different computer id");
     }
     tracing::info!(computer_id = hub.identity.computer_id(), "registered with the Kith cloud");
@@ -333,11 +364,10 @@ pub async fn register(hub: &Hub, base: &str) -> Result<()> {
 }
 
 /// Short-lived media credentials, issued only after the host checks screen authorization.
-pub async fn screen_ice(hub: &Hub, device_key: &str) -> Result<crate::screen::IceConfig> {
-    let value =
-        call(hub, &base(hub)?, Method::POST, "/v1/host/screen-ice", Some(&json!({"deviceKey": device_key}))).await?;
-    let config: crate::screen::IceConfig =
-        serde_json::from_value(value).context("invalid screen relay configuration")?;
+pub async fn screen_ice(hub: &Hub, device_key: &str) -> Result<IceConfig> {
+    let body = ScreenIceRequest { device_key: device_key.to_owned() };
+    let config: IceConfig =
+        send(hub, &base(hub)?, path::HOST_SCREEN_ICE, &body).await.context("invalid screen relay configuration")?;
     if config.ice_servers.is_empty() || config.expires_at <= now_ms() + 60_000 {
         bail!("the screen relay returned expired or empty credentials");
     }
@@ -346,65 +376,29 @@ pub async fn screen_ice(hub: &Hub, device_key: &str) -> Result<crate::screen::Ic
 
 // MARK: state (§4.3)
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct State {
-    owner: Option<Owner>,
-    /// None from a cloud that predates invites: the memberships this host knows are left alone.
-    #[serde(default)]
-    memberships: Option<Vec<super::members::Listed>>,
-    /// None from a cloud that predates bot guests: no bot is admitted, and the ones this host knows are left alone.
-    #[serde(default)]
-    bot_devices: Option<Vec<super::botsync::Listed>>,
-    #[serde(default)]
-    grants: Vec<Grant>,
-    #[serde(default)]
-    requests: Vec<StateRequest>,
-    /// The accounts this computer's owner revoked (on any of their Macs). None from a cloud that predates revoking.
-    #[serde(default)]
-    revoked: Option<Vec<String>>,
-}
-
-#[allow(clippy::struct_field_names, reason = "wire names")]
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Grant {
-    pub grant_id: String,
-    pub device_key: String,
-    /// The account that owns the device.
-    #[serde(default)]
-    pub user_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StateRequest {
-    request_id: String,
-    device_key: String,
-    #[serde(default)]
-    device_name: String,
-    #[serde(default)]
-    platform: String,
-    #[serde(default)]
-    user_id: Option<String>,
-    email: Option<String>,
-    commit: String,
-    #[serde(default)]
-    host_nonce: Option<String>,
-    #[serde(default)]
-    device_nonce: Option<String>,
-    #[serde(default)]
-    created_at: i64,
-    #[serde(default)]
-    expires_at: i64,
-}
-
-/// `GET /v1/host/state` and apply it: renew or remove account devices, answer access requests.
+/// `GET /v1/host/state` and apply it: renew or remove account devices, answer access requests. While the cloud names
+/// another owner than the pinned one, only what removes access is applied.
 pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     let _one = hub.cloud.pulling.lock().await;
-    let state: State = serde_json::from_value(call(hub, base, Method::GET, "/v1/host/state", None).await?)
+    // memberships, botDevices and revoked are None from a cloud that predates them: what this host knows stays.
+    let state: HostState = serde_json::from_value(call(hub, base, Method::GET, path::HOST_STATE, None).await?)
         .context("reading the cloud state")?;
-    let owner_uid = state.owner.as_ref().map(|o| o.user_id.clone());
+    let (owner, change) = match super::owner::check(&hub.store, state.owner.as_ref())? {
+        super::owner::Check::Trusted(owner) => (owner, None),
+        super::owner::Check::Held { pinned, cloud } => {
+            let change = OwnerChange { owner: cloud };
+            if hub.cloud.status().owner_change.as_ref() != Some(&change) {
+                tracing::warn!(
+                    pinned = pinned.as_ref().map(|o| o.user_id.as_str()),
+                    cloud = change.owner.as_ref().map(|o| o.user_id.as_str()),
+                    "the cloud names another owner for this computer; waiting for a confirmation here"
+                );
+            }
+            (pinned, Some(change))
+        }
+    };
+    let held = change.is_some();
+    let owner_uid = owner.as_ref().map(|o| o.user_id.clone());
     // Before the memberships: a membership the revoke cut then ends on a person already revoked (R6). A failure fails
     // the pull, so this host stays out of sync instead of serving on access it couldn't apply.
     let bin = super::account::bin().await;
@@ -414,24 +408,28 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     // Before the grants: a member's device is kept only while its account is bound to its person.
     super::members::sync(hub, state.memberships.as_deref(), owner_uid.as_deref()).await;
     super::botsync::sync(hub, state.bot_devices.as_deref()).await;
-    apply_grants(hub, &state.grants, owner_uid.as_deref())?;
-    update_status(hub, |s| s.owner = state.owner);
-    super::account::sync(hub, owner_uid.as_deref()).await;
-    sync_requests(hub, base, state.requests, owner_uid.as_deref()).await;
-    let auto = approval(&hub.store) == Approval::Auto;
-    // A member of this computer was invited by its owner, so their devices don't wait for a comparison.
-    let ready: Vec<String> = hub
-        .cloud
-        .requests
-        .locked()
-        .iter()
-        .filter(|r| r.code.is_some() && (auto || r.person.is_some()))
-        .map(|r| r.id.clone())
-        .collect();
-    // The SAS exchange still runs (the device's commit must match); only the user's comparison is skipped.
-    for id in ready {
-        if let Err(e) = decide(hub, &id, true).await {
-            tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't auto-approve an access request");
+    if held {
+        revoke_ungranted(hub, &state.grants)?;
+    } else {
+        apply_grants(hub, &state.grants, owner_uid.as_deref())?;
+    }
+    update_status(hub, |s| {
+        s.owner = owner;
+        s.owner_change = change;
+    });
+    if !held {
+        super::account::sync(hub, owner_uid.as_deref()).await;
+        sync_requests(hub, base, state.requests, owner_uid.as_deref()).await;
+        let auto = approval(&hub.store) == Approval::Auto;
+        // In Code mode every device waits for the owner to compare its code, a member's too: the invite named a person,
+        // not a device, and only the code tells that person's device from one the cloud swapped in.
+        let ready: Vec<String> =
+            hub.cloud.requests.locked().iter().filter(|r| auto && r.code.is_some()).map(|r| r.id.clone()).collect();
+        // The SAS exchange still runs (the device's commit must match); only the user's comparison is skipped.
+        for id in ready {
+            if let Err(e) = decide(hub, &id, true).await {
+                tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't auto-approve an access request");
+            }
         }
     }
     retry_revokes(hub, base).await;
@@ -477,7 +475,7 @@ fn is_owner_request(hub: &Hub, owner_uid: Option<&str>, user_id: Option<&str>) -
 /// The cloud can only shorten access: a local account device listed with the same grant and
 /// key is renewed, one missing is removed; grants this host never approved are ignored, and so are grants
 /// whose account is not the device's owner or its bound person.
-pub fn apply_grants(hub: &Hub, grants: &[Grant], owner_uid: Option<&str>) -> Result<()> {
+pub fn apply_grants(hub: &Hub, grants: &[HostGrant], owner_uid: Option<&str>) -> Result<()> {
     let until = now_ms() + LEASE_MS;
     let mut known = vec![false; grants.len()];
     for d in hub.store.devices()? {
@@ -504,6 +502,18 @@ pub fn apply_grants(hub: &Hub, grants: &[Grant], owner_uid: Option<&str>) -> Res
     Ok(())
 }
 
+/// While the owner is held: an account device whose grant is gone is removed, and nothing is renewed.
+fn revoke_ungranted(hub: &Hub, grants: &[HostGrant]) -> Result<()> {
+    for d in hub.store.devices()? {
+        let listed = grants.iter().any(|g| Some(&g.grant_id) == d.grant_id.as_ref() && g.device_key == d.key);
+        if d.source == DeviceSource::Account && !listed {
+            tracing::info!(device = d.key, "account device's grant is gone from the cloud");
+            hub.revoke_device(&d.key)?;
+        }
+    }
+    Ok(())
+}
+
 enum Next {
     /// Seen for the first time without a host nonce: send ours.
     Offer(Box<Request>),
@@ -512,7 +522,7 @@ enum Next {
 }
 
 /// Keeps the pending access requests in step with the cloud (§4.2 B steps 4 and 6).
-async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid: Option<&str>) {
+async fn sync_requests(hub: &Hub, base: &str, list: Vec<HostAccessRequest>, owner_uid: Option<&str>) {
     let mut next = vec![];
     let mut changed = false;
     let mut throttled = false;
@@ -528,12 +538,16 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
             kept
         });
         changed |= mine.len() != before;
-        let mut budget = nonce_budget(&hub.store);
+        let mut budget = nonce_budget(&hub.store, SAS_NONCES);
+        let mut member_budget = nonce_budget(&hub.store, MEMBER_SAS_NONCES);
+        // In Auto mode nobody compares a member's code, so their requests aren't rationed.
+        let compared = approval(&hub.store) == Approval::Code;
         for s in &list {
             let (Ok(dk), Ok(commit)) = (crypto::unb64_n::<32>(&s.device_key), crypto::unb64_n::<32>(&s.commit)) else {
                 next.push(Next::Deny(s.request_id.clone()));
                 continue;
             };
+            let owner = is_owner_request(hub, owner_uid, s.user_id.as_deref());
             let Some(i) = mine.iter().position(|r| r.id == s.request_id) else {
                 // Our nonce is only in memory: after a restart this request can't be finished.
                 if s.host_nonce.is_some() {
@@ -545,17 +559,20 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
                 } else if let Err(why) = requester(hub, owner_uid, s.user_id.as_deref()) {
                     tracing::warn!(request_id = s.request_id, why, "denying an access request from an unknown account");
                     next.push(Next::Deny(s.request_id.clone()));
-                } else if is_owner_request(hub, owner_uid, s.user_id.as_deref()) && is_web(&s.platform) {
+                } else if owner && is_web(&s.platform) {
                     tracing::warn!(request_id = s.request_id, "denying a web device's request for the owner's account");
                     next.push(Next::Deny(s.request_id.clone()));
-                } else if is_owner_request(hub, owner_uid, s.user_id.as_deref()) && budget.len() >= SAS_NONCES_PER_HOUR
+                } else if (owner && budget.len() >= SAS_NONCES_PER_HOUR)
+                    || (!owner && compared && member_budget.len() >= SAS_NONCES_PER_HOUR)
                 {
                     throttled = true;
                 } else {
-                    // A member's code is never compared (they skip the comparison), so their requests don't spend
-                    // the budget that guards the owner's own 6-digit code, and can't use it up to lock the owner out.
-                    if is_owner_request(hub, owner_uid, s.user_id.as_deref()) {
+                    // Members' requests spend a budget of their own, so they can't use up the one that guards the
+                    // owner's 6-digit code and lock the owner out.
+                    if owner {
                         budget.push(now_ms());
+                    } else if compared {
+                        member_budget.push(now_ms());
                     }
                     next.push(Next::Offer(Box::new(Request {
                         id: s.request_id.clone(),
@@ -600,7 +617,8 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
             changed = true;
         }
         // Saved before any nonce leaves, so a restart can't reset the budget.
-        set_nonce_budget(&hub.store, &budget);
+        set_nonce_budget(&hub.store, SAS_NONCES, &budget);
+        set_nonce_budget(&hub.store, MEMBER_SAS_NONCES, &member_budget);
     }
     if throttled {
         tracing::warn!("accessRequests throttled: too many account access requests this hour");
@@ -611,8 +629,8 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
     for n in next {
         match n {
             Next::Offer(r) => {
-                let path = format!("/v1/host/access-requests/{}/nonce", r.id);
-                match call(hub, base, Method::POST, &path, Some(&json!({"nonce": b64(&r.host_nonce)}))).await {
+                let nonce = HostNonce { nonce: b64(&r.host_nonce) };
+                match send::<_, EmptyAnswer>(hub, base, &path::host_nonce(&r.id), &nonce).await {
                     Ok(_) => {
                         hub.cloud.requests.locked().push(*r);
                         changed = true;
@@ -636,24 +654,23 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
     }
 }
 
-/// The host nonces sent in the last hour.
-fn nonce_budget(store: &Store) -> Vec<i64> {
+/// The host nonces sent in the last hour, from the budget kept under `key`.
+fn nonce_budget(store: &Store, key: &str) -> Vec<i64> {
     let since = now_ms() - HOUR_MS;
-    let sent: Vec<i64> = store.kv_get(SAS_NONCES).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+    let sent: Vec<i64> = store.kv_get(key).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
     sent.into_iter().filter(|t| *t > since).collect()
 }
 
-fn set_nonce_budget(store: &Store, sent: &[i64]) {
-    let saved = serde_json::to_string(sent).map_err(anyhow::Error::from).and_then(|v| store.kv_set(SAS_NONCES, &v));
+fn set_nonce_budget(store: &Store, key: &str, sent: &[i64]) {
+    let saved = serde_json::to_string(sent).map_err(anyhow::Error::from).and_then(|v| store.kv_set(key, &v));
     if let Err(e) = saved {
         tracing::warn!(error = format!("{e:#}"), "couldn't save the access request budget");
     }
 }
 
-async fn decision(hub: &Hub, base: &str, id: &str, approve: bool) -> Result<Value> {
-    let path = format!("/v1/host/access-requests/{id}/decision");
-    let decision = if approve { "approve" } else { "deny" };
-    call(hub, base, Method::POST, &path, Some(&json!({"decision": decision}))).await
+async fn decision(hub: &Hub, base: &str, id: &str, approve: bool) -> Result<Decided> {
+    let body = HostDecision { decision: if approve { Decision::Approve } else { Decision::Deny } };
+    send(hub, base, &path::host_decision(id), &body).await
 }
 
 async fn deny(hub: &Hub, base: &str, id: &str) {
@@ -694,8 +711,9 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
     if !approve {
         return Ok(());
     }
-    let grant = answer["grantId"]
-        .as_str()
+    let grant = answer
+        .grant_id
+        .as_deref()
         .filter(|g| g.starts_with("grt_"))
         .ok_or_else(|| anyhow!("the cloud gave no grant"))?;
     hub.store.put_device(&Device {
@@ -704,7 +722,8 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
         platform: r.platform,
         source: DeviceSource::Account,
         grant_id: Some(grant.to_owned()),
-        scopes: vec![Scope::Control, Scope::Screen],
+        // A member never shares this computer's screen, so their device isn't granted it.
+        scopes: if r.person.is_some() { vec![Scope::Control] } else { vec![Scope::Control, Scope::Screen] },
         lease_until: Some(now_ms() + LEASE_MS),
         created_at: now_ms(),
         last_seen_at: None,
@@ -748,7 +767,7 @@ async fn retry_revokes(hub: &Hub, base: &str) {
     }
     let mut left = vec![];
     for id in pending {
-        match call(hub, base, Method::POST, &format!("/v1/host/grants/{id}/revoke"), Some(&json!({}))).await {
+        match call(hub, base, Method::POST, &path::host_revoke_grant(&id), Some(&json!({}))).await {
             Ok(_) => {}
             Err(e) if cloud_status_of(&e) == Some(404) => {}
             Err(e) => {
@@ -762,9 +781,9 @@ async fn retry_revokes(hub: &Hub, base: &str) {
 
 // MARK: invites and memberships
 
-/// A signed `POST /v1/host/*` for the invite calls (`path` from `/v1/host/`).
-pub async fn post(hub: &Hub, path: &str, body: &Value) -> Result<Value> {
-    call(hub, &base(hub)?, Method::POST, path, Some(body)).await
+/// A signed `POST /v1/host/*` for the invite calls (`path` from `kith_wire::cloud::path`).
+pub async fn post<B: Serialize>(hub: &Hub, path: &str, body: &B) -> Result<Value> {
+    call(hub, &base(hub)?, Method::POST, path, Some(&serde_json::to_value(body)?)).await
 }
 
 /// Whether `e` is the cloud answering with `status`.
@@ -777,9 +796,26 @@ pub fn refused_with(e: &anyhow::Error, status: u16) -> bool {
 /// `unclaim`: takes this computer out of its account.
 pub async fn unclaim(hub: &Hub) -> Result<()> {
     let base = base(hub)?;
-    call(hub, &base, Method::POST, "/v1/host/unclaim", Some(&json!({}))).await?;
+    call(hub, &base, Method::POST, path::HOST_UNCLAIM, Some(&json!({}))).await?;
     tracing::info!("left the account");
+    super::owner::pin(&hub.store, None)?;
     pull(hub, &base).await
+}
+
+/// `confirmOwner` (local only): someone on this computer accepts the owner the cloud names, `user_id` (None: no
+/// owner) as they saw it, so a change that happened since is not confirmed with it.
+pub async fn confirm_owner(hub: &Hub, user_id: Option<&str>) -> Result<CloudStatus> {
+    let base = base(hub)?;
+    let Some(change) = hub.cloud.status().owner_change else {
+        bail!("The Kith cloud names no other owner for this computer.");
+    };
+    if change.owner.as_ref().map(|o| o.user_id.as_str()) != user_id {
+        return Err(Conflict("The cloud's owner changed again; check it and confirm again.").into());
+    }
+    super::owner::pin(&hub.store, change.owner.as_ref())?;
+    tracing::info!(owner = user_id, "the owner was confirmed on this computer");
+    pull(hub, &base).await?;
+    Ok(hub.cloud.status())
 }
 
 /// `setCloud`: turns the cloud on or off; the relay restarts.
@@ -839,7 +875,7 @@ mod tests {
         let mut local = account_device("qr", "x");
         (local.source, local.grant_id, local.lease_until) = (DeviceSource::Local, None, None);
         hub.store.put_device(&local).unwrap();
-        let grant = |g: &str, k: &str| Grant { grant_id: g.into(), device_key: k.into(), user_id: None };
+        let grant = |g: &str, k: &str| HostGrant { grant_id: g.into(), device_key: k.into(), ..HostGrant::default() };
         apply_grants(
             &hub,
             &[grant("grt_a", "kept"), grant("grt_c", "another key"), grant("grt_injected", "attacker")],
@@ -929,10 +965,12 @@ mod tests {
                 post(|Ax(f): Ax<Arc<FakeCloud>>, OriginalUri(uri): OriginalUri, axum::Json(b): axum::Json<Value>| async move {
                     let path = uri.path().to_owned();
                     f.posts.lock().unwrap().push((path.clone(), b.clone()));
-                    axum::Json(if path.ends_with("/decision") && b["decision"] == "approve" {
+                    axum::Json(if !path.ends_with("/decision") {
+                        json!({})
+                    } else if b["decision"] == "approve" {
                         json!({"status": "approved", "grantId": "grt_new"})
                     } else {
-                        json!({})
+                        json!({"status": "denied"})
                     })
                 }),
             )
@@ -970,7 +1008,7 @@ mod tests {
         assert!(early.is::<Conflict>(), "approve before the reveal is refused");
         assert_eq!(hub.cloud.status().owner.unwrap().user_id, "user_1");
 
-        *fake.state.lock().unwrap() = json!({"owner": null, "grants": [], "requests": [
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_1"}, "grants": [], "requests": [
             request("req_ok", Some(nh("req_ok")), Some(nd)),
             request("req_bad", Some(nh("req_bad")), Some(wrong)),
         ]});
@@ -986,7 +1024,156 @@ mod tests {
         decide(&hub, "req_ok", true).await.unwrap();
         let d = hub.store.device(&b64(&dk)).unwrap();
         assert_eq!((d.source, d.grant_id.as_deref()), (DeviceSource::Account, Some("grt_new")));
+        assert_eq!(d.scopes, [Scope::Control, Scope::Screen], "the owner's device can share the screen");
         assert_eq!(hub.cloud.requests_json().len(), 0);
+    }
+
+    fn add_member(hub: &Hub) {
+        hub.store
+            .add_membership(&crate::store::Membership {
+                membership_id: "mem_m".into(),
+                user_id: "user_m".into(),
+                person_id: "sam".into(),
+                invite_id: "inv".into(),
+                created_at: now_ms(),
+            })
+            .unwrap();
+    }
+
+    /// A member's request from `dk` (committed to `nd`), with the host's and the device's nonces once they are out.
+    fn member_request(
+        id: &str,
+        dk: [u8; 32],
+        nd: [u8; 32],
+        host_nonce: Option<&str>,
+        device_nonce: Option<[u8; 32]>,
+    ) -> Value {
+        json!({"requestId": id, "deviceKey": b64(&dk), "deviceName": "Sam's iPhone", "platform": "ios", "userId": "user_m",
+            "email": "sam@example.com", "commit": b64(&crypto::sas_commit(crypto::Labels::Kith, &dk, &nd)),
+            "hostNonce": host_nonce, "deviceNonce": device_nonce.map(|n| b64(&n)), "createdAt": 0, "expiresAt": 0})
+    }
+
+    #[tokio::test]
+    async fn in_code_mode_a_members_device_waits_for_the_code_too() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        assert_eq!(approval(&hub.store), Approval::Code);
+        let (dk, bad_dk, nd, wrong): ([u8; 32], [u8; 32], [u8; 32], [u8; 32]) =
+            (crypto::random(), crypto::random(), crypto::random(), crypto::random());
+        let state = |requests: Vec<Value>| json!({"owner": {"userId": "user_o"}, "grants": [], "requests": requests});
+        *fake.state.lock().unwrap() =
+            state(vec![member_request("req_m", dk, nd, None, None), member_request("req_bad", bad_dk, nd, None, None)]);
+        pull(&hub, &base).await.unwrap();
+        let nh = |id: &str| {
+            let posts = fake.posts.lock().unwrap();
+            posts.iter().find(|(p, _)| p.contains(id)).unwrap().1["nonce"].as_str().unwrap().to_owned()
+        };
+        let (nh_m, nh_bad) = (nh("req_m"), nh("req_bad"));
+        *fake.state.lock().unwrap() = state(vec![
+            member_request("req_m", dk, nd, Some(&nh_m), Some(nd)),
+            member_request("req_bad", bad_dk, nd, Some(&nh_bad), Some(wrong)),
+        ]);
+        pull(&hub, &base).await.unwrap();
+        let denied =
+            fake.posts.lock().unwrap().iter().any(|(p, b)| p.ends_with("req_bad/decision") && b["decision"] == "deny");
+        assert!(denied, "a member's reveal that doesn't match its commit is refused");
+        assert!(hub.store.device(&b64(&dk)).is_none(), "not approved without the owner checking the code");
+        let list = hub.cloud.requests_json();
+        assert_eq!(list.len(), 1);
+        let nh_m: [u8; 32] = crypto::unb64_n(&nh_m).unwrap();
+        assert_eq!(list[0]["code"], crypto::sas_code(crypto::Labels::Kith, &hub.identity.sign_pub(), &dk, &nd, &nh_m));
+        assert_eq!(list[0]["personId"], "sam");
+        // Another pull leaves it waiting for the owner.
+        pull(&hub, &base).await.unwrap();
+        assert!(hub.store.device(&b64(&dk)).is_none());
+        assert!(!fake.posts.lock().unwrap().iter().any(|(p, _)| p.ends_with("req_m/decision")));
+
+        decide(&hub, "req_m", true).await.unwrap();
+        let d = hub.store.device(&b64(&dk)).unwrap();
+        assert_eq!((d.source, d.person_id.as_deref()), (DeviceSource::Account, Some("sam")));
+        assert_eq!(d.scopes, [Scope::Control], "a member's device never carries the screen");
+    }
+
+    #[tokio::test]
+    async fn in_auto_mode_a_members_device_is_approved_on_its_reveal() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        set_approval(&hub, Approval::Auto).unwrap();
+        add_member(&hub);
+        let (dk, nd): ([u8; 32], [u8; 32]) = (crypto::random(), crypto::random());
+        let state = |r: Value| json!({"owner": {"userId": "user_o"}, "grants": [], "requests": [r]});
+        *fake.state.lock().unwrap() = state(member_request("req_m", dk, nd, None, None));
+        pull(&hub, &base).await.unwrap();
+        assert!(hub.store.device(&b64(&dk)).is_none(), "nothing is approved before the reveal");
+        let nh = fake.posts.lock().unwrap()[0].1["nonce"].as_str().unwrap().to_owned();
+        *fake.state.lock().unwrap() = state(member_request("req_m", dk, nd, Some(&nh), Some(nd)));
+        pull(&hub, &base).await.unwrap();
+        let d = hub.store.device(&b64(&dk)).unwrap();
+        assert_eq!((d.source, d.person_id.as_deref()), (DeviceSource::Account, Some("sam")), "approved on its own");
+        assert_eq!(d.scopes, [Scope::Control]);
+    }
+
+    #[tokio::test]
+    async fn the_cloud_alone_cannot_change_the_owner() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        set_approval(&hub, Approval::Auto).unwrap();
+        hub.store.put_device(&account_device("phone", "grt_a")).unwrap();
+        hub.store.put_device(&account_device("lost", "grt_b")).unwrap();
+        let grant = |g: &str, k: &str, u: &str| json!({"grantId": g, "deviceKey": k, "userId": u});
+        let renewed = |key: &str| hub.store.device(key).unwrap().lease_until.unwrap() > now_ms() + LEASE_MS - 5000;
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_kai"},
+            "grants": [grant("grt_a", "phone", "user_kai"), grant("grt_b", "lost", "user_kai")], "requests": []});
+        pull(&hub, &base).await.unwrap();
+        assert!(renewed("phone"), "the first pull pins the owner it names");
+
+        hub.store.put_device(&account_device("phone", "grt_a")).unwrap();
+        let (dk, nd): ([u8; 32], [u8; 32]) = (crypto::random(), crypto::random());
+        let request = json!({"requestId": "req_1", "deviceKey": b64(&dk), "userId": "user_mallory", "deviceName": "Phone",
+            "platform": "ios", "commit": b64(&crypto::sas_commit(crypto::Labels::Kith, &dk, &nd)), "createdAt": 0, "expiresAt": 0});
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_mallory"},
+            "grants": [grant("grt_a", "phone", "user_mallory")], "requests": [request]});
+        pull(&hub, &base).await.unwrap();
+        let status = hub.cloud.status();
+        assert_eq!(status.owner.unwrap().user_id, "user_kai", "the owner stays the pinned one");
+        assert_eq!(status.owner_change.unwrap().owner.unwrap().user_id, "user_mallory", "the apps see the change");
+        assert!(hub.store.device("phone").is_some(), "the cloud's owner doesn't remove the owner's devices");
+        assert!(!renewed("phone"), "nor renews them");
+        assert!(hub.store.device("lost").is_none(), "a grant gone from the cloud is still revoked");
+        assert!(fake.posts.lock().unwrap().is_empty(), "no access request is answered");
+        assert_eq!(hub.cloud.requests_json(), Vec::<Value>::new());
+
+        let stale = confirm_owner(&hub, Some("user_kai")).await.unwrap_err();
+        assert!(stale.is::<Conflict>(), "only the owner the cloud names now is confirmed");
+        let status = confirm_owner(&hub, Some("user_mallory")).await.unwrap();
+        assert_eq!((status.owner.unwrap().user_id, status.owner_change), ("user_mallory".to_owned(), None));
+        assert!(renewed("phone"), "confirmed here: the state applies again");
+        assert_eq!(fake.posts.lock().unwrap().len(), 1, "and the request gets its nonce");
+        assert!(confirm_owner(&hub, Some("user_mallory")).await.is_err(), "nothing left to confirm");
+    }
+
+    #[tokio::test]
+    async fn a_claim_signed_here_moves_the_owner_without_a_confirmation() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        *fake.state.lock().unwrap() = json!({"owner": null, "grants": [], "requests": []});
+        pull(&hub, &base).await.unwrap();
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_kai"}, "grants": [], "requests": []});
+        pull(&hub, &base).await.unwrap();
+        assert!(hub.cloud.status().owner_change.is_some(), "an unclaimed computer isn't claimed by the cloud alone");
+        crate::remote::owner::signed_for(&hub.store, "user_kai").unwrap();
+        pull(&hub, &base).await.unwrap();
+        let status = hub.cloud.status();
+        assert_eq!((status.owner.unwrap().user_id, status.owner_change), ("user_kai".to_owned(), None));
     }
 
     #[tokio::test]
@@ -1000,7 +1187,8 @@ mod tests {
         let request = |host_nonce: Option<String>, device_nonce: Option<[u8; 32]>| {
             json!({"owner": null, "grants": [], "requests": [{"requestId": "req_1", "deviceKey": b64(&dk),
                 "commit": b64(&crypto::sas_commit(crypto::Labels::Kith, &dk, &nd)), "hostNonce": host_nonce,
-                "deviceNonce": device_nonce.map(|n| b64(&n))}]})
+                "deviceNonce": device_nonce.map(|n| b64(&n)), "deviceName": "Phone", "platform": "ios",
+                "createdAt": 1, "expiresAt": 2}]})
         };
         *fake.state.lock().unwrap() = request(None, None);
         pull(&hub, &base).await.unwrap();
@@ -1016,8 +1204,10 @@ mod tests {
         let hub = temp_hub();
         let fake = Arc::new(FakeCloud::default());
         let base = fake_cloud(fake.clone()).await;
-        let request =
-            |id: String, dk: [u8; 32]| json!({"requestId": id, "deviceKey": b64(&dk), "commit": b64(&[0u8; 32])});
+        let request = |id: String, dk: [u8; 32]| {
+            json!({"requestId": id, "deviceKey": b64(&dk), "commit": b64(&[0u8; 32]),
+                "deviceName": "Phone", "platform": "ios", "createdAt": 1, "expiresAt": 2})
+        };
         let one_key: [u8; 32] = crypto::random();
         let mut requests: Vec<Value> = (0..2).map(|i| request(format!("same_{i}"), one_key)).collect();
         requests.extend((0..8).map(|i| request(format!("req_{i}"), crypto::random())));
@@ -1038,26 +1228,25 @@ mod tests {
 
     #[tokio::test]
     async fn a_members_requests_do_not_spend_the_owners_budget() {
-        let hub = temp_hub();
-        let fake = Arc::new(FakeCloud::default());
-        let base = fake_cloud(fake.clone()).await;
-        hub.store
-            .add_membership(&crate::store::Membership {
-                membership_id: "mem_m".into(),
-                user_id: "user_m".into(),
-                person_id: "sam".into(),
-                invite_id: "inv".into(),
-                created_at: now_ms(),
-            })
-            .unwrap();
-        let request = |id: String, user: Option<&str>| json!({"requestId": id, "deviceKey": b64(&crypto::random::<32>()), "commit": b64(&[0u8; 32]), "userId": user});
-        let mut requests: Vec<Value> = (0..8).map(|i| request(format!("member_{i}"), Some("user_m"))).collect();
-        requests.push(request("mine".into(), None));
-        *fake.state.lock().unwrap() = json!({"owner": null, "grants": [], "requests": requests});
-        pull(&hub, &base).await.unwrap();
-        let posts = fake.posts.lock().unwrap();
-        assert!(posts.iter().any(|(p, _)| p.contains("mine")), "the owner's own request still gets its code");
-        assert_eq!(posts.len(), 9, "members' requests are not rationed: their code is never compared");
+        // Code mode compares members' codes, so they are rationed too, on a budget of their own; Auto mode doesn't.
+        for (mode, members_sent) in [(Approval::Code, SAS_NONCES_PER_HOUR), (Approval::Auto, 8)] {
+            let hub = temp_hub();
+            let fake = Arc::new(FakeCloud::default());
+            let base = fake_cloud(fake.clone()).await;
+            set_approval(&hub, mode).unwrap();
+            add_member(&hub);
+            let request = |id: String, user: Option<&str>| {
+                json!({"requestId": id, "deviceKey": b64(&crypto::random::<32>()), "commit": b64(&[0u8; 32]), "userId": user,
+                "deviceName": "Phone", "platform": "ios", "createdAt": 1, "expiresAt": 2})
+            };
+            let mut requests: Vec<Value> = (0..8).map(|i| request(format!("member_{i}"), Some("user_m"))).collect();
+            requests.push(request("mine".into(), None));
+            *fake.state.lock().unwrap() = json!({"owner": null, "grants": [], "requests": requests});
+            pull(&hub, &base).await.unwrap();
+            let posts = fake.posts.lock().unwrap();
+            assert!(posts.iter().any(|(p, _)| p.contains("mine")), "the owner's own request still gets its code");
+            assert_eq!(posts.iter().filter(|(p, _)| p.contains("member_")).count(), members_sent, "{mode:?}");
+        }
     }
 
     #[tokio::test]
@@ -1077,7 +1266,10 @@ mod tests {
                     created_at: now_ms(),
                 })
                 .unwrap();
-            let request = |id: &str, user: &str, platform: &str| json!({"requestId": id, "deviceKey": b64(&crypto::random::<32>()), "commit": b64(&[0u8; 32]), "userId": user, "platform": platform});
+            let request = |id: &str, user: &str, platform: &str| {
+                json!({"requestId": id, "deviceKey": b64(&crypto::random::<32>()), "commit": b64(&[0u8; 32]), "userId": user, "platform": platform,
+                "deviceName": "Phone", "createdAt": 1, "expiresAt": 2})
+            };
             *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_o", "email": "o@example.com"}, "grants": [], "requests": [
                 request("owner_web", "user_o", "web"), request("owner_ios", "user_o", "ios"),
                 request("member_web", "user_m", "web"), request("owner_none", "user_o", "")]});

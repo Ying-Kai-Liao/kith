@@ -4,6 +4,7 @@
 
 import { randomId, sha256, utf8 } from "../auth";
 import { ApiError, audit, body, host, notify, optStr, signed, str, type Ctx } from "./common";
+import type { Responses } from "../contract.gen";
 
 /** Same ceiling as member invites: the Mac makes 24 h links, a longer ask is a bug or a hostile host. */
 const MAX_INVITE_TTL_MS = 48 * 3600_000;
@@ -34,7 +35,7 @@ const hex = (bytes: Uint8Array) => Array.from(bytes, (x) => x.toString(16).padSt
 
 // ---- host-signed ----
 
-export async function hostCreateBotInvite(c: Ctx) {
+export async function hostCreateBotInvite(c: Ctx): Promise<Responses["hostCreateBotInvite"]> {
   const comp = await host(c);
   const b = body(c);
   const inviteId = str(b, "inviteId", 64);
@@ -56,7 +57,7 @@ export async function hostCreateBotInvite(c: Ctx) {
   if (inserted.meta.changes === 0) {
     // Re-posting the same invite is a no-op; the same id with another hash or computer is a clash.
     const row = await c.env.DB.prepare("SELECT * FROM bot_invites WHERE invite_id = ?").bind(inviteId).first<BotInviteRow>();
-    if (!row) throw new ApiError("tooMany", "Too many open bot invites on this computer", 409);
+    if (!row) throw new ApiError("tooMany", "Too many open bot invites on this computer");
     if (row.computer_id !== comp.id || row.token_hash !== tokenHash) throw new ApiError("conflict", "inviteId is taken");
     return { ok: true };
   }
@@ -64,7 +65,7 @@ export async function hostCreateBotInvite(c: Ctx) {
   return { ok: true };
 }
 
-export async function hostRevokeBotInvite(c: Ctx, [inviteId]: string[]) {
+export async function hostRevokeBotInvite(c: Ctx, [inviteId]: string[]): Promise<Responses["hostRevokeBotInvite"]> {
   const comp = await host(c);
   const row = await c.env.DB.prepare("SELECT * FROM bot_invites WHERE invite_id = ? AND computer_id = ?")
     .bind(inviteId, comp.id)
@@ -84,7 +85,7 @@ export async function hostRevokeBotInvite(c: Ctx, [inviteId]: string[]) {
 }
 
 /** Ends one bot device and closes its relay sockets. Repeating it re-sends the block, so a lost notify can be retried. */
-export async function hostRevokeBotDevice(c: Ctx, [botDeviceId]: string[]) {
+export async function hostRevokeBotDevice(c: Ctx, [botDeviceId]: string[]): Promise<Responses["hostRevokeBotDevice"]> {
   const comp = await host(c);
   const row = await c.env.DB.prepare("SELECT * FROM bot_devices WHERE bot_device_id = ? AND computer_id = ?")
     .bind(botDeviceId, comp.id)
@@ -128,7 +129,7 @@ export async function activeBotDevices(c: Ctx, computerId: string) {
  * The bot (Kith-Sig by its own key) joins the computer whose Mac made this invite. Single use and bound to the first
  * key to accept; the same key repeating it gets the same device, so a retry or a second `kith join` is safe.
  */
-export async function acceptBotInvite(c: Ctx, [inviteId]: string[]) {
+export async function acceptBotInvite(c: Ctx, [inviteId]: string[]): Promise<Responses["acceptBotInvite"]> {
   // Before the signature check, so a flood of bad signatures can't skip the limit (each one costs a nonce row).
   if (c.env.BOT_JOIN_LIMITER) {
     const ip = c.req.headers.get("CF-Connecting-IP") ?? "unknown";
@@ -156,7 +157,7 @@ export async function acceptBotInvite(c: Ctx, [inviteId]: string[]) {
     if (d.revoked_at) throw new ApiError("inviteRevoked", "Your access to this computer was removed");
     return { computerId: inv.computer_id, botDeviceId: d.bot_device_id };
   };
-  const used = () => new ApiError("inviteUsed", "This invite was already used", 409);
+  const used = () => new ApiError("inviteUsed", "This invite was already used");
 
   if (inv.accepted_at) {
     const again = mine(await device());
@@ -197,7 +198,7 @@ export async function acceptBotInvite(c: Ctx, [inviteId]: string[]) {
       .bind(inv.computer_id, s.kid)
       .first();
     if (active) throw new ApiError("conflict", "This key already has a bot on this computer");
-    throw new ApiError("tooMany", "This computer has too many bots", 409);
+    throw new ApiError("tooMany", "This computer has too many bots");
   }
   await audit(c.env, `bot:${botDeviceId}`, "botinvite.accept", inviteId!, "ok", c.now).run();
   await notify(c.env, inv.computer_id);

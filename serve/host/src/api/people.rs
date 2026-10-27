@@ -14,6 +14,7 @@ use crate::hub::Hub;
 use crate::remote::{account, cloud, crypto};
 use crate::store::{Invite, PersonRow, now_ms};
 use anyhow::{Context, Result, anyhow, bail};
+use kith_wire::cloud::{CreateInvite, PersonRevoke, path};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -213,8 +214,12 @@ async fn make_invite(
         revoked_at: None,
     };
     hub.store.put_invite(&invite)?;
-    let body = json!({"inviteId": invite_id, "tokenHash": hex(&crypto::sha256(&[proof.as_bytes()])), "expiresAt": invite.expires_at});
-    if let Err(e) = cloud::post(hub, "/v1/host/invites", &body).await {
+    let body = CreateInvite {
+        invite_id: invite_id.clone(),
+        token_hash: hex(&crypto::sha256(&[proof.as_bytes()])),
+        expires_at: invite.expires_at,
+    };
+    if let Err(e) = cloud::post(hub, path::HOST_CREATE_INVITE, &body).await {
         hub.store.delete_invite(&invite_id).ok();
         return Err(e.context("The Kith cloud didn't take the invite, so none was made"));
     }
@@ -246,7 +251,7 @@ async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {
     let revoked = hub.store.revoke_invite(id)?;
     let mut in_cloud = false;
     if revoked {
-        match cloud::post(hub, &format!("/v1/host/invites/{id}/revoke"), &json!({})).await {
+        match cloud::post(hub, &path::host_revoke_invite(id), &json!({})).await {
             Ok(_) => in_cloud = true,
             // Accepted there already: the membership is the thing to revoke, and this host won't honour it.
             Err(e) if cloud::refused_with(&e, 404) || cloud::refused_with(&e, 409) => {}
@@ -379,9 +384,9 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
     }
     let everywhere = !who.kith.is_empty() && cloud::url(&hub.store).is_some();
     if everywhere {
-        let (path, what) =
-            if revoke { ("/v1/host/people/revoke", "revoked") } else { ("/v1/host/people/unrevoke", "restored") };
-        cloud::post(hub, path, &json!({"userId": who.kith})).await.map_err(|e| {
+        let (to, what) =
+            if revoke { (path::HOST_REVOKE_PERSON, "revoked") } else { (path::HOST_UNREVOKE_PERSON, "restored") };
+        cloud::post(hub, to, &PersonRevoke { user_id: who.kith.clone() }).await.map_err(|e| {
             anyhow!(
                 "{id} wasn't {what}: a change to someone's access has to reach your other computers through the Kith \
                  cloud, and it couldn't be reached ({e:#}). Try again once this computer is online."

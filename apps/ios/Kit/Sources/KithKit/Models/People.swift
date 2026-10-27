@@ -15,16 +15,6 @@ public enum InviteRole: String, Codable, CaseIterable, Sendable {
     public var title: String { self == .member ? "Member" : "Guest" }
 }
 
-/// What this account is on a computer, from `GET /v1/computers`.
-public enum ComputerRole: String, Codable, Sendable {
-    case owner, member
-
-    public init(from decoder: Decoder) throws {
-        // A role this version doesn't know gets the least: nothing owner-only is shown for it.
-        self = ComputerRole(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .member
-    }
-}
-
 public struct HostPersonDevice: Codable, Hashable, Sendable, Identifiable {
     public var key: String
     public var name: String?
@@ -121,13 +111,3 @@ public struct AuditRow: Codable, Hashable, Sendable, Identifiable {
     public var time: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 }
 
-/// The cloud's answer to accepting an invite (`POST /v1/invites/{id}/accept`).
-public struct InviteAccepted: Codable, Hashable, Sendable {
-    public var computerId: ComputerID
-    public var membershipId: String?
-
-    public init(computerId: ComputerID, membershipId: String? = nil) {
-        self.computerId = computerId
-        self.membershipId = membershipId
-    }
-}

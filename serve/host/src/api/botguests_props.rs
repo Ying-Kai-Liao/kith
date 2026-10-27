@@ -140,7 +140,12 @@ impl State {
         let listed: Vec<Member> = ["sam", "ann"]
             .iter()
             .zip(invites)
-            .map(|(p, invite_id)| Member { membership_id: format!("mem_{p}"), user_id: format!("user_{p}"), invite_id })
+            .map(|(p, invite_id)| Member {
+                membership_id: format!("mem_{p}"),
+                user_id: format!("user_{p}"),
+                invite_id,
+                ..Default::default()
+            })
             .collect();
         members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
         let callers = [Caller::Local, r.device("sam-phone", Some("sam")), r.device("ann-phone", Some("ann"))];
@@ -211,8 +216,12 @@ impl State {
         };
         let key = b64(&crypto::random::<32>());
         let invite = made["inviteId"].as_str().unwrap().to_owned();
-        let listed =
-            Listed { bot_device_id: format!("bd_{}", &key[..8]), invite_id: invite.clone(), device_key: key.clone() };
+        let listed = Listed {
+            bot_device_id: format!("bd_{}", &key[..8]),
+            invite_id: invite.clone(),
+            device_key: key.clone(),
+            ..Listed::default()
+        };
         // The cloud lists every bot device it has, so the ones already admitted stay in the list.
         let mut all: Vec<Listed> = self
             .r
@@ -223,7 +232,12 @@ impl State {
             .into_iter()
             .filter(|g| g.state.live())
             .filter_map(|g| g.cloud_device)
-            .map(|bot_device_id| Listed { bot_device_id, invite_id: String::new(), device_key: String::new() })
+            .map(|bot_device_id| Listed {
+                bot_device_id,
+                invite_id: String::new(),
+                device_key: String::new(),
+                ..Default::default()
+            })
             .collect();
         all.push(listed);
         botsync::apply(&self.r.hub, &all).await.unwrap();
