@@ -887,6 +887,10 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
                 card: Some(CardSpec { run: false, person: 0, member: true, agent: 0 }),
                 ..entry(0, true, 1, 0)
             },
+            // 16..: their bot guest's run cards past the bot's box: an escape card, and file tools outside its grants.
+            run(2, false, 9),
+            run(2, false, 2),
+            run(2, false, 3),
         ],
     };
     let ids = w.load(&sc);
@@ -926,6 +930,17 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
         );
     }
     assert!(answer(15).is_ok(), "a chat card with a member approver and its card-store row");
+    // (21) What p1 couldn't answer on their own run they can't answer on their bot's: F11 steps 2a and 2b.
+    let past_the_box: Vec<&str> = [
+        (16, "their bot guest's escape card (its yes widens the bot's next run past its box)"),
+        (17, "Read outside their bot guest's grant folders (F11 step 2a)"),
+        (18, "Edit outside their bot guest's grant folders (F11 step 2a)"),
+    ]
+    .into_iter()
+    .filter(|(i, _)| answer(*i).is_ok())
+    .map(|(_, what)| what)
+    .collect();
+    assert!(past_the_box.is_empty(), "p1 answered, as their bot guest's owner, what is the owner's: {past_the_box:#?}");
     // Every method off the member list is refused, one by one (a random draw hits a single method too rarely).
     for m in router_methods().iter().filter(|m| !MEMBER_METHODS.contains(&m.as_str())) {
         let body = json!({"botId": ids.bots[0], "entryId": ids.entries[0]});
