@@ -469,8 +469,8 @@ impl Actor {
         // with this launch before its turn: that session alone, in the same process, so the other threads' sessions
         // and their background work go on. A narrowing never waits: the turn after it runs on the new profile (M7).
         let mut reload = None;
+        let sid = if warm && self.conn.is_some() { self.hq_session(slot) } else { None };
         if warm && let Some(conn) = self.conn.as_mut() {
-            let sid = self.hq_session(slot);
             let changed = match (&digest, &sid) {
                 (Some(digest), Some(sid)) => conn.profiles.get(sid).is_none_or(|p| &p.digest != digest),
                 _ => false,

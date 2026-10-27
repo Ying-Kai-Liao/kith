@@ -304,7 +304,7 @@ pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str
         return;
     }
     // A yes that arrived while the asking process was still up was spent as a live one; nobody is waiting for it.
-    if card.state == crate::store::CardState::Used && hub.store.card_undelivered(&card.id).unwrap_or(false) {
+    if card.state == CardState::Used && hub.store.card_undelivered(&card.id).unwrap_or(false) {
         tracing::debug!(card = card.id, "access yes returned to its session");
     }
     if option_id != Some("always") {
