@@ -227,7 +227,7 @@ async fn an_app_chats_activation_reserves_a_once_grant_and_a_failed_load_leaves_
     let next = access::Reservation::open("rsv-load-3", Vec::new());
     assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-load-3")).await["grants"]["read"], json!([docs]));
     let holds = next.commit(&r.hub.store);
-    assert_eq!(holds, [card.id.clone()]);
+    assert_eq!(holds, std::slice::from_ref(&card.id));
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Used);
     assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "rsv-after")).await["grants"]["read"], json!([]));
 
