@@ -63,3 +63,10 @@ describe("GET /download", () => {
     expect(html).toContain("Apple silicon and Intel");
   });
 });
+
+describe("GET /download styles", () => {
+  it("lets [hidden] beat a.big, so only the visitor OS button shows", async () => {
+    const html = await (await get("/download")).text();
+    expect(html).toContain("[hidden]{display:none!important}");
+  });
+});

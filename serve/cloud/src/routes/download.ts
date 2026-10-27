@@ -42,7 +42,7 @@ const STYLE =
   "a.big{display:inline-block;padding:.75rem 1.5rem;border-radius:.6rem;background:#111;color:#fff;text-decoration:none;font-weight:600}" +
   "a{color:inherit}ul{padding-left:1.2rem;margin:.25rem 0}" +
   "code{display:block;padding:.75rem;border-radius:.5rem;background:#f1f1f1;overflow-x:auto;white-space:pre;font-size:.85rem}" +
-  "p,.sub{color:#555}[hidden]{display:none}" +
+  "p,.sub{color:#555}[hidden]{display:none!important}" +
   "@media(prefers-color-scheme:dark){body{background:#111;color:#eee}a.big{background:#eee;color:#111}code{background:#222}p,.sub{color:#aaa}}";
 
 let scriptHash: Promise<string> | undefined;
