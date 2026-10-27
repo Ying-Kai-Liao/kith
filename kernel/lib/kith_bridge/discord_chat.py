@@ -5,7 +5,8 @@ and kith-send (KITH_DISCORD_WEBHOOK_URL, KITH_DISCORD_THREAD_ID) posts there too
 same name, so @ autocompletes; when the bot can't manage roles, a plain-text @agent works the same. DMs with the bot
 work like a room with a default (the owner's: KITH_BRIDGE_DM_DEFAULT).
 
-Server: KITH_DISCORD_GUILD (name or ID) when the bot is in more than one.
+Server: KITH_DISCORD_GUILD (name or ID) when the bot is in more than one. Until kith knows the owner's Discord account,
+the owner of that named server is taken as kith's owner; with no server named, no one is.
 
 Every gateway frame (a heartbeat ack comes every ~41 s) is a sign of life; without any for `quiet` seconds kith-bridge
 restarts the connection. After each (re)connect the bridge reads what was sent since the last message it saw (at most
@@ -38,6 +39,7 @@ class Discord(Adapter):
         self.hooks: dict[int, discord.Webhook] = {}
         self.roles: dict[int, str] = {}      # role id → agent
         self.guild = None
+        self.named = False   # self.guild is the one KITH_DISCORD_GUILD names: its owner stands in for kith's
         self.cs.setdefault('hooks', {})
         ready = asyncio.Event()
         tasks = []
@@ -45,13 +47,15 @@ class Discord(Adapter):
         @client.event
         async def on_ready():
             squash = lambda x: re.sub(r'\s+', '', x).lower()
-            want = squash(os.environ.get('KITH_DISCORD_GUILD', '')) if self.conn == 'discord/hq' else ''
+            setting = squash(os.environ.get('KITH_DISCORD_GUILD', ''))
+            want = setting if self.conn == 'discord/hq' else ''
             guilds = [g for g in client.guilds if not want or want in (squash(g.name), str(g.id))]
             if len(guilds) != 1:
                 log(f'{self.conn}: expected one server, found {[g.name for g in client.guilds]}; set KITH_DISCORD_GUILD')
                 await client.close()
                 return
             self.guild = guilds[0]
+            self.named = bool(setting) and setting in (squash(self.guild.name), str(self.guild.id))
             await self.setup()
             if not ready.is_set():   # on_ready fires again after reconnects
                 ready.set()
@@ -230,7 +234,7 @@ class Discord(Adapter):
                 p = folder / a.filename
                 await a.save(p)
                 files.append(str(p))
-        admin = self.guild is not None and msg.author.id == self.guild.owner_id
+        admin = self.guild is not None and self.named and msg.author.id == self.guild.owner_id   # any other: no one
         return Incoming(uid=str(msg.author.id), text=text, room=room, origin=origin, thread=thread,
                         private=private, addressed=addressed or private, room_agent=room_agent, admin=admin,
                         files=files, ref=msg, sent=msg.created_at.timestamp())
