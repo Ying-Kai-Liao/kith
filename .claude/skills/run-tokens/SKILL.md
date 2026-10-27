@@ -43,6 +43,10 @@ How the token identity reaches the recall audience filter: `run_kernel` spawns t
 
 Owner runs get no token: `grant_for_env` issues one only when the env list names `KITH_PERSON`, and `agent/bot/hq.rs` only for a person or bot guest; the owner's `kith recall` reads the index directly. Runs that spawn helpers remove `KITH_RUN_TOKEN`/`KITH_RUN_SOCKET` (agent/acp.rs, agent/hq.rs). KITH_PERSON is never read on the host path: `authorize` and `resolve` take no env, so the property "env set or unset changes nothing" holds by construction (`run_recall` only removes it, then sets the token's person).
 
+## A guest shell that drops its token
+
+A guest's shell can unset `KITH_RUN_TOKEN` and `KITH_PERSON` (or set `KITH_PERSON` to the owner) and call the kernel tools directly. Those paths trust the env, so each one asks the OS too: `kith_paths.guest_sandbox()` is true when the home folder can't be listed (the guest sandbox's `denyRead` of the home; the owner's runs never have it), read from `pwd`, not `$HOME`. Inside it, no person or the owner means no one: `_caller()` in kith_recall.py (nobody), `thread_command` in kith-recall (no summarise), `guest_run()` in kith-memory (`-`), `acting()` in kith-auth (`-`), and `bin/kith` refuses to start an owner run. Outside it nothing changes. Checked by `kernel/tests/kith-recall-check` (Darwin, a `sandbox-exec` profile denying the home: each tool with the env dropped and with the owner named, and the same calls outside as controls) and by the `guest-sandbox` probe in `kith-guest-sandbox-check`'s `KITH_REAL_SANDBOX=1` run (the real Claude Code sandbox).
+
 ## Sync commit
 
 Last confirmed that the properties describe `runauth.rs`, `kernel/bin/kith-recall`'s guest branch and the guest branches of `kith-memory` and `project-id` (`kernel/lib/kith_runsocket.py`): the commit that adds `memorySearch` and `projectId` (flow/guest-tools-via-host-runsocket, 2026-10-25; before it `7b6622a0`). When `git diff <sync> -- serve/host/src/runauth.rs kernel/bin/kith-recall kernel/bin/kith-memory kernel/bin/project-id kernel/lib/kith_runsocket.py` is not empty, re-read the diff against the coverage table before trusting a pass. Move the sync commit forward only after you have confirmed the properties still describe the code at the new commit (`/maintain-formal-verification-skill`).
@@ -61,7 +65,8 @@ Last confirmed that the properties describe `runauth.rs`, `kernel/bin/kith-recal
 ## NOT covered
 
 - The OS sandbox that stops a guest reading the index or the data folder directly: kith-guest-isolation's smoke probe and the Linux CI check (#148).
-- The recall SQL audience filter and `_caller()` (kernel/lib/kith_recall.py), the env the host sets for the recall child, the real socket accept loop.
+- The recall SQL audience filter (kernel/lib/kith_recall.py), the env the host sets for the recall child, the real socket accept loop. `_caller()` is covered by examples only (kith-recall-check), not properties.
+- A guest sandbox profile that allows reading the home folder: `guest_sandbox()` would then say owner. kith-guest-sandbox-check asserts the generated settings never allow it.
 - Stale tokens held by a process outside the sandbox (an attacker with the owner's uid).
 
 ## Real bug or harness error

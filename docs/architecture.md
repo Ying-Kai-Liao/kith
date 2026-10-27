@@ -202,8 +202,12 @@ Others are turned away from it, because its session holds what the agent saw for
 [--matrix]` shows everything: each person's accounts, owned profiles, the agents they reach and how, and the
 account each service would really use in their runs.
 
-Not a sandbox: everything runs as one macOS user, so a run with a free shell can unset `KITH_PERSON` and become the
-owner. Guests get no free shell; never give one to someone you wouldn't give the Mac.
+Everything runs as one macOS user. A run for anyone but the owner has Claude Code's OS sandbox around its shell
+(`kernel/bin/kith`): it reads only what the run was given, its recall and memory search go to the host with its run
+token (`serve/host/src/runauth.rs`), and a shell that unsets `KITH_PERSON` (or names the owner in it) is no one, not
+the owner: `kith_paths.guest_sandbox()` asks the OS (that sandbox closes the home folder), not the environment.
+Hooks and MCP servers run outside it, with the environment the host set. Guests get no free shell; never give one to
+someone you wouldn't give the Mac.
 
 Known gap: an agent called as an `kith:<name>` subagent shares the calling session's MCP servers, so grants only
 apply to full `kith <agent>` runs.
