@@ -1,3 +1,4 @@
+import { CODE_HINT } from '@shared/invite-join'
 import { roleLabel, type MacRole } from '@shared/mac-role'
 import type { Computer } from '@shared/models'
 import { OPEN_INVITE_LINK } from './relay-macs'
@@ -15,7 +16,7 @@ export interface MacRow {
   role: MacRole
   roleLabel: string
   status: string
-  /** Six digits to compare with the ones on the Mac (an owner's own Mac only). */
+  /** This device's six digits while it asks: the owner compares them with the ones on the Mac. */
   code: string | null
   /** connect: no channel yet · cancel: asking · disconnect: connected, or access removed (forget) · none: always there */
   action: 'connect' | 'cancel' | 'disconnect' | 'forget' | 'none'
@@ -76,8 +77,9 @@ export function macRows(app: AppModel, isSSH: (id: string) => boolean): MacRow[]
       status = 'Asking the Mac…'
       action = 'cancel'
     } else if (access?.kind === 'code') {
-      status = access.compare ? 'Check these digits on the Mac' : 'Waiting for the Mac to approve'
-      code = access.compare ? access.code : null
+      // The owner checks the digits on the Mac; a member shows them to the owner, who may ask for them.
+      status = role === 'owner' ? 'Check these digits on the Mac' : CODE_HINT
+      code = access.code
       action = 'cancel'
     } else if (access?.kind === 'failed') {
       status = access.message

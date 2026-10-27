@@ -339,6 +339,134 @@ async fn kith_auth_refuses_secrets_rule_w_the_owner_and_non_members_for_an_alway
     assert_eq!(held["access"]["read"], json!([docs]), "only the plain folder was written");
 }
 
+/// F4: someone who uses the agent through the everyone row has no membership of their own, so kith-auth can't keep an
+/// always for them. The yes stays a once grant, and the card says so instead of reading "Always allowed".
+#[tokio::test]
+async fn an_always_kith_auth_refuses_stays_once_and_the_card_tells_the_owner() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    assert!(r.auth_ok(&["member", "house", "*", "preset=guest"]));
+    assert!(r.auth_ok(&["member", "house", "sam", "--rm"]));
+    assert!(r.allowed("sam", "house"), "sam still uses house, through the everyone row");
+    let docs = place(&r, "docs");
+    request(&r.hub, &sam("1:1:house:sam", "r1"), &ask_for(&docs)).await;
+    let card = open_cards(&r).pop().expect("a card for the owner");
+    reply(&r, &card, "always");
+    let entry = || r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().data;
+    for _ in 0..200 {
+        if entry()["outcome"].is_string() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let data = entry();
+    let said = data["outcome"].as_str().expect("the card says what became of the always");
+    assert!(said.starts_with("Allowed once only"), "{said}");
+    assert!(said.contains("no membership of their own"), "and why: {said}");
+    assert!(!said.contains("kith-auth:"), "{said}");
+    assert_eq!((data["status"].as_str(), data["selected"].as_str()), (Some("answered"), Some("allow")));
+    assert_eq!(r.hub.store.card(&card.id).unwrap().scope, "once");
+    // It is a real once grant: the next activation gets it, the one after doesn't, and nothing was kept.
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "n1")).await["grants"]["read"], json!([docs]));
+    assert_eq!(consume(&r.hub, &sam("1:1:house:sam", "n2")).await["grants"]["read"], json!([]));
+    assert_eq!(roles::resolve("sam", "house").await.unwrap()["access"]["read"], json!([]));
+}
+
+/// An always kept as asked has no outcome note: the apps say "Always allowed" from the option.
+#[tokio::test]
+async fn a_kept_always_has_no_outcome_note() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    let docs = place(&r, "docs");
+    request(&r.hub, &sam("1:1:house:sam", "r1"), &ask_for(&docs)).await;
+    let card = open_cards(&r).pop().unwrap();
+    reply(&r, &card, "always");
+    for _ in 0..200 {
+        if r.hub.store.card(&card.id).is_some_and(|c| c.state == CardState::Used) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    let data = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().data;
+    assert_eq!((data["selected"].as_str(), data["outcome"].is_null()), (Some("always"), true), "{data}");
+}
+
+/// The owner's list of an agent's always grants (`kithAccessGrants`), and taking one away (`kithRemoveAccessGrant`):
+/// the next run of that person no longer gets it, and the others stay.
+#[tokio::test]
+async fn the_owner_lists_an_agents_always_grants_and_a_removed_one_is_gone_from_the_next_run() {
+    let r = Rig::new().await;
+    let bot = r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    let (docs, notes) = (place(&r, "docs"), place(&r, "notes"));
+    let before = now_ms();
+    assert!(r.auth_ok(&["access", "house", "sam", "read", &docs]));
+    assert!(r.auth_ok(&["access", "house", "sam", "write", &notes]));
+    assert!(r.auth_ok(&["access", "house", "sam", "domain", "pypi.org"]));
+    let call = |method: &'static str, body: Value| {
+        let hub = r.hub.clone();
+        async move { crate::api::dispatch(&hub, &crate::api::devices::Caller::Local, method, body).await }
+    };
+    let listed = call("kithAccessGrants", json!({"botId": bot})).await.unwrap();
+    let grants = listed["grants"].as_array().unwrap();
+    let mut seen: Vec<_> = grants
+        .iter()
+        .map(|g| (g["person"].as_str().unwrap(), g["kind"].as_str().unwrap(), g["target"].as_str().unwrap()))
+        .collect();
+    seen.sort_unstable();
+    assert_eq!(
+        seen,
+        sorted_tuples(vec![
+            ("sam", "domain", "pypi.org"),
+            ("sam", "read", docs.as_str()),
+            ("sam", "write", notes.as_str())
+        ])
+    );
+    assert!(grants.iter().all(|g| g["name"] == "Sam"), "{listed}");
+    assert!(grants.iter().all(|g| g["since"].as_i64().is_some_and(|t| t >= before)), "{listed}");
+
+    let left = call("kithRemoveAccessGrant", json!({"botId": bot, "person": "sam", "kind": "read", "target": docs}))
+        .await
+        .unwrap();
+    assert_eq!(left["grants"].as_array().unwrap().len(), 2, "{left}");
+    let next = consume(&r.hub, &sam("1:1:house:sam", "after")).await;
+    assert_eq!(next["grants"]["read"], json!([]), "{next}");
+    assert_eq!(
+        (next["grants"]["write"].clone(), next["grants"]["domains"].clone()),
+        (json!([notes]), json!(["pypi.org"]))
+    );
+
+    for bad in [
+        json!({"botId": bot, "person": "sam", "kind": "exec", "target": notes}),
+        json!({"botId": bot, "person": "--rm", "kind": "write", "target": notes}),
+        json!({"botId": bot, "person": "sam", "kind": "write"}),
+    ] {
+        assert!(call("kithRemoveAccessGrant", bad.clone()).await.is_err(), "{bad}");
+    }
+    assert_eq!(call("kithAccessGrants", json!({"botId": bot})).await.unwrap()["grants"].as_array().unwrap().len(), 2);
+}
+
+/// A member can't see or take back anyone's always grants (both are owner-only).
+#[tokio::test]
+async fn a_member_cant_list_or_remove_always_grants() {
+    let r = Rig::new().await;
+    let bot = r.owner_bot("house");
+    let sam_phone = joined(&r, "guest").await;
+    for (method, body) in [
+        ("kithAccessGrants", json!({"botId": bot})),
+        ("kithRemoveAccessGrant", json!({"botId": bot, "person": "sam", "kind": "domain", "target": "pypi.org"})),
+    ] {
+        assert!(crate::api::dispatch(&r.hub, &sam_phone, method, body).await.is_err(), "{method}");
+    }
+}
+
+fn sorted_tuples<'a>(mut v: Vec<(&'a str, &'a str, &'a str)>) -> Vec<(&'a str, &'a str, &'a str)> {
+    v.sort_unstable();
+    v
+}
+
 /// The shared layout (no `~/.kith`): the secrets folder is the config folder itself. The kernel (`whole_secret_paths`) and the
 /// host (`holds_secrets_folder`) must refuse the same grants: the folder, below it, and any folder above it.
 #[test]

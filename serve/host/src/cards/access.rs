@@ -297,7 +297,8 @@ fn parts(resource: &str) -> Option<(&str, &str)> {
 }
 
 /// The answer to an escape card. A no changes nothing. A yes is owed a resume at the next activation; an "always" is
-/// first written to kith-auth (so the resume finds it) and falls back to a once grant when kith-auth refuses.
+/// first written to kith-auth (so the resume finds it) and falls back to a once grant when kith-auth refuses. The
+/// fallback is never silent: the card then reads "Allowed once only" and says why ([`kept_once`]).
 pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str>) {
     if !allow {
         return;
@@ -313,6 +314,7 @@ pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str
     let (hub, card) = (hub.clone(), card.clone());
     // Recorded first, so a launch that races this write can't take it as a once grant as well.
     if !hub.store.card_scope(&card.id, "always").unwrap_or(false) {
+        kept_once(&hub, &card, "the always couldn't be recorded");
         super::follow_up(&hub, &card);
         return;
     }
@@ -325,12 +327,25 @@ pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str
             Err(why) => {
                 tracing::warn!(card = card.id, why, "kith-auth refused an always; it stays a once grant");
                 let _ = hub.store.card_scope(&card.id, "once");
+                kept_once(&hub, &card, &why);
             }
         }
         if let Some(fresh) = hub.store.card(&card.id) {
             super::follow_up(&hub, &fresh);
         }
     });
+}
+
+/// An "always" that stayed a once grant: the card says so in its outcome (`outcome`, which the apps show in place of the
+/// option's own words), and `selected` is the once option, so an app that doesn't know `outcome` reads "Allowed once".
+fn kept_once(hub: &Hub, card: &Card, why: &str) {
+    let Some(id) = &card.entry_id else { return };
+    let Some(mut e) = hub.store.entry(id) else { return };
+    let why = why.trim().trim_start_matches("kith-auth:").trim();
+    let why = if why.is_empty() { "kith-auth refused it" } else { why };
+    e.data["selected"] = "allow".into();
+    e.data["outcome"] = format!("Allowed once only: it can't be kept for always ({why})").into();
+    hub.set_entry(id, &e.data);
 }
 
 /// `kith-auth access <agent> <person> read|write|domain <target>`.
@@ -342,6 +357,43 @@ async fn write_always(card: &Card) -> Result<(), String> {
         .await
         .ok_or("kith-auth didn't answer")?;
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()) }
+}
+
+/// The always grants of `agent` (`kith-auth access <agent> --json`), for the owner's list in the apps: each is
+/// `{person, name, kind: read|write|domain, target, since}` (`since` in ms, null for one kith-auth kept no time for).
+pub async fn standing(agent: &str) -> anyhow::Result<Vec<Value>> {
+    let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow::anyhow!("kith-auth can't be reached"))?;
+    let out = crate::channels::hq::output(&bin, &["access", agent, "--json"])
+        .await
+        .ok_or_else(|| anyhow::anyhow!("kith-auth didn't answer"))?;
+    if !out.status.success() {
+        anyhow::bail!("couldn't read the always grants: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(serde_json::from_slice(&out.stdout)?)
+}
+
+/// Takes one always grant away (`kith-auth access … --rm`), as `standing` listed it, and reads the list back. The next
+/// launch of a run asks kith-auth again (`consume`), so it no longer gets it; a run already going keeps its box.
+pub async fn take_away(agent: &str, person: &str, kind: &str, target: &str) -> anyhow::Result<Vec<Value>> {
+    if !matches!(kind, "read" | "write" | "domain") {
+        anyhow::bail!("`kind` must be read, write or domain");
+    }
+    if [person, target].iter().any(|a| a.is_empty() || a.starts_with('-')) {
+        anyhow::bail!("`person` and `target` must be one of the listed grants");
+    }
+    let bin = crate::remote::account::bin().await.ok_or_else(|| anyhow::anyhow!("kith-auth can't be reached"))?;
+    let out = crate::channels::hq::output(&bin, &["access", agent, person, kind, target, "--rm"])
+        .await
+        .ok_or_else(|| anyhow::anyhow!("kith-auth didn't answer"))?;
+    if !out.status.success() {
+        anyhow::bail!("couldn't remove it: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let left = standing(agent).await?;
+    let same = |g: &Value| g["person"] == person && g["kind"] == kind && g["target"] == target;
+    if left.iter().any(same) {
+        anyhow::bail!("kith-auth still lists it; it wasn't removed");
+    }
+    Ok(left)
 }
 
 /// What a launch gets: once grants of the session (consumed here, atomically) and the membership's always entries (read from

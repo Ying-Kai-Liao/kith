@@ -147,6 +147,32 @@ export function parseKithInfoResult(raw: unknown): KithInfoResult {
   return { info: parseKithInfo(r.info), error: str(r.error), fetchedAt: num(r.fetchedAt) }
 }
 
+/** One "always" answer to an escape card that kith-auth keeps (`kithAccessGrants`): `person` may `kind` `target` beyond
+ *  the box in every run, until it is removed. `since` is null for one kith-auth kept no time for. */
+export interface AccessGrant { person: string; name: string; kind: 'read' | 'write' | 'domain'; target: string; since: number | null }
+
+export function parseAccessGrants(raw: unknown): AccessGrant[] {
+  const r = isObject(raw) ? raw : {}
+  return objects(r.grants).flatMap((g) => {
+    const kind = str(g.kind)
+    const person = str(g.person)
+    const target = str(g.target)
+    if ((kind !== 'read' && kind !== 'write' && kind !== 'domain') || !person || !target) return []
+    return [{ person, name: str(g.name) ?? '', kind, target, since: num(g.since) }]
+  })
+}
+
+/** What a grant lets them do, in words: "Read ~/docs", "Read and write ~/notes", "Connect to pypi.org". */
+export function accessGrantText(g: Pick<AccessGrant, 'kind' | 'target'>): string {
+  return g.kind === 'domain' ? `Connect to ${g.target}` : `${g.kind === 'write' ? 'Read and write' : 'Read'} ${g.target}`
+}
+
+/** Who holds it and since when: "Sam · since 3 Oct". The everyone row (`*`) is "Everyone". */
+export function accessGrantHolder(g: Pick<AccessGrant, 'person' | 'name' | 'since'>): string {
+  const who = g.person === '*' ? 'Everyone' : g.name || g.person
+  return g.since === null ? who : `${who} · since ${new Date(g.since).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' })}`
+}
+
 export function parseSearchResult(raw: unknown): KithSearchResult {
   const r = isObject(raw) ? raw : {}
   const hits = objects(r.hits).flatMap((h) => (str(h.path) ? [{

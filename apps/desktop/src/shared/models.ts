@@ -287,6 +287,8 @@ export interface EntryData {
   locations?: { path: string; line?: number }[]
   options?: PermissionOption[]
   selected?: string
+  /** permission, answered: the host's words for what became of the answer when it isn't the option's own (an "always" kith-auth couldn't keep stayed a once grant). Shown in place of the option's outcome. */
+  outcome?: string
   command?: string
   detail?: string
   cwd?: string
@@ -521,7 +523,10 @@ export interface CloudStatus {
   url?: string | null
   registered?: boolean | null
   connected?: boolean | null
+  /** The owner this computer pinned; the cloud alone can't change it. */
   owner?: CloudOwner | null
+  /** The cloud names another owner (`owner` null: none); held until confirmed on this computer. */
+  ownerChange?: { owner?: CloudOwner | null } | null
   lastError?: string | null
   approval?: AccountApproval | null
 }
