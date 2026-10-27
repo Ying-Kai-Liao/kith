@@ -402,14 +402,16 @@ struct AccessBanners: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            // A computer joined by invite takes a member itself: there is no code to compare.
-            ForEach(Array(accounts.pendingAccess.values).filter { accounts.role(for: $0.computerId) != .member }.sorted { $0.requestId < $1.requestId }) { ticket in
+            // A member's device shows its code too: in Code mode the computer's owner compares it before letting it in.
+            ForEach(Array(accounts.pendingAccess.values).sorted { $0.requestId < $1.requestId }) { ticket in
                 let name = accounts.cloudComputers.first { $0.computerId == ticket.computerId }?.name ?? "Your computer"
+                let member = accounts.role(for: ticket.computerId) == .member
                 HStack(spacing: 12) {
                     Spinner(size: 16)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Approve on \(name)").font(.subheadline.weight(.medium)).foregroundStyle(Palette.text)
-                        Text("Code \(ticket.code.prefix(3)) \(ticket.code.suffix(3))")
+                        Text(member ? "Asking \(name) for access" : "Approve on \(name)")
+                            .font(.subheadline.weight(.medium)).foregroundStyle(Palette.text)
+                        Text(member ? InviteJoin.codeLine(ticket.code) : "Code \(ticket.code.prefix(3)) \(ticket.code.suffix(3))")
                             .font(.footnote.monospacedDigit()).foregroundStyle(Palette.secondary)
                     }
                     Spacer(minLength: 8)
