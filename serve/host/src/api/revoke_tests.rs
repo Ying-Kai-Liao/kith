@@ -160,6 +160,23 @@ async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
 }
 
 #[tokio::test]
+async fn a_revoke_applies_while_the_cloud_names_another_owner() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let base = cloud::url(&r.hub.store).unwrap();
+    // Pins the owner; no `memberships`, so sam stays bound to their account.
+    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "grants": [], "revoked": [], "requests": []}));
+    cloud::pull(&r.hub, &base).await.unwrap();
+    r.set_cloud_state(
+        json!({"owner": {"userId": "user_mallory"}, "memberships": [], "grants": [], "revoked": ["user_sam"], "requests": []}),
+    );
+    cloud::pull(&r.hub, &base).await.unwrap();
+    assert!(r.hub.cloud.status().owner_change.is_some());
+    assert_eq!(r.who("user_sam")["revoked"], true);
+    assert!(!r.allowed("sam", "house"));
+}
+
+#[tokio::test]
 async fn a_change_the_cloud_announces_during_a_pull_keeps_the_host_out_of_sync() {
     use crate::remote::sync_lease;
     let r = Rig::new().await;

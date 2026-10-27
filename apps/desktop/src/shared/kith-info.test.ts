@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
-  cronWords, formatUsd, isUnsupportedHost, lastRunText, packageNotes, parseKithInfo, parseKithInfoResult,
+  accessGrantHolder, accessGrantText, cronWords, formatUsd, isUnsupportedHost, lastRunText, packageNotes, parseAccessGrants, parseKithInfo, parseKithInfoResult,
   parseSearchResult, rolePrompt, shortVersion, splitRoleSections, topModels,
 } from './kith-info.ts'
 
@@ -109,4 +109,20 @@ test('rolePrompt joins the intro and every section, Not yours included', () => {
   for (const s of info.role!.sections) assert.ok(text.includes(`## ${s.title}`))
   assert.equal(rolePrompt(null), null)
   assert.equal(rolePrompt({ intro: ' ', sections: [] }), null)
+})
+
+test('access grants: the host list parsed, and what each lets them do in words', () => {
+  const grants = parseAccessGrants({ grants: [
+    { person: 'sam', name: 'Sam', kind: 'read', target: '/Users/kai/docs', since: 1_790_000_000_000 },
+    { person: '*', name: '', kind: 'domain', target: 'pypi.org', since: null },
+    { person: 'sam', kind: 'exec', target: '/bin' },
+    { person: 'sam', kind: 'write' },
+  ] })
+  assert.deepEqual(grants.map((g) => [g.person, g.kind, g.target]), [['sam', 'read', '/Users/kai/docs'], ['*', 'domain', 'pypi.org']])
+  assert.equal(accessGrantText(grants[0]), 'Read /Users/kai/docs')
+  assert.equal(accessGrantText({ kind: 'write', target: '/x' }), 'Read and write /x')
+  assert.equal(accessGrantText(grants[1]), 'Connect to pypi.org')
+  assert.match(accessGrantHolder(grants[0]), /^Sam · since /)
+  assert.equal(accessGrantHolder(grants[1]), 'Everyone')
+  assert.deepEqual(parseAccessGrants(null), [])
 })

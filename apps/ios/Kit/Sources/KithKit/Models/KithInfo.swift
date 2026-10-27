@@ -450,3 +450,57 @@ public struct KithSearchHit: Decodable, Hashable, Sendable, Identifiable {
         agent = c.value(.agent)
     }
 }
+
+/// One "always" answer to an escape card that kith-auth keeps (`kithAccessGrants`, serve/docs/bot-info.md): `person` may
+/// `kind` (read, write, domain) `target` beyond the box in every run, until it is removed. `since` is nil for one
+/// kith-auth kept no time for.
+public struct AccessGrant: Decodable, Hashable, Sendable, Identifiable {
+    public var person: String
+    public var name: String
+    public var kind: String
+    public var target: String
+    public var since: Double?
+    public var id: String { "\(person)\n\(kind)\n\(target)" }
+
+    public init(person: String, name: String = "", kind: String, target: String, since: Double? = nil) {
+        self.person = person
+        self.name = name
+        self.kind = kind
+        self.target = target
+        self.since = since
+    }
+
+    /// What it lets them do: "Read ~/docs", "Read and write ~/notes", "Connect to pypi.org".
+    public var text: String {
+        switch kind {
+        case "domain": "Connect to \(target)"
+        case "write": "Read and write \(target)"
+        default: "Read \(target)"
+        }
+    }
+
+    /// Who holds it and since when: "Sam · since 3 Oct 2026". The everyone row (`*`) is "Everyone".
+    public var holder: String {
+        let who = person == "*" ? "Everyone" : (name.isEmpty ? person : name)
+        guard let since else { return who }
+        let date = Date(timeIntervalSince1970: since / 1000).formatted(.dateTime.day().month(.abbreviated).year())
+        return "\(who) · since \(date)"
+    }
+}
+
+/// The host's `kithAccessGrants` and `kithRemoveAccessGrant` answer; a grant this app can't read is left out.
+public struct AccessGrants: Decodable, Sendable {
+    public var grants: [AccessGrant]
+
+    private enum CodingKeys: String, CodingKey { case grants }
+    private struct Raw: Decodable { var person: String; var name: String?; var kind: String; var target: String; var since: Double? }
+
+    public init(grants: [AccessGrant] = []) { self.grants = grants }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let raw: [Raw] = c.list(.grants)
+        grants = raw.filter { ["read", "write", "domain"].contains($0.kind) && !$0.person.isEmpty && !$0.target.isEmpty }
+            .map { AccessGrant(person: $0.person, name: $0.name ?? "", kind: $0.kind, target: $0.target, since: $0.since) }
+    }
+}

@@ -27,7 +27,8 @@ assert.equal(tokenIsGone({ reason: "Unregistered", statusCode: 410 }), true);
 assert.equal(tokenIsGone({ reason: "BadDeviceToken", statusCode: 400 }), true);
 console.log("Live Activity payload tests ok");
 
-const env = { TICKET_KEY: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))) } as any;
+// Legacy tickets (no computer, no expiry) and unsigned pushes, as before computer-bound tickets.
+const env = { TICKET_KEY: btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(32)))), LEGACY_TICKETS_UNTIL: "2999-01-01" } as any;
 const ticket = await sealTicket(env, { t: "ab".repeat(32), e: "sandbox", k: "alert" });
 async function request(path: string, body: unknown) {
   return worker.fetch(new Request(`https://relay.test${path}`, { method: "POST", body: JSON.stringify(body) }), env);
@@ -56,13 +57,13 @@ const batch = await pushBatch(new Request("https://relay.test/push-batch", {
     { ticket: newerTicket, alert: { body: "current-key" } },
     { ticket: "invalid" },
   ] }),
-}), env, async request => {
-  sent.push((await request.json() as any).alert.body);
+}), env, async notification => {
+  sent.push(notification.alert!.body!);
   return Response.json({ ok: true });
 });
 assert.deepEqual(sent, ["current-key"]);
 assert.deepEqual(await batch.json(), { results: [
-  { index: 0, status: 200, superseded: true }, { index: 1, status: 200 }, { index: 2, status: 403 },
+  { index: 0, status: 200, superseded: true }, { index: 1, status: 200 }, { index: 2, status: 403, gone: true },
 ] });
 assert.equal((await request("/push-batch", { notifications: [] })).status, 400);
 console.log("physical device deduplication tests ok");

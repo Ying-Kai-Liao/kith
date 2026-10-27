@@ -83,6 +83,35 @@ final class KithInfoStore {
         // The view going away cancels the fetch too.
         await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         if inflight == task { inflight = nil }
+        await loadGrants()
+    }
+
+    /// The agent's "always" access grants (`kithAccessGrants`). Stays empty for a member (the host answers 403), an older
+    /// host (404) or a failed read: the Access section shows only when there is one.
+    private(set) var grants: [AccessGrant] = []
+    /// The grant being removed, and why the last removal failed (the row stays).
+    private(set) var removingGrant: AccessGrant?
+    private(set) var grantError: String?
+
+    func loadGrants() async {
+        #if DEBUG
+        if DemoAgent.response(for: botId) != nil { return }
+        #endif
+        guard let answer = try? await client().kithAccessGrants(botId: botId) else { return }
+        grants = answer.grants
+    }
+
+    /// Takes one away; the next run of that person no longer gets it. What shows afterwards is the host's list, read back.
+    func remove(_ grant: AccessGrant) async {
+        guard removingGrant == nil else { return }
+        removingGrant = grant
+        grantError = nil
+        defer { removingGrant = nil }
+        do {
+            grants = try await client().kithRemoveAccessGrant(botId: botId, grant: grant).grants
+        } catch {
+            grantError = error.localizedDescription
+        }
     }
 
     /// Why the last permission change failed; the old value stays shown.
