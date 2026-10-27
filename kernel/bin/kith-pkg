@@ -731,6 +731,8 @@ def choose_mode(name, home):
 def cmd_install(link, name=None, ask=False):
     url, ref, path, default = parse_link(link)
     name = name or default
+    if name == 'kith':   # the command's own name: `kith kith` can't be an agent
+        die("an agent can't be called 'kith' (it is the command's own name); pick another with --as NAME", 2)
     if not re.fullmatch(r'[a-z0-9][a-z0-9-]*', name):
         die(f'agent name {name!r}: use lowercase letters, digits and dashes (--as NAME)', 2)
     if name in installed():

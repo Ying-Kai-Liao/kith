@@ -14,6 +14,7 @@ src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 name=${1:-}; desc=${2:-}
 [[ $name =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "kith-new: name must be lowercase letters, digits, dashes (got '$name')" >&2; exit 2; }
+[[ $name != kith ]] || { echo "kith-new: an agent can't be called 'kith' (it is the command's own name)" >&2; exit 2; }
 [[ -n $desc && $desc != *": "* ]] || { echo "kith-new: give a one-line description without ': ' in it" >&2; exit 2; }
 eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"   # KITH_HOME, KITH_STATE, KITH_AGENTS
 agents=$KITH_AGENTS

@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""kith-self-update — update kith itself (`kith update` with no agent), by however this Mac installed it.
+
+  kith-self-update            update kith: git checkout -> git pull --ff-only; Homebrew -> brew upgrade kith;
+                              install.sh layout (~/.kith) -> run scripts/install.sh again; the desktop app -> print the download link
+  kith-self-update --check    one line on stdout when kith is behind (for kith doctor), nothing otherwise; offline,
+                              no remote or a slow one all end in nothing, within a few seconds; always exit 0
+
+A git checkout that is dirty, has no upstream or can't fast-forward is left as it is and the exit code is 1:
+never a force, a stash or a reset.
+"""
+import os, re, shutil, subprocess, sys
+from pathlib import Path
+
+APP_LINK = 'https://kithbot.app/download/mac'
+# The logical path (symlinks not resolved): it may be a link to a path with spaces, and install layouts are told apart by it.
+KERNEL = Path(os.path.abspath(os.environ.get('KITH_ROOT') or Path(__file__).parent.parent))
+REPO = os.environ.get('KITH_REPO') or 'Ying-Kai-Liao/kith'
+
+
+def die(msg, code=1):
+    print(f'kith update: {msg}', file=sys.stderr)
+    sys.exit(code)
+
+
+def run(*args, cwd=None, timeout=60, env=None):
+    try:
+        return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return subprocess.CompletedProcess(args, 124, '', str(e))
+
+
+def git(*args, timeout=60):
+    return run('git', '-C', str(KERNEL), *args, timeout=timeout,
+               env={**os.environ, 'GIT_TERMINAL_PROMPT': '0', 'GIT_SSH_COMMAND': os.environ.get('GIT_SSH_COMMAND', 'ssh -o BatchMode=yes')})
+
+
+def paths():
+    return [str(KERNEL), os.path.realpath(KERNEL)]
+
+
+def brew_prefix():
+    r = run('brew', '--prefix', timeout=15) if shutil.which('brew') else None
+    return r.stdout.strip() if r and r.returncode == 0 else ''
+
+
+def method():
+    """app | brew | release | git | '' for how this kernel got here."""
+    if any('.app/Contents/Resources/kith/' in p + '/' for p in paths()):
+        return 'app'
+    prefix = brew_prefix()
+    if any('/Cellar/' in p or (prefix and p.startswith(prefix + '/')) for p in paths()):
+        return 'brew'
+    if KERNEL.parent.name == 'kith' and KERNEL.parent.parent.name == 'share':   # bin/kith beside share/kith/kernel
+        return 'release'
+    top = git('rev-parse', '--show-toplevel')
+    if top.returncode == 0 and os.path.realpath(top.stdout.strip()) == os.path.realpath(KERNEL.parent):
+        return 'git'
+    return ''
+
+
+def release_prefix():
+    return KERNEL.parent.parent.parent
+
+
+def binary_version():
+    """The version a kith binary reports (the installed release's, else one on PATH); '' when none answers."""
+    for exe in (release_prefix() / 'bin' / 'kith', shutil.which('kith')):
+        if exe and os.access(exe, os.X_OK):
+            r = run(str(exe), '--version', timeout=5)
+            m = re.search(r'\d+\.\d+\.\d+\S*', r.stdout) if r.returncode == 0 else None
+            if m:
+                return m.group(0)
+    return ''
+
+
+def latest_release():
+    """Tag of the latest GitHub release (the redirect install.sh follows), '' when it can't be reached in a few seconds."""
+    r = run('curl', '-fsSL', '-m', '4', '-o', '/dev/null', '-w', '%{url_effective}', f'https://github.com/{REPO}/releases/latest', timeout=6)
+    tag = r.stdout.strip().rsplit('/', 1)[-1] if r.returncode == 0 else ''
+    return tag[1:] if re.fullmatch(r'v\d+\.\d+\.\d+', tag) else ''
+
+
+def as_tuple(v):
+    return tuple(int(x) for x in re.findall(r'\d+', v.split('-')[0])[:3])
+
+
+def head():
+    return git('log', '-1', '--format=%h %s').stdout.strip()
+
+
+def show_version(label, line):
+    v = binary_version()
+    print(f'{label}: {line}' + (f' (kith {v})' if v else ''))
+
+
+def update_git():
+    if git('status', '--porcelain', '--untracked-files=no').stdout.strip():   # agents/ is ignored; untracked files can't block a fast-forward
+        die(f'{KERNEL.parent} has uncommitted changes to tracked files; commit or discard them, then run kith update again. Nothing changed.')
+    if git('symbolic-ref', '-q', 'HEAD').returncode:
+        die(f'{KERNEL.parent} is on a detached HEAD, so there is nothing to pull from. Check out a branch. Nothing changed.')
+    up = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
+    if up.returncode:
+        die(f'the branch in {KERNEL.parent} has no upstream, so there is nothing to pull from (git branch --set-upstream-to). Nothing changed.')
+    up = up.stdout.strip()
+    show_version('before', head())
+    f = git('fetch', '-q', up.split('/', 1)[0], timeout=120)
+    if f.returncode:
+        die(f'could not fetch {up}: {f.stderr.strip()}. Nothing changed.')
+    ahead, behind = (int(x) for x in git('rev-list', '--left-right', '--count', 'HEAD...@{u}').stdout.split())
+    if not behind:
+        print('kith is up to date' + (f' ({ahead} commit{"s" if ahead != 1 else ""} ahead of {up})' if ahead else ''))
+        return
+    if ahead:
+        die(f'{KERNEL.parent} has {ahead} commit{"s" if ahead != 1 else ""} {up} lacks and lacks {behind} of its own: it cannot fast-forward. Merge or rebase there yourself. Nothing changed.')
+    r = git('pull', '-q', '--ff-only', timeout=300)
+    if r.returncode:
+        die(f'git pull --ff-only failed: {r.stderr.strip()}')
+    show_version('after', head())
+
+
+def update_brew():
+    print(f'before: {binary_version() or "kith (version unknown)"}')
+    if subprocess.call(['brew', 'upgrade', 'kith']):
+        die('brew upgrade kith failed')
+    print(f'after: {binary_version() or "kith (version unknown)"}')
+
+
+def update_release():
+    before = binary_version()
+    print(f'before: kith {before or "(version unknown)"} ({release_prefix()})')
+    env = {**os.environ}
+    env.setdefault('KITH_PREFIX', str(release_prefix()))   # upgrade the install this is, not a second one in ~/.kith
+    url = f'https://raw.githubusercontent.com/{REPO}/main/scripts/install.sh'
+    if subprocess.call(['bash', '-c', 'set -o pipefail; curl -fsSL "$1" | sh', 'kith-update', url], env=env):
+        die('re-running scripts/install.sh failed')
+    after = binary_version()
+    print(f'after: kith {after or "(version unknown)"}' + (' (already the latest)' if after and after == before else ''))
+
+
+def check():
+    m = method()
+    if m == 'git':
+        up = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
+        if up.returncode or git('fetch', '-q', up.stdout.strip().split('/', 1)[0], timeout=5).returncode:
+            return
+        r = git('rev-list', '--count', 'HEAD..@{u}')
+        n = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
+        if n:
+            print(f'kith is {n} commit{"s" if n != 1 else ""} behind {up.stdout.strip()}: kith update')
+    elif m in ('brew', 'release'):
+        have, latest = binary_version(), latest_release()
+        if have and latest and as_tuple(have) < as_tuple(latest):
+            print(f'kith {have} is older than the latest release {latest}: kith update')
+
+
+def main(argv):
+    if argv and argv[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return
+    if argv == ['--check']:
+        try:
+            check()
+        except Exception:   # a doctor line is never worth a crash
+            pass
+        return
+    if argv:
+        die('kith update takes an agent (kith update <agent>), --all, or nothing', 2)
+    m = method()
+    if m == 'app':
+        print(f'kith runs from the desktop app, which updates by download: {APP_LINK}')
+    elif m == 'git':
+        update_git()
+    elif m == 'brew':
+        update_brew()
+    elif m == 'release':
+        update_release()
+    else:
+        die(f"can't tell how kith was installed ({KERNEL}); reinstall with scripts/install.sh, or git pull in your checkout")
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
