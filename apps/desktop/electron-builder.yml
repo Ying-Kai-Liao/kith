@@ -24,8 +24,13 @@ extraResources:
 protocols:
   - name: Kith
     schemes: [kith, com.yingkailiao.kith]
-# No update feed until Kith publishes its own (src/shared/update-feed.ts).
-publish: null
+# The app's own updates (src/shared/update-feed.ts): electron-updater reads app-update.yml, generated from this block,
+# and finds latest-mac.yml on the latest non-prerelease Release of the repo. electron-builder never uploads itself: the
+# release workflow runs it with --publish never and attaches the files. Dev builds set publish: null.
+publish:
+  provider: github
+  owner: Ying-Kai-Liao
+  repo: kith
 
 mac:
   category: public.app-category.developer-tools
@@ -38,6 +43,9 @@ mac:
       arch: universal
   # The zip (update feed) takes this name; the DMG sets its own.
   artifactName: kith-macos.${ext}
+  # kith-tts is arm64 only and identical in both halves of the universal merge, which @electron/universal
+  # refuses unless it is named here.
+  x64ArchFiles: Contents/Resources/kith-tts
   hardenedRuntime: true
   # The computer-use driver keeps its maker's Developer ID signature (packaging/cua-driver).
   signIgnore:
@@ -84,11 +92,19 @@ linux:
   icon: resources/icon.png
   executableName: kith
   synopsis: Your coding agents as teammates
+  # Required by the deb target (package.json has no author email).
+  maintainer: Ying-Kai Liao <Ying-Kai-Liao@users.noreply.github.com>
   target: [AppImage, deb, tar.gz]
-  artifactName: kith-linux-${arch}.${ext}
+  artifactName: kith-linux-${env.KITH_LINUX_ARCH}.${ext}
   desktop:
     entry:
       StartupWMClass: Kith
+# Fixed, version-free names with one arch spelling (${arch} would give x86_64 for the AppImage and amd64 for the deb);
+# the release workflow sets KITH_LINUX_ARCH to x64 or arm64.
+appImage:
+  artifactName: kith-linux-${env.KITH_LINUX_ARCH}.${ext}
+deb:
+  artifactName: kith-linux-${env.KITH_LINUX_ARCH}.${ext}
 
 win:
   icon: resources/icon.png

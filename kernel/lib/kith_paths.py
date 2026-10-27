@@ -5,6 +5,7 @@
   kith_paths.py --sh     export lines for bash: eval "$(python3 lib/kith_paths.py --sh)"
   kith_paths.py --json   the same as JSON (the Claude Code adapter)
   kith_paths.py --bin    the kith program (Rust), or nothing when this Mac has none
+  kith_paths.py --guest-sandbox   exit 0 inside the sandbox of a run for anyone but the owner, else 1
 
 Two places, like ~/.claude for Claude Code:
 
@@ -171,6 +172,19 @@ def retire_old_job(name):
         plist.unlink(missing_ok=True)
 
 
+def guest_sandbox():
+    """Whether this process is inside the OS sandbox kernel/bin/kith puts around the run of anyone but the owner. That
+    sandbox closes the home folder to reads and nothing of the owner's ever does, so the answer comes from the OS, not
+    the environment: a guest's shell that drops KITH_PERSON (or names the owner in it) is still told apart from the
+    owner's. Any doubt is a guest."""
+    import pwd
+    try:
+        with os.scandir(pwd.getpwuid(os.getuid()).pw_dir):
+            return False
+    except (OSError, KeyError):
+        return True
+
+
 def with_old_names(p):
     """p plus every KITH_<X> under its old name HQ_<X>, for agents' tools that still read those."""
     return {**p, **{'HQ_' + k[5:]: v for k, v in p.items()}}
@@ -183,6 +197,8 @@ if __name__ == '__main__':
         print('\n'.join('export %s=%s' % (k, shlex.quote(v)) for k, v in p.items()))
     elif arg == '--bin':
         print(kith_bin())
+    elif arg == '--guest-sandbox':
+        sys.exit(0 if guest_sandbox() else 1)
     elif arg == '--json':
         print(json.dumps(p))
     else:

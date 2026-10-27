@@ -6,7 +6,8 @@
 //! when the bot can't manage roles, a plain-text `@agent` works the same. DMs with the bot work like a room with a
 //! default (the owner's: `channels.dm_default`).
 //!
-//! Server: `channels.discord_guild` (name or id) when the bot is in more than one.
+//! Server: `channels.discord_guild` (name or id) when the bot is in more than one. Until kith knows the owner's
+//! Discord account, the owner of that named server is taken as kith's owner; with the setting unset, no one is.
 //!
 //! Every gateway frame (a heartbeat ack comes every ~41 s) is a sign of life; without any for [`QUIET`] the
 //! supervisor restarts the connection. After each new session the adapter reads what was sent since the last
@@ -137,6 +138,8 @@ struct Guild {
     id: String,
     name: String,
     owner_id: String,
+    /// The server `channels.discord_guild` names: only its owner is taken as kith's owner before linking.
+    named: bool,
     manage_roles: bool,
 }
 
@@ -253,16 +256,11 @@ impl Discord {
     async fn pick_guild(&self) -> Result<()> {
         let guilds = self.get("/users/@me/guilds").await?;
         let all = guilds.as_array().cloned().unwrap_or_default();
-        let want = if self.conn == "discord/hq" { self.cfg.guild.as_deref().map(message::squash) } else { None };
+        let setting = self.cfg.guild.as_deref().map(message::squash).filter(|w| !w.is_empty());
+        let want = if self.conn == "discord/hq" { setting.as_deref() } else { None };
         let title = |g: &Value| g["name"].as_str().unwrap_or_default().to_owned();
-        let found: Vec<&Value> = all
-            .iter()
-            .filter(|g| {
-                want.as_ref().is_none_or(|w| {
-                    w.is_empty() || *w == message::squash(&title(g)) || Some(w.as_str()) == id_of(&g["id"]).as_deref()
-                })
-            })
-            .collect();
+        let is = |w: &str, g: &Value| w == message::squash(&title(g)) || Some(w) == id_of(&g["id"]).as_deref();
+        let found: Vec<&Value> = all.iter().filter(|g| want.is_none_or(|w| is(w, g))).collect();
         let [g] = found.as_slice() else {
             let names: Vec<String> = all.iter().map(title).collect();
             bail!("expected one server, found {names:?}; set channels.discord_guild in config.json");
@@ -271,8 +269,9 @@ impl Discord {
         let perms = g["permissions"].as_str().and_then(|p| p.parse::<u64>().ok()).unwrap_or(0);
         let detail = self.get(&format!("/guilds/{id}")).await?;
         let owner_id = id_of(&detail["owner_id"]).unwrap_or_default();
-        self.rt.locked().guild =
-            Some(Guild { id, name: title(g), owner_id, manage_roles: perms & (MANAGE_ROLES | ADMINISTRATOR) != 0 });
+        let named = setting.as_deref().is_some_and(|w| is(w, g));
+        let manage_roles = perms & (MANAGE_ROLES | ADMINISTRATOR) != 0;
+        self.rt.locked().guild = Some(Guild { id, name: title(g), owner_id, named, manage_roles });
         Ok(())
     }
 
@@ -644,7 +643,7 @@ impl Discord {
             (
                 rt.me.clone(),
                 rt.roles.clone(),
-                rt.guild.as_ref().map(|g| g.owner_id.clone()),
+                rt.guild.as_ref().filter(|g| g.named).map(|g| g.owner_id.clone()), // any other server's owner is no one
                 rt.guild.as_ref().map(|g| g.id.clone()),
             )
         };

@@ -280,6 +280,19 @@ is "shared layout: the whole config folder, below it and the folders above it ar
 ln -sfn "$T/granted" "$T/moved"; printf '{"read": ["%s"], "write": [], "domains": []}' "$T/moved" > "$T/grants.json"
 grun
 is "build-time re-check: a grant that is a link now (it resolves elsewhere) is dropped" "$(set_ok "'$T/moved' not in fs['allowRead'] and '$T/granted' not in fs['allowRead']")" True
+# The host's launch (--launch-json, an app chat's run) is the same activation: the grant is in the settings it is handed.
+lj() { (cd "$T/work" && "$KITH" echo --launch-json 2>/dev/null) | python3 -c '
+import json,sys
+s=json.load(sys.stdin)["settings"]; fs=s.get("sandbox", {}).get("filesystem", {})
+print(eval(sys.argv[1]))' "$1"; }
+printf '{"read": ["%s"], "write": [], "domains": ["pypi.org"]}' "$T/granted" > "$T/grants.json"
+is "launch-json: a yes once is in the settings the host gets" "$(KITH_PERSON=guest KITH_RUN_TOKEN=run-tok KITH_RUN_SOCKET=$GD/g.sock lj "'$T/granted' in fs['allowRead'] and '$T/granted' in s['permissions']['additionalDirectories'] and s['sandbox']['network']['allowedDomains'] == ['pypi.org']")" True
+is "launch-json: the launch after has nothing, the grant was one use" "$(KITH_PERSON=guest KITH_RUN_TOKEN=run-tok KITH_RUN_SOCKET=$GD/g.sock lj "'$T/granted' in fs['allowRead'] or 'allowedDomains' in s['sandbox']['network']")" False
+printf '{"read": ["%s"], "write": [], "domains": []}' "$T/granted" > "$T/grants.json"
+is "launch-json: no run token, nothing asked or added" "$(KITH_PERSON=guest lj "'$T/granted' in fs['allowRead']")/$([[ -f $T/grants.json ]] && echo kept)" False/kept
+: > "$T/grants.log"; KITH_RUN_TOKEN=run-tok KITH_RUN_SOCKET=$GD/g.sock lj True >/dev/null
+is "launch-json: an owner launch asks nothing" "$(wc -c < "$T/grants.log" | tr -d ' ')" 0
+rm -f "$T/grants.json"
 : > "$T/grants.log"; KITH_PERSON=guest run "no token" >/dev/null 2>&1
 is "a guest launch with no run token asks nothing" "$(wc -c < "$T/grants.log" | tr -d ' ')" 0
 run "owner" >/dev/null 2>&1
