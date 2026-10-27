@@ -7,7 +7,7 @@ use super::fake::{Event, Fake};
 use super::judge::Judge;
 use super::manager::{Backoff, Manager, Registry, supervise};
 use super::settings::Settings;
-use super::text::{INTERRUPTED, short};
+use super::text::INTERRUPTED;
 use super::{Core, Incoming, Secrets, core};
 use crate::LockExt;
 use crate::agent::gate::{Gate, Settings as GateSettings, memory};
@@ -117,14 +117,14 @@ impl Rig {
         let (bin, stub) = (dir.join("bin"), dir.join("stub"));
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::create_dir_all(&stub).unwrap();
-        for tool in ["kith", "kith-auth", "kith-live"] {
+        for tool in ["kith", "kith-auth"] {
             std::os::unix::fs::symlink(stub_script(), bin.join(tool)).unwrap();
         }
         for (name, card) in [
             ("house", "description: Keeps the house\ndisplay_name: Home\n"),
             ("personal", "description: Personal\n"),
             ("shop", "description: Shopping\n"),
-            ("coder", "description: Codes\nsession: live\n"),
+            ("coder", "description: Codes\n"),
         ] {
             std::fs::create_dir_all(dir.join("agents").join(name)).unwrap();
             std::fs::write(dir.join("agents").join(name).join("agent.md"), card).unwrap();
@@ -132,7 +132,6 @@ impl Rig {
         let paths = super::hq::Paths {
             hq_bin: bin.join("kith"),
             auth_bin: bin.join("kith-auth"),
-            live_bin: bin.join("kith-live"),
             machine: dir.join("machine"),
             agent_roots: vec![dir.join("agents")],
             data: dir.join("data"),
@@ -414,56 +413,6 @@ async fn a_non_owner_runs_as_themselves_and_stays_out_of_others_threads() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_live_agent_gets_the_message_typed_in_and_its_answers_are_posted() {
-    let r = Rig::new();
-    r.send(&Rig::msg("1", "@coder build it")).await;
-    let sent = r.calls("kith-live");
-    assert_eq!(sent.len(), 1);
-    let args: Vec<&str> = sent[0]["args"].as_array().unwrap().iter().map(|a| a.as_str().unwrap()).collect();
-    let key = "fake/x:room:1";
-    let boxed = short(key);
-    assert_eq!(args[..3], ["send", "coder", "--reply"]);
-    assert_eq!(args[3], format!("bridge:{boxed}"));
-    assert_eq!(args[args.len() - 2..], ["--", "build it"]);
-    assert!(r.calls("kith").is_empty(), "no run: the live session takes it");
-    assert_eq!(r.fake.posts()[0], ("kith".into(), "Sent to coder's live session. Its answers come here.".into()));
-
-    // `kith-send --to bridge:<box>` leaves whole files in the box's outbox.
-    let outbox = r.dir.join("machine/bridge/outbox").join(format!("live-{boxed}"));
-    assert!(outbox.is_dir());
-    std::fs::write(outbox.join("1.json"), json!({"as": "coder", "text": "built"}).to_string()).unwrap();
-    std::fs::write(
-        outbox.join("2.json"),
-        json!({"as": "coder", "files": ["/tmp/a.zip"], "caption": "result"}).to_string(),
-    )
-    .unwrap();
-    until("the live posts", || r.fake.events().len() >= 4).await;
-    let events = r.fake.events();
-    assert!(matches!(&events[2], Event::Post { agent, text, .. } if agent == "coder" && text == "built"));
-    assert!(
-        matches!(&events[3], Event::Files { agent, files, caption } if agent == "coder" && files == &["/tmp/a.zip"] && caption == "result")
-    );
-    assert!(std::fs::read_dir(&outbox).unwrap().next().is_none(), "posted files are removed");
-    r.core.forget("fake/x");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_live_agent_without_a_session_runs_once_and_refuses_others() {
-    let r = Rig::new();
-    r.put("live", &json!({"running": false}));
-    r.send(&Rig::msg("1", "@coder quick one")).await;
-    until("the one-off run", || !r.fake.posts().is_empty()).await;
-    assert_eq!(r.calls("kith-live").len(), 1);
-    assert_eq!(r.calls("kith")[0]["agent"], "coder");
-    r.idle().await;
-
-    r.put("access", &json!({"kai": {"owner": true}, "guest": {"owner": false, "agents": ["coder"]}}));
-    r.send(&Rig::msg("2", "@coder let me in")).await;
-    assert_eq!(r.fake.replies()[0], "coder takes work from the owner only.");
-    assert_eq!(r.calls("kith-live").len(), 1);
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn messages_that_wait_for_a_turn_become_one_prompt() {
     let mut opts = Opts::new();
     // The stub starts slowly on a busy machine: leave room between the two messages.
@@ -714,7 +663,7 @@ async fn a_connections_state_comes_over_from_the_bridge_and_only_that_one() {
                               "sessions": {"house": "old-session"}, "conv": {"key": "fake/a:room:9"}},
             "fake/b:room:3": {"person": "kai", "last": "shop", "sessions": {"shop": "other"}}
         },
-        "replies": {}, "inbox": {}, "pending": {}, "live": {}
+        "replies": {}, "inbox": {}, "pending": {}
     });
     let file = r.dir.join("machine/bridge/state.json");
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();

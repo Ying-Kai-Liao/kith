@@ -158,13 +158,6 @@ def repos_and_agents():
         if harness != 'claude' and not shutil.which(harness) \
                 and harness not in ('dsh', 'opencode'):   # those two run through npx when not installed
             notes.append(f'runs on {harness}, which is not installed')
-        live = ''
-        if re.search(r'^session:\s*live\s*$', (Path(o['dir']) / 'agent.md').read_text(), re.M):
-            at = run(str(KITH / 'bin' / 'kith-live'), 'where', name)
-            live = (f'live session in {at.stdout.strip()}' if at.returncode == 0 else
-                    f'live session not running (kith live start {name}); chats and kith ask run it once meanwhile')
-            live += ('; starts at login (dev.kith.live)' if kith_settings.get('live_at_login', name)
-                     else f'; not at login (kith live login on {name})')
         deps = run(str(KITH / 'bin' / 'kith-pkg'), 'deps', name)
         if deps.returncode:
             notes.append('missing ' + ', '.join(l.split()[0] for l in deps.stdout.splitlines()[2:] if l.strip())
@@ -173,8 +166,6 @@ def repos_and_agents():
             bad(f'{name}: {(problems.stdout + problems.stderr).strip().splitlines()[-1]}')
         else:
             (warn if notes else ok)(f'{name}' + (f' ({", ".join(notes)})' if notes else ''))
-        if live:
-            note(f'  {live}')
 
 
 def services():
@@ -312,6 +303,9 @@ def plugin():
             warn(f'{p} is in plugins but not installed: claude plugin install {p}')
 
 
+RETIRED = {'live'}   # background jobs kith removed; a plist left on a Mac only fails
+
+
 def reason_network():
     """Reason's `setup` wiring Claude Code (user-scope MCP server `reason-network`) makes its daemon list every Claude Code
     session on this Mac, kith's agent runs included, as one its team peers can wake and prompt: past kith-auth, people's
@@ -337,6 +331,9 @@ def jobs():
             bad(f'{f.name}: unreadable ({e})')
             continue
         label, argv = pl.get('Label', f.stem), pl.get('ProgramArguments', [])
+        if label.split('.')[-1] in RETIRED:
+            bad(f'{label}: kith no longer has this job: launchctl bootout gui/{uid}/{label}; rm {f}')
+            continue
         missing = [a for a in argv if a.startswith('/') and not os.path.exists(a)]
         if missing:
             bad(f'{label}: runs {missing[0]}, which is not there (reinstall the job)')

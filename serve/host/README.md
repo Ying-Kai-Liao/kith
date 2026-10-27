@@ -86,7 +86,7 @@ prints) and `MemAvailable` on Linux; a platform or read error counts as room. `G
 ## Chat channels (Discord, Telegram, Slack)
 
 The host carries the routing core of kith's chat bridge (`src/channels/`): people, `@agent`, threads and
-sessions, the queue with Jev routing, `kith <agent>` runs under the resource gate, live agents and the
+sessions, the queue with Jev routing, `kith <agent>` runs under the resource gate and the
 `kith-send` outbox. The platform adapters plug into it one at a time; until one is ported its bots stay with
 the Python bridge. A bot is cut over by revoking its profile from `bridge` and restarting the bridge
 (`launchctl kickstart -k gui/$UID/dev.kith.bridge`; it reads its grants only at start), and only then granting

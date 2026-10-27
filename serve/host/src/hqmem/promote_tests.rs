@@ -5,6 +5,7 @@
 
 use super::tidy::{self, Answered};
 use super::*;
+use kith_mem::rusqlite::params;
 use kith_mem::tidy::{self as kd, Audience, NoteFacets, Plan};
 
 struct Home {
@@ -241,4 +242,100 @@ fn an_older_approval_does_not_come_back_after_a_newer_retag() {
     // Putting the old text back (the old approved_change) does not widen it again.
     home.set("plans.md", &wide);
     assert_eq!(home.facets("plans.md").audience, Audience::Owner);
+}
+
+/// Approves `plans.md` as shared through the host and returns the change id.
+fn approve_plans(home: &Home, conn: &Connection) -> i64 {
+    let m = home.load();
+    tidy::apply(conn, &m, &plan(&m, &serde_json::json!([{"file": "plans.md", "audience": "shared"}]))).unwrap();
+    let id = tidy::promotions(conn, "builder", "pending", 10).unwrap()[0]["id"].as_i64().unwrap();
+    tidy::answer(conn, &home.layout, "builder", id, true, "").unwrap();
+    assert_eq!(home.facets("plans.md").audience, Audience::Shared);
+    id
+}
+
+#[test]
+fn a_row_written_into_the_database_by_hand_grants_nothing() {
+    let home = Home::new();
+    let conn = home.conn();
+    let real = approve_plans(&home, &conn);
+    let (dream, sig): (i64, String) = conn
+        .query_row("SELECT dream, sig FROM hq_promotions WHERE id = ?1", [real], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    let key = home.root.join("state/secrets/memory-approvals.key");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        assert_eq!(std::fs::metadata(&key).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    // A forged approval of Sam's note, unsigned, then carrying the real row's signature: neither widens it.
+    conn.execute(
+        "INSERT INTO hq_promotions (agent, file, from_audience, audience, status, created_at, dream)
+         VALUES ('builder', 'people/sam/trip.md', 'person:sam', 'shared', 'approved', 0, ?1)",
+        [dream],
+    )
+    .unwrap();
+    let forged = conn.last_insert_rowid();
+    home.set(
+        "people/sam/trip.md",
+        &format!("---\naudience: shared\napproved_change: {forged}\n---\n- Sam flies to Osaka\n"),
+    );
+    assert_eq!(home.facets("people/sam/trip.md").audience.to_string(), "person:sam");
+    conn.execute("UPDATE hq_promotions SET sig = ?1 WHERE id = ?2", params![sig, forged]).unwrap();
+    assert_eq!(home.facets("people/sam/trip.md").audience.to_string(), "person:sam");
+
+    // The real row moved to another audience no longer matches its signature.
+    conn.execute("UPDATE hq_promotions SET audience = 'person:eve' WHERE id = ?1", [real]).unwrap();
+    home.set("plans.md", &format!("---\naudience: person:eve\napproved_change: {real}\n---\n- Osaka\n"));
+    assert_eq!(home.facets("plans.md").audience, Audience::Owner);
+    conn.execute("UPDATE hq_promotions SET audience = 'shared' WHERE id = ?1", [real]).unwrap();
+    home.set("plans.md", &format!("---\naudience: shared\napproved_change: {real}\n---\n- Osaka\n"));
+    assert_eq!(home.facets("plans.md").audience, Audience::Shared);
+
+    // With the key gone nothing is granted: the most private reading.
+    std::fs::remove_file(&key).unwrap();
+    assert_eq!(home.facets("plans.md").audience, Audience::Owner);
+}
+
+#[test]
+fn a_waiting_or_declined_question_flipped_to_approved_grants_nothing() {
+    let home = Home::new();
+    home.set("people/sam/mood.md", "---\ndescription: Mood\n---\n- Sam is shy\n");
+    let conn = home.conn();
+    approve_plans(&home, &conn);
+    let m = home.load();
+    tidy::apply(&conn, &m, &plan(&m, &serde_json::json!([{"file": "people/sam/mood.md", "audience": "shared"}])))
+        .unwrap();
+    let id = tidy::promotions(&conn, "builder", "pending", 10).unwrap()[0]["id"].as_i64().unwrap();
+    let dream: i64 = conn.query_row("SELECT max(id) FROM memory_dreams", [], |r| r.get(0)).unwrap();
+    conn.execute("UPDATE hq_promotions SET status = 'approved', dream = ?1 WHERE id = ?2", params![dream, id]).unwrap();
+    home.set("people/sam/mood.md", &format!("---\naudience: shared\napproved_change: {id}\n---\n- Sam is shy\n"));
+    assert_eq!(home.facets("people/sam/mood.md").audience.to_string(), "person:sam");
+}
+
+#[test]
+fn approvals_from_before_signing_are_signed_once_at_the_upgrade() {
+    let home = Home::new();
+    let conn = home.conn();
+    let id = approve_plans(&home, &conn);
+    // The database as an older host left it: no signatures, no key.
+    conn.execute_batch("ALTER TABLE hq_promotions DROP COLUMN sig").unwrap();
+    std::fs::remove_file(home.root.join("state/secrets/memory-approvals.key")).unwrap();
+    drop(conn);
+    let conn = home.conn();
+    let sig: Option<String> =
+        conn.query_row("SELECT sig FROM hq_promotions WHERE id = ?1", [id], |r| r.get(0)).unwrap();
+    assert!(sig.is_some());
+    assert_eq!(home.facets("plans.md").audience, Audience::Shared);
+}
+
+#[test]
+fn the_signature_is_the_kernels() {
+    // The same answer as kernel/lib/kith_facets.py's `signature` (kernel/tests/kith-recall-check).
+    let key: Vec<u8> = (0..32).collect();
+    assert_eq!(
+        tidy::signature(&key, 7, "echo", "people/sam/ü.md", "room:grp1").unwrap(),
+        "8f50a51b1e41ae8cb8f5488e7dff393bba6b281b275075cf6c122932aa9c9c7f"
+    );
 }

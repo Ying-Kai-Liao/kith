@@ -40,7 +40,6 @@
 #   kith auth [ls|grant|revoke|set ...]                  which agent may use which service, as which account (kith-auth)
 #   kith cost [agents|agent <name>|...]                  what the agents cost, from the usage ledger (kith-cost)
 #   kith ask <agent> [-c] [--as NAME] "task"            ask an agent, get its answer back; -c continues (kith-ask)
-#   kith live start|where|send <agent> ...               agents that run as one live session (session: live) (kith-live)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
 #   kith memory search <words> [--agent NAME|--all]      search what the agents wrote down (kith-memory)
 #   kith recall <query> [--project p] [--room r] [--thread t] [--tier 2|3|all] [--json]   search notes within what you may see (kith-recall)
@@ -95,7 +94,6 @@ case $1 in
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
   cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
-  live)               shift; exec "$KITH/bin/kith-live" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;
   backup)             case ${2:-} in list|add|remove) shift; exec "$KITH/bin/kith-account" backup "$@" ;; esac
