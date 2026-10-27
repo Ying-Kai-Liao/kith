@@ -5,6 +5,7 @@ import {
 } from '@shared/kith-info'
 import { Button, Disclosure, DropdownMenu, IconButton, Pill, Spinner } from '../../../components/Controls'
 import { Icon } from '../../../components/Icon'
+import { AccessGrants } from './AccessGrants'
 import { AgentBackups } from './AgentBackups'
 import { MarkdownText } from '../../thread/Markdown'
 import type { KithInfoStore } from '../../../store/kith-info-store'
@@ -61,6 +62,7 @@ export function KithDetails({ kith, about, routines }: {
       {info.errors.projects !== undefined || info.projects.length ? <Projects info={info} failed={unread('projects')} /> : null}
       <ModelAndPermissions info={info} />
       <AgentBackups agent={info.agent} />
+      <AccessGrants botId={kith.botId} />
       <Lists info={info} />
       <div className="sheet-footer kith-refresh">
         {kith.refreshError ? <span className="kith-failed" role="alert">Refresh failed: {kith.refreshError}</span>
