@@ -1,6 +1,5 @@
-//! Chat channels: the routing core of hq's chat bridge (`kernel/lib/hq_bridge/core.py`) inside the host, with no
-//! platform of its own. Discord, Telegram and Slack plug in as [`Adapter`]s; each is cut over from the Python
-//! bridge on its own (grant its profile to the client `serve` in hq-auth, revoke it from `bridge`).
+//! Chat channels: Discord, Telegram and Slack bots for kith, inside the host. Each platform plugs in as an
+//! [`Adapter`]; a bot runs here when its profile is granted to the client `serve` in kith-auth.
 //!
 //! What it does for a message, whatever the platform: finds the person (`hq-auth who`, `/link CODE` to link an
 //! account), picks the agent (`@agent`, the thread's last agent, the room's default, or asks "who should take
@@ -9,16 +8,12 @@
 //! `hq <agent> <task>` under the resource gate. Agents' own posts (`hq-send`) reach the thread through the run's
 //! outbox folder (`HQ_BRIDGE_OUTBOX`).
 //!
-//! Cutting a bot over from the bridge: first `hq-auth revoke bridge <platform>` and restart the bridge
-//! (`launchctl kickstart -k gui/$UID/dev.hq.bridge`; it reads its grants only when it starts), and only then
-//! `hq-auth grant serve <platform> <profile>`: this host copies the bridge's state (last message seen, threads)
-//! when the connection first starts, which must be after the bridge stopped handling messages, or what the
-//! bridge already answered is run again. The router needs the Jev
-//! key too: `hq-auth grant serve jev-browser <profile>`, or every message sent while an agent works is merged.
+//! The router needs the Jev key: `kith-auth grant serve jev-browser <profile>`, or every message sent while an
+//! agent works is merged.
 //!
 //! State: `<data dir>/channels/state.json` (the bridge's v2 schema), run outboxes and attachments next to it. The
-//! first time a connection starts here its entries are copied from the bridge's `~/.hq/bridge/state.json`, which
-//! is only read.
+//! first time a connection starts here its entries are copied from the retired Python bridge's
+//! `~/.kith/bridge/state.json` when a Mac still has one, which is only read.
 //!
 //! A host whose `KITH_SERVE_HOME` is not the default data folder runs no channels (hq-auth and `~/.hq` are global, so a
 //! test host would take over the real bots): it asks neither hq-auth nor reads the bridge's state. `KITH_SERVE_CHANNELS=1`

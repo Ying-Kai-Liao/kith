@@ -33,7 +33,6 @@ The tests of each step on the code (all in CI):
 ```
 kernel/tests/kith-auth-revoke-check      # kith-auth: may/bot_may/who/resolve, rows kept, undo exact, R9 refusal
 python3 kernel/tests/kith-auth-props.py  # random op sequences incl. revoke/unrevoke (may() vs a reference)
-kernel/tests/kith-bridge-revoke-check    # the bridge: removed message, held, spawn and delivery re-checks
 cd serve/host && cargo test revoke        # host: api/revoke_tests.rs, bot_guests_tests.rs (sync gate, dormant bots)
 cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of the owner, accept refused
 ```
@@ -78,7 +77,7 @@ cost (a guest's message is held while nothing is revoked) is real.
 | the relay refuses their bot's traffic | not in the relay (the cloud doesn't know a bot's owner account): the host's ordered socket stands in. `relay.rs` on `cloud.changed` calls `sync_lease::changed` before reading the next frame; `botguests.rs` `ask` and `thread` wait for `sync_lease::wait`, then `roles::may_use` | `RelayOK` (bot door) |
 | each Mac applies the cloud's record | `remote/cloud.rs` `pull`: `members::apply_revoked` (kith-auth `--local`), then `people::cut_off`, then the memberships; `relay.rs` `pull_state` with `sync_lease::mark`/`pulled` | `CloudDeliver` |
 | in sync | `remote/sync_lease.rs`: `hub.cloud_synced` (host) and `cloud-sync.json {linked, until}` (kernel, read by kith-auth `bridge_held` for `who`/`resolve` `held`) | `InSync` |
-| the bridge takes a message | `core.py` `handle`: `revoked` -> "Your access ... was removed"; `held` (non-owner) -> `held()` waits for the sync | `BridgeRecv` (drop / hold / start) |
+| the bridge takes a message | host `channels/` (see the note below); was `core.py` `handle`: `revoked` -> "Your access ... was removed"; `held` (non-owner) -> `held()` waits for the sync | `BridgeRecv` (drop / hold / start) |
 | the bridge's turn starts | `core.py` `run` -> `access()` (resolve in sync, else wait up to `HOLD`, then refuse) | the start in `BridgeRecv`; `HelperGate` (bridge) |
 | a helper spawn | `bin/kith` -> kith-auth `resolve` (`may()`), every spawn | `Helper` |
 | delivery | bridge: `core.py` `still()` before the answer, `flush()` before each kith-send post (both via `access()`); bot: `botThread` gate; app: the device is revoked here and blocked by the relay | `Deliver` |
@@ -88,6 +87,14 @@ cost (a guest's message is held while nothing is revoked) is real.
 A check and the act it guards are separate actions in the model (`Start`, `Helper`, `Deliver`). In the code the
 bridge checks in `handle`, queues in the inbox, and starts in `run`: that is why `run` re-checks (in sync), and the
 answer and each post re-check again.
+
+**The bridge door is now the host's chat channels** (`serve/host/src/channels/`). The Python bridge
+(`kernel/bin/kith-bridge`, `kernel/lib/kith_bridge/core.py`, its `kith-bridge-revoke-check`) that held the
+`core.py` rows above was removed 2026-10-27; the host replaced it on 2026-10-22. As of that date the channels
+re-check `resolve` at spawn for invitees (`queue.rs`), but have no `revoked` reply, no `held` wait while out of sync
+and no re-check at delivery, so `BridgeRecv`'s hold and `Deliver`'s bridge re-check are not in the code (`R5`, `R6c`,
+`R8` are open for this door). `drift.sh` lists the channels as changed until they are ported and the model
+re-confirmed.
 
 ## Bounds and assumptions
 
@@ -131,8 +138,6 @@ On the code (dry run at the sync commit, edits dropped after):
 - removing the revoked check from kith-auth `may()`: `kith-auth-revoke-check` (6 FAIL), `kith-auth-props` (shrunk to
   `[person sam, member house sam, revoke sam]`) and 5 host tests (`cargo test --bin kith revoke`: 4 of
   `api::revoke_tests` and the bot test below) fail.
-- removing the bridge's delivery re-check (`still()` in `run`): `kith-bridge-revoke-check` fails (2 FAIL: "lost during
-  the turn: neither its answer ..."); removing its in-sync hold: 8 FAIL.
 - removing the `sync_lease::wait` in bot `ask`: `bot_guests_tests` `a_bot_ask_waits_for_the_cloud...` fails (an ask
   while out of sync is not refused "syncing").
 

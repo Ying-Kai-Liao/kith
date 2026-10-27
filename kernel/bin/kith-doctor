@@ -303,7 +303,7 @@ def plugin():
             warn(f'{p} is in plugins but not installed: claude plugin install {p}')
 
 
-RETIRED = {'live'}   # background jobs kith removed; a plist left on a Mac only fails
+RETIRED = {'live', 'bridge'}   # background jobs kith removed; a plist left on a Mac only fails
 
 
 def reason_network():

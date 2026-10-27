@@ -53,7 +53,7 @@ project it holds for (`bin/project-id --info`, `kith project`).
 | **Grant** | Which agent may use which service, as which account | `~/.kith/secrets/auth.json` (this Mac, never in git) | built |
 | **Browser profile** | A set of logins and the browser that made them, opened by every browser tool an agent has; its own per agent unless granted a shared one | `browser/<name>` in `auth.json`, folder `~/.kith/browsers/<name>` (this Mac, never in git) | built |
 | **Environment** | The installed software a package's plugins need, built per machine | not yet | planned |
-| **Kernel** | Runs agents and connects them: `bin/kith`, `kith-pkg`, `kith-auth`, the bridge, the adapter | this repo: `kernel/` (`bin/`, `lib/`, `adapters/`, `services/`); no agents | built |
+| **Kernel** | Runs agents and connects them: `bin/kith`, `kith-pkg`, `kith-auth`, `kith-send`, the adapter | this repo: `kernel/` (`bin/`, `lib/`, `adapters/`, `services/`); no agents | built |
 
 Rules that follow from it:
 - **A package holds no state.** Sharing or upgrading an agent never touches anyone's memory or data.
@@ -125,7 +125,7 @@ result shape back. Session ids from other harnesses are `<harness>:<id>`, so a s
 harness that made it. Settings permissions, hooks and per-request cost stay Claude-only.
 
 **Permission mode** (`lib/kith_settings.py`, 2026-10-19). An owner's run starts in the first mode that is set: the
-caller's (`--permission-mode MODE` or `--bypass` on `kith <agent>`, else `KITH_PERMISSION_MODE`, which the bridge,
+caller's (`--permission-mode MODE` or `--bypass` on `kith <agent>`, else `KITH_PERMISSION_MODE`, which the host's channels,
 `kith schedule`, `kith ask` and `kith remote` set only from their own
 `KITH_BRIDGE_`, `KITH_SCHED_`, `KITH_ASK_` and `KITH_REMOTE_PERMISSION_MODE`), this Mac's choice for the agent
 (`agents.<name>.permission_mode` in `~/.kith/settings.json`; `kith install` asks for someone's agent and saves the
@@ -135,11 +135,11 @@ own settings: kith-wide, not secret, never committed; `kith doctor` shows the on
 into the run's settings, so only Claude Code runs get it; other harnesses tell only `bypassPermissions` apart from the
 rest, so for them an unset mode stays as before. A run for anyone but the owner takes its membership's mode instead.
 
-**Channels** (`bin/kith-bridge`, `lib/kith_bridge/`, `bin/kith-send`; 2026-10-19). One bridge process for every platform
-and every bot. Each bot is a connection: a `discord/`, `telegram/` or `slack/` profile granted to `bridge` (a grant
-can hold a list, one bot each), plus the Discord token in `KITH_DISCORD_BOT_TOKEN` as `discord/kith`. Every connection
-runs and restarts on its own. `core.py` holds what is the same everywhere; an adapter per platform
-(`discord_chat.py`, `telegram_chat.py`, `slack_chat.py`) only receives, posts as the agent, threads and stops.
+**Channels** (`serve/host/src/channels/`, `bin/kith-send`; 2026-10-19, in the host since 2026-10-22). The host
+runs every platform and every bot (the Python `kith-bridge` that came first was removed 2026-10-27). Each bot is a
+connection: a `discord/`, `telegram/` or `slack/` profile granted to `serve` (a grant can hold a list, one bot
+each). Every connection runs and restarts on its own. `core.rs` holds what is the same everywhere; an adapter per
+platform (`discord/`, `telegram/`, `slack/`) only receives, posts as the agent, threads and stops.
 - **Rooms:** where people talk (a DM, `#home`, a group), keyed `<connection>:<chat>`, with an optional default agent
   (`/default <agent>`). An agent's Discord channel is a room defaulting to that agent; the owner's new DMs default to
   `personal`.
@@ -152,7 +152,7 @@ runs and restarts on its own. `core.py` holds what is the same everywhere; an ad
 - **The queue**, the same on every platform: messages sent while an agent works wait and go to it together; Jev
   routes each (stop, correction → restart, other subject, more of the same); a Stop button and `/stop`.
 - **Files:** in as local paths; out with `kith-send`, which leaves them in the run's outbox (`KITH_BRIDGE_OUTBOX`) for
-  the bridge to post (Discord threads: the channel's webhook, as before).
+  the host to post (Discord threads: the channel's webhook, as before).
 - Telegram: groups too (privacy mode: commands, mentions of the bot and replies to it), Markdown shown as Telegram
   HTML. Slack: Socket Mode, `@agent` as plain text, `!command` (Slack keeps `/`). Discord: a mentionable role per
   agent for `@` autocomplete when the bot may manage roles.
@@ -170,7 +170,7 @@ runs and restarts on its own. `core.py` holds what is the same everywhere; an ad
   default, keys and bots shared; `"*"` shares one on purpose. A run for anyone else never gets someone else's
   profile, whatever the grants say.
 
-A run's person is `KITH_PERSON`: set only by entry points (the bridge from the sender's account, a schedule from the
+A run's person is `KITH_PERSON`: set only by entry points (the host's channels from the sender's account, a schedule from the
 person whose run added the job, checked against kith-auth when it is due), unset means the owner, inherited by every
 helper. `kith ask agent@machine` is refused for anyone but the owner: the other machine has no id for them yet. `bin/kith` resolves it before anything else and fails closed. For anyone but
 the owner, the membership's mode replaces the caller's, and the run:
@@ -180,8 +180,8 @@ the owner, the membership's mode replaces the caller's, and the run:
 - gets `person=`, `name=`, `lang=`, `tz=` on its `<session>` tag (PROTOCOL: "Who you work for").
 
 The plugin refuses `kith:<name>` spawns the person may not use (`--via` the calling agent: a helper is allowed when
-the caller's membership lists it). The bridge maps a sender to a person (`whois`), links accounts with `/link CODE`
-(from `kith auth invite`), checks access before starting, and gives a thread to the person who started it.
+the caller's membership lists it). The host's channels map a sender to a person (`whois`), link accounts with `/link CODE`
+(from `kith auth invite`), check access before starting, and give a thread to the person who started it.
 Others are turned away from it, because its session holds what the agent saw for them. The old Discord settings
 (`KITH_DISCORD_REPLY_TO`, `KITH_DISCORD_ALLOWED_IDS`, `KITH_DISCORD_OWNER_ID`) are ignored: the owner is the `people` owner
 (until their Discord account is known, the owner of the one server named by `channels.discord_guild` stands in in the
@@ -189,7 +189,7 @@ host; with no server named, no one does).
 - Only the owner gets a free shell: `mode=bypassPermissions` on a membership or preset needs `--trusted`; one set
   without it (by hand) runs in `default`.
 - `kith auth person <id> id=<new>` renames, carrying memberships, grants, owned profiles and invites; the old id stays
-  in `was`, so bridge threads and the cost ledger still mean them.
+  in `was`, so chat threads and the cost ledger still mean them.
 - Cost per person: the ledger's runs carry `person` (`kith cost people`), and `budget=USD` on a membership caps a
   calendar month of their runs of that agent (helpers reached through it included); `bin/kith` refuses past it.
 - Memory per person ([memory-per-person.md](memory-per-person.md)): the owner's memory stays in the agent's
@@ -228,7 +228,7 @@ principals and limits, origin-tagged threads, and the apps' bot rows and approva
 - **An `admin` level** (everything but the owner's logins, folder isolation off). On hold until the owner asks.
 - **Sign-in links** (deferred 2026-10-19 until someone needs their own account; meanwhile people use the owner's accounts
   shared with them, `kith auth share`) for a person's own accounts: an OAuth link sent in chat (Google first), with the token stored in
-  the Keychain as `google/<person>` and granted `agent@person`. Needs a Google Cloud OAuth client, and the bridge has
+  the Keychain as `google/<person>` and granted `agent@person`. Needs a Google Cloud OAuth client, and the host's channels have
   no public URL: either the loopback redirect (the person pastes back the address their browser fails to open) or a
   small relay. Undecided.
 - **Shared browser logins** (deferred 2026-10-19 until two runs need one profile at once; who may use a login is

@@ -31,16 +31,16 @@ kith/agents/                        the agents folder, $KITH_AGENTS: your privat
   agents.json                       committed: installed agents and where their roles come from (kith-pkg save)
   private-words                     committed: words kith-pkg check --share refuses in a role
   .gitignore                        ignores everything else (kernel/lib/dot-kith.gitignore): from here down, this Mac only
-  secrets/                          auth.json (grants and profiles, kith-auth), auth.log, env (bridge, Telegram, tokens);
+  secrets/                          auth.json (grants and profiles, kith-auth), auth.log, env (Telegram, tokens);
                                     agents' file tools are denied it (bin/kith)
   settings.json                     kith's own settings for this Mac, not secret (lib/kith_settings.py): permission_mode, plugins, agents
   ask.json  remotes.json            kith ask conversations → sessions; other machines (kith-remote)
   cost.db                           the cost ledger (kith-cost)
-  bridge/  sched/                   Discord thread → session map, attachments; last tick and runs per job
+  bridge/  sched/                   the retired Python bridge's state (the host imports it once); last tick and runs per job
   monitor/  house/  cost/           devops' monitor.db and monitor.log; house's remind.log; the cost sync.log
   store/<name>@<version>/           read-only role snapshots runs are pinned to (prompt.md, settings.json, .home);
   store/.pointers/                  unchanged files hard-linked to the previous version's; good/pin per agent
-  logs/                             bridge.log, sched/tick.log, sched/runs/<agent>/ (each scheduled run's output)
+  logs/                             sched/tick.log, sched/runs/<agent>/ (each scheduled run's output)
   cache/                            rebuildable: handoff/ (scratch clones and worktrees of callers' repos, kith-remote)
   bin/kith-uv                         uv copy with Full Disk Access, what every launchd job runs (repo on an external disk)
 ~/Workspace/kith -> kith/kernel/      older address of the kernel, kept for paths that still name it (removable)
@@ -63,7 +63,6 @@ LaunchAgents in `~/Library/LaunchAgents/`, each run through `~/.kith/bin/kith-uv
 
 | Label | Runs | When | Written by |
 |---|---|---|---|
-| `dev.kith.bridge` | `kernel/bin/kith-bridge` | always (KeepAlive) | `kith-bridge --install` |
 | `dev.kith.sched` | `kernel/bin/kith-sched tick` | every minute | `kith-sched --install` (not installed on this Mac) |
 | `dev.kith.cost` | `kernel/bin/kith-cost sync` | every 6 h | by hand (no installer) |
 | `dev.kith.monitor` | devops `role/tools/monitor.py run` | always (KeepAlive) | `monitor.py install` (devops' repo) |
@@ -75,7 +74,7 @@ Paths in this table are inside `kernel/`, except `install.sh` and `.claude-plugi
 
 | File | Lang | What it does | Called by |
 |---|---|---|---|
-| `bin/kith` | bash | Runs one agent: resolves the pinned package, fills placeholders, adds memory and project, settings + cost-tag hook, granted MCP servers, model/effort, then `exec claude`. Also the front door for `versions`, `install`, `auth`, `cost`… | you, `kith-bridge`, agents calling helpers |
+| `bin/kith` | bash | Runs one agent: resolves the pinned package, fills placeholders, adds memory and project, settings + cost-tag hook, granted MCP servers, model/effort, then `exec claude`. Also the front door for `versions`, `install`, `auth`, `cost`… | you, `kith serve`, agents calling helpers |
 | `bin/kith-pkg` | python | Packages: fingerprint → check → snapshot into `~/.kith/store` (clones or hard links), gc; pin/rollback; auto-commit each good version to the agent's repo; install/update/share/search/restore; fetch third-party skills; `check --share` privacy scan | `bin/kith`, the adapter (`resolve --all --json`), `install.sh` |
 | `bin/kith-auth` | python | Services and grants: which agent may use which service as which account; builds `--mcp-config`; hands out secrets (`get`, `exec`) and logs them; keeps the "always" answers to escape cards (`access`; `access <agent> --json` lists them with when each was given, for the apps' Access list) | `bin/kith`, agents' tools, the host |
 | `bin/kith-cost` | python | Cost ledger: syncs request usage from `~/.claude/projects` into `cost.db`; `tag` records each kith session (SessionStart hook); reports by agent, version, model, effort | you, launchd `dev.kith.cost`, the hook `bin/kith` adds |
@@ -88,13 +87,9 @@ Paths in this table are inside `kernel/`, except `install.sh` and `.claude-plugi
 | `bin/kith-new` | bash | Scaffolds `agents/<name>/`: `role/` as its own repo, memory folders next to it | you, the builder agent |
 | `bin/project-id` | python | Directory → project ID from `projects.json` (remotes and paths as aliases, a path also matching the folders inside it); `--info` the project's parents and homes; `--register` with `--in PARENT`, `--home [DIR]` (bare: a new folder inside the parent's home, else under the root); `--children ID [--all]` the projects it holds and where each is on this Mac (a repo is registered by remote and checkout); `--root [DIR]` where new homes go (`homes` in `projects.json`, default `~/Documents`, asked by `kith init`) | `bin/kith`, the adapter, agents |
 | `bin/kith-project` | python | `kith project`: the project here and its parents (repos, home, memory, children), `ls` as a tree, `add` (→ `project-id --register`), `root` (→ `project-id --root`), `open [ID]`: Claude Code in the project's home with `--add-dir` for everything it holds | you |
-| `bin/kith-bridge` | python (uv script) | Chat: every granted bot (Discord, Telegram, Slack) in one process, each connection restarting on its own (also when it goes quiet); a watchdog thread exits the process when the loop or its thread pool is stuck (`KITH_BRIDGE_STALL`, default 180 s) so launchd starts it again; launchd `dev.kith.bridge` | launchd |
-| `lib/kith_bridge/core.py` | python | The bridge's core: people (`kith-auth who`), access, rooms and defaults, `@agent` routing, threads → `{agent: session}`, the queue with the Jev router, stop, runs `kith <agent>` with `KITH_PERSON`, posts what the run's outbox holds | `kith-bridge` |
-| `lib/kith_bridge/discord_chat.py`, `telegram_chat.py`, `slack_chat.py` | python | One adapter per platform: receive, post as the agent, threads, the working line with Stop, buttons, files; Telegram's Markdown → HTML. What came while the bridge was away is answered once, marked late: Telegram from its saved offset, Discord from history after the last message it saw (24 h at most) | `kith-bridge` |
-| `tests/kith-bridge-check` | python (uv script) | The bridge's self-healing against fake Discord and Telegram and a stub `kith`, in a throwaway HOME: one answer per message, catch-up after downtime, dead connections replaced, a stuck loop exits | you, after a bridge change |
 | `bin/kith-acp` | python | `kith acp <agent> [--keep …]`: the agent as an ACP agent for ACP clients. Runs claude-agent-acp with `adapters/acp/claude-via-kith` as its claude; drops the client's MCP servers (except `--keep`) and `_meta.systemPrompt`; gives each group chat its own agent session (map in `~/.kith/acp/<agent>.json`), rewriting session ids both ways so the client only sees its own; logs in `~/.kith/logs/acp/` | an ACP client (a Kith bot's `command`) |
 | `bin/kith-serve`, `bin/kith` | bash | `kith serve start\|stop\|restart\|status\|relay [URL]`: builds `serve/host` (dev-app profile) when stale, only from `~/.kith/hq-serve` (another checkout hands over to it or refuses; `start --dev` / `KITH_SERVE_DEV=1` builds from the current one), installs `~/.kith/serve/bin/kith-serve`, runs its `install --port 19224` (launchd `dev.kith.serve`); relay URL in `~/.kith/serve/config.json`. `kith` forwards to `kith` | you |
-| `bin/kith-send` | bash | Delivers a result: into the Discord thread when inside one, into the bridge's outbox (`KITH_BRIDGE_OUTBOX`) inside any other chat task, else Telegram | agents |
+| `bin/kith-send` | bash | Delivers a result: into the Discord thread when inside one, into the run's outbox (`KITH_BRIDGE_OUTBOX`, posted by the host) inside any other chat task, else Telegram | agents |
 | `bin/kith-init` | python | Setup, safe to repeat: checks git (+ identity), claude, gh, uv; makes ~/.kith and the agents folder git repos with a first commit and `user.md`; offers private GitHub backups; installs what agents.json lists; offers a starter (`lib/starters.json`). `--from <user>` clones that user's hq-state and hq-agents first (a new Mac) | `install.sh` (last step), you |
 | `bin/kith-doctor` | python | Read-only checks with a fix for each: folders and links, tools, the state, agents and role repos (uncommitted, unpushed, no backup), agent checks, grants, plugin version, the `plugins` every agent gets (and any not installed), each `dev.kith.*` job (loaded, running, stuck in kith-uv = lost Full Disk Access) | you |
 | `lib/dot-kith.gitignore`, `lib/agents.gitignore`, `lib/user.md`, `lib/starters.json` | text | What `kith init` puts in a new ~/.kith and agents folder; the starter agents it offers (link null until published) | `kith-init` |
@@ -122,16 +117,16 @@ Packages never hold absolute paths. `bin/kith` and the adapter fill these in at 
 | `{{MEMORY_DIR}}` / `{{FILES_DIR}}` / `{{PERSON_FILE}}` | whose memory, outputs and profile the run uses: the owner's `memory/`, `files/`, `user.md`; anyone else's `memory/people/<id>/`, `files/people/<id>/`, `<state>/people/<id>.md` | |
 | `{{SHARED_MEMORY}}` | `memory/shared/`: the craft, for everyone who uses the agent | |
 | `{{STATE}}` / `{{AGENTS}}` | the state folder; the agents folder | `KITH_STATE`, `KITH_AGENTS` (also `KITH_HOME`) |
-| `{{MACHINE}}` | this Mac's kith folder, `~/.kith` (`bridge/attachments/`, …; never `secrets/`, which runs are denied) | `KITH_MACHINE` |
+| `{{MACHINE}}` | this Mac's kith folder, `~/.kith` (…; never `secrets/`, which runs are denied) | `KITH_MACHINE` |
 | `{{USER_HOME}}` | `$HOME` | |
 
 Also set for a run: `KITH_AGENT_VERSION`, `KITH_MODEL`, `KITH_EFFORT`, `KITH_PROJECT` (read by `kith-cost tag`), and, from the
-bridge, `KITH_VIA=discord`, `telegram` or `slack`, `KITH_BRIDGE_OUTBOX`, `KITH_PERSON` for anyone but the owner (`schedule` from kith-sched, plus `KITH_SCHED_JOB`; `ask` from kith-ask), `KITH_DISCORD_WEBHOOK_URL`, `KITH_DISCORD_THREAD_ID` (read by `kith-send`), `KITH_CLAUDE_ARGS`
+host's chat channels, `KITH_VIA=discord`, `telegram` or `slack`, `KITH_BRIDGE_OUTBOX`, `KITH_PERSON` for anyone but the owner (`schedule` from kith-sched, plus `KITH_SCHED_JOB`; `ask` from kith-ask), `KITH_DISCORD_WEBHOOK_URL`, `KITH_DISCORD_THREAD_ID` (read by `kith-send`), `KITH_CLAUDE_ARGS`
 (extra `claude` flags; `bin/kith` clears it once read so helpers don't inherit it).
 
 ## Flows
 
-**`kith <agent> "task"`** (terminal, or the bridge on a Discord message)
+**`kith <agent> "task"`** (terminal, or the host on a chat message)
 1. `bin/kith` → `kith-pkg resolve <agent>`: unchanged package → its current snapshot; changed → check, snapshot into
    `~/.kith/store`, commit to the agent's repo; failing check → the last good version.
 2. Prompt = snapshot `prompt.md` (agent.md body + PROTOCOL.md) with placeholders filled + `MEMORY.md` + session tag.
@@ -178,7 +173,7 @@ the last tick (at most a day back) and that isn't still running: `kith <agent> "
 | What makes a version valid, snapshots, auto-commit, install/share | `bin/kith-pkg` (`problems()` for checks) |
 | A new placeholder | `bin/kith` `fill()`, `register.tsx` `fill`, `kith-pkg` `PLACEHOLDERS` |
 | Services, grants, secrets | `kernel/services/`, `kernel/bin/kith-auth` |
-| Discord behaviour | `bin/kith-bridge`; delivery in `bin/kith-send` |
+| Chat behaviour (Discord, Telegram, Slack) | `serve/host/src/channels/`; delivery in `bin/kith-send` |
 | How memory is searched (what's indexed, ranking) | `bin/kith-memory` |
 | Scheduled jobs (cron syntax, catch-up, how a job runs) | `bin/kith-sched` |
 | Where kith's folders are (KITH_HOME, ~/.kith and what is in it) | `lib/kith_paths.py`, nowhere else |

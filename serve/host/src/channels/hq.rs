@@ -55,7 +55,7 @@ impl Paths {
         })
     }
 
-    /// The bridge's state file. Read only: the bridge keeps writing it for the connections it still runs.
+    /// The retired Python bridge's state file, imported once per connection. Read only.
     pub fn bridge_state(&self) -> PathBuf {
         self.machine.join("bridge").join("state.json")
     }

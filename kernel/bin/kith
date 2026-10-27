@@ -97,7 +97,7 @@ case $1 in
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;
   backup)             case ${2:-} in list|add|remove) shift; exec "$KITH/bin/kith-account" backup "$@" ;; esac
-                      shift; exec "$KITH/bin/hq-state" backup "$@" ;;
+                      shift; exec "$KITH/bin/kith-state" backup "$@" ;;
   account)            shift; exec "$KITH/bin/kith-account" "${@:---help}" ;;
   new)                shift; exec "$KITH/bin/kith-new" "$@" ;;
   remote)             shift; exec "$KITH/bin/kith-remote" "${@:---help}" ;;
@@ -838,7 +838,7 @@ json.dump(s, open(f, "w"), indent=1)' "$runs/$$.settings.json"
 fi
 # The read-only kernel commands PROTOCOL tells agents to run, allowed without a prompt. Under every path the kernel
 # has (logical, resolved, ~/kith/kernel) and, since a path with a space gets quoted, with the program in quotes too.
-readonly_cmds=("project-id" "project-id --list" "project-id --info:*" "project-id --children:*" "kith-memory search:*" "kith-who:*" "hq-memory search:*" "hq-who:*")
+readonly_cmds=("project-id" "project-id --list" "project-id --info:*" "project-id --children:*" "kith-memory search:*" "kith-who:*" "hq-who:*")
 allowed=()
 while IFS= read -r base; do
   [[ -n $base && -d $base/bin ]] || continue
@@ -969,7 +969,7 @@ if [[ -n $resume ]]; then
   else args+=(--resume "$resume"); fi
 fi
 if [[ $launch -eq 1 ]]; then emit_launch "${args[@]}"; exit 0; fi
-# Extra claude flags from a caller such as kith-bridge (e.g. --output-format json --resume <session>).
+# Extra claude flags from a caller such as kith serve (e.g. --output-format json --resume <session>).
 # For anyone but the owner, permission flags in them are dropped: the membership's mode stands.
 if [[ -n ${KITH_CLAUDE_ARGS:-} ]]; then
   read -r -a extra <<< "$KITH_CLAUDE_ARGS"

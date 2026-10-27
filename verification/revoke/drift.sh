@@ -13,7 +13,9 @@ SYNC=48af5a4eafb8e5b866afdccc911c3652e41284e3
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
-  kernel/lib/kith_bridge/core.py          # handle (revoked, held), held, access, run (spawn re-check), still, flush (deliver)
+  serve/host/src/channels/queue.rs        # the bridge door (Python bridge removed 2026-10-27): spawn re-check; revoked, held, delivery re-check not ported yet
+  serve/host/src/channels/core.rs
+  serve/host/src/channels/hq.rs           # Who (no revoked/held yet), resolve
   serve/host/src/api/people.rs            # revoke_person (cloud first, then kith-auth), cut_off
   serve/host/src/api/botguests.rs         # ask, thread: the sync gate (sync_lease::wait), then may_use
   serve/host/src/remote/sync_lease.rs     # in sync or not: changed, mark/pulled, wait, the bridge's lease file
