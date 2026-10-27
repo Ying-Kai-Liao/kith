@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Writes each side's types for each contract (serve/contract/<name>/contract.json): the cloud HTTP API (TypeScript for
-// the cloud and for desktop+web, Swift for iOS, Rust for the host and the guest) and the host RPC (TypeScript for
-// desktop+web, Swift for iOS, Rust for the host). No dependencies: plain Node.
+// the cloud and for desktop+web, Swift for iOS, Rust for the host and the guest), the host RPC (TypeScript for
+// desktop+web, Swift for iOS, Rust for the host) and what the kernel prints for the host (Rust). No dependencies: plain
+// Node.
 //
 //   node serve/contract/gen.mjs           write the generated files
 //   node serve/contract/gen.mjs --check   fail when one is missing or differs from what the contract makes
@@ -35,6 +36,11 @@ const CONTRACTS = {
       "serve/host/crates/wire/src/rpc.rs": "rust",
     },
   },
+  kernel: {
+    outputs: {
+      "serve/host/crates/wire/src/kernel.rs": "rust",
+    },
+  },
 };
 
 // The contract being written; set by `load`.
@@ -48,6 +54,7 @@ function load(name) {
   SWIFT_NS = CONTRACTS[name].swiftNamespace ?? null;
   C.routes ??= {};
   C.methods ??= {};
+  C.commands ??= {};
   // A method's params are a type of their own, `<Method>Params`.
   for (const [m, def] of Object.entries(C.methods)) {
     const t = paramsType(m);
@@ -108,6 +115,13 @@ function validate() {
     if (!C.types[m.result]) fail(`method ${name}: unknown result ${m.result}`);
     if (!m.who?.length || m.who.some((w) => !ROLES.has(w))) fail(`method ${name}: who is some of ${[...ROLES]}`);
   }
+  for (const [name, c] of Object.entries(C.commands)) {
+    const { of, map, opt } = parse(c.result ?? "");
+    if (!C.types[of] || map || opt) fail(`command ${name}: its result is a type or a list of one`);
+    if (!c.args?.length) fail(`command ${name}: no args`);
+    for (const a of c.args) if (/[{}]/.test(a) && !/^\{\w+\}$/.test(a)) fail(`command ${name}: an argument is a word or a whole {param}`);
+  }
+  if (C.fieldCase && C.fieldCase !== "snake") fail(`fieldCase is "snake" or left out (camelCase)`);
 }
 
 const routeKind = (r) => r.kind ?? "json";
@@ -557,7 +571,9 @@ function rust() {
     if (t.doc) L.push(`/// ${t.doc}`);
     const fields = Object.entries(t.fields);
     L.push("#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]");
-    if (fields.length) L.push('#[serde(rename_all = "camelCase")]');
+    // The contract's names are what goes on the wire: camelCase ones are snake_case fields renamed, snake_case ones
+    // are the fields' own names.
+    if (fields.length && C.fieldCase !== "snake") L.push('#[serde(rename_all = "camelCase")]');
     if (!fields.length) {
       L.push(`pub struct ${name} {}`, "");
       continue;
@@ -599,6 +615,8 @@ function rust() {
     L.push("            Self::Unknown => None,", "        }", "    }", "}", "");
   }
   if (Object.keys(C.methods).length) rsMethods(L);
+  if (Object.keys(C.commands).length) rsCommands(L);
+  if (Object.keys(C.methods).length || Object.keys(C.commands).length) rsSchema(L);
   L.push("/// Decodes `value` as the contract type `name`; None when the contract has no such type. For the fixtures' tests.");
   L.push("pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_json::Error>> {");
   L.push("    Some(match name {");
@@ -618,6 +636,35 @@ function rsMethods(L) {
     L.push(`/// What ${ROLE_WHO[role]} may call.`);
     L.push(`pub const ${screaming(role)}_METHODS: &[&str] = &[${ms.map((m) => `method::${screaming(m)}`).join(", ")}];`, "");
   }
+}
+
+/** Each command as a function of its params and options, giving the arguments to run the kernel with. */
+function rsCommands(L) {
+  L.push("/// Each command's arguments, as the kernel takes them.", "pub mod command {");
+  for (const [name, c] of Object.entries(C.commands)) {
+    const ps = c.args.filter((a) => a.startsWith("{")).map((a) => snake(a.slice(1, -1)));
+    const opts = Object.entries(c.options ?? {});
+    const doc = [c.doc, ...opts.map(([o, flag]) => `\`${snake(o)}\` adds \`${flag} <${snake(o)}>\`.`)].filter(Boolean).join(" ");
+    if (doc) L.push(`    /// ${doc}`);
+    const life = ps.length || opts.length ? "'a" : "'static";
+    const sig = [...ps.map((p) => `${rsId(p)}: &'a str`), ...opts.map(([o]) => `${rsId(snake(o))}: Option<&'a str>`)].join(", ");
+    const lt = life === "'a" ? "<'a>" : "";
+    const args = c.args.map((a) => (a.startsWith("{") ? rsId(snake(a.slice(1, -1))) : `"${a}"`)).join(", ");
+    L.push(`    pub fn ${rsId(snake(name))}${lt}(${sig}) -> Vec<&${life} str> {`);
+    if (!opts.length) L.push(`        vec![${args}]`);
+    else {
+      L.push(`        let mut args = vec![${args}];`);
+      for (const [o, flag] of opts) L.push(`        if let Some(v) = ${rsId(snake(o))} {`, `            args.extend(["${flag}", v]);`, "        }");
+      L.push("        args");
+    }
+    L.push("    }");
+  }
+  L.push("}", "");
+  L.push("/// Each command's name and the spec of what it prints (a type, or `[T]` for a list of one). For the fixtures' tests.");
+  L.push(`pub const COMMANDS: &[(&str, &str)] = &[${Object.entries(C.commands).map(([n, c]) => `("${n}", "${c.result}")`).join(", ")}];`, "");
+}
+
+function rsSchema(L) {
   L.push("/// The contract as data, for `crate::check` (the producer's strict check and the consumer's).");
   L.push("pub static SCHEMA: crate::check::Schema = crate::check::Schema {");
   L.push("    enums: &[");
@@ -630,6 +677,7 @@ function rsMethods(L) {
     const omit = (t.mayOmit ?? []).map((f) => `"${f}"`).join(", ");
     L.push(`        crate::check::TypeSchema { name: "${name}", fields: &[${fields}], may_omit: &[${omit}] },`);
   }
+  if (!Object.keys(C.methods).length) return void L.push("    ],", "    methods: &[],", "};", "");
   L.push("    ],", "    methods: &[");
   for (const [name, m] of Object.entries(C.methods)) {
     L.push(
@@ -645,9 +693,10 @@ const checking = process.argv.includes("--check");
 let stale = 0;
 for (const name of Object.keys(CONTRACTS)) {
   load(name);
-  const made = { ts: typescript(), swift: swift(), rust: rust() };
+  const make = { ts: typescript, swift, rust };
+  const made = {};
   for (const [path, kind] of Object.entries(CONTRACTS[name].outputs)) {
-    const text = made[kind];
+    const text = (made[kind] ??= make[kind]());
     const file = join(root, path);
     let now = null;
     try {

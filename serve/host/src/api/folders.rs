@@ -45,7 +45,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             hq::project_add(&id, &path).await?;
             // Registered; if the list can't be read back, say what was registered.
             let listed = hq::projects(true).await.ok().and_then(|l| l.into_iter().find(|p| p.id == id));
-            let project = listed.unwrap_or(hq::Project { id, paths: vec![path], home: None, parent: None });
+            let project = listed.unwrap_or(hq::Project { id, paths: vec![path], ..hq::Project::default() });
             json!({"project": folder::project_value(&project)})
         }
         _ => return Ok(ControlFlow::Continue(b)),

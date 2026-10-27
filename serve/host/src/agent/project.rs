@@ -303,7 +303,7 @@ mod tests {
     use super::*;
 
     fn project(id: &str, paths: &[&str]) -> Project {
-        serde_json::from_value(json!({"id": id, "paths": paths})).unwrap()
+        Project { id: id.into(), paths: paths.iter().map(|p| (*p).to_owned()).collect(), ..Project::default() }
     }
 
     fn known() -> Vec<Candidate> {
