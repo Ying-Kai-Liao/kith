@@ -534,6 +534,7 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
                 next.push(Next::Deny(s.request_id.clone()));
                 continue;
             };
+            let owner = is_owner_request(hub, owner_uid, s.user_id.as_deref());
             let Some(i) = mine.iter().position(|r| r.id == s.request_id) else {
                 // Our nonce is only in memory: after a restart this request can't be finished.
                 if s.host_nonce.is_some() {
@@ -545,21 +546,17 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
                 } else if let Err(why) = requester(hub, owner_uid, s.user_id.as_deref()) {
                     tracing::warn!(request_id = s.request_id, why, "denying an access request from an unknown account");
                     next.push(Next::Deny(s.request_id.clone()));
-                } else if is_owner_request(hub, owner_uid, s.user_id.as_deref()) && is_web(&s.platform) {
+                } else if owner && is_web(&s.platform) {
                     tracing::warn!(request_id = s.request_id, "denying a web device's request for the owner's account");
                     next.push(Next::Deny(s.request_id.clone()));
-                } else if is_owner_request(hub, owner_uid, s.user_id.as_deref()) && budget.len() >= SAS_NONCES_PER_HOUR
-                {
-                    throttled = true;
-                } else if !is_owner_request(hub, owner_uid, s.user_id.as_deref())
-                    && compared
-                    && member_budget.len() >= SAS_NONCES_PER_HOUR
+                } else if (owner && budget.len() >= SAS_NONCES_PER_HOUR)
+                    || (!owner && compared && member_budget.len() >= SAS_NONCES_PER_HOUR)
                 {
                     throttled = true;
                 } else {
                     // Members' requests spend a budget of their own, so they can't use up the one that guards the
                     // owner's 6-digit code and lock the owner out.
-                    if is_owner_request(hub, owner_uid, s.user_id.as_deref()) {
+                    if owner {
                         budget.push(now_ms());
                     } else if compared {
                         member_budget.push(now_ms());
