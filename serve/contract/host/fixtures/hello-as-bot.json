@@ -3,9 +3,9 @@
   "type": "Hello",
   "body": {
     "hostId": "host",
-    "computerId": "aitBotnx9qRQpGoaSrla3Q",
-    "signKey": "_CWbpi8RG4a-N1PeImfXLGL-5XgB1gs6ces7sNTaQlo",
-    "boxKey": "a6jmXA29A8dOXqIPc3eLKR_pexqPleY3qwrhQztkYR8",
+    "computerId": "AAAAAAAAAAAAAAAAAAAAAA",
+    "signKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "boxKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
     "name": "Mac",
     "version": "0.1.0",
     "protocol": 1,
