@@ -42,6 +42,9 @@ const persist = join(tmp, 'wrangler')
 const home = join(tmp, 'home')
 const authFile = join(tmp, 'auth.json')
 const children: ChildProcess[] = []
+// The last lines each child printed (wrangler, the host), shown when the run fails: CI has no E2E_VERBOSE, and without
+// them a failure such as the relay's "Can't reach your computer" says nothing about what the host did.
+const tails = new Map<string, string[]>()
 
 function check(cond: unknown, what: string): asserts cond {
   if (!cond) throw new Error(`check failed: ${what}`)
@@ -61,8 +64,16 @@ async function waitFor<T>(what: string, f: () => T | undefined | false | Promise
 
 function run(cmd: string, args: string[], env: Record<string, string> = {}): ChildProcess {
   const child = spawn(cmd, args, { cwd: CLOUD_DIR, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] })
-  child.stdout?.on('data', (d) => process.env.E2E_VERBOSE && process.stdout.write(String(d)))
-  child.stderr?.on('data', (d) => process.env.E2E_VERBOSE && process.stderr.write(String(d)))
+  const name = cmd.split('/').pop() ?? cmd
+  const tail = tails.get(name) ?? []
+  tails.set(name, tail)
+  const keep = (d: unknown) => {
+    tail.push(...String(d).split('\n').filter(Boolean))
+    tail.splice(0, Math.max(0, tail.length - 400))
+  }
+  child.stdout?.on('data', (d) => (keep(d), process.env.E2E_VERBOSE && process.stdout.write(String(d))))
+  child.stderr?.on('data', (d) => (keep(d), process.env.E2E_VERBOSE && process.stderr.write(String(d))))
+  child.once('exit', (code, sig) => keep(`[${name} exited: ${sig ?? code}]`))
   children.push(child)
   return child
 }
@@ -314,8 +325,11 @@ try {
   await main()
 } catch (e) {
   console.error('\ndesktop relay e2e (real host) failed:', e)
+  for (const [name, tail] of tails) console.error(`\n--- last ${tail.length} lines of ${name} ---\n${tail.join('\n')}`)
   process.exitCode = 1
 } finally {
   await Promise.all(children.map(stop))
   rmSync(tmp, { recursive: true, force: true })
+  // Relay links a failed check left open keep Node running until the job's timeout (shown as cancelled): end here.
+  process.exit()
 }
