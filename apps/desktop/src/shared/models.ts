@@ -287,6 +287,8 @@ export interface EntryData {
   locations?: { path: string; line?: number }[]
   options?: PermissionOption[]
   selected?: string
+  /** permission, answered: the host's words for what became of the answer when it isn't the option's own (an "always" kith-auth couldn't keep stayed a once grant). Shown in place of the option's outcome. */
+  outcome?: string
   command?: string
   detail?: string
   cwd?: string
