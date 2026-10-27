@@ -141,6 +141,7 @@ pub struct Owner {
 /// `cloudStatus` and the `cloud` event.
 #[derive(Serialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[expect(clippy::struct_excessive_bools, reason = "independent status flags the apps read as they are")]
 pub struct CloudStatus {
     pub enabled: bool,
     pub url: Option<String>,
