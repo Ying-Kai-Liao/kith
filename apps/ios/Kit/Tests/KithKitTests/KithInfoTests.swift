@@ -160,21 +160,24 @@ private func houseInfo() throws -> KithInfo {
     #expect(HqSetting.rows(nil)[1].editable == false)
 }
 
-@Test func accessGrantsDecodeAndSayWhatTheyAllow() throws {
-    let answer = try decode(AccessGrants.self, """
+@Test func accessLedgerDecodesAndSaysWhatEachAllows() throws {
+    let answer = try decode(AccessLedger.self, """
     {"grants": [
-      {"person": "sam", "name": "Sam", "kind": "read", "target": "/Users/kai/docs", "since": 1790000000000},
-      {"person": "*", "name": "", "kind": "domain", "target": "pypi.org", "since": null},
-      {"person": "sam", "kind": "write", "target": "/Users/kai/notes"},
-      {"person": "sam", "kind": "exec", "target": "/bin"},
-      {"person": "sam", "kind": "read"}
+      {"key": "read:house:sam:/Users/kai/docs", "kind": "read", "agent": "house", "person": "sam", "name": "Sam", "target": "/Users/kai/docs", "since": 1790000000000, "approved_by": null},
+      {"key": "domain:house:*:pypi.org", "kind": "domain", "agent": "house", "person": "*", "name": "", "target": "pypi.org", "since": null},
+      {"key": "write:house:sam:/Users/kai/notes", "kind": "write", "agent": "house", "person": "sam", "target": "/Users/kai/notes"},
+      {"key": "service:house:sam:notion/sam", "kind": "service", "agent": "house", "person": "sam", "target": "notion/sam"},
+      {"key": "exec:house:sam:/bin", "kind": "exec", "person": "sam", "target": "/bin"},
+      {"kind": "read", "person": "sam", "target": "/x"}
     ]}
     """)
-    #expect(answer.grants.map(\.text) == ["Read /Users/kai/docs", "Connect to pypi.org", "Read and write /Users/kai/notes"])
+    #expect(answer.grants.map(\.text) == ["Read /Users/kai/docs", "Connect to pypi.org", "Read and write /Users/kai/notes", "Use notion/sam"])
+    #expect(answer.grants.map(\.id) == answer.grants.map(\.key))
+    #expect(answer.grants[0].agent == "house")
     #expect(answer.grants[0].holder.hasPrefix("Sam · since "))
     #expect(answer.grants[1].holder == "Everyone")
     #expect(answer.grants[2].holder == "sam")
-    #expect(try decode(AccessGrants.self, "{}").grants.isEmpty)
+    #expect(try decode(AccessLedger.self, "{}").grants.isEmpty)
 }
 
 @Test func aPermissionEntryCarriesTheHostsOutcome() throws {
