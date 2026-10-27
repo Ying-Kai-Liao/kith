@@ -81,6 +81,7 @@ for who in guest bot-3f9a1c2e; do
     for f in index serve secrets browsers bridge room-ledger; do
       expect "$who: denyRead $root/$f" "$(q "$S" "'$root/$f' in dr")" True
     done
+    expect "$who: the memory approval key is unreadable ($root)" "$(q "$S" "any('$root/secrets/memory-approvals.key'.startswith(d.rstrip('/') + '/') for d in dr if d != '/') and any(r.startswith('Read(') and r.endswith('secrets/**)') for r in s['permissions']['deny'])")" True
   done
   expect "$who: denyRead the other agent's folder (both spellings)" "$(q "$S" "'$KITH_HOME/agents/other' in dr")" True
   expect "$who: denyRead the owner user.md" "$(q "$S" "'$T/linked state/user.md' in dr and '$T/real state/user.md' in dr")" True
