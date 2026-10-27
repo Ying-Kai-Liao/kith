@@ -4,20 +4,27 @@ code	INVARIANT	TypeOK	pass
 code	PROPERTY	ResumeRefusedWhileTurnRuns	pass
 code	PROPERTY	ResumeRefusedWhileOpen	pass
 code	PROPERTY	SendRefusedWhenHostSeesTerminal	pass
+# --- the writer claims (#324): one writer while claude keeps the session id it was started on -----
+code-no-fork	INVARIANT	OneWriter	pass
+code-no-fork	PROPERTY	ResumeNeverWhileOtherTerminal	pass
+code-no-fork	PROPERTY	SendNeverWhileTerminalClaims	pass
+code-instant-no-fork	PROPERTY	SendNeverWhileTerminalClaims	pass
+code-no-fork	PROPERTY	ContinuesLastSession	pass
+code-bot-no-fork	PROPERTY	BotRefusedWhileHeld	pass
 # --- findings: the code breaks these (see SKILL.md, Findings) ----------------
 code	INVARIANT	OneWriter	fail
+code	PROPERTY	ResumeNeverWhileOtherTerminal	fail
+code	PROPERTY	SendNeverWhileTerminalClaims	fail
+code	PROPERTY	ContinuesLastSession	fail
+code-claims-bot	PROPERTY	BotRefusedWhileHeld	fail
 code	PROPERTY	TakeoverOnlyWhenIdle	fail
 code	INVARIANT	NoForeignSignal	fail
 atomic-takeover	PROPERTY	TakeoverOnlyWhenIdle	pass
 atomic-takeover	INVARIANT	NoForeignSignal	pass
-code	PROPERTY	ResumeNeverWhileSendPending	fail
-code	PROPERTY	ResumeNeverWhileOtherTerminal	fail
-code	PROPERTY	SendNeverWhileTerminalClaims	fail
-code-instant	PROPERTY	SendNeverWhileTerminalClaims	fail
-code	PROPERTY	ContinuesLastSession	fail
-# --- design (bot guests, not wired in code yet) ------------------------------
+code-no-fork	PROPERTY	ResumeNeverWhileSendPending	fail
+code-no-fork	PROPERTY	CacheNeverStale	fail
+# --- design: a bot gate that reads the summary field liveWriter -----------------
 design-bot-field	PROPERTY	BotRefusedWhileHeld	fail
-design-bot-live	PROPERTY	BotRefusedWhileHeld	fail
 # --- what-if: the fixes the findings point at --------------------------------
 whatif-fixes	INVARIANT	OneWriter	pass
 whatif-fixes	PROPERTY	TakeoverOnlyWhenIdle	pass
@@ -25,23 +32,29 @@ whatif-fixes	PROPERTY	ResumeNeverWhileSendPending	pass
 whatif-fixes	PROPERTY	ResumeNeverWhileOtherTerminal	pass
 whatif-fixes	PROPERTY	SendNeverWhileTerminalClaims	pass
 whatif-fixes	PROPERTY	ContinuesLastSession	pass
+whatif-fixes	PROPERTY	CacheNeverStale	pass
 whatif-fixes-bot	PROPERTY	BotRefusedWhileHeld	pass
-# the what-if is not vacuous: a host turn, a bot turn, a busy terminal, a take-over and a host turn after a terminal all happen in it
+# the runs are not vacuous: a host turn, a bot turn, a busy terminal, a take-over, a host turn after a terminal, and a turn refused by a claim all happen
+code-no-fork	INVARIANT	NeverHostRuns	fail
+code-no-fork	INVARIANT	NeverTerminalBusy	fail
+code-no-fork	INVARIANT	NeverTookOver	fail
+code-no-fork	INVARIANT	NeverHostRunsAfterTerminalHeld	fail
+code-no-fork	INVARIANT	NeverHostRefusedByClaim	fail
+code-bot-no-fork	INVARIANT	NeverBotRuns	fail
 whatif-fixes	INVARIANT	NeverHostRuns	fail
 whatif-fixes	INVARIANT	NeverTerminalBusy	fail
 whatif-fixes	INVARIANT	NeverTookOver	fail
 whatif-fixes	INVARIANT	NeverHostRunsAfterTerminalHeld	fail
 whatif-fixes-bot	INVARIANT	NeverBotRuns	fail
 # --- broken variants: each property must fail when its check is removed ------
+fresh-no-claim	INVARIANT	OneWriter	fail
+broken-host-no-cas	INVARIANT	OneWriter	fail
+broken-resume-no-claim	PROPERTY	ResumeNeverWhileOtherTerminal	fail
 broken-no-send-gate	PROPERTY	SendRefusedWhenHostSeesTerminal	fail
 broken-no-taking-block	PROPERTY	SendRefusedWhenHostSeesTerminal	fail
 broken-resume-ignores-host	PROPERTY	ResumeRefusedWhileTurnRuns	fail
 broken-resume-ignores-open	PROPERTY	ResumeRefusedWhileOpen	fail
-code	PROPERTY	CacheNeverStale	fail
-whatif-no-import-forget	PROPERTY	CacheNeverStale	fail
-whatif-fixes	PROPERTY	CacheNeverStale	pass
+broken-no-import-forget	PROPERTY	CacheNeverStale	fail
 broken-no-forget	PROPERTY	CacheNeverStale	fail
 broken-takeover-busy	PROPERTY	TakeoverOnlyWhenIdle	fail
 broken-no-procstart	INVARIANT	NoForeignSignal	fail
-code-claims-bot	PROPERTY	BotRefusedWhileHeld	pass
-code-claims-bot	INVARIANT	NeverBotRuns	fail
