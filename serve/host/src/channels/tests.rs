@@ -7,7 +7,7 @@ use super::fake::{Event, Fake};
 use super::judge::Judge;
 use super::manager::{Backoff, Manager, Registry, supervise};
 use super::settings::Settings;
-use super::text::{INTERRUPTED, short};
+use super::text::INTERRUPTED;
 use super::{Core, Incoming, Secrets, core};
 use crate::LockExt;
 use crate::agent::gate::{Gate, Settings as GateSettings, memory};
