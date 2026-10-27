@@ -353,3 +353,78 @@ async fn a_turn_that_already_acted_is_not_run_again_on_the_next_entry() {
     s.ask("next").await;
     assert_eq!(s.answers().await[0].1, json!("claude:work"));
 }
+
+impl Setup {
+    /// Waits until the host has asked kith for house's chain at least `n` times.
+    async fn chain_asked(&self, n: usize) {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        loop {
+            let text = std::fs::read_to_string(self.home.join("calls.jsonl")).unwrap_or_default();
+            if text.lines().filter(|l| l.contains("--backups-json")).count() >= n {
+                return;
+            }
+            assert!(Instant::now() < deadline, "the chain was never asked for");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn on_a_main_account_of_its_own_a_turn_that_ran_out_still_moves_to_the_next_entry() {
+    // The agent's main account is claude:work; the default login is its backup.
+    let s = start(&["claude"]).await;
+    std::fs::write(s.home.join("main"), "claude:work").unwrap();
+    s.ask("first, on the main account").await;
+    assert_eq!(s.answers().await[0], ("answered by claude:work".to_owned(), Value::Null), "null: the agent's own");
+    s.chain_asked(1).await;
+    s.limit("claude:work", Some(limited("rate_limit", 3)));
+
+    s.ask("second, when it is out").await;
+
+    assert_eq!(s.answers().await[1], ("answered by claude".to_owned(), json!("claude")));
+    assert_eq!(s.prompts("claude:work").len(), 2, "the main account was tried once");
+    assert_eq!(s.prompts("primary"), Vec::<String>::new(), "nothing ran on the default login as the main account");
+    assert_eq!(s.backups_file()["claude:work"]["reason"], "rate_limit", "the main account is what ran out");
+    assert_eq!(s.backup_launches(), vec!["claude"]);
+    let backup_prompt = &s.prompts("claude")[0];
+    assert!(backup_prompt.contains("first, on the main account"), "told the conversation: {backup_prompt}");
+
+    // Back from its limit, the main account loads the session it made.
+    s.limit("claude:work", None);
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    s.ask("third").await;
+    assert_eq!(s.answers().await[2], ("answered by claude:work".to_owned(), Value::Null));
+    let loads = s.requests("claude:work", "session/load");
+    assert_eq!(loads.len(), 1, "its stored session is resumed");
+    assert_eq!(loads[0]["params"]["sessionId"], "claude:work-s1");
+}
+
+#[tokio::test]
+async fn a_session_made_under_another_account_is_not_loaded_the_agent_starts_fresh_and_is_told() {
+    let s = start(&[]).await;
+    s.ask("one, on the default login").await;
+    s.chain_asked(1).await;
+
+    let got = s.host.call("accountSet", json!({"agent": "house", "account": "claude:home"})).await;
+    assert_eq!(got["main"]["agents"]["house"]["id"], "claude:home", "{got}");
+    assert_eq!(got["main"]["agents"]["house"]["source"], "agent");
+    s.ask("two, on the new main account").await;
+
+    assert_eq!(s.answers().await[1], ("answered by claude:home".to_owned(), Value::Null));
+    assert_eq!(s.requests("claude:home", "session/load"), Vec::<Value>::new(), "no load of another login's session");
+    assert_eq!(s.requests("claude:home", "session/new").len(), 1);
+    let prompt = &s.prompts("claude:home")[0];
+    assert!(
+        prompt.contains("main account changed") && prompt.contains("one, on the default login"),
+        "the new session is told the conversation: {prompt}"
+    );
+    assert!(prompt.contains("two, on the new main account"), "{prompt}");
+    assert_eq!(s.notices("main account changed").await.len(), 1);
+    assert_eq!(s.notices("Couldn't resume").await, Vec::<String>::new(), "not a failed load");
+    assert_eq!(s.backup_launches(), Vec::<String>::new(), "the main account is no backup");
+
+    // The next turn stays in the session the new account made.
+    s.ask("three").await;
+    assert_eq!(s.requests("claude:home", "session/new").len(), 1);
+    assert!(!s.prompts("claude:home")[1].contains("main account changed"));
+}

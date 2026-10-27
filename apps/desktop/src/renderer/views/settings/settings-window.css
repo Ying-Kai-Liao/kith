@@ -382,6 +382,12 @@
   height: 100%;
   object-fit: cover;
 }
+.photo-tile-sky {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-size: cover;
+}
 .photo-tile-busy {
   position: absolute;
   inset: 0;

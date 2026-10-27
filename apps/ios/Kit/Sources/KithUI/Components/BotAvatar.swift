@@ -130,30 +130,63 @@ public enum SkyTone: CaseIterable, Sendable, CustomStringConvertible {
     }
 }
 
-/// One of the Kith sky pictures a person can pick as their own. Tone and crop mirror desktop's `SkyPick`.
+/// One of the eight Kith sky pictures a person can pick as their own: two palette colours behind a zoomed crop of
+/// the sky art's clouds. Mirrors desktop's `SKY_PRESETS` (same order, same values).
 public struct SkyPreset: Identifiable, Equatable, Sendable {
-    public let tone: SkyTone
-    /// Crop position in percent of the sky image.
-    public let x: Int, y: Int
-    public var id: String { "\(tone)-\(x)-\(y)" }
+    public let name: String
+    /// Palette, top to bottom, as 0xRRGGBB.
+    let top: UInt32, bottom: UInt32
+    /// How many picture-widths of sky art span the tile; higher is a tighter crop.
+    let zoom: Int
+    /// Crop position in percent of the movable range (CSS background-position).
+    let x: Int, y: Int
+    /// How strongly the clouds show over the palette, in percent.
+    let cloud: Int
+    public var id: String { name }
 
     public static let all: [SkyPreset] = [
-        .init(tone: .dawn, x: 20, y: 30), .init(tone: .dawn, x: 70, y: 60),
-        .init(tone: .clear, x: 15, y: 20), .init(tone: .clear, x: 60, y: 40), .init(tone: .clear, x: 85, y: 75),
-        .init(tone: .dusk, x: 25, y: 50), .init(tone: .dusk, x: 75, y: 30), .init(tone: .dusk, x: 50, y: 85),
+        .init(name: "night", top: 0x050A24, bottom: 0x1B2F7A, zoom: 3, x: 0, y: 0, cloud: 30),
+        .init(name: "golden", top: 0xE8801A, bottom: 0xFFD27A, zoom: 3, x: 100, y: 0, cloud: 55),
+        .init(name: "dusk", top: 0x4A2F98, bottom: 0xF07A5A, zoom: 4, x: 90, y: 10, cloud: 50),
+        .init(name: "dawn", top: 0x6FA0E8, bottom: 0xF8B890, zoom: 4, x: 5, y: 15, cloud: 55),
+        .init(name: "noon", top: 0x0F4FC8, bottom: 0x4FA8F2, zoom: 3, x: 80, y: 40, cloud: 60),
+        .init(name: "overcast", top: 0x58626E, bottom: 0xAEB6BE, zoom: 2, x: 40, y: 0, cloud: 75),
+        .init(name: "twilight", top: 0x141C5E, bottom: 0xC8409A, zoom: 4, x: 10, y: 30, cloud: 45),
+        .init(name: "mint", top: 0x1E8A78, bottom: 0xBDEBD0, zoom: 3, x: 85, y: 70, cloud: 60),
     ]
-
-    var crop: (x: Double, y: Double) { (Double(x) / 100, Double(y) / 100) }
 
     /// A square picture of the preset, ready to upload.
     @MainActor public func renderedJPEG(side: CGFloat = 512) -> Data? {
-        let renderer = ImageRenderer(content: SkyArt(tone: tone, crop: crop, size: side))
+        let renderer = ImageRenderer(content: SkyPresetArt(preset: self, size: side))
         renderer.scale = 1
         return renderer.uiImage?.jpegData(compressionQuality: 0.9)
     }
 }
 
-/// The square sky picture behind `SkyPatch` and the uploaded presets.
+/// A preset's square picture: the palette gradient, then the cloud crop placed by the CSS background rules
+/// (width = zoom x tile, offset = (tile - image) x position), so it matches desktop.
+struct SkyPresetArt: View {
+    let preset: SkyPreset
+    let size: CGFloat
+
+    var body: some View {
+        let art = UIImage(named: "sky-header-day", in: KithUIFonts.resources, with: nil)
+        let aspect = art.map { $0.size.height / $0.size.width } ?? 0.509
+        let w = size * CGFloat(preset.zoom), h = w * aspect
+        ZStack(alignment: .topLeading) {
+            LinearGradient(colors: [Color(hex: preset.top), Color(hex: preset.bottom)], startPoint: .top, endPoint: .bottom)
+            Image("sky-header-day", bundle: KithUIFonts.resources)
+                .resizable()
+                .frame(width: w, height: h)
+                .offset(x: (size - w) * CGFloat(preset.x) / 100, y: (size - h) * CGFloat(preset.y) / 100)
+                .opacity(Double(preset.cloud) / 100)
+        }
+        .frame(width: size, height: size, alignment: .topLeading)
+        .clipped()
+    }
+}
+
+/// The square sky picture behind `SkyPatch`.
 struct SkyArt: View {
     let tone: SkyTone
     let crop: (x: Double, y: Double)
@@ -195,8 +228,13 @@ public struct SkyPatch: View {
     }
 
     public var body: some View {
-        SkyArt(tone: preset?.tone ?? SkyTone.tone(for: id, isYou: isYou),
-               crop: preset?.crop ?? SkyTone.crop(for: id), size: size)
+        Group {
+            if let preset {
+                SkyPresetArt(preset: preset, size: size)
+            } else {
+                SkyArt(tone: SkyTone.tone(for: id, isYou: isYou), crop: SkyTone.crop(for: id), size: size)
+            }
+        }
         .clipShape(Circle())
         .overlay(Circle().strokeBorder(Color.white.opacity(0.85), lineWidth: size >= 40 ? 1.5 : 1))
         .kithBotShadow()

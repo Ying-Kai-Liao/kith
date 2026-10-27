@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  addable, backAt, hasClaudeAccount, isOut, loginCommand, move, parseBackups, stateText, viaLabel, entryFor,
+  addable, backAt, familyOf, hasClaudeAccount, isOut, loginCommand, mainChoices, mainEntry, mainSourceText, move, parseBackups,
+  stateText, viaLabel, entryFor,
 } from './backups.ts'
 
 const sample = {
@@ -76,4 +77,43 @@ test('an entry the host has not described yet still has a name and a login comma
   assert.equal(e.harness, 'codex')
   assert.equal(loginCommand(e), 'codex login')
   assert.equal(loginCommand(entryFor(parseBackups({}), 'claude:x')), null)
+})
+
+test('the main accounts parse above the chain; an old host reads as none', () => {
+  const b = parseBackups({
+    ...sample,
+    main: {
+      global: 'claude:work',
+      agents: {
+        house: { id: 'claude:work', source: 'global', harness: 'claude', ready: true },
+        deep: { id: 'codex:deep', source: 'agent', harness: 'codex', ready: false, why: 'not logged in', fix: 'kith account login codex deep' },
+        bad: { source: 'agent' },
+        worse: 5,
+      },
+    },
+  })
+  assert.equal(b.main.global, 'claude:work')
+  assert.deepEqual(Object.keys(b.main.agents), ['house', 'deep'])
+  assert.equal(b.main.agents.house!.why, null)
+  assert.equal(b.main.agents.deep!.fix, 'kith account login codex deep')
+  assert.equal(mainSourceText(b.main.agents.house!), "the computer's main account")
+  assert.equal(mainSourceText(b.main.agents.deep!), "this bot's own choice")
+  assert.equal(mainSourceText({ ...b.main.agents.deep!, source: 'default' }), 'the default login')
+  assert.deepEqual(parseBackups(sample).main, { global: null, agents: {} })
+})
+
+test('a main account is of the agent harness: an API key is a Claude one, ready first', () => {
+  const b = parseBackups({ ...sample, entries: [...sample.entries, { id: 'claude-api:main', harness: 'claude', kind: 'api-key', ready: true }] })
+  assert.equal(familyOf('claude-api:main'), 'claude')
+  assert.equal(familyOf('codex:deep'), 'codex')
+  assert.deepEqual(mainChoices(b, 'claude'), ['claude:work', 'claude-api:main', 'claude'])
+  assert.deepEqual(mainChoices(b, 'codex'), ['codex:deep', 'codex'])
+  assert.equal(mainChoices(b, null).length, 5)
+})
+
+test('the main entry takes its state from the main row, which knows the agent', () => {
+  const b = parseBackups(sample)
+  const e = mainEntry(b, { id: 'claude:work', source: 'agent', harness: 'claude', ready: false, why: 'logged out', fix: 'claude auth login' })
+  assert.equal(stateText(e).text, 'logged out')
+  assert.equal(e.outUntil, 2_000_000)
 })

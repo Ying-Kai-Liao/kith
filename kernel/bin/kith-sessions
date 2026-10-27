@@ -23,7 +23,8 @@
                                            claims of this process and, if the host took the session over while it ran, says how to get it back
 
 Registry file (contract with the host, serve/): dir 0700, file 0600, written by tmp + rename:
-  {"v":1,"sessionId","agent","cwd","transcriptPath","pid" (the claude process),"project","source","resumedFrom","startedAt"}
+  {"v":1,"sessionId","agent","cwd","transcriptPath","pid" (the claude process),"project","source","resumedFrom","startedAt",
+   "account" (the login it was made under: KITH_ACCOUNT_ID, e.g. claude or claude:work; bin/kith resumes it only there)}
 Writer claim (contract with the host, serve/host/src/terminal/claim.rs): $KITH_STATE/live/terminal/<sid>.claim, made whole in a
 temp file and linked into place (exclusive), 0600: {"pid","procStart","at","kind"}. Whoever holds it is the one writer of the
 session, before the registry file exists and with the host down. Stale (pid gone, or started at another time) = free, taken over by rename.
@@ -53,6 +54,27 @@ def reg_dir():
 
 def claude_dir():
     return Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+
+
+def transcripts(pattern):
+    """Transcripts matching pattern under every Claude login's projects: this run's, the default one, and each extra
+    account's (kith account add claude <name>), so a session made under another main account is still found."""
+    roots = [claude_dir(), Path.home() / '.claude']
+    try:
+        machine = os.environ.get('KITH_MACHINE')
+        if not machine:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'lib'))
+            from kith_paths import paths
+            machine = paths()['KITH_MACHINE']
+        roots += sorted((Path(machine) / 'accounts' / 'claude').glob('*'))
+    except Exception:  # noqa: BLE001 — the default places still count
+        pass
+    seen = set()
+    for r in roots:
+        if r in seen:
+            continue
+        seen.add(r)
+        yield from (r / 'projects').glob(pattern)
 
 
 def run_kind(env=os.environ):
@@ -136,7 +158,7 @@ def record():
         write_atomic(path, {
             'v': 1, 'sessionId': sid, 'agent': env['KITH_AGENT'], 'cwd': cwd, 'transcriptPath': hook.get('transcript_path'),
             'pid': pid, 'project': env.get('KITH_PROJECT') or None, 'source': hook.get('source') or 'startup',
-            'resumedFrom': resumed, 'startedAt': started,
+            'resumedFrom': resumed, 'startedAt': started, 'account': env.get('KITH_ACCOUNT_ID') or None,
             'kind': kind, 'label': run_label(kind), 'procStart': proc_start(pid) if pid and kind != 'terminal' else None})
     except Exception as e:  # noqa: BLE001 — listing must never block a session
         print(f'kith-sessions record: {e}', file=sys.stderr)
@@ -359,8 +381,10 @@ def live_pid(entry):
     pid = entry.get('pid')
     try:
         os.kill(pid, 0)
-        return pid if json.loads((claude_dir() / 'sessions' / f'{pid}.json').read_text()).get('sessionId') == entry.get('sessionId') else None
-    except (OSError, ValueError, TypeError):
+        # the login the session was made under keeps its sessions folder (<config dir>/projects/<p>/<sid>.jsonl)
+        root = Path(entry['transcriptPath']).parents[2] if entry.get('transcriptPath') else claude_dir()
+        return pid if json.loads((root / 'sessions' / f'{pid}.json').read_text()).get('sessionId') == entry.get('sessionId') else None
+    except (OSError, ValueError, TypeError, IndexError):
         return None
 
 
@@ -382,7 +406,7 @@ def cwd_in(transcript):
 
 def transcript_cwd(sid):
     """The folder a Claude session ran in, from its transcript; None when there is no such session, '' when it names no folder."""
-    for t in (claude_dir() / 'projects').glob(f'*/{sid}.jsonl'):
+    for t in transcripts(f'*/{sid}.jsonl'):
         return cwd_in(t)
     return None
 
@@ -427,7 +451,7 @@ def recent(agent, limit=15, where=None):
     finally:
         c.close()
     on_disk = {}
-    for t in (claude_dir() / 'projects').glob('*/*.jsonl'):
+    for t in transcripts('*/*.jsonl'):
         on_disk.setdefault(t.stem, t)
     here, out = where and os.path.realpath(where), []
     for sid, started, via, project in rows:
