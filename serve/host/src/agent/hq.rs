@@ -867,7 +867,7 @@ mod tests {
     #[test]
     fn a_session_loads_only_under_the_account_that_made_it() {
         let on = |harness: &str, account: Option<&str>| -> Launch {
-            serde_json::from_value(json!({"harness": harness, "account_id": account})).unwrap()
+            printed_launch(json!({"harness": harness, "account_id": account}))
         };
         let work = on("claude", Some("claude:work"));
         assert!(work.may_load(Some("claude:work")));
