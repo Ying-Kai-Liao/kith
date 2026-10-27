@@ -266,6 +266,12 @@ def tick():
         prune()
     except Exception as e:   # housekeeping must never stop jobs from starting
         print('kith-sched: prune: %s' % e, file=sys.stderr)
+    # The wake queue (kith-wake): owed turns of ended sessions start here once their writer lets go, and turns whose
+    # deliverer died (a restart) are answered or owed again.
+    try:
+        subprocess.run([sys.executable, str(KITH / 'bin/kith-wake'), 'drain'], timeout=30, stdout=subprocess.DEVNULL)
+    except Exception as e:  # noqa: BLE001
+        print('kith-sched: wake drain: %s' % e, file=sys.stderr)
     now = dt.datetime.now().replace(second=0, microsecond=0)
     s = machine()
     last = dt.datetime.fromisoformat(s['tick']) if s.get('tick') else now - dt.timedelta(minutes=1)
