@@ -12,8 +12,8 @@ import { BotStore } from './bot-store'
 /** Where asking one Mac for this device's access stands. */
 export type MacAccess =
   | { kind: 'asking' }
-  /** An owner compares these six digits with the ones on the Mac; a member is approved by the Mac without them. */
-  | { kind: 'code'; code: string; compare: boolean }
+  /** This device's six digits: in Code mode the Mac's owner compares them before letting it in, a member's device too. */
+  | { kind: 'code'; code: string }
   | { kind: 'failed'; message: string }
 
 /** The Mac was reached before this device showed its invite. */
@@ -188,7 +188,7 @@ export class RelayMacs extends Observable {
       const outcome = await askForAccess(window.kith.relay, c, {
         cancelled: () => mine.cancelled,
         onCode: (t) => {
-          this.access.set(id, { kind: 'code', code: t.code, compare: c.role === 'owner' })
+          this.access.set(id, { kind: 'code', code: t.code })
           this.changed()
         },
       })

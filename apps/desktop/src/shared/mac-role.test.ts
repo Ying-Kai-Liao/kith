@@ -95,6 +95,43 @@ test('the join over the relay: token kept, then access, then proveInvite as the 
   assert.equal(end.step, 'done')
   assert.deepEqual(log, ['keep', 'request', 'host:proveInvite'])
   assert.deepEqual(accepted, [await inviteProof(link.token)])
+  // A member's device shows its digits too: in Code mode the Mac's owner compares them before approving.
+  assert.deepEqual(steps.filter((s) => s.code !== null).map((s) => [s.step, s.code]), [['asking', '123456']])
+})
+
+/** A Mac that answers each ask `answers[i]` after `delays[i]` ms of a fake clock. */
+function askedMac(answers: ('denied' | 'approved')[], delays: number[]) {
+  const log: string[] = []
+  let t = 0
+  let asks = 0
+  const api: RelayApi = {
+    computers: async () => ({ ok: true, value: [{ computerId: 'cmp_1', name: 'Mac', role: 'member', platform: 'macos', signKey: 'k', online: true, access: 'none' }] }),
+    requestAccess: async () => (log.push('request'), { ok: true, value: { requestId: `r${++asks}`, expiresAt: 10 ** 13, code: '123456', computerId: 'cmp_1' } }),
+    accessStatus: async () => ((t += delays[asks - 1]), { ok: true, value: answers[asks - 1] }),
+    cancelAccess: async () => {},
+    state: async () => ({ kind: 'ready' }),
+    call: async (_c, _k, method) => (log.push(`host:${method}`), { proven: true }),
+  }
+  const deps = relayJoinDeps(
+    api,
+    { signedIn: () => true, waitForSignIn: async () => {}, accept: async () => ({ computerId: 'cmp_1' }), keepToken: async () => {} },
+    { now: () => t, sleep: async (ms) => void (t += ms) },
+  )
+  return { log, join: () => runJoin({ computerId: 'cmp_1', inviteId: 'i', token: 'y'.repeat(24) }, deps, () => {}) }
+}
+
+test('a Mac that turns a new member down at once is asked again', async () => {
+  const mac = askedMac(['denied', 'approved'], [100, 100])
+  assert.equal((await mac.join()).step, 'done')
+  assert.deepEqual(mac.log, ['request', 'request', 'host:proveInvite'])
+})
+
+test("the owner's no after comparing the code is final", async () => {
+  const mac = askedMac(['denied', 'approved'], [20_000, 100])
+  const end = await mac.join()
+  assert.equal(end.step, 'failed')
+  assert.equal(end.message, 'The Mac said no.')
+  assert.deepEqual(mac.log, ['request'])
 })
 
 test('a device the cloud lists as granted joins without asking again', async () => {

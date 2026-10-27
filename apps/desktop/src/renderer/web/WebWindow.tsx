@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { JoinStep } from '@shared/invite-join'
+import { CODE_HINT, type JoinStep } from '@shared/invite-join'
 import type { RelayState } from '@shared/relay'
 import { Button, Spinner } from '../components/Controls'
 import { Icon } from '../components/Icon'
@@ -9,6 +9,7 @@ import { StoreContext, useApp } from '../store/context'
 import { account, useAccount, type SignInProvider } from '../store/account'
 import { inviteJoin } from '../store/invite-join'
 import { refKey } from '../store/app-model'
+import { spaced } from '../store/mac-list'
 import { useRelayMacs } from '../store/relay-macs'
 import { BotRow } from '../views/BotRow'
 import { GrantedAgentsChat } from '../views/computers/GrantedAgentsChat'
@@ -134,6 +135,7 @@ function JoinPanel() {
           <span className="web-title-small">{state ? progress[state.step] : 'Getting your invite…'}</span>
         </div>
         {state?.message ? <p className={state.step === 'failed' ? 'web-error' : 'web-text'} role={state.step === 'failed' ? 'alert' : undefined}>{state.message}</p> : null}
+        {state?.step === 'asking' && state.code ? <p className="web-text" data-code={state.code}>Your code: <span className="web-code">{spaced(state.code)}</span>. {CODE_HINT}</p> : null}
         {state?.step === 'waiting' ? <Button kind="secondary" onClick={() => void inviteJoin.run()}>Try again</Button> : null}
         {state?.step === 'done' || state?.step === 'waiting' || state?.step === 'failed' ? <Button onClick={close}>{state.step === 'done' ? 'Open chats' : 'Close'}</Button> : null}
       </div>
@@ -279,7 +281,12 @@ function MemberApp() {
                   </div>
                 ) : null}
                 {access?.kind === 'failed' ? <div className="web-notice error" role="alert"><span>{access.message}</span><Button kind="secondary" onClick={() => { tried.current.delete(c.computerId); macs.access.delete(c.computerId); void macs.connect(c.computerId) }}>Try again</Button></div> : null}
-                {access?.kind === 'asking' || access?.kind === 'code' ?<div className="web-notice info"><Spinner size={12} /><span>Asking {c.name} for access…</span></div> : null}
+                {access?.kind === 'asking' || access?.kind === 'code' ? (
+                  <div className="web-notice info">
+                    <Spinner size={12} />
+                    <span>Asking {c.name} for access…{access.kind === 'code' ? <> Your code: <span className="web-code">{spaced(access.code)}</span>. {CODE_HINT}</> : null}</span>
+                  </div>
+                ) : null}
                 {store ? (
                   store.roster.length === 0 ? (
                     <p className="web-fine web-pad">{store.shownConnection.kind === 'online' ? 'No chats yet. Start one with New chat.' : 'Chats appear once the computer is reachable.'}</p>
