@@ -387,7 +387,7 @@ async fn the_owner_lists_an_agents_always_grants_and_a_removed_one_is_gone_from_
         ])
     );
     assert!(grants.iter().all(|g| g["name"] == "Sam"), "{listed}");
-    assert!(grants.iter().all(|g| g["since"].as_u64().is_some_and(|t| t >= before)), "{listed}");
+    assert!(grants.iter().all(|g| g["since"].as_i64().is_some_and(|t| t >= before)), "{listed}");
 
     let left = call("kithRemoveAccessGrant", json!({"botId": bot, "person": "sam", "kind": "read", "target": docs}))
         .await
