@@ -78,7 +78,10 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           "always" on an escape card: a place or website a member's (or bot's) boxed runs of
                                           that agent may reach, beyond the box. Not for secrets or the paths a run may never
                                           write (rule W); not for the owner or someone with no row of their own; a bot gets
-                                          no more than its owner holds. Listed as `access` in `resolve`.
+                                          no more than its owner holds. Listed as `access` in `resolve`. --rm takes one
+                                          away as it is written, whatever has changed since.
+  kith-auth access <agent> --json           read-only: every such always of the agent's rows, [{person, name, kind,
+                                          target, since}] (since: ms, null when written before the time was kept)
   kith-auth owner <profile> <id>|-|default  the profile is that person's (their logins, their calendar); - = shared;
                                           default: logins and browser profiles are the owner's, keys and bots shared
   kith-auth share <profile> <id>[,..] [--rm]   it stays its owner's, and these people's runs may use it too (through
@@ -916,10 +919,13 @@ def held(have, kind, value):
 def cmd_access(args):
     """The always half of an escape card. One command is one transaction under the auth.json lock (C2: someone removed, or
     never a member, is refused in the same step that would write)."""
+    if len(args) == 2 and args[1] == '--json':
+        return list_access(args[0])
     if len(args) not in (4, 5) or args[2] not in ACCESS_KINDS or (len(args) == 5 and args[4] != '--rm'):
         die('access <agent> <id> read|write|domain <path|host> [--rm]', 2)
     agent, pid, kind, value = args[:4]
-    removing = len(args) == 5
+    if len(args) == 5:
+        return remove_access(agent, pid, kind, value)
     import kith_guard
     if kind == 'domain':
         if not kith_guard.valid_domain(value):
@@ -937,13 +943,6 @@ def cmd_access(args):
         if kith_guard.is_rule_w(home, value, trees=[str(KITH)]):
             die(f'{value} is somewhere a boxed run never writes or loads from (rule W): it is never granted', 2)
     auth = load_auth(write=True)
-    if removing:   # taking access away works on anyone
-        row = auth['members'].get(agent, {}).get(pid)
-        if row and value in (row.get('access') or {}).get(ACCESS_KINDS[kind], []):
-            row['access'][ACCESS_KINDS[kind]].remove(value)
-            save_auth(auth)
-        print(f'{pid} no longer has {kind} {value} beyond the box for {agent}')
-        return
     need_person(auth, pid)
     pid = canonical(auth, pid)
     if is_owner(auth, pid):
@@ -959,8 +958,46 @@ def cmd_access(args):
     have = row.setdefault('access', {}).setdefault(ACCESS_KINDS[kind], [])
     if value not in have:
         have.append(value)
+        if not isinstance(row.get('access_since'), dict):
+            row['access_since'] = {}
+        row['access_since'][f'{kind}:{value}'] = int(time.time() * 1000)
     save_auth(auth)
     print(f'{pid} may {kind} {value} beyond the box for {agent}')
+
+
+def remove_access(agent, pid, kind, value):
+    """Taking an always away works on anyone, and on the entry as it is written: no check stands in the way (a path that
+    moved since, or that a newer rule would refuse, must still go). A path is also tried by its real path."""
+    field = ACCESS_KINDS[kind]
+    names = [value] + ([os.path.realpath(value)] if kind != 'domain' and os.path.isabs(value) else [])
+    auth = load_auth(write=True)
+    row = auth['members'].get(agent, {}).get(pid)
+    have = row.get('access') if row and isinstance(row.get('access'), dict) else {}
+    gone = [v for v in dict.fromkeys(names) if v in have.get(field, [])]
+    for v in gone:
+        have[field].remove(v)
+        if isinstance(row.get('access_since'), dict):
+            row['access_since'].pop(f'{kind}:{v}', None)
+    if gone:
+        save_auth(auth)
+    print(f'{pid} no longer has {kind} {value} beyond the box for {agent}')
+
+
+def list_access(agent):
+    """Every always of the agent's rows, for the apps' list of them: who, what and since when."""
+    auth = load_auth()
+    out = []
+    for pid, row in auth['members'].get(agent, {}).items():
+        if not isinstance(row, dict):
+            continue
+        since = row.get('access_since') if isinstance(row.get('access_since'), dict) else {}
+        held_now = access_of(row)
+        for kind, field in ACCESS_KINDS.items():
+            for v in held_now[field]:
+                at = since.get(f'{kind}:{v}')
+                out.append({'person': pid, 'name': auth['people'].get(pid, {}).get('name', ''), 'kind': kind,
+                            'target': v, 'since': at if isinstance(at, int) else None})
+    print(json.dumps(out))
 
 
 def mode_of(row, p):
