@@ -183,7 +183,8 @@ the caller's membership lists it). The bridge maps a sender to a person (`whois`
 (from `kith auth invite`), checks access before starting, and gives a thread to the person who started it.
 Others are turned away from it, because its session holds what the agent saw for them. The old Discord settings
 (`KITH_DISCORD_REPLY_TO`, `KITH_DISCORD_ALLOWED_IDS`, `KITH_DISCORD_OWNER_ID`) are ignored: the owner is the `people` owner
-(until their Discord account is known, the server's owner stands in).
+(until their Discord account is known, the owner of the one server named by `channels.discord_guild` stands in in the
+host; with no server named, no one does).
 - Only the owner gets a free shell: `mode=bypassPermissions` on a membership or preset needs `--trusted`; one set
   without it (by hand) runs in `default`.
 - `kith auth person <id> id=<new>` renames, carrying memberships, grants, owned profiles and invites; the old id stays
