@@ -4,7 +4,7 @@
 //! Tables, all keyed by the connection first (`<conn>:<chat>…`): `conns` (per-connection state: offsets, webhooks),
 //! `rooms` (default agent), `threads` (one task each: person, owner, last, room, sessions {agent: session}, conv,
 //! newest last), `replies` (a platform message -> its thread key), `inbox` (`<thread>#<agent>` -> batches of
-//! messages that wait for a turn), `pending` ("who should take this?" asks) and `live` (live-agent box -> thread).
+//! messages that wait for a turn) and `pending` ("who should take this?" asks).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -24,7 +24,6 @@ pub struct State {
     pub replies: Map<String, Value>,
     pub inbox: BTreeMap<String, Vec<Vec<String>>>,
     pub pending: Map<String, Value>,
-    pub live: Map<String, Value>,
 }
 
 /// How much of a connection's state came over from the bridge.
@@ -35,7 +34,6 @@ pub struct Imported {
     pub replies: usize,
     pub inbox: usize,
     pub pending: usize,
-    pub live: usize,
 }
 
 impl State {
@@ -95,7 +93,6 @@ impl State {
         n.pending = copy(table("pending"), &mut self.pending, &|_, v| {
             v.get("room").and_then(Value::as_str).is_some_and(|r| r.starts_with(&prefix))
         });
-        n.live = copy(table("live"), &mut self.live, &|_, v| v.as_str().is_some_and(|k| k.starts_with(&prefix)));
         for (wk, batches) in table("inbox") {
             if !wk.starts_with(&prefix) || self.inbox.contains_key(&wk) {
                 continue;
@@ -126,8 +123,7 @@ mod tests {
             },
             "replies": {"telegram/hq:1:7": "telegram/hq:1:5", "telegram/home:2:8": "telegram/home:2:6"},
             "inbox": {"telegram/hq:1:5#house": [["queued"]], "telegram/home:2:6#x": [["no"]]},
-            "pending": {"p1": {"room": "telegram/hq:1", "task": "t"}, "p2": {"room": "telegram/home:2"}},
-            "live": {"b1": "telegram/hq:1:5", "b2": "telegram/home:2:6"}
+            "pending": {"p1": {"room": "telegram/hq:1", "task": "t"}, "p2": {"room": "telegram/home:2"}}
         })
     }
 
@@ -135,14 +131,13 @@ mod tests {
     fn imports_one_connection_only() {
         let mut st = State::default();
         let n = st.import_connection(&bridge(), "telegram/hq");
-        assert_eq!(n, Imported { rooms: 1, threads: 1, replies: 1, inbox: 1, pending: 1, live: 1 });
+        assert_eq!(n, Imported { rooms: 1, threads: 1, replies: 1, inbox: 1, pending: 1 });
         assert_eq!(st.conns["telegram/hq"]["offset"], 9);
         assert!(!st.conns.contains_key("telegram/home"));
         assert_eq!(st.threads["telegram/hq:1:5"]["sessions"]["house"], "s1");
         assert_eq!(st.threads.len(), 1);
         assert_eq!(st.inbox["telegram/hq:1:5#house"], vec![vec!["queued".to_owned()]]);
         assert!(st.pending.contains_key("p1") && !st.pending.contains_key("p2"));
-        assert!(st.live.contains_key("b1") && !st.live.contains_key("b2"));
     }
 
     #[test]

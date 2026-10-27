@@ -135,14 +135,8 @@ def main(argv):
         ranked = [r for r in ranked if r[0] >= 0.5 * ranked[0][0]][:limit]
     me = os.environ.get('KITH_AGENT', '')
 
-    pkgs = agents()
-
-    def call(o):   # a live agent (session: live) is one session, reached with kith ask, never a subagent
-        live = frontmatter((pkgs[o] / 'agent.md').read_text(), 'session') == 'live' if o in pkgs else False
-        return f'kith ask {o} "task"' if live else f'kith:{o}'
-
     if as_json:
-        print(json.dumps([{'agent': o, 'score': round(s, 2), 'call': call(o),
+        print(json.dumps([{'agent': o, 'score': round(s, 2), 'call': f'kith:{o}',
                            'matched': [{'kind': k, 'text': t} for _, k, t, _ in h]} for s, o, h in ranked],
                          ensure_ascii=False, indent=1))
         return 0
@@ -150,8 +144,7 @@ def main(argv):
         print(f'No agent does "{" ".join(words)}". Ask builder to make or extend one: kith:builder')
         return 0
     for s, owner, hits in ranked:
-        how = call(owner)
-        print(f"{owner}{' (you)' if owner == me else ''}  → {how}" + ('' if how.startswith('kith ask') else f"  (terminal: kith {owner} \"task\")"))
+        print(f"{owner}{' (you)' if owner == me else ''}  → kith:{owner}  (terminal: kith {owner} \"task\")")
         for _, kind, text, _ in hits:
             print(f'    {kind}: {text[:160]}{"…" if len(text) > 160 else ""}')
     return 0

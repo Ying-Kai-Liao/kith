@@ -7,8 +7,7 @@
 //! this?"), keeps a thread per task with a session per agent, queues messages sent while the agent works (merging
 //! them, and with Jev stopping, restarting or splitting the work), and runs each turn as a subprocess
 //! `hq <agent> <task>` under the resource gate. Agents' own posts (`hq-send`) reach the thread through the run's
-//! outbox folder (`HQ_BRIDGE_OUTBOX`), a live agent's (`hq-send --to bridge:<box>`) through
-//! `~/.hq/bridge/outbox/live-<box>/`.
+//! outbox folder (`HQ_BRIDGE_OUTBOX`).
 //!
 //! Cutting a bot over from the bridge: first `hq-auth revoke bridge <platform>` and restart the bridge
 //! (`launchctl kickstart -k gui/$UID/dev.hq.bridge`; it reads its grants only when it starts), and only then

@@ -18,8 +18,7 @@ const AGENT_REFRESH: Duration = Duration::from_secs(30);
 pub struct Paths {
     pub hq_bin: PathBuf,
     pub auth_bin: PathBuf,
-    pub live_bin: PathBuf,
-    /// This Mac's Kith folder (`~/.kith`, or `~/.hq` until it is migrated): the bridge's state and the live outboxes `kith-send --to bridge:<box>` writes.
+    /// This Mac's Kith folder (`~/.kith`, or `~/.hq` until it is migrated): the bridge's state.
     pub machine: PathBuf,
     /// Folders with one folder per agent.
     pub agent_roots: Vec<PathBuf>,
@@ -49,7 +48,6 @@ impl Paths {
         let machine = crate::kernel::var("MACHINE").map_or_else(|| crate::kernel::machine_dir(&home), PathBuf::from);
         Some(Self {
             auth_bin: beside("kith-auth"),
-            live_bin: beside("kith-live"),
             hq_bin,
             machine,
             agent_roots,
@@ -60,11 +58,6 @@ impl Paths {
     /// The bridge's state file. Read only: the bridge keeps writing it for the connections it still runs.
     pub fn bridge_state(&self) -> PathBuf {
         self.machine.join("bridge").join("state.json")
-    }
-
-    /// Where `kith-send --to bridge:<box>` leaves what a live agent says.
-    pub fn live_outbox(&self, box_id: &str) -> PathBuf {
-        self.machine.join("bridge").join("outbox").join(format!("live-{box_id}"))
     }
 }
 
@@ -272,10 +265,6 @@ impl Agents {
         let w = word.to_lowercase();
         self.list().into_iter().find(|a| w == *a || w == cmd_name(a))
     }
-
-    pub fn is_live(&self, agent: &str) -> bool {
-        self.card(agent, "session").as_deref() == Some("live")
-    }
 }
 
 /// Telegram commands: lowercase letters, digits and `_`.
@@ -292,7 +281,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("kith-agents-{}", uuid::Uuid::new_v4()));
         for (name, card, sub) in [
             ("house", "description: Keeps the house\ndisplay_name: Home\n", ""),
-            ("my-agent", "description: x\nsession: live\n", "role/"),
+            ("my-agent", "description: x\n", "role/"),
             (".hidden", "description: no\n", ""),
         ] {
             std::fs::create_dir_all(dir.join(name).join(sub)).unwrap();
@@ -308,7 +297,6 @@ mod tests {
         assert_eq!(agents.find("MY_AGENT").as_deref(), Some("my-agent"));
         assert_eq!(agents.find("house").as_deref(), Some("house"));
         assert!(agents.find("empty").is_none());
-        assert!(agents.is_live("my-agent") && !agents.is_live("house"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -365,7 +353,7 @@ mod tool_tests {
         let bin = t.join("bin/kith");
         // Release install: the entry is the binary, the tool is in the kernel.
         assert_eq!(tool_near("kith-auth", &bin, &bin, Some(&kernel)), Some(kernel.join("bin/kith-auth")));
-        assert_eq!(tool_near("kith-live", &bin, &bin, Some(&kernel)), None);
+        assert_eq!(tool_near("kith-send", &bin, &bin, Some(&kernel)), None);
         // Git checkout: the tool sits beside the entry and wins.
         std::fs::write(t.join("bin/kith-auth"), "").unwrap();
         assert_eq!(tool_near("kith-auth", &bin, &bin, Some(&kernel)), Some(t.join("bin/kith-auth")));

@@ -23,8 +23,7 @@ sleep 2
 if [ "$last" = "boom" ]; then echo "agent failed" >&2; exit 1; fi
 printf '{"result":"answer to: %s","session_id":"s1","total_cost_usd":0.01}\n' "$last"
 STUB
-printf '#!/bin/sh\nexit 1\n' > "$T/k/bin/kith-live"   # no agent is live
-chmod +x "$T/k/bin/kith" "$T/k/bin/kith-live"
+chmod +x "$T/k/bin/kith"
 ASK=$T/k/bin/kith-ask
 fails=0
 expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (got '$2', want '$3')"; fails=$((fails + 1)); fi; }

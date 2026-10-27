@@ -8,9 +8,10 @@
   kith ask ls                           the conversations kept, newest first
   kith ask <agent>@<machine> "task"     an agent on another machine of yours, over ssh (kith remote --help)
   kith ask --bg <agent> [options] "task"  the same run in the background: prints an id at once and returns
-  kith ask --wait ID [--timeout S]      the answers to ID since you last looked (waits up to S seconds, default 600,
-                                      for the first; exit 3 when none came). For a --bg run: waits for the run to
-                                      end, prints its answer and exits with its exit code (every call prints it again)
+  kith ask --wait ID [--timeout S]      the answers to ID since you last looked (`kith-send --to ask:ID`; waits up to
+                                      S seconds, default 600, for the first; exit 3 when none came). For a --bg run:
+                                      waits for the run to end, prints its answer and exits with its exit code (every
+                                      call prints it again)
 
 Options: -c/--continue, --as NAME (a named conversation: -c --as NAME picks it up from anywhere, in its folder),
 -C/--dir DIR (work in DIR), -p PROJECT (its memory, and its folder unless -C says; the current one if it has none),
@@ -29,10 +30,6 @@ one-shot run.
 Without --bg the call blocks until the agent has finished (minutes for a real job). With --bg it returns an id at
 once: the run goes on detached, its answer and errors are kept in ~/.kith/ask-bg/, and `kith ask --wait ID` collects
 them. Everything else (-c, -p, --json, ...) means the same.
-Live agents (`session: live` in agent.md, e.g. coder) run as one session of their own. When it is running (kith-live
-where), the task is typed into it with reply=ask:<id> and kith ask returns at once with the id; the agent answers with
-`kith-send --to ask:<id>` (a job can take an hour), and `kith ask --wait <id>` prints the answers. -p sends the project
-along; -c, --as, -m, -e and -H don't apply. Not running: the task runs once as usual.
 
 Conversations: ~/.kith/ask.json (agent + directory, or --as NAME → session id). A conversation belongs to the
 directory it ran in, so after -C or -p, `-c` from inside that folder (or with the same -C/-p) continues it.
@@ -139,28 +136,6 @@ def wait(argv):
     return 0
 
 
-def live(agent, task, project):
-    """Type the task into the agent's running session; None when it isn't a live agent or isn't running."""
-    live_bin = str(KITH / 'bin/kith-live')
-    if subprocess.run([live_bin, 'is', agent]).returncode != 0:
-        return None
-    at = subprocess.run([live_bin, 'where', agent], capture_output=True, text=True)
-    if at.returncode != 0:
-        print('kith ask: %s runs as a live session and none is running; this task runs once instead '
-              '(start it to keep its queue: kith live start %s)' % (agent, agent), file=sys.stderr)
-        return None
-    mid = '%s-%s' % (dt.datetime.now().strftime('%Y%m%d%H%M%S'), os.urandom(3).hex())
-    sender = 'agent:' + os.environ['KITH_AGENT'] if os.environ.get('KITH_AGENT') else 'owner'
-    r = subprocess.run([live_bin, 'send', agent, '--reply', 'ask:' + mid, '--from', sender, '--id', mid,
-                        *(['--project', project] if project else []), '--', task], capture_output=True, text=True)
-    if r.returncode != 0:
-        sys.stderr.write(r.stderr)
-        return r.returncode
-    print('sent to %s\'s live session (%s) as %s; its answers: kith ask --wait %s'
-          % (agent, at.stdout.strip(), mid, mid))
-    return 0
-
-
 def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip()); return 0
@@ -190,11 +165,7 @@ def main(argv):
     task = ' '.join(words).strip()
     if not task:
         sys.exit('usage: kith ask <agent> [-c] [--as NAME] [-C DIR] [-p PROJECT] [-m MODEL] [-e EFFORT] [-H HARNESS] [--json] "task"')
-    if not cont and not os.environ.get('KITH_PERSON'):   # anyone but the owner: a one-shot, which bin/kith checks
-        sent = live(agent, task, next((v for f, v in zip(kith_opts[::2], kith_opts[1::2]) if f in ('-p', '--project')), ''))
-        if sent is not None:
-            return sent
-    if bg:   # a live agent already answered above; anything else runs detached, as the call without --bg
+    if bg:   # runs detached, as the call without --bg
         return background([agent, *rest])
 
     # Where the agent works: -C, else the folder of the project -p names, else a named conversation's own folder.
