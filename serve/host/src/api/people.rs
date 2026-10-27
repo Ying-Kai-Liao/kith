@@ -243,8 +243,7 @@ async fn make_invite(
     // page looks for the invite where it isn't and keeps waiting.
     let cloud_url = cloud::url(&hub.store);
     let on_main = cloud_url.as_deref().is_some_and(cloud::is_main_cloud);
-    let web_link =
-        env.web_origin().filter(|_| !on_main).map(|o| format!("{o}/join#c={cid}&i={invite_id}&t={token}"));
+    let web_link = env.web_origin().filter(|_| !on_main).map(|o| format!("{o}/join#c={cid}&i={invite_id}&t={token}"));
     // The cloud's page opens the app (or says how to get it); the token stays in the fragment here too.
     let page_link = cloud_url.map(|u| format!("{}/i/{cid}/{invite_id}#t={token}", cloud::links_base(&u)));
     // `link` is what the share sheets show: the web link (a Dev web client), else the page link, else the app link.
