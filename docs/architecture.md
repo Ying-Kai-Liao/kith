@@ -208,7 +208,10 @@ apply to full `kith <agent>` runs.
 
 ## Planned
 
-**Bot guests** (design 2026-10-23, [docs/kith-bot-guests.md](kith-bot-guests.md)): cloud agents with their own VM (Grok Bot, and others) join a Kith computer by invite with a client-only Linux `kith` and ask its agents over the same end-to-end relay. Each bot belongs to one person and gets at most their access.
+**Bot guests**, what is left ([docs/kith-bot-guests.md](kith-bot-guests.md)): bots in rooms (Grok teams, section 7.9) and
+linking a Grok account to a person (7.10). The rest is built: invites, `kith join` and `kith ask` from the client-only
+Linux `kith` (`serve/host/crates/guest`, released as `kith-guest-linux-*`), the owner's approval, the host's bot
+principals and limits, origin-tagged threads, and the apps' bot rows and approval card.
 
 **People and channels**, what is left of the 2026-10-19 design (the rest is built, above; Slack waits for an app):
 
@@ -224,9 +227,6 @@ apply to full `kith <agent>` runs.
   should become a browser profile (`browser/agent`, living in the Chrome app). It can't be merged into the
   jev-browser profile yet: yt-dlp couldn't decrypt 208 of that profile's 670 cookies, which are encrypted with a
   different key. Structural too: propose first.
-
-**Publishing an agent with a past.** `kith share --public` refuses an agent whose old commits name the user. Next:
-`--fresh`, a public repo from the current version alone, kept in step from the private one.
 
 **Environments.** Skills increasingly need installed software (image: uv, rembg models, mermaid-cli, Chrome,
 codex; video: Node kits; transcription: whisper models). Plan:

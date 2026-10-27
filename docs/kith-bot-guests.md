@@ -1,6 +1,6 @@
 # Bot guests
 
-Status: design, 2026-10-23. Nothing here is built. Every later package codes from this file; where the code made a
+Status: design, 2026-10-23. Built as of 2026-10-27, except rooms (P7, section 7.9) and Grok-account linking (P9, 7.10). Every later package codes from this file; where the code made a
 choice impossible, the section says so ("Differences from the brief" at the end of section 1).
 
 A bot guest is a cloud agent with its own VM (Grok Bot, and later Muse, Dots, Codex or Cursor agents). It installs a

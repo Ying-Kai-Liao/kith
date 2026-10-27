@@ -66,6 +66,10 @@ upgrade. `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` (a local file)
 `packaging/homebrew/kith.rb` (for the tap [`Ying-Kai-Liao/homebrew-kith`](https://github.com/Ying-Kai-Liao/homebrew-kith)). Releases are built by `.github/workflows/release.yml`
 on a `v*` tag.
 
+The Mac app (`apps/`, a dmg) carries all of this inside: the host (`Contents/Resources/kith-serve`, run as a launchd job)
+and the release layout (`Contents/Resources/kith/bin/kith` with its kernel), so it needs no separate install; see
+[apps/README.md](apps/README.md).
+
 A Linux VM that only needs to join a computer and ask its agents (a cloud bot) installs the static client-only `kith`, no root:
 `curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | sh`, then `kith join <link>`
 (x86_64 and aarch64; `KITH_VERSION`, `KITH_GUEST_PREFIX` in the script's header).
