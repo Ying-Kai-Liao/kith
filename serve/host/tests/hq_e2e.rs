@@ -25,9 +25,22 @@ async fn start() -> Setup {
 
 /// [`start`] with another scripted agent (`fixture [args]`).
 async fn start_with(agent: &str) -> Setup {
+    let home = std::env::temp_dir().join(format!("kith-hq-e2e-{}", uuid::Uuid::new_v4()));
+    start_in(agent, home, &[]).await
+}
+
+/// [`start`] for a test that makes `house` an invited person's: kith-auth and the kernel's home are folders of the
+/// agent's, never this computer's.
+async fn start_for_a_person() -> Setup {
+    let home = std::env::temp_dir().join(format!("kith-hq-e2e-{}", uuid::Uuid::new_v4()));
+    let (auth, kith) = (home.join("auth.json"), home.join("kith-home"));
+    let (auth, kith) = (auth.to_string_lossy(), kith.to_string_lossy());
+    start_in("instructions_agent.py claude", home.clone(), &[("KITH_AUTH", &auth), ("KITH_HOME", &kith)]).await
+}
+
+async fn start_in(agent: &str, home: PathBuf, env: &[(&str, &str)]) -> Setup {
     let (script, args) = agent.split_once(' ').unwrap_or((agent, ""));
     let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let home = std::env::temp_dir().join(format!("kith-hq-e2e-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&home).unwrap();
     let stub = fixtures.join("stub_hq.py");
     let acp = format!("{} {args}", common::python_agent(&fixtures.join(script)));
@@ -37,13 +50,15 @@ async fn start_with(agent: &str) -> Setup {
         std::fs::create_dir_all(area.join(dir)).unwrap();
     }
     let area = area.canonicalize().unwrap();
-    let host = Host::start_env(&[
-        ("KITH_KERNEL_BIN", &stub.to_string_lossy()),
-        ("STUB_HQ_HOME", &home_text),
-        ("KITH_SERVE_HQ_ACP_COMMAND", &acp),
-        ("KITH_SERVE_FOLDER_ROOTS", &area.to_string_lossy()),
-    ])
-    .await;
+    let (stub, area_text) = (stub.to_string_lossy(), area.to_string_lossy());
+    let mut vars = vec![
+        ("KITH_KERNEL_BIN", stub.as_ref()),
+        ("STUB_HQ_HOME", home_text.as_str()),
+        ("KITH_SERVE_HQ_ACP_COMMAND", acp.as_str()),
+        ("KITH_SERVE_FOLDER_ROOTS", area_text.as_ref()),
+    ];
+    vars.extend(env.iter().copied());
+    let host = Host::start_env(&vars).await;
     Setup { host, home, area }
 }
 
@@ -200,6 +215,60 @@ async fn the_host_restart_loads_the_session_with_a_fresh_launch() {
     assert_eq!(load[0]["params"]["sessionId"], "s1");
     assert_eq!(load[0]["params"]["_meta"]["systemPrompt"]["append"], "You are house, the household keeper.");
     assert_eq!(s.requests("session/new").len(), 1);
+}
+
+/// An invited person's turn compares what their session runs with against what it was loaded with. Unchanged, the warm
+/// session takes the turn as it is; changed (a yes on an escape card), that session alone is loaded again with the new
+/// grant, in the same agent process, and the other thread's session is left alone.
+#[tokio::test]
+async fn a_persons_new_grant_loads_their_session_again_in_the_same_process() {
+    let mut s = start_for_a_person().await;
+    let id = s.house().await["id"].as_str().unwrap().to_owned();
+    s.host.wait_tasks_on(&id).await;
+    s.host
+        .restart(|dir| {
+            let db = rusqlite::Connection::open(dir.join("serve.db")).unwrap();
+            db.execute("UPDATE bots SET config = json_set(config, '$.person', 'sam')", []).unwrap();
+        })
+        .await;
+    s.house().await;
+    s.host.call("updateBot", json!({"id": id, "tasks": false})).await;
+    s.host.reply(&id, "hello").await;
+    let history = s.host.call("history", json!({"botId": id})).await;
+    let root = history["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "user").unwrap()["id"].clone();
+    let root = root.as_str().unwrap().to_owned();
+    s.thread_reply(&id, &root, "in the thread").await;
+    assert_eq!(s.requests("session/new").len(), 2, "the chat's session (s1) and the thread's (s2)");
+
+    // Nothing changed: the warm session answers without loading again.
+    s.host.reply(&id, "again").await;
+    assert!(s.requests("session/load").is_empty(), "{:?}", s.requests("session/load"));
+
+    // A yes on an escape card: the kernel's next launch for sam's conversation carries the folder.
+    let granted = s.dir("alpha").to_string_lossy().into_owned();
+    std::fs::write(s.home.join("grants.json"), json!({"read": [granted]}).to_string()).unwrap();
+    s.host.reply(&id, "now with the folder").await;
+    let loads = s.requests("session/load");
+    assert_eq!(loads.len(), 1, "{loads:?}");
+    assert_eq!(loads[0]["params"]["sessionId"], "s1");
+    let settings = &loads[0]["params"]["_meta"]["claudeCode"]["options"]["settings"];
+    assert_eq!(settings["sandbox"]["filesystem"]["allowRead"], json!([granted]));
+    // The turn ran in the session loaded with it: the load came before the prompt.
+    let order: Vec<Value> = s.lines("requests.jsonl");
+    let load_at = order.iter().position(|r| r["method"] == "session/load").unwrap();
+    let last_prompt = order.iter().rposition(|r| r["method"] == "session/prompt").unwrap();
+    assert!(load_at < last_prompt);
+    assert_eq!(order[last_prompt]["params"]["sessionId"], "s1");
+    // One process all along, and the thread's session was neither loaded nor closed.
+    assert_eq!(s.requests("initialize").len(), 1);
+    let pids: std::collections::HashSet<_> = order.iter().map(|r| r["pid"].clone()).collect();
+    assert_eq!(pids.len(), 1, "{pids:?}");
+    let thread: Vec<&Value> = order.iter().filter(|r| r["params"]["sessionId"] == "s2").collect();
+    assert!(thread.iter().all(|r| r["method"] != "session/load" && r["method"] != "session/close"), "{thread:?}");
+
+    // The grant is the session's now: the next turn doesn't load it again.
+    s.host.reply(&id, "and again").await;
+    assert_eq!(s.requests("session/load").len(), 1);
 }
 
 #[tokio::test]
