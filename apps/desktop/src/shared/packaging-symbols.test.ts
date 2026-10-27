@@ -35,3 +35,18 @@ test('Linux and Windows packaging does not require Apple-only SF Symbols', async
     await assert.doesNotReject(verifyBuild(fixture(t, platform)))
   }
 })
+
+test('macOS packaging fails loudly when a bundled native helper is missing', async (t) => {
+  const context = fixture(t) as ReturnType<typeof fixture> & { packager: { config?: unknown } }
+  const symbols = join(context.packager.projectDir, 'out/renderer/symbols')
+  mkdirSync(symbols, { recursive: true })
+  writeFileSync(join(symbols, 'manifest.json'), JSON.stringify({ 'apple.logo': { w: 0.9, h: 1.15 } }))
+  for (const weight of ['light', 'regular', 'medium', 'semibold', 'bold', 'black']) {
+    writeFileSync(join(symbols, `apple.logo.${weight}.png`), 'fixture')
+  }
+  context.packager.config = { mac: { extraResources: [{ from: 'build/native/kith-speech', to: 'kith-speech' }] } }
+  await assert.rejects(verifyBuild(context), /missing build\/native\/kith-speech/)
+  mkdirSync(join(context.packager.projectDir, 'build/native'), { recursive: true })
+  writeFileSync(join(context.packager.projectDir, 'build/native/kith-speech'), 'fixture')
+  await assert.doesNotReject(verifyBuild(context))
+})
