@@ -427,6 +427,18 @@ public extension HostClient {
         return try await call("kithSetCallModel", Body(botId: botId, model: model), timeout: 60)
     }
 
+    /// A Kith agent's "always" access grants (what, for whom, since when). Owner only: a member gets 403, an older host 404.
+    func kithAccessGrants(botId: String) async throws -> AccessGrants {
+        struct Body: Encodable { var botId: String }
+        return try await call("kithAccessGrants", Body(botId: botId), timeout: 30)
+    }
+
+    /// Takes one away, so that person's next run no longer gets it; the answer is the list read back.
+    func kithRemoveAccessGrant(botId: String, grant: AccessGrant) async throws -> AccessGrants {
+        struct Body: Encodable { var botId: String; var person: String; var kind: String; var target: String }
+        return try await call("kithRemoveAccessGrant", Body(botId: botId, person: grant.person, kind: grant.kind, target: grant.target), timeout: 30)
+    }
+
     /// The backup chain (serve/host/src/api/backups.rs); this app only reads it. A host before it answers 404.
     func backups() async throws -> Backups {
         try await call("backups", timeout: 90)

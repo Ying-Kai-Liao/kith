@@ -5,8 +5,13 @@ import Foundation
 /// one namespace per account context so a signed-out account's data never shows in another.
 public enum SharedStore {
     public static let appGroup = AppEnvironment.current.appGroup
-    /// The APNs push relay (relay/ in this repo).
-    public static let relayURL = LegacyCompat.relayURL
+    /// The APNs push relay (serve/relay in this repo): the build's `KITH_PUSH_RELAY_HOST`, else the old one.
+    public static let relayURL = relayURL(host: Bundle.main.object(forInfoDictionaryKey: "KithPushRelayHost") as? String)
+
+    static func relayURL(host: String?) -> String {
+        guard let host = host?.trimmingCharacters(in: .whitespaces), !host.isEmpty, !host.hasPrefix("$(") else { return LegacyCompat.relayURL }
+        return "https://\(host)"
+    }
 
     private static var defaults: UserDefaults { UserDefaults(suiteName: appGroup) ?? .standard }
 

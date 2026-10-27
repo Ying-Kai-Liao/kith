@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# kith-helper-mcp-check — a kith:<agent> helper shares its caller's MCP servers; `kith-auth helper-mcp` (its PreToolUse
+# hook) answers a kith MCP service's tool with the helper's own grant for the run's person: none is ask in the owner's
+# session and deny in anyone else's, and a check that fails refuses too. In a throwaway auth.json, never ~/.kith.
+#
+#   kernel/tests/kith-helper-mcp-check     a second or two; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-helper-mcp-check.XXXXXX")
+trap 'rm -rf "$T"' EXIT
+export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith
+unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT HQ_HOME
+mkdir -p "$HOME"
+for a in house garden; do
+  mkdir -p "$KITH_HOME/agents/$a/role"
+  printf -- '---\nname: %s\ndescription: test\n---\nbody\n' "$a" > "$KITH_HOME/agents/$a/role/agent.md"
+done
+mkdir -p "$KITH_HOME/agents/house/role/services"
+echo '{"kind": "mcp", "mcp": {"command": "tracker-mcp"}}' > "$KITH_HOME/agents/house/role/services/tracker.json"
+cat > "$KITH_AUTH" <<'EOF'
+{"people": {"kai": {"owner": true}, "mia": {}},
+ "members": {"house": {"mia": {}}, "garden": {"mia": {}}},
+ "profiles": {"jev-browser/main": {}, "tracker/main": {}},
+ "grants": {"house": {"jev-browser": "jev-browser/main", "tracker": "tracker/main"}}}
+EOF
+# H <agent> <ask|deny> <tool>: the hook's decision, or "pass"
+H() {
+  local out
+  out=$(printf '{"tool_name": "%s", "tool_input": {}}' "$3" | python3 "$KERNEL/bin/kith-auth" helper-mcp "$1" "$2") || return 1
+  [[ -z $out ]] && { echo pass; return; }
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["permissionDecision"])' <<< "$out"
+}
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+
+check "owner's session: a helper without the grant is asked" "[ \"\$(H garden ask mcp__jev-browser__navigate)\" = ask ]"
+check "owner's session: a helper with the grant passes" "[ \"\$(H house ask mcp__jev-browser__navigate)\" = pass ]"
+check "an agent's own service is grant-bound too" "[ \"\$(H garden ask mcp__tracker__list)\" = ask ] && [ \"\$(H house ask mcp__tracker__list)\" = pass ]"
+check "a server that is no kith service passes" "[ \"\$(H garden deny mcp__kithpermit__request_access)\" = pass ] && [ \"\$(H garden deny mcp__kith__invoke)\" = pass ]"
+check "a tool that is no MCP tool passes" "[ \"\$(H garden deny Bash)\" = pass ]"
+check "a guest's session: a helper without the grant is denied" "[ \"\$(KITH_PERSON=mia H garden deny mcp__jev-browser__navigate)\" = deny ]"
+check "a guest's session: a shared profile granted to the helper passes" "[ \"\$(KITH_PERSON=mia H house deny mcp__jev-browser__navigate)\" = pass ]"
+python3 - "$KITH_AUTH" <<'EOF'
+import json, sys
+d = json.load(open(sys.argv[1])); d['profiles']['jev-browser/main']['person'] = 'kai'; json.dump(d, open(sys.argv[1], 'w'))
+EOF
+check "a guest's session: the owner's own profile is never theirs" "[ \"\$(KITH_PERSON=mia H house deny mcp__jev-browser__navigate)\" = deny ]"
+check "the owner's session still has it" "[ \"\$(H house ask mcp__jev-browser__navigate)\" = pass ]"
+echo '{not json' > "$KITH_AUTH"
+check "an unreadable auth.json refuses (fails closed)" "[ \"\$(H house ask mcp__jev-browser__navigate)\" = ask ] && [ \"\$(KITH_PERSON=mia H house deny mcp__jev-browser__navigate)\" = deny ]"
+check "unreadable hook input refuses" "[ \"\$(echo nope | python3 \"\$KERNEL/bin/kith-auth\" helper-mcp house deny | grep -c '\"deny\"')\" = 1 ]"
+check "a decision other than ask or deny is a usage error (exit 2 blocks the tool)" \
+  "echo '{}' | python3 \"\$KERNEL/bin/kith-auth\" helper-mcp house allow; [ \$? = 2 ]"
+
+exit $fail

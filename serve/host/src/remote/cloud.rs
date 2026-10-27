@@ -32,6 +32,8 @@ pub fn approval(store: &Store) -> Approval {
 
 /// When this host sent its recent SAS nonces (kv, JSON array of ms).
 const SAS_NONCES: &str = "sas_nonces";
+/// The same for members' requests whose code is compared (Code mode), kept apart so they can't use up the owner's.
+const MEMBER_SAS_NONCES: &str = "member_sas_nonces";
 /// Every host nonce is one guess at the phone's code for whoever controls the cloud, revealed
 /// or not: at most this many per hour keeps a 6-digit SAS out of reach of a search.
 const SAS_NONCES_PER_HOUR: usize = 5;
@@ -465,15 +467,10 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
         super::account::sync(hub, owner_uid.as_deref()).await;
         sync_requests(hub, base, state.requests, owner_uid.as_deref()).await;
         let auto = approval(&hub.store) == Approval::Auto;
-        // A member of this computer was invited by its owner, so their devices don't wait for a comparison.
-        let ready: Vec<String> = hub
-            .cloud
-            .requests
-            .locked()
-            .iter()
-            .filter(|r| r.code.is_some() && (auto || r.person.is_some()))
-            .map(|r| r.id.clone())
-            .collect();
+        // In Code mode every device waits for the owner to compare its code, a member's too: the invite named a person,
+        // not a device, and only the code tells that person's device from one the cloud swapped in.
+        let ready: Vec<String> =
+            hub.cloud.requests.locked().iter().filter(|r| auto && r.code.is_some()).map(|r| r.id.clone()).collect();
         // The SAS exchange still runs (the device's commit must match); only the user's comparison is skipped.
         for id in ready {
             if let Err(e) = decide(hub, &id, true).await {
@@ -587,12 +584,16 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
             kept
         });
         changed |= mine.len() != before;
-        let mut budget = nonce_budget(&hub.store);
+        let mut budget = nonce_budget(&hub.store, SAS_NONCES);
+        let mut member_budget = nonce_budget(&hub.store, MEMBER_SAS_NONCES);
+        // In Auto mode nobody compares a member's code, so their requests aren't rationed.
+        let compared = approval(&hub.store) == Approval::Code;
         for s in &list {
             let (Ok(dk), Ok(commit)) = (crypto::unb64_n::<32>(&s.device_key), crypto::unb64_n::<32>(&s.commit)) else {
                 next.push(Next::Deny(s.request_id.clone()));
                 continue;
             };
+            let owner = is_owner_request(hub, owner_uid, s.user_id.as_deref());
             let Some(i) = mine.iter().position(|r| r.id == s.request_id) else {
                 // Our nonce is only in memory: after a restart this request can't be finished.
                 if s.host_nonce.is_some() {
@@ -604,17 +605,20 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
                 } else if let Err(why) = requester(hub, owner_uid, s.user_id.as_deref()) {
                     tracing::warn!(request_id = s.request_id, why, "denying an access request from an unknown account");
                     next.push(Next::Deny(s.request_id.clone()));
-                } else if is_owner_request(hub, owner_uid, s.user_id.as_deref()) && is_web(&s.platform) {
+                } else if owner && is_web(&s.platform) {
                     tracing::warn!(request_id = s.request_id, "denying a web device's request for the owner's account");
                     next.push(Next::Deny(s.request_id.clone()));
-                } else if is_owner_request(hub, owner_uid, s.user_id.as_deref()) && budget.len() >= SAS_NONCES_PER_HOUR
+                } else if (owner && budget.len() >= SAS_NONCES_PER_HOUR)
+                    || (!owner && compared && member_budget.len() >= SAS_NONCES_PER_HOUR)
                 {
                     throttled = true;
                 } else {
-                    // A member's code is never compared (they skip the comparison), so their requests don't spend
-                    // the budget that guards the owner's own 6-digit code, and can't use it up to lock the owner out.
-                    if is_owner_request(hub, owner_uid, s.user_id.as_deref()) {
+                    // Members' requests spend a budget of their own, so they can't use up the one that guards the
+                    // owner's 6-digit code and lock the owner out.
+                    if owner {
                         budget.push(now_ms());
+                    } else if compared {
+                        member_budget.push(now_ms());
                     }
                     next.push(Next::Offer(Box::new(Request {
                         id: s.request_id.clone(),
@@ -659,7 +663,8 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
             changed = true;
         }
         // Saved before any nonce leaves, so a restart can't reset the budget.
-        set_nonce_budget(&hub.store, &budget);
+        set_nonce_budget(&hub.store, SAS_NONCES, &budget);
+        set_nonce_budget(&hub.store, MEMBER_SAS_NONCES, &member_budget);
     }
     if throttled {
         tracing::warn!("accessRequests throttled: too many account access requests this hour");
@@ -695,15 +700,15 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<StateRequest>, owner_uid
     }
 }
 
-/// The host nonces sent in the last hour.
-fn nonce_budget(store: &Store) -> Vec<i64> {
+/// The host nonces sent in the last hour, from the budget kept under `key`.
+fn nonce_budget(store: &Store, key: &str) -> Vec<i64> {
     let since = now_ms() - HOUR_MS;
-    let sent: Vec<i64> = store.kv_get(SAS_NONCES).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
+    let sent: Vec<i64> = store.kv_get(key).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
     sent.into_iter().filter(|t| *t > since).collect()
 }
 
-fn set_nonce_budget(store: &Store, sent: &[i64]) {
-    let saved = serde_json::to_string(sent).map_err(anyhow::Error::from).and_then(|v| store.kv_set(SAS_NONCES, &v));
+fn set_nonce_budget(store: &Store, key: &str, sent: &[i64]) {
+    let saved = serde_json::to_string(sent).map_err(anyhow::Error::from).and_then(|v| store.kv_set(key, &v));
     if let Err(e) = saved {
         tracing::warn!(error = format!("{e:#}"), "couldn't save the access request budget");
     }
@@ -763,7 +768,8 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
         platform: r.platform,
         source: DeviceSource::Account,
         grant_id: Some(grant.to_owned()),
-        scopes: vec![Scope::Control, Scope::Screen],
+        // A member never shares this computer's screen, so their device isn't granted it.
+        scopes: if r.person.is_some() { vec![Scope::Control] } else { vec![Scope::Control, Scope::Screen] },
         lease_until: Some(now_ms() + LEASE_MS),
         created_at: now_ms(),
         last_seen_at: None,
@@ -1066,7 +1072,98 @@ mod tests {
         decide(&hub, "req_ok", true).await.unwrap();
         let d = hub.store.device(&b64(&dk)).unwrap();
         assert_eq!((d.source, d.grant_id.as_deref()), (DeviceSource::Account, Some("grt_new")));
+        assert_eq!(d.scopes, [Scope::Control, Scope::Screen], "the owner's device can share the screen");
         assert_eq!(hub.cloud.requests_json().len(), 0);
+    }
+
+    fn add_member(hub: &Hub) {
+        hub.store
+            .add_membership(&crate::store::Membership {
+                membership_id: "mem_m".into(),
+                user_id: "user_m".into(),
+                person_id: "sam".into(),
+                invite_id: "inv".into(),
+                created_at: now_ms(),
+            })
+            .unwrap();
+    }
+
+    /// A member's request from `dk` (committed to `nd`), with the host's and the device's nonces once they are out.
+    fn member_request(
+        id: &str,
+        dk: [u8; 32],
+        nd: [u8; 32],
+        host_nonce: Option<&str>,
+        device_nonce: Option<[u8; 32]>,
+    ) -> Value {
+        json!({"requestId": id, "deviceKey": b64(&dk), "deviceName": "Sam's iPhone", "platform": "ios", "userId": "user_m",
+            "email": "sam@example.com", "commit": b64(&crypto::sas_commit(crypto::Labels::Kith, &dk, &nd)),
+            "hostNonce": host_nonce, "deviceNonce": device_nonce.map(|n| b64(&n))})
+    }
+
+    #[tokio::test]
+    async fn in_code_mode_a_members_device_waits_for_the_code_too() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        assert_eq!(approval(&hub.store), Approval::Code);
+        let (dk, bad_dk, nd, wrong): ([u8; 32], [u8; 32], [u8; 32], [u8; 32]) =
+            (crypto::random(), crypto::random(), crypto::random(), crypto::random());
+        let state = |requests: Vec<Value>| json!({"owner": {"userId": "user_o"}, "grants": [], "requests": requests});
+        *fake.state.lock().unwrap() =
+            state(vec![member_request("req_m", dk, nd, None, None), member_request("req_bad", bad_dk, nd, None, None)]);
+        pull(&hub, &base).await.unwrap();
+        let nh = |id: &str| {
+            let posts = fake.posts.lock().unwrap();
+            posts.iter().find(|(p, _)| p.contains(id)).unwrap().1["nonce"].as_str().unwrap().to_owned()
+        };
+        let (nh_m, nh_bad) = (nh("req_m"), nh("req_bad"));
+        *fake.state.lock().unwrap() = state(vec![
+            member_request("req_m", dk, nd, Some(&nh_m), Some(nd)),
+            member_request("req_bad", bad_dk, nd, Some(&nh_bad), Some(wrong)),
+        ]);
+        pull(&hub, &base).await.unwrap();
+        let denied =
+            fake.posts.lock().unwrap().iter().any(|(p, b)| p.ends_with("req_bad/decision") && b["decision"] == "deny");
+        assert!(denied, "a member's reveal that doesn't match its commit is refused");
+        assert!(hub.store.device(&b64(&dk)).is_none(), "not approved without the owner checking the code");
+        let list = hub.cloud.requests_json();
+        assert_eq!(list.len(), 1);
+        let nh_m: [u8; 32] = crypto::unb64_n(&nh_m).unwrap();
+        assert_eq!(list[0]["code"], crypto::sas_code(crypto::Labels::Kith, &hub.identity.sign_pub(), &dk, &nd, &nh_m));
+        assert_eq!(list[0]["personId"], "sam");
+        // Another pull leaves it waiting for the owner.
+        pull(&hub, &base).await.unwrap();
+        assert!(hub.store.device(&b64(&dk)).is_none());
+        assert!(!fake.posts.lock().unwrap().iter().any(|(p, _)| p.ends_with("req_m/decision")));
+
+        decide(&hub, "req_m", true).await.unwrap();
+        let d = hub.store.device(&b64(&dk)).unwrap();
+        assert_eq!((d.source, d.person_id.as_deref()), (DeviceSource::Account, Some("sam")));
+        assert_eq!(d.scopes, [Scope::Control], "a member's device never carries the screen");
+    }
+
+    #[tokio::test]
+    async fn in_auto_mode_a_members_device_is_approved_on_its_reveal() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        set_approval(&hub, Approval::Auto).unwrap();
+        add_member(&hub);
+        let (dk, nd): ([u8; 32], [u8; 32]) = (crypto::random(), crypto::random());
+        let state = |r: Value| json!({"owner": {"userId": "user_o"}, "grants": [], "requests": [r]});
+        *fake.state.lock().unwrap() = state(member_request("req_m", dk, nd, None, None));
+        pull(&hub, &base).await.unwrap();
+        assert!(hub.store.device(&b64(&dk)).is_none(), "nothing is approved before the reveal");
+        let nh = fake.posts.lock().unwrap()[0].1["nonce"].as_str().unwrap().to_owned();
+        *fake.state.lock().unwrap() = state(member_request("req_m", dk, nd, Some(&nh), Some(nd)));
+        pull(&hub, &base).await.unwrap();
+        let d = hub.store.device(&b64(&dk)).unwrap();
+        assert_eq!((d.source, d.person_id.as_deref()), (DeviceSource::Account, Some("sam")), "approved on its own");
+        assert_eq!(d.scopes, [Scope::Control]);
     }
 
     #[tokio::test]
@@ -1196,26 +1293,22 @@ mod tests {
 
     #[tokio::test]
     async fn a_members_requests_do_not_spend_the_owners_budget() {
-        let hub = temp_hub();
-        let fake = Arc::new(FakeCloud::default());
-        let base = fake_cloud(fake.clone()).await;
-        hub.store
-            .add_membership(&crate::store::Membership {
-                membership_id: "mem_m".into(),
-                user_id: "user_m".into(),
-                person_id: "sam".into(),
-                invite_id: "inv".into(),
-                created_at: now_ms(),
-            })
-            .unwrap();
-        let request = |id: String, user: Option<&str>| json!({"requestId": id, "deviceKey": b64(&crypto::random::<32>()), "commit": b64(&[0u8; 32]), "userId": user});
-        let mut requests: Vec<Value> = (0..8).map(|i| request(format!("member_{i}"), Some("user_m"))).collect();
-        requests.push(request("mine".into(), None));
-        *fake.state.lock().unwrap() = json!({"owner": null, "grants": [], "requests": requests});
-        pull(&hub, &base).await.unwrap();
-        let posts = fake.posts.lock().unwrap();
-        assert!(posts.iter().any(|(p, _)| p.contains("mine")), "the owner's own request still gets its code");
-        assert_eq!(posts.len(), 9, "members' requests are not rationed: their code is never compared");
+        // Code mode compares members' codes, so they are rationed too, on a budget of their own; Auto mode doesn't.
+        for (mode, members_sent) in [(Approval::Code, SAS_NONCES_PER_HOUR), (Approval::Auto, 8)] {
+            let hub = temp_hub();
+            let fake = Arc::new(FakeCloud::default());
+            let base = fake_cloud(fake.clone()).await;
+            set_approval(&hub, mode).unwrap();
+            add_member(&hub);
+            let request = |id: String, user: Option<&str>| json!({"requestId": id, "deviceKey": b64(&crypto::random::<32>()), "commit": b64(&[0u8; 32]), "userId": user});
+            let mut requests: Vec<Value> = (0..8).map(|i| request(format!("member_{i}"), Some("user_m"))).collect();
+            requests.push(request("mine".into(), None));
+            *fake.state.lock().unwrap() = json!({"owner": null, "grants": [], "requests": requests});
+            pull(&hub, &base).await.unwrap();
+            let posts = fake.posts.lock().unwrap();
+            assert!(posts.iter().any(|(p, _)| p.contains("mine")), "the owner's own request still gets its code");
+            assert_eq!(posts.iter().filter(|(p, _)| p.contains("member_")).count(), members_sent, "{mode:?}");
+        }
     }
 
     #[tokio::test]
