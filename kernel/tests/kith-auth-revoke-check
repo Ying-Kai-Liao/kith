@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # kith-auth-revoke-check — revoking a person: they reach nothing (the `*` row and helpers included) and their bots go
-# dormant; undo gives back every row as it was; the bridge's `who` says revoked, and held while a cloud-linked Mac is
-# out of sync; on a cloud-linked Mac a revoke or undo goes through kith serve and is refused when it can't reach it.
+# dormant; undo gives back every row as it was; `who` (kith serve's channels) says revoked, and held while a
+# cloud-linked Mac is out of sync; on a cloud-linked Mac a revoke or undo goes through kith serve and is refused when it
+# can't reach it.
 # The rules' properties under random sequences: kith-auth-props. Throwaway dirs, never ~/.kith.
 #
 #   kernel/tests/kith-auth-revoke-check     a few seconds; prints each check, exits 1 when one fails
@@ -44,7 +45,7 @@ check "revoked: may says why" "{ A may sam house || true; } | grep -q 'access wa
 check "revoked: resolve is not allowed" "[ \"\$(A resolve house --person sam | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"allowed\"])')\" = False ]"
 check "revoked: access lists nothing" "[ -z \"\$(A access sam --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin) or \"\")')\" ]"
 check "revoked: rows are kept" "[ \"\$(J \"json.dumps([d['members'], d.get('grants', {})], sort_keys=True)\")\" = '$ROWS' ]"
-check "revoked: their handle is kept (the bridge tells them)" "[ \"\$(W 42 \"['person']\")\" = sam ]"
+check "revoked: their handle is kept (the channels tell them)" "[ \"\$(W 42 \"['person']\")\" = sam ]"
 check "revoked: who says revoked" "[ \"\$(W 42 \"['revoked']\")\" = True ]"
 check "revoked: people --json says revoked, bot too" "[ \"\$(A people --json | python3 -c 'import json,sys; print(sorted(p[\"id\"] for p in json.load(sys.stdin) if p[\"revoked\"]))')\" = \"['sam', 'sambot']\" ]"
 check "revoked: people shows it" "A people sam | grep -q 'access removed'"
@@ -71,7 +72,7 @@ check "a link code made before the revoke is refused" "! A link discord 77 $CODE
 check "and binds nothing" "[ \"\$(J \"'discord' in d['people']['sam'].get('handles', {})\")\" = False ]"
 A person sam --unrevoke >/dev/null
 
-# the bridge's hold (R8): a linked Mac serves non-owners only while kith serve's lease on the cloud sync is live
+# the channels' hold (R8): a linked Mac serves non-owners only while kith serve's lease on the cloud sync is live
 A handle kai telegram 1 >/dev/null
 check "never linked: nobody held" "[ \"\$(W 42 \"['held']\")\" = False ]"
 now=$(python3 -c 'import time; print(int(time.time() * 1000))')
@@ -80,7 +81,7 @@ check "linked, lease live: not held" "[ \"\$(W 42 \"['held']\")\" = False ]"
 printf '{"linked": true, "until": %s}\n' "$((now - 1000))" > "$KITH_SERVE_DIR/cloud-sync.json"
 check "linked, lease run out: held" "[ \"\$(W 42 \"['held']\")\" = True ]"
 check "linked, lease run out: the owner is never held" "[ \"\$(W 1 \"['held']\")\" = False ]"
-check "resolve says held too (the bridge's spawn and delivery re-check)" \
+check "resolve says held too (the channels' turn start and delivery re-check)" \
   "[ \"\$(A resolve house --person sam | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"held\"])')\" = True ]"
 check "resolve: the owner is never held" \
   "[ \"\$(A resolve house --person kai | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"held\"])')\" = False ]"
