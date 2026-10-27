@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "a259a1658e8b06bac0dc162c422adf8e0f163178de432184e2d6c870894e4482";
+pub const CONTRACT_SHA256: &str = "3508398770f9ec4df5154235c1c9ff6db1e22c3faa7f17261fa87878a6b6a113";
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -660,6 +660,7 @@ pub mod path {
     pub fn invite_page(computer_id: &str, invite_id: &str) -> String {
         format!("/i/{computer_id}/{invite_id}")
     }
+    pub const HOME_PAGE: &str = "/";
     pub const DOWNLOAD_PAGE: &str = "/download";
     pub fn download_redirect(key: &str) -> String {
         format!("/download/{key}")

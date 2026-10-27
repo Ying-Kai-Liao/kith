@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Kith</title>
+<meta name="description" content="Kith makes the agents you build on your own computer shareable. Send someone a link; your agent keeps working on your Mac.">
+<link rel="icon" href="img/mark.png">
+<style>
+/* The artifact viewer's base styles the page was designed in; the room's script relies on [hidden] winning. */
+:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0;font:14px system-ui,sans-serif}
+img{max-width:100%}
+[hidden]{display:none!important}
+/* Self-hosted Latin subsets (OFL), the same files Google Fonts serves. */
+@font-face{font-family:Inter;font-style:normal;font-weight:400 600;font-display:swap;src:url(fonts/inter-latin.woff2) format("woff2")}
+@font-face{font-family:Nunito;font-style:normal;font-weight:800;font-display:swap;src:url(fonts/nunito-800-latin.woff2) format("woff2")}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:500;font-display:swap;src:url(fonts/jetbrains-mono-500-latin.woff2) format("woff2")}
+</style>
+<style>
+/* Layout: one page on the morning sky (night sky in dark mode); centred hero around a shared-agent card, then left-aligned sections on a 1120 column */
+:root{
+  --bg:#FFFFFF; --fg:#14161B; --muted:#5F6472; --soft:#4B5160; --line:#E6E7EE; --panel:#F5F5FA;
+  --card:#FFFFFF; --inset:#F5F5FA; --bubble:#E9E9EF; --btn:#14161B; --btn-fg:#FFFFFF; --ghost:rgba(255,255,255,.72);
+  --focus:#6A45F2; --ok:#178357; --video:#8E6BFF; --code-bg:#14161B; --code-fg:#E9EAF0; --code-dim:#8D93A3;
+  --shadow:0 24px 60px -16px rgba(30,40,80,.24),0 0 0 1px rgba(20,22,27,.06);
+  --sky:url(img/sky-day.jpg); --sky-card:url(img/sky-card.jpg);
+  --display:Nunito,"SF Pro Rounded",ui-rounded,system-ui,sans-serif;
+  --body:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#14161B; --fg:#F2F3F7; --muted:#A3A8B6; --soft:#C3C7D2; --line:#2A2D36; --panel:#1C1F27;
+  --card:#1C1F27; --inset:#2A2D36; --bubble:#2A2D36; --btn:#F2F3F7; --btn-fg:#14161B; --ghost:rgba(28,31,39,.7);
+  --focus:#B49CFF; --ok:#4CC38A; --video:#B49CFF; --code-bg:#0D0E12; --code-fg:#E9EAF0; --code-dim:#7D8393;
+  --shadow:0 24px 60px -16px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.07);
+  --sky:url(img/sky-night.jpg); --sky-card:url(img/sky-card-night.jpg); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#14161B; --fg:#F2F3F7; --muted:#A3A8B6; --soft:#C3C7D2; --line:#2A2D36; --panel:#1C1F27;
+  --card:#1C1F27; --inset:#2A2D36; --bubble:#2A2D36; --btn:#F2F3F7; --btn-fg:#14161B; --ghost:rgba(28,31,39,.7);
+  --focus:#B49CFF; --ok:#4CC38A; --video:#B49CFF; --code-bg:#0D0E12; --code-fg:#E9EAF0; --code-dim:#7D8393;
+  --shadow:0 24px 60px -16px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.07);
+  --sky:url(img/sky-night.jpg); --sky-card:url(img/sky-card-night.jpg); color-scheme:dark}
+
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--fg);font:400 16px/1.55 var(--body);-webkit-font-smoothing:antialiased;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));overflow-x:hidden;position:relative}
+::selection{background:#C9B8FF;color:#14161B}
+a{color:inherit;text-underline-offset:3px;text-decoration-thickness:1px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:6px}
+h1,h2,h3,p,ul,ol{margin:0}
+.sky{position:absolute;inset:0 0 auto 0;height:min(62vw,760px);min-height:560px;background:var(--sky) top center/cover no-repeat;pointer-events:none}
+.sky::after{content:"";position:absolute;inset:auto 0 0 0;height:40%;background:linear-gradient(transparent,var(--bg))}
+.col{max-width:1120px;margin:0 auto;position:relative}
+.ico{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:44px;padding:0 20px;border-radius:22px;border:0;
+  background:var(--btn);color:var(--btn-fg);font:600 15px var(--body);text-decoration:none;cursor:pointer;transition:transform .2s cubic-bezier(.16,1,.3,1),opacity .2s}
+.btn:hover{transform:translateY(-1px)}
+.btn:active{transform:translateY(0);opacity:.85}
+.btn.ghost{background:var(--ghost);color:var(--fg);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 14%,transparent);backdrop-filter:blur(12px)}
+.btn.sm{min-height:36px;padding:0 16px;font-size:14px}
+
+/* nav */
+nav{display:flex;align-items:center;gap:28px;padding-block:20px}
+.brand{display:flex;align-items:center;gap:8px;font:800 24px/1 var(--display);letter-spacing:-.03em;text-decoration:none}
+.brand img{width:32px;height:32px}
+nav .links{display:flex;gap:26px;font:500 15px var(--body);color:var(--soft);margin-left:12px}
+nav .links a{text-decoration:none}
+nav .links a:hover{color:var(--fg)}
+nav .btn{margin-left:auto}
+
+/* hero: copy left, a live room right */
+.hero-b{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,600px);gap:64px;align-items:center;padding-block:clamp(40px,6vw,72px) 0}
+.hero-b .copy{display:flex;flex-direction:column;gap:20px;min-width:0}
+.hero-b h1{max-width:9em}
+.hero-b .acts{justify-content:flex-start;margin-top:8px}
+.hero-b .fine{max-width:34em}
+#link .intro{max-width:none;align-items:center;text-align:center}
+#link h2{max-width:16em}
+/* link section (was the hero of concept A) */
+.hero{text-align:center;padding-block:clamp(40px,7vw,72px) 0;display:flex;flex-direction:column;align-items:center;gap:18px}
+.ln{display:inline-block}
+h1{font:800 clamp(36px,5.4vw,60px)/1.04 var(--display);letter-spacing:-.035em;text-wrap:balance;max-width:16em}
+.lead{font-size:clamp(17px,1.6vw,19px);color:var(--soft);max-width:34em;text-wrap:pretty}
+.acts{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:10px}
+.fine{font-size:14px;color:var(--muted)}
+
+.stage{display:grid;grid-template-columns:1fr 420px 1fr;gap:48px;align-items:center;margin-top:48px;text-align:left}
+.thread{display:flex;flex-direction:column;align-items:flex-start;gap:6px;min-width:0}
+.from{font-size:12px;color:var(--muted);margin-left:14px}
+.bub{background:var(--bubble);border-radius:20px;padding:10px 14px;font-size:16px;line-height:1.4;max-width:330px}
+.share{width:100%;border-radius:22px;overflow:hidden;background:var(--card);box-shadow:var(--shadow);margin-top:4px}
+.share .art{height:200px;background:var(--sky-card) center 18%/cover;display:grid;place-items:center}
+.share .art img{width:150px;height:150px;filter:drop-shadow(0 14px 18px rgba(40,30,110,.25))}
+.share .meta{padding:16px 18px 18px;display:flex;flex-direction:column;gap:8px}
+.share .n{font:800 26px/1 var(--display);letter-spacing:-.02em}
+.by{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+.share p{font-size:15px;color:var(--soft);margin-bottom:8px}
+.share .btn{width:100%}
+.notes{display:flex;flex-direction:column;gap:40px;min-width:0}
+.note h3{font:800 18px/1.2 var(--display);margin-bottom:6px;letter-spacing:-.01em}
+.note p{font-size:15px;color:var(--soft)}
+.faces{display:flex;gap:8px;margin-top:12px}
+.faces>*{width:30px;height:30px}
+
+/* arrival: the room plays in once on load: Rex, his bot, then the ask */
+@media (prefers-reduced-motion:no-preference){
+  .hero-b .room .body>*{animation:land .7s cubic-bezier(.16,1,.3,1) backwards}
+  .hero-b .room .body>:nth-child(1){animation-delay:.2s}.hero-b .room .body>:nth-child(2){animation-delay:.7s}.hero-b .room .body>:nth-child(3){animation-delay:1.3s}.hero-b .room .body>:nth-child(4){animation-delay:1.7s}
+}
+@keyframes land{from{opacity:0;transform:translateY(14px) scale(.98)}}
+
+/* people and outside bots */
+.person{border-radius:50%;background:url(img/sky-card.jpg) no-repeat;background-size:320%;flex:none}
+.p1{background-position:22% 8%}.p2{background-position:70% 14%}
+.guest{border-radius:30%;background:#14161B;display:grid;place-items:center;flex:none;box-shadow:0 0 0 1px rgba(255,255,255,.12)}
+.guest svg{width:55%;height:55%;stroke:#fff;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+
+/* sections */
+section.s{padding-block:clamp(72px,10vw,120px) 0}
+.s h2{font:800 clamp(30px,3.6vw,42px)/1.1 var(--display);letter-spacing:-.03em;text-wrap:balance}
+.s .intro{display:flex;flex-direction:column;gap:12px;max-width:36em}
+.s .intro p{font-size:18px;color:var(--soft);text-wrap:pretty}
+
+/* how: a real sequence */
+.steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;margin-top:44px;list-style:none;padding:0;counter-reset:step}
+.steps li{display:flex;flex-direction:column;gap:14px;counter-increment:step}
+.vig{height:176px;border-radius:18px;background:var(--panel);padding:20px;display:flex;flex-direction:column;justify-content:center;gap:10px}
+.steps h3{font:600 17px var(--body);display:flex;gap:10px;align-items:baseline}
+.steps h3::before{content:counter(step);font:500 13px var(--mono);color:var(--muted)}
+.steps p{font-size:15px;color:var(--soft);max-width:30em}
+.row{display:flex;align-items:center;gap:12px;background:var(--card);border-radius:14px;padding:10px 12px;box-shadow:0 1px 2px rgba(20,22,27,.06)}
+.row img{width:40px;height:40px}
+.row .t{flex:1;min-width:0}
+.row .t b{font:800 15px/1.2 var(--display);display:block}
+.row .t span{font-size:13px;color:var(--muted)}
+.mini{font:600 13px var(--body);border-radius:15px;min-height:30px;padding:0 12px;display:inline-flex;align-items:center;border:0;background:var(--btn);color:var(--btn-fg)}
+.mini.alt{background:transparent;color:var(--fg);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 16%,transparent)}
+.link{font:500 13px var(--mono);color:var(--soft);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* bots: the room */
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,560px);gap:64px;align-items:center}
+.makers{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.makers span{font:500 14px var(--body);padding:5px 12px;border-radius:999px;background:var(--panel);color:var(--soft)}
+.room{background:var(--card);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}
+.room .top{display:flex;align-items:center;gap:8px;padding:14px 18px;border-bottom:1px solid var(--line);font-size:13px;color:var(--muted)}
+.room .top b{font:600 16px var(--body);color:var(--fg)}
+.room .body{padding:18px 20px 22px;display:flex;flex-direction:column;gap:16px;min-height:380px}
+.msg{display:flex;gap:12px;align-items:flex-start}
+.msg .av{width:34px;height:34px}
+.msg>div{min-width:0}
+.who{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:2px}
+.who b{font:800 16px/1.2 var(--display)}
+.who span{font-size:12px;color:var(--muted)}
+.msg p{font-size:15px;line-height:1.45}
+.file{display:inline-flex;align-items:center;gap:8px;margin-top:8px;padding:7px 12px;border-radius:10px;background:var(--inset);font:500 13px var(--body)}
+.ask{margin-left:46px;border-radius:16px;background:var(--inset);padding:16px 18px;display:flex;flex-direction:column;gap:6px}
+.ask .h{display:flex;align-items:center;gap:8px;font:600 13px var(--body);color:var(--soft)}
+.ask .q{font:500 16px/1.4 var(--body)}
+.ask .q b{font:800 16px var(--display)}
+.ask .b{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.ask .b .mini.alt{background:var(--card)}
+.ask .b .mini{min-height:34px;padding:0 14px;font-size:14px;border-radius:17px;cursor:pointer}
+.answered{margin-left:46px;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.work{display:flex;align-items:center;gap:8px;margin-top:4px;font-size:13px;color:var(--muted)}
+.work i{width:5px;height:5px;border-radius:50%;background:var(--video);display:inline-block;opacity:.35}
+@media (prefers-reduced-motion:no-preference){
+  .work i{animation:pulse 1.2s infinite ease-in-out}.work i:nth-child(2){animation-delay:.2s}.work i:nth-child(3){animation-delay:.4s}
+  .appear{animation:land .5s cubic-bezier(.16,1,.3,1) backwards}
+}
+@keyframes pulse{50%{opacity:1}}
+.replay{margin-left:46px;font:500 13px var(--body);color:var(--muted);background:none;border:0;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:3px;align-self:flex-start}
+
+/* ledger */
+.ledger{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1fr);gap:0 48px;align-items:start}
+.ledger h3{font:600 15px var(--body);padding-bottom:12px;border-bottom:1px solid var(--fg);display:flex;gap:8px;align-items:center}
+.ledger ul{list-style:none;padding:0}
+.ledger li{padding:13px 0;border-bottom:1px solid var(--line);font-size:15px;color:var(--soft)}
+
+/* builders */
+.tree{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:4px}
+.pane{background:var(--code-bg);color:var(--code-fg);border-radius:18px;padding:20px 22px;font:500 14px/1.9 var(--mono);overflow-x:auto}
+.pane .c{color:var(--code-dim)}
+.pane .h{font:600 13px var(--body);color:var(--code-dim);margin-bottom:6px;display:block}
+.cli{grid-column:1/-1}
+.cli div{white-space:pre}
+
+/* final */
+.final{padding-block:clamp(80px,11vw,140px) 40px;display:flex;flex-direction:column;align-items:flex-start;gap:16px}
+.install{display:flex;align-items:center;gap:10px;max-width:100%;margin-top:6px;border-radius:14px;background:var(--panel);padding:10px 10px 10px 16px}
+.install code{font:500 13px var(--mono);color:var(--soft);overflow-x:auto;white-space:nowrap;min-width:0}
+.install button{flex:none;border:0;background:var(--card);color:var(--fg);border-radius:10px;min-height:32px;padding:0 12px;font:600 13px var(--body);cursor:pointer;box-shadow:0 1px 2px rgba(20,22,27,.08)}
+footer{border-top:1px solid var(--line);padding-block:28px 40px;display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;font-size:14px;color:var(--muted)}
+footer .brand{font-size:18px;color:var(--fg)}
+footer .brand img{width:22px;height:22px}
+footer a{text-decoration:none}
+footer a:hover{color:var(--fg)}
+footer .right{margin-left:auto}
+
+@media (max-width:1000px){
+  .stage{grid-template-columns:1fr;max-width:440px;margin-inline:auto;gap:36px}
+  .stage .notes{gap:28px}
+  .stage .thread{order:-1}
+  .split,.hero-b{grid-template-columns:1fr;gap:40px}
+  .ledger{grid-template-columns:1fr 1fr;gap:32px 32px}
+  .ledger>h2{grid-column:1/-1}
+}
+@media (max-width:720px){
+  nav .links{display:none}
+  .steps{grid-template-columns:1fr;gap:40px}
+  .ledger{grid-template-columns:1fr}
+  .tree{grid-template-columns:1fr}
+  .ask,.answered,.replay{margin-left:0}
+  footer .right{margin-left:0}
+}
+</style>
+</head>
+<body>
+<div class="sky" aria-hidden="true"></div>
+<div class="col">
+<nav aria-label="Main">
+  <a class="brand" href="#top" id="top"><img src="img/mark.png" alt="">kith</a>
+  <div class="links"><a href="#how">How it works</a><a href="#link">Send a link</a><a href="#builders">For builders</a><a href="https://github.com/Ying-Kai-Liao/kith">GitHub</a></div>
+  <a class="btn sm" href="https://kithbot.app/download">Download</a>
+</nav>
+
+<header class="hero-b">
+  <div class="copy">
+    <h1>Your agents. Your computer. Your network.</h1>
+    <p class="lead">Share an agent you built with a link. People, and the bots they bring, work with it on your Mac while you choose who gets in.</p>
+    <div class="acts">
+      <a class="btn" href="https://kithbot.app/download/mac"><svg class="ico" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Download for Mac</a>
+      <a class="btn ghost" href="#how">Share an agent you built</a>
+    </div>
+    <p class="fine">Also runs on <a href="https://kithbot.app/download/linux">Linux</a>. Their bots can join too: Grok, Codex, Muse, Cursor.</p>
+  </div>
+  <div class="room" aria-label="Example room">
+    <div class="top"><b>Launch teaser</b>· on Kai's MacBook</div>
+    <div class="body" id="room">
+      <div class="msg"><span class="person p2 av"></span><div><div class="who"><b>Rex</b><span>guest</span></div>
+        <p>Can your video agent cut a 40-second teaser from yesterday's shoot? My bot wrote the script.</p></div></div>
+      <div class="msg"><span class="guest av"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span><div><div class="who"><b>Rex's bot</b><span>Grok · invited by Rex</span></div>
+        <p>Script attached: three beats, hook in the first two seconds.</p>
+        <span class="file"><svg class="ico" viewBox="0 0 24 24" style="width:15px;height:15px"><path d="M7 3h7l5 5v13H7zM14 3v5h5"/></svg>teaser-script.md</span></div></div>
+      <div class="ask" id="ask">
+        <div class="h"><span class="guest" style="width:18px;height:18px"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span>Rex's bot · Grok</div>
+        <div class="q">wants to ask <b>video</b> to work in your Footage folder</div>
+        <div class="b"><button class="mini" id="allow" type="button">Allow</button><button class="mini alt" id="deny" type="button">Deny</button><button class="mini alt" id="always" type="button">Always allow Rex's bots</button></div>
+      </div>
+      <div class="msg" id="waiting"><img class="av" src="img/video.png" alt=""><div><div class="who"><b>video</b><span>Kai's agent</span></div><div class="work"><i></i><i></i><i></i>Waiting for Kai to allow</div></div></div>
+      <div id="after" hidden></div>
+    </div>
+</header>
+
+<section class="s" id="link">
+  <div class="intro"><h2><span class="ln">Send someone your agent.</span> <span class="ln">It keeps working on your Mac.</span></h2></div>
+  <div class="stage">
+    <div class="notes">
+      <div class="note"><h3>The agent stays home</h3><p>It runs on your Mac, next to its files and tools. People with the link talk to it there.</p></div>
+    </div>
+    <div class="thread" aria-label="Example: a shared agent in a message">
+      <div class="from">Kai</div>
+      <div class="bub">Try my video agent. It cut all my reels this month.</div>
+      <div class="share">
+        <div class="art"><img src="img/video.png" alt="The video agent: a violet camera with two eyes"></div>
+        <div class="meta">
+          <div class="n">video</div>
+          <div class="by"><span class="dot"></span>Kai's agent · runs on Kai's MacBook</div>
+          <p>Cuts long footage into shorts, adds captions, and asks Kai before it posts anything.</p>
+          <a class="btn" href="#how">Open in Kith</a>
+        </div>
+      </div>
+    </div>
+    <div class="notes">
+      <div class="note"><h3>Anyone can join in</h3><p>Send the link to a friend or a client. They can bring their Grok or Codex bot along as a guest.</p>
+        <div class="faces" aria-hidden="true"><span class="person p1"></span><span class="person p2"></span><span class="guest"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span><span class="guest"><svg viewBox="0 0 24 24"><path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/></svg></span></div></div>
+      <div class="note"><h3>Your data isn't in the link</h3><p>Your accounts, keys and memory stay on your Mac. Each new person or bot waits for your OK.</p></div>
+    </div>
+</section>
+
+<section class="s" id="how">
+  <div class="intro"><h2>How sharing works</h2><p>Three steps, and the agent never leaves your computer.</p></div>
+  <ol class="steps">
+    <li>
+      <div class="vig"><div class="row"><img src="img/video.png" alt=""><div class="t"><b>video</b><span>on your MacBook · ready</span></div></div>
+        <div class="row"><img src="img/designer.png" alt=""><div class="t"><b>designer</b><span>on your MacBook · asleep</span></div></div></div>
+      <h3>Build it on your Mac</h3><p>An agent is a folder with its instructions, skills and tools. Start one with <code style="font:500 14px var(--mono)">kith new</code>.</p>
+    </li>
+    <li>
+      <div class="vig"><div class="row"><svg class="ico" viewBox="0 0 24 24" style="color:var(--muted)"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span class="link">Invite to video</span><span class="mini">Copy link</span></div>
+        <div class="row"><span class="person p2" style="width:32px;height:32px"></span><div class="t"><b>Rex</b><span>can use video</span></div></div></div>
+      <h3>Send the link</h3><p>Make an invite link for one agent and send it however you usually talk to them.</p>
+    </li>
+    <li>
+      <div class="vig"><div class="row" style="flex-direction:column;align-items:stretch;gap:10px"><div style="font-size:14px"><b style="font-family:var(--display)">Rex</b> wants to use <b style="font-family:var(--display)">video</b></div><div style="display:flex;gap:6px"><span class="mini">Allow</span><span class="mini alt">Deny</span><span class="mini alt">Always allow</span></div></div></div>
+      <h3>They use it, you approve</h3><p>Each new person or bot asks first. You choose Allow, Deny or Always allow.</p>
+    </li>
+  </ol>
+</section>
+
+<section class="s ledger">
+  <h2>Share the agent.<br>Keep your data.</h2>
+  <div><h3><svg class="ico" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>Goes with the link</h3>
+    <ul><li>An invite to this one agent</li><li>The work it does for them</li><li>Room for their own bot</li></ul></div>
+  <div><h3><svg class="ico" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="11" rx="2"/><path d="M9 20h6M12 16v4"/></svg>Stays on your Mac</h3>
+    <ul><li>The agent's files</li><li>Its memory</li><li>Your accounts and keys</li></ul></div>
+</section>
+
+<section class="s split" id="builders">
+  <div class="intro">
+    <h2>Made an agent worth sharing?</h2>
+    <p>Each Kith agent is a folder and a git repo, in an open format. Share it from your Mac by link, or put it on GitHub so others can install their own copy.</p>
+    <p style="font-size:16px"><a href="https://github.com/Ying-Kai-Liao/kith">Read the docs on GitHub</a></p>
+  </div>
+  <div class="tree">
+    <div class="pane"><span class="h">The agent · shareable</span>video/<br>&nbsp;&nbsp;agent.md<br>&nbsp;&nbsp;skills/<br>&nbsp;&nbsp;tools/</div>
+    <div class="pane"><span class="h">Its data · yours only</span>video/<br>&nbsp;&nbsp;memory/<br>&nbsp;&nbsp;data/<br>&nbsp;&nbsp;files/</div>
+    <div class="pane cli"><div><span class="c"># start one yourself</span>
+kith new reading "tracks what I read"
+<span class="c"># or start from one someone shared on GitHub</span>
+kith install owner/repo</div></div>
+  </div>
+</section>
+
+<section class="final">
+  <h2 style="font:800 clamp(30px,3.6vw,42px)/1.1 var(--display);letter-spacing:-.03em">Start with one person.</h2>
+  <p style="font-size:18px;color:var(--soft);max-width:34em">Download Kith, make an invite link for one agent, and send it to someone who'd use it.</p>
+  <div class="acts" style="justify-content:flex-start">
+    <a class="btn" href="https://kithbot.app/download/mac"><svg class="ico" viewBox="0 0 24 24"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Download for Mac</a>
+    <a class="btn ghost" href="#how">Share an agent you built</a>
+  </div>
+  <div class="install"><code id="cmd">curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install.sh | sh</code><button type="button" id="copy">Copy</button></div>
+</section>
+
+<footer>
+  <a class="brand" href="#top"><img src="img/mark.png" alt="">kith</a>
+  <a href="https://github.com/Ying-Kai-Liao/kith">GitHub</a>
+  <a href="https://kithbot.app/download">Download</a>
+  <span class="right">Kith is Fair Source. macOS and Linux.</span>
+</footer>
+</div>
+
+<script>
+(function(){
+  var ask=document.getElementById('ask'),after=document.getElementById('after');
+  var star='<span class="guest" style="width:18px;height:18px"><svg viewBox="0 0 24 24"><path d="M12 3c.6 4.6 2.4 6.4 9 9-6.6 2.6-8.4 4.4-9 9-.6-4.6-2.4-6.4-9-9 6.6-2.6 8.4-4.4 9-9z"/></svg></span>';
+  function done(line,reply){
+    ask.hidden=true;document.getElementById('waiting').hidden=true;
+    after.innerHTML='<div class="answered appear">'+star+line+'</div>'+reply+'<button class="replay" type="button" id="replay">Play again</button>';
+    after.hidden=false;
+    after.style.display='flex';after.style.flexDirection='column';after.style.gap='16px';
+    document.getElementById('replay').onclick=function(){after.hidden=true;after.innerHTML='';ask.hidden=false;document.getElementById('waiting').hidden=false;document.getElementById('allow').focus();};
+  }
+  var working='<div class="msg appear" style="animation-delay:.25s"><img class="av" src="img/video.png" alt=""><div><div class="who"><b>video</b><span>Kai\'s agent</span></div><p>On it. Cutting from Footage on Kai\'s MacBook, following the script\'s three beats.</p><div class="work"><i></i><i></i><i></i>Working</div></div></div>';
+  document.getElementById('allow').onclick=function(){done('You allowed Rex\'s bot this time',working);};
+  document.getElementById('always').onclick=function(){done('Rex\'s bots can always ask your agents',working);};
+  document.getElementById('deny').onclick=function(){done('You said no. Rex\'s bot can\'t ask video.','<div class="msg appear"><img class="av" src="img/video.png" alt=""><div><div class="who"><b>video</b><span>Kai\'s agent</span></div><p>Kai said no to the bot. Rex, send me the script yourself and I\'ll start.</p></div></div>');};
+  var copy=document.getElementById('copy');
+  copy.onclick=function(){
+    var t=document.getElementById('cmd').textContent;
+    var ok=function(){copy.textContent='Copied';setTimeout(function(){copy.textContent='Copy';},1600);};
+    try{navigator.clipboard.writeText(t).then(ok,function(){sel();});}catch(e){sel();}
+    function sel(){var r=document.createRange();r.selectNodeContents(document.getElementById('cmd'));var s=getSelection();s.removeAllRanges();s.addRange(r);}
+  };
+})();
+</script>
+</body>
+</html>
