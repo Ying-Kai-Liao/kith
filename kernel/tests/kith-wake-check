@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# kith-wake-check — the kernel's wake queue: dedupe by id (rule 13), one item and one turn per session (S5), a request
+# leaves only when its turn ends (W2), a held writer keeps it owed, a dead deliverer is answered or owed again from the
+# transcript (at most once, never lost), Stop withdraws what is owed, a person's wake stays theirs.
+#
+#   kernel/tests/kith-wake-check     a few seconds; prints each check, exits 1 when one fails
+#
+# bin/kith is a stub (KITH_WAKE_KITH) that writes the note into a fake transcript the way claude would. Nothing touches
+# the real ~/.kith or ~/.claude.
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-wake-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_LOGS=$T/logs CLAUDE_CONFIG_DIR=$T/claude KITH_WAKE_NO_KICK=1
+unset KITH_PERSON KITH_AGENT KITH_ROOM KITH_RESUME HQ_HOME HQ_STATE
+mkdir -p "$HOME" "$KITH_STATE/live/terminal" "$CLAUDE_CONFIG_DIR/projects/p"
+W=$KERNEL/bin/kith-wake
+TR=$CLAUDE_CONFIG_DIR/projects/p
+cat > "$T/kith" <<'STUB'
+#!/bin/sh
+# stub: kith <agent> --resume <sid> <note>. STUB_MODE: ok (the note reaches the transcript), held (refused, a writer has it),
+# fail (exits 1 before the session saw anything), late (the session saw it, then the run failed)
+agent=$1 sid=$3 note=$4
+{ printf '%s|%s|%s|' "$agent" "$sid" "${KITH_VIA:-}"; printf '%s' "${KITH_PERSON:-}"; printf '\n'; } >> "$KITH_STATE/stub-calls"
+printf '%s' "$note" > "$KITH_STATE/stub-note"
+case ${STUB_MODE:-ok} in
+  held) echo "kith: that session is open in another writer (pid 1, terminal); close it first" >&2; exit 1 ;;
+  fail) echo "kith: claude crashed" >&2; exit 1 ;;
+esac
+printf '{"type":"user","message":{"content":%s}}\n' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$note")" >> "$CLAUDE_CONFIG_DIR/projects/p/$sid.jsonl"
+[ "${STUB_MODE:-ok}" = late ] && exit 1
+exit 0
+STUB
+chmod +x "$T/kith"
+export KITH_WAKE_KITH=$T/kith
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+is() { [[ $2 == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
+owed() {   # owed <session>: how many requests the queue holds for it
+  python3 "$W" ls --json | python3 -c 'import json,sys; s=sys.argv[1]; print(sum(len(i["requests"]) for i in json.load(sys.stdin) if i["session"]==s))' "$1"
+}
+how() {    # how <id>: what became of it (answered, withdrawn, recovered, failed), empty if still open
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], {}).get("how", ""))' "$KITH_STATE/sessions/queue/answered.json" "$1" 2>/dev/null
+}
+field() { python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2]) or "")' "$1" "$2"; }
+dead_pid() { python3 -c 'import os; print(os.getpid())'; }
+
+# --- dedupe and merge (rule 13, S5) ---------------------------------------------------------------------------------
+is "a first request is queued" "$(python3 "$W" enqueue s1 --id card:1 --agent designer --why 'card answered' -- yes, go)" queued
+is "the same id again is dropped" "$(python3 "$W" enqueue s1 --id card:1 --agent designer -- yes, go)" duplicate
+is "another id for the session merges" "$(python3 "$W" enqueue s1 --id ci:r#4@abc --agent designer --why 'CI finished' -- green)" merged
+is "one item, two requests" "$(owed s1)" 2
+is "the same id for another session is still a duplicate" "$(python3 "$W" enqueue s9 --id card:1 --agent designer -- x)" duplicate
+python3 "$W" enqueue s1 --id x:1 --agent coder -- x >/dev/null 2>&1; is "another agent on the session is refused" "$?" 1
+python3 "$W" enqueue s1 --id x:2 --agent designer --person anna --door host -- x >/dev/null 2>&1
+is "another person on the session is refused" "$?" 1
+python3 "$W" enqueue s2 --id x:3 --agent designer --person anna -- x >/dev/null 2>&1
+is "a person's wake through the run door is refused (only the host has their token)" "$?" 1
+
+# --- the run door: one turn carries both, and they leave when it ends (W2) -------------------------------------------
+python3 "$W" deliver s1; is "deliver: the turn ran" "$?" 0
+is "the stub ran once, as the owner, via wake" "$(cat "$KITH_STATE/stub-calls")" "designer|s1|wake|"
+note=$(cat "$KITH_STATE/stub-note")
+[[ $note == "[kith wake "*"2 things happened"*"1. card answered: yes, go"*"2. CI finished: green" ]] && ok "one note holds both" || bad "merged note" "$note"
+is "nothing owed after the turn" "$(owed s1)" 0
+is "the card id is answered" "$(how card:1)" answered
+is "a duplicate after the answer is dropped" "$(python3 "$W" enqueue s1 --id card:1 --agent designer -- again)" duplicate
+is "the item file is gone" "$(find "$KITH_STATE/sessions/queue" -name '*.json' ! -name answered.json | wc -l | tr -d ' ')" 0
+
+# --- a writer holds the session: the wake waits (a reply to a terminal's session) ------------------------------------
+python3 "$W" enqueue s2 --id reply:1 --agent designer -- the answer >/dev/null
+sleep 30 & holder=$!
+python3 - "$KITH_STATE/live/terminal/s2.claim" "$holder" <<'PY'
+import json, os, subprocess, sys
+start = ' '.join(subprocess.run(['ps', '-o', 'lstart=', '-p', sys.argv[2]], capture_output=True, text=True,
+                                env={**os.environ, 'LC_ALL': 'C'}).stdout.split())
+json.dump({'pid': int(sys.argv[2]), 'procStart': start, 'kind': 'terminal'}, open(sys.argv[1], 'w'))
+PY
+is "drain leaves a held session alone" "$(python3 "$W" drain)" ""
+python3 "$W" deliver s2
+is "deliver refuses a held session too" "$(owed s2)/$(wc -l < "$KITH_STATE/stub-calls" | tr -d ' ')" "1/1"
+kill $holder 2>/dev/null; wait $holder 2>/dev/null
+is "once the terminal is gone, drain delivers" "$(python3 "$W" drain)" "delivering s2"
+for _ in $(seq 50); do [[ $(owed s2) == 0 ]] && break; sleep 0.1; done
+is "the reply reached the session" "$(owed s2)/$(how reply:1)" "0/answered"
+
+# --- a restart between enqueue and delivery (W2): the request is in the files, delivered once ------------------------
+python3 "$W" enqueue s4 --id restart:1 --agent designer -- after the restart >/dev/null
+calls=$(wc -l < "$KITH_STATE/stub-calls" | tr -d ' ')
+is "after a restart, the first drain delivers it" "$(python3 "$W" drain)" "delivering s4"
+for _ in $(seq 50); do [[ $(owed s4) == 0 ]] && break; sleep 0.1; done
+is "the next drain doesn't deliver it again" "$(python3 "$W" drain)/$(how restart:1)" "/answered"
+is "one turn ran" "$(( $(wc -l < "$KITH_STATE/stub-calls" | tr -d ' ') - calls ))" 1
+
+# --- refused and failed turns ---------------------------------------------------------------------------------------
+python3 "$W" enqueue s3 --id w:1 --agent designer -- one >/dev/null
+STUB_MODE=held python3 "$W" deliver s3
+is "a refused claim is owed again, not a failed try" "$(owed s3)/$(python3 "$W" ls --json | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["tries"])')" "1/0"
+STUB_MODE=fail python3 "$W" deliver s3
+is "a run that failed before the session saw it is owed again" "$(owed s3)/$(how w:1)" "1/"
+is "and waits before the next try" "$(python3 "$W" drain)" ""
+python3 - "$KITH_STATE/sessions/queue" <<'PY'
+import json, pathlib, sys
+for f in pathlib.Path(sys.argv[1]).glob('*.json'):
+    if f.name != 'answered.json':
+        it = json.loads(f.read_text()); it['next'] = 0; f.write_text(json.dumps(it))
+PY
+STUB_MODE=late python3 "$W" deliver s3
+is "a run that failed after the session saw the note is answered (at most once)" "$(owed s3)/$(how w:1)" "0/answered, exit 1"
+
+# --- the host door: take, merge while running, done -------------------------------------------------------------------
+python3 "$W" enqueue acp:c1:t1 --id card:7 --agent designer --person anna --room r1 --door host --why 'card answered' -- allowed >/dev/null
+turn=$(python3 "$W" take --holder $$)
+run=$(field "$turn" run)
+is "take: the person and room of the wake" "$(field "$turn" person)/$(field "$turn" room)" "anna/r1"
+is "take twice: nothing more to start" "$(python3 "$W" take --holder $$ >/dev/null; echo $?)" 1
+is "a request during the turn merges into the item" "$(python3 "$W" enqueue acp:c1:t1 --id card:8 --agent designer --person anna --door host -- later)" merged
+is "Stop doesn't take back what the running turn holds" "$(python3 "$W" withdraw acp:c1:t1 --id card:7)" "withdrew 0"
+python3 "$W" done "$run"
+is "done: the turn's request is answered, the newer one still owed" "$(how card:7)/$(owed acp:c1:t1)" "answered/1"
+is "Stop withdraws what is owed" "$(python3 "$W" withdraw acp:c1:t1)" "withdrew 1"
+is "a withdrawn id coming back is dropped" "$(python3 "$W" enqueue acp:c1:t1 --id card:8 --agent designer --person anna --door host -- later)" duplicate
+
+# --- the deliverer died (host or Mac restart): answered from the transcript, or owed again ---------------------------
+python3 "$W" enqueue acp:c2:t1 --id card:9 --agent designer --door host -- seen >/dev/null
+gone=$(dead_pid)
+turn=$(python3 "$W" take --holder "$gone" --sid s5)
+printf '{"type":"user","message":{"content":"%s"}}\n' "[kith wake $(field "$turn" run)] seen" > "$TR/s5.jsonl"
+python3 "$W" drain >/dev/null
+is "a dead turn whose note reached the session is answered, not sent twice" "$(how card:9)/$(owed acp:c2:t1)" "recovered/0"
+python3 "$W" enqueue acp:c3:t1 --id card:10 --agent designer --door host -- unseen >/dev/null
+python3 "$W" take --holder "$gone" --sid s6 >/dev/null
+python3 "$W" drain >/dev/null
+again=$(python3 "$W" take --holder $$ --session acp:c3:t1 2>/dev/null)
+[[ -z $again ]] && ok "a dead turn the session never saw waits its pause" || bad "no pause after a dead turn" "$again"
+is "and is still owed, not lost" "$(owed acp:c3:t1)/$(how card:10)" "1/"
+is "its dead turn was let go" "$(python3 "$W" ls --json | python3 -c 'import json,sys; print([(i["turn"], i["tries"]) for i in json.load(sys.stdin) if i["session"]=="acp:c3:t1"])')" "[(None, 1)]"
+
+# --- the tick drains ----------------------------------------------------------------------------------------------
+/usr/bin/grep -q "'kith-wake'\|bin/kith-wake" "$KERNEL/bin/kith-sched" && ok "kith-sched tick runs the drain" || bad "tick has no drain"
+
+[[ $fail == 0 ]] && echo "all kith-wake checks passed" || exit 1

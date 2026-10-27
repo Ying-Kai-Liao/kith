@@ -110,6 +110,7 @@ case $1 in
   bug)                shift; exec "$KITH/bin/kith-bug" "${@:---help}" ;;
   project)            shift; exec "$KITH/bin/kith-project" "$@" ;;
   schedule)           shift; exec "$KITH/bin/kith-sched" "${@:-ls}" ;;
+  wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   serve)              shift; exec "$KITH/bin/kith-serve" "${@:-help}" ;;
 esac

@@ -186,6 +186,8 @@ jobs:
         run: kernel/tests/kith-call-check
       - name: Ask check
         run: kernel/tests/kith-ask-check
+      - name: Wake check
+        run: kernel/tests/kith-wake-check
       - name: Schedule person check
         run: kernel/tests/kith-sched-person-check
       - uses: oven-sh/setup-bun@v2
