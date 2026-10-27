@@ -129,7 +129,72 @@ struct EntrySpec {
     author: usize,
     /// 0 an ordinary card, 1 a key card, 2 an account card (cards/secret.rs).
     secret: usize,
+    /// Index into `TOOLS`: the tool the card asks for (its title, and the tool of its card-store row).
+    tool: usize,
+    /// The approver stored on the entry: 0 none (an older card), 1 member, 2 owner.
+    approver: usize,
+    /// Its row in the card store: none (an older card), an `acp` card of a chat turn, a `run` card of a `claude -p` run.
+    card: Option<CardSpec>,
 }
+
+/// A card-store row behind an entry (store/cards.rs).
+#[derive(Clone, Debug)]
+struct CardSpec {
+    run: bool,
+    /// Whose run it was: 0 and 1 the people, 2 a bot guest's person (see `Ids::card_person`), 3 nobody we know.
+    person: usize,
+    /// The approver the host stored when it made the card (`cards::approver_of`).
+    member: bool,
+    agent: usize,
+}
+
+/// One tool a card can ask for, labelled with what the F11 rules make of it. The labels are the rule, written here, not
+/// read back from `roles`: `code` (step 1: runs code, or the host can't see into it), `outside` (step 2a: it names a file
+/// outside every grant folder of the run; the test home has none, so every named file is outside), `escape` (step 2b: an
+/// escape card, whose yes widens the run's next activation), `secret` (a key or account request, cards/secret.rs).
+struct Tool {
+    name: &'static str,
+    kind: &'static str,
+    input: &'static str,
+    code: bool,
+    outside: bool,
+    escape: bool,
+    secret: bool,
+}
+
+const fn tool(name: &'static str, kind: &'static str, input: &'static str, code: bool, outside: bool) -> Tool {
+    Tool { name, kind, input, code, outside, escape: false, secret: false }
+}
+
+const TOOLS: [Tool; 11] = [
+    tool("", "fetch", "{}", false, false),
+    tool("WebFetch", "fetch", r#"{"url":"https://example.com"}"#, false, false),
+    tool("Read", "read", r#"{"file_path":"/etc/hosts"}"#, false, true),
+    tool("Edit", "edit", r#"{"file_path":"/Users/someone/notes.txt","old_string":"a","new_string":"b"}"#, false, true),
+    tool("BashOutput", "execute", r#"{"bash_id":"1"}"#, false, false),
+    tool("Bash", "execute", r#"{"command":"true"}"#, true, false),
+    tool("mcp__x__y", "other", "{}", true, false),
+    tool("", "other", "{}", true, false),
+    tool("Grep", "execute", r#"{"pattern":"x"}"#, true, false),
+    Tool {
+        name: crate::cards::access::TOOL,
+        kind: "other",
+        input: r#"{"kind":"path","target":"read /Users/someone/Documents"}"#,
+        code: false,
+        outside: false,
+        escape: true,
+        secret: false,
+    },
+    Tool {
+        name: crate::cards::secret::TOOL,
+        kind: "other",
+        input: "{}",
+        code: false,
+        outside: false,
+        escape: false,
+        secret: true,
+    },
+];
 
 const BOTS: usize = 4;
 
@@ -154,8 +219,29 @@ fn scenario() -> impl Strategy<Value = Scenario> {
         deleted,
         agent,
     });
-    let entry = (0..=BOTS, proptest::bool::weighted(0.7), 0..4usize, 0..3usize)
-        .prop_map(|(bot, permission, author, secret)| EntrySpec { bot, permission, author, secret });
+    let card = proptest::option::weighted(
+        0.6,
+        (proptest::bool::weighted(0.7), 0..4usize, any::<bool>(), 0..2usize)
+            .prop_map(|(run, person, member, agent)| CardSpec { run, person, member, agent }),
+    );
+    let entry = (
+        0..=BOTS,
+        proptest::bool::weighted(0.7),
+        0..4usize,
+        prop_oneof![6 => Just(0usize), 1 => 1..3usize],
+        0..TOOLS.len(),
+        0..3usize,
+        card,
+    )
+        .prop_map(|(bot, permission, author, secret, tool, approver, card)| EntrySpec {
+            bot,
+            permission,
+            author,
+            secret,
+            tool,
+            approver,
+            card,
+        });
     (
         0..3usize,
         [[ans(), ans()], [ans(), ans()]],
@@ -185,6 +271,17 @@ struct Ids {
     bots: Vec<String>,
     ghost: String,
     entries: Vec<String>,
+}
+
+/// The person a card's run was for (`CardSpec::person`): the first bot guest's person when the case has one.
+fn card_person(sc: &Scenario, bot_people: &[String], c: &CardSpec) -> String {
+    match c.person {
+        0 | 1 => PEOPLE[c.person].to_owned(),
+        2 => {
+            sc.bots.iter().position(|b| b.owner == 3).map_or_else(|| "bot-nobody".to_owned(), |i| bot_people[i].clone())
+        }
+        _ => "someone-else".to_owned(),
+    }
 }
 
 impl World {
@@ -251,8 +348,9 @@ impl World {
             }
         }
         let bots: Vec<String> = (0..sc.bots.len()).map(|i| format!("c{n}b{i}")).collect();
+        let bot_people: Vec<String> = (0..sc.bots.len()).map(|i| format!("bot-c{n}g{i}")).collect();
         for (i, (id, b)) in bots.iter().zip(&sc.bots).enumerate() {
-            let bot_person = format!("bot-c{n}g{i}");
+            let bot_person = bot_people[i].clone();
             let person = match b.owner {
                 0 => None,
                 3 => Some(bot_person.as_str()),
@@ -275,7 +373,11 @@ impl World {
                 2 => Some(json!(bots[(e.bot + 1) % bots.len()])),
                 _ => Some(json!(7)),
             };
-            let mut data = json!({"options": [{"optionId": "allow"}], "toolKind": "fetch"}); // not code: a member may answer
+            let t = &TOOLS[e.tool];
+            let mut data = json!({"options": [{"optionId": "allow"}], "toolKind": t.kind, "title": t.name});
+            if e.approver > 0 {
+                data["approver"] = json!(["", "member", "owner"][e.approver]);
+            }
             if e.secret > 0 {
                 data["card"] = json!(["", "key", "account"][e.secret]);
                 data["secret"] = json!({"service": "github", "vars": ["GITHUB_TOKEN"], "state": "pending"});
@@ -284,7 +386,30 @@ impl World {
                 data["author"] = a;
             }
             let kind = if e.permission { EntryKind::Permission } else { EntryKind::Notice };
-            entries.push(store.insert_entry(&Lane::main(&chat), kind, 1, &data).unwrap().id);
+            let id = store.insert_entry(&Lane::main(&chat), kind, 1, &data).unwrap().id;
+            if let Some(c) = &e.card {
+                let new = crate::store::NewCard {
+                    session: format!("s-{id}"),
+                    source: if c.run { "run" } else { "acp" },
+                    bot_id: (!c.run).then(|| chat.clone()),
+                    run_id: c.run.then(|| format!("r-{id}")),
+                    person: card_person(sc, &bot_people, c),
+                    agent: AGENTS[c.agent].to_owned(),
+                    approver: if c.member { "member" } else { "owner" },
+                    tool: t.name.to_owned(),
+                    input: t.input.to_owned(),
+                    resource: format!("k-{id}"),
+                    shown: String::new(),
+                    deadline: i64::MAX,
+                };
+                let card = match store.card_open(&new, 1).unwrap() {
+                    crate::store::Opened::New(c)
+                    | crate::store::Opened::Joined(c)
+                    | crate::store::Opened::Granted(c) => c,
+                };
+                store.card_live(&card.id, Some(&id), None).unwrap();
+            }
+            entries.push(id);
         }
         // After the entries: deleting a bot deletes its lines.
         for (id, b) in bots.iter().zip(&sc.bots) {
@@ -337,6 +462,7 @@ fn agent_index(name: &str) -> Option<usize> {
 pub(super) fn router_methods() -> Vec<String> {
     let sources = [
         include_str!("bots.rs"),
+        include_str!("calls.rs"),
         include_str!("cards.rs"),
         include_str!("host.rs"),
         include_str!("folders.rs"),
@@ -503,12 +629,36 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
     let chat = if by_entry(method) {
         let entry = world.hub.store.entry(body["entryId"].as_str().unwrap_or_default());
         let Some(entry) = entry else { return Err(fail("guard let an unknown entry through")) };
+        let spec = &sc.entries[call.entry];
+        let t = &TOOLS[spec.tool];
         if roles::secret_card(&entry.data) {
             return Err(fail(format!("{method} let a member through for a key or account card")));
+        }
+        if spec.card.is_some() && t.secret {
+            return Err(fail(format!(
+                "{method} let a member through for a card whose card-store tool is a key request"
+            )));
         }
         if method == "respondPermission" {
             if entry.kind != "permission" {
                 return Err(fail("respondPermission let through for a card that is not a permission request"));
+            }
+            // (21) The card of a `claude -p` run names whose run it was; the chat it shows in says nothing.
+            if let Some(c) = spec.card.as_ref().filter(|c| c.run) {
+                return check_run_card(world, sc, call, &entry.id, c, t);
+            }
+            // (22) F11 step 1: a tool that runs code is the owner's to allow, whoever asked; and an approver stored as
+            // the owner (`cards::approver_of`: a file outside the run's grants, a guest's run) stays the owner's.
+            if t.code {
+                return Err(fail(format!(
+                    "respondPermission let {me} allow {:?} ({}), which runs code",
+                    t.name, t.kind
+                )));
+            }
+            if spec.approver == 2 {
+                return Err(fail(format!(
+                    "respondPermission let {me} answer a card stored with the owner as approver"
+                )));
             }
             if let Some(a) = entry.data["author"].as_str()
                 && a != entry.bot_id
@@ -578,6 +728,53 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
     Ok(())
 }
 
+/// (21) Who may answer the card of a `claude -p` run. A member answers their own run's card when the host stored them as
+/// its approver. A bot guest's owner answers their bot's card (docs/kith-bot-guests.md 7.6) only for what they could answer
+/// for their own run: not code (F11 step 1), not a file outside the bot's grant folders (step 2a: `cards::approver_of`,
+/// "a file outside the run's grants is the owner's to allow, whoever the run is for"), and not an escape card (step 2b:
+/// its yes widens the bot's next activation past its box, and a bot never gets more than its owner holds, which
+/// `kith-auth access` enforces for an always and nothing enforces for a once). Either way only while kith-auth says
+/// member now (A7).
+fn check_run_card(
+    w: &World,
+    sc: &Scenario,
+    call: &CallSpec,
+    entry: &str,
+    c: &CardSpec,
+    t: &Tool,
+) -> Result<(), TestCaseError> {
+    let me = PEOPLE[call.person];
+    let member = sc.grants[call.person][c.agent].member();
+    let whose = w.hub.store.card_by_entry(entry).map(|card| card.person).unwrap_or_default();
+    let own = whose == me && c.member;
+    let their_bot = w.hub.store.bot_guest_of_person(&whose).is_some_and(|g| g.owner_person.as_deref() == Some(me));
+    if t.code {
+        return Err(fail(format!("{me} allowed {:?} ({}) on a run card: it runs code", t.name, t.kind)));
+    }
+    if !member {
+        return Err(fail(format!("{me} answered a run card of {} without being a member of it now", AGENTS[c.agent])));
+    }
+    if own {
+        return Ok(());
+    }
+    if !their_bot {
+        return Err(fail(format!("{me} answered a run card of someone else's run ({c:?})")));
+    }
+    if t.escape {
+        return Err(fail(format!(
+            "{me} answered their bot guest's escape card ({}): its yes widens the bot's next run past what {me} holds",
+            t.name
+        )));
+    }
+    if t.outside {
+        return Err(fail(format!(
+            "{me} answered their bot guest's {} card for a file outside the bot's grant folders ({}): the owner's to allow",
+            t.name, t.input
+        )));
+    }
+    Ok(())
+}
+
 /// A read of the chat of a bot guest the person owns: held by that ownership, not by the agent grant (the chat of an
 /// ended bot stays readable to its owner).
 fn reads_bot_guest_chat(w: &World, me: &str, method: &str, b: &Value) -> bool {
@@ -637,12 +834,22 @@ fn guard_never_lets_a_person_past_their_grant() {
         .unwrap();
 }
 
+/// A plain card (no tool named, kind fetch, no approver stored, no card-store row) for the hand-written cases.
+fn entry(bot: usize, permission: bool, author: usize, secret: usize) -> EntrySpec {
+    EntrySpec { bot, permission, author, secret, tool: 0, approver: 0, card: None }
+}
+
 /// Soundness alone passes a guard that refuses everything: these calls must get through.
 #[test]
 fn guard_lets_a_granted_member_use_their_own_chat() {
     let w = World::new();
+    let run = |person: usize, member: bool, tool: usize| EntrySpec {
+        tool,
+        card: Some(CardSpec { run: true, person, member, agent: 0 }),
+        ..entry(0, true, 1, 0)
+    };
     let sc = Scenario {
-        bot_owner: 0,
+        bot_owner: 1,
         grants: [[Ans::Member, Ans::Guest], [Ans::Denied(false), Ans::Denied(false)]],
         people: [Some(PersonSpec { agents: [1, 1], projects: [true, false] }), None],
         bots: vec![
@@ -651,14 +858,35 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
             BotSpec { owner: 2, deleted: false, agent: 1 },
             BotSpec { owner: 0, deleted: false, agent: 1 },
             BotSpec { owner: 1, deleted: true, agent: 1 },
+            BotSpec { owner: 3, deleted: false, agent: 1 },
         ],
         entries: vec![
-            EntrySpec { bot: 0, permission: true, author: 1, secret: 0 },
-            EntrySpec { bot: 1, permission: true, author: 0, secret: 0 },
-            EntrySpec { bot: 0, permission: false, author: 1, secret: 0 },
-            EntrySpec { bot: 0, permission: true, author: 2, secret: 0 },
-            EntrySpec { bot: 0, permission: true, author: 1, secret: 1 },
-            EntrySpec { bot: 0, permission: true, author: 0, secret: 2 },
+            entry(0, true, 1, 0),
+            entry(1, true, 0, 0),
+            entry(0, false, 1, 0),
+            entry(0, true, 2, 0),
+            entry(0, true, 1, 1),
+            entry(0, true, 0, 2),
+            // 6..: cards of `claude -p` runs (a1, where p1 is a member), and tool rules on chat cards.
+            run(0, true, 1),
+            run(0, true, 5),
+            run(0, false, 1),
+            run(1, true, 1),
+            run(2, false, 1),
+            run(2, false, 5),
+            EntrySpec { tool: 5, ..entry(0, true, 1, 0) },
+            EntrySpec { tool: 1, approver: 2, ..entry(0, true, 1, 0) },
+            EntrySpec {
+                tool: 10,
+                card: Some(CardSpec { run: false, person: 0, member: true, agent: 0 }),
+                ..entry(0, true, 1, 0)
+            },
+            EntrySpec {
+                tool: 1,
+                approver: 1,
+                card: Some(CardSpec { run: false, person: 0, member: true, agent: 0 }),
+                ..entry(0, true, 1, 0)
+            },
         ],
     };
     let ids = w.load(&sc);
@@ -682,6 +910,22 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
         }
     }
     assert!(go("send", json!({"botId": ids.bots[4]})).is_err(), "a deleted chat");
+    let answer = |i: usize| go("respondPermission", json!({"entryId": ids.entries[i]}));
+    assert!(answer(6).is_ok(), "a member answers their own run's card");
+    assert!(answer(7).is_err(), "Bash on their own run's card is the owner's (F11 step 1)");
+    assert!(answer(8).is_err(), "a run card stored with the owner as approver");
+    assert!(answer(9).is_err(), "another person's run card");
+    assert!(answer(10).is_ok(), "the bot guest's owner answers its WebFetch card (7.6)");
+    assert!(answer(11).is_err(), "Bash on their bot's run card is the owner's");
+    assert!(answer(12).is_err(), "Bash in their own chat is the owner's");
+    assert!(answer(13).is_err(), "a chat card stored with the owner as approver");
+    for m in ["respondPermission", "react", "editHandoff", "keepConversation"] {
+        assert!(
+            go(m, json!({"entryId": ids.entries[14]})).is_err(),
+            "{m} on a card whose card-store tool asks for a key"
+        );
+    }
+    assert!(answer(15).is_ok(), "a chat card with a member approver and its card-store row");
     // Every method off the member list is refused, one by one (a random draw hits a single method too rarely).
     for m in router_methods().iter().filter(|m| !MEMBER_METHODS.contains(&m.as_str())) {
         let body = json!({"botId": ids.bots[0], "entryId": ids.entries[0]});
@@ -703,11 +947,23 @@ fn kith_auth_answers_fail_closed() {
     all.extend((0..OTHER_PRESETS.len()).map(Ans::Other));
     for a in all {
         w.write_grants(&[[a.clone(), Ans::Fail], [Ans::Fail, Ans::Fail]]);
-        let (may, approves) = w.rt.block_on(async {
-            (roles::may_use("p1", "a1").await, roles::approves_own("p1", "a1", "Edit", "edit").await)
+        let (may, checked, approves, code) = w.rt.block_on(async {
+            (
+                roles::may_use("p1", "a1").await,
+                roles::may_use_checked("p1", "a1").await,
+                roles::approves_own("p1", "a1", "Edit", "edit").await,
+                roles::approves_own("p1", "a1", "Bash", "execute").await,
+            )
         });
         assert_eq!(may, a.allowed(), "may_use for {a:?}");
+        // The checked form says yes exactly when may_use does, and "couldn't ask" (never yes) when kith-auth gave no
+        // answer or named the owner: a caller that retries on None must not take it as a grant.
+        assert_eq!(checked == Some(true), a.allowed(), "may_use_checked for {a:?}: {checked:?}");
+        if matches!(a, Ans::Fail | Ans::OwnerTrue) {
+            assert_eq!(checked, None, "may_use_checked for {a:?}");
+        }
         assert_eq!(approves, a.member(), "approves_own for {a:?}");
+        assert!(!code, "approves_own let a member allow Bash for {a:?}");
         // An agent or person the table doesn't list is a failure of kith-auth: denied.
         assert!(!w.rt.block_on(roles::may_use("p1", "a2")));
         assert!(!w.rt.block_on(roles::may_use("nobody", "a1")));

@@ -76,6 +76,7 @@ fn router_methods() -> BTreeSet<String> {
     let sources = [
         include_str!("bots.rs"),
         include_str!("calls.rs"),
+        include_str!("cards.rs"),
         include_str!("host.rs"),
         include_str!("folders.rs"),
         include_str!("backups.rs"),
