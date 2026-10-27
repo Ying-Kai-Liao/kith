@@ -50,6 +50,8 @@ async function call(path: string, body: unknown, signer?: typeof A, e = env, tam
   const headers: Record<string, string> = signer ? { "Kith-Sig": tamper(await signer.sign(url, text)) } : {};
   return worker.fetch(new Request(url, { method: "POST", body: text, headers }), e);
 }
+/** Status and whether the host is told to forget the ticket. */
+const answer = async (r: Response | Promise<Response>) => { const res = await r; return [res.status, (await res.json() as { gone?: boolean }).gone === true]; };
 const alertFor = (ticket: string, computerId = A.id) =>
   ({ ticket, alert: { title: "Kith", body: "Needs you" }, data: { botId: "bot", computerId, ctx: "local", sealed: "x" } });
 async function fcmTicket(token: string, computerId = A.id, e = env) {
@@ -80,24 +82,26 @@ console.log("registration tests ok");
 let r = await call("/push", alertFor(ticket), A, after);
 assert.equal(r.status, 200);
 assert.deepEqual(delivered, ["device-one-token-0123456789"]);
-// Another computer holding the ticket can't use it, even claiming to be A in the data.
-assert.equal((await call("/push", alertFor(ticket), B, after)).status, 403);
-assert.equal((await call("/push", alertFor(ticket), B)).status, 403);
+// Another computer holding the ticket can't use it, even claiming to be A in the data; it can never work for that
+// computer, so its host is told to forget it.
+assert.deepEqual(await answer(call("/push", alertFor(ticket), B, after)), [403, true]);
+assert.deepEqual(await answer(call("/push", alertFor(ticket), B)), [403, true]);
 // Signatures that don't verify: altered, over another body, outside the time window, unsigned after the grace window.
-assert.equal((await call("/push", alertFor(ticket), A, env, h => h.replace(/sig=(.)/, (_, c) => `sig=${c === "A" ? "B" : "A"}`))).status, 403);
-assert.equal((await call("/push", alertFor(ticket), A, env, h => h.replace(/ts=\d+/, `ts=${Date.now() - 600_000}`))).status, 403);
+// These are the request's fault, not the ticket's, so the ticket is kept.
+assert.deepEqual(await answer(call("/push", alertFor(ticket), A, env, h => h.replace(/sig=(.)/, (_, c) => `sig=${c === "A" ? "B" : "A"}`))), [403, false]);
+assert.deepEqual(await answer(call("/push", alertFor(ticket), A, env, h => h.replace(/ts=\d+/, `ts=${Date.now() - 600_000}`))), [403, false]);
 {
   const url = "https://relay.test/push";
   const header = await A.sign(url, JSON.stringify(alertFor(ticket, B.id)));
   const forged = await worker.fetch(new Request(url, { method: "POST", body: JSON.stringify(alertFor(ticket)), headers: { "Kith-Sig": header } }), env);
-  assert.equal(forged.status, 403);
+  assert.deepEqual(await answer(forged), [403, false]);
   const late = await A.sign(url, JSON.stringify(alertFor(ticket)), Date.now() - 600_000);
   const replayed = await worker.fetch(new Request(url, { method: "POST", body: JSON.stringify(alertFor(ticket)), headers: { "Kith-Sig": late } }), env);
-  assert.equal(replayed.status, 403);
+  assert.deepEqual(await answer(replayed), [403, false]);
 }
-assert.equal((await call("/push", alertFor(ticket), undefined, after)).status, 403);
-// A ticket altered by its holder doesn't open.
-assert.equal((await call("/push", alertFor(ticket.slice(0, -2) + (ticket.endsWith("AA") ? "BB" : "AA")), A)).status, 403);
+assert.deepEqual(await answer(call("/push", alertFor(ticket), undefined, after)), [403, false]);
+// A ticket altered by its holder doesn't open, and never will: forget it.
+assert.deepEqual(await answer(call("/push", alertFor(ticket.slice(0, -2) + (ticket.endsWith("AA") ? "BB" : "AA")), A)), [403, true]);
 // Expired: refused, and the host is told to forget it (410 + gone).
 const expired = await sealTicket(env, { p: "fcm", t: "device-one-token-0123456789", k: "alert", c: "local", h: A.id, x: now - 1 });
 r = await call("/push", alertFor(expired), A);
@@ -150,9 +154,12 @@ const other = await fcmTicket("b-device-token-0123456789", B.id);
 const stale = await sealTicket(env, { p: "fcm", t: "expired-device-token-012345", k: "alert", c: "local", h: A.id, x: now - 1 });
 const batch = { notifications: [alertFor(ticket), alertFor(other, B.id), alertFor(stale), { ticket: "invalid" }] };
 r = await call("/push-batch", batch, A, after);
-assert.deepEqual(await r.json(), { results: [{ index: 0, status: 200 }, { index: 1, status: 403 }, { index: 2, status: 410 }, { index: 3, status: 403 }] });
+assert.deepEqual(await r.json(), { results: [{ index: 0, status: 200 }, { index: 1, status: 403, gone: true },
+  { index: 2, status: 410, gone: true }, { index: 3, status: 403, gone: true }] });
 assert.deepEqual(delivered, ["device-one-token-0123456789"]);
-assert.equal((await call("/push-batch", batch, A, env, h => h.replace(/ts=\d+/, "ts=1"))).status, 403);
+assert.deepEqual(await answer(call("/push-batch", batch, A, env, h => h.replace(/ts=\d+/, "ts=1"))), [403, false]);
+// Unsigned after the grace window: the host's fault, so only the expired and invalid tickets are forgotten.
 r = await call("/push-batch", batch, undefined, after);
-assert.deepEqual((await r.json() as { results: Array<{ status: number }> }).results.map(x => x.status), [403, 403, 410, 403]);
+assert.deepEqual((await r.json() as { results: Array<{ status: number; gone?: boolean }> }).results.map(x => [x.status, x.gone === true]),
+  [[403, false], [403, false], [410, true], [403, true]]);
 console.log("batch binding tests ok");

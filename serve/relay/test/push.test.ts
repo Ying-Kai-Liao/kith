@@ -63,7 +63,7 @@ const batch = await pushBatch(new Request("https://relay.test/push-batch", {
 });
 assert.deepEqual(sent, ["current-key"]);
 assert.deepEqual(await batch.json(), { results: [
-  { index: 0, status: 200, superseded: true }, { index: 1, status: 200 }, { index: 2, status: 403 },
+  { index: 0, status: 200, superseded: true }, { index: 1, status: 200 }, { index: 2, status: 403, gone: true },
 ] });
 assert.equal((await request("/push-batch", { notifications: [] })).status, 400);
 console.log("physical device deduplication tests ok");

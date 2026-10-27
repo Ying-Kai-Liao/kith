@@ -7,7 +7,10 @@ hosts only ever see tickets (`POST /push`). Only the Worker can decrypt the raw 
 A ticket names the one computer the phone registered it for and expires (alerts 90 days, Live Activities 7; the
 phone mints a fresh one each time it connects). The host signs each push with its identity key (`Kith-Sig`, as
 for the cloud); the Worker derives the computer id from that key and refuses a ticket pushed by any other computer.
-An expired ticket answers 410 `gone`, so the host forgets it, as it does when APNs or FCM says the token is dead.
+A refusal that is about the ticket carries `gone: true` and the host forgets it: expired (410), invalid, or
+registered for another computer (403), as when APNs or FCM says the token is dead (410). A refusal that is the
+request's fault (bad signature, unsigned after the rollout window) is a 403 without `gone`, so no ticket is lost;
+neither is one on a provider 403, which is about the relay's own credentials.
 Pushes are limited to 60 a minute per device, counted in memory per Worker isolate (so per Cloudflare location).
 
 `LEGACY_TICKETS_UNTIL` (`wrangler.toml` `[vars]`) is the end of the rollout window: until then tickets from apps that

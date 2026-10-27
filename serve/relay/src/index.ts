@@ -246,14 +246,15 @@ export async function pusherOf(req: Request, body: Uint8Array, now = Date.now())
   return { computerId: b64url((await sha256(pub)).subarray(0, 16)) };
 }
 
-/** Why this pusher may not use this ticket now, or null. 410 tells the host to forget the ticket. */
+/** Why this pusher may not use this ticket now, or null. `gone: true` tells the host to forget the ticket: it can never
+ * work for this host. A refusal that is the request's fault (unsigned, bad signature) leaves it out, so no ticket is lost. */
 export function refusal(t: TicketPayload, who: Pusher, body: PushBody, env: Env, now = Date.now()): Response | null {
   const legacy = legacyOpen(env, now);
   if (t.x === undefined ? !legacy : t.x * 1000 <= now) return json({ error: "ticket expired", gone: true }, 410);
   if (who.computerId === undefined && !legacy) return json({ error: "push must be signed" }, 403);
   // Hosts from before signed pushes still say which computer they are in an alert's data.
   const claimed = who.computerId ?? body.data?.computerId;
-  if (t.h !== undefined && claimed !== undefined && claimed !== t.h) return json({ error: "ticket belongs to another computer" }, 403);
+  if (t.h !== undefined && claimed !== undefined && claimed !== t.h) return json({ error: "ticket belongs to another computer", gone: true }, 403);
   return null;
 }
 
@@ -290,7 +291,7 @@ async function push(req: Request, env: Env): Promise<Response> {
 
 export async function pushOne(body: PushBody | null, who: Pusher, env: Env, now = Date.now()): Promise<Response> {
   const t = typeof body?.ticket === "string" ? await openTicket(env, body.ticket) : null;
-  if (!body || !t) return json({ error: "invalid ticket" }, 403);
+  if (!body || !t) return json({ error: "invalid ticket", gone: true }, 403);
   const refused = refusal(t, who, body, env, now);
   if (refused) return refused;
   if (rateLimited(`${t.p ?? "apns"}:${t.t}`, now)) return json({ error: "too many pushes" }, 429);
@@ -392,10 +393,11 @@ export async function pushBatch(req: Request, env: Env, deliver = pushOne): Prom
     typeof notification?.ticket === "string" ? openTicket(env, notification.ticket) : null));
   const latest = latestTicketIndices(tickets);
   const results = await Promise.all(notifications.map(async (notification, index) => {
-    if (!tickets[index]) return { index, status: 403 };
+    if (!tickets[index]) return { index, status: 403, gone: true };
     if (!latest.has(index)) return { index, status: 200, superseded: true };
     const response = await deliver(notification, who, env);
-    return { index, status: response.status };
+    const reply = await response.clone().json().catch(() => null) as { gone?: unknown } | null;
+    return reply?.gone === true ? { index, status: response.status, gone: true } : { index, status: response.status };
   }));
   return json({ results });
 }
