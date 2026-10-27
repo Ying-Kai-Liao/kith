@@ -153,13 +153,41 @@ jobs:
       - name: Checksums
         run: cd dist && cat kith-*.tar.gz.sha256 > SHA256SUMS && cat SHA256SUMS
       - name: Homebrew formula
-        # The filled formula goes on the release; copying it into the tap repo is a manual step
-        # (packaging/homebrew/README.md).
+        # The filled formula goes on the release, and the tap step below copies it into the tap repo.
         run: sh scripts/update-formula.sh "${GITHUB_REF_NAME#v}" dist/SHA256SUMS > dist/kith.rb && cat dist/kith.rb
+      - name: Sign SHA256SUMS
+        # install-guest.sh checks this signature against the public key it carries (KITH_PUBKEY, the same as
+        # packaging/minisign.pub), so a swapped release can't pass with its own checksums. The key is the
+        # MINISIGN_SECRET_KEY secret (an unencrypted minisign secret key file).
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+        run: |
+          if [ -z "$MINISIGN_SECRET_KEY" ]; then
+            echo "::error::Repo secret MINISIGN_SECRET_KEY is missing, so SHA256SUMS can't be signed and install-guest.sh would refuse this release. Add it (packaging/README.md), then re-run this job."
+            exit 1
+          fi
+          sudo apt-get install -y -qq minisign >/dev/null
+          printf '%s\n' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/minisign.key"
+          minisign -S -s "$RUNNER_TEMP/minisign.key" -m dist/SHA256SUMS -t "kith $GITHUB_REF_NAME SHA256SUMS"
+          rm -f "$RUNNER_TEMP/minisign.key"
+          minisign -V -p packaging/minisign.pub -m dist/SHA256SUMS
+          minisign -V -P "$(sed -n 's/^KITH_PUBKEY=//p' scripts/install-guest.sh)" -m dist/SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.tar.gz
             dist/SHA256SUMS
+            dist/SHA256SUMS.minisig
             dist/kith.rb
           generate_release_notes: true
+      - name: Update the Homebrew tap
+        # Writes this release's kith.rb to Formula/kith.rb in Ying-Kai-Liao/homebrew-kith. HOMEBREW_TAP_TOKEN is a
+        # fine-grained token with Contents read/write on that repo only (packaging/homebrew/README.md).
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::Repo secret HOMEBREW_TAP_TOKEN is missing, so the tap still has the previous formula. Add it (packaging/homebrew/README.md) and re-run this job, or copy kith.rb from this release to Formula/kith.rb by hand."
+            exit 0
+          fi
+          sh scripts/update-tap.sh "${GITHUB_REF_NAME#v}" dist/kith.rb

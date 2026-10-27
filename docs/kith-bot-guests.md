@@ -1110,8 +1110,9 @@ name clash with the host's `kith` bin. `kith ask agent@machine` over ssh (`kerne
   closed; `sha256sum`, else `shasum -a 256`), installs `bin/kith` to `${KITH_GUEST_PREFIX:-$HOME/.local}/bin/kith` by writing a
   temp file and renaming, and prints a PATH hint when that directory isn't on `PATH`. Re-running upgrades. It needs only `curl`
   (or `wget`), `tar`, `sh`. Env: `KITH_VERSION`, `KITH_GUEST_PREFIX`, `KITH_REPO`, `KITH_INSTALL_TARBALL` (offline/tests, same as
-  `install.sh`). The checksum comes from the same release, so it detects corruption and a bad mirror, not a compromised
-  release; signing is a later step (open question 8).
+  `install.sh`). Built since: `SHA256SUMS` is signed with minisign in CI (`SHA256SUMS.minisig`, key in
+  `packaging/README.md`), and the installer checks it against the public key it carries (minisign, else OpenSSL 3) before
+  trusting the checksum, so a compromised release is refused too. `KITH_ALLOW_UNSIGNED=1` installs on the checksum alone.
 - `scripts/install.sh` (Mac) already refuses non-Darwin with a pointer to the repo; change that message to point at
   `install-guest.sh` for Linux VMs that only need the client.
 
@@ -1188,8 +1189,7 @@ Kai has a Grok bot account and offered to test. When P1-P5 are deployed to `kith
    answer"). Kai decides whether a silence is a no.
 7. **A revoked bot's memory.** Kept by default (like a removed person's, `end_access`), so re-joining the same bot (`botId` re-key)
    restores it. Alternative: delete on revoke.
-8. **Signing releases.** The installer checks SHA256 from the same release. Add minisign/cosign verification before more
-   providers use it?
+8. **Signing releases.** Settled 2026-10-27: minisign signs `SHA256SUMS` in CI and the installer verifies it (P5 above).
 
 ## 14. Edge cases
 
