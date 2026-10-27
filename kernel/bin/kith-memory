@@ -42,7 +42,7 @@ import kith_runsocket  # noqa: E402
 # A guest run's search goes to the host, which runs it as the token's person: nothing below reads a memory folder.
 if sys.argv[1:2] == ['search'] and kith_runsocket.guest_run():
     sys.exit(kith_runsocket.ask('kith-memory', 'memorySearch', sys.argv[2:]))
-from kith_paths import paths, kith_bin  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import guest_sandbox, paths, kith_bin  # noqa: E402  the one place that knows where kith's folders are
 STATE = paths()['KITH_STATE']
 
 
@@ -103,10 +103,11 @@ def listing(agent, guest=None):
 
 def guest_run():
     """The id of the person this runs for when that isn't the owner, else None. Fails closed: no answer from kith-auth
-    is a person with no memory ('-')."""
+    is a person with no memory ('-'), and so is the owner inside a guest's sandbox (its shell dropped KITH_PERSON or
+    named the owner in it)."""
     person = os.environ.get('KITH_PERSON')
     if not person:
-        return None
+        return '-' if guest_sandbox() else None
     r = subprocess.run([str(KITH / 'bin' / 'kith-auth'), 'resolve', os.environ.get('KITH_AGENT') or '-', '--person', person],
                        capture_output=True, text=True)
     try:
@@ -114,7 +115,9 @@ def guest_run():
     except ValueError:
         return '-'
     pid = r.get('person') or '-'
-    return None if r.get('owner') else pid if re.fullmatch(r'[a-z][a-z0-9-]*', pid) else '-'
+    if r.get('owner'):
+        return '-' if guest_sandbox() else None
+    return pid if re.fullmatch(r'[a-z][a-z0-9-]*', pid) else '-'
 
 
 def passages(path):

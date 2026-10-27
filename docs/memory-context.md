@@ -186,7 +186,9 @@ The caller's identity and audience come from the environment that the host or th
 arguments:
 
 - `KITH_AGENT` (the agent the run is for) and `KITH_PERSON` (set by the host for the run; the owner when unset),
-  both already set by `kernel/bin/kith`.
+  both already set by `kernel/bin/kith`. A guest run asks the host with its run token instead (`KITH_RUN_TOKEN`; the
+  host sets both from the token), and inside a guest's sandbox an unset or owner `KITH_PERSON` is no one
+  (`kith_paths.guest_sandbox()`, which asks the OS, not the environment).
 - The visible set comes from `kith-auth resolve <agent> --person <id>` (the membership, as the run gets it today).
   For a bot guest, `KITH_PERSON=bot-<hex>` and the visible set is that of its root owner (`kith-auth people --json`,
   `root`), at guest level. A `KITH_PERSON` whose `bot_of` parent is missing has no access (fail closed).
