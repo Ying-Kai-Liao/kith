@@ -297,10 +297,23 @@ function ManagedComputerCard({ store, onPair }: { store: BotStore; onPair: () =>
       <Button kind="secondary" onClick={() => setConfirmOwnerChange(true)} disabled={busy || !online}>Review</Button>
     </HStack>
   ) : null
-  const confirmOwner = () =>
+  // Pinned from the cloud's first answer (this Mac knew no account of its own): shown until confirmed here.
+  const fromCloudLine =
+    !change && owner && cloud?.ownerFromCloud ? (
+      <HStack key="ownerFromCloud" gap={8} className="settings-row">
+        <VStack grow className="settings-stack">
+          <span>Owner set from the cloud</span>
+          <Text size="caption" tone="attention">
+            {`${name} knew no account of its own when it took ${owner.email ?? owner.userId} as its owner from Kith's cloud. Confirm it if that's your account.`}
+          </Text>
+        </VStack>
+        <Button kind="secondary" onClick={() => confirmOwner(owner.userId)} disabled={busy || !online}>Confirm</Button>
+      </HStack>
+    ) : null
+  const confirmOwner = (userId: string | null) =>
     run(async () => {
       try {
-        await (await store.ready()).call('confirmOwner', { userId: newOwner?.userId ?? null }, 30_000)
+        await (await store.ready()).call('confirmOwner', { userId }, 30_000)
         await app.cloud.refresh()
       } catch (e) {
         store.setError(errorText(e))
@@ -337,6 +350,7 @@ function ManagedComputerCard({ store, onPair }: { store: BotStore; onPair: () =>
           </button>,
           accountLine,
           ...(ownerChangeLine ? [ownerChangeLine] : []),
+          ...(fromCloudLine ? [fromCloudLine] : []),
           ...(owner
             ? [
                 <Switch
@@ -432,7 +446,7 @@ function ManagedComputerCard({ store, onPair }: { store: BotStore; onPair: () =>
         open={confirmOwnerChange}
         title="Accept the new owner?"
         message={`${changeText} Accept only if you made this change: the new account's devices can then be let in, and devices approved through ${owner?.email ?? 'the old account'} lose access.`}
-        actions={[{ title: newOwner ? 'Accept new owner' : 'Accept leaving', destructive: true, action: confirmOwner }]}
+        actions={[{ title: newOwner ? 'Accept new owner' : 'Accept leaving', destructive: true, action: () => confirmOwner(newOwner?.userId ?? null) }]}
         onClose={() => setConfirmOwnerChange(false)}
       />
     </>

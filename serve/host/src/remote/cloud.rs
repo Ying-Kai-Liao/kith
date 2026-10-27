@@ -140,6 +140,7 @@ pub use kith_wire::cloud::Owner;
 /// `cloudStatus` and the `cloud` event.
 #[derive(Serialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[expect(clippy::struct_excessive_bools, reason = "independent status flags the apps read as they are")]
 pub struct CloudStatus {
     pub enabled: bool,
     pub url: Option<String>,
@@ -152,6 +153,9 @@ pub struct CloudStatus {
     /// The cloud names another owner than `owner`: nothing that depends on the owner is applied until someone on
     /// this computer confirms it (`confirmOwner`).
     pub owner_change: Option<OwnerChange>,
+    /// `owner` is the cloud's first answer: this Mac knew no owner account of its own when it was pinned. Shown
+    /// until someone on this computer confirms it (`confirmOwner` with that account).
+    pub owner_from_cloud: bool,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -383,7 +387,15 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     // memberships, botDevices and revoked are None from a cloud that predates them: what this host knows stays.
     let state: HostState = serde_json::from_value(call(hub, base, Method::GET, path::HOST_STATE, None).await?)
         .context("reading the cloud state")?;
-    let (owner, change) = match super::owner::check(&hub.store, state.owner.as_ref())? {
+    let bin = super::account::bin().await;
+    let known = if super::owner::unpinned(&hub.store) {
+        // The kith-auth the account handle is written through (`account::sync`), so a test never reads the Mac's own.
+        let auth = tokio::task::spawn_blocking(super::account::auth_bin).await.ok().flatten();
+        super::owner::known(&hub.store, auth.as_deref()).await
+    } else {
+        None
+    };
+    let (owner, change) = match super::owner::check(&hub.store, state.owner.as_ref(), known.as_deref())? {
         super::owner::Check::Trusted(owner) => (owner, None),
         super::owner::Check::Held { pinned, cloud } => {
             let change = OwnerChange { owner: cloud };
@@ -401,7 +413,6 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     let owner_uid = owner.as_ref().map(|o| o.user_id.clone());
     // Before the memberships: a membership the revoke cut then ends on a person already revoked (R6). A failure fails
     // the pull, so this host stays out of sync instead of serving on access it couldn't apply.
-    let bin = super::account::bin().await;
     for person in super::members::apply_revoked(bin.as_deref(), state.revoked.as_deref()).await? {
         crate::api::people::cut_off(hub, &person).await;
     }
@@ -416,6 +427,7 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     update_status(hub, |s| {
         s.owner = owner;
         s.owner_change = change;
+        s.owner_from_cloud = super::owner::from_cloud(&hub.store);
     });
     if !held {
         super::account::sync(hub, owner_uid.as_deref()).await;
@@ -803,16 +815,20 @@ pub async fn unclaim(hub: &Hub) -> Result<()> {
 }
 
 /// `confirmOwner` (local only): someone on this computer accepts the owner the cloud names, `user_id` (None: no
-/// owner) as they saw it, so a change that happened since is not confirmed with it.
+/// owner) as they saw it, so a change that happened since is not confirmed with it. With no change waiting, it confirms
+/// an owner that was set from the cloud.
 pub async fn confirm_owner(hub: &Hub, user_id: Option<&str>) -> Result<CloudStatus> {
     let base = base(hub)?;
-    let Some(change) = hub.cloud.status().owner_change else {
-        bail!("The Kith cloud names no other owner for this computer.");
+    let status = hub.cloud.status();
+    let accepted = match status.owner_change {
+        Some(change) => change.owner,
+        None if status.owner_from_cloud => status.owner,
+        None => bail!("The Kith cloud names no other owner for this computer."),
     };
-    if change.owner.as_ref().map(|o| o.user_id.as_str()) != user_id {
+    if accepted.as_ref().map(|o| o.user_id.as_str()) != user_id {
         return Err(Conflict("The cloud's owner changed again; check it and confirm again.").into());
     }
-    super::owner::pin(&hub.store, change.owner.as_ref())?;
+    super::owner::pin(&hub.store, accepted.as_ref())?;
     tracing::info!(owner = user_id, "the owner was confirmed on this computer");
     pull(hub, &base).await?;
     Ok(hub.cloud.status())
@@ -1133,6 +1149,7 @@ mod tests {
             "grants": [grant("grt_a", "phone", "user_kai"), grant("grt_b", "lost", "user_kai")], "requests": []});
         pull(&hub, &base).await.unwrap();
         assert!(renewed("phone"), "the first pull pins the owner it names");
+        assert!(hub.cloud.status().owner_from_cloud, "when this Mac knew no owner of its own, and says so");
 
         hub.store.put_device(&account_device("phone", "grt_a")).unwrap();
         let (dk, nd): ([u8; 32], [u8; 32]) = (crypto::random(), crypto::random());
@@ -1154,9 +1171,28 @@ mod tests {
         assert!(stale.is::<Conflict>(), "only the owner the cloud names now is confirmed");
         let status = confirm_owner(&hub, Some("user_mallory")).await.unwrap();
         assert_eq!((status.owner.unwrap().user_id, status.owner_change), ("user_mallory".to_owned(), None));
+        assert!(!status.owner_from_cloud, "confirmed here");
         assert!(renewed("phone"), "confirmed here: the state applies again");
         assert_eq!(fake.posts.lock().unwrap().len(), 1, "and the request gets its nonce");
         assert!(confirm_owner(&hub, Some("user_mallory")).await.is_err(), "nothing left to confirm");
+    }
+
+    #[tokio::test]
+    async fn an_owner_set_from_the_cloud_is_confirmed_here() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        *fake.state.lock().unwrap() = json!({"owner": {"userId": "user_kai"}, "grants": [], "requests": []});
+        pull(&hub, &base).await.unwrap();
+        assert!(hub.cloud.status().owner_from_cloud);
+        let other = confirm_owner(&hub, Some("user_other")).await.unwrap_err();
+        assert!(other.is::<Conflict>(), "only the owner shown");
+        let status = confirm_owner(&hub, Some("user_kai")).await.unwrap();
+        assert_eq!((status.owner.unwrap().user_id, status.owner_from_cloud), ("user_kai".to_owned(), false));
+        pull(&hub, &base).await.unwrap();
+        assert!(!hub.cloud.status().owner_from_cloud, "and stays confirmed");
+        assert!(confirm_owner(&hub, Some("user_kai")).await.is_err(), "nothing left to confirm");
     }
 
     #[tokio::test]

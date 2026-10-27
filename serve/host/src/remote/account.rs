@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// The platform name of an account handle, next to telegram and discord.
 const PLATFORM: &str = "kith";
 /// The Clerk user id this host last bound (or found bound) to its owner person.
-const APPLIED: &str = "account_handle";
+pub(crate) const APPLIED: &str = "account_handle";
 /// The conflicting account id already warned about, so repeated pulls stay quiet.
 static CONFLICT_WARNED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 static NO_OWNER_LOGGED: AtomicBool = AtomicBool::new(false);
@@ -105,6 +105,19 @@ async fn apply(store: &Store, bin: &Path, owner: Option<&str>) -> Result<()> {
     }
     store.kv_set(APPLIED, uid)?;
     Ok(())
+}
+
+/// The account this host bound to its owner person, if any.
+pub fn applied(store: &Store) -> Option<String> {
+    store.kv_get(APPLIED).filter(|uid| !uid.is_empty())
+}
+
+/// The owner person's `kith` handle in kith-auth: the Kith account id the owner is known by on this Mac.
+pub async fn owner_handle(bin: &Path) -> Option<String> {
+    let out = hq::output(bin, &["people", "--json"]).await?;
+    let people: Vec<Value> = serde_json::from_slice(&out.stdout).ok()?;
+    let owner = people.iter().find(|p| p["owner"] == true)?;
+    owner["kith"].as_str().filter(|uid| !uid.is_empty()).map(str::to_owned)
 }
 
 pub(crate) async fn who(bin: &Path, uid: &str) -> Who {

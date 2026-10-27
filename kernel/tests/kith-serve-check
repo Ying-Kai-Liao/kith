@@ -128,6 +128,20 @@ check "status forwards with the port" "grep -q 'kith-serve status --port 19224' 
 check "status says relay is the built-in default" "echo \"\$out\" | grep -q 'relay: built-in default'"
 check "relay with no argument says the default too" "'$SERVE' relay | grep -q 'built-in default'"
 
+# cloud forwards to the host, but --confirm-owner only from a terminal: piped stdin (a script, an agent) is refused
+: > "$STUB_LOG"; "$SERVE" cloud >/dev/null 2>&1
+check "cloud forwards with the port" "grep -qx 'kith-serve cloud --port 19224' '$STUB_LOG'"
+: > "$STUB_LOG"; out=$(echo user_x | "$SERVE" cloud --confirm-owner 2>&1); rc=$?
+check "cloud --confirm-owner refuses stdin that isn't a terminal" "[ $rc = 1 ] && echo \"\$out\" | grep -q 'terminal' && [ ! -s '$STUB_LOG' ]"
+: > "$STUB_LOG"; out=$("$SERVE" cloud --approval code --confirm-owner </dev/null 2>&1); rc=$?
+check "cloud --confirm-owner among other flags is refused too, before anything is changed" "[ $rc = 1 ] && [ ! -s '$STUB_LOG' ]"
+if script -q /dev/null true </dev/null >/dev/null 2>&1; then
+  : > "$STUB_LOG"; script -q /dev/null "$SERVE" cloud --confirm-owner </dev/null >/dev/null 2>&1
+  check "cloud --confirm-owner at a terminal reaches the host" "grep -qx 'kith-serve cloud --port 19224 --confirm-owner' '$STUB_LOG'"
+else
+  echo "skip cloud --confirm-owner at a terminal (no script(1) pty here)"
+fi
+
 # no launcher unless one is configured: hq-uv alone changes nothing; a configured one is passed on
 mkdir -p "$HOME/.kith/bin"; printf '#!/bin/sh\n' > "$HOME/.kith/bin/hq-uv"; chmod +x "$HOME/.kith/bin/hq-uv"
 : > "$STUB_LOG.launcher"; "$SERVE" start --no-build >/dev/null 2>&1
