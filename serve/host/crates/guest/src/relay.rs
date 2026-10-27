@@ -215,7 +215,7 @@ fn upgrade_fail(status: u16) -> Fail {
 pub async fn connect(target: &Target, key: &SigningKey, dial_timeout: Duration) -> Result<Channel, Fail> {
     let base =
         Url::parse(&target.cloud).map_err(|e| Fail::Final(CliError::unexpected(format!("bad cloud address: {e}"))))?;
-    let path_and_query = format!("/v1/relay/device/{}?v=1", target.computer_id);
+    let path_and_query = kith_wire::cloud::path::relay_device(&target.computer_id);
     let mut ws_url = base.join(&path_and_query).map_err(|e| Fail::Final(CliError::unexpected(e.to_string())))?;
     ws_url
         .set_scheme(if base.scheme() == "http" { "ws" } else { "wss" })

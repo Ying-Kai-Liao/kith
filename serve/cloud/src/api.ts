@@ -3,6 +3,7 @@
 
 import type { Env } from "./index";
 import type { Ctx } from "./routes/common";
+import type { Responses } from "./contract.gen";
 
 export { ApiError, type Ctx } from "./routes/common";
 export * from "./routes/account";
@@ -16,7 +17,7 @@ export const VERSION = "0.1.0";
 
 // ---- public ----
 
-export const health = async () => ({ ok: true, version: VERSION });
+export const health = async (): Promise<Responses["health"]> => ({ ok: true, version: VERSION });
 
 /**
  * Where a connector's sign-in page returns when the user signed in on the phone. Stateless: it bounces

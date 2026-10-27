@@ -1,0 +1,30 @@
+{
+  "type": "HostState",
+  "body": {
+    "owner": {
+      "userId": "user_2abc"
+    },
+    "grants": [
+      {
+        "grantId": "grt_7g8h",
+        "deviceKey": "dGhpcmQgdGVzdCBrZXkgb2YgdGhpcnR5LXR3byBieQ",
+        "deviceName": "Kai’s iPhone",
+        "platform": "ios",
+        "scopes": [
+          "chat"
+        ]
+      }
+    ],
+    "requests": [
+      {
+        "requestId": "req_5e6f",
+        "deviceKey": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+        "deviceName": "iPad",
+        "platform": "ios",
+        "commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "createdAt": 1793000000000,
+        "expiresAt": 1793000600000
+      }
+    ]
+  }
+}

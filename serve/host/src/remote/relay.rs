@@ -32,7 +32,7 @@ use tokio_stream::StreamMap;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_tungstenite::tungstenite::{self, Message, client::IntoClientRequest as _};
 
-const PATH: &str = "/v1/relay/host?v=1";
+const PATH: &str = kith_wire::cloud::path::RELAY_HOST;
 /// Must be exactly this string: the relay answers it without waking up.
 const PING: &str = r#"{"t":"ping"}"#;
 const PING_EVERY: Duration = Duration::from_secs(30);

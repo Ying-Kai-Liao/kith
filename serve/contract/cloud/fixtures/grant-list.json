@@ -1,0 +1,17 @@
+{
+  "type": "GrantList",
+  "body": {
+    "grants": [
+      {
+        "grantId": "grt_7g8h",
+        "deviceId": "dev_1a2b",
+        "deviceName": "Kai’s iPhone",
+        "platform": "ios",
+        "scopes": [
+          "chat"
+        ],
+        "createdAt": 1791000000000
+      }
+    ]
+  }
+}

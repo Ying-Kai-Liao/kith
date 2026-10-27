@@ -1,0 +1,9 @@
+{
+  "type": "AccessStatus",
+  "body": {
+    "requestId": "req_5e6f",
+    "computerId": "cmp_7f3a9c",
+    "status": "paused",
+    "expiresAt": 1793000600000
+  }
+}

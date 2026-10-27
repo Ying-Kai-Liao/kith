@@ -1,3 +1,4 @@
+import type { InviteAccepted } from './cloud-contract.gen.ts'
 import { inviteProof, type InviteLink } from './invite.ts'
 
 /** The invitee's side of a link, as steps the app can show. Every dependency is injected so the order is testable. */
@@ -30,7 +31,7 @@ export interface JoinDeps {
   /** Resolves once the account is signed in (the person picks Apple, Google or GitHub on the sheet). */
   waitForSignIn(): Promise<void>
   /** POST /v1/invites/<id>/accept with `{token: h1}`. Throws `CloudFailureLike`. */
-  accept(inviteId: string, h1: string): Promise<{ computerId: string; membershipId?: string }>
+  accept(inviteId: string, h1: string): Promise<InviteAccepted>
   /** POST /v1/computers/<c>/access-requests; asking again for the same Mac must be harmless. `onCode` gets each request's six digits. */
   requestAccess(computerId: string, onCode?: (code: string) => void): Promise<void>
   /** The connection to that Mac, or null while it is offline. Throws when this app can't connect at all. */

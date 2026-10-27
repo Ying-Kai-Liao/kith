@@ -32,7 +32,12 @@ fn denied(e: &anyhow::Error) -> bool {
 async fn joined(r: &Rig, roles: Value) -> (Caller, String) {
     let made = call(r, &Caller::Local, "createInvite", json!({"name": "Sam", "agents": roles})).await.unwrap();
     let invite = made["inviteId"].as_str().unwrap().to_owned();
-    let listed = [Listed { membership_id: "mem_sam".into(), user_id: "user_sam".into(), invite_id: invite }];
+    let listed = [Listed {
+        membership_id: "mem_sam".into(),
+        user_id: "user_sam".into(),
+        invite_id: invite,
+        ..Default::default()
+    }];
     members::apply(&r.hub, Some(&r.bin), &listed, Some("user_owner")).await.unwrap();
     (r.device("sam-phone", Some("sam")), "mem_sam".into())
 }
@@ -338,6 +343,7 @@ async fn memberships_bind_only_to_our_open_invites_and_leave_with_the_cloud() {
         membership_id: id.into(),
         user_id: user.into(),
         invite_id: inv.into(),
+        ..Default::default()
     };
     let bin = Some(r.bin.as_path());
 
@@ -436,10 +442,11 @@ async fn a_pull_binds_the_member_and_their_device_waits_for_the_owner_to_compare
     call(&r, &caller, "hello", json!({})).await.unwrap();
 
     // Grants: renewed for the bound account, removed for any other.
-    let grant = |user: Option<&str>| cloud::Grant {
+    let grant = |user: Option<&str>| kith_wire::cloud::HostGrant {
         grant_id: "grt_new".into(),
         device_key: device.key.clone(),
         user_id: user.map(str::to_owned),
+        ..kith_wire::cloud::HostGrant::default()
     };
     cloud::apply_grants(&r.hub, &[grant(Some("user_sam"))], Some("user_owner")).unwrap();
     assert!(r.hub.store.device(&device.key).is_some());
@@ -447,10 +454,11 @@ async fn a_pull_binds_the_member_and_their_device_waits_for_the_owner_to_compare
     assert!(r.hub.store.device(&device.key).is_none(), "a grant naming another account isn't honoured");
     // An owner's device needs the owner's account (or a cloud that doesn't say).
     let owner_phone = r.device("owner-phone", None);
-    let og = |user: Option<&str>| cloud::Grant {
+    let og = |user: Option<&str>| kith_wire::cloud::HostGrant {
         grant_id: "grt_owner-phone".into(),
         device_key: "owner-phone".into(),
         user_id: user.map(str::to_owned),
+        ..kith_wire::cloud::HostGrant::default()
     };
     cloud::apply_grants(&r.hub, &[og(None)], Some("user_owner")).unwrap();
     cloud::apply_grants(&r.hub, &[og(Some("user_owner"))], Some("user_owner")).unwrap();

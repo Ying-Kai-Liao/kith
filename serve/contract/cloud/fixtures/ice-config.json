@@ -1,0 +1,20 @@
+{
+  "type": "IceConfig",
+  "body": {
+    "iceServers": [
+      {
+        "urls": [
+          "stun:stun.cloudflare.com:3478"
+        ]
+      },
+      {
+        "urls": [
+          "turn:turn.cloudflare.com:3478?transport=udp"
+        ],
+        "username": "u",
+        "credential": "c"
+      }
+    ],
+    "expiresAt": 1793003600000
+  }
+}

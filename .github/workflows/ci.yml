@@ -112,38 +112,38 @@ jobs:
           predicate-quantifier: every
           filters: |
             host:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             # What the root crate builds from: the host and the memory and wire crates, not guest or tts, which
             # nothing in the host depends on. Those two get their own small job (host-crates).
             host_core:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
             cloud:
-              - '{serve/cloud/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
+              - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             relay:
               - '{serve/relay/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             ios:
-              - '{apps/ios/**,apps/shared/**,apps/Kith.xcodeproj/**,apps/project.yml,.github/workflows/ci.yml}'
+              - '{apps/ios/**,apps/shared/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/README.md'
             desktop:
-              - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
+              - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             # The static Linux client (kith-guest) and the scripts and workflow that package and install it.
             guest_linux:
-              - '{serve/host/crates/guest/**,serve/host/crates/wire/**,serve/host/Cargo.lock,serve/rust-toolchain.toml,scripts/package-guest.sh,scripts/install-guest.sh,scripts/smoke-guest.sh,.github/workflows/release.yml,.github/workflows/ci.yml}'
+              - '{serve/host/crates/guest/**,serve/host/crates/wire/**,serve/contract/**,serve/host/Cargo.lock,serve/rust-toolchain.toml,scripts/package-guest.sh,scripts/install-guest.sh,scripts/smoke-guest.sh,.github/workflows/release.yml,.github/workflows/ci.yml}'
               - '!**/*.md'
             # The real kith-guest against a real kith-serve and wrangler dev (apps/desktop/tools/relay-e2e-bot.ts).
             bot_e2e:
-              - '{serve/host/**,serve/cloud/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,kernel/bin/kith-auth,apps/desktop/tools/relay-e2e-host.ts,apps/desktop/tools/relay-e2e-bot.ts,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/cloud/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/kith-auth,apps/desktop/tools/relay-e2e-host.ts,apps/desktop/tools/relay-e2e-bot.ts,.github/workflows/ci.yml}'
               - '!**/*.md'
             # The e2e also runs serve/cloud's wrangler dev, so cloud changes trigger it (not the macOS desktop job).
             e2e:
-              - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/cloud/**,.github/workflows/ci.yml}'
+              - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,serve/cloud/**,.github/workflows/ci.yml}'
               - '!**/*.md'
   kernel:
     needs: changes
@@ -415,6 +415,10 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: serve/cloud/package-lock.json
+      # serve/contract/cloud/contract.json is the one place the cloud API's words are spelled; the TS, Swift and Rust
+      # files made from it must be current (serve/contract/README.md).
+      - name: Contract files are current
+        run: node ../contract/gen.mjs --check
       - run: npm ci --no-audit --no-fund
       - name: Typecheck
         run: npm run typecheck

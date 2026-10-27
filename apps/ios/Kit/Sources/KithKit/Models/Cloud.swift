@@ -1,29 +1,23 @@
 import Foundation
 
-// Wire types for the Kith cloud (`/v1`, cloud/src/api.ts) and the relay mailbox. Times are epoch milliseconds.
-// Decoding is lenient: unknown fields are ignored and anything the server may omit is optional.
+// The Kith cloud's types (`CloudComputer`, `CloudDevice`, `CloudGrant`, `AccessStatus`, …), paths and error codes come
+// from its contract, serve/contract/cloud/contract.json, through CloudContract.gen.swift. What is here is this app's own:
+// the relay mailbox, and what a cloud type means to it. Times are epoch milliseconds.
 
-/// A computer in the account (`GET /v1/computers`). Its `boxKey` is for display only.
-public struct CloudComputer: Codable, Hashable, Sendable, Identifiable {
-    public var computerId: ComputerID
-    public var name: String
-    public var platform: String?
-    public var device: String?
-    /// Delivered by the cloud: trusted only after the SAS matched (`AccessTicket.signKey`).
-    public var signKey: String
-    public var boxKey: String?
-    public var version: String?
-    public var online: Bool?
-    public var lastSeenAt: Int64?
-    public var claimedAt: Int64?
-    /// `none` · `pending` · `granted` (only when the request carried this device's signature).
-    public var access: String?
-    /// What this account is on the computer; missing from a cloud before invites, which means owner.
-    public var role: ComputerRole?
-
+extension CloudComputer: Identifiable {
     public var id: ComputerID { computerId }
-    public var isMember: Bool { role == .member }
+    /// Invited to it rather than its owner. A role this version doesn't know gets the least (member); none (a cloud
+    /// from before invites) is the owner.
+    public var isMember: Bool { role != nil && role != .owner }
     public var isOnline: Bool { online ?? false }
+}
+
+extension CloudDevice: Identifiable {
+    public var id: String { deviceId }
+}
+
+extension CloudGrant: Identifiable {
+    public var id: String { grantId }
 }
 
 /// A started access request, after both nonces were exchanged: `code` is ready to show.
@@ -47,48 +41,6 @@ public struct AccessTicket: Codable, Hashable, Sendable, Identifiable {
         self.signKey = signKey
         self.labels = labels
     }
-}
-
-public enum AccessState: String, Codable, Sendable {
-    case pending, approved, denied, expired, cancelled
-
-    public init(from decoder: Decoder) throws {
-        // A state this version doesn't know is over as far as it can tell.
-        self = AccessState(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .expired
-    }
-}
-
-/// `GET /v1/access-requests/{id}`.
-public struct AccessStatus: Codable, Hashable, Sendable {
-    public var requestId: String
-    public var computerId: ComputerID?
-    public var status: AccessState
-    public var expiresAt: Int64?
-    public var hostNonce: String?
-    public var grantId: String?
-}
-
-/// `GET /v1/devices`.
-public struct CloudDevice: Codable, Hashable, Sendable, Identifiable {
-    public var deviceId: String
-    public var deviceKey: String
-    public var name: String
-    public var platform: String?
-    public var createdAt: Int64?
-    public var lastUsedAt: Int64?
-    public var revoked: Bool?
-    public var id: String { deviceId }
-}
-
-/// `GET /v1/computers/{id}/grants`.
-public struct CloudGrant: Codable, Hashable, Sendable, Identifiable {
-    public var grantId: String
-    public var deviceId: String
-    public var deviceName: String?
-    public var platform: String?
-    public var scopes: [String]?
-    public var createdAt: Int64?
-    public var id: String { grantId }
 }
 
 /// A message waiting in the relay mailbox for a computer that is offline.

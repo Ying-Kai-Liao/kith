@@ -7,6 +7,7 @@ use super::account;
 use crate::hub::Hub;
 use crate::store::{Membership, Store, now_ms};
 use anyhow::{Context, Result};
+use kith_wire::cloud::path;
 use serde::Deserialize;
 use serde_json::json;
 use std::path::Path;
@@ -14,15 +15,8 @@ use std::path::Path;
 /// kv: membership ids the cloud has not yet confirmed as revoked (JSON array).
 const PENDING_REVOKES: &str = "membership_revokes";
 
-/// One active membership of `GET /v1/host/state`.
-#[allow(clippy::struct_field_names, reason = "wire names")]
-#[derive(Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Listed {
-    pub membership_id: String,
-    pub user_id: String,
-    pub invite_id: String,
-}
+/// One active membership of `GET /v1/host/state`: the cloud contract's `Membership`.
+pub use kith_wire::cloud::Membership as Listed;
 
 /// Applies the cloud's membership list. `None` (an older cloud that doesn't list them) changes nothing. Never fails
 /// the pull: a problem is logged and the next pull tries again.
@@ -218,7 +212,7 @@ pub async fn retry_revokes(hub: &Hub) {
     }
     let mut left = vec![];
     for id in ids {
-        match super::cloud::post(hub, &format!("/v1/host/memberships/{id}/revoke"), &json!({})).await {
+        match super::cloud::post(hub, &path::host_revoke_membership(&id), &json!({})).await {
             Ok(_) => {}
             Err(e) if super::cloud::refused_with(&e, 404) => {}
             Err(e) => {
