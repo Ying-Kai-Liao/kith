@@ -287,7 +287,8 @@ fn bots_refused(hub: std::sync::Arc<Hub>, bot: BotConfig, lane: Lane, ids: Vec<S
             return;
         }
         let name = hub.store.person(&person).map_or_else(|| person.clone(), |p| p.name);
-        let card = bots_card(&bot.id, &agent, &person, &name, dollars(&state["spent"]), cap, state["month"].as_str(), &ids);
+        let card =
+            bots_card(&bot.id, &agent, &person, &name, dollars(&state["spent"]), cap, state["month"].as_str(), &ids);
         if hub.add_entry(&lane, EntryKind::Permission, hub.store.max_turn(&lane.chat), &card).is_none() {
             return;
         }
@@ -311,7 +312,8 @@ pub fn bots_card(
 ) -> Value {
     let mut card = guest_card(bot, agent, person, name, spent, cap, month, ids);
     let month = month.unwrap_or("this month");
-    card["title"] = format!("Your bots reached their {} for {month}. {name}'s last message wasn't run.", money(cap)).into();
+    card["title"] =
+        format!("Your bots reached their {} for {month}. {name}'s last message wasn't run.", money(cap)).into();
     card["limit"]["kind"] = "bots".into();
     card
 }
