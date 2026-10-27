@@ -3,9 +3,10 @@ import Testing
 
 @Suite struct ProfileImageTests {
     @Test func eightSkyPresetsMatchDesktop() {
-        #expect(SkyPreset.all.map { "\($0.tone) \($0.x) \($0.y)" } == [
-            "dawn 20 30", "dawn 70 60", "clear 15 20", "clear 60 40", "clear 85 75",
-            "dusk 25 50", "dusk 75 30", "dusk 50 85",
+        #expect(SkyPreset.all.map { "\($0.name) \(String($0.top, radix: 16, uppercase: true)) \(String($0.bottom, radix: 16, uppercase: true)) \($0.zoom) \($0.x) \($0.y) \($0.cloud)" } == [
+            "night B1538 2C468F 3 0 0 45", "golden F29A2E FFDD94 3 100 0 60", "dusk 5A3FA8 F08A6A 4 90 10 55",
+            "dawn 4F86E0 F5A878 4 5 15 60", "noon 1F5FD0 6DB8F5 4 62 25 70", "overcast 6F7A87 C9D0D6 2 40 0 85",
+            "twilight 1C2468 C8509A 4 10 30 50", "mint 2E9E8A D3F2DE 4 55 5 65",
         ])
         #expect(Set(SkyPreset.all.map(\.id)).count == 8)
     }

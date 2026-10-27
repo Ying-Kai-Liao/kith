@@ -30,28 +30,35 @@ export function skyPatchOf(id: string, you = false): SkyPick {
   }
 }
 
-/** The eight Kith default profile pictures, the same on iOS: crops of the sky art. Keep these exact. */
-export const SKY_PRESETS: readonly SkyPick[] = [
-  { tone: 'dawn', x: 20, y: 30 },
-  { tone: 'dawn', x: 70, y: 60 },
-  { tone: 'clear', x: 15, y: 20 },
-  { tone: 'clear', x: 60, y: 40 },
-  { tone: 'clear', x: 85, y: 75 },
-  { tone: 'dusk', x: 25, y: 50 },
-  { tone: 'dusk', x: 75, y: 30 },
-  { tone: 'dusk', x: 50, y: 85 },
-]
-
-/** The tone washes of `.kc-sky-*` in kith.css as canvas stops (top to bottom), so a rendered preset matches the CSS patch. */
-export const SKY_TONE_STOPS: Record<SkyTone, readonly (readonly [number, string])[]> = {
-  dawn: [[0, 'rgba(255,190,150,0)'], [0.7, 'rgba(255,170,130,0.55)'], [1, 'rgba(240,130,110,0.7)']],
-  clear: [[0, 'rgba(120,190,255,0.1)'], [1, 'rgba(255,255,255,0.12)']],
-  dusk: [[0, 'rgba(90,100,190,0.5)'], [0.65, 'rgba(200,120,160,0.45)'], [1, 'rgba(255,170,110,0.5)']],
+/** A Kith default profile picture: two palette colours (top to bottom) behind a zoomed crop of the sky art's clouds. */
+export interface SkyLook {
+  name: string
+  top: string
+  bottom: string
+  /** How many picture-widths of sky art span the tile; higher is a tighter crop. */
+  zoom: number
+  /** Which part of the sky art the crop shows, in percent of the movable range (CSS background-position). */
+  x: number
+  y: number
+  /** How strongly the clouds show over the palette, in percent. */
+  cloud: number
 }
 
-/** Where `.kc-sky` puts the image on an `out`-pixel square: background-size 420% auto, positioned by x/y percent. */
-export function skyCropRect(imgW: number, imgH: number, pick: SkyPick, out: number) {
-  const w = out * 4.2
+/** The eight Kith default profile pictures, the same on iOS (ProfileImageTests pins both). Keep these exact. */
+export const SKY_PRESETS: readonly SkyLook[] = [
+  { name: 'night', top: '#0B1538', bottom: '#2C468F', zoom: 3, x: 0, y: 0, cloud: 45 },
+  { name: 'golden', top: '#F29A2E', bottom: '#FFDD94', zoom: 3, x: 100, y: 0, cloud: 60 },
+  { name: 'dusk', top: '#5A3FA8', bottom: '#F08A6A', zoom: 4, x: 90, y: 10, cloud: 55 },
+  { name: 'dawn', top: '#4F86E0', bottom: '#F5A878', zoom: 4, x: 5, y: 15, cloud: 60 },
+  { name: 'noon', top: '#1F5FD0', bottom: '#6DB8F5', zoom: 4, x: 62, y: 25, cloud: 70 },
+  { name: 'overcast', top: '#6F7A87', bottom: '#C9D0D6', zoom: 2, x: 40, y: 0, cloud: 85 },
+  { name: 'twilight', top: '#1C2468', bottom: '#C8509A', zoom: 4, x: 10, y: 30, cloud: 50 },
+  { name: 'mint', top: '#2E9E8A', bottom: '#D3F2DE', zoom: 4, x: 55, y: 5, cloud: 65 },
+]
+
+/** Where the sky art sits on an `out`-pixel square, by the CSS background-size / -position rules. */
+export function skyCropRect(imgW: number, imgH: number, pick: { x: number; y: number }, out: number, zoom = 4.2) {
+  const w = out * zoom
   const h = (w * imgH) / imgW
   return { x: (out - w) * (pick.x / 100), y: (out - h) * (pick.y / 100), w, h }
 }
