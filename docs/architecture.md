@@ -271,7 +271,11 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   owner's list shows the cards waiting on the owner. When the approver changes, the new one gets it and a push, the
   old one an update without buttons; a push for a lane opens the list, not a chat.
 - **6. Removal.** Built in a different shape from the design: a revoke goes through the cloud first and reaches every
-  Mac before the next turn (`verification/revoke`).
+  Mac before the next turn (`verification/revoke`). A removed person's id is retired (`kith-auth retired <id>`): no new
+  person, bot or rename takes it, and an invite under the same name gets a new id (`sam-2`), so nobody new reads the
+  old person's memory and files or uses their logins. Ids an earlier removal left memory, files or a profile for count
+  as retired too. Only the undo of an invite whose link never went out frees an id (`person <id> --rm --unused`,
+  refused if they have anything).
 - **7. An ask that parks is a job.** A `kith ask` run that ends its turn on a card exits 3 (`waiting`) with the ask
   id. The card keeps the id and shows "<agent>, asked by <caller>". The resumed turn runs as `kith ask --reply` and
   its words are that id's answer (`kith ask --wait` returns it, or the caller's session is woken, also when it ended
@@ -279,7 +283,6 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 - **8. Lifecycle owns every stop.** Not built (below).
 
 **Planned (agreed, not built yet).**
-- Removed ids are retired, so a new invite under the same name never inherits the old person's memory or logins.
 - Rule 8: every stop of a session goes through the session lifecycle (lease, intent first) once F12 is built;
   today a stop is a claim release and a kill (`kith-sessions` has writer claims only).
 
