@@ -35,7 +35,11 @@ struct ChatRow: View {
         case "agent":
             VStack(alignment: .leading, spacing: 4) {
                 if chat?.isGroup == true, groupStart { AuthorLabel(botId: entry.data.author) }
-                AgentBubble(entry: entry, openTrace: openTrace, reply: reply)
+                if let card = entry.data.richCard, card.drawsInChat {
+                    if card.type == "news" { NewsCard(entry: entry, card: card) } else { ScheduleCard(entry: entry, card: card) }
+                } else {
+                    AgentBubble(entry: entry, openTrace: openTrace, reply: reply)
+                }
                 Group {
                     AnsweredByLabel(answeredBy: entry.data.answeredBy)
                     if let percent = entry.data.contextPercent {
@@ -76,6 +80,9 @@ struct ChatRow: View {
                 ConnectionRequestCard(entry: entry, request: request).padding(.top, 12)
             } else if let card = entry.data.handoff {
                 HandoffCardRow(entry: entry, card: card).padding(.top, 10)
+            } else if let card = entry.data.richCard, card.type == "schedule", card.drawsInChat {
+                // A routine's card arrives as a notice from the host, not as the bot's message.
+                ScheduleCard(entry: entry, card: card).padding(.top, 10)
             } else {
                 // Only a notice that carries a thread (a bot from outside's conversation) gets a chip.
                 VStack(alignment: .leading, spacing: 4) {
