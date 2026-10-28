@@ -46,7 +46,13 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           owner), revoked_at (their own), kith (account id or '')}], each bot after
                                           its parent; bots are listed under their owner
   kith-auth person <id> [name=.. lang=.. tz=.. owner] [--rm]   a person; `owner` marks you (one owner); --rm forgets
-                                          them (rows, grants and bots go; their memory stays to delete by hand)
+                                          them (rows, grants and bots go; their memory stays to delete by hand) and
+                                          retires the id: no new person or bot gets it, so nobody else ever reads
+                                          their memory and files or uses their logins
+  kith-auth person <id> --rm --unused      remove a person who never had anything (kith serve's undo of an invite that
+                                          was never sent): the id is not retired; refused if they have anything
+  kith-auth retired <id>                   exit 0 and why when a new person can't take the id (removed, an old id of
+                                          someone, or memory, files or a profile an earlier removal left), else 1
   kith-auth person <id> --revoke | --unrevoke   revoke: they stay in kith, reach nothing (the `*` row included),
                                           their bots go dormant and kith serve tells them their access was removed;
                                           undo brings back every row as it was. On a Mac linked to the Kith cloud it
@@ -196,7 +202,7 @@ def load_auth(write=False):
         data = {}
     except ValueError as e:
         die(f'{AUTH}: invalid JSON ({e})')
-    for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites'):
+    for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites', 'retired'):
         data.setdefault(table, {})
     return data
 
@@ -1215,6 +1221,33 @@ def forget(auth, ids):
                 prof.pop('with')
 
 
+def retired(auth, pid, left=True):
+    """Why a new person or bot can't take this id, or None. A removed person's id is retired (in `retired`): whoever
+    took it would read the old person's memory and files and use the logins they owned. Removals made before
+    `retired` existed left only those behind, so they retire the id too (left=False: not for a bot, whose folders
+    are its own from an earlier join, nor for the owner, whose they are anyway)."""
+    if pid in auth['retired']:
+        return f"'{pid}' was a person who was removed"
+    if canonical(auth, pid) != pid:
+        return f"'{pid}' is an old id of {canonical(auth, pid)}"
+    if not left:
+        return None
+    kept = sorted({label for label, _ in person_folders(pid)})
+    if kept:
+        return f"memory and files of a removed '{pid}' are still in {', '.join(kept)} (move them away to use the id)"
+    owned = sorted(n for n, prof in auth['profiles'].items() if prof.get('person') == pid)
+    if owned:
+        return f"a removed '{pid}' still owns {', '.join(owned)}"
+    return None
+
+
+def need_free(auth, pid, left=True):
+    """For a new person or bot: refused when the id is retired."""
+    why = retired(auth, pid, left)
+    if why:
+        die(f'{why}: give the new person another id (e.g. {pid}-2)')
+
+
 def services_of(auth, agent, person):
     """Every service a run of agent could be handed: its needs, its grants and the person's own grants."""
     out = set(needs(agent)) | set(auth['grants'].get(agent, {})) | set(auth['grants'].get(f'{agent}@{person}', {}))
@@ -1368,23 +1401,30 @@ def cmd_person(args):
         return rename(auth, pid, kv.pop('id'))
     if 'owner' in flags and auth['people'].get(pid, {}).get('bot_of'):
         die(f'{pid} is a bot: it can not be the owner')
+    if '--rm' in flags and '--unused' in flags:
+        return remove_unused(auth, pid)
     if '--rm' in flags:
         # their bots go with them: a bot is never more than its owner's, so without one it has no access anyway
         gone = [pid]
         for x in gone:
             gone += [b for b in bots_of(auth, x) if b not in gone]
+        if pid in auth['people'] and not auth['people'][pid].get('bot_of'):
+            # bots are not retired: their ids are the cloud's, and the same bot may join again
+            for x in [pid] + auth['people'][pid].get('was', []):
+                auth['retired'][x] = {'at': int(time.time())}
         for x in gone:
             auth['people'].pop(x, None)
         forget(auth, gone)
         save_auth(auth)
         kept = sorted({label for label, _ in person_folders(pid)})
         print(f'{pid} removed, with their memberships and grants' + (f' and bots ({", ".join(gone[1:])})' if gone[1:] else '')
-              + ' (profiles they own are kept)'
+              + ' (profiles they own are kept); the id is retired, a new person gets another'
               + (f'; their memory and files in {", ".join(kept)} are kept (delete them by hand)' if kept else ''))
         return
     if pid not in auth['people'] and canonical(auth, pid) != pid:
         die(f"'{pid}' was renamed to {canonical(auth, pid)}")
     if pid not in auth['people']:
+        need_free(auth, pid, left='owner' not in flags)
         forget(auth, [pid])   # a new person starts with nothing, whatever an older removal left behind
     p = auth['people'].setdefault(pid, {})
     p.update({k: v for k, v in kv.items() if v})
@@ -1404,6 +1444,26 @@ def cmd_person(args):
         p['owner'] = True
     save_auth(auth)
     print(f'{pid}: ' + (', '.join(f'{k} {v}' for k, v in p.items() if k not in ('handles', 'was')) or 'added'))
+
+
+def remove_unused(auth, pid):
+    """--rm --unused: only kith serve knows that no invite link went out, so it says so; this is the backstop, under
+    the same lock as the removal. Anything the person has (or a bot, an old id, memory, a /link code) refuses."""
+    need_person(auth, pid)
+    p = auth['people'][pid]
+    has = ([k for k in ('owner', 'bot_of', 'handles', 'was', 'revoked') if p.get(k)]
+           + (['bots'] if bots_of(auth, pid) else [])
+           + (['memberships'] if any(pid in rows for rows in auth['members'].values()) else [])
+           + (['grants'] if any('@' in k and k.rsplit('@', 1)[1] == pid for k in auth['grants']) else [])
+           + (['invites'] if any(i.get('person') == pid for i in auth['invites'].values()) else [])
+           + (['profiles'] if any(prof.get('person') == pid or pid in prof.get('with', [])
+                                  for prof in auth['profiles'].values()) else [])
+           + sorted({label for label, _ in person_folders(pid)}))
+    if has:
+        die(f'{pid} is not unused ({", ".join(has)}): kith-auth person {pid} --rm removes them and retires the id')
+    auth['people'].pop(pid)
+    save_auth(auth)
+    print(f'{pid} removed (unused: the id is free again)')
 
 
 def revoke_person(pid, revoke, local):
@@ -1453,6 +1513,7 @@ def rename(auth, old, new):
         die('a person id is lowercase letters, digits and -, e.g. sam', 2)
     if new in auth['people'] or any(new in p.get('was', []) for p in auth['people'].values()):
         die(f"'{new}' is already a person (or one's old id)")
+    need_free(auth, new)
     forget(auth, [new])
     p = auth['people'].pop(old)
     p['was'] = list(dict.fromkeys(p.get('was', []) + [old]))
@@ -1738,6 +1799,7 @@ def cmd_bot(args):
     if cur and canonical(auth, cur['bot_of']) != parent:
         die(f"{bid} belongs to {cur['bot_of']}; remove it (--rm) and add it again to hand it over")
     if cur is None:
+        need_free(auth, bid, left=False)
         forget(auth, [bid])
     p = auth['people'].setdefault(bid, {})
     p['bot_of'] = parent
@@ -1904,6 +1966,11 @@ def main(argv):
               + (f'; granted to {", ".join(users)}' if users else ''))
     elif cmd == 'people':
         cmd_people(rest)
+    elif cmd == 'retired' and len(rest) == 1:
+        why = retired(load_auth(), rest[0])
+        if not why:
+            sys.exit(1)
+        print(why)
     elif cmd == 'person':
         cmd_person(rest)
     elif cmd == 'handle':
