@@ -125,6 +125,25 @@ async function signOut() {
   }
 }
 
+/**
+ * The composer's + in a browser: the page's own file input, opened in the click itself (Safari allows no other time).
+ * Cancelling resolves with nothing. The bytes stay in the page until the composer uploads them to the chat.
+ */
+function pickFiles(): Promise<{ name: string; data: Uint8Array }[]> {
+  return new Promise((resolve) => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.multiple = true
+    input.addEventListener('cancel', () => resolve([]))
+    input.addEventListener('change', () => {
+      const picked = [...(input.files ?? [])]
+      void Promise.all(picked.map(async (f) => ({ name: f.name, data: new Uint8Array(await f.arrayBuffer()) })))
+        .then(resolve, () => resolve([]))
+    })
+    input.click()
+  })
+}
+
 const snapshot: HostSnapshot = { state: { kind: 'notInstalled' }, local: null, dev: false, logPath: '' }
 const updates: UpdateState = {
   supported: false, checking: false, availableVersion: null, downloadPercent: null, staged: false, installing: false,
@@ -236,7 +255,7 @@ const bridge: KithBridge = {
     },
     openMemoryFile: () => {},
     copy: (text) => void navigator.clipboard?.writeText(text).catch(() => {}),
-    pickFiles: async () => [],
+    pickFiles,
     pickFolder: async () => null,
     readClipboardFiles: async () => [],
     setTraySummary() {},
