@@ -220,6 +220,9 @@ def ask_helper(a, env=os.environ):
         return '%s did not answer in time; carry on without it.' % agent
     except OSError as e:
         return 'Could not ask %s (%s).' % (agent, e.strerror or type(e).__name__)
+    if r.returncode != 0 and 'out of sync with the Kith cloud' in (r.stderr or ''):
+        return ('%s did not run: Kith on this computer is out of sync with the Kith cloud, so it cannot tell yet whether '
+                'you may still use it. Try again in a minute.' % agent)
     if r.returncode != 0:
         return 'Could not ask %s: %s' % (agent, (r.stderr or r.stdout or 'no answer').strip()[-1500:])
     return r.stdout.strip() or '%s gave no answer.' % agent
