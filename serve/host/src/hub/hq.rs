@@ -95,7 +95,11 @@ impl Hub {
                 b.config.hq_agent.as_deref() == Some(agent.name.as_str()) && b.config.person.is_none()
             };
             let Some(row) = rows.iter().find(mine) else {
-                self.create_bot(new_bot(agent))?;
+                let made = self.create_bot(new_bot(agent))?;
+                // Born with tasks on: the one-time turn-on is done, so a later "off" from the user stays off.
+                if let Some(id) = made["id"].as_str() {
+                    self.store.kv_set(&tasks_key(id), "1")?;
+                }
                 done.created.push(agent.name.clone());
                 continue;
             };
@@ -111,8 +115,10 @@ impl Hub {
                 patch.insert("cwd".into(), agent.home.clone().into());
             }
             // Chats with hq bots auto-thread (a task per burst) like any bot's; older bots were created with it off.
-            if row.config.tasks == Some(false) && self.store.kv_get(&tasks_key(&row.config.id)).is_none() {
-                patch.insert("tasks".into(), true.into());
+            if self.store.kv_get(&tasks_key(&row.config.id)).is_none() {
+                if row.config.tasks == Some(false) {
+                    patch.insert("tasks".into(), true.into());
+                }
                 self.store.kv_set(&tasks_key(&row.config.id), "1")?;
             }
             let came_back = row.config.hidden && self.store.kv_get(&gone_key(&row.config.id)).is_some();
@@ -226,8 +232,13 @@ mod tests {
         let bot = bots(&hub).remove(0);
         assert!(bot.uses_tasks(), "a new hq bot starts a task per burst");
 
-        // A bot made before tasks were on by default has tasks off; the first sync turns it on, and the user's choice after that stays.
+        // A new bot is born with the turn-on done: the user's "off" survives the next sync.
         hub.update_bot(&json!({"id": bot.id, "tasks": false})).unwrap();
+        hub.apply_hq_agents(std::slice::from_ref(&house)).unwrap();
+        assert!(!bots(&hub)[0].uses_tasks());
+
+        // A bot made before tasks were on by default has tasks off; the first sync turns it on, and the user's choice after that stays.
+        hub.store.kv_delete(&tasks_key(&bot.id)).unwrap();
         hub.apply_hq_agents(std::slice::from_ref(&house)).unwrap();
         assert!(bots(&hub)[0].uses_tasks());
         hub.update_bot(&json!({"id": bot.id, "tasks": false})).unwrap();
