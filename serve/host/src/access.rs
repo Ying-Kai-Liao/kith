@@ -153,6 +153,7 @@ mod tests {
             answered_parked: false,
             granted_at: None,
             resumed_at: None,
+            applied_at: None,
             reply_to: None,
             asked_by: None,
             answerable_by: answerable_by.map(str::to_owned),

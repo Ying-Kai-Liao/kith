@@ -257,7 +257,11 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   the grants only when it started with them; a failed load leaves them for the next activation (M4). Each loaded
   app-chat session keeps a profile digest, compared at every turn (M6); a yes, a removed grant or a demotion reloads
   that session alone before its next turn, never the agent process. A narrowing never waits: the next turn runs on
-  the new profile (M7).
+  the new profile (M7). A card's wake is taken off the owed list when a door queues it, and is `applied` only when
+  the turn that carries it has started: the bot's prompt was sent, the channel's process spawned, the `-p` run got
+  past its claim wait (M5). A turn that doesn't start gives the wake back; a host start gives back every wake that
+  wasn't applied and offers it again (the channel inbox drops its saved copy, so it runs once). After a Stop a
+  given-back wake waits for the next offer instead.
 - **5. Somewhere to ask.** Not built (below).
 - **6. Removal.** Built in a different shape from the design: a revoke goes through the cloud first and reaches every
   Mac before the next turn (`verification/revoke`).
@@ -268,7 +272,6 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 - **8. Lifecycle owns every stop.** Not built (below).
 
 **Planned (agreed, not built yet).**
-- A card's wake stays queued until an activation that includes the yes has started (M5).
 - No chat with the agent on this Mac: the card goes to the approver's inbox instead of "There is nowhere to ask".
 - Rule 5: host down, the kernel restarts the host job and retries the ask token once before refusing.
 - Removed ids are retired, so a new invite under the same name never inherits the old person's memory or logins.

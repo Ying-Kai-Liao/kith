@@ -4,7 +4,8 @@
 //! Tables, all keyed by the connection first (`<conn>:<chat>…`): `conns` (per-connection state: offsets, webhooks),
 //! `rooms` (default agent), `threads` (one task each: person, owner, last, room, sessions {agent: session}, conv,
 //! newest last), `replies` (a platform message -> its thread key), `inbox` (`<thread>#<agent>` -> batches of
-//! messages that wait for a turn) and `pending` ("who should take this?" asks).
+//! messages that wait for a turn), `pending` ("who should take this?" asks) and `wakes` (the card wake notes among the
+//! inbox's messages, `<thread>#<agent>` -> notes).
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -24,6 +25,7 @@ pub struct State {
     pub replies: Map<String, Value>,
     pub inbox: BTreeMap<String, Vec<Vec<String>>>,
     pub pending: Map<String, Value>,
+    pub wakes: BTreeMap<String, Vec<String>>,
 }
 
 /// How much of a connection's state came over from the bridge.
@@ -41,7 +43,20 @@ impl State {
     pub fn load(path: &Path) -> Self {
         let mut st: Self = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         st.version = 2;
+        st.drop_wakes();
         st
+    }
+
+    /// A card's wake still in the inbox never reached a turn: the card store owes it again after a restart and
+    /// `cards::start` offers it anew, so the copy here goes (M5), or it would run twice.
+    fn drop_wakes(&mut self) {
+        for (wk, notes) in std::mem::take(&mut self.wakes) {
+            let Some(q) = self.inbox.get_mut(&wk) else { continue };
+            for batch in q.iter_mut() {
+                batch.retain(|m| !notes.contains(m));
+            }
+            q.retain(|b| !b.is_empty());
+        }
     }
 
     /// Prunes to the newest [`KEEP`] threads and replies (those with queued messages stay), then writes the file
@@ -163,6 +178,23 @@ mod tests {
         assert!(back.threads.contains_key("c:0") && !back.threads.contains_key("c:1"));
         assert_eq!(back.replies.len(), KEEP);
         assert!(!path.with_extension("tmp").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_card_wake_left_in_the_inbox_is_dropped_at_load_as_the_card_store_offers_it_again() {
+        let dir = std::env::temp_dir().join(format!("kith-state-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("state.json");
+        let mut st = State::default();
+        st.inbox.insert("c:1#house".into(), vec![vec!["hi".into()], vec!["[Kith] wake".into()]]);
+        st.inbox.insert("c:2#house".into(), vec![vec!["[Kith] other".into()]]);
+        st.wakes.insert("c:1#house".into(), vec!["[Kith] wake".into()]);
+        st.wakes.insert("c:2#house".into(), vec!["[Kith] other".into()]);
+        st.save(&path).unwrap();
+        let back = State::load(&path);
+        assert_eq!(back.inbox["c:1#house"], vec![vec!["hi".to_owned()]], "the person's message stays");
+        assert!(!back.inbox.contains_key("c:2#house"), "a batch of wakes only goes");
+        assert!(back.wakes.is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
