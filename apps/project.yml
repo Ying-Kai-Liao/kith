@@ -208,6 +208,7 @@ targets:
         INFOPLIST_KEY_NSSupportsLiveActivities: YES
         INFOPLIST_KEY_NSCameraUsageDescription: Scan the pairing code shown on your computer, or take a photo to send to a bot.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Talk to your bots in a voice call.
+        INFOPLIST_KEY_NSFaceIDUsageDescription: Confirm it's you before letting a new device use your computer.
         INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Your words are transcribed on this iPhone and sent to your bot as a message.
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: Kith connects to the computer running your bots on your local network.
         # Portrait everywhere except the screen viewer (AppDelegate + OrientationLock).

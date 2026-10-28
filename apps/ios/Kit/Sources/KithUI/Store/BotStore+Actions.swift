@@ -184,6 +184,25 @@ extension BotStore {
     /// This account owns the computer: only the owner's hello has no member grant list.
     public var isOwner: Bool { hello?.grantedAgents == nil }
 
+    /// Members' devices waiting for the owner. A member, or a computer older than this, refuses: nothing waits then.
+    func refreshAccessRequests() async {
+        guard let client else { return }
+        accessRequests = (try? await client.accessRequests()) ?? []
+    }
+
+    /// Answers a member's device. The computer refuses a request that isn't a member's (the owner's own new devices
+    /// are approved at the computer). Returns the error to show, or nil.
+    public func decideAccessRequest(_ request: MemberAccessRequest, approve: Bool) async -> String? {
+        guard let client else { return "Not connected to \(hostName)." }
+        do {
+            try await client.decideAccessRequest(request.requestId, approve: approve)
+            accessRequests.removeAll { $0.requestId == request.requestId }
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     /// The owner's Stop on a card's held row: ends the old run that holds the card's session. One at a time per
     /// session (a second tap, or the same session's other card, does nothing while it runs). The cards' rows close
     /// when the host clears `held` on their entries, not here.

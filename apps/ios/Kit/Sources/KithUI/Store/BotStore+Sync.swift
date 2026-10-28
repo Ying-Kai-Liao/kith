@@ -124,6 +124,8 @@ extension BotStore {
             windowFloors = requestedSince > 0 && !hostRewound ? loadedFloors() : [:]
             catchUpRev = hostRev
             bump(rev)
+            // Live changes come as events; what was already waiting is read once per connection.
+            Task { [weak self] in await self?.refreshAccessRequests() }
         case let .bot(bot):
             let neededInput = bots[bot.id]?.needsInput == true
             let before = bots[bot.id]
@@ -190,6 +192,8 @@ extension BotStore {
             restartEvents()
         case .botRequest, .botUpdated:
             Task { [weak self] in await self?.botGuests.refresh() }
+        case let .accessRequests(requests):
+            accessRequests = requests
         case let .undecodable(type):
             // Never skip past data we couldn't read: rewind once and fetch everything again.
             log.error("undecodable \(type) event")

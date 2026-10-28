@@ -95,10 +95,16 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             }
             json!({})
         }
-        "accessRequests" => json!({"requests": hub.cloud.requests_json()}),
+        // The owner's phone sees and answers members' requests; a new device of the owner's own is approved at the
+        // computer, so a phone in the wrong hands can't add another owner device.
+        "accessRequests" => json!({"requests": hub.cloud.requests_json_for(matches!(caller, Caller::Local))}),
         "decideAccessRequest" => {
             let approve = b["approve"].as_bool().ok_or_else(|| anyhow!("`approve` is required"))?;
-            crate::remote::cloud::decide(hub, str_arg(&b, "requestId")?, approve).await?;
+            let id = str_arg(&b, "requestId")?;
+            if !matches!(caller, Caller::Local) && !hub.cloud.is_member_request(id) {
+                return Err(super::devices::Forbidden.into());
+            }
+            crate::remote::cloud::decide(hub, id, approve).await?;
             json!({})
         }
         "unclaim" => {

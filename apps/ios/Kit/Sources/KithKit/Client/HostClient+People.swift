@@ -27,6 +27,19 @@ public extension HostClient {
         return try await call("createInvite", Body(name: name, personId: personId, agents: agents), timeout: 60)
     }
 
+    /// Members' devices waiting for the owner's OK (an older computer answers this phone with a refusal).
+    func accessRequests() async throws -> [MemberAccessRequest] {
+        struct Res: Decodable { var requests: [MemberAccessRequest] }
+        let res: Res = try await call("accessRequests")
+        return res.requests
+    }
+
+    func decideAccessRequest(_ requestId: String, approve: Bool) async throws {
+        struct Body: Encodable { var requestId: String; var approve: Bool }
+        // The computer tells the cloud before it answers.
+        let _: Empty = try await call("decideAccessRequest", Body(requestId: requestId, approve: approve), timeout: 30)
+    }
+
     func revokeInvite(_ inviteId: String) async throws {
         let _: Empty = try await call("revokeInvite", ["inviteId": inviteId], timeout: 30)
     }

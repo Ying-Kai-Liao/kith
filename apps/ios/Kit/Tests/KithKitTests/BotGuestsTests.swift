@@ -45,6 +45,15 @@ private let botJSON = #"""
     if case .botUpdated = HostClient.parseEvent(Data(#"{"type":"botUpdated","bot":{"botId":"b","state":"active"}}"#.utf8)) {} else { Issue.record("botUpdated") }
 }
 
+@Test func membersAccessRequestsAreDecoded() {
+    let json = #"{"type":"accessRequests","requests":[{"requestId":"req_1","deviceKey":"k","deviceName":"Kith web","platform":"web","email":"sam@x.com","personId":"sam","code":"123456","createdAt":1,"expiresAt":2}]}"#
+    guard case let .accessRequests(list) = HostClient.parseEvent(Data(json.utf8)) else { Issue.record("accessRequests"); return }
+    #expect(list.map(\.requestId) == ["req_1"])
+    #expect(list.first?.spacedCode == "123 456")
+    let waiting = MemberAccessRequest(requestId: "r", deviceName: "d", platform: "web", expiresAt: 0)
+    #expect(waiting.spacedCode == nil)
+}
+
 private actor Canned: HostTransport {
     struct Call: Sendable { var method: String; var body: Data }
     private(set) var calls: [Call] = []
