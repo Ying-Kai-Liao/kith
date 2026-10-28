@@ -30,6 +30,8 @@ import { noticeThreadChip } from './notice-thread'
 import { botGuestSender, botOriginLabel } from '@shared/bot-guest-chat'
 import { runLabel, threadOrigin } from '@shared/thread-writer'
 import { avatarImage } from '@shared/crew'
+import { richCardOf, type RichCard } from '@shared/rich-card'
+import { NewsCard, ScheduleCard } from './RichCards'
 
 export function reactionPick(store: BotStore, entry: Entry): ReactionPick {
   return { emoji: QUICK_REACTIONS, chosen: entry.data.reactions ?? [], toggle: (e) => store.react(entry, e) }
@@ -76,11 +78,12 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
           {chip}
         </VStack>
       )
-    case 'agent':
+    case 'agent': {
+      const card = richCardOf(entry.data)
       return (
         <VStack align="flex-start" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
           {chat && isGroup(chat) && groupStart ? <AuthorLabel botId={entry.data.author} /> : null}
-          <AgentBubble entry={entry} openTrace={openTrace} reply={reply} />
+          {card ? <AgentCard entry={entry} card={card} openTrace={openTrace} reply={reply} /> : <AgentBubble entry={entry} openTrace={openTrace} reply={reply} />}
           <VStack gap={4} className={chat && isGroup(chat) ? 'chat-row-indent' : undefined}>
             <AnsweredBy answeredBy={entry.data.answeredBy} />
             <ContextHint contextPercent={entry.data.contextPercent} />
@@ -89,6 +92,7 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
           </VStack>
         </VStack>
       )
+    }
     case 'permission':
       return (
         <VStack gap={4} className="chat-row group-start">
@@ -99,10 +103,26 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
     default:
       if (entry.data.connectionRequest) return <div className="chat-row group-start"><ConnectionRequestCard entry={entry} /></div>
       if (entry.data.handoff) return <div className="chat-row notice"><HandoffNotice entry={entry} card={entry.data.handoff} /></div>
+      // A routine's "Created routine" notice is its Schedule card.
+      if (richCardOf(entry.data)?.type === 'schedule') return <div className="chat-row group-start"><div className="agent-inset"><ScheduleCard entry={entry} card={richCardOf(entry.data)!} /></div></div>
       // Any notice that roots a thread (a bot guest's conversation) opens it like a message does.
       return <div className="chat-row notice">{chip && entry.data.thread?.origin === 'bot' ? null : <NoticeRow entry={entry} />}{chip ? <div className="notice-thread-chip">{chip}</div> : null}</div>
   }
 })
+
+/** An agent message drawn as its card. A brief's lead and tail stay the agent's words, as bubbles around it. */
+function AgentCard({ entry, card, openTrace, reply }: { entry: Entry; card: RichCard; openTrace: () => void; reply?: () => void }) {
+  if (card.type === 'schedule') return <div className="agent-inset"><ScheduleCard entry={entry} card={card} /></div>
+  const words = (key: 'lead' | 'tail') => (typeof card.snapshot?.[key] === 'string' ? (card.snapshot[key] as string).trim() : '')
+  const bubble = (text: string) => (text ? <AgentBubble entry={{ ...entry, data: { ...entry.data, text } }} openTrace={openTrace} reply={reply} /> : null)
+  return (
+    <>
+      {bubble(words('lead'))}
+      <div className="agent-inset"><NewsCard entry={entry} card={card} /></div>
+      {bubble(words('tail'))}
+    </>
+  )
+}
 
 /** A quiet "context N%" under the reply; the host sets it only above its threshold. */
 function ContextHint({ contextPercent }: { contextPercent: unknown }) {
