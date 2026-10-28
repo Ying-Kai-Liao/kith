@@ -226,6 +226,10 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
             Err(denied("This device hasn't shown its invite yet."))
         };
     }
+    // A proven device shows its kept invite again on every connection; it is told it has, in the words the apps wait for.
+    if method == "proveInvite" {
+        return Err(denied("This device has already shown its invite."));
+    }
     if !member_may(method) {
         return Err(denied("This isn't available to guests and members on this computer."));
     }
