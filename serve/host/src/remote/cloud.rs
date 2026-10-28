@@ -27,6 +27,8 @@ pub const LEASE_MS: i64 = 15 * 60 * 1000;
 const TIMEOUT: Duration = Duration::from_secs(15);
 /// Grant revocations the cloud hasn't confirmed yet (kv, JSON array of grant ids).
 const PENDING_REVOKES: &str = "grant_revokes";
+/// A member's browser unused this long is removed; they ask again and the owner approves again.
+const WEB_IDLE_MS: i64 = 30 * 24 * HOUR_MS;
 /// kv: the saved `Approval`.
 const APPROVAL: &str = "account_approval";
 
@@ -449,6 +451,7 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
             }
         }
     }
+    expire_idle_web(hub);
     retry_revokes(hub, base).await;
     super::members::retry_revokes(hub).await;
     super::botsync::retry_revokes(hub).await;
@@ -777,6 +780,30 @@ pub async fn revoke_grant(hub: Arc<Hub>, grant_id: String) {
     }
 }
 
+/// Removes members' web devices nobody used for `WEB_IDLE_MS` (never used: counted from approval), and queues their
+/// grants for the cloud. A browser is the device most likely left signed in somewhere; a phone or the owner's own stay.
+fn expire_idle_web(hub: &Hub) {
+    let Ok(devices) = hub.store.devices() else { return };
+    let cutoff = now_ms() - WEB_IDLE_MS;
+    let mut pending = pending_revokes(&hub.store);
+    for d in devices {
+        let idle = d.source == DeviceSource::Account
+            && d.person_id.is_some()
+            && is_web(&d.platform)
+            && d.last_seen_at.unwrap_or(d.created_at) < cutoff;
+        if !idle || !hub.revoke_device(&d.key).unwrap_or(false) {
+            continue;
+        }
+        tracing::info!(device = d.key, "removed a member's web device unused for 30 days");
+        if let Some(g) = d.grant_id
+            && !pending.contains(&g)
+        {
+            pending.push(g);
+        }
+    }
+    set_pending_revokes(&hub.store, &pending);
+}
+
 async fn retry_revokes(hub: &Hub, base: &str) {
     let pending = pending_revokes(&hub.store);
     if pending.is_empty() {
@@ -884,6 +911,32 @@ mod tests {
             created_at: now_ms(),
             last_seen_at: None,
             person_id: None,
+        }
+    }
+
+    #[test]
+    fn a_members_idle_browser_is_removed_after_30_days() {
+        let hub = temp_hub();
+        let old = now_ms() - WEB_IDLE_MS - 1000;
+        let device = |key: &str, platform: &str, person: Option<&str>, created_at: i64| Device {
+            platform: platform.into(),
+            person_id: person.map(str::to_owned),
+            created_at,
+            ..account_device(key, &format!("grt_{key}"))
+        };
+        for d in [
+            device("idle", "web", Some("sam"), old),
+            device("fresh", "web", Some("sam"), now_ms()),
+            device("phone", "ios", Some("sam"), old),
+            device("owners", "web", None, old),
+        ] {
+            hub.store.put_device(&d).unwrap();
+        }
+        expire_idle_web(&hub);
+        assert!(hub.store.device("idle").is_none(), "unused for 30 days: gone");
+        assert_eq!(pending_revokes(&hub.store), ["grt_idle"], "and its grant goes to the cloud");
+        for kept in ["fresh", "phone", "owners"] {
+            assert!(hub.store.device(kept).is_some(), "{kept} stays");
         }
     }
 
