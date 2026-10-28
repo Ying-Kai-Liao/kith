@@ -247,7 +247,12 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   transaction that records it (M2).
 - **3. Choices.** Allow once, Always allow (only where a lasting form exists: a path, a domain, a service), Deny. No
   Always on tool prompts for anyone but the owner; the owner's own chats keep Claude Code's options. An Always
-  kith-auth refuses is shown as once, with why ("Allowed once only: …").
+  kith-auth refuses is shown as once, with why ("Allowed once only: …"). Each lasting entry records who approved it
+  (`approved_by` in the ledger: "owner", a person id, or null for one from before it was recorded). The host passes a
+  person's yes as `kith-auth access … --by <id>`, and kith-auth writes it only if that person is a member of the agent
+  then, for themselves or their own bot, under the same lock as the write (M3). An owner's yes replaces a person's;
+  a person's never replaces the owner's. When a person stops being a member of the agent (made a guest or removed
+  from it), the entries they approved go, on their own row and their bots'; a rename carries them.
 - **4. Delivery.** Take the session's writer claim -> reserve its once grants -> load the session with them -> take
   the grants only when it started with them; a failed load leaves them for the next activation (M4). Each loaded
   app-chat session keeps a profile digest, compared at every turn (M6); a yes, a removed grant or a demotion reloads
@@ -263,8 +268,6 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 - **8. Lifecycle owns every stop.** Not built (below).
 
 **Planned (agreed, not built yet).**
-- `approved_by` on ledger entries (the field exists, null today); a demotion drops what a person approved for
-  themselves, and kith-auth writes a self-approved entry only while they are a member (M3).
 - A card's wake stays queued until an activation that includes the yes has started (M5).
 - No chat with the agent on this Mac: the card goes to the approver's inbox instead of "There is nowhere to ask".
 - Rule 5: host down, the kernel restarts the host job and retries the ask token once before refusing.
