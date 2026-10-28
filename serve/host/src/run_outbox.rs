@@ -5,13 +5,18 @@
 //! the run was for. Each item lands once, across restarts too, in that person's own chat with the agent, never in a
 //! group. The run may still be writing, so items and their files are moved into `.taken/<run>/`, where nothing but the
 //! host writes, before anything in them is trusted.
+//!
+//! Two items become cards (`crate::rich_card`): a `kith-sched` change, checked against the agent's live jobs before
+//! it is shown, and a scheduled run's brief.
 use crate::chat::files;
 use crate::hub::Hub;
+use crate::rich_card;
 use crate::store::{EntryKind, Lane};
 use anyhow::{Context as _, Result};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -30,6 +35,7 @@ struct Meta {
     #[serde(default)]
     via: String,
     job: Option<String>,
+    cron: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -40,6 +46,7 @@ struct Item {
     caption: Option<String>,
     #[serde(default)]
     files: Vec<Stored>,
+    schedule: Option<rich_card::Op>,
 }
 
 #[derive(Deserialize)]
@@ -97,23 +104,43 @@ fn is_data(name: &str) -> bool {
 pub fn start(hub: &Arc<Hub>) {
     let Some(root) = root() else { return };
     let weak = Arc::downgrade(hub);
+    let rt = tokio::runtime::Handle::current();
     tokio::spawn(async move {
         let mut clock = tokio::time::interval(Duration::from_secs(2));
         clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             clock.tick().await;
             let Some(hub) = weak.upgrade() else { break };
-            let root = root.clone();
-            if let Err(error) = tokio::task::spawn_blocking(move || drain(&hub, &root)).await {
+            let (root, rt) = (root.clone(), rt.clone());
+            if let Err(error) = tokio::task::spawn_blocking(move || drain(&hub, &root, &|a| live_jobs(&rt, a))).await {
                 tracing::warn!(%error, "run outbox will retry");
             }
         }
     });
 }
 
+/// What `kith-info` says `agent`'s jobs are now, not a cached answer: the run has just changed them.
+fn live_jobs(rt: &tokio::runtime::Handle, agent: &str) -> Option<Vec<Value>> {
+    let info = rt.block_on(crate::agent::hq::info(agent, true)).info.ok()?;
+    info.get("schedules")?.as_array().cloned()
+}
+
+/// The agents' live jobs, read at most once a drain and only for an agent whose run changed one.
+struct Live<'a> {
+    read: &'a dyn Fn(&str) -> Option<Vec<Value>>,
+    got: HashMap<String, Option<Vec<Value>>>,
+}
+
+impl Live<'_> {
+    fn jobs(&mut self, agent: &str) -> Option<&[Value]> {
+        self.got.entry(agent.to_owned()).or_insert_with(|| (self.read)(agent)).as_deref()
+    }
+}
+
 /// Posts every item waiting in `root`, each once.
-fn drain(hub: &Hub, root: &Path) {
+fn drain(hub: &Hub, root: &Path, jobs: &dyn Fn(&str) -> Option<Vec<Value>>) {
     let Ok(list) = std::fs::read_dir(root) else { return };
+    let mut live = Live { read: jobs, got: HashMap::new() };
     for meta_path in list.flatten().map(|e| e.path()) {
         let Some(run) = meta_path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".json")) else {
             continue;
@@ -121,13 +148,13 @@ fn drain(hub: &Hub, root: &Path) {
         if !valid(run) || !regular(&meta_path) {
             continue;
         }
-        if let Err(error) = drain_run(hub, root, run, &meta_path) {
+        if let Err(error) = drain_run(hub, root, run, &meta_path, &mut live) {
             tracing::warn!(run, error = format!("{error:#}"), "run outbox item will retry");
         }
     }
 }
 
-fn drain_run(hub: &Hub, root: &Path, run: &str, meta_path: &Path) -> Result<()> {
+fn drain_run(hub: &Hub, root: &Path, run: &str, meta_path: &Path, live: &mut Live) -> Result<()> {
     let meta: Meta = serde_json::from_slice(&std::fs::read(meta_path)?).context("reading the run's meta")?;
     let dir = root.join(run);
     let taken = root.join(TAKEN).join(run);
@@ -144,7 +171,7 @@ fn drain_run(hub: &Hub, root: &Path, run: &str, meta_path: &Path) -> Result<()> 
             .collect();
         stems.sort_by_key(|s| s.parse::<u128>().unwrap_or(u128::MAX));
         for stem in stems {
-            post(hub, chat.as_deref(), &meta, run, &taken, &stem)?;
+            post(hub, chat.as_deref(), &meta, run, &taken, &stem, live)?;
         }
         let _ = std::fs::remove_dir(&taken);
     }
@@ -203,11 +230,23 @@ fn read_item(path: &Path) -> Option<Item> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-fn post(hub: &Hub, chat: Option<&str>, meta: &Meta, run: &str, taken: &Path, stem: &str) -> Result<()> {
+fn post(
+    hub: &Hub,
+    chat: Option<&str>,
+    meta: &Meta,
+    run: &str,
+    taken: &Path,
+    stem: &str,
+    live: &mut Live,
+) -> Result<()> {
     let at = taken.join(format!("{stem}.json"));
     let item = read_item(&at);
     let id = format!("outbox-{run}-{stem}");
-    if let (Some(chat), Some(item)) = (chat, &item)
+    if let (Some(chat), Some(Item { schedule: Some(op), sender, .. })) = (chat, &item)
+        && hub.store.entry(&id).is_none()
+    {
+        post_schedule(hub, chat, meta, &id, op, sender, live)?;
+    } else if let (Some(chat), Some(item)) = (chat, &item)
         && hub.store.entry(&id).is_none()
     {
         let root = files::root(chat);
@@ -232,10 +271,15 @@ fn post(hub: &Hub, chat: Option<&str>, meta: &Meta, run: &str, taken: &Path, ste
             let mut data = json!({
                 "text": text,
                 "final": true,
-                "outbox": {"agent": meta.agent, "person": meta.person, "via": meta.via, "job": meta.job, "as": item.sender},
+                "outbox": outbox(meta, &item.sender),
             });
             if !snapshots.is_empty() {
                 data["files"] = Value::from(snapshots.iter().map(|s| json!(s.meta)).collect::<Vec<_>>());
+            } else if meta.via == "schedule"
+                && let Some(job) = &meta.job
+                && let Some(card) = rich_card::news::card(&text, &meta.agent, job, meta.cron.as_deref())
+            {
+                data["richCard"] = card;
             }
             hub.add_entry_once(&id, &Lane::main(chat), EntryKind::Agent, &data)?;
             snapshots.iter_mut().for_each(files::Snapshot::commit);
@@ -250,6 +294,42 @@ fn post(hub: &Hub, chat: Option<&str>, meta: &Meta, run: &str, taken: &Path, ste
     }
     std::fs::remove_file(&at)?;
     Ok(())
+}
+
+fn outbox(meta: &Meta, sender: &str) -> Value {
+    json!({"agent": meta.agent, "person": meta.person, "via": meta.via, "job": meta.job, "as": sender})
+}
+
+/// A run changed one of the agent's jobs: its Schedule card, when the live jobs show that change for the run's
+/// person, and the job's previous card in this chat folds to a line.
+fn post_schedule(
+    hub: &Hub,
+    chat: &str,
+    meta: &Meta,
+    id: &str,
+    op: &rich_card::Op,
+    sender: &str,
+    live: &mut Live,
+) -> Result<()> {
+    let Some(jobs) = live.jobs(&meta.agent) else {
+        tracing::warn!(agent = meta.agent, job = op.id, "schedule card dropped: the agent's jobs couldn't be read");
+        return Ok(());
+    };
+    let key = format!("richcard.schedule.{chat}.{}.{}", meta.agent, op.id);
+    let prior = hub.store.kv_get(&key).and_then(|p| hub.store.entry(&p));
+    let now = chrono::Local::now().fixed_offset();
+    let snapshot = prior.as_ref().map(|p| &p.data["richCard"]["snapshot"]);
+    let Some(mut data) = rich_card::schedule(&meta.agent, meta.person.as_deref(), op, jobs, snapshot, now) else {
+        tracing::info!(agent = meta.agent, job = op.id, op = op.op, "schedule card dropped: the jobs don't show it");
+        return Ok(());
+    };
+    data["outbox"] = outbox(meta, sender);
+    hub.add_entry_once(id, &Lane::main(chat), EntryKind::Agent, &data)?;
+    if let Some(mut prior) = prior {
+        prior.data["richCard"]["snapshot"]["folded"] = json!(if op.op == "removed" { "removed" } else { "changed" });
+        hub.set_entry(&prior.id, &prior.data);
+    }
+    hub.store.kv_set(&key, id)
 }
 
 #[cfg(test)]

@@ -17,6 +17,7 @@ mod limits;
 mod market;
 mod mcp;
 mod remote;
+mod rich_card;
 mod routines;
 mod run_outbox;
 mod runauth;
