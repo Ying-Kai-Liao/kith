@@ -98,7 +98,10 @@ pub struct Card {
     /// The answer arrived while the process was gone (nothing to continue; the grant waits for a resume).
     pub answered_parked: bool,
     pub granted_at: Option<i64>,
+    /// A door took the resume (the claim); with no `applied_at` the turn that carries it hasn't started yet.
     pub resumed_at: Option<i64>,
+    /// The turn that carries the resume started (M5): the wake is delivered and nothing more is owed.
+    pub applied_at: Option<i64>,
     /// The `kith ask` id the run was started by: the card's outcome is that ask's answer (rule 7).
     pub reply_to: Option<String>,
     /// The agent that asked it, for the card's chain; none for a terminal.
@@ -153,7 +156,7 @@ pub enum Answered {
 
 const COLS: &str = "id, session, source, bot_id, run_id, entry_id, person, agent, approver, tool, input, resource, shown, \
     scope, state, created_at, deadline, answer, allowed, answered_by, answered_at, answered_parked, granted_at, resumed_at, \
-    reply_to, asked_by, answerable_by, in_grants";
+    reply_to, asked_by, answerable_by, in_grants, applied_at";
 
 fn row(r: &rusqlite::Row) -> rusqlite::Result<Card> {
     Ok(Card {
@@ -185,6 +188,7 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Card> {
         asked_by: r.get(25)?,
         answerable_by: r.get(26)?,
         in_grants: r.get::<_, i64>(27)? != 0,
+        applied_at: r.get(28)?,
     })
 }
 
@@ -593,7 +597,8 @@ impl Store {
     }
 
     /// After a host restart: live waits are gone, so live cards park; an approved card whose grant was not recorded
-    /// gets it (C4). Returns the cards that parked.
+    /// gets it (C4); a resume a door took whose turn never started (the queue it waited in is gone) is owed again
+    /// (M5). Returns the cards that parked.
     pub fn cards_restart(&self, now: i64) -> Result<Vec<Card>> {
         let c = self.db.locked();
         let parked = move_where(&c, "state IN ('pending','live')", params![], CardState::Parked)?;
@@ -601,6 +606,7 @@ impl Store {
             "UPDATE cards SET granted_at = ?1 WHERE state = 'approved' AND allowed = 1 AND granted_at IS NULL",
             [now],
         )?;
+        c.execute("UPDATE cards SET resumed_at = NULL WHERE resumed_at IS NOT NULL AND applied_at IS NULL", [])?;
         Ok(parked)
     }
 
@@ -625,16 +631,24 @@ impl Store {
 
     /// Claims the resume of a card: a compare-and-set on `resumed_at`, so a door's copy and a restart's re-derive can't
     /// both start a turn. True only for the caller that set it. Taken just before the turn is handed over; a refused
-    /// hand-over gives it back ([`Self::card_resume_release`]).
+    /// hand-over gives it back ([`Self::card_resume_release`]), and the turn's start marks it applied
+    /// ([`Self::card_resume_applied`]).
     pub fn card_resume_claim(&self, id: &str, now: i64) -> Result<bool> {
         let sql = format!("UPDATE cards SET resumed_at = ?1 WHERE id = ?2 AND {OWED}");
         Ok(self.db.locked().execute(&sql, params![now, id])? == 1)
     }
 
-    /// The hand-over was refused (the session is held, the actor is gone): the resume is owed again.
+    /// The hand-over was refused (the session is held, the actor is gone) or its turn never ran: the resume is owed
+    /// again.
     pub fn card_resume_release(&self, id: &str) -> Result<bool> {
-        let sql = "UPDATE cards SET resumed_at = NULL WHERE id = ?1 AND resumed_at IS NOT NULL";
+        let sql = "UPDATE cards SET resumed_at = NULL, applied_at = NULL WHERE id = ?1 AND resumed_at IS NOT NULL";
         Ok(self.db.locked().execute(sql, [id])? == 1)
+    }
+
+    /// The turn that carries a claimed resume started (M5): from here a restart doesn't offer it again.
+    pub fn card_resume_applied(&self, id: &str, now: i64) -> Result<bool> {
+        let sql = "UPDATE cards SET applied_at = ?1 WHERE id = ?2 AND resumed_at IS NOT NULL AND applied_at IS NULL";
+        Ok(self.db.locked().execute(sql, params![now, id])? == 1)
     }
 
     /// An owed resume that can't happen (the person lost the agent, the session is gone): the card ends.
@@ -907,6 +921,29 @@ mod tests {
         s.card_answer(&denied.id, false, "deny", "kai", None, 200, false).unwrap();
         s.cards_restart(700).unwrap();
         assert_eq!(s.card(&denied.id).unwrap().granted_at, None);
+    }
+
+    #[test]
+    fn a_resume_whose_turn_never_started_is_owed_again_after_a_restart() {
+        let s = temp_store();
+        let (lost, ran) = (new(&s, "s1", "Bash:a"), new(&s, "s2", "Bash:b"));
+        s.cards_park_run("r1").unwrap();
+        for c in [&lost, &ran] {
+            s.card_answer(&c.id, true, "allow", "kai", None, 200, false).unwrap();
+            assert!(s.card_resume_claim(&c.id, 300).unwrap());
+        }
+        // Only `ran`'s turn started before the host stopped (M5, D5).
+        assert!(s.card_resume_applied(&ran.id, 310).unwrap());
+        assert!(!s.card_resume_applied(&ran.id, 320).unwrap(), "applied once");
+        assert_eq!(s.cards_awaiting_resume(0).len(), 0, "both claimed");
+        s.cards_restart(400).unwrap();
+        let owed: Vec<_> = s.cards_awaiting_resume(0).into_iter().map(|c| c.id).collect();
+        assert_eq!(owed, std::slice::from_ref(&lost.id), "the lost wake is offered again; the started one is not");
+        assert_eq!(s.card(&ran.id).unwrap().applied_at, Some(310));
+        // A claim given back is not applied, even if its turn had looked started (a held session refused it).
+        assert!(s.card_resume_release(&ran.id).unwrap());
+        assert_eq!(s.card(&ran.id).unwrap().applied_at, None);
+        assert!(!s.card_resume_applied(&ran.id, 500).unwrap(), "nothing to apply without a claim");
     }
 
     #[test]
