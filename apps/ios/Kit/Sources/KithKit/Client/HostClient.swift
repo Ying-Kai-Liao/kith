@@ -14,6 +14,8 @@ public enum HostEvent: Sendable {
     /// the screens need: they read the lists again.
     case botRequest
     case botUpdated
+    /// Members' devices waiting for the owner's OK, the whole list each time.
+    case accessRequests([MemberAccessRequest])
     /// An event this app version couldn't decode (host newer/older than the app).
     case undecodable(type: String)
 }
@@ -151,6 +153,7 @@ public struct HostClient: Sendable {
         struct EntryWrap: Decodable { var entry: Entry }
         struct UsageWrap: Decodable { var usage: Usage }
         struct ScreenWrap: Decodable { var screen: ScreenState }
+        struct RequestsWrap: Decodable { var requests: [MemberAccessRequest] }
         let d = decoder
         guard let env = try? d.decode(Envelope.self, from: data) else { return nil }
         switch env.type {
@@ -177,6 +180,8 @@ public struct HostClient: Sendable {
             return .botRequest
         case "botUpdated":
             return .botUpdated
+        case "accessRequests":
+            return (try? d.decode(RequestsWrap.self, from: data)).map { .accessRequests($0.requests) }
         default:
             return nil
         }

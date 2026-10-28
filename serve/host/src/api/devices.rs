@@ -66,8 +66,6 @@ pub(super) const LOCAL_ONLY: &[&str] = &[
     "confirmOwner",
     "devices",
     "revokeDevice",
-    "accessRequests",
-    "decideAccessRequest",
     "cloudStatus",
     "setCloud",
     "setApproval",

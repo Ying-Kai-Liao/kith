@@ -132,6 +132,12 @@ pub fn events_stream(
         let (hub, who) = (hub.clone(), who.clone());
         async move {
             match msg {
+                // The owner's other devices get members' requests, the ones they may answer (see `decideAccessRequest`).
+                Ok(v) if !local && who.is_none() && v["type"] == "accessRequests" => Some(json!({
+                    "type": "accessRequests",
+                    "requests": v["requests"].as_array().into_iter().flatten()
+                        .filter(|r| !r["personId"].is_null()).cloned().collect::<Vec<_>>(),
+                })),
                 Ok(v) if !local && v["type"].as_str().is_some_and(|t| LOCAL_EVENTS.contains(&t)) => None,
                 Ok(v) => roles::event_for(&hub.store, who.as_deref(), v),
                 // Lagged: tell the client to resync from its last rev.

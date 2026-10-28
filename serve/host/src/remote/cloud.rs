@@ -245,6 +245,15 @@ impl Cloud {
     pub fn requests_json(&self) -> Vec<Value> {
         self.requests.locked().iter().map(Request::json).collect()
     }
+
+    /// What a caller may see: all of them on this computer, members' requests only on the owner's other devices.
+    pub fn requests_json_for(&self, local: bool) -> Vec<Value> {
+        self.requests.locked().iter().filter(|r| local || r.person.is_some()).map(Request::json).collect()
+    }
+
+    pub fn is_member_request(&self, id: &str) -> bool {
+        self.requests.locked().iter().any(|r| r.id == id && r.person.is_some())
+    }
 }
 
 /// Changes the status and tells this computer's apps when it actually changed.
@@ -949,6 +958,31 @@ mod tests {
         for kept in ["fresh", "phone", "owners"] {
             assert!(hub.store.device(kept).is_some(), "{kept} stays");
         }
+    }
+
+    #[test]
+    fn the_owners_phone_sees_and_may_answer_only_members_requests() {
+        let hub = temp_hub();
+        let request = |id: &str, person: Option<&str>| Request {
+            id: id.into(),
+            device_key: crypto::random(),
+            device_name: "Kith web".into(),
+            platform: "web".into(),
+            email: None,
+            commit: [0; 32],
+            host_nonce: [0; 32],
+            code: Some("123456".into()),
+            person: person.map(str::to_owned),
+            created_at: now_ms(),
+            expires_at: now_ms() + HOUR_MS,
+        };
+        hub.cloud.requests.locked().extend([request("req_owner", None), request("req_sam", Some("sam"))]);
+        let ids = |v: Vec<Value>| v.iter().map(|r| r["requestId"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+        assert_eq!(ids(hub.cloud.requests_json_for(true)), ["req_owner", "req_sam"], "the computer sees all");
+        assert_eq!(ids(hub.cloud.requests_json_for(false)), ["req_sam"], "a phone sees members' only");
+        assert!(hub.cloud.is_member_request("req_sam"));
+        assert!(!hub.cloud.is_member_request("req_owner"), "an owner device is approved at the computer");
+        assert!(!hub.cloud.is_member_request("req_gone"));
     }
 
     #[test]

@@ -111,3 +111,32 @@ public struct AuditRow: Codable, Hashable, Sendable, Identifiable {
     public var time: Date { Date(timeIntervalSince1970: Double(at) / 1000) }
 }
 
+/// A member's new device asking to use this computer (`accessRequests`), as the owner's phone sees it: the computer
+/// lists only members' requests to its other devices, and only those may be answered from here.
+public struct MemberAccessRequest: Codable, Hashable, Sendable, Identifiable {
+    public var requestId: String
+    public var deviceName: String
+    public var platform: String
+    public var email: String?
+    public var personId: String?
+    /// The six digits the device shows, once it revealed them; Approve waits for it.
+    public var code: String?
+    public var expiresAt: Int64
+    public var id: String { requestId }
+
+    public init(requestId: String, deviceName: String, platform: String, email: String? = nil, personId: String? = nil,
+                code: String? = nil, expiresAt: Int64) {
+        self.requestId = requestId
+        self.deviceName = deviceName
+        self.platform = platform
+        self.email = email
+        self.personId = personId
+        self.code = code
+        self.expiresAt = expiresAt
+    }
+
+    /// "123 456", as the device shows it.
+    public var spacedCode: String? {
+        code.map { $0.count == 6 ? "\($0.prefix(3)) \($0.suffix(3))" : $0 }
+    }
+}

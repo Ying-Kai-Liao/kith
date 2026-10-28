@@ -74,6 +74,8 @@ public final class BotStore {
     public internal(set) var usage: Usage
     /// The computer's remote screen (`nil`: the host predates it).
     public internal(set) var screen: ScreenState?
+    /// Members' new devices waiting for the owner's OK (see `decideAccessRequest`); always empty for a member.
+    public internal(set) var accessRequests: [MemberAccessRequest] = []
     /// Installed on the computer, for the Plugins screen and bot settings.
     public internal(set) var installedConnectors: [InstalledConnector] = []
     public internal(set) var installedSkills: [InstalledSkill] = []

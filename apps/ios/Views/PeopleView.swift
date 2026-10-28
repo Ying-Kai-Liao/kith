@@ -1,6 +1,7 @@
 import CoreImage.CIFilterBuiltins
 import KithKit
 import KithUI
+import LocalAuthentication
 import SwiftUI
 
 /// The agents the owner has on a computer, which an invite can offer. Their own bots only: a chat an invited person has
@@ -47,7 +48,9 @@ struct PeopleSection: View {
         let count = people.people.count
         let people = count == 0 ? "Invite someone" : count == 1 ? "1 person" : "\(count) people"
         let bots = store.botGuests.liveCount
-        return bots == 0 ? people : "\(count == 0 ? "0 people" : people) · \(bots == 1 ? "1 bot" : "\(bots) bots")"
+        let summary = bots == 0 ? people : "\(count == 0 ? "0 people" : people) · \(bots == 1 ? "1 bot" : "\(bots) bots")"
+        let asking = store.accessRequests.count
+        return asking == 0 ? summary : "\(summary) · \(asking) waiting"
     }
 }
 
@@ -61,11 +64,36 @@ struct PeopleView: View {
     @State private var botSheet: BotSheetTarget?
 
     private var guests: BotGuestStore { store.botGuests }
+    @State private var answering: Set<String> = []
+    @State private var answerError: String?
+
+    private func requester(_ request: MemberAccessRequest) -> String {
+        request.personId.flatMap { people.person($0)?.name } ?? request.email ?? "Someone you invited"
+    }
+
+    /// Approving lets a new device in, so it asks for Face ID (or the passcode) first; Deny doesn't.
+    private func answer(_ request: MemberAccessRequest, approve: Bool) {
+        Task {
+            answerError = nil
+            if approve, !(await ownerConfirms("Let \(requester(request))'s \(request.deviceName) use \(store.hostName)")) { return }
+            answering.insert(request.id)
+            answerError = await store.decideAccessRequest(request, approve: approve)
+            answering.remove(request.id)
+        }
+    }
 
     var body: some View {
         CardForm {
-            if let error = people.error {
+            if let error = people.error ?? answerError {
                 Text(error).font(.footnote).foregroundStyle(Palette.danger)
+            }
+            if !store.accessRequests.isEmpty {
+                CardSection("Asking to connect", footer: "Approve only if the code matches the one on their screen.") {
+                    ForEach(store.accessRequests) { request in
+                        AccessRequestRow(request: request, name: requester(request), busy: answering.contains(request.id),
+                                         approve: { answer(request, approve: true) }, deny: { answer(request, approve: false) })
+                    }
+                }
             }
             CardSection("People", footer: people.people.isEmpty
                         ? "Nobody yet. They sign in to Kith with their own account, so you can see who did what."
@@ -170,6 +198,49 @@ private struct PersonRow: View {
         let devices = count == 1 ? "1 device" : "\(count) devices"
         if person.devices.contains(where: { $0.connected == true }) { return "\(devices) · online now" }
         return person.lastSeen.map { "\(devices) · last seen \(RelativeTime.day($0))" } ?? devices
+    }
+}
+
+/// Face ID, Touch ID or the passcode; false when cancelled or this iPhone has none set up.
+@MainActor
+private func ownerConfirms(_ reason: String) async -> Bool {
+    let context = LAContext()
+    guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: nil) else { return false }
+    return (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)) ?? false
+}
+
+/// A member's new device: who, what it is, its code, and the answer buttons (Approve once it showed its code).
+private struct AccessRequestRow: View {
+    let request: MemberAccessRequest
+    let name: String
+    let busy: Bool
+    let approve: () -> Void
+    let deny: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.body.weight(.semibold)).foregroundStyle(Palette.text)
+                Text(request.deviceName).font(.subheadline).foregroundStyle(Palette.secondary)
+            }
+            if let code = request.spacedCode {
+                Text(code).font(.title2.monospacedDigit().weight(.semibold)).foregroundStyle(Palette.text)
+                    .accessibilityLabel("Code \(code)")
+            } else {
+                Text("Waiting for their code…").font(.subheadline).foregroundStyle(Palette.secondary)
+            }
+            HStack(spacing: 16) {
+                Button("Approve", action: approve)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.accent)
+                    .disabled(busy || request.code == nil)
+                Button("Deny", action: deny)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.danger)
+                    .disabled(busy)
+                if busy { ProgressView() }
+            }
+        }
     }
 }
 
