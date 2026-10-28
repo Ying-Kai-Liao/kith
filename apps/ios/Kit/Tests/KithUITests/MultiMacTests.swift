@@ -170,6 +170,16 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
     #expect(GuestPrompt.waitingText(for: card("p3", chat: "c", approver: "member"), activity: nil, isOwner: true) == nil)
 }
 
+@Test func theHostsCanAnswerDecidesTheButtons() {
+    var mine = card("p1", chat: "c", approver: "owner")
+    mine.data.canAnswer = true
+    #expect(GuestPrompt.waitingText(for: mine, activity: "Waiting for Kai", isOwner: false) == nil)
+    var theirs = card("p2", chat: "c", approver: "member")
+    theirs.data.canAnswer = false
+    #expect(GuestPrompt.waitingText(for: theirs, activity: "Waiting for Kai", isOwner: false) == "Waiting for Kai")
+    #expect(BoardModel.isWaiting(mine) && !BoardModel.isWaiting(theirs))
+}
+
 @MainActor @Test func aGuestsPromptMakesNoBotAndNoUnreadChatAndIsOnlyTheOwnersToAnswer() throws {
     let suite = "MultiMacTests.\(UUID().uuidString)"
     defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }

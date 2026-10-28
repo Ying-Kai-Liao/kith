@@ -117,8 +117,8 @@ export const NOTE_LIMIT = 280
 
 const pendingPermission = (e: Entry) => e.kind === 'permission' && e.data.status === 'pending'
 
-/** A guest's card in a chat of this account's own is the owner's to answer, not this one's. */
-const isMine = (e: Entry) => pendingPermission(e) && e.data.approver !== 'owner'
+/** A card this account may answer, as the host says (`canAnswer`); from an older host, a guest's card in a chat of this account's own is the owner's to answer, not this one's. */
+const isMine = (e: Entry) => pendingPermission(e) && (e.data.canAnswer ?? e.data.approver !== 'owner')
 
 /** Questions waiting on you in one chat: the count on a Crew row. */
 export const pendingQuestions = (entries: readonly Entry[]) => entries.filter(isMine).length

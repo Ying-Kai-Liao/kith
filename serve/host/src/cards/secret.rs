@@ -250,6 +250,8 @@ pub async fn request(hub: &Arc<Hub>, o: &Origin, service: &str, purpose: &str) -
     };
     let cfg = settings(&hub.store);
     let now = now_ms();
+    let ask = crate::access::Request { person: "", agent: &o.agent, owner_run: true, ask: crate::access::Ask::Secret };
+    let answerable_by = crate::access::approver(&hub.store, &ask).await;
     let new = NewCard {
         session: o.session.clone(),
         source: o.source,
@@ -257,7 +259,8 @@ pub async fn request(hub: &Arc<Hub>, o: &Origin, service: &str, purpose: &str) -
         run_id: o.run_id.clone(),
         person: String::new(),
         agent: o.agent.clone(),
-        approver: "owner",
+        answerable_by,
+        in_grants: false,
         tool: TOOL.to_owned(),
         input: json!({"service": service, "purpose": purpose}).to_string(),
         resource: format!("secret:{service}"),
@@ -586,7 +589,7 @@ pub async fn respond(hub: &Arc<Hub>, entry_id: &str, option: Option<&str>) -> an
 /// A deny (or cancel). True when the card turned out to be closed already.
 fn deny(hub: &Arc<Hub>, card: &Card, option: Option<&str>) -> anyhow::Result<bool> {
     let Some(_slot) = Slot::take(&card.id) else { return Ok(true) };
-    let applied = hub.store.card_answer(&card.id, false, option.unwrap_or("cancel"), "owner", now_ms(), false)?;
+    let applied = hub.store.card_answer(&card.id, false, option.unwrap_or("cancel"), "owner", None, now_ms(), false)?;
     let crate::store::Answered::Applied { card, .. } = applied else {
         if hub.store.card(&card.id).is_some_and(|c| c.state == CardState::Expired) {
             super::close_entry(hub, card, "expired");

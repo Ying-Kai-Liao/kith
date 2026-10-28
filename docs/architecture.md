@@ -238,8 +238,13 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 **Rules** (built unless marked).
 - **1-2. Who answers.** The owner for the owner's runs; a member for their own run when the tool runs no code and
   every named path is inside their folders (a call naming no path fails closed; a bot's owner answers only inside
-  the bot's folders); the owner for everything else. The owner's devices always show the buttons. Each producer
-  checks this itself today; one `approver()` with the answer stored on the card is planned.
+  the bot's folders); the owner for everything else. The owner's devices always show the buttons. Every producer
+  asks `access::approver()` (`serve/host/src/access.rs`) and stores the answer on the card (`answerable_by`, NULL =
+  the owner); the answer guard and each viewer's `canAnswer` use `may_answer = owner || (answerable_by == viewer &&
+  still a member now)`. Open cards are re-derived on the sweep tick and when kith-auth's auth.json changes (a 3 s
+  poll): a person who becomes a guest hands the card to the owner, one who loses the agent has it withdrawn. An
+  answer counts only while the card still names that person and they still have a device here, checked in the same
+  transaction that records it (M2).
 - **3. Choices.** Allow once, Always allow (only where a lasting form exists: a path, a domain, a service), Deny. No
   Always on tool prompts for anyone but the owner; the owner's own chats keep Claude Code's options. An Always
   kith-auth refuses is shown as once, with why ("Allowed once only: …").
@@ -258,12 +263,8 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 - **8. Lifecycle owns every stop.** Not built (below).
 
 **Planned (agreed, not built yet).**
-- Rules 1-2: one `approver()` used by every producer and the answer guard, with `answerableBy` stored on the card;
-  `may_answer = owner || (answerableBy == viewer && still a member now)`; open cards re-derived on the sweep tick and
-  when auth.json changes, so a role change never strands a card.
 - `approved_by` on ledger entries (the field exists, null today); a demotion drops what a person approved for
   themselves, and kith-auth writes a self-approved entry only while they are a member (M3).
-- An answer is recorded only if the person isn't revoked, in the same step (M2).
 - A card's wake stays queued until an activation that includes the yes has started (M5).
 - No chat with the agent on this Mac: the card goes to the approver's inbox instead of "There is nowhere to ask".
 - Rule 5: host down, the kernel restarts the host job and retries the ask token once before refusing.

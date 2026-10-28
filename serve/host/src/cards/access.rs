@@ -21,6 +21,7 @@
 
 use super::{Card, CardState, resource};
 use crate::LockExt;
+use crate::access::Ask;
 use crate::hub::Hub;
 use crate::runauth::{RunIdentity, TokenScope};
 use crate::store::{Store, now_ms};
@@ -236,12 +237,8 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
         return json!({"ok": true, "carded": true, "message":
             "That is already approved. It applies the next time you run: end your turn now."});
     }
-    let approver = match &target {
-        Target::Path { real, .. } => {
-            super::approver_of(who, "Read", &json!({"file_path": real.to_string_lossy()})).await
-        }
-        Target::Domain(_) => "owner",
-    };
+    let ask = crate::access::Request { person: &who.person, agent: &who.agent, owner_run: false, ask: Ask::Escape };
+    let answerable_by = crate::access::approver(&hub.store, &ask).await;
     let new = crate::store::NewCard {
         session: who.session.clone(),
         source: "run",
@@ -249,7 +246,8 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
         run_id: Some(who.run_id.clone()),
         person: who.person.clone(),
         agent: who.agent.clone(),
-        approver,
+        answerable_by,
+        in_grants: false,
         tool: TOOL.to_owned(),
         input: json!({"kind": req["kind"], "target": target.shown(), "reason": reason, "write": req["write"]})
             .to_string(),

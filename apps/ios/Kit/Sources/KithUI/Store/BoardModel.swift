@@ -281,10 +281,10 @@ public struct BoardModel: Equatable, Sendable {
 
     // MARK: pieces
 
-    /// A permission card waiting on this account. A guest's card in a chat of this account's own is the owner's to
-    /// answer, not this one's.
+    /// A permission card waiting on this account, as the host says (`canAnswer`). From an older host, a guest's card in
+    /// a chat of this account's own is the owner's to answer, not this one's.
     static func isWaiting(_ entry: Entry) -> Bool {
-        entry.kind == "permission" && entry.data.status == "pending" && entry.data.approver != "owner"
+        entry.kind == "permission" && entry.data.status == "pending" && (entry.data.canAnswer ?? (entry.data.approver != "owner"))
     }
 
     /// Questions waiting on you in one bot's chat: what its Crew row badges, the same count the Board adds up.

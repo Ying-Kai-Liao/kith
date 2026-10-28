@@ -78,16 +78,37 @@ async fn permission_prompts_go_to_the_owner_for_a_guest_and_to_a_member_for_thei
     };
     let ask = card(crate::store::EntryKind::Permission);
     let said = card(crate::store::EntryKind::Agent);
+    // The card-store row the host opens with the prompt, naming who answers it (`access::approver`).
+    let new = crate::store::NewCard {
+        session: "s-ask".into(),
+        source: "acp",
+        bot_id: Some(chat.clone()),
+        run_id: None,
+        person: "sam".into(),
+        agent: "house".into(),
+        answerable_by: Some("sam".into()),
+        in_grants: true,
+        tool: "WebFetch".into(),
+        input: "{}".into(),
+        resource: "k-ask".into(),
+        shown: String::new(),
+        deadline: i64::MAX,
+        reply_to: None,
+        asked_by: None,
+    };
+    let (crate::store::Opened::New(row) | crate::store::Opened::Joined(row) | crate::store::Opened::Granted(row)) =
+        r.hub.store.card_open(&new, 1).unwrap();
+    r.hub.store.card_live(&row.id, Some(&ask.id), None).unwrap();
     let guard = |m: &'static str, b: Value| {
         let hub = r.hub.clone();
         async move { roles::guard(&hub, "sam", true, m, &b).await }
     };
 
-    // Running is open to both roles; a member answers their own run's prompt, and only a prompt.
+    // Running is open to both roles; a member answers the prompt naming them, and only a prompt.
     for m in ["send", "newSession"] {
         guard(m, json!({"botId": chat, "text": "hi"})).await.expect(m);
     }
-    guard("respondPermission", json!({"entryId": ask.id})).await.expect("a member answers their own prompt");
+    guard("respondPermission", json!({"entryId": ask.id})).await.expect("a member answers the prompt naming them");
     let e = guard("respondPermission", json!({"entryId": said.id})).await.unwrap_err();
     assert!(e.is::<NotAllowed>(), "{e:#}");
     // Someone else's chat is never theirs to answer.
@@ -109,7 +130,13 @@ async fn permission_prompts_go_to_the_owner_for_a_guest_and_to_a_member_for_thei
     let e = guard("respondPermission", json!({"entryId": ask.id})).await.unwrap_err();
     assert!(e.is::<NotAllowed>(), "{e:#}");
     // The owner can always answer: the guard is for invitees only, the owner's calls never reach it.
-    assert!(roles::approves_own("sam", "house", "Edit", "edit").await.eq(&false));
+    let ask = crate::access::Request {
+        person: "sam",
+        agent: "house",
+        owner_run: false,
+        ask: crate::access::Ask::Tool { in_grants: true },
+    };
+    assert_eq!(crate::access::approver(&r.hub.store, &ask).await, None, "a guest's card is the owner's");
     call(&r, &sam, "history", json!({"botId": chat})).await.unwrap();
     call(&r, &sam, "stop", json!({"botId": chat})).await.unwrap();
 }

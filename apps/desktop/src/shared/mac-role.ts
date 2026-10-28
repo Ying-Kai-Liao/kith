@@ -85,12 +85,15 @@ export function guestPrompts(entries: ReadonlyMap<string, Entry[]>, ownBots: { h
 }
 
 /**
- * Whose answer a pending card waits for, or null when it is this account's to answer. A card for the owner is the
- * owner's own on the owner's device; the host still decides whose answer counts.
+ * Whose answer a pending card waits for, or null when it is this account's to answer: the host says so (`canAnswer`,
+ * the same rule its guard applies); an older host doesn't, and then a card for the owner is the owner's own on the
+ * owner's device.
  */
 export function waitingFor(entry: Entry, ownerName: string | null, isOwner: boolean): string | null {
   const d = entry.data
-  if (isOwner || d.status !== 'pending' || d.approver !== 'owner') return null
+  if (d.status !== 'pending') return null
+  if (d.canAnswer !== undefined) return d.canAnswer ? null : ownerName || 'the owner'
+  if (isOwner || d.approver !== 'owner') return null
   return ownerName || 'the owner'
 }
 

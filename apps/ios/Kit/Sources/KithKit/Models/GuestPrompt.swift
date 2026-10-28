@@ -74,11 +74,16 @@ public struct GuestPrompt: Identifiable, Hashable, Sendable {
         return waiting.map { GuestPrompt($0) }
     }
 
-    /// In the invitee's own chat: a card that waits for the owner shows this and no buttons. The host's activity line
-    /// ("Waiting for Kai") carries the owner's name; without it, "the owner". On the owner's own device a card for the
-    /// owner is his to answer (nil); the host still decides whose answer counts.
+    /// A card this account can't answer shows this and no buttons. The host says which those are (`canAnswer`, the
+    /// rule its guard applies); an older host doesn't, and then a card for the owner is the owner's own on the owner's
+    /// device. The host's activity line ("Waiting for Kai") carries the owner's name; without it, "the owner".
     public static func waitingText(for entry: Entry, activity: String?, isOwner: Bool) -> String? {
-        guard !isOwner, entry.kind == "permission", entry.data.status == "pending", entry.data.approver == "owner" else { return nil }
+        guard entry.kind == "permission", entry.data.status == "pending" else { return nil }
+        if let can = entry.data.canAnswer {
+            guard !can else { return nil }
+        } else {
+            guard !isOwner, entry.data.approver == "owner" else { return nil }
+        }
         if let activity, activity.hasPrefix("Waiting for ") { return activity }
         return "Waiting for the owner"
     }

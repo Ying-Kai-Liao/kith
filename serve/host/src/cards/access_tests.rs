@@ -105,7 +105,7 @@ fn ask_for(target: &str) -> Value {
 
 /// The answer an approver gives to the entry of `card`.
 fn reply(r: &Rig, card: &Card, option: &str) {
-    let out = answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(option), "owner").unwrap();
+    let out = answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(option), None).unwrap();
     assert!(matches!(out, Outcome::Recorded { .. }), "{out:?}");
 }
 

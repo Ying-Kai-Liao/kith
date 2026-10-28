@@ -67,6 +67,10 @@ test('an invitee sees "Waiting for <name>" on an owner-approved card only while 
   assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'owner' }), null, false), 'the owner')
   assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'member' }), 'Kai', false), null)
   assert.equal(waitingFor(card('a', 'b', { status: 'answered', approver: 'owner' }), 'Kai', false), null)
+  // The host's canAnswer wins over the role and the approver.
+  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'member', canAnswer: false }), 'Kai', false), 'Kai')
+  assert.equal(waitingFor(card('a', 'b', { status: 'pending', approver: 'owner', canAnswer: true }), 'Kai', false), null)
+  assert.equal(waitingFor(card('a', 'b', { status: 'answered', canAnswer: false }), 'Kai', false), null)
   assert.equal(ownerNameFrom('Waiting for Kai'), 'Kai')
   assert.equal(ownerNameFrom('Needs approval: x'), null)
 })
