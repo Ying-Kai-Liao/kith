@@ -17,7 +17,8 @@ ln -s "$KERNEL/lib" "$T/k/lib"
 for b in kith-sched kith-ask kith-remote kith-auth; do cp "$KERNEL/bin/$b" "$T/k/bin/$b"; done
 cat > "$T/k/bin/kith" <<'STUB'
 #!/bin/sh
-# stub: records who the run is for (owner when KITH_PERSON is unset)
+# stub: records who the run is for (owner when KITH_PERSON is unset) and its outbox
+echo "${KITH_RUN_OUTBOX:-}" > "$KITH_STATE/box-$KITH_SCHED_JOB"
 echo "${KITH_PERSON:-owner}" > "$KITH_STATE/ran-$KITH_SCHED_JOB"
 STUB
 chmod +x "$T/k/bin/kith"
@@ -45,8 +46,15 @@ check "a job added from a guest's run records them" "[ \"\$(person_of sams)\" = 
 
 S run house sams >/dev/null 2>&1
 check "the guest's job runs for them" "[ \"\$(ran sams)\" = sam ]"
-S run house mine >/dev/null 2>&1
+# Its outbox: a fresh folder of <machine>/outbox, and beside it who the run is for, where the run can't write.
+box=$(cat "$KITH_STATE/box-sams")
+meta() { python3 -c "import json,sys; m=json.load(open(sys.argv[1]+'.json')); print(m['agent'], m['person'], m['via'], m['job'])" "$1"; }
+check "a scheduled run gets an outbox of its own" "[ -d \"$box\" ] && [ \"\$(dirname \"$box\")\" = \"$KITH_STATE/outbox\" ]"
+check "beside it: the agent, the job's person and the job" "[ \"\$(meta \"$box\")\" = 'house sam schedule sams' ]"
+KITH_RUN_OUTBOX=/elsewhere S run house mine >/dev/null 2>&1
 check "a job with no person runs as the owner" "[ \"\$(ran mine)\" = owner ]"
+box=$(cat "$KITH_STATE/box-mine")
+check "an owner's job: its own outbox (not the one it was started with), for the owner" "[ \"\$(dirname \"$box\")\" = \"$KITH_STATE/outbox\" ] && [ \"\$(meta \"$box\")\" = 'house None schedule mine' ]"
 S run house kais >/dev/null 2>&1
 check "a job the owner added as a person runs for that person" "[ \"\$(ran kais)\" = kai ]"
 

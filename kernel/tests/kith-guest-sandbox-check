@@ -232,6 +232,17 @@ print(len(allow) >= 4 and not bad or bad[:2])')" True
   expect "$who, home through a link: rule W and the read-only folders stay denied" "$(q "$S" "all(any(r == x for r in s['permissions']['deny']) for x in ['Edit(/$T/linkhome/agents/echo/files/people/$who/**/.git/hooks/**)', 'Edit(/$KERNEL/**)', 'Edit(/$KITH_STATE/people/**)', 'Edit(/$KITH_HOME/agents/echo/role/**)'])")" True
   expect "$who, home through a link: the other agent's folder is denied under both spellings" "$(q "$S" "all('Read(/%s/agents/other/**)' % r in s['permissions']['deny'] for r in ['$T/linkhome', '$KITH_HOME'])")" True
 done
+# The run's outbox (KITH_RUN_OUTBOX): a guest writes and reads its own folder of <machine>/outbox and nothing else there.
+mkdir -p "$KITH_STATE/outbox/r1" "$T/elsewhere"
+BOX="$T/real state/outbox/r1"
+S=$(KITH_PERSON=guest KITH_RUN_OUTBOX="$KITH_STATE/outbox/r1" settings)
+expect "guest: its own outbox is writable and readable" "$(q "$S" "'$BOX' in aw and '$BOX' in fs['allowRead']")" True
+expect "guest: nothing else in the outbox folder is" "$(q "$S" "not any(p.rstrip('/').endswith(' state/outbox') for p in aw + fs['allowRead'])")" True
+for bad in "$KITH_STATE/outbox" "$T/elsewhere" "$KITH_STATE/outbox/r1/.."; do
+  S=$(KITH_PERSON=guest KITH_RUN_OUTBOX="$bad" settings)
+  expect "guest: KITH_RUN_OUTBOX=${bad#"$T/"} opens nothing" "$(q "$S" "not any(p.startswith(('$T/real state/outbox', '$T/linked state/outbox', '$T/elsewhere')) for p in aw + fs['allowRead'])")" True
+done
+expect "owner: no sandbox for the outbox either" "$(q "$(KITH_RUN_OUTBOX="$KITH_STATE/outbox/r1" settings)" '"sandbox" in s')" False
 ALLOWED=$(cd "$KITH_HOME/agents/echo" && KITH_PERSON=guest "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print("mcp__kithpermit__ask_helper" in json.load(sys.stdin).get("allowed_tools",""))')
 expect "guest: the launch's allowed tools carry mcp__kithpermit__ask_helper" "$ALLOWED" True
 OWNER_ALLOWED=$(cd "$KITH_HOME/agents/echo" && "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print("mcp__kithpermit__ask_helper" in json.load(sys.stdin).get("allowed_tools",""))')

@@ -13,8 +13,9 @@
 
 A job is a one-shot `kith AGENT "task"`, the same run as from your terminal: pinned package, memory, the agent's own
 tools, tagged in the cost ledger with via=schedule. The task is told it was scheduled and to deliver with kith-send,
-which goes to your Telegram. Jobs live with the agent's life, <kith>/agents/AGENT/jobs.json, so they are versioned
-with your memory and never shared with the package.
+which goes to your Telegram and, through the run's outbox, to the person's chat with the agent in the Kith app. Jobs
+live with the agent's life, <kith>/agents/AGENT/jobs.json, so they are versioned with your memory and never shared
+with the package.
 
 A job runs as the person whose run added it (KITH_PERSON then; none = the owner), with their limits, checked against
 kith-auth each time it is due: once they are revoked or no longer a member, or while this Mac is out of sync with the
@@ -209,6 +210,23 @@ def refused(agent, job):
     return None
 
 
+def run_outbox(agent, job, person):
+    """The run's outbox, <machine>/outbox/<run>/: kith-send leaves its messages there and kith serve posts them into
+    the person's chat with the agent, whenever it next runs. Who the run is for is in <run>.json beside it, out of the
+    run's reach (a guest's sandbox may write the folder only). None when it can't be made (a run inside a sandbox)."""
+    root = paths()['KITH_MACHINE'] / 'outbox'
+    run = re.sub(r'[^A-Za-z0-9._-]', '_', 'sched-%s-%s-%d' % (agent, job['id'], time.time_ns()))
+    try:
+        (root / run).mkdir(parents=True)
+        meta = root / (run + '.json')
+        with open(str(meta) + '.tmp', 'w') as f:
+            json.dump({'agent': agent, 'person': person, 'via': 'schedule', 'job': job['id'], 'at': time.time()}, f)
+        os.replace(str(meta) + '.tmp', meta)
+    except OSError:
+        return None
+    return root / run
+
+
 def start(agent, job, now, why):
     """Start `kith AGENT task` detached; its output goes to a log file. Returns the log path, or None when the job's
     person may not run it now (said on stdout, the tick log)."""
@@ -228,11 +246,14 @@ def start(agent, job, now, why):
     if os.environ.get('KITH_SCHED_PERMISSION_MODE'):   # unset: the agent's mode, else kith's default (bin/kith)
         env['KITH_PERMISSION_MODE'] = os.environ['KITH_SCHED_PERMISSION_MODE']
     for k in ('KITH_AGENT', 'KITH_MODEL', 'KITH_EFFORT', 'KITH_HARNESS', 'KITH_DISCORD_WEBHOOK_URL', 'KITH_DISCORD_THREAD_ID',
-              'KITH_BRIDGE_OUTBOX'):   # and the HQ_ twins that sync_env made
+              'KITH_BRIDGE_OUTBOX', 'KITH_RUN_OUTBOX'):   # and the HQ_ twins that sync_env made
         env.pop('HQ_' + k[5:], None)
         env.pop(k, None)
     if job.get('person'):   # none: whoever started this (launchd's tick: the owner; a run by hand: that run's person)
         env['KITH_PERSON'] = env['HQ_PERSON'] = job['person']
+    box = run_outbox(agent, job, env.get('KITH_PERSON') or None)
+    if box:
+        env['KITH_RUN_OUTBOX'] = env['HQ_RUN_OUTBOX'] = str(box)
     if job.get('model'): env['KITH_MODEL'] = job['model']
     if job.get('effort'): env['KITH_EFFORT'] = job['effort']
     if job.get('harness'): env['KITH_HARNESS'] = job['harness']

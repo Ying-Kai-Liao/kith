@@ -576,9 +576,19 @@ pub async fn launch(
     if let Some((_, vars)) = access {
         env.extend(vars.iter().cloned());
     }
+    // A 1:1 chat's run leaves what it sends with `kith-send` here, for this chat (`run_outbox`); the kernel lets a
+    // person's sandbox write it, so it has to see it too.
+    let outbox = (room == room_of(agent, person, None))
+        .then(|| crate::run_outbox::for_chat(agent, person))
+        .and_then(|made| {
+            made.inspect_err(|error| tracing::warn!(agent, error = format!("{error:#}"), "no run outbox")).ok()
+        })
+        .map(|dir| crate::kernel::both("RUN_OUTBOX", &dir.to_string_lossy()));
+    env.extend(outbox.iter().flatten().cloned());
     let out = run_bound(bin, &args, Some(cwd), LAUNCH_TIMEOUT, person, &env, access.map(|(g, _)| g)).await?;
     let mut launch: Launch = serde_json::from_str(out.trim())
         .with_context(|| format!("`kith {agent} --launch-json` didn't print a launch object"))?;
+    launch.env.extend(outbox.into_iter().flatten());
     // Only the host hands a run its token (see `runauth`), whatever the kernel's answer says.
     launch.env.remove(crate::runauth::TOKEN_ENV);
     launch.env.remove(crate::runauth::SOCKET_ENV);
