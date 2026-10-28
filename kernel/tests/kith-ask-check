@@ -2,6 +2,8 @@
 # kith-ask-check — `kith ask --bg` returns an id at once and `kith ask --wait <id>` collects the answer and exit code.
 # A run that parks on an approval card exits 3 with its id; the card's later answer reaches the asker once: its --wait while
 # its session is open, else a wake of that session (kith-wake), also when the session ends unread (--sweep).
+# `kith ask --to ID` (and -c while the conversation runs) is a wake of the --bg run's session: held while the run holds
+# it, merged into one turn, delivered when the run ends; only the owner or the job's own person may send one.
 # kith-ask runs from a copy of the kernel with a stub bin/kith (a slow agent that fails for one task, and parks for
 # another as kith-permit does), so no real agent runs.
 #
@@ -19,7 +21,8 @@ ln -s "$KERNEL/lib" "$T/k/lib"
 cp "$KERNEL/bin/kith-ask" "$T/k/bin/kith-ask"
 cp "$KERNEL/bin/kith-wake" "$T/k/bin/kith-wake"
 BOX=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()["KITH_MACHINE"] / "live" / "ask")' "$KERNEL/lib")
-export BOX KITH_WAKE_NO_KICK=1
+BGDIR=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()["KITH_MACHINE"] / "ask-bg")' "$KERNEL/lib")
+export BOX KITH_WAKE_NO_KICK=1 KITH_LOGS=$T/logs KITH_WAKE_KITH=$T/k/bin/kith
 cat > "$T/k/bin/kith" <<'STUB'
 #!/bin/sh
 # stub: kith <agent> [opts] -- <task>; answers like KITH_OUTPUT=json
@@ -27,11 +30,19 @@ for last; do :; done
 env | grep -E '^KITH_(LAUNCH_KIND|LAUNCH_LABEL|VIA)=' | sort > "$KITH_STATE/stub-env"
 printf '%s' "${KITH_LAUNCH_ASK_ID:-}" > "$KITH_STATE/stub-askid"
 printf '%s\n' "$*" > "$KITH_STATE/stub-args"
+# a resume is a woken turn (kith-wake deliver): plain words, as claude -p prints them
+if [ "${KITH_VIA:-}" = wake ]; then echo "$*" | tr '\n' ' ' >> "$KITH_STATE/stub-resumes"; echo >> "$KITH_STATE/stub-resumes"; echo "woken: $last"; exit 0; fi
+# what bin/kith does for a --bg run: claims the session for the pid that becomes claude, then notes it
+if [ -n "${KITH_LAUNCH_SID_FILE:-}" ] && [ -z "${STUB_NOSID:-}" ]; then
+  mkdir -p "$KITH_STATE/live/terminal"
+  printf '{"pid":%s}' "$$" > "$KITH_STATE/live/terminal/${STUB_SID:-s1}.claim"
+  echo "${STUB_SID:-s1}" > "$KITH_LAUNCH_SID_FILE"
+fi
 sleep "${STUB_SLEEP:-2}"
 if [ "$last" = "boom" ]; then echo "agent failed" >&2; exit 1; fi
 # what kith-permit does when a card outlives its window: the ask that started the run is parked
 if [ "$last" = "park" ]; then : > "$BOX/$KITH_LAUNCH_ASK_ID.parked"; fi
-printf '{"result":"answer to: %s","session_id":"s1","total_cost_usd":0.01}\n' "$last"
+printf '{"result":"answer to: %s","session_id":"%s","total_cost_usd":0.01}\n' "$last" "${STUB_SID:-s1}"
 STUB
 chmod +x "$T/k/bin/kith"
 ASK=$T/k/bin/kith-ask
@@ -42,7 +53,7 @@ waitid() { sed -n 's/.*kith ask --wait \([A-Za-z0-9._-]*\)$/\1/p'; }
 queued() { python3 -c '
 import json, sys, pathlib
 q = pathlib.Path(sys.argv[1]) / "sessions" / "queue"
-rows = [json.loads(p.read_text()) for p in q.glob("*.json")] if q.is_dir() else []
+rows = [json.loads(p.read_text()) for p in q.glob("*.json") if p.name != "answered.json"] if q.is_dir() else []
 print(" ".join("%s:%s" % (it["session"], "|".join(r["text"] for r in it["requests"])) for it in rows))' "$KITH_STATE"; }
 claim() { mkdir -p "$KITH_STATE/live/terminal"; printf '{"pid":%s}' "$$" > "$KITH_STATE/live/terminal/$1.claim"; }
 
@@ -122,5 +133,62 @@ sleep 1
 expect "a parked --bg run: --wait says not yet" "$("$ASK" --wait "$pe" --timeout 0 >/dev/null 2>&1; echo $?)" 3
 "$ASK" --answer "$pe" --as echo -- "approved later" >/dev/null
 expect "then gives the answer" "$("$ASK" --wait "$pe" --timeout 5 2>/dev/null | tail -1)" "approved later"
+
+# --to: a follow-up to a running --bg job is a wake of its session (kith-wake), delivered once the job's turn ends
+unset KITH_WAKE_NO_KICK
+ended() { n=0; until [ -f "$BGDIR/$1.exit" ] || [ $n -gt 100 ]; do sleep 0.2; n=$((n + 1)); done; }
+touch "$KITH_STATE/stub-resumes"
+resumes() { grep -c -- "--resume $1 " "$KITH_STATE/stub-resumes"; }
+mkdir -p "$T/w"
+j=$(cd "$T/w" && STUB_SLEEP=4 STUB_SID=sj "$ASK" --bg echo "build it" | idof)
+expect "--to a running job: queued" "$("$ASK" --to "$j" "also do X" 2>"$T/err")" queued
+expect "it says the job is still running" "$(grep -c 'is still running' "$T/err")" 1
+expect "a second message merges" "$("$ASK" --to "$j" "and Y" 2>/dev/null)" merged
+expect "the same message again is a duplicate" "$("$ASK" --to "$j" "and Y" 2>/dev/null)" duplicate
+expect "-c while it runs joins the same turn" "$(cd "$T/w" && "$ASK" echo -c "and Z" 2>/dev/null)" merged
+expect "nothing reaches the session while the job holds it" "$(resumes sj)" 0
+ended "$j"
+expect "--wait: the job's answer, then the one turn its follow-ups woke" \
+  "$("$ASK" --wait "$j" --timeout 20 2>/dev/null | head -2)" \
+  "answer to: build it
+woken: [kith wake $(grep -- '--resume sj ' "$KITH_STATE/stub-resumes" | sed -n 's/.*\[kith wake \([0-9a-f]*\)\].*/\1/p' | head -1)] 3 things happened while this session was idle:"
+expect "one resumed turn of the same session" "$(resumes sj)" 1
+expect "carrying all three messages" "$(grep -- "--resume sj " "$KITH_STATE/stub-resumes" | grep -c 'also do X.*and Y.*and Z')" 1
+expect "--wait again gives it all again" "$("$ASK" --wait "$j" --timeout 5 2>/dev/null | grep -c '^woken:')" 1
+# a job that has ended: the message resumes its session now (never a new conversation)
+expect "--to an ended job: queued" "$("$ASK" --to "$j" "one more" 2>"$T/err")" queued
+expect "it says the job had ended" "$(grep -c 'had ended' "$T/err")" 1
+expect "and --wait follows that turn too" "$("$ASK" --wait "$j" --timeout 20 2>/dev/null | grep -c '^woken:')" 2
+expect "the session was resumed again" "$(resumes sj)" 2
+out=$("$ASK" --to bg-nope "hi" 2>&1); rc=$?
+expect "an unknown job says so" "$out ($rc)" "kith ask: no job bg-nope on this Mac (kith ask --bg prints the ids) (1)"
+nj=$(cd "$T/w" && STUB_SLEEP=0 STUB_NOSID=1 STUB_SID=sn "$ASK" --bg echo "codex job" | idof)
+ended "$nj"
+expect "a job with no session to send to says so" "$("$ASK" --to "$nj" "hi" 2>&1 | grep -c 'has no session to send to')" 1
+expect "and starts nothing" "$(resumes sn)" 0
+
+# -c while another run holds the conversation's session (no --bg job): its next turn, not a refusal
+export KITH_WAKE_NO_KICK=1
+claim s1
+expect "-c on a held conversation: queued" "$(cd "$T" && "$ASK" echo -c "later please" 2>/dev/null)" queued
+expect "for that session" "$(queued)" "s1:later please"
+rm "$KITH_STATE/live/terminal/s1.claim"
+
+# a person's job: the owner or that person (while they may still ask the agent) may send to it; its turn stays theirs
+pj=$(cd "$T/w" && STUB_SLEEP=3 STUB_SID=sp KITH_PERSON=bob "$ASK" --bg echo "bob's job" | idof)
+expect "another person can't send to it" "$(KITH_PERSON=eve "$ASK" --to "$pj" "hi" 2>&1)" "kith ask: $pj is not one of your jobs"
+expect "nor its person without kith-auth's yes" "$(KITH_PERSON=bob "$ASK" --to "$pj" "hi" 2>&1)" "kith ask: $pj is not one of your jobs"
+printf '#!/bin/sh\necho "{\\"allowed\\": true}"\n' > "$T/k/bin/kith-auth"; chmod +x "$T/k/bin/kith-auth"
+expect "its person may" "$(KITH_PERSON=bob "$ASK" --to "$pj" "hi" 2>/dev/null)" queued
+expect "so may the owner" "$("$ASK" --to "$pj" "from the owner" 2>/dev/null)" merged
+expect "the turn is bob's, through the host" "$(python3 -c '
+import json, pathlib, sys
+for p in (pathlib.Path(sys.argv[1]) / "sessions" / "queue").glob("*.json"):
+    it = json.loads(p.read_text())
+    if it.get("session") == "sp": print(it["person"], it["door"])' "$KITH_STATE")" "bob host"
+expect "a person can't send to the owner's job" "$(KITH_PERSON=bob "$ASK" --to "$j" "x" 2>&1)" "kith ask: $j is not one of your jobs"
+"$T/k/bin/kith-wake" withdraw sp >/dev/null
+expect "a withdrawn message sent again: duplicate" "$("$ASK" --to "$pj" "hi" 2>"$T/err")" duplicate
+expect "and says it was withdrawn" "$(grep -c withdrawn "$T/err")" 1
 
 [ "$fails" = 0 ] && echo "all kith-ask checks passed" || { echo "$fails check(s) failed"; exit 1; }
