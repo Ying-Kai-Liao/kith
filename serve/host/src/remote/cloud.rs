@@ -444,7 +444,7 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
             hub.cloud.requests.locked().iter().filter(|r| auto && r.code.is_some()).map(|r| r.id.clone()).collect();
         // The SAS exchange still runs (the device's commit must match); only the user's comparison is skipped.
         for id in ready {
-            if let Err(e) = decide(hub, &id, true).await {
+            if let Err(e) = settle(hub, &id, true, false).await {
                 tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't auto-approve an access request");
             }
         }
@@ -699,6 +699,11 @@ async fn deny(hub: &Hub, base: &str, id: &str) {
 /// `decideAccessRequest`: approving adds the device the user saw (its key, the SAS they
 /// compared) with the grant the cloud returns; nothing else can add an account device.
 pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
+    settle(hub, id, approve, true).await
+}
+
+/// `by_owner`: the owner decided on this Mac (not auto mode), so a member's device needs no invite token as well.
+async fn settle(hub: &Hub, id: &str, approve: bool, by_owner: bool) -> Result<()> {
     let base = base(hub)?;
     let r =
         hub.cloud.requests.locked().iter().find(|r| r.id == id).cloned().ok_or_else(|| anyhow!("unknown request"))?;
@@ -733,6 +738,7 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
         .as_deref()
         .filter(|g| g.starts_with("grt_"))
         .ok_or_else(|| anyhow!("the cloud gave no grant"))?;
+    let member = by_owner && r.person.is_some();
     hub.store.put_device(&Device {
         key: b64(&r.device_key),
         name: r.device_name.chars().take(100).collect(),
@@ -746,6 +752,11 @@ pub async fn decide(hub: &Hub, id: &str, approve: bool) -> Result<()> {
         last_seen_at: None,
         person_id: r.person,
     })?;
+    // The owner approved this device on the Mac after comparing its code, which the cloud can't fake: that is as strong
+    // as the invite token, and a member's new browser (after a sign-out, in another tab) has no token left to show.
+    if member {
+        hub.store.set_device_proven(&b64(&r.device_key))?;
+    }
     tracing::info!(grant_id = grant, "account device approved");
     hub.auth_changed();
     Ok(())
@@ -1122,6 +1133,7 @@ mod tests {
         let d = hub.store.device(&b64(&dk)).unwrap();
         assert_eq!((d.source, d.person_id.as_deref()), (DeviceSource::Account, Some("sam")));
         assert_eq!(d.scopes, [Scope::Control], "a member's device never carries the screen");
+        assert!(hub.store.device_proven(&b64(&dk)), "the owner's approval stands in for the invite token");
     }
 
     #[tokio::test]
@@ -1143,6 +1155,7 @@ mod tests {
         let d = hub.store.device(&b64(&dk)).unwrap();
         assert_eq!((d.source, d.person_id.as_deref()), (DeviceSource::Account, Some("sam")), "approved on its own");
         assert_eq!(d.scopes, [Scope::Control]);
+        assert!(!hub.store.device_proven(&b64(&dk)), "nobody checked the code: it still shows its invite");
     }
 
     #[tokio::test]
