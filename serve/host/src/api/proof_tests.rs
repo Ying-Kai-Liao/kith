@@ -60,7 +60,9 @@ async fn an_unproven_device_can_only_prove_and_only_a_few_times() {
     let other = r.unproven_device("other-phone", Some("sam"));
     assert!(call(&r, &other, "proveInvite", json!({"inviteId": "inv_nope", "token": t})).await.is_err());
     call(&r, &other, "proveInvite", json!({"inviteId": invite, "token": t})).await.unwrap();
-    assert!(call(&r, &other, "proveInvite", json!({"inviteId": invite, "token": t})).await.is_err(), "once is enough");
+    let again = call(&r, &other, "proveInvite", json!({"inviteId": invite, "token": t})).await.unwrap_err();
+    // The apps take exactly this answer as "already in" and go on to connect; any other refusal stops them for good.
+    assert!(format!("{again:#}").contains("already shown its invite"), "once is enough: {again:#}");
 }
 
 #[tokio::test]
