@@ -205,9 +205,8 @@ async fn the_host_restart_loads_the_session_with_a_fresh_launch() {
     s.host.reply(&id, "hello").await;
     s.host.restart(|_| {}).await;
     s.house().await;
-    s.host.wait_tasks_on(&id).await;
-    // The startup sync turns tasks on once for a bot that has them off (see `hub::hq`); this test reads the main chat.
-    s.host.call("updateBot", json!({"id": id, "tasks": false})).await;
+    // The user's "off" survives the restart's sync (see `hub::hq`): this test reads the main chat.
+    assert_eq!(s.house().await["tasks"], false);
     s.host.reply(&id, "again").await;
     assert_eq!(s.launches().len(), 2, "the launch is fetched again");
     let load = s.requests("session/load");
@@ -238,7 +237,7 @@ async fn a_persons_new_grant_loads_their_session_again_in_the_same_process() {
     let root = history["entries"].as_array().unwrap().iter().find(|e| e["kind"] == "user").unwrap()["id"].clone();
     let root = root.as_str().unwrap().to_owned();
     s.thread_reply(&id, &root, "in the thread").await;
-    assert_eq!(s.requests("session/new").len(), 2, "the chat's session (s1) and the thread's (s2)");
+    assert_eq!(s.requests("session/new").len(), 2, "the chat's session and the thread's");
 
     // Nothing changed: the warm session answers without loading again.
     s.host.reply(&id, "again").await;
@@ -259,12 +258,15 @@ async fn a_persons_new_grant_loads_their_session_again_in_the_same_process() {
     let last_prompt = order.iter().rposition(|r| r["method"] == "session/prompt").unwrap();
     assert!(load_at < last_prompt);
     assert_eq!(order[last_prompt]["params"]["sessionId"], "s1");
-    // One process all along, and the thread's session was neither loaded nor closed.
-    assert_eq!(s.requests("initialize").len(), 1);
-    let pids: std::collections::HashSet<_> = order.iter().map(|r| r["pid"].clone()).collect();
-    assert_eq!(pids.len(), 1, "{pids:?}");
-    let thread: Vec<&Value> = order.iter().filter(|r| r["params"]["sessionId"] == "s2").collect();
-    assert!(thread.iter().all(|r| r["method"] != "session/load" && r["method"] != "session/close"), "{thread:?}");
+    // The chat kept its one process all along (a thread lane has its own actor, so its own process), and the thread's
+    // process neither loaded nor closed a session.
+    let inits: Vec<&Value> = order.iter().filter(|r| r["method"] == "initialize").collect();
+    assert_eq!(inits.len(), 2, "the chat's process and the thread's");
+    let (chat, thread) = (&inits[0]["pid"], &inits[1]["pid"]);
+    assert_eq!(&order[load_at]["pid"], chat);
+    assert_eq!(&order[last_prompt]["pid"], chat);
+    let in_thread: Vec<&Value> = order.iter().filter(|r| &r["pid"] == thread).collect();
+    assert!(in_thread.iter().all(|r| r["method"] != "session/load" && r["method"] != "session/close"), "{in_thread:?}");
 
     // The grant is the session's now: the next turn doesn't load it again.
     s.host.reply(&id, "and again").await;
