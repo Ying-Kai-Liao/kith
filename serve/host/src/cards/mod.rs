@@ -440,7 +440,7 @@ pub fn answer(
     let said_no = if option_id.is_some() { "was denied" } else { "was cancelled" };
     if card.tool == access::TOOL {
         // No process waits on an escape card: the yes is applied at the session's next activation (see `access`).
-        access::answered(hub, &card, allow, option_id);
+        access::answered(hub, &card, allow, option_id, person);
     } else if was_live && card.source == "run" {
         let verdict = if allow { Verdict::Allow } else { Verdict::Deny("The approver said no.".into()) };
         // A yes to a live asker was spent in the answer itself (no parallel ask can take it too); if nobody was

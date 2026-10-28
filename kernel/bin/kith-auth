@@ -78,17 +78,21 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           (helpers they reach through it included; kith cost people shows it)
   kith-auth budgets <agent> --json          read-only: {person: dollars a month or null} for each person with a row
                                           of their own on the agent (the apps' Access > People)
-  kith-auth access <agent> <id> read|write|domain <path|host> [--rm]
+  kith-auth access <agent> <id> read|write|domain <path|host> [--by <id>] [--rm]
                                           "always" on an escape card: a place or website a member's (or bot's) boxed runs of
                                           that agent may reach, beyond the box. Not for secrets or the paths a run may never
                                           write (rule W); not for the owner or someone with no row of their own; a bot gets
                                           no more than its owner holds. Listed as `access` in `resolve`. --rm takes one
-                                          away as it is written, whatever has changed since.
+                                          away as it is written, whatever has changed since. --by: the person who
+                                          approved it (themselves, or their bot's owner), refused unless they are a
+                                          member of the agent now; without it the owner did. A member made a guest
+                                          loses the entries they approved.
   kith-auth ledger [--person ID] [--agent AGENT] [--json]   read-only: the grants ledger, every lasting grant for anyone
                                           but the owner: the access above (kind read|write|domain) and a person's own
                                           service grants (<agent>@<person>, kind service, target the profile). --json:
                                           [{key, kind, agent, person, name, target, since, approved_by}] (since: ms or
-                                          null; approved_by: null, not recorded yet)
+                                          null; approved_by: owner, a person id, or null for an entry from before it
+                                          was recorded and for service grants)
   kith-auth ledger --rm <key>               takes that one entry away, as listed; exit 1 when the ledger has no such key.
                                           key = <kind>:<agent>:<person>:<target> (kind, agent and person never hold a
                                           ':', so the target is all that follows the third)
@@ -959,9 +963,11 @@ def held(have, kind, value):
 
 def cmd_access(args):
     """The always half of an escape card. One command is one transaction under the auth.json lock (C2: someone removed, or
-    never a member, is refused in the same step that would write)."""
-    if len(args) not in (4, 5) or args[2] not in ACCESS_KINDS or (len(args) == 5 and args[4] != '--rm'):
-        die('access <agent> <id> read|write|domain <path|host> [--rm]', 2)
+    never a member, is refused in the same step that would write; M3: so is a person approving who isn't a member now)."""
+    opts, args = take_opts(args, {'--by'})
+    if len(args) not in (4, 5) or args[2] not in ACCESS_KINDS or (len(args) == 5 and args[4] != '--rm') \
+            or (opts and (len(args) == 5 or not opts['--by'] or opts['--by'].startswith('-'))):
+        die('access <agent> <id> read|write|domain <path|host> [--by <id>] [--rm]', 2)
     agent, pid, kind, value = args[:4]
     if len(args) == 5:
         return remove_access(agent, pid, kind, value)
@@ -994,14 +1000,57 @@ def cmd_access(args):
     parent = parent_of(auth, pid)
     if parent and not is_owner(auth, parent) and not held(resolve(auth, agent, parent).get('access', {}), ACCESS_KINDS[kind], value):
         die(f"{pid} is a bot: it can't be given more than its owner {parent} holds")
+    by = approver_of(auth, agent, pid, opts.get('--by'))
     have = row.setdefault('access', {}).setdefault(ACCESS_KINDS[kind], [])
+    if not isinstance(row.get('access_by'), dict):
+        row['access_by'] = {}
+    key = f'{kind}:{value}'
     if value not in have:
         have.append(value)
         if not isinstance(row.get('access_since'), dict):
             row['access_since'] = {}
-        row['access_since'][f'{kind}:{value}'] = int(time.time() * 1000)
+        row['access_since'][key] = int(time.time() * 1000)
+        row['access_by'][key] = by
+    elif by is None:   # the owner's yes outlasts a person's; a person's never replaces the owner's
+        row['access_by'][key] = None
     save_auth(auth)
     print(f'{pid} may {kind} {value} beyond the box for {agent}')
+
+
+def approver_of(auth, agent, pid, by):
+    """Who approved an always, as `access_by` stores it: None for the owner (no --by is the owner, typing it or answering
+    in the apps), else the person, who must be pid or the bot pid's owner and a member of agent now. Checked inside the
+    same lock as the write, so a demotion can't slip between them (M3)."""
+    if by is None or is_owner(auth, canonical(auth, by)):
+        return None
+    by = canonical(auth, by)
+    if by not in (pid, parent_of(auth, pid)):
+        die(f'{by} approves only for themselves or their own bot, not for {pid}')
+    r = resolve(auth, agent, by)
+    if not r['allowed'] or r.get('preset') != 'member':
+        die(f'{by} is not a member of {agent} now')
+    return by
+
+
+def drop_self_approved(auth, agent, pid):
+    """pid stops being a member of agent (made a guest, or removed from it): the always entries they approved on agent,
+    on their own row and their bots', go, since they could approve them only as a member (M3). Entries with no
+    approver recorded (from before it was) stay for the owner to review. Returns how many went."""
+    gone = 0
+    rows = auth['members'].get(agent, {})
+    for who in [pid, *bots_of(auth, pid)]:
+        row = rows.get(who)
+        by = row.get('access_by') if isinstance(row, dict) and isinstance(row.get('access_by'), dict) else {}
+        for key in [k for k, v in by.items() if v == pid]:
+            kind, _, value = key.partition(':')
+            listed = (row.get('access') or {}).get(ACCESS_KINDS.get(kind, ''))
+            if isinstance(listed, list) and value in listed:
+                listed.remove(value)
+                gone += 1
+            by.pop(key)
+            if isinstance(row.get('access_since'), dict):
+                row['access_since'].pop(key, None)
+    return gone
 
 
 def remove_access(agent, pid, kind, value):
@@ -1015,8 +1064,9 @@ def remove_access(agent, pid, kind, value):
     gone = [v for v in dict.fromkeys(names) if v in have.get(field, [])]
     for v in gone:
         have[field].remove(v)
-        if isinstance(row.get('access_since'), dict):
-            row['access_since'].pop(f'{kind}:{v}', None)
+        for meta in ('access_since', 'access_by'):
+            if isinstance(row.get(meta), dict):
+                row[meta].pop(f'{kind}:{v}', None)
     if gone:
         save_auth(auth)
     print(f'{pid} no longer has {kind} {value} beyond the box for {agent}')
@@ -1036,19 +1086,22 @@ def ledger(auth):
     (a membership row's access, the `*` row's included) and a person's own service grants (`<agent>@<person>`)."""
     out = []
 
-    def add(kind, agent, pid, target, since=None):
+    def add(kind, agent, pid, target, since=None, by=None):
         out.append({'key': ledger_key(kind, agent, pid, target), 'kind': kind, 'agent': agent, 'person': pid,
                     'name': auth['people'].get(pid, {}).get('name', ''), 'target': target,
-                    'since': since if isinstance(since, int) else None, 'approved_by': None})
+                    'since': since if isinstance(since, int) else None, 'approved_by': by})
     for agent, rows in auth['members'].items():
         for pid, row in rows.items() if isinstance(rows, dict) else ():
             if not isinstance(row, dict):
                 continue
             since = row.get('access_since') if isinstance(row.get('access_since'), dict) else {}
+            by = row.get('access_by') if isinstance(row.get('access_by'), dict) else {}
             held_now = access_of(row)
             for kind, field in ACCESS_KINDS.items():
                 for v in held_now[field]:
-                    add(kind, agent, pid, v, since.get(f'{kind}:{v}'))
+                    k = f'{kind}:{v}'
+                    # null in access_by is the owner's yes; no value at all is an entry from before it was recorded
+                    add(kind, agent, pid, v, since.get(k), ('owner' if by[k] is None else by[k]) if k in by else None)
     for k, svcs in auth['grants'].items():
         agent, at, pid = k.partition('@')
         if not at or not isinstance(svcs, dict) or is_owner(auth, canonical(auth, pid)):
@@ -1087,8 +1140,9 @@ def remove_grant(key):
         if isinstance(listed, list) and target in listed:
             gone = True
             listed.remove(target)
-            if isinstance(row.get('access_since'), dict):
-                row['access_since'].pop(f'{kind}:{target}', None)
+            for meta in ('access_since', 'access_by'):
+                if isinstance(row.get(meta), dict):
+                    row[meta].pop(f'{kind}:{target}', None)
     if not gone:
         die(f'the ledger has no {key} (removed already?)')
     save_auth(auth)
@@ -1409,6 +1463,11 @@ def rename(auth, old, new):
     for rows in auth['members'].values():
         if old in rows:
             rows[new] = rows.pop(old)
+        for row in rows.values():   # who approved an always is them under the new id too (a demotion drops it)
+            by = row.get('access_by') if isinstance(row, dict) else None
+            if isinstance(by, dict):
+                for k in [k for k, v in by.items() if v == old]:
+                    by[k] = new
     auth['grants'] = {(k.rsplit('@', 1)[0] + '@' + new if k.endswith(f'@{old}') else k): g
                       for k, g in auth['grants'].items()}
     owned = [n for n, prof in auth['profiles'].items() if prof.get('person') == old]
@@ -1596,13 +1655,15 @@ def cmd_member(args):
         if agent not in agent_dirs():
             die(f"no agent '{agent}' (kith ls)")
         if '--rm' in flags:
+            n = drop_self_approved(auth, agent, pid) if pid != EVERYONE else 0   # their bots' rows keep nothing of theirs
             auth['members'].get(agent, {}).pop(pid, None)
             if not auth['members'].get(agent):
                 auth['members'].pop(agent, None)
-            print(f'{pid} may no longer use {agent}')
+            print(f'{pid} may no longer use {agent}' + (f' ({n} always {"entry" if n == 1 else "entries"} they approved went)' if n else ''))
             continue
         if kv.get('mode'):
             check_free_shell(kv['mode'], flags, f'{pid} on {agent}')
+        was_member = pid != EVERYONE and resolve(auth, agent, pid).get('preset') == 'member'
         row = auth['members'].setdefault(agent, {}).setdefault(pid, {})
         if 'mode' in kv:
             row.pop('trusted', None)
@@ -1630,6 +1691,9 @@ def cmd_member(args):
                  'deny': p.get('deny', []) + row.get('deny', []), 'helpers': row.get('helpers', [])}
         else:
             r = resolve(auth, agent, pid)
+            if was_member and r.get('preset') != 'member' and (n := drop_self_approved(auth, agent, pid)):
+                print(f'{pid} is no longer a member of {agent}: {n} always {"entry" if n == 1 else "entries"} they approved went')
+                r = resolve(auth, agent, pid)
             if r['owner']:   # the owner is always allowed: resolve gives no preset or mode for them
                 print(f'{pid} is the owner: always may use {agent}')
                 continue
