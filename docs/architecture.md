@@ -216,6 +216,65 @@ run's person is asked in the owner's session (a role limit the owner can pass) a
 check that fails refuses the same way. Servers that are no kith service (the plugin's own, an agent's mcp.json) are
 not grant-bound and pass. A guest's run starts no shared services anyway (`bin/kith` gives it kithpermit only).
 
+## Access and approvals
+
+The agreed design is access-arch v3 (2026-10-25, model-checked). Code comments cite its rule numbers ("access-arch
+rule 4"), its model-check fixes (M1-M8) and the approval-card invariants (A1-A9, C1-C8); this section keeps the
+numbers they cite. Built state checked against main ff39195e, 2026-10-29.
+
+A limit that isn't a secret or a login becomes a card for whoever may answer it, never a plain refusal; every yes
+that lasts lives in kith-auth, where the owner can see and remove it.
+
+**Parts, one writer each.**
+- kith-auth: the ledger of lasting grants for anyone but the owner: member rows (role, access paths and domains),
+  service grants `<agent>@<person>`, profile shares, aliases. `kith-auth ledger [--person ID] [--agent AGENT]` lists
+  them and `ledger --rm <key>` removes one; the apps' Access lists use the host's `accessLedger` / `removeGrant`
+  (`serve/host/src/api/people.rs`), which call it.
+- Host card store (`serve/host/src/store/cards.rs`): requests (cards) and once grants, bound to the session that
+  asked. Producers: app-chat prompts (`agent/bot/updates.rs`), `claude -p` prompts through kith-permit
+  (`cards/mod.rs`), escape cards `request_access` (`cards/access.rs`), secret cards (`cards/secret.rs`).
+- Launchers: the kernel for `-p` runs, the host for app chats (`agent/bot/hq.rs`). Both take grants the same way.
+
+**Rules** (built unless marked).
+- **1-2. Who answers.** The owner for the owner's runs; a member for their own run when the tool runs no code and
+  every named path is inside their folders (a call naming no path fails closed; a bot's owner answers only inside
+  the bot's folders); the owner for everything else. The owner's devices always show the buttons. Each producer
+  checks this itself today; one `approver()` with the answer stored on the card is planned.
+- **3. Choices.** Allow once, Always allow (only where a lasting form exists: a path, a domain, a service), Deny. No
+  Always on tool prompts for anyone but the owner; the owner's own chats keep Claude Code's options. An Always
+  kith-auth refuses is shown as once, with why ("Allowed once only: …").
+- **4. Delivery.** Take the session's writer claim -> reserve its once grants -> load the session with them -> take
+  the grants only when it started with them; a failed load leaves them for the next activation (M4). Each loaded
+  app-chat session keeps a profile digest, compared at every turn (M6); a yes, a removed grant or a demotion reloads
+  that session alone before its next turn, never the agent process. A narrowing never waits: the next turn runs on
+  the new profile (M7).
+- **5. Somewhere to ask.** Not built (below).
+- **6. Removal.** Built in a different shape from the design: a revoke goes through the cloud first and reaches every
+  Mac before the next turn (`verification/revoke`).
+- **7. An ask that parks is a job.** Not built (below).
+- **8. Lifecycle owns every stop.** Not built (below).
+
+**Planned (agreed, not built yet).**
+- Rules 1-2: one `approver()` used by every producer and the answer guard, with `answerableBy` stored on the card;
+  `may_answer = owner || (answerableBy == viewer && still a member now)`; open cards re-derived on the sweep tick and
+  when auth.json changes, so a role change never strands a card.
+- `approved_by` on ledger entries (the field exists, null today); a demotion drops what a person approved for
+  themselves, and kith-auth writes a self-approved entry only while they are a member (M3).
+- An answer is recorded only if the person isn't revoked, in the same step (M2).
+- A card's wake stays queued until an activation that includes the yes has started (M5).
+- Rule 7: a `kith ask` run that parks on a card returns `waiting` + an id, not an answer; the resumed answer joins
+  that id (`kith ask --wait`) or wakes the caller's session if it ended (M8).
+- No chat with the agent on this Mac: the card goes to the approver's inbox instead of "There is nowhere to ask".
+- Rule 5: host down, the kernel restarts the host job and retries the ask token once before refusing.
+- Removed ids are retired, so a new invite under the same name never inherits the old person's memory or logins.
+- Rule 8: every stop of a session goes through the session lifecycle (lease, intent first) once F12 is built;
+  today a stop is a claim release and a kill (`kith-sessions` has writer claims only).
+
+**Must stay true** (beyond A1-A9 and C1-C8): buttons iff the answer would be accepted; no card is stranded; a yes
+recorded before the deadline is in the session's next activation; every lasting grant is listed and removable;
+removed means removed under every id; a card shows the scope actually granted; a `kith ask` caller hears the answer
+exactly once; no turn runs on a profile wider than the current grants.
+
 ## Planned
 
 **Bot guests**, what is left ([docs/kith-bot-guests.md](kith-bot-guests.md)): bots in rooms (Grok teams, section 7.9) and
