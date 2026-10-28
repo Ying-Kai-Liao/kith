@@ -362,13 +362,23 @@ fn card_of(store: &Store, e: &Value) -> Option<crate::store::Card> {
 
 /// Sets `canAnswer` on the permission entry `e` for `who` (None: the owner, who answers every one), from who the card
 /// names (`access::can_answer`): the apps show its buttons only when it is true. A card with no row (a limit card) is
-/// the owner's.
+/// the owner's. Who could answer it before is the owner's to see only.
 pub fn mark_can_answer(store: &Store, who: Option<&str>, e: &mut Value) {
     if e["kind"] != "permission" || !e["data"].is_object() {
         return;
     }
     let can = who.is_none() || card_of(store, e).is_some_and(|c| crate::access::can_answer(who, &c));
     e["data"]["canAnswer"] = can.into();
+    if who.is_some()
+        && let Some(data) = e["data"].as_object_mut()
+    {
+        data.remove("formerApprovers");
+    }
+}
+
+/// Whether `me` could answer the permission entry `e` before its approver changed (`cards::approver_changed`).
+fn was_approver(e: &Value, me: &str) -> bool {
+    e["kind"] == "permission" && e["data"]["formerApprovers"].as_array().is_some_and(|l| l.iter().any(|p| p == me))
 }
 
 fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
@@ -377,10 +387,12 @@ fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
     if who.is_some() && kind == "entry" && secret_card(&v["entry"]["data"]) {
         return None;
     }
-    // A card reaches the person it names to answer it, wherever it was raised.
+    // A card reaches the person it names to answer it, wherever it was raised, and still reaches one it named before
+    // (who then can't answer it, so it leaves their Needs-you list).
     if let Some(me) = who
         && kind == "entry"
-        && card_of(store, &v["entry"]).is_some_and(|c| c.answerable_by.as_deref() == Some(me))
+        && (was_approver(&v["entry"], me)
+            || card_of(store, &v["entry"]).is_some_and(|c| c.answerable_by.as_deref() == Some(me)))
     {
         let mut v = shape_bot(v);
         hide_foreign_summary(me, &mut v["entry"]);

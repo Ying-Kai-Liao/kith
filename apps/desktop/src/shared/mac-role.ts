@@ -46,10 +46,11 @@ export function agentsWithoutChat(bots: { hqAgent?: string | null }[], granted: 
   return (granted ?? []).filter((g) => !has.has(g.agent))
 }
 
-/** A guest's permission card waiting for this Mac's owner. */
+/** A card outside this account's chats that waits for its answer: a guest's, or one in an agent's card lane (no chat here). */
 export interface GuestPrompt {
   entryId: string
   botId: string
+  /** Whose run asked; '' for the owner's own run. */
   personName: string
   agent: string
   title: string
@@ -59,20 +60,22 @@ export interface GuestPrompt {
 }
 
 /**
- * The cards in an owner's event stream that come from other people's chats: pending, for the owner, and from a bot that
- * isn't in the owner's own roster. They are read from the entries as they are, so one answered anywhere drops out.
+ * The pending cards in this account's event stream from outside its own roster (other people's chats, an agent's card
+ * lane) that wait for it: on the owner's Mac those for the owner, elsewhere those the host says it may answer
+ * (`canAnswer`). They are read from the entries as they are, so one answered anywhere, or whose approver changed, drops out.
  */
-export function guestPrompts(entries: ReadonlyMap<string, Entry[]>, ownBots: { has(id: string): boolean }): GuestPrompt[] {
+export function guestPrompts(entries: ReadonlyMap<string, Entry[]>, ownBots: { has(id: string): boolean }, isOwner: boolean): GuestPrompt[] {
   const out: GuestPrompt[] = []
   for (const [botId, list] of entries) {
     if (ownBots.has(botId)) continue
     for (const e of list) {
       const d = e.data
-      if (e.kind !== 'permission' || d.status !== 'pending' || d.approver !== 'owner') continue
+      if (e.kind !== 'permission' || d.status !== 'pending') continue
+      if (isOwner ? d.approver !== 'owner' : d.canAnswer !== true) continue
       out.push({
         entryId: e.id,
         botId,
-        personName: d.personName || d.person || 'Someone',
+        personName: d.personName || d.person || '',
         agent: d.agent ?? '',
         title: d.title ?? 'Use a tool',
         options: d.options ?? [],
@@ -83,6 +86,9 @@ export function guestPrompts(entries: ReadonlyMap<string, Entry[]>, ownBots: { h
   }
   return out.sort((a, b) => a.createdAt - b.createdAt)
 }
+
+/** The "who" line of a prompt: the person and the agent, or the agent alone for the owner's own run. */
+export const promptWho = (p: Pick<GuestPrompt, 'personName' | 'agent'>) => (p.personName ? `${p.personName} · ${p.agent}` : p.agent)
 
 /**
  * Whose answer a pending card waits for, or null when it is this account's to answer: the host says so (`canAnswer`,

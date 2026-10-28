@@ -262,7 +262,14 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   past its claim wait (M5). A turn that doesn't start gives the wake back; a host start gives back every wake that
   wasn't applied and offers it again (the channel inbox drops its saved copy, so it runs once). After a Stop a
   given-back wake waits for the next offer instead.
-- **5. Somewhere to ask.** Not built (below).
+- **5. Somewhere to ask.** Host down: when `kith-permit issue` finds nothing on the host's port, it restarts the
+  host's launchd job as the Mac app does (loaded from its plist when launchd doesn't know it, then kickstarted), waits
+  for the port and asks for the ask token once more; still none, the run's asks are refused with "the Kith host isn't
+  running". No chat with the agent on this Mac: the card goes into the agent's card lane (`cards:<agent>`, never a
+  chat, never in the roster or the unread counts), sent only to its approver and the owner, and waits in the
+  approver's Needs-you list, key and account cards included, until it is answered, expires or access ends. The
+  owner's list shows the cards waiting on the owner. When the approver changes, the new one gets it and a push, the
+  old one an update without buttons; a push for a lane opens the list, not a chat.
 - **6. Removal.** Built in a different shape from the design: a revoke goes through the cloud first and reaches every
   Mac before the next turn (`verification/revoke`).
 - **7. An ask that parks is a job.** A `kith ask` run that ends its turn on a card exits 3 (`waiting`) with the ask
@@ -272,8 +279,6 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 - **8. Lifecycle owns every stop.** Not built (below).
 
 **Planned (agreed, not built yet).**
-- No chat with the agent on this Mac: the card goes to the approver's inbox instead of "There is nowhere to ask".
-- Rule 5: host down, the kernel restarts the host job and retries the ask token once before refusing.
 - Removed ids are retired, so a new invite under the same name never inherits the old person's memory or logins.
 - Rule 8: every stop of a session goes through the session lifecycle (lease, intent first) once F12 is built;
   today a stop is a claim release and a kill (`kith-sessions` has writer claims only).

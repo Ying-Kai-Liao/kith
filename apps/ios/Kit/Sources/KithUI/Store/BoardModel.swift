@@ -171,12 +171,15 @@ public struct BoardModel: Equatable, Sendable {
                     hostName: computer.hostName, entry: nil, botRequest: request, card: DecisionCardModel(botRequest: request),
                     color: "", at: request.createdAt, trouble: computer.trouble))
             }
-            // Guests' requests: outside any chat of the owner's, so no bot to open.
+            // Guests' requests and card lanes: outside any chat of this account's, so no bot to open. A key or account card
+            // opens its request view, where the card is.
             for prompt in computer.guestPrompts {
                 let target = BoardTarget(computerId: computer.id, botId: prompt.chatId)
+                let card = prompt.entry.data.isSecretCard ? Self.secretRow(prompt.entry, agent: prompt.entry.data.agent ?? "The agent")
+                    : DecisionCardModel(guest: prompt)
                 decisions.append(BoardDecision(
                     id: "\(computer.id)/\(prompt.id)", target: target, hostName: computer.hostName, entry: prompt.entry,
-                    botRequest: nil, card: DecisionCardModel(guest: prompt), color: "", at: prompt.entry.createdAt, trouble: computer.trouble))
+                    botRequest: nil, card: card, color: "", at: prompt.entry.createdAt, trouble: computer.trouble))
             }
             if let trouble = computer.trouble {
                 waits.append(BoardWait(id: "computer/\(computer.id)", kind: .computer(trouble), target: nil, hostName: computer.hostName,

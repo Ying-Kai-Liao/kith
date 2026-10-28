@@ -114,7 +114,7 @@ pub async fn rederive(hub: &Arc<Hub>) {
             continue;
         }
         match hub.store.card_set_answerable(&card.id, now.as_deref()) {
-            Ok(Some(changed)) => crate::cards::approver_changed(hub, &changed),
+            Ok(Some(changed)) => crate::cards::approver_changed(hub, &changed, card.answerable_by.as_deref()),
             Ok(None) => {}
             Err(error) => {
                 tracing::warn!(error = format!("{error:#}"), card = %card.id, "couldn't change a card's approver");

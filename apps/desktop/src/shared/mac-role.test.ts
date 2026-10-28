@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { inviteProof } from './invite.ts'
 import { runJoin, type JoinState } from './invite-join.ts'
-import { agentsWithoutChat, guestPrompts, isAccessRemoved, macRole, scopedKey, ownerNameFrom, parseGranted, visibleBots, waitingFor } from './mac-role.ts'
+import { agentsWithoutChat, guestPrompts, isAccessRemoved, macRole, promptWho, scopedKey, ownerNameFrom, parseGranted, visibleBots, waitingFor } from './mac-role.ts'
 import type { Entry } from './models.ts'
 import { relayJoinDeps, type RelayApi } from './relay-access.ts'
 import type { RelayComputer } from './relay.ts'
@@ -48,11 +48,31 @@ test('guest prompts: pending, for the owner, from bots outside the roster', () =
     ]],
     ['other', [card('c4', 'other', { status: 'pending', approver: 'owner', person: 'lee', agent: 'video', title: 'ls', options: opts }, 2)]],
   ])
-  const list = guestPrompts(entries, new Map([['mine', 1]]))
+  const list = guestPrompts(entries, new Map([['mine', 1]]), true)
   assert.deepEqual(list.map((p) => [p.entryId, p.personName, p.agent, p.options.length]), [['c4', 'lee', 'video', 1], ['c1', 'Mia', 'house', 1]])
   // Answered elsewhere: the entry updates and drops out.
   entries.get('guestbot')![0] = card('c1', 'guestbot', { status: 'answered', approver: 'owner', personName: 'Mia' }, 5)
-  assert.deepEqual(guestPrompts(entries, new Map([['mine', 1]])).map((p) => p.entryId), ['c4'])
+  assert.deepEqual(guestPrompts(entries, new Map([['mine', 1]]), true).map((p) => p.entryId), ['c4'])
+})
+
+test("a card lane's cards wait for their approver: the owner's on the owner's Mac, the ones the host says a member may answer on theirs", () => {
+  const entries = new Map<string, Entry[]>([
+    ['mine', [card('m1', 'mine', { status: 'pending', approver: 'member', canAnswer: true })]],
+    ['cards:house', [
+      card('l1', 'cards:house', { status: 'pending', approver: 'owner', agent: 'house', title: 'Run ls', canAnswer: true }, 3),
+      card('l2', 'cards:house', { status: 'pending', approver: 'member', person: 'sam', personName: 'Sam', agent: 'house', canAnswer: true }, 4),
+      card('l3', 'cards:house', { status: 'pending', approver: 'owner', agent: 'house', card: 'key', canAnswer: true }, 5),
+    ]],
+  ])
+  const own = new Map([['mine', 1]])
+  // The owner answers any card, but their list keeps those waiting on them; a member's moves there when re-derive does.
+  assert.deepEqual(guestPrompts(entries, own, true).map((p) => p.entryId), ['l1', 'l3'])
+  // A member sees what the host says they may answer, never a card in their own chat (that is in the chat).
+  assert.deepEqual(guestPrompts(entries, own, false).map((p) => p.entryId), ['l1', 'l2', 'l3'])
+  entries.set('cards:house', [card('l2', 'cards:house', { status: 'pending', approver: 'owner', person: 'sam', agent: 'house', canAnswer: false }, 4)])
+  assert.deepEqual(guestPrompts(entries, own, false), [], 'an approver who lost the card loses it from the list')
+  assert.equal(promptWho({ personName: '', agent: 'house' }), 'house')
+  assert.equal(promptWho({ personName: 'Sam', agent: 'house' }), 'Sam · house')
 })
 
 test("the owner's own device shows the buttons on a card addressed to the owner", () => {

@@ -243,8 +243,9 @@ public final class BotStore {
         return bots.values.filter { $0.hqAgent.map(agents.contains) ?? false }
     }
 
-    /// Guest prompts the owner is asked to answer on this computer (see `GuestPrompt`).
-    public var guestPrompts: [GuestPrompt] { GuestPrompt.pending(in: entries, known: Set(bots.keys)) }
+    /// Cards outside this account's chats that wait for it on this computer (see `GuestPrompt`); `isOwner` is the
+    /// account's role here.
+    public func guestPrompts(isOwner: Bool) -> [GuestPrompt] { GuestPrompt.pending(in: entries, known: Set(bots.keys), isOwner: isOwner) }
 
     /// Display name for a harness id, as the host reports it (falls back to the built-in list).
     public func backendName(_ id: String) -> String {

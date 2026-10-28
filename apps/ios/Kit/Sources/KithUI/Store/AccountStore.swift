@@ -99,10 +99,10 @@ public final class AccountStore {
         AccessLevel.of(role: role(for: id), granted: stores[id]?.hello?.grantedAgents)
     }
 
-    /// Guests' prompts waiting for this account's answer on a computer. Only the owner's: a member answers their own
-    /// in their chat, and nothing here crosses to another computer.
+    /// Cards outside this account's chats waiting for its answer on a computer: guests' for the owner, and a card lane's
+    /// for whoever the host names. Nothing here crosses to another computer.
     public func guestPrompts(for id: ComputerID) -> [GuestPrompt] {
-        role(for: id) == .owner ? stores[id]?.guestPrompts ?? [] : []
+        stores[id]?.guestPrompts(isOwner: role(for: id) == .owner) ?? []
     }
 
     /// Bots from outside waiting for this account's answer on a computer it owns.
@@ -110,12 +110,12 @@ public final class AccountStore {
         role(for: id) == .owner ? stores[id]?.botGuests.requests ?? [] : []
     }
 
-    /// Whether a link to this chat opens a guest's request instead: the account owns the computer and has no bot by that
-    /// id. If it only hasn't synced yet, the request view waits and hands over to the chat when the bot appears; if the
-    /// request was answered meanwhile, it says so.
+    /// Whether a link to this chat opens a guest's request instead: an agent's card lane, or a chat the account has no
+    /// bot for on a computer it owns. If it only hasn't synced yet, the request view waits and hands over to the chat
+    /// when the bot appears; if the request was answered meanwhile, it says so.
     public func opensGuestPrompt(_ ref: BotReference) -> Bool {
-        guard role(for: ref.computerId) == .owner, let store = stores[ref.computerId] else { return false }
-        return store.bots[ref.botId] == nil
+        guard let store = stores[ref.computerId] else { return false }
+        return GuestPrompt.isCardLane(ref.botId) || (role(for: ref.computerId) == .owner && store.bots[ref.botId] == nil)
     }
 
     /// The computers this account owns (or pairs by QR), for the screens only an owner has.

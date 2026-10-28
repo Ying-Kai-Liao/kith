@@ -143,9 +143,9 @@ export class BotMirror extends Observable {
     return this.role === 'owner'
   }
 
-  /** Guests' prompts waiting for this Mac's owner; not bots of the roster, so no unread and no fake bots. */
+  /** Cards from outside the roster waiting for this account (guests' for the owner, a card lane's for its approver); not bots, so no unread and no fake bots. */
   get guestPrompts(): GuestPrompt[] {
-    return this.isOwner ? guestPrompts(this.entries, this.bots) : []
+    return guestPrompts(this.entries, this.bots, this.isOwner)
   }
 
   /** Roster order: pinned first, then where the user dragged them, then most recent activity. */

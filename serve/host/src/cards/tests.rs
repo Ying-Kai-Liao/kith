@@ -312,6 +312,52 @@ async fn an_open_cards_approver_follows_kith_auth_and_only_losing_the_agent_with
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn);
 }
 
+/// Rule 5: with no chat with the agent on this computer, a card goes to the agent's card lane, which reaches the
+/// approver's Needs-you list and nobody else's; a new approver gets it and the old one sees it can't answer any more.
+#[tokio::test]
+async fn a_card_with_no_chat_goes_to_the_approvers_needs_you_list() {
+    let r = Rig::new().await;
+    window(&r.hub, 20);
+    let shaped = |viewer: Option<&str>, card: &Card| {
+        let e = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap();
+        roles::event_for(&r.hub.store, viewer, json!({"type": "entry", "rev": e.rev, "entry": e}))
+    };
+
+    // The owner's run, and no chat at all: the card is the owner's, in the lane, with a push.
+    let pushed_before = crate::remote::push::SENT.lock().unwrap().len();
+    let call = ask(&r.hub, owner_run("s1"), "Bash", ls());
+    let card = shown(&r.hub).await;
+    let entry = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap();
+    assert_eq!((entry.bot_id.as_str(), entry.data["author"].as_str()), ("cards:house", Some("cards:house")));
+    assert!(r.hub.store.bot("cards:house").unwrap().is_none(), "the lane is never a chat");
+    assert_eq!(shaped(None, &card).unwrap()["entry"]["data"]["canAnswer"], true);
+    assert!(
+        crate::remote::push::SENT.lock().unwrap()[pushed_before..].iter().any(|m| m == "house needs you\nRun ls /tmp")
+    );
+    answer(&r.hub, &entry.id, Some("allow"), None).unwrap();
+    assert!(call.await.unwrap().allow);
+
+    // A member's run with no chat either: the member answers it, other people never see it, the owner does.
+    joined(&r, "member").await;
+    let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "WebFetch", json!({"url": "https://example.com"}));
+    let card = shown(&r.hub).await;
+    assert_eq!(card.answerable_by.as_deref(), Some("sam"));
+    assert_eq!(r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().bot_id, "cards:house");
+    assert_eq!(shaped(Some("sam"), &card).unwrap()["entry"]["data"]["canAnswer"], true);
+    assert!(shaped(Some("alex"), &card).is_none(), "nobody else's list");
+    assert!(shaped(None, &card).is_some());
+
+    // Sam is made a guest: the card is the owner's now; sam still gets it once more, with no buttons.
+    r.auth(&["member", "house", "sam", "preset=guest"]);
+    crate::access::rederive(&r.hub).await;
+    let for_sam = shaped(Some("sam"), &card).expect("the former approver is told");
+    assert_eq!(for_sam["entry"]["data"]["canAnswer"], false);
+    assert!(for_sam["entry"]["data"].get("formerApprovers").is_none(), "who answered before is the owner's to see");
+    assert_eq!(shaped(None, &card).unwrap()["entry"]["data"]["formerApprovers"], json!(["sam"]));
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
+    assert!(call.await.unwrap().allow);
+}
+
 /// F11: an invited person's run executes as the owner's macOS user, so a card for a tool that runs code is the
 /// owner's even in a member's own run, and the member's answer is refused by the approver stored on the card.
 #[tokio::test]

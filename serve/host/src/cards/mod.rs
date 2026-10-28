@@ -148,18 +148,37 @@ fn title_of(tool: &str, shown: &str) -> String {
     }
 }
 
-/// The chat a -p run's card appears in: the person's own chat with the agent, else (the owner's run, or a person with
-/// no chat yet) the owner's chat with it. Cards are Permission entries, so the apps already show them there.
-fn chat_for(hub: &Hub, person: &str, agent: &str) -> Option<crate::store::BotConfig> {
+/// The lane of an agent's cards that have no chat on this computer (`cards:<agent>`). It has no bot row: no roster
+/// entry, no sends, no unread count. The apps show its pending cards in the approver's Needs-you list (rule 5).
+const LANE: &str = "cards:";
+
+/// The card lane of `agent`, as the chat a card and its push name (never stored as a bot).
+fn lane_of(agent: &str) -> crate::store::BotConfig {
+    serde_json::from_value(json!({"id": format!("{LANE}{agent}"), "name": agent, "hqAgent": agent}))
+        .expect("a bot config from an id and a name")
+}
+
+/// Where a -p run's card appears: the person's own chat with the agent, else (the owner's run, or a person with no chat
+/// yet) the owner's chat with it, else the agent's card lane. Cards are Permission entries, so the apps already show
+/// them in a chat, and the lane's in Needs-you.
+fn chat_for(hub: &Hub, person: &str, agent: &str) -> crate::store::BotConfig {
     let rows: Vec<_> =
         hub.store.bots().unwrap_or_default().into_iter().filter(|r| !r.deleted).map(|r| r.config).collect();
     let of_agent = |c: &&crate::store::BotConfig| c.hq_agent.as_deref() == Some(agent);
     if !person.is_empty()
         && let Some(c) = rows.iter().filter(of_agent).find(|c| c.person.as_deref() == Some(person))
     {
-        return Some(c.clone());
+        return c.clone();
     }
-    rows.iter().filter(of_agent).find(|c| c.person.is_none()).cloned()
+    rows.iter().filter(of_agent).find(|c| c.person.is_none()).cloned().unwrap_or_else(|| lane_of(agent))
+}
+
+/// The chat `id` names in an entry's `author`: a bot's, or an agent's card lane.
+fn chat_of(hub: &Hub, id: &str) -> Option<crate::store::BotConfig> {
+    match id.strip_prefix(LANE) {
+        Some(agent) => Some(lane_of(agent)),
+        None => hub.store.bot(id).ok().flatten().map(|r| r.config),
+    }
 }
 
 /// The host half of `--permission-prompt-tool` for a -p run (A5, A6, A9). Never panics, never blocks past the window.
@@ -225,7 +244,7 @@ async fn request_card(
     // Listening comes first: an answer that lands the moment the card is shown must find this call.
     let (_waiting, rx) = Waiting::new(&card.id);
     let Some(card) = show(hub, who, &card) else {
-        return deny("There is nowhere to ask about this: no chat with this agent on this computer.");
+        return deny("Approvals aren't available right now.");
     };
     let label = approver_label(hub, &card).await;
     match tokio::time::timeout(cfg.window, rx).await {
@@ -296,7 +315,7 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card) -> Option<Card> {
         hub.set_entry(entry_id, &e.data);
         return hub.store.card_live(&card.id, None, Some(&who.run_id)).ok().flatten();
     }
-    let chat = chat_for(hub, &who.person, &who.agent)?;
+    let chat = chat_for(hub, &who.person, &who.agent);
     let escape = card.tool == access::TOOL;
     let (title, kind) = (title_of(&card.tool, &card.shown), tool_kind(&card.tool));
     let (title, detail, options) = if escape {
@@ -368,15 +387,23 @@ fn tell_approver(hub: &Hub, chat: &crate::store::BotConfig, card: &Card, data: &
     );
 }
 
-/// Who may answer `card` changed (`crate::access::rederive`): its entry says so, which reaches the apps with `canAnswer`
-/// for each viewer, and the new approver is told.
-pub fn approver_changed(hub: &Hub, card: &Card) {
+/// Who may answer `card` changed from `before` (`crate::access::rederive`): its entry says so, which reaches the apps
+/// with `canAnswer` for each viewer, and the new approver is told. A member who could answer it before is named in
+/// `formerApprovers`, so the entry still reaches them, with `canAnswer` false, and leaves their Needs-you list.
+pub fn approver_changed(hub: &Hub, card: &Card, before: Option<&str>) {
     let Some(entry_id) = &card.entry_id else { return };
     let Some(mut e) = hub.store.entry(entry_id) else { return };
     e.data["approver"] = card.approver.as_str().into();
+    if let Some(p) = before.filter(|p| card.answerable_by.as_deref() != Some(*p)) {
+        let mut former = e.data["formerApprovers"].as_array().cloned().unwrap_or_default();
+        if !former.iter().any(|v| v == p) {
+            former.push(p.into());
+            e.data["formerApprovers"] = former.into();
+        }
+    }
     hub.set_entry(entry_id, &e.data);
     let chat = e.data["author"].as_str().unwrap_or(&e.bot_id).to_owned();
-    let Some(chat) = hub.store.bot(&chat).ok().flatten().map(|r| r.config) else { return };
+    let Some(chat) = chat_of(hub, &chat) else { return };
     let title = e.data["title"].as_str().unwrap_or_default().to_owned();
     tell_approver(hub, &chat, card, &e.data, format!("{} needs you", chat.name), &title);
 }
