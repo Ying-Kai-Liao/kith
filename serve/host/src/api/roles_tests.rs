@@ -433,13 +433,10 @@ async fn a_pull_binds_the_member_and_their_device_waits_for_the_owner_to_compare
     let device = r.hub.store.device(&b64(&dk)).expect("approved");
     assert_eq!((device.person_id.as_deref(), device.grant_id.as_deref()), (Some("sam"), Some("grt_new")));
     let caller = Caller::Device { key: device.key.clone(), scopes: device.scopes.clone() };
-    assert_eq!(principal(&r.hub.store, &caller), Principal::Unproven("sam".into()), "approved, but not yet proven");
-    assert!(call(&r, &caller, "hello", json!({})).await.is_err());
-    let t = made["link"].as_str().unwrap().rsplit("t=").next().unwrap().to_owned();
-    let wrong = call(&r, &caller, "proveInvite", json!({"inviteId": invite, "token": "nope"})).await.unwrap_err();
-    assert!(wrong.is::<NotAllowed>());
-    call(&r, &caller, "proveInvite", json!({"inviteId": invite, "token": t})).await.unwrap();
-    assert_eq!(principal(&r.hub.store, &caller), Principal::Member("sam".into()));
+    // The owner compared its code on this Mac: that stands in for the invite token, which a new browser no longer has.
+    assert_eq!(principal(&r.hub.store, &caller), Principal::Member("sam".into()), "the owner's approval proves it");
+    let again = call(&r, &caller, "proveInvite", json!({"inviteId": invite, "token": "nope"})).await.unwrap_err();
+    assert!(format!("{again:#}").contains("already shown its invite"));
     call(&r, &caller, "hello", json!({})).await.unwrap();
 
     // Grants: renewed for the bound account, removed for any other.

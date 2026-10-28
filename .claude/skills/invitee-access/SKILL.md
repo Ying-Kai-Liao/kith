@@ -14,7 +14,7 @@ Tool: property tests with generated inputs. Rust has no cheap verifier that runs
 Host, `serve/host/src/api/roles_props.rs`:
 
 1. `guard` lets a proven person through only for a method on `MEMBER_METHODS`; for a method that names a chat, that chat is theirs, not deleted, and kith-auth allows its agent right now. Harm: someone reads or drives another person's or the owner's chat.
-2. An unproven device may only call `proveInvite`. Harm: an invite link alone opens the host.
+2. An unproven device may only call `proveInvite`. A member's device counts as proven when it shows the invite token or when the owner approved its access request by hand on the Mac (`cloud::decide`; never auto mode, where nobody compares the code). Harm: an invite link alone, or the cloud alone, opens the host.
 3. `respondPermission` passes only for a card of kind permission, raised by that chat, and only when kith-auth says preset `member`. Harm: a guest approves their own agent's dangerous action; a prompt of another chat is answered.
 4. `send` passes with no folder or clear, and a project only if it is in the person's shared projects (checked with the handler's own `Change::from_args`). Harm: a guest picks a folder on the owner's Mac.
 5. The same call after the grant is removed is refused (kith-auth is asked every call). Harm: a revoked person keeps access.

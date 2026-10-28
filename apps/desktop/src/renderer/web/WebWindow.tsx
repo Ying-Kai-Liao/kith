@@ -289,7 +289,7 @@ function MemberApp() {
                 ) : null}
                 {store ? (
                   store.roster.length === 0 ? (
-                    <p className="web-fine web-pad">{store.shownConnection.kind === 'online' ? 'No chats yet. Start one with New chat.' : 'Chats appear once the computer is reachable.'}</p>
+                    <p className="web-fine web-pad">{store.shownConnection.kind === 'online' ? 'No chats yet. Start one with New chat.' : waitingText(store.shownConnection)}</p>
                   ) : (
                     store.roster.map((bot) => (
                       <button
@@ -345,4 +345,9 @@ function Shell({ header, children }: { header?: React.ReactNode; children: React
       {children}
     </div>
   )
+}
+
+/** Why there are no chats yet: what the Mac or the link said (a refusal names its fix), else the general wait. */
+function waitingText(c: { kind: string; message?: string }) {
+  return c.message || 'Chats appear once the computer is reachable.'
 }
