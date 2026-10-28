@@ -92,6 +92,14 @@ turn spoken in a voice call (`sonnet`, `haiku`, `opus`, `own` for the agent's ow
 Mac's choice; kith's default is `sonnet`). `info.call_model` is the choice (`default` when none),
 `info.call_model_effective` what applies (`""` is the agent's own).
 
+## `kithSchedule { botId, id, op }`
+
+Same answer and errors as `kithSetPermission`. The Schedule card's buttons for one of the agent's kith-sched jobs:
+`op` is `pause`, `resume`, `run` or `remove`, run as `kith schedule <pause|resume|run|rm> <agent> <id>` with
+`KITH_PERSON` set to the job's person (its `person` in `info.schedules`, read fresh; none is the owner), so kith-sched
+stays the only writer of jobs.json and its own rule for `run` holds. A job `info.schedules` doesn't list is a 400.
+The owner's only: no member contract lists it.
+
 Calls: an app sends `send { ..., via: "call" }` for a message spoken in a call (an older host ignores it, an older
 app never sends it). The host adds a short voice note to that turn's prompt (spoken sentences, no markdown, send files
 to the chat; the chat keeps only the spoken words) and, for a kith bot on its own Claude account, switches the live

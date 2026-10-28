@@ -86,6 +86,35 @@ async fn a_non_kith_bot_has_no_info_and_no_memory_to_read() {
     assert!(!ok);
 }
 
+/// The Schedule card's buttons: kith-sched does the change as the person the job runs for (kith-info's word, not the
+/// caller's), and the answer is the job read back.
+#[tokio::test]
+async fn a_schedule_button_runs_kith_sched_as_the_jobs_person() {
+    let s = start().await;
+    let jobs = json!([{"id": "news", "person": "sam", "paused": false}, {"id": "mine", "person": null, "paused": false}]);
+    std::fs::write(s.home.join("schedules.json"), jobs.to_string()).unwrap();
+    let got = s.host.call("kithSchedule", json!({"botId": s.id, "id": "news", "op": "pause", "person": "kai"})).await;
+    assert_eq!(got["info"]["schedules"][0]["paused"], true, "the job as it is now: {got}");
+    let got = s.host.call("kithSchedule", json!({"botId": s.id, "id": "mine", "op": "remove"})).await;
+    assert_eq!(got["info"]["schedules"].as_array().unwrap().len(), 1);
+
+    let text = std::fs::read_to_string(s.home.join("calls.jsonl")).unwrap();
+    let calls: Vec<Value> =
+        text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).filter(|c| c["args"][0] == "schedule").collect();
+    assert_eq!(calls[0]["args"], json!(["schedule", "pause", "house", "news"]));
+    assert_eq!(calls[0]["person"], "sam", "as the job's person");
+    assert_eq!(calls[1]["args"], json!(["schedule", "rm", "house", "mine"]));
+    assert_eq!(calls[1]["person"], Value::Null, "a job of the owner's runs as the owner");
+
+    let (ok, body) = s.host.post("kithSchedule", &json!({"botId": s.id, "id": "gone", "op": "run"})).await;
+    assert!(!ok && body.to_string().contains("no scheduled job gone"), "{body}");
+    let (ok, body) = s.host.post("kithSchedule", &json!({"botId": s.id, "id": "news", "op": "delete"})).await;
+    assert!(!ok && body.to_string().contains("op must be"), "{body}");
+    let plain = s.host.bot("plain", "ask").await;
+    let (ok, _) = s.host.post("kithSchedule", &json!({"botId": plain, "id": "news", "op": "run"})).await;
+    assert!(!ok, "not a kith agent");
+}
+
 #[tokio::test]
 async fn kith_failing_is_an_error_field_not_an_error_status() {
     let s = start().await;

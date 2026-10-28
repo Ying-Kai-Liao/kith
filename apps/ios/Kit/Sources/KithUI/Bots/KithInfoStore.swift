@@ -168,6 +168,15 @@ final class KithInfoStore {
         }
     }
 
+    /// A Schedule card's button: kith-sched does it, and the info read back is what every card of this agent shows.
+    /// Throws why it failed.
+    func schedule(_ id: String, op: ScheduleOp) async throws {
+        let response = try await client().kithSchedule(botId: botId, id: id, op: op.rawValue)
+        guard response.info != nil else { throw ScheduleError(message: response.error ?? "kith has no answer") }
+        refreshError = nil
+        phase = .loaded(response)
+    }
+
     func search(_ query: String) async throws -> KithSearchResult {
         try await client().kithMemorySearch(botId: botId, query: query, limit: 30)
     }

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import type { Entry } from '@shared/models'
 import type { RichCard } from '@shared/rich-card'
-import { scheduleView, type ScheduleFold } from '@shared/schedule-card'
+import { ownerNameFrom } from '@shared/mac-role'
+import { scheduleFoot, scheduleView, type ScheduleFold, type ScheduleOp, type ScheduleView } from '@shared/schedule-card'
 import { newsView, type NewsRow } from '@shared/news-card'
 import { BotAvatar } from '../../components/Avatar'
 import { Icon } from '../../components/Icon'
@@ -24,12 +25,55 @@ function FoldedCard({ fold, open }: { fold: ScheduleFold; open: () => void }) {
   return fold.opens ? <button className="rc-pill" onClick={open}>{body}</button> : <div className="rc-pill">{body}</div>
 }
 
+/** The owner's buttons (Pause or Resume, Run now, trash with its confirm in the card), or who can press them. */
+function ScheduleButtons({ view, act, ownerName }: { view: ScheduleView; act: ((op: ScheduleOp) => Promise<void>) | null; ownerName: string | null }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState<ScheduleOp | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const foot = scheduleFoot(view, { owner: act !== null, ownerName, confirming, busy })
+  const press = async (op: ScheduleOp) => {
+    if (!act) return
+    setBusy(op)
+    setError(null)
+    try {
+      await act(op)
+      setConfirming(false)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    }
+    setBusy(null)
+  }
+  if (foot.kind === 'note') return <div className="rc-note">{foot.text}</div>
+  return (
+    <>
+      {foot.kind === 'confirm' ? (
+        <div className="rc-confirm">
+          <span className="rc-confirm-text">{foot.question}</span>
+          <div className="rc-buttons">
+            <button className="rc-button danger" disabled={foot.removing} onClick={() => void press('remove')}>Remove</button>
+            <button className="rc-button" disabled={foot.removing} onClick={() => { setConfirming(false); setError(null) }}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <div className="rc-buttons">
+          <button className={foot.toggle.ink ? 'rc-button ink' : 'rc-button'} disabled={foot.busy} onClick={() => void press(foot.toggle.op)}>{foot.toggle.label}</button>
+          <button className="rc-button" disabled={foot.run.disabled} onClick={() => void press('run')}>{foot.run.label}</button>
+          <button className="rc-trash" disabled={foot.busy} aria-label={`Remove ${view.name}`} title="Remove" onClick={() => { setConfirming(true); setError(null) }}>
+            <Icon name="trash" size={13} color="var(--kith-muted)" />
+          </button>
+        </div>
+      )}
+      {error ? <div className="rc-action-error" role="alert">{error}</div> : null}
+    </>
+  )
+}
+
 /** The Schedule card: a Kith agent's kith-sched job or an outside bot's routine (DESIGN.md "Schedule"). */
 export function ScheduleCard({ entry, card }: { entry: Entry; card: RichCard }) {
   const store = useStore()
   const [opened, setOpened] = useState(false)
   const [allTask, setAllTask] = useState(false)
-  const live = useLiveSchedule(card, entry)
+  const { live, act } = useLiveSchedule(card, entry)
   const person = typeof card.snapshot?.person === 'string' ? card.snapshot.person : null
   const view = scheduleView(card, {
     postedAt: entry.createdAt,
@@ -76,6 +120,7 @@ export function ScheduleCard({ entry, card }: { entry: Entry; card: RichCard }) 
         </div>
       </div>
       {view.task ? <button className={allTask ? 'rc-task all' : 'rc-task'} onClick={() => setAllTask(!allTask)}>{view.task}</button> : null}
+      <ScheduleButtons view={view} act={store.isOwner ? act : null} ownerName={ownerNameFrom(store.bots.get(entry.botId)?.activity)} />
     </section>
   )
 }
