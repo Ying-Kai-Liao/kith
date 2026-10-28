@@ -30,7 +30,7 @@ defaultMode, else in kith's default (auto; ~/.kith/settings.json changes it): no
 one that would need it is refused. The agent's settings.json allow/deny rules still apply.
 Machine state (last tick, last runs): ~/.kith/sched/. Logs (tick.log, each run's output): ~/.kith/logs/sched/.
 """
-import datetime as dt, json, os, plistlib, re, subprocess, sys, time
+import contextlib, datetime as dt, fcntl, json, os, plistlib, re, subprocess, sys, time
 from pathlib import Path
 
 KITH = Path(__file__).resolve().parent.parent
@@ -120,18 +120,44 @@ def jobs_file(agent):
     return (pkgs / agent if (pkgs / agent / 'role').is_dir() else STATE / 'agents' / agent) / 'jobs.json'
 
 
+def read_jobs(f):
+    """The jobs in f ([] when there is no file); raises ValueError when the file can't be read as a list of jobs."""
+    if not f.exists():
+        return []
+    jobs = json.loads(f.read_text())
+    if not isinstance(jobs, list) or not all(isinstance(j, dict) and 'id' in j for j in jobs):
+        raise ValueError('not a list of jobs')
+    return jobs
+
+
 def load(agent):
+    """For readers (tick, ls): a file that can't be read counts as no jobs, with a line on stderr."""
     f = jobs_file(agent)
     try:
-        return json.loads(f.read_text()) if f.exists() else []
-    except ValueError as e:
+        return read_jobs(f)
+    except (OSError, ValueError) as e:
         print('kith-sched: %s: %s (skipped)' % (f, e), file=sys.stderr); return []
 
 
-def save(agent, jobs):
+@contextlib.contextmanager
+def editing(agent):
+    """The one way to change an agent's jobs: yields its jobs under an exclusive lock, then replaces jobs.json whole
+    with the list as the block left it. A file that can't be read is refused, never overwritten as if it were empty."""
     f = jobs_file(agent)
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps(jobs, indent=2, ensure_ascii=False) + '\n')
+    MACHINE.mkdir(parents=True, exist_ok=True)
+    with open(MACHINE / ('%s.jobs.lock' % agent), 'a') as lock:   # flock goes with the process: a crash frees it
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            jobs = read_jobs(f)
+        except (OSError, ValueError) as e:
+            sys.exit("kith-sched: can't read %s (%s); fix or remove it first, nothing was changed" % (f, e))
+        yield jobs
+        tmp = f.with_name('.%s.%d.tmp' % (f.name, os.getpid()))
+        with open(tmp, 'w') as out:
+            out.write(json.dumps(jobs, indent=2, ensure_ascii=False) + '\n')
+            out.flush(); os.fsync(out.fileno())
+        os.replace(tmp, f)
 
 
 def all_jobs():
@@ -367,11 +393,11 @@ def need_agent(a):
         sys.exit('kith-sched: no agent %r (have: %s)' % (a, ' '.join(agents())))
 
 
-def find(agent, jid):
-    jobs = load(agent)
+def find(agent, jid, jobs=None):
+    jobs = load(agent) if jobs is None else jobs
     for j in jobs:
         if j['id'] == jid:
-            return jobs, j
+            return j
     sys.exit('kith-sched: %s has no job %r (have: %s)' % (agent, jid, ' '.join(j['id'] for j in jobs) or 'none'))
 
 
@@ -437,16 +463,16 @@ def main(argv):
         if opts.get('m'): job['model'] = opts['m']
         if opts.get('e'): job['effort'] = opts['e']
         if opts.get('H'): job['harness'] = opts['H']
-        jobs = [j for j in load(agent) if j['id'] != job['id']] + [job]
-        save(agent, jobs)
+        with editing(agent) as jobs:
+            jobs[:] = [j for j in jobs if j['id'] != job['id']] + [job]
         print('%s/%s: next run %s' % (agent, job['id'], nxt.strftime('%a %d %b %H:%M') if nxt else 'never'))
         if not job_installed('sched'):
             print('not ticking yet: run `kith schedule --install` once')
         return
     if cmd in ('rm', 'pause', 'resume', 'run') and len(rest) == 2:
         agent, jid = rest
-        jobs, job = find(agent, jid)
         if cmd == 'run':
+            job = find(agent, jid)
             caller = os.environ.get('KITH_PERSON')
             if job.get('person') and caller:   # by hand, never as someone else (the owner may)
                 try:
@@ -461,12 +487,13 @@ def main(argv):
                 sys.exit(1)
             print('started → %s' % log)
             return
-        if cmd == 'rm':
-            jobs.remove(job)
-        else:
-            job.pop('paused', None)
-            if cmd == 'pause': job['paused'] = True
-        save(agent, jobs)
+        with editing(agent) as jobs:
+            job = find(agent, jid, jobs)
+            if cmd == 'rm':
+                jobs.remove(job)
+            else:
+                job.pop('paused', None)
+                if cmd == 'pause': job['paused'] = True
         print('%s/%s %s' % (agent, jid, {'rm': 'removed', 'pause': 'paused', 'resume': 'resumed'}[cmd]))
         return
     sys.exit('kith-sched: unknown command; see kith-sched --help')

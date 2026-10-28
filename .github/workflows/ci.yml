@@ -208,6 +208,8 @@ jobs:
         run: kernel/tests/kith-wake-check
       - name: Schedule person check
         run: kernel/tests/kith-sched-person-check
+      - name: Schedule jobs file check
+        run: kernel/tests/kith-sched-jobs-check
       - name: Terminal flags check
         run: kernel/tests/kith-terminal-flags-check
       - uses: oven-sh/setup-bun@v2
