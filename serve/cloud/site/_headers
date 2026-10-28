@@ -5,3 +5,15 @@
 /fonts/*
   Cache-Control: public, max-age=2592000
   X-Content-Type-Options: nosniff
+# The member web client at kithbot.app/join/ (built there by `npm run build:web`, never committed): the production cloud
+# and Clerk instance only; script-src stays 'self' (as apps/desktop/web-host/_headers for the dev copy).
+/join/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; connect-src https://api.kithbot.app wss://api.kithbot.app https://clerk.kithbot.app; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; object-src 'none'; require-trusted-types-for 'script'
+  Cross-Origin-Opener-Policy: same-origin
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Cache-Control: no-cache
+/join/assets/*
+  ! Cache-Control
+  Cache-Control: public, max-age=31536000, immutable

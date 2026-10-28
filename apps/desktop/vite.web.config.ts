@@ -15,8 +15,9 @@ const fromEnv = (name: string, fallback: string) => process.env[name]?.trim() ||
 export default defineConfig({
   root: resolve('src/renderer/web'),
   publicDir: false,
-  // Absolute: the page is served at /join, /, and wherever the SPA fallback lands.
-  base: '/',
+  // Absolute: the page is served at /join, /, and wherever the SPA fallback lands. The production copy lives under
+  // kithbot.app/join/ (serve/cloud `build:web`), so its base and output folder come from the environment.
+  base: fromEnv('KITH_WEB_BASE', '/'),
   resolve: { alias: { '@shared': resolve('src/shared') } },
   plugins: [react()],
   define: {
@@ -27,7 +28,7 @@ export default defineConfig({
     }),
   },
   build: {
-    outDir: resolve('dist-web'),
+    outDir: resolve(fromEnv('KITH_WEB_OUT_DIR', 'dist-web')),
     emptyOutDir: true,
     chunkSizeWarningLimit: 3000,
     // Safari 17+ / Chrome 120+ / Firefox 120+ all have the Ed25519 WebCrypto this client needs anyway.
