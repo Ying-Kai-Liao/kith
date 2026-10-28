@@ -56,6 +56,9 @@ impl State {
                 batch.retain(|m| !notes.contains(m));
             }
             q.retain(|b| !b.is_empty());
+            if q.is_empty() {
+                self.inbox.remove(&wk);
+            }
         }
     }
 
