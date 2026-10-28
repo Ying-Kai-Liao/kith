@@ -3,7 +3,7 @@
 // or kept, so a changed store changes the Board. The sidebar only lays these values out.
 import { cardHeading, cardQuestion, type BotGuest } from './bot-guests.ts'
 import { limitOf, limitQuestion } from './usage-limits.ts'
-import type { GuestPrompt } from './mac-role.ts'
+import { promptWho, type GuestPrompt } from './mac-role.ts'
 import { isWorkingIn, type Bot, type Entry } from './models.ts'
 import { isBusyInTerminal } from './thread-writer.ts'
 import { isTask, taskLastAt, taskStatus, taskTitle } from './tasks.ts'
@@ -180,7 +180,7 @@ export function buildBoard(computers: BoardComputer[], now = Date.now()): BoardM
         id: `${computer.id}/${prompt.entryId}`,
         target: { computerId: computer.id, botId: prompt.botId },
         hostName: computer.hostName,
-        botName: `${prompt.personName} · ${prompt.agent}`,
+        botName: promptWho(prompt),
         thread: null,
         threadTitle: null,
         question: prompt.title,

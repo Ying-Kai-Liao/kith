@@ -245,9 +245,7 @@ pub async fn request(hub: &Arc<Hub>, o: &Origin, service: &str, purpose: &str) -
     }
     let plan = plan_for(&state);
     let purpose = clean_purpose(purpose);
-    let Some(chat) = chat_for(hub, "", &o.agent) else {
-        return refused("There is nowhere to ask: no chat with this agent on this computer.");
-    };
+    let chat = chat_for(hub, "", &o.agent);
     let cfg = settings(&hub.store);
     let now = now_ms();
     let ask = crate::access::Request { person: "", agent: &o.agent, owner_run: true, ask: crate::access::Ask::Secret };
@@ -277,7 +275,7 @@ pub async fn request(hub: &Arc<Hub>, o: &Origin, service: &str, purpose: &str) -
         }
     };
     if !show(hub, &chat, &card, service, &purpose, &plan) {
-        return refused("There is nowhere to ask: no chat with this agent on this computer.");
+        return refused("Keys aren't available right now.");
     }
     let owner = crate::api::roles::owner_name(&o.agent).await.unwrap_or_else(|| "the owner".into());
     json!({"ok": true, "carded": true, "message": TOLD.replace("{owner}", &owner)})

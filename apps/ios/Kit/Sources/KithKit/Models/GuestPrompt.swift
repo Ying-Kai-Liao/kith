@@ -29,22 +29,26 @@ public enum AccessLevel: String, Sendable {
     }
 }
 
-/// A guest's pending permission card as the computer's owner sees it: outside any chat the owner has, so it is
-/// neither a bot in the roster nor an unread chat.
+/// A pending card outside any chat this account has, waiting for its answer: a guest's (for the owner), or one in an
+/// agent's card lane (`cards:<agent>`, an agent with no chat on the computer) for whoever the host names. Neither a bot
+/// in the roster nor an unread chat.
 public struct GuestPrompt: Identifiable, Hashable, Sendable {
     public let entry: Entry
 
     public init(_ entry: Entry) { self.entry = entry }
 
     public var id: String { entry.id }
-    /// The invitee's chat the card is in (what the push names).
+    /// The invitee's chat or the card lane the card is in (what the push names).
     public var chatId: String { entry.botId }
-    /// "<personName> · <agent>".
+    /// "<personName> · <agent>", or the agent alone for the owner's own run.
     public var who: String {
-        let person = entry.data.personName ?? entry.data.person ?? "Someone"
-        guard let agent = entry.data.agent, !agent.isEmpty else { return person }
-        return "\(person) · \(agent)"
+        let person = [entry.data.personName, entry.data.person].compactMap { $0 }.first { !$0.isEmpty }
+        guard let agent = entry.data.agent, !agent.isEmpty else { return person ?? "Someone" }
+        return person.map { "\($0) · \(agent)" } ?? agent
     }
+
+    /// Whether a chat id is an agent's card lane: never a bot, so a push naming it opens the waiting cards.
+    public static func isCardLane(_ chatId: String) -> Bool { chatId.hasPrefix("cards:") }
     /// What the agent wants to do.
     public var request: String { entry.data.title ?? "" }
     /// Only what the card offered, allow first.
@@ -63,12 +67,15 @@ public struct GuestPrompt: Identifiable, Hashable, Sendable {
         }
     }
 
-    /// Pending cards that wait for the owner, in an invitee's chat the owner has no bot for, oldest first.
-    /// `known` is the owner's own bots: a card in one of those is that bot's card, not a guest's.
-    public static func pending(in entries: [String: [Entry]], known: Set<String>) -> [GuestPrompt] {
+    /// Pending cards outside this account's bots that wait for it, oldest first: on a computer it owns those for the
+    /// owner, elsewhere those the host says it may answer (`canAnswer`). `known` is the account's own bots: a card in one
+    /// of those is that bot's card. One whose approver changed drops out with the host's update.
+    public static func pending(in entries: [String: [Entry]], known: Set<String>, isOwner: Bool) -> [GuestPrompt] {
         var waiting: [Entry] = []
         for (chat, list) in entries where !known.contains(chat) {
-            waiting += list.filter { $0.kind == "permission" && $0.data.status == "pending" && $0.data.approver == "owner" && !$0.data.isSecretCard }
+            waiting += list.filter {
+                $0.kind == "permission" && $0.data.status == "pending" && (isOwner ? $0.data.approver == "owner" : $0.data.canAnswer == true)
+            }
         }
         waiting.sort { $0.createdAt != $1.createdAt ? $0.createdAt < $1.createdAt : $0.id < $1.id }
         return waiting.map { GuestPrompt($0) }

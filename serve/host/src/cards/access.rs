@@ -265,7 +265,7 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
         }
     };
     let Some(card) = super::show(hub, who, &card) else {
-        return refused("There is nowhere to ask about this: no chat with this agent on this computer.");
+        return refused("Approvals aren't available right now.");
     };
     let label = super::approver_label(hub, &card).await;
     json!({"ok": true, "carded": true, "message": format!(
