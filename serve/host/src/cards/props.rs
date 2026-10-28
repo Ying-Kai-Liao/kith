@@ -57,6 +57,8 @@ fn ask(session: usize, resource: usize, person: usize) -> NewCard {
         resource: RESOURCES[resource].into(),
         shown: RESOURCES[resource].into(),
         deadline: 1_000,
+        reply_to: None,
+        asked_by: None,
     }
 }
 

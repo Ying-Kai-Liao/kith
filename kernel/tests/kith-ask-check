@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # kith-ask-check — `kith ask --bg` returns an id at once and `kith ask --wait <id>` collects the answer and exit code.
-# kith-ask runs from a copy of the kernel with a stub bin/kith (a slow agent that fails for one task), so no real agent runs.
+# A run that parks on an approval card exits 3 with its id; the card's later answer reaches the asker once: its --wait while
+# its session is open, else a wake of that session (kith-wake), also when the session ends unread (--sweep).
+# kith-ask runs from a copy of the kernel with a stub bin/kith (a slow agent that fails for one task, and parks for
+# another as kith-permit does), so no real agent runs.
 #
 #   kernel/tests/kith-ask-check     a few seconds; exits 1 when a check fails
 set -uo pipefail
@@ -10,17 +13,24 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/kith-ask-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state
-unset KITH_PERSON KITH_AGENT HQ_HOME HQ_STATE KITH_RESUME
+unset KITH_PERSON KITH_AGENT HQ_HOME HQ_STATE KITH_RESUME HQ_PERSON HQ_AGENT KITH_VIA HQ_VIA CLAUDE_CODE_SESSION_ID KITH_ASK_ID
 mkdir -p "$HOME" "$KITH_STATE" "$T/k/bin"
 ln -s "$KERNEL/lib" "$T/k/lib"
 cp "$KERNEL/bin/kith-ask" "$T/k/bin/kith-ask"
+cp "$KERNEL/bin/kith-wake" "$T/k/bin/kith-wake"
+BOX=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()["KITH_MACHINE"] / "live" / "ask")' "$KERNEL/lib")
+export BOX KITH_WAKE_NO_KICK=1
 cat > "$T/k/bin/kith" <<'STUB'
 #!/bin/sh
 # stub: kith <agent> [opts] -- <task>; answers like KITH_OUTPUT=json
 for last; do :; done
-env | grep -E '^KITH_(LAUNCH|VIA)' | sort > "$KITH_STATE/stub-env"
-sleep 2
+env | grep -E '^KITH_(LAUNCH_KIND|LAUNCH_LABEL|VIA)=' | sort > "$KITH_STATE/stub-env"
+printf '%s' "${KITH_LAUNCH_ASK_ID:-}" > "$KITH_STATE/stub-askid"
+printf '%s\n' "$*" > "$KITH_STATE/stub-args"
+sleep "${STUB_SLEEP:-2}"
 if [ "$last" = "boom" ]; then echo "agent failed" >&2; exit 1; fi
+# what kith-permit does when a card outlives its window: the ask that started the run is parked
+if [ "$last" = "park" ]; then : > "$BOX/$KITH_LAUNCH_ASK_ID.parked"; fi
 printf '{"result":"answer to: %s","session_id":"s1","total_cost_usd":0.01}\n' "$last"
 STUB
 chmod +x "$T/k/bin/kith"
@@ -28,6 +38,13 @@ ASK=$T/k/bin/kith-ask
 fails=0
 expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (got '$2', want '$3')"; fails=$((fails + 1)); fi; }
 idof() { sed -n 's/.* as \(bg-[A-Za-z0-9._-]*\);.*/\1/p'; }
+waitid() { sed -n 's/.*kith ask --wait \([A-Za-z0-9._-]*\)$/\1/p'; }
+queued() { python3 -c '
+import json, sys, pathlib
+q = pathlib.Path(sys.argv[1]) / "sessions" / "queue"
+rows = [json.loads(p.read_text()) for p in q.glob("*.json")] if q.is_dir() else []
+print(" ".join("%s:%s" % (it["session"], "|".join(r["text"] for r in it["requests"])) for it in rows))' "$KITH_STATE"; }
+claim() { mkdir -p "$KITH_STATE/live/terminal"; printf '{"pid":%s}' "$$" > "$KITH_STATE/live/terminal/$1.claim"; }
 
 start=$(date +%s)
 out=$(cd "$T" && "$ASK" --bg echo "hello there")
@@ -50,5 +67,60 @@ expect "a failed run: its stderr is shown" "$(grep -c 'agent failed' "$T/err")" 
 expect "a foreground ask is launched as an ask card by the asking agent" "$(tr '\n' ' ' < "$KITH_STATE/stub-env")" "KITH_LAUNCH_KIND=ask KITH_LAUNCH_LABEL=architect KITH_VIA=ask "
 (cd "$T" && "$ASK" echo hi >/dev/null 2>&1)
 expect "an ask from a terminal has no asking agent" "$(tr '\n' ' ' < "$KITH_STATE/stub-env")" "KITH_LAUNCH_KIND=ask KITH_LAUNCH_LABEL= KITH_VIA=ask "
+
+export STUB_SLEEP=0
+# a run that ends its turn on an open card: "waiting" and the id, not an answer
+out=$(cd "$T" && "$ASK" echo park 2>/dev/null); code=$?
+p1=$(printf '%s' "$out" | waitid)
+expect "a parked run exits 3" "$code" 3
+expect "it prints the id to wait on" "$([ -n "$p1" ] && echo yes)" yes
+expect "its turn's words are not the answer" "$(printf '%s' "$out" | grep -c 'answer to:')" 0
+expect "the run was started with that id" "$(cat "$KITH_STATE/stub-askid")" "$p1"
+json=$(cd "$T" && "$ASK" echo --json park 2>/dev/null)
+expect "--json says waiting" "$(printf '%s' "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["waiting"], d["answer"], bool(d["id"]))')" "True None True"
+(cd "$T" && "$ASK" echo hi >/dev/null 2>&1)
+expect "a run that did not park leaves no registration" "$(ls "$BOX" | grep -c "$(cat "$KITH_STATE/stub-askid")")" 0
+
+# the asker is a shell (no session): the later answer waits for --wait, once
+"$ASK" --answer "$p1" --as echo -- "the card was approved" >/dev/null
+expect "--wait returns the later answer" "$("$ASK" --wait "$p1" --timeout 5 2>/dev/null)" "the card was approved"
+expect "only once" "$("$ASK" --wait "$p1" --timeout 0 >/dev/null 2>&1; echo $?)" 3
+expect "no wake for a shell" "$(queued)" ""
+
+# the asker's session is still open (its writer claim held): kept for its --wait, no wake
+pa=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-a KITH_AGENT=architect "$ASK" echo park 2>/dev/null | waitid)
+claim sess-a
+expect "an open asker's answer is kept" "$("$ASK" --answer "$pa" --as echo -- "yes from Kai")" kept
+"$ASK" --sweep >/dev/null
+expect "the sweep leaves an open asker alone" "$(queued)" ""
+# ... it ends without reading: the sweep makes the answer one wake of its session, exactly once
+rm "$KITH_STATE/live/terminal/sess-a.claim"
+"$ASK" --sweep >/dev/null
+"$ASK" --sweep >/dev/null
+expect "an asker that left unread is woken once" "$(queued)" "sess-a:yes from Kai"
+expect "and the answer is no longer waiting for --wait" "$("$ASK" --wait "$pa" --timeout 0 >/dev/null 2>&1; echo $?)" 3
+
+# the asker's session has already ended: the answer wakes it at once
+pb=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-b KITH_AGENT=architect "$ASK" echo park 2>/dev/null | waitid)
+expect "a gone asker is woken" "$("$ASK" --answer "$pb" --as echo -- "denied")" woke
+expect "with the answer" "$(queued | tr ' ' '\n' | grep -c '^sess-b:denied$')" 1
+
+# --reply: the host's resume of the parked run, whose words are the ask's answer
+pc=$(cd "$T" && "$ASK" echo park 2>/dev/null | waitid)
+"$ASK" --reply "$pc" echo --resume s1 -- "Kai approved" >/dev/null 2>&1
+expect "--reply resumes that session" "$(cat "$KITH_STATE/stub-args")" "echo --resume s1 -- Kai approved"
+expect "with the same ask id" "$(cat "$KITH_STATE/stub-askid")" "$pc"
+expect "its words are the answer" "$("$ASK" --wait "$pc" --timeout 5 2>/dev/null)" "answer to: Kai approved"
+pd=$(cd "$T" && "$ASK" echo park 2>/dev/null | waitid)
+"$ASK" --reply "$pd" echo --resume s1 -- park >/dev/null 2>&1
+expect "a resumed turn that parks again answers nothing yet" "$("$ASK" --wait "$pd" --timeout 0 >/dev/null 2>&1; echo $?)" 3
+
+# --bg: a parked run's --wait goes on to the card's answer
+pe=$(cd "$T" && "$ASK" --bg echo park | idof)
+"$ASK" --wait "$pe" --timeout 0 >/dev/null 2>&1
+sleep 1
+expect "a parked --bg run: --wait says not yet" "$("$ASK" --wait "$pe" --timeout 0 >/dev/null 2>&1; echo $?)" 3
+"$ASK" --answer "$pe" --as echo -- "approved later" >/dev/null
+expect "then gives the answer" "$("$ASK" --wait "$pe" --timeout 5 2>/dev/null | tail -1)" "approved later"
 
 [ "$fails" = 0 ] && echo "all kith-ask checks passed" || { echo "$fails check(s) failed"; exit 1; }

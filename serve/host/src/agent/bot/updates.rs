@@ -256,6 +256,8 @@ impl Actor {
             resource,
             shown,
             deadline: now.saturating_add(crate::cards::settings(&self.hub.store).expiry_ms),
+            reply_to: None,
+            asked_by: None,
         };
         let opened = self.hub.store.card_open(&card, now);
         if let Ok(Opened::Granted(_)) = &opened

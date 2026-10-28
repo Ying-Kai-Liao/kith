@@ -15,14 +15,15 @@ PIDS=()
 trap 'for p in ${PIDS[@]+"${PIDS[@]}"}; do kill "$p" 2>/dev/null; done; rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME="$T/kith" KITH_STATE=$T/state KITH_AUTH=$T/auth.json
 unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE KITH_RESUME CLAUDE_CONFIG_DIR HQ_HOME HQ_STATE \
-  KITH_SERVE_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ASK_TOKEN KITH_ASK_SOCKET KITH_VIA
+  KITH_SERVE_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ASK_TOKEN KITH_ASK_SOCKET KITH_VIA KITH_ASK_ID KITH_LAUNCH_ASK_ID HQ_ASK_ID \
+  HQ_AGENT HQ_PERSON HQ_VIA CLAUDE_CODE_SESSION_ID
 mkdir -p "$HOME" "$KITH_HOME/agents/echo/role" "$KITH_STATE/projects" "$KITH_STATE/logs" "$T/bin" "$T/serve" "$T/work"
 printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$KITH_HOME/agents/echo/role/agent.md"
 cat > "$T/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 [[ $1 == --version ]] && { echo "2.1.309 (Claude Code)"; exit 0; }
 [[ $1 == plugin ]] && { echo '[]'; exit 0; }
-{ printf 'PID=%s\nASK=%s|%s\nRUN=%s|%s\n' "$$" "${KITH_ASK_TOKEN:-}" "${KITH_ASK_SOCKET:-}" "${KITH_RUN_TOKEN:-}" "${KITH_RUN_SOCKET:-}"
+{ printf 'PID=%s\nASK=%s|%s\nRUN=%s|%s\nASKID=%s\n' "$$" "${KITH_ASK_TOKEN:-}" "${KITH_ASK_SOCKET:-}" "${KITH_RUN_TOKEN:-}" "${KITH_RUN_SOCKET:-}" "${KITH_ASK_ID:-}"
   printf 'ARG=%s\n' "$@"; } > "$STUB_OUT"
 prev=; for a in "$@"; do [ "$prev" = --settings ] && cp "$a" "$STUB_OUT.settings" 2>/dev/null; prev=$a; done
 STUB
@@ -74,6 +75,17 @@ check('owner: allow with the ask token', kp.decide('Bash', inp, owner)['behavior
 check('owner: sent the ask token', seen[-1]['token'], 'tok-o')
 reply[0] = b'{"ok":true,"behavior":"deny","message":"waiting on Kai, end your turn"}\n'
 check('deny: host message passed through', kp.decide('Bash', inp, guest), {'behavior': 'deny', 'message': 'waiting on Kai, end your turn'})
+# A card past its window ("waiting"): a run kith ask started marks that ask parked (kith-ask then says "waiting").
+reply[0] = b'{"ok":true,"behavior":"deny","waiting":true,"message":"waiting on Kai, end your turn"}\n'
+parked = kp.ask_box() / 'ask-7.parked'
+check('waiting, no ask id: the deny as it came', kp.decide('Bash', inp, owner)['behavior'], 'deny')
+check('waiting, no ask id: nothing parked', list(kp.ask_box().glob('*.parked')) if kp.ask_box().is_dir() else [], [])
+check('waiting with an ask id: still a deny', kp.decide('Bash', inp, dict(owner, KITH_ASK_ID='ask-7'))['behavior'], 'deny')
+check('waiting with an ask id: the ask is parked', parked.exists(), True)
+parked.unlink()
+reply[0] = b'{"ok":true,"behavior":"deny","message":"No."}\n'
+kp.decide('Bash', inp, dict(owner, KITH_ASK_ID='ask-7'))
+check('a deny in the window: not parked', parked.exists(), False)
 reply[0] = b'{"ok":false,"error":"bad token"}\n'
 check('error reply: deny with the error', kp.decide('Bash', inp, guest), {'behavior': 'deny', 'message': 'bad token'})
 for name, raw in (('not json', b'garbage\n'), ('a list', b'[1]\n'), ('allow without ok', b'{"behavior":"allow"}\n'), ('unknown behavior', b'{"ok":true,"behavior":"maybe"}\n'), ('empty', b'')):
@@ -193,6 +205,21 @@ KITH_ASK_TOKEN=host-tok KITH_ASK_SOCKET=/tmp/h.sock run "host launched" >/dev/nu
 is "owner with KITH_ASK_TOKEN from the host: no issueAskToken" "$(wc -l < "$T/host.log" | tr -d ' ')" 0
 is "owner with KITH_ASK_TOKEN from the host: kept" "$(stub ASK)" "host-tok|/tmp/h.sock"
 has "owner with KITH_ASK_TOKEN from the host: prompt tool flag" "$(args)" "$FLAG"
+
+# a run kith ask started (KITH_LAUNCH_ASK_ID): its token carries that ask and who asked (the ask's registration)
+box=$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()["KITH_MACHINE"] / "live" / "ask")' "$KERNEL/lib")
+mkdir -p "$box" && printf '{"agent":"architect"}' > "$box/ask-1.reg"
+: > "$T/host.log"
+KITH_LAUNCH_ASK_ID=ask-1 run "asked" >/dev/null
+is "asked run: replyTo and askedBy sent" "$(tail -1 "$T/host.log" | python3 -c 'import json,sys; b=json.load(sys.stdin)["body"]; print(b.get("replyTo"), b.get("askedBy"))')" "ask-1 architect"
+is "asked run: KITH_ASK_ID in claude's env (kith-permit's)" "$(stub ASKID)" "ask-1"
+: > "$T/host.log"
+KITH_LAUNCH_ASK_ID=ask-2 run "asked from a terminal" >/dev/null
+is "asked from a terminal: askedBy empty" "$(tail -1 "$T/host.log" | python3 -c 'import json,sys; b=json.load(sys.stdin)["body"]; print(b.get("replyTo"), repr(b.get("askedBy")))')" "ask-2 ''"
+: > "$T/host.log"
+KITH_ASK_ID=ask-1 run "not asked" >/dev/null
+is "an inherited KITH_ASK_ID is dropped: no replyTo" "$(tail -1 "$T/host.log" | python3 -c 'import json,sys; print(json.load(sys.stdin)["body"].get("replyTo"))')" "None"
+is "an inherited KITH_ASK_ID is dropped: not in claude's env" "$(stub ASKID)" ""
 
 # nested: a helper started by a run never inherits the parent's token; it gets its own
 : > "$T/host.log"

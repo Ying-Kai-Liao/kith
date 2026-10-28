@@ -2,10 +2,12 @@
 //! outside the host's own launch path, so before it starts `claude` it asks the host, with its owner credentials (the
 //! serve token), for a token that can do one thing: `requestPermission` on the run socket.
 //!
-//! `issueAskToken {agent, session, pid}` -> `{token, socket, env, expiresInS}`
+//! `issueAskToken {agent, session, pid, replyTo?, askedBy?}` -> `{token, socket, env, expiresInS}`
 //!   - `agent`: the hq agent the run is for. `session`: what the run continues (a card is per session and resource, and a
 //!     once grant is only good in its own session). `pid`: the process the run will be started under (usually the
 //!     kernel's own pid): the socket only accepts the token from that process or one of its children.
+//!   - `replyTo`: the `kith ask` id the run was started by, and `askedBy` the agent that asked (empty for a terminal). A
+//!     card the run parks on answers that ask when it is answered, denied or expires (`kith-ask --answer`/`--reply`).
 //!   - Give the run `env` (`KITH_ASK_TOKEN`, `KITH_ASK_SOCKET`) so the `--permission-prompt-tool` server it starts can
 //!     call the socket. The token ends after `expiresInS`, when the process is gone, or on `revokeAskToken {token}`.
 //!
@@ -32,9 +34,17 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, mut b: Value) -> Result<C
             if agent.is_empty() || agent.len() > 128 || session.is_empty() || session.len() > 256 {
                 bail!("`agent` and `session` must be short, non-empty words");
             }
+            let reply = match b["replyTo"].as_str() {
+                None => None,
+                Some(to) => match crate::runauth::AskReply::parse(to, b["askedBy"].as_str()) {
+                    Some(r) => Some(r),
+                    None => bail!("`replyTo` must be a kith ask id"),
+                },
+            };
             let Some(socket) = crate::runauth::socket() else { bail!("the run socket isn't listening") };
             let ttl = crate::runauth::ASK_TOKEN_TTL;
-            let token = crate::runauth::table().insert_ask(crate::runauth::ask_identity(agent, session), pid, ttl)?;
+            let token =
+                crate::runauth::table().insert_ask(crate::runauth::ask_identity(agent, session, reply), pid, ttl)?;
             json!({
                 "token": token,
                 "socket": socket,

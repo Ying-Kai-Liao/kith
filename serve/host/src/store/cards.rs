@@ -98,6 +98,10 @@ pub struct Card {
     pub answered_parked: bool,
     pub granted_at: Option<i64>,
     pub resumed_at: Option<i64>,
+    /// The `kith ask` id the run was started by: the card's outcome is that ask's answer (rule 7).
+    pub reply_to: Option<String>,
+    /// The agent that asked it, for the card's chain; none for a terminal.
+    pub asked_by: Option<String>,
 }
 
 /// What a new ask is, before it has an id.
@@ -115,6 +119,8 @@ pub struct NewCard {
     pub resource: String,
     pub shown: String,
     pub deadline: i64,
+    pub reply_to: Option<String>,
+    pub asked_by: Option<String>,
 }
 
 /// What opening a card came to.
@@ -138,7 +144,8 @@ pub enum Answered {
 }
 
 const COLS: &str = "id, session, source, bot_id, run_id, entry_id, person, agent, approver, tool, input, resource, shown, \
-    scope, state, created_at, deadline, answer, allowed, answered_by, answered_at, answered_parked, granted_at, resumed_at";
+    scope, state, created_at, deadline, answer, allowed, answered_by, answered_at, answered_parked, granted_at, resumed_at, \
+    reply_to, asked_by";
 
 fn row(r: &rusqlite::Row) -> rusqlite::Result<Card> {
     Ok(Card {
@@ -166,6 +173,8 @@ fn row(r: &rusqlite::Row) -> rusqlite::Result<Card> {
         answered_parked: r.get::<_, i64>(21)? != 0,
         granted_at: r.get(22)?,
         resumed_at: r.get(23)?,
+        reply_to: r.get(24)?,
+        asked_by: r.get(25)?,
     })
 }
 
@@ -225,8 +234,8 @@ impl Store {
         let id = uuid::Uuid::new_v4().to_string();
         tx.execute(
             "INSERT INTO cards(id, session, source, bot_id, run_id, person, agent, approver, tool, input, resource, shown,
-                               scope, state, created_at, deadline)
-             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'once', 'pending', ?13, ?14)",
+                               scope, state, created_at, deadline, reply_to, asked_by)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'once', 'pending', ?13, ?14, ?15, ?16)",
             params![
                 id,
                 n.session,
@@ -241,7 +250,9 @@ impl Store {
                 n.resource,
                 n.shown,
                 now,
-                n.deadline
+                n.deadline,
+                n.reply_to,
+                n.asked_by
             ],
         )?;
         let card = get(&tx, &id)?.ok_or_else(|| anyhow::anyhow!("card vanished"))?;
@@ -612,6 +623,8 @@ mod tests {
             resource: resource.into(),
             shown: resource.into(),
             deadline: 10_000,
+            reply_to: None,
+            asked_by: None,
         }
     }
 

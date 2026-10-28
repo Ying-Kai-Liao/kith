@@ -15,7 +15,9 @@
 //!   notice in the thread. A held writer claim fails that turn's start; the actor calls [`refused`].
 //! - `run:..:<thread>#<agent>`: a channel thread. The note joins the channel inbox (`Core::wake`).
 //! - `run:..:<claude session>`: a `claude -p` run the kernel started (`kith ask`, `kith-sched`). The host runs
-//!   `kith <agent> --resume <session> "<note>"` with `KITH_PERSON` set to the card's person (absent for the owner).
+//!   `kith <agent> --resume <session> "<note>"` with `KITH_PERSON` set to the card's person (absent for the owner). A
+//!   card a `kith ask` run parked on (`reply_to`) runs it as `kith ask --reply <id> ...`: the resumed turn's words are
+//!   that ask's answer (rule 7).
 //!
 //! A card used by a later message before its resume still gets the wake, without a grant (C7, A9): the run asks again
 //! if it still needs it.
@@ -300,7 +302,7 @@ pub struct Spawn {
 
 /// `kith <agent> --resume <session> "<note>"` as the card's person, with the env the host gives its own runs: a person's
 /// run gets `KITH_PERSON` (the owner's none) so the session doesn't resume under the owner's profile. The run token is
-/// added by the caller.
+/// added by the caller. A card with `reply_to` goes through `kith ask --reply`, which hands the turn's answer to the asker.
 pub fn spawn_for(card: &Card, session: &str, note: &str) -> Spawn {
     let mut env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| crate::channels::run::inherited(k)).collect();
     let mut set = |name: &str, v: &str| env.extend(crate::kernel::both(name, v));
@@ -312,7 +314,14 @@ pub fn spawn_for(card: &Card, session: &str, note: &str) -> Spawn {
         set("PERSON", &card.person);
         set("ROOM", &crate::agent::hq::room_of(&card.agent, Some(&card.person), None));
     }
-    Spawn { args: vec![card.agent.clone(), "--resume".into(), session.to_owned(), note.to_owned()], env }
+    let resume = [card.agent.as_str(), "--resume", session];
+    let args = match &card.reply_to {
+        Some(id) => {
+            ["ask", "--reply", id.as_str()].into_iter().chain(resume).chain(["--", note]).map(str::to_owned).collect()
+        }
+        None => resume.into_iter().chain([note]).map(str::to_owned).collect(),
+    };
+    Spawn { args, env }
 }
 
 async fn run_door(hub: &Arc<Hub>, card: &Card, group: &[Card], session: &str, note: &str) -> Step {
@@ -348,7 +357,8 @@ async fn run_door(hub: &Arc<Hub>, card: &Card, group: &[Card], session: &str, no
     // so no profile carries the grant and the stale-profile race can't happen.
     let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> =
         spawn.env.iter().map(|(k, v)| (k.into(), v.into())).collect();
-    let grant = crate::runauth::grant_for_env(&mut env, &card.agent, session);
+    let reply = card.reply_to.as_deref().and_then(|to| crate::runauth::AskReply::parse(to, card.asked_by.as_deref()));
+    let grant = crate::runauth::grant_for_env(&mut env, &card.agent, session, reply);
     spawn.env = env.iter().filter_map(|(k, v)| Some((k.to_str()?.to_owned(), v.to_str()?.to_owned()))).collect();
     #[cfg(test)]
     {
@@ -481,6 +491,23 @@ pub(crate) mod tests_seen {
 
     static SEEN: Mutex<Vec<Seen>> = Mutex::new(Vec::new());
     static SPAWNS: Mutex<Vec<(Spawn, String)>> = Mutex::new(Vec::new());
+    static ASKED: Mutex<Vec<Vec<String>>> = Mutex::new(Vec::new());
+
+    /// A `kith ask --answer` the host would have run (`cards::tell_asker`).
+    pub fn asked(args: Vec<String>) {
+        ASKED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(args);
+    }
+
+    /// The answers sent to the `kith ask` with this id.
+    pub fn answers_to(id: &str) -> Vec<Vec<String>> {
+        ASKED
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .filter(|a| a.get(2).map(String::as_str) == Some(id))
+            .cloned()
+            .collect()
+    }
 
     pub fn record(door: &'static str, session: &str, note: &str, _env: &[(String, String)]) {
         SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(Seen {
@@ -510,7 +537,10 @@ pub(crate) mod tests_seen {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
-            .filter(|(s, _)| s.args.get(2).map(String::as_str) == Some(session_id))
+            .filter(|(s, _)| {
+                let at = s.args.iter().position(|a| a == "--resume");
+                at.and_then(|i| s.args.get(i + 1)).map(String::as_str) == Some(session_id)
+            })
             .map(|(s, _)| s.clone())
             .collect()
     }

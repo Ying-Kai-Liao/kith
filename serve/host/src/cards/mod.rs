@@ -114,10 +114,12 @@ impl Drop for Waiting {
 pub struct Decision {
     pub allow: bool,
     pub message: String,
+    /// No answer in the live window: the run ends its turn on the card (a `kith ask` that started it waits for it).
+    pub waiting: bool,
 }
 
 fn deny(message: impl Into<String>) -> Decision {
-    Decision { allow: false, message: message.into() }
+    Decision { allow: false, message: message.into(), waiting: false }
 }
 
 /// The agent-visible tool kind the apps already know how to draw.
@@ -212,9 +214,11 @@ async fn request_card(
         resource: resource.to_owned(),
         shown: shown.to_owned(),
         deadline: now.saturating_add(cfg.expiry_ms),
+        reply_to: who.reply.as_ref().map(|r| r.to.clone()),
+        asked_by: who.reply.as_ref().and_then(|r| r.asked_by.clone()),
     };
     let card = match hub.store.card_open(&new, now) {
-        Ok(Opened::Granted(_)) => return Decision { allow: true, message: "Allowed once.".into() },
+        Ok(Opened::Granted(_)) => return Decision { allow: true, message: "Allowed once.".into(), waiting: false },
         Ok(Opened::New(c) | Opened::Joined(c)) => c,
         Err(error) => {
             tracing::error!(error = format!("{error:#}"), "couldn't store an approval card");
@@ -228,13 +232,53 @@ async fn request_card(
     };
     let label = approver_label(hub, &card).await;
     match tokio::time::timeout(cfg.window, rx).await {
-        Ok(Ok(Verdict::Allow)) => Decision { allow: true, message: "Approved.".into() },
+        Ok(Ok(Verdict::Allow)) => Decision { allow: true, message: "Approved.".into(), waiting: false },
         Ok(Ok(Verdict::Deny(why))) => deny(why),
-        Ok(Err(_)) | Err(_) => deny(format!(
-            "This is waiting on {label} to approve ({}). Don't retry it or try another way around. End your turn now and \
-             tell the user the request is waiting for approval.",
-            short(&card.shown, 80)
-        )),
+        Ok(Err(_)) | Err(_) => Decision {
+            waiting: true,
+            ..deny(format!(
+                "This is waiting on {label} to approve ({}). Don't retry it or try another way around. End your turn now \
+                 and tell the user the request is waiting for approval.",
+                short(&card.shown, 80)
+            ))
+        },
+    }
+}
+
+/// "<agent>, asked by <caller>" for a card a `kith ask` run opened (rule 7): whose request it is reaches the approver.
+fn chain_of(card: &Card) -> Option<String> {
+    card.reply_to.as_ref()?;
+    Some(format!("{}, asked by {}", card.agent, card.asked_by.as_deref().unwrap_or("a terminal")))
+}
+
+/// A card a `kith ask` run parked on ended without a yes: that is the ask's answer (rule 7). The kernel's mailbox keeps it
+/// for the asker's `kith ask --wait`, or wakes the asker's session (`kith-ask --answer`).
+fn tell_asker(card: &Card, how: &str) {
+    let Some(id) = &card.reply_to else { return };
+    let text = format!("{}'s request ({}) {how}.", card.agent, short(&card.shown, 80));
+    let args = ["ask", "--answer", id.as_str(), "--as", card.agent.as_str(), "--", text.as_str()].map(str::to_owned);
+    #[cfg(test)]
+    resume::tests_seen::asked(args.to_vec());
+    #[cfg(not(test))]
+    {
+        let Some(bin) = crate::agent::hq::bin() else {
+            tracing::warn!(card = %card.id, "no kernel to answer a kith ask with");
+            return;
+        };
+        let env = std::env::vars().filter(|(k, _)| crate::channels::run::inherited(k));
+        let spawned = std::process::Command::new(bin)
+            .args(&args)
+            .env_clear()
+            .envs(env)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        match spawned {
+            // Reaped off the runtime: a short write to the mailbox, or a wake request.
+            Ok(mut child) => drop(std::thread::spawn(move || child.wait())),
+            Err(error) => tracing::warn!(card = %card.id, error = %error, "couldn't answer a kith ask"),
+        }
     }
 }
 
@@ -287,6 +331,9 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card) -> Option<Card> {
         "cardId": card.id,
         "source": "run",
     });
+    if let Some(chain) = chain_of(card) {
+        data["chain"] = chain.into();
+    }
     if !who.person.is_empty() {
         let name = hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty());
         data["person"] = who.person.as_str().into();
@@ -298,7 +345,10 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card) -> Option<Card> {
     let live = hub.store.card_live(&card.id, Some(&entry.id), Some(&who.run_id)).ok().flatten()?;
     // Tell the approver: the owner's devices for an owner card, the member's own for theirs.
     let mut target = chat.clone();
-    let mut heading = format!("{} needs you", chat.name);
+    let mut heading = match data["chain"].as_str() {
+        Some(chain) => format!("{chain} needs you"),
+        None => format!("{} needs you", chat.name),
+    };
     if live.approver == "owner" {
         target.person = None;
         if !who.person.is_empty() {
@@ -362,6 +412,7 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
         hub.set_entry(entry_id, &e.data);
     }
     let mut forward = false;
+    let said_no = if option_id.is_some() { "was denied" } else { "was cancelled" };
     if card.tool == access::TOOL {
         // No process waits on an escape card: the yes is applied at the session's next activation (see `access`).
         access::answered(hub, &card, allow, option_id);
@@ -369,13 +420,18 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
         let verdict = if allow { Verdict::Allow } else { Verdict::Deny("The approver said no.".into()) };
         // A yes to a live asker was spent in the answer itself (no parallel ask can take it too); if nobody was
         // there to hear it, it goes back as the answer to a parked card.
-        if !deliver(&card.id, &verdict) && allow && hub.store.card_undelivered(&card.id)? {
+        let heard = deliver(&card.id, &verdict);
+        if !heard && allow && hub.store.card_undelivered(&card.id)? {
             follow_up(hub, &card);
+        } else if !heard && !allow {
+            tell_asker(&card, said_no);
         }
     } else if was_live {
         forward = true;
     } else if allow {
         follow_up(hub, &card);
+    } else {
+        tell_asker(&card, said_no);
     }
     Ok(Outcome::Recorded { forward })
 }
@@ -484,10 +540,16 @@ pub fn withdraw_person(hub: &Hub, person: &str, agent: Option<&str>) {
 
 /// Past their deadline, cards expire: silence is no (A1).
 pub fn sweep(hub: &Hub) {
-    match hub.store.cards_sweep(now_ms()) {
+    expire(hub, now_ms());
+}
+
+fn expire(hub: &Hub, at: i64) {
+    match hub.store.cards_sweep(at) {
         Ok(expired) => {
             for card in &expired {
-                deliver(&card.id, &Verdict::Deny("The request expired without an answer.".into()));
+                if !deliver(&card.id, &Verdict::Deny("The request expired without an answer.".into())) {
+                    tell_asker(card, "expired without an answer");
+                }
                 close_entry(hub, card, "expired");
             }
         }

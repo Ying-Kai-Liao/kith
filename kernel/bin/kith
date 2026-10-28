@@ -518,6 +518,11 @@ fi
 # An ask token (the owner's approval cards, KITH_ASK_*) belongs to one run: a helper this run starts, or any run for a person
 # who isn't the owner, never inherits it. A helper of the owner's asks the host for its own below.
 [[ $nested -eq 1 || $p_owner == 0 ]] && unset KITH_ASK_TOKEN KITH_ASK_SOCKET HQ_ASK_TOKEN HQ_ASK_SOCKET   # (kith_env_sync would fill the KITH_ names back from the HQ_ ones)
+# The kith ask this run answers (kith-ask sets KITH_LAUNCH_ASK_ID for the one run it starts): the ask token below carries it,
+# so a card the run parks on answers that ask later (kith-ask). The owner's runs only; a run this one starts never has it.
+ask_id=${KITH_LAUNCH_ASK_ID:-}
+unset KITH_LAUNCH_ASK_ID KITH_ASK_ID HQ_LAUNCH_ASK_ID HQ_ASK_ID
+[[ $p_owner == 1 && -z ${KITH_PERSON:-} && -n $ask_id ]] && export KITH_ASK_ID=$ask_id
 if [[ $launch -eq 1 ]]; then
   case $harness in claude|codex) ;; *) echo "kith: $agent runs on $harness; --launch-json covers claude and codex only for now" >&2; exit $([[ -n $backup ]] && echo 4 || echo 1) ;; esac
   out_format="" resume=""; unset KITH_CLAUDE_ARGS HQ_CLAUDE_ARGS
