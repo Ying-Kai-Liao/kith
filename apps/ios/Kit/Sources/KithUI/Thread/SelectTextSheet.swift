@@ -50,7 +50,7 @@ extension MarkdownText {
                 line = flat(t)
             case let .bullet(t, marker, depth):
                 line = String(repeating: "    ", count: depth) + marker + " " + flat(t)
-            case let .code(t, _):
+            case let .code(t, _, _):
                 line = t
             case let .table(header, rows):
                 line = ([header] + rows).map { $0.map(flat).joined(separator: "\t") }.joined(separator: "\n")
