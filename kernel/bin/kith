@@ -197,6 +197,10 @@ fi
 src_pkg=$(agent_dir "$agent")
 if [[ -z $src_pkg ]]; then
   echo "kith: no agent named \"$agent\"." >&2
+  # A guest's shell cannot start another run: Claude Code needs the network and the login its sandbox withholds, and the
+  # agents folder is closed to it. A helper its membership grants is asked through the ask_helper tool, which runs outside.
+  python3 "$KITH/lib/kith_paths.py" --guest-sandbox \
+    && echo "kith: from a guest's shell a helper is asked with the ask_helper tool (mcp__kithpermit__ask_helper: agent and task), for a helper your membership grants." >&2
   guess=$(agent_suggest "$agent")
   if [[ -n $guess ]]; then echo "Did you mean: $guess?" >&2; else echo "Run kith ls to see your agents." >&2; fi
   exit 2
@@ -564,7 +568,7 @@ if [[ $p_owner == 0 ]]; then
   for d in "$KITH" "$pkg" "$src_pkg" "$KITH_STATE/people"; do
     [[ -d $d ]] || continue
     for p in "$d" "$(cd "$d" && pwd -P)"; do
-      [[ $mem/ == "$p"/* || $files/ == "$p"/* || $shared/ == "$p"/* ]] && continue
+      [[ $mem/ == "$p"/* || $files/ == "$p"/* || $shared/ == "$p"/* || $(real "$mem")/ == "$p"/* || $(real "$files")/ == "$p"/* || $(real "$shared")/ == "$p"/* ]] && continue
       p_deny+=$'\n'"Edit(/$p/**)"
     done
   done
@@ -829,7 +833,10 @@ deny += [r for r in kith_guard.edit_rules(w_trees, w_files) if r not in deny]
 # project files) is closed to Edit/Write, whatever the permission mode would allow there.
 for d in os.environ["READ_DIRS"].split("\n"):
     for x in both(os.path.abspath(d)) if d else []:
-        if not any(w == x or w.startswith(x + "/") or x.startswith(w + "/") for w in writable):
+        # writable holds real paths; a spelling through a link (~/kith) is compared as what it points at, or a deny on it
+        # would cover the person slice below it (deny beats allow).
+        xr = os.path.realpath(x)
+        if not any(w == xr or w.startswith(xr + "/") or xr.startswith(w + "/") for w in writable):
             r = "Edit(/%s/**)" % x
             if r not in deny:
                 deny.append(r)
@@ -853,7 +860,7 @@ while IFS= read -r base; do
   done
 done < <(printf '%s\n' "$KITH" "$kith_real" "$KITH_HOME/kernel" | awk '!seen[$0]++')
 # The way out of the guest sandbox is a request, not a prompt: asking is always allowed (the host makes the card, F11 2b).
-[[ $p_owner == 0 ]] && allowed+=("mcp__kithpermit__request_access" "mcp__kithpermit__report_bug")
+[[ $p_owner == 0 ]] && allowed+=("mcp__kithpermit__request_access" "mcp__kithpermit__report_bug" "mcp__kithpermit__ask_helper")
 # Each agent carries only its own tools: the shared services it needs and is granted (kith-auth), its own mcp.json
 # for servers no one else uses, and no global skills unless capabilities.yaml says global_skills: true (or the owner is at
 # their own terminal, below). Its own skills are files it reads on demand. A broken auth.json costs the agent its

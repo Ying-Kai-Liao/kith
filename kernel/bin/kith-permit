@@ -18,6 +18,12 @@ login: kith-permit (the owner's user, outside the sandbox) scrubs the report, re
 person, and asks the owner a card (requestPermission, tool mcp__kithpermit__report_bug, input = the exact draft). Only a
 clear allow files it (kernel/lib/kith_bug.py); any other answer keeps the draft and says so.
 
+A fourth tool, ask_helper(agent, task), is how a guest's run reaches a helper its membership grants (kith-auth member ...
+helpers=): the guest's shell cannot start another run (the OS sandbox closes the network, the login and the other agents'
+folders), so kith-permit, outside the sandbox, runs `kith ask AGENT` as the run's own person and agent (from its environment,
+which the guest cannot change). The kernel decides as for any helper call: a helper not granted is refused, one granted runs
+with the caller's membership, never looser, in its own guest sandbox.
+
 When Claude Code reaches a permission prompt in a run nobody is watching (an "ask" rule, a tool the mode doesn't allow),
 it calls approve instead of refusing. The tool sends the host one line over the run socket,
   {"token", "method": "requestPermission", "tool", "input"}
@@ -30,7 +36,7 @@ Which token: a guest run has KITH_RUN_TOKEN and KITH_RUN_SOCKET (the host gave t
 and KITH_ASK_SOCKET (the host gave them, or `issue` got them for a run kith started itself). Secrets and logins are
 never carded: the host denies them at once. See kernel/PROTOCOL.md.
 """
-import json, os, socket, subprocess, sys
+import json, os, re, socket, subprocess, sys
 
 SERVER, TOOL = 'kithpermit', 'approve'
 # The host waits its live window (default 90 s, at most 600) before it answers; a little longer than that.
@@ -146,6 +152,46 @@ def report_bug(a, env=os.environ):
     return 'Redacted draft:\n\n%s\n\n%s' % (kith_bug.draft_text(d), text)
 
 
+HELPER = 'ask_helper'
+HELPER_WAIT_S = 900
+
+
+def helper_def():
+    return {'name': HELPER,
+            'description': 'Ask a helper agent your membership grants and get its answer, as `kith ask AGENT "task"` does '
+                           'for an owner. A shell in this run cannot start another agent, so use this tool. Give the helper '
+                           'agent and the whole task; it sees nothing of this conversation. A helper you are not granted is refused.',
+            'inputSchema': {'type': 'object',
+                            'properties': {'agent': {'type': 'string', 'description': 'the helper agent, e.g. personal'},
+                                           'task': {'type': 'string', 'description': 'what to ask it, self-contained'}},
+                            'required': ['agent', 'task']}}
+
+
+def ask_helper(a, env=os.environ):
+    """The text the agent is told for one ask_helper call: the helper's answer, or why there is none."""
+    agent, task = a.get('agent'), a.get('task')
+    if not (isinstance(agent, str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', agent) and isinstance(task, str) and task.strip()):
+        return 'Give the helper agent and the task.'
+    if len(task) > 20000:
+        return 'The task is too long.'
+    # who is asking comes from this process's environment, which the run's shell cannot change; kith-auth checks the rest
+    if not (env.get('KITH_PERSON') and env.get('KITH_AGENT')):
+        return "Helpers are asked from a guest's run only."
+    if agent == env['KITH_AGENT']:
+        return 'You are %s; ask another agent.' % agent
+    child = {k: v for k, v in env.items() if k not in ('KITH_ASK_TOKEN', 'KITH_ASK_SOCKET', 'HQ_ASK_TOKEN', 'HQ_ASK_SOCKET')}
+    try:
+        r = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-ask'), agent, '--', task],
+                           env=child, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=HELPER_WAIT_S)
+    except subprocess.TimeoutExpired:
+        return '%s did not answer in time; carry on without it.' % agent
+    except OSError as e:
+        return 'Could not ask %s (%s).' % (agent, e.strerror or type(e).__name__)
+    if r.returncode != 0:
+        return 'Could not ask %s: %s' % (agent, (r.stderr or r.stdout or 'no answer').strip()[-1500:])
+    return r.stdout.strip() or '%s gave no answer.' % agent
+
+
 def call_host(method, body, env=os.environ, timeout=30):
     """One request to the host over the run socket: the reply dict, or None when there is no token, no socket or no answer."""
     token, path = credentials(env)
@@ -231,7 +277,8 @@ def handle(msg, env=os.environ):
         result = {'protocolVersion': ver, 'capabilities': {'tools': {}}, 'serverInfo': {'name': SERVER, 'version': '1'}}
     elif method == 'tools/list':
         # a key card needs a host to ask, so request_secret is only offered to a run that has a token
-        result = {'tools': [tool_def(), access_def(), bug_def()] + ([secret_def()] if credentials(env)[0] else [])}
+        result = {'tools': [tool_def(), access_def(), bug_def()] + ([secret_def()] if credentials(env)[0] else [])
+                           + ([helper_def()] if env.get('KITH_PERSON') else [])}
     elif method == 'ping':
         result = {}
     elif method == 'tools/call':
@@ -241,6 +288,8 @@ def handle(msg, env=os.environ):
             result = {'content': [{'type': 'text', 'text': request_access(a, env)}]}
         elif p.get('name') == SECRET:
             result = {'content': [{'type': 'text', 'text': request_secret(a, env)}]}
+        elif p.get('name') == HELPER:
+            result = {'content': [{'type': 'text', 'text': ask_helper(a, env)}]}
         elif p.get('name') == BUG:
             result = {'content': [{'type': 'text', 'text': report_bug(a, env)}]}
         else:

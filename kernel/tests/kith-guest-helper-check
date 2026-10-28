@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# kith-guest-helper-check — a guest's run reaches the helpers its membership grants (kith-auth member ... helpers=) through
+# kith-permit's ask_helper tool, which runs outside the OS sandbox as the run's own person and agent: a granted helper
+# answers, one that is not granted is refused (by kith-auth, as for any helper call), a helper cannot widen its caller's
+# grants, a revoked person reaches nothing, and the tool never passes the owner's ask token on. (The message `kith` gives in a guest's
+# shell needs the real OS sandbox: kith-guest-sandbox-check KITH_REAL_SANDBOX=1.) No real claude: a stub answers. Throwaway HOME and KITH_HOME.
+#
+#   kernel/tests/kith-guest-helper-check     a few seconds; exits 1 when a check fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-guest-helper-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME="$T/kith" KITH_STATE=$T/state KITH_AUTH=$T/auth.json
+unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE KITH_RESUME CLAUDE_CONFIG_DIR HQ_HOME HQ_STATE \
+  KITH_SERVE_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ASK_TOKEN KITH_ASK_SOCKET KITH_VIA
+mkdir -p "$HOME" "$T/bin" "$KITH_STATE/projects" "$KITH_STATE/logs"
+for a in front helper third; do
+  mkdir -p "$KITH_HOME/agents/$a/role"
+  printf -- '---\nname: %s\ndescription: test agent\n---\nYou are %s.\n' "$a" "$a" > "$KITH_HOME/agents/$a/role/agent.md"
+done
+# claude answers as `--output-format json` does, and says which agent and person it ran for plus whether an ask token came along
+cat > "$T/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+[[ $1 == --version ]] && { echo "2.1.309 (Claude Code)"; exit 0; }
+[[ $1 == plugin ]] && { echo '[]'; exit 0; }
+printf '{"result":"pong from %s for %s ask=%s","session_id":"s1","total_cost_usd":0}' "$KITH_AGENT" "$KITH_PERSON" "${KITH_ASK_TOKEN:-none}"
+STUB
+chmod +x "$T/bin/claude"
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
+export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH
+
+AUTH=$KERNEL/bin/kith-auth
+fails=0
+expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (got $2, want $3)"; fails=$((fails + 1)); fi; }
+has() { case $2 in *"$3"*) echo "ok   $1" ;; *) echo "FAIL $1 ('$3' not in: $2)"; fails=$((fails + 1)) ;; esac; }
+
+"$AUTH" person guest name=Guest >/dev/null 2>&1
+"$AUTH" member front guest mode=default helpers=helper >/dev/null 2>&1
+"$AUTH" person ex name=Ex >/dev/null 2>&1
+"$AUTH" member front ex mode=default helpers=helper >/dev/null 2>&1
+
+# ask AGENT TASK, with the environment of a guest's run: the person and the agent come from the process, as in the MCP server
+ask() {   # ask PERSON CALLER AGENT TASK [extra env as VAR=value ...]
+  local person=$1 caller=$2 agent=$3 task=$4; shift 4
+  env "$@" KITH_PERSON="$person" KITH_AGENT="$caller" python3 -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+a = {"agent": sys.argv[2], "task": sys.argv[3]}
+if sys.argv[2] == "-": a.pop("agent")
+print(kp.ask_helper(a))' "$KERNEL/bin/kith-permit" "$agent" "$task"
+}
+
+expect "a granted helper answers, as the guest, from its own agent" "$(ask guest front helper "say pong")" "pong from helper for guest ask=none"
+has "a helper the membership does not grant is refused by kith-auth" "$(ask guest front third "say pong")" "may not use third"
+has "a helper cannot ask a third agent the caller's membership does not grant" "$(ask guest helper third "say pong")" "may not use third"
+has "the caller itself is not a helper" "$(ask guest front front "say pong")" "ask another agent"
+has "no helper named" "$(ask guest front - "say pong")" "Give the helper agent and the task"
+has "an odd agent name is refused before anything runs" "$(ask guest front '../x' "say pong")" "Give the helper agent and the task"
+has "an empty task is refused" "$(ask guest front helper "  ")" "Give the helper agent and the task"
+has "no person in the environment: not a guest's run" "$(python3 -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+print(kp.ask_helper({"agent": "helper", "task": "x"}, {}))' "$KERNEL/bin/kith-permit")" "guest's run only"
+has "the owner's ask token is not passed to the helper" "$(ask guest front helper "say pong" KITH_ASK_TOKEN=owner-secret)" "ask=none"
+has "a stranger with no membership is refused" "$(ask stranger front helper "say pong")" "not a person in kith"
+
+"$AUTH" person ex --revoke >/dev/null 2>&1
+has "a revoked person reaches nothing, helper or not" "$(ask ex front helper "say pong")" "Could not ask helper"
+"$AUTH" person ex --unrevoke >/dev/null 2>&1
+has "and gets exactly what they had back" "$(ask ex front helper "say pong")" "pong from helper for ex"
+
+# the tool is listed for a run that has a person and for none else
+tools() { env "$@" python3 -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+import os
+print([t["name"] for t in kp.handle({"id": 1, "method": "tools/list"}, os.environ)["result"]["tools"]])' "$KERNEL/bin/kith-permit"; }
+has "tools/list: ask_helper for a guest's run" "$(tools KITH_PERSON=guest KITH_AGENT=front)" "ask_helper"
+listed=$(tools X=1)
+expect "tools/list: not for a process with no person" "${listed//ask_helper/LISTED}" "$listed"
+
+exit $((fails > 0))

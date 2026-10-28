@@ -204,6 +204,39 @@ expect "old Claude Code: the owner still runs" "$rc" 0
 KITH_PERSON=stranger "$KITH" echo --launch-json >/dev/null 2>&1; rc=$?
 expect "a stranger: refused before any run" "$rc" 3
 
+printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$T/bin/claude"
+# The Kith folder reached through a link (~/kith -> the disk it sits on): the folders the run writes are writable to the file
+# tools under both spellings. Claude Code folds an Edit deny into the sandbox's write list as well, so a deny on the link
+# spelling of a writable folder shut Write/Edit and Bash out of the person's own memory and files at once.
+ln -s "$KITH_HOME" "$T/linkhome"
+link_settings() { (cd "$T/linkhome/agents/echo" && KITH_HOME="$T/linkhome" KITH_PERSON=$1 "$KITH" echo --launch-json 2>/dev/null) | python3 -c '
+import json,sys
+j=json.load(sys.stdin)
+s=j.get("settings") or {}
+if isinstance(s,str): s=json.load(open(s))
+json.dump(s,sys.stdout,sort_keys=True)'; }
+for who in guest bot-3f9a1c2e; do
+  S=$(link_settings $who)
+  expect "$who, home through a link: nothing Edit-denied holds a folder the run may write (either spelling)" "$(SJ=$S python3 -c '
+import json, os
+s = json.loads(os.environ["SJ"])
+real = os.path.realpath
+def path(r):   # Edit(//abs/**) -> /abs
+    return r[len("Edit("):-1][1:]
+allow = [path(r)[:-3] for r in s["permissions"]["allow"] if r.startswith("Edit(") and r.endswith("/**)")]
+deny = [path(r)[:-3] for r in s["permissions"]["deny"] if r.startswith("Edit(") and r.endswith("/**)") and "*" not in path(r)[:-3]]
+aw = s["sandbox"]["filesystem"]["allowWrite"]
+bad = [(d, a) for d in deny for a in allow + aw if real(a) == real(d) or real(a).startswith(real(d) + "/")]
+print(len(allow) >= 4 and not bad or bad[:2])')" True
+  expect "$who, home through a link: the slice and the shared memory are Edit-allowed under the link spelling" "$(q "$S" "all('Edit(/$T/linkhome/agents/echo/%s/**)' % x in s['permissions']['allow'] for x in ['files/people/$who', 'memory/shared'])")" True
+  expect "$who, home through a link: rule W and the read-only folders stay denied" "$(q "$S" "all(any(r == x for r in s['permissions']['deny']) for x in ['Edit(/$T/linkhome/agents/echo/files/people/$who/**/.git/hooks/**)', 'Edit(/$KERNEL/**)', 'Edit(/$KITH_STATE/people/**)', 'Edit(/$KITH_HOME/agents/echo/role/**)'])")" True
+  expect "$who, home through a link: the other agent's folder is denied under both spellings" "$(q "$S" "all('Read(/%s/agents/other/**)' % r in s['permissions']['deny'] for r in ['$T/linkhome', '$KITH_HOME'])")" True
+done
+ALLOWED=$(cd "$KITH_HOME/agents/echo" && KITH_PERSON=guest "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print("mcp__kithpermit__ask_helper" in json.load(sys.stdin).get("allowed_tools",""))')
+expect "guest: the launch's allowed tools carry mcp__kithpermit__ask_helper" "$ALLOWED" True
+OWNER_ALLOWED=$(cd "$KITH_HOME/agents/echo" && "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print("mcp__kithpermit__ask_helper" in json.load(sys.stdin).get("allowed_tools",""))')
+expect "owner: no ask_helper tool, nothing new" "$OWNER_ALLOWED" False
+
 # --- The real thing (KITH_REAL_SANDBOX=1, macOS, a logged-in claude): a guest run under Claude Code's own sandbox ------------
 # Everything above reads the generated JSON; this runs a real `claude -p` as the guest (the model is told to run one probe
 # script) and checks what the OS let the shell do. Throwaway KITH_HOME / KITH_STATE; the real home folder is only the
