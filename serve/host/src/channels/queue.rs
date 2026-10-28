@@ -271,10 +271,12 @@ impl Core {
                 None => None,
             };
             // Access can end while the turn waited for the gate: look again right before the batch is taken, so a
-            // sweep that found nothing stoppable (or ran before this turn existed) can't be outrun. The owner's own
-            // runs are never refused here.
-            let revoked = invitee && !hq::resolve(&self.paths, &person, agent).await.allowed;
-            if revoked {
+            // sweep that found nothing stoppable (or ran before this turn existed) can't be outrun. Asked in sync
+            // with the Kith cloud (waiting up to `sync_hold`), as a revoke made on another computer may not be here
+            // yet. The owner's own runs are never refused here.
+            let refused = if invitee { Some(self.access(&person, agent).await).filter(|a| !a.allowed) } else { None };
+            if let Some(access) = refused {
+                tracing::info!("{wk}: {person} may not use {agent} now ({}); not starting the turn", access.why);
                 self.with(|i| {
                     i.st.inbox.insert(wk.to_owned(), Vec::new());
                     i.save();

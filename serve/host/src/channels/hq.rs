@@ -97,6 +97,7 @@ pub async fn output(bin: &Path, args: &[&str]) -> Option<std::process::Output> {
 
 /// A sender, as `kith-auth who <platform> <uid>` knows them.
 #[derive(Clone, Debug, Default)]
+#[allow(clippy::struct_excessive_bools, reason = "kith-auth who's own flags, read as they are")]
 pub struct Who {
     pub person: Option<String>,
     pub owner: bool,
@@ -104,6 +105,11 @@ pub struct Who {
     pub was: Vec<String>,
     pub owner_id: Option<String>,
     pub owner_linked: bool,
+    /// Revoked (`kith-auth person <id> --revoke`): their handle is kept so they are told why nothing answers.
+    pub revoked: bool,
+    /// This computer is out of sync with the Kith cloud and they are not the owner: a revoke made on another computer
+    /// may not have reached this one yet (revoke-person R8).
+    pub held: bool,
 }
 
 impl Who {
@@ -119,6 +125,8 @@ impl Who {
                 .unwrap_or_default(),
             owner_id: text("owner_id"),
             owner_linked: v.get("owner_linked").and_then(Value::as_bool).unwrap_or(false),
+            revoked: v.get("revoked").and_then(Value::as_bool).unwrap_or(false),
+            held: v.get("held").and_then(Value::as_bool).unwrap_or(false),
         }
     }
 
@@ -134,6 +142,8 @@ pub struct Access {
     pub allowed: bool,
     pub why: String,
     pub owner: bool,
+    /// As in `Who`: out of sync with the Kith cloud, so `allowed` may be stale.
+    pub held: bool,
 }
 
 pub async fn who(paths: &Paths, platform: &str, uid: &str) -> Who {
@@ -149,8 +159,26 @@ pub async fn resolve(paths: &Paths, person: &str, agent: &str) -> Access {
             allowed: v.get("allowed").and_then(Value::as_bool).unwrap_or(false),
             why: v.get("why").and_then(Value::as_str).unwrap_or("").to_owned(),
             owner: v.get("owner").and_then(Value::as_bool).unwrap_or(false),
+            held: v.get("held").and_then(Value::as_bool).unwrap_or(false),
         },
         None => Access { why: format!("can't check whether {person} may use {agent}"), ..Access::default() },
+    }
+}
+
+/// `resolve`, answered while this computer is in sync with the Kith cloud (revoke-person R5, R8): while kith-auth says
+/// held this asks again every `poll`, up to `hold`; still held then, it is refused, as a revoke made on another
+/// computer may not have reached this one.
+pub async fn resolve_in_sync(paths: &Paths, person: &str, agent: &str, hold: Duration, poll: Duration) -> Access {
+    let end = Instant::now() + hold;
+    loop {
+        let access = resolve(paths, person, agent).await;
+        if !access.held {
+            return access;
+        }
+        if Instant::now() >= end {
+            return Access { allowed: false, why: "out of sync with the Kith cloud".into(), ..access };
+        }
+        tokio::time::sleep(poll).await;
     }
 }
 

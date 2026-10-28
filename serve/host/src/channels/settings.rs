@@ -30,6 +30,11 @@ pub struct Settings {
     pub reader_grace: Duration,
     /// How often the outbox and live outboxes are posted (not configurable).
     pub poll: Duration,
+    /// While this computer is out of sync with the Kith cloud, how long a message or a turn of anyone but the owner
+    /// waits for the sync before it is refused (not configurable).
+    pub sync_hold: Duration,
+    /// How often a held message or turn asks whether the sync is back (not configurable).
+    pub sync_poll: Duration,
 }
 
 impl Default for Settings {
@@ -47,6 +52,8 @@ impl Default for Settings {
             run_timeout: Duration::from_secs(3600),
             reader_grace: Duration::from_secs(3),
             poll: Duration::from_secs(1),
+            sync_hold: Duration::from_secs(120),
+            sync_poll: Duration::from_secs(2),
         }
     }
 }

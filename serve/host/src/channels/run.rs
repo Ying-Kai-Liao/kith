@@ -6,6 +6,7 @@
 
 use super::adapter::{Adapter, Ended};
 use super::core::Core;
+use super::hq::{self, Paths};
 use super::queue::kill;
 use super::text::{context_pct, short};
 use crate::LockExt;
@@ -82,6 +83,29 @@ enum Attempt {
     Stopped(Ended),
     /// The process could not start; the thread was told.
     NotStarted,
+}
+
+/// Whether a person's turn may still reach them, asked again before its answer and before each post it leaves in the
+/// outbox (revoke-person R5), in sync with the Kith cloud (`hq::resolve_in_sync`, R8). The owner's turns aren't asked.
+#[derive(Clone)]
+pub(super) struct Recheck {
+    paths: Paths,
+    /// None for the owner.
+    person: Option<String>,
+    agent: String,
+    hold: Duration,
+    poll: Duration,
+}
+
+impl Recheck {
+    async fn still(&self) -> bool {
+        let Some(person) = &self.person else { return true };
+        let access = hq::resolve_in_sync(&self.paths, person, &self.agent, self.hold, self.poll).await;
+        if !access.allowed {
+            tracing::info!("{person} lost {} during the turn ({}): nothing more is delivered", self.agent, access.why);
+        }
+        access.allowed
+    }
 }
 
 /// `kith <agent> --backups-json` now, remembered in `backups` (a failure keeps what was known before).
@@ -192,7 +216,14 @@ impl Core {
         let person = self.with(|i| {
             i.st.threads.get(key).and_then(|t| t.get("person")).and_then(Value::as_str).unwrap_or("").to_owned()
         });
-        let owner = if person.is_empty() { true } else { super::hq::resolve(&self.paths, &person, agent).await.owner };
+        let owner = if person.is_empty() { true } else { hq::resolve(&self.paths, &person, agent).await.owner };
+        let still = Recheck {
+            paths: self.paths.clone(),
+            person: (!owner).then(|| person.clone()),
+            agent: agent.to_owned(),
+            hold: self.settings.sync_hold,
+            poll: self.settings.sync_poll,
+        };
         let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> =
             std::env::vars_os().filter(|(k, _)| k.to_str().is_some_and(inherited)).collect();
         // Both spellings of a kernel setting: the kernel reads KITH_<X>, role repos written before the rename HQ_<X>.
@@ -260,7 +291,7 @@ impl Core {
                 set(&mut run_env, "RESUME", session); // any harness: bin/hq starts a new session when this one is another harness's
             }
             let attempt = match self
-                .attempt(ad, agent, wk, task, conv, outbox, run_env, backup.as_deref(), fresh_backup)
+                .attempt(ad, agent, wk, task, conv, outbox, &still, run_env, backup.as_deref(), fresh_backup)
                 .await?
             {
                 Attempt::Stopped(ended) => return Ok(ended),
@@ -306,6 +337,7 @@ impl Core {
                     key,
                     agent,
                     conv,
+                    &still,
                     attempt,
                     res,
                     backup.as_deref(),
@@ -327,6 +359,7 @@ impl Core {
         task: &str,
         conv: &Value,
         outbox: &Path,
+        still: &Recheck,
         mut env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
         backup: Option<&str>,
         fresh_backup: bool,
@@ -388,13 +421,13 @@ impl Core {
         let readers = [tokio::spawn(read_into(stdout, out.clone())), tokio::spawn(read_into(stderr, err.clone()))];
         let stop_pump = Arc::new(tokio::sync::Notify::new());
         let pump = {
-            let (poll, ad, conv, outbox, stop) =
-                (self.settings.poll, ad.clone(), conv.clone(), outbox.to_path_buf(), stop_pump.clone());
+            let (poll, ad, conv, outbox, still, stop) =
+                (self.settings.poll, ad.clone(), conv.clone(), outbox.to_path_buf(), still.clone(), stop_pump.clone());
             tokio::spawn(async move {
                 let mut posted = 0;
                 loop {
                     tokio::select! {
-                        () = tokio::time::sleep(poll) => posted += flush(&ad, &conv, &outbox).await,
+                        () = tokio::time::sleep(poll) => posted += flush(&ad, &conv, &outbox, &still).await,
                         () = stop.notified() => break posted,
                     }
                 }
@@ -426,7 +459,7 @@ impl Core {
         let code = outcome.ok().and_then(|(_, code)| code);
         stop_pump.notify_one();
         let mut posted = pump.await.unwrap_or(0); // a post in flight finishes before the last flush
-        posted += flush(ad, conv, outbox).await;
+        posted += flush(ad, conv, outbox, still).await;
         if let Some(ended) = self.with(|i| i.busy.get(wk).and_then(|b| b.ended)) {
             return Ok(Attempt::Stopped(ended));
         }
@@ -439,7 +472,7 @@ impl Core {
     }
 
     /// Posts what the run ended with: the answer (and, from a backup, the line saying so), or its error. Remembers the
-    /// session for the next message.
+    /// session for the next message. Nothing, when the person lost the agent while it ran.
     #[allow(clippy::too_many_arguments)] // what the turn knows once it has its output
     async fn finish(
         &self,
@@ -447,12 +480,16 @@ impl Core {
         key: &str,
         agent: &str,
         conv: &Value,
+        still: &Recheck,
         ran: Ran,
         res: Option<Value>,
         backup: Option<&str>,
         chain: &[ChainEntry],
         limit_hit: bool,
     ) -> Ended {
+        if !still.still().await {
+            return Ended::Done; // revoked while it ran: the late answer is not delivered
+        }
         let (mut text, sid, pct) = if let Some(res) = res {
             let mut text = res.get("result").and_then(Value::as_str).unwrap_or("").to_owned();
             if res.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
@@ -538,15 +575,21 @@ impl Core {
     }
 }
 
-/// Posts what the run's hq-send calls left in its outbox, oldest first.
-/// How many it took.
-pub(super) async fn flush(ad: &Arc<dyn Adapter>, conv: &Value, outbox: &Path) -> usize {
+/// Posts what the run's hq-send calls left in its outbox, oldest first; once the person lost the agent, deletes it
+/// instead. How many it posted.
+pub(super) async fn flush(ad: &Arc<dyn Adapter>, conv: &Value, outbox: &Path, still: &Recheck) -> usize {
     let mut taken = 0;
     {
         let Ok(entries) = std::fs::read_dir(outbox) else { return 0 };
         let mut files: Vec<_> =
             entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect();
         files.sort();
+        if !files.is_empty() && !still.still().await {
+            for f in &files {
+                let _ = std::fs::remove_file(f);
+            }
+            return 0;
+        }
         for f in files {
             let Some(item) = std::fs::read(&f).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else {
                 continue;
