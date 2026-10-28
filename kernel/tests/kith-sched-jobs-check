@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# kith-sched-jobs-check — writes to an agent's jobs.json never lose a job: writers take turns, the file is replaced
+# whole, and a file kith-sched can't read is refused by every writer, never overwritten as if it were empty.
+# Throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-sched-jobs-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-jobs.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_AUTH=$T/auth.json
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/house/role"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+J=$KITH_HOME/agents/house/jobs.json
+S() { python3 "$KERNEL/bin/kith-sched" "$@"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+count() { python3 -c "import json; print(len(json.load(open('$J'))))"; }
+
+# 30 adds at once, as from parallel runs: every one is kept
+for i in $(seq 1 30); do S add house "0 8 * * *" "task $i" --id "j$i" >/dev/null 2>&1 & done
+wait
+check "30 concurrent adds keep all 30 jobs" "[ \"\$(count)\" = 30 ]"
+# adds racing pauses and removes: the removed ones are gone, every other job stays
+for i in $(seq 31 45); do S add house "0 8 * * *" "task $i" --id "j$i" >/dev/null 2>&1 & done
+for i in $(seq 1 10); do S rm house "j$i" >/dev/null 2>&1 & done
+for i in $(seq 11 20); do S pause house "j$i" >/dev/null 2>&1 & done
+wait
+check "adds racing removes and pauses: 45 - 10 jobs left" "[ \"\$(count)\" = 35 ]"
+check "and every pause stuck" "[ \"\$(python3 -c \"import json; print(sum(1 for j in json.load(open('$J')) if j.get('paused')))\")\" = 10 ]"
+check "no temporary file left behind" "[ -z \"\$(find \"$KITH_HOME/agents/house\" -name '*.tmp*')\" ]"
+
+# an unreadable file: writers refuse and leave it byte for byte
+printf '[{"id": "half' > "$J"
+cp "$J" "$T/before"
+S add house "0 8 * * *" "new" --id new > "$T/out" 2>&1; rc=$?
+check "add on an unreadable jobs.json fails" "[ $rc -ne 0 ]"
+check "and says why" "grep -q 'jobs.json' $T/out"
+check "and leaves the file as it was" "cmp -s $J $T/before"
+for c in rm pause resume; do
+  S $c house j1 >/dev/null 2>&1; rc=$?
+  check "$c on an unreadable jobs.json fails and leaves it" "[ $rc -ne 0 ] && cmp -s $J $T/before"
+done
+S ls house > "$T/out" 2>&1
+check "ls still runs and names the unreadable file" "grep -q 'jobs.json' $T/out"
+
+exit $fail
