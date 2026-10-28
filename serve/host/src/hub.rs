@@ -198,6 +198,7 @@ impl Hub {
         self.spawn_unsaved_retry();
         tokio::spawn(crate::agent::gate::run(self.gate.clone(), Arc::downgrade(self)));
         crate::routines::start(self);
+        crate::run_outbox::start(self);
         crate::analytics::start(self);
         hq::start(self);
         crate::terminal::start(self);

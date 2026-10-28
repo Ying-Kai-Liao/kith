@@ -13,8 +13,10 @@
 # KITH_TELEGRAM_BOT_TOKEN / KITH_TELEGRAM_CHAT_ID from ~/.kith/secrets/env (or the file KITH_TELEGRAM_ENV_FILE names
 # there). Never prints a token.
 #
-# Started from a Kith app chat (KITH_VIA=serve) it still goes to Telegram but says so: the chat's own way to give the
-# user a file or image is the send_file tool (mcp__kith-files__send_file).
+# A run that has an outbox of its own (KITH_RUN_OUTBOX: an app chat's run, a kith-sched run) also leaves the message
+# there, and kith serve posts it into the person's chat with the agent; it still goes to Telegram when a bot is set up.
+# `--to dm` is Telegram only. Started from a Kith app chat (KITH_VIA=serve) with no outbox it still goes to Telegram
+# but says so: the chat's own way to give the user a file or image is the send_file tool (mcp__kith-files__send_file).
 set -euo pipefail
 . "$(dirname "$0")/../lib/kith-env.sh"   # old HQ_X callers and secrets/env: KITH_X and HQ_X agree
 
@@ -51,7 +53,7 @@ with open(dest, 'a') as f:   # kith ask --wait reads it line by line
     f.write(json.dumps(item, ensure_ascii=False) + '\n')
 PY
       echo "sent to $to as $as"; exit 0 ;;
-    dm) unset KITH_DISCORD_WEBHOOK_URL KITH_DISCORD_THREAD_ID KITH_BRIDGE_OUTBOX HQ_DISCORD_WEBHOOK_URL HQ_DISCORD_THREAD_ID HQ_BRIDGE_OUTBOX ;;
+    dm) unset KITH_DISCORD_WEBHOOK_URL KITH_DISCORD_THREAD_ID KITH_BRIDGE_OUTBOX KITH_RUN_OUTBOX HQ_DISCORD_WEBHOOK_URL HQ_DISCORD_THREAD_ID HQ_BRIDGE_OUTBOX HQ_RUN_OUTBOX ;;
     *) echo "kith-send: unknown target $to (ask:<id>, dm)" >&2; exit 2 ;;
   esac
 fi
@@ -85,9 +87,35 @@ PY
   exit 0
 fi
 
+# The run's own outbox: the files are copied in, since the host takes only what is inside it.
+boxed=0
+if [[ -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX ]]; then
+  [[ -f $1 ]] && kind=files || kind=text
+  python3 - "$KITH_RUN_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
+import json, os, shutil, sys, time
+box, who, kind, caption, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+n = time.time_ns()
+item = {'as': who, 'at': time.time()}
+if kind == 'files':
+    item['caption'], item['files'] = caption, []
+    for i, f in enumerate(rest):
+        stored = '%d-%d' % (n, i)   # the name the app shows is 'name'
+        shutil.copyfile(f, os.path.join(box, stored))
+        item['files'].append({'file': stored, 'name': os.path.basename(f)})
+else:
+    item['text'] = ' '.join(rest)
+name = os.path.join(box, '%d.json' % n)
+with open(name + '.tmp', 'w') as f:
+    json.dump(item, f, ensure_ascii=False)
+os.rename(name + '.tmp', name)   # whole or not at all: the host reads *.json only
+PY
+  boxed=1
+  echo "left for the Kith app as $as"
+fi
+
 # KITH_VIA=serve covers the whole process (routines and bot-to-bot requests started from a chat too), so this only
 # hints and still goes on to Telegram as it always did.
-if [[ ${KITH_VIA:-} == serve && $to != dm && -z ${KITH_TELEGRAM_CHAT_ID:-} ]]; then
+if [[ $boxed == 0 && ${KITH_VIA:-} == serve && $to != dm && -z ${KITH_TELEGRAM_CHAT_ID:-} ]]; then
   echo "kith-send: hint: in a Kith app chat, share a file or image with your send_file tool (mcp__kith-files__send_file: path, name?), not kith-send; this goes to Telegram." >&2
 fi
 
@@ -99,9 +127,14 @@ if [[ -z ${KITH_TELEGRAM_BOT_TOKEN:-} && -n $tg_file && -f $tg_file ]]; then
   KITH_TELEGRAM_BOT_TOKEN=$(sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "$tg_file" | tr -d '"'"'"'')
   KITH_TELEGRAM_CHAT_ID=${KITH_TELEGRAM_CHAT_ID:-$(sed -n 's/^TELEGRAM_HOME_CHANNEL=//p' "$tg_file" | tr -d '"'"'"'')}
 fi
-[[ -n ${KITH_TELEGRAM_BOT_TOKEN:-} && -n ${KITH_TELEGRAM_CHAT_ID:-} ]] || { echo "kith-send: no Telegram bot configured" >&2; exit 1; }
+if [[ -z ${KITH_TELEGRAM_BOT_TOKEN:-} || -z ${KITH_TELEGRAM_CHAT_ID:-} ]]; then
+  [[ $boxed == 1 ]] && exit 0
+  echo "kith-send: no Telegram bot configured" >&2; exit 1
+fi
 api="https://api.telegram.org/bot$KITH_TELEGRAM_BOT_TOKEN"
 
+# Once it is in the app's outbox, a Telegram failure is reported but does not fail the send (a retry would post twice).
+(( boxed )) && set +eo pipefail
 check() { python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else print("kith-send:", d.get("description"), file=sys.stderr) or 1)'; }
 
 if [[ ! -f $1 ]]; then
