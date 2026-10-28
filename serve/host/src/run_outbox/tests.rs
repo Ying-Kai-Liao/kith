@@ -47,8 +47,8 @@ fn an_item_lands_once_in_its_persons_chat_across_restarts() {
     assert_ne!(sam, owner);
     item(&sam, "1", &json!({"as": "echo", "text": "for sam"}));
     item(&owner, "2", &json!({"as": "image", "text": "for the owner"}));
-    drain(&r.hub, &r.root);
-    drain(&r.hub, &r.root);
+    drain(&r.hub, &r.root, &no_jobs);
+    drain(&r.hub, &r.root, &no_jobs);
 
     let got = texts(&r, "sam");
     assert_eq!(got.len(), 1);
@@ -67,7 +67,7 @@ fn an_item_lands_once_in_its_persons_chat_across_restarts() {
         "t".into(),
         0,
     );
-    drain(&hub, &r.root);
+    drain(&hub, &r.root, &no_jobs);
     assert_eq!(texts(&r, "sam").len(), 1);
     assert!(std::fs::read_dir(&sam).unwrap().next().is_none(), "the box is empty");
 }
@@ -89,7 +89,7 @@ fn only_plain_files_inside_the_box_are_shared() {
             {"file": "9-2", "name": "hard.txt"}, {"file": "../secret.txt", "name": "up.txt"},
         ]}),
     );
-    drain(&r.hub, &r.root);
+    drain(&r.hub, &r.root, &no_jobs);
 
     let got = texts(&r, "sam");
     assert_eq!(got.len(), 1);
@@ -120,7 +120,7 @@ fn a_schedule_run_reaches_the_jobs_person_and_its_box_goes_when_done() {
     )
     .unwrap();
     item(&r.root.join("sched-echo-x-2"), "6", &json!({"as": "echo", "text": "for ana"}));
-    drain(&r.hub, &r.root);
+    drain(&r.hub, &r.root, &no_jobs);
 
     let got = texts(&r, "sam");
     assert_eq!(got[0]["text"], "the news");
@@ -128,4 +128,106 @@ fn a_schedule_run_reaches_the_jobs_person_and_its_box_goes_when_done() {
     assert_eq!(texts(&r, "own").len(), 0);
     assert!(std::fs::read_dir(r.root.join("sched-echo-x-2")).unwrap().next().is_none());
     assert!(r.root.join(format!("{run}.json")).exists(), "kept a while for a run still going");
+}
+
+fn no_jobs(_: &str) -> Option<Vec<Value>> {
+    None
+}
+
+fn job(person: Option<&str>, paused: bool) -> Vec<Value> {
+    vec![json!({
+        "id": "daily-news", "cron": "0 7 * * *", "task": "the news", "paused": paused, "next_run": null,
+        "last_run": null, "last_status": null, "source": "kith", "person": person,
+    })]
+}
+
+fn op(dir: &Path, stem: &str, op: &str) {
+    item(dir, stem, &json!({"as": "echo", "at": 1, "schedule": {"id": "daily-news", "op": op}}));
+}
+
+#[test]
+fn a_schedule_change_shows_its_card_and_the_jobs_last_card_folds() {
+    let r = rig();
+    let sam = make(&r.root, "echo", Some("sam")).unwrap();
+    op(&sam, "1", "added");
+    drain(&r.hub, &r.root, &|_| Some(job(Some("sam"), false)));
+    let got = texts(&r, "sam");
+    assert_eq!(got.len(), 1);
+    let card = &got[0]["richCard"];
+    assert_eq!(card["type"], "schedule");
+    assert_eq!(card["ref"], json!({"agent": "echo", "id": "daily-news"}));
+    assert_eq!(card["snapshot"]["every"], "Every day at 7:00");
+    assert_eq!(card["snapshot"]["task"], "the news");
+    assert!(got[0]["text"].as_str().unwrap().starts_with("Schedule added · Daily news\nEvery day at 7:00"));
+    assert_eq!(got[0]["outbox"]["person"], "sam");
+
+    op(&sam, "2", "paused");
+    drain(&r.hub, &r.root, &|_| Some(job(Some("sam"), true)));
+    let got = texts(&r, "sam");
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[0]["richCard"]["snapshot"]["folded"], "changed");
+    assert_eq!(got[1]["text"], "Schedule paused · Daily news\nIt won't run until you resume it.");
+    assert!(got[1]["richCard"]["snapshot"].get("folded").is_none());
+
+    // Gone from the jobs: the card keeps what the last one knew of it.
+    op(&sam, "3", "removed");
+    drain(&r.hub, &r.root, &|_| Some(vec![]));
+    let got = texts(&r, "sam");
+    assert_eq!(got[1]["richCard"]["snapshot"]["folded"], "removed");
+    assert_eq!(got[2]["text"], "Schedule removed · Daily news\nIt won't run again.");
+    assert_eq!(got[2]["richCard"]["snapshot"]["every"], "Every day at 7:00");
+}
+
+#[test]
+fn a_change_the_live_jobs_dont_show_posts_nothing() {
+    let r = rig();
+    let sam = make(&r.root, "echo", Some("sam")).unwrap();
+    let reads = std::cell::Cell::new(0);
+    op(&sam, "1", "paused"); // the job isn't paused
+    op(&sam, "2", "made-up");
+    op(&sam, "3", "removed"); // the job is still there
+    drain(&r.hub, &r.root, &|_| {
+        reads.set(reads.get() + 1);
+        Some(job(Some("sam"), false))
+    });
+    assert_eq!(reads.get(), 1, "the jobs are read once a drain");
+    // The owner's job, named from sam's chat.
+    op(&sam, "4", "added");
+    drain(&r.hub, &r.root, &|_| Some(job(None, false)));
+    // The jobs couldn't be read.
+    op(&sam, "5", "added");
+    drain(&r.hub, &r.root, &no_jobs);
+    assert_eq!(texts(&r, "sam"), Vec::<Value>::new());
+    assert!(std::fs::read_dir(&sam).unwrap().next().is_none(), "and the items are not kept");
+}
+
+#[test]
+fn a_scheduled_brief_comes_as_a_news_card_and_a_chats_reply_does_not() {
+    let r = rig();
+    let run = "sched-echo-morning-brief-1";
+    std::fs::create_dir_all(r.root.join(run)).unwrap();
+    std::fs::write(
+        r.root.join(format!("{run}.json")),
+        json!({"agent": "echo", "person": "sam", "via": "schedule", "job": "morning-brief", "cron": "0 7 * * *"})
+            .to_string(),
+    )
+    .unwrap();
+    let brief = "Your morning:\n- **Rain by noon** — take a coat (BOM, https://bom.gov.au/nsw)\n- [Kith 2.0 ships](https://github.com/k/kith) — cards in chat\n";
+    item(&r.root.join(run), "1", &json!({"as": "echo", "text": brief}));
+    let sam = make(&r.root, "echo", Some("sam")).unwrap();
+    item(&sam, "2", &json!({"as": "echo", "text": brief}));
+    drain(&r.hub, &r.root, &no_jobs);
+
+    let mut got = texts(&r, "sam");
+    assert_eq!(got.len(), 2);
+    got.sort_by_key(|e| e["outbox"]["via"] != "schedule");
+    let card = &got[0]["richCard"];
+    assert_eq!(got[0]["text"], brief.trim(), "the text as sent is its twin");
+    assert_eq!(card["type"], "news");
+    assert_eq!(card["ref"], json!({"agent": "echo", "job": "morning-brief"}));
+    assert_eq!(card["snapshot"]["every"], "Every day at 7:00");
+    assert_eq!(card["snapshot"]["rows"][0]["title"], "Rain by noon");
+    assert_eq!(card["snapshot"]["rows"][0]["source"], "BOM");
+    assert_eq!(card["snapshot"]["rows"][1]["domain"], "github.com");
+    assert!(got[1].get("richCard").is_none());
 }

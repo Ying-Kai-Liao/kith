@@ -317,7 +317,8 @@ def schedules(name, errors=None):
         # The scheduler records when and where a run started, not how it ended: running or done, as `kith schedule log` says.
         status = ('running' if sched.running(l.get('pid')) else 'done') if l else None
         out.append({'id': j.get('id'), 'cron': j.get('cron'), 'task': j.get('task', ''), 'paused': paused,
-                    'last_run': at, 'last_status': status, 'next_run': nxt, 'source': 'kith'})
+                    'last_run': at, 'last_status': status, 'next_run': nxt, 'source': 'kith',
+                    'person': j.get('person')})
     return out + launchd_jobs(name, sched, now, errors)
 
 

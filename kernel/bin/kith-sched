@@ -220,11 +220,27 @@ def run_outbox(agent, job, person):
         (root / run).mkdir(parents=True)
         meta = root / (run + '.json')
         with open(str(meta) + '.tmp', 'w') as f:
-            json.dump({'agent': agent, 'person': person, 'via': 'schedule', 'job': job['id'], 'at': time.time()}, f)
+            json.dump({'agent': agent, 'person': person, 'via': 'schedule', 'job': job['id'], 'cron': job['cron'],
+                       'at': time.time()}, f)
         os.replace(str(meta) + '.tmp', meta)
     except OSError:
         return None
     return root / run
+
+
+def tell_app(agent, jid, op):
+    """Leaves the change in the run's own outbox (an app chat's run, a scheduled run), when it has one: kith serve
+    checks it against the jobs and shows it as a Schedule card in the person's chat with the agent."""
+    box = os.environ.get('KITH_RUN_OUTBOX') or os.environ.get('HQ_RUN_OUTBOX')
+    if not box or not os.path.isdir(box):
+        return
+    name = os.path.join(box, '%d.json' % time.time_ns())
+    try:
+        with open(name + '.tmp', 'w') as f:
+            json.dump({'as': agent, 'at': time.time(), 'schedule': {'id': jid, 'op': op}}, f)
+        os.rename(name + '.tmp', name)   # whole or not at all: the host reads *.json only
+    except OSError as e:
+        print('kith-sched: the app was not told (%s)' % e, file=sys.stderr)
 
 
 def start(agent, job, now, why):
@@ -485,7 +501,9 @@ def main(argv):
         if opts.get('e'): job['effort'] = opts['e']
         if opts.get('H'): job['harness'] = opts['H']
         with editing(agent) as jobs:
+            had = any(j['id'] == job['id'] for j in jobs)
             jobs[:] = [j for j in jobs if j['id'] != job['id']] + [job]
+        tell_app(agent, job['id'], 'updated' if had else 'added')
         print('%s/%s: next run %s' % (agent, job['id'], nxt.strftime('%a %d %b %H:%M') if nxt else 'never'))
         if not job_installed('sched'):
             print('not ticking yet: run `kith schedule --install` once')
@@ -515,7 +533,9 @@ def main(argv):
             else:
                 job.pop('paused', None)
                 if cmd == 'pause': job['paused'] = True
-        print('%s/%s %s' % (agent, jid, {'rm': 'removed', 'pause': 'paused', 'resume': 'resumed'}[cmd]))
+        done = {'rm': 'removed', 'pause': 'paused', 'resume': 'resumed'}[cmd]
+        tell_app(agent, jid, done)
+        print('%s/%s %s' % (agent, jid, done))
         return
     sys.exit('kith-sched: unknown command; see kith-sched --help')
 

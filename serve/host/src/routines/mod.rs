@@ -281,7 +281,7 @@ impl Routines {
             s.routines.push(r.clone());
             Ok(r)
         })?;
-        hub.add_entry(&Lane::main(bot), EntryKind::Notice, 0, &json!({"text":format!("{} routine: {name}", if updated {"Updated"} else {"Created"}), "routineId": id, "style":"info"}));
+        hub.add_entry(&Lane::main(bot), EntryKind::Notice, 0, &json!({"text":format!("{} routine: {name}", if updated {"Updated"} else {"Created"}), "routineId": id, "style":"info", "richCard": crate::rich_card::routine(&routine, updated, chrono::Local::now().fixed_offset())}));
         Ok(json!({"routine":public(&routine)}))
     }
 
