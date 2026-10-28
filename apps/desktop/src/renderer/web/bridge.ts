@@ -45,7 +45,8 @@ const ssoMarker = {
   },
 }
 
-const origin = location.origin
+// Clerk sends the browser back to the page itself (kithbot.app/join/), not the site's root, which is the landing page.
+const origin = new URL(import.meta.env.BASE_URL, location.origin).href
 const account = new WebAccount({
   clerk: new Clerk(webConfig.clerkPublishableKey) as unknown as ClerkLike,
   cloudURL: webConfig.cloudURL,
