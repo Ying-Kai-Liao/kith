@@ -716,8 +716,14 @@ private struct HomeSheets: ViewModifier {
                 photoItems = []
                 addPhotos(items)
             }
-            .fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
-                if case .success(let urls) = result { addFiles(urls) }
+            // SwiftUI presents only one file importer in the stack: while a chat is pushed over Crew, its composer's
+            // must be the only one, or + → Files there does nothing.
+            .background {
+                if accounts.selection == nil {
+                    Color.clear.fileImporter(isPresented: $pickingFiles, allowedContentTypes: [.item], allowsMultipleSelection: true) { result in
+                        if case .success(let urls) = result { addFiles(urls) }
+                    }
+                }
             }
             .fullScreenCover(isPresented: $pickingCamera) {
                 CameraPicker(picked: addCamera).ignoresSafeArea()
