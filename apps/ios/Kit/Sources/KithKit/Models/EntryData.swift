@@ -39,6 +39,8 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var person: String?
     public var personName: String?
     public var agent: String?
+    /// permission, from a run `kith ask` started: "<agent>, asked by <caller agent>" (or "a terminal").
+    public var chain: String?
     public var entries: [PlanItem]?
     /// notice: info | error | divider
     public var style: String?

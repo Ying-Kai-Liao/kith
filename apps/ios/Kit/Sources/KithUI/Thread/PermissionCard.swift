@@ -37,7 +37,7 @@ struct PermissionCard: View {
     }
 
     private var place: String {
-        "Runs on \(hostName)\(d.cwd.map { " · \(($0 as NSString).lastPathComponent)" } ?? "")"
+        "Runs on \(hostName)\(d.cwd.map { " · \(($0 as NSString).lastPathComponent)" } ?? "")\(d.chain.map { " · \($0)" } ?? "")"
     }
 
     /// The card's values; the option ids are the host's.

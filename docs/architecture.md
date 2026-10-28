@@ -251,7 +251,10 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 - **5. Somewhere to ask.** Not built (below).
 - **6. Removal.** Built in a different shape from the design: a revoke goes through the cloud first and reaches every
   Mac before the next turn (`verification/revoke`).
-- **7. An ask that parks is a job.** Not built (below).
+- **7. An ask that parks is a job.** A `kith ask` run that ends its turn on a card exits 3 (`waiting`) with the ask
+  id. The card keeps the id and shows "<agent>, asked by <caller>". The resumed turn runs as `kith ask --reply` and
+  its words are that id's answer (`kith ask --wait` returns it, or the caller's session is woken, also when it ended
+  with the answer unread, M8); a no or an expiry is the answer instead. Tool-prompt cards of owner runs only.
 - **8. Lifecycle owns every stop.** Not built (below).
 
 **Planned (agreed, not built yet).**
@@ -262,8 +265,6 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   themselves, and kith-auth writes a self-approved entry only while they are a member (M3).
 - An answer is recorded only if the person isn't revoked, in the same step (M2).
 - A card's wake stays queued until an activation that includes the yes has started (M5).
-- Rule 7: a `kith ask` run that parks on a card returns `waiting` + an id, not an answer; the resumed answer joins
-  that id (`kith ask --wait`) or wakes the caller's session if it ended (M8).
 - No chat with the agent on this Mac: the card goes to the approver's inbox instead of "There is nowhere to ask".
 - Rule 5: host down, the kernel restarts the host job and retries the ask token once before refusing.
 - Removed ids are retired, so a new invite under the same name never inherits the old person's memory or logins.

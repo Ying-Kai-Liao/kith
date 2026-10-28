@@ -74,7 +74,7 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
     pair,
     title: permissionHeadline(d.toolKind),
     subject: d.title ?? '',
-    place: `Runs on ${hostName}${cwd}`,
+    place: `Runs on ${hostName}${cwd}${d.chain ? ` · ${d.chain}` : ''}`,
     waiting,
     outcome: pending ? undefined : permissionOutcome(entry),
     held: held?.model ? <HeldRow model={held.model} onStop={() => setConfirming(true)} /> : undefined,

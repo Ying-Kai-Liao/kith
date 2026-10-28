@@ -85,6 +85,32 @@ pub struct RunIdentity {
     /// The project the run was launched in (`project-id` answers about this one only): fixed when the token is issued,
     /// never taken from a request.
     pub project: Option<String>,
+    /// The `kith ask` this run answers (an owner run only): its cards carry it, so a card it parks on answers that ask.
+    pub reply: Option<AskReply>,
+}
+
+/// The `kith ask` a run was started by: its id (the asker's mailbox) and the agent that asked, none for a terminal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskReply {
+    pub to: String,
+    pub asked_by: Option<String>,
+}
+
+impl AskReply {
+    /// An ask id and asking agent as the kernel writes them (kith-ask, kith-permit): `None` for an id that isn't one; an
+    /// asker that isn't an agent name is a terminal.
+    pub fn parse(to: &str, asked_by: Option<&str>) -> Option<Self> {
+        let id_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-');
+        if to.is_empty() || to.len() > 64 || !to.chars().all(id_char) {
+            return None;
+        }
+        let agent = asked_by.filter(|a| {
+            a.len() <= 64
+                && a.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit())
+                && a.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+        });
+        Some(Self { to: to.to_owned(), asked_by: agent.map(str::to_owned) })
+    }
 }
 
 /// What the host learned about the connection's other end.
@@ -306,6 +332,7 @@ pub fn grant_for(
         scope: TokenScope::Guest,
         session: session_of(person, session),
         project: project.filter(|p| !p.is_empty()).map(str::to_owned),
+        reply: None,
     };
     match RunGrant::issue(table(), identity) {
         Ok(grant) => {
@@ -326,8 +353,9 @@ fn session_of(person: &str, session: &str) -> String {
     format!("run:g:{}:{person}:{session}", person.len())
 }
 
-/// The identity of an owner run of `agent` under `session` (cards only, see [`TokenScope::OwnerAsk`]).
-pub fn ask_identity(agent: &str, session: &str) -> RunIdentity {
+/// The identity of an owner run of `agent` under `session` (cards only, see [`TokenScope::OwnerAsk`]), answering the
+/// `kith ask` in `reply` when it was started by one.
+pub fn ask_identity(agent: &str, session: &str, reply: Option<AskReply>) -> RunIdentity {
     RunIdentity {
         person: String::new(),
         agent: agent.to_owned(),
@@ -336,24 +364,26 @@ pub fn ask_identity(agent: &str, session: &str) -> RunIdentity {
         scope: TokenScope::OwnerAsk,
         session: format!("run:o:{session}"),
         project: None,
+        reply,
     }
 }
 
 /// For a run started from an environment list (channel runs): when it names a person, issues a grant and adds the
 /// token and socket to the list. The owner's list (no `KITH_PERSON`) gets an owner token (cards only) under its own
 /// names. `session` is the conversation the run continues (the work key of a channel thread): a card and a once
-/// grant belong to it.
+/// grant belong to it. `reply` is the `kith ask` an owner run answers (a resumed run's, from its card).
 pub fn grant_for_env(
     env: &mut Vec<(std::ffi::OsString, std::ffi::OsString)>,
     agent: &str,
     session: &str,
+    reply: Option<AskReply>,
 ) -> Option<RunGrant> {
     let get = |name: &str| env.iter().rev().find(|(k, _)| k == name).and_then(|(_, v)| v.to_str()).map(str::to_owned);
     let (grant, vars) = if let Some(person) = get("KITH_PERSON").filter(|p| !p.is_empty()) {
         grant_for(&person, agent, get("KITH_ROOM").as_deref(), session, get("KITH_PROJECT").as_deref())?
     } else {
         let socket = SOCKET.get()?;
-        let grant = RunGrant::issue(table(), ask_identity(agent, session)).ok()?;
+        let grant = RunGrant::issue(table(), ask_identity(agent, session, reply)).ok()?;
         let vars = grant.env(socket);
         (grant, vars)
     };
@@ -393,6 +423,8 @@ pub enum Response {
     Decision {
         allow: bool,
         message: String,
+        /// Denied for now: the card outlived the live window and the run is to end its turn on it.
+        waiting: bool,
     },
     /// The answer to `requestAccess` and `consumeAccess`: the line as built.
     Line(Value),
@@ -407,8 +439,12 @@ impl Response {
     fn to_line(&self) -> String {
         let v = match self {
             Self::Ok { stdout, stderr, code } => json!({"ok": true, "stdout": stdout, "stderr": stderr, "code": code}),
-            Self::Decision { allow, message } => {
-                json!({"ok": true, "behavior": if *allow { "allow" } else { "deny" }, "message": message})
+            Self::Decision { allow, message, waiting } => {
+                let mut v = json!({"ok": true, "behavior": if *allow { "allow" } else { "deny" }, "message": message});
+                if *waiting {
+                    v["waiting"] = true.into();
+                }
+                v
             }
             Self::Line(v) => v.clone(),
             Self::Refused(error) => json!({"ok": false, "error": error}),
@@ -659,9 +695,13 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
         Ok(Authorized { identity, ask: Some(ask), .. }) => match hub() {
             Some(hub) => {
                 let d = crate::cards::request_permission(&hub, &identity, &ask.tool, &ask.input).await;
-                Response::Decision { allow: d.allow, message: d.message }
+                Response::Decision { allow: d.allow, message: d.message, waiting: d.waiting }
             }
-            None => Response::Decision { allow: false, message: "Approvals aren't available right now.".into() },
+            None => Response::Decision {
+                allow: false,
+                message: "Approvals aren't available right now.".into(),
+                waiting: false,
+            },
         },
         Ok(Authorized { identity, access: Some(call), .. }) => match (hub(), call) {
             (Some(hub), AccessCall::Request(req)) => {
@@ -874,6 +914,7 @@ mod tests {
             scope: TokenScope::Guest,
             session: "run:1:1:echo:sam".into(),
             project: Some("alpha".into()),
+            reply: None,
         }
     }
 
@@ -1031,7 +1072,7 @@ mod tests {
     #[test]
     fn an_owner_token_gets_neither_memory_search_nor_project_id() {
         let t = open_table();
-        let token = t.insert_ask(ask_identity("echo", "s1"), 5, Duration::from_secs(60)).unwrap();
+        let token = t.insert_ask(ask_identity("echo", "s1", None), 5, Duration::from_secs(60)).unwrap();
         for (method, args) in [("memorySearch", json!(["zebra"])), ("projectId", json!([]))] {
             let got = authorize(&t, &req(&token, method, &args), peer(5));
             assert!(matches!(got, Err(Response::Refused(ref why)) if why == "not authorized"), "{method}: {got:?}");
@@ -1132,7 +1173,7 @@ mod tests {
     #[test]
     fn an_owner_token_can_ask_for_a_card_but_reads_nothing() {
         let t = open_table();
-        let owner = ask_identity("echo", "s1");
+        let owner = ask_identity("echo", "s1", None);
         let token = t.insert_ask(owner.clone(), 5, Duration::from_secs(60)).unwrap();
         let line = json!({"token": token, "method": "requestPermission", "tool": "Bash", "input": {"command": "ls"}});
         let job = authorize(&t, line.to_string().as_bytes(), peer(5)).unwrap();
@@ -1157,7 +1198,7 @@ mod tests {
     #[test]
     fn only_an_owner_token_can_ask_for_a_key() {
         let t = open_table();
-        let owner = ask_identity("echo", "s1");
+        let owner = ask_identity("echo", "s1", None);
         let token = t.insert_ask(owner.clone(), 5, Duration::from_secs(60)).unwrap();
         let line = json!({"token": token, "method": "requestSecret", "service": "github", "purpose": "pull requests"});
         let job = authorize(&t, line.to_string().as_bytes(), peer(5)).unwrap();
@@ -1180,16 +1221,16 @@ mod tests {
         assert_ne!(session_of("sam", "t1"), session_of("sam", "t2"));
         // A person whose id is `owner`, or whose id ends like another's session starts, is not the owner's run or
         // another person.
-        assert_ne!(session_of("owner", "x"), ask_identity("echo", "x").session);
+        assert_ne!(session_of("owner", "x"), ask_identity("echo", "x", None).session);
         assert_ne!(session_of("a", "b:c"), session_of("a:b", "c"));
-        assert!(ask_identity("echo", "g:1:sam:x").session.starts_with("run:o:"));
+        assert!(ask_identity("echo", "g:1:sam:x", None).session.starts_with("run:o:"));
         assert!(session_of("owner", "x").starts_with("run:g:"));
     }
 
     #[test]
     fn an_api_issued_token_ends_with_its_process_or_its_time() {
         let t = open_table();
-        let (a, b) = (ask_identity("echo", "a"), ask_identity("echo", "b"));
+        let (a, b) = (ask_identity("echo", "a", None), ask_identity("echo", "b", None));
         let (run_a, run_b) = (a.run_id.clone(), b.run_id.clone());
         let ta = t.insert_ask(a, 7, Duration::from_secs(60)).unwrap();
         let tb = t.insert_ask(b, 8, Duration::from_millis(0)).unwrap();
@@ -1218,10 +1259,10 @@ mod tests {
     fn env_list_gets_a_token_only_with_a_person() {
         // No socket is listening in unit tests, so no token is issued: the list is left as it was.
         let mut owner = vec![("KITH_AGENT".into(), "echo".into())];
-        assert!(grant_for_env(&mut owner, "echo", "w1").is_none());
+        assert!(grant_for_env(&mut owner, "echo", "w1", None).is_none());
         assert_eq!(owner.len(), 1);
         let mut guest = vec![("KITH_PERSON".into(), "sam".into())];
-        assert!(grant_for_env(&mut guest, "echo", "w1").is_none());
+        assert!(grant_for_env(&mut guest, "echo", "w1", None).is_none());
         assert!(!guest.iter().any(|(k, _)| k == TOKEN_ENV));
     }
 

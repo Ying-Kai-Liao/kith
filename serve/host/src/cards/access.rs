@@ -256,6 +256,8 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
         resource: key,
         shown: format!("{}\n\nWhy: {reason}", target.shown()),
         deadline: now.saturating_add(cfg.expiry_ms),
+        reply_to: None,
+        asked_by: None,
     };
     let card = match hub.store.card_open(&new, now) {
         Ok(crate::store::Opened::New(c) | crate::store::Opened::Joined(c) | crate::store::Opened::Granted(c)) => c,
