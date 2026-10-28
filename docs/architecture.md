@@ -252,8 +252,7 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 - **6. Removal.** Built in a different shape from the design: a revoke goes through the cloud first and reaches every
   Mac before the next turn (`verification/revoke`).
 - **7. An ask that parks is a job.** Not built (below).
-- **8. Lifecycle owns every stop.** Every stop of a session goes through the session lifecycle (lease, intent first);
-  revoke doesn't wait for outstanding work.
+- **8. Lifecycle owns every stop.** Not built (below).
 
 **Planned (agreed, not built yet).**
 - Rules 1-2: one `approver()` used by every producer and the answer guard, with `answerableBy` stored on the card;
@@ -268,6 +267,8 @@ that lasts lives in kith-auth, where the owner can see and remove it.
 - No chat with the agent on this Mac: the card goes to the approver's inbox instead of "There is nowhere to ask".
 - Rule 5: host down, the kernel restarts the host job and retries the ask token once before refusing.
 - Removed ids are retired, so a new invite under the same name never inherits the old person's memory or logins.
+- Rule 8: every stop of a session goes through the session lifecycle (lease, intent first) once F12 is built;
+  today a stop is a claim release and a kill (`kith-sessions` has writer claims only).
 
 **Must stay true** (beyond A1-A9 and C1-C8): buttons iff the answer would be accepted; no card is stranded; a yes
 recorded before the deadline is in the session's next activation; every lasting grant is listed and removable;
