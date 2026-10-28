@@ -599,12 +599,17 @@ def run(agent, cmd):
 
 def wake_owed():
     """A terminal held its session while wakes for it queued (a reply, a card, a waiter): now that it let go, the kernel's
-    wake queue may deliver them without waiting for the next tick."""
+    wake queue may deliver them without waiting for the next tick. A kith ask this session made and didn't read the
+    answer of becomes one of them first (kith-ask --sweep, M8)."""
     d = reg_dir()
-    if d and any((d.parent.parent / 'sessions' / 'queue').glob('*.json')):
-        subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / 'kith-wake'), 'drain'],
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                         start_new_session=True)
+    if not d:
+        return
+    here = Path(__file__).resolve().parent
+    script = '"$0" "$1" --sweep; ls "$3"/*.json >/dev/null 2>&1 && exec "$0" "$2" drain'
+    subprocess.Popen(['/bin/sh', '-c', script, sys.executable, str(here / 'kith-ask'), str(here / 'kith-wake'),
+                      str(d.parent.parent / 'sessions' / 'queue')],
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
 
 
 def taken_note(agent, pid):

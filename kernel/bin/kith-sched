@@ -329,7 +329,12 @@ def tick():
     except Exception as e:   # housekeeping must never stop jobs from starting
         print('kith-sched: prune: %s' % e, file=sys.stderr)
     # The wake queue (kith-wake): owed turns of ended sessions start here once their writer lets go, and turns whose
-    # deliverer died (a restart) are answered or owed again.
+    # deliverer died (a restart) are answered or owed again. First, a kith ask answer whose asker's session has ended
+    # without reading it becomes such a turn (kith-ask --sweep).
+    try:
+        subprocess.run([sys.executable, str(KITH / 'bin/kith-ask'), '--sweep'], timeout=30, stdout=subprocess.DEVNULL)
+    except Exception as e:  # noqa: BLE001
+        print('kith-sched: ask sweep: %s' % e, file=sys.stderr)
     try:
         subprocess.run([sys.executable, str(KITH / 'bin/kith-wake'), 'drain'], timeout=30, stdout=subprocess.DEVNULL)
     except Exception as e:  # noqa: BLE001
