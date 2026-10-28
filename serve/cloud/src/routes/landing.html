@@ -71,6 +71,7 @@ nav .links{display:flex;gap:26px;font:500 15px var(--body);color:var(--soft);mar
 nav .links a{text-decoration:none}
 nav .links a:hover{color:var(--fg)}
 nav .btn{margin-left:auto}
+nav .btn + .btn{margin-left:-16px}
 
 /* hero: copy left, a live room right */
 .hero-b{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,600px);gap:64px;align-items:center;padding-block:clamp(40px,6vw,72px) 0}
@@ -225,6 +226,7 @@ footer .right{margin-left:auto}
 <nav aria-label="Main">
   <a class="brand" href="#top" id="top"><img src="img/mark.png" alt="">kith</a>
   <div class="links"><a href="#how">How it works</a><a href="#link">Send a link</a><a href="#builders">For builders</a><a href="https://github.com/Ying-Kai-Liao/kith">GitHub</a></div>
+  <a class="btn sm ghost" href="https://kithbot.app/join/">Sign in</a>
   <a class="btn sm" href="https://kithbot.app/download">Download</a>
 </nav>
 
