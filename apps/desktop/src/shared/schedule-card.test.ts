@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { RichCard } from './rich-card.ts'
-import { dayWord, liveKithJob, liveRoutine, quietEvery, scheduleView, shortPaths } from './schedule-card.ts'
+import { dayWord, liveKithJob, liveRoutine, quietEvery, scheduleFoot, scheduleView, shortPaths } from './schedule-card.ts'
 
 // Thursday 29 Oct 2026, local time.
 const at = (day: number, h: number, m: number) => new Date(2026, 9, day, h, m).getTime()
@@ -89,6 +89,34 @@ test('a snapshot that is missing pieces still draws', () => {
   assert.equal(v.name, 'Schedule')
   assert.equal(v.next, '—')
   assert.equal(v.last.text, 'Not run yet')
+})
+
+test('the foot: the owner gets Pause / Run now, Resume in ink when paused, and Running… until the run ends', () => {
+  const foot = (card: RichCard, extra: Partial<Parameters<typeof scheduleFoot>[1]> = {}) =>
+    scheduleFoot(view(card), { owner: true, ownerName: null, confirming: false, busy: null, ...extra })
+  assert.deepEqual(foot(job()), {
+    kind: 'buttons', toggle: { op: 'pause', label: 'Pause', ink: false }, run: { label: 'Run now', disabled: false }, busy: false,
+  })
+  const paused = foot(job({ paused: true }))
+  assert.equal(paused.kind === 'buttons' && paused.toggle.label, 'Resume')
+  assert.equal(paused.kind === 'buttons' && paused.toggle.ink, true)
+  const pressed = foot(job(), { busy: 'run' })
+  assert.deepEqual(pressed.kind === 'buttons' && pressed.run, { label: 'Running…', disabled: true })
+  const running = foot(job({ lastRun: at(29, 9, 15), lastStatus: 'running' }))
+  assert.deepEqual(running.kind === 'buttons' && running.run, { label: 'Running…', disabled: true })
+  const pausing = foot(job(), { busy: 'pause' })
+  assert.equal(pausing.kind === 'buttons' && pausing.run.disabled, true, 'one call at a time')
+})
+
+test('the foot: trash asks inside the card, and others read who can pause or run it', () => {
+  const card = job()
+  assert.deepEqual(scheduleFoot(view(card), { owner: true, ownerName: null, confirming: true, busy: null }), {
+    kind: 'confirm', question: "Remove Daily news? It won't run again, and its task goes with it.", removing: false,
+  })
+  const removing = scheduleFoot(view(card), { owner: true, ownerName: null, confirming: true, busy: 'remove' })
+  assert.equal(removing.kind === 'confirm' && removing.removing, true)
+  assert.deepEqual(scheduleFoot(view(card), { owner: false, ownerName: 'Kai', confirming: false, busy: null }), { kind: 'note', text: 'Kai can pause or run it.' })
+  assert.deepEqual(scheduleFoot(view(card), { owner: false, ownerName: null, confirming: true, busy: null }), { kind: 'note', text: 'The owner can pause or run it.' })
 })
 
 test('day words, quiet schedule words and short paths', () => {

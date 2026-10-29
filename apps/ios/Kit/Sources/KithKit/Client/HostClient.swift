@@ -438,6 +438,13 @@ public extension HostClient {
         return try await call("kithSetCallModel", Body(botId: botId, model: model), timeout: 60)
     }
 
+    /// A Schedule card's button on a Kith job (`kith-sched pause|resume|run|rm`): `op` is pause, resume, run or remove.
+    /// Owner only; the answer is hq's info read back.
+    func kithSchedule(botId: String, id: String, op: String) async throws -> KithInfoResponse {
+        struct Body: Encodable { var botId: String; var id: String; var op: String }
+        return try await call("kithSchedule", Body(botId: botId, id: id, op: op), timeout: 60)
+    }
+
     /// The grants ledger: every lasting grant for anyone but the owner, of one agent and/or one person. Owner only: a
     /// member gets 403, an older host 404.
     func accessLedger(agent: String? = nil, person: String? = nil) async throws -> AccessLedger {

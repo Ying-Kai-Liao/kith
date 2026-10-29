@@ -171,3 +171,24 @@ export function liveRoutine(listing: { routines: readonly RoutineState[]; runs: 
     error: routine.lastError ?? null,
   }
 }
+
+export type ScheduleOp = 'pause' | 'resume' | 'run' | 'remove'
+
+/** The card's foot: the owner's buttons (or the in-card remove confirm), or a line saying who can. */
+export type ScheduleFoot =
+  | { kind: 'note'; text: string }
+  | { kind: 'confirm'; question: string; removing: boolean }
+  | { kind: 'buttons'; toggle: { op: 'pause' | 'resume'; label: string; ink: boolean }; run: { label: string; disabled: boolean }; busy: boolean }
+
+/** `busy` is the button whose call is on its way; Run now reads "Running…" until the run ends. */
+export function scheduleFoot(view: ScheduleView, opts: { owner: boolean; ownerName: string | null; confirming: boolean; busy: ScheduleOp | null }): ScheduleFoot {
+  if (!opts.owner) return { kind: 'note', text: `${opts.ownerName || 'The owner'} can pause or run it.` }
+  if (opts.confirming) return { kind: 'confirm', question: `Remove ${view.name}? It won't run again, and its task goes with it.`, removing: opts.busy === 'remove' }
+  const running = view.last.running || opts.busy === 'run'
+  return {
+    kind: 'buttons',
+    toggle: view.paused ? { op: 'resume', label: 'Resume', ink: true } : { op: 'pause', label: 'Pause', ink: false },
+    run: { label: running ? 'Running…' : 'Run now', disabled: running || opts.busy !== null },
+    busy: opts.busy !== null,
+  }
+}

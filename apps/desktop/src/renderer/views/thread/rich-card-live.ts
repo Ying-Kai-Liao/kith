@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import type { Entry } from '@shared/models'
 import type { RichCard } from '@shared/rich-card'
-import { liveKithJob, liveRoutine, type ScheduleLive } from '@shared/schedule-card'
+import { liveKithJob, liveRoutine, type ScheduleLive, type ScheduleOp } from '@shared/schedule-card'
 import { Observable, useModel } from '../../lib/observable'
 import { useStore, useStoreRef } from '../../store/context'
 import type { BotStore } from '../../store/bot-store'
@@ -20,8 +20,13 @@ class RoutinePoll extends Observable {
 
   constructor(private readonly host: BotStore, private readonly botId: string) { super() }
 
-  load(): Promise<void> {
-    if (Date.now() - this.at < POLL_MS - 5000) return Promise.resolve()
+  /** `force` reads again after a button, past one already on its way (it may predate the change). */
+  async load(force = false): Promise<void> {
+    if (force) {
+      await this.inflight
+      this.at = 0
+    }
+    if (Date.now() - this.at < POLL_MS - 5000) return
     return (this.inflight ??= (async () => {
       try {
         this.listing = await (await this.host.ready()).call<RoutineListing>('routines', { botId: this.botId })
@@ -52,12 +57,21 @@ function loadKith(model: KithInfoStore) {
   void model.load()
 }
 
+/** A routine's buttons go through the routines API; a Kith job's through `kithSchedule`. */
+const ROUTINE_CALLS: Record<ScheduleOp, (botId: string, id: string) => [string, Record<string, unknown>]> = {
+  pause: (botId, id) => ['setRoutineEnabled', { botId, id, enabled: false }],
+  resume: (botId, id) => ['setRoutineEnabled', { botId, id, enabled: true }],
+  run: (botId, id) => ['runRoutine', { botId, id }],
+  remove: (botId, id) => ['deleteRoutine', { botId, id }],
+}
+
 /**
  * The job a Schedule card shows, read live for the owner: a Kith job from `kithInfo` schedules, a routine from the
- * `routines` listing. Undefined while nothing is read, or for anyone else (members get no job state), so the card shows
- * its snapshot; null when the job is gone.
+ * `routines` listing. `live` is undefined while nothing is read, or for anyone else (members get no job state), so the
+ * card shows its snapshot; null when the job is gone. `act` is the owner's buttons (null for anyone else); it throws why
+ * a call failed, and the card then shows the job read back.
  */
-export function useLiveSchedule(card: RichCard, entry: Entry): ScheduleLive | null | undefined {
+export function useLiveSchedule(card: RichCard, entry: Entry): { live: ScheduleLive | null | undefined; act: ((op: ScheduleOp) => Promise<void>) | null } {
   const host = useStoreRef()
   const store = useStore()
   const ref = card.ref ?? {}
@@ -79,7 +93,20 @@ export function useLiveSchedule(card: RichCard, entry: Entry): ScheduleLive | nu
     return () => clearInterval(timer)
   }, [kith, poll])
 
-  if (routine) return poll?.listing ? liveRoutine(poll.listing, routine) : undefined
   const id = typeof ref.id === 'string' ? ref.id : null
-  return kith?.info && id ? liveKithJob(kith.info.schedules, id) : undefined
+  if (routine) {
+    const act = routineBot && poll
+      ? async (op: ScheduleOp) => {
+          const [method, args] = ROUTINE_CALLS[op](routineBot, routine)
+          try {
+            await (await host.ready()).call(method, args)
+          } finally {
+            await poll.load(true)
+          }
+        }
+      : null
+    return { live: poll?.listing ? liveRoutine(poll.listing, routine) : undefined, act }
+  }
+  const act = kith && id ? (op: ScheduleOp) => kith.schedule(id, op) : null
+  return { live: kith?.info && id ? liveKithJob(kith.info.schedules, id) : undefined, act }
 }
