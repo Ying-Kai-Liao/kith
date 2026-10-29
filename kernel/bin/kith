@@ -271,17 +271,17 @@ mkdir -p "$home/memory/projects" "$home/memory/sessions" "$home/memory/shared"
 # their outputs in files/people/<id>/ and who they are in <state>/people/<id>.md (the owner's: user.md). memory/shared/
 # is for every member: the craft, never a person.
 mem=$home/memory files=$home/files person_file=$KITH_STATE/user.md work="" ctmp="" ctmp_note=""
+unset KITH_WORK
 if [[ $p_owner == 0 ]]; then
   [[ $p_id =~ ^[a-z][a-z0-9-]*$ ]] || { echo "kith: bad person id '$p_id' from kith-auth" >&2; exit 3; }
   mem=$home/memory/people/$p_id files=$home/files/people/$p_id person_file=$KITH_STATE/people/$p_id.md
   mkdir -p "$mem/projects" "$mem/sessions" "$files" "$KITH_STATE/people"
-  # Their own uv cache: the shared one is the owner's too, and a package planted in it would run in the owner's next `uv run`.
-  export UV_CACHE_DIR=$files/.uv-cache; mkdir -p "$UV_CACHE_DIR"
-  # Their workspace: temp files and tool caches (npm, npx, Puppeteer's Chrome) go in their own folder, since /tmp and the
-  # owner's caches stay closed to the box.
-  work=$files/.work; mkdir -p "$work/tmp" "$work/cache"
-  export TMPDIR=$work/tmp XDG_CACHE_HOME=$work/cache npm_config_cache=$work/cache/npm \
-    PUPPETEER_CACHE_DIR=$work/cache/puppeteer NODE_USE_ENV_PROXY=1
+  # Their workspace: temp files and tool caches (uv, npm, npx, Puppeteer's Chrome) go in their own folder, since /tmp and
+  # the owner's caches stay closed to the box. Only their sandboxed shell is pointed there (lib/guest-env.sh, which Claude
+  # Code sources before each Bash command): this process, Claude Code, its hooks and MCP servers run outside the box, and
+  # would run a package or a Chrome the guest planted in these folders.
+  work=$files/.work; mkdir -p "$work/tmp" "$work/cache/uv"
+  export KITH_WORK=$work CLAUDE_ENV_FILE=$KITH/lib/guest-env.sh
   # Claude Code's own temp dir (in /tmp every command's cwd file was refused) must be short (kith_paths.py guest_tmp),
   # so it is <machine>/run/t/<p>, theirs alone.
   ctmp=$(python3 "$KITH/lib/kith_paths.py" --guest-tmp "$p_id") || ctmp=""
@@ -716,8 +716,7 @@ if os.environ["P_OWNER"] == "0":
             path = "/".join(keep)
             if path.startswith("/") and len(path) > 1:
                 deny_read += both(path)
-    uv_cache = os.environ.get("UV_CACHE_DIR") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "uv")
-    allow_write = [d.strip() for d in os.environ["WRITABLE"].split("\n") if d.strip()] + [uv_cache] \
+    allow_write = [d.strip() for d in os.environ["WRITABLE"].split("\n") if d.strip()] \
         + [d for d in (os.environ["WORK"], os.environ["CTMP"]) if d]
     # The host socket has a fixed place, so it is allowed whether or not the caller put KITH_RUN_SOCKET in this process
     # (the host adds it to the run environment after the launch JSON is built); one that differs is allowed as well.
@@ -820,9 +819,9 @@ for d in os.environ["READ_DIRS"].split("\n"):
     if d:
         allow += both(os.path.abspath(d))
 # what a kernel helper needs to start: uv, the pythons it manages, the kith program itself. The run has a uv cache of
-# its own (UV_CACHE_DIR above); the shared one of the owner (~/.cache/uv, ~/Library/Caches/uv) stays closed, like
-# the rest of the home folder.
-for d in (os.environ.get("UV_CACHE_DIR"), os.environ.get("WORK"), home + "/.local/share/uv", home + "/.local/bin"):
+# its own (in WORK, lib/guest-env.sh); the shared one of the owner (~/.cache/uv, ~/Library/Caches/uv) stays closed,
+# like the rest of the home folder.
+for d in (os.environ.get("WORK"), home + "/.local/share/uv", home + "/.local/bin"):
     if d:
         allow += both(d)
 if os.environ["CTMP"]:   # the Claude Code temp folder of theirs (above), never run/t around it
@@ -892,8 +891,8 @@ s["permissions"]["blockReadsOutsideWorkingDirectories"] = True
 # The tool reads the owner global config (name, email, credential helpers), which sits in the closed home folder and
 # makes it fail outright when it cannot be read: point it at nothing instead.
 s.setdefault("env", {})["GIT_CONFIG_GLOBAL"] = "/dev/null"
-for k in ("UV_CACHE_DIR", "TMPDIR", "XDG_CACHE_HOME", "npm_config_cache", "PUPPETEER_CACHE_DIR", "NODE_USE_ENV_PROXY"):
-    if os.environ.get(k):   # their own cache and workspace, also for a launch-json run whose environment comes from the host
+for k in ("KITH_WORK", "CLAUDE_ENV_FILE"):
+    if os.environ.get(k):   # their workspace, for their sandboxed shell only (lib/guest-env.sh); also for a launch-json run
         s["env"][k] = os.environ[k]
 json.dump(s, open(f, "w"), indent=1)' "$runs/$$.settings.json"
 fi
@@ -950,7 +949,7 @@ emit_launch() {
   [[ $harness == claude ]] || allowed_tools=""
   # A guest's workspace (above): Claude Code reads its temp dir from the process environment, not the settings, so the host
   # has to start it with these.
-  local work_env=""; [[ $p_owner == 1 ]] || work_env="UV_CACHE_DIR TMPDIR CLAUDE_CODE_TMPDIR XDG_CACHE_HOME npm_config_cache PUPPETEER_CACHE_DIR NODE_USE_ENV_PROXY"
+  local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE"
   ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
     BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib \

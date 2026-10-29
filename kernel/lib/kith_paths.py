@@ -198,6 +198,32 @@ def guest_tmp(pid):
     return None
 
 
+# A guest's workspace (lib/guest-env.sh sets these for their sandboxed shell only): temp files and tool caches in a folder
+# they write. A process outside the sandbox never gets them, nor any other path into their folders (guest_scrub).
+GUEST_WORK_VARS = ('TMPDIR', 'XDG_CACHE_HOME', 'UV_CACHE_DIR', 'npm_config_cache', 'PUPPETEER_CACHE_DIR', 'NODE_USE_ENV_PROXY')
+
+
+def in_guest_folders(path, pid, extra=()):
+    """Whether `path` is, by real path, in a folder `pid`'s runs write in: their files folder of any agent
+    (<agents>/<agent>/files/people/<pid>), their Claude Code temp folder, or one of `extra` (folders granted for writing)."""
+    fold = (lambda s: s.lower()) if os.uname().sysname == 'Darwin' else (lambda s: s)
+    real = fold(os.path.realpath(path))
+    agents = fold(os.path.realpath(paths()['KITH_AGENTS']))
+    parts = Path(os.path.relpath(real, agents)).parts
+    if parts[:1] != ('..',) and len(parts) >= 4 and parts[1:4] == ('files', 'people', fold(pid)):
+        return True
+    roots = [fold(os.path.realpath(r)) for r in (guest_tmp(pid), *extra) if r]
+    return any(real == r or real.startswith(r.rstrip('/') + '/') for r in roots)
+
+
+def guest_scrub(env, pid, extra=()):
+    """`env` without any variable that names a path in `pid`'s writable folders (any entry of a list such as PATH counts):
+    a process outside their sandbox must not take a temp file, a cache or a program from where they write."""
+    def names(v):
+        return any(x.startswith('/') and in_guest_folders(x, pid, extra) for x in v.split(os.pathsep))
+    return {k: v for k, v in env.items() if not names(v)}
+
+
 def _tmp_record(d):
     """Whose run/t/<name> is: run/t-who/<name>, out of the guest's reach (only run/t/<name> is theirs to write)."""
     return Path(os.path.dirname(d) + '-who') / os.path.basename(d)

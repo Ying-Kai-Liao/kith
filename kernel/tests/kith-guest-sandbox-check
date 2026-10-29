@@ -70,8 +70,33 @@ print(json.load(sys.stdin).get("env",{}).get("CLAUDE_CODE_ARTIFACT","unset"))'; 
 expect "owner: launch env enables the Artifact tools" "$(launch_env)" 1
 expect "owner: no Bash hook that allows" "$(q "$OWNER" "any(h.get('matcher') == 'Bash' for h in s.get('hooks', {}).get('PreToolUse', []))")" False
 lj() { (cd "$KITH_HOME/agents/echo" && "$KITH" echo --launch-json 2>/dev/null) | python3 -c "import json,sys; j=json.load(sys.stdin); e=j.get('env',{}); print($1)"; }
-expect "owner: no workspace env, no limits note" "$(lj "[k for k in ('TMPDIR','CLAUDE_CODE_TMPDIR','npm_config_cache','NODE_USE_ENV_PROXY') if k in e], '<limits>' in j['system_prompt']")" "[] False"
-expect "guest: the launch env carries the workspace" "$(KITH_PERSON=guest lj "e.get('TMPDIR','').endswith('/people/guest/.work/tmp'), e.get('npm_config_cache','').endswith('/.work/cache/npm'), e.get('NODE_USE_ENV_PROXY')")" "True True 1"
+WORKVARS="('TMPDIR','XDG_CACHE_HOME','UV_CACHE_DIR','npm_config_cache','PUPPETEER_CACHE_DIR','NODE_USE_ENV_PROXY')"
+expect "owner: no workspace env, no limits note" "$(lj "[k for k in $WORKVARS + ('CLAUDE_CODE_TMPDIR','KITH_WORK','CLAUDE_ENV_FILE') if k in e], '<limits>' in j['system_prompt']")" "[] False"
+# The guest writes its workspace, so only its sandboxed shell is pointed there (CLAUDE_ENV_FILE): Claude Code, its hooks
+# and MCP servers (kith-auth exec passes its environment on) run outside the box, and would run an npx package or a
+# Chrome planted in it. The launch env names the workspace once, as KITH_WORK, which only lib/guest-env.sh reads.
+expect "guest: the launch env points its shell at the workspace and sets none of it for the run" "$(KITH_PERSON=guest lj "[k for k in $WORKVARS if k in e], e.get('KITH_WORK','').endswith('/people/guest/.work'), e.get('CLAUDE_ENV_FILE','').endswith('/lib/guest-env.sh')")" "[] True True"
+expect "guest: nothing in the launch env but KITH_WORK is inside their folder" "$(KITH_PERSON=guest lj "sorted(k for k, v in e.items() if '/people/guest' in str(v))")" "['KITH_WORK']"
+expect "guest: CLAUDE_ENV_FILE gives their shell the workspace" "$(KITH_WORK=/w sh -c '. "$1"; echo "$TMPDIR $XDG_CACHE_HOME $UV_CACHE_DIR $npm_config_cache $PUPPETEER_CACHE_DIR $NODE_USE_ENV_PROXY"' _ "$KERNEL/lib/guest-env.sh")" "/w/tmp /w/cache /w/cache/uv /w/cache/npm /w/cache/puppeteer 1"
+expect "owner: CLAUDE_ENV_FILE changes nothing without KITH_WORK" "$(env -u KITH_WORK TMPDIR=/t sh -c '. "$1"; echo "$TMPDIR ${npm_config_cache:-unset}"' _ "$KERNEL/lib/guest-env.sh")" "/t unset"
+expect "guest: guest-env.sh sets exactly the workspace vars kith_paths.py names" "$(env -i KITH_WORK=/w /bin/sh -c '. "$1"; env' _ "$KERNEL/lib/guest-env.sh" | python3 -c "
+import sys; sys.path.insert(0, '$KERNEL/lib'); from kith_paths import GUEST_WORK_VARS
+names = set(l.split('=', 1)[0] for l in sys.stdin.read().splitlines()) - set(['KITH_WORK', 'PWD', 'SHLVL', '_'])
+print(names == set(GUEST_WORK_VARS))")" True
+# A guest's MCP server starts through kith-auth exec, outside their sandbox: no variable that leads into a folder they
+# write reaches it (by value, each entry of a list too), and it doesn't start in one of those folders.
+mkdir -p "$KITH_HOME/agents/echo/role/services" "$KITH_HOME/agents/echo/files/people/guest/proj"
+printf '{"kind": "mcp", "secrets": [], "mcp": {"command": "env"}}\n' > "$KITH_HOME/agents/echo/role/services/envsvc.json"
+python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); a["profiles"]["envsvc/t"]={}; json.dump(a,open(sys.argv[1],"w"))' "$KITH_AUTH"
+"$AUTH" grant echo@guest envsvc envsvc/t >/dev/null 2>&1; "$AUTH" grant echo envsvc envsvc/t >/dev/null 2>&1
+GW=$KITH_HOME/agents/echo/files/people/guest/.work
+exec_env() { (cd "$KITH_HOME/agents/echo/files/people/guest/proj" && env "$@" TMPDIR="$GW/tmp" XDG_CACHE_HOME="$GW/cache" UV_CACHE_DIR="$GW/cache/uv" \
+  npm_config_cache="$GW/cache/npm" PUPPETEER_CACHE_DIR="$GW/cache/puppeteer" KEEP_ME=/usr/lib LIST_VAR="/usr/bin:$GW/bin" \
+  "$AUTH" exec --for echo envsvc -- env) | python3 -c '
+import sys; e = dict(l.split("=", 1) for l in sys.stdin.read().splitlines() if "=" in l)
+print([k for k in ("TMPDIR", "XDG_CACHE_HOME", "UV_CACHE_DIR", "npm_config_cache", "PUPPETEER_CACHE_DIR", "LIST_VAR") if k in e], e.get("KEEP_ME"), "/people/" in e.get("PWD", ""))'; }
+expect "guest: kith-auth exec passes no path into their folders and leaves them as its working folder" "$(exec_env KITH_PERSON=guest)" "[] /usr/lib False"
+expect "owner: kith-auth exec passes its environment on as before" "$(exec_env -u KITH_PERSON)" "['TMPDIR', 'XDG_CACHE_HOME', 'UV_CACHE_DIR', 'npm_config_cache', 'PUPPETEER_CACHE_DIR', 'LIST_VAR'] /usr/lib True"
 expect "guest: told its limits at launch" "$(KITH_PERSON=guest lj "all(x in j['system_prompt'] for x in ('<limits>', 'request_access', 'ask_helper', '/people/guest'))")" True
 # Claude Code keeps its own temp folder only when <dir>/claude-<uid> fits in 44 bytes; this test's folders are longer, so
 # the run gets none (never /tmp) and its limits note says why.
@@ -86,7 +111,8 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: no network but the fixed host socket (both spellings), even with no KITH_RUN_SOCKET" "$(q "$S" "sb['network']['allowUnixSockets'] == ['$T/linked state/run/host.sock', '$T/real state/run/host.sock']")" True
   expect "$who: loopback servers (a render preview), no domains beyond the allowlist" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(True, False)"
   W=$KITH_HOME/agents/echo/files/people/$who/.work
-  expect "$who: the workspace is writable, tool caches and temp files in it" "$(q "$S" "'$W' in aw and (s['env']['TMPDIR'], s['env']['XDG_CACHE_HOME'], s['env']['npm_config_cache'], s['env']['PUPPETEER_CACHE_DIR'], s['env']['NODE_USE_ENV_PROXY']) == ('$W/tmp', '$W/cache', '$W/cache/npm', '$W/cache/puppeteer', '1')")" True
+  expect "$who: the workspace is writable, given to the shell only" "$(q "$S" "'$W' in aw and s['env'].get('KITH_WORK') == '$W' and s['env'].get('CLAUDE_ENV_FILE','').endswith('/lib/guest-env.sh')")" True
+  expect "$who: the settings env (Claude Code, hooks, MCP servers) holds no workspace var and no path inside their folder but KITH_WORK" "$(q "$S" "[k for k in $WORKVARS if k in s['env']], sorted(k for k, v in s['env'].items() if '/people/$who' in str(v))")" "([], ['KITH_WORK'])"
   expect "$who: nothing of <machine>/run is readable or writable but its socket" "$(q "$S" "not any('/run/t' in a or a.rstrip('/').endswith('/run') for a in aw + fs['allowRead'])")" True
   expect "$who: shell commands in the sandbox run without asking (a PreToolUse Bash hook allows)" "$(q "$S" "any(h.get('matcher') == 'Bash' and 'allow' in h['hooks'][0]['command'] for h in s['hooks']['PreToolUse'])")" True
   for root in "$T/linked state" "$T/real state"; do
@@ -105,7 +131,7 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: the denies stay on top of the allowlist (index not allowed)" "$(q "$S" "not any(a == '$T/real state/index' or a == '$T/real state' for a in fs['allowRead'])")" True
   expect "$who: global config of the owner is not read" "$(q "$S" 's["env"]["GIT_CONFIG_GLOBAL"]')" /dev/null
   expect "$who: the link to the state folder is itself readable" "$(q "$S" "'$T/linked state' in fs['allowRead']")" True
-  expect "$who: the owner's uv caches are not readable, its own one is" "$(q "$S" "not any(a in fs['allowRead'] for a in ['$HOME/.cache/uv', '$HOME/Library/Caches/uv']) and s['env']['UV_CACHE_DIR'] in fs['allowRead']")" True
+  expect "$who: the owner's uv caches are not readable, its own one (in the workspace) is" "$(q "$S" "not any(a in fs['allowRead'] for a in ['$HOME/.cache/uv', '$HOME/Library/Caches/uv']) and s['env']['KITH_WORK'] in fs['allowRead']")" True
   expect "$who: rule W: denyWrite has the run-later paths at any depth, by both spellings, and the secrets" "$(q "$S" "all(x in fs['denyWrite'] for x in ['$KITH_HOME/agents/echo/files/people/$who/.git/hooks', '$KITH_HOME/agents/echo/files/people/$who/**/.git/hooks', '$KITH_HOME/agents/echo/files/people/$who/**/.git/hooks/**', '$KITH_HOME/agents/echo/files/people/$who/CLAUDE.md', '$KITH_HOME/agents/echo/files/people/$who/**/.claude', '$HOME/.zshrc', '$HOME/Library/LaunchAgents', '$HOME/.local/bin', '/opt/homebrew', '$T/real state/secrets', '$T/real state/serve'])")" True
   expect "$who: denyWrite never covers a folder the run writes in" "$(q "$S" "not any(w == a or a.startswith(w + '/') for w in fs['denyWrite'] for a in aw)")" True
   expect "$who: the file tools get the same list as Edit denies (deny beats allow), and the read-only folders are closed to Edit" "$(q "$S" "all(any(r == x for r in s['permissions']['deny']) for x in ['Edit(/$KITH_HOME/agents/echo/files/people/$who/**/.git/hooks/**)', 'Edit(/$KITH_HOME/agents/echo/files/people/$who/CLAUDE.md)', 'Edit(/$HOME/.zshrc)', 'Edit(/$KERNEL/**)', 'Edit(/$KITH_STATE/people/**)'])")" True
@@ -147,9 +173,9 @@ done
 expect "guest: the agents .git is not in allowRead" "$(q "$S" "not any(a == '$KITH_HOME/agents/.git' or '$KITH_HOME/agents/.git'.startswith(a + '/') for a in fs['allowRead'])")" True
 expect "guest: Edit denied on the kernel, the pinned package, the live role and the people files" "$(q "$S" "all(any(r == 'Edit(/%s/**)' % x for r in s['permissions']['deny']) for x in ['$KERNEL', '$KITH_HOME/agents/echo/role', '$KITH_STATE/people'])")" True
 expect "guest: no write to skills/learned or the shared project files" "$(q "$S" "not any('skills/learned' in a or '/projects' in a for a in aw) and not any('skills/learned' in r or '/projects' in r for r in s['permissions']['allow'])")" True
-expect "guest: own uv cache, writable, in the run env; the shared one is not" "$(q "$S" "s['env'].get('UV_CACHE_DIR','').endswith('/files/people/guest/.uv-cache') and s['env']['UV_CACHE_DIR'] in aw and not any(a.endswith('/.cache/uv') for a in aw)")" True
+expect "guest: own uv cache writable (in the workspace); the shared one is not" "$(q "$S" "s['env'].get('KITH_WORK','').endswith('/files/people/guest/.work') and s['env']['KITH_WORK'] in aw and not any(a.endswith('/.cache/uv') for a in aw)")" True
 OWNER=$(settings)
-expect "owner: skills/learned and the project files are writable, no uv cache of its own" "$(q "$OWNER" "any('skills/learned' in r for r in s['permissions']['allow']) and any('/projects/**' in r for r in s['permissions']['allow']) and 'UV_CACHE_DIR' not in s.get('env', {})")" True
+expect "owner: skills/learned and the project files are writable, no uv cache of its own" "$(q "$OWNER" "any('skills/learned' in r for r in s['permissions']['allow']) and any('/projects/**' in r for r in s['permissions']['allow']) and not set(['UV_CACHE_DIR', 'KITH_WORK', 'CLAUDE_ENV_FILE']) & set(s.get('env', {}))")" True
 expect "owner: no Edit deny on the kernel" "$(q "$OWNER" "not any(r == 'Edit(/%s/**)' % '$KERNEL' for r in s['permissions']['deny'])")" True
 # the working directory: the home folder or a parent of a folder the run gets moves to the person's files folder
 CWDJ=$(cd "$HOME" && KITH_PERSON=guest "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["cwd"])')
@@ -341,7 +367,8 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
     echo "r net-curl curl -sS -m 5 https://example.com"
     echo "r read-owner-uv-cache ls '$REAL_HOME/.cache/uv'"   # the owner's uv cache (uv's default place)
     echo "r uv-run uv run --no-project python -c pass"
-    echo "r uv-own-cache test \"\$(uv cache dir)\" = '$SLICE/.uv-cache'"
+    echo "r uv-own-cache test \"\$(uv cache dir)\" = '$SLICE/.work/cache/uv'"
+    echo "r shell-workspace test \"\$TMPDIR \$npm_config_cache\" = '$SLICE/.work/tmp $SLICE/.work/cache/npm'"
   } > "$SLICE/probe.sh"
   (cd "$T/proj" && KITH_MODEL=${KITH_REAL_MODEL:-haiku} KITH_PERSON=guest KITH_RUN_SOCKET="$T/run s.sock" KITH_RUN_TOKEN=probe HOME=$REAL_HOME PATH=${PATH#"$T/bin:"} \
      perl -e 'alarm 240; exec @ARGV' "$KITH" echo "Run exactly this one Bash command and then reply done: bash '$SLICE/probe.sh'" < /dev/null > "$T/real.out" 2> "$T/real.err")
@@ -349,7 +376,7 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
   rexpect() { local got; got=$(sed -n "s/^$1 //p" "$SLICE/probe.out" 2>/dev/null); expect "real: $1 $2" "${got:-none}" "$2"; }
   for n in read-ssh read-keychains read-home read-backup read-other-slice read-state-secrets \
            write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other read-owner-uv-cache; do rexpect $n denied; done
-  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run uv-run uv-own-cache; do rexpect $n ok; done
+  for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run uv-run uv-own-cache shell-workspace; do rexpect $n ok; done
   rm -f "$REAL_HOME/.zshrc-probe-should-not-exist"
 
   # --- escape cards (F11 step 2b): a denied folder is readable after a yes-once grant, in the next launch only ----------------

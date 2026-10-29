@@ -147,7 +147,7 @@ KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
 SERVICES = KITH / 'services'
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
-from kith_paths import guest_sandbox, guest_tmp_remove, paths, sync_env  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import guest_sandbox, guest_scrub, guest_tmp_remove, in_guest_folders, paths, sync_env  # noqa: E402  the one place that knows where kith's folders are
 STATE_ROOT, AGENTS = paths()['KITH_STATE'], paths()['KITH_AGENTS']  # <home>/state, <home>/agents
 
 
@@ -676,6 +676,15 @@ def cmd_exec(args):
     auth = load_auth()
     profile = grant_for(auth, agent, svc)
     env = sync_env({**os.environ, **settings(auth, agent, svc), **secrets(auth, svc, profile, agent)})
+    person = acting(auth)
+    if not is_owner(auth, person) and person != '-':
+        # A guest's server runs outside their sandbox: nothing in its environment or its working folder may lead into a
+        # folder they write (a planted npx package, Chrome, .npmrc or node_modules would run as the owner).
+        extra = access_of(row_of(auth, agent, person) or {})['write']
+        env = guest_scrub(env, person, extra)
+        if in_guest_folders(os.getcwd(), person, extra):
+            os.chdir(Path.home())
+        env['PWD'] = os.getcwd()
     audit(agent, svc, profile, 'exec')
     os.execvpe(cmd[0], cmd, env)
 
