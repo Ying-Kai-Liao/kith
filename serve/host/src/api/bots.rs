@@ -274,7 +274,9 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 tracing::warn!(%error, bot, "couldn't mark bot read after send");
             }
             if row.config.is_group() {
-                crate::chat::group::start(hub, &row.config, lane);
+                // The sender grants the turn budget (rule C1); a plain message gets today's ten.
+                let budget = crate::chat::group::budget_of(b["budget"].as_i64());
+                crate::chat::group::start(hub, &lane, budget, b["asMember"].as_str().unwrap_or("owner"))?;
             } else {
                 hub.send_cmd(bot, Cmd::Send { lane: turn_lane, entry_id: e.id.clone(), text: prompt, route: true })?;
             }
@@ -331,7 +333,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
         "stop" => {
             let bot = str_arg(&b, "botId")?;
             match hub.store.bot(bot)? {
-                Some(row) if row.config.is_group() => hub.groups.stop(hub, bot),
+                Some(row) if row.config.is_group() => crate::chat::group::stop(hub, bot),
                 _ if b["all"] == true => hub.send_cmd(bot, Cmd::Stop)?,
                 _ => {
                     let lane =
@@ -393,8 +395,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             }
             // The card store decides whether the answer counts (A1) and records it; an answer for a process that is up
             // goes on to the bot's actor, which holds the request id.
-            let by = b["asPerson"].as_str().unwrap_or("owner");
-            match crate::cards::answer(hub, entry_id, option_id.as_deref(), by)? {
+            match crate::cards::answer(hub, entry_id, option_id.as_deref(), b["asPerson"].as_str())? {
                 crate::cards::Outcome::Closed => json!({"closed": true}),
                 crate::cards::Outcome::Recorded { forward } => {
                     if forward

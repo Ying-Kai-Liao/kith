@@ -8,7 +8,8 @@
 #   kith account add|list|remove ...                     extra Claude / Codex logins for that chain, one folder each (kith-account)
 #   kith account use <id> [--agent A] | --reset           the main account an agent's runs use; the chain sits on top of it
 #   kith ls [--json]                list agents (--json: name, description, home, model, effort, harness, for programs)
-#   kith who <words>                which agent owns this work: skills, tools, "Not yours" lines searched (kith-who)
+#   kith send-to <service> "text" [--body FILE|-] [--profile P] [--for A] [--json]   push to a bot's webhook (grok); "sent" = a run started (success:true), not a reply; Grok caps 200 runs/h per routine, silently (kith-send-to)
+#   kith who <words>               which agent owns this work: skills, tools, "Not yours" lines searched (kith-who)
 #   kith <agent> [-p ID] [-m MODEL] [-e EFFORT] [-H HARNESS] [--permission-mode MODE|--bypass] [task...]  interactive without a task, one-shot with one
 #   kith <agent> --resume|-r THREAD   pick up in this terminal a thread started in the app, or a Claude session id; -r alone: pick from the recent ones; -c: the latest begun here (kith-sessions)
 #   kith <agent> --print [...]      show the assembled system prompt, don't run
@@ -111,6 +112,7 @@ case $1 in
   recall)             shift; exec "$KITH/bin/kith-recall" "${@:---help}" ;;
   summarise|forget)   exec "$KITH/bin/kith-recall" "$@" ;;
   memory)             shift; exec "$KITH/bin/kith-memory" "${@:---help}" ;;
+  send-to)            shift; exec "$KITH/bin/kith-send-to" "$@" ;;
   who)                shift; exec "$KITH/bin/kith-who" "${@:---help}" ;;
   bug)                shift; exec "$KITH/bin/kith-bug" "${@:---help}" ;;
   project)            shift; exec "$KITH/bin/kith-project" "$@" ;;
@@ -217,8 +219,18 @@ if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/
 nested=0; [[ -n ${KITH_AGENT:-} ]] && nested=1   # started by another run (KITH_AGENT is exported further down)
 caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trusted=0 p_mode="" p_model="" p_deny="" p_line="" p_env_names="" p_rooms=""
 if [[ -n ${KITH_PERSON:-} ]]; then
-  res=$("$KITH/bin/kith-auth" resolve "$agent" ${caller:+--via "$caller" --take-once}) \
-    || { echo "kith: can't check whether ${KITH_PERSON} may use $agent (kith-auth resolve failed)" >&2; exit 1; }
+  # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
+  # kith-auth says held, a revoke made in the app or on another Mac may not be here yet, so ask again every 2 s for up
+  # to KITH_SYNC_HOLD s (default 120), then refuse; as the channels' resolve_in_sync, for every spawn (a guest's helper,
+  # a schedule). kith-auth never holds the owner.
+  hold=${KITH_SYNC_HOLD:-120}; [[ $hold =~ ^[0-9]+$ ]] || hold=120; held_until=$((SECONDS + hold))
+  while :; do
+    res=$("$KITH/bin/kith-auth" resolve "$agent" ${caller:+--via "$caller" --take-once}) \
+      || { echo "kith: can't check whether ${KITH_PERSON} may use $agent (kith-auth resolve failed)" >&2; exit 1; }
+    RES=$res python3 -c 'import json, os, sys; sys.exit(0 if json.loads(os.environ["RES"]).get("held") else 1)' || break
+    (( SECONDS < held_until )) || { echo "kith: out of sync with the Kith cloud, so ${KITH_PERSON} can't use $agent on this computer yet; try again in a minute" >&2; exit 3; }
+    sleep 2
+  done
   eval "$(RES=$res python3 -c '
 import json, os, re, shlex, sys
 r = json.loads(os.environ["RES"])
@@ -546,6 +558,9 @@ fi
 # so a card the run parks on answers that ask later (kith-ask). The owner's runs only; a run this one starts never has it.
 ask_id=${KITH_LAUNCH_ASK_ID:-}
 unset KITH_LAUNCH_ASK_ID KITH_ASK_ID HQ_LAUNCH_ASK_ID HQ_ASK_ID
+# Where to note the session this one-shot runs in once it holds it (kith ask --bg, so `kith ask --to` can reach it).
+sid_file=${KITH_LAUNCH_SID_FILE:-}
+unset KITH_LAUNCH_SID_FILE
 [[ $p_owner == 1 && -z ${KITH_PERSON:-} && -n $ask_id ]] && export KITH_ASK_ID=$ask_id
 if [[ $launch -eq 1 ]]; then
   case $harness in claude|codex) ;; *) echo "kith: $agent runs on $harness; --launch-json covers claude and codex only for now" >&2; exit $([[ -n $backup ]] && echo 4 || echo 1) ;; esac
@@ -1086,6 +1101,7 @@ if [[ $# -gt 0 ]]; then
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
   [[ -z $csid ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
   # A permission prompt in this run asks for approval through a card (--permission-prompt-tool) instead of being refused.
   # A guest run was given KITH_RUN_TOKEN/KITH_RUN_SOCKET by the host, an owner run KITH_ASK_*, or gets them here: the
   # host binds the token to this pid (exec keeps it) and to the session the run continues, or a --session-id chosen now.

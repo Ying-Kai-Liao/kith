@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 8;
+const SCHEMA: i64 = 11;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -18,6 +18,12 @@ const SCHEMA: i64 = 8;
 /// 6: bot guests (docs/kith-bot-guests.md 4.3): the bots, their invites and conversations, and `people.auto_bots`.
 /// 7: approval cards (host card store): what a run asked for beyond its limits, and what became of it.
 /// 8: a card asked from a `kith ask` run answers that ask (`cards.reply_to`, `cards.asked_by`).
+/// 9: who may answer a card (`cards.answerable_by`, NULL is the owner) and whether what it names was within the
+/// asker's grants when it opened (`cards.in_grants`), so the approver can be derived again later.
+/// 10: when a card's resume reached a turn that started (`cards.applied_at`, M5); a claimed resume without it is owed
+/// again after a restart. Resumes claimed before this version count as applied.
+/// 11: room conversations (`conversations`): a person's message to a group opens one with a turn budget; its queue and
+/// what is left are written with each step so a restart resumes it, and its epoch (per lane) only grows.
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
         c.query_row("SELECT CAST(v AS INTEGER) FROM kv WHERE k = 'schema'", [], |r| r.get(0)).optional()?.unwrap_or(0);
@@ -39,7 +45,56 @@ fn migrate(c: &Connection) -> Result<()> {
     if version < 7 {
         migrate_7(c)?;
     }
-    migrate_8(c)
+    if version < 8 {
+        migrate_8(c)?;
+    }
+    if version < 9 {
+        migrate_9(c)?;
+    }
+    if version < 10 {
+        migrate_10(c)?;
+    }
+    migrate_11(c)
+}
+
+fn migrate_11(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         CREATE TABLE IF NOT EXISTS conversations(
+            id TEXT PRIMARY KEY, chat TEXT NOT NULL, thread TEXT NOT NULL DEFAULT '', epoch INTEGER NOT NULL,
+            budget INTEGER NOT NULL, left INTEGER NOT NULL,
+            state TEXT NOT NULL CHECK (state IN ('open','ended','stopped')),
+            opened_by TEXT NOT NULL, opened_at INTEGER NOT NULL, last_at INTEGER NOT NULL,
+            queue TEXT NOT NULL DEFAULT '{}');
+         CREATE UNIQUE INDEX IF NOT EXISTS conversations_open ON conversations(chat, thread) WHERE state = 'open';
+         CREATE INDEX IF NOT EXISTS conversations_lane ON conversations(chat, thread, epoch);
+         INSERT INTO kv(k, v) VALUES('schema', '11') ON CONFLICT(k) DO UPDATE SET v = '11';
+         COMMIT;",
+    )?;
+    Ok(())
+}
+
+fn migrate_10(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         ALTER TABLE cards ADD COLUMN applied_at INTEGER;
+         UPDATE cards SET applied_at = resumed_at WHERE resumed_at IS NOT NULL;
+         INSERT INTO kv(k, v) VALUES('schema', '10') ON CONFLICT(k) DO UPDATE SET v = '10';
+         COMMIT;",
+    )?;
+    Ok(())
+}
+
+fn migrate_9(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         ALTER TABLE cards ADD COLUMN answerable_by TEXT;
+         ALTER TABLE cards ADD COLUMN in_grants INTEGER NOT NULL DEFAULT 0;
+         UPDATE cards SET answerable_by = person, in_grants = 1 WHERE approver = 'member';
+         INSERT INTO kv(k, v) VALUES('schema', '9') ON CONFLICT(k) DO UPDATE SET v = '9';
+         COMMIT;",
+    )?;
+    Ok(())
 }
 
 fn migrate_8(c: &Connection) -> Result<()> {
@@ -212,15 +267,39 @@ mod tests {
                 "DROP TABLE invites; DROP TABLE people; DROP TABLE memberships; DROP TABLE audit;
                  ALTER TABLE devices DROP COLUMN proven; ALTER TABLE devices DROP COLUMN person_id;
                  ALTER TABLE cards DROP COLUMN reply_to; ALTER TABLE cards DROP COLUMN asked_by;
+                 ALTER TABLE cards DROP COLUMN answerable_by; ALTER TABLE cards DROP COLUMN in_grants;
+                 ALTER TABLE cards DROP COLUMN applied_at;
                  INSERT INTO devices VALUES('old', 'Phone', 'ios', 'local', NULL, '[\"control\"]', NULL, 1, NULL);
                  UPDATE kv SET v = '4' WHERE k = 'schema';",
             )
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("8"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("11"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
+    }
+
+    #[test]
+    fn schema_eleven_adds_conversations_to_an_existing_v10_database() {
+        let dir = std::env::temp_dir().join(format!("kith-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("t.db");
+        {
+            let s = Store::open(&db).unwrap();
+            drop(s);
+            let c = Connection::open(&db).unwrap();
+            c.execute_batch("DROP TABLE conversations; UPDATE kv SET v = '10' WHERE k = 'schema';").unwrap();
+        }
+        let s = Store::open(&db).unwrap();
+        assert_eq!(s.kv_get("schema").as_deref(), Some("11"));
+        let lane = crate::store::Lane::main("g");
+        assert_eq!(s.lane_epoch(&lane), 0);
+        let conv = s.open_conversation(&lane, 10, "owner").unwrap();
+        assert_eq!((conv.epoch, conv.left), (1, 10));
+        drop(s);
+        let s = Store::open(&db).unwrap();
+        assert_eq!(s.open_conversations().unwrap().len(), 1, "reopening keeps the table and its rows");
     }
 
     #[test]
@@ -239,7 +318,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("8"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("11"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         drop(s);
         let s = Store::open(&db).unwrap();

@@ -9,7 +9,7 @@ public struct RichCard: Codable, Hashable, Sendable {
     public typealias JSON = HostContract.JSONValue
 
     /// The card types this app draws, each with the newest version it knows.
-    public static let known: [String: Int] = [:]
+    public static let known: [String: Int] = ["schedule": 1, "news": 1]
 
     /// schedule · routine · news; open string.
     public var type: String

@@ -8,8 +8,8 @@
 # set SYNC below to the commit you checked (and in .claude/skills/revoke-access/SKILL.md).
 set -euo pipefail
 
-# The commit at which the model was confirmed to describe the files below: the code of the revoke (PR "revoke a person").
-SYNC=961325fb23acb25ea15c3de7d744faa444a5641e
+# The commit at which the model was confirmed to describe the files below (see the skill's "Sync commit").
+SYNC=5a7898911c39987b89fb6099843df3f374e51f2f
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
@@ -18,7 +18,7 @@ FILES=(
   serve/host/src/channels/run.rs          # Recheck::still in finish (the answer) and flush (each outbox post) (Deliver)
   serve/host/src/channels/hq.rs           # Who (revoked, held), resolve (held), resolve_in_sync
   serve/host/src/channels/settings.rs     # sync_hold, sync_poll
-  kernel/bin/kith                         # a helper spawn: kith-auth resolve, allowed only (Helper)
+  kernel/bin/kith                         # a helper spawn: kith-auth resolve, waits while held (Helper)
   serve/host/src/api/people.rs            # revoke_person (cloud first, then kith-auth), cut_off
   serve/host/src/api/botguests.rs         # ask, thread: the sync gate (sync_lease::wait), then may_use
   serve/host/src/remote/sync_lease.rs     # in sync or not: changed, mark/pulled, wait, the lease file kith-auth reads (held)
@@ -27,6 +27,7 @@ FILES=(
   serve/host/src/remote/members.rs        # apply_revoked, end_access (keeps a revoked person's handle and bots)
   serve/cloud/src/routes/invites.ts       # hostRevokePerson, hostUnrevokePerson, revokedOf, acceptInvite refusal
   serve/cloud/src/routes/host.ts          # host state: revoked
+  serve/host/src/run_outbox.rs            # a run's outbox into the person's app chat (the app door: the relay's block)
   kernel/lib/kith_door.py                 # the guest door: run (lock, kith-auth door, claim, start = DoorStart), sweep (DoorSweep)
   serve/host/src/doors.rs                 # the host's door sweep: on cut_off, the bot-guest sweep and every 60 s (DoorSweep)
 )

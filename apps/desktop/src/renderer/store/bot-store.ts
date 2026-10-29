@@ -257,6 +257,11 @@ export class BotStore extends BotSync {
     return this.withLink((c) => c.callHost('linkCode', {}))
   }
 
+  /** Whether this person's Schedule cards are also said in their Telegram or Discord chat (on by default); `on` sets it first. */
+  scheduleMessages(on?: boolean) {
+    return this.withLink((c) => c.callHost('scheduleMessages', on === undefined ? {} : { on })).then((r) => r.on)
+  }
+
   /** Fire-and-forget; the host holds it until this computer answers and drops it on a no. */
   track(event: AnalyticsEvent) {
     void this.withLink((c) => c.call('track', { event })).catch((error: unknown) => console.warn(`track ${event} failed`, error))
@@ -608,6 +613,20 @@ export class BotStore extends BotSync {
       this.changed()
     }
     return value
+  }
+
+  stageFiles(botId: string, files: { name: string; data: Uint8Array }[]) {
+    this.stagedFiles.set(botId, [...(this.stagedFiles.get(botId) ?? []), ...files])
+    this.changed()
+  }
+
+  takeStagedFiles(botId: string) {
+    const files = this.stagedFiles.get(botId)
+    if (files) {
+      this.stagedFiles.delete(botId)
+      this.changed()
+    }
+    return files
   }
 
   setRoutineDraft(botId: string, text: string) {

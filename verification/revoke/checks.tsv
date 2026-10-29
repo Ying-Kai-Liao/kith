@@ -30,6 +30,8 @@ broken-bridge-no-sync	PROPERTY	R6cDown	fail
 broken-bridge-no-sync	PROPERTY	R6cWake	fail
 broken-bridge-no-sync	PROPERTY	R5c	fail
 broken-bridge-no-sync	PROPERTY	NeverBridgeInCloudDown	fail
+broken-helper-no-sync	PROPERTY	R5c	fail
+broken-helper-no-sync	PROPERTY	R5	pass
 # --- guest door: start in one locked step (D2), the sweep stops it (D1) ------
 door	PROPERTY	DoorD2	pass
 door	PROPERTY	DoorD2c	pass

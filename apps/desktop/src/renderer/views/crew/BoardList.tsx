@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { avatarImage, DEFAULT_IMAGE } from '@shared/crew'
-import { needsYouRows, projectDetail, type BoardDecision, type BoardModel, type BoardTarget } from '@shared/board'
+import { needsYouRows, type BoardDecision, type BoardModel, type BoardTarget } from '@shared/board'
 import { isGroup, type Bot } from '@shared/models'
 import { Icon } from '../../components/Icon'
 import { BotAvatar, CountBadge } from '../../components/kith'
@@ -12,7 +12,7 @@ import { pairOf } from '../../components/kith/pair.ts'
 import { LimitCard } from '../thread/LimitCard'
 
 /**
- * The Board in the sidebar: Needs you (a row per thread, with its count), Working, Where we left off and Projects.
+ * The Board in the sidebar: Needs you (a row per thread, with its count), Working, Done today and Where we left off.
  * A row opens the room its thread is in. Only the layout lives here; the sections are `buildBoard`'s.
  */
 export function BoardList({ board, selected, bots, stores, open }: {
@@ -26,7 +26,7 @@ export function BoardList({ board, selected, bots, stores, open }: {
 }) {
   const needs = needsYouRows(board.needsYou)
   const isSelected = (t: BoardTarget) => sameRef(t, selected)
-  const empty = !board.needsYou.length && !board.working.length && !board.leftOff.length && !board.projects.length
+  const empty = !board.needsYou.length && !board.working.length && !board.doneToday.length && !board.leftOff.length
   return (
     <div className="cs-board">
       <Section title="Needs you" count={board.needsYou.length} show={board.needsYou.length > 0}>
@@ -44,16 +44,17 @@ export function BoardList({ board, selected, bots, stores, open }: {
           <BoardRow key={w.id} bot={w.bot} title={w.title} detail={w.detail} selected={isSelected(w.target)} onClick={() => open(w.target)} />
         ))}
       </Section>
+      <Section title="Done today" count={board.doneToday.length} show={board.doneToday.length > 0}>
+        {board.doneToday.map((w) => (
+          <BoardRow key={w.id} bot={w.bot} title={w.title} detail={w.detail} selected={isSelected(w.target)} onClick={() => open(w.target)} />
+        ))}
+      </Section>
       <Section title="Where we left off" count={board.leftOff.length} show={board.leftOff.length > 0}>
         {board.leftOff.map((h) => (
           <BoardRow key={h.id} bot={h.bot} title={h.botName} detail={h.note} selected={isSelected(h.target)} onClick={() => open(h.target)} />
         ))}
       </Section>
-      <Section title="Projects" count={board.projects.length} show={board.projects.length > 0}>
-        {board.projects.map((p) => (
-          <BoardRow key={p.id} icon="briefcase" title={p.name} detail={projectDetail(p)} selected={isSelected(p.target)} onClick={() => open(p.target)} />
-        ))}
-      </Section>
+      {/* Projects wait for slice 4 (labels as filters); `board.projects` stays for the callers that use it. */}
       {empty ? <div className="cs-board-empty">Nothing is waiting on you.</div> : null}
     </div>
   )

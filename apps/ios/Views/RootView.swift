@@ -1,6 +1,7 @@
 import KithKit
 import KithUI
 import SwiftUI
+import UserNotifications
 import WidgetKit
 
 struct RootView: View {
@@ -70,8 +71,18 @@ struct RootView: View {
                 } reply: {
                     store.declineCall(call)
                     accounts.selection = BotReference(accountId: nil, computerId: store.computer.id, botId: call.botId)
+                } snooze: {
+                    store.declineCall(call)
+                    snoozeCall(CallSnooze(ctx: accounts.storage.id, computerId: store.computer.id, botId: call.botId,
+                                          name: store.bots[call.botId]?.name ?? call.name))
                 }
                 .id(call.id)
+            }
+        }
+        .kithOverlay(isPresented: Binding(get: { app.callBack != nil }, set: { if !$0 { app.callBack = nil } })) { close in
+            // A snoozed call ringing again: the agent's call, opened through the same cover as a call from Crew.
+            if let ref = app.callBack, let store = accounts.store(for: ref.computerId) {
+                HomeCallCover(store: store, botId: ref.botId) { app.callBack = nil; close() }
             }
         }
         .task {
@@ -94,7 +105,8 @@ struct RootView: View {
         .kithSheet(item: Binding(get: { app.guestPrompt.map(GuestPromptTarget.init) }, set: { app.guestPrompt = $0?.ref })) { target in
             let ref = target.ref
             if let store = accounts.store(for: ref.computerId) {
-                GuestPromptSheet(store: store, chatId: ref.botId, close: { app.guestPrompt = nil }, openChat: {
+                GuestPromptSheet(store: store, chatId: ref.botId, isOwner: accounts.role(for: ref.computerId) == .owner,
+                                 close: { app.guestPrompt = nil }, openChat: {
                     app.guestPrompt = nil
                     accounts.selection = ref
                 })
@@ -132,6 +144,20 @@ struct RootView: View {
         let store: BotStore
         let botId: String
         let callId: String
+    }
+
+    /// "In 10 min": a local notification that rings this agent's call again. One pending per agent.
+    private func snoozeCall(_ snooze: CallSnooze) {
+        let content = UNMutableNotificationContent()
+        content.title = snooze.title
+        content.body = snooze.body
+        content.sound = .default
+        content.categoryIdentifier = CallSnooze.category
+        content.userInfo = snooze.userInfo
+        let request = UNNotificationRequest(identifier: snooze.identifier, content: content,
+                                            trigger: UNTimeIntervalNotificationTrigger(timeInterval: CallSnooze.delay, repeats: false))
+        // Same identifier replaces the pending one.
+        UNUserNotificationCenter.current().add(request)
     }
 
     /// The first agent ringing on any computer.

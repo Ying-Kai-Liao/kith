@@ -2,6 +2,7 @@
 
 use super::fast_mode::Listing;
 use super::{Actor, Seg, SegKind};
+use crate::access::{self, Ask, Request};
 use crate::agent::acp::{self, Incoming};
 use crate::chat::tasks::TaskState;
 use crate::hub::BotStatus;
@@ -177,30 +178,31 @@ impl Actor {
                 self.hub.store.entry(eid)?.data["title"].as_str().map(str::to_owned)
             })
             .unwrap_or_else(|| "Use a tool".into());
-        // An invitee's run asks its approver: the member for a member's own run, the owner for a guest's. The card says
-        // whose run it is, since the owner sees it outside the invitee's chat.
+        // An invitee's run asks its approver (`access::approver`). The card says whose run it is, since the approver
+        // sees it outside the invitee's chat.
         let whose = match (self.cfg.person.clone(), self.cfg.hq_agent.clone()) {
             (Some(person), Some(agent)) => Some((person, agent)),
             _ => None,
         };
-        let mut approver = None;
+        let mut in_grants = false;
+        let mut answerable_by = None;
         if let Some((person, agent)) = &whose {
             let name = tool["_meta"]["claudeCode"]["toolName"].as_str().unwrap_or_default();
             let kind = tool["kind"].as_str().unwrap_or("other");
-            // A file outside the run's grants is the owner's to allow, as for a -p run's card.
-            let inside =
-                crate::api::roles::acp_within(&crate::api::roles::grant_roots(person, agent), name, kind, tool);
-            approver = Some(if inside && crate::api::roles::approves_own(person, agent, name, kind).await {
-                "member"
-            } else {
-                "owner"
-            });
+            let ask = Request {
+                person,
+                agent,
+                owner_run: false,
+                ask: Ask::Tool { in_grants: access::acp_in_grants(person, agent, name, kind, tool) },
+            };
+            in_grants = ask.in_grants();
+            answerable_by = access::approver(&self.hub.store, &ask).await;
         }
         let raw = &tool["rawInput"];
         let tool_name = crate::cards::edge::acp_tool(tool, &title).to_owned();
         // A host or a helper the owner is asked about can be kept: "Always for <person>", or the job that holds it.
         let mut kept = None;
-        if let (Some((person, agent)), Some("owner")) = (&whose, approver) {
+        if let (Some((person, agent)), None) = (&whose, &answerable_by) {
             let who = self.hub.store.person(person).map(|p| p.name).filter(|n| !n.is_empty());
             let who = who.unwrap_or_else(|| person.clone());
             kept = crate::cards::edge::for_acp(person, &who, agent, &tool_name, raw, &mut options).await;
@@ -231,18 +233,22 @@ impl Actor {
         if let Some((_, edge)) = kept {
             data["edge"] = edge;
         }
-        let mut owner_label = None;
-        let approver_card = approver.unwrap_or("owner");
-        if let (Some((person, agent)), Some(approver)) = (&whose, approver) {
+        // Who the run waits for when it isn't the asker: the owner, or a bot's owner person.
+        let mut waiting_for = None;
+        if let Some((person, agent)) = &whose {
             let name = self.hub.store.person(person).map(|p| p.name).filter(|n| !n.is_empty());
             data["cwd"] = Value::Null;
-            data["approver"] = approver.into();
+            data["approver"] = if answerable_by.is_some() { "member" } else { "owner" }.into();
             data["person"] = person.as_str().into();
             data["personName"] = name.unwrap_or_else(|| person.clone()).into();
             data["agent"] = agent.as_str().into();
-            if approver == "owner" {
-                owner_label = Some(crate::api::roles::owner_name(agent).await.unwrap_or_else(|| "the owner".into()));
-            }
+            waiting_for = match &answerable_by {
+                Some(p) if p == person => None,
+                Some(p) => Some(
+                    self.hub.store.person(p).map(|o| o.name).filter(|n| !n.is_empty()).unwrap_or_else(|| p.clone()),
+                ),
+                None => Some(crate::api::roles::owner_name(agent).await.unwrap_or_else(|| "the owner".into())),
+            };
         }
         let in_turn = self.turn.is_some();
         let turn = self.turn.unwrap_or_else(|| self.hub.store.max_turn(&self.lane.chat));
@@ -267,7 +273,8 @@ impl Actor {
             run_id: None,
             person: whose.as_ref().map(|w| w.0.clone()).unwrap_or_default(),
             agent: whose.as_ref().map(|w| w.1.clone()).or_else(|| self.cfg.hq_agent.clone()).unwrap_or_default(),
-            approver: approver_card,
+            answerable_by: answerable_by.clone(),
+            in_grants,
             tool: tool_name,
             input: raw.to_string(),
             resource,
@@ -305,7 +312,7 @@ impl Actor {
                 let _ = self.hub.store.card_live(&c.id, Some(&e.id), None);
             }
             // The owner may be a while: the slot goes back to the gate so other people's turns aren't stuck behind it.
-            if owner_label.is_some() && in_turn {
+            if waiting_for.is_some() && in_turn {
                 self.parked_prompts.insert(e.id.clone(), self.hub.gate.park(&self.rt));
             }
             self.perms.entry(e.id).or_default().push(rpc_id);
@@ -316,7 +323,7 @@ impl Actor {
         if in_turn {
             self.hub.set_runtime(&self.rt, |r| {
                 r.status = BotStatus::NeedsInput;
-                r.activity = match &owner_label {
+                r.activity = match &waiting_for {
                     Some(owner) => format!("Waiting for {owner}"),
                     None => format!("Needs approval: {title}"),
                 };
@@ -326,9 +333,9 @@ impl Actor {
         let mut target =
             self.hub.store.bot(&self.lane.chat).ok().flatten().map_or_else(|| self.cfg.clone(), |r| r.config);
         let mut heading = format!("{} needs you", self.cfg.name);
-        if owner_label.is_some() {
-            // A guest waits; the owner's devices are the ones to tell.
-            target.person = None;
+        if waiting_for.is_some() {
+            // The asker waits; the approver's devices are the ones to tell.
+            target.person.clone_from(&answerable_by);
             heading = format!("{} needs your OK", data["personName"].as_str().unwrap_or_default());
         }
         push::notify(&self.hub, &target, Some(&self.cfg.id), &heading, &title, AlertKind::NeedsInput);

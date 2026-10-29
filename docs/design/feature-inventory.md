@@ -115,7 +115,7 @@ Paths are relative to `apps/ios/`. `KUI` = `Kit/Sources/KithUI`, `KK` = `Kit/Sou
 | I-E5 | Pair a computer (QR scan, pasted `kith://pair` link, Tailscale hint, Wi-Fi hint, camera unavailable) | `Views/PairingView.swift`, `KK/Client/Pairing.swift` | Pairing | Computers > Pair a computer; first-run setup | keep |
 | I-E6 | Computer colour swatch panel | `Views/SettingsView.swift` (`SwatchPanel`) | Colour per computer | Computers | keep |
 | I-E7 | Voice chat settings per computer: engine (On device, Kith voice, OpenAI, Gemini), voice choice, download voice status, API keys (save, test, replace, remove) | `KUI/Call/VoiceChatSettingsView.swift` | Voice settings | Settings > Voice | keep |
-| I-E8 | Link Telegram or Discord (`/link` code with expiry, copy) | `Views/SettingsView.swift` (`LinkChatSection`) | Link chat accounts | Settings | keep |
+| I-E8 | Link Telegram or Discord (`/link` code with expiry, copy); "Schedule changes there too" switch (`scheduleMessages`, per person, on by default, hidden on older hosts) | `Views/SettingsView.swift` (`LinkChatSection`, `ScheduleMessagesToggle`) | Link chat accounts | Settings | keep |
 | I-E9 | Backups status (per computer list of backup agents, fix hints) | `KUI/Bots/BackupsStatusSection.swift` | Shows backup chain | Settings or Computers | keep |
 | I-E10 | Push notifications switch + OS permission row (On / Off in Settings / Turn on) | `Views/SettingsView.swift`, `App/Push.swift` | Notification control | Settings | keep |
 | I-E11 | Text size (Default, Small, Large, Extra large) | `Views/SettingsView.swift` | Overrides Dynamic Type inside Kith | Settings (Dynamic Type applies) | keep |
@@ -407,7 +407,7 @@ Windows are routed by `?window=` in `apps/desktop/src/renderer/main.tsx`: `chat`
 |---|---|---|---|---|---|
 | D-160 | Settings sheet shell | `V/settings/SettingsView.tsx` `SettingsView` | 800x620 sheet with sidebar groups Personal (General, Voice chat, Usage) and This Mac (Computers & devices, Computer access, Updates); pending-approval count next to Computers; Close button. | Settings (from Profile menu) | adapt |
 | D-161 | General > Account | `V/settings/SettingsView.tsx` `GeneralSettings` | Email or "Not signed in", Sign out or Apple/Google/GitHub buttons, error footer. | Profile menu / Settings > Account | keep |
-| D-162 | General > Link chat | `V/settings/LinkChatRow.tsx` | "Link Telegram or Discord": Link / New code, shows `/link NNNNNN`, Copy, expiry minutes. Hidden on older hosts. | Settings > Link chat | keep |
+| D-162 | General > Link chat | `V/settings/LinkChatRow.tsx` | "Link Telegram or Discord": Link / New code, shows `/link NNNNNN`, Copy, expiry minutes. Hidden on older hosts. Below it, `ScheduleMessagesRow`: "Schedule changes in Telegram or Discord" switch (`scheduleMessages`, per person, on by default; the app card stays either way), hidden on older hosts. | Settings > Link chat | keep |
 | D-163 | General > Appearance | `V/settings/SettingsView.tsx` | Text size (11 to 18 pt picker), Usage icons (Character/Original), Compact sidebar switch. | Settings > Appearance | keep |
 | D-164 | General > System | `V/settings/SettingsView.tsx` | Show in Dock (macOS), Show in notch / Show at top of screen (island, if supported), Open at login. | Settings > System | keep |
 | D-165 | General > Privacy | `V/settings/SettingsView.tsx` `PrivacySettings` | "Share usage analytics" switch (disabled when host not running) + info button. | Settings > Privacy | keep |

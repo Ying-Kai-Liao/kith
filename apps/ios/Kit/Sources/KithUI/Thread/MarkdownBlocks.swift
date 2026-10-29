@@ -9,7 +9,8 @@ enum MarkdownBlocks {
         case heading(String, level: Int)
         case bullet(String, marker: String, depth: Int = 0)
         case quote(String)
-        case code(String, language: String)
+        /// `closed` is false for a fence still open at the end (a reply that's still streaming).
+        case code(String, language: String, closed: Bool = true)
         case table(header: [String], rows: [[String]])
         case rule
     }
@@ -84,7 +85,7 @@ enum MarkdownBlocks {
                 paragraph.append(raw)
             }
         }
-        if let c = code { blocks.append(.code(c.joined(separator: "\n"), language: language)) }
+        if let c = code { blocks.append(.code(c.joined(separator: "\n"), language: language, closed: false)) }
         flush()
         return blocks
     }

@@ -270,6 +270,12 @@ def test_access_never_exceeds_the_grant(ops):
                 assert x not in a['people'], f'{x} survived removing {op[1]}'
                 assert all(x not in rows for rows in a['members'].values()), f'{x} keeps a membership'
                 assert not any(allowed(ag, x) for ag in AGENTS), f'{x} still gets in after {op[1]} was removed'
+            # (retired) the id of a removed person, never a bot's, is never handed out again.
+            p = before['people'].get(op[1])
+            assert (op[1] in a['retired']) == (p is not None and not p.get('bot_of')) or op[1] in before['retired'], \
+                f'{op[1]}: retired {op[1] in a["retired"]}'
+        if op[0] in ('person', 'bot') and op[1] not in before['people'] and op[1] in before['retired']:
+            assert not ok and op[1] not in a['people'], f'{op}: a retired id was given to someone new'
         if op[0] == 'member-rm' and ok and op[2] != EVERYONE:
             _, agent, who = op
             everyone = EVERYONE in a['members'].get(agent, {}) and who not in bot_ids(a)

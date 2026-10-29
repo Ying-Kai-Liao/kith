@@ -37,8 +37,18 @@ public final class BotStore {
     public internal(set) var connection: Connection = .connecting
     /// The first catch-up has arrived: everything up to the host's rev when this app connected.
     public internal(set) var caughtUp = false
-    /// A thread to open once its chat is on screen (the bot's page sends the owner to a conversation); the chat clears it.
+    /// A thread's root message the chat scrolls to once it is on screen (the bot's page sends the owner to a conversation); the chat clears it.
     public var pendingThread: PendingThread?
+    /// A message to scroll to and flash when the chat opens (a search result on message text); the chat clears it.
+    public var focusEntry: FocusEntry?
+    public struct FocusEntry: Equatable, Sendable {
+        public var chat: String
+        public var entry: String
+        public init(chat: String, entry: String) {
+            self.chat = chat
+            self.entry = entry
+        }
+    }
     var catchUpRev = Int64.max
     /// The `since` this connection's events stream was opened with; the `hello` that opens its
     /// catch-up reads it (after a mirror reset `rev` no longer says what was requested).
@@ -90,6 +100,8 @@ public final class BotStore {
     /// Bots whose thread the reader just left: the next message in their main chat starts a new task instead of
     /// going on with the current one (which would put it back in that thread).
     var leftThread: Set<String> = []
+    /// The message each chat is replying to: shown over the composer; the next send starts with its first line as a quote.
+    var replyQuotes: [String: Entry] = [:]
     /// What the user picked per task on this device: open or folded in the main chat; nil follows the task.
     var taskChoices: [String: Bool] = [:]
     /// Whether a send from the composer starts a new task: asked for, or (main chat only) the reader is out of the
@@ -243,8 +255,9 @@ public final class BotStore {
         return bots.values.filter { $0.hqAgent.map(agents.contains) ?? false }
     }
 
-    /// Guest prompts the owner is asked to answer on this computer (see `GuestPrompt`).
-    public var guestPrompts: [GuestPrompt] { GuestPrompt.pending(in: entries, known: Set(bots.keys)) }
+    /// Cards outside this account's chats that wait for it on this computer (see `GuestPrompt`); `isOwner` is the
+    /// account's role here.
+    public func guestPrompts(isOwner: Bool) -> [GuestPrompt] { GuestPrompt.pending(in: entries, known: Set(bots.keys), isOwner: isOwner) }
 
     /// Display name for a harness id, as the host reports it (falls back to the built-in list).
     public func backendName(_ id: String) -> String {

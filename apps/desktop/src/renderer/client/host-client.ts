@@ -324,6 +324,11 @@ export class HostClient {
     return parseKithInfoResult(await this.call('kithSetCallModel', { botId, model }, 60_000))
   }
 
+  /** A Schedule card's button on a kith job (owner only): kith-sched does it, and the answer is the agent's info read back. */
+  async kithSchedule(botId: string, id: string, op: 'pause' | 'resume' | 'run' | 'remove'): Promise<KithInfoResult> {
+    return parseKithInfoResult(await this.call('kithSchedule', { botId, id, op }, 60_000))
+  }
+
   /** The backup chain: global order, per-agent orders and each entry's state. A host before this call answers 404. */
   async backups(): Promise<Backups> {
     return parseBackups(await this.call('backups', {}, 90_000))

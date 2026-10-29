@@ -297,6 +297,8 @@ export interface EntryData {
   cwd?: string
   /** permission, in an invited person's run: who answers it (a guest's go to the owner), whose run it is and which agent. */
   approver?: 'owner' | 'member'
+  /** permission: whether this account may answer it, from who the card names (sent per viewer; older hosts don't). */
+  canAnswer?: boolean
   person?: string
   personName?: string
   agent?: string

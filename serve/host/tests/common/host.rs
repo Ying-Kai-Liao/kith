@@ -73,18 +73,6 @@ impl Host {
         super::snapshot(&self.base, &self.token).await["bots"].as_array().cloned().unwrap_or_default()
     }
 
-    /// Waits until the startup sync has turned tasks on (absent is on, the default) for an hq bot that had them off (it does that once, see
-    /// `hub::hq`); a test that reads the main chat after a restart turns them off again only after this, or the sync
-    /// would undo it.
-    #[allow(dead_code)]
-    pub async fn wait_tasks_on(&self, bot: &str) {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while !self.roster().await.iter().any(|b| b["id"] == bot && b["tasks"] != false) {
-            assert!(Instant::now() < deadline, "the sync never turned tasks on for {bot}");
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    }
-
     pub async fn call(&self, method: &str, body: Value) -> Value {
         let (ok, body) = self.post(method, &body).await;
         assert!(ok, "{method}: {body}");

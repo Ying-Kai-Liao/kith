@@ -8,13 +8,13 @@ Kith has three parts:
 
 Someone who was invited to another person's Mac needs none of this: see [Joining someone's Kith](invited.md).
 
-What works today, before Kith is in the paid Apple Developer Program:
+What works today:
 
 | Part | Status |
 |---|---|
 | `kith` command | Released for macOS (Apple silicon and Intel). Checksums are signed with minisign. |
 | Mac app | No download yet: the release workflow builds it but publishes only a signed, notarized app. Build it yourself for now. |
-| iPhone app | Not on the App Store or TestFlight. Build it from Xcode onto your own phone. |
+| iPhone app | In internal TestFlight testing only, not public yet. Build it from Xcode onto your own phone. |
 
 ## The `kith` command
 
@@ -51,8 +51,9 @@ Other ways to install it:
 
 There is no download yet. A release publishes the app (`kith-macos.dmg`, linked from
 <https://kithbot.app/download/mac>) only once it is signed with a Developer ID and notarized
-([releasing.md](releasing.md)), and both need the paid Apple Developer Program. Until Kith has it, build the app
-yourself, the same way CI does (`.github/workflows/ci.yml`, job `desktop`). You need Node 24, Rust (the toolchain
+([releasing.md](releasing.md)). Kith is in the paid Apple Developer Program now; the Developer ID certificate and
+notarization secrets are not set up yet. Until they are, build the app yourself, the same way CI does
+(`.github/workflows/ci.yml`, job `desktop`). You need Node 24, Rust (the toolchain
 pinned in `serve/rust-toolchain.toml`) and Xcode's command line tools:
 
 ```sh

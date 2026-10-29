@@ -57,7 +57,7 @@ async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only
     assert_eq!(data["options"][1]["name"], "Always for Sam");
     assert_eq!(data["options"][2]["name"], "Turn on Make videos: registry.npmjs.org, github.com");
     assert!(data["detail"].as_str().unwrap().ends_with("Part of Make videos, not on for Sam."), "{data}");
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::ALWAYS), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::ALWAYS), None).unwrap();
     assert!(call.await.unwrap().allow);
     let domains = || {
         let v: Value = serde_json::from_str(&r.auth(&["resolve", "house", "--person", "sam"])).unwrap();
@@ -69,7 +69,7 @@ async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only
 
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "SandboxNetworkAccess", net("registry.npmjs.org"));
     let card = shown(&r.hub).await;
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), None).unwrap();
     assert!(call.await.unwrap().allow);
     until(|| job(&r)["ticked"] == true).await;
     assert_eq!(
@@ -82,7 +82,7 @@ async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "SandboxNetworkAccess", net("pypi.org"));
     let card = shown(&r.hub).await;
     assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, "deny"]);
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     assert!(call.await.unwrap().allow);
 }
 
@@ -101,7 +101,7 @@ async fn a_package_update_that_widens_a_ticked_job_asks_once_and_a_no_declines_t
     let data = options(&r, &card);
     assert_eq!(data["options"][2]["name"], "Keep Make videos on, with example.com");
     assert!(data["detail"].as_str().unwrap().contains("A package update added example.com"), "{data}");
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     assert!(!call.await.unwrap().allow);
     until(|| job(&r)["declined"] == true).await;
     assert_eq!(job(&r)["declined"], true);
@@ -111,7 +111,7 @@ async fn a_package_update_that_widens_a_ticked_job_asks_once_and_a_no_declines_t
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "SandboxNetworkAccess", net("example.com"));
     let card = shown(&r.hub).await;
     assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, "deny"]);
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     assert!(!call.await.unwrap().allow);
 }
 
@@ -133,7 +133,7 @@ async fn a_helpers_yes_is_written_before_the_run_hears_it() {
         data["options"][0]["name"], "money, once, for Sam's house in the next 5 minutes",
         "the once grant is the person's for 5 minutes, not this one request"
     );
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     assert!(call.await.unwrap().allow);
     assert!(
         r.auth_ok(&["may", "sam", "money", "--via", "house", "--once"]),
@@ -143,7 +143,7 @@ async fn a_helpers_yes_is_written_before_the_run_hears_it() {
 
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::HELPER_TOOL, input);
     let card = shown(&r.hub).await;
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::ALWAYS), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::ALWAYS), None).unwrap();
     assert!(call.await.unwrap().allow);
     assert!(r.auth_ok(&["may", "sam", "money", "--via", "house"]), "always lands in the row's helpers");
 }
@@ -170,7 +170,7 @@ async fn a_door_card_offers_only_its_job_and_the_job_is_on_before_the_run_hears_
     let data = options(&r, &card);
     assert_eq!(ids(&data), [edge::JOB, "deny"], "no once: a door starts only on its ticked job; no always");
     assert_eq!(data["options"][0]["name"], "Turn on Make videos: github.com, render");
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), None).unwrap();
     assert!(call.await.unwrap().allow);
     assert_eq!(job(&r)["ticked"], true, "written before the run heard yes");
     assert!(job(&r)["granted"]["doors"][0].as_str().unwrap().starts_with("render@"));
@@ -182,7 +182,7 @@ async fn a_door_card_offers_only_its_job_and_the_job_is_on_before_the_run_hears_
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::DOOR_TOOL, input);
     let card = shown(&r.hub).await;
     caps(&r, "doors: []\n");
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), None).unwrap();
     assert!(!call.await.unwrap().allow, "never a yes the start would refuse");
     let entry = || options(&r, &card);
     until(|| entry()["outcome"].is_string()).await;
@@ -199,8 +199,8 @@ async fn a_door_no_job_holds_can_only_be_refused() {
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::DOOR_TOOL, json!({"door": "render", "path": "/x"}));
     let card = shown(&r.hub).await;
     assert_eq!(ids(&options(&r, &card)), ["deny"]);
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").ok();
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).ok();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     assert!(!call.await.unwrap().allow);
 }
 
@@ -223,7 +223,8 @@ async fn app_card(r: &Rig, chat: &str, host: &str) -> (Card, Value) {
         run_id: None,
         person: "sam".into(),
         agent: "house".into(),
-        approver: "owner",
+        answerable_by: None,
+        in_grants: false,
         tool,
         input: call["rawInput"].to_string(),
         resource: format!("net:{host}"),
@@ -252,7 +253,7 @@ async fn a_members_app_chat_ask_keeps_what_the_owner_picked_and_its_agent_hears_
     assert_eq!(ids(&data), ["allow", edge::ALWAYS, edge::JOB, "reject"]);
     assert_eq!(data["edge"]["job"], "make-videos");
     let entry = card.entry_id.as_ref().unwrap();
-    assert_eq!(answer(&r.hub, entry, Some(edge::ALWAYS), "owner").unwrap(), Outcome::Recorded { forward: true });
+    assert_eq!(answer(&r.hub, entry, Some(edge::ALWAYS), None).unwrap(), Outcome::Recorded { forward: true });
     assert_eq!(edge::adapter_option(&data["options"], edge::ALWAYS), Some("allow"), "the actor sends its allow_once");
     until(|| domains() == json!(["github.com"])).await;
     assert_eq!(domains(), json!(["github.com"]), "kith-auth access house sam domain github.com");
@@ -260,7 +261,7 @@ async fn a_members_app_chat_ask_keeps_what_the_owner_picked_and_its_agent_hears_
 
     let (card, data) = app_card(&r, &chat, "registry.npmjs.org").await;
     let entry = card.entry_id.as_ref().unwrap();
-    assert_eq!(answer(&r.hub, entry, Some(edge::JOB), "owner").unwrap(), Outcome::Recorded { forward: true });
+    assert_eq!(answer(&r.hub, entry, Some(edge::JOB), None).unwrap(), Outcome::Recorded { forward: true });
     assert_eq!(edge::adapter_option(&data["options"], edge::JOB), Some("allow"));
     until(|| job(&r)["ticked"] == true).await;
     assert_eq!(job(&r)["granted"]["domains"], json!(["registry.npmjs.org", "github.com"]), "the job is on");

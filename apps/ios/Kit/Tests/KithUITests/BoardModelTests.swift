@@ -229,10 +229,16 @@ private func keyCard(_ id: String, chat: String) -> Entry {
     #expect(model.needsYou.first?.card.options.count == 2)
 }
 
-@Test func aKeyCardIsNeverAGuestPrompt() {
-    var key = keyCard("k1", chat: "guest-chat")
+@Test func aKeyCardInAnAgentsCardLaneIsARowThatOpensItsRequest() throws {
+    var key = keyCard("k1", chat: "cards:house")
     key.data.approver = "owner"
-    let plain = permission("p1", chat: "guest-chat", approver: "owner")
-    let prompts = GuestPrompt.pending(in: ["guest-chat": [key, plain]], known: [])
-    #expect(prompts.map(\.id) == ["p1"])
+    key.data.agent = "house"
+    let plain = permission("p1", chat: "cards:house", at: nowMs + 1, approver: "owner")
+    let prompts = GuestPrompt.pending(in: ["cards:house": [key, plain]], known: [], isOwner: true)
+    #expect(prompts.map(\.id) == ["k1", "p1"])
+    let model = board(computer(bots: [], entries: [:], guests: prompts))
+    let row = try #require(model.needsYou.first { $0.entry?.id == "k1" })
+    #expect(row.opensChat)
+    #expect(row.target.botId == "cards:house")
+    #expect(row.card.question == "house needs a key for github")
 }

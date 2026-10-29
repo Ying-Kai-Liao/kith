@@ -35,6 +35,8 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var cwd: String?
     /// permission, in an invited person's chat: who answers it, `owner` (a guest's) or `member`. Nil on the owner's own cards.
     public var approver: String?
+    /// permission: whether this account may answer it, from who the card names. Sent per viewer; nil from older hosts.
+    public var canAnswer: Bool?
     /// permission, in an invited person's chat: whose run asked, and which agent.
     public var person: String?
     public var personName: String?

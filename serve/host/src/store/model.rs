@@ -275,6 +275,14 @@ pub struct Entry {
     pub updated_at: i64,
 }
 
+/// The one test for "a person wrote this" (rule C1 of the agent-conversations plan): an entry of kind `user` without a
+/// bot guest as sender. The owner's own message, an invited person's (`data.person`) and a host-written one
+/// (`data.from == "host"`) all count; a bot's ask (`data.sender.botId`) and every non-user entry do not. Anything that
+/// opens a conversation's budget, or resets "since the last user message", asks this instead of comparing the kind.
+pub fn is_person_message(e: &Entry) -> bool {
+    e.kind == EntryKind::User.as_str() && e.data["sender"]["botId"].is_null()
+}
+
 pub struct LastMessage {
     pub text: String,
     pub at: i64,
@@ -293,6 +301,31 @@ pub struct BotRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(kind: &str, data: Value) -> Entry {
+        Entry {
+            id: "e".into(),
+            seq: 1,
+            bot_id: "b".into(),
+            thread_id: None,
+            rev: 1,
+            kind: kind.into(),
+            turn: 1,
+            data,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn only_a_user_entry_without_a_bot_sender_is_a_person_message() {
+        let person = |data: Value| is_person_message(&entry("user", data));
+        assert!(person(serde_json::json!({"text": "owner"})));
+        assert!(person(serde_json::json!({"text": "invited", "person": "sam"})));
+        assert!(person(serde_json::json!({"text": "host", "from": "host"})));
+        assert!(!person(serde_json::json!({"text": "bot", "sender": {"botId": "bg1", "name": "Grok"}})));
+        assert!(!is_person_message(&entry("agent", serde_json::json!({"text": "reply"}))));
+    }
 
     #[test]
     fn permission_wire_values_round_trip() {

@@ -39,6 +39,7 @@ CONSTANTS
     NoDeliverRecheck,   \* a turn's delivery re-checks nothing (no may(), no relay, no sync)
     RevokeDeletesRows,  \* revoke deletes P's rows on the Mac it lands on; undo only clears the flag
     BotIgnoresOwner,    \* B is allowed on its own row alone, without its owner's live may()
+    HelperNoSync,       \* a helper spawned from a bridge turn reads only may(), not whether the Mac is in sync
     \* ---- the guest door ----
     GuestDoor,          \* TRUE = P's guest door is in the model. Nothing else reads gdoor, so the rows of the other
                         \*   properties leave it out (FALSE in base.consts) and stay small; the door rows turn it on
@@ -99,7 +100,7 @@ InSync(m) == net[m] = "online" /\ ~outbox[m] /\ ver[m] = cloudVer
 BridgeGate(m) == ~BridgeSyncFirst \/ InSync(m)
 \* Helper spawn re-check per door: app/bot ask the relay; the bridge needs sync.
 HelperGate(m, w) == IF DoorOf(m, w) = "bridge"
-                    THEN BridgeGate(m)
+                    THEN HelperNoSync \/ BridgeGate(m)
                     ELSE ~RelayChecks \/ (net[m] = "online" /\ ~cloudRevoked)
 
 OwnerRevoked == revokes = 1 /\ undos = 0
