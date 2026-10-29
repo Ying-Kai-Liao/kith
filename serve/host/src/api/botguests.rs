@@ -844,6 +844,30 @@ fn replay(hub: &Hub, bot: &BotGuest, e: &Entry) -> Result<Value> {
     }))
 }
 
+/// Whether `e`, the ask this bot already sent under a nonce, is the one now being sent again: the same trimmed text, to
+/// the same agent, in the same conversation. A conversation named by id or `ref` must be the earlier one; an ask that
+/// named neither made a new conversation then and may do again.
+fn is_retry(
+    hub: &Hub,
+    e: &Entry,
+    text: &str,
+    agent: &str,
+    known: Option<&BotConversation>,
+    external: Option<&str>,
+) -> bool {
+    if e.data["text"].as_str() != Some(text) {
+        return false;
+    }
+    let earlier = e.thread_id.as_deref().and_then(|root| hub.store.bot_conversation_of_thread(&e.bot_id, root));
+    let Some(earlier) = earlier else {
+        // Its conversation is gone (ended): same text still replays, to the 404 it always got.
+        return true;
+    };
+    earlier.agent == agent
+        && known.is_none_or(|c| c.conversation_id == earlier.conversation_id)
+        && external.is_none_or(|r| earlier.external_ref.as_deref() == Some(r))
+}
+
 /// Where a conversation stands: `running`, `waitingApproval`, `queued`, `stopped` or `idle`, and how many asks wait
 /// behind the running one.
 fn conv_state(hub: &Hub, conv: &BotConversation) -> (State, usize) {
@@ -934,9 +958,17 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     if !roles::may_use(&bot.person_id, &agent).await {
         return Err(BotError::err(403, Code::NotGranted, format!("This bot may not use {agent}.")));
     }
-    // A retry of an ask already sent answers the same and sends nothing.
+    // A retry of an ask already sent answers the same and sends nothing; the same nonce for anything else is refused
+    // (C4). The nonce is the bot's own, across its agents and conversations.
     let chat = known.as_ref().map(|c| c.chat_bot_id.clone()).or_else(|| chat_row_of(hub, &bot.person_id, &agent));
-    if let Some(e) = chat.as_deref().and_then(|c| hub.store.find_by_nonce(c, nonce)) {
+    if let Some(e) = hub.store.find_bot_guest_nonce(&bot.bot_id, nonce) {
+        if !is_retry(hub, &e, text, &agent, known.as_ref(), external.as_deref()) {
+            return Err(BotError::err(
+                409,
+                Code::NonceReused,
+                "This clientNonce was already used for a different message.",
+            ));
+        }
         return replay(hub, bot, &e);
     }
     let now = now_ms();

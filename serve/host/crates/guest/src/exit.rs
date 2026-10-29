@@ -153,6 +153,11 @@ impl HostErr {
             Code::BadRequest | Code::TooLong | Code::NotSupported => {
                 CliError::new(Exit::Usage, "badRequest", non_empty(&message, "The computer refused the request"))
             }
+            Code::NonceReused => CliError::new(
+                Exit::Usage,
+                "nonceReused",
+                non_empty(&message, "This clientNonce was already used for a different message."),
+            ),
             // The rest say no more than their status does. No wildcard: a new code in the contract is decided on here.
             Code::Syncing | Code::TooMany | Code::Unknown => match status {
                 401 | 403 => CliError::new(

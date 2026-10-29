@@ -16,7 +16,7 @@ use crate::LockExt;
 use crate::agent::bot::Cmd;
 use crate::hub::Hub;
 use crate::remote::push::{self, AlertKind};
-use crate::store::{BotConfig, BotKind, Entry, EntryKind, Lane, Store};
+use crate::store::{BotConfig, BotKind, Entry, EntryKind, Lane, Store, is_person_message};
 use anyhow::{Result, anyhow, bail};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -178,7 +178,7 @@ fn members(hub: &Hub, group: &BotConfig) -> Vec<BotConfig> {
 /// The lane's messages since the user last wrote there, that message included.
 fn since_last_user_message(hub: &Hub, lane: &Lane) -> Result<Vec<Entry>> {
     let recent = hub.store.messages_after(lane, 0, HISTORY_LINES)?;
-    let start = recent.iter().rposition(|e| e.kind == EntryKind::User.as_str()).unwrap_or(0);
+    let start = recent.iter().rposition(is_person_message).unwrap_or(0);
     Ok(recent[start..].to_vec())
 }
 
@@ -270,6 +270,11 @@ fn member_prompt(hub: &Hub, group: &BotConfig, members: &[BotConfig], me: &BotCo
 
 fn line(hub: &Hub, group: &BotConfig, e: &Entry, me: &BotConfig) -> String {
     let text = e.data["text"].as_str().unwrap_or_default();
+    if let Some(bot) = e.data["sender"]["botId"].as_str().filter(|_| e.kind == EntryKind::User.as_str()) {
+        // A bot guest's ask is its own voice in the room, not the user's.
+        let name = e.data["sender"]["name"].as_str().filter(|n| !n.is_empty()).unwrap_or(bot);
+        return format!("{name} (bot guest): {text}");
+    }
     if e.kind == EntryKind::User.as_str() {
         let root = crate::chat::uploads::root(group);
         let files: Vec<_> = e.data["attachments"]
@@ -314,6 +319,24 @@ mod tests {
             created_at: 0,
             updated_at: 0,
         }
+    }
+
+    #[tokio::test]
+    async fn a_bot_guests_entry_does_not_reset_since_the_last_user_message() {
+        let room = Room::new();
+        let main = Lane::main(&room.group);
+        let hub = &room.hub;
+        let user = hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "hello"})).unwrap();
+        hub.add_entry(&main, EntryKind::Agent, 2, &json!({"text": "hi", "author": "a"})).unwrap();
+        let guest = json!({"text": "psst", "sender": {"botId": "bg1", "name": "Grok"}});
+        let ask = hub.add_entry(&main, EntryKind::User, 3, &guest).unwrap();
+        let since = since_last_user_message(hub, &main).unwrap();
+        assert_eq!(since.first().map(|e| e.id.clone()), Some(user.id), "the guest's ask is not the user's message");
+        assert_eq!(
+            line(hub, &hub.store.bot(&room.group).unwrap().unwrap().config, &ask, &bot("a", "Alice")),
+            "Grok (bot guest): psst"
+        );
+        room.shutdown().await;
     }
 
     #[test]

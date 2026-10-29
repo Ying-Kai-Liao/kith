@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "5aa41228fc447623c0111891615c570477f9508add3ea88310cf1176d1b02e33"
+    public static let sha256 = "8816a5c4b430db848eca31d6aca93d967fc69bfe446563667005f23860b76a39"
 }
 
 extension HostContract {
@@ -202,6 +202,7 @@ extension HostContract {
         case syncing
         case heldByOtherWriter
         case tooMany
+        case nonceReused
         /// A value this version doesn't know.
         case unknown
 
