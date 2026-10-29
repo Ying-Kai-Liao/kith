@@ -31,6 +31,12 @@ doors:
     bin: fake/door.mjs
     args: [render]
     writes: [renders]
+  - name: cut
+    npm: [fake@1.0.0]
+    lockfile: render.lock.json
+    tools: [node, ffmpeg]
+    bin: fake/door.mjs
+    writes: [renders]
   - name: spare
     npm: [fake@1.0.0]
     lockfile: render.lock.json
@@ -71,7 +77,7 @@ doors:
 jobs:
   - name: make-videos
     label: Make videos
-    doors: [render]
+    doors: [render, cut]
 YAML
 echo '{"lockfileVersion":3}' > "$PKG/render.lock.json"
 echo '{}' > "$KITH_HOME/agents/video/outside.json"
@@ -94,7 +100,7 @@ piece() { py 'import kith_door; print(kith_door.piece(kith_door.declared(sys.arg
 
 # --- the schema
 P=$(py 'import kith_jobs, json; d, p = kith_jobs.doors(sys.argv[1]); print(json.dumps({"doors": sorted(d), "problems": p}))' "$CAPS")
-expect "the valid doors" "$(field "$P" doors)" '["render", "spare"]'
+expect "the valid doors" "$(field "$P" doors)" '["cut", "render", "spare"]'
 has "a version range is not a pin" "$P" "door ranged: npm lists packages at exact versions"
 has "a lockfile outside the package" "$P" "door outside-lock: lockfile is a file next to capabilities.yaml"
 has "a door without node" "$P" "door no-node: tools are among"
@@ -117,6 +123,18 @@ has "only the passed ports" "$PROF" '(allow network-outbound (remote ip "localho
 has "the serve ports are closed even on a passed port" "$PROF" '(deny network* (local ip "*:19224")'
 lacks "the folder itself is not written" "$PROF" '(subpath "/x/proj") (literal "/dev/null")'
 has "the declared folder is" "$PROF" '(allow file-write* (subpath "/x/proj/renders") (subpath "/t")'
+
+# --- where a tool may be installed: the box reads its install folder
+tree() { py 'import kith_door
+try: print(kith_door._tree("ffmpeg", sys.argv[1]))
+except kith_door.DoorError as e: print("refused:", e)' "$1"; }
+has "a tool in ~/bin would open the home folder" "$(tree "$HOME/bin/ffmpeg")" "refused: ffmpeg is installed in $HOME,"
+has "nor a folder around it" "$(tree "$T/bin/ffmpeg")" "refused:"
+has "nor Kith's folder" "$(tree "$KITH_HOME/bin/ffmpeg")" "refused:"
+has "nor one under the agents' files" "$(tree "$KITH_HOME/agents/video/files/x/bin/ffmpeg")" "refused:"
+has "nor the keys" "$(tree "$KITH_STATE/secrets/x/bin/ffmpeg")" "refused:"
+expect "its own folder in the home folder is" "$(tree "$HOME/.local/ffmpeg/bin/ffmpeg")" "$HOME/.local/ffmpeg"
+expect "Homebrew's is" "$(tree /opt/homebrew/Cellar/ffmpeg/8.0/bin/ffmpeg)" "/opt/homebrew/Cellar/ffmpeg/8.0"
 
 # --- kith-auth door: what the locked start reads
 expect "the owner runs no door" "$(field "$(door kai "$DOOR")" state)" "owner"
@@ -166,11 +184,12 @@ mkdir -p "$DIR/renders" "$KITH_HOME/agents/video/files/people/ann/proj/renders"
 echo "$KITH_AUTH" > "$DIR/secret-path.txt"
 CACHE=$(py '
 import kith_door
-c = kith_door.cache_dir("video", kith_door.declared(sys.argv[1], "render"))
-(c / "node_modules" / "fake").mkdir(parents=True)
-for n in (kith_door.PRELOAD, kith_door.WRAPPER):
-    (c / n).write_bytes((kith_door.LIB / n).read_bytes())
-(c / ".ready").write_text("render\n")
+for name in ("cut", "render"):
+    c = kith_door.cache_dir("video", kith_door.declared(sys.argv[1], name))
+    (c / "node_modules" / "fake").mkdir(parents=True)
+    for n in (kith_door.PRELOAD, kith_door.WRAPPER):
+        (c / n).write_bytes((kith_door.LIB / n).read_bytes())
+    (c / ".ready").write_text(name + "\n")
 print(c)' "$CAPS")
 cat > "$CACHE/node_modules/fake/door.mjs" <<'JS'
 import fs from 'node:fs';
@@ -219,13 +238,34 @@ if (fs.existsSync('hold')) {
   srv.close();
 }
 JS
-run_door() {   # run_door PERSON FOLDER: what the agent is told (exec: in the background, $! is the supervisor)
+run_door() {   # run_door PERSON FOLDER [DOOR]: what the agent is told (exec: in the background, $! is the supervisor)
   exec env KITH_PERSON="$1" KITH_AGENT=video KITH_AGENT_DIR="$PKG" python3 -c '
 import importlib.machinery, importlib.util, sys
 loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
 spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
-print(kp.run_door({"door": "render", "path": sys.argv[2]}))' "$KERNEL/bin/kith-permit" "$2"
+print(kp.run_door({"door": sys.argv[3], "path": sys.argv[2]}))' "$KERNEL/bin/kith-permit" "$2" "${3:-render}"
 }
+# late_door race|stuck: runs the door in this process, and a SIGTERM lands once the box runs but before run() holds its
+# Popen (as one inside Popen's wait for the exec would). stuck: also no process of the door dies when killed.
+late_door() { py '
+import os, signal, subprocess, time, kith_door
+real, pid_file = subprocess.Popen, sys.argv[2] + "/renders/door.pid"
+class Late(real):
+    def __init__(self, argv, *a, **k):
+        super().__init__(argv, *a, **k)
+        if argv[0] != kith_door.SANDBOX_EXEC:
+            return
+        for _ in range(100):
+            if os.path.exists(pid_file) and os.path.getsize(pid_file): break
+            time.sleep(0.1)
+        os.kill(os.getpid(), signal.SIGTERM)
+kith_door.subprocess.Popen = Late
+if sys.argv[1] == "stuck":
+    kith_door.kill = lambda claim, since, parent=None: kith_door.door_procs(claim, since, parent)
+code, tail = kith_door.run("video", "bill", kith_door.declared(sys.argv[3], "render"), sys.argv[2])
+print(tail.splitlines()[-1], len(kith_door._kept), [c.get("left") for c in kith_door._claims()])
+if sys.argv[1] == "stuck":
+    print(subprocess.run([sys.argv[4] + "/bin/kith-door", "sweep"], capture_output=True, text=True).stdout)' "$1" "$DIR" "$CAPS" "$KERNEL"; }
 alive() { kill -0 "$1" 2>/dev/null && echo alive || echo gone; }
 claims() { python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$("$KERNEL/bin/kith-door" ls)"; }
 started() { for _ in $(seq 1 100); do [ -s "$DIR/renders/door.pid" ] && return 0; /bin/sleep 0.1; done; return 1; }
@@ -248,6 +288,15 @@ expect "no claim is left" "$(claims)" "0"
 has "a folder outside the person's" "$(run_door bill "$KITH_HOME/agents/video/files/people/ann/proj")" "must be one of bill's folders"
 ln -s "$KITH_HOME/agents/video/files/people/ann/proj" "$DIR/to-ann"
 has "nor through a link" "$(run_door bill "$DIR/to-ann")" "must be one of bill's folders"
+mkdir -p "$HOME/bin"
+printf '#!/bin/sh\n: > "$0.ran"\n' > "$HOME/bin/ffmpeg"
+chmod +x "$HOME/bin/ffmpeg"
+rm -f "$DIR/renders/out.txt"
+OUT=$(PATH=$HOME/bin:$PATH run_door bill "$DIR" cut)
+has "an ffmpeg in ~/bin: the door refuses" "$OUT" "The door did not run: ffmpeg is installed in $HOME,"
+expect "and never starts" "$([ -e "$DIR/renders/out.txt" ] && echo started || echo none)" "none"
+expect "no claim is made" "$(claims)" "0"
+rm -rf "$HOME/bin"
 
 touch "$DIR/hold"
 rm -f "$DIR/renders/door.pid"
@@ -284,6 +333,19 @@ expect "a door outlives a supervisor killed with -9" "$(alive "$DPID")" "alive"
 has "a sweep ends a door whose supervisor is gone" "$("$KERNEL/bin/kith-door" sweep)" '"ended": ["'
 expect "the door is gone" "$(alive "$DPID")" "gone"
 expect "and its detached child" "$(alive "$CPID")" "gone"
+expect "and its claim" "$(claims)" "0"
+
+rm -f "$DIR/renders/door.pid"
+has "a SIGTERM before run() holds its Popen still ends the box" "$(late_door race)" "the door was stopped 0 []"
+expect "the door is gone" "$(alive "$(cat "$DIR/renders/door.pid")")" "gone"
+expect "and its detached child" "$(alive "$(cat "$DIR/renders/child.pid")")" "gone"
+expect "and its claim" "$(claims)" "0"
+rm -f "$DIR/renders/door.pid"
+OUT=$(late_door stuck)
+has "a box that would not die keeps its claim and its ports" "$OUT" "the next sweep ends it 4 [True]"
+has "and the next sweep ends it" "$OUT" '"ended": ["'
+expect "the door is gone" "$(alive "$(cat "$DIR/renders/door.pid")")" "gone"
+expect "and its detached child" "$(alive "$(cat "$DIR/renders/child.pid")")" "gone"
 expect "and its claim" "$(claims)" "0"
 
 rm -f "$DIR/renders/door.pid"

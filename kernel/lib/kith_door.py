@@ -31,6 +31,7 @@ import fcntl
 import hashlib
 import json
 import os
+import pwd
 import re
 import secrets
 import selectors
@@ -44,7 +45,7 @@ import time
 from pathlib import Path
 
 import kith_jobs
-from kith_paths import guest_sandbox, guest_scrub, paths
+from kith_paths import HOME, guest_sandbox, guest_scrub, paths
 
 LIB = Path(__file__).resolve().parent
 PRELOAD, WRAPPER = 'door-preload.mjs', 'door-chrome'
@@ -67,6 +68,7 @@ XPC_LOOKUP = ('com.apple.MTLCompilerService',)
 CHROME_RENDEZVOUS = r'^org\.chromium\.Chromium\.MachPortRendezvousServer\.[0-9]+$'
 IOKIT_CLASSES = ('IOSurfaceRootUserClient', 'AGXDeviceUserClient', 'RootDomainUserClient')  # Chrome segfaults without the last
 CLAIM = re.compile(r'^[0-9a-f]{16}$')
+_kept = []    # the sockets of a door a process of which would not die: held while this process lives
 
 
 class DoorError(Exception):
@@ -167,6 +169,8 @@ def tools(decl, env=os.environ):
                 continue
             raise DoorError(f'{t} is not installed on this Mac (the door needs it)')
         out[t] = os.path.realpath(found)
+        if t != 'npm':
+            _tree(t, out[t], env)
     return out
 
 
@@ -175,9 +179,33 @@ def _prefix(tool):
     return os.path.dirname(os.path.dirname(tool))
 
 
-def _npm_cli(t):
+def _fold(p):
+    return p.lower() if os.uname().sysname == 'Darwin' else p
+
+
+def _tree(name, tool, env=os.environ):
+    """The install folder the box may read for `tool`, or DoorError when that folder is the owner's home folder, holds
+    it, holds one of Kith's folders, the keys or ~/.ssh, or is inside the keys, ~/.ssh or the agents' files (a tool in
+    ~/bin would open the whole home folder to whatever the guest feeds it)."""
+    p = paths()
+    homes = {env.get('HOME') or '', str(HOME), pwd.getpwuid(os.getuid()).pw_dir} - {''}
+    ssh = {os.path.join(h, '.ssh') for h in homes}
+    held = {*homes, *ssh, env.get('KITH_AUTH') or str(p['KITH_SECRETS'] / 'auth.json'),
+            *(str(p[k]) for k in ('KITH_HOME', 'KITH_STATE', 'KITH_AGENTS', 'KITH_MACHINE', 'KITH_SECRETS'))}
+    inside = {*ssh, str(p['KITH_SECRETS']), str(p['KITH_AGENTS'])}
+    real = lambda s: _fold(os.path.realpath(s)).rstrip('/') or '/'
+    under = lambda a, b: a == b or b == '/' or a.startswith(b + '/')
+    tree = real(_prefix(tool))
+    if any(under(real(h), tree) for h in held) or any(under(tree, real(i)) for i in inside):
+        raise DoorError(f"{name} is installed in {_prefix(tool)}, where the door's box would read the owner's files; "
+                        f"install {name} outside the home folder (for example with Homebrew)")
+    return _prefix(tool)
+
+
+def _npm_cli(t, env=os.environ):
     """npm-cli.js of the owner's npm: run with node, never through the npm shell script."""
     if 'npm' in t and t['npm'].endswith('npm-cli.js'):
+        _tree('npm', t['npm'], env)
         return t['npm']
     guess = os.path.join(_prefix(t['node']), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js')
     if os.path.isfile(guess):
@@ -201,7 +229,7 @@ def prepare(agent, decl, log=lambda s: None, env=os.environ):
     if (cache / '.ready').is_file():
         return cache
     t = tools(decl, env)
-    npm_cli = _npm_cli(t)
+    npm_cli = _npm_cli(t, env)
     work = Path(str(cache) + '.prep')
     shutil.rmtree(work, ignore_errors=True)
     (work / 'tmp').mkdir(parents=True, mode=0o700)
@@ -285,9 +313,11 @@ def _pids():
 
 
 def proc_info(pid):
-    """(ppid, start time in s) of a running process, or None."""
+    """(ppid, start time in s) of a running process, or None (a zombie runs nothing)."""
     bi = _BsdInfo()
     if _c().proc_pidinfo(pid, 3, 0, ctypes.byref(bi), ctypes.sizeof(bi)) != ctypes.sizeof(bi):   # PROC_PIDTBSDINFO
+        return None
+    if bi.status == 5:   # SZOMB
         return None
     return bi.ppid, bi.start_sec + bi.start_usec / 1e6
 
@@ -323,14 +353,14 @@ def run_dir():
     return d
 
 
-def door_procs(claim, since):
-    """Every process of the door `claim`: in its sandbox, or tagged KITH_DOOR=<claim>, started at or after `since`, and
-    their descendants."""
+def door_procs(claim, since, parent=None):
+    """Every process of the door `claim`: in its sandbox, or tagged KITH_DOOR=<claim>, or (given its supervisor's pid
+    `parent`) a child of the supervisor, started at or after `since`, and their descendants."""
     d = run_dir()
     tag = b'KITH_DOOR=' + claim.encode()
     procs = {p: i for p in _pids() if (i := proc_info(p)) and i[1] >= since - 1}
     found = {p for p in procs if (_may_read(p, f'{d}/{claim}.in') == 0 and _may_read(p, f'{d}/{claim}.out') == 1)
-             or tag in _environ(p)}
+             or procs[p][0] == parent or tag in _environ(p)}
     grew = True
     while grew:
         grew = False
@@ -341,29 +371,27 @@ def door_procs(claim, since):
     return found - {os.getpid(), 0, 1}
 
 
-def kill(claim, since):
-    """Stops every process of the door, rescans until nothing new appears, kills them all, and waits until none is left.
-    Returns how many it killed."""
+def kill(claim, since, parent=None):
+    """Stops every process of the door, rescans until nothing new appears, kills them all, and waits up to 10 s until
+    none is left. Returns the ones still left (none, unless one would not die)."""
     stopped = set()
-    while new := door_procs(claim, since) - stopped:
+    while new := door_procs(claim, since, parent) - stopped:
         for p in new:
             try:
                 os.kill(p, signal.SIGSTOP)
             except ProcessLookupError:
                 pass
         stopped |= new
-    deadline = time.time() + 10
-    while True:
-        for p in stopped:
+    deadline, left = time.time() + 10, stopped
+    while left and time.time() < deadline:
+        for p in left:    # only what the last scan found: a pid that ended may already be someone else's
             try:
                 os.kill(p, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-        left = door_procs(claim, since)
-        if not left or time.time() > deadline:
-            return len(stopped)
-        stopped |= left
         time.sleep(0.05)
+        left = door_procs(claim, since, parent)
+    return left
 
 
 # ---- the locked start, the run and the sweep
@@ -467,7 +495,7 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None):
     me = proc_info(os.getpid())
     parent = os.getppid()
     since = time.time()
-    p, tail = None, []
+    p, tail, record = None, [], None
 
     def stop(*_):
         raise KeyboardInterrupt
@@ -479,9 +507,10 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None):
             v = check(agent, person, piece(decl), env)
             if not v.get('ok'):
                 raise DoorError(v.get('why') or 'not allowed')
-            (d / f'{claim}.json').write_text(json.dumps(
-                {'claim': claim, 'pid': os.getpid(), 'procStart': me[1] if me else 0, 'person': person, 'agent': agent,
-                 'door': piece(decl), 'since': since, 'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}))
+            record = {'claim': claim, 'pid': os.getpid(), 'procStart': me[1] if me else 0, 'person': person,
+                      'agent': agent, 'door': piece(decl), 'since': since,
+                      'at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+            (d / f'{claim}.json').write_text(json.dumps(record))
             p = subprocess.Popen(argv, env=box_env, cwd=tmp, start_new_session=True, stdin=subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, pass_fds=fds)
         sel = selectors.DefaultSelector()
@@ -516,14 +545,25 @@ def run(agent, person, decl, folder, env=os.environ, on_line=None):
         tail.append('the door closed its output but did not end')
     finally:
         signal.signal(signal.SIGTERM, old)
-        if p is not None:
-            kill(claim, since)
-            if p.poll() is None:
-                p.kill()
-            p.wait()
-        for s in socks:     # only now: no door process is left that could take the port by an implicit bind
-            s.close()
-        _forget(claim)
+        left = set()
+        if record is not None:   # the box may run even when p is None: a SIGTERM inside Popen, after the fork
+            left = kill(claim, since, os.getpid())
+            if p is not None:
+                if p.poll() is None:
+                    p.kill()
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                left = door_procs(claim, since, os.getpid())
+        if left:   # one would not die: the claim stays for the next sweep, and the ports stay held until it is gone
+            _kept.extend(socks)
+            (d / f'{claim}.json').write_text(json.dumps({**record, 'left': True}))
+            tail.append('a process of the door would not end; the next sweep ends it')
+        else:
+            for s in socks:     # only now: no door process is left that could take the port by an implicit bind
+                s.close()
+            _forget(claim)
     return code, '\n'.join(tail)
 
 
@@ -537,16 +577,17 @@ def sweep(persons=(), recheck=True):
         fcntl.flock(lock, fcntl.LOCK_EX)    # no start is half done while the claims are read
         doomed = []
         for c in _claims():
-            if c.get('person') in persons or not _alive(c):
+            if c.get('person') in persons or not _alive(c) or c.get('left'):
                 doomed.append(c)
             elif recheck:
                 v = check(str(c.get('agent')), str(c.get('person')), str(c.get('door')))
                 if not v.get('ok') and v.get('state') != 'held':
                     doomed.append(c)
     for c in doomed:
-        kill(c['claim'], float(c.get('since') or 0))
-        if not _alive(c):
-            _forget(c['claim'])    # a live supervisor cleans up its own when its box ends
+        if kill(c['claim'], float(c.get('since') or 0)):
+            continue               # one would not die: the claim stays, and the next sweep tries again
+        if not _alive(c) or c.get('left'):
+            _forget(c['claim'])    # a live supervisor cleans up its own when its box ends, unless it gave up on it
         ended.append(c['claim'])
     return ended
 
