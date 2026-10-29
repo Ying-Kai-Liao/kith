@@ -135,12 +135,12 @@ function Gallery() {
         </Row>
       </Section>
 
-      <Section title="DecisionCard" note="Tinted with the agent's pair; 1 to 4 options; permission; guest prompt; answered.">
+      <Section title="DecisionCard" note="Tinted in the agent's pair while it waits, grey once answered; 1 to 4 options; permission (Allow once / Always allow in folder / red Deny); guest prompt; answered.">
         <Row gap={24}>
           <div style={col(340)}><DecisionCard kind="question" pair={designerPair} title="Which direction for the app?" options={[{ id: 'a', label: 'Sky and glass' }, { id: 'b', label: 'Flat panels' }]} onChoose={() => {}} /></div>
           <div style={col(340)}><DecisionCard kind="question" pair={coderPair} title="Open a PR now, or batch it with the sleep notice fix?" options={[{ id: 'a', label: 'Open a PR now' }, { id: 'b', label: 'Batch it' }, { id: 'c', label: 'A very long option label that wraps onto a second line' }, { id: 'd', label: 'Ask me later' }]} onChoose={() => {}} pending="b" /></div>
           <div style={col(260)}><DecisionCard kind="question" pair={coderPair} title="Keep going?" options={[{ id: 'a', label: 'Yes' }]} onChoose={() => {}} /></div>
-          <div style={col(340)}><DecisionCard kind="permission" pair={coderPair} title="Wants to run a command" subject="npm run typecheck && git push origin flow/kith-redesign" place="Runs on Mac mini · kith" onAllow={() => {}} onDeny={() => {}} onAlways={() => {}} /></div>
+          <div style={col(340)}><DecisionCard kind="permission" pair={coderPair} title="Wants to run a command" subject="npm run typecheck && git push origin flow/kith-redesign" place="Runs on Mac mini · kith" allowLabel="Allow once" alwaysLabel="Always allow in kith" onAllow={() => {}} onDeny={() => {}} onAlways={() => {}} /></div>
           <div style={col(340)}><DecisionCard kind="permission" pair={coderPair} title="Wants to run a command" subject="rm -rf build" place="Runs on Mac mini · kith" waiting="Kai" onAllow={() => {}} onDeny={() => {}} /></div>
           <div style={col(340)}><DecisionCard kind="permission" pair={coderPair} title="Wants to change files" subject="relay/socket.ts" outcome="Allowed once" onAllow={() => {}} onDeny={() => {}} /></div>
         </Row>
@@ -181,6 +181,7 @@ function Gallery() {
           <div style={{ marginTop: 14 }}><CountBadge count={100} /><Cap>99+</Cap></div>
           <div style={{ marginTop: 14 }}><CountBadge count={3} size={16} /><Cap>board 16</Cap></div>
           <div style={{ marginTop: 14 }}><CountBadge count={0} /><Cap>0 hidden</Cap></div>
+          <div style={{ marginTop: 14, padding: 10, background: '#000', borderRadius: 10 }}><CountBadge count={2} inverted /><Cap>inverted (island)</Cap></div>
         </Row>
       </Section>
 

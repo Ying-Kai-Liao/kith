@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { botGuestVariant, countLabel, dockAction, dockCallVisible, hashSeed, SKY_PRESETS, skyCropRect, repliesLabel, resumeCommand, skyPatchOf, statusChipOf, writerBannerOf } from './logic.ts'
+import { FALLBACK_PAIR, pairOf } from './pair.ts'
+import { PALETTE } from '../../../shared/living-bots.ts'
 
 test('the sky patch is stable per id, and you are always dawn', () => {
   assert.deepEqual(skyPatchOf('acct_mia'), skyPatchOf('acct_mia'))
@@ -92,4 +94,11 @@ test('the canvas crop follows the CSS background-size and -position rules', () =
   assert.deepEqual({ x: r.x, y: r.y + 0, w: r.w, h: r.h }, { x: -160, y: 0, w: 420, h: 210 })
   const z = skyCropRect(2000, 1000, { x: 100, y: 0 }, 100, 3)
   assert.deepEqual({ x: z.x, y: z.y + 0, w: z.w, h: z.h }, { x: -200, y: 0, w: 300, h: 150 })
+})
+
+test('pairOf: gradient keeps both colours, plain is flat, the rest fall back', () => {
+  const c = PALETTE[0]!
+  assert.deepEqual(pairOf(`kith:${c.id}`), { a: c.a, b: c.b })
+  assert.deepEqual(pairOf(`kith:${c.id}:plain`), { a: c.a, b: c.a })
+  for (const v of ['', 'blue', 'kith:nope', 'kith:nope:plain', null, undefined]) assert.deepEqual(pairOf(v), FALLBACK_PAIR)
 })

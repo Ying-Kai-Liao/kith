@@ -40,9 +40,10 @@
 /* The GitHub star ask (StarPrompt). */
 .star-prompt {
   width: 420px;
+  padding: 28px 24px 24px;
 }
-.star-prompt-body {
-  padding: 0 24px 24px;
+.star-prompt-cube {
+  display: block;
 }
 .star-prompt-message {
   text-align: center;

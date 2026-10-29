@@ -50,12 +50,17 @@ export interface ChatSlot {
 
 /**
  * The chat-visible entries of a main transcript, with consecutive exchanges with the same peer
- * (either direction) merged. Anything else visible ends the run; trace entries don't.
+ * (either direction) merged. Anything else visible ends the run; trace entries don't. `withTools` keeps tool calls
+ * as slots of their own (the flat chat shows them as rows); they don't end a run either.
  */
-export function groupExchanges(entries: Entry[]): ChatSlot[] {
+export function groupExchanges(entries: Entry[], withTools = false): ChatSlot[] {
   const out: ChatSlot[] = []
   let run: ChatSlot | null = null
   for (const entry of entries) {
+    if (withTools && entry.kind === 'tool') {
+      out.push({ entry, exchanges: null })
+      continue
+    }
     if (!isChat(entry)) continue
     const x = botExchange(entry)
     if (!x) {

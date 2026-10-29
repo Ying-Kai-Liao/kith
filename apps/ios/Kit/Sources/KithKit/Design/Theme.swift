@@ -50,7 +50,7 @@ public enum Palette {
 }
 
 /// The 15 colour pairs a bot's body can wear (eyes.json `palette`, from branding). A pick is
-/// stored in `avatarColor` as `kith:<id>`; any other value, including the bare ids of the old
+/// stored in `avatarColor` as `kith:<id>` (gradient) or `kith:<id>:plain` (a flat fill of the pair's first colour); any other value, including the bare ids of the old
 /// palette (`blue`, `green`...), is the untouched original body.
 public enum AvatarPalette {
     public struct Swatch: Identifiable, Hashable, Sendable {
@@ -60,6 +60,9 @@ public enum AvatarPalette {
         public let b: UInt32
         /// The value to store in `avatarColor`.
         public var stored: String { "kith:" + id }
+        /// The value for a flat fill of `a`.
+        public var storedPlain: String { stored + ":plain" }
+        public func stored(plain: Bool) -> String { plain ? storedPlain : stored }
         /// The deeper colour of the pair, for badges.
         public var color: Color { Color(hex: a) }
     }
@@ -82,17 +85,26 @@ public enum AvatarPalette {
         .init(id: "dawn", label: "Dawn", a: 0x8FC7FC, b: 0xA67EFC),
     ]
 
-    /// The palette id a stored `avatarColor` picks: only `kith:<id>` with a known id does; nil is the original body.
-    public static func pick(_ stored: String?) -> String? {
+    /// What a stored `avatarColor` picks: `kith:<id>` with a known id is a gradient, `kith:<id>:plain` a flat fill; nil is
+    /// the original body. The one parse every drawing goes through.
+    public static func parse(_ stored: String?) -> (id: String, plain: Bool)? {
         guard let stored, stored.hasPrefix("kith:") else { return nil }
-        let id = String(stored.dropFirst(5))
-        return colors.contains { $0.id == id } ? id : nil
+        var id = String(stored.dropFirst(5))
+        var plain = false
+        if id.hasSuffix(":plain") { id = String(id.dropLast(6)); plain = true }
+        return colors.contains { $0.id == id } ? (id, plain) : nil
     }
+
+    /// The palette id a stored `avatarColor` picks, gradient or plain; nil is the original body.
+    public static func pick(_ stored: String?) -> String? { parse(stored)?.id }
+
+    public static func isPlain(_ stored: String?) -> Bool { parse(stored)?.plain ?? false }
 
     /// A badge color (a computer's, a call's): the pair's deeper colour, with or without the
     /// `kith:` prefix; the accent when it is neither. These are pastels, so never use one as text on white.
     public static func color(_ id: String) -> Color {
-        let bare = id.hasPrefix("kith:") ? String(id.dropFirst(5)) : id
+        var bare = id.hasPrefix("kith:") ? String(id.dropFirst(5)) : id
+        if bare.hasSuffix(":plain") { bare = String(bare.dropLast(6)) }
         return colors.first { $0.id == bare }?.color ?? Palette.accent
     }
 }

@@ -3,7 +3,7 @@ import KithUI
 import SwiftUI
 
 /// The picture at the top left of Crew: your sky patch (your photo once you have one) in a ring. A stock menu with
-/// the account (its subtitle is the Macs' health line; the Macs themselves live in Account > Your devices),
+/// the account (its subtitle is the Macs' health line), Computers (opens Account > Your devices),
 /// Extensions, Usage and Settings.
 struct ProfileMenu: View {
     @Environment(AppStore.self) private var app
@@ -30,6 +30,9 @@ struct ProfileMenu: View {
                 Image(systemName: "person.crop.circle")
             }
             Divider()
+            Button { app.showComputers = true } label: {
+                Label("Computers", systemImage: "desktopcomputer")
+            }
             if ownerThings {
                 Button { app.marketplace = app.currentStore?.computer.id } label: {
                     Label("Extensions", systemImage: "puzzlepiece.extension")
