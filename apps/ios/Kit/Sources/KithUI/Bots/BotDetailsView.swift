@@ -3,7 +3,7 @@ import SwiftUI
 
 /// The details sheet's pages, as on the desktop inspector.
 enum DetailsTab: Hashable {
-    case details, memory, settings
+    case details, memory, access, settings
 }
 
 /// What to open the details sheet on.
@@ -34,6 +34,8 @@ struct BotDetailsView: View {
     @State private var template: EditorRequest?
     /// A kith bot's details (serve/docs/bot-info.md); nil for any other bot. Kept while `bot` events arrive.
     @State private var kith: KithInfoStore?
+    /// The Access tab's data (keys, grants, spend); nil for a bot with no hq agent, a guest, or a group.
+    @State private var access: AccessStore?
     private let call: CallAction?
     /// Cards that kith's sections repeat go once kith has the fact on screen.
     private var shown: BotSections { BotSections(hqAgent: bot?.hqAgent, info: kith?.info, unsupportedHost: kith?.unavailable ?? true) }
@@ -84,6 +86,12 @@ struct BotDetailsView: View {
             kith = store
             await store.load()
         }
+        .task(id: "access/\(botId)/\(bot?.hqAgent ?? "")") {
+            guard model.isOwner, let bot, let agent = bot.hqAgent, !bot.isGroup, !agent.isEmpty else { access = nil; return }
+            let store = access?.agent == agent ? access! : AccessStore(agent: agent) { try await model.ready() }
+            access = store
+            await store.load()
+        }
         .onChange(of: draft) { _, draft in autosave(draft) }
         .kithSheet(item: $template) { BotTemplateView(draft: $0.draft) }
     }
@@ -131,7 +139,7 @@ struct BotDetailsView: View {
                 .padding(.top, 14)
                 .transition(.opacity)
             }
-            SegmentedChoice(selection: $tab, options: [(.details, "Details"), (.memory, "Memory"), (.settings, "Settings")])
+            SegmentedChoice(selection: $tab, options: tabs)
                 .padding(.horizontal, 16)
         }
         .padding(.top, scrolled ? 0 : 18)
@@ -139,6 +147,12 @@ struct BotDetailsView: View {
         .frame(maxWidth: .infinity)
         .background(Palette.background)
         .animation(.easeOut(duration: 0.15), value: scrolled)
+    }
+
+    /// Access sits between Memory and Settings for an owner's hq agent whose host can answer it.
+    private var showsAccess: Bool { access?.available == true }
+    private var tabs: [(id: DetailsTab, label: String)] {
+        [(.details, "Details"), (.memory, "Memory")] + (showsAccess ? [(.access, "Access")] : []) + [(.settings, "Settings")]
     }
 
     /// The ink Call capsule; white on night in dark. `blocked` is why it can't be used now.
@@ -201,7 +215,7 @@ struct BotDetailsView: View {
 
     @ViewBuilder private var about: some View {
         if let draft = Binding($draft) {
-            BotSettingsForm(draft: draft, error: saveError, scrolls: false, part: .often, shown: shown, kith: kith)
+            BotSettingsForm(draft: draft, error: saveError, scrolls: false, part: .often, shown: shown, kith: kith, permissionInAccess: showsAccess)
         }
     }
 
@@ -236,6 +250,8 @@ struct BotDetailsView: View {
                     }
                 }
             }
+        case .access:
+            if let access, showsAccess { AccessTabView(store: access, kith: kith) } else { detailsPage }
         case .settings:
             if let draft = Binding($draft) {
                 BotSettingsForm(draft: draft, error: saveError, scrolls: false, part: .rarely, shown: shown, kith: kith)
