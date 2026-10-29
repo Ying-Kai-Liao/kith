@@ -1,0 +1,23 @@
+{
+  "description": "Grok's webhook: an agent pushes a message to the owner's Grok bot with `kith send-to grok \"text\"`; one profile per bot (grok/kai, grok/work). Grok's answer comes back on its bot link, not here",
+  "kind": "cli",
+  "display": "Grok",
+  "secrets": ["GROK_WEBHOOK_URL", "GROK_WEBHOOK_KEY"],
+  "webhook": {
+    "url": "GROK_WEBHOOK_URL",
+    "key": "GROK_WEBHOOK_KEY",
+    "header": "Authorization",
+    "scheme": "Bearer",
+    "text_field": "text",
+    "success_field": "success",
+    "run_field": "runUuid",
+    "error_field": "error",
+    "sent": "Grok started a run, not that it replied",
+    "not_started": "Grok answered 2xx but did not start a run (no \"success\":true)",
+    "status_messages": {
+      "400": "Grok's routine is paused (disabled); the message was not delivered",
+      "401": "Grok refused the key (401); replace it via request_secret / kith-auth set grok/<account> GROK_WEBHOOK_KEY"
+    },
+    "limits": "Grok allows 300 runs/hour across all routines and 200/hour per routine; over a cap the run fails silently (no HTTP error), so a 200 can still end in no run"
+  }
+}

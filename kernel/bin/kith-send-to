@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""kith-send-to — push a message to a bot's webhook (a kith-auth service with a "webhook" block, e.g. grok).
+
+  kith send-to <service> "text" [--profile P] [--for AGENT] [--json]
+  kith send-to <service> --body FILE|- [--profile P] [--for AGENT] [--json]
+
+The URL and key never touch an argv or the output: the command re-runs itself under `kith-auth exec`, where they are
+env vars, and hands them to curl on stdin (`--config -`). "Sent" needs a 2xx whose body has the service's success flag
+(grok: {"success":true,"runUuid":...}); even then it means the run STARTED, not that it replied, and over Grok's caps
+(300 runs/hour, 200 per routine) a run fails silently with no HTTP error. 400 (routine paused) and 401 (key refused)
+are not retried. A 429 is not documented by Grok; it is retried as a fallback (Retry-After, else 30s then 60s; three tries, 120s of waiting at most; KITH_SEND_TO_BACKOFF_SCALE
+multiplies the sleeps, 0 in tests). Exit: 0 sent, 1 failed, 2 usage."""
+import json, os, re, subprocess, sys, tempfile, time
+from pathlib import Path
+from urllib.parse import urlsplit
+
+HERE = Path(__file__).resolve().parent
+AUTH = HERE / 'kith-auth'
+MAX_BODY = 64 * 1024
+TRIES, WAIT_CAP = 3, 120
+
+
+def out(msg, code=1, as_json=False, **extra):
+    if as_json:
+        print(json.dumps({'ok': code == 0, **extra, 'message': msg}))
+    else:
+        print(msg, file=sys.stdout if code == 0 else sys.stderr)
+    sys.exit(code)
+
+
+def service_json(name, agent):
+    files = [HERE.parent / 'services' / f'{name}.json']
+    if agent and os.environ.get('KITH_AGENTS'):
+        files.append(Path(os.environ['KITH_AGENTS']) / agent / 'role' / 'services' / f'{name}.json')
+    for f in files:
+        if f.is_file():
+            try:
+                return json.loads(f.read_text())
+            except ValueError:
+                return None
+    return None
+
+
+def cq(s):   # a quoted curl config string
+    return '"' + s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '').replace('\r', '') + '"'
+
+
+def helper(argv):
+    """Runs inside kith-auth exec, where the secrets are env vars. Prints one RESULT line."""
+    urlvar, keyvar, header, scheme, bodyf, sf, rf, ef = argv
+    cfg = (f'url = {cq(os.environ[urlvar])}\n'
+           f'header = {cq("Content-Type: application/json")}\n'
+           f'header = {cq(header + ": " + (scheme + " " if scheme else "") + os.environ[keyvar])}\n'
+           f'data-binary = {cq("@" + bodyf)}\nrequest = "POST"\nmax-time = 30\n')
+    scale = float(os.environ.get('KITH_SEND_TO_BACKOFF_SCALE', '1'))
+    waited, status = 0, 0
+    with tempfile.TemporaryDirectory() as d:
+        hf, bf = Path(d) / 'h', Path(d) / 'resp'
+        for attempt in range(1, TRIES + 1):
+            try:   # curl's own error text can echo the URL, so its stderr is dropped
+                r = subprocess.run(['curl', '-s', '-o', str(bf), '-D', str(hf), '-w', '%{http_code}', '--config', '-'],
+                                   input=cfg, capture_output=True, text=True, timeout=45)
+                status = int(r.stdout.strip()) if r.stdout.strip().isdigit() else 0
+            except (subprocess.TimeoutExpired, OSError):
+                status = 0
+            if status != 429:
+                break
+            retry = None
+            try:
+                for line in hf.read_text().splitlines():
+                    k, _, v = line.partition(':')
+                    if k.strip().lower() == 'retry-after' and v.strip().isdigit():
+                        retry = int(v.strip())
+            except OSError:
+                pass
+            wait = retry if retry is not None else 30 * 2 ** (attempt - 1)
+            if attempt == TRIES or waited + wait > WAIT_CAP:
+                break
+            waited += wait
+            time.sleep(wait * scale)
+        try:
+            resp = json.loads(bf.read_text(errors='replace')) if bf.exists() else None
+        except ValueError:
+            resp = None
+        if not isinstance(resp, dict):
+            resp = {}
+        res = {'status': status, 'attempts': attempt, 'success': resp.get(sf) is True}
+        if isinstance(resp.get(rf), str):
+            res['run'] = re.sub(r'[^A-Za-z0-9_.:-]', '', resp[rf])[:100]
+        if isinstance(resp.get(ef), str):   # the server's words, minus our URL and key, capped
+            e = resp[ef]
+            u = urlsplit(os.environ[urlvar])   # servers echo the path ("Automation /hooks/abc is disabled") as often as the URL
+            for secret in (os.environ[urlvar], u.path.strip('/'), u.netloc, os.environ[keyvar]):
+                if secret:
+                    e = e.replace(secret, '')
+            res['error'] = ' '.join(e.split())[:200]
+    print('RESULT ' + json.dumps(res))
+
+
+def main(argv):
+    if argv[:1] == ['--helper']:
+        return helper(argv[1:])
+    agent = profile = body_src = None
+    as_json, rest, i = False, [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a in ('--for', '--profile', '--body') and i + 1 < len(argv):
+            v = argv[i + 1]
+            if a == '--for':
+                agent = v
+            elif a == '--profile':
+                profile = v
+            else:
+                body_src = v
+            i += 2
+        elif a == '--json':
+            as_json = True
+            i += 1
+        else:
+            rest.append(a)
+            i += 1
+    if len(rest) != (1 if body_src is not None else 2):
+        out('usage: kith send-to <service> "text" | --body FILE|-  [--profile P] [--for AGENT] [--json]', 2)
+    svc = rest[0]
+    spec = service_json(svc, agent)
+    hook = (spec or {}).get('webhook')
+    if not hook:
+        out(f"'{svc}' has no webhook to push to (its service json needs a \"webhook\" block)", 2, as_json)
+    name = spec.get('display') or svc.capitalize()
+    if body_src is None:
+        raw = json.dumps({hook.get('text_field', 'text'): rest[1]}).encode()
+    else:
+        try:
+            raw = sys.stdin.buffer.read(MAX_BODY + 1) if body_src == '-' else Path(body_src).read_bytes()
+        except OSError:
+            out('cannot read the body file', 2, as_json)
+        try:
+            json.loads(raw)
+        except ValueError:
+            out('the body is not JSON', 2, as_json)
+    if len(raw) > MAX_BODY:
+        out(f'the body is over {MAX_BODY // 1024} KiB', 2, as_json)
+    env = dict(os.environ)
+    if profile:
+        env['KITH_AUTH_PROFILE'] = profile   # kith-auth's grant lookup honours it for several granted profiles
+    with tempfile.TemporaryDirectory() as d:
+        bf = Path(d) / 'body.json'
+        bf.write_bytes(raw)
+        cmd = ([sys.executable, str(AUTH), 'exec'] + (['--for', agent] if agent else []) +
+               [svc, '--', sys.executable, str(Path(__file__).resolve()), '--helper',
+                hook['url'], hook['key'], hook.get('header', 'Authorization'), hook.get('scheme', ''), str(bf),
+                hook.get('success_field', 'success'), hook.get('run_field', 'runUuid'), hook.get('error_field', 'error')])
+        r = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, text=True)
+    line = next((l for l in r.stdout.splitlines() if l.startswith('RESULT ')), None)
+    if r.returncode or not line:   # kith-auth exec died (its message is on stderr): no grant, no profile, key missing
+        print(f"An agent without {name}'s key asks for it with the request_secret tool (service {svc}), not in chat.", file=sys.stderr)
+        out(f'not sent: {name} could not be reached through kith-auth', 1, as_json, status=0, attempts=0)
+    res = json.loads(line[7:])
+    st, n = res['status'], res['attempts']
+    msgs = hook.get('status_messages', {})
+    extra = {'status': st, 'attempts': n}
+    if 200 <= st < 300:
+        if not res.get('success'):
+            out(hook.get('not_started') or f'{name} answered {st} but did not confirm it started a run', 1, as_json, **extra)
+        run = res.get('run')
+        out(f"sent ({hook.get('sent') or name + ' received it, not that it ran'})" + (f' run {run}' if run else ''),
+            0, as_json, **extra, **({'runUuid': run} if run else {}))
+    if str(st) in msgs:   # 400 / 401: retrying cannot help
+        err = res.get('error')
+        out(msgs[str(st)] + (f': {err}' if err and st == 400 else ''), 1, as_json, **extra)
+    if st == 429:
+        out(f"{name}'s hourly cap is reached; try again later", 1, as_json, **extra)
+    out(f'not sent: {name} answered {st}' if st else f'not sent: could not reach {name}', 1, as_json, **extra)
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
