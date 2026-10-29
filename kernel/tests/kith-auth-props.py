@@ -1,5 +1,5 @@
 """Generated-input properties of kith-auth's access rules (people, memberships, bot persons, person removal and
-revoke, the bots cap, access beyond the box, membership env and modes), run in-process against a throwaway auth.json. Method: .claude/skills/invitee-access/SKILL.md.
+revoke, the bots cap, access beyond the box, membership env and modes, job ticks and helper grants), run in-process against a throwaway auth.json. Method: .claude/skills/invitee-access/SKILL.md.
 Started by kernel/tests/kith-auth-props, which pins hypothesis; run that, not this."""
 import contextlib
 import importlib.machinery
@@ -26,6 +26,10 @@ for a in AGENTS:
     d = T / 'kith' / 'agents' / a / 'role'
     d.mkdir(parents=True)
     (d / 'agent.md').write_text(f'---\nname: {a}\ndescription: test\n---\nbody\n')
+# house's one job holds a host beyond the box, garden as a helper and a door: what a tick may grant
+(T / 'kith' / 'agents' / 'house' / 'role' / 'capabilities.yaml').write_text(
+    'helpers: [garden]\ndoors:\n  - name: render\n    argv: [echo, hi]\n'
+    'jobs:\n  - name: work\n    domains: [a.example]\n    helpers: [garden]\n    doors: [render]\n')
 
 KERNEL = Path(__file__).resolve().parent.parent
 loader = importlib.machinery.SourceFileLoader('kith_auth', str(KERNEL / 'bin' / 'kith-auth'))
@@ -91,6 +95,9 @@ OPS = st.one_of(
     st.tuples(st.just('access'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(BEYOND)),
     st.tuples(st.just('access-rm'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(BEYOND)),
     st.tuples(st.just('hand'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS + ['ghost']), st.sampled_from(HAND)),
+    st.tuples(st.just('job'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE])),
+    st.tuples(st.just('job-rm'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS)),
+    st.tuples(st.just('helper'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(['', '--once'])),
 )
 
 
@@ -108,6 +115,11 @@ ACCESS = st.tuples(st.sampled_from(AGENTS), st.sampled_from(PEOPLE), st.sampled_
     lambda t: {'': [], 'revoke': [('revoke', t[1])], 'member-rm': [('member-rm', t[0], t[1])]}[t[5]]
     + [('access', t[0], who, t[2]) for who in ([t[1]] if t[3] else []) + BOTS]
     + ([('access-rm', t[0], t[1], t[2])] if t[4] else []))
+# the same for a job tick and a helper's always or once (the edge cards): the person, then each bot
+JOBS = st.tuples(st.sampled_from(PEOPLE), st.booleans(), st.sampled_from(['job', 'helper']),
+                 st.sampled_from(['', '--once']), st.sampled_from(['', '', 'revoke', 'member-rm'])).map(
+    lambda t: {'': [], 'revoke': [('revoke', t[0])], 'member-rm': [('member-rm', 'house', t[0])]}[t[4]]
+    + [(t[2], 'house', who) + ((t[3],) if t[2] == 'helper' else ()) for who in ([t[0]] if t[1] else []) + BOTS])
 # A table first (people, their bots, rows with settings), then anything: random commands alone rarely build one.
 SEQUENCES = st.tuples(
     st.lists(st.tuples(st.just('hand'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(HAND)),
@@ -121,6 +133,7 @@ SEQUENCES = st.tuples(
              max_size=2),
     st.sampled_from([[], [('cap', '50')]]),
     st.lists(ACCESS, max_size=3).map(lambda xs: [op for x in xs for op in x]),
+    st.lists(JOBS, max_size=2).map(lambda xs: [op for x in xs for op in x]),
     st.lists(OPS, max_size=8),
 ).map(lambda parts: [op for part in parts for op in part])
 
@@ -154,6 +167,10 @@ def apply(op):
         return True
     if kind in ('access', 'access-rm'):
         return run('access', op[1], op[2], op[3][0], op[3][1], *(['--rm'] if kind == 'access-rm' else []))
+    if kind in ('job', 'job-rm'):
+        return run('job', op[1], op[2], 'work', *(['--rm'] if kind == 'job-rm' else []))
+    if kind == 'helper':
+        return run('helper', op[1], op[2], 'garden', *([op[3]] if op[3] else []))
     return run('bots-cap', op[1])
 
 
@@ -185,6 +202,9 @@ def state_properties():
             if ka.cut_off(a, who):
                 # (R1, R2, I6) revoked, or a bot of someone revoked: nothing, whatever rows they hold, `*` included.
                 assert r['allowed'] is False, f'{who} is revoked (or their owner is) but may use {agent}: {r}'
+                # (D) a helper's "just this once" is checked in the same step as revoke: it never lets them in.
+                for via in AGENTS:
+                    assert ka.may(a, who, agent, via, once=True)[0] is False, f'{who} is revoked but a once lets {agent} in'
                 continue
             parent = a['people'][who].get('bot_of')
             if r['allowed'] is True:
@@ -199,6 +219,8 @@ def state_properties():
                 if r['allowed'] is True and who not in rows:
                     # (escape always) access beyond the box is a person's own: the everyone row never carries it.
                     assert not any(r['access'].values()), f'{who} reaches {r["access"]} on {agent} through the everyone row'
+                    # (job) ticks sit on a person's own row: the everyone row carries no job and no door.
+                    assert not r['jobs'] and not r['doors'], f'{who} has {r["jobs"]} {r["doors"]} on {agent} through the everyone row'
                 continue
             if r['allowed'] is not True:
                 continue
@@ -217,6 +239,12 @@ def state_properties():
                 for k, vals in r['access'].items():
                     for v in vals:
                         assert covered(pr['access'], k, v), f'bot {who} reaches {k} {v} on {agent}; its owner {pr["access"]}'
+                # (job) a ticked job gives a bot only the doors its owner has.
+                assert set(r['doors']) <= set(pr['doors']), f'bot {who} has doors {r["doors"]}, its owner {pr["doors"]}'
+                # (D) a bot's once for a helper counts only while its owner may call that helper now.
+                for via in AGENTS:
+                    if via != agent and ka.may(a, who, agent, via, once=True)[0]:
+                        assert ka.may(a, parent, agent, via)[0], f'bot {who} reaches {agent} via {via} past its owner'
             else:
                 # (c) the owner's bots together are capped by owner_bots_budget, when set.
                 assert r['budget'] == (a.get('owner_bots_budget') or ''), f'owner bot {who}: budget {r["budget"]!r}'
@@ -283,6 +311,24 @@ def test_access_never_exceeds_the_grant(ops):
             assert ok == want, f'{op}: accepted {ok}, expected {want}'
             if ok:
                 assert value in a['members'][agent][who]['access'][KINDS[kind]], f'{op}: accepted but not written'
+                others = {g: {x: r for x, r in rs.items() if not (g == agent and x == who)} for g, rs in a['members'].items()}
+                olds = {g: {x: r for x, r in rs.items() if not (g == agent and x == who)} for g, rs in before['members'].items()}
+                assert others == olds, f'{op}: changed another row'
+            else:
+                assert a == before, f'{op}: refused but wrote'
+        if op[0] in ('job', 'helper'):
+            # (C2) a tick, or a helper's always or once, writes only on a person's own row (never the owner's or the
+            # everyone row) while they hold the agent now; for an invitee's bot, a helper only its owner may call. It
+            # writes only that row, and a refusal writes nothing.
+            agent, who = op[1], op[2]
+            p = before['people'].get(who)
+            parent = (p or {}).get('bot_of')
+            pr = ka.resolve(before, agent, parent) if parent else {}
+            want = (p is not None and not p.get('owner') and isinstance(before['members'].get(agent, {}).get(who), dict)
+                    and ka.may(before, who, agent)[0] and ('work' in ka.jobs_of(agent) if op[0] == 'job' else agent != 'garden')
+                    and (op[0] == 'job' or not parent or pr.get('owner') or 'garden' in pr.get('helpers', [])))
+            assert ok == want, f'{op}: accepted {ok}, expected {want}'
+            if ok:
                 others = {g: {x: r for x, r in rs.items() if not (g == agent and x == who)} for g, rs in a['members'].items()}
                 olds = {g: {x: r for x, r in rs.items() if not (g == agent and x == who)} for g, rs in before['members'].items()}
                 assert others == olds, f'{op}: changed another row'

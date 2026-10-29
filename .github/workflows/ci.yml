@@ -229,6 +229,8 @@ jobs:
         run: kernel/tests/kith-guest-sandbox-check
       - name: Guest helper check
         run: kernel/tests/kith-guest-helper-check
+      - name: Guest jobs check
+        run: kernel/tests/kith-guest-jobs-check
       - name: Load check
         run: kernel/tests/kith-load-check
 

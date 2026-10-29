@@ -54,7 +54,8 @@ print(kp.ask_helper(a))' "$KERNEL/bin/kith-permit" "$agent" "$task"
 }
 
 expect "a granted helper answers, as the guest, from its own agent" "$(ask guest front helper "say pong")" "pong from helper for guest ask=none"
-has "a helper the membership does not grant is refused by kith-auth" "$(ask guest front third "say pong")" "may not use third"
+# (the card a helper the membership does not grant asks of the owner: kith-guest-jobs-check, with a stub host)
+has "a helper the membership does not grant asks the owner, and with no one to ask is refused" "$(ask guest front third "say pong")" "the action was refused"
 has "a helper cannot ask a third agent the caller's membership does not grant" "$(ask guest helper third "say pong")" "may not use third"
 has "the caller itself is not a helper" "$(ask guest front front "say pong")" "ask another agent"
 has "no helper named" "$(ask guest front - "say pong")" "Give the helper agent and the task"

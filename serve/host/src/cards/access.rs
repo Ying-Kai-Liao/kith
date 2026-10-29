@@ -266,7 +266,8 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
             return refused("Approvals aren't available right now.");
         }
     };
-    let Some(card) = super::show(hub, who, &card) else {
+    let extra = super::edge_extras(hub, who, &card).await;
+    let Some(card) = super::show(hub, who, &card, extra) else {
         return refused("There is nowhere to ask about this: no chat with this agent on this computer.");
     };
     let label = super::approver_label(hub, &card).await;
@@ -277,8 +278,8 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
     )})
 }
 
-/// What the approver sees on an escape card.
-pub fn entry_view(card: &Card) -> (String, String, Value) {
+/// What the approver sees on an escape card. `name`: whose run asked.
+pub fn entry_view(card: &Card, name: &str) -> (String, String, Value) {
     let input: Value = serde_json::from_str(&card.input).unwrap_or(Value::Null);
     let title = format!("Let {} {}", card.agent, input["target"].as_str().unwrap_or_default());
     let detail = format!(
@@ -287,7 +288,7 @@ pub fn entry_view(card: &Card) -> (String, String, Value) {
     );
     let options = json!([
         {"optionId": "allow", "name": "Allow once", "kind": "allow_once"},
-        {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
+        {"optionId": "always", "name": format!("Always for {name}"), "kind": "allow_always"},
         {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
     ]);
     (title, detail, options)
@@ -340,7 +341,7 @@ pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str
 
 /// An "always" that stayed a once grant: the card says so in its outcome (`outcome`, which the apps show in place of the
 /// option's own words), and `selected` is the once option, so an app that doesn't know `outcome` reads "Allowed once".
-fn kept_once(hub: &Hub, card: &Card, why: &str) {
+pub(super) fn kept_once(hub: &Hub, card: &Card, why: &str) {
     let Some(id) = &card.entry_id else { return };
     let Some(mut e) = hub.store.entry(id) else { return };
     let why = why.trim().trim_start_matches("kith-auth:").trim();

@@ -21,8 +21,11 @@ clear allow files it (kernel/lib/kith_bug.py); any other answer keeps the draft 
 A fourth tool, ask_helper(agent, task), is how a guest's run reaches a helper its membership grants (kith-auth member ...
 helpers=): the guest's shell cannot start another run (the OS sandbox closes the network, the login and the other agents'
 folders), so kith-permit, outside the sandbox, runs `kith ask AGENT` as the run's own person and agent (from its environment,
-which the guest cannot change). The kernel decides as for any helper call: a helper not granted is refused, one granted runs
-with the caller's membership, never looser, in its own guest sandbox.
+which the guest cannot change). The kernel decides as for any helper call: one granted (the row's helpers=, or a ticked
+job's) runs with the caller's membership, never looser, in its own guest sandbox. One not granted is asked of the owner on
+a card first (requestPermission, tool mcp__kithpermit__ask_helper, input {agent, task}), which this call waits for: the
+host writes "just this once" or "always for <person>" through kith-auth (helper ...) before it answers yes, and the launch
+checks that grant again with revoke and uses up a once (`kith-auth resolve --take-once`).
 
 When Claude Code reaches a permission prompt in a run nobody is watching (an "ask" rule, a tool the mode doesn't allow),
 it calls approve instead of refusing. The tool sends the host one line over the run socket,
@@ -193,7 +196,8 @@ def helper_def():
     return {'name': HELPER,
             'description': 'Ask a helper agent your membership grants and get its answer, as `kith ask AGENT "task"` does '
                            'for an owner. A shell in this run cannot start another agent, so use this tool. Give the helper '
-                           'agent and the whole task; it sees nothing of this conversation. A helper you are not granted is refused.',
+                           'agent and the whole task; it sees nothing of this conversation. A helper you are not granted '
+                           'asks the owner first, and runs only if they say yes.',
             'inputSchema': {'type': 'object',
                             'properties': {'agent': {'type': 'string', 'description': 'the helper agent, e.g. personal'},
                                            'task': {'type': 'string', 'description': 'what to ask it, self-contained'}},
@@ -213,6 +217,9 @@ def ask_helper(a, env=os.environ):
     if agent == env['KITH_AGENT']:
         return 'You are %s; ask another agent.' % agent
     child = {k: v for k, v in env.items() if k not in ('KITH_ASK_TOKEN', 'KITH_ASK_SOCKET', 'HQ_ASK_TOKEN', 'HQ_ASK_SOCKET')}
+    refused = helper_card(env['KITH_PERSON'], env['KITH_AGENT'], agent, task, child)
+    if refused:
+        return refused
     try:
         r = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-ask'), agent, '--', task],
                            env=child, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=HELPER_WAIT_S)
@@ -223,6 +230,25 @@ def ask_helper(a, env=os.environ):
     if r.returncode != 0:
         return 'Could not ask %s: %s' % (agent, (r.stderr or r.stdout or 'no answer').strip()[-1500:])
     return r.stdout.strip() or '%s gave no answer.' % agent
+
+
+def helper_card(person, caller, agent, task, env):
+    """A helper the caller's membership doesn't grant is asked of the owner on a card while this call waits (Just this once,
+    Always for <person>, No): the host writes the grant through kith-auth before it answers yes, and the helper's launch
+    checks it again (and uses up a once) with revoke. None: go on and ask; else what the agent is told. A person who may
+    not use the caller gets no card: kith ask refuses them in its own words."""
+    auth = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth')
+
+    def may(*args):
+        try:
+            return subprocess.run([auth, 'may', *args], env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                                  timeout=30).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return True     # kith ask asks kith-auth again and says why
+    if may(person, agent, '--via', caller, '--once') or not may(person, caller):
+        return None
+    d = decide('mcp__kithpermit__ask_helper', {'agent': agent, 'task': task[:2000]}, env)
+    return None if d['behavior'] == 'allow' else d['message']
 
 
 def call_host(method, body, env=os.environ, timeout=30):
