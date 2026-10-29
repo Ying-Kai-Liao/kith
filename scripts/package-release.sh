@@ -5,7 +5,7 @@
 #
 # kith-<version>-darwin-<arch>.tar.gz holding bin/kith (and bin/kith-tts, the local voice helper, when KITH_TTS_BIN names
 # a built one: arm64 only) and share/kith/{kernel,.claude-plugin,install.sh,LICENSE,
-# LICENSE.serve,NOTICE,THIRD_PARTY_NOTICES.md,README.md}: the layout the binary's kernel lookup expects (kernel at ../share/kith/kernel). Also writes the
+# NOTICE,THIRD_PARTY_NOTICES.md,README.md}: the layout the binary's kernel lookup expects (kernel at ../share/kith/kernel). Also writes the
 # tarball's .sha256 next to it.
 set -eu
 [ $# -ge 3 ] || { sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }

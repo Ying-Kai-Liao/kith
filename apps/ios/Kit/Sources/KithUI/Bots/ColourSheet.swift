@@ -8,12 +8,15 @@ struct ColourSheet: View {
     @Binding var draft: BotDraft
     var isGroup = false
     @State private var work: BotDraft
+    /// Gradient | Plain. Kept apart from `work.avatarColor` so the switch can be set before a swatch is picked.
+    @State private var plain: Bool
     @Environment(\.dismissModal) private var dismiss
 
     init(draft: Binding<BotDraft>, isGroup: Bool = false) {
         _draft = draft
         self.isGroup = isGroup
         _work = State(initialValue: draft.wrappedValue)
+        _plain = State(initialValue: AvatarPalette.isPlain(draft.wrappedValue.avatarColor))
     }
 
     private var portrait: String? { CrewAvatar.asset(for: work, isGroup: isGroup) }
@@ -27,18 +30,20 @@ struct ColourSheet: View {
                     CharacterAvatar(portrait: portrait, color: work.avatarColor, size: KithSize.botAvatarColourSheet, id: work.id ?? "")
                         .padding(.top, 14)
                     if !isGroup {
+                        SegmentedChoice(selection: Binding(get: { plain }, set: { setPlain($0) }),
+                                        options: [(false, "Gradient"), (true, "Plain")])
                         LazyVGrid(columns: columns, spacing: 14) {
                             ForEach(AvatarPalette.colors) { swatch in self.swatch(swatch) }
                         }
                         Button {
-                            withAnimation(Motion.hover) { work.avatarColor = "" }
+                            withAnimation(Motion.hover) { work.avatarColor = ""; plain = false }
                         } label: {
                             Label("Reset to default", systemImage: "arrow.counterclockwise")
                                 .font(.system(size: 13))
                                 .foregroundStyle(Palette.ink)
                         }
                         .buttonStyle(.plain)
-                        .disabled(AvatarPalette.pick(work.avatarColor) == nil)
+                        .disabled(AvatarPalette.pick(work.avatarColor) == nil && !plain)
                         Text("The eyes never change.")
                             .font(.system(size: 11.5))
                             .foregroundStyle(Palette.muted)
@@ -51,6 +56,13 @@ struct ColourSheet: View {
             }
         }
         .background(Palette.background)
+    }
+
+    /// Switching keeps the colour picked and changes how it is drawn.
+    private func setPlain(_ on: Bool) {
+        plain = on
+        guard let id = AvatarPalette.pick(work.avatarColor), let swatch = AvatarPalette.colors.first(where: { $0.id == id }) else { return }
+        withAnimation(Motion.hover) { work.avatarColor = swatch.stored(plain: on) }
     }
 
     private var header: some View {
@@ -75,14 +87,15 @@ struct ColourSheet: View {
     }
 
     private func swatch(_ swatch: AvatarPalette.Swatch) -> some View {
-        let on = work.avatarColor == swatch.stored
+        let on = AvatarPalette.pick(work.avatarColor) == swatch.id
         return Circle()
-            .fill(LinearGradient(colors: [Color(hex: swatch.a), Color(hex: swatch.b)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            .fill(plain ? AnyShapeStyle(Color(hex: swatch.a))
+                  : AnyShapeStyle(LinearGradient(colors: [Color(hex: swatch.a), Color(hex: swatch.b)], startPoint: .topLeading, endPoint: .bottomTrailing)))
             .frame(width: 40, height: 40)
             .padding(3)
             .overlay(Circle().strokeBorder(on ? Palette.ink : .clear, lineWidth: 2))
             .contentShape(Circle())
-            .onTapGesture { withAnimation(Motion.hover) { work.avatarColor = swatch.stored } }
+            .onTapGesture { withAnimation(Motion.hover) { work.avatarColor = swatch.stored(plain: plain) } }
             .accessibilityLabel(swatch.label)
             .accessibilityAddTraits(on ? .isSelected : [])
     }

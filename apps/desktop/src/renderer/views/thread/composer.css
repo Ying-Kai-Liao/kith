@@ -228,3 +228,26 @@
 .composer-add.on {
   background: color-mix(in srgb, var(--accent) 16%, var(--composer-fill));
 }
+
+/* "Reply": the quoted line over the box, with its x. */
+.reply-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px 6px;
+  padding: 6px 8px 6px 12px;
+  border-left: 2px solid var(--accent, #0a84ff);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  min-width: 0;
+}
+.reply-chip-x {
+  margin-left: auto;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--secondary);
+}
