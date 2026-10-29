@@ -2,6 +2,7 @@
 //! woken Grok can't keep a process running, so there is no listen mode): read what the room said since a cursor, post
 //! one reply.
 
+use std::fmt::Write as _;
 use std::io::Read;
 
 use kith_wire::rpc::{BotEntryKind, BotPostParams, BotPosted, BotRoom, BotRoomReadParams, method};
@@ -60,7 +61,10 @@ pub fn nonce_of(args: &RoomPostArgs, text: &str) -> String {
         all.push(part);
     }
     let digest = kith_wire::crypto::sha256(&all);
-    let hex: String = digest.iter().take(16).map(|b| format!("{b:02x}")).collect();
+    let hex = digest.iter().take(16).fold(String::new(), |mut s, b| {
+        let _ = write!(s, "{b:02x}");
+        s
+    });
     format!("room-{hex}")
 }
 
