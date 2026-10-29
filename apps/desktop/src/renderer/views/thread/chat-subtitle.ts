@@ -1,4 +1,5 @@
-import { isGroup, type Bot, type Connection, type ScreenState } from '@shared/models'
+import { isGroup, type Bot, type ScreenState } from '../../../shared/models.ts'
+import type { Connection } from '../../store/bot-mirror.ts'
 import type { StatusKind } from '../../components/kith/logic.ts'
 
 export type ChatSubtitle =
