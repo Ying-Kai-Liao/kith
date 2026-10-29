@@ -40,8 +40,10 @@ cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of th
 
 ## Sync commit
 
-**9186a42a6043** (2026-10-29: main `bc3d92b8` plus the guest workbench, which removes a guest's Claude Code temp folder
-on revoke and removal; the row "remove their temp folder" below). Between `3eb9f9a50c25` and `bc3d92b8` the covered
+**680cee57a624** (2026-10-29: the guest workbench's workspace fix. `cut_off` removes the temp folder after the bot
+sweep, not before it, and `kith-auth exec` scrubs paths into a guest's folders. Neither is a revoke step, and `run.sh`
+gave every row as expected). Earlier: `9186a42a6043` (main `bc3d92b8` plus the guest workbench, which removes a guest's
+Claude Code temp folder on revoke and removal; the row "remove their temp folder" below). Between `3eb9f9a50c25` and `bc3d92b8` the covered
 files changed by the outbox, the ask job and `ask_helper`, the guest's `kith message`, the invite web link, member
 device approval, `settle`/`expire_idle_web` and `grant_for_env(..., None)`; no revoke step, and `run.sh` gave every
 row as expected. Earlier: `3eb9f9a50c25` (2026-10-28: origin/main `b241d7bb` plus the channels' revoke checks, which
@@ -94,7 +96,7 @@ cost (a guest's message is held while nothing is revoked) is real.
 | delivery | bridge: `channels/run.rs` `Recheck::still` (via `resolve_in_sync`) at the start of `finish` (the answer) and in `flush` before posting the outbox (refused: the outbox files are deleted, nothing posted); the owner is never re-checked; bot: `botThread` gate; app: the device is revoked here and blocked by the relay | `Deliver` |
 | stop a running turn once the revoke lands | `people.rs` `cut_off`: devices revoked, `botguests::enforce`, `stop_runs`, `sweep_claims` | `Stop` |
 | network up / cloud down / offline | the relay connection (`relay.rs` loop: `set(false)` on every (re)connect until a pull succeeds, `renew` on each ping) | `SetNet` |
-| remove their temp folder (`<machine>/run/t/<p>`, their bots' too) | `people.rs` `cut_off` after `stop_runs` -> kith-auth `person <p> --clear-temp`; kith-auth `revoke_person` (not `--local`) and `person --rm` -> `kith_paths.guest_tmp_remove`; a folder with no live record is emptied at the next run (`guest_tmp_ready`) | none: a cleanup, not a door. No turn starts for a revoked person, so nothing can use it; pinned by `kernel/tests/kith-guest-sandbox-check` |
+| remove their temp folder (`<machine>/run/t/<p>`, their bots' too) | `people.rs` `cut_off` after `stop_runs` and the bot sweep (`sweep_claims`) -> kith-auth `person <p> --clear-temp`; kith-auth `revoke_person` (not `--local`) and `person --rm` -> `kith_paths.guest_tmp_remove`; a folder with no live record is emptied at the next run (`guest_tmp_ready`) | none: a cleanup, not a door. No turn starts for a revoked person, so nothing can use it; pinned by `kernel/tests/kith-guest-sandbox-check` |
 
 A check and the act it guards are separate actions in the model (`Start`, `Helper`, `Deliver`). In the code the
 channels check in `handle`, queue in the inbox, and start in `queue.rs` `work`: that is why `work` re-checks (in
