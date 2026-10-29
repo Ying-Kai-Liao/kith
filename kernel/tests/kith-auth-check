@@ -176,4 +176,46 @@ check "ledger: --rm of a key it doesn't hold fails, a malformed key too" "! A le
 check "access: --rm takes away a path that no longer exists" "mkdir -p '$TR/gone' && A access house ann read '$TR/gone' && rmdir '$TR/gone' && A access house ann read '$TR/gone' --rm && [ \"\$(R ann \"'$TR/gone' in d['access']['read']\")\" = False ]"
 check "ledger: --rm takes away a path that no longer exists, by its key" "mkdir -p '$TR/gone' && A access house ann read '$TR/gone' && rmdir '$TR/gone' && A ledger --rm 'read:house:ann:$TR/gone' && [ \"\$(R ann \"'$TR/gone' in d['access']['read']\")\" = False ]"
 check "access: removing the person removes it" "A person ann --rm >/dev/null 2>&1; ! A access house ann read '$TR/docs'"
+# --- approved_by (M3): who approved an always; a person only while a member, checked in the same step; a demotion takes theirs
+A person mia >/dev/null 2>&1
+A member house mia preset=member >/dev/null 2>&1
+A bot bot-m --of mia >/dev/null 2>&1
+A member house bot-m >/dev/null 2>&1
+mkdir -p "$TR/m1" "$TR/m2" "$TR/m3" "$TR/m4"
+BY() { A ledger --person "$1" --agent house --json | J "sorted((g['target'].rsplit('/', 1)[-1], g['approved_by']) for g in d)"; }
+check "approved_by: the owner's yes is 'owner', a member's own is their id" "A access house mia read '$TR/m1' && A access house mia read '$TR/m2' --by mia && A access house mia domain m.example --by mia && [ \"\$(BY mia)\" = \"[('m.example', 'mia'), ('m1', 'owner'), ('m2', 'mia')]\" ]"
+check "approved_by: --by the owner is the owner" "A access house bob read '$TR/m3' --by kai && [ \"\$(BY bob)\" = \"[('m3', 'owner')]\" ]"
+check "approved_by: a member approves for their own bot" "A access house bot-m read '$TR/m2' --by mia && [ \"\$(BY bot-m)\" = \"[('m2', 'mia')]\" ]"
+check "approved_by: not for someone else, and a guest never" "! A access house bob read '$TR/m4' --by mia && [[ \"\$(A access house bob read '$TR/m4' --by bob 2>&1)\" == *'not a member of house now'* ]]"
+check "approved_by: a person's yes never replaces the owner's, the owner's replaces a person's" "A access house mia read '$TR/m1' --by mia && A access house mia read '$TR/m4' --by mia && A access house mia read '$TR/m4' && [ \"\$(BY mia)\" = \"[('m.example', 'mia'), ('m1', 'owner'), ('m2', 'mia'), ('m4', 'owner')]\" ]"
+check "approved_by: --by takes a person and no --rm" "! A access house mia read '$TR/m1' --by && ! A access house mia read '$TR/m1' --rm --by mia"
+check "demotion: member -> guest says what went" "[[ \"\$(A member house mia preset=guest)\" == *'3 always entries they approved went'* ]]"
+check "demotion: their own yeses go, on their bot's row too; the owner's stay" "[ \"\$(BY mia)\" = \"[('m1', 'owner'), ('m4', 'owner')]\" ] && [ \"\$(BY bot-m)\" = '[]' ]"
+check "demotion: a guest can't approve one again" "! A access house mia read '$TR/m2' --by mia"
+check "demotion: made a member again, nothing comes back" "A member house mia preset=member && [ \"\$(BY mia)\" = \"[('m1', 'owner'), ('m4', 'owner')]\" ]"
+check "demotion: a change that keeps them a member drops nothing" "A access house mia read '$TR/m2' --by mia && A member house mia budget=5 && [ \"\$(BY mia)\" = \"[('m1', 'owner'), ('m2', 'mia'), ('m4', 'owner')]\" ]"
+check "removed from the agent: what they approved for their bot goes too" "A member house bot-m >/dev/null && A access house bot-m read '$TR/m2' --by mia && [[ \"\$(A member house mia --rm)\" == *'(2 always entries they approved went)'* ]] && [ \"\$(BY bot-m)\" = '[]' ]"
+check "renamed: their yeses follow the new id, and a demotion still takes them" "A member house mia preset=member && A access house mia read '$TR/m2' --by mia && A person mia id=mio && [ \"\$(BY mio)\" = \"[('m2', 'mio')]\" ] && A member house mio preset=guest && [ \"\$(BY mio)\" = '[]' ]"
+A person lea >/dev/null 2>&1
+A member house lea preset=member >/dev/null 2>&1
+A access house lea read "$TR/m1" >/dev/null 2>&1
+A access house lea read "$TR/m2" --by lea >/dev/null 2>&1
+python3 - <<'PY'
+import json, os
+p = os.environ['KITH_AUTH']; a = json.load(open(p))
+a['members']['house']['lea'].pop('access_by')   # entries written before approved_by was recorded
+json.dump(a, open(p, 'w'))
+PY
+check "approved_by: an entry from before it was recorded is null, and a demotion leaves it" "[ \"\$(BY lea)\" = \"[('m1', None), ('m2', None)]\" ] && A member house lea preset=guest && [ \"\$(BY lea)\" = \"[('m1', None), ('m2', None)]\" ]"
+# a member's yes racing their demotion: whichever runs first under the lock, no guest keeps a yes of their own
+bad=0
+for i in $(seq 1 15); do
+  A person "d$i" >/dev/null 2>&1
+  A member house "d$i" preset=member >/dev/null 2>&1
+  ( A access house "d$i" domain "d$i.example" --by "d$i" >/dev/null 2>&1 ) &
+  ( A member house "d$i" preset=guest >/dev/null 2>&1 ) &
+  wait
+  [ "$(BY "d$i")" = '[]' ] || bad=$((bad + 1))
+done
+check "15 parallel approve-vs-demote races: no guest keeps their own yes ($bad bad)" "[ $bad = 0 ]"
 exit $fail

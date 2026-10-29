@@ -608,6 +608,37 @@ impl Core {
         self.with(|i| i.st.threads.get(key).and_then(|t| t.get("conv").cloned()).unwrap_or(Value::Null))
     }
 
+    /// A message from `agent` to `person` (`None` is the owner) outside any turn: posted in their newest one-to-one
+    /// thread with that agent on a connection that is up, never in a room. Whether it was posted.
+    pub async fn tell(&self, person: Option<&str>, agent: &str, text: &str) -> bool {
+        let person = match person {
+            Some(p) => p.to_owned(),
+            None => match hq::who(&self.paths, "kith", "-").await.owner_id {
+                Some(owner) => owner,
+                None => return false,
+            },
+        };
+        let ads = self.ads.locked().clone();
+        let found = self.with(|i| {
+            i.st.threads.iter().rev().find_map(|(key, th)| {
+                let theirs = th.get("person").and_then(Value::as_str) == Some(person.as_str())
+                    && th.get("private").and_then(Value::as_bool) == Some(true)
+                    && (th.get("last").and_then(Value::as_str) == Some(agent) || th["sessions"].get(agent).is_some());
+                let ad = ads.iter().find(|(conn, _)| key.starts_with(&format!("{conn}:")))?.1;
+                theirs.then(|| (ad.clone(), th.get("conv").cloned().unwrap_or(Value::Null)))
+            })
+        });
+        let Some((ad, conv)) = found else { return false };
+        if !self.access(&person, agent).await.allowed {
+            return false;
+        }
+        if let Err(e) = ad.post(&conv, agent, text, None).await {
+            tracing::warn!("{}: a message to {person} failed: {e:#}", ad.conn());
+            return false;
+        }
+        true
+    }
+
     /// Forgets a connection's running adapter when its grant is revoked.
     pub fn forget(&self, conn: &str) {
         self.ads.locked().remove(conn);

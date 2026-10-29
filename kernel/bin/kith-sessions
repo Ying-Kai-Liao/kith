@@ -20,7 +20,7 @@
   kith-sessions latest AGENT DIR           for `kith AGENT -c`: the id of the agent's newest session begun in DIR
                                            (both only name a session: `resolve` still claims and checks it)
   kith-sessions run AGENT -- CMD...        run CMD (claude) as a child: signals and exit code pass through; afterwards gives back the
-                                           claims of this process and, if the host took the session over while it ran, says how to get it back
+                                           claims of this process and says how to get the session back: `kith AGENT --resume ID` (also when the host took it over)
 
 Registry file (contract with the host, serve/): dir 0700, file 0600, written by tmp + rename:
   {"v":1,"sessionId","agent","cwd","transcriptPath","pid" (the claude process),"project","source","resumedFrom","startedAt",
@@ -590,7 +590,8 @@ def run(agent, cmd):
             break
     try:
         release_claims(os.getpid())
-        taken_note(agent, child)
+        if not taken_note(agent, child):
+            resume_note(agent, child)
         wake_owed()
     except Exception as e:  # noqa: BLE001
         print(f'kith-sessions: {e}', file=sys.stderr)
@@ -612,10 +613,32 @@ def wake_owed():
                      start_new_session=True)
 
 
-def taken_note(agent, pid):
+def resume_note(agent, pid):
+    """claude ends with "claude --resume <id>", which skips the agent (its account, memory, project): say the kith command.
+    The registry names the session this process ended with (the id changes on /clear); a session with no transcript, which
+    claude does not offer to resume, gets no note."""
     d = reg_dir()
     if not d or not d.is_dir():
         return
+    last = None
+    for f in d.glob('*.json'):
+        try:
+            e = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if e.get('pid') == pid and (last is None or e.get('startedAt', '') >= last.get('startedAt', '')):
+            last = e
+    if last and last.get('transcriptPath') and Path(last['transcriptPath']).exists():
+        r = host_call('resolveThread', {'thread': last['sessionId']}) or {}
+        print(f'Resume it as {agent} with: kith {agent} --resume {r.get("threadId") or last["sessionId"]}', file=sys.stderr)
+
+
+def taken_note(agent, pid):
+    """Prints the take-over note when the host took the session over while it ran; True if it did."""
+    d = reg_dir()
+    if not d or not d.is_dir():
+        return False
+    noted = False
     for f in d.glob('*.json'):
         try:
             e = json.loads(f.read_text())
@@ -631,6 +654,8 @@ def taken_note(agent, pid):
         if fresh:
             r = host_call('resolveThread', {'thread': e['sessionId']}) or {}
             print(f'continued in Kith — get it back with: kith {agent} --resume {r.get("threadId") or e["sessionId"]}', file=sys.stderr)
+            noted = True
+    return noted
 
 
 if __name__ == '__main__':

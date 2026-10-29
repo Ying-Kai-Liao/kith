@@ -139,7 +139,7 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
         "chat-ann": [card("p4", chat: "chat-ann", at: 2)],
         "mine": [card("p5", chat: "mine", approver: nil, at: 1)],
     ]
-    let pending = GuestPrompt.pending(in: entries, known: ["mine"])
+    let pending = GuestPrompt.pending(in: entries, known: ["mine"], isOwner: true)
     #expect(pending.map(\.id) == ["p4", "p1"])
     #expect(pending[1].who == "Sam · house")
     #expect(pending[1].request == "Run a command")
@@ -148,7 +148,26 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
     #expect(pending[1].options.map(\.optionId) == ["allow", "reject"])
     #expect(pending[1].options.map(GuestPrompt.label) == ["Allow once", "Deny"])
     // The same card inside one of the owner's own bots is that bot's, not a guest's.
-    #expect(GuestPrompt.pending(in: entries, known: ["chat-sam", "chat-ann", "mine"]).isEmpty)
+    #expect(GuestPrompt.pending(in: entries, known: ["chat-sam", "chat-ann", "mine"], isOwner: true).isEmpty)
+}
+
+@Test func aCardLanesCardsWaitForWhoeverTheHostSaysMayAnswerThem() {
+    var forAnn = card("l1", chat: "cards:house", approver: "member", at: 1)
+    forAnn.data.canAnswer = true
+    forAnn.data.person = nil
+    forAnn.data.personName = nil
+    var forOwner = card("l2", chat: "cards:house", approver: "owner", at: 2)
+    forOwner.data.canAnswer = false
+    let entries = ["cards:house": [forAnn, forOwner]]
+    // A member sees what the host says is theirs; the owner, the cards waiting on the owner.
+    #expect(GuestPrompt.pending(in: entries, known: [], isOwner: false).map(\.id) == ["l1"])
+    #expect(GuestPrompt.pending(in: entries, known: [], isOwner: true).map(\.id) == ["l2"])
+    // The approver changed: the host's update says so and the card leaves the list.
+    forAnn.data.canAnswer = false
+    #expect(GuestPrompt.pending(in: ["cards:house": [forAnn]], known: [], isOwner: false).isEmpty)
+    // The owner's own run has no person: the agent alone.
+    #expect(GuestPrompt(forAnn).who == "house")
+    #expect(GuestPrompt.isCardLane("cards:house") && !GuestPrompt.isCardLane("chat-sam"))
 }
 
 @Test func theInviteesChatShowsWaitingTextInPlaceOfButtons() {
@@ -168,6 +187,16 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
     #expect(GuestPrompt.waitingText(for: card("p1", chat: "c"), activity: "Waiting for Kai", isOwner: true) == nil)
     #expect(GuestPrompt.waitingText(for: card("p2", chat: "c"), activity: nil, isOwner: true) == nil)
     #expect(GuestPrompt.waitingText(for: card("p3", chat: "c", approver: "member"), activity: nil, isOwner: true) == nil)
+}
+
+@Test func theHostsCanAnswerDecidesTheButtons() {
+    var mine = card("p1", chat: "c", approver: "owner")
+    mine.data.canAnswer = true
+    #expect(GuestPrompt.waitingText(for: mine, activity: "Waiting for Kai", isOwner: false) == nil)
+    var theirs = card("p2", chat: "c", approver: "member")
+    theirs.data.canAnswer = false
+    #expect(GuestPrompt.waitingText(for: theirs, activity: "Waiting for Kai", isOwner: false) == "Waiting for Kai")
+    #expect(BoardModel.isWaiting(mine) && !BoardModel.isWaiting(theirs))
 }
 
 @MainActor @Test func aGuestsPromptMakesNoBotAndNoUnreadChatAndIsOnlyTheOwnersToAnswer() throws {
@@ -208,6 +237,14 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
     #expect(accounts.opensGuestPrompt(ref))
     #expect(!accounts.opensGuestPrompt(BotReference(accountId: accounts.accountId, computerId: a.id, botId: "mine")))
     #expect(!accounts.opensGuestPrompt(BotReference(accountId: accounts.accountId, computerId: b.id, botId: "chat-sam")))
+    // A card lane is never a chat, on any computer the account is on.
+    #expect(accounts.opensGuestPrompt(BotReference(accountId: accounts.accountId, computerId: b.id, botId: "cards:house")))
+
+    // On a computer the account is a member of, the host's canAnswer decides.
+    var lane = card("l1", chat: "cards:house", approver: "member")
+    lane.data.canAnswer = true
+    accounts.store(for: b.id)?.upsert(lane)
+    #expect(accounts.guestPrompts(for: b.id).map(\.id) == ["l1"])
 }
 
 // MARK: - access removed

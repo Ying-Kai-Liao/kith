@@ -3,7 +3,7 @@
 // or kept, so a changed store changes the Board. The sidebar only lays these values out.
 import { cardHeading, cardQuestion, type BotGuest } from './bot-guests.ts'
 import { limitOf, limitQuestion } from './usage-limits.ts'
-import type { GuestPrompt } from './mac-role.ts'
+import { promptWho, type GuestPrompt } from './mac-role.ts'
 import { isWorkingIn, type Bot, type Entry } from './models.ts'
 import { isBusyInTerminal } from './thread-writer.ts'
 import { isTask, taskLastAt, taskStatus, taskTitle } from './tasks.ts'
@@ -117,8 +117,8 @@ export const NOTE_LIMIT = 280
 
 const pendingPermission = (e: Entry) => e.kind === 'permission' && e.data.status === 'pending'
 
-/** A guest's card in a chat of this account's own is the owner's to answer, not this one's. */
-const isMine = (e: Entry) => pendingPermission(e) && e.data.approver !== 'owner'
+/** A card this account may answer, as the host says (`canAnswer`); from an older host, a guest's card in a chat of this account's own is the owner's to answer, not this one's. */
+const isMine = (e: Entry) => pendingPermission(e) && (e.data.canAnswer ?? e.data.approver !== 'owner')
 
 /** Questions waiting on you in one chat: the count on a Crew row. */
 export const pendingQuestions = (entries: readonly Entry[]) => entries.filter(isMine).length
@@ -180,7 +180,7 @@ export function buildBoard(computers: BoardComputer[], now = Date.now()): BoardM
         id: `${computer.id}/${prompt.entryId}`,
         target: { computerId: computer.id, botId: prompt.botId },
         hostName: computer.hostName,
-        botName: `${prompt.personName} · ${prompt.agent}`,
+        botName: promptWho(prompt),
         thread: null,
         threadTitle: null,
         question: prompt.title,

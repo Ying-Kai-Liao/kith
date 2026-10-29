@@ -150,7 +150,7 @@ jobs:
     env:
       KITH_CLERK_PUBLISHABLE_KEY: pk_live_Y2xlcmsua2l0aGJvdC5hcHAk
       KITH_CLOUD_URL: https://api.kithbot.app
-      APPLE_TEAM_ID: 7FUM8A8H72
+      APPLE_TEAM_ID: T6DWQUSF55
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

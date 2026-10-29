@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { isUnsupportedHost } from '@shared/kith-info'
-import { Button } from '../../components/Controls'
+import { Button, Switch } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { HStack, VStack } from '../../components/Stack'
 import { Text } from '../../components/Text'
@@ -64,6 +64,47 @@ export function LinkChatRow() {
           </Text>
         </VStack>
       ) : null}
+      {error ? <Text size="footnote" tone="attention">{error}</Text> : null}
+    </VStack>
+  )
+}
+
+/** Whether a Schedule card's words also go to your Telegram or Discord chat with the agent. The card stays in the app either way. */
+export function ScheduleMessagesRow() {
+  const app = useApp()
+  const local = useModel(app.local)
+  const online = local?.connection.kind === 'online'
+  const [on, setOn] = useState<boolean | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!local || !online) return
+    let live = true
+    // An older host doesn't know the method: the row stays hidden.
+    local.scheduleMessages().then((v) => live && setOn(v), () => undefined)
+    return () => {
+      live = false
+    }
+  }, [local, online])
+  if (!local || !online || on === null) return null
+
+  const set = (next: boolean) => {
+    setOn(next)
+    setError(null)
+    local.scheduleMessages(next).then(setOn, (e: unknown) => {
+      setOn(!next)
+      setError(errorText(e))
+    })
+  }
+  return (
+    <VStack gap={8}>
+      <div className="settings-row">
+        <Icon name="calendar" size={26} color="var(--secondary)" />
+        <VStack grow className="settings-stack">
+          <Text truncate>Schedule changes in Telegram or Discord</Text>
+          <Text size="caption" tone="secondary">Tell me there too when an agent adds, changes or removes a scheduled job</Text>
+        </VStack>
+        <Switch on={on} onChange={set} label="Schedule changes in Telegram or Discord" />
+      </div>
       {error ? <Text size="footnote" tone="attention">{error}</Text> : null}
     </VStack>
   )

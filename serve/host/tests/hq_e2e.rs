@@ -223,7 +223,6 @@ async fn the_host_restart_loads_the_session_with_a_fresh_launch() {
 async fn a_persons_new_grant_loads_their_session_again_in_the_same_process() {
     let mut s = start_for_a_person().await;
     let id = s.house().await["id"].as_str().unwrap().to_owned();
-    s.host.wait_tasks_on(&id).await;
     s.host
         .restart(|dir| {
             let db = rusqlite::Connection::open(dir.join("serve.db")).unwrap();

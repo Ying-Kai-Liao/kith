@@ -1,0 +1,7 @@
+{
+  "method": "scheduleMessages",
+  "type": "ScheduleMessages",
+  "body": {
+    "on": false
+  }
+}

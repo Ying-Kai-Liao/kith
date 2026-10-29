@@ -242,6 +242,29 @@ extension AccountStore {
         store.entries["pip"] = pip
     }
 
+    /// The `mermaid` demo's last reply: two diagrams and one mermaid can't draw, which stays a code block.
+    private static let mermaidReply = """
+    Both paths post it:
+
+    ```mermaid
+    sequenceDiagram
+      Sweep->>Host: post notice
+      Wake->>Host: post notice
+    ```
+
+    ```mermaid
+    graph TD
+      A -->
+    ```
+
+    ```mermaid
+    graph LR
+      W[Wake hook] --> N{Sent?}
+      S[Sweep] --> N
+      N -->|no| P[Post]
+    ```
+    """
+
     /// The `chat` demo: a bot with four tasks, one held by a terminal, and the newest with a tool row, a reply and a
     /// question waiting; the flat chat shows all their replies in time order.
     @MainActor
@@ -311,7 +334,7 @@ extension AccountStore {
                 entry("tool", root: open.id, ago: 6, data: ["toolKind": "edit", "title": "kith-sessions.py", "status": "completed",
                                                             "diffs": [["path": "kith-sessions.py", "added": 6, "removed": 2, "isNew": false, "startLine": 1, "patch": "+skip"]]]),
                 entry("tool", root: open.id, ago: 5, data: ["toolKind": "execute", "title": "swift test", "status": "completed", "output": "42 tests passed"]),
-                reply(open, ago: 3, "One fix in two files. Want me to run the host tests too?"),
+                reply(open, ago: 3, DemoScreens.name == "mermaid" ? mermaidReply : "One fix in two files. Want me to run the host tests too?"),
                 entry("permission", root: open.id, ago: 2, data: [
                     "title": "cargo test -p kith-host", "toolKind": "execute", "status": "pending", "cwd": "/Users/kai/kith",
                     "options": [["optionId": "o1", "name": "Allow once", "kind": "allow_once"],

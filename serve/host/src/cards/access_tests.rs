@@ -105,7 +105,7 @@ fn ask_for(target: &str) -> Value {
 
 /// The answer an approver gives to the entry of `card`.
 fn reply(r: &Rig, card: &Card, option: &str) {
-    let out = answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(option), "owner").unwrap();
+    let out = answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(option), None).unwrap();
     assert!(matches!(out, Outcome::Recorded { .. }), "{out:?}");
 }
 
@@ -391,6 +391,52 @@ async fn a_kept_always_has_no_outcome_note() {
     }
     let data = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().data;
     assert_eq!((data["selected"].as_str(), data["outcome"].is_null()), (Some("always"), true), "{data}");
+}
+
+/// The entry of an always card once kith-auth has answered: kept (the card is used) or kept once (it has an outcome).
+async fn settled(r: &Rig, card: &Card) -> Value {
+    for _ in 0..200 {
+        let data = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().data;
+        if r.hub.store.card(&card.id).is_some_and(|c| c.state == CardState::Used) || data["outcome"].is_string() {
+            return data;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    panic!("the always never settled");
+}
+
+/// M3: kith-auth writes who approved an always, in the same step as the check that they may. The owner's yes reads
+/// "owner" in the ledger; a person who is no longer a member of the agent by then gets a once grant, and the card says why.
+#[tokio::test]
+async fn an_always_records_who_approved_it_and_a_person_who_is_no_member_now_gets_once() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    let approved_by = |target: &str| {
+        let ledger: Value =
+            serde_json::from_str(&r.auth(&["ledger", "--person", "sam", "--agent", "house", "--json"])).unwrap();
+        let rows = ledger.as_array().cloned().unwrap_or_default();
+        rows.into_iter().find(|e| e["target"] == json!(target)).map(|e| e["approved_by"].clone())
+    };
+
+    let docs = place(&r, "docs");
+    request(&r.hub, &sam("1:1:house:sam", "r1"), &ask_for(&docs)).await;
+    let card = open_cards(&r).pop().unwrap();
+    reply(&r, &card, "always");
+    assert!(settled(&r, &card).await["outcome"].is_null());
+    assert_eq!(approved_by(&docs), Some(json!("owner")));
+
+    // Escape cards are the owner's to answer today, so the store records the yes and the host passes the approver
+    // as it would for a person's (`--by sam`). Sam is a guest of house, so kith-auth won't keep it.
+    let notes = place(&r, "notes");
+    request(&r.hub, &sam("1:1:house:sam", "r2"), &ask_for(&notes)).await;
+    let card = open_cards(&r).pop().unwrap();
+    r.hub.store.card_answer(&card.id, true, "always", "sam", None, now_ms(), false).unwrap();
+    access::answered(&r.hub, &card, true, Some("always"), Some("sam"));
+    let said = settled(&r, &card).await["outcome"].as_str().expect("an outcome").to_owned();
+    assert!(said.starts_with("Allowed once only") && said.contains("not a member of house now"), "{said}");
+    assert_eq!(r.hub.store.card(&card.id).unwrap().scope, "once");
+    assert_eq!(approved_by(&notes), None, "nothing was kept");
 }
 
 /// The grants ledger (`accessLedger`), narrowed to an agent or a person, and taking one entry away by its key

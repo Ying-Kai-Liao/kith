@@ -361,6 +361,12 @@ grep -q "kith designer --resume th-1" "$T/tty.out" && ok "taken: note names the 
 (cd "$T/work/a" && STUB_SID=app-sid tty "$KERNEL/bin/kith" designer)
 is "stale .taken: no note" "$(note)" 0
 [[ ! -e $REG/app-sid.taken ]] && ok "stale .taken: removed" || bad "stale .taken kept"
+# a session closed in the terminal says how to resume it as the agent (only one claude would offer to resume: it has a transcript)
+rsn() { sed 's/\r//' "$T/tty.out" | grep -c "Resume it as designer with: kith designer --resume $1"; }
+rm -f "$CLAUDE_CONFIG_DIR/projects/p/rs-sid.jsonl"
+(cd "$T/work/a" && STUB_SID=rs-sid tty "$KERNEL/bin/kith" designer); is "closed, no transcript: no resume note" "$(rsn rs-sid)" 0
+printf '{"type":"user"}\n' > "$CLAUDE_CONFIG_DIR/projects/p/rs-sid.jsonl"
+(cd "$T/work/a" && STUB_SID=rs-sid tty "$KERNEL/bin/kith" designer); is "closed, with transcript: resume note names the agent" "$(rsn rs-sid)" 1
 # host down: the note falls back to the session id
 kill $HOSTPID 2>/dev/null; wait $HOSTPID 2>/dev/null
 rm -f "$T/go" "$REG/app-sid.json"

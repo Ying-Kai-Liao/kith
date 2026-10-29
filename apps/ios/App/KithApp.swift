@@ -159,7 +159,7 @@ private struct DebugHooks: ViewModifier {
                     app.showSettings = true
                     try? await Task.sleep(for: .seconds(1.5))
                     app.openWidgets = true
-                case "chat":
+                case "chat", "mermaid":
                     if let computer = app.accounts.computers.first {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: DemoScreens.chatBotId)
                     }
@@ -368,8 +368,8 @@ final class AppStore {
         }
     }
 
-    /// Opens a bot's chat. A chat the account has no bot for, on a computer it owns, is a guest's: its push is for the
-    /// request waiting there, which shows as a card instead of a chat that isn't the owner's.
+    /// Opens a bot's chat. An agent's card lane, or a chat the account has no bot for on a computer it owns (a guest's),
+    /// is not a chat: its push is for the request waiting there, which shows as a card.
     func openBot(_ ref: BotReference) {
         if accounts.opensGuestPrompt(ref) {
             accounts.selection = nil

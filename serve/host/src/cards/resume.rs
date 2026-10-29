@@ -10,6 +10,11 @@
 //! writer claim is held, the bot's actor is gone) gives the claim back and the resume stays owed; it is retried with a
 //! doubling pause (5 s up to 10 min) until it happens or the card expires (silence is no).
 //!
+//! The claim takes the wake off the list, not the yes: the card is `applied` only when the turn that carries it has
+//! started (M5), and a turn that never starts gives the claim back. A host that stops in between loses the door's queue
+//! (the actor's, or a channel thread's) but not the wake: a restart gives back every claim that wasn't applied
+//! (`Store::cards_restart`), and `cards::start` offers those cards again.
+//!
 //! Doors, by where the card came from (its `session`):
 //! - `acp:<chat>:<thread>`: a bot chat's turn. A turn is queued on the bot's actor (`agent/bot/queue.rs`), after a short
 //!   notice in the thread. A held writer claim fails that turn's start; the actor calls [`refused`].
@@ -43,7 +48,8 @@ const EARLY_EXIT: Duration = Duration::from_secs(CLAIM_WAIT_S + 3);
 
 /// Cards with a retry loop running: an answer, a restart and a refused claim all offer the same card.
 static IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
-/// The entry of a queued wake turn -> the cards it answers, so a refused start can give their claims back.
+/// The entry of a queued wake turn -> the cards it answers, until that turn starts ([`turn_started`]) or doesn't
+/// ([`refused`], [`not_started`]).
 static WAKES: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn lock<T>(m: &'static Mutex<T>) -> std::sync::MutexGuard<'static, T> {
@@ -121,6 +127,18 @@ fn release_all(hub: &Hub, cards: &[Card]) {
     for c in cards {
         let _ = hub.store.card_resume_release(&c.id);
     }
+}
+
+/// The turn that carries these cards' resumes started: they are delivered (M5).
+fn applied(hub: &Hub, ids: &[String]) {
+    let now = now_ms();
+    for id in ids {
+        let _ = hub.store.card_resume_applied(id, now);
+    }
+}
+
+fn ids_of(cards: &[Card]) -> Vec<String> {
+    cards.iter().map(|c| c.id.clone()).collect()
 }
 
 fn end_owed(hub: &Hub, card: &Card) {
@@ -213,7 +231,7 @@ fn bot_door(hub: &Arc<Hub>, group: &[Card], bot: &str, lane: &Lane, note: &str) 
         release_all(hub, &claimed);
         return Step::Retry;
     };
-    lock(&WAKES).insert(entry.id.clone(), claimed.iter().map(|c| c.id.clone()).collect());
+    lock(&WAKES).insert(entry.id.clone(), ids_of(&claimed));
     clear_held(hub, &claimed);
     #[cfg(test)]
     {
@@ -238,6 +256,15 @@ fn bot_door(hub: &Arc<Hub>, group: &[Card], bot: &str, lane: &Lane, note: &str) 
     }
 }
 
+/// The bot's turn for these entries started (its prompt went to the agent): a wake among them is delivered. Called
+/// from the actor once the prompt is sent.
+pub fn turn_started(hub: &Hub, entry_ids: &[String]) {
+    for entry in entry_ids {
+        let Some(ids) = lock(&WAKES).remove(entry) else { continue };
+        applied(hub, &ids);
+    }
+}
+
 /// A wake turn on a bot's actor could not start because the session's writer is held: the claims go back and the
 /// resume is offered again, with the holder shown on the card. Called from the actor's `start_failed`.
 pub fn refused(hub: &Arc<Hub>, entry_ids: &[String], session: Option<&str>) {
@@ -254,13 +281,32 @@ pub fn refused(hub: &Arc<Hub>, entry_ids: &[String], session: Option<&str>) {
     }
 }
 
+/// A wake turn on a bot's actor failed to start for another reason: the claims go back. `again`: it is offered again
+/// with the usual pause; after a Stop it is not, and stays owed for the next offer (a restart, or another yes in the
+/// session).
+pub fn not_started(hub: &Arc<Hub>, entry_ids: &[String], again: bool) {
+    for entry in entry_ids {
+        let Some(ids) = lock(&WAKES).remove(entry) else { continue };
+        given_back(hub, &ids, again);
+    }
+}
+
+fn given_back(hub: &Arc<Hub>, ids: &[String], again: bool) {
+    for id in ids {
+        let _ = hub.store.card_resume_release(id);
+        if again && let Some(card) = hub.store.card(id) {
+            offer(hub, &card);
+        }
+    }
+}
+
 // ---- door (b): a channel thread
 
 fn channel_door(hub: &Arc<Hub>, group: &[Card], wk: &str, note: &str) -> Step {
     let got = Mutex::new(Vec::new());
     let result = crate::channels::wake(wk, note, || {
         let claimed = claim_all(hub, group);
-        let ids = claimed.iter().map(|c| c.id.clone()).collect();
+        let ids = ids_of(&claimed);
         *got.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = claimed;
         ids
     });
@@ -281,14 +327,15 @@ fn channel_door(hub: &Arc<Hub>, group: &[Card], wk: &str, note: &str) -> Step {
     }
 }
 
-/// A channel turn carrying a wake never ran (the session was held, the spawn failed): the claims go back, the cards stay
-/// owed and are offered again with the usual backoff (C5: the marker means the turn started).
-pub fn channel_failed(hub: &Arc<Hub>, card_ids: &[String]) {
-    for id in card_ids {
-        let Some(card) = hub.store.card(id) else { continue };
-        let _ = hub.store.card_resume_release(id);
-        offer(hub, &card);
-    }
+/// The channel run that carries these cards' wake started (its process is up).
+pub fn channel_started(hub: &Hub, card_ids: &[String]) {
+    applied(hub, card_ids);
+}
+
+/// A channel turn carrying a wake never ran (the session was held, the spawn failed, Stop): the claims go back and the
+/// cards stay owed. `again`: offered again with the usual backoff; after a Stop they wait for the next offer.
+pub fn channel_failed(hub: &Arc<Hub>, card_ids: &[String], again: bool) {
+    given_back(hub, card_ids, again);
 }
 
 // ---- door (c): a -p run the kernel started
@@ -366,6 +413,7 @@ async fn run_door(hub: &Arc<Hub>, card: &Card, group: &[Card], session: &str, no
         tests_seen::record("run", &card.session, note, &spawn.env);
         tests_seen::spawned(spawn);
         clear_held(hub, &claimed);
+        applied(hub, &ids_of(&claimed));
         Step::Done
     }
     #[cfg(not(test))]
@@ -373,6 +421,7 @@ async fn run_door(hub: &Arc<Hub>, card: &Card, group: &[Card], session: &str, no
         match exec(&bin, &spawn, grant).await {
             Exec::Running => {
                 clear_held(hub, &claimed);
+                applied(hub, &ids_of(&claimed));
                 Step::Done
             }
             Exec::Held => {

@@ -443,6 +443,23 @@ pub async fn set_call_model(agent: &str, model: &str) -> Result<InfoRun> {
     Ok(refill(agent, true).await)
 }
 
+/// `kith schedule <op> <agent> <id>` (pause, resume, run or rm) as the person the job runs for, so kith-sched stays
+/// the only writer of jobs.json and its own "only they or the owner can run it" rule applies. The person is the job's
+/// as kith-info reads it now, never the caller's word. Returns the info read back from hq.
+pub async fn schedule(agent: &str, id: &str, op: &str) -> Result<InfoRun> {
+    let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
+        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+    };
+    let info = refill(agent, true).await.info.map_err(|e| anyhow!("can't read {agent}'s schedules: {e}"))?;
+    let job = info["schedules"]
+        .as_array()
+        .and_then(|jobs| jobs.iter().find(|j| j["id"].as_str() == Some(id)))
+        .ok_or_else(|| anyhow!("{agent} has no scheduled job {id}"))?;
+    let person = job["person"].as_str().filter(|p| !p.is_empty());
+    run_as(&bin, &["schedule", op, agent, id], None, LIST_TIMEOUT, person).await?;
+    Ok(refill(agent, true).await)
+}
+
 /// Runs kith for `agent`. A caller that finds a run in flight waits for it and takes its answer (a refresh asked
 /// for while one is running would only repeat it), except `force`, which runs again after it: that run may have
 /// read before the write being read back. Otherwise a still-fresh answer is reused unless `force`.
