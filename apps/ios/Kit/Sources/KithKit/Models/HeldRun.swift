@@ -40,7 +40,7 @@ public struct HeldRun: Codable, Hashable, Sendable {
         f.dateFormat = "H:mm"
         let time = f.string(from: date)
         if calendar.isDate(date, inSameDayAs: now) { return time }
-        if calendar.isDateInYesterday(date) { return "yesterday \(time)" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: now), calendar.isDate(date, inSameDayAs: yesterday) { return "yesterday \(time)" }
         if now.timeIntervalSince(date) < 7 * 86_400 { return "\(calendar.shortWeekdaySymbols[calendar.component(.weekday, from: date) - 1]) \(time)" }
         f.dateFormat = "MMM d"
         return f.string(from: date)
