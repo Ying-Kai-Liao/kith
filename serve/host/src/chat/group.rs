@@ -104,8 +104,8 @@ pub fn with_members(store: &Store, members: &[String]) -> Result<Option<String>>
 }
 
 /// A person wrote in a group lane: open a conversation there (ending the one still open) and run its room turn.
-pub fn start(hub: &Arc<Hub>, lane: Lane, budget: i64, opened_by: &str) -> Result<()> {
-    let conv = hub.store.open_conversation(&lane, budget, opened_by)?;
+pub fn start(hub: &Arc<Hub>, lane: &Lane, budget: i64, opened_by: &str) -> Result<()> {
+    let conv = hub.store.open_conversation(lane, budget, opened_by)?;
     spawn(hub, conv);
     Ok(())
 }
@@ -153,39 +153,38 @@ async fn run(hub: &Arc<Hub>, mut conv: Conversation) -> Result<()> {
         let members = members(hub, &group);
         // The speaker a restart interrupted goes first, already charged. Otherwise the next in the queue, charged now:
         // a turn that is sent costs one even if the member passes, times out or fails.
-        let member_id = match conv.queue.current.clone() {
-            Some(id) => id,
-            None => {
-                if conv.queue.waiting.is_empty() {
-                    if conv.queue.round > 0 && conv.queue.spoke == 0 {
-                        hub.store.end_conversation(&conv.id, ConvState::Ended)?;
-                        break;
-                    }
-                    let since_user = since_last_user_message(hub, &lane)?;
-                    let mut speakers: Vec<String> =
-                        responders(&members, &since_user).into_iter().map(|m| m.id.clone()).collect();
-                    // Each round starts one member later, so the same bot doesn't always speak first.
-                    if !speakers.is_empty() {
-                        let offset = conv.queue.round as usize % speakers.len();
-                        speakers.rotate_left(offset);
-                    }
-                    conv.queue.waiting = speakers;
-                    conv.queue.round += 1;
-                    conv.queue.spoke = 0;
-                    if conv.queue.waiting.is_empty() {
-                        hub.store.end_conversation(&conv.id, ConvState::Ended)?;
-                        break;
-                    }
-                }
-                if conv.left <= 0 {
+        let member_id = if let Some(id) = conv.queue.current.clone() {
+            id
+        } else {
+            if conv.queue.waiting.is_empty() {
+                if conv.queue.round > 0 && conv.queue.spoke == 0 {
                     hub.store.end_conversation(&conv.id, ConvState::Ended)?;
                     break;
                 }
-                let id = conv.queue.waiting.remove(0);
-                conv.left -= 1;
-                conv.queue.current = Some(id.clone());
-                id
+                let since_user = since_last_user_message(hub, &lane)?;
+                let mut speakers: Vec<String> =
+                    responders(&members, &since_user).into_iter().map(|m| m.id.clone()).collect();
+                // Each round starts one member later, so the same bot doesn't always speak first.
+                if !speakers.is_empty() {
+                    let offset = conv.queue.round as usize % speakers.len();
+                    speakers.rotate_left(offset);
+                }
+                conv.queue.waiting = speakers;
+                conv.queue.round += 1;
+                conv.queue.spoke = 0;
+                if conv.queue.waiting.is_empty() {
+                    hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+                    break;
+                }
             }
+            if conv.left <= 0 {
+                hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+                break;
+            }
+            let id = conv.queue.waiting.remove(0);
+            conv.left -= 1;
+            conv.queue.current = Some(id.clone());
+            id
         };
         // Written before the turn is sent: a restart from here on resumes this speaker without charging again.
         if !hub.store.save_conversation(&conv.id, conv.left, &conv.queue)? {

@@ -276,7 +276,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             if row.config.is_group() {
                 // The sender grants the turn budget (rule C1); a plain message gets today's ten.
                 let budget = crate::chat::group::budget_of(b["budget"].as_i64());
-                crate::chat::group::start(hub, lane, budget, b["asMember"].as_str().unwrap_or("owner"))?;
+                crate::chat::group::start(hub, &lane, budget, b["asMember"].as_str().unwrap_or("owner"))?;
             } else {
                 hub.send_cmd(bot, Cmd::Send { lane: turn_lane, entry_id: e.id.clone(), text: prompt, route: true })?;
             }
