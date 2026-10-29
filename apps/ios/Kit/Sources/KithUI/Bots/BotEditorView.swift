@@ -92,6 +92,8 @@ struct BotSettingsForm: View {
     var shown = BotSections.all
     /// An hq bot's kith details: its permission, model, effort and Fast mode come from hq (`HqSettingsRows`).
     var kith: KithInfoStore?
+    /// The details sheet has an Access tab: the permission mode lives there (Asks before), not in these rows.
+    var permissionInAccess = false
     @Environment(BotStore.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pickingFolder = false
@@ -217,7 +219,7 @@ struct BotSettingsForm: View {
     }
 
     @ViewBuilder private var settingsRows: some View {
-        if let kith, !shown.kithSettings { HqSettingsRows(store: kith) } else { modelPicker }
+        if let kith, !shown.kithSettings { HqSettingsRows(store: kith, showsPermission: !permissionInAccess) } else { modelPicker }
     }
 
     private var modelPicker: some View {
@@ -238,7 +240,7 @@ struct BotSettingsForm: View {
 
     /// "Cyan" or "Original body", under Look and colour.
     private var lookSummary: String {
-        AvatarPalette.colors.first { $0.stored == draft.avatarColor }?.label ?? "Original colour"
+        AvatarPalette.colors.first { $0.id == AvatarPalette.pick(draft.avatarColor) }?.label ?? "Original colour"
     }
 
     private var allSections: some View {
@@ -527,7 +529,7 @@ struct AvatarPicker: View {
 
     /// One color choice; `stored` is what goes in `avatarColor` ("" is the untouched body).
     private func swatch<Fill: View>(stored: String, name: String, @ViewBuilder fill: () -> Fill) -> some View {
-        let on = stored.isEmpty ? AvatarPalette.pick(draft.avatarColor) == nil : draft.avatarColor == stored
+        let on = stored.isEmpty ? AvatarPalette.pick(draft.avatarColor) == nil : AvatarPalette.pick(draft.avatarColor) == AvatarPalette.pick(stored)
         return fill()
             .frame(width: 26, height: 26)
             .padding(4)

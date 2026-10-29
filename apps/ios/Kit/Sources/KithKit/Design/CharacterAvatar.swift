@@ -111,8 +111,7 @@ struct StillBot: View {
     }
 }
 
-/// A group chat's face: the cube bot that holds the crew, on the soft logo tile (LAYERS.md
-/// section 5). Its eyes are drawn like any bot's, so the group blinks too.
+/// A group chat's face: the cube bot that holds the crew, with no tile behind it. Its eyes are drawn like any bot's, so the group blinks too.
 public struct GroupAvatar: View {
     let size: CGFloat
     let still: Bool
@@ -125,24 +124,11 @@ public struct GroupAvatar: View {
         self.id = id
     }
 
-    /// Base #F6F6FA with the logo gradient (#8FC7FC, #A67EFC, #F281F3, #FDCEC0, 135 degrees) on top at 45%.
-    static var tile: some View {
-        ZStack {
-            Color(hex: 0xF6F6FA)
-            LinearGradient(colors: [Color(hex: 0x8FC7FC), Color(hex: 0xA67EFC), Color(hex: 0xF281F3), Color(hex: 0xFDCEC0)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing).opacity(0.45)
-        }
-    }
-
     public var body: some View {
         let placement = LivingBotData.rigs["kith"]?.group ?? BotPlacement(scale: 1.134, dx: 0, dy: 0.0045)
-        ZStack {
-            Self.tile
-            BotFace(asset: "kith-cube", botId: id, size: size, still: still, placement: placement)
-        }
-        .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
-        .accessibilityHidden(true)
+        BotFace(asset: "kith-cube", botId: id, size: size, still: still, placement: placement)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
     }
 }
 

@@ -3,6 +3,11 @@ import SwiftUI
 
 /// The rows a conversation is made of.
 
+/// Which reply's context line is open: a tap opens that one (closing any other) or closes it if open.
+enum ContextLineToggle {
+    static func tapped(_ id: String, open: String?) -> String? { open == id ? nil : id }
+}
+
 /// One chat-visible entry in a chat or a thread, with what can be done to it.
 struct ChatRow: View {
     let entry: Entry
@@ -10,13 +15,17 @@ struct ChatRow: View {
     /// The bot or group the chat belongs to.
     let chat: Bot?
     let openTrace: () -> Void
-    /// Main chat only: start (or open) the thread on this message.
-    var openThread: ((Entry) -> Void)?
+    /// Reply to this message (a quote over the composer); nil where nothing is sent (read-only chats).
+    var onReply: ((Entry) -> Void)?
     @Environment(BotStore.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// A tapped agent reply shows its time and context line under it. The chat holds which one is open
+    /// (one at a time, closed by scrolling), so the row only gets whether it is this one.
+    var showsContext = false
+    var toggleContext: () -> Void = {}
 
     var body: some View {
-        let reply = openThread.map { open in { open(entry) } }
+        let reply = onReply.map { reply in { reply(entry) } }
         // The replying agent's colour pair (in a group, the one who wrote it).
         let tint = AgentTint.resolve((entry.data.author.flatMap { model.bots[$0] } ?? chat)?.avatarColor)
         switch entry.kind {
@@ -28,23 +37,24 @@ struct ChatRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 UserBubble(entry: entry, botWorking: chat?.isWorking == true, reply: reply)
                 ReactionsRow(entry: entry)
-                threadChip
             }
             .animation(Motion.reduced(Motion.layout, reduceMotion), value: entry.data.reactions)
             .padding(.top, groupStart ? 12 : 4)
         case "agent":
             VStack(alignment: .leading, spacing: 4) {
-                if chat?.isGroup == true, groupStart { AuthorLabel(botId: entry.data.author) }
-                AgentBubble(entry: entry, openTrace: openTrace, reply: reply)
+                if groupStart { AuthorLabel(botId: entry.data.author ?? chat?.id) }
+                AgentBubble(entry: entry, openTrace: openTrace, reply: reply) {
+                    withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { toggleContext() }
+                }
                 Group {
                     AnsweredByLabel(answeredBy: entry.data.answeredBy)
-                    if let percent = entry.data.contextPercent {
-                        Text("context \(percent)%")
-                            .kithText(.secondary)
-                            .foregroundStyle(Palette.muted)
+                    if showsContext, entry.data.status != "streaming" {
+                        ContextLineView(time: Self.clock(entry.date), percent: entry.data.contextPercent)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.trailing, 40)
+                            .transition(.opacity)
                     }
                     ReactionsRow(entry: entry)
-                    threadChip
                 }
                 .padding(.leading, chat?.isGroup == true ? 34 : 0)
             }
@@ -53,21 +63,10 @@ struct ChatRow: View {
         case "permission":
             VStack(alignment: .leading, spacing: 4) {
                 if chat?.isGroup == true { AuthorLabel(botId: entry.data.author) }
-                if entry.data.isSecretCard {
-                    secretCard(tint: tint)
-                } else if entry.data.limit != nil {
-                    // An agent at its monthly limit (the owner's message waits under it), or a person at theirs.
-                    LimitCardView(entry: entry, tint: tint, answering: model.answering[entry.id],
-                                  waiting: GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
-                                  time: entry.date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)),
-                                  respond: { option in model.respond(entry, option: option) })
+                if let fold = CardFold.of(entry) {
+                    FoldedCard(fold: fold, time: Self.clock(entry.date)) { permissionBody(tint: tint) }
                 } else {
-                PermissionCard(entry: entry, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
-                               waiting: heldElsewhere ? "Open in the terminal: answer it there."
-                                   : chat?.botGuest.map({ !$0.canAnswer(isOwner: model.isOwner) }) == true ? "Only the computer's owner answers this."
-                                   : GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
-                               respond: { option in model.respond(entry, option: option) },
-                               held: heldModel, stop: { model.stopHolder(for: entry) }, stopped: model.stoppedRuns[entry.id])
+                    permissionBody(tint: tint)
                 }
             }
             .padding(.top, 12)
@@ -77,13 +76,32 @@ struct ChatRow: View {
             } else if let card = entry.data.handoff {
                 HandoffCardRow(entry: entry, card: card).padding(.top, 10)
             } else {
-                // Only a notice that carries a thread (a bot from outside's conversation) gets a chip.
-                VStack(alignment: .leading, spacing: 4) {
-                    NoticeRow(entry: entry)
-                    threadChip
-                }
-                .padding(.top, 10)
+                NoticeRow(entry: entry).padding(.top, 10)
             }
+        }
+    }
+
+    private static func clock(_ date: Date) -> String {
+        date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+    }
+
+    /// The full approval, limit or key/access card.
+    @ViewBuilder private func permissionBody(tint: AgentTint) -> some View {
+        if entry.data.isSecretCard {
+            secretCard(tint: tint)
+        } else if entry.data.limit != nil {
+            // An agent at its monthly limit (the owner's message waits under it), or a person at theirs.
+            LimitCardView(entry: entry, tint: tint, answering: model.answering[entry.id],
+                          waiting: GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
+                          time: Self.clock(entry.date),
+                          respond: { option in model.respond(entry, option: option) })
+        } else {
+            PermissionCard(entry: entry, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
+                           waiting: heldElsewhere ? "Open in the terminal: answer it there."
+                           : chat?.botGuest.map({ !$0.canAnswer(isOwner: model.isOwner) }) == true ? "Only the computer's owner answers this."
+                           : GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
+                           respond: { option in model.respond(entry, option: option) },
+                           held: heldModel, stop: { model.stopHolder(for: entry) }, stopped: model.stoppedRuns[entry.id])
         }
     }
 
@@ -112,19 +130,6 @@ struct ChatRow: View {
         guard let root = entry.threadId else { return false }
         return model.allEntries(entry.botId).first { $0.id == root }?.data.thread?.isHeldElsewhere == true
     }
-
-    /// What hangs under an entry: its thread, when it has replies and this view can open threads. Any kind of entry
-    /// (a message, or a notice a bot from outside's conversation hangs on) gets the same chip.
-    static func chipSummary(_ entry: Entry, canOpen: Bool) -> ThreadSummary? {
-        guard canOpen, let summary = entry.data.thread, summary.count > 0 else { return nil }
-        return summary
-    }
-
-    @ViewBuilder private var threadChip: some View {
-        if let summary = Self.chipSummary(entry, canOpen: openThread != nil), let openThread {
-            ThreadChip(summary: summary, yourTurn: ThreadFeed.hasQuestion(model.replies(entry.botId, root: entry.id), held: summary.isHeldElsewhere)) { openThread(entry) }
-        }
-    }
 }
 
 /// A chat's time separator: Today 3:27 AM.
@@ -149,30 +154,11 @@ struct AuthorLabel: View {
     var body: some View {
         let bot = botId.flatMap { model.bots[$0] }
         HStack(spacing: 8) {
-            if let bot { CharacterAvatar(bot: bot, size: 26, animated: false) }
+            if let bot { CharacterAvatar(bot: bot, size: 24, animated: false).shadow(color: Palette.ink.opacity(0.12), radius: 4, y: 2) }
             Text(model.authorName(botId))
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Palette.text)
+                .kithText(.agentName)
+                .foregroundStyle(Palette.ink)
         }
-    }
-}
-
-/// Under a message with a thread: the redesign's chip (who replied, how many, how recently). Tapping either part opens it.
-struct ThreadChip: View {
-    let summary: ThreadSummary
-    var yourTurn = false
-    let open: () -> Void
-    @Environment(BotStore.self) private var model
-
-    var body: some View {
-        let author = summary.authors.lazy.compactMap { model.bots[$0] }.first
-        let chip = ThreadFeed.chip(face: author.map(CrewFace.init(bot:)) ?? CrewFace(portrait: nil),
-                                    tint: AgentTint.resolve(author?.avatarColor), count: summary.count, unread: summary.unread,
-                                    lastAt: summary.lastAt, place: nil, yourTurn: yourTurn,
-                                   summary: summary, mac: model.hostName)
-        ThreadChipView(chip, openLabel: "View thread, \(summary.count) \(summary.count == 1 ? "reply" : "replies")"
-                           + ((summary.unread ?? 0) > 0 ? ", \(summary.unread ?? 0) new" : ""),
-                       onToggle: open, onOpenThread: open)
     }
 }
 
@@ -208,7 +194,7 @@ struct UserBubble: View {
                         MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) },
                         MenuItem("Select Text", icon: "selection.pin.in.out") { selecting = true },
                     ]
-                    if let reply { items.append(MenuItem("Reply in thread", icon: "arrowshape.turn.up.left", action: reply)) }
+                    if let reply { items.insert(MenuItem("Reply", icon: "arrowshape.turn.up.left", action: reply), at: 0) }
                     if entry.data.status == "queued" {
                         items.append(MenuItem("Unsend", icon: "arrow.uturn.backward") { model.unsend(entry) })
                     }
@@ -262,6 +248,8 @@ struct AgentBubble: View {
     let entry: Entry
     let openTrace: () -> Void
     var reply: (() -> Void)?
+    /// A tap on the bubble (links keep their own).
+    var onTap: (() -> Void)?
     @State private var selecting = false
     @Environment(BotStore.self) private var model
 
@@ -279,13 +267,14 @@ struct AgentBubble: View {
                         .background(Palette.bubbleAgent, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
                 }
             }
+                .onTapGesture { onTap?() }
                 .contextActions(reactions: model.reactionPick(entry)) {
                     var items = [
                         MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) },
                         MenuItem("Select Text", icon: "selection.pin.in.out") { selecting = true },
                         MenuItem("Show what it did", icon: "list.bullet", action: openTrace),
                     ]
-                    if let reply { items.insert(MenuItem("Reply in thread", icon: "arrowshape.turn.up.left", action: reply), at: 2) }
+                    if let reply { items.insert(MenuItem("Reply", icon: "arrowshape.turn.up.left", action: reply), at: 0) }
                     return items
                 }
                 .kithSheet(isPresented: $selecting) { SelectTextSheet(text: MarkdownText.plain(entry.data.text ?? "")) }
@@ -462,10 +451,15 @@ struct ReactionsRow: View {
     var body: some View {
         if let reactions = entry.data.reactions, !reactions.isEmpty {
             HStack(spacing: 4) {
-                ForEach(reactions, id: \.self) { emoji in
+                ForEach(ReactionGroups.of(reactions), id: \.emoji) { group in
+                    let emoji = group.emoji
                     Button { model.react(entry, emoji) } label: {
-                        Text(emoji)
-                            .font(.system(size: 15))
+                        HStack(spacing: 4) {
+                            Text(emoji).font(.system(size: 15))
+                            Text("\(group.count)")
+                                .font(.system(size: 13).monospacedDigit())
+                                .foregroundStyle(Palette.ink)
+                        }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Palette.panel, in: Capsule())
@@ -474,7 +468,8 @@ struct ReactionsRow: View {
                     }
                     .buttonStyle(PressScale())
                     .help("Remove \(emoji)")
-                    .accessibilityLabel("Remove reaction \(emoji)")
+                    .accessibilityLabel("\(emoji) \(group.count)")
+                    .accessibilityHint("Removes your reaction")
                     .transition(.scale.combined(with: .opacity))
                 }
                 Menu {
@@ -496,11 +491,35 @@ struct ReactionsRow: View {
     }
 }
 
+/// The line under a tapped agent reply: time, a 13 pt ring and "N% context". No percent, time only.
+struct ContextLineView: View {
+    let time: String
+    let percent: Int?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(time).kithText(.code).foregroundStyle(Palette.muted)
+            if let percent {
+                ZStack {
+                    Circle().stroke(Palette.ink.opacity(0.16), lineWidth: 2)
+                    Circle().trim(from: 0, to: ContextLine.fraction(percent))
+                        .stroke(Palette.ink, style: StrokeStyle(lineWidth: 2, lineCap: .butt))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 13, height: 13)
+                Text(ContextLine.label(percent: percent) ?? "").kithText(.code).foregroundStyle(Palette.muted)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// iPhone: a row renders again only when what it shows changed, so a reply being written
 /// elsewhere in the chat skips it.
 extension ChatRow: @MainActor Equatable {
     static func == (a: Self, b: Self) -> Bool {
         a.entry == b.entry && a.groupStart == b.groupStart && a.chat?.isGroup == b.chat?.isGroup
-            && a.chat?.isWorking == b.chat?.isWorking && (a.openThread == nil) == (b.openThread == nil)
+            && a.chat?.isWorking == b.chat?.isWorking && (a.onReply == nil) == (b.onReply == nil)
+            && a.showsContext == b.showsContext
     }
 }

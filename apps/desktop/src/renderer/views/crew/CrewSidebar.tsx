@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type WheelEvent, type ReactNode, type RefObject } from 'react'
 import { boardWaiting, buildBoard, type BoardTarget } from '@shared/board'
 import { resultList, searchCrew, type CrewHit, type CrewSearchSource } from '@shared/crew-search'
 import { isGroup } from '@shared/models'
@@ -18,6 +18,7 @@ import type { useComputerRoster } from '../../store/computer-roster'
 import { BotRoster } from '../BotRoster'
 import { useDictation } from '../thread/dictation'
 import { UpdateBadge } from '../UpdateButton'
+import { swipeTracker } from '../../lib/sidebar-swipe'
 import { BoardList } from './BoardList'
 import { SearchResults } from './SearchResults'
 import '../sidebar-footer.css'
@@ -76,8 +77,22 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
       setMode(next)
     }
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    // The View menu's Crew / Board (Electron swallows the keys for its accelerators). Both set the mode rather
+    // than toggle it, so a press that reaches both paths still switches once.
+    const off = window.kith.app.onCommand((c) => c.kind === 'sidebarMode' && setMode(c.mode))
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      off()
+    }
   }, [compact])
+
+  // A two-finger sideways swipe on the list switches Crew <-> Board; vertical scrolling is left alone.
+  const swipe = useRef(swipeTracker())
+  const onWheel = (e: WheelEvent<HTMLDivElement>) => {
+    if (searching) return
+    const next = swipe.current(e.deltaX, e.deltaY, e.timeStamp)
+    if (next) setMode(next)
+  }
 
   const byKey = useMemo(() => new Map(items.map((i) => [refKey(i.ref), i])), [items])
   const botOf = (t: BoardTarget) => byKey.get(refKey(t))?.bot
@@ -123,6 +138,21 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
   const change = (text: string) => {
     setQuery(text)
     setActive(0)
+  }
+
+  // The dock has no send of its own: attached files go to the top match while searching, else the chat open now,
+  // else the first chat, and wait staged in its composer.
+  const topHit = searching ? hits[active] ?? hits[0] : undefined
+  const attachTarget = (topHit && byKey.get(refKey(topHit.ref))) ?? (app.selection ? byKey.get(refKey(app.selection)) : undefined) ?? items[0]
+  const attach = async () => {
+    const target = attachTarget
+    if (!target) return
+    const picked = await window.kith.app.pickFiles()
+    if (!picked.length) return
+    target.store.stageFiles(target.bot.id, picked)
+    dictation.stop()
+    openRef(target.ref)
+    setQuery('')
   }
 
   const profile = <SidebarProfile accountOpen={accountOpen} onAccount={onAccount} />
@@ -178,12 +208,12 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
         </div>
         {newMenuNode}
       </div>
-      <div className="roster" ref={listRef} tabIndex={0} onKeyDown={mode === 'crew' && !searching ? onListKey : undefined}>
+      <div className="roster" ref={listRef} tabIndex={0} onKeyDown={mode === 'crew' && !searching ? onListKey : undefined} onWheel={onWheel}>
         {body}
       </div>
       <div className="cs-dock">
         <div className={`cs-box kith-glass ${searching ? 'typing' : ''}`}>
-          <button className="cs-box-plus" aria-label="New" disabled={!canCreate} onClick={() => setNewMenu(true)}>
+          <button className="cs-box-plus" aria-label="Attach files or images" title="Attach files or images" disabled={!attachTarget} onClick={() => void attach()}>
             <Icon name="plus" size={15} weight="medium" />
           </button>
           <input
