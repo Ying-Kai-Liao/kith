@@ -42,11 +42,15 @@ extension BotStore {
     @discardableResult
     func sendComposerDraft(to botId: String, thread: String? = nil, files: [OutgoingFile] = [], newTask: Bool = false,
                            start: FolderChoice? = nil) -> Bool {
-        let text = composerDraft(for: botId, thread: thread)
-        guard !retired, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { return false }
+        let typed = composerDraft(for: botId, thread: thread)
+        guard !retired, !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { return false }
+        // A reply quotes its message; with nothing typed (files only) there is nothing to attach it to.
+        let quote = thread == nil ? replyQuotes[botId].flatMap(ReplyQuote.line(of:)) : nil
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? typed : ReplyQuote.compose(quote: quote, text: typed)
         let pasted = composerPasted[composerKey(botId, thread)] ?? []
         send(text, to: botId, thread: thread, nonce: UUID().uuidString, files: files, pasted: pasted, newTask: newTask,
              start: start)
+        replyQuotes[botId] = nil
         setComposerDraft("", for: botId, thread: thread)
         return true
     }
