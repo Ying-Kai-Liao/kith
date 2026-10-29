@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below: the code of the revoke (PR "revoke a person").
-SYNC=892b64dd7d2dd2ca7369a284ec0ca9bf2fb9ea66
+SYNC=a0b2e759d7b92db730a8f1365828b6cfbbe2c10d
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)

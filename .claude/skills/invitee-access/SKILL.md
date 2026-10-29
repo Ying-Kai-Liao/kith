@@ -1,6 +1,6 @@
 ---
 name: invitee-access
-description: Property tests that an invited person and a bot guest never get more than they were granted. Use when a change touches serve/host/src/api/roles.rs (guard, member_may, MEMBER_METHODS, BOT_METHODS, BOT_PENDING_METHODS, bot_may, shape, event_for, event_for_bot, bot_entry, shape_bot, hello_for, own_bot, owned_bot_chat_agent, approves_own, runs_code, stored_member_approver, may_use, may_use_checked, granted_agents), serve/host/src/api/botguests.rs (the five member handlers, end_bot, revoke_owned_by, enforce, bot_call, ask, the ten-bot limit), the bot principal in api/devices.rs (bot_principal), remote/botsync.rs, a router method in serve/host/src/api/ (a new method must stay off the member list unless justified), dispatch/member_call in api/mod.rs, people/proveInvite, event fan-out in api/events.rs, who answers a card (cards::approver_of, the run-card branch of guard, cards/access.rs escape cards), or kernel/bin/kith-auth (resolve, resolve_bot, may, person --rm/--revoke/--clear-temp, member and its env/mode checks, bot, bots-cap, access, forget).
+description: Property tests that an invited person and a bot guest never get more than they were granted. Use when a change touches serve/host/src/api/roles.rs (guard, member_may, MEMBER_METHODS, BOT_METHODS, BOT_PENDING_METHODS, bot_may, shape, event_for, event_for_bot, bot_entry, shape_bot, hello_for, own_bot, owned_bot_chat_agent, approves_own, runs_code, stored_member_approver, may_use, may_use_checked, granted_agents), serve/host/src/api/botguests.rs (the five member handlers, end_bot, revoke_owned_by, enforce, bot_call, ask, the ten-bot limit), the bot principal in api/devices.rs (bot_principal), remote/botsync.rs, a router method in serve/host/src/api/ (a new method must stay off the member list unless justified), dispatch/member_call in api/mod.rs, people/proveInvite, event fan-out in api/events.rs, who answers a card (cards::approver_of, the run-card branch of guard, cards/access.rs escape cards, cards/edge.rs edge buttons), or kernel/bin/kith-auth (resolve, resolve_bot, may, person --rm/--revoke/--clear-temp, member and its env/mode checks, bot, bots-cap, access, job, helper, forget).
 ---
 
 # Invitee access never exceeds the grant
@@ -45,10 +45,12 @@ kith-auth, `kernel/tests/kith-auth-props.py` (generated command sequences on a t
 24. (F11 step 1) An allowed resolve never runs in a free-shell mode (`bypassPermissions`, `auto`) without `--trusted`, also when auth.json was hand-edited to say so. Harm: a guest's run gets a shell with no prompts.
 25. (membership env) `member ... env.NAME=` refuses a name that changes how the run starts or which kith it talks to (`PATH`, `KITH_HOME`, `DYLD_INSERT_LIBRARIES`), writing nothing, and no allowed resolve carries one, hand edits included. Harm: a membership row runs the agent through another binary or another kith.
 26. (forget) A new person or bot starts with nothing: no membership, grant or invite left behind by an earlier removal of the same id or a hand edit. Harm: an id handed out again inherits the old person's rights.
+27. (jobs and helpers, guest workbench 1.3/1.4; C2) `kith-auth job AGENT WHO JOB` and `kith-auth helper AGENT WHO HELPER [--once]` write exactly when WHO is a person (not the owner, not the everyone row, not removed or revoked) who holds the agent now through a row of their own, the job is declared, and, for a helper of an invitee's bot, its owner may call that helper now; they write only that row, and a refusal writes nothing. A person allowed through the everyone row carries no job and no door. An invitee's bot gets only the doors its owner has (its helpers and hosts from a job fall under 11 and 23). Harm: a card's always or a tick widens the everyone row, or a bot past its owner.
+28. (helper once, D) A helper's "just this once" (`may --once`, `resolve --take-once`) never lets a revoked person, or a bot of one, in, and a bot's once counts only while its owner may call that helper now. Harm: a once given before a revoke starts a helper after it.
 
 ## Coverage record
 
-Sync commit: `892b64dd7d2dd2ca7369a284ec0ca9bf2fb9ea66` (2026-10-29: main `bc3d92b8` plus the guest workbench, its workspace fix and no local servers for guests; `kernel/tests/kith-auth-props.py` passes there, and no host roles code changed, so `roles_props` and `botguests_props` are left to CI). If `git diff 9186a42a -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
+Sync commit: `a0b2e759d7b92db730a8f1365828b6cfbbe2c10d` (2026-10-30: the guest workbench's jobs and edge asks on top of `892b64dd`; `kernel/tests/kith-auth-props.py` passes there with breaks M10-M13 failing, and `cargo test --bin kith -- cards:: agent::bot` passes; no host roles code changed, so `roles_props` and `botguests_props` are left to CI). If `git diff a0b2e759 -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
 
 Recheck 2026-10-29 from `60d2031e`: the covered files changed by `proveInvite`'s "already shown" answer (roles.rs), access requests sent to owner devices (events.rs), the `LOCAL_ONLY` removal (devices.rs), the `reply_to`/`asked_by` fields of escape cards (cards/access.rs), and kith-auth `person --clear-temp` plus the temp folder removal in `--rm` and `--revoke`. None gives a person or bot more: the removal deletes a folder of theirs and grants nothing.
 
@@ -75,6 +77,8 @@ How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechec
 | serve/host/src/api/mod.rs | `member_call` (guard before route) | read, not run: see not covered |
 | kernel/bin/kith-auth | `resolve`, `resolve_bot`, `may`, `bot_may`, `bot_row`, `cmd_person --rm`, `cmd_member`, `cmd_bot`, `cmd_bots_cap` | 10-13 |
 | | `cmd_access` (C2), the access cap in `resolve_bot`, `check_env_key`, the `--trusted` free-shell rule, `forget`, `cmd_person --revoke/--unrevoke` | 12, 23-26 |
+| | `cmd_job`, `cmd_helper`, `own_row`, `job_grants`, `helpers_in`, `with_jobs`, the doors cap in `resolve_bot`, `may(..., once)`, `bot_row(..., once)` | 11, 23, 27, 28 |
+| serve/host/src/cards/edge.rs | `of`, `extras`, `apply` (the owner's edge buttons; every card they go on is the owner's: `edge_extras` requires approver owner) | `cards::edge_tests` (examples) |
 
 ## Run
 
@@ -163,6 +167,16 @@ Each is a one-text change to a copy of kith-auth in a scratch folder (the repo c
 | M7 | `cmd_access` skips `need_person` and the owner refusal | `access garden kai domain b.example` accepted for the owner (23) |
 | M8 | `check_env_key` accepts `PATH` | `member garden kai env.PATH=x` accepted (25) |
 | M9 | `mode_of` ignores `--trusted` | "sam runs house in auto without --trusted" (24) |
+
+Guest workbench breaks (2026-10-30, the same way, 1500 examples; M0 passed at 600): the JOBS opening (a tick or a
+helper grant for a person and each bot, maybe after a revoke or a taken row) is what reaches them.
+
+| # | The break | Caught by (shrunk case) |
+|---|---|---|
+| M10 | `resolve_bot` gives a bot its ticked doors uncapped | "bot bot-a has doors ['render@…'], its owner []" (27) |
+| M11 | `may` lets a once through before the revoke check | "bot-a is revoked but a once lets garden in" (28) |
+| M12 | `cmd_helper` skips the bot owner's check | `helper house bot-a garden` accepted (27) |
+| M13 | `job_grants` reads the everyone row's ticks | "bot bot-a keeps house after its owner sam lost it" (11; the everyone-row line of 27 was not the one hit) |
 
 ### Host breaks of the 2026-10-28 additions
 
