@@ -40,8 +40,8 @@ cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of th
 
 ## Sync commit
 
-**680cee57a624** (2026-10-29: the guest workbench's workspace fix. `cut_off` removes the temp folder after the bot
-sweep, not before it, and `kith-auth exec` scrubs paths into a guest's folders. Neither is a revoke step, and `run.sh`
+**892b64dd7d2d** (2026-10-29: the guest workbench's workspace fix, and no local servers in a guest's shell, a sandbox setting. `cut_off` removes the temp folder after the bot
+sweep, not before it, and `kith-auth exec` scrubs paths into a guest's folders. None is a revoke step, and `run.sh` (at `680cee57`)
 gave every row as expected). Earlier: `9186a42a6043` (main `bc3d92b8` plus the guest workbench, which removes a guest's
 Claude Code temp folder on revoke and removal; the row "remove their temp folder" below). Between `3eb9f9a50c25` and `bc3d92b8` the covered
 files changed by the outbox, the ask job and `ask_helper`, the guest's `kith message`, the invite web link, member

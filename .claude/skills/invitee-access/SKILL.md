@@ -48,7 +48,7 @@ kith-auth, `kernel/tests/kith-auth-props.py` (generated command sequences on a t
 
 ## Coverage record
 
-Sync commit: `680cee57a6243652bddd0b2e1287cbb26399fea4` (2026-10-29: main `bc3d92b8` plus the guest workbench and its workspace fix; `kernel/tests/kith-auth-props.py` passes there, and no host roles code changed, so `roles_props` and `botguests_props` are left to CI). If `git diff 9186a42a -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
+Sync commit: `892b64dd7d2dd2ca7369a284ec0ca9bf2fb9ea66` (2026-10-29: main `bc3d92b8` plus the guest workbench, its workspace fix and no local servers for guests; `kernel/tests/kith-auth-props.py` passes there, and no host roles code changed, so `roles_props` and `botguests_props` are left to CI). If `git diff 9186a42a -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
 
 Recheck 2026-10-29 from `60d2031e`: the covered files changed by `proveInvite`'s "already shown" answer (roles.rs), access requests sent to owner devices (events.rs), the `LOCAL_ONLY` removal (devices.rs), the `reply_to`/`asked_by` fields of escape cards (cards/access.rs), and kith-auth `person --clear-temp` plus the temp folder removal in `--rm` and `--revoke`. None gives a person or bot more: the removal deletes a folder of theirs and grants nothing.
 
