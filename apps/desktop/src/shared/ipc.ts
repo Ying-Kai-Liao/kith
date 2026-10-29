@@ -88,6 +88,8 @@ export type WindowCommand =
   /** An invite link arrived; the window takes it with `invites.takePending`. */
   | { kind: 'joinInvite' }
   | { kind: 'search' }
+  /** View > Crew / Board: the home sidebar's list. */
+  | { kind: 'sidebarMode'; mode: 'crew' | 'board' }
   | { kind: 'toggleSidebar' }
   | { kind: 'toggleDetails' }
   | { kind: 'respondPermission'; ref: string; entryId: string; optionId: string }

@@ -49,6 +49,7 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
   const draft = useSyncExternalStore(drafts.subscribe, () => drafts.get(botId, thread))
   const setDraft = (text: string) => drafts.set(botId, thread, text)
   const [files, setFiles] = useState<OutgoingFile[]>([])
+  const appendRef = useRef<(incoming: { name: string; data: Uint8Array }[]) => void>(() => {})
   const dictation = useDictation(draft, setDraft)
   const field = useRef<HTMLTextAreaElement>(null)
   const measure = useRef<HTMLDivElement>(null)
@@ -90,6 +91,15 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
     drafts.set(botId, thread, previous ? `${previous}\n${incoming}` : incoming)
     field.current?.focus()
   }, [routineDraft, thread, botId, store, drafts])
+
+  // Files picked in the sidebar's dock arrive here once their chat is open.
+  const staged = store.stagedFiles.get(botId)
+  useEffect(() => {
+    if (thread || !staged) return
+    const incoming = store.takeStagedFiles(botId)
+    if (incoming) appendRef.current(incoming)
+    field.current?.focus()
+  }, [staged, thread, botId, store])
 
   // Measure a separate, wrapping copy: collapsing the live textarea to zero breaks its
   // height transition, caret scroll and IME composition. Observe font/width changes too.
@@ -160,6 +170,8 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
     }
     setFiles((list) => [...list, ...accepted])
   }
+
+  appendRef.current = append
 
   const submit = () => {
     // Send while recording: the recording ends and what it heard goes with the message.
