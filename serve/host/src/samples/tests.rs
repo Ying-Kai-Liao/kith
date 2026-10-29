@@ -23,8 +23,8 @@ fn live_samples(hub: &Hub) -> Vec<String> {
     rows.filter(|b| b.config.name == "Samples").map(|b| b.config.id).collect()
 }
 
-#[test]
-fn every_card_is_posted_once_into_one_samples_chat() {
+#[tokio::test]
+async fn every_card_is_posted_once_into_one_samples_chat() {
     let hub = hub();
     let first = post(&hub).unwrap()["botId"].as_str().unwrap().to_owned();
     let got = post(&hub).unwrap();
