@@ -289,7 +289,11 @@
       }
     },
     "Revoked": { "doc": "revoked is false when it already was.", "fields": { "revoked": "bool" } },
-    "BotLimits": { "fields": { "ratePerHour": "int", "concurrent": "int" } },
+    "BotLimits": {
+      "doc": "A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host.",
+      "fields": { "ratePerHour": "int", "concurrent": "int", "turnTimeoutS": "int?", "wakeProfile": "string?" },
+      "mayOmit": ["turnTimeoutS", "wakeProfile"]
+    },
     "BotGuest": {
       "doc": "A bot guest. personId and conversations are the computer owner's.",
       "fields": {
@@ -344,9 +348,34 @@
         "seq": "int",
         "state": "ConversationState",
         "queued": "int",
+        "duplicate": "bool?",
+        "room": "string?"
+      },
+      "mayOmit": ["duplicate", "room"]
+    },
+    "BotPosted": {
+      "doc": "A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current). A retry with the same clientNonce and text answers the same, marked duplicate.",
+      "fields": {
+        "entryId": "string",
+        "seq": "int",
+        "turn": "int",
+        "room": "string",
+        "conversation": "string",
+        "replied": "bool",
+        "late": "bool",
         "duplicate": "bool?"
       },
       "mayOmit": ["duplicate"]
+    },
+    "BotRoom": {
+      "doc": "A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next.",
+      "fields": {
+        "room": "string",
+        "conversation": "string?",
+        "epoch": "int?",
+        "entries": "[BotEntry]",
+        "cursor": "int"
+      }
     },
     "BotSender": {
       "doc": "Who sent an ask: the bot, and the person it spoke for when it said.",
@@ -364,9 +393,12 @@
         "text": "string",
         "sender": "BotSender?",
         "final": "bool?",
-        "error": "bool?"
+        "error": "bool?",
+        "room": "string?",
+        "epoch": "int?",
+        "author": "string?"
       },
-      "mayOmit": ["sender", "final", "error"]
+      "mayOmit": ["sender", "final", "error", "room", "epoch", "author"]
     },
     "BotThread": {
       "doc": "A bot's conversation since afterSeq. done: the last ask has its final answer, an error notice, or was taken back; turn is the last ask's.",
@@ -599,9 +631,15 @@
       "result": "BotGuests"
     },
     "setBotLimits": {
-      "doc": "One of their bots' limits; a limit left out stays.",
+      "doc": "One of their bots' limits; a limit left out stays. turnTimeoutS is clamped to 30 to 3600. wakeProfile (the computer's owner only) is a kith-auth profile name for the grok service; an empty string clears it.",
       "who": ["member"],
-      "params": { "botId": "string", "ratePerHour": "int?", "concurrent": "int?" },
+      "params": {
+        "botId": "string",
+        "ratePerHour": "int?",
+        "concurrent": "int?",
+        "turnTimeoutS": "int?",
+        "wakeProfile": "string?"
+      },
       "result": "BotGuestAnswer"
     },
     "resolveCitation": {
@@ -629,7 +667,7 @@
       "result": "BotProof"
     },
     "botAsk": {
-      "doc": "Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room is refused (notSupported).",
+      "doc": "Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room (a room this bot is a member of) turns the ask into one turn of the agent it @-mentions there: no conversation opens, the agent's reply wakes nobody, and an open conversation's budget is charged.",
       "who": ["bot"],
       "params": {
         "agent": "string?",
@@ -642,6 +680,25 @@
         "noQueue": "bool?"
       },
       "result": "BotAsked"
+    },
+    "botPost": {
+      "doc": "Posts into a room the bot is a member of. conversation and epoch say which turn it answers; with the turnKey of the turn the room is waiting on it is the member's reply, without one it is an unprompted post (charged one turn; wakes only the members it @-mentions, only while the conversation is open with budget left). Anything else is kept as late and wakes nobody. clientNonce makes a retry post once; the same nonce with other text is nonceReused. A post never opens or tops up a budget. A room the bot is not in is notFound.",
+      "who": ["bot"],
+      "params": {
+        "room": "string",
+        "conversation": "string",
+        "epoch": "int",
+        "turnKey": "string?",
+        "text": "string",
+        "clientNonce": "string"
+      },
+      "result": "BotPosted"
+    },
+    "botRoomRead": {
+      "doc": "What a bot member may read of a room: its entries after the cursor, shaped as for a bot, with the newest conversation and epoch to post under. A room the bot is not in is notFound.",
+      "who": ["bot"],
+      "params": { "room": "string", "since": "int?", "limit": "int?" },
+      "result": "BotRoom"
     },
     "botThread": {
       "doc": "What a bot may read of its own conversation, after afterSeq.",

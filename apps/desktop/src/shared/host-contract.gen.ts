@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59'
+export const CONTRACT_SHA256 = 'e70b86d635ebb0d98f6655571824268167f7ea15a2ccc72ace9d10433cd572f8'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -359,9 +359,12 @@ export interface Revoked {
   revoked: boolean
 }
 
+/** A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host. */
 export interface BotLimits {
   ratePerHour: number
   concurrent: number
+  turnTimeoutS?: number | null
+  wakeProfile?: string | null
 }
 
 /** A bot guest. personId and conversations are the computer owner's. */
@@ -429,6 +432,28 @@ export interface BotAsked {
   state: ConversationState
   queued: number
   duplicate?: boolean | null
+  room?: string | null
+}
+
+/** A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current). A retry with the same clientNonce and text answers the same, marked duplicate. */
+export interface BotPosted {
+  entryId: string
+  seq: number
+  turn: number
+  room: string
+  conversation: string
+  replied: boolean
+  late: boolean
+  duplicate?: boolean | null
+}
+
+/** A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next. */
+export interface BotRoom {
+  room: string
+  conversation?: string | null
+  epoch?: number | null
+  entries: BotEntry[]
+  cursor: number
 }
 
 /** Who sent an ask: the bot, and the person it spoke for when it said. */
@@ -450,6 +475,9 @@ export interface BotEntry {
   sender?: BotSender | null
   final?: boolean | null
   error?: boolean | null
+  room?: string | null
+  epoch?: number | null
+  author?: string | null
 }
 
 /** A bot's conversation since afterSeq. done: the last ask has its final answer, an error notice, or was taken back; turn is the last ask's. */
@@ -669,6 +697,8 @@ export interface SetBotLimitsParams {
   botId: string
   ratePerHour?: number | null
   concurrent?: number | null
+  turnTimeoutS?: number | null
+  wakeProfile?: string | null
 }
 
 /** What `resolveCitation` takes. */
@@ -701,6 +731,23 @@ export interface BotAskParams {
   speaker?: string | null
   clientNonce: string
   noQueue?: boolean | null
+}
+
+/** What `botPost` takes. */
+export interface BotPostParams {
+  room: string
+  conversation: string
+  epoch: number
+  turnKey?: string | null
+  text: string
+  clientNonce: string
+}
+
+/** What `botRoomRead` takes. */
+export interface BotRoomReadParams {
+  room: string
+  since?: number | null
+  limit?: number | null
 }
 
 /** What `botThread` takes. */
@@ -763,6 +810,8 @@ export interface Types {
   BotSelf: BotSelf
   BotProof: BotProof
   BotAsked: BotAsked
+  BotPosted: BotPosted
+  BotRoom: BotRoom
   BotSender: BotSender
   BotEntry: BotEntry
   BotThread: BotThread
@@ -805,6 +854,8 @@ export interface Types {
   BotStatusParams: BotStatusParams
   ProveBotInviteParams: ProveBotInviteParams
   BotAskParams: BotAskParams
+  BotPostParams: BotPostParams
+  BotRoomReadParams: BotRoomReadParams
   BotThreadParams: BotThreadParams
   BotConversationsParams: BotConversationsParams
   BotStopParams: BotStopParams
@@ -870,6 +921,8 @@ export const METHODS = {
   botStatus: { who: ['bot', 'botPending'], params: 'BotStatusParams', result: 'BotSelf' },
   proveBotInvite: { who: ['bot', 'botPending'], params: 'ProveBotInviteParams', result: 'BotProof' },
   botAsk: { who: ['bot'], params: 'BotAskParams', result: 'BotAsked' },
+  botPost: { who: ['bot'], params: 'BotPostParams', result: 'BotPosted' },
+  botRoomRead: { who: ['bot'], params: 'BotRoomReadParams', result: 'BotRoom' },
   botThread: { who: ['bot'], params: 'BotThreadParams', result: 'BotThread' },
   botConversations: { who: ['bot'], params: 'BotConversationsParams', result: 'BotConversations' },
   botStop: { who: ['bot'], params: 'BotStopParams', result: 'Empty' },
@@ -916,6 +969,8 @@ export interface Params {
   botStatus: BotStatusParams
   proveBotInvite: ProveBotInviteParams
   botAsk: BotAskParams
+  botPost: BotPostParams
+  botRoomRead: BotRoomReadParams
   botThread: BotThreadParams
   botConversations: BotConversationsParams
   botStop: BotStopParams
@@ -961,6 +1016,8 @@ export interface Results {
   botStatus: BotSelf
   proveBotInvite: BotProof
   botAsk: BotAsked
+  botPost: BotPosted
+  botRoomRead: BotRoom
   botThread: BotThread
   botConversations: BotConversations
   botStop: Empty
@@ -974,7 +1031,7 @@ export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread
 export const UNPROVEN_METHODS = ['proveInvite'] as const satisfies readonly MethodName[]
 
 /** What a bot guest (the pending ones too: see botPending) may call. */
-export const BOT_METHODS = ['hello', 'botStatus', 'proveBotInvite', 'botAsk', 'botThread', 'botConversations', 'botStop', 'botLeave'] as const satisfies readonly MethodName[]
+export const BOT_METHODS = ['hello', 'botStatus', 'proveBotInvite', 'botAsk', 'botPost', 'botRoomRead', 'botThread', 'botConversations', 'botStop', 'botLeave'] as const satisfies readonly MethodName[]
 
 /** What a bot guest that is still joining or waiting for its owner's allow may call. */
 export const BOT_PENDING_METHODS = ['hello', 'botStatus', 'proveBotInvite'] as const satisfies readonly MethodName[]
@@ -1041,16 +1098,18 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     Proven: { fields: { proven: 'bool' } },
     BotInviteCreated: { fields: { botId: 'string', inviteId: 'string', expiresAt: 'int', link: 'string', kithLink: 'string', share: 'string' } },
     Revoked: { fields: { revoked: 'bool' } },
-    BotLimits: { fields: { ratePerHour: 'int', concurrent: 'int' } },
+    BotLimits: { fields: { ratePerHour: 'int', concurrent: 'int', turnTimeoutS: 'int?', wakeProfile: 'string?' }, mayOmit: ['turnTimeoutS', 'wakeProfile'] },
     BotGuest: { fields: { botId: 'string', name: 'string', provider: 'BotProvider', state: 'BotGuestState', ownerPerson: 'string?', ownerName: 'string?', agents: '[string]', limits: 'BotLimits', connected: 'bool', createdAt: 'int', joinedAt: 'int?', decidedAt: 'int?', decidedBy: 'string?', lastSeenAt: 'int?', revokedAt: 'int?', revokedWhy: 'string?', personId: 'string?', conversations: 'json?' }, mayOmit: ['personId', 'conversations'] },
     BotGuests: { fields: { bots: '[BotGuest]' } },
     BotGuestAnswer: { fields: { bot: 'BotGuest?' } },
     BotOwner: { fields: { name: 'string' } },
     BotSelf: { fields: { botId: 'string', name: 'string', state: 'BotGuestState', owner: 'BotOwner', agents: '[GrantedAgent]', limits: 'BotLimits', version: 'string', minClient: 'string' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
-    BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
+    BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?', room: 'string?' }, mayOmit: ['duplicate', 'room'] },
+    BotPosted: { fields: { entryId: 'string', seq: 'int', turn: 'int', room: 'string', conversation: 'string', replied: 'bool', late: 'bool', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
+    BotRoom: { fields: { room: 'string', conversation: 'string?', epoch: 'int?', entries: '[BotEntry]', cursor: 'int' } },
     BotSender: { fields: { botId: 'string', name: 'string', speaker: 'string?' } },
-    BotEntry: { fields: { id: 'string', seq: 'int', turn: 'int', at: 'int', conversation: 'string', kind: 'BotEntryKind', text: 'string', sender: 'BotSender?', final: 'bool?', error: 'bool?' }, mayOmit: ['sender', 'final', 'error'] },
+    BotEntry: { fields: { id: 'string', seq: 'int', turn: 'int', at: 'int', conversation: 'string', kind: 'BotEntryKind', text: 'string', sender: 'BotSender?', final: 'bool?', error: 'bool?', room: 'string?', epoch: 'int?', author: 'string?' }, mayOmit: ['sender', 'final', 'error', 'room', 'epoch', 'author'] },
     BotThread: { fields: { conversation: 'string', entries: '[BotEntry]', done: 'bool', turn: 'int?', state: 'ConversationState' } },
     BotConversation: { fields: { conversation: 'string', agent: 'string', ref: 'string?', originLabel: 'string', lastAt: 'int', state: 'ConversationState' } },
     BotConversations: { fields: { conversations: '[BotConversation]' } },
@@ -1085,12 +1144,14 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     RevokeBotInviteParams: { fields: { inviteId: 'string' } },
     RevokeBotParams: { fields: { botId: 'string' } },
     MyBotsParams: { fields: {} },
-    SetBotLimitsParams: { fields: { botId: 'string', ratePerHour: 'int?', concurrent: 'int?' } },
+    SetBotLimitsParams: { fields: { botId: 'string', ratePerHour: 'int?', concurrent: 'int?', turnTimeoutS: 'int?', wakeProfile: 'string?' } },
     ResolveCitationParams: { fields: { citation: 'string' } },
     ProveInviteParams: { fields: { inviteId: 'string', token: 'string' } },
     BotStatusParams: { fields: {} },
     ProveBotInviteParams: { fields: { inviteId: 'string', token: 'string' } },
     BotAskParams: { fields: { agent: 'string?', text: 'string', conversation: 'string?', ref: 'string?', room: 'string?', speaker: 'string?', clientNonce: 'string', noQueue: 'bool?' } },
+    BotPostParams: { fields: { room: 'string', conversation: 'string', epoch: 'int', turnKey: 'string?', text: 'string', clientNonce: 'string' } },
+    BotRoomReadParams: { fields: { room: 'string', since: 'int?', limit: 'int?' } },
     BotThreadParams: { fields: { conversation: 'string', afterSeq: 'int?', limit: 'int?' } },
     BotConversationsParams: { fields: { limit: 'int?' } },
     BotStopParams: { fields: { conversation: 'string' } },

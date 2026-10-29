@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 11;
+const SCHEMA: i64 = 12;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -24,6 +24,8 @@ const SCHEMA: i64 = 11;
 /// again after a restart. Resumes claimed before this version count as applied.
 /// 11: room conversations (`conversations`): a person's message to a group opens one with a turn budget; its queue and
 /// what is left are written with each step so a restart resumes it, and its epoch (per lane) only grows.
+/// 12: a bot guest's room settings: how long a room waits for its post (`turn_timeout_s`) and the kith-auth profile
+/// the host wakes it through (`wake_profile`, NULL: no wake).
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
         c.query_row("SELECT CAST(v AS INTEGER) FROM kv WHERE k = 'schema'", [], |r| r.get(0)).optional()?.unwrap_or(0);
@@ -54,7 +56,21 @@ fn migrate(c: &Connection) -> Result<()> {
     if version < 10 {
         migrate_10(c)?;
     }
-    migrate_11(c)
+    if version < 11 {
+        migrate_11(c)?;
+    }
+    migrate_12(c)
+}
+
+fn migrate_12(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         ALTER TABLE bot_guests ADD COLUMN turn_timeout_s INTEGER NOT NULL DEFAULT 300;
+         ALTER TABLE bot_guests ADD COLUMN wake_profile TEXT;
+         INSERT INTO kv(k, v) VALUES('schema', '12') ON CONFLICT(k) DO UPDATE SET v = '12';
+         COMMIT;",
+    )?;
+    Ok(())
 }
 
 fn migrate_11(c: &Connection) -> Result<()> {
@@ -275,7 +291,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("11"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("12"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -292,7 +308,7 @@ mod tests {
             c.execute_batch("DROP TABLE conversations; UPDATE kv SET v = '10' WHERE k = 'schema';").unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("11"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("12"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -318,7 +334,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("11"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("12"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         drop(s);
         let s = Store::open(&db).unwrap();

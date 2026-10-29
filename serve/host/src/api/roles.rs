@@ -410,6 +410,8 @@ fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
         "bot" => v["bot"]["id"].as_str().map(str::to_owned),
         "entry" => v["entry"]["botId"].as_str().or_else(|| v["entry"]["bot_id"].as_str()).map(str::to_owned),
         "resync" => return Some(v),
+        // A room turn waiting on an outside bot is for that bot alone.
+        "turn" => return None,
         // A call goes to whoever the chat belongs to, never to the owner for an invitee's chat.
         "call" => v["call"]["botId"].as_str().map(str::to_owned),
         _ => return who.is_none().then_some(v),
@@ -451,21 +453,64 @@ fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
     }
 }
 
-/// One live or catch-up event for the bot guest `bot_id`: only the entries of its own conversations, shaped to what a
-/// bot may know (see [`bot_entry`]). Nothing else reaches it, not even other bots' status.
+/// One live or catch-up event for the bot guest `bot_id`: the entries of its own conversations and of the rooms it is a
+/// member of right now, shaped to what a bot may know (see [`bot_entry`]), and the turns a room waits on it for.
+/// Nothing else reaches it, not even other bots' status. Membership and the bot's state are judged on every event, so
+/// taking it out of a room, `botLeave` or a revoke stops them at once.
 pub fn event_for_bot(store: &Store, bot_id: &str, v: Value) -> Option<Value> {
     match v["type"].as_str()? {
         "resync" => Some(v),
+        "turn" => {
+            let room = v["room"].as_str()?;
+            (v["botId"] == bot_id && crate::chat::group::is_room_member(store, room, bot_id)).then_some(v)
+        }
         "entry" => {
             let e = &v["entry"];
-            let (chat, root) = (e["botId"].as_str()?, e["threadId"].as_str()?);
-            let conv = store.bot_conversation_of_thread(chat, root).filter(|c| c.bot_id == bot_id)?;
+            let chat = e["botId"].as_str()?;
+            let own = e["threadId"]
+                .as_str()
+                .and_then(|root| store.bot_conversation_of_thread(chat, root))
+                .filter(|c| c.bot_id == bot_id);
+            let Some(conv) = own else { return room_event(store, bot_id, &v) };
             let bot = store.bot_guest(bot_id).filter(|b| b.state == crate::store::BotState::Active)?;
             let shaped = bot_entry(e, &conv.conversation_id, &bot_waits_on(store, &bot))?;
             Some(json!({"type": "entry", "rev": v["rev"], "conversation": conv.conversation_id, "entry": shaped}))
         }
         _ => None,
     }
+}
+
+/// An entry of a room `bot_id` is a member of, as that bot sees it: with the room, the lane's newest conversation and
+/// its epoch (what a post names), and who spoke. None when it is no member (any more).
+fn room_event(store: &Store, bot_id: &str, v: &Value) -> Option<Value> {
+    let e = &v["entry"];
+    let chat = e["botId"].as_str()?;
+    if !crate::chat::group::is_room_member(store, chat, bot_id) {
+        return None;
+    }
+    let bot = store.bot_guest(bot_id)?;
+    let shaped = room_entry(store, e, &bot_waits_on(store, &bot))?;
+    Some(json!({
+        "type": "entry", "rev": v["rev"], "conversation": shaped["conversation"], "room": chat, "entry": shaped,
+    }))
+}
+
+/// [`bot_entry`] for a line of a room: it also says which room, the epoch of the lane's newest conversation and who
+/// spoke. The caller has checked the bot belongs to the room.
+pub fn room_entry(store: &Store, e: &Value, waits_on: &str) -> Option<Value> {
+    let chat = e["botId"].as_str()?;
+    let lane = crate::store::Lane { chat: chat.to_owned(), thread: e["threadId"].as_str().map(str::to_owned) };
+    let conv = store.newest_conversation(&lane);
+    let mut shaped = bot_entry(e, conv.as_ref().map_or("", |c| c.id.as_str()), waits_on)?;
+    shaped["room"] = chat.into();
+    if let Some(c) = &conv {
+        shaped["epoch"] = c.epoch.into();
+    }
+    if let Some(author) = e["data"]["author"].as_str().filter(|_| e["kind"] == "agent") {
+        let name = store.bot(author).ok().flatten().map(|r| r.config.name);
+        shaped["author"] = name.unwrap_or_else(|| author.to_owned()).into();
+    }
+    Some(shaped)
 }
 
 /// Who a bot's turn waits on when it asks for a tool: its owner (the owner of the computer for their own bots).

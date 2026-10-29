@@ -389,6 +389,13 @@ Install the Kith client, then join my Kith computer. This link works once and ex
 
 Afterwards ask my agents with:  kith ask @<agent> "your question"
 Run `kith --help` for the rest.
+
+If I put you in a Kith room, you are woken (a webhook run) when it is your turn. The wake names a room, a conversation,
+an epoch, a turnKey and a `since` cursor. On a wake, run:
+  kith room read <room> --since <since>
+  kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> "your reply"
+Post once per wake, or post (pass) when you have nothing to add. Please allow `kith` to run when asked: approvals for
+routine runs expire after about 30 minutes, so allow it again if a wake finds it blocked.
 ```
 
 `GET /b/<computerId>/<inviteId>` on the cloud answers the same text without the secrets (for a bot that fetches the URL
@@ -511,8 +518,9 @@ pub const BOT_METHODS: &[&str] = &[
     "botConversations", // list its own
     "botStop",          // stop the running turn of its own conversation
     "botLeave",         // the bot retires itself
+    "botPost",          // post into a room it is a member of (7.12)
+    "botRoomRead",      // read a room it is a member of (7.12)
     // later packages:
-    "botRoom",          // open / join / leave / info
     "botLinkRequest",   // Grok-account linking (2.7)
 ];
 pub const BOT_PENDING_METHODS: &[&str] = &["hello", "botStatus", "proveBotInvite"];
@@ -786,6 +794,10 @@ Pruning is the existing `audit_prune`.
 
 ### 7.9 Rooms (Grok teams)
 
+Superseded for the owner's own bots by 7.12: a bot joins a Kith group room (a `kind: group` bot) as a member, and the
+commands are `kith room read` and `kith room post`. The text below is the design for several bots sharing one thread of
+a single agent, still not built.
+
 A room is one thread several bots write to.
 
 - `botRoom {action:"open", agent, name?}` -> `{room, code}`; `{action:"join", code}` -> `{room, agent, name}`;
@@ -804,6 +816,37 @@ A room is one thread several bots write to.
 - A room's permission prompts go to the creator bot's owner and Kai.
 - One writer: bots in a room queue behind each other (a room is `liveWriter = "bot"` as a whole); the one-writer rule
   applies against app users only.
+
+### 7.12 The owner's own bot as a member of a Kith room (E9/E10, conversations plan PR 3)
+
+Only the computer owner's own bot guests (`owner_person` none; an active one counts as its owner, C7). Another person's
+bot, or one that is revoked, denied or still waiting, is refused when the owner adds it (`valid_members`, the group's
+member list): there is no new way to add a member, it is the owner's own group edit.
+
+- **Wake, not listen.** Grok can't keep a process running, so the host wakes it. When the room turn reaches the bot
+  member, the turn is charged (C2) and the host emits a bot-only `turn` event `{room, conversation, epoch, turnKey}`; if
+  the bot has a **wake profile** it also runs `kith send-to grok --body - --profile <p> --json` (the body on stdin, so
+  the webhook URL and key stay in kith-auth, never in an argument or a log) with `{room, conversation, epoch, turnKey,
+  since, text}`: a short instruction and a read cursor, never the key and never text from any room. A 200 means the run
+  started. A refused wake (non-200), no wake profile, or no post within the bot's **turn timeout** is a pass; the turn
+  was already charged. The wait is the room task's own await.
+- **Settings** (`setBotLimits`, the computer owner for the profile): `turnTimeoutS` (default 300, clamped 30 to 3600) and
+  `wakeProfile` (a kith-auth profile name for the `grok` service; empty clears it). Stored in `bot_guests` (schema 12).
+- **`botPost {room, conversation, epoch, turnKey?, clientNonce, text}`**, 16,000 characters at most, at the bot's rate.
+  Stored once per nonce (the same text replays, other text is `nonceReused`, C4). With the turnKey of the turn the room
+  waits on it is that member's reply and completes the wait. Without a turnKey it is an unprompted post: charged one
+  turn, it wakes only the members it @-mentions, and only while its conversation is open with budget left. A conversation
+  that ended or moved on, a turnKey nobody waits on any more, or an exhausted budget store the post marked `late`: it is
+  kept, wakes nobody and costs nothing (C3). A post never opens or tops up a budget (C1). It is stored as a `user` entry
+  with `data.sender.botId`, so it is never taken for a person's message. A room the bot is not a member of is a 404.
+- **`botRoomRead {room, since?, limit?}`** reads the room after a cursor (a `rev`); the first read is the newest few.
+  Entries are shaped as for any bot plus `room`, `epoch` and `author`. `kith room read` prints them and the new cursor.
+- **Events.** The bot's event stream also carries the `entry` events of the rooms it is a member of right now. Membership
+  and the bot's state are checked on every event: taking it out of the group, `botLeave` or a revoke ends them at once.
+- **`botAsk` with `room`** (C5): the question becomes one turn of the agent it @-mentions in that room, no conversation
+  opens, the reply wakes nobody. An open conversation's budget is charged; the bot's ask rate always is.
+- **Restart.** A bot turn in progress resumes by waiting again under the same turnKey; the wake is not sent twice (it is
+  marked sent before it goes out) and nothing is charged again.
 
 ### 7.10 Linked Grok accounts
 
@@ -951,7 +994,8 @@ kith threads [--json]
 kith stop <conversation>
 kith agents [--json]
 kith status [--json]
-kith room open <@agent> [--name N] | join <code> | leave <rm_..> | info <rm_..>
+kith room read <room> [--since CURSOR] [--json]        (7.12)
+kith room post <room> --conversation C --epoch E [--turn-key K] [--nonce N] [--json] <TEXT | ->
 kith link-account --speaker S [--json]          (package 7)
 kith leave
 kith --version | --help

@@ -38,6 +38,9 @@ const HOUR_MS: i64 = 60 * 60 * 1000;
 /// Defaults of `bot_guests` and what a bot's owner may raise them to; the computer's owner may go higher.
 const DEFAULT_RATE: i64 = 60;
 const DEFAULT_CONCURRENT: i64 = 2;
+/// How long a room waits for an outside bot's post on its turn (a bot's own setting, in this range).
+const DEFAULT_TURN_TIMEOUT_S: i64 = 300;
+const TURN_TIMEOUT_RANGE: (i64, i64) = (30, 3600);
 const OWNER_MAX_RATE: i64 = 600;
 const OWNER_MAX_CONCURRENT: i64 = 8;
 /// Oldest conversations counted when asking how many turns a bot has running.
@@ -280,7 +283,13 @@ fn share_text(link: &str, agents: &[String]) -> String {
          curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | sh\n  \
          kith join '{link}'\n\n\
          Afterwards ask my agents with:  kith ask @{agent} \"your question\"\n\
-         Run `kith --help` for the rest.\n"
+         Run `kith --help` for the rest.\n\n\
+         If I put you in a Kith room, you are woken (a webhook run) when it is your turn. The wake names a room, a \
+         conversation, an epoch, a turnKey and a `since` cursor. On a wake, run:\n  \
+         kith room read <room> --since <since>\n  \
+         kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> \"your reply\"\n\
+         Post once per wake, or post (pass) when you have nothing to add. Please allow `kith` to run when asked: \
+         approvals for routine runs expire after about 30 minutes, so allow it again if a wake finds it blocked.\n"
     )
 }
 
@@ -325,6 +334,8 @@ async fn new_bot(hub: &Arc<Hub>, actor: &Actor, bin: &Path, owner_id: &str, b: &
         cloud_device: None,
         rate_per_hour: DEFAULT_RATE,
         concurrent: DEFAULT_CONCURRENT,
+        turn_timeout_s: DEFAULT_TURN_TIMEOUT_S,
+        wake_profile: None,
         created_at: now_ms(),
         joined_at: None,
         decided_at: None,
@@ -399,6 +410,22 @@ async fn actor_label(hub: &Hub, caller: &Caller) -> String {
     }
 }
 
+fn limits_of(g: &BotGuest) -> Value {
+    json!({
+        "ratePerHour": g.rate_per_hour, "concurrent": g.concurrent,
+        "turnTimeoutS": g.turn_timeout_s, "wakeProfile": g.wake_profile,
+    })
+}
+
+/// A kith-auth profile name as `kith send-to --profile` takes it: a plain word or path, never a flag.
+fn valid_profile(p: &str) -> bool {
+    !p.is_empty()
+        && p.len() <= 64
+        && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+        && !p.starts_with(['-', '.', '/'])
+        && !p.contains("..")
+}
+
 /// A bot as the apps get it. `full` (the computer's owner) adds its person id and conversations.
 fn view(hub: &Hub, g: &BotGuest, full: bool) -> Value {
     let owner_name = g.owner_person.as_deref().and_then(|p| hub.store.person(p)).map(|p| p.name);
@@ -406,7 +433,7 @@ fn view(hub: &Hub, g: &BotGuest, full: bool) -> Value {
     let mut v = json!({
         "botId": g.bot_id, "name": g.name, "provider": g.provider, "state": g.state.as_str(),
         "ownerPerson": g.owner_person, "ownerName": owner_name, "agents": g.agents,
-        "limits": {"ratePerHour": g.rate_per_hour, "concurrent": g.concurrent}, "connected": connected,
+        "limits": limits_of(g), "connected": connected,
         "createdAt": g.created_at, "joinedAt": g.joined_at, "decidedAt": g.decided_at, "decidedBy": g.decided_by,
         "lastSeenAt": g.last_seen_at, "revokedAt": g.revoked_at, "revokedWhy": g.revoked_why,
     });
@@ -529,7 +556,22 @@ async fn set_bot_limits(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result<Va
     };
     let rate = pick("ratePerHour", bot.rate_per_hour, max_rate)?;
     let concurrent = pick("concurrent", bot.concurrent, max_concurrent)?;
+    // A room waits this long for the bot's post; out of range is clamped, not refused.
+    let timeout = match b["turnTimeoutS"].as_i64() {
+        None if b["turnTimeoutS"].is_null() => bot.turn_timeout_s,
+        Some(n) => n.clamp(TURN_TIMEOUT_RANGE.0, TURN_TIMEOUT_RANGE.1),
+        None => bail!("`turnTimeoutS` is a number of seconds"),
+    };
+    // The wake goes out through a key on this Mac, so only the computer's owner picks which profile it uses.
+    let wake = match b["wakeProfile"].as_str() {
+        None if b["wakeProfile"].is_null() => bot.wake_profile.clone(),
+        Some(_) if matches!(actor, Actor::Member(_)) => return Err(Forbidden.into()),
+        Some("") => None,
+        Some(p) if valid_profile(p.trim()) => Some(p.trim().to_owned()),
+        _ => bail!("`wakeProfile` is the name of a kith-auth profile (letters, digits, - _ . /), or empty for none"),
+    };
     hub.store.set_bot_limits(id, rate, concurrent)?;
+    hub.store.set_bot_room_settings(id, timeout, wake.as_deref())?;
     hub.store.audit_add(&actor_label(hub, caller).await, caller.device_key(), "bot.limits", Some(id), true);
     emit_updated(hub, id);
     Ok(json!({"bot": hub.store.bot_guest(id).map(|g| view(hub, &g, false))}))
@@ -570,6 +612,8 @@ pub(crate) async fn end_bot(hub: &Hub, bot_id: &str, final_state: BotState, why:
             return false;
         }
     }
+    // A room waiting on this bot's post stops waiting: its turn ends as a pass.
+    crate::chat::group::cancel_bot_turns(|t| t.bot_id == bot.bot_id);
     // What the bot had asked its owner for ends with it (A7).
     crate::cards::withdraw_person(hub, &bot.person_id, None);
     if let Some(key) = &bot.device_key
@@ -706,7 +750,7 @@ pub(super) async fn bot_call(
     hub.store.touch_bot_guest(&bot.bot_id);
     // A sent ask audits itself, and a retry of one isn't a new ask and isn't logged; the proof counts only when it
     // checks out.
-    let ask_ok = method == "botAsk" && outcome.is_ok();
+    let ask_ok = matches!(method, "botAsk" | "botPost") && outcome.is_ok();
     if !ask_ok {
         hub.store.audit_add(&bot.person_id, caller.device_key(), method, target.as_deref(), outcome.is_ok());
     }
@@ -735,6 +779,8 @@ async fn bot_method(
         "botStatus" => status(hub, bot, active).await,
         "proveBotInvite" => prove(hub, caller, bot, b).await,
         "botAsk" => ask(hub, caller, bot, b).await,
+        "botPost" => post(hub, caller, bot, b).await,
+        "botRoomRead" => room_read(hub, bot, b).await,
         "botThread" => thread(hub, bot, b).await,
         "botConversations" => conversations(hub, bot, b),
         "botStop" => stop(hub, bot, b),
@@ -761,7 +807,7 @@ async fn status(hub: &Hub, bot: &BotGuest, active: bool) -> Result<Value> {
     Ok(json!({
         "botId": bot.bot_id, "name": bot.name, "state": bot.state.as_str(),
         "owner": {"name": owner_label(hub, bot).await}, "agents": agents,
-        "limits": {"ratePerHour": bot.rate_per_hour, "concurrent": bot.concurrent},
+        "limits": limits_of(bot),
         "version": env!("CARGO_PKG_VERSION"), "minClient": MIN_CLIENT,
     }))
 }
@@ -923,9 +969,11 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     let nonce = nonce.ok_or_else(|| bad("`clientNonce` (1 to 128 characters) is required"))?;
     let external = opt_string(b, "ref", 128)?;
     let speaker = opt_string(b, "speaker", 128)?;
-    if !b["room"].is_null() {
-        return Err(BotError::err(400, Code::NotSupported, "Rooms aren't available on this computer yet."));
-    }
+    let room = match &b["room"] {
+        Value::Null => None,
+        Value::String(r) if !r.is_empty() => Some(r.as_str()),
+        _ => return Err(bad("`room` is a room id")),
+    };
     let no_queue = b["noQueue"] == true;
     // The cloud may have just recorded a revoke of the bot's owner: no turn starts until this host has applied it.
     if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
@@ -936,6 +984,12 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
         ));
     }
     let _one = ASK_LOCK.lock().await;
+    if let Some(room) = room {
+        if b["conversation"].as_str().is_some_and(|c| !c.is_empty()) || external.is_some() {
+            return Err(bad("A room ask has no conversation or ref: it is one turn of an agent in the room."));
+        }
+        return ask_room(hub, caller, bot, room, text, nonce, speaker).await;
+    }
 
     // Which conversation. Another bot's id is a 404, never a 403: no existence leak.
     let known = match b["conversation"].as_str().filter(|c| !c.is_empty()) {
@@ -1040,6 +1094,220 @@ async fn ask(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Resu
     Ok(json!({
         "conversation": conv.conversation_id, "entryId": entry.id, "turn": turn, "seq": entry.rev,
         "state": if busy { State::Queued } else { State::Running }, "queued": queued + usize::from(busy && state != State::Queued),
+    }))
+}
+
+/// `botAsk` with a `room` (C5): the bot's question becomes one turn of the agent it @-mentions in a room it is a member
+/// of. No conversation opens, and the agent's reply wakes nobody. When the room has an open conversation the turn is
+/// taken from its budget (C2); with none it costs the bot its ask rate only.
+async fn ask_room(
+    hub: &Arc<Hub>,
+    caller: &Caller,
+    bot: &BotGuest,
+    room: &str,
+    text: &str,
+    nonce: &str,
+    speaker: Option<String>,
+) -> Result<Value> {
+    let missing = || BotError::err(404, Code::NotFound, "No such room.");
+    if !crate::chat::group::is_room_member(&hub.store, room, &bot.bot_id) {
+        return Err(missing());
+    }
+    let group = hub.store.bot(room)?.filter(|r| !r.deleted).map(|r| r.config).ok_or_else(missing)?;
+    if let Some(e) = hub.store.find_bot_guest_nonce(&bot.bot_id, nonce) {
+        if e.bot_id != room || e.data["text"].as_str() != Some(text) {
+            return Err(BotError::err(
+                409,
+                Code::NonceReused,
+                "This clientNonce was already used for a different message.",
+            ));
+        }
+        return Ok(json!({
+            "conversation": "", "entryId": e.id, "turn": e.turn, "seq": e.rev, "state": State::Idle, "queued": 0,
+            "duplicate": true, "room": room,
+        }));
+    }
+    let now = now_ms();
+    if hub.store.audit_count_since(&bot.person_id, "botAsk", now - HOUR_MS) >= bot.rate_per_hour {
+        return Err(BotError::err(
+            429,
+            Code::RateLimited,
+            format!("This bot has asked {} times in the last hour. Try again in a few minutes.", bot.rate_per_hour),
+        ));
+    }
+    let agents = crate::chat::group::mentioned_agents(hub, &group, text);
+    let Some(agent) = agents.first() else {
+        let names: Vec<String> =
+            group.members.iter().filter_map(|m| hub.store.bot(m).ok().flatten()).map(|r| r.config.name).collect();
+        return Err(BotError::err(
+            400,
+            Code::BadRequest,
+            format!("Name the agent to ask with @ ({}).", names.join(", ")),
+        ));
+    };
+    // Like any ask: at most what its owner holds of the agent.
+    if let Some(hq) = &agent.hq_agent
+        && !roles::may_use(&bot.person_id, hq).await
+    {
+        return Err(BotError::err(403, Code::NotGranted, format!("This bot may not use {}.", agent.name)));
+    }
+    let lane = Lane::main(room);
+    if hub.store.open_conversation_of(&lane).is_some() && hub.store.charge_lane(&lane)?.is_none() {
+        return Err(BotError::err(409, Code::Busy, "This room's turn budget is spent."));
+    }
+    let sender = json!({
+        "botId": bot.bot_id, "name": bot.name, "provider": bot.provider,
+        "owner": bot.owner_person, "speaker": speaker,
+    });
+    let data = json!({"text": text, "clientNonce": nonce, "attachments": [], "pasted": [text], "sender": sender});
+    let turn = hub.store.max_turn(room);
+    let entry =
+        hub.add_entry(&lane, EntryKind::User, turn, &data).ok_or_else(|| anyhow!("couldn't save the message"))?;
+    hub.store.audit_add(&bot.person_id, caller.device_key(), "botAsk", Some(room), true);
+    crate::chat::group::ask_agent(hub, room, &agent.id)?;
+    Ok(json!({
+        "conversation": "", "entryId": entry.id, "turn": turn, "seq": entry.rev, "state": State::Running, "queued": 0,
+        "room": room,
+    }))
+}
+
+/// `botPost {room, conversation, epoch, turnKey?, text, clientNonce}`: the bot says something in a room it is a member
+/// of. It is stored once per nonce (the same text again replays, other text is `nonceReused`, C4). With the turnKey of
+/// the turn the room waits on it for, it is the member's reply and completes that turn. With none it is an unprompted
+/// post: charged one turn, and it wakes only the members it @-mentions, only while its conversation is open with budget
+/// left. Anything else (a conversation that ended or moved on, a turnKey nobody waits on any more) is kept and marked
+/// late, wakes nobody, and costs nothing (C3). A post never opens or tops up a budget (C1).
+async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Result<Value> {
+    let bad = |m: &str| BotError::err(400, Code::BadRequest, m);
+    let text = b["text"].as_str().map(str::trim).filter(|t| !t.is_empty()).ok_or_else(|| bad("`text` is required"))?;
+    if text.chars().count() > MAX_TEXT {
+        return Err(BotError::err(400, Code::TooLong, format!("A post is at most {MAX_TEXT} characters.")));
+    }
+    let nonce = b["clientNonce"].as_str().filter(|n| (1..=128).contains(&n.chars().count()));
+    let nonce = nonce.ok_or_else(|| bad("`clientNonce` (1 to 128 characters) is required"))?;
+    let room = b["room"].as_str().filter(|r| !r.is_empty()).ok_or_else(|| bad("`room` is required"))?;
+    let conversation = b["conversation"].as_str().filter(|c| !c.is_empty());
+    let conversation = conversation.ok_or_else(|| bad("`conversation` is required"))?;
+    let epoch = b["epoch"].as_u64().ok_or_else(|| bad("`epoch` is required"))?;
+    let turn_key = b["turnKey"].as_str().filter(|k| !k.is_empty());
+    if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
+        return Err(BotError::err(
+            503,
+            Code::Syncing,
+            "This computer is catching up with the Kith cloud. Try again in a moment.",
+        ));
+    }
+    let _one = ASK_LOCK.lock().await;
+    // Not a member, or no such conversation in that room: a 404, never a hint that the room exists.
+    let missing = || BotError::err(404, Code::NotFound, "No such room.");
+    if !crate::chat::group::is_room_member(&hub.store, room, &bot.bot_id) {
+        return Err(missing());
+    }
+    let conv = hub.store.conversation(conversation).filter(|c| c.lane.chat == room).ok_or_else(missing)?;
+    if let Some(e) = hub.store.find_bot_guest_nonce(&bot.bot_id, nonce) {
+        if e.bot_id != room || e.data["text"].as_str() != Some(text) {
+            return Err(BotError::err(
+                409,
+                Code::NonceReused,
+                "This clientNonce was already used for a different message.",
+            ));
+        }
+        return Ok(posted(&e, true));
+    }
+    if hub.store.audit_count_since(&bot.person_id, "botPost", now_ms() - HOUR_MS) >= bot.rate_per_hour {
+        return Err(BotError::err(
+            429,
+            Code::RateLimited,
+            format!("This bot has posted {} times in the last hour. Try again in a few minutes.", bot.rate_per_hour),
+        ));
+    }
+    let lane = conv.lane.clone();
+    let live = epoch == conv.epoch && crate::chat::group::current(&hub.store, &lane, conv.epoch);
+    let live = live && hub.store.conversation(&conv.id).is_some_and(|c| c.state == crate::store::ConvState::Open);
+    let replies = live
+        && turn_key.is_some_and(|k| crate::chat::group::bot_turn_waits(k, &bot.bot_id, &conv.id, conv.epoch));
+    let mut charged = false;
+    let mut late = !live;
+    if live && !replies {
+        // Without a key it is the bot speaking up: one turn off the budget, if there is one. With a key nobody waits on
+        // any more (answered already, or timed out) it is late.
+        if turn_key.is_some() {
+            late = true;
+        } else if hub.store.charge_lane(&lane)?.is_some() {
+            charged = true;
+        } else {
+            late = true;
+        }
+    }
+    let sender = json!({"botId": bot.bot_id, "name": bot.name, "provider": bot.provider, "owner": bot.owner_person});
+    // `pasted`: memory never takes a bot's text as its owner's own words.
+    let mut data = json!({
+        "text": text, "clientNonce": nonce, "attachments": [], "pasted": [text], "sender": sender,
+        "conversation": conv.id, "epoch": epoch, "replied": replies,
+    });
+    if let Some(k) = turn_key {
+        data["turnKey"] = k.into();
+    }
+    if late {
+        data["late"] = true.into();
+    }
+    let entry = hub
+        .add_entry(&lane, EntryKind::User, hub.store.max_turn(room), &data)
+        .ok_or_else(|| anyhow!("couldn't save the post"))?;
+    hub.store.audit_add(&bot.person_id, caller.device_key(), "botPost", Some(&conv.id), true);
+    if replies {
+        // The room turn that waits reads the text from here; it @-mentions on from there.
+        crate::chat::group::complete_bot_turn(turn_key.unwrap_or_default(), &bot.bot_id, &conv.id, conv.epoch, text);
+    } else if charged
+        && let Some(group) = hub.store.bot(room)?.map(|r| r.config)
+    {
+        let woken = crate::chat::group::mentioned_members(hub, &group, text);
+        crate::chat::group::queue_mentions(&conv.id, woken.into_iter().filter(|m| *m != bot.bot_id).collect());
+    }
+    Ok(posted(&entry, false))
+}
+
+/// What `botPost` answers for a stored post.
+fn posted(e: &Entry, duplicate: bool) -> Value {
+    let mut v = json!({
+        "entryId": e.id, "seq": e.rev, "turn": e.turn, "room": e.bot_id,
+        "conversation": e.data["conversation"], "replied": e.data["replied"] == true,
+        "late": e.data["late"] == true,
+    });
+    if duplicate {
+        v["duplicate"] = true.into();
+    }
+    v
+}
+
+/// `botRoomRead {room, since?, limit?}`: what a member bot may read of a room, after the cursor `since` (the `rev` of
+/// the last entry it saw; its first read gets the newest few). Each entry is shaped as for a bot (no thoughts, tool
+/// calls, plans or attachments), with the room, the lane's conversation and epoch, and who spoke.
+async fn room_read(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
+    let room = b["room"].as_str().filter(|r| !r.is_empty());
+    let missing = || BotError::err(404, Code::NotFound, "No such room.");
+    let room = room.filter(|r| crate::chat::group::is_room_member(&hub.store, r, &bot.bot_id)).ok_or_else(missing)?;
+    // Like reading a thread: only in sync with the cloud, so a bot revoked there reads nothing more.
+    if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
+        return Err(BotError::err(
+            503,
+            Code::Syncing,
+            "This computer is catching up with the Kith cloud. Try again in a moment.",
+        ));
+    }
+    let since = b["since"].as_i64().unwrap_or(0).max(0);
+    let limit = b["limit"].as_i64().unwrap_or(50).clamp(1, 200);
+    let rows = hub.store.chat_entries_since(room, since, limit)?;
+    let waits_on = match &bot.owner_person {
+        Some(p) => hub.store.person(p).map_or_else(|| "the owner".to_owned(), |p| p.name),
+        None => "the owner".to_owned(),
+    };
+    let entries: Vec<Value> = rows.iter().filter_map(|e| roles::room_entry(&hub.store, &json!(e), &waits_on)).collect();
+    let cursor = rows.iter().map(|e| e.rev).max().unwrap_or(0).max(since);
+    let newest = hub.store.newest_conversation(&Lane::main(room));
+    Ok(json!({
+        "room": room, "conversation": newest.as_ref().map(|c| c.id.clone()), "epoch": newest.as_ref().map(|c| c.epoch),
+        "entries": entries, "cursor": cursor,
     }))
 }
 
