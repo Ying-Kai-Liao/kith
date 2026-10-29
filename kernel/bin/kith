@@ -726,7 +726,9 @@ if os.environ["P_OWNER"] == "0":
     s["sandbox"] = {
         "enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": True,
         "filesystem": {"denyRead": list(dict.fromkeys(deny_read)), "allowWrite": list(dict.fromkeys(allow_write))},
-        "network": {"allowUnixSockets": list(dict.fromkeys(socks)), "allowLocalBinding": True}}   # a local server (a render preview)
+        # No local servers (allowLocalBinding): with the host down, one left running could take its loopback port and be
+        # sent the serve token by kith-permit, kith-recall or kith-call. A render preview runs in the render door instead.
+        "network": {"allowUnixSockets": list(dict.fromkeys(socks))}}
 allow = s["permissions"].setdefault("allow", [])
 if os.environ["P_OWNER"] == "0":   # no broad Bash rule for the run of an invited person unless the membership is trusted (F11)
     sys.path.insert(0, os.environ["KITH_ROOT"] + "/lib")

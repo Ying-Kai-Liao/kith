@@ -109,7 +109,7 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: sandbox on, fail closed, no escape hatch" "$(q "$S" '(sb.get("enabled"), sb.get("failIfUnavailable"), sb.get("allowUnsandboxedCommands"))')" "(True, True, False)"
   expect "$who: no excluded commands" "$(q "$S" '"excludedCommands" in sb')" False
   expect "$who: no network but the fixed host socket (both spellings), even with no KITH_RUN_SOCKET" "$(q "$S" "sb['network']['allowUnixSockets'] == ['$T/linked state/run/host.sock', '$T/real state/run/host.sock']")" True
-  expect "$who: loopback servers (a render preview), no domains beyond the allowlist" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(True, False)"
+  expect "$who: no local servers (a stray one could take the host's port), no domains beyond the allowlist" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(None, False)"
   W=$KITH_HOME/agents/echo/files/people/$who/.work
   expect "$who: the workspace is writable, given to the shell only" "$(q "$S" "'$W' in aw and s['env'].get('KITH_WORK') == '$W' and s['env'].get('CLAUDE_ENV_FILE','').endswith('/lib/guest-env.sh')")" True
   expect "$who: the settings env (Claude Code, hooks, MCP servers) holds no workspace var and no path inside their folder but KITH_WORK" "$(q "$S" "[k for k in $WORKVARS if k in s['env']], sorted(k for k, v in s['env'].items() if '/people/$who' in str(v))")" "([], ['KITH_WORK'])"
