@@ -159,7 +159,7 @@ private struct DebugHooks: ViewModifier {
                     app.showSettings = true
                     try? await Task.sleep(for: .seconds(1.5))
                     app.openWidgets = true
-                case "chat":
+                case "chat", "mermaid":
                     if let computer = app.accounts.computers.first {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: DemoScreens.chatBotId)
                     }
@@ -223,6 +223,8 @@ final class AppStore {
     var marketplace: ComputerID?
     /// A guest's permission request opened from its push, shown as a sheet on the computer it belongs to.
     var guestPrompt: BotReference?
+    /// A snoozed call's notification was tapped: the agent whose call to open.
+    var callBack: BotReference?
     /// An invite link being joined, shown as a sheet.
     private(set) var inviteJoin: InviteJoinModel?
 
@@ -366,8 +368,8 @@ final class AppStore {
         }
     }
 
-    /// Opens a bot's chat. A chat the account has no bot for, on a computer it owns, is a guest's: its push is for the
-    /// request waiting there, which shows as a card instead of a chat that isn't the owner's.
+    /// Opens a bot's chat. An agent's card lane, or a chat the account has no bot for on a computer it owns (a guest's),
+    /// is not a chat: its push is for the request waiting there, which shows as a card.
     func openBot(_ ref: BotReference) {
         if accounts.opensGuestPrompt(ref) {
             accounts.selection = nil
@@ -481,6 +483,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let ctx = info["ctx"] as? String
         let computerId = info["computerId"] as? String
         let botId = info["botId"] as? String
+        let callsBack = CallSnooze.isCallBack(info)
         // UIKit saves application state from this completion. The async delegate
         // bridge can complete off the main thread even after MainActor.run.
         Task { @MainActor in
@@ -489,7 +492,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             // Only open it in the account it was sent to, on a computer that account still has.
             let accounts = AppStore.shared.accounts
             guard ctx == accounts.storage.id, accounts.store(for: computerId) != nil else { return }
-            AppStore.shared.openBot(BotReference(accountId: accounts.accountId, computerId: computerId, botId: botId))
+            let ref = BotReference(accountId: accounts.accountId, computerId: computerId, botId: botId)
+            if callsBack { AppStore.shared.callBack = ref } else { AppStore.shared.openBot(ref) }
         }
     }
 

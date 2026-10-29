@@ -18,7 +18,8 @@ import sys
 home = os.environ["STUB_HQ_HOME"]
 args = sys.argv[1:]
 with open(os.path.join(home, "calls.jsonl"), "a", encoding="utf-8") as log:
-    log.write(json.dumps({"args": args, "via": os.environ.get("KITH_VIA") or os.environ.get("HQ_VIA"), "cwd": os.getcwd()}) + "\n")
+    log.write(json.dumps({"args": args, "via": os.environ.get("KITH_VIA") or os.environ.get("HQ_VIA"), "cwd": os.getcwd(),
+                          "person": os.environ.get("KITH_PERSON") or None}) + "\n")
 
 def call_model():
     """`set call-model` keeps the choice in `call_model`; like kith, default (or none) is sonnet and `own` is the agent's own."""
@@ -37,6 +38,12 @@ def main_json():
     path = os.path.join(home, "main")
     chosen = open(path, encoding="utf-8").read().strip() if os.path.exists(path) else ""
     return {"id": main_account(), "source": "agent" if chosen else "default", "harness": "claude", "ready": True}
+
+
+def schedules():
+    """The agent's jobs, as kith-info lists them: `schedules.json` there, none without it."""
+    path = os.path.join(home, "schedules.json")
+    return json.load(open(path, encoding="utf-8")) if os.path.exists(path) else []
 
 
 def permission(default):
@@ -75,6 +82,20 @@ elif args[:3] == ["house", "set", "call-model"] and len(args) == 4:
             os.remove(path)
     else:
         open(path, "w", encoding="utf-8").write(args[3])
+elif args[:1] == ["schedule"] and len(args) == 4 and args[1] in ("pause", "resume", "rm", "run"):
+    # kith-sched's own edits of `schedules.json`; `run` marks the job running.
+    jobs = schedules()
+    job = next((j for j in jobs if j["id"] == args[3]), None)
+    if job is None:
+        print(f"kith-sched: {args[2]} has no job {args[3]}", file=sys.stderr)
+        sys.exit(1)
+    if args[1] == "rm":
+        jobs.remove(job)
+    elif args[1] == "run":
+        job["running"] = True
+    else:
+        job["paused"] = args[1] == "pause"
+    json.dump(jobs, open(os.path.join(home, "schedules.json"), "w", encoding="utf-8"))
 elif args[:2] == ["account", "use"]:
     # `account use ID --agent house` / `account use --reset --agent house`: the main account, in `main`.
     path = os.path.join(home, "main")
@@ -133,7 +154,7 @@ elif args == ["house", "--info-json"]:
         "call_model": call_model()[0], "call_model_effective": call_model()[1],
         "role": {"path": home + "/role", "intro": "Keeps the house.", "sections": [{"title": "Not yours", "text": "Money."}]},
         "package": {"version": None, "remote": None, "dirty": False, "unpushed": 0, "pinned": None},
-        "skills": [], "tools": [], "mcp_servers": [], "plugins": [], "projects": [], "schedules": [], "cost": None,
+        "skills": [], "tools": [], "mcp_servers": [], "plugins": [], "projects": [], "schedules": schedules(), "cost": None,
         "memory": {"dir": memory, "files": files, "total_bytes": sum(f["bytes"] for f in files)}, "errors": {},
         "future_key": True,
     }))

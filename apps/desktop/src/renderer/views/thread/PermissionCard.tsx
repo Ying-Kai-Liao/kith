@@ -8,6 +8,7 @@ import { FALLBACK_PAIR } from '../../components/kith/pair.ts'
 import { Icon } from '../../components/Icon'
 import { HStack, VStack } from '../../components/Stack'
 import { Text } from '../../components/Text'
+import { alwaysAllowLabel } from './permission-labels.ts'
 import { permissionOutcome } from './permission-outcome.ts'
 import { permissionChoices, sortedOptions } from './permission-options.ts'
 import './permission-card.css'
@@ -79,6 +80,8 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
           pending={answering !== null ? true : null}
           onAllow={() => respond(byKind('allow_once')!.optionId)}
           onDeny={() => respond(byKind('reject_once')!.optionId)}
+          allowLabel="Allow once"
+          alwaysLabel={alwaysAllowLabel(d.cwd)}
           onAlways={byKind('allow_always') ? () => respond(byKind('allow_always')!.optionId) : undefined}
         />
       ) : (

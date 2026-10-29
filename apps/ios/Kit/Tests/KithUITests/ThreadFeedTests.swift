@@ -45,6 +45,21 @@ private func tool(_ seq: Int64) -> Entry {
     #expect(running.verb == "Used" && running.result == nil)
 }
 
+@Test func aTitleThatOpensWithTheVerbIsNotDoubled() {
+    func object(_ kind: String, _ title: String) -> String {
+        ThreadFeed.toolRow(entry(1, "tool") { $0.toolKind = kind; $0.title = title }).object
+    }
+    #expect(object("read", "Read src/pace.js") == "src/pace.js")
+    #expect(object("read", "reading src/pace.js") == "src/pace.js")
+    #expect(object("edit", "Write src/pace.js") == "src/pace.js")
+    #expect(object("search", "Searched for foo") == "for foo")
+    #expect(object("fetch", "Fetch https://x.dev") == "https://x.dev")
+    #expect(object("read", "src/pace.js") == "src/pace.js")
+    #expect(object("read", "Read") == "Read")
+    #expect(object("read", "Ran tests") == "Ran tests")
+    #expect(object("execute", "Run npm test") == "Run npm test")
+}
+
 @Test func aPendingPermissionIsYourTurn() {
     let pending = entry(1, "permission") { $0.status = "pending" }
     let answered = entry(2, "permission") { $0.status = "answered" }

@@ -198,6 +198,8 @@ impl Core {
         let outbox = self.paths.data.join("outbox").join(short(&format!("{wk}{}", super::core::now())));
         std::fs::create_dir_all(&outbox).with_context(|| format!("creating {}", outbox.display()))?;
         let ended = self.turn(ad, key, agent, wk, task, &conv, &outbox).await;
+        // A wake this turn didn't settle never ran (the spawn failed, every account was out, an error).
+        self.wake_not_run(task, true);
         let _ = std::fs::remove_dir(&outbox);
         ended
     }
@@ -309,11 +311,10 @@ impl Core {
             }
             let res = serde_json::from_slice::<Value>(&attempt.out).ok();
             // A card's wake rides in this task: no result means the turn never ran (held session, failed spawn).
-            let failed = self.settle_wake(task, res.is_some());
-            if !failed.is_empty()
-                && let Some(hub) = crate::runauth::hub()
-            {
-                crate::cards::resume::channel_failed(&hub, &failed);
+            if res.is_some() {
+                self.settle_wake(task, true);
+            } else {
+                self.wake_not_run(task, true);
             }
             let limit = res.as_ref().and_then(depleted);
             if let Some(limit) = limit {
@@ -367,6 +368,7 @@ impl Core {
         // A person's run (the env names one) gets a token of its own, revoked when this attempt ends.
         let grant = crate::runauth::grant_for_env(&mut env, agent, wk, None);
         if let Some(ended) = self.with(|i| i.busy.get(wk).and_then(|b| b.ended)) {
+            self.wake_not_run(task, false);
             return Ok(Attempt::Stopped(ended)); // stopped before the process existed
         }
         // A backup's new session knows nothing of the thread: it is told so, rather than left to guess.
@@ -396,6 +398,7 @@ impl Core {
                 return Ok(Attempt::NotStarted);
             }
         };
+        self.wake_started(task);
         let pid = child.id();
         if let (Some(grant), Some(pid)) = (&grant, pid) {
             grant.bind_pid(pid);
@@ -461,6 +464,7 @@ impl Core {
         let mut posted = pump.await.unwrap_or(0); // a post in flight finishes before the last flush
         posted += flush(ad, conv, outbox, still).await;
         if let Some(ended) = self.with(|i| i.busy.get(wk).and_then(|b| b.ended)) {
+            self.settle_wake(task, true); // it ran: the wake was delivered
             return Ok(Attempt::Stopped(ended));
         }
         let (out, err) = if timed_out {

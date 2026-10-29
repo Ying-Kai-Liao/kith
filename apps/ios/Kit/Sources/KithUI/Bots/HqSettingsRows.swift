@@ -5,9 +5,11 @@ import SwiftUI
 /// are written through to hq and shown as hq reports them; the others hq has no setting for, so they are read-only and say "Set in Kith".
 struct HqSettingsRows: View {
     let store: KithInfoStore
+    /// False once the Access tab shows the permission mode.
+    var showsPermission = true
 
     var body: some View {
-        ForEach(HqSetting.rows(store.info), id: \.key) { row in
+        ForEach(HqSetting.rows(store.info).filter { showsPermission || $0.key != .permission }, id: \.key) { row in
             ValueRow(row.label, detail: row.hint) {
                 if row.editable {
                     ChoicePicker(
@@ -29,7 +31,7 @@ struct HqSettingsRows: View {
         if let error = store.callModelError {
             Text("Call model not changed: \(error)").font(.footnote).foregroundStyle(Palette.danger)
         }
-        if let error = store.permissionError {
+        if showsPermission, let error = store.permissionError {
             Text("Permission not changed: \(error)").font(.footnote).foregroundStyle(Palette.danger)
         }
     }

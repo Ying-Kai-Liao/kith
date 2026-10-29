@@ -51,7 +51,8 @@ fn ask(session: usize, resource: usize, person: usize) -> NewCard {
         run_id: Some("r".into()),
         person: PEOPLE[person].into(),
         agent: "echo".into(),
-        approver: "owner",
+        answerable_by: None,
+        in_grants: false,
         tool: "Bash".into(),
         input: "{}".into(),
         resource: RESOURCES[resource].into(),
@@ -121,7 +122,7 @@ impl World {
                 let Some(id) = self.ids.get(pick % self.ids.len().max(1)).cloned() else { return };
                 let before = self.s.card(&id).unwrap();
                 let at = if *late { 5_000 } else { self.now };
-                let got = self.s.card_answer(&id, *allow, "x", "kai", at, *spend).unwrap();
+                let got = self.s.card_answer(&id, *allow, "x", "kai", None, at, *spend).unwrap();
                 match got {
                     Answered::Applied { card, .. } => {
                         assert!(
@@ -139,6 +140,7 @@ impl World {
                             "A1"
                         );
                     }
+                    Answered::Refused => unreachable!("the owner's answer is never refused"),
                 }
             }
             Op::Undeliver { pick } => {
@@ -302,7 +304,7 @@ fn a_secret_card_is_written_at_most_once_and_never_after_it_closed() {
                     }
                     SecretOp::Deny => {
                         if claimed.is_none() {
-                            s.card_answer(&card.id, false, "deny", "owner", now, false).unwrap();
+                            s.card_answer(&card.id, false, "deny", "owner", None, now, false).unwrap();
                         }
                     }
                     SecretOp::Sweep { by } => {

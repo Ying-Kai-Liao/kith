@@ -124,19 +124,6 @@ pub fn runs_code(tool: &str, kind: &str) -> bool {
     kind == "execute" || tool == "Bash" || tool.starts_with("mcp__")
 }
 
-/// Who answers the agent's permission prompts in `person`'s chat with `agent`: a member answers their own, except for
-/// a tool that runs code (`runs_code`); everyone else's (a guest's, or any preset that isn't `member`) go to the
-/// owner. Asked of kith-auth each time and failing toward the owner. The one rule behind the -p cards, the ACP cards
-/// and `respondPermission`.
-pub async fn approves_own(person: &str, agent: &str, tool: &str, kind: &str) -> bool {
-    if runs_code(tool, kind) {
-        return false;
-    }
-    resolve(person, agent)
-        .await
-        .is_some_and(|v| v["allowed"].as_bool() == Some(true) && v["preset"].as_str() == Some("member"))
-}
-
 /// Whether every file a file tool names lies inside `roots` (real paths, links followed, `..` applied). A path that can't be
 /// resolved, or a relative one, is outside, and so is a file tool that names none (Grep with no path searches the working
 /// directory, which may be anywhere). A tool that isn't a file tool names no files and is inside.
@@ -174,25 +161,6 @@ pub fn grant_roots(person: &str, agent: &str) -> Vec<std::path::PathBuf> {
         .iter()
         .filter_map(|p| crate::cards::resource::resolve(&p.to_string_lossy()))
         .collect()
-}
-
-fn kind_of(entry: &crate::store::Entry) -> &str {
-    entry.data["toolKind"].as_str().unwrap_or_default()
-}
-
-/// Whether `person` may answer the permission card `entry` of `agent`: the card was made for a member (the approver
-/// stored on it, never recomputed without the tool), the tool it asks for isn't code, and kith-auth still says member
-/// now, so a revoke applies. A card with no approver stored (older ones) is judged by the tool alone; an open old Bash
-/// card stored with a member approver is owner-only from here on.
-async fn stored_member_approver(hub: &Hub, entry: &crate::store::Entry, person: &str, agent: &str) -> bool {
-    if entry.data["approver"].as_str().is_some_and(|a| a != "member") {
-        return false;
-    }
-    let tool = hub
-        .store
-        .card_by_entry(&entry.id)
-        .map_or_else(|| entry.data["title"].as_str().unwrap_or_default().to_owned(), |c| c.tool);
-    approves_own(person, agent, &tool, kind_of(entry)).await
 }
 
 /// The person's chat `bot`, when it is theirs and its agent is still granted to them.
@@ -235,8 +203,9 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
     }
     match method {
         // Checked by their own handlers, or about no chat at all.
-        "hello" | "projects" | "linkCode" | "startChat" | "callAccept" | "callDecline" | "callGreet"
-        | "createBotInvite" | "revokeBotInvite" | "revokeBot" | "myBots" | "setBotLimits" | "resolveCitation" => {}
+        "hello" | "projects" | "linkCode" | "scheduleMessages" | "startChat" | "callAccept" | "callDecline"
+        | "callGreet" | "createBotInvite" | "revokeBotInvite" | "revokeBot" | "myBots" | "setBotLimits"
+        | "resolveCitation" => {}
         // A card or message names its chat only through the entry.
         "respondPermission" | "react" | "editHandoff" | "keepConversation" => {
             let id = b["entryId"].as_str().unwrap_or_default();
@@ -245,54 +214,18 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
             if secret_card(&entry.data)
                 || hub.store.card_by_entry(id).is_some_and(|c| c.tool == crate::cards::secret::TOOL)
             {
-                return Err(denied("Only the owner can answer this agent's permission requests for you."));
+                return Err(denied(crate::cards::NOT_YOURS));
             }
-            // A `claude -p` run's card has no chat turn behind it: the card says whose run it was and who answers,
-            // asked of kith-auth now, so a revoke applies (A7). The bot's owner answers for their bot under the same
-            // rule, with the bot's own folders as the bounds; never its escape card, whose once nothing bounds by what
-            // the owner holds.
-            if method == "respondPermission"
-                && let Some(card) = hub.store.card_by_entry(id).filter(|c| c.source == "run")
-            {
-                let theirs = card.approver == "member" && card.person == person;
-                let input = serde_json::from_str::<Value>(&card.input).unwrap_or_default();
-                let their_bot = hub
-                    .store
-                    .bot_guest_of_person(&card.person)
-                    .is_some_and(|b| b.owner_person.as_deref() == Some(person))
-                    && card.tool != crate::cards::access::TOOL
-                    && within(&grant_roots(&card.person, &card.agent), &card.tool, &input);
-                return if entry.kind == "permission"
-                    && (theirs || their_bot)
-                    && !runs_code(&card.tool, kind_of(&entry))
-                    && approves_own(person, &card.agent, &card.tool, kind_of(&entry)).await
-                {
-                    Ok(())
-                } else {
-                    Err(denied("Only the owner can answer this agent's permission requests for you."))
-                };
-            }
-            // The prompts of a bot of theirs come to them when they are a member of the agent (the owner answers too).
-            if method == "respondPermission"
-                && let Some(agent) = owned_bot_chat_agent(hub, person, &entry.bot_id)
-            {
-                return if entry.kind == "permission" && stored_member_approver(hub, &entry, person, &agent).await {
-                    Ok(())
-                } else {
-                    Err(denied("Only the owner can answer this agent's permission requests for you."))
+            // Who answers is stored on the card when it opens (`access::approver`, the one rule for every producer);
+            // kith-auth is asked again now, so a revoke applies (A7). What the card names isn't judged again.
+            if method == "respondPermission" {
+                let card = hub.store.card_by_entry(id).filter(|_| entry.kind == "permission");
+                return match card {
+                    Some(card) if crate::access::may_answer(Some(person), &card).await => Ok(()),
+                    _ => Err(denied(crate::cards::NOT_YOURS)),
                 };
             }
             own_bot(hub, person, &entry.bot_id).await?;
-            // Only a member answers what their own run asked. A guest's prompts are the owner's to answer, and a
-            // card of any other kind (or one a group's bot raised) is not a prompt of their run at all.
-            if method == "respondPermission" {
-                let agent = hub.store.bot(&entry.bot_id).ok().flatten().and_then(|r| r.config.hq_agent);
-                // The bot that raised the card is stamped as its author; in a group it is a member bot, not this chat.
-                let own = entry.kind == "permission" && entry.data["author"].as_str().is_none_or(|a| a == entry.bot_id);
-                if !own || !stored_member_approver(hub, &entry, person, agent.as_deref().unwrap_or_default()).await {
-                    return Err(denied("Only the owner can answer this agent's permission requests for you."));
-                }
-            }
         }
         // Reading the chat of a bot guest they own (docs/kith-bot-guests.md 6.1); every other method, writes included,
         // falls to `own_bot`, which refuses a chat that is not the person's own.
@@ -372,6 +305,7 @@ pub fn shape(hub: &Hub, person: &str, method: &str, mut v: Value) -> Value {
                 list.retain(|e| !secret_card(&e["data"]));
                 for e in list {
                     hide_foreign_summary(person, e);
+                    mark_can_answer(&hub.store, Some(person), e);
                 }
             }
         }
@@ -412,12 +346,58 @@ fn bot_person(store: &Store, id: &str) -> Option<Option<String>> {
 }
 
 /// One live or catch-up event, for the owner (`who` None) or for `person`: the owner never sees an invitee's chats,
-/// an invitee sees only their own, and no invitee sees usage, screens or the cloud.
+/// an invitee sees only their own, and no invitee sees usage, screens or the cloud. A permission card says whether
+/// they may answer it (`canAnswer`).
 pub fn event_for(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
+    let mut v = route(store, who, v)?;
+    if v["type"] == "entry" {
+        mark_can_answer(store, who, &mut v["entry"]);
+    }
+    Some(v)
+}
+
+/// The card behind the permission entry `e` (an entry as JSON).
+fn card_of(store: &Store, e: &Value) -> Option<crate::store::Card> {
+    (e["kind"] == "permission").then(|| store.card_by_entry(e["id"].as_str()?)).flatten()
+}
+
+/// Sets `canAnswer` on the permission entry `e` for `who` (None: the owner, who answers every one), from who the card
+/// names (`access::can_answer`): the apps show its buttons only when it is true. A card with no row (a limit card) is
+/// the owner's. Who could answer it before is the owner's to see only.
+pub fn mark_can_answer(store: &Store, who: Option<&str>, e: &mut Value) {
+    if e["kind"] != "permission" || !e["data"].is_object() {
+        return;
+    }
+    let can = who.is_none() || card_of(store, e).is_some_and(|c| crate::access::can_answer(who, &c));
+    e["data"]["canAnswer"] = can.into();
+    if who.is_some()
+        && let Some(data) = e["data"].as_object_mut()
+    {
+        data.remove("formerApprovers");
+    }
+}
+
+/// Whether `me` could answer the permission entry `e` before its approver changed (`cards::approver_changed`).
+fn was_approver(e: &Value, me: &str) -> bool {
+    e["kind"] == "permission" && e["data"]["formerApprovers"].as_array().is_some_and(|l| l.iter().any(|p| p == me))
+}
+
+fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
     let kind = v["type"].as_str().unwrap_or_default().to_owned();
     // A key or account card goes to the owner's devices and nobody else's.
     if who.is_some() && kind == "entry" && secret_card(&v["entry"]["data"]) {
         return None;
+    }
+    // A card reaches the person it names to answer it, wherever it was raised, and still reaches one it named before
+    // (who then can't answer it, so it leaves their Needs-you list).
+    if let Some(me) = who
+        && kind == "entry"
+        && (was_approver(&v["entry"], me)
+            || card_of(store, &v["entry"]).is_some_and(|c| c.answerable_by.as_deref() == Some(me)))
+    {
+        let mut v = shape_bot(v);
+        hide_foreign_summary(me, &mut v["entry"]);
+        return Some(v);
     }
     let bot = match kind.as_str() {
         // A bot guest changed state: the owner of the computer and the bot's own owner hear of it.

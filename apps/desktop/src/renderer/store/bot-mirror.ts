@@ -47,6 +47,8 @@ export class BotMirror extends Observable {
   /** Agents ringing the person right now (see `shared/incoming-call`). */
   incomingCalls: IncomingCall[] = []
   routineDrafts = new Map<string, string>()
+  /** Files picked in the sidebar's dock for a chat; its composer takes them. */
+  stagedFiles = new Map<string, { name: string; data: Uint8Array }[]>()
   readonly composerDrafts: ComposerDrafts
   lastError: string | null = null
   /** A kit view selected a bot on this store (new chat, editor); the account picks it up. */
@@ -143,9 +145,9 @@ export class BotMirror extends Observable {
     return this.role === 'owner'
   }
 
-  /** Guests' prompts waiting for this Mac's owner; not bots of the roster, so no unread and no fake bots. */
+  /** Cards from outside the roster waiting for this account (guests' for the owner, a card lane's for its approver); not bots, so no unread and no fake bots. */
   get guestPrompts(): GuestPrompt[] {
-    return this.isOwner ? guestPrompts(this.entries, this.bots) : []
+    return guestPrompts(this.entries, this.bots, this.isOwner)
   }
 
   /** Roster order: pinned first, then where the user dragged them, then most recent activity. */

@@ -4,6 +4,8 @@
 
 Kith
 
+Kith: Copyright 2026 Ying-Kai Liao, Apache-2.0 (see the LICENSE file).
+
 Portions derived from Codync, Copyright 2026 Po Kai Lee and the Codync contributors (https://github.com/leepokai/Codync), Apache-2.0.
 
 Local voice (kith-tts) uses Phonon, Gradium's on-device text to speech: the ptts runtime
@@ -11,7 +13,7 @@ Local voice (kith-tts) uses Phonon, Gradium's on-device text to speech: the ptts
 model and voices (https://huggingface.co/gradium/phonon-31m-en and /gradium/phonon-voices, Apache-2.0,
 Copyright Gradium). The model files are downloaded on first use and are not part of this repository.
 
-Kith includes 601 third-party packages and vendored files under the licenses below.
+Kith includes 714 third-party packages and vendored files under the licenses below.
 
 ## 0BSD
 
@@ -69,6 +71,12 @@ PERFORMANCE OF THIS SOFTWARE.
 - tokenizers 0.23.2 (cargo)
   https://github.com/huggingface/tokenizers
   Copyright Anthony MOI <m.anthony.moi@gmail.com>, Nicolas Patry <patry.nicolas@protonmail.com>
+- @chevrotain/types 11.1.2 (npm)
+  git://github.com/Chevrotain/chevrotain
+  Copyright Shahar Soel
+- dompurify 3.4.17 (npm)
+  git://github.com/cure53/DOMPurify
+  Copyright Dr.-Ing. Mario Heiderich, Cure53 <mario@cure53.de> (https://cure53.de/)
 - swift-argument-parser 1.8.2 (swiftpm)
   https://github.com/apple/swift-argument-parser
 
@@ -1756,6 +1764,25 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
   https://github.com/dalek-cryptography/curve25519-dalek/tree/main/x25519-dalek
   Copyright (c) 2017-2021 isis agora lovecruft. All rights reserved.
   Copyright (c) 2019-2021 DebugSteven. All rights reserved.
+- d3-array 2.12.1 (npm)
+  https://github.com/d3/d3-array
+  Copyright 2010-2020 Mike Bostock
+- d3-ease 3.0.1 (npm)
+  https://github.com/d3/d3-ease
+  Copyright 2010-2021 Mike Bostock
+  Copyright 2001 Robert Penner
+- d3-path 1.0.9 (npm)
+  https://github.com/d3/d3-path
+  Copyright 2015-2016 Mike Bostock
+- d3-sankey 0.12.3 (npm)
+  https://github.com/d3/d3-sankey
+  Copyright 2015, Mike Bostock
+- d3-shape 1.3.7 (npm)
+  https://github.com/d3/d3-shape
+  Copyright 2010-2015 Mike Bostock
+- rw 1.3.3 (npm)
+  http://github.com/mbostock/rw
+  Copyright (c) 2014-2016, Michael Bostock
 - webrtc 153.0.0 (swiftpm)
   https://github.com/stasel/WebRTC
   Copyright (c) 2011, The WebRTC project authors. All rights reserved.
@@ -1847,6 +1874,65 @@ TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
 PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
 LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+~~~~~
+
+~~~~~
+Copyright (c) the holders named for each package above
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* The name Michael Bostock may not be used to endorse or promote products
+  derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL MICHAEL BOSTOCK BE LIABLE FOR ANY DIRECT,
+INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+~~~~~
+
+~~~~~
+Copyright (c) the holders named for each package above
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice,
+  this list of conditions and the following disclaimer in the documentation
+  and/or other materials provided with the distribution.
+
+* Neither the name of the author nor the names of contributors may be used to
+  endorse or promote products derived from this software without specific prior
+  written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ~~~~~
 
@@ -1998,12 +2084,114 @@ insights.
 - cliui 6.0.0 (npm)
   http://github.com/yargs/cliui
   Copyright (c) 2015, Contributors
+- d3-array 3.2.4 (npm)
+  https://github.com/d3/d3-array
+  Copyright 2010-2023 Mike Bostock
+- d3-axis 3.0.0 (npm)
+  https://github.com/d3/d3-axis
+  Copyright 2010-2021 Mike Bostock
+- d3-brush 3.0.0 (npm)
+  https://github.com/d3/d3-brush
+  Copyright 2010-2021 Mike Bostock
+- d3-chord 3.0.1 (npm)
+  https://github.com/d3/d3-chord
+  Copyright 2010-2021 Mike Bostock
+- d3-color 3.1.0 (npm)
+  https://github.com/d3/d3-color
+  Copyright 2010-2022 Mike Bostock
+- d3-contour 4.0.2 (npm)
+  https://github.com/d3/d3-contour
+  Copyright 2012-2023 Mike Bostock
+- d3-delaunay 6.0.4 (npm)
+  https://github.com/d3/d3-delaunay
+  Copyright 2018-2021 Observable, Inc.
+  Copyright 2021 Mapbox
+- d3-dispatch 3.0.1 (npm)
+  https://github.com/d3/d3-dispatch
+  Copyright 2010-2021 Mike Bostock
+- d3-drag 3.0.0 (npm)
+  https://github.com/d3/d3-drag
+  Copyright 2010-2021 Mike Bostock
+- d3-dsv 3.0.1 (npm)
+  https://github.com/d3/d3-dsv
+  Copyright 2013-2021 Mike Bostock
+- d3-fetch 3.0.1 (npm)
+  https://github.com/d3/d3-fetch
+  Copyright 2016-2021 Mike Bostock
+- d3-force 3.0.0 (npm)
+  https://github.com/d3/d3-force
+  Copyright 2010-2021 Mike Bostock
+- d3-format 3.1.2 (npm)
+  https://github.com/d3/d3-format
+  Copyright 2010-2026 Mike Bostock
+- d3-geo 3.1.1 (npm)
+  https://github.com/d3/d3-geo
+  Copyright 2010-2024 Mike Bostock
+  Copyright 2008-2012 Charles Karney
+- d3-hierarchy 3.1.2 (npm)
+  https://github.com/d3/d3-hierarchy
+  Copyright 2010-2021 Mike Bostock
+- d3-interpolate 3.0.1 (npm)
+  https://github.com/d3/d3-interpolate
+  Copyright 2010-2021 Mike Bostock
+- d3-path 3.1.0 (npm)
+  https://github.com/d3/d3-path
+  Copyright 2015-2022 Mike Bostock
+- d3-polygon 3.0.1 (npm)
+  https://github.com/d3/d3-polygon
+  Copyright 2010-2021 Mike Bostock
+- d3-quadtree 3.0.1 (npm)
+  https://github.com/d3/d3-quadtree
+  Copyright 2010-2021 Mike Bostock
+- d3-random 3.0.1 (npm)
+  https://github.com/d3/d3-random
+  Copyright 2010-2021 Mike Bostock
+- d3-scale-chromatic 3.1.0 (npm)
+  https://github.com/d3/d3-scale-chromatic
+  Copyright 2010-2024 Mike Bostock
+  Copyright 2002 Cynthia Brewer, Mark Harrower, and The Pennsylvania State University
+- d3-scale 4.0.2 (npm)
+  https://github.com/d3/d3-scale
+  Copyright 2010-2021 Mike Bostock
+- d3-selection 3.0.0 (npm)
+  https://github.com/d3/d3-selection
+  Copyright 2010-2021 Mike Bostock
+- d3-shape 3.2.0 (npm)
+  https://github.com/d3/d3-shape
+  Copyright 2010-2022 Mike Bostock
+- d3-time-format 4.1.0 (npm)
+  https://github.com/d3/d3-time-format
+  Copyright 2010-2021 Mike Bostock
+- d3-time 3.1.0 (npm)
+  https://github.com/d3/d3-time
+  Copyright 2010-2022 Mike Bostock
+- d3-timer 3.0.1 (npm)
+  https://github.com/d3/d3-timer
+  Copyright 2010-2021 Mike Bostock
+- d3-transition 3.0.1 (npm)
+  https://github.com/d3/d3-transition
+  Copyright 2010-2021 Mike Bostock
+- d3-zoom 3.0.0 (npm)
+  https://github.com/d3/d3-zoom
+  Copyright 2010-2021 Mike Bostock
+- d3 7.9.0 (npm)
+  https://github.com/d3/d3
+  Copyright 2010-2023 Mike Bostock
+- delaunator 5.1.0 (npm)
+  https://github.com/mapbox/delaunator
+  Copyright (c) 2026, Mapbox
 - get-caller-file 2.0.5 (npm)
   https://github.com/stefanpenner/get-caller-file
   Copyright 2018 Stefan Penner
 - graceful-fs 4.2.11 (npm)
   https://github.com/isaacs/node-graceful-fs
   Copyright (c) 2011-2022 Isaac Z. Schlueter, Ben Noordhuis, and Contributors
+- internmap 1.0.1 (npm)
+  https://github.com/mbostock/internmap
+  Copyright 2021 Mike Bostock
+- internmap 2.0.3 (npm)
+  https://github.com/mbostock/internmap
+  Copyright 2021 Mike Bostock
 - lucide 1.52.0 (npm)
   https://github.com/lucide-icons/lucide
   Copyright (c) 2026 Lucide Icons and Contributors
@@ -2077,6 +2265,70 @@ THIS SOFTWARE.
 ~~~~~
 
 ~~~~~
+Copyright (c) the holders named for each package above
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+
+Apache-Style Software License for ColorBrewer software and ColorBrewer Color Schemes
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+~~~~~
+
+~~~~~
+Copyright (c) the holders named for each package above
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
+
+This license applies to GeographicLib, versions 1.12 and later.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~~
+
+~~~~~
 Except as otherwise noted, this project is licensed under the following
 (ISC-style) terms:
 
@@ -2140,6 +2392,24 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+~~~~~
+
+~~~~~
+ISC License
+
+Copyright (c) the holders named for each package above
+
+Permission to use, copy, modify, and/or distribute this software for any purpose
+with or without fee is hereby granted, provided that the above copyright notice
+and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER
+TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF
+THIS SOFTWARE.
 ~~~~~
 
 ~~~~~
@@ -4169,6 +4439,12 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - zvariant 4.2.0 (cargo)
   https://github.com/dbus2/zbus/
   Copyright (c) 2024 Zeeshan Ali Khan & zbus contributors
+- @antfu/install-pkg 2.1.0 (npm)
+  https://github.com/antfu-collective/install-pkg
+  Copyright (c) 2021 Anthony Fu <https://github.com/antfu>
+- @braintree/sanitize-url 7.1.2 (npm)
+  https://github.com/braintree/sanitize-url
+  Copyright (c) 2017 Braintree
 - @clerk/backend 3.20.1 (npm)
   https://github.com/clerk/javascript
   Copyright (c) 2022 Clerk, Inc.
@@ -4178,6 +4454,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - @fivesheepco/cloudflare-apns2 13.0.0 (npm)
   https://github.com/FiveSheepCo/cloudflare-apns2
   Copyright (c) 2023 AndrewBarba
+- @iconify/types 2.0.0 (npm)
+  https://github.com/iconify/iconify
+  Copyright (c) 2021 - 2022 Vjacheslav Trushkin / Iconify OÜ
+- @iconify/utils 3.1.7 (npm)
+  https://github.com/iconify/iconify
+  Copyright (c) 2021-PRESENT Vjacheslav Trushkin
+- @mermaid-js/parser 1.2.1 (npm)
+  https://github.com/mermaid-js/mermaid
+  Copyright (c) 2023 Yokozuna59
 - @noble/ciphers 2.4.0 (npm)
   https://github.com/paulmillr/noble-ciphers
   Copyright (c) 2022 Paul Miller (https://paulmillr.com)
@@ -4197,6 +4482,109 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - @tsndr/cloudflare-worker-jwt 3.2.1 (npm)
   https://github.com/tsndr/cloudflare-worker-jwt
   Copyright (c) 2021 Tobias Schneider
+- @types/d3-array 3.2.2 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-axis 3.0.6 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-brush 3.0.6 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-chord 3.0.6 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-color 3.1.3 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-contour 3.0.6 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-delaunay 6.0.4 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-dispatch 3.0.7 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-drag 3.0.7 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-dsv 3.0.7 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-ease 3.0.2 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-fetch 3.0.7 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-force 3.0.10 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-format 3.0.4 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-geo 3.1.1 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-hierarchy 3.1.7 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-interpolate 3.0.4 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-path 3.1.1 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-polygon 3.0.2 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-quadtree 3.0.6 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-random 3.0.4 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-scale-chromatic 3.1.0 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-scale 4.0.9 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-selection 3.0.12 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-shape 3.2.0 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-time-format 4.0.3 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-time 3.0.4 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-timer 3.0.2 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-transition 3.0.9 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3-zoom 3.0.9 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/d3 7.4.3 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/geojson 7946.0.16 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @types/trusted-types 2.0.7 (npm)
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+  Copyright (c) Microsoft Corporation.
+- @upsetjs/venn.js 2.0.0 (npm)
+  https://github.com/upsetjs/venn.js
+  Copyright (c) 2013 Ben Frederickson
+  Copyright (c) 2021 Samuel Gratzl
 - @xterm/addon-fit 0.11.0 (npm)
   https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit
   Copyright (c) 2019, The xterm.js authors (https://github.com/xtermjs/xterm.js)
@@ -4226,6 +4614,33 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - color-name 1.1.4 (npm)
   git@github.com:colorjs/color-name
   Copyright (c) 2015 Dmitry Ivanov
+- commander 7.2.0 (npm)
+  https://github.com/tj/commander.js
+  Copyright (c) 2011 TJ Holowaychuk <tj@vision-media.ca>
+- commander 8.3.0 (npm)
+  https://github.com/tj/commander.js
+  Copyright (c) 2011 TJ Holowaychuk <tj@vision-media.ca>
+- cose-base 1.0.3 (npm)
+  https://github.com/iVis-at-Bilkent/cose-base
+  Copyright (c) 2019 - present, iVis@Bilkent.
+- cose-base 2.2.0 (npm)
+  https://github.com/iVis-at-Bilkent/cose-base
+  Copyright (c) 2019 - present, iVis@Bilkent.
+- cytoscape-cose-bilkent 4.1.0 (npm)
+  https://github.com/cytoscape/cytoscape.js-cose-bilkent
+  Copyright (c) 2016-2018, The Cytoscape Consortium.
+- cytoscape-fcose 2.2.0 (npm)
+  https://github.com/iVis-at-Bilkent/cytoscape.js-fcose
+  Copyright (c) 2018 - present, iVis-at-Bilkent.
+- cytoscape 3.34.4 (npm)
+  https://github.com/cytoscape/cytoscape.js
+  Copyright (c) 2016-2026, The Cytoscape Consortium.
+- dagre-d3-es 7.0.14 (npm)
+  https://github.com/tbo47/dagre-es
+  Copyright (c) 2022-2024 Thibaut Lassalle, David Newell, Alois Klink, Sidharth Vinod and dagre-es contributors
+- dayjs 1.11.23 (npm)
+  https://github.com/iamkun/dayjs
+  Copyright (c) 2018-present, iamkun
 - debug 4.4.3 (npm)
   git://github.com/debug-js/debug
   Copyright (c) 2014-2017 TJ Holowaychuk <tj@vision-media.ca>
@@ -4245,12 +4660,58 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - emoji-regex 8.0.0 (npm)
   https://github.com/mathiasbynens/emoji-regex
   Copyright Mathias Bynens <https://mathiasbynens.be/>
+- es-toolkit 1.53.0 (npm)
+  https://github.com/toss/es-toolkit
+  Copyright (c) 2024 Viva Republica, Inc.
+  es-toolkit
+  Parts of the test suite and compatibility layer in es-toolkit/compat are
+  derived from Lodash (https://github.com/lodash/lodash).
+  Lodash copyright notice and MIT permission notice:
+  Copyright OpenJS Foundation and other contributors <https://openjsf.org/>
+  Based on Underscore.js, copyright Jeremy Ashkenas,
+  DocumentCloud and Investigative Reporters & Editors <http://underscorejs.org/>
+  This software consists of voluntary contributions made by many
+  individuals. For exact contribution history, see the revision history
+  available at https://github.com/lodash/lodash
+  The following license applies to all parts of this software except as
+  documented below:
+  ====
+  Permission is hereby granted, free of charge, to any person obtaining
+  a copy of this software and associated documentation files (the
+  "Software"), to deal in the Software without restriction, including
+  without limitation the rights to use, copy, modify, merge, publish,
+  distribute, sublicense, and/or sell copies of the Software, and to
+  permit persons to whom the Software is furnished to do so, subject to
+  the following conditions:
+  The above copyright notice and this permission notice shall be
+  included in all copies or substantial portions of the Software.
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+  EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+  MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+  NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE
+  LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+  OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+  WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+- fastdom 1.0.12 (npm)
+  git://github.com/wilsonpage/fastdom
+  Copyright Wilson Page
 - find-up 4.1.0 (npm)
   sindresorhus/find-up
   Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
 - fs-extra 10.1.0 (npm)
   https://github.com/jprichardson/node-fs-extra
   Copyright (c) 2011-2017 JP Richardson
+- hachure-fill 0.5.2 (npm)
+  https://github.com/pshihn/hachure-fill
+  Copyright (c) 2023 Preet Shihn
+- iconv-lite 0.6.3 (npm)
+  git://github.com/ashtuchkin/iconv-lite
+  Copyright (c) 2011 Alexander Shtuchkin
+- import-meta-resolve 4.2.0 (npm)
+  wooorm/import-meta-resolve
+  Copyright (c) Titus Wormer <mailto:tituswormer@gmail.com>
+  Copyright Node.js contributors. All rights reserved.
+  Copyright Joyent, Inc. and other Node contributors. All rights reserved.
 - is-fullwidth-code-point 3.0.0 (npm)
   sindresorhus/is-fullwidth-code-point
   Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
@@ -4263,12 +4724,28 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - jsonfile 6.2.1 (npm)
   git@github.com:jprichardson/node-jsonfile
   Copyright (c) 2012-2015, JP Richardson <jprichardson@gmail.com>
+- katex 0.16.47 (npm)
+  https://github.com/KaTeX/KaTeX
+  Copyright (c) 2013-2020 Khan Academy and other contributors
+- khroma 2.1.0 (npm)
+  https://github.com/fabiospampinato/khroma
+  Copyright (c) 2019-present Fabio Spampinato, Andrew Maney
+- layout-base 1.0.2 (npm)
+  https://github.com/iVis-at-Bilkent/layout-base
+  Copyright (c) 2019 iVis@Bilkent
+- layout-base 2.0.1 (npm)
+  https://github.com/iVis-at-Bilkent/layout-base
+  Copyright (c) 2019 iVis@Bilkent
 - lazy-val 1.0.5 (npm)
   develar/lazy-val
   Copyright Vladimir Krivosheev
 - locate-path 5.0.0 (npm)
   sindresorhus/locate-path
   Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
+- lodash-es 4.18.1 (npm)
+  lodash/lodash
+  Copyright OpenJS Foundation and other contributors <https://openjsf.org/>
+  Copyright and related rights for sample code are waived via CC0. Sample
 - lodash.escaperegexp 4.1.2 (npm)
   lodash/lodash
   Copyright jQuery Foundation and other contributors <https://jquery.org/>
@@ -4277,6 +4754,14 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
   lodash/lodash
   Copyright JS Foundation and other contributors <https://js.foundation/>
   Copyright and related rights for sample code are waived via CC0. Sample
+- marked 16.4.2 (npm)
+  git://github.com/markedjs/marked
+  Copyright (c) 2018+, MarkedJS (https://github.com/markedjs/)
+  Copyright (c) 2011-2018, Christopher Jeffrey (https://github.com/chjj/)
+  Copyright © 2004, John Gruber
+- mermaid 11.17.2 (npm)
+  https://github.com/mermaid-js/mermaid
+  Copyright (c) 2014 - 2022 Knut Sveidqvist
 - ms 2.1.3 (npm)
   vercel/ms
   Copyright (c) 2020 Vercel, Inc.
@@ -4289,11 +4774,23 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - p-try 2.2.0 (npm)
   sindresorhus/p-try
   Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
+- package-manager-detector 1.9.0 (npm)
+  https://github.com/antfu-collective/package-manager-detector
+  Copyright (c) 2020-PRESENT Anthony Fu <https://github.com/antfu>
+- path-data-parser 0.1.0 (npm)
+  https://github.com/pshihn/path-data-parser
+  Copyright (c) 2020 Preet Shihn
 - path-exists 4.0.0 (npm)
   sindresorhus/path-exists
   Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
 - pngjs 5.0.0 (npm)
   git://github.com/lukeapage/pngjs
+- points-on-curve 0.2.0 (npm)
+  https://github.com/pshihn/bezier-points
+  Copyright (c) 2020 Preet Shihn
+- points-on-path 0.2.1 (npm)
+  https://github.com/pshihn/points-on-path
+  Copyright (c) 2020 Preet
 - qrcode 1.5.4 (npm)
   git://github.com/soldair/node-qrcode
   Copyright (c) 2012 Ryan Day
@@ -4306,27 +4803,48 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 - require-directory 2.1.1 (npm)
   git://github.com/troygoode/node-require-directory
   Copyright (c) 2011 Troy Goode <troygoode@gmail.com>
+- roughjs 4.6.6 (npm)
+  https://github.com/pshihn/rough
+  Copyright (c) 2019 Preet Shihn
+- safer-buffer 2.1.2 (npm)
+  https://github.com/ChALkeR/safer-buffer
+  Copyright (c) 2018 Nikita Skovoroda <chalkerx@gmail.com>
 - scheduler 0.28.0 (npm)
   https://github.com/react/react
   Copyright (c) Meta Platforms, Inc. and affiliates.
 - standardwebhooks 1.1.1 (npm)
   https://github.com/standard-webhooks/standard-webhooks
   Copyright Standard Webhooks
+- strictdom 1.0.1 (npm)
+  git://github.com/wilsonpage/strictdom
+  Copyright Wilson Page
 - string-width 4.2.3 (npm)
   sindresorhus/string-width
   Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
 - strip-ansi 6.0.1 (npm)
   chalk/strip-ansi
   Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
+- stylis 4.4.0 (npm)
+  https://github.com/thysultan/stylis.js
+  Copyright (c) 2016-present Sultan Tarimo
 - svix 2.5.0 (npm)
   https://github.com/svix/svix-webhooks
   Copyright svix
 - tiny-typed-emitter 2.1.0 (npm)
   https://github.com/binier/tiny-typed-emitter
   Copyright (c) 2020 Zurab Benashvili (binier) <zura.bena@gmail.com>
+- tinyexec 1.3.1 (npm)
+  https://github.com/tinylibs/tinyexec
+  Copyright (c) 2024 Tinylibs
+- ts-dedent 2.3.0 (npm)
+  https://github.com/tamino-martinius/node-ts-dedent
+  Copyright (c) 2018 Tamino Martinius
 - universalify 2.0.1 (npm)
   https://github.com/RyanZim/universalify
   Copyright (c) 2017, Ryan Zimmerman <opensrc@ryanzim.com>
+- uuid 14.0.3 (npm)
+  https://github.com/uuidjs/uuid
+  Copyright (c) 2010-2020 Robert Kieffer and other contributors
 - wrap-ansi 6.2.0 (npm)
   chalk/wrap-ansi
   Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)
@@ -4383,6 +4901,51 @@ Copyright (c) the holders named for each package above
 ~~~~~
 
 ~~~~~
+# License information
+
+## Contribution License Agreement
+
+If you contribute code to this project, you are implicitly allowing your code
+to be distributed under the MIT license. You are also implicitly verifying that
+all code is your original work. `</legalese>`
+
+## Marked
+
+Copyright (c) the holders named for each package above
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+## Markdown
+
+http://daringfireball.net/
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+* Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
+* Neither the name “Markdown” nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
+
+This software is provided by the copyright holders and contributors “as is” and any express or implied warranties, including, but not limited to, the implied warranties of merchantability and fitness for a particular purpose are disclaimed. In no event shall the copyright owner or contributors be liable for any direct, indirect, incidental, special, exemplary, or consequential damages (including, but not limited to, procurement of substitute goods or services; loss of use, data, or profits; or business interruption) however caused and on any theory of liability, whether in contract, strict liability, or tort (including negligence or otherwise) arising in any way out of the use of this software, even if advised of the possibility of such damage.
+~~~~~
+
+~~~~~
 # MIT License
 
 Copyright (c) the holders named for each package above
@@ -4404,6 +4967,106 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+~~~~~
+
+~~~~~
+(The MIT License)
+
+Copyright (c) the holders named for each package above
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+~~~~~
+
+~~~~~
+(The MIT License)
+
+Copyright (c) the holders named for each package above
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+This is a derivative work based on:
+<https://github.com/nodejs/node>.
+Which is licensed:
+
+"""
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+"""
+
+This license applies to parts of Node.js originating from the
+https://github.com/joyent/node repository:
+
+"""
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+deal in the Software without restriction, including without limitation the
+rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+"""
 ~~~~~
 
 ~~~~~
@@ -4958,6 +5621,28 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ~~~~~
 Copyright (c) the holders named for each package above
 
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+~~~~~
+
+~~~~~
+Copyright (c) the holders named for each package above
+
 Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
 
 The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
@@ -5111,6 +5796,32 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+~~~~~
+
+~~~~~
+Original dagre-d3 copyright: Copyright (c) 2013 Chris Pettitt
+Original dagre copyright: Copyright (c) 2012-2014 Chris Pettitt
+Original graphlib copyright: Copyright (c) 2012-2014 Chris Pettitt
+
+Copyright (c) the holders named for each package above
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
 ~~~~~
 
 ~~~~~
@@ -5527,6 +6238,30 @@ The MIT License (MIT)
 
 Copyright (c) the holders named for each package above
 
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+~~~~~
+
+~~~~~
+The MIT License (MIT)
+
+Copyright (c) the holders named for each package above
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -5735,6 +6470,41 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
+~~~~~
+
+~~~~~
+import fs from 'fs';
+import path from 'path';
+
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const year = (new Date()).getFullYear();
+
+const license = `Copyright (c) 2016-${year}, The Cytoscape Consortium.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.`;
+
+fs.writeFileSync(path.join(__dirname, 'LICENSE'), license);
 ~~~~~
 
 ~~~~~
@@ -7216,6 +7986,9 @@ ICU 1.8.1 to ICU 57.1 © 1995-2016 International Business Machines Corporation a
 - fast-sha256 1.3.0 (npm)
   https://github.com/dchest/fast-sha256-js
   Copyright Dmitry Chestnykh
+- robust-predicates 3.0.3 (npm)
+  https://github.com/mourner/robust-predicates
+  Copyright Vladimir Agafonkin
 
 ~~~~~
 This is free and unencumbered software released into the public domain.

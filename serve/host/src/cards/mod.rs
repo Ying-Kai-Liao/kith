@@ -33,6 +33,8 @@ const DEFAULT_WINDOW: Duration = Duration::from_secs(90);
 const DEFAULT_EXPIRY_MS: i64 = 24 * 60 * 60 * 1000;
 const SWEEP_EVERY: Duration = Duration::from_secs(60);
 const MAX_INPUT: usize = 32 * 1024;
+/// What a person is told for a card that isn't theirs to answer.
+pub const NOT_YOURS: &str = "Only the owner can answer this agent's permission requests for you.";
 
 /// The host's settings for cards, read each time they are needed (kv keys above; none set is the default).
 pub struct Settings {
@@ -147,31 +149,36 @@ fn title_of(tool: &str, shown: &str) -> String {
     }
 }
 
-/// The chat a -p run's card appears in: the person's own chat with the agent, else (the owner's run, or a person with
-/// no chat yet) the owner's chat with it. Cards are Permission entries, so the apps already show them there.
-fn chat_for(hub: &Hub, person: &str, agent: &str) -> Option<crate::store::BotConfig> {
+/// The lane of an agent's cards that have no chat on this computer (`cards:<agent>`). It has no bot row: no roster
+/// entry, no sends, no unread count. The apps show its pending cards in the approver's Needs-you list (rule 5).
+const LANE: &str = "cards:";
+
+/// The card lane of `agent`, as the chat a card and its push name (never stored as a bot).
+fn lane_of(agent: &str) -> crate::store::BotConfig {
+    serde_json::from_value(json!({"id": format!("{LANE}{agent}"), "name": agent, "hqAgent": agent}))
+        .expect("a bot config from an id and a name")
+}
+
+/// Where a -p run's card appears: the person's own chat with the agent, else (the owner's run, or a person with no chat
+/// yet) the owner's chat with it, else the agent's card lane. Cards are Permission entries, so the apps already show
+/// them in a chat, and the lane's in Needs-you.
+fn chat_for(hub: &Hub, person: &str, agent: &str) -> crate::store::BotConfig {
     let rows: Vec<_> =
         hub.store.bots().unwrap_or_default().into_iter().filter(|r| !r.deleted).map(|r| r.config).collect();
     let of_agent = |c: &&crate::store::BotConfig| c.hq_agent.as_deref() == Some(agent);
     if !person.is_empty()
         && let Some(c) = rows.iter().filter(of_agent).find(|c| c.person.as_deref() == Some(person))
     {
-        return Some(c.clone());
+        return c.clone();
     }
-    rows.iter().filter(of_agent).find(|c| c.person.is_none()).cloned()
+    rows.iter().filter(of_agent).find(|c| c.person.is_none()).cloned().unwrap_or_else(|| lane_of(agent))
 }
 
-/// Whom a card goes to for a run of `who`: the owner for the owner's own run, else whoever kith-auth names now, and always the owner for a tool that runs code.
-async fn approver_of(who: &RunIdentity, tool: &str, input: &Value) -> &'static str {
-    if who.scope == TokenScope::OwnerAsk || who.person.is_empty() {
-        return "owner";
-    }
-    // A file outside the run's grants is the owner's to allow, whoever the run is for (F11 step 2a).
-    let inside = crate::api::roles::within(&crate::api::roles::grant_roots(&who.person, &who.agent), tool, input);
-    if inside && crate::api::roles::approves_own(&who.person, &who.agent, tool, tool_kind(tool)).await {
-        "member"
-    } else {
-        "owner"
+/// The chat `id` names in an entry's `author`: a bot's, or an agent's card lane.
+fn chat_of(hub: &Hub, id: &str) -> Option<crate::store::BotConfig> {
+    match id.strip_prefix(LANE) {
+        Some(agent) => Some(lane_of(agent)),
+        None => hub.store.bot(id).ok().flatten().map(|r| r.config),
     }
 }
 
@@ -200,7 +207,15 @@ async fn request_card(
     shown: &str,
 ) -> Decision {
     let cfg = settings(&hub.store);
-    let approver = approver_of(who, tool, input).await;
+    // A file outside the run's grants is the owner's to allow, whoever the run is for (F11 step 2a).
+    let in_grants = crate::access::tool_in_grants(&who.person, &who.agent, tool, tool_kind(tool), input);
+    let req = crate::access::Request {
+        person: &who.person,
+        agent: &who.agent,
+        owner_run: who.scope == TokenScope::OwnerAsk,
+        ask: crate::access::Ask::Tool { in_grants },
+    };
+    let answerable_by = crate::access::approver(&hub.store, &req).await;
     let now = now_ms();
     let new = NewCard {
         session: who.session.clone(),
@@ -209,7 +224,8 @@ async fn request_card(
         run_id: Some(who.run_id.clone()),
         person: who.person.clone(),
         agent: who.agent.clone(),
-        approver,
+        answerable_by,
+        in_grants: req.in_grants(),
         tool: tool.to_owned(),
         input: input.to_string(),
         resource: resource.to_owned(),
@@ -230,7 +246,7 @@ async fn request_card(
     let (_waiting, rx) = Waiting::new(&card.id);
     let extra = edge_extras(hub, who, &card).await;
     let Some(card) = show(hub, who, &card, extra) else {
-        return deny("There is nowhere to ask about this: no chat with this agent on this computer.");
+        return deny("Approvals aren't available right now.");
     };
     let label = approver_label(hub, &card).await;
     match tokio::time::timeout(cfg.window, rx).await {
@@ -285,10 +301,10 @@ fn tell_asker(card: &Card, how: &str) {
 }
 
 async fn approver_label(hub: &Hub, card: &Card) -> String {
-    if card.approver == "owner" {
+    let Some(p) = &card.answerable_by else {
         return crate::api::roles::owner_name(&card.agent).await.unwrap_or_else(|| "the owner".into());
-    }
-    hub.store.person(&card.person).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| "the member".into())
+    };
+    hub.store.person(p).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| "the member".into())
 }
 
 /// What the owner's card for an edge ask of an invitee's run adds (see `edge`): none for a `kith ask` run's card, whose
@@ -313,7 +329,7 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
         hub.set_entry(entry_id, &e.data);
         return hub.store.card_live(&card.id, None, Some(&who.run_id)).ok().flatten();
     }
-    let chat = chat_for(hub, &who.person, &who.agent)?;
+    let chat = chat_for(hub, &who.person, &who.agent);
     let person_name = hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty());
     let escape = card.tool == access::TOOL;
     let (title, kind) = (title_of(&card.tool, &card.shown), tool_kind(&card.tool));
@@ -377,27 +393,53 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
     let turn = hub.store.max_turn(&chat.id);
     let entry = hub.add_entry(&lane, EntryKind::Permission, turn, &data)?;
     let live = hub.store.card_live(&card.id, Some(&entry.id), Some(&who.run_id)).ok().flatten()?;
-    // Tell the approver: the owner's devices for an owner card, the member's own for theirs.
-    let mut target = chat.clone();
-    let mut heading = match data["chain"].as_str() {
+    let heading = match data["chain"].as_str() {
         Some(chain) => format!("{chain} needs you"),
         None => format!("{} needs you", chat.name),
     };
-    if live.approver == "owner" {
-        target.person = None;
-        if !who.person.is_empty() {
-            heading = format!("{} needs your OK", data["personName"].as_str().unwrap_or_default());
-        }
-    }
+    tell_approver(hub, &chat, &live, &data, heading, &title);
+    Some(live)
+}
+
+/// Pushes a card to its approver's devices: the owner's for an owner card, else those of the person it names (a member, or
+/// a bot guest's owner), whoever's chat it is in.
+fn tell_approver(hub: &Hub, chat: &crate::store::BotConfig, card: &Card, data: &Value, heading: String, title: &str) {
+    let mut target = chat.clone();
+    target.person.clone_from(&card.answerable_by);
+    let heading = if !card.person.is_empty() && card.answerable_by.as_deref() != Some(card.person.as_str()) {
+        format!("{} needs your OK", data["personName"].as_str().unwrap_or_default())
+    } else {
+        heading
+    };
     crate::remote::push::notify(
         hub,
         &target,
         Some(&chat.id),
         &heading,
-        &title,
+        title,
         crate::remote::push::AlertKind::NeedsInput,
     );
-    Some(live)
+}
+
+/// Who may answer `card` changed from `before` (`crate::access::rederive`): its entry says so, which reaches the apps
+/// with `canAnswer` for each viewer, and the new approver is told. A member who could answer it before is named in
+/// `formerApprovers`, so the entry still reaches them, with `canAnswer` false, and leaves their Needs-you list.
+pub fn approver_changed(hub: &Hub, card: &Card, before: Option<&str>) {
+    let Some(entry_id) = &card.entry_id else { return };
+    let Some(mut e) = hub.store.entry(entry_id) else { return };
+    e.data["approver"] = card.approver.as_str().into();
+    if let Some(p) = before.filter(|p| card.answerable_by.as_deref() != Some(*p)) {
+        let mut former = e.data["formerApprovers"].as_array().cloned().unwrap_or_default();
+        if !former.iter().any(|v| v == p) {
+            former.push(p.into());
+            e.data["formerApprovers"] = former.into();
+        }
+    }
+    hub.set_entry(entry_id, &e.data);
+    let chat = e.data["author"].as_str().unwrap_or(&e.bot_id).to_owned();
+    let Some(chat) = chat_of(hub, &chat) else { return };
+    let title = e.data["title"].as_str().unwrap_or_default().to_owned();
+    tell_approver(hub, &chat, card, &e.data, format!("{} needs you", chat.name), &title);
 }
 
 // ---- answers
@@ -422,15 +464,25 @@ pub fn allows(entry_data: &Value, option_id: Option<&str>) -> bool {
         .any(|x| x["optionId"].as_str() == Some(o) && x["kind"].as_str().is_some_and(|k| k.starts_with("allow")))
 }
 
-/// An approver's answer to the card behind `entry_id` (`respondPermission`). Who may answer was decided before this
-/// (roles.rs); here only the card decides whether the answer counts.
-pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str) -> anyhow::Result<Outcome> {
+/// An approver's answer to the card behind `entry_id` (`respondPermission`): from the owner (`person` None) or an
+/// invited person. Who may answer was checked before this (roles.rs, `crate::access::may_answer`); the card store checks
+/// it again as it records the answer (M2), and decides whether the answer counts.
+pub fn answer(
+    hub: &Arc<Hub>,
+    entry_id: &str,
+    option_id: Option<&str>,
+    person: Option<&str>,
+) -> anyhow::Result<Outcome> {
     let Some(entry) = hub.store.entry(entry_id) else { return Ok(Outcome::Closed) };
     let Some(card) = hub.store.card_by_entry(entry_id) else { return Ok(Outcome::Closed) };
     let allow = allows(&entry.data, option_id);
-    let Answered::Applied { card, was_live } =
-        hub.store.card_answer(&card.id, allow, option_id.unwrap_or("cancel"), by, now_ms(), allow)?
-    else {
+    let by = person.unwrap_or("owner");
+    let answered =
+        hub.store.card_answer(&card.id, allow, option_id.unwrap_or("cancel"), by, person, now_ms(), allow)?;
+    if answered == Answered::Refused {
+        return Err(crate::api::devices::NotAllowed(NOT_YOURS.into()).into());
+    }
+    let Answered::Applied { card, was_live } = answered else {
         // An expired one shows as expired now, whatever the sweep was doing.
         if let Some(c) = hub.store.card(&card.id).filter(|c| c.state == CardState::Expired) {
             close_entry(hub, &c, "expired");
@@ -447,7 +499,7 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
     }
     let kept = entry.data.get("edge").filter(|e| e.is_object() && card.approver == "owner").cloned();
     if let Some(kept) = kept {
-        let (hub, option) = (hub.clone(), option_id.map(str::to_owned));
+        let (hub, option, person) = (hub.clone(), option_id.map(str::to_owned), person.map(str::to_owned));
         let helper = card.tool == edge::HELPER_TOOL && card.source == "run";
         let card = card.clone();
         // What the answer keeps is written first; a helper's run is told only then, since kith ask checks it at launch.
@@ -461,7 +513,7 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
                     access::kept_once(&hub, &card, &why);
                 }
             }
-            if helper && let Err(error) = settle(&hub, &card, was_live, allow, option.as_deref()) {
+            if helper && let Err(error) = settle(&hub, &card, was_live, allow, option.as_deref(), person.as_deref()) {
                 tracing::warn!(error = format!("{error:#}"), card = card.id, "couldn't tell a helper card's answer");
             }
         });
@@ -469,17 +521,24 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
             return Ok(Outcome::Recorded { forward: false });
         }
     }
-    Ok(Outcome::Recorded { forward: settle(hub, &card, was_live, allow, option_id)? })
+    Ok(Outcome::Recorded { forward: settle(hub, &card, was_live, allow, option_id, person)? })
 }
 
 /// Tells whoever waits on an answered card, or owes its session the answer. True for a bot chat's card whose process
 /// was up: the caller forwards the answer to the bot's actor.
-fn settle(hub: &Arc<Hub>, card: &Card, was_live: bool, allow: bool, option_id: Option<&str>) -> anyhow::Result<bool> {
+fn settle(
+    hub: &Arc<Hub>,
+    card: &Card,
+    was_live: bool,
+    allow: bool,
+    option_id: Option<&str>,
+    person: Option<&str>,
+) -> anyhow::Result<bool> {
     let mut forward = false;
     let said_no = if option_id.is_some() { "was denied" } else { "was cancelled" };
     if card.tool == access::TOOL {
         // No process waits on an escape card: the yes is applied at the session's next activation (see `access`).
-        access::answered(hub, card, allow, option_id);
+        access::answered(hub, card, allow, option_id, person);
     } else if was_live && card.source == "run" {
         let verdict = if allow { Verdict::Allow } else { Verdict::Deny("The approver said no.".into()) };
         // A yes to a live asker was spent in the answer itself (no parallel ask can take it too); if nobody was
@@ -647,6 +706,7 @@ pub fn start(hub: &Arc<Hub>) {
             tick.tick().await;
             let Some(hub) = weak.upgrade() else { return };
             sweep(&hub);
+            crate::access::rederive(&hub).await;
             // An owner token handed out over the API ends with its process or its time.
             let gone = tokio::task::spawn_blocking(|| crate::runauth::table().reap(crate::runauth::pid_alive))
                 .await
@@ -656,6 +716,39 @@ pub fn start(hub: &Arc<Hub>) {
             }
         }
     });
+    let weak = Arc::downgrade(hub);
+    tokio::spawn(async move {
+        // kith-auth writes its file from outside the host (a revoke, a new grant): who answers follows within seconds.
+        let mut seen = auth_stamp();
+        let mut tick = tokio::time::interval(AUTH_POLL);
+        loop {
+            tick.tick().await;
+            let now = auth_stamp();
+            if now == seen {
+                continue;
+            }
+            seen = now;
+            let Some(hub) = weak.upgrade() else { return };
+            crate::access::rederive(&hub).await;
+        }
+    });
+}
+
+/// How often kith-auth's file is looked at for a change.
+const AUTH_POLL: Duration = Duration::from_secs(3);
+
+/// When kith-auth's file last changed: `KITH_AUTH`, else every place `kernel/lib/kith_paths.py` may put it.
+fn auth_stamp() -> Vec<Option<std::time::SystemTime>> {
+    let home = dirs::home_dir().unwrap_or_default();
+    let files = match std::env::var_os("KITH_AUTH").filter(|v| !v.is_empty()) {
+        Some(given) => vec![std::path::PathBuf::from(given)],
+        None => vec![
+            crate::kernel::machine_dir(&home).join("secrets/auth.json"),
+            home.join(".config/kith/auth.json"),
+            home.join(".config/hq/auth.json"),
+        ],
+    };
+    files.iter().map(|f| std::fs::metadata(f).and_then(|m| m.modified()).ok()).collect()
 }
 
 #[cfg(test)]

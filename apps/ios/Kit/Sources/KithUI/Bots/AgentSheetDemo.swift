@@ -12,6 +12,7 @@ public enum DemoAgent {
         switch screen {
         case "agent-memory": .memory
         case "agent-settings": .settings
+        case "agent-access": .access
         default: .details
         }
     }
