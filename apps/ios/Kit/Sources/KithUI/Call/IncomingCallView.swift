@@ -11,6 +11,8 @@ public struct IncomingCallView: View {
     let decline: () -> Void
     /// Declines, then opens the bot's chat.
     let reply: () -> Void
+    /// Declines, then rings again in 10 minutes; nil hides the pill.
+    let snooze: (() -> Void)?
     @State private var ring = RingTone()
     /// Set by the first tap on any of the three buttons; the others then do nothing.
     @State private var answered = false
@@ -18,12 +20,13 @@ public struct IncomingCallView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     public init(call: IncomingCall, bot: Bot?, accept: @escaping () -> Void, decline: @escaping () -> Void,
-                reply: @escaping () -> Void) {
+                reply: @escaping () -> Void, snooze: (() -> Void)? = nil) {
         self.call = call
         self.bot = bot
         self.accept = accept
         self.decline = decline
         self.reply = reply
+        self.snooze = snooze
     }
 
     private var name: String { bot?.name ?? call.name }
@@ -71,20 +74,10 @@ public struct IncomingCallView: View {
                 .padding(.horizontal, 24)
             }
             Spacer()
-            Button {
-                guard !answered else { return }
-                answered = true
-                ring.stop()
-                reply()
-            } label: {
-                Text("Reply in chat")
-                    .font(.custom(KithFonts.interSemiBold, size: 15))
-                    .foregroundStyle(Palette.ink)
-                    .padding(.horizontal, 22)
-                    .padding(.vertical, 12)
-                    .kithGlass(in: Capsule(), interactive: true)
+            HStack(spacing: 12) {
+                pill("Reply in chat", reply)
+                if let snooze { pill("In 10 min", snooze) }
             }
-            .buttonStyle(PressScale())
             .padding(.bottom, 28)
             HStack(spacing: 72) {
                 button("Decline", "phone.down.fill", Color(hex: 0xFF3B30)) {
@@ -113,6 +106,23 @@ public struct IncomingCallView: View {
         .onDisappear { ring.stop() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(name) is calling")
+    }
+
+    private func pill(_ title: String, _ action: @escaping () -> Void) -> some View {
+        Button {
+            guard !answered else { return }
+            answered = true
+            ring.stop()
+            action()
+        } label: {
+            Text(title)
+                .font(.custom(KithFonts.interSemiBold, size: 15))
+                .foregroundStyle(Palette.ink)
+                .padding(.horizontal, 22)
+                .padding(.vertical, 12)
+                .kithGlass(in: Capsule(), interactive: true)
+        }
+        .buttonStyle(PressScale())
     }
 
     private func button(_ label: String, _ symbol: String, _ fill: Color, action: @escaping () -> Void) -> some View {

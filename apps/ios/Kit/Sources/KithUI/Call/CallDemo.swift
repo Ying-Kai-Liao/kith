@@ -54,7 +54,7 @@ public struct DemoCallScreen: View {
                 call: IncomingCall(id: "demo", botId: Self.botId, name: "coder",
                                    reason: "The release build is green. Want to talk through what to ship?",
                                    deadline: Date().addingTimeInterval(45)),
-                bot: store.bots[Self.botId], accept: {}, decline: {}, reply: {})
+                bot: store.bots[Self.botId], accept: {}, decline: {}, reply: {}, snooze: {})
         } else {
             CallScreen(botId: Self.botId, close: {}, engine: engine).environment(store)
         }
