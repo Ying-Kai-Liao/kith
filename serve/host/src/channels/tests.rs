@@ -365,6 +365,56 @@ async fn the_owners_new_dm_goes_to_the_dm_default() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_told_message_goes_to_the_persons_newest_one_to_one_thread_with_the_agent_only() {
+    let r = Rig::new();
+    r.put(
+        "people",
+        &json!({"fake:1": {"person": "kai", "owner": true, "was": []},
+                "fake:2": {"person": "guest", "owner": false, "was": []},
+                "kith:-": {"person": null, "owner": false, "was": [], "owner_id": "kai"}}),
+    );
+    let dm = |uid: &str, room: &str, text: &str| {
+        let mut m = Rig::msg(uid, text);
+        m.room = room.into();
+        m.private = true;
+        m
+    };
+    r.send(&dm("1", "fake/x:dm", "@house hi")).await;
+    until("the owner's answer", || r.fake.posts().len() == 1).await;
+    r.idle().await;
+    r.send(&dm("2", "fake/x:dm2", "@shop hi")).await;
+    until("the guest's answer", || r.fake.posts().len() == 2).await;
+    r.idle().await;
+    r.send(&Rig::msg("2", "@shop milk please")).await;
+    until("the guest's room answer", || r.fake.posts().len() == 3).await;
+    r.idle().await;
+    let told = |r: &Rig| {
+        r.fake.events().into_iter().filter_map(|e| match e {
+            Event::Post { thread, agent, text, .. } if text.starts_with("Added") => Some((thread, agent, text)),
+            _ => None,
+        })
+    };
+
+    assert!(!r.core.tell(None, "house", "Added: tidy up").await, "no connection is up yet");
+    r.core.resume(&r.ad);
+    assert!(r.core.tell(None, "house", "Added: tidy up").await, "None is the owner");
+    assert!(r.core.tell(Some("guest"), "shop", "Added: milk").await);
+    assert_eq!(
+        told(&r).collect::<Vec<_>>(),
+        [
+            ("fake/x:dm:1".into(), "house".into(), "Added: tidy up".into()),
+            ("fake/x:dm2:2".into(), "shop".into(), "Added: milk".into()),
+        ],
+        "the guest's newer thread in the room is not theirs alone"
+    );
+    assert!(!r.core.tell(Some("guest"), "house", "Added: x").await, "no thread with that agent");
+    assert!(!r.core.tell(Some("nobody"), "shop", "Added: x").await);
+    r.put("access", &json!({"kai": {"owner": true}, "guest": {"owner": false, "agents": []}}));
+    assert!(!r.core.tell(Some("guest"), "shop", "Added: x").await, "an agent they may no longer use says nothing");
+    assert_eq!(told(&r).count(), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn who_should_take_this_then_a_button_picks() {
     let r = Rig::new();
     r.send(&Rig::msg("1", "do the thing")).await;

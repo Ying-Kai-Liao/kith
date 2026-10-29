@@ -8,10 +8,13 @@
   kith ask ls                           the conversations kept, newest first
   kith ask <agent>@<machine> "task"     an agent on another machine of yours, over ssh; the owner's runs only (kith remote --help)
   kith ask --bg <agent> [options] "task"  the same run in the background: prints an id at once and returns
+  kith ask --to ID "message"            a follow-up to the --bg run ID: queued for its session (kith-wake) and delivered
+                                      when its turn ends, or now if it has ended; messages sent before then arrive as
+                                      one turn. Prints queued, merged or duplicate (the same message again)
   kith ask --wait ID [--timeout S]      the answers to ID since you last looked (`kith-send --to ask:ID`; waits up to
                                       S seconds, default 600, for the first; exit 3 when none came). For a --bg run:
                                       waits for the run to end, prints its answer and exits with its exit code (every
-                                      call prints it again)
+                                      call prints it again), then what each turn its --to messages woke said
   kith ask --answer ID [--as AGENT] -- TEXT   hand TEXT to whoever asked ID: their answers while they still wait,
                                       else a wake of their session (the host, for a parked card's later turn or no)
   kith ask --sweep                      answers nobody read whose asker's session has ended become its wake (the tick)
@@ -40,19 +43,25 @@ Without --bg the call blocks until the agent has finished (minutes for a real jo
 once: the run goes on detached, its answer and errors are kept in ~/.kith/ask-bg/, and `kith ask --wait ID` collects
 them. Everything else (-c, -p, --json, ...) means the same.
 
+Follow-ups: a --bg run notes its session (ID.json, ID.sid) as soon as it holds it, so `kith ask --to ID` can reach it.
+The message is a wake of that session (kith-wake, door run: the only way a turn is added to it), so it never types into
+a running turn and never starts another conversation: a job with no session to send to says so. A woken turn runs as
+the person the job serves, whoever sent it; the owner may send to any job, a person only to their own. `-c` while
+the conversation it continues is still running does the same instead of being refused.
+
 Conversations: ~/.kith/ask.json (agent + directory, or --as NAME → session id). A conversation belongs to the
 directory it ran in, so after -C or -p, `-c` from inside that folder (or with the same -C/-p) continues it.
 Answers: ~/.kith/live/ask/ID.jsonl (ID.read: how many the caller has had), ID.reg who asked (the caller's session,
 agent and person), ID.parked while the run waits on a card. One lock (.lock) over reading, appending and handing over.
 """
-import datetime as dt, fcntl, importlib.util, json, os, re, subprocess, sys, time
+import datetime as dt, fcntl, hashlib, importlib.util, json, os, re, subprocess, sys, time
 from contextlib import contextmanager
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
 
 KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
-from kith_paths import paths  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import guest_sandbox, paths  # noqa: E402  the one place that knows where kith's folders are
 KEPT = paths()['KITH_MACHINE'] / 'ask.json'
 BG = paths()['KITH_MACHINE'] / 'ask-bg'
 BOX = paths()['KITH_MACHINE'] / 'live' / 'ask'
@@ -220,6 +229,144 @@ def sweep():
     return out
 
 
+def note_job(mid, agent, key):
+    """A --bg run as it starts: whose job it is and where, for `kith ask --to`. bin/kith adds the session (ID.sid) once
+    it holds the session's writer claim."""
+    rec = {'agent': agent, 'key': key, 'dir': os.getcwd(), 'person': os.environ.get('KITH_PERSON') or None,
+           'at': time.time()}
+    tmp = BG / (mid + '.json.tmp')
+    tmp.write_text(json.dumps(rec))
+    tmp.replace(BG / (mid + '.json'))
+
+
+def job_of(mid):
+    try:
+        job = json.loads((BG / (mid + '.json')).read_text())
+    except (OSError, ValueError):
+        return None
+    return job if isinstance(job, dict) else None
+
+
+def job_session(mid, wait=10):
+    """The session of --bg run mid; a run still starting gets a few seconds to claim it."""
+    sid, end = BG / (mid + '.sid'), time.time() + wait
+    while not sid.exists() and not (BG / (mid + '.exit')).exists() and time.time() < end:
+        time.sleep(0.5)
+    try:
+        return sid.read_text().strip() or None
+    except OSError:
+        return None
+
+
+def running_job(key):
+    """The --bg run still going on the conversation key (newest first), if one is."""
+    if not BG.is_dir():
+        return None
+    for f in sorted(BG.glob('*.json'), key=lambda f: f.stat().st_mtime, reverse=True):
+        mid = f.name[:-len('.json')]
+        if not (BG / (mid + '.exit')).exists() and (BG / (mid + '.sid')).exists() and (job_of(mid) or {}).get('key') == key:
+            return mid
+    return None
+
+
+def caller_person():
+    """Who is sending: a person's id, or None for the owner. A guest's shell that dropped KITH_PERSON is no one."""
+    person = os.environ.get('KITH_PERSON') or None
+    if not person and guest_sandbox():
+        sys.exit('kith ask: this is inside a guest\'s run, which can\'t send as the owner')
+    return person
+
+
+def may_ask(agent):
+    """Whether the person this call is for may still ask agent today (kith-auth, as bin/kith checks a run)."""
+    via = os.environ.get('KITH_AGENT')
+    try:
+        r = subprocess.run([str(KITH / 'bin/kith-auth'), 'resolve', agent, *(['--via', via] if via and via != agent else [])],
+                           capture_output=True, text=True)
+        return bool(json.loads(r.stdout).get('allowed'))
+    except (OSError, ValueError, AttributeError):   # no answer is no
+        return False
+
+
+def follow_up(sid, agent, person, rid, text, why):
+    """One wake request on sid (kith-wake: merged with what else it is owed, delivered once when nobody holds it)."""
+    wake = wake_queue()
+    try:
+        got = wake.enqueue(sid, rid, agent, text, person=person, door='host' if person else 'run', why=why)
+    except SystemExit as e:
+        sys.exit('kith ask: %s' % e)
+    if got == 'duplicate':
+        how = wake.status(rid)[0]
+        print('kith ask: that message was sent already (%s)' % {'queued': 'still queued', 'running': 'in the turn now'}
+              .get(how, how), file=sys.stderr)
+    return got
+
+
+def send_to(mid, text):
+    """kith ask --to ID TEXT: a follow-up to the --bg run ID."""
+    if not ID.fullmatch(mid) or not (BG / (mid + '.cmd')).exists():
+        sys.exit('kith ask: no job %s on this Mac (kith ask --bg prints the ids)' % mid)
+    job, sid = job_of(mid), job_session(mid)
+    if not job or not sid:
+        sys.exit('kith ask: %s has no session to send to (it ended before it began one, or runs on a harness other than '
+                 'claude); ask anew without --to' % mid)
+    caller = caller_person()
+    if caller is not None and (caller != job.get('person') or not may_ask(job['agent'])):
+        sys.exit('kith ask: %s is not one of your jobs' % mid)
+    rid = 'ask-to:%s/%s' % (mid, hashlib.sha256(text.encode()).hexdigest()[:12])
+    who = os.environ.get('KITH_AGENT') or caller or 'the owner'
+    got = follow_up(sid, job['agent'], job.get('person'), rid, text, '%s sent a follow-up to kith ask %s' % (who, mid))
+    to = BG / (mid + '.to')
+    if rid not in (to.read_text().split() if to.exists() else []):
+        with open(to, 'a') as f:
+            f.write(rid + '\n')
+    if got != 'duplicate':
+        when = ('had ended: its session resumes now with your message' if (BG / (mid + '.exit')).exists() else
+                'is still running: your message reaches it when its turn ends')
+        print('%s %s; follow it: kith ask --wait %s' % (mid, when, mid), file=sys.stderr)
+    print(got)
+    return 0
+
+
+def follow_ups(mid, end, code):
+    """After a --bg run's own answer: what each turn its --to messages woke said, once per turn, in order."""
+    to = BG / (mid + '.to')
+    if not to.exists():
+        return code
+    wake, rids = wake_queue(), to.read_text().split()
+    while True:
+        got = [wake.status(r) for r in rids]
+        if all(how not in ('queued', 'running') for how, _ in got) or time.time() >= end:
+            break
+        time.sleep(1)
+    shown = []
+    for how, run in got:
+        if how in ('queued', 'running'):
+            print('kith ask: a follow-up to %s is still to come; ask again with: kith ask --wait %s' % (mid, mid),
+                  file=sys.stderr)
+            return 3
+        if run and run not in shown:
+            shown.append(run)
+            for ext, stream in (('log', sys.stdout), ('err', sys.stderr)):
+                f = wake.logs_dir() / ('%s.%s' % (run, ext))
+                stream.write(f.read_text(errors='replace') if f.exists() else '')
+        if how in ('answered', 'recovered'):
+            code = 0
+        elif how == 'withdrawn':
+            print('kith ask: a follow-up to %s was withdrawn before it reached the job' % mid, file=sys.stderr)
+        else:
+            print('kith ask: a follow-up to %s ended %s' % (mid, how), file=sys.stderr)
+            code = 1
+    return code
+
+
+def kick_wakes(sid):
+    """The run's turn ended: a wake its session is owed (a --to message) is delivered now, not at the next tick."""
+    wake = wake_queue()
+    if sid and wake.item_path(sid).exists():
+        wake.spawn_drain()
+
+
 def wait_bg(mid, timeout):
     """The answer of a `kith ask --bg` run: waits for it to end, then prints what it printed."""
     out, err, code = BG / (mid + '.out'), BG / (mid + '.err'), BG / (mid + '.exit')
@@ -263,7 +410,7 @@ def wait(argv):
         code = wait_bg(mid, timeout)
         # A --bg run that parked on a card (exit 3, with its id registered) has its answer still to come: below.
         if not (code == 3 and (BG / (mid + '.exit')).exists() and box(mid, 'reg').exists()):
-            return code
+            return follow_ups(mid, end, code) if (BG / (mid + '.exit')).exists() else code
     while len(lines_of(mid)) <= read_count(mid) and time.time() < end:
         time.sleep(2)
     with box_locked():   # the sweep may have handed them to a wake meanwhile
@@ -323,6 +470,10 @@ def main(argv):
         ls(); return 0
     if argv[0] == '--wait':
         return wait(argv[1:])
+    if argv[0] == '--to':
+        if len(argv) < 3 or not ' '.join(argv[2:]).strip():
+            sys.exit('usage: kith ask --to ID "message"')
+        return send_to(argv[1], ' '.join(a for a in argv[2:] if a != '--').strip())
     if argv[0] == '--answer':
         return answer_cmd(argv[1:])
     if argv[0] == '--reply':
@@ -373,6 +524,18 @@ def main(argv):
 
     key = '%s|%s' % (agent, ('as:' + name) if name else os.getcwd())
     prev = load().get(key) if cont else None
+    # The conversation is still running (a --bg job, or another run holds its session): the message is its next turn.
+    running = running_job(key) if cont else None
+    if running:
+        return send_to(running, task)
+    if prev and not os.environ.get('KITH_PERSON') and wake_queue().writer_live(prev['session_id']):
+        sid = prev['session_id']
+        got = follow_up(sid, agent, None, 'ask-c:%s/%s' % (sid, hashlib.sha256(task.encode()).hexdigest()[:12]), task,
+                        '%s continued this conversation while it was running' % (os.environ.get('KITH_AGENT') or 'the owner'))
+        if got != 'duplicate':
+            print('%s is still answering in that conversation: your message is its next turn' % agent, file=sys.stderr)
+        print(got)
+        return 0
     if cont and not prev:
         sys.exit('kith ask: no conversation with %s %s to continue; start one without -c'
                  % (agent, 'named ' + name if name else 'from this directory'))
@@ -393,11 +556,17 @@ def main(argv):
     if prev:
         env['KITH_RESUME'] = prev['session_id']
     # This call's id: a card the run parks on answers it later (--bg: the bg id, so the same --wait collects it).
-    mid = env.pop('KITH_ASK_BG', None) or new_id('ask')
+    bg_id = env.pop('KITH_ASK_BG', None)
+    mid = bg_id or new_id('ask')
+    if bg_id:
+        note_job(bg_id, agent, key)
+        env['KITH_LAUNCH_SID_FILE'] = str(BG / (bg_id + '.sid'))
     register(mid, agent)
     env['KITH_LAUNCH_ASK_ID'] = mid
     proc = subprocess.run([str(KITH / 'bin/kith'), agent, *kith_opts, '--', task], env=env, stdin=subprocess.DEVNULL,
                           capture_output=True, text=True)
+    if bg_id:
+        kick_wakes(job_session(bg_id, wait=0))
     parked = box(mid, 'parked').exists()
     if not parked:
         box(mid, 'reg').unlink(missing_ok=True)

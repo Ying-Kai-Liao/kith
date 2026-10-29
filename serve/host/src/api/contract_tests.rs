@@ -92,6 +92,7 @@ async fn member_answers(r: &Rig, sam: &Caller) -> BTreeMap<&'static str, Value> 
     got.insert("projects", call(r, sam, "projects", json!({})).await);
     got.insert("threadProjects", call(r, sam, "threadProjects", json!({"botId": chat})).await);
     got.insert("linkCode", call(r, sam, "linkCode", json!({})).await);
+    got.insert("scheduleMessages", call(r, sam, "scheduleMessages", json!({"on": false})).await);
     got.insert("myBots", call(r, sam, "myBots", json!({})).await);
     got.insert("logCall", call(r, sam, "logCall", json!({"botId": chat, "seconds": 42})).await);
     let upload = json!({"botId": chat, "uploadId": "6f1c0e2a-5b7d-4c1e-9a3f-2d8b4e6a0c11", "name": "note.txt", "data": "aGk=", "offset": 0, "done": true});
