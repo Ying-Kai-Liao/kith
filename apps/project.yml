@@ -30,7 +30,7 @@ settings:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: 7FUM8A8H72
+    DEVELOPMENT_TEAM: T6DWQUSF55
     # A free Personal Team cannot sign Push, Sign in with Apple or communication notifications.
     # KITH_PERSONAL_TEAM=YES swaps the iOS app to iOS.personal.entitlements without them.
     KITH_PERSONAL_TEAM: "NO"
