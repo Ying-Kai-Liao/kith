@@ -71,6 +71,24 @@ async fn a_caller_is_the_owner_or_a_person() {
     assert!(call(&r, &ghost, "hello", json!({})).await.is_err());
 }
 
+#[tokio::test]
+async fn schedule_messages_are_on_until_the_person_turns_their_own_off() {
+    let r = Rig::new().await;
+    r.auth(&["person", "sam"]);
+    let owner = r.device("owner-phone", None);
+    let sam = r.device("sam-phone", Some("sam"));
+    let on = |v: anyhow::Result<Value>| v.unwrap()["on"].as_bool().unwrap();
+    assert!(on(call(&r, &sam, "scheduleMessages", json!({})).await));
+    assert!(!on(call(&r, &sam, "scheduleMessages", json!({"on": false})).await));
+    assert!(!on(call(&r, &sam, "scheduleMessages", json!({})).await), "it stays off");
+    assert!(on(call(&r, &owner, "scheduleMessages", json!({})).await), "sam's switch isn't the owner's");
+    assert!(!crate::run_outbox::schedule_messages(&r.hub.store, Some("sam")));
+    assert!(crate::run_outbox::schedule_messages(&r.hub.store, None));
+    assert!(on(call(&r, &sam, "scheduleMessages", json!({"on": true})).await));
+    let ghost = Caller::Device { key: "ghost".into(), scopes: vec![Scope::Control] };
+    assert!(call(&r, &ghost, "scheduleMessages", json!({"on": false})).await.is_err());
+}
+
 /// Every method name the router has an arm for, read from the api sources.
 fn router_methods() -> BTreeSet<String> {
     let sources = [

@@ -85,6 +85,13 @@ pub fn wake(wk: &str, text: &str, claim: impl FnOnce() -> Vec<String>) -> Wake {
     CORE.get().map_or(Wake::Offline, |core| core.wake(wk, text, claim))
 }
 
+/// Posts `text` from `agent` in `person`'s newest one-to-one chat-channel thread with it (`Core::tell`), in the
+/// background. A host without channels, or a person without such a thread, gets nothing.
+pub fn tell(person: Option<String>, agent: String, text: String) {
+    let (Some(core), Ok(rt)) = (CORE.get().cloned(), tokio::runtime::Handle::try_current()) else { return };
+    rt.spawn(async move { core.tell(person.as_deref(), &agent, &text).await });
+}
+
 /// Whether the thread behind `wk` is one of the channels' (a card's session names it, see `runauth::grant_for_env`).
 pub fn has_work_key(wk: &str) -> bool {
     wk.rsplit_once('#').is_some_and(|(key, _)| CORE.get().is_some_and(|core| core.has_thread(key)))
