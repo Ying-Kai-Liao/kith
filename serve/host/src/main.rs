@@ -140,7 +140,8 @@ enum Sub {
         /// The other computer, by name or id. Without it, lists the account's computers and who asks to pair.
         computer: Option<String>,
         /// Allow a computer asking to pair with this one, by typing the code it shows (asked for when left out).
-        /// Refused when stdin is not a terminal.
+        /// Refused when stdin is not a terminal. Name the computer before the flag (`kith link NAME --accept`):
+        /// after it, the name would be read as the code.
         #[arg(long, num_args = 0..=1, value_name = "CODE", conflicts_with = "deny")]
         #[allow(clippy::option_option)] // clap's flag with an optional value
         accept: Option<Option<String>>,
@@ -827,10 +828,8 @@ async fn links(port: u16) -> Result<()> {
         );
     }
     for r in local_call(port, "peerRequests", json!({})).await?["requests"].as_array().into_iter().flatten() {
-        println!(
-            "{} asks to pair with this computer. Allow it with `kith link --accept`.",
-            r["name"].as_str().unwrap_or_default()
-        );
+        let name = r["name"].as_str().unwrap_or_default();
+        println!("{name} asks to pair with this computer. Allow it with `kith link '{name}' --accept`.");
     }
     Ok(())
 }
@@ -886,7 +885,7 @@ enum LinkAnswer {
     Deny,
 }
 
-/// `kith link --accept [CODE]` / `--deny`: answers a computer asking to pair with this one. A yes needs the code the
+/// `kith link [NAME] --accept [CODE]` / `--deny`: answers a computer asking to pair with this one. A yes needs the code the
 /// other computer shows, typed by a person at this one.
 async fn answer_link(port: u16, which: Option<String>, answer: LinkAnswer) -> Result<()> {
     use std::io::{BufRead, IsTerminal, Write};
@@ -906,7 +905,7 @@ async fn answer_link(port: u16, which: Option<String>, answer: LinkAnswer) -> Re
     let r = match matching.as_slice() {
         [r] => *r,
         [] => anyhow::bail!("No computer is asking to pair with this one."),
-        _ => anyhow::bail!("More than one computer asks to pair: name one, e.g. `kith link --accept <name>`."),
+        _ => anyhow::bail!("More than one computer asks to pair: name one, e.g. `kith link <name> --accept`."),
     };
     let id = r["requestId"].as_str().unwrap_or_default();
     let name = r["name"].as_str().unwrap_or_default();
@@ -1006,4 +1005,27 @@ async fn statusline(port: u16, wrapped: String) {
     }
     println!("{line}");
     ingest().await;
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    fn link(args: &[&str]) -> (Option<String>, Option<Option<String>>, bool) {
+        let cli = Cli::try_parse_from(["kith-serve", "link"].iter().chain(args)).unwrap();
+        let Some(Sub::Link { computer, accept, deny, .. }) = cli.cmd else { panic!("not link") };
+        (computer, accept, deny)
+    }
+
+    #[test]
+    fn the_suggested_link_answers_parse_as_meant() {
+        // What `kith link` and its errors tell a person to type: the name stays the computer, never the code.
+        assert_eq!(link(&["Mac mini", "--accept"]), (Some("Mac mini".into()), Some(None), false));
+        assert_eq!(link(&["--accept"]), (None, Some(None), false));
+        assert_eq!(
+            link(&["Mac mini", "--accept", "123456"]),
+            (Some("Mac mini".into()), Some(Some("123456".into())), false)
+        );
+        assert_eq!(link(&["Mac mini", "--deny"]), (Some("Mac mini".into()), None, true));
+    }
 }

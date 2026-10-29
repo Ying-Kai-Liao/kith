@@ -12,7 +12,7 @@
 #   kith serve cloud [...]          the host's cloud status and settings; --confirm-owner accepts an owner change by
 #                                   typing the account at a terminal (refused when stdin is not a terminal)
 #   kith serve link [NAME]          pair with another computer of this account (the same code shows on both; the yes is
-#                                   typed on the other one); no NAME lists them. link --accept [CODE] / --deny answers here
+#                                   typed on the other one); no NAME lists them. link [NAME] --accept [CODE] / --deny answers here
 #                                   (refused when stdin is not a terminal); unlink NAME ends a pairing both ways
 #
 # Data dir ~/.kith/serve, port 19224, launchd label dev.kith.serve, logs inside the data dir. The host's own
