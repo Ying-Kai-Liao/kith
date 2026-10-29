@@ -71,6 +71,25 @@ enum ThreadFeed {
         "execute": "Ran", "think": "Thought", "fetch": "Fetched",
     ]
 
+    /// Words a host title may open with per kind ("Read src/pace.js"); the row already has the verb.
+    private static let titleVerbs: [String: Set<String>] = [
+        "read": ["read", "reading"],
+        "edit": ["edit", "edited", "editing", "write", "wrote", "writing", "written"],
+        "delete": ["delete", "deleted", "deleting", "remove", "removed", "removing"],
+        "move": ["move", "moved", "moving", "rename", "renamed", "renaming"],
+        "search": ["search", "searched", "searching"],
+        "think": ["think", "thought", "thinking"],
+        "fetch": ["fetch", "fetched", "fetching"],
+    ]
+
+    /// "Read src/pace.js" -> "src/pace.js" for a read row; a title that is only the verb stays as it is.
+    static func withoutVerb(_ title: String, kind: String?) -> String {
+        guard let kind, let words = titleVerbs[kind], let space = title.firstIndex(of: " ") else { return title }
+        let rest = title[title.index(after: space)...].drop { $0 == " " }
+        guard !rest.isEmpty, words.contains(title[..<space].lowercased()) else { return title }
+        return String(rest)
+    }
+
     /// One tool entry as one row: "Edited kith-sessions.py  +6 -2". The sheet gets the command and what it printed.
     static func toolRow(_ entry: Entry, patches withPatches: Bool = true) -> ToolCallRowModel {
         let d = entry.data
@@ -80,7 +99,8 @@ enum ThreadFeed {
         if let first = diffs.first {
             object = (first.path as NSString).lastPathComponent + (diffs.count > 1 ? " +\(diffs.count - 1)" : "")
         } else {
-            object = (d.title ?? "").split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+            let line = (d.title ?? "").split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+            object = withoutVerb(line, kind: d.toolKind)
         }
         let result: ToolCallRowModel.Result? = switch d.status {
         case "completed": .text(diffs.isEmpty ? "done" : "+\(diffs.map(\.added).reduce(0, +)) -\(diffs.map(\.removed).reduce(0, +))")

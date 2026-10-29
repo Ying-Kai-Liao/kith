@@ -14,3 +14,16 @@ test('tool rows show the verb, file and diff size, or the failure', () => {
   assert.deepEqual([run.verb, run.object, run.result, run.state, run.command], ['Ran', 'npm test', 'failed', 'error', 'npm test\nmore'])
   assert.equal(toolRowOf(entry('w', 'tool', { status: 'in_progress' })).result, undefined)
 })
+
+test('a title that already opens with the verb does not double it', () => {
+  const obj = (toolKind: string, title: string) => toolRowOf(entry('t', 'tool', { toolKind, title })).object
+  assert.equal(obj('read', 'Read src/pace.js'), 'src/pace.js')
+  assert.equal(obj('read', 'reading src/pace.js'), 'src/pace.js')
+  assert.equal(obj('edit', 'Write src/pace.js'), 'src/pace.js')
+  assert.equal(obj('search', 'Searched for foo'), 'for foo')
+  assert.equal(obj('fetch', 'Fetch https://x.dev'), 'https://x.dev')
+  assert.equal(obj('read', 'src/pace.js'), 'src/pace.js')
+  assert.equal(obj('read', 'Read'), 'Read')
+  assert.equal(obj('read', 'Ran tests'), 'Ran tests')
+  assert.equal(toolRowOf(entry('x', 'tool', { toolKind: 'execute', title: 'Run npm test' })).object, 'Run npm test')
+})
