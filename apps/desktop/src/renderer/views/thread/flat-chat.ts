@@ -48,15 +48,18 @@ export function buildChat(entries: Entry[]): ChatItem[] {
   for (const { entry: e, exchanges } of groupExchanges(flatEntries(entries), true)) {
     if (e.kind === 'tool') {
       run.push(e)
+      // A long run counts as activity, so it doesn't make a gap of its own.
+      if (lastDate !== null) lastDate = e.createdAt
       continue
     }
     const id = stableId(e)
     const at = e.createdAt
+    // The tools sit above the separator of the message after a gap, not under it.
+    flush()
     if (lastDate === null || at - lastDate > 3_600_000) {
       out.push({ id: `sep-${id}`, kind: 'separator', date: at })
       lastAuthor = null
     }
-    flush()
     if (exchanges) {
       out.push({ id, kind: 'exchanges', entry: e, exchanges })
       lastAuthor = null

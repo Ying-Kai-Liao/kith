@@ -54,3 +54,8 @@ test('author grouping and time separators', () => {
   assert.deepEqual(items.map((i) => i.kind === 'separator' ? 'sep' : i.id), ['sep', 'u1', 'u2', 'a', 'sep', 'late'])
   assert.deepEqual(items.filter((i) => i.kind === 'entry').map((i) => i.kind === 'entry' && i.groupStart), [true, false, true, true])
 })
+
+test('tools before a gap of over an hour stay above the next message\'s separator', () => {
+  const items = buildChat([entry('a', 'agent', 1, { final: true, author: 'x' }), entry('t', 'tool', 2), entry('b', 'agent', 20_000, { final: true, author: 'x' })])
+  assert.deepEqual(items.map((i) => (i.kind === 'separator' ? 'sep' : i.id)), ['sep', 'a', 't', 'sep', 'b'])
+})
