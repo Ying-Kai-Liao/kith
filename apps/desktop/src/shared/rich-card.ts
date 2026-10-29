@@ -16,7 +16,7 @@ export interface RichCard {
 }
 
 /** The card types this app draws, each with the newest version it knows. */
-export const KNOWN_CARDS: Readonly<Record<string, number>> = {}
+export const KNOWN_CARDS: Readonly<Record<string, number>> = { schedule: 1, news: 1 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 
