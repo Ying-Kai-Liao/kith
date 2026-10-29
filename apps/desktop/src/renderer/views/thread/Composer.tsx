@@ -12,7 +12,7 @@ import { useStore } from '../../store/context'
 import { MAX_FILE_SIZE, type OutgoingFile } from '../../store/bot-store'
 import { StartingFolderChip, type StartingPick } from '../bots/PlaceFolderPicker'
 import { pluginsFor } from '../marketplace/plugins'
-import { currentTaskOpen, routesOf, startsNewTask } from './task-routing'
+import { quotesOf, withQuote } from './reply-quote'
 import { composerEnter } from './composer-keyboard'
 import { CommandMenu, useCommandMenu } from './CommandMenu'
 import { ComposerAttachment } from './ComposerAttachment'
@@ -22,12 +22,11 @@ import { builtInCommand, slashCommands, slashQuery, type SlashCommand } from './
 type Trailing = 'interrupt' | 'stop' | 'call' | 'send'
 
 /**
- * The message box under a chat or a thread: send, or stop while the bot (or the group) is
+ * The message box under a chat: send, or stop while the bot (or the group) is
  * working there. In a group, typing `@` suggests its bots; with one bot, a leading `/` lists its commands.
  */
-export function Composer({ botId, thread = null, onCall, onInterrupt }: {
+export function Composer({ botId, onCall, onInterrupt }: {
   botId: string
-  thread?: string | null
   /** Starts a voice call; while the box is empty it takes the send button's place. */
   onCall?: (() => void) | null
   /** Interrupts the bot while it is speaking in a voice call. */
@@ -35,61 +34,65 @@ export function Composer({ botId, thread = null, onCall, onInterrupt }: {
 }) {
   const store = useStore()
   // Remount transient editor state (selection, attachments, IME) when its destination changes.
-  return <DestinationComposer key={JSON.stringify([store.contextId, store.computer.id, botId, thread])}
-    botId={botId} thread={thread} onCall={onCall} onInterrupt={onInterrupt} />
+  return <DestinationComposer key={JSON.stringify([store.contextId, store.computer.id, botId])}
+    botId={botId} onCall={onCall} onInterrupt={onInterrupt} />
 }
 
-function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
-  botId: string; thread: string | null; onCall?: (() => void) | null; onInterrupt?: (() => void) | null
+function DestinationComposer({ botId, onCall, onInterrupt }: {
+  botId: string; onCall?: (() => void) | null; onInterrupt?: (() => void) | null
 }) {
   const store = useStore()
   const plugins = useModel(pluginsFor(store))
   const bot = store.bots.get(botId) ?? null
   const drafts = store.composerDrafts
-  const draft = useSyncExternalStore(drafts.subscribe, () => drafts.get(botId, thread))
-  const setDraft = (text: string) => drafts.set(botId, thread, text)
+  const draft = useSyncExternalStore(drafts.subscribe, () => drafts.get(botId, null))
+  const setDraft = (text: string) => drafts.set(botId, null, text)
   const [files, setFiles] = useState<OutgoingFile[]>([])
+  const appendRef = useRef<(incoming: { name: string; data: Uint8Array }[]) => void>(() => {})
   const dictation = useDictation(draft, setDraft)
   const field = useRef<HTMLTextAreaElement>(null)
   const measure = useRef<HTMLDivElement>(null)
   const composing = useRef(false)
   /** Text pasted into this draft since the last send. */
   const pasted = useRef<string[]>([])
-  // In a bot's chat a message goes on with the current task: Stop and "working" are that task's.
-  const tasks = !thread && !!bot && bot.tasks
-  const place = thread ?? (tasks ? currentTask(store.chat(botId))?.id ?? null : null)
+  // The flat chat has no thread: a message goes on with the current task (the host routes it), and Stop and
+  // "working" are that task's. Only the New task button starts another.
+  const tasks = !!bot && bot.tasks
+  const place = tasks ? currentTask(store.chat(botId))?.id ?? null : null
   const [newTask, setNewTask] = useState(false)
-  // Out of the current task (left its thread, or it is folded): the next message starts a task of its own.
-  const routes = routesOf(store)
-  useSyncExternalStore(routes.subscribe, routes.getVersion)
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(tick)
-  }, [])
-  const currentOpen = (at: number) => (tasks && bot ? currentTaskOpen(bot, store.chat(botId), (id) => store.replies(botId, id), at, (id) => routes.choices.get(id)) : null)
-  const startsNew = tasks && startsNewTask({ requested: newTask, thread, left: routes.hasLeft(botId), currentOpen: currentOpen(now) })
+  const startsNew = tasks && newTask
+  // "Reply" on a message: its first line, quoted over the box and in front of what is sent.
+  const quotes = quotesOf(store)
+  useSyncExternalStore(quotes.subscribe, quotes.getVersion)
+  const quote = quotes.get(botId)
   // The folder the next new task starts in; the chat's own shows until one is picked.
   const [taskFolder, setTaskFolder] = useState<StartingPick | null>(null)
-  const working = !!bot && isWorkingIn(bot, botId, place) && !startsNew
+  const working = !!bot && (isWorkingIn(bot, botId, place) || isWorkingIn(bot, botId, null)) && !startsNew
   const empty = !draft.trim() && !files.length
   const canSend = !empty && (store.connection.kind === 'online' || (store.canQueue && !files.length))
   const canAttach = !!bot
 
-  const threadRoot = thread ? store.allEntries(botId).find((e) => e.id === thread) : undefined
-  const threadName = threadRoot?.data.text?.replace(/\s+/g, ' ').trim().slice(0, 28)
-  const placeholder = thread ? (threadName ? `Reply to ${threadName}…` : 'Reply in thread…') : bot && isGroup(bot) ? 'Message everyone · @ to ask one bot' : startsNew ? `Tell ${bot?.name ?? ''}…` : working ? `Queue a message for ${bot?.name ?? ''}` : tasks && place ? 'Reply in task…' : `Tell ${bot?.name ?? ''}…`
+  const placeholder = bot && isGroup(bot) ? 'Message everyone · @ to ask one bot' : startsNew ? `Tell ${bot?.name ?? ''}…` : working ? `Queue a message for ${bot?.name ?? ''}` : `Tell ${bot?.name ?? ''}…`
 
   // A routine's "Try it" fills the box.
   const routineDraft = store.routineDrafts.get(botId)
   useEffect(() => {
-    if (thread || routineDraft === undefined) return
+    if (routineDraft === undefined) return
     const incoming = store.consumeRoutineDraft(botId)
     if (incoming === undefined) return
-    const previous = drafts.get(botId, thread)
-    drafts.set(botId, thread, previous ? `${previous}\n${incoming}` : incoming)
+    const previous = drafts.get(botId, null)
+    drafts.set(botId, null, previous ? `${previous}\n${incoming}` : incoming)
     field.current?.focus()
-  }, [routineDraft, thread, botId, store, drafts])
+  }, [routineDraft, botId, store, drafts])
+
+  // Files picked in the sidebar's dock arrive here once their chat is open.
+  const staged = store.stagedFiles.get(botId)
+  useEffect(() => {
+    if (!staged) return
+    const incoming = store.takeStagedFiles(botId)
+    if (incoming) appendRef.current(incoming)
+    field.current?.focus()
+  }, [staged, botId, store])
 
   // Measure a separate, wrapping copy: collapsing the live textarea to zero breaks its
   // height transition, caret scroll and IME composition. Observe font/width changes too.
@@ -161,17 +164,17 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
     setFiles((list) => [...list, ...accepted])
   }
 
+  appendRef.current = append
+
   const submit = () => {
     // Send while recording: the recording ends and what it heard goes with the message.
     if (dictation.listening) dictation.stop()
     const command = files.length ? null : builtInCommand(bot, draft)
     if (command) return run(command)
     if (!canSend) return
-    // Decided again at the moment of sending: the task may have folded since the box last drew.
-    const fresh = tasks && startsNewTask({ requested: newTask, thread, left: routes.hasLeft(botId), currentOpen: currentOpen(Date.now()) })
-    store.send(draft, botId, thread, files, undefined, pasted.current, fresh, newTask ? (taskFolder?.start ?? null) : null)
+    store.send(withQuote(draft, quote), botId, null, files, undefined, pasted.current, startsNew, newTask ? (taskFolder?.start ?? null) : null)
     pasted.current = []
-    if (tasks) routes.stay(botId)
+    quotes.set(botId, null)
     setNewTask(false)
     setTaskFolder(null)
     setDraft('')
@@ -214,6 +217,15 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
       >
         <div className="composer-surface">
           <CommandMenu commands={menu.shown} index={menu.index} hover={menu.hover} pick={run} />
+          <ComposerReveal open={!!quote}>
+            <div className="reply-chip">
+              <Icon name="arrowshape.turn.up.left" size={11} color="var(--secondary)" />
+              <Text size="footnote" tone="secondary" truncate>{quote ?? ''}</Text>
+              <button className="press reply-chip-x" title="Don't reply to this" aria-label="Remove the quoted message" onClick={() => { quotes.set(botId, null); field.current?.focus() }}>
+                <Icon name="xmark" size={9} weight="semibold" />
+              </button>
+            </div>
+          </ComposerReveal>
           <ComposerReveal open={newTask && !!bot?.folder}>
             <div className="place-chip-row composer-folder">
               <StartingFolderChip inherited={bot ? defaultFolderOf(bot) : null} value={taskFolder} onChange={setTaskFolder} />
@@ -240,12 +252,7 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
                 title={startsNew ? 'Your next message starts a new task' : 'New task'}
                 aria-pressed={startsNew}
                 onClick={() => {
-                  if (startsNew && !newTask) {
-                    // Out of the task without having asked: this goes back to it, even if it had folded.
-                    routes.stay(botId)
-                    const root = currentTask(store.chat(botId))
-                    if (root) routes.choose(root.id, true)
-                  } else setNewTask((on) => !on)
+                  setNewTask((on) => !on)
                   field.current?.focus()
                 }}
               >
@@ -261,7 +268,7 @@ function DestinationComposer({ botId, thread, onCall, onInterrupt }: {
                 readOnly={dictation.listening}
                 placeholder={placeholder}
                 spellCheck
-                aria-label={thread ? 'Reply' : 'Message'}
+                aria-label="Message"
                 aria-keyshortcuts="Enter Shift+Enter"
                 onCompositionStart={() => { composing.current = true }}
                 onCompositionEnd={() => { composing.current = false }}

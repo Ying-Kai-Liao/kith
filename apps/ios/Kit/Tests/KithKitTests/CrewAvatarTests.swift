@@ -39,6 +39,28 @@ import UIKit
     #expect(AvatarPalette.pick(nil) == nil)
 }
 
+@Test func plainIsAFlatFillOfTheFirstColourAndOldValuesStayAsTheyWere() throws {
+    #expect(AvatarPalette.parse("kith:coral")?.plain == false)
+    #expect(AvatarPalette.parse("kith:coral:plain")?.id == "coral")
+    #expect(AvatarPalette.parse("kith:coral:plain")?.plain == true)
+    for odd in ["", "blue", "kith:", "kith:nope:plain", "kith:coral:flat", "coral:plain", "kith:coral:plain:plain"] {
+        #expect(AvatarPalette.parse(odd) == nil, "\(odd)")
+    }
+    let swatch = try #require(AvatarPalette.colors.first { $0.id == "coral" })
+    #expect(swatch.stored(plain: true) == "kith:coral:plain")
+    #expect(swatch.stored(plain: false) == "kith:coral")
+    #expect(AvatarPalette.pick("kith:coral:plain") == "coral")
+    #expect(AvatarPalette.isPlain("kith:coral:plain") && !AvatarPalette.isPlain("kith:coral") && !AvatarPalette.isPlain(nil))
+    // The badge lookup strips the prefix and the mode.
+    #expect(AvatarPalette.color("kith:blue:plain") == AvatarPalette.color("kith:blue"))
+    #expect(LivingBotTint.paletteId("kith:coral:plain") == "coral:plain")
+    #expect(LivingBotTint.paletteId("kith:coral") == "coral")
+    // A plain body is its own image, not the gradient one.
+    let gradient = try #require(LivingBotTint.image(asset: "crew-builder", paletteId: "coral"))
+    let flat = try #require(LivingBotTint.image(asset: "crew-builder", paletteId: "coral:plain"))
+    #expect(gradient !== flat)
+}
+
 @Test func theSwiftPaletteMatchesBrandingsEyesJson() {
     let json = LivingBotData.palette
     #expect(json.count == 15)

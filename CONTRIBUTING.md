@@ -10,4 +10,4 @@ Never `gh pr merge` directly: that skips the heavy tier. Don't rebase or merge m
 
 ## License
 
-Contributions are licensed under MIT (inbound = MIT, no CLA).
+Contributions are licensed under Apache-2.0 (inbound = Apache-2.0, no CLA).

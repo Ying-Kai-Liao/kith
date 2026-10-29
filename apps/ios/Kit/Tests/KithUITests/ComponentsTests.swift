@@ -44,6 +44,8 @@ import Testing
         #expect(AgentTint(stored: "kith:coral") != nil)
         #expect(AgentTint(stored: "blue") == nil)
         #expect(AgentTint(stored: "kith:nope") == nil)
+        #expect(AgentTint(stored: "kith:coral:plain")?.b == AgentTint(stored: "kith:coral:plain")?.a)
+        #expect(AgentTint(stored: "kith:coral")?.b != AgentTint(stored: "kith:coral")?.a)
         #expect(AgentTint.resolve("blue") == .neutral)
     }
 

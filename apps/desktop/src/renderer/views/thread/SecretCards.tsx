@@ -29,7 +29,7 @@ export function AccessCard({ entry, agent, pair = FALLBACK_PAIR, answering, resp
   const outcome = secretOutcome(secret)
   const busy = answering !== null
   return (
-    <section className="kc-decision question secret-card" style={pairStyle(pair)} aria-label={`${agent} wants ${secret.service}`}>
+    <section className={`kc-decision question secret-card${outcome ? '' : ' asking'}`} style={pairStyle(pair)} aria-label={`${agent} wants ${secret.service}`}>
       <div className="kc-decision-title kith-text-body">{`${agent} wants ${secret.service}`}</div>
       {secret.purpose ? <div className="secret-card-why kith-text-secondary">{secret.purpose}</div> : null}
       {outcome ? (
@@ -114,7 +114,7 @@ export function KeyCard({ entry, agent, pair = FALLBACK_PAIR, answering, respond
   }
 
   return (
-    <section className="kc-decision question secret-card" style={pairStyle(pair)} aria-label={`${agent} needs a key for ${secret.service}`}>
+    <section className={`kc-decision question secret-card${outcome ? '' : ' asking'}`} style={pairStyle(pair)} aria-label={`${agent} needs a key for ${secret.service}`}>
       <div className="secret-card-head">
         <Icon name="key" size={14} />
         <div className="kc-decision-title kith-text-body">{`${secret.service} key for ${agent}`}</div>

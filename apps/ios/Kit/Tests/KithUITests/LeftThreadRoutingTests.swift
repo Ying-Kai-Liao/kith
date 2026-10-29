@@ -25,7 +25,7 @@ struct LeftThreadRoutingTests {
         #expect(!model.startsNewTask("a", thread: nil, requested: false))
     }
 
-    /// The main chat's send continues the current task only while it shows open (the same rule TaskRow uses).
+    /// The main chat's send continues the current task only while it shows open (the idle rule, Tasks.isOpen).
     @Test func aFoldedCurrentTaskStartsANewOneInTheMainChat() {
         let suite = "FoldedRouting.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
