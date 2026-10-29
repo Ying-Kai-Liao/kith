@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Wire cryptography of the Kith relay protocol, shared by the host and the guest client"
-license = "MIT"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
