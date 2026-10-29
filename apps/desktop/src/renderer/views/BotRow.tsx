@@ -14,7 +14,7 @@ import './crew/crew-sidebar.css'
 const faceOf = (bot: Bot): Face => (isGroup(bot) ? 'group' : (avatarImage(bot) ?? DEFAULT_IMAGE))
 
 /**
- * A Crew row (the mock's Mac density): the bot at 40 with no tile, its name, the time or state at the right, one
+ * A Crew row (the mock's Mac density): the bot at 48 with no tile, its name, the time or state at the right, one
  * status line (ink when it needs you) and the ink count of questions waiting. In the rail only the bot at 36 shows.
  */
 export const BotRow = memo(function BotRow({ bot, store, compact, usingComputer, members, waiting }: {
@@ -39,7 +39,7 @@ export const BotRow = memo(function BotRow({ bot, store, compact, usingComputer,
   const group = isGroup(bot)
   return (
     <span className="cs-row">
-      <GuestBadged bot={bot} badge={16}><RowFace bot={bot} members={members} size={40} state={state} /></GuestBadged>
+      <GuestBadged bot={bot} badge={16}><RowFace bot={bot} members={members} size={48} state={state} /></GuestBadged>
       <span className="cs-row-main">
         <span className="cs-row-top">
           {bot.pinned ? <Icon name="pin.fill" size={9} color="var(--kith-muted)" /> : null}
@@ -69,14 +69,14 @@ function GuestBadged({ bot, badge, children }: { bot: Bot; badge: number; childr
   )
 }
 
-function RowFace({ bot, members, size, state }: { bot: Bot; members: Bot[]; size: 36 | 40; state: 'working' | 'idle' }) {
+function RowFace({ bot, members, size, state }: { bot: Bot; members: Bot[]; size: 36 | 48; state: 'working' | 'idle' }) {
   if (isGroup(bot) && members.length >= 2) {
     const [a, b] = members
     return (
       <span className="cs-duo" style={{ width: size, height: size }} aria-hidden>
-        <span className="cs-duo-a kc-bot-shadow"><LiveBot face={faceOf(a!)} color={a!.avatarColor} size={26} id={a!.id} animated={false} /></span>
-        <span className="cs-duo-b kc-bot-shadow"><LiveBot face={faceOf(b!)} color={b!.avatarColor} size={26} id={b!.id} animated={false} /></span>
-        <span className="cs-duo-sky"><SkyPatch id={bot.id} size={15} /></span>
+        <span className="cs-duo-a kc-bot-shadow"><LiveBot face={faceOf(a!)} color={a!.avatarColor} size={30} id={a!.id} animated={false} /></span>
+        <span className="cs-duo-b kc-bot-shadow"><LiveBot face={faceOf(b!)} color={b!.avatarColor} size={30} id={b!.id} animated={false} /></span>
+        <span className="cs-duo-sky"><SkyPatch id={bot.id} size={18} /></span>
       </span>
     )
   }
