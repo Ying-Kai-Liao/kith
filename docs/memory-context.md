@@ -159,7 +159,12 @@ Ordering in the prompt (fixed, so the cache stays warm):
 3. the agent memory with this person: owner `MEMORY.md`, or `shared/MEMORY.md` then `people/<id>/MEMORY.md`;
 4. room notes (`room` facet = this thread's room), newest first;
 5. project memory for the current project(s), each project's index note first;
-6. the session line (`<session project=… holds=… …/>`), as today.
+6. the project's start files (`start_files` in `kernel/lib/kith_facets.py`, also printed by `kith-project notes`): the
+   agent's session file for the project when its audience and room pass the rules above, the shared `codebase.md`,
+   and `decisions.md` cut to the agent's own `open:` lines older than the last 30 (the newest 10 and a count) and the
+   last 30 lines. Each file is cut at 16,000 characters (decisions at 32,000) with a line saying so; they are outside
+   the 8,000-character cap. The agent no longer reads these at the start of a call (`kernel/PROTOCOL.md`);
+7. the session line (`<session project=… holds=… …/>`), as today.
 
 Size budget: a single cap on the whole tier-1 block, in characters, set per agent (`memory_cap:` in its agent.md) with a default
 of 8,000 characters (Kai, q45). Inside the cap, the order above decides what is cut: when over the cap, room notes and

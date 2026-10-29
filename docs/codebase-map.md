@@ -99,7 +99,8 @@ Paths in this table are inside `kernel/`, except `install.sh` and `.claude-plugi
 | `adapters/claude-code/hooks/register.tsx` | TS | The Claude Code plugin: registers each agent as `kith:<name>` (pinned package, frontmatter `model`), puts project + memory in front of each spawn, applies `effort` per request, nudges for the session file, `/kith` and `mcp__kith__invoke` | Claude Code, every session |
 | `adapters/acp/claude-via-kith`, `adapters/acp/shim/claude` | bash, python | The SDK's claude binary: saves the SDK's args and runs `kith <agent>` with the shim first on PATH; the shim merges kith's args with the SDK's (one appended system prompt, kith's first; the client's permission mode wins). The client's memory keeper runs on plain claude | `bin/kith-acp` (via claude-agent-acp) |
 | `adapters/claude-code/.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json` | JSON | Plugin manifest (option `hq_path`) and this repo as its marketplace | `install.sh` |
-| `kernel/PROTOCOL.md` | md | The rules every agent gets after its `agent.md`: memory, projects, sessions, learned skills, delivery | `kith-pkg` (into `prompt.md`), the adapter |
+| `kernel/PROTOCOL.md` | md | The core every agent gets after its `agent.md`: memory, what goes where, owner and helpers, and the kernel-skills table | `kith-pkg` (into `prompt.md`), the adapter |
+| `kernel/skills/<name>/SKILL.md` | md | Kernel skills an agent reads when its case comes up (keys, kith-send, kith-call, group rooms, refusals and guests, project files); not filled, they name kernel paths relative to themselves | every agent, on demand |
 | `kernel/services/<name>.json` | JSON | One shared service: kind (mcp, cli, login), how to start it, secret names (never values) | `kith-auth`, `kith-pkg` checks |
 | `install.sh` (top) | bash | Links `~/kith` and `~/.local/bin/kith`, makes `~/.kith/secrets`, installs the plugin, then runs `kith init` with its arguments (`--from <user>`) | you, once per Mac |
 
@@ -129,7 +130,8 @@ host's chat channels, `KITH_VIA=discord`, `telegram` or `slack`, `KITH_BRIDGE_OU
 **`kith <agent> "task"`** (terminal, or the host on a chat message)
 1. `bin/kith` → `kith-pkg resolve <agent>`: unchanged package → its current snapshot; changed → check, snapshot into
    `~/.kith/store`, commit to the agent's repo; failing check → the last good version.
-2. Prompt = snapshot `prompt.md` (agent.md body + PROTOCOL.md) with placeholders filled + `MEMORY.md` + session tag.
+2. Prompt = snapshot `prompt.md` (agent.md body + PROTOCOL.md) with placeholders filled + memory and the project's
+   start files (`lib/kith_facets.py load`: session file, codebase.md, decisions tail and own open lines) + session tag.
 3. Settings = snapshot `settings.json` + a SessionStart hook → `kith-cost tag`; installed plugins off but `kith@kith` and
    `plugins` from `~/.kith/settings.json`, unless the agent's `enabledPlugins` sets them. MCP = `kith-auth mcp-config <agent>` +
    the package's `mcp.json`. `--model`/`--effort` from frontmatter.
@@ -168,7 +170,8 @@ the last tick (at most a day back) and that isn't still running: `kith <agent> "
 
 | To change | Open |
 |---|---|
-| What every agent is told (memory, sessions, delivery rules) | `kernel/PROTOCOL.md` |
+| What every agent is told (memory, sessions, delivery rules) | `kernel/PROTOCOL.md` (always), `kernel/skills/` (on demand) |
+| What an agent finds loaded at the start of a call | `lib/kith_facets.py` (`load`, `start_files`) |
 | How a run is assembled (flags, prompt, settings, model/effort) | `bin/kith`, and the same in `register.tsx` for subagents |
 | What makes a version valid, snapshots, auto-commit, install/share | `bin/kith-pkg` (`problems()` for checks) |
 | A new placeholder | `bin/kith` `fill()`, `register.tsx` `fill`, `kith-pkg` `PLACEHOLDERS` |

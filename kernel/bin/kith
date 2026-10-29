@@ -58,8 +58,8 @@
 # version once they pass checks; running sessions keep theirs. Shared services and their secrets come from
 # bin/kith-auth: only the ones the agent needs and is granted, secrets injected into the server process only.
 #
-# Same prompt the Claude Code plugin gives kith:<agent>: agent.md + PROTOCOL.md, plus the
-# agent's MEMORY.md and the project:
+# Same prompt the Claude Code plugin gives kith:<agent>: agent.md + PROTOCOL.md (the core; the rest is in
+# kernel/skills/), plus the agent's memory, the project's start files and the project:
 # -p ID, else the project whose remote/path matches the current directory, else none.
 # agents/<name>/settings.json is merged over your global Claude Code settings.
 # Model and effort: `model:` and `effort:` in agent.md's frontmatter (the same fields the kith:<name> subagent uses),
@@ -417,7 +417,8 @@ held=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --child
 # same one the host's runs get through KITH_ROOM). The owner's run: about them, the agent's memory, then the shared part
 # when there is one. Anyone else's: about them, the shared part and their own. In a group room only what everyone there
 # may see; a bot guest (bot-<hex>) is shared craft and its own room's notes. A person the host's KITH_ROOM_MEMBERS names
-# is in that room (kith_facets.py; kith-auth keeps no room membership, so p_rooms is empty today).
+# is in that room (kith_facets.py; kith-auth keeps no room membership, so p_rooms is empty today). Then the project's
+# start files the same filter allows: the session file, codebase.md, the last 30 decision lines and the agent's own open lines.
 load_kind=person; [[ $p_owner == 1 ]] && load_kind=owner; [[ ${p_id:-} == bot-* ]] && load_kind=guest
 load_out=$(python3 "$KITH/lib/kith_facets.py" load --agent "$agent" --home "$home" --person-file "$person_file" \
   --kind "$load_kind" --person "${p_id:-}" --rooms "$p_rooms" --room "${KITH_ROOM:-}" --project "$project" \

@@ -304,16 +304,26 @@ export const register: Register = (on, options) => {
     if (!state) state = (await kithPaths($, kith)).KITH_STATE
     const today = new Date().toISOString().slice(0, 10)
 
-    // Whose memory the helper gets. The owner's run: the agent's own MEMORY.md, as ever. Anyone else's: what
-    // kith_facets.py loads for that person, as bin/kith does for their own run (a bot guest, bot-*, is a guest). Fails
-    // closed: when that can't be had, the helper gets no memory, never the owner's.
+    // Whose memory the helper gets: what kith_facets.py loads (memory and the project's start files), as bin/kith does
+    // for the same run. The owner's: kind owner, or the agent's MEMORY.md alone when the load fails. Anyone else's: that
+    // person (a bot guest, bot-*, is a guest), failing closed: no memory, never the owner's.
     const who = await runPerson($)
     let memoryBlock = ''
     let sessionsDir = who === null ? '' : `${layout(agent, kith, who).mem}/sessions`
     if (who === '') {
-      const memoryFile = `${layout(agent, kith, '').mem}/MEMORY.md`
-      const memory = (await $.fs.exists(memoryFile)) ? await $.fs.read(memoryFile) : ''
-      memoryBlock = `<long-term-memory path="${memoryFile}">\n${memory}\n</long-term-memory>`
+      try {
+        const home = lifeOf(agent, kith)
+        const out = await $.process.run(['python3', `${kith}/lib/kith_facets.py`, 'load', '--agent', agent, '--home', home,
+          '--person-file', layout(agent, kith, '').personFile, '--kind', 'owner', '--person', '', '--rooms', '',
+          '--room', (await $.env.get('KITH_ROOM')) ?? '', '--project', project,
+          '--agent-md', `${installed[agent] ?? `${home}/role`}/agent.md`, '--json'], { timeoutMs: 10_000 })
+        if (out.exitCode !== 0) throw new Error('facets load failed')
+        memoryBlock = JSON.parse(out.stdout).block ?? ''
+      } catch {
+        const memoryFile = `${layout(agent, kith, '').mem}/MEMORY.md`
+        const memory = (await $.fs.exists(memoryFile)) ? await $.fs.read(memoryFile) : ''
+        memoryBlock = `<long-term-memory path="${memoryFile}">\n${memory}\n</long-term-memory>`
+      }
     } else if (who) {
       try {
         const caller = (await $.env.get('KITH_AGENT')) ?? ''

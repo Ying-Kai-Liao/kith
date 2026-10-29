@@ -36,7 +36,7 @@ token, a reply that doesn't parse. On allow, updatedInput is the input exactly a
 
 Which token: a guest run has KITH_RUN_TOKEN and KITH_RUN_SOCKET (the host gave them); an owner run has KITH_ASK_TOKEN
 and KITH_ASK_SOCKET (the host gave them, or `issue` got them for a run kith started itself). Secrets and logins are
-never carded: the host denies them at once. See kernel/PROTOCOL.md.
+never carded: the host denies them at once. What the agent is told: kernel/skills/kith-guests/SKILL.md.
 """
 import json, os, re, socket, subprocess, sys
 

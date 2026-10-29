@@ -401,6 +401,57 @@ def load_memory(agent, home, person_file, reader, room, projects, cap=LOAD_CAP, 
     return {'block': block, 'loaded': len(shown), 'more': more, 'withheld': withheld, 'group': group}
 
 
+DECISIONS_TAIL = 30   # the last lines of a project's decisions.md every run starts with
+OWN_OPEN_MAX = 10     # and at most this many of the agent's own `open:` lines from before them, newest
+START_CAP = 16000     # characters of one start file
+
+
+def _cut(text, cap=START_CAP):
+    return text if len(text) <= cap else text[:cap] + '\n[cut at %d characters: read the file for the rest]' % cap
+
+
+def start_files(agent, home, reader, room, project, members=None, state=None):
+    """The start files of `project` after the notes: where the reader's last call on it left off (sessions/<ID>.md, by
+    the same audience and room rule as a note), its codebase map, and its decisions: the last
+    DECISIONS_TAIL lines plus this agent's own open lines from before them. The shared project files load for every
+    run in the project, as the protocol had every run read them (a guest's sandbox already lets it read the folder)."""
+    if not (project and ID.match(project)):
+        return ''
+    if is_one_to_one(room, reader):
+        room = own_room(agent, reader)
+    aud = load_audiences(reader, room, agent, members)
+    mem = Path(home) / 'memory'
+    if state is None:
+        sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+        from kith_paths import paths
+        state = paths()['KITH_STATE']
+    out = []
+    rel = ('sessions/%s.md' if reader.get('kind') == 'owner' else 'people/' + reader.get('id', '-') + '/sessions/%s.md') % project
+    t = _read(mem / rel)
+    f = facets_for(rel, agent, t or '')
+    if t and t.strip() and f['audience'] in aud and (not f['room'] or f['room'] == room):
+        out.append(_tag(str(mem / rel), _cut(t), 'session:' + project))
+    d = Path(state) / 'projects' / project
+    t = _read(d / 'codebase.md')
+    if t and t.strip():
+        out.append(_tag(str(d / 'codebase.md'), _cut(t), 'project:' + project))
+    t = _read(d / 'decisions.md')
+    if t and t.strip():
+        lines = [x for x in t.split('\n') if x.strip()]
+        tail, before = lines[-DECISIONS_TAIL:], lines[:-DECISIONS_TAIL]
+        mine = re.compile(r'\d{4}-\d\d-\d\d · %s · open:' % re.escape(agent))
+        opens = [x for x in before if mine.match(x)]
+        text = ''
+        if opens:
+            text = 'Your own open lines older than the last %d (%d%s; all: grep \'· %s · open:\'):\n%s\n\n' % (
+                DECISIONS_TAIL,
+                len(opens), ', the newest %d here' % OWN_OPEN_MAX if len(opens) > OWN_OPEN_MAX else '', agent,
+                '\n'.join(opens[-OWN_OPEN_MAX:]))
+        text += 'The last %d of %d lines:\n%s' % (len(tail), len(lines), '\n'.join(tail))
+        out.append(_tag(str(d / 'decisions.md'), _cut(text, 2 * START_CAP), 'project:' + project))
+    return '\n'.join(out)
+
+
 def project_notes(agent, home, reader, room, projects, cap=LOAD_CAP, members=None):
     """Only the project section of load_memory, for a chat whose project moved after its first message: the same
     filter (audience, room, projects empty or current), index note first, newest after, cut to `cap` characters."""
@@ -462,11 +513,12 @@ def main(argv):
     out = load_memory(a.agent, a.home, a.person_file, reader, room, [a.project] if a.project else [], cap, members, ledger)
     attrs = ' loaded="%d"%s%s' % (out['loaded'], ' more="%d"' % out['more'] if out['more'] else '',
                                   ' room="group"' if out['group'] else '')
+    block = '\n'.join(b for b in (out['block'], start_files(a.agent, a.home, reader, room, a.project, members)) if b)
     if a.json:
         import json
-        print(json.dumps({'block': out['block'], 'attrs': attrs}))
+        print(json.dumps({'block': block, 'attrs': attrs}))
         return 0
-    print('mems=%s\nload_attrs=%s' % (shlex.quote(out['block']), shlex.quote(attrs)))
+    print('mems=%s\nload_attrs=%s' % (shlex.quote(block), shlex.quote(attrs)))
     return 0
 
 
