@@ -10,7 +10,7 @@ extension RichCard {
 }
 
 /// A card folded to one line: a changed or removed job, or a card after its day (tap opens it in place).
-private struct FoldedCard: View {
+private struct FoldedRichCard: View {
     let fold: ScheduleCardModel.Fold
     let open: () -> Void
 
@@ -121,7 +121,7 @@ struct ScheduleCard: View {
                                      personName: person.map { $0.prefix(1).uppercased() + $0.dropFirst() }, opened: opened)
         Group {
             if let fold = view.fold {
-                FoldedCard(fold: fold) { opened = true }
+                FoldedRichCard(fold: fold) { opened = true }
             } else {
                 full(view)
             }
@@ -278,7 +278,7 @@ struct NewsCard: View {
     var body: some View {
         let view = NewsCardModel(card: card, postedAt: entry.date, expanded: expanded, opened: opened)
         if let fold = view.fold {
-            FoldedCard(fold: .init(text: fold, trailing: CardWords.clock(entry.date), opens: true, done: false)) { opened = true }
+            FoldedRichCard(fold: .init(text: fold, trailing: CardWords.clock(entry.date), opens: true, done: false)) { opened = true }
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 if !view.lead.isEmpty { CardBubble(text: view.lead) }
