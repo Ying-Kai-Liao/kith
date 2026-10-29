@@ -1,0 +1,3 @@
+\* the door checks access, then claims and starts in a later step (GuestDoor.tla split)
+DoorSplit = TRUE
+GuestDoor = TRUE

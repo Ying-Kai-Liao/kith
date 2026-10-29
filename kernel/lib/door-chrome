@@ -1,0 +1,8 @@
+#!/bin/sh
+# A door's Chrome (kith_door.py): start it without a debugging port or address (the door's preload drives it over a pipe).
+n=$#
+for a in "$@"; do
+  case $a in --remote-debugging-port=* | --remote-debugging-address=*) ;; *) set -- "$@" "$a" ;; esac
+done
+shift "$n"
+exec "$KITH_DOOR_CHROME" "$@"

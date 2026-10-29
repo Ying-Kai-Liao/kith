@@ -7,3 +7,7 @@ StarIgnoresRevoke = FALSE
 NoDeliverRecheck = FALSE
 RevokeDeletesRows = FALSE
 BotIgnoresOwner = FALSE
+GuestDoor = FALSE
+DoorNoHold = FALSE
+DoorSplit = FALSE
+NoDoorSweep = FALSE

@@ -52,6 +52,8 @@ kith-auth, `kernel/tests/kith-auth-props.py` (generated command sequences on a t
 
 Sync commit: `a0b2e759d7b92db730a8f1365828b6cfbbe2c10d` (2026-10-30: the guest workbench's jobs and edge asks on top of `892b64dd`; `kernel/tests/kith-auth-props.py` passes there with breaks M10-M13 failing, and `cargo test --bin kith -- cards:: agent::bot` passes; no host roles code changed, so `roles_props` and `botguests_props` are left to CI). If `git diff a0b2e759 -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
 
+Recheck 2026-10-30 (guest workbench step 2, the door): no covered function's answer changed; doors, `kith-auth door` and the door card are new entry points, checked by example (rows below), not by these properties: a door adds no method, event or row a person reaches, only a card the owner answers and a read-only `kith-auth door`. The props were not rerun for it.
+
 Recheck 2026-10-29 from `60d2031e`: the covered files changed by `proveInvite`'s "already shown" answer (roles.rs), access requests sent to owner devices (events.rs), the `LOCAL_ONLY` removal (devices.rs), the `reply_to`/`asked_by` fields of escape cards (cards/access.rs), and kith-auth `person --clear-temp` plus the temp folder removal in `--rm` and `--revoke`. None gives a person or bot more: the removal deletes a folder of theirs and grants nothing.
 
 How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechecked against `ed2ceb63`, where the properties and generators were brought up to the code (21-26 and the rows below are new) and property 21 failed on the code for the escape card and for Read/Edit outside the bot's folders. `6fc50729` (on main) bounded the bot owner's answer by the bot's grant folders, which fixed the Read/Edit cases; `60d2031e` refuses the bot owner its bot's escape card, which fixed the last one.
@@ -79,6 +81,9 @@ How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechec
 | | `cmd_access` (C2), the access cap in `resolve_bot`, `check_env_key`, the `--trusted` free-shell rule, `forget`, `cmd_person --revoke/--unrevoke` | 12, 23-26 |
 | | `cmd_job`, `cmd_helper`, `own_row`, `job_grants`, `helpers_in`, `with_jobs`, the doors cap in `resolve_bot`, `may(..., once)`, `bot_row(..., once)` | 11, 23, 27, 28 |
 | serve/host/src/cards/edge.rs | `of`, `extras`, `apply` (the owner's edge buttons; every card they go on is the owner's: `edge_extras` requires approver owner) | `cards::edge_tests` (examples) |
+| | `Edge::Door` (`run_door`): the job holding the door and No, never once or always; the job is ticked before the run hears yes, and a tick kith-auth refuses is a no | `cards::edge_tests` (examples) |
+| kernel/bin/kith-auth | `door_state`, `cmd_door`, `jobs --door` (read-only: a door starts only for a person, not held, whose tick names the door's digest) | `kernel/tests/kith-guest-door-check` (examples) |
+| kernel/lib/kith_door.py, kernel/bin/kith-permit `run_door` | the door's start (the folder in the person's slice) and its box (writes, reads, network) | `kernel/tests/kith-guest-door-check` (examples; the box part on macOS only); the revoke side in the revoke-access skill |
 
 ## Run
 

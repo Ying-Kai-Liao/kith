@@ -1,0 +1,3 @@
+\* nothing kills a running door when its person is revoked
+NoDoorSweep = TRUE
+GuestDoor = TRUE

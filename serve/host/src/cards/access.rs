@@ -351,6 +351,16 @@ pub(super) fn kept_once(hub: &Hub, card: &Card, why: &str) {
     hub.set_entry(id, &e.data);
 }
 
+/// A door card's yes whose job kith-auth refused to turn on: a door only runs on its job, so the run is told no.
+pub(super) fn not_kept(hub: &Hub, card: &Card, why: &str) {
+    let Some(id) = &card.entry_id else { return };
+    let Some(mut e) = hub.store.entry(id) else { return };
+    let why = why.trim().trim_start_matches("kith-auth:").trim();
+    let why = if why.is_empty() { "kith-auth refused it" } else { why };
+    e.data["outcome"] = format!("Not turned on ({why})").into();
+    hub.set_entry(id, &e.data);
+}
+
 /// `kith-auth access <agent> <person> read|write|domain <target>`.
 async fn write_always(card: &Card) -> Result<(), String> {
     let (mode, target) = parts(&card.resource).ok_or("not an access card")?;

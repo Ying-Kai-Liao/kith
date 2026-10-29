@@ -1,6 +1,7 @@
 //! The edge asks of a shared agent's run that the owner can keep (guest workbench 1.4): a host the sandbox asked to
-//! reach, and a helper the run asked for (kith-permit's `ask_helper`). The owner's card adds "Always for <person>", which
-//! keeps that one thing, and, when a job of the agent holds it, the job: "Turn on <job>" with every piece listed, or
+//! reach, a helper the run asked for (kith-permit's `ask_helper`), and a door it asked to run (`run_door`, step 2). The
+//! owner's card adds "Always for <person>", which keeps that one thing (never for a door: a door is only ever granted by
+//! its job, which its start checks under the auth lock), and, when a job of the agent holds it, the job: "Turn on <job>" with every piece listed, or
 //! "Keep <job> on" when a package update added the piece to a job already on. Nothing turns a whole job on silently,
 //! and a path never names a job. What the card offered is kept on its entry (`edge`), so the answer grants what was shown.
 
@@ -9,6 +10,9 @@ use serde_json::{Value, json};
 
 /// kith-permit's helper tool: its card waits in kith-permit, and a yes is written before the run hears it.
 pub const HELPER_TOOL: &str = "mcp__kithpermit__ask_helper";
+/// kith-permit's door tool: like a helper's, its card waits in kith-permit, and the job is written before the run hears
+/// the yes. Its card has no "Just this once".
+pub const DOOR_TOOL: &str = "mcp__kithpermit__run_door";
 /// Claude Code's sandbox network ask. In a bot chat it has no tool name and is titled with the host.
 const NETWORK_TOOL: &str = "SandboxNetworkAccess";
 pub const ALWAYS: &str = "kith-always";
@@ -21,6 +25,7 @@ pub type Extra = (String, Vec<Value>, Value);
 pub enum Edge {
     Domain(String),
     Helper(String),
+    Door(String),
 }
 
 impl Edge {
@@ -28,12 +33,13 @@ impl Edge {
         match self {
             Self::Domain(_) => "domains",
             Self::Helper(_) => "helpers",
+            Self::Door(_) => "doors",
         }
     }
 
     fn value(&self) -> &str {
         match self {
-            Self::Domain(v) | Self::Helper(v) => v,
+            Self::Domain(v) | Self::Helper(v) | Self::Door(v) => v,
         }
     }
 }
@@ -45,12 +51,12 @@ pub fn of(tool: &str, input: &Value, resource: &str) -> Option<Edge> {
         return access::valid_domain(host).then(|| Edge::Domain(host.to_owned()));
     }
     if tool == HELPER_TOOL {
-        let name = input["agent"].as_str()?;
-        let ok = !name.is_empty()
-            && name.len() <= 64
-            && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-            && name.starts_with(|c: char| c.is_ascii_alphanumeric());
-        return ok.then(|| Edge::Helper(name.to_owned()));
+        let name = input["agent"].as_str().filter(|n| plain_name(n))?;
+        return Some(Edge::Helper(name.to_owned()));
+    }
+    if tool == DOOR_TOOL {
+        let name = input["door"].as_str().filter(|n| plain_name(n))?;
+        return Some(Edge::Door(name.to_owned()));
     }
     let obj = input.as_object()?;
     let host = obj.get("host")?.as_str()?;
@@ -59,20 +65,37 @@ pub fn of(tool: &str, input: &Value, resource: &str) -> Option<Edge> {
         .then(|| Edge::Domain(host.to_owned()))
 }
 
+/// An agent, job or door name (kith_jobs' AGENT rule): letters, digits, `.`, `_` and `-`, no `:` or `@`.
+fn plain_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && name.starts_with(|c: char| c.is_ascii_alphanumeric())
+}
+
+/// Whether a job's piece is the edge: a door piece is `name@digest`, and the card names the door.
+fn is_piece(edge: &Edge, piece: &Value) -> bool {
+    let Some(p) = piece.as_str() else { return false };
+    match edge {
+        Edge::Door(name) => p.split('@').next() == Some(name.as_str()),
+        _ => p == edge.value(),
+    }
+}
+
 /// What the owner's card adds for an edge: a line of text, the options to put before its No, and what they grant
-/// (kept on the entry as `edge`). `always`: offer "Always for <person>" (an escape card has its own).
+/// (kept on the entry as `edge`). `always`: offer "Always for <person>" (an escape card has its own; a door has none).
 pub async fn extras(person: &str, name: &str, agent: &str, edge: &Edge, always: bool) -> Extra {
     let job = job_of(agent, person, edge).await;
     let mut text = String::new();
     let mut options = Vec::new();
-    if always {
+    if always && !matches!(edge, Edge::Door(_)) {
         options.push(json!({"optionId": ALWAYS, "name": format!("Always for {name}"), "kind": "allow_always"}));
     }
     let mut kept = json!({"kind": edge.kind(), "value": edge.value()});
     if let Some(j) = job {
         let label = j["label"].as_str().unwrap_or_default();
         let ticked = j["ticked"].as_bool() == Some(true);
-        let added = j["added"][edge.kind()].as_array().is_some_and(|a| a.iter().any(|v| v == edge.value()));
+        let added = j["added"][edge.kind()].as_array().is_some_and(|a| a.iter().any(|v| is_piece(edge, v)));
         let pieces = json!({"domains": j["domains"], "helpers": j["helpers"], "doors": j["doors"]});
         if !ticked {
             text = format!("Part of {label}, not on for {name}.");
@@ -140,12 +163,13 @@ fn listed(pieces: &Value) -> String {
     names("domains").chain(names("helpers")).chain(doors).collect::<Vec<_>>().join(", ")
 }
 
-/// `kith-auth jobs <agent> --person <p> --domain|--helper <v> --json`: the job that holds the edge, as this person has it.
+/// `kith-auth jobs <agent> --person <p> --domain|--helper|--door <v> --json`: the job that holds the edge, as this person has it.
 async fn job_of(agent: &str, person: &str, edge: &Edge) -> Option<Value> {
     let bin = crate::remote::account::bin().await?;
     let flag = match edge {
         Edge::Domain(_) => "--domain",
         Edge::Helper(_) => "--helper",
+        Edge::Door(_) => "--door",
     };
     let out =
         crate::channels::hq::output(&bin, &["jobs", agent, "--person", person, flag, edge.value(), "--json"]).await?;

@@ -321,14 +321,15 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
         access::entry_view(card, &name.unwrap_or_else(|| card.person.clone()))
     } else {
         let (yes, no) = if extra.is_some() { ("Just this once", "No") } else { ("Allow once", "Deny") };
-        (
-            title,
-            crate::agent::acp::truncate(&card.shown, 6000),
-            json!([
-                {"optionId": "allow", "name": yes, "kind": "allow_once"},
-                {"optionId": "deny", "name": no, "kind": "reject_once"},
-            ]),
-        )
+        let mut options = vec![
+            json!({"optionId": "allow", "name": yes, "kind": "allow_once"}),
+            json!({"optionId": "deny", "name": no, "kind": "reject_once"}),
+        ];
+        // A door starts only on its job, ticked: a yes to this one run would be refused at its start.
+        if card.tool == edge::DOOR_TOOL {
+            options.remove(0);
+        }
+        (title, crate::agent::acp::truncate(&card.shown, 6000), Value::Array(options))
     };
     let kept = extra.map(|(text, more, kept)| {
         if !text.is_empty() {
@@ -442,13 +443,19 @@ pub fn answer(hub: &Arc<Hub>, entry_id: &str, option_id: Option<&str>, by: &str)
     let kept = entry.data.get("edge").filter(|e| e.is_object() && card.approver == "owner").cloned();
     if let Some(kept) = kept {
         let (hub, option) = (hub.clone(), option_id.map(str::to_owned));
-        let helper = card.tool == edge::HELPER_TOOL && card.source == "run";
+        let door = card.tool == edge::DOOR_TOOL;
+        let helper = (card.tool == edge::HELPER_TOOL || door) && card.source == "run";
         let card = card.clone();
-        // What the answer keeps is written first; a helper's run is told only then, since kith ask checks it at launch.
+        // What the answer keeps is written first; a helper's or door's run is told only then, since kith ask checks it
+        // at launch and a door at its start.
         tokio::spawn(async move {
+            let mut allow = allow;
             if let Err(why) = edge::apply(&card, &kept, option.as_deref(), allow).await {
                 tracing::warn!(card = card.id, why, "kith-auth refused what an edge card keeps");
-                if allow && matches!(option.as_deref(), Some(edge::ALWAYS | edge::JOB)) {
+                if allow && door {
+                    allow = false;
+                    access::not_kept(&hub, &card, &why);
+                } else if allow && matches!(option.as_deref(), Some(edge::ALWAYS | edge::JOB)) {
                     if helper {
                         let _ = edge::once_instead(&card).await;
                     }

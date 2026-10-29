@@ -1,5 +1,6 @@
 //! The owner's cards for a guest's edge asks (guest workbench 1.4): a host the sandbox asked for and a helper, each with
-//! "Always for <person>" and the job that holds it, written to the real kith-auth before the run hears the yes.
+//! "Always for <person>" and the job that holds it, written to the real kith-auth before the run hears the yes; and a
+//! door (step 2), whose only yes is its job.
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -141,6 +142,62 @@ async fn a_helpers_yes_is_written_before_the_run_hears_it() {
     assert!(r.auth_ok(&["may", "sam", "money", "--via", "house"]), "always lands in the row's helpers");
 }
 
+const DOOR_CAPS: &str = "doors:\n  - name: render\n    npm: [hyperframes@0.4.1]\n    lockfile: render.lock.json\n    tools: [node]\n    bin: hyperframes/bin/hyperframes.mjs\n    writes: [renders]\njobs:\n  - name: make-videos\n    label: Make videos\n    domains: [github.com]\n    doors: [render]\n";
+
+fn door_caps(r: &Rig, text: &str) {
+    std::fs::write(r.dir.join("home/agents/house/render.lock.json"), "{\"lockfileVersion\":3}").unwrap();
+    caps(r, text);
+}
+
+#[tokio::test]
+async fn a_door_card_offers_only_its_job_and_the_job_is_on_before_the_run_hears_yes() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    door_caps(&r, DOOR_CAPS);
+    window(&r.hub, 20);
+    let input = json!({"door": "render", "path": "/x/people/sam/proj"});
+
+    let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::DOOR_TOOL, input.clone());
+    let card = shown(&r.hub).await;
+    assert_eq!(card.approver, "owner");
+    let data = options(&r, &card);
+    assert_eq!(ids(&data), [edge::JOB, "deny"], "no once: a door starts only on its ticked job; no always");
+    assert_eq!(data["options"][0]["name"], "Turn on Make videos: github.com, render");
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), "owner").unwrap();
+    assert!(call.await.unwrap().allow);
+    assert_eq!(job(&r)["ticked"], true, "written before the run heard yes");
+    assert!(job(&r)["granted"]["doors"][0].as_str().unwrap().starts_with("render@"));
+
+    // A job that is gone by the answer: the run is told no, and the card says why.
+    caps(&r, "doors: []\n");
+    assert!(r.auth_ok(&["job", "house", "sam", "make-videos", "--rm"]));
+    door_caps(&r, DOOR_CAPS);
+    let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::DOOR_TOOL, input);
+    let card = shown(&r.hub).await;
+    caps(&r, "doors: []\n");
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), "owner").unwrap();
+    assert!(!call.await.unwrap().allow, "never a yes the start would refuse");
+    let entry = || options(&r, &card);
+    until(|| entry()["outcome"].is_string()).await;
+    assert!(entry()["outcome"].as_str().unwrap().starts_with("Not turned on ("), "{}", entry());
+}
+
+#[tokio::test]
+async fn a_door_no_job_holds_can_only_be_refused() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    door_caps(&r, &DOOR_CAPS.replace("    doors: [render]\n", ""));
+    window(&r.hub, 20);
+    let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::DOOR_TOOL, json!({"door": "render", "path": "/x"}));
+    let card = shown(&r.hub).await;
+    assert_eq!(ids(&options(&r, &card)), ["deny"]);
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").ok();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), "owner").unwrap();
+    assert!(!call.await.unwrap().allow);
+}
+
 /// A member's app chat asks the owner for a host as the bot actor does: the adapter's sandbox ask is titled with the
 /// host and has no tool name; the entry and the `acp` card carry what `on_permission` gives them.
 async fn app_card(r: &Rig, chat: &str, host: &str) -> (Card, Value) {
@@ -237,4 +294,6 @@ fn only_a_plain_host_or_a_named_helper_is_an_edge() {
     assert_eq!(edge::of(access::TOOL, &json!({}), "access:read:/x"), None, "a path names no job");
     assert_eq!(edge::of(edge::HELPER_TOOL, &json!({"agent": "money"}), ""), Some(edge::Edge::Helper("money".into())));
     assert_eq!(edge::of(edge::HELPER_TOOL, &json!({"agent": "a:b"}), ""), None);
+    assert_eq!(edge::of(edge::DOOR_TOOL, &json!({"door": "render"}), ""), Some(edge::Edge::Door("render".into())));
+    assert_eq!(edge::of(edge::DOOR_TOOL, &json!({"door": "render@abc"}), ""), None, "a card names the door, not a digest");
 }

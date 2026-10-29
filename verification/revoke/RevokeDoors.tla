@@ -18,6 +18,10 @@
 (* each Mac remembers the version it last applied.                         *)
 (* A check and the act it guards are separate actions (start / helper     *)
 (* re-check / deliver re-check) so a revoke can land between them.         *)
+(* GUEST DOOR (round 3, guest workbench): a turn of P may run a declared   *)
+(*   door (video's render) outside its sandbox, once, on m1 here. Its      *)
+(*   start is one step under kith-auth's lock (D2: allowed, not held =     *)
+(*   in sync); the host's sweep kills it once P may no longer run it (D1). *)
 (***************************************************************************)
 EXTENDS Naturals
 
@@ -34,7 +38,14 @@ CONSTANTS
     StarIgnoresRevoke,  \* a `*` row answers before the revoked flag is looked at
     NoDeliverRecheck,   \* a turn's delivery re-checks nothing (no may(), no relay, no sync)
     RevokeDeletesRows,  \* revoke deletes P's rows on the Mac it lands on; undo only clears the flag
-    BotIgnoresOwner     \* B is allowed on its own row alone, without its owner's live may()
+    BotIgnoresOwner,    \* B is allowed on its own row alone, without its owner's live may()
+    \* ---- the guest door ----
+    GuestDoor,          \* TRUE = P's guest door is in the model. Nothing else reads gdoor, so the rows of the other
+                        \*   properties leave it out (FALSE in base.consts) and stay small; the door rows turn it on
+    \* ---- broken guest doors (FALSE in the design) ----
+    DoorNoHold,         \* the door start reads may() only, not whether the Mac is in sync (GuestDoor.tla "nohold")
+    DoorSplit,          \* the door checks, then claims and starts in a later step (GuestDoor.tla "split")
+    NoDoorSweep         \* nothing kills a running door when its person is revoked
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -46,10 +57,14 @@ Doors   == {"none", "app", "bridge"}
 Status  == {"idle", "queued", "held", "running", "helping", "delivered", "aborted"}
 Waiting == {"idle", "queued", "held"}
 Live    == {"running", "helping"}
+\* P's guest door on a Mac: idle; checked (DoorSplit only: access read, no claim yet); running (claimed, so the
+\* sweep sees it); killed by the sweep; done (it ended by itself).
+GDoor   == {"idle", "checked", "running", "killed", "done"}
 
 Rows0  == [m \in Macs |-> IF m = "m1" THEN {"hand", "star"} ELSE {"hand", "host"}]
 BotRow == [m \in Macs |-> TRUE]
 BotMacs == {"m2"}   \* Macs B sends to (bound)
+DoorMacs == IF GuestDoor THEN {"m1"} ELSE {}   \* Macs P runs a guest door on (bound; m2 stays idle)
 
 VARIABLES
     rows,          \* rows[m]: P's membership rows in m's auth.json
@@ -62,9 +77,10 @@ VARIABLES
     revokes,       \* 0..1
     undos,         \* 0..1
     turn,          \* turn[m][w] \in Status
-    door           \* door[m]: the door of P's slot on m (B always uses the cloud bot door)
+    door,          \* door[m]: the door of P's slot on m (B always uses the cloud bot door)
+    gdoor          \* gdoor[m] \in GDoor: P's guest door on m
 
-vars == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door>>
+vars == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor>>
 auth == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos>>
 
 (* ---- access ---- *)
@@ -110,6 +126,7 @@ Init ==
     /\ undos = 0
     /\ turn = [m \in Macs |-> [w \in Who |-> "idle"]]
     /\ door = [m \in Macs |-> "none"]
+    /\ gdoor = [m \in Macs |-> "idle"]
 
 (* ---- owner ---- *)
 \* From the phone app: the cloud record first; Macs learn by cloud delivery.
@@ -118,7 +135,7 @@ AppRevoke ==
     /\ revokes' = 1
     /\ cloudRevoked' = TRUE
     /\ cloudVer' = cloudVer + 1
-    /\ UNCHANGED <<rows, revoked, ver, outbox, net, undos, turn, door>>
+    /\ UNCHANGED <<rows, revoked, ver, outbox, net, undos, turn, door, gdoor>>
 
 \* The app shows the cloud's record; undo is offered when it says revoked.
 AppUndo ==
@@ -128,7 +145,7 @@ AppUndo ==
     /\ undos' = 1
     /\ cloudRevoked' = FALSE
     /\ cloudVer' = cloudVer + 1
-    /\ UNCHANGED <<rows, revoked, ver, outbox, net, revokes, turn, door>>
+    /\ UNCHANGED <<rows, revoked, ver, outbox, net, revokes, turn, door, gdoor>>
 
 \* On m's terminal: local flag at once (rows untouched), cloud now or later.
 CliRevoke(m) ==
@@ -139,7 +156,7 @@ CliRevoke(m) ==
     /\ revoked' = [revoked EXCEPT ![m] = TRUE]
     /\ rows' = IF RevokeDeletesRows THEN [rows EXCEPT ![m] = {}] ELSE rows
     /\ Publish(m, TRUE)
-    /\ UNCHANGED <<net, undos, turn, door>>
+    /\ UNCHANGED <<net, undos, turn, door, gdoor>>
 
 CliUndo(m) ==
     /\ OwnerCli
@@ -150,7 +167,7 @@ CliUndo(m) ==
     /\ undos' = 1
     /\ revoked' = [revoked EXCEPT ![m] = FALSE]
     /\ Publish(m, FALSE)
-    /\ UNCHANGED <<rows, net, revokes, turn, door>>
+    /\ UNCHANGED <<rows, net, revokes, turn, door, gdoor>>
 
 (* ---- cloud and network ---- *)
 \* An online Mac with an outbox pushes its flag; the cloud takes it as a new version (last writer wins).
@@ -161,7 +178,7 @@ Push(m) ==
     /\ cloudVer' = cloudVer + 1
     /\ ver' = [ver EXCEPT ![m] = cloudVer + 1]
     /\ outbox' = [outbox EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<rows, revoked, net, revokes, undos, turn, door>>
+    /\ UNCHANGED <<rows, revoked, net, revokes, undos, turn, door, gdoor>>
 
 \* The cloud delivers its latest record to an online Mac that has nothing to push; kith-auth applies it.
 CloudDeliver(m) ==
@@ -171,12 +188,12 @@ CloudDeliver(m) ==
     /\ revoked' = [revoked EXCEPT ![m] = cloudRevoked]
     /\ ver' = [ver EXCEPT ![m] = cloudVer]
     /\ rows' = IF RevokeDeletesRows /\ cloudRevoked THEN [rows EXCEPT ![m] = {}] ELSE rows
-    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door>>
+    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor>>
 
 \* Internet lost, Kith cloud lost (or unreachable from m), or back.
 SetNet(m, n) ==
     /\ net' = [net EXCEPT ![m] = n]
-    /\ UNCHANGED <<rows, revoked, ver, outbox, cloudRevoked, cloudVer, revokes, undos, turn, door>>
+    /\ UNCHANGED <<rows, revoked, ver, outbox, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor>>
 
 (* ---- doors ---- *)
 \* APP door: P's app message arrives through the relay. Relay check, Mac's may() and the start are one step.
@@ -187,7 +204,7 @@ AppStart(m) ==
     /\ MayP(m)
     /\ turn' = [turn EXCEPT ![m]["P"] = "running"]
     /\ door' = [door EXCEPT ![m] = "app"]
-    /\ UNCHANGED auth
+    /\ UNCHANGED <<auth, gdoor>>
 
 \* Cloud bot guest B: reaches the Mac only through the cloud, like the app door.
 \* Bound: B sends only to m2 (its row is on both Macs; the m1 slot stays idle) to keep runs short.
@@ -198,7 +215,7 @@ BotStart(m) ==
     /\ RelayOK
     /\ MayB(m)
     /\ turn' = [turn EXCEPT ![m]["B"] = "running"]
-    /\ UNCHANGED <<auth, door>>
+    /\ UNCHANGED <<auth, door, gdoor>>
 
 \* P writes on Telegram while m is offline: Telegram queues it.
 TgQueue(m) ==
@@ -206,7 +223,7 @@ TgQueue(m) ==
     /\ net[m] = "offline"
     /\ turn' = [turn EXCEPT ![m]["P"] = "queued"]
     /\ door' = [door EXCEPT ![m] = "bridge"]
-    /\ UNCHANGED auth
+    /\ UNCHANGED <<auth, gdoor>>
 
 \* BRIDGE door: a message reaches the bridge (P writes now while m has internet, or Telegram hands over the
 \* queued one on reconnect, or the bridge retries a held one). One step: out of sync -> hold it
@@ -220,7 +237,7 @@ BridgeRecv(m) ==
                 ELSE "idle"
        IN /\ turn' = [turn EXCEPT ![m]["P"] = s]
           /\ door' = [door EXCEPT ![m] = IF s = "idle" THEN "none" ELSE "bridge"]
-    /\ UNCHANGED auth
+    /\ UNCHANGED <<auth, gdoor>>
 
 (* ---- a running turn ---- *)
 \* Helper spawn re-checks may() (I2) and its door's gate. A refused spawn changes nothing.
@@ -229,7 +246,7 @@ Helper(m, w) ==
     /\ May(m, w)
     /\ HelperGate(m, w)
     /\ turn' = [turn EXCEPT ![m][w] = "helping"]
-    /\ UNCHANGED <<auth, door>>
+    /\ UNCHANGED <<auth, door, gdoor>>
 
 \* Delivery per door. App/bot: the reply goes through the relay, which re-checks the cloud record; the Mac
 \* re-checks may(). Bridge: needs internet; holds the reply until in sync, then re-checks may().
@@ -244,14 +261,50 @@ Deliver(m, w) ==
        ELSE /\ net[m] = "online"
             /\ turn' = [turn EXCEPT ![m][w] =
                            IF NoDeliverRecheck \/ (May(m, w) /\ RelayOK) THEN "delivered" ELSE "aborted"]
-    /\ UNCHANGED <<auth, door>>
+    /\ UNCHANGED <<auth, door, gdoor>>
 
 \* Optional: the door stops a live turn once the revoke reached m.
 Stop(m, w) ==
     /\ turn[m][w] \in Live
     /\ revoked[m]
     /\ turn' = [turn EXCEPT ![m][w] = "aborted"]
-    /\ UNCHANGED <<auth, door>>
+    /\ UNCHANGED <<auth, door, gdoor>>
+
+(* ---- guest door (kernel/lib/kith_door.py, kith-auth door) ---- *)
+\* A live turn of P asks for the door (the owner's job card, if any, is answered before this). kith_door.run takes
+\* kith-auth's lock, reads `kith-auth door` (may(), not held, the job ticked), writes the claim and starts the box:
+\* one step. Any door P's turn came through: the run is already going, the door is a tool call inside it.
+DoorGate(m) == MayP(m) /\ (DoorNoHold \/ InSync(m))
+DoorCheck(m) ==
+    /\ DoorSplit
+    /\ m \in DoorMacs
+    /\ gdoor[m] = "idle"
+    /\ turn[m]["P"] \in Live
+    /\ DoorGate(m)
+    /\ gdoor' = [gdoor EXCEPT ![m] = "checked"]
+    /\ UNCHANGED <<auth, turn, door>>
+DoorStart(m) ==
+    /\ IF DoorSplit
+       THEN gdoor[m] = "checked"
+       ELSE /\ m \in DoorMacs
+            /\ gdoor[m] = "idle"
+            /\ turn[m]["P"] \in Live
+            /\ DoorGate(m)
+    /\ gdoor' = [gdoor EXCEPT ![m] = "running"]
+    /\ UNCHANGED <<auth, turn, door>>
+\* The box ends by itself (render done or failed).
+DoorEnd(m) ==
+    /\ gdoor[m] = "running"
+    /\ gdoor' = [gdoor EXCEPT ![m] = "done"]
+    /\ UNCHANGED <<auth, turn, door>>
+\* The sweep (cut_off on a revoke, the bot-guest sweep, the host's 60 s loop): under the lock, a claimed door whose
+\* person may no longer run it is killed (held alone doesn't end one). A checked, unclaimed door is not seen.
+DoorSweep(m) ==
+    /\ ~NoDoorSweep
+    /\ gdoor[m] = "running"
+    /\ ~MayP(m)
+    /\ gdoor' = [gdoor EXCEPT ![m] = "killed"]
+    /\ UNCHANGED <<auth, turn, door>>
 
 \* Host restart (round 1's Restart) is left out here: it only aborts live turns, which no property depends on.
 
@@ -268,12 +321,17 @@ Next ==
           \/ BotStart(m)
           \/ TgQueue(m)
           \/ BridgeRecv(m)
+          \/ DoorCheck(m)
+          \/ DoorStart(m)
+          \/ DoorEnd(m)
+          \/ DoorSweep(m)
     \/ \E m \in Macs, w \in Who :
           \/ Helper(m, w)
           \/ Deliver(m, w)
           \/ Stop(m, w)
 
-Spec == Init /\ [][Next]_vars
+\* The sweep loop runs every 60 s: weak fairness (only DoorD1, a liveness property, depends on it).
+Spec == Init /\ [][Next]_vars /\ \A m \in Macs : WF_vars(DoorSweep(m))
 
 (* ---- properties ---- *)
 TypeOK ==
@@ -288,6 +346,7 @@ TypeOK ==
     /\ undos \in 0..1
     /\ turn \in [Macs -> [Who -> Status]]
     /\ door \in [Macs -> Doors]
+    /\ gdoor \in [Macs -> GDoor]
     /\ \A m \in Macs : ver[m] <= cloudVer
 
 \* Lemma the fix rests on: a Mac with nothing to push that has the cloud's latest version agrees with the cloud.
@@ -318,6 +377,13 @@ R6cDown == [][\A m \in Macs : (StartOf(m, "P") /\ door'[m] = "bridge" /\ net[m] 
 R6cWake == [][\A m \in Macs : (turn[m]["P"] = "queued" /\ turn'[m]["P"] = "running" /\ net[m] = "online") => ~cloudRevoked]_vars
 \* B is never allowed where P is not.
 BotBelowOwner == \A m \in Macs : MayB(m) => MayP(m)
+DoorStartOf(m) == gdoor[m] # "running" /\ gdoor'[m] = "running"
+\* DoorD2 (GuestDoor.tla D2): once the revoke reached a Mac, no guest door of P starts there ...
+DoorD2 == [][\A m \in Macs : DoorStartOf(m) => ~revoked[m]]_vars
+\* ... and once the cloud has it, none starts on any Mac (the held check: a Mac behind the cloud waits).
+DoorD2c == [][\A m \in Macs : DoorStartOf(m) => ~cloudRevoked]_vars
+\* DoorD1 (GuestDoor.tla D1): a door running for a revoked P is stopped (or the revoke is undone).
+DoorD1 == \A m \in Macs : (gdoor[m] = "running" /\ revoked[m]) ~> (gdoor[m] # "running" \/ ~revoked[m])
 
 (* ---- probes: each must FAIL on the design (a reachability witness), unless noted ---- *)
 \* The bridge does serve P end to end when in sync and nothing is revoked.
@@ -333,6 +399,10 @@ NeverWakeHold == [][\A m \in Macs : ~(turn[m]["P"] = "queued" /\ turn'[m]["P"] =
 NeverHeldServed == [][\A m \in Macs : ~(turn[m]["P"] = "held" /\ turn'[m]["P"] = "running" /\ cloudVer = 2)]_vars
 \* The cost: the bridge never holds P's message while nothing is revoked. Must FAIL (counterexample = the cost).
 NoBridgeRefusal == revokes = 0 => \A m \in Macs : turn[m]["P"] # "held"
+\* A member's door does run ...
+NeverDoorRuns == \A m \in Macs : gdoor[m] # "running"
+\* ... and the sweep does stop one (P revoked while the door ran).
+NeverDoorKilled == \A m \in Macs : gdoor[m] # "killed"
 \* The bridge never starts P's turn while m is cloudDown and nothing is revoked.
 \* PASSES on the design (in-sync needs the cloud link: the cost, proved); FAILS on BridgeNoSync (reachable).
 NeverBridgeInCloudDown ==

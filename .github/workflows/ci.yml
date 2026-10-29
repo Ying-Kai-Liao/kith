@@ -231,6 +231,8 @@ jobs:
         run: kernel/tests/kith-guest-helper-check
       - name: Guest jobs check
         run: kernel/tests/kith-guest-jobs-check
+      - name: Guest door check
+        run: kernel/tests/kith-guest-door-check
       - name: Load check
         run: kernel/tests/kith-load-check
 

@@ -9,6 +9,7 @@ mod cards;
 mod channels;
 mod chat;
 mod compat;
+mod doors;
 mod environment;
 mod hqmem;
 mod hub;

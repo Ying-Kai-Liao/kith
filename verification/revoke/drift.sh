@@ -27,6 +27,8 @@ FILES=(
   serve/host/src/remote/members.rs        # apply_revoked, end_access (keeps a revoked person's handle and bots)
   serve/cloud/src/routes/invites.ts       # hostRevokePerson, hostUnrevokePerson, revokedOf, acceptInvite refusal
   serve/cloud/src/routes/host.ts          # host state: revoked
+  kernel/lib/kith_door.py                 # the guest door: run (lock, kith-auth door, claim, start = DoorStart), sweep (DoorSweep)
+  serve/host/src/doors.rs                 # the host's door sweep: on cut_off, the bot-guest sweep and every 60 s (DoorSweep)
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done
