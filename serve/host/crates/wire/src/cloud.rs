@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "3508398770f9ec4df5154235c1c9ff6db1e22c3faa7f17261fa87878a6b6a113";
+pub const CONTRACT_SHA256: &str = "0c5a1e624112809e89829ddfc89c784ff5e09aa201a157f1aa7cf54b05814888";
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -464,7 +464,7 @@ pub struct BotDevice {
     pub created_at: i64,
 }
 
-/// GET /v1/host/state. memberships, botDevices and revoked are absent from a cloud that predates them: then the host leaves what it knows alone.
+/// GET /v1/host/state. memberships, botDevices, revoked, peerRequests and peers are absent from a cloud that predates them: then the host leaves what it knows alone.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HostState {
@@ -478,6 +478,64 @@ pub struct HostState {
     pub bot_devices: Option<Vec<BotDevice>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revoked: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_requests: Option<Vec<HostPeerRequest>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peers: Option<Vec<HostPeer>>,
+}
+
+/// Another computer of this computer's account, which it may ask to pair with (Mac link).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerComputer {
+    pub computer_id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    pub sign_key: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerComputerList {
+    pub computers: Vec<PeerComputer>,
+}
+
+/// The asking computer's device key for the link and its SAS commit (base64url, 32 bytes each).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatePeerRequest {
+    pub computer_id: String,
+    pub device_key: String,
+    pub commit: String,
+}
+
+/// A pending pairing request from another computer of the account, as the answering host sees it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HostPeerRequest {
+    pub request_id: String,
+    pub computer_id: String,
+    pub name: String,
+    pub device_key: String,
+    pub commit: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_nonce: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_nonce: Option<String>,
+    pub created_at: i64,
+    pub expires_at: i64,
+}
+
+/// An active pairing this computer is on: fromComputerId asks toComputerId's agents with deviceKey. name is the other computer's.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HostPeer {
+    pub grant_id: String,
+    pub from_computer_id: String,
+    pub to_computer_id: String,
+    pub name: String,
+    pub device_key: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -625,6 +683,26 @@ pub mod path {
     }
     pub fn host_revoke_grant(grant_id: &str) -> String {
         format!("/v1/host/grants/{grant_id}/revoke")
+    }
+    pub const HOST_PEER_COMPUTERS: &str = "/v1/host/peer-computers";
+    pub const HOST_CREATE_PEER_REQUEST: &str = "/v1/host/peer-requests";
+    pub fn host_get_peer_request(request_id: &str) -> String {
+        format!("/v1/host/peer-requests/{request_id}")
+    }
+    pub fn host_reveal_peer_request(request_id: &str) -> String {
+        format!("/v1/host/peer-requests/{request_id}/reveal")
+    }
+    pub fn host_cancel_peer_request(request_id: &str) -> String {
+        format!("/v1/host/peer-requests/{request_id}")
+    }
+    pub fn host_peer_nonce(request_id: &str) -> String {
+        format!("/v1/host/peer-requests/{request_id}/nonce")
+    }
+    pub fn host_peer_decision(request_id: &str) -> String {
+        format!("/v1/host/peer-requests/{request_id}/decision")
+    }
+    pub fn host_revoke_peer(grant_id: &str) -> String {
+        format!("/v1/host/peers/{grant_id}/revoke")
     }
     pub const HOST_UNCLAIM: &str = "/v1/host/unclaim";
     pub const HOST_CREATE_INVITE: &str = "/v1/host/invites";
@@ -810,6 +888,11 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "Membership" => serde_json::from_value::<Membership>(value).map(drop),
         "BotDevice" => serde_json::from_value::<BotDevice>(value).map(drop),
         "HostState" => serde_json::from_value::<HostState>(value).map(drop),
+        "PeerComputer" => serde_json::from_value::<PeerComputer>(value).map(drop),
+        "PeerComputerList" => serde_json::from_value::<PeerComputerList>(value).map(drop),
+        "CreatePeerRequest" => serde_json::from_value::<CreatePeerRequest>(value).map(drop),
+        "HostPeerRequest" => serde_json::from_value::<HostPeerRequest>(value).map(drop),
+        "HostPeer" => serde_json::from_value::<HostPeer>(value).map(drop),
         "ScreenIceRequest" => serde_json::from_value::<ScreenIceRequest>(value).map(drop),
         "IceServer" => serde_json::from_value::<IceServer>(value).map(drop),
         "IceConfig" => serde_json::from_value::<IceConfig>(value).map(drop),

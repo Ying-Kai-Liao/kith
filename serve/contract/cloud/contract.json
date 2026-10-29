@@ -172,15 +172,45 @@
       }
     },
     "HostState": {
-      "doc": "GET /v1/host/state. memberships, botDevices and revoked are absent from a cloud that predates them: then the host leaves what it knows alone.",
+      "doc": "GET /v1/host/state. memberships, botDevices, revoked, peerRequests and peers are absent from a cloud that predates them: then the host leaves what it knows alone.",
       "fields": {
         "owner": "Owner?",
         "grants": "[HostGrant]",
         "requests": "[HostAccessRequest]",
         "memberships": "[Membership]?",
         "botDevices": "[BotDevice]?",
-        "revoked": "[string]?"
+        "revoked": "[string]?",
+        "peerRequests": "[HostPeerRequest]?",
+        "peers": "[HostPeer]?"
       }
+    },
+    "PeerComputer": {
+      "doc": "Another computer of this computer's account, which it may ask to pair with (Mac link).",
+      "fields": { "computerId": "string", "name": "string", "platform": "string?", "signKey": "string" }
+    },
+    "PeerComputerList": { "fields": { "computers": "[PeerComputer]" } },
+    "CreatePeerRequest": {
+      "doc": "The asking computer's device key for the link and its SAS commit (base64url, 32 bytes each).",
+      "fields": { "computerId": "string", "deviceKey": "string", "commit": "string" }
+    },
+    "HostPeerRequest": {
+      "doc": "A pending pairing request from another computer of the account, as the answering host sees it.",
+      "fields": {
+        "requestId": "string",
+        "computerId": "string",
+        "name": "string",
+        "deviceKey": "string",
+        "commit": "string",
+        "hostNonce": "string?",
+        "deviceNonce": "string?",
+        "createdAt": "int",
+        "expiresAt": "int"
+      },
+      "mayOmit": ["hostNonce", "deviceNonce"]
+    },
+    "HostPeer": {
+      "doc": "An active pairing this computer is on: fromComputerId asks toComputerId's agents with deviceKey. name is the other computer's.",
+      "fields": { "grantId": "string", "fromComputerId": "string", "toComputerId": "string", "name": "string", "deviceKey": "string" }
     },
     "ScreenIceRequest": { "fields": { "deviceKey": "string" } },
     "IceServer": {
@@ -251,6 +281,22 @@
       "request": "HostDecision", "response": "Decided"
     },
     "hostRevokeGrant": { "method": "POST", "path": "v1/host/grants/{grantId}/revoke", "auth": "host", "response": "EmptyAnswer" },
+    "hostPeerComputers": { "method": "GET", "path": "v1/host/peer-computers", "auth": "host", "response": "PeerComputerList" },
+    "hostCreatePeerRequest": {
+      "method": "POST", "path": "v1/host/peer-requests", "auth": "host", "request": "CreatePeerRequest", "response": "AccessRequestCreated"
+    },
+    "hostGetPeerRequest": { "method": "GET", "path": "v1/host/peer-requests/{requestId}", "auth": "host", "response": "AccessStatus" },
+    "hostRevealPeerRequest": {
+      "method": "POST", "path": "v1/host/peer-requests/{requestId}/reveal", "auth": "host", "request": "Reveal", "response": "EmptyAnswer"
+    },
+    "hostCancelPeerRequest": { "method": "DELETE", "path": "v1/host/peer-requests/{requestId}", "auth": "host", "response": "EmptyAnswer" },
+    "hostPeerNonce": {
+      "method": "POST", "path": "v1/host/peer-requests/{requestId}/nonce", "auth": "host", "request": "HostNonce", "response": "EmptyAnswer"
+    },
+    "hostPeerDecision": {
+      "method": "POST", "path": "v1/host/peer-requests/{requestId}/decision", "auth": "host", "request": "HostDecision", "response": "Decided"
+    },
+    "hostRevokePeer": { "method": "POST", "path": "v1/host/peers/{grantId}/revoke", "auth": "host", "response": "EmptyAnswer" },
     "hostUnclaim": { "method": "POST", "path": "v1/host/unclaim", "auth": "host", "response": "EmptyAnswer" },
     "hostCreateInvite": { "method": "POST", "path": "v1/host/invites", "auth": "host", "request": "CreateInvite", "response": "OkAnswer" },
     "hostRevokeInvite": { "method": "POST", "path": "v1/host/invites/{inviteId}/revoke", "auth": "host", "response": "OkAnswer" },
