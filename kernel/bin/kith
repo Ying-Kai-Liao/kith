@@ -522,6 +522,9 @@ fi
 # so a card the run parks on answers that ask later (kith-ask). The owner's runs only; a run this one starts never has it.
 ask_id=${KITH_LAUNCH_ASK_ID:-}
 unset KITH_LAUNCH_ASK_ID KITH_ASK_ID HQ_LAUNCH_ASK_ID HQ_ASK_ID
+# Where to note the session this one-shot runs in once it holds it (kith ask --bg, so `kith ask --to` can reach it).
+sid_file=${KITH_LAUNCH_SID_FILE:-}
+unset KITH_LAUNCH_SID_FILE
 [[ $p_owner == 1 && -z ${KITH_PERSON:-} && -n $ask_id ]] && export KITH_ASK_ID=$ask_id
 if [[ $launch -eq 1 ]]; then
   case $harness in claude|codex) ;; *) echo "kith: $agent runs on $harness; --launch-json covers claude and codex only for now" >&2; exit $([[ -n $backup ]] && echo 4 || echo 1) ;; esac
@@ -1045,6 +1048,7 @@ if [[ $# -gt 0 ]]; then
   # A one-shot takes the claim (kind oneshot) for this shell's pid: exec keeps the pid, so the claim is claude's own and
   # ends with it. A held session is waited for a little (KITH_CLAIM_WAIT), then refused.
   [[ -z $csid ]] || python3 "$KITH/bin/kith-sessions" claim "$csid" "$$" ${claim_person:+"$claim_person" "$agent"} || exit 1
+  [[ -z $csid || -z $sid_file ]] || printf '%s\n' "$csid" > "$sid_file"
   # A permission prompt in this run asks for approval through a card (--permission-prompt-tool) instead of being refused.
   # A guest run was given KITH_RUN_TOKEN/KITH_RUN_SOCKET by the host, an owner run KITH_ASK_*, or gets them here: the
   # host binds the token to this pid (exec keeps it) and to the session the run continues, or a --session-id chosen now.
