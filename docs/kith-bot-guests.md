@@ -488,7 +488,7 @@ because the config still holds the token while `state = joining`.
 
 After `welcome`, the channel is the same encrypted frame stream as the apps (`{t:"f",c,d}`; inner messages
 `{id, m, b}` and answers `{id, ok}` or `{id, err:{status, message, code?}}`). `err.code` is new and optional: a stable
-machine string for bots (`heldByOtherWriter`, `rateLimited`, `pending`, `notGranted`, `revoked`, `busy`). Apps ignore it.
+machine string for bots (`heldByOtherWriter`, `rateLimited`, `pending`, `notGranted`, `revoked`, `busy`, `nonceReused`). Apps ignore it.
 
 Principals (`serve/host/src/api/devices.rs`): add `Principal::Bot { bot_id, person }` (state `active`) and
 `Principal::BotPending(bot_id)` (state `joining` or `pending`). `dispatch` routes both to a new `bot_call`, the same
@@ -991,7 +991,7 @@ start), progress and warnings.
 |---|---|
 | 0 | ok |
 | 1 | unexpected error |
-| 2 | usage (bad flags, empty or oversized text) |
+| 2 | usage (bad flags, empty or oversized text, a `clientNonce` already used for a different message: `nonceReused`) |
 | 3 | not joined (no config); run `kith join` |
 | 4 | invite problem: invalid, expired, revoked or already used |
 | 5 | joined but pending: waiting for the owner's allow |

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "5aa41228fc447623c0111891615c570477f9508add3ea88310cf1176d1b02e33";
+pub const CONTRACT_SHA256: &str = "8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -391,6 +391,8 @@ pub enum BotErrorCode {
     HeldByOtherWriter,
     #[serde(rename = "tooMany")]
     TooMany,
+    #[serde(rename = "nonceReused")]
+    NonceReused,
     /// A value this version doesn't know.
     #[default]
     #[serde(rename = "unknown", other)]
@@ -411,6 +413,7 @@ impl BotErrorCode {
             Self::Syncing => "syncing",
             Self::HeldByOtherWriter => "heldByOtherWriter",
             Self::TooMany => "tooMany",
+            Self::NonceReused => "nonceReused",
             Self::Unknown => "unknown",
         }
     }
@@ -1003,6 +1006,8 @@ pub struct SendParams {
     pub folder: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clear: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<i64>,
 }
 
 /// What `thread` takes.
@@ -1330,7 +1335,7 @@ pub mod method {
     pub const KITH_INFO: &str = "kithInfo";
     /// Their own chat with an agent they hold, one per agent: made on first use.
     pub const START_CHAT: &str = "startChat";
-    /// A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member.
+    /// A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10.
     pub const SEND: &str = "send";
     /// A thread's replies (its newest 500); the root is in the main chat.
     pub const THREAD: &str = "thread";
@@ -1436,7 +1441,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::EnumSchema { name: "CitationError", values: &["not_shared"], unknown: "not_shared" },
         crate::check::EnumSchema { name: "ConversationState", values: &["running", "waitingApproval", "queued", "stopped", "idle"], unknown: "running" },
         crate::check::EnumSchema { name: "BotEntryKind", values: &["user", "agent", "notice", "waiting"], unknown: "unknown" },
-        crate::check::EnumSchema { name: "BotErrorCode", values: &["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany"], unknown: "unknown" },
+        crate::check::EnumSchema { name: "BotErrorCode", values: &["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany", "nonceReused"], unknown: "unknown" },
     ],
     types: &[
         crate::check::TypeSchema { name: "Empty", fields: &[], may_omit: &[] },
@@ -1486,7 +1491,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "HelloParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "KithInfoParams", fields: &[("botId", "string"), ("refresh", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "StartChatParams", fields: &[("agent", "string")], may_omit: &[] },
-        crate::check::TypeSchema { name: "SendParams", fields: &[("botId", "string"), ("text", "string"), ("clientNonce", "string?"), ("threadId", "string?"), ("attachments", "[string]?"), ("pasted", "[string]?"), ("newTask", "bool?"), ("via", "MessageVia?"), ("project", "string?"), ("folder", "string?"), ("clear", "bool?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "SendParams", fields: &[("botId", "string"), ("text", "string"), ("clientNonce", "string?"), ("threadId", "string?"), ("attachments", "[string]?"), ("pasted", "[string]?"), ("newTask", "bool?"), ("via", "MessageVia?"), ("project", "string?"), ("folder", "string?"), ("clear", "bool?"), ("budget", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "ThreadParams", fields: &[("botId", "string"), ("rootId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "HistoryParams", fields: &[("botId", "string"), ("beforeSeq", "int?"), ("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "NewSessionParams", fields: &[("botId", "string")], may_omit: &[] },

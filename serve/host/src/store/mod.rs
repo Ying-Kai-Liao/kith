@@ -8,6 +8,7 @@
 mod botguests;
 mod bots;
 mod cards;
+mod conversations;
 mod devices;
 mod entries;
 mod memory;
@@ -18,10 +19,13 @@ mod threads;
 
 pub use botguests::{BotConversation, BotGuest, BotInvite, BotState};
 pub use cards::{Answered, Card, CardState, NewCard, Opened};
+#[cfg(test)]
+pub use conversations::RoomQueue;
+pub use conversations::{ConvState, Conversation};
 pub use devices::{Device, DeviceSource, Scope};
 #[cfg(test)]
 pub use model::Permission;
-pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, lane_key};
+pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, is_person_message, lane_key};
 pub use people::{Invite, Membership, PersonRow};
 
 use crate::LockExt;

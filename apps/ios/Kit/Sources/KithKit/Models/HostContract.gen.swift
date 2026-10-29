@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "5aa41228fc447623c0111891615c570477f9508add3ea88310cf1176d1b02e33"
+    public static let sha256 = "8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59"
 }
 
 extension HostContract {
@@ -202,6 +202,7 @@ extension HostContract {
         case syncing
         case heldByOtherWriter
         case tooMany
+        case nonceReused
         /// A value this version doesn't know.
         case unknown
 
@@ -1016,8 +1017,9 @@ extension HostContract {
         public var project: String?
         public var folder: String?
         public var clear: Bool?
+        public var budget: Int64?
 
-        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil) {
+        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil) {
             self.botId = botId
             self.text = text
             self.clientNonce = clientNonce
@@ -1029,6 +1031,7 @@ extension HostContract {
             self.project = project
             self.folder = folder
             self.clear = clear
+            self.budget = budget
         }
     }
 

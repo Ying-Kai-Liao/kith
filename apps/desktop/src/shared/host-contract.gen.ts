@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '5aa41228fc447623c0111891615c570477f9508add3ea88310cf1176d1b02e33'
+export const CONTRACT_SHA256 = '8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -85,7 +85,7 @@ export type BotEntryKind = (typeof BotEntryKindValues)[number]
 export const decodeBotEntryKind = (raw: unknown): BotEntryKind | 'unknown' => known(BotEntryKindValues, raw, 'unknown')
 
 /** The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status. */
-export const BotErrorCodeValues = ['pending', 'notGranted', 'rateLimited', 'busy', 'notFound', 'badRequest', 'tooLong', 'notSupported', 'syncing', 'heldByOtherWriter', 'tooMany'] as const
+export const BotErrorCodeValues = ['pending', 'notGranted', 'rateLimited', 'busy', 'notFound', 'badRequest', 'tooLong', 'notSupported', 'syncing', 'heldByOtherWriter', 'tooMany', 'nonceReused'] as const
 export type BotErrorCode = (typeof BotErrorCodeValues)[number]
 /** How a consumer reads a BotErrorCode word: one this version doesn't know is 'unknown'. */
 export const decodeBotErrorCode = (raw: unknown): BotErrorCode | 'unknown' => known(BotErrorCodeValues, raw, 'unknown')
@@ -503,6 +503,7 @@ export interface SendParams {
   project?: string | null
   folder?: string | null
   clear?: boolean | null
+  budget?: number | null
 }
 
 /** What `thread` takes. */
@@ -1056,7 +1057,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HelloParams: { fields: {} },
     KithInfoParams: { fields: { botId: 'string', refresh: 'bool?' } },
     StartChatParams: { fields: { agent: 'string' } },
-    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?' } },
+    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?', budget: 'int?' } },
     ThreadParams: { fields: { botId: 'string', rootId: 'string' } },
     HistoryParams: { fields: { botId: 'string', beforeSeq: 'int?', limit: 'int?' } },
     NewSessionParams: { fields: { botId: 'string' } },
