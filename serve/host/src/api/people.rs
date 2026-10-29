@@ -458,6 +458,12 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
     if !bots.is_empty() {
         super::botguests::sweep_claims(hub, bots, false).await;
     }
+    // Once nothing of theirs runs: the Claude Code temp folder their runs wrote in (<machine>/run/t/<id>).
+    if let Some(bin) = account::bin().await
+        && let Err(e) = account::run(&bin, &["person", person, "--clear-temp"]).await
+    {
+        tracing::warn!(error = format!("{e:#}"), person, "couldn't remove a revoked person's temp folder");
+    }
 }
 
 /// Stops the turns `person` has running: chats of their bots and runs of their linked chat accounts. With
