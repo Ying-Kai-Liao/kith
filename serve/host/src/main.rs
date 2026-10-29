@@ -1011,6 +1011,7 @@ async fn statusline(port: u16, wrapped: String) {
 mod cli_tests {
     use super::*;
 
+    #[allow(clippy::option_option)] // mirrors Sub::Link's --accept
     fn link(args: &[&str]) -> (Option<String>, Option<Option<String>>, bool) {
         let cli = Cli::try_parse_from(["kith-serve", "link"].iter().chain(args)).unwrap();
         let Some(Sub::Link { computer, accept, deny, .. }) = cli.cmd else { panic!("not link") };
