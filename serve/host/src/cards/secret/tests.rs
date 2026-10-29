@@ -478,17 +478,23 @@ async fn the_clock_cannot_expire_a_card_while_its_key_is_being_written() {
     f.state(NONE);
     f.ask("github").await;
     let (card, _) = f.open();
-    f.set_deadline(&card, now_ms() + 100);
-    f.delay("0.6");
+    // The margin is measured from before provide's `list_keys` subprocess and the claim, which on a slow runner can
+    // take a few hundred ms; a 1.5 s deadline leaves room for that. Whatever the claim time, the 2.5 s write ends
+    // after the deadline, and the sweeper (30 x 100 ms) keeps sweeping past it, so the sweep always runs while the
+    // key is being written and after the original deadline.
+    let deadline = now_ms() + 1500;
+    f.set_deadline(&card, deadline);
+    f.delay("2.5");
     let m = marker();
     let hub = f.r.hub.clone();
     let sweeper = tokio::spawn(async move {
         for _ in 0..30 {
-            tokio::time::sleep(Duration::from_millis(30)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
             sweep(&hub);
         }
     });
     f.provide(&card, Some("work"), &[("GITHUB_TOKEN", &m)]).await.unwrap();
+    assert!(now_ms() > deadline, "the write outlasted the card's own deadline");
     sweeper.await.unwrap();
     assert_eq!(f.card(&card).state, CardState::Used);
     assert_eq!(f.sets(), 1);
