@@ -43,7 +43,7 @@ struct PermissionCard: View {
     /// The card's values; the option ids are the host's.
     var cardModel: DecisionCardModel {
         DecisionCardModel(heading: place, question: headline, detail: d.title, options: ordered.map { o in
-            DecisionOption(id: o.optionId, title: label(o), role: o.kind == "allow_once" ? .primary : o.kind.hasPrefix("allow") ? .normal : .destructive)
+            DecisionOption(id: o.optionId, title: GuestPrompt.label(o, edge: d.edge), role: o.kind == "allow_once" ? .primary : o.kind.hasPrefix("allow") ? .normal : .destructive)
         })
     }
 
@@ -107,16 +107,6 @@ struct PermissionCard: View {
     private var ordered: [PermissionOption] {
         let rank = ["allow_once": 0, "allow_always": 1, "reject_once": 2, "reject_always": 3]
         return (d.options ?? []).sorted { (rank[$0.kind] ?? 9) < (rank[$1.kind] ?? 9) }
-    }
-
-    private func label(_ o: PermissionOption) -> String {
-        switch o.kind {
-        case "allow_once": "Allow once"
-        case "allow_always": "Always allow"
-        case "reject_once": "Deny"
-        case "reject_always": "Never"
-        default: o.name
-        }
     }
 
     private var outcome: String {

@@ -53,6 +53,7 @@ async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only
     assert_eq!(card.approver, "owner");
     let data = options(&r, &card);
     assert_eq!(ids(&data), ["allow", edge::ALWAYS, edge::JOB, "deny"]);
+    assert_eq!(data["options"][0]["name"], "Just this once", "a host's yes is this one request");
     assert_eq!(data["options"][1]["name"], "Always for Sam");
     assert_eq!(data["options"][2]["name"], "Turn on Make videos: registry.npmjs.org, github.com");
     assert!(data["detail"].as_str().unwrap().ends_with("Part of Make videos, not on for Sam."), "{data}");
@@ -126,7 +127,12 @@ async fn a_helpers_yes_is_written_before_the_run_hears_it() {
 
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::HELPER_TOOL, input.clone());
     let card = shown(&r.hub).await;
-    assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, "deny"]);
+    let data = options(&r, &card);
+    assert_eq!(ids(&data), ["allow", edge::ALWAYS, "deny"]);
+    assert_eq!(
+        data["options"][0]["name"], "money, once, for Sam's house in the next 5 minutes",
+        "the once grant is the person's for 5 minutes, not this one request"
+    );
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
     assert!(call.await.unwrap().allow);
     assert!(

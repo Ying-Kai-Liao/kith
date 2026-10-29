@@ -47,7 +47,7 @@ public struct DecisionCardModel: Equatable, Sendable {
     public init(guest prompt: GuestPrompt) {
         self.init(heading: prompt.who, question: prompt.request.isEmpty ? "Wants to do something" : prompt.request,
                   options: prompt.options.map { option in
-            DecisionOption(id: option.optionId, title: GuestPrompt.label(option),
+            DecisionOption(id: option.optionId, title: GuestPrompt.label(option, edge: prompt.entry.data.edge),
                            role: option.kind == "allow_once" ? .primary : option.kind.hasPrefix("allow") ? .normal : .destructive)
         })
     }

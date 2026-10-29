@@ -113,6 +113,15 @@ pub async fn extras(person: &str, name: &str, agent: &str, edge: &Edge, always: 
     (text, options, kept)
 }
 
+/// The yes of the owner's edge card. A host's is this one request. A helper's is the once grant kith-auth keeps on the
+/// person's row for 5 minutes (`HELPER_ONCE_MS`), which any of their runs of the agent can use, so it names that instead.
+pub fn once_label(kept: &Value, name: &str, agent: &str) -> String {
+    match (kept["kind"].as_str(), kept["value"].as_str()) {
+        (Some("helpers"), Some(helper)) => format!("{helper}, once, for {name}'s {agent} in the next 5 minutes"),
+        _ => "Just this once".into(),
+    }
+}
+
 /// The tool a bot chat's (ACP) ask is about: Claude Code's tool name, else its title (a sandbox network ask is titled
 /// with its host). The card keeps it as its `tool`, which is what [`of`] reads again at the answer.
 pub fn acp_tool<'a>(tool: &'a Value, title: &'a str) -> &'a str {
@@ -180,8 +189,8 @@ async fn job_of(agent: &str, person: &str, edge: &Edge) -> Option<Value> {
     v["jobs"].get(0).cloned()
 }
 
-/// Writes what the answer to an edge card keeps, before the run hears the yes. A helper's "Just this once" is a once
-/// grant kith ask uses up at the helper's launch; a domain's is the live yes alone. No to a widening card declines that
+/// Writes what the answer to an edge card keeps, before the run hears the yes. A helper's once yes is a once grant
+/// kith ask uses up at the helper's launch; a domain's is the live yes alone. No to a widening card declines that
 /// package update. `Err` says why kith-auth refused.
 pub async fn apply(card: &Card, kept: &Value, option: Option<&str>, allow: bool) -> Result<(), String> {
     let Some(edge) = of(&card.tool, &serde_json::from_str(&card.input).unwrap_or(Value::Null), &card.resource) else {
