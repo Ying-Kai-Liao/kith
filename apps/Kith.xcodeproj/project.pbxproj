@@ -42,6 +42,10 @@
 		7E5F670CFFA0E4373F44DB41 /* AccountSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31BFDAD6DCCE1CC98642ACDD /* AccountSession.swift */; };
 		8157F3E9CFB390CBCB1A9F9A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 4815867922559696EDCA47FD /* Assets.xcassets */; };
 		8517F8FC5AFAFF1527369829 /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6932F782C1B87C9608359A6 /* NotificationService.swift */; };
+		5A4E00000000000000000003 /* KithShare.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000002 /* KithShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		5A4E00000000000000000004 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000006 /* ShareViewController.swift */; };
+		5A4E00000000000000000005 /* ShareComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000007 /* ShareComposer.swift */; };
+		5A4E00000000000000000010 /* KithKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5A4E0000000000000000000F /* KithKit */; };
 		89CA3972915769DBA315876F /* Push.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3BF4D3B82FE8274F610C703 /* Push.swift */; };
 		8BB3FC79EB798CE4347E6FD3 /* KithKit in Frameworks */ = {isa = PBXBuildFile; productRef = 50F314172CC2AD1C5CDC916A /* KithKit */; };
 		921ED46A1643AB90BB3D4CF7 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99C11684BFBEB49006600A9 /* Session.swift */; };
@@ -87,6 +91,13 @@
 			remoteGlobalIDString = C42E5E078332C6C2B35AF5FA;
 			remoteInfo = NotificationService;
 		};
+		5A4E0000000000000000000B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5B6351DD20AF4506794D6460 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5A4E00000000000000000001;
+			remoteInfo = ShareExtension;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -98,6 +109,7 @@
 			files = (
 				F842AE1C5ED96AF9A7F5D16C /* Widgets.appex in Embed Foundation Extensions */,
 				72A907055F1AAEF8F10EAD72 /* NotificationService.appex in Embed Foundation Extensions */,
+				5A4E00000000000000000003 /* KithShare.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -171,6 +183,11 @@
 		5E1A7C0D3B9F4A6281C0D7F2 /* Inter-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Bold.ttf"; sourceTree = "<group>"; };
 		5E1A7C0D3B9F4A6281C0D7F3 /* JetBrainsMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "JetBrainsMono-Regular.ttf"; sourceTree = "<group>"; };
 		5E1A7C0D3B9F4A6281C0D7F4 /* Nunito-Variable.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Nunito-Variable.ttf"; sourceTree = "<group>"; };
+		5A4E00000000000000000002 /* KithShare.appex */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = "wrapper.app-extension"; path = KithShare.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A4E00000000000000000006 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
+		5A4E00000000000000000007 /* ShareComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareComposer.swift; sourceTree = "<group>"; };
+		5A4E00000000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		5A4E00000000000000000009 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -207,6 +224,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				8BB3FC79EB798CE4347E6FD3 /* KithKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5A4E0000000000000000000E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A4E00000000000000000010 /* KithKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -252,6 +277,7 @@
 			children = (
 				60422D3CA8FEBCDC5AC465E0 /* iOS.app */,
 				7B7E845BA1B8696B266CF578 /* NotificationService.appex */,
+				5A4E00000000000000000002 /* KithShare.appex */,
 				741B706007BA1B91CB853699 /* Screen.app */,
 				6D734BEE7CD3F84677B0218B /* Widgets.appex */,
 			);
@@ -306,6 +332,7 @@
 			children = (
 				F25D9D57F88C5EFD30A30920 /* App */,
 				7C394B2BCD85FCD4A17A0B4D /* NotificationService */,
+				5A4E0000000000000000000A /* ShareExtension */,
 				C2E4BC991A101B97C0E4F058 /* Resources */,
 				64D176A915A00A2E5FB10F5B /* Views */,
 				5756AB2A238F70069A04CA65 /* Widgets */,
@@ -397,6 +424,17 @@
 			path = desktop;
 			sourceTree = "<group>";
 		};
+		5A4E0000000000000000000A /* ShareExtension */ = {
+			isa = PBXGroup;
+			children = (
+				5A4E00000000000000000008 /* Info.plist */,
+				5A4E00000000000000000007 /* ShareComposer.swift */,
+				5A4E00000000000000000009 /* ShareExtension.entitlements */,
+				5A4E00000000000000000006 /* ShareViewController.swift */,
+			);
+			path = ShareExtension;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -436,6 +474,7 @@
 			dependencies = (
 				40DF4BEA40A82C095F51AB76 /* PBXTargetDependency */,
 				0BA52D71EA0FB37D52E4AE22 /* PBXTargetDependency */,
+				5A4E0000000000000000000C /* PBXTargetDependency */,
 			);
 			name = iOS;
 			packageProductDependencies = (
@@ -486,6 +525,25 @@
 			productReference = 7B7E845BA1B8696B266CF578 /* NotificationService.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		5A4E00000000000000000001 /* ShareExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5A4E00000000000000000011 /* Build configuration list for PBXNativeTarget "ShareExtension" */;
+			buildPhases = (
+				5A4E0000000000000000000D /* Sources */,
+				5A4E0000000000000000000E /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ShareExtension;
+			packageProductDependencies = (
+				5A4E0000000000000000000F /* KithKit */,
+			);
+			productName = ShareExtension;
+			productReference = 5A4E00000000000000000002 /* KithShare.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -511,6 +569,10 @@
 						DevelopmentTeam = T6DWQUSF55;
 						ProvisioningStyle = Automatic;
 					};
+					5A4E00000000000000000001 = {
+						DevelopmentTeam = T6DWQUSF55;
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = F977CF173B7D60769B393751 /* Build configuration list for PBXProject "Kith" */;
@@ -533,6 +595,7 @@
 			projectRoot = "";
 			targets = (
 				C42E5E078332C6C2B35AF5FA /* NotificationService */,
+				5A4E00000000000000000001 /* ShareExtension */,
 				907F1F4A709111FC7178EAE9 /* Screen */,
 				A27E4E88D6A5B9850734B594 /* Widgets */,
 				913BDA9F79CE8C35A9E35830 /* iOS */,
@@ -688,6 +751,15 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5A4E0000000000000000000D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5A4E00000000000000000005 /* ShareComposer.swift in Sources */,
+				5A4E00000000000000000004 /* ShareViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -700,6 +772,11 @@
 			isa = PBXTargetDependency;
 			target = A27E4E88D6A5B9850734B594 /* Widgets */;
 			targetProxy = D40A213F2C1B900F886F95EB /* PBXContainerItemProxy */;
+		};
+		5A4E0000000000000000000C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5A4E00000000000000000001 /* ShareExtension */;
+			targetProxy = 5A4E0000000000000000000B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -1422,6 +1499,86 @@
 			};
 			name = Release;
 		};
+		5A4E00000000000000000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ios/ShareExtension/ShareExtension.entitlements;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ios/ShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(KITH_APP_NAME)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(KITH_IOS_BUNDLE_ID).Share";
+				PRODUCT_NAME = KithShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		5A4E00000000000000000013 /* DevDebug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ios/ShareExtension/ShareExtension.entitlements;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ios/ShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(KITH_APP_NAME)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(KITH_IOS_BUNDLE_ID).Share";
+				PRODUCT_NAME = KithShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = DevDebug;
+		};
+		5A4E00000000000000000014 /* DevRelease */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ios/ShareExtension/ShareExtension.entitlements;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ios/ShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(KITH_APP_NAME)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(KITH_IOS_BUNDLE_ID).Share";
+				PRODUCT_NAME = KithShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = DevRelease;
+		};
+		5A4E00000000000000000015 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = ios/ShareExtension/ShareExtension.entitlements;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = ios/ShareExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "$(KITH_APP_NAME)";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "$(KITH_IOS_BUNDLE_ID).Share";
+				PRODUCT_NAME = KithShare;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -1480,6 +1637,17 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		5A4E00000000000000000011 /* Build configuration list for PBXNativeTarget "ShareExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5A4E00000000000000000012 /* Debug */,
+				5A4E00000000000000000013 /* DevDebug */,
+				5A4E00000000000000000014 /* DevRelease */,
+				5A4E00000000000000000015 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
@@ -1534,6 +1702,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 2C830647014432C6F20C557C /* XCRemoteSwiftPackageReference "clerk-ios" */;
 			productName = ClerkKit;
+		};
+		5A4E0000000000000000000F /* KithKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KithKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

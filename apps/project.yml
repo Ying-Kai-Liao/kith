@@ -155,6 +155,7 @@ targets:
         excludes:
           - Widgets
           - NotificationService
+          - ShareExtension
           - WhatsNew.md
           # The app's shared Swift package (models, client, screens), added as a package below.
           - Kit
@@ -170,6 +171,8 @@ targets:
       - target: Widgets
         embed: true
       - target: NotificationService
+        embed: true
+      - target: ShareExtension
         embed: true
     postBuildScripts:
       - name: Kith environment
@@ -253,6 +256,25 @@ targets:
         INFOPLIST_FILE: ios/NotificationService/Info.plist
         GENERATE_INFOPLIST_FILE: YES
         CODE_SIGN_ENTITLEMENTS: ios/NotificationService/NotificationService.entitlements
+        INFOPLIST_KEY_CFBundleDisplayName: $(KITH_APP_NAME)
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SKIP_INSTALL: YES
+  # "Kith" in other apps' share sheets: queues a link for a chat in the App Group; the app sends it (KithApp.deliverShares).
+  ShareExtension:
+    type: app-extension
+    platform: iOS
+    sources:
+      - ios/ShareExtension
+    dependencies:
+      - package: KithKit
+        product: KithKit
+    settings:
+      base:
+        PRODUCT_NAME: KithShare
+        PRODUCT_BUNDLE_IDENTIFIER: $(KITH_IOS_BUNDLE_ID).Share
+        INFOPLIST_FILE: ios/ShareExtension/Info.plist
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: ios/ShareExtension/ShareExtension.entitlements
         INFOPLIST_KEY_CFBundleDisplayName: $(KITH_APP_NAME)
         TARGETED_DEVICE_FAMILY: "1,2"
         SKIP_INSTALL: YES

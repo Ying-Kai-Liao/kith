@@ -74,6 +74,7 @@ struct KithApp: App {
                     // Back in the app: a computer may have joined the account meanwhile.
                     if phase == .active {
                         Task { await app.accounts.refreshCloud() }
+                        app.deliverShares()
                     }
                 }
                 #if DEBUG
@@ -377,6 +378,27 @@ final class AppStore {
         } else {
             accounts.selection = ref
         }
+    }
+
+    /// Sends what the share sheet queued (ShareExtension) into the chosen chats, then opens the last one. A share for
+    /// a computer this account no longer has can't go anywhere and is dropped with the expired ones.
+    func deliverShares() {
+        let context = storage
+        var done = Set<String>()
+        var last: BotReference?
+        for share in context.pendingShares {
+            if share.isExpired(at: .now) || share.target.accountId != context.accountID {
+                done.insert(share.id)
+            } else if let store = accounts.store(for: share.target.computerId) {
+                store.send(share.text, to: share.target.botId)
+                done.insert(share.id)
+                last = share.target
+            } else if !accounts.computers.contains(where: { $0.id == share.target.computerId }) {
+                done.insert(share.id)
+            }
+        }
+        context.clearShares(ids: done)
+        if let last { openBot(last) }
     }
 
     /// The same link opened twice shows the join that is already running.
