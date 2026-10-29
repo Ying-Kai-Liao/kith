@@ -524,7 +524,10 @@ async fn main() -> Result<()> {
         }
         Sub::SampleCards { port } => {
             let got = local_call(port, "sampleCards", json!({})).await?;
-            println!("Posted {} sample cards to the Samples chat.", got["cards"]);
+            println!(
+                "Posted {} sample cards to the Samples chat. Its approval cards show under Needs you until you delete the chat.",
+                got["cards"]
+            );
             Ok(())
         }
         Sub::Memory { cmd } => std::process::exit(hqmem::run(cmd)?),

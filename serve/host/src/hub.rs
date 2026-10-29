@@ -243,13 +243,14 @@ impl Hub {
     }
 
     /// Adds a group the host made itself (`samples`), as it is: none of `create_bot`'s checks or reuse.
-    pub fn add_host_group(&self, cfg: &BotConfig) -> Result<()> {
+    pub fn add_host_group(&self, mut cfg: BotConfig) -> Result<()> {
         if !cfg.is_group() {
             bail!("only a group");
         }
+        cfg.position = self.new_bot_position()?;
         {
             let _g = self.emit_lock.locked();
-            self.store.save_bot(cfg)?;
+            self.store.save_bot(&cfg)?;
         }
         self.emit_bot(&cfg.id);
         Ok(())

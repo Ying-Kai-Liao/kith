@@ -40,7 +40,7 @@ async fn every_card_is_posted_once_into_one_samples_chat() {
         assert!(posted[i].data["richCard"].is_object(), "the {what} sample has its card");
     }
     let permissions = posted.iter().filter(|e| e.kind == "permission").count();
-    assert_eq!(permissions, 6, "approval, decision, access, key and two limits");
+    assert_eq!(permissions, 6, "escape, exit plan, access, key and two limits");
 }
 
 #[tokio::test]

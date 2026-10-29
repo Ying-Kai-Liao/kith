@@ -69,7 +69,7 @@ pub fn post(hub: &Arc<Hub>) -> Result<Value> {
         "createdAt": crate::store::now_ms(),
     }))?;
     hub.store.kv_set(CHAT, &id)?;
-    hub.add_host_group(&cfg)?;
+    hub.add_host_group(cfg)?;
     let cards = cards(&id);
     let lane = Lane::main(&id);
     for (kind, mut data) in cards.iter().cloned() {
@@ -119,25 +119,35 @@ fn cards(chat: &str) -> Vec<(EntryKind, Value)> {
         \nThat's all for today.";
     let news = json!({"text": brief, "final": true, "richCard": news::card(brief, AGENT, JOB, Some("0 7 * * *"))});
 
-    let approval = json!({
-        "title": "Run git push", "toolKind": "execute", "command": "git push origin coder/sample-branch",
-        "detail": "git push origin coder/sample-branch", "diffs": [], "cwd": "/Users/you/Workspace/kith",
+    // A guest's run asking past its sandbox (`cards::access::entry_view`).
+    let escape = json!({
+        "title": format!("Let {AGENT} connect to api.github.com"), "toolKind": "other", "command": null,
+        "detail": format!(
+            "connect to api.github.com\n\nWhy: Check the open pull requests Sam asked about.\n\nOnce: the next time \
+             {AGENT} runs in this conversation. Always: every run of {AGENT} for this person, until you take it away."
+        ),
+        "diffs": [], "cwd": null,
         "options": [
             {"optionId": "allow", "name": "Allow once", "kind": "allow_once"},
             {"optionId": "always", "name": "Always allow", "kind": "allow_always"},
             {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
         ],
         "status": "pending", "selected": null, "approver": "owner", "agent": AGENT, "source": "run",
+        "person": "sample-person", "personName": "Sam",
     });
-    let decision = json!({
-        "title": "Which name should the new screen use?", "toolKind": "other", "command": null,
-        "detail": "The design has two candidates.", "diffs": [], "cwd": null,
+    // The Claude adapter's exit-plan request in an owner run, as `agent::bot::updates` passes it through.
+    let plan = json!({
+        "title": "Approve Plan", "toolKind": "switch_mode", "command": null,
+        "detail": "1. Add a Samples chat that holds one of every card.\n2. Turn away every answer aimed at it.\n3. Add `kith serve sample-cards`.",
+        "diffs": [], "cwd": "/Users/you/Workspace/kith",
         "options": [
-            {"optionId": "a", "name": "Inbox", "kind": "allow_once"},
-            {"optionId": "b", "name": "Activity", "kind": "allow_once"},
-            {"optionId": "later", "name": "Ask me later", "kind": "reject_once"},
+            {"optionId": "exit-plan-default", "name": "Yes, manually approve edits", "kind": "allow_once"},
+            {"optionId": "exit-plan-clear-auto", "name": "Yes, clear context (38% used) and use auto mode", "kind": "allow_always"},
+            {"optionId": "exit-plan-auto", "name": "Yes, and use auto mode", "kind": "allow_always"},
+            {"optionId": "exit-plan-bypass", "name": "Yes, and bypass permissions", "kind": "allow_always"},
+            {"optionId": "reject", "name": "No, keep planning", "kind": "reject_once"},
         ],
-        "status": "pending", "selected": null, "approver": "owner", "agent": AGENT, "source": "run",
+        "status": "pending", "selected": null,
     });
     let secret = |card: &str, title: &str, detail: &str, options: Value, accounts: Value| {
         json!({
@@ -193,8 +203,8 @@ fn cards(chat: &str) -> Vec<(EntryKind, Value)> {
         (EntryKind::Agent, schedule),
         (EntryKind::Notice, routine),
         (EntryKind::Agent, news),
-        (EntryKind::Permission, approval),
-        (EntryKind::Permission, decision),
+        (EntryKind::Permission, escape),
+        (EntryKind::Permission, plan),
         (EntryKind::Permission, access),
         (EntryKind::Permission, key),
         (EntryKind::Permission, agent_limit),
