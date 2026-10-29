@@ -76,7 +76,13 @@ pub fn post_body(args: &RoomPostArgs, text: &str, nonce: &str) -> serde_json::Va
     })
 }
 
-pub async fn run(cmd: RoomCommand, store: Store, cloud: Option<&str>, out: &Out, tuning: Tuning) -> Result<(), CliError> {
+pub async fn run(
+    cmd: RoomCommand,
+    store: Store,
+    cloud: Option<&str>,
+    out: &Out,
+    tuning: Tuning,
+) -> Result<(), CliError> {
     let mut client = Client::from_store(store, cloud, out, tuning)?;
     let result = match cmd {
         RoomCommand::Read(args) => read(&mut client, &args, out).await,

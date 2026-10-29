@@ -158,7 +158,8 @@ impl Store {
     #[cfg(test)]
     pub fn conversations_of(&self, chat: &str) -> Result<Vec<Conversation>> {
         let c = self.db.locked();
-        let mut st = c.prepare(&format!("SELECT {COLS} FROM conversations WHERE chat = ?1 ORDER BY opened_at, epoch"))?;
+        let mut st =
+            c.prepare(&format!("SELECT {COLS} FROM conversations WHERE chat = ?1 ORDER BY opened_at, epoch"))?;
         Ok(st.query_map([chat], row_conversation)?.collect::<rusqlite::Result<_>>()?)
     }
 
@@ -197,9 +198,12 @@ impl Store {
             params![id, json, now_ms()],
         )?;
         if n > 0 {
-            return Ok(Charge::Charged(c.query_row("SELECT left FROM conversations WHERE id = ?1", [id], |r| r.get(0))?));
+            return Ok(Charge::Charged(
+                c.query_row("SELECT left FROM conversations WHERE id = ?1", [id], |r| r.get(0))?,
+            ));
         }
-        let open: i64 = c.query_row("SELECT COUNT(*) FROM conversations WHERE id = ?1 AND state = 'open'", [id], |r| r.get(0))?;
+        let open: i64 =
+            c.query_row("SELECT COUNT(*) FROM conversations WHERE id = ?1 AND state = 'open'", [id], |r| r.get(0))?;
         Ok(if open > 0 { Charge::Spent } else { Charge::Closed })
     }
 

@@ -149,6 +149,16 @@ async fn bot_answers(r: &Rig) -> BTreeMap<&'static str, (&'static str, Value)> {
     let crashed = json!({"text": "The agent crashed", "style": "error"});
     r.hub.add_entry(&lane, EntryKind::Notice, user.turn, &crashed).unwrap();
     got.insert("botThread", ("botThread", call(r, &rex, "botThread", json!({"conversation": conv})).await));
+    // A room with the bot in it: read what is there, then post into it without a turn (a late line, nothing started).
+    let house = r.owner_bot("house");
+    let bot_id = got["proveBotInvite"].1["botId"].as_str().unwrap().to_owned();
+    let room_cfg = json!({"id": "", "kind": "group", "name": "Crew", "members": [house, bot_id]});
+    let room = r.hub.create_bot(serde_json::from_value(room_cfg).unwrap()).unwrap()["id"].as_str().unwrap().to_owned();
+    r.hub.add_entry(&Lane::main(&room), EntryKind::User, 1, &json!({"text": "hello crew", "status": "sent"})).unwrap();
+    let read = call(r, &rex, "botRoomRead", json!({"room": room})).await;
+    got.insert("botRoomRead", ("botRoomRead", read));
+    let post = json!({"room": room, "conversation": "cv_none", "epoch": 1, "text": "hi from outside", "clientNonce": "p1"});
+    got.insert("botPost", ("botPost", call(r, &rex, "botPost", post).await));
     got.insert("botConversations", ("botConversations", call(r, &rex, "botConversations", json!({})).await));
     got.insert("botStop", ("botStop", call(r, &rex, "botStop", json!({"conversation": conv})).await));
     got.insert("botLeave", ("botLeave", call(r, &rex, "botLeave", json!({})).await));

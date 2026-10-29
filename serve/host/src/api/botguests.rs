@@ -1224,8 +1224,8 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
     let lane = conv.lane.clone();
     let live = epoch == conv.epoch && crate::chat::group::current(&hub.store, &lane, conv.epoch);
     let live = live && hub.store.conversation(&conv.id).is_some_and(|c| c.state == crate::store::ConvState::Open);
-    let replies = live
-        && turn_key.is_some_and(|k| crate::chat::group::bot_turn_waits(k, &bot.bot_id, &conv.id, conv.epoch));
+    let replies =
+        live && turn_key.is_some_and(|k| crate::chat::group::bot_turn_waits(k, &bot.bot_id, &conv.id, conv.epoch));
     let mut charged = false;
     let mut late = !live;
     if live && !replies {
@@ -1258,9 +1258,7 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
     if replies {
         // The room turn that waits reads the text from here; it @-mentions on from there.
         crate::chat::group::complete_bot_turn(turn_key.unwrap_or_default(), &bot.bot_id, &conv.id, conv.epoch, text);
-    } else if charged
-        && let Some(group) = hub.store.bot(room)?.map(|r| r.config)
-    {
+    } else if charged && let Some(group) = hub.store.bot(room)?.map(|r| r.config) {
         let woken = crate::chat::group::mentioned_members(hub, &group, text);
         crate::chat::group::queue_mentions(&conv.id, woken.into_iter().filter(|m| *m != bot.bot_id).collect());
     }

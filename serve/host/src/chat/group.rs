@@ -119,7 +119,12 @@ pub fn bot_turn_waits(key: &str, bot_id: &str, conversation: &str, epoch: u64) -
 /// An unprompted post of an outside bot woke these members: the room turn queues them after everyone waiting.
 pub fn queue_mentions(conversation: &str, members: Vec<String>) {
     if !members.is_empty() {
-        MENTIONS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).entry(conversation.to_owned()).or_default().extend(members);
+        MENTIONS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(conversation.to_owned())
+            .or_default()
+            .extend(members);
     }
 }
 
@@ -153,9 +158,11 @@ pub fn guest_member(hub: &Hub, id: &str) -> Option<BotGuest> {
 
 /// Whether bot guest `bot_id` is a member of room `room` right now (checked on every read, post and event).
 pub fn is_room_member(store: &Store, room: &str, bot_id: &str) -> bool {
-    let in_room = store.bot(room).ok().flatten().is_some_and(|r| {
-        !r.deleted && r.config.is_group() && r.config.members.iter().any(|m| m == bot_id)
-    });
+    let in_room = store
+        .bot(room)
+        .ok()
+        .flatten()
+        .is_some_and(|r| !r.deleted && r.config.is_group() && r.config.members.iter().any(|m| m == bot_id));
     in_room && store.bot_guest(bot_id).is_some_and(|g| is_owners_active_bot(&g))
 }
 
@@ -417,14 +424,25 @@ const WAKE_LIMIT: Duration = Duration::from_secs(180);
 /// An outside bot's turn: tells it (a `turn` event, and a wake through its webhook when it has a wake profile), then
 /// waits for its post under this turn's key for the bot's own timeout. No post by then, no wake profile reachable or a
 /// wake the webhook refused is a pass; the turn was charged when it was sent.
-async fn bot_turn(hub: &Arc<Hub>, conv: &mut Conversation, group: &BotConfig, guest: &BotGuest) -> Result<Option<String>> {
+async fn bot_turn(
+    hub: &Arc<Hub>,
+    conv: &mut Conversation,
+    group: &BotConfig,
+    guest: &BotGuest,
+) -> Result<Option<String>> {
     let Some(key) = conv.queue.turn_key.clone() else {
         return Ok(None);
     };
     let (reply, answer) = oneshot::channel();
     turns().insert(
         key.clone(),
-        BotTurn { bot_id: guest.bot_id.clone(), lane: conv.lane.clone(), conversation: conv.id.clone(), epoch: conv.epoch, reply },
+        BotTurn {
+            bot_id: guest.bot_id.clone(),
+            lane: conv.lane.clone(),
+            conversation: conv.id.clone(),
+            epoch: conv.epoch,
+            reply,
+        },
     );
     // However this ends, nothing waits under the key afterwards.
     struct Forget(String);
@@ -780,7 +798,7 @@ mod tests {
             )
             .await
             .unwrap();
-            serde_json::from_value::<serde_json::Value>(sent["entry"].clone())
+            serde_json::from_value::<Value>(sent["entry"].clone())
                 .ok()
                 .and_then(|e| self.hub.store.entry(e["id"].as_str()?))
                 .unwrap()
@@ -871,7 +889,7 @@ mod tests {
         let unread = || room.hub.bot_value_for_test(&room.group)["unread"].as_i64().unwrap();
         assert_eq!(summary["unread"], 1);
         assert_eq!(unread(), 2, "the main chat's reply and the thread's");
-        let mark = |b: serde_json::Value| crate::api::dispatch(&room.hub, &Caller::Local, "markRead", b);
+        let mark = |b: Value| crate::api::dispatch(&room.hub, &Caller::Local, "markRead", b);
         mark(json!({"botId": room.group})).await.unwrap();
         assert_eq!(unread(), 1);
         mark(json!({"botId": room.group, "threadId": first.id})).await.unwrap();
@@ -954,7 +972,9 @@ mod tests {
         fn member_turns(&self) -> usize {
             ["a", "b"]
                 .iter()
-                .map(|id| std::fs::read_to_string(self.dir.join(id).join("prompts.jsonl")).map_or(0, |p| p.lines().count()))
+                .map(|id| {
+                    std::fs::read_to_string(self.dir.join(id).join("prompts.jsonl")).map_or(0, |p| p.lines().count())
+                })
                 .sum()
         }
 
@@ -1093,7 +1113,6 @@ mod tests {
         assert!(after_stop >= 2, "stop never moves the epoch back");
         room.shutdown().await;
     }
-
 
     // MARK: an outside bot as a member (conversations plan PR 3)
 
@@ -1251,8 +1270,11 @@ mod tests {
         room.send("@Grok what do you think?", None).await;
         let turn = next_turn(&mut events).await;
         assert_eq!((turn["botId"].as_str(), turn["room"].as_str()), (Some("bg1"), Some(room.group.as_str())));
-        let (conv, epoch, key) =
-            (turn["conversation"].as_str().unwrap(), turn["epoch"].as_u64().unwrap(), turn["turnKey"].as_str().unwrap());
+        let (conv, epoch, key) = (
+            turn["conversation"].as_str().unwrap(),
+            turn["epoch"].as_u64().unwrap(),
+            turn["turnKey"].as_str().unwrap(),
+        );
         // Charged when sent: one of ten is gone before the bot says anything.
         assert_eq!(room.conversations()[0].left, DEFAULT_BUDGET - 1);
 
@@ -1396,7 +1418,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unprompted_post_is_charged_and_wakes_only_who_it_mentions_and_with_no_open_conversation_starts_nothing() {
+    async fn an_unprompted_post_is_charged_and_wakes_only_who_it_mentions_and_with_no_open_conversation_starts_nothing()
+    {
         let room = Room::new();
         let bot = room.join_bot(300, None);
         let main = Lane::main(&room.group);
@@ -1413,8 +1436,11 @@ mod tests {
         let mut events = room.hub.events.subscribe();
         room.send("@Grok start", None).await;
         let turn = next_turn(&mut events).await;
-        let (conv, epoch, key) =
-            (turn["conversation"].as_str().unwrap(), turn["epoch"].as_u64().unwrap(), turn["turnKey"].as_str().unwrap());
+        let (conv, epoch, key) = (
+            turn["conversation"].as_str().unwrap(),
+            turn["epoch"].as_u64().unwrap(),
+            turn["turnKey"].as_str().unwrap(),
+        );
         let left = room.hub.store.conversation(conv).unwrap().left;
         let speak = room.bot_post(&bot, conv, epoch, None, "@a CHATTY please look", "u2").await.unwrap();
         assert_eq!((speak["late"].as_bool(), speak["replied"].as_bool()), (Some(false), Some(false)));
@@ -1445,7 +1471,10 @@ mod tests {
         let (conv, key) = (turn["conversation"].as_str().unwrap(), turn["turnKey"].as_str().unwrap());
         let one = room.bot_post(&bot, conv, 1, Some(key), "first", "p1").await.unwrap();
         let two = room.bot_post(&bot, conv, 1, Some(key), "second", "p2").await.unwrap();
-        assert_eq!((one["replied"].as_bool(), two["replied"].as_bool(), two["late"].as_bool()), (Some(true), Some(false), Some(true)));
+        assert_eq!(
+            (one["replied"].as_bool(), two["replied"].as_bool(), two["late"].as_bool()),
+            (Some(true), Some(false), Some(true))
+        );
         room.settle().await;
         room.shutdown().await;
     }
@@ -1487,16 +1516,28 @@ mod tests {
             .hub
             .add_entry(&main, EntryKind::Agent, 1, &json!({"text": "hi", "author": "a", "final": true}))
             .unwrap();
-        let hidden = room.hub.add_entry(&main, EntryKind::Thought, 1, &json!({"text": "thinking", "author": "a"})).unwrap();
+        let hidden =
+            room.hub.add_entry(&main, EntryKind::Thought, 1, &json!({"text": "thinking", "author": "a"})).unwrap();
         let event = |e: &Entry| json!({"type": "entry", "rev": e.rev, "entry": e});
         let seen = |e: &Entry| crate::api::roles::event_for_bot(&room.hub.store, "bg1", event(e));
         let first = seen(&said).expect("a member sees the room");
-        assert_eq!((first["room"].as_str(), first["entry"]["text"].as_str()), (Some(room.group.as_str()), Some("hello room")));
+        assert_eq!(
+            (first["room"].as_str(), first["entry"]["text"].as_str()),
+            (Some(room.group.as_str()), Some("hello room"))
+        );
         assert_eq!(seen(&agent).unwrap()["entry"]["author"], "a");
         assert!(seen(&hidden).is_none(), "a thought is not shown, as in any bot thread");
         // A room it is not in stays dark, even to a member of another.
-        let other = room.hub.create_bot(serde_json::from_value(json!({"id": "", "kind": "group", "name": "Other", "members": ["a"]})).unwrap()).unwrap();
-        let elsewhere = room.hub.add_entry(&Lane::main(other["id"].as_str().unwrap()), EntryKind::User, 1, &json!({"text": "secret"})).unwrap();
+        let other = room
+            .hub
+            .create_bot(
+                serde_json::from_value(json!({"id": "", "kind": "group", "name": "Other", "members": ["a"]})).unwrap(),
+            )
+            .unwrap();
+        let elsewhere = room
+            .hub
+            .add_entry(&Lane::main(other["id"].as_str().unwrap()), EntryKind::User, 1, &json!({"text": "secret"}))
+            .unwrap();
         assert!(seen(&elsewhere).is_none(), "no text from a room the bot isn't in");
 
         // Out of the group: events stop at once.
@@ -1523,12 +1564,18 @@ mod tests {
         assert_eq!(read["entries"].as_array().unwrap().len(), 2);
         let cursor = read["cursor"].as_i64().unwrap();
         room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "third"})).unwrap();
-        let next =
-            crate::api::dispatch(&room.hub, &bot, "botRoomRead", json!({"room": room.group, "since": cursor})).await.unwrap();
+        let next = crate::api::dispatch(&room.hub, &bot, "botRoomRead", json!({"room": room.group, "since": cursor}))
+            .await
+            .unwrap();
         assert_eq!(next["entries"][0]["text"], "third");
         assert_eq!(next["entries"].as_array().unwrap().len(), 1);
 
-        let other = room.hub.create_bot(serde_json::from_value(json!({"id": "", "kind": "group", "name": "Other", "members": ["a"]})).unwrap()).unwrap();
+        let other = room
+            .hub
+            .create_bot(
+                serde_json::from_value(json!({"id": "", "kind": "group", "name": "Other", "members": ["a"]})).unwrap(),
+            )
+            .unwrap();
         let other = other["id"].as_str().unwrap();
         let denied = crate::api::dispatch(&room.hub, &bot, "botRoomRead", json!({"room": other})).await.unwrap_err();
         assert_eq!(code_of(&denied), Some("notFound"));
@@ -1597,7 +1644,11 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(room.hub.store.open_conversation_of(&main).unwrap().left, left - 1, "every door's turns are charged");
+        assert_eq!(
+            room.hub.store.open_conversation_of(&main).unwrap().left,
+            left - 1,
+            "every door's turns are charged"
+        );
         std::fs::write(room.dir.join("a/release"), "").unwrap();
         std::fs::write(room.dir.join("b/release"), "").unwrap();
         room.settle().await;
@@ -1632,6 +1683,53 @@ mod tests {
         assert!(stub.args().is_empty(), "the wake already went out before the restart");
         let after = room.hub.store.conversation(&conv.id).unwrap();
         assert_eq!(after.left, 2, "the interrupted turn was charged once, before the restart: {after:?}");
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_bot_whose_own_post_is_the_latest_line_is_not_woken_again_or_charged_and_the_room_ends() {
+        let room = Room::new();
+        let bot = room.join_bot(300, None);
+        let mut events = room.hub.events.subscribe();
+        room.send("@Grok what do you think?", None).await;
+        let turn = next_turn(&mut events).await;
+        let (conv, epoch, key) = (
+            turn["conversation"].as_str().unwrap(),
+            turn["epoch"].as_u64().unwrap(),
+            turn["turnKey"].as_str().unwrap(),
+        );
+        room.bot_post(&bot, conv, epoch, Some(key), "I think yes", "n1").await.unwrap();
+        let done = room.closed().await;
+        room.settle().await;
+        // Only the bot was named, it spoke last, so the next round has nobody: the skipped turn costs nothing and the
+        // conversation ends by itself rather than waiting on anyone.
+        assert_eq!((done.state, done.left), (ConvState::Ended, DEFAULT_BUDGET - 1), "{done:?}");
+        assert_eq!(room.member_turns(), 0);
+        assert_eq!(room.bot_entries().len(), 1, "it was not asked a second time");
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn an_ask_against_a_spent_open_conversation_opens_nothing_and_wakes_nobody() {
+        let room = Room::new();
+        let bot = room.join_bot(300, None);
+        let main = Lane::main(&room.group);
+        room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "hello", "status": "sent"})).unwrap();
+        let conv = room.hub.store.open_conversation(&main, 0, "owner").unwrap();
+        let e = crate::api::dispatch(
+            &room.hub,
+            &bot,
+            "botAsk",
+            json!({"room": room.group, "text": "@a CHATTY hello", "clientNonce": "q1"}),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(code_of(&e), Some("busy"));
+        room.settle().await;
+        let after = room.hub.store.conversation(&conv.id).unwrap();
+        assert_eq!((after.left, room.conversations().len()), (0, 1), "no top-up, no new conversation");
+        assert_eq!(room.member_turns(), 0, "nobody was woken");
+        assert!(room.bot_entries().is_empty(), "the ask was not stored");
         room.shutdown().await;
     }
 
