@@ -10,7 +10,7 @@ class Kith < Formula
   desc "Your coding-agent bots and the agents behind them, from one command"
   homepage "https://github.com/Ying-Kai-Liao/kith"
   version "0.1.0"
-  license "AGPL-3.0-only"
+  license "Apache-2.0"
 
   on_macos do
     on_arm do

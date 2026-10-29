@@ -52,4 +52,4 @@ The crate re-exports the `rusqlite` it builds against: use that one, because a b
 
 ## License
 
-AGPL-3.0-only (see `LICENSE`).
+Apache-2.0 (see `LICENSE`).

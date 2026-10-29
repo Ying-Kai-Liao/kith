@@ -1,5 +1,7 @@
 Kith
 
+Kith's host, cloud, relay and apps: Copyright 2026 Ying-Kai Liao, Apache-2.0 (see the LICENSE file in each folder).
+
 Portions derived from Codync, Copyright 2026 Po Kai Lee and the Codync contributors (https://github.com/leepokai/Codync), Apache-2.0.
 
 Local voice (kith-tts) uses Phonon, Gradium's on-device text to speech: the ptts runtime
