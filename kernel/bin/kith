@@ -282,13 +282,26 @@ mkdir -p "$home/memory/projects" "$home/memory/sessions" "$home/memory/shared"
 # Whose memory this run uses. The owner's is the agent's memory/ itself; anyone else's is memory/people/<id>/, with
 # their outputs in files/people/<id>/ and who they are in <state>/people/<id>.md (the owner's: user.md). memory/shared/
 # is for every member: the craft, never a person.
-mem=$home/memory files=$home/files person_file=$KITH_STATE/user.md
+mem=$home/memory files=$home/files person_file=$KITH_STATE/user.md work="" ctmp="" ctmp_note=""
+unset KITH_WORK
 if [[ $p_owner == 0 ]]; then
   [[ $p_id =~ ^[a-z][a-z0-9-]*$ ]] || { echo "kith: bad person id '$p_id' from kith-auth" >&2; exit 3; }
   mem=$home/memory/people/$p_id files=$home/files/people/$p_id person_file=$KITH_STATE/people/$p_id.md
   mkdir -p "$mem/projects" "$mem/sessions" "$files" "$KITH_STATE/people"
-  # Their own uv cache: the shared one is the owner's too, and a package planted in it would run in the owner's next `uv run`.
-  export UV_CACHE_DIR=$files/.uv-cache; mkdir -p "$UV_CACHE_DIR"
+  # Their workspace: temp files and tool caches (uv, npm, npx, Puppeteer's Chrome) go in their own folder, since /tmp and
+  # the owner's caches stay closed to the box. Only their sandboxed shell is pointed there (lib/guest-env.sh, which Claude
+  # Code sources before each Bash command): this process, Claude Code, its hooks and MCP servers run outside the box, and
+  # would run a package or a Chrome the guest planted in these folders.
+  work=$files/.work; mkdir -p "$work/tmp" "$work/cache/uv"
+  export KITH_WORK=$work CLAUDE_ENV_FILE=$KITH/lib/guest-env.sh
+  # Claude Code's own temp dir (in /tmp every command's cwd file was refused) must be short (kith_paths.py guest_tmp),
+  # so it is <machine>/run/t/<p>, theirs alone.
+  ctmp=$(python3 "$KITH/lib/kith_paths.py" --guest-tmp "$p_id") || ctmp=""
+  if [[ -n $ctmp ]]; then export CLAUDE_CODE_TMPDIR=$ctmp
+  else
+    ctmp_note="Claude Code's temp folder for $p_id doesn't fit in 44 bytes under $KITH_MACHINE/run/t, so it falls back to /tmp, which this run can't write: every shell command will fail. The owner can move this Mac's Kith folder to a shorter path."
+    echo "kith: $ctmp_note" >&2
+  fi
 fi
 shared=$home/memory/shared
 
@@ -428,6 +441,14 @@ eval "$load_out"
 prompt="$(template | fill)
 $mems
 <session project=\"${project:-none}\"$load_attrs${parents:+ parents=\"$parents\"}${held:+ holds=\"$(printf '%s\n' "$held" | cut -f1 | paste -sd' ' -)\"} cwd=\"$PWD\" date=\"$(date +%F)\"$p_line/>"
+# A guest's run is told its limits up front, so it doesn't learn them one refused command at a time.
+[[ $p_owner == 1 ]] || prompt+="
+
+<limits>This run is in a sandbox for $p_id. You can write only in $files (their files; tool caches in $work),
+$mem (their memory) and \$TMPDIR (temp files). /tmp, the owner's folders and other agents' folders are closed.
+Shell commands inside the sandbox run without asking. Anything past it asks the owner: a website or a file outside
+these folders with the request_access tool, another agent with the ask_helper tool (agent and task); \`kith ask\`
+doesn't work from your shell.${ctmp_note:+ $ctmp_note}</limits>"
 
 if [[ $print -eq 1 ]]; then printf '%s\n' "$prompt"; [[ $# -gt 0 ]] && printf '\n[task] %s\n' "$*"; exit 0; fi
 
@@ -639,7 +660,7 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
   [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
-fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
+fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
 $learned
 $state_projects" python3 -c '
 import json, os, re, sys
@@ -653,6 +674,15 @@ for event, key in (("PreToolUse", "MEM_PRE"), ("PostToolUse", "MEM_POST"), ("Pre
     if os.environ[key]:
         s["hooks"].setdefault(event, []).append(
             {"matcher": "Write|Edit|MultiEdit", "hooks": [{"type": "command", "command": os.environ[key], "timeout": 10}]})
+# Anyone but the owner: Bash runs in the OS sandbox below, which is the boundary, so a command needs no card. The sandbox
+# auto-allow of Claude Code asks for every command it cannot check up front (a loop, an export, cd with rm), and those asks
+# were cards to the owner. Network outside the box still asks on its own (SandboxNetworkAccess); no broad Bash rule (F11).
+if os.environ["P_OWNER"] == "0":
+    import shlex
+    allow_bash = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                         "permissionDecisionReason": "in the OS sandbox"}}
+    s["hooks"].setdefault("PreToolUse", []).append({"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "printf %s " + shlex.quote(json.dumps(allow_bash)), "timeout": 5}]})
 sec = os.environ["KITH_SECRETS"]   # a folder of its own, or (the older layout) two files among the machine things
 files = ["%s/**" % sec] if sec != os.environ["KITH_MACHINE"] else ["%s/env" % sec, "%s/auth.json" % sec]
 s.setdefault("permissions", {}).setdefault("deny", []).extend(
@@ -701,8 +731,8 @@ if os.environ["P_OWNER"] == "0":
             path = "/".join(keep)
             if path.startswith("/") and len(path) > 1:
                 deny_read += both(path)
-    uv_cache = os.environ.get("UV_CACHE_DIR") or os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "uv")
-    allow_write = [d.strip() for d in os.environ["WRITABLE"].split("\n") if d.strip()] + [uv_cache]
+    allow_write = [d.strip() for d in os.environ["WRITABLE"].split("\n") if d.strip()] \
+        + [d for d in (os.environ["WORK"], os.environ["CTMP"]) if d]
     # The host socket has a fixed place, so it is allowed whether or not the caller put KITH_RUN_SOCKET in this process
     # (the host adds it to the run environment after the launch JSON is built); one that differs is allowed as well.
     socks = [x for m in machine for x in both(m + "/run/host.sock")]
@@ -711,6 +741,8 @@ if os.environ["P_OWNER"] == "0":
     s["sandbox"] = {
         "enabled": True, "failIfUnavailable": True, "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": True,
         "filesystem": {"denyRead": list(dict.fromkeys(deny_read)), "allowWrite": list(dict.fromkeys(allow_write))},
+        # No local servers (allowLocalBinding): with the host down, one left running could take its loopback port and be
+        # sent the serve token by kith-permit, kith-recall or kith-call. A render preview runs in the render door instead.
         "network": {"allowUnixSockets": list(dict.fromkeys(socks))}}
 allow = s["permissions"].setdefault("allow", [])
 if os.environ["P_OWNER"] == "0":   # no broad Bash rule for the run of an invited person unless the membership is trusted (F11)
@@ -792,7 +824,7 @@ if [[ $p_owner == 0 && $harness == claude ]]; then
   [[ $wide == 1 && $PWD != "$files" ]] && { echo "kith: working directory $PWD is wider than a guest may read; working in $files" >&2; cd "$files"; }
   read_dirs=$PWD
   for ((i = 1; i < ${#dirs[@]}; i += 2)); do read_dirs+=$'\n'"${dirs[i]}"; done
-  READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -c '
+  READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox WORK=$work CTMP=$ctmp GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -c '
 import json, os, re, sys
 f = sys.argv[1]
 s = json.load(open(f))
@@ -804,11 +836,13 @@ for d in os.environ["READ_DIRS"].split("\n"):
     if d:
         allow += both(os.path.abspath(d))
 # what a kernel helper needs to start: uv, the pythons it manages, the kith program itself. The run has a uv cache of
-# its own (UV_CACHE_DIR above); the shared one of the owner (~/.cache/uv, ~/Library/Caches/uv) stays closed, like
-# the rest of the home folder.
-for d in (os.environ.get("UV_CACHE_DIR"), home + "/.local/share/uv", home + "/.local/bin"):
+# its own (in WORK, lib/guest-env.sh); the shared one of the owner (~/.cache/uv, ~/Library/Caches/uv) stays closed,
+# like the rest of the home folder.
+for d in (os.environ.get("WORK"), home + "/.local/share/uv", home + "/.local/bin"):
     if d:
         allow += both(d)
+if os.environ["CTMP"]:   # the Claude Code temp folder of theirs (above), never run/t around it
+    allow.append(os.environ["CTMP"])
 if os.environ.get("RUN_OUTBOX"):   # its own outbox, which kith-send writes (made writable above)
     allow += both(os.environ["RUN_OUTBOX"])
 try:   # the developer shims of macOS look the toolchain up here, which can sit on another volume
@@ -874,8 +908,9 @@ s["permissions"]["blockReadsOutsideWorkingDirectories"] = True
 # The tool reads the owner global config (name, email, credential helpers), which sits in the closed home folder and
 # makes it fail outright when it cannot be read: point it at nothing instead.
 s.setdefault("env", {})["GIT_CONFIG_GLOBAL"] = "/dev/null"
-if os.environ.get("UV_CACHE_DIR"):   # their own cache, also for a launch-json run whose environment comes from the host
-    s["env"]["UV_CACHE_DIR"] = os.environ["UV_CACHE_DIR"]
+for k in ("KITH_WORK", "CLAUDE_ENV_FILE"):
+    if os.environ.get(k):   # their workspace, for their sandboxed shell only (lib/guest-env.sh); also for a launch-json run
+        s["env"][k] = os.environ[k]
 json.dump(s, open(f, "w"), indent=1)' "$runs/$$.settings.json"
 fi
 # The read-only kernel commands PROTOCOL tells agents to run, allowed without a prompt. Under every path the kernel
@@ -929,7 +964,10 @@ emit_launch() {
   [[ $harness == claude ]] && settings=$(cat "$runs/$$.settings.json")
   grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null && no_slash=false || no_slash=true
   [[ $harness == claude ]] || allowed_tools=""
-  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
+  # A guest's workspace (above): Claude Code reads its temp dir from the process environment, not the settings, so the host
+  # has to start it with these.
+  local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE"
+  ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
     BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib \
     python3 -c '

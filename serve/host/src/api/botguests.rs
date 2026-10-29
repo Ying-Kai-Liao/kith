@@ -1222,21 +1222,21 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
         ));
     }
     let lane = conv.lane.clone();
-    let live = epoch == conv.epoch && crate::chat::group::current(&hub.store, &lane, conv.epoch);
-    let live = live && hub.store.conversation(&conv.id).is_some_and(|c| c.state == crate::store::ConvState::Open);
+    let current = epoch == conv.epoch && crate::chat::group::current(&hub.store, &lane, conv.epoch);
+    let live = current && hub.store.conversation(&conv.id).is_some_and(|c| c.state == crate::store::ConvState::Open);
     let replies =
         live && turn_key.is_some_and(|k| crate::chat::group::bot_turn_waits(k, &bot.bot_id, &conv.id, conv.epoch));
     let mut charged = false;
-    let mut late = !live;
+    let mut after_the_fact = !live;
     if live && !replies {
         // Without a key it is the bot speaking up: one turn off the budget, if there is one. With a key nobody waits on
         // any more (answered already, or timed out) it is late.
         if turn_key.is_some() {
-            late = true;
+            after_the_fact = true;
         } else if hub.store.charge_lane(&lane)?.is_some() {
             charged = true;
         } else {
-            late = true;
+            after_the_fact = true;
         }
     }
     let sender = json!({"botId": bot.bot_id, "name": bot.name, "provider": bot.provider, "owner": bot.owner_person});
@@ -1248,7 +1248,7 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
     if let Some(k) = turn_key {
         data["turnKey"] = k.into();
     }
-    if late {
+    if after_the_fact {
         data["late"] = true.into();
     }
     let entry = hub

@@ -215,10 +215,10 @@ pub fn with_members(store: &Store, members: &[String]) -> Result<Option<String>>
 }
 
 /// A person wrote in a group lane: open a conversation there (ending the one still open) and run its room turn.
-pub fn start(hub: &Arc<Hub>, lane: Lane, budget: i64, opened_by: &str) -> Result<()> {
-    let conv = hub.store.open_conversation(&lane, budget, opened_by)?;
+pub fn start(hub: &Arc<Hub>, lane: &Lane, budget: i64, opened_by: &str) -> Result<()> {
+    let conv = hub.store.open_conversation(lane, budget, opened_by)?;
     // The older conversation's outside bot (if the room was waiting on one) is not waited for any more.
-    cancel_bot_turns(|t| t.lane == lane);
+    cancel_bot_turns(|t| t.lane == *lane);
     spawn(hub, conv);
     Ok(())
 }
@@ -279,59 +279,56 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         }
         // The speaker a restart interrupted goes first, already charged. Otherwise the next in the queue, charged now:
         // a turn that is sent costs one even if the member passes, times out or fails.
-        let member_id = match conv.queue.current.clone() {
-            Some(id) => {
-                // Written before the turn is sent: a restart from here on resumes this speaker without charging again.
-                if !hub.store.save_queue(&conv.id, &conv.queue)? {
-                    return Ok(());
-                }
-                id
+        let member_id = if let Some(id) = conv.queue.current.clone() {
+            // Written before the turn is sent: a restart from here on resumes this speaker without charging again.
+            if !hub.store.save_queue(&conv.id, &conv.queue)? {
+                return Ok(());
             }
-            None => {
+            id
+        } else {
+            if conv.queue.waiting.is_empty() {
+                if conv.queue.round > 0 && conv.queue.spoke == 0 {
+                    hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+                    break;
+                }
+                let since_user = since_last_user_message(hub, &lane)?;
+                let mut speakers: Vec<String> =
+                    responders(&members, &since_user).into_iter().map(|m| m.id.clone()).collect();
+                // An outside bot whose own post is the room's latest line has nothing new to read: waking it
+                // again would only spend its owner's Grok runs.
+                speakers.retain(|id| !spoke_last(hub, &lane, id));
+                // Each round starts one member later, so the same bot doesn't always speak first.
+                if !speakers.is_empty() {
+                    let offset = conv.queue.round as usize % speakers.len();
+                    speakers.rotate_left(offset);
+                }
+                conv.queue.waiting = speakers;
+                conv.queue.round += 1;
+                conv.queue.spoke = 0;
                 if conv.queue.waiting.is_empty() {
-                    if conv.queue.round > 0 && conv.queue.spoke == 0 {
-                        hub.store.end_conversation(&conv.id, ConvState::Ended)?;
-                        break;
-                    }
-                    let since_user = since_last_user_message(hub, &lane)?;
-                    let mut speakers: Vec<String> =
-                        responders(&members, &since_user).into_iter().map(|m| m.id.clone()).collect();
-                    // An outside bot whose own post is the room's latest line has nothing new to read: waking it
-                    // again would only spend its owner's Grok runs.
-                    speakers.retain(|id| !spoke_last(hub, &lane, id));
-                    // Each round starts one member later, so the same bot doesn't always speak first.
-                    if !speakers.is_empty() {
-                        let offset = conv.queue.round as usize % speakers.len();
-                        speakers.rotate_left(offset);
-                    }
-                    conv.queue.waiting = speakers;
-                    conv.queue.round += 1;
-                    conv.queue.spoke = 0;
-                    if conv.queue.waiting.is_empty() {
-                        hub.store.end_conversation(&conv.id, ConvState::Ended)?;
-                        break;
-                    }
+                    hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+                    break;
                 }
-                let mut next = conv.queue.clone();
-                let id = next.waiting.remove(0);
-                next.current = Some(id.clone());
-                // An outside bot posts under a key of this turn; its wake goes out once.
-                next.turn_key = guest_member(hub, &id).map(|_| uuid::Uuid::new_v4().to_string());
-                next.woke = false;
-                // The turn and the queue are written together, before the turn is sent.
-                match hub.store.charge_turn(&conv.id, &next)? {
-                    Charge::Charged(left) => {
-                        conv.left = left;
-                        conv.queue = next;
-                    }
-                    Charge::Spent => {
-                        hub.store.end_conversation(&conv.id, ConvState::Ended)?;
-                        break;
-                    }
-                    Charge::Closed => return Ok(()),
-                }
-                id
             }
+            let mut next = conv.queue.clone();
+            let id = next.waiting.remove(0);
+            next.current = Some(id.clone());
+            // An outside bot posts under a key of this turn; its wake goes out once.
+            next.turn_key = guest_member(hub, &id).map(|_| uuid::Uuid::new_v4().to_string());
+            next.woke = false;
+            // The turn and the queue are written together, before the turn is sent.
+            match hub.store.charge_turn(&conv.id, &next)? {
+                Charge::Charged(left) => {
+                    conv.left = left;
+                    conv.queue = next;
+                }
+                Charge::Spent => {
+                    hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+                    break;
+                }
+                Charge::Closed => return Ok(()),
+            }
+            id
         };
         let Some(member) = members.iter().find(|m| m.id == member_id) else {
             // Left the group since it was queued.
@@ -421,6 +418,14 @@ fn spoke_last(hub: &Hub, lane: &Lane, id: &str) -> bool {
 /// How long the host lets one wake command run (it retries a 429 itself, for up to two minutes of waiting).
 const WAKE_LIMIT: Duration = Duration::from_secs(180);
 
+/// Takes its key out of `turns()` when the room turn ends, however it ends.
+struct Forget(String);
+impl Drop for Forget {
+    fn drop(&mut self) {
+        turns().remove(&self.0);
+    }
+}
+
 /// An outside bot's turn: tells it (a `turn` event, and a wake through its webhook when it has a wake profile), then
 /// waits for its post under this turn's key for the bot's own timeout. No post by then, no wake profile reachable or a
 /// wake the webhook refused is a pass; the turn was charged when it was sent.
@@ -445,12 +450,6 @@ async fn bot_turn(
         },
     );
     // However this ends, nothing waits under the key afterwards.
-    struct Forget(String);
-    impl Drop for Forget {
-        fn drop(&mut self) {
-            turns().remove(&self.0);
-        }
-    }
     let _forget = Forget(key.clone());
     let _ = hub.events.send(json!({
         "type": "turn", "botId": guest.bot_id, "room": conv.lane.chat, "thread": conv.lane.thread,
@@ -1393,7 +1392,7 @@ mod tests {
         next_turn(&mut events).await;
         room.closed().await;
         assert!(started.elapsed() < Duration::from_secs(20), "a refused wake didn't wait for the timeout");
-        assert!(!refused.args().is_empty());
+        assert!(refused.args().len() > 1);
         room.settle().await;
         room.shutdown().await;
     }
