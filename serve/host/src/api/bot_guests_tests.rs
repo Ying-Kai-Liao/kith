@@ -843,3 +843,40 @@ async fn a_bot_ask_waits_for_the_cloud_and_a_revoke_from_another_mac_puts_the_bo
     assert_eq!(call(&r, &j.caller, "botAsk", ask("again", "d")).await.unwrap()["state"], "running");
     assert!(call(&r, &j.caller, "botThread", thread).await.is_ok());
 }
+
+#[tokio::test]
+async fn a_used_nonce_replays_the_same_ask_and_refuses_anything_else() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    r.owner_bot("money");
+    let j = join(&r, &Caller::Local, json!({"name": "Rex", "provider": "grok", "agents": ["house", "money"]})).await;
+    assert_eq!(prove(&r, &j).await.unwrap()["state"], "active");
+    let first = call(&r, &j.caller, "botAsk", ask("one", "n1")).await.unwrap();
+    let conv = first["conversation"].as_str().unwrap().to_owned();
+    let users = || {
+        let c = r.hub.store.bot_conversation_by_id(&conv).unwrap();
+        r.hub.store.thread(&c.chat_bot_id, &c.thread_root, 50).unwrap().iter().filter(|e| e.kind == "user").count()
+    };
+    let person = r.hub.store.bot_guest(&j.bot).unwrap().person_id;
+
+    // Same text (the trimmed one), same agent: the replay, also when it names the conversation it made.
+    let again = call(&r, &j.caller, "botAsk", ask("  one ", "n1")).await.unwrap();
+    assert_eq!((&again["entryId"], &again["duplicate"]), (&first["entryId"], &json!(true)));
+    let named = call(&r, &j.caller, "botAsk", json!({"conversation": conv, "text": "one", "clientNonce": "n1"})).await;
+    assert_eq!(named.unwrap()["duplicate"], true);
+
+    // Other text, other agent, other conversation: refused with nothing stored, sent or counted.
+    let audits = r.hub.store.audit_count_since(&person, "botAsk", 0);
+    let refused = [
+        ask("two", "n1"),
+        json!({"agent": "money", "text": "one", "clientNonce": "n1"}),
+        json!({"agent": "house", "ref": "grok:1", "text": "one", "clientNonce": "n1"}),
+    ];
+    for body in refused {
+        let e = call(&r, &j.caller, "botAsk", body.clone()).await.unwrap_err();
+        assert_eq!(code(&e), Some("nonceReused"), "{body}");
+        assert!(e.downcast_ref::<BotError>().is_some_and(|b| b.status == 409));
+    }
+    assert_eq!(users(), 1);
+    assert_eq!(r.hub.store.audit_count_since(&person, "botAsk", 0), audits);
+}
