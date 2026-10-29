@@ -11,8 +11,9 @@ public struct AgentTint: Equatable, Sendable {
     public init(a: Color, b: Color) { self.a = a; self.b = b }
 
     public init?(stored: String?) {
-        guard let id = AvatarPalette.pick(stored), let swatch = AvatarPalette.colors.first(where: { $0.id == id }) else { return nil }
-        self.init(a: Color(hex: swatch.a), b: Color(hex: swatch.b))
+        guard let pick = AvatarPalette.parse(stored), let swatch = AvatarPalette.colors.first(where: { $0.id == pick.id }) else { return nil }
+        // A plain pick is one colour everywhere the pair is worn.
+        self.init(a: Color(hex: swatch.a), b: Color(hex: pick.plain ? swatch.a : swatch.b))
     }
 
     /// For an agent without a pair.

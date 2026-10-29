@@ -10,7 +10,7 @@ import { Icon } from '../../components/Icon'
 import { ModalHeader, Sheet, SheetPage, useDismiss } from '../../components/Overlay'
 import { HStack, IconSlot, VStack } from '../../components/Stack'
 import { Text } from '../../components/Text'
-import { paletteValue } from '@shared/living-bots'
+import { paletteValue, parseColor } from '@shared/living-bots'
 import { AVATAR_PALETTE } from '../../lib/theme'
 import { useStore } from '../../store/context'
 import { botSections, permissionMenu, permissionMode } from '@shared/bot-sections'
@@ -148,7 +148,7 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
     </Field>
   )
   // hq is the one source of an hq bot's permission, model, effort and Fast mode: one set of rows replaces Kith's own.
-  const model = kith && !shown.kithSettings ? [<HqSettings key="hq" kith={kith} />] : [
+  const model = kith && !shown.kithSettings ? [<HqSettings key="hq" kith={kith} inSheet={part === 'often'} />] : [
     <AgentModelPicker key="model" backend={draft.backend} models={models} selection={draft.model} onChange={setModel} options={draft.modelOptions ?? {}} onOptionsChange={setModelOptions} />,
     (draft.backend !== 'custom' && models.catalog?.fastMode) || draft.fastMode || (saved?.backend === draft.backend && fastModeShown(saved)) ? (
       // Shown while the agent offers it (its model list, or the bot's own sessions), or while it's on.
@@ -408,6 +408,13 @@ function ColourSheet({ draft, face, isGroup, auto, onSource, onColor, close }: {
   const source = draft.avatarSource ?? 'auto'
   const color = draft.avatarColor
   const opened = useRef({ source, color })
+  // Gradient | Plain rides on the pick (`kith:<id>:plain`); with none yet it is only remembered here.
+  const [plain, setPlain] = useState(parseColor(color)?.plain ?? false)
+  const pick = parseColor(color)
+  const setMode = (next: boolean) => {
+    setPlain(next)
+    if (pick) onColor(paletteValue(pick.pair.id, next))
+  }
   // Old data (`shape`, or an id this app doesn't know) is Automatic.
   const picked = /^(crew|spare):/.test(source)
   const current = picked ? source : 'auto'
@@ -426,6 +433,7 @@ function ColourSheet({ draft, face, isGroup, auto, onSource, onColor, close }: {
         <button className="colour-text-button" onClick={() => {
           onSource(opened.current.source)
           onColor(opened.current.color)
+          setPlain(parseColor(opened.current.color)?.plain ?? false)
           close()
         }}>Cancel</button>
         <span className="colour-title">Colour</span>
@@ -435,17 +443,22 @@ function ColourSheet({ draft, face, isGroup, auto, onSource, onColor, close }: {
         <div className="colour-preview">
           <LiveBot face={face ?? 'group'} color={color} size={84} id={draft.id ?? 'new'} animated={false} />
         </div>
+        <div className="colour-mode" role="tablist" aria-label="Colour style">
+          {([[false, 'Gradient'], [true, 'Plain']] as const).map(([value, label]) => (
+            <button key={label} role="tab" aria-selected={plain === value} className={plain === value ? 'on' : ''} onClick={() => setMode(value)}>{label}</button>
+          ))}
+        </div>
         <div className="colour-grid" role="group" aria-label="Colour">
           {AVATAR_PALETTE.map((c) => {
-            const on = paletteValue(c.id) === color
+            const on = pick?.pair.id === c.id
             return (
-              <button key={c.id} className={`colour-swatch ${on ? 'on' : ''}`} aria-label={c.id} aria-pressed={on} onClick={() => onColor(paletteValue(c.id))}>
-                <span style={{ background: `linear-gradient(135deg, ${c.a}, ${c.b})` }} />
+              <button key={c.id} className={`colour-swatch ${on ? 'on' : ''}`} aria-label={c.id} aria-pressed={on} onClick={() => onColor(paletteValue(c.id, plain))}>
+                <span style={{ background: plain ? c.a : `linear-gradient(135deg, ${c.a}, ${c.b})` }} />
               </button>
             )
           })}
         </div>
-        <button className="colour-reset" disabled={!color} onClick={() => onColor('')}>
+        <button className="colour-reset" disabled={!color} onClick={() => { setPlain(false); onColor('') }}>
           <Icon name="arrow.counterclockwise" size={12} weight="medium" /> Reset to default
         </button>
         <p className="colour-note">The eyes never change.</p>

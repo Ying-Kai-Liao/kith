@@ -36,9 +36,9 @@ interface Common {
 
 export type DecisionCardProps =
   | (Common & { kind: 'question'; options: DecisionOption[]; onChoose: (id: string) => void })
-  | (Common & { kind: 'permission'; onAllow: () => void; onDeny: () => void; onAlways?: () => void; /** The always button's words ("Always" by default). */ alwaysLabel?: string })
+  | (Common & { kind: 'permission'; onAllow: () => void; onDeny: () => void; onAlways?: () => void; /** The allow button's words ("Allow" by default). */ allowLabel?: string; /** The always button's words ("Always" by default). */ alwaysLabel?: string })
 
-/** A question waiting on you, or a permission prompt. Buttons are tinted with the agent's pair; no amber. */
+/** A question waiting on you, or a permission prompt. While it waits the card is tinted in the agent's pair (grey once answered); no amber. */
 export function DecisionCard(props: DecisionCardProps) {
   const { pair, heading, leading, title, subject, place, details, outcome, held, waiting, pending = null } = props
   const busy = pending !== null && pending !== false
@@ -46,12 +46,12 @@ export function DecisionCard(props: DecisionCardProps) {
     props.kind === 'question'
       ? props.options.slice(0, 4).map((o) => ({ id: o.id, label: o.label, tone: 'pair' as const, run: () => props.onChoose(o.id) }))
       : [
-          { id: 'allow', label: 'Allow', tone: 'ink' as const, run: props.onAllow },
-          { id: 'deny', label: 'Deny', tone: 'plain' as const, run: props.onDeny },
+          { id: 'allow', label: props.allowLabel ?? 'Allow', tone: 'ink' as const, run: props.onAllow },
+          { id: 'deny', label: 'Deny', tone: 'deny' as const, run: props.onDeny },
           ...(props.onAlways ? [{ id: 'always', label: props.alwaysLabel ?? 'Always', tone: 'plain' as const, run: props.onAlways }] : []),
         ]
   return (
-    <section className={`kc-decision ${props.kind}`} style={pairStyle(pair)} aria-label={title}>
+    <section className={`kc-decision ${props.kind}${outcome ? '' : ' asking'}`} style={pairStyle(pair)} aria-label={title}>
       {heading ? (
         <div className="kc-decision-heading kith-text-secondary">
           {leading ? <span className="kc-decision-leading">{leading}</span> : null}

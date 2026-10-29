@@ -2,11 +2,13 @@ import { useRef, useState } from 'react'
 import type { IslandBot, IslandPermission } from '@shared/island'
 import { Button, Spinner } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
+import { CountBadge } from '../../components/kith'
+import { islandOptionLabel } from '../thread/permission-labels.ts'
 import { ThinkingOrb } from '../../components/ThinkingOrb'
 import { avatarColor, withAlpha } from '../../lib/theme'
 import type { IslandModel } from './island-model'
 import { useArrivals, useFlip, useSwap } from './island-motion'
-import { AgentRow, AMBER, badgeOf, BigCharacter, GREEN, IslandBotAvatar, KeyHint, MiniColumn, moodOf, RED, StateBadge, StatusDot, stepIcon } from './island-parts'
+import { AgentRow, badgeOf, BigCharacter, GREEN, IslandBotAvatar, KeyHint, MiniColumn, moodOf, RED, StateBadge, StatusDot, stepIcon } from './island-parts'
 
 const veil = (color: string, alpha: number) => `radial-gradient(120% 90% at 50% 130%, ${withAlpha(color, alpha)}, ${withAlpha(color, 0)} 70%)`
 
@@ -44,7 +46,7 @@ export function Wings({ model, peek }: { model: IslandModel; peek: boolean }) {
               ))}
             </span>
           ) : focus.status === 'needsInput' ? (
-            <span className="island-dot needs-you" />
+            <CountBadge inverted count={model.summary.bots.filter((b) => b.status === 'needsInput').length || 1} size={16} label="Needs you" />
           ) : (
             <ThinkingOrb size={14} color="#F5F6F8" />
           )}
@@ -126,7 +128,7 @@ export function Approval({ model, card }: { model: IslandModel; card: IslandPerm
   const swap = useSwap(card.entryId)
   return (
     <div className="island-with-minis">
-      <div className="island-card island-alert" style={{ background: `${veil(AMBER, 0.42)}, var(--island-card)` }}>
+      <div className="island-card island-alert" style={{ background: `${veil(avatarColor(card.bot.color), 0.3)}, var(--island-card)` }}>
         <div key={card.entryId} className={`island-swap-slot ${swap}`}>
           <BigCharacter bot={card.bot} size={56} mood="needsInput" badge="needsInput" onOpen={() => model.openBot(card.ref)} />
           <div className="island-alert-text">
@@ -136,9 +138,9 @@ export function Approval({ model, card }: { model: IslandModel; card: IslandPerm
               {/* A key request has no answer to give here: the field is in the chat. */}
               {options.length === 0 ? <Button onClick={() => model.openBot(card.ref)}>Open</Button> : null}
               {options.map((o) => (
-                <Button key={o.id} kind={o.kind === 'allow_once' ? 'primary' : 'secondary'} disabled={card.answering !== null} onClick={() => model.respond(card, o.id)}>
+                <Button key={o.id} kind={o.kind === 'allow_once' ? 'primary' : 'secondary'} className={o.kind.startsWith('reject') ? 'island-deny' : undefined} disabled={card.answering !== null} onClick={() => model.respond(card, o.id)}>
                   {card.answering === o.id ? <Spinner size={12} /> : null}
-                  {o.label}
+                  {islandOptionLabel(o.kind, o.label)}
                   {o.kind === 'allow_once' ? <KeyHint keys="⌥Y" /> : o.kind === 'reject_once' ? <KeyHint keys="⌥N" /> : null}
                 </Button>
               ))}
