@@ -203,8 +203,9 @@ pub async fn guard(hub: &Arc<Hub>, person: &str, proven: bool, method: &str, b: 
     }
     match method {
         // Checked by their own handlers, or about no chat at all.
-        "hello" | "projects" | "linkCode" | "startChat" | "callAccept" | "callDecline" | "callGreet"
-        | "createBotInvite" | "revokeBotInvite" | "revokeBot" | "myBots" | "setBotLimits" | "resolveCitation" => {}
+        "hello" | "projects" | "linkCode" | "scheduleMessages" | "startChat" | "callAccept" | "callDecline"
+        | "callGreet" | "createBotInvite" | "revokeBotInvite" | "revokeBot" | "myBots" | "setBotLimits"
+        | "resolveCitation" => {}
         // A card or message names its chat only through the entry.
         "respondPermission" | "react" | "editHandoff" | "keepConversation" => {
             let id = b["entryId"].as_str().unwrap_or_default();

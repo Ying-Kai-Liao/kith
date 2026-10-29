@@ -43,8 +43,12 @@ struct ChatRow: View {
         case "agent":
             VStack(alignment: .leading, spacing: 4) {
                 if groupStart { AuthorLabel(botId: entry.data.author ?? chat?.id) }
-                AgentBubble(entry: entry, openTrace: openTrace, reply: reply) {
-                    withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { toggleContext() }
+                if let card = entry.data.richCard, card.drawsInChat {
+                    if card.type == "news" { NewsCard(entry: entry, card: card) } else { ScheduleCard(entry: entry, card: card) }
+                } else {
+                    AgentBubble(entry: entry, openTrace: openTrace, reply: reply) {
+                        withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { toggleContext() }
+                    }
                 }
                 Group {
                     AnsweredByLabel(answeredBy: entry.data.answeredBy)
@@ -75,6 +79,9 @@ struct ChatRow: View {
                 ConnectionRequestCard(entry: entry, request: request).padding(.top, 12)
             } else if let card = entry.data.handoff {
                 HandoffCardRow(entry: entry, card: card).padding(.top, 10)
+            } else if let card = entry.data.richCard, card.type == "schedule", card.drawsInChat {
+                // A routine's card arrives as a notice from the host, not as the bot's message.
+                ScheduleCard(entry: entry, card: card).padding(.top, 10)
             } else {
                 NoticeRow(entry: entry).padding(.top, 10)
             }

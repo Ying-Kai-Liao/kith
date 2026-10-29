@@ -29,6 +29,8 @@ broken-bridge-no-sync	PROPERTY	R6cDown	fail
 broken-bridge-no-sync	PROPERTY	R6cWake	fail
 broken-bridge-no-sync	PROPERTY	R5c	fail
 broken-bridge-no-sync	PROPERTY	NeverBridgeInCloudDown	fail
+broken-helper-no-sync	PROPERTY	R5c	fail
+broken-helper-no-sync	PROPERTY	R5	pass
 # --- probes: things that should happen do (a probe "fails" = it is reachable) -
 code	INVARIANT	NeverBridgeServed	fail
 code	PROPERTY	NeverAppAfterUndo	fail

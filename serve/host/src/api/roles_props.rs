@@ -603,6 +603,7 @@ fn nothing_to_check(m: &str) -> bool {
         "hello"
             | "projects"
             | "linkCode"
+            | "scheduleMessages"
             | "startChat"
             | "callAccept"
             | "callDecline"
@@ -747,6 +748,12 @@ fn guard_never_lets_a_person_past_their_grant() {
                 if let Err(e) = &verdict {
                     prop_assert!(e.is::<NotAllowed>());
                 }
+                return Ok(());
+            }
+            // (2) A proven device that shows its invite again is told it already has, in the words the apps wait for.
+            if c.method == "proveInvite" {
+                let e = verdict.as_ref().err().map(|e| format!("{e:#}")).unwrap_or_default();
+                prop_assert!(e.contains("already shown its invite"), "proven proveInvite: {e:?}");
                 return Ok(());
             }
             match verdict {

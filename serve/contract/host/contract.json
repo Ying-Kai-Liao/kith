@@ -273,6 +273,7 @@
       "doc": "The code that links a Telegram, Discord or Slack account to the caller's person.",
       "fields": { "code": "string", "expiresAt": "int" }
     },
+    "ScheduleMessages": { "fields": { "on": "bool" } },
     "CallAccepted": { "doc": "The chat the accepted call belongs to.", "fields": { "botId": "string" } },
     "Proven": { "fields": { "proven": "bool" } },
 
@@ -530,6 +531,12 @@
       "who": ["member"],
       "params": {},
       "result": "LinkCode"
+    },
+    "scheduleMessages": {
+      "doc": "Whether their own Schedule cards are also said in their Telegram, Discord or Slack chat with the agent (on unless they turn it off), set first when on is given. The card in the app and a run's own messages stay either way.",
+      "who": ["member"],
+      "params": { "on": "bool?" },
+      "result": "ScheduleMessages"
     },
     "callAccept": {
       "doc": "Answers an incoming call from their own agent; the host checks the call is theirs.",

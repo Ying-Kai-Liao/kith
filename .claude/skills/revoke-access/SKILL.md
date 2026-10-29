@@ -1,6 +1,6 @@
 ---
 name: revoke-access
-description: Model-checks (TLA+/TLC) that a revoked person, and their bots, reach nothing on any of the owner's Macs, and that undo restores exactly what they had. Use when a change touches kernel/bin/kith-auth may(), cut_off, bot_may, bridge_held or cmd_person/revoke_person, serve/host/src/api/people.rs revoke_person or cut_off, serve/host/src/remote/{members,cloud,relay,sync_lease}.rs, the bot ask/thread gates in api/botguests.rs, the chat channels' access checks in serve/host/src/channels/ (core.rs handle/held/take/access, queue.rs work, run.rs Recheck/finish/flush, hq.rs who/resolve_in_sync), or the cloud's person revoke in serve/cloud/src/routes/invites.ts. Also use to answer "can a revoked person still get through?".
+description: Model-checks (TLA+/TLC) that a revoked person, and their bots, reach nothing on any of the owner's Macs, and that undo restores exactly what they had. Use when a change touches kernel/bin/kith-auth may(), cut_off, bot_may, bridge_held or cmd_person/revoke_person, the helper spawn's in-sync wait in kernel/bin/kith (and kith-permit ask_helper), serve/host/src/api/people.rs revoke_person or cut_off, serve/host/src/remote/{members,cloud,relay,sync_lease}.rs, the bot ask/thread gates in api/botguests.rs, the chat channels' access checks in serve/host/src/channels/ (core.rs handle/held/take/access, queue.rs work, run.rs Recheck/finish/flush, hq.rs who/resolve_in_sync), or the cloud's person revoke in serve/cloud/src/routes/invites.ts. Also use to answer "can a revoked person still get through?".
 ---
 
 # Revoke access: a revoked person reaches nothing, anywhere
@@ -18,7 +18,7 @@ design). This skill is its only documentation.
 ## Run it
 
 ```
-verification/revoke/run.sh                          # every row of checks.tsv (33 rows, about a minute)
+verification/revoke/run.sh                          # every row of checks.tsv (35 rows, about a minute)
 verification/revoke/run.sh --show VARIANT PROPERTY   # TLC's full output (the counterexample) for one row
 verification/revoke/drift.sh                        # covered files changed since the sync commit?
 ```
@@ -40,8 +40,15 @@ cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of th
 
 ## Sync commit
 
-**3eb9f9a50c25** (2026-10-28: origin/main `b241d7bb` plus the channels' revoke checks, which took over the retired
-bridge's doors: the revoked reply, the held wait, the turn-start and delivery re-checks). First written at `48af5a4eafb8`
+**1f397684bb18** (2026-10-29: origin/main `bc3d92b8` plus the helper's in-sync wait in `kernel/bin/kith`, finding 2).
+Between `3eb9f9a50c25` (2026-10-28, the channels' revoke checks) and it, the covered files changed by the invite link's
+web origin (`people.rs`, #376), the iPhone's answer to members' access requests, the owner-approved proven device and
+idle web devices (`cloud.rs`, #382/#383/#387; `pull` still applies revoked before memberships), and in `kernel/bin/kith`
+self-update, the guest sandbox's real paths, `KITH_ASK_ID`, the run outbox (#388) and `ask_helper` for guests (#380,
+the `Helper` door from a guest's run): no revoke step, except that #380 made the helper's missing in-sync check
+reachable from a guest's turn, now fixed. Before that, `3eb9f9a50c25` was origin/main `b241d7bb` plus the channels'
+revoke checks, which took over the retired bridge's doors: the revoked reply, the held wait, the turn-start and
+delivery re-checks. First written at `48af5a4eafb8`
 (the revoke-a-person code, "kith serve: a revoke goes through the cloud first ..."). Between the two, the covered files
 changed by contract and type refactors (cloud HTTP and host RPC), the grants ledger, `bots-cap --json` and budgets, the
 host's owner pin in `pull` (revoked is still applied before memberships), the claim refactor in `kernel/bin/kith`, and
@@ -86,8 +93,8 @@ cost (a guest's message is held while nothing is revoked) is real.
 | in sync | `remote/sync_lease.rs`: `hub.cloud_synced` (host) and `cloud-sync.json {linked, until}` (kernel, read by kith-auth `bridge_held` for `who`/`resolve` `held`) | `InSync` |
 | the bridge (chat channels) takes a message | `serve/host/src/channels/core.rs` `handle`: `who` (`hq.rs` `who`, with `revoked`/`held`); `held` (non-owner) -> `held()` in the background asks `who` every `sync_poll` up to `sync_hold` (2 s / 120 s), then "Kith on this computer is catching up ..."; in sync -> `take`: `revoked` -> "Your access to kith on this computer was removed." and nothing else | `BridgeRecv` (drop / hold / start) |
 | the bridge's turn starts | `channels/queue.rs` `work`, right before the batch is taken: `Core::access` -> `hq::resolve_in_sync` (resolve; while `held`, wait up to `sync_hold`, then refuse "out of sync with the Kith cloud"); the owner is not re-checked | the start in `BridgeRecv`; `HelperGate` (bridge) |
-| a helper spawn | `bin/kith` -> kith-auth `resolve` (`may()`), every spawn; only `allowed` is read, not `held` (see findings) | `Helper` |
-| delivery | bridge: `channels/run.rs` `Recheck::still` (via `resolve_in_sync`) at the start of `finish` (the answer) and in `flush` before posting the outbox (refused: the outbox files are deleted, nothing posted); the owner is never re-checked; bot: `botThread` gate; app: the device is revoked here and blocked by the relay | `Deliver` |
+| a helper spawn | `bin/kith`, every spawn for anyone but the owner: kith-auth `resolve` (`may()`); while `held`, ask again every 2 s up to `KITH_SYNC_HOLD` (120 s), then refuse "out of sync with the Kith cloud" (exit 3), as `resolve_in_sync`; the owner is never held. A guest's helper comes through kith-permit `ask_helper` (outside the sandbox), which tells the agent to try again | `Helper` (`HelperNoSync = FALSE`) |
+| delivery | app: a run's outbox (`run_outbox.rs`, #388) posts into the person's own app chat with no re-check here; their devices are revoked in `cut_off` and blocked by the relay, so it is the app door's `RelayOK`; bridge: `channels/run.rs` `Recheck::still` (via `resolve_in_sync`) at the start of `finish` (the answer) and in `flush` before posting the outbox (refused: the outbox files are deleted, nothing posted); the owner is never re-checked; bot: `botThread` gate; app: the device is revoked here and blocked by the relay | `Deliver` |
 | stop a running turn once the revoke lands | `people.rs` `cut_off`: devices revoked, `botguests::enforce`, `stop_runs`, `sweep_claims` | `Stop` |
 | network up / cloud down / offline | the relay connection (`relay.rs` loop: `set(false)` on every (re)connect until a pull succeeds, `renew` on each ping) | `SetNet` |
 
@@ -124,7 +131,11 @@ The model's "bridge" is this door.
    so a fully in-sync Mac serves the person. Hence R9: on a cloud-linked Mac a terminal revoke or undo needs the
    cloud, and is refused with a message when it can't be reached (`api/people.rs` `revoke_person`). `app-only` (no
    terminal revoke) passes too.
-2. The probes under `code` and `app-only` (see above) are reachable, as they should be.
+2. **A helper that reads only `may()` breaks R5c** (`broken-helper-no-sync` / `R5c`): a guest's turn on a Mac that
+   has not yet pulled a revoke made elsewhere spawns a helper for them; `R5` still holds, since local `may()` catches
+   the revoke once it is on the Mac. `kernel/bin/kith` read only `allowed` from `resolve` until 2026-10-29, which #380
+   (`ask_helper` for guests) made reachable; it now waits while `held`, as the channels' `resolve_in_sync` does.
+3. The probes under `code` and `app-only` (see above) are reachable, as they should be.
 
 ## How we know it can fail
 
@@ -136,6 +147,7 @@ The model's "bridge" is this door.
 | `broken-bot-ignores-owner` | bot_may's live owner check | `BotBelowOwner` |
 | `broken-no-relay-check` | the relay's / socket order's refusal | `R6c`, `R5c` |
 | `broken-bridge-no-sync` | the bridge's in-sync wait | `R6c`, `R6cDown`, `R6cWake`, `R5c`, `NeverBridgeInCloudDown` |
+| `broken-helper-no-sync` | the helper spawn's in-sync wait (`bin/kith`) | `R5c` (`R5` passes) |
 | `terminal-offline` | R9 (terminal revoke needs the cloud) | `R6` |
 
 On the code (dry run at the sync commit, edits dropped after):
@@ -145,6 +157,8 @@ On the code (dry run at the sync commit, edits dropped after):
   `api::revoke_tests` and the bot test below) fail.
 - removing the `sync_lease::wait` in bot `ask`: `bot_guests_tests` `a_bot_ask_waits_for_the_cloud...` fails (an ask
   while out of sync is not refused "syncing").
+- removing the in-sync wait in `kernel/bin/kith` (2026-10-29, at `1f397684`): `kith-guest-helper-check` fails 4
+  checks (a held guest's helper runs, and is not told it is out of sync).
 
 ## When you change covered code
 

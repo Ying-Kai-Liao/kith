@@ -125,6 +125,7 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             serde_json::to_value(crate::remote::cloud::confirm_owner(hub, user_id).await?)?
         }
         "linkCode" => crate::remote::account::link_code(hub, caller).await?,
+        "scheduleMessages" => crate::remote::account::schedule_messages(hub, caller, b["on"].as_bool())?,
         "claimSign" => claim_sign(hub, &b).await?,
         _ => return Ok(ControlFlow::Continue(b)),
     }))
