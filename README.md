@@ -437,19 +437,9 @@ put its skills in `role/skills/`. New sessions pick it up; `kith share <name>` p
 
 ## Licensing
 
-Kith is split on purpose. Every part is open source: MIT for the pieces you build on, Apache-2.0 for the host, cloud, relay and apps.
+Kith is open source under [Apache-2.0](LICENSE); `NOTICE` carries the attributions that travel with it, including the Codync-derived parts of the relay. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by the license. Third-party and vendored files (for example `apps/packaging/cua-driver`) keep their own licenses. Contributions are accepted under Apache-2.0 (no CLA), see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-| Part | Folders | License |
-| --- | --- | --- |
-| Kernel, agent folder format and protocol | `kernel/` (incl. `kernel/PROTOCOL.md`) | MIT, open source |
-| Bot client and wire protocol crates, guest scripts | `serve/host/crates/guest`, `serve/host/crates/wire`, `scripts/install-guest.sh`, `scripts/package-guest.sh`, `scripts/smoke-guest.sh` | MIT, open source |
-| Docs and specs, top-level scripts | `docs/`, `serve/docs/`, `install.sh`, other `scripts/` | MIT, open source |
-| Host, cloud, relay | `serve/host` (except the crates above), `serve/cloud`, `serve/relay` | Apache-2.0, open source |
-| Apps (Mac, iOS, web/desktop) | `apps/` | Apache-2.0, open source |
-
-Apache-2.0 is an OSI-approved open-source license: you can read, run, modify, self-host and build on these parts, commercially or not, as long as you keep the license and copyright notices (see `NOTICE`). The nearest `LICENSE` file to a file is the one that applies to it. `NOTICE` carries the attribution for the Codync-derived portions of the relay and covers the Apache-2.0 parts too. The "Kith" name and logo are covered by [TRADEMARKS.md](TRADEMARKS.md), not by these licenses.
-
-Code committed before 2026-10-25 was published under MIT/Apache-2.0, and copies taken before then keep those licenses. Versions of these parts released under FSL-1.1-MIT between 2026-10-25 and the move to Apache-2.0 keep the FSL-1.1-MIT license for those copies; from that change on, the parts above are Apache-2.0. Contributions are accepted under MIT (no CLA), see [CONTRIBUTING.md](CONTRIBUTING.md).
+Code committed before 2026-10-25 was published under MIT/Apache-2.0, and copies taken before then keep those licenses. Versions of the host, cloud, relay and apps released under FSL-1.1-MIT between 2026-10-25 and the move to Apache-2.0 keep the FSL-1.1-MIT license for those copies; from that change on, the whole repo is Apache-2.0.
 
 ## Credits
 Kith's relay is borrowed from [Codync](https://github.com/leepokai/Codync) (Apache-2.0).

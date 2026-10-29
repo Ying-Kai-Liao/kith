@@ -52,4 +52,4 @@ The crate re-exports the `rusqlite` it builds against: use that one, because a b
 
 ## License
 
-Apache-2.0 (see `LICENSE`).
+Apache-2.0 (see the `LICENSE` at the root of the Kith repo).

@@ -1,6 +1,6 @@
 # kith-serve
 
-Kith's host: runs coding-agent bots over ACP and serves the Kith apps. Apache-2.0 (the guest and wire crates are MIT): see `../../NOTICE`, `../../THIRD_PARTY_NOTICES.md` and `LICENSE`.
+Kith's host: runs coding-agent bots over ACP and serves the Kith apps. Apache-2.0: see `../../LICENSE`, `../../NOTICE` and `../../THIRD_PARTY_NOTICES.md`.
 
 ## One `kith` binary
 
