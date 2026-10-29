@@ -135,6 +135,9 @@ impl App {
                 if let Some(root) = thread {
                     body["threadId"] = root.into();
                 }
+                if let Some(budget) = super::super::GROUP_BUDGET.get() {
+                    body["budget"] = (*budget).into();
+                }
                 if let Some(pasted) = self.pasted.get(&key).filter(|p| !p.is_empty()) {
                     body["pasted"] = json!(pasted);
                 }
