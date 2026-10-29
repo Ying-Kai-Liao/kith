@@ -76,6 +76,7 @@
     "event:entry(permission).entry.createdAt": "number",
     "event:entry(permission).entry.data": "object",
     "event:entry(permission).entry.data.author": "string",
+    "event:entry(permission).entry.data.canAnswer": "bool",
     "event:entry(permission).entry.data.command": "string",
     "event:entry(permission).entry.data.cwd": "string",
     "event:entry(permission).entry.data.detail": "string",
