@@ -178,7 +178,11 @@ pub fn schedule_messages(hub: &Hub, caller: &Caller, on: Option<bool>) -> Result
     let person = match devices::principal(&hub.store, caller) {
         Principal::Owner => None,
         Principal::Member(person) => Some(person),
-        Principal::Nobody | Principal::Unproven(_) | Principal::Bot { .. } | Principal::BotPending(_) => {
+        Principal::Nobody
+        | Principal::Unproven(_)
+        | Principal::Bot { .. }
+        | Principal::BotPending(_)
+        | Principal::Peer(_) => {
             bail!("this device isn't allowed on this computer")
         }
     };
