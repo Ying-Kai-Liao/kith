@@ -1,4 +1,4 @@
-import { glyphColor, gradientTable, paletteColor, rigOf } from '@shared/living-bots'
+import { glyphColor, gradientTable, parseColor, rigOf } from '@shared/living-bots'
 
 // The bots' layers (branding living-bots/bots/<name>/), bundled with the app at 256 px.
 const layers = import.meta.glob<string>('../assets/bots/*/*.png', { eager: true, query: '?url', import: 'default' })
@@ -38,7 +38,8 @@ function pixels(image: HTMLImageElement) {
  * top in a darker colour. Resolves null for an original body, the kith cube, or when the layers fail to load.
  */
 export function recolour(name: string, colorId: string): Promise<string | null> {
-  const pair = paletteColor(colorId)
+  const pick = parseColor(colorId)
+  const pair = pick?.pair
   const tint = layerURL(name, 'tint')
   if (!pair || !tint || !rigOf(name)?.tint) return Promise.resolve(null)
   const key = `${name}|${colorId}`
@@ -49,7 +50,7 @@ export function recolour(name: string, colorId: string): Promise<string | null> 
     job = (async () => {
       const [map, glyph] = await Promise.all([load(tint), rigOf(name)!.detail && layerURL(name, 'detail') ? load(layerURL(name, 'detail')!) : null])
       const { canvas, ctx, data } = pixels(map)
-      const table = gradientTable(pair.a, pair.b)
+      const table = gradientTable(pair.a, pick!.plain ? pair.a : pair.b)
       for (let i = 0; i < data.data.length; i += 4) {
         const [r, g, b] = table[data.data[i]!]!
         data.data[i] = r
@@ -92,7 +93,7 @@ export function onIconsLoaded(callback: () => void) {
 
 /** The body image for a menu icon, or null while it loads (listeners are told when it is ready). */
 export function iconBody(name: string, colorId: string): HTMLImageElement | null {
-  const tinted = rigOf(name)?.tint && paletteColor(colorId) ? colorId : ''
+  const tinted = rigOf(name)?.tint && parseColor(colorId) ? colorId : ''
   const key = `${name}|${tinted}`
   const hit = iconImages.get(key)
   if (hit) return hit

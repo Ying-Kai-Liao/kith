@@ -13,8 +13,26 @@ function callOptions(kith: KithInfoStore, current: string) {
   return known.some((m) => m.id === current) ? known : [...known, { id: current, label: callModelLabel(current) }]
 }
 
-export function HqSettings({ kith }: { kith: KithInfoStore }) {
-  const rows = hqSettings(kith.info)
+/** The permission mode menu (Claude Code's six modes) with its error line: the agent sheet's Access tab, under "Asks before". */
+export function PermissionRow({ kith }: { kith: KithInfoStore }) {
+  const row = hqSettings(kith.info).find((r) => r.key === 'permission')!
+  return (
+    <>
+      <ValueRow label="Mode" detail={row.hint}>
+        <ChoicePicker
+          selection={row.value}
+          options={PERMISSION_MODES.some((m) => m.id === row.value) ? PERMISSION_MODES : [...PERMISSION_MODES, { id: row.value, label: permissionLabel(row.value), detail: '' }]}
+          onChange={(mode) => { if (!kith.permissionSaving && mode !== row.value) void kith.setPermission(mode) }}
+        />
+      </ValueRow>
+      {kith.permissionError ? <Text size="footnote" tone="danger" className="fade-in" role="alert">Permission not changed: {kith.permissionError}</Text> : null}
+    </>
+  )
+}
+
+/** `inSheet`: the agent sheet shows the permission on its Access tab, so it is left out here. */
+export function HqSettings({ kith, inSheet = false }: { kith: KithInfoStore; inSheet?: boolean }) {
+  const rows = hqSettings(kith.info).filter((r) => !(inSheet && r.key === 'permission'))
   return (
     <>
       {rows.map((row) => (
@@ -37,7 +55,7 @@ export function HqSettings({ kith }: { kith: KithInfoStore }) {
         </ValueRow>
       ))}
       {kith.callModelError ? <Text size="footnote" tone="danger" className="fade-in" role="alert">Call model not changed: {kith.callModelError}</Text> : null}
-      {kith.permissionError ? <Text size="footnote" tone="danger" className="fade-in" role="alert">Permission not changed: {kith.permissionError}</Text> : null}
+      {!inSheet && kith.permissionError ? <Text size="footnote" tone="danger" className="fade-in" role="alert">Permission not changed: {kith.permissionError}</Text> : null}
     </>
   )
 }
