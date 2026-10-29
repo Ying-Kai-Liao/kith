@@ -2,6 +2,8 @@ import { SharedFileView } from './SharedImage'
 import { memo, useEffect, useRef, useState } from 'react'
 import { isGroup, isWorking, needsInput, type Bot, type Entry } from '@shared/models'
 import { BotAvatar } from '../../components/Avatar'
+import { BotAvatar as KithBot } from '../../components/kith'
+import { avatarImage } from '@shared/crew'
 import { Hairline, IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { AnchoredMenu, useContextMenu, type MenuItem, type ReactionPick } from '../../components/Overlay'
@@ -23,7 +25,10 @@ import { confirmMessage, confirmTitle, heldIcon, heldRowOf, stoppedDivider } fro
 import { ConnectionRequestCard } from '../marketplace/ConnectionRequestCard'
 import { HandoffNotice } from './HandoffNotice'
 import { AnsweredBy } from './AnsweredBy'
-import { contextLabel } from './context-hint'
+import { contextLine } from './context-hint'
+import { groupReactions } from './reaction-groups'
+import { FoldedPill } from './FoldedCard'
+import { foldOf } from './fold-card'
 import { callLineSuffix } from './call-line'
 import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
 import { toolRowOf } from '@shared/thread-feed'
@@ -72,11 +77,10 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
     case 'agent':
       return (
         <VStack align="flex-start" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
-          {chat && isGroup(chat) && groupStart ? <AuthorLabel botId={entry.data.author} /> : null}
+          {groupStart ? <AuthorLabel botId={entry.data.author ?? entry.botId} /> : null}
           <AgentBubble entry={entry} openTrace={openTrace} reply={reply} />
           <VStack gap={4} className={chat && isGroup(chat) ? 'chat-row-indent' : undefined}>
             <AnsweredBy answeredBy={entry.data.answeredBy} />
-            <ContextHint contextPercent={entry.data.contextPercent} />
             <ReactionsRow entry={entry} />
           </VStack>
         </VStack>
@@ -96,14 +100,47 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
   }
 })
 
-/** A quiet "context N%" under the reply; the host sets it only above its threshold. */
-function ContextHint({ contextPercent }: { contextPercent: unknown }) {
-  const label = contextLabel(contextPercent)
-  return label ? <Text size="footnote" tone="tertiary">{label}</Text> : null
+/** Under a tapped reply, at its bottom right: the time, then a 13 pt ring and "N% context" when the host sent a percent. */
+function ContextLine({ entry }: { entry: Entry }) {
+  const line = contextLine(relativeTime.time(entry.createdAt), entry.data.contextPercent)
+  const r = 5.5
+  const c = 2 * Math.PI * r
+  return (
+    <div className="context-line">
+      <span className="context-line-time">{line.time}</span>
+      {line.fill !== null && line.label ? (
+        <>
+          <svg className="context-ring" width={13} height={13} viewBox="0 0 13 13" aria-hidden>
+            <circle cx="6.5" cy="6.5" r={r} className="context-ring-track" />
+            <circle cx="6.5" cy="6.5" r={r} className="context-ring-arc" strokeDasharray={`${line.fill * c} ${c}`} transform="rotate(-90 6.5 6.5)" />
+          </svg>
+          <span className="context-line-label">{line.label}</span>
+        </>
+      ) : null}
+    </div>
+  )
 }
 
 /** Follows the store: the card shows a spinner while its answer is on its way. */
 function LivePermission({ entry }: { entry: Entry }) {
+  const store = useLiveStore()
+  const [open, setOpen] = useState(false)
+  const fold = foldOf(entry)
+  // An approved card that still holds its old run keeps its Stop row, so it stays a card.
+  const folded = fold && !(entry.data.held || store.stoppedRuns.get(entry.id))
+  if (folded) {
+    return (
+      <div className="agent-inset">
+        <FoldedPill fold={fold} time={relativeTime.time(entry.createdAt)} open={open} toggle={() => setOpen((o) => !o)} />
+        {open ? <div className="folded-card-body"><OpenCard entry={entry} /></div> : null}
+      </div>
+    )
+  }
+  return <OpenCard entry={entry} />
+}
+
+/** The full card for an entry, pending or answered. */
+function OpenCard({ entry }: { entry: Entry }) {
   const store = useLiveStore()
   const ownerName = ownerNameFrom(store.bots.get(entry.botId)?.activity)
   // A key request is its own card; an entry without data.card (or an old one) is the approval card as before.
@@ -147,14 +184,14 @@ function heldFor(entry: Entry, store: BotStore, ownerName: string | null): HeldC
   }
 }
 
-/** Who wrote a message in a group: their avatar and name in their color. */
+/** Who wrote a message: the bot at 24 (no tile, soft shadow) and its name in Nunito 800. */
 export function AuthorLabel({ botId }: { botId?: string | null }) {
   const store = useStore()
   const bot = botId ? store.bots.get(botId) : undefined
   return (
     <HStack gap={8}>
-      {bot ? <BotAvatar bot={bot} size={26} animated={false} /> : null}
-      <Text size="subheadline" weight="medium" tone="secondary">{store.authorName(botId)}</Text>
+      {bot ? <KithBot face={isGroup(bot) ? 'group' : (avatarImage(bot) ?? 'group')} color={bot.avatarColor} id={bot.id} size={24} animated={false} /> : null}
+      <span className="kith-text-agent-name author-name">{store.authorName(botId)}</span>
     </HStack>
   )
 }
@@ -261,10 +298,24 @@ function GuestBotBubble({ entry, reply }: { entry: Entry; reply?: () => void }) 
 export function AgentBubble({ entry, openTrace, reply }: { entry: Entry; openTrace: () => void; reply?: () => void }) {
   const store = useStore()
   const [hovering, setHovering] = useState(false)
+  const [line, setLine] = useState(false)
   const copy = () => entry.data.text && window.kith.app.copy(entry.data.text)
+  // Scrolling the chat takes the line away again.
+  useEffect(() => {
+    if (!line) return
+    const hide = () => setLine(false)
+    window.addEventListener('scroll', hide, true)
+    return () => window.removeEventListener('scroll', hide, true)
+  }, [line])
+  // A tap on the reply itself; links, buttons and a text selection keep their own meaning.
+  const tap = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('a, button, input, textarea, summary, [role="button"]')) return
+    if (window.getSelection()?.toString()) return
+    setLine((v) => !v)
+  }
   return (
     <div className="message agent" title={fullDate.format(entry.createdAt)} onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-      <div className="message-body">
+      <div className="message-body" onClick={tap}>
         <Bubble
           className={entry.data.files?.length ? "file-message" : "bubble agent"}
           reactions={reactionPick(store, entry)}
@@ -276,6 +327,7 @@ export function AgentBubble({ entry, openTrace, reply }: { entry: Entry; openTra
         >
           {entry.data.files?.length ? <div className="file-message-cards">{entry.data.files.map((file) => <SharedFileView key={file.id} entry={entry} file={file} />)}</div> : <MarkdownText text={entry.data.text ?? ''} />}
         </Bubble>
+        {line ? <ContextLine entry={entry} /> : null}
         <MessageActions className="trailing" visible={hovering} reactions={reactionPick(store, entry)} reply={reply} trace={openTrace} copy={copy} />
       </div>
     </div>
@@ -363,13 +415,14 @@ function Timer({ since }: { since: number }) {
 /** The user's reactions under a message; clicking one takes it back. */
 export function ReactionsRow({ entry }: { entry: Entry }) {
   const store = useStore()
-  const reactions = entry.data.reactions
-  if (!reactions?.length) return null
+  const groups = groupReactions(entry.data.reactions)
+  if (!groups.length) return null
   return (
     <HStack align="stretch" gap={4}>
-      {reactions.map((emoji) => (
-        <button key={emoji} className="press reaction-chip" title={`Remove ${emoji}`} aria-label={`Remove reaction ${emoji}`} onClick={() => store.react(entry, emoji)}>
+      {groups.map(({ emoji, count, mine }) => (
+        <button key={emoji} className={mine ? 'press reaction-chip mine' : 'press reaction-chip'} title={`Remove ${emoji}`} aria-label={`Remove reaction ${emoji}`} onClick={() => store.react(entry, emoji)}>
           <Text size="body">{emoji}</Text>
+          <span className="reaction-count">{count}</span>
         </button>
       ))}
     </HStack>
