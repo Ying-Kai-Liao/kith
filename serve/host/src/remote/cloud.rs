@@ -780,21 +780,34 @@ fn pending_revokes(store: &Store) -> Vec<String> {
     store.kv_get(PENDING_REVOKES).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
 }
 
-fn set_pending_revokes(store: &Store, ids: &[String]) {
-    let saved = serde_json::to_string(ids).map_err(anyhow::Error::from).and_then(|v| store.kv_set(PENDING_REVOKES, &v));
+/// Changes the queue of grants to revoke in one step: it is read again here, so a grant queued while the caller was
+/// awaiting the cloud is kept, and no `.await` sits between the read and the write.
+fn update_pending_revokes(store: &Store, change: impl FnOnce(&mut Vec<String>)) {
+    static WRITING: Mutex<()> = Mutex::new(());
+    let _one_at_a_time = WRITING.locked();
+    let mut pending = pending_revokes(store);
+    change(&mut pending);
+    let saved =
+        serde_json::to_string(&pending).map_err(anyhow::Error::from).and_then(|v| store.kv_set(PENDING_REVOKES, &v));
     if let Err(e) = saved {
         tracing::warn!(error = format!("{e:#}"), "couldn't remember a grant to revoke");
     }
 }
 
+fn queue_revokes(store: &Store, ids: impl IntoIterator<Item = String>) {
+    update_pending_revokes(store, |pending| {
+        for id in ids {
+            if !pending.contains(&id) {
+                pending.push(id);
+            }
+        }
+    });
+}
+
 /// Tells the cloud an account device was removed here. Local removal already took effect;
 /// a failure is retried on later state pulls.
 pub async fn revoke_grant(hub: Arc<Hub>, grant_id: String) {
-    let mut pending = pending_revokes(&hub.store);
-    if !pending.contains(&grant_id) {
-        pending.push(grant_id);
-        set_pending_revokes(&hub.store, &pending);
-    }
+    queue_revokes(&hub.store, [grant_id]);
     if let Ok(base) = base(&hub) {
         retry_revokes(&hub, &base).await;
     }
@@ -802,26 +815,24 @@ pub async fn revoke_grant(hub: Arc<Hub>, grant_id: String) {
 
 /// Removes members' web devices nobody used for `WEB_IDLE_MS` (never used: counted from approval), and queues their
 /// grants for the cloud. A browser is the device most likely left signed in somewhere; a phone or the owner's own stay.
+/// One with a channel open now is in use, however long ago it was opened.
 fn expire_idle_web(hub: &Hub) {
     let Ok(devices) = hub.store.devices() else { return };
     let cutoff = now_ms() - WEB_IDLE_MS;
-    let mut pending = pending_revokes(&hub.store);
+    let mut grants = vec![];
     for d in devices {
         let idle = d.source == DeviceSource::Account
             && d.person_id.is_some()
             && is_web(&d.platform)
-            && d.last_seen_at.unwrap_or(d.created_at) < cutoff;
+            && d.last_seen_at.unwrap_or(d.created_at) < cutoff
+            && !hub.connected.locked().contains_key(&d.key);
         if !idle || !hub.revoke_device(&d.key).unwrap_or(false) {
             continue;
         }
         tracing::info!(device = d.key, "removed a member's web device unused for 30 days");
-        if let Some(g) = d.grant_id
-            && !pending.contains(&g)
-        {
-            pending.push(g);
-        }
+        grants.extend(d.grant_id);
     }
-    set_pending_revokes(&hub.store, &pending);
+    queue_revokes(&hub.store, grants);
 }
 
 async fn retry_revokes(hub: &Hub, base: &str) {
@@ -829,18 +840,15 @@ async fn retry_revokes(hub: &Hub, base: &str) {
     if pending.is_empty() {
         return;
     }
-    let mut left = vec![];
+    let mut done = vec![];
     for id in pending {
         match call(hub, base, Method::POST, &path::host_revoke_grant(&id), Some(&json!({}))).await {
-            Ok(_) => {}
-            Err(e) if cloud_status_of(&e) == Some(404) => {}
-            Err(e) => {
-                tracing::warn!(error = format!("{e:#}"), grant_id = id, "couldn't revoke a grant in the cloud");
-                left.push(id);
-            }
+            Ok(_) => done.push(id),
+            Err(e) if cloud_status_of(&e) == Some(404) => done.push(id),
+            Err(e) => tracing::warn!(error = format!("{e:#}"), grant_id = id, "couldn't revoke a grant in the cloud"),
         }
     }
-    set_pending_revokes(&hub.store, &left);
+    update_pending_revokes(&hub.store, |pending| pending.retain(|id| !done.contains(id)));
 }
 
 // MARK: invites and memberships
@@ -949,15 +957,48 @@ mod tests {
             device("fresh", "web", Some("sam"), now_ms()),
             device("phone", "ios", Some("sam"), old),
             device("owners", "web", None, old),
+            device("open", "web", Some("sam"), old),
         ] {
             hub.store.put_device(&d).unwrap();
         }
+        hub.connected.locked().insert("open".into(), 1);
         expire_idle_web(&hub);
         assert!(hub.store.device("idle").is_none(), "unused for 30 days: gone");
         assert_eq!(pending_revokes(&hub.store), ["grt_idle"], "and its grant goes to the cloud");
-        for kept in ["fresh", "phone", "owners"] {
+        for kept in ["fresh", "phone", "owners", "open"] {
             assert!(hub.store.device(kept).is_some(), "{kept} stays");
         }
+    }
+
+    #[tokio::test]
+    async fn a_grant_queued_while_a_retry_is_in_flight_is_not_lost() {
+        use axum::extract::State as Ax;
+        let hub = temp_hub();
+        let (hit, gate) = (Arc::new(tokio::sync::Notify::new()), Arc::new(tokio::sync::Notify::new()));
+        let app = axum::Router::new()
+            .route(
+                "/v1/host/grants/{id}/revoke",
+                axum::routing::post(
+                    |Ax((hit, gate)): Ax<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>| async move {
+                        hit.notify_one();
+                        gate.notified().await;
+                        axum::Json(json!({}))
+                    },
+                ),
+            )
+            .with_state((hit.clone(), gate.clone()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        queue_revokes(&hub.store, ["grt_a".to_owned()]);
+        let retrying = hub.clone();
+        let retry = tokio::spawn(async move { retry_revokes(&retrying, &base).await });
+        hit.notified().await; // the cloud call for grt_a is pending
+        queue_revokes(&hub.store, ["grt_b".to_owned()]); // the owner removes another device meanwhile
+        gate.notify_one();
+        retry.await.unwrap();
+        assert_eq!(pending_revokes(&hub.store), ["grt_b"], "grt_a went through; grt_b is still queued");
     }
 
     #[test]
