@@ -22,7 +22,10 @@ private let known = ["schedule": 2]
 @Test func anUnknownTypeOrANewerVersionIsThePlainRow() throws {
     #expect(try entry(#"{"richCard":{"type":"news","v":1}}"#).data.richCard?.isDrawable(known: known) == false)
     #expect(try entry(#"{"richCard":{"type":"schedule","v":3}}"#).data.richCard?.isDrawable(known: known) == false)
-    #expect(try entry(#"{"richCard":{"type":"schedule","v":1}}"#).data.richCard?.isDrawable() == false)
+    #expect(try entry(#"{"richCard":{"type":"schedule","v":1}}"#).data.richCard?.isDrawable() == true)
+    #expect(try entry(#"{"richCard":{"type":"news","v":1}}"#).data.richCard?.isDrawable() == true)
+    #expect(try entry(#"{"richCard":{"type":"news","v":2}}"#).data.richCard?.isDrawable() == false)
+    #expect(try entry(#"{"richCard":{"type":"weather","v":1}}"#).data.richCard?.isDrawable() == false)
 }
 
 @Test func anythingThatIsNotACardStillDecodesTheEntry() throws {

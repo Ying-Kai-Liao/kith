@@ -92,14 +92,14 @@ async fn an_owner_run_gets_a_card_and_a_yes_in_the_window_continues_the_same_run
     assert_eq!(entry.data["command"], "ls /tmp");
     assert!(roles::offered(&entry.data, "allow") && roles::offered(&entry.data, "deny"));
 
-    assert_eq!(answer(&r.hub, &entry.id, Some("allow"), "owner").unwrap(), Outcome::Recorded { forward: false });
+    assert_eq!(answer(&r.hub, &entry.id, Some("allow"), None).unwrap(), Outcome::Recorded { forward: false });
     assert_eq!(call.await.unwrap(), Decision { allow: true, message: "Approved.".into(), waiting: false });
     // C3: the live yes spent the grant; no resume, nothing left to use (A4).
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Used);
     assert_eq!(r.hub.store.cards_awaiting_resume(0).len(), 0);
     assert_eq!(entry_status(&r.hub, &card), "answered");
     // A second device, a retry: nothing (A1).
-    assert_eq!(answer(&r.hub, &entry.id, Some("deny"), "owner").unwrap(), Outcome::Closed);
+    assert_eq!(answer(&r.hub, &entry.id, Some("deny"), None).unwrap(), Outcome::Closed);
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Used);
 }
 
@@ -121,7 +121,7 @@ async fn no_answer_in_the_window_tells_the_run_to_end_its_turn_and_a_later_yes_i
     assert_eq!(r.hub.store.entry(&entry_id).unwrap().data["parked"], true);
 
     // The yes arrives after the process is gone: recorded as an approved card with its grant, not dropped.
-    assert_eq!(answer(&r.hub, &entry_id, Some("allow"), "owner").unwrap(), Outcome::Recorded { forward: false });
+    assert_eq!(answer(&r.hub, &entry_id, Some("allow"), None).unwrap(), Outcome::Recorded { forward: false });
     let kept = r.hub.store.card(&card.id).unwrap();
     assert!(kept.state == CardState::Approved && kept.granted_at.is_some() && kept.answered_parked);
     assert_eq!(entry_status(&r.hub, &card), "answered", "no longer shown as waiting");
@@ -156,7 +156,7 @@ async fn a_repeat_joins_the_open_card_and_one_yes_is_one_use() {
         .history(r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().bot_id.as_str(), i64::MAX, 50)
         .unwrap();
     assert_eq!(entries.iter().filter(|e| e.kind == "permission").count(), 1, "one entry too");
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     let (a, b) = (a.await.unwrap(), b.await.unwrap());
     assert_eq!([a.allow, b.allow].iter().filter(|x| **x).count(), 1, "a: {a:?} b: {b:?}");
 }
@@ -169,12 +169,12 @@ async fn a_no_and_an_expiry_and_a_withdrawal_never_give_access() {
     let call = ask(&r.hub, owner_run("s1"), "Bash", ls());
     let card = shown(&r.hub).await;
     let entry_id = card.entry_id.clone().unwrap();
-    answer(&r.hub, &entry_id, Some("deny"), "owner").unwrap();
+    answer(&r.hub, &entry_id, Some("deny"), None).unwrap();
     let d = call.await.unwrap();
     assert!(!d.allow, "{d:?}");
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Denied);
     // Denied is closed: a later yes does nothing, and the next ask is a fresh card, not a grant.
-    assert_eq!(answer(&r.hub, &entry_id, Some("allow"), "owner").unwrap(), Outcome::Closed);
+    assert_eq!(answer(&r.hub, &entry_id, Some("allow"), None).unwrap(), Outcome::Closed);
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Denied);
 
     // Expiry: the sweep closes it with a deny for any waiter, and the entry shows it.
@@ -188,7 +188,7 @@ async fn a_no_and_an_expiry_and_a_withdrawal_never_give_access() {
     }
     assert!(!call.await.unwrap().allow);
     assert_eq!(entry_status(&r.hub, &card), "expired");
-    assert_eq!(answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap(), Outcome::Closed);
+    assert_eq!(answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap(), Outcome::Closed);
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Expired, "expired never gives access");
 }
 
@@ -254,7 +254,7 @@ async fn a_guests_card_goes_to_the_owner_a_members_to_themself_and_a_revoke_appl
     let d = call.await.unwrap();
     assert!(!d.allow && d.message.contains("withdrawn"), "{d:?}");
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn);
-    assert_eq!(answer(&r.hub, &entry.id, Some("allow"), "owner").unwrap(), Outcome::Closed, "answers on it do nothing");
+    assert_eq!(answer(&r.hub, &entry.id, Some("allow"), None).unwrap(), Outcome::Closed, "answers on it do nothing");
     assert_eq!(entry_status(&r.hub, &card), "cancelled");
 
     // A guest's own run asks the owner.
@@ -263,7 +263,98 @@ async fn a_guests_card_goes_to_the_owner_a_members_to_themself_and_a_revoke_appl
     assert_eq!(card.approver, "owner");
     let e = who_may(json!({"entryId": card.entry_id})).await.unwrap_err();
     assert!(e.is::<crate::api::devices::NotAllowed>(), "{e:#}");
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
+    assert!(call.await.unwrap().allow);
+}
+
+/// Who answers follows kith-auth while the card is open: a member made a guest hands it to the owner and back again, the
+/// apps are told (`canAnswer`, per viewer), and only losing the agent withdraws it.
+#[tokio::test]
+async fn an_open_cards_approver_follows_kith_auth_and_only_losing_the_agent_withdraws_it() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let sam = joined(&r, "member").await;
+    // The card shows in sam's own chat.
+    dispatch(&r.hub, &sam, "startChat", json!({"agent": "house"})).await.unwrap();
+    window(&r.hub, 20);
+    let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "WebFetch", json!({"url": "https://example.com"}));
+    let card = shown(&r.hub).await;
+    let entry_id = card.entry_id.clone().unwrap();
+    let state = |viewer: Option<&str>| {
+        let c = r.hub.store.card(&card.id).unwrap();
+        let e = r.hub.store.entry(&entry_id).unwrap();
+        let shaped = roles::event_for(&r.hub.store, viewer, json!({"type": "entry", "rev": e.rev, "entry": e}));
+        (
+            c.answerable_by,
+            e.data["approver"].as_str().unwrap_or_default().to_owned(),
+            shaped.map(|v| v["entry"]["data"]["canAnswer"].clone()),
+        )
+    };
+    assert_eq!(state(Some("sam")), (Some("sam".into()), "member".into(), Some(json!(true))));
+    assert_eq!(state(None).2, Some(json!(true)), "the owner can always answer");
+
+    r.auth(&["member", "house", "sam", "preset=guest"]);
+    crate::access::rederive(&r.hub).await;
+    let (by, approver, sam_can) = state(Some("sam"));
+    assert_eq!((by, approver.as_str()), (None, "owner"), "a guest's card is the owner's");
+    assert_eq!(sam_can, Some(json!(false)), "sam still sees the card in their chat, with no buttons");
+    assert_eq!(state(None).2, Some(json!(true)));
+    assert!(r.hub.store.card(&card.id).unwrap().state.open(), "a demotion doesn't close the card");
+
+    r.auth(&["member", "house", "sam", "preset=member"]);
+    crate::access::rederive(&r.hub).await;
+    assert_eq!(state(Some("sam")), (Some("sam".into()), "member".into(), Some(json!(true))), "and back");
+
+    r.auth(&["member", "house", "sam", "--rm"]);
+    crate::access::rederive(&r.hub).await;
+    let d = call.await.unwrap();
+    assert!(!d.allow && d.message.contains("withdrawn"), "{d:?}");
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn);
+}
+
+/// Rule 5: with no chat with the agent on this computer, a card goes to the agent's card lane, which reaches the
+/// approver's Needs-you list and nobody else's; a new approver gets it and the old one sees it can't answer any more.
+#[tokio::test]
+async fn a_card_with_no_chat_goes_to_the_approvers_needs_you_list() {
+    let r = Rig::new().await;
+    window(&r.hub, 20);
+    let shaped = |viewer: Option<&str>, card: &Card| {
+        let e = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap();
+        roles::event_for(&r.hub.store, viewer, json!({"type": "entry", "rev": e.rev, "entry": e}))
+    };
+
+    // The owner's run, and no chat at all: the card is the owner's, in the lane, with a push.
+    let pushed_before = crate::remote::push::SENT.lock().unwrap().len();
+    let call = ask(&r.hub, owner_run("s1"), "Bash", ls());
+    let card = shown(&r.hub).await;
+    let entry = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap();
+    assert_eq!((entry.bot_id.as_str(), entry.data["author"].as_str()), ("cards:house", Some("cards:house")));
+    assert!(r.hub.store.bot("cards:house").unwrap().is_none(), "the lane is never a chat");
+    assert_eq!(shaped(None, &card).unwrap()["entry"]["data"]["canAnswer"], true);
+    assert!(
+        crate::remote::push::SENT.lock().unwrap()[pushed_before..].iter().any(|m| m == "house needs you\nRun ls /tmp")
+    );
+    answer(&r.hub, &entry.id, Some("allow"), None).unwrap();
+    assert!(call.await.unwrap().allow);
+
+    // A member's run with no chat either: the member answers it, other people never see it, the owner does.
+    joined(&r, "member").await;
+    let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "WebFetch", json!({"url": "https://example.com"}));
+    let card = shown(&r.hub).await;
+    assert_eq!(card.answerable_by.as_deref(), Some("sam"));
+    assert_eq!(r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().bot_id, "cards:house");
+    assert_eq!(shaped(Some("sam"), &card).unwrap()["entry"]["data"]["canAnswer"], true);
+    assert!(shaped(Some("alex"), &card).is_none(), "nobody else's list");
+    assert!(shaped(None, &card).is_some());
+
+    // Sam is made a guest: the card is the owner's now; sam still gets it once more, with no buttons.
+    r.auth(&["member", "house", "sam", "preset=guest"]);
+    crate::access::rederive(&r.hub).await;
+    let for_sam = shaped(Some("sam"), &card).expect("the former approver is told");
+    assert_eq!(for_sam["entry"]["data"]["canAnswer"], false);
+    assert!(for_sam["entry"]["data"].get("formerApprovers").is_none(), "who answered before is the owner's to see");
+    assert_eq!(shaped(None, &card).unwrap()["entry"]["data"]["formerApprovers"], json!(["sam"]));
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     assert!(call.await.unwrap().allow);
 }
 
@@ -320,21 +411,21 @@ async fn a_members_own_card_for_code_goes_to_the_owner() {
         } else {
             said.unwrap_or_else(|e| panic!("{tool}: the member may answer: {e:#}"));
         }
-        answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+        answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
         assert!(call.await.unwrap().allow, "{tool}");
     }
     // The predicate itself: code is the owner's whoever the member is.
-    assert!(!roles::approves_own("sam", "house", "Bash", "execute").await);
-    assert!(!roles::approves_own("sam", "house", "Run", "execute").await, "a shell tool of another harness");
-    assert!(!roles::approves_own("sam", "house", "mcp__x__y", "other").await);
-    assert!(roles::approves_own("sam", "house", "BashOutput", "execute").await);
-    assert!(roles::approves_own("sam", "house", "Edit", "edit").await);
+    assert!(roles::runs_code("Bash", "execute"));
+    assert!(roles::runs_code("Run", "execute"), "a shell tool of another harness");
+    assert!(roles::runs_code("mcp__x__y", "other"));
+    assert!(!roles::runs_code("BashOutput", "execute"));
+    assert!(!roles::runs_code("Edit", "edit"));
     // An ACP request with no toolName: only a kind that clearly runs no code stays the member's.
     for kind in ["read", "edit", "search", "fetch", "think"] {
-        assert!(roles::approves_own("sam", "house", "", kind).await, "{kind}");
+        assert!(!roles::runs_code("", kind), "{kind}");
     }
     for kind in ["execute", "other", "delete", "move", "switch_mode", "", "made-up"] {
-        assert!(!roles::approves_own("sam", "house", "", kind).await, "{kind} with no tool name");
+        assert!(roles::runs_code("", kind), "{kind} with no tool name");
     }
     let call = ask(&r.hub, owner_run("s1"), "Bash", ls());
     assert_eq!(shown(&r.hub).await.approver, "owner");
@@ -382,14 +473,19 @@ async fn a_bots_owner_answers_its_run_cards_only_inside_the_bots_folders() {
     for (input, may) in cases {
         let call = ask(&r.hub, guest_run(bot, "1:1:house:bot"), "Edit", input);
         let card = shown(&r.hub).await;
-        assert_eq!(card.approver, "owner", "a bot's own run never answers itself");
+        let stored = r.hub.store.card(&card.id).unwrap().answerable_by;
+        assert_eq!(
+            stored.as_deref(),
+            may.then_some("sam"),
+            "the bot's owner, never the bot, and only inside its folders"
+        );
         let said = roles::guard(&r.hub, "sam", true, "respondPermission", &json!({"entryId": card.entry_id})).await;
         if may {
             said.unwrap_or_else(|e| panic!("inside the bot's folders: {e:#}"));
         } else {
             assert!(said.unwrap_err().is::<crate::api::devices::NotAllowed>(), "outside the bot's folders");
         }
-        answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+        answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
         assert!(call.await.unwrap().allow);
     }
 }
@@ -408,7 +504,7 @@ async fn a_restart_parks_live_cards_and_keeps_their_entries_answerable() {
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Parked);
     r.hub.store.expire_pending().unwrap();
     assert_eq!(entry_status(&r.hub, &card), "pending", "a card the store holds open is not expired at startup");
-    answer(&r.hub, &entry_id, Some("allow"), "owner").unwrap();
+    answer(&r.hub, &entry_id, Some("allow"), None).unwrap();
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved);
     // An old entry from before the store has no card: closed, no crash.
     let old = r
@@ -420,8 +516,8 @@ async fn a_restart_parks_live_cards_and_keeps_their_entries_answerable() {
             &json!({"status": "pending", "options": [{"optionId": "allow", "kind": "allow_once"}]}),
         )
         .unwrap();
-    assert_eq!(answer(&r.hub, &old.id, Some("allow"), "owner").unwrap(), Outcome::Closed);
-    assert_eq!(answer(&r.hub, "no-such-entry", Some("allow"), "owner").unwrap(), Outcome::Closed);
+    assert_eq!(answer(&r.hub, &old.id, Some("allow"), None).unwrap(), Outcome::Closed);
+    assert_eq!(answer(&r.hub, "no-such-entry", Some("allow"), None).unwrap(), Outcome::Closed);
 }
 
 #[tokio::test]
@@ -445,7 +541,8 @@ async fn a_bot_chat_card_answered_after_its_process_is_gone_is_recorded() {
         run_id: None,
         person: String::new(),
         agent: "house".into(),
-        approver: "owner",
+        answerable_by: None,
+        in_grants: false,
         tool: "Bash".into(),
         input: "{}".into(),
         resource: "Bash:x".into(),
@@ -460,7 +557,7 @@ async fn a_bot_chat_card_answered_after_its_process_is_gone_is_recorded() {
     // Process gone first: parked, then the answer is recorded and shown.
     bot_exited(&r.hub, &chat);
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Parked);
-    assert_eq!(answer(&r.hub, &entry.id, Some("allow"), "owner").unwrap(), Outcome::Recorded { forward: false });
+    assert_eq!(answer(&r.hub, &entry.id, Some("allow"), None).unwrap(), Outcome::Recorded { forward: false });
     assert_eq!(r.hub.store.entry(&entry.id).unwrap().data["status"], "answered");
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved);
 }
@@ -487,7 +584,7 @@ async fn a_yes_after_the_window_but_before_the_process_exits_is_not_lost() {
     // The run's wait ended but its process is still up: nobody is listening for the yes.
     let card = shown(&r.hub).await;
     assert_eq!(
-        answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap(),
+        answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap(),
         Outcome::Recorded { forward: false }
     );
     let kept = r.hub.store.card(&card.id).unwrap();
@@ -507,7 +604,7 @@ async fn a_parallel_ask_cannot_take_the_grant_a_live_asker_is_given() {
     window(&r.hub, 20);
     let call = ask(&r.hub, owner_run("s1"), "Bash", ls());
     let card = shown(&r.hub).await;
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     // The yes is spent at the answer: a parallel ask of the same session opens a card of its own, not a grant.
     assert!(matches!(r.hub.store.card(&card.id).unwrap().state, CardState::Used));
     let again = NewCard {
@@ -517,7 +614,8 @@ async fn a_parallel_ask_cannot_take_the_grant_a_live_asker_is_given() {
         run_id: None,
         person: String::new(),
         agent: "house".into(),
-        approver: "owner",
+        answerable_by: None,
+        in_grants: false,
         tool: card.tool.clone(),
         input: card.input.clone(),
         resource: card.resource.clone(),
@@ -551,7 +649,8 @@ async fn a_turn_that_ends_with_a_question_open_parks_it() {
         run_id: None,
         person: String::new(),
         agent: "house".into(),
-        approver: "owner",
+        answerable_by: None,
+        in_grants: false,
         tool: "Bash".into(),
         input: "{}".into(),
         resource: "Bash:y".into(),

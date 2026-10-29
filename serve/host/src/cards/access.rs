@@ -21,6 +21,7 @@
 
 use super::{Card, CardState, resource};
 use crate::LockExt;
+use crate::access::Ask;
 use crate::hub::Hub;
 use crate::runauth::{RunIdentity, TokenScope};
 use crate::store::{Store, now_ms};
@@ -236,12 +237,8 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
         return json!({"ok": true, "carded": true, "message":
             "That is already approved. It applies the next time you run: end your turn now."});
     }
-    let approver = match &target {
-        Target::Path { real, .. } => {
-            super::approver_of(who, "Read", &json!({"file_path": real.to_string_lossy()})).await
-        }
-        Target::Domain(_) => "owner",
-    };
+    let ask = crate::access::Request { person: &who.person, agent: &who.agent, owner_run: false, ask: Ask::Escape };
+    let answerable_by = crate::access::approver(&hub.store, &ask).await;
     let new = crate::store::NewCard {
         session: who.session.clone(),
         source: "run",
@@ -249,7 +246,8 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
         run_id: Some(who.run_id.clone()),
         person: who.person.clone(),
         agent: who.agent.clone(),
-        approver,
+        answerable_by,
+        in_grants: false,
         tool: TOOL.to_owned(),
         input: json!({"kind": req["kind"], "target": target.shown(), "reason": reason, "write": req["write"]})
             .to_string(),
@@ -267,7 +265,7 @@ pub async fn request(hub: &Arc<Hub>, who: &RunIdentity, req: &Value) -> Value {
         }
     };
     let Some(card) = super::show(hub, who, &card) else {
-        return refused("There is nowhere to ask about this: no chat with this agent on this computer.");
+        return refused("Approvals aren't available right now.");
     };
     let label = super::approver_label(hub, &card).await;
     json!({"ok": true, "carded": true, "message": format!(
@@ -298,10 +296,11 @@ fn parts(resource: &str) -> Option<(&str, &str)> {
     resource.strip_prefix("access:")?.split_once(':')
 }
 
-/// The answer to an escape card. A no changes nothing. A yes is owed a resume at the next activation; an "always" is
-/// first written to kith-auth (so the resume finds it) and falls back to a once grant when kith-auth refuses. The
-/// fallback is never silent: the card then reads "Allowed once only" and says why ([`kept_once`]).
-pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str>) {
+/// The answer to an escape card, from the owner (`by` None) or a person. A no changes nothing. A yes is owed a resume at
+/// the next activation; an "always" is first written to kith-auth (so the resume finds it), with who approved it, and
+/// falls back to a once grant when kith-auth refuses. The fallback is never silent: the card then reads "Allowed once
+/// only" and says why ([`kept_once`]).
+pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str>, by: Option<&str>) {
     if !allow {
         return;
     }
@@ -313,7 +312,7 @@ pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str
         super::follow_up(hub, card);
         return;
     }
-    let (hub, card) = (hub.clone(), card.clone());
+    let (hub, card, by) = (hub.clone(), card.clone(), by.map(str::to_owned));
     // Recorded first, so a launch that races this write can't take it as a once grant as well.
     if !hub.store.card_scope(&card.id, "always").unwrap_or(false) {
         kept_once(&hub, &card, "the always couldn't be recorded");
@@ -321,7 +320,7 @@ pub fn answered(hub: &Arc<Hub>, card: &Card, allow: bool, option_id: Option<&str
         return;
     }
     tokio::spawn(async move {
-        let written = write_always(&card).await;
+        let written = write_always(&card, by.as_deref()).await;
         match written {
             Ok(()) => {
                 let _ = hub.store.card_always_written(&card.id);
@@ -350,14 +349,15 @@ fn kept_once(hub: &Hub, card: &Card, why: &str) {
     hub.set_entry(id, &e.data);
 }
 
-/// `kith-auth access <agent> <person> read|write|domain <target>`.
-async fn write_always(card: &Card) -> Result<(), String> {
+/// `kith-auth access <agent> <person> read|write|domain <target> [--by <person>]`: kith-auth records who approved it and
+/// refuses a person who isn't a member of the agent by then, in the same step as the write (M3).
+async fn write_always(card: &Card, by: Option<&str>) -> Result<(), String> {
     let (mode, target) = parts(&card.resource).ok_or("not an access card")?;
     let bin = crate::remote::account::bin().await.ok_or("kith-auth can't be reached")?;
     // A write grant covers reading too, so "read" cards write the narrower entry.
-    let out = crate::channels::hq::output(&bin, &["access", &card.agent, &card.person, mode, target])
-        .await
-        .ok_or("kith-auth didn't answer")?;
+    let mut args = vec!["access", &card.agent, &card.person, mode, target];
+    args.extend(by.map(|p| ["--by", p]).into_iter().flatten());
+    let out = crate::channels::hq::output(&bin, &args).await.ok_or("kith-auth didn't answer")?;
     if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).trim().to_owned()) }
 }
 

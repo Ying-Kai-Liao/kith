@@ -11,10 +11,14 @@ trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/dot KITH_AUTH=$T/dot/auth.json
 unset KITH_AGENT KITH_PERSON KITH_ROOM HQ_STATE HQ_HOME KITH_PROJECT
 mkdir -p "$HOME" "$KITH_STATE"
+R=$KERNEL/bin/kith-recall KA=$KERNEL/bin/kith-auth
+# people first: an id with memory already under it is a removed person's, and a new person is refused it
+python3 "$KA" person kai owner >/dev/null; python3 "$KA" person sam >/dev/null; python3 "$KA" person eve >/dev/null
 M=$KITH_HOME/agents/echo/memory
 mkdir -p "$M/shared" "$M/people/sam" "$M/people/eve" "$M/projects/alpha" "$M/sessions" "$KITH_HOME/agents/other/memory" \
   "$KITH_STATE/people" "$KITH_STATE/secrets" "$KITH_HOME/agents/echo/role" "$KITH_HOME/agents/other/role"
 for a in echo other; do printf -- '---\nname: %s\ndescription: test agent\n---\nYou test.\n' $a > "$KITH_HOME/agents/$a/role/agent.md"; done
+python3 "$KA" member echo sam >/dev/null; python3 "$KA" member echo eve >/dev/null
 echo 'owner secret zebra plan' > "$M/MEMORY.md"
 echo 'shared craft zebra tip' > "$M/shared/MEMORY.md"
 echo 'sam likes zebra tea' > "$M/people/sam/MEMORY.md"
@@ -28,9 +32,6 @@ echo 'other agent zebra' > "$KITH_HOME/agents/other/memory/MEMORY.md"
 echo 'about owner zebra' > "$KITH_STATE/user.md"
 echo 'sam profile zebra' > "$KITH_STATE/people/sam.md"
 echo 'TOPSECRET zebra' > "$KITH_STATE/secrets/key.md"
-R=$KERNEL/bin/kith-recall KA=$KERNEL/bin/kith-auth
-python3 "$KA" person kai owner >/dev/null; python3 "$KA" person sam >/dev/null; python3 "$KA" person eve >/dev/null
-python3 "$KA" member echo sam >/dev/null; python3 "$KA" member echo eve >/dev/null
 fails=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # audiences "a b" seen by a recall for zebra, as the env given in $1 (a list of VAR=value)

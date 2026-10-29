@@ -7,3 +7,4 @@ StarIgnoresRevoke = FALSE
 NoDeliverRecheck = FALSE
 RevokeDeletesRows = FALSE
 BotIgnoresOwner = FALSE
+HelperNoSync = FALSE

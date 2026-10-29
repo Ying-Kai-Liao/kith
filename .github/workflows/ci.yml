@@ -77,6 +77,7 @@ jobs:
               - 'scripts/notices/**'
               - 'apps/packaging/cua-driver/LICENSE'
               - 'apps/ios/Kit/Sources/KithKit/Resources/ThirdPartyNotices/**'
+              - 'apps/ios/Kit/Sources/KithUI/Resources/Mermaid/**'
               - '.github/workflows/ci.yml'
             # The TLA+ model of one writer per thread and the code it covers (the list in the thread-writers skill).
             threads:
@@ -485,16 +486,19 @@ jobs:
             apps/desktop/package-lock.json
             serve/cloud/package-lock.json
             serve/relay/package-lock.json
+            apps/ios/Kit/Mermaid/package-lock.json
       # The npm licenses are read from node_modules; scripts stay off, nothing is built.
       - name: Install npm dependencies
         run: |
-          for d in apps/desktop serve/cloud serve/relay; do
+          for d in apps/desktop serve/cloud serve/relay apps/ios/Kit/Mermaid; do
             npm ci --prefix "$d" --ignore-scripts --no-audit --no-fund
           done
       - name: Notices generator tests
         run: node --test scripts/notices/generate.test.mjs
       - name: Notices are current and licenses pass the policy
         run: node scripts/notices/generate.mjs --check
+      - name: The iOS app's mermaid.js is the pinned package's
+        run: cmp apps/ios/Kit/Mermaid/node_modules/mermaid/dist/mermaid.min.js apps/ios/Kit/Sources/KithUI/Resources/Mermaid/mermaid.min.js
 
   relay:
     needs: changes

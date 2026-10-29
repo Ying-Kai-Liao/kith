@@ -86,6 +86,17 @@ export class KithInfoStore extends Observable {
     this.changed()
   }
 
+  /** A Schedule card's button: kith-sched does it, and the info read back is what every card of this agent shows. Throws why it failed. */
+  async schedule(id: string, op: 'pause' | 'resume' | 'run' | 'remove'): Promise<void> {
+    const result = await (await this.client()).kithSchedule(this.botId, id, op)
+    if (!result.info) throw new Error(result.error ?? 'Kith gave no answer')
+    this.info = result.info
+    this.error = null
+    this.refreshError = null
+    this.fetchedAt = result.fetchedAt
+    this.changed()
+  }
+
   private run(refresh: boolean): Promise<void> {
     const request = ++this.request
     this.loading = true

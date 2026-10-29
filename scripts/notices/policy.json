@@ -15,7 +15,8 @@
   "npm": [
     { "name": "apps/desktop", "dir": "apps/desktop", "bundled": ["react", "react-dom", "@xterm/xterm", "@xterm/addon-fit", "@xterm/addon-web-links", "lucide", "qrcode"] },
     { "name": "serve/cloud", "dir": "serve/cloud", "bundled": [] },
-    { "name": "serve/relay", "dir": "serve/relay", "bundled": [] }
+    { "name": "serve/relay", "dir": "serve/relay", "bundled": [] },
+    { "name": "apps/ios mermaid", "dir": "apps/ios/Kit/Mermaid", "bundled": [] }
   ],
   "cargo": ["serve/host/Cargo.lock"],
   "swiftpm": [

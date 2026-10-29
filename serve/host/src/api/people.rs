@@ -99,6 +99,11 @@ async fn person_exists(bin: &Path, id: &str) -> bool {
     account::run(bin, &["people", id]).await.is_ok()
 }
 
+/// A removed person's id (or someone's old one): a new person never takes it, so never their memory, files or logins.
+async fn retired(bin: &Path, id: &str) -> bool {
+    account::run(bin, &["retired", id]).await.is_ok()
+}
+
 async fn grant(bin: &Path, person: &str, agent: &str, role: &str, fresh: bool) -> Result<()> {
     let preset = format!("preset={role}");
     let mut args = vec!["member", agent, person, preset.as_str()];
@@ -115,15 +120,22 @@ async fn grant(bin: &Path, person: &str, agent: &str, role: &str, fresh: bool) -
 struct Undo {
     person: Option<String>,
     agents: Vec<(String, String)>,
+    invite: Option<String>,
 }
 
 impl Undo {
     async fn run(self, hub: &Hub, bin: &Path) {
+        if let Some(i) = &self.invite {
+            hub.store.delete_invite(i).ok();
+        }
         for (person, agent) in &self.agents {
             account::run(bin, &["member", agent, person, "--rm"]).await.ok();
         }
-        if let Some(p) = &self.person {
-            account::run(bin, &["person", p, "--rm"]).await.ok();
+        // No link went out, so the id isn't retired (--unused, which kith-auth refuses if they have anything). Refused,
+        // they stay in both: a retry with the same name finds them again.
+        if let Some(p) = &self.person
+            && account::run(bin, &["person", p, "--rm", "--unused"]).await.is_ok()
+        {
             hub.store.delete_person(p).ok();
         }
     }
@@ -177,8 +189,10 @@ async fn make_invite(
             let base = slug(name);
             let mut id = base.clone();
             let mut n = 1;
-            // The same name again is the same person; another person's id is never taken over.
-            while person_exists(bin, &id).await && hub.store.person(&id).is_none_or(|p| p.name != name) {
+            // The same name again is the same person; another person's id, or a removed one's, is never taken over.
+            while retired(bin, &id).await
+                || person_exists(bin, &id).await && hub.store.person(&id).is_none_or(|p| p.name != name)
+            {
                 n += 1;
                 id = format!("{base}-{n}");
             }
@@ -216,13 +230,13 @@ async fn make_invite(
         revoked_at: None,
     };
     hub.store.put_invite(&invite)?;
+    undo.invite = Some(invite_id.clone());
     let body = CreateInvite {
         invite_id: invite_id.clone(),
         token_hash: hex(&crypto::sha256(&[proof.as_bytes()])),
         expires_at: invite.expires_at,
     };
     if let Err(e) = cloud::post(hub, path::HOST_CREATE_INVITE, &body).await {
-        hub.store.delete_invite(&invite_id).ok();
         return Err(e.context("The Kith cloud didn't take the invite, so none was made"));
     }
     // Only now: a refused invite leaves the mirror as it was.
@@ -443,6 +457,12 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
         .collect();
     if !bots.is_empty() {
         super::botguests::sweep_claims(hub, bots, false).await;
+    }
+    // Once nothing of theirs runs: the Claude Code temp folder their runs wrote in (<machine>/run/t/<id>).
+    if let Some(bin) = account::bin().await
+        && let Err(e) = account::run(&bin, &["person", person, "--clear-temp"]).await
+    {
+        tracing::warn!(error = format!("{e:#}"), person, "couldn't remove a revoked person's temp folder");
     }
 }
 

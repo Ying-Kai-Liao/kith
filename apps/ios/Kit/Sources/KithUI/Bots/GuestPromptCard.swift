@@ -52,24 +52,54 @@ public struct GuestPromptCard: View {
     }
 }
 
+/// A key or account card waiting outside any chat (an agent's card lane): the same card a chat shows.
+public struct SecretPromptCard: View {
+    let prompt: GuestPrompt
+    let store: BotStore
+
+    public init(prompt: GuestPrompt, store: BotStore) {
+        self.prompt = prompt
+        self.store = store
+    }
+
+    public var body: some View {
+        let entry = prompt.entry
+        let bot = entry.data.agent.flatMap(store.agentBot)
+        let agent = bot?.name ?? entry.data.agent ?? "The agent"
+        let tint = AgentTint.resolve(bot?.avatarColor)
+        if entry.data.card == "key" {
+            KeyCard(entry: entry, agentName: agent, hostName: store.hostName, tint: tint, answering: store.answering[entry.id],
+                    save: { account, values in try await store.provideSecret(entry, account: account, values: values) },
+                    deny: { store.respond(entry, option: "deny") })
+        } else {
+            AccessCard(entry: entry, agentName: agent, tint: tint, answering: store.answering[entry.id]) { option in
+                store.respond(entry, option: option)
+            }
+        }
+    }
+}
+
 /// What opening a guest prompt from its push shows: the card for that chat, a moment of loading while the computer's
 /// events arrive, then "already answered" when none is waiting.
 public struct GuestPromptSheet: View {
     let store: BotStore
     let chatId: String
+    /// The account's role on this computer (see `GuestPrompt.pending`).
+    let isOwner: Bool
     let close: () -> Void
     /// The chat turned out to be one of the owner's own bots once the roster arrived.
     let openChat: () -> Void
     @State private var waited = false
 
-    public init(store: BotStore, chatId: String, close: @escaping () -> Void, openChat: @escaping () -> Void) {
+    public init(store: BotStore, chatId: String, isOwner: Bool, close: @escaping () -> Void, openChat: @escaping () -> Void) {
         self.store = store
         self.chatId = chatId
+        self.isOwner = isOwner
         self.close = close
         self.openChat = openChat
     }
 
-    private var prompts: [GuestPrompt] { store.guestPrompts.filter { $0.chatId == chatId } }
+    private var prompts: [GuestPrompt] { store.guestPrompts(isOwner: isOwner).filter { $0.chatId == chatId } }
 
     public var body: some View {
         VStack(spacing: 14) {
@@ -83,8 +113,12 @@ public struct GuestPromptSheet: View {
                 }
             } else {
                 ForEach(prompts) { prompt in
-                    GuestPromptCard(prompt: prompt, answering: store.answering[prompt.entry.id]) {
-                        store.respond(prompt.entry, option: $0)
+                    if prompt.entry.data.isSecretCard {
+                        SecretPromptCard(prompt: prompt, store: store)
+                    } else {
+                        GuestPromptCard(prompt: prompt, answering: store.answering[prompt.entry.id]) {
+                            store.respond(prompt.entry, option: $0)
+                        }
                     }
                 }
             }

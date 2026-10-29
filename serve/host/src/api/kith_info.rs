@@ -60,6 +60,22 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 Err(e) => json!({"info": null, "error": e, "fetchedAt": got.fetched_at}),
             }
         }
+        // The Schedule card's buttons for a kith job: kith-sched does it, as the job's person (`hq::schedule`). Owner
+        // only, like every method a member's contract doesn't list. hq's info read back, so the card shows the job now.
+        "kithSchedule" => {
+            let name = kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?;
+            let id = str_arg(&b, "id")?;
+            let op = match b["op"].as_str() {
+                Some(op @ ("pause" | "resume" | "run")) => op,
+                Some("remove") => "rm",
+                _ => bail!("op must be pause, resume, run or remove"),
+            };
+            let got = hq::schedule(&name, id, op).await?;
+            match got.info {
+                Ok(info) => json!({"info": info, "fetchedAt": got.fetched_at}),
+                Err(e) => json!({"info": null, "error": e, "fetchedAt": got.fetched_at}),
+            }
+        }
         "kithMemoryFile" => {
             let name = kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?;
             let path = str_arg(&b, "path")?.to_owned();
