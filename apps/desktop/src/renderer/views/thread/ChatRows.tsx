@@ -1,6 +1,6 @@
 import { SharedFileView } from './SharedImage'
 import { memo, useEffect, useRef, useState } from 'react'
-import { isGroup, isWorking, needsInput, type Bot, type Entry, type ThreadSummary } from '@shared/models'
+import { isGroup, isWorking, needsInput, type Bot, type Entry } from '@shared/models'
 import { BotAvatar } from '../../components/Avatar'
 import { Hairline, IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
@@ -25,31 +25,26 @@ import { HandoffNotice } from './HandoffNotice'
 import { AnsweredBy } from './AnsweredBy'
 import { contextLabel } from './context-hint'
 import { callLineSuffix } from './call-line'
-import { BotGuestAvatar, ThreadChip as KithThreadChip, pairOf, type Origin, type Place } from '../../components/kith'
-import { noticeThreadChip } from './notice-thread'
-import { botGuestSender, botOriginLabel } from '@shared/bot-guest-chat'
-import { runLabel, threadOrigin } from '@shared/thread-writer'
-import { avatarImage } from '@shared/crew'
+import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
+import { toolRowOf } from '@shared/thread-feed'
+import { botGuestSender } from '@shared/bot-guest-chat'
+import { quoteOf, quotesOf } from './reply-quote'
 
 export function reactionPick(store: BotStore, entry: Entry): ReactionPick {
   return { emoji: QUICK_REACTIONS, chosen: entry.data.reactions ?? [], toggle: (e) => store.react(entry, e) }
 }
 
-/** One chat-visible entry in a chat or a thread, with what can be done to it. */
-export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrace, openThread, replyInThread, openId = null }: {
+/** One chat-visible entry in the flat chat, with what can be done to it. */
+export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrace }: {
   entry: Entry
   groupStart: boolean
   chat: Bot | null
   openTrace: () => void
-  /** Main chat only: start (or open) the thread on this message. */
-  openThread?: (e: Entry) => void
-  /** "Reply in thread": opens the thread, never folds one that is open. */
-  replyInThread?: (e: Entry) => void
-  /** The thread open under its message: its chip tints in the agent's colours. */
-  openId?: string | null
 }) {
-  const reply = openThread ? () => (replyInThread ?? openThread)(entry) : undefined
-  const chip = (entry.kind === 'notice' ? noticeThreadChip(entry) : entry.data.thread && entry.data.thread.count > 0) && entry.data.thread && openThread ? <ThreadChip summary={entry.data.thread} open={() => openThread(entry)} isOpen={openId === entry.id} chat={chat} /> : null
+  const store = useStore()
+  // Reply is a quote above the composer; the host has no reply link.
+  const quote = quoteOf(entry.data.text)
+  const reply = quote && !chat?.botGuest ? () => quotesOf(store).set(entry.botId, quote) : undefined
   const guestSender = botGuestSender(chat, entry)
   switch (entry.kind) {
     case 'user':
@@ -64,7 +59,6 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
             <VStack gap={4} className="chat-row-indent">
               <GuestBotBubble entry={entry} reply={reply} />
               <ReactionsRow entry={entry} />
-              {chip}
             </VStack>
           </VStack>
         )
@@ -73,7 +67,6 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
         <VStack align="flex-end" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
           <UserBubble entry={entry} botWorking={!!chat && isWorking(chat)} reply={reply} />
           <ReactionsRow entry={entry} />
-          {chip}
         </VStack>
       )
     case 'agent':
@@ -85,7 +78,6 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
             <AnsweredBy answeredBy={entry.data.answeredBy} />
             <ContextHint contextPercent={entry.data.contextPercent} />
             <ReactionsRow entry={entry} />
-            {chip}
           </VStack>
         </VStack>
       )
@@ -100,7 +92,7 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
       if (entry.data.connectionRequest) return <div className="chat-row group-start"><ConnectionRequestCard entry={entry} /></div>
       if (entry.data.handoff) return <div className="chat-row notice"><HandoffNotice entry={entry} card={entry.data.handoff} /></div>
       // Any notice that roots a thread (a bot guest's conversation) opens it like a message does.
-      return <div className="chat-row notice">{chip && entry.data.thread?.origin === 'bot' ? null : <NoticeRow entry={entry} />}{chip ? <div className="notice-thread-chip">{chip}</div> : null}</div>
+      return <div className="chat-row notice"><NoticeRow entry={entry} /></div>
   }
 })
 
@@ -167,41 +159,6 @@ export function AuthorLabel({ botId }: { botId?: string | null }) {
   )
 }
 
-/**
- * Under a message with a thread: where it works (grey), then the pill with the agent's face, the reply count and
- * when. While the thread is open under its message the pill tints in the agent's colours.
- */
-export function ThreadChip({ summary, open, isOpen = false, chat }: { summary: ThreadSummary; open: () => void; isOpen?: boolean; chat: Bot | null }) {
-  const store = useStore()
-  const author = summary.authors.map((id) => store.bots.get(id)).find((b): b is Bot => !!b) ?? (chat && !isGroup(chat) ? chat : null)
-  const folder = chat?.folder
-  const place: Place | undefined = folder && folder.kind !== 'workspace' && folder.name ? { kind: folder.kind === 'project' ? 'project' : 'folder', name: folder.name } : undefined
-  const image = author ? avatarImage(author) : null
-  // A thread started outside the app (a terminal, a channel) says so; an origin this app doesn't know shows nothing.
-  const origin = threadOrigin(summary)
-  const tag: Origin | undefined = origin === 'terminal' || origin === 'bot' || origin === 'discord' || origin === 'telegram' || origin === 'slack' ? origin : undefined
-  return (
-    <div className={`thread-meta ${chat && isGroup(chat) ? 'start' : ''}`}>
-      <KithThreadChip
-        thread={{
-          replies: summary.count,
-          newCount: summary.unread ?? 0,
-          time: relativeTime.day(summary.lastAt),
-          open: isOpen,
-          // Without a face (a deleted bot) the chip still counts; the pill just has no picture.
-          agent: { face: image ?? 'group', color: author?.avatarColor, id: author?.id ?? 'unknown' },
-          pair: pairOf(author?.avatarColor),
-          place,
-          origin: tag,
-          originLabel: origin === 'bot' ? botOriginLabel(summary) : runLabel(summary),
-          onToggle: open,
-          onOpen: open,
-        }}
-      />
-    </div>
-  )
-}
-
 /** A message's text with a right-click menu (with quick reactions on top). */
 export function Bubble({ className, items, reactions, children }: { className: string; items: () => MenuItem[]; reactions?: ReactionPick; children: React.ReactNode }) {
   const menu = useContextMenu()
@@ -236,8 +193,8 @@ export function UserBubble({ entry, botWorking, reply }: { entry: Entry; botWork
             className="bubble user selectable"
             reactions={reactionPick(store, entry)}
             items={() => [
+              ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
               { title: 'Copy', icon: 'square.on.square', action: copy },
-              ...(reply ? [{ title: 'Reply in thread', icon: 'arrowshape.turn.up.left', action: reply }] : []),
               ...(status === 'queued' ? [{ title: 'Unsend', icon: 'arrow.uturn.backward', action: () => store.unsend(entry) }] : []),
             ]}
           >
@@ -279,7 +236,7 @@ function UserStatus({ entry, botWorking, hovering }: { entry: Entry; botWorking:
   }
 }
 
-/** An outside bot's message: an agent-style bubble on the left (copy and thread, no queue or unsend). */
+/** An outside bot's message: an agent-style bubble on the left (reply and copy, no queue or unsend). */
 function GuestBotBubble({ entry, reply }: { entry: Entry; reply?: () => void }) {
   const store = useStore()
   const copy = () => entry.data.text && window.kith.app.copy(entry.data.text)
@@ -290,8 +247,8 @@ function GuestBotBubble({ entry, reply }: { entry: Entry; reply?: () => void }) 
           className="bubble agent selectable"
           reactions={reactionPick(store, entry)}
           items={() => [
+            ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
             { title: 'Copy', icon: 'square.on.square', action: copy },
-            ...(reply ? [{ title: 'Reply in thread', icon: 'arrowshape.turn.up.left', action: reply }] : []),
           ]}
         >
           <MarkdownText text={entry.data.text ?? ''} />
@@ -312,8 +269,8 @@ export function AgentBubble({ entry, openTrace, reply }: { entry: Entry; openTra
           className={entry.data.files?.length ? "file-message" : "bubble agent"}
           reactions={reactionPick(store, entry)}
           items={() => [
+            ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
             { title: 'Copy', icon: 'square.on.square', action: copy },
-            ...(reply ? [{ title: 'Reply in thread', icon: 'arrowshape.turn.up.left', action: reply }] : []),
             { title: 'Show what it did', icon: 'list.bullet', action: openTrace },
           ]}
         >
@@ -419,7 +376,7 @@ export function ReactionsRow({ entry }: { entry: Entry }) {
   )
 }
 
-/** Compact actions beside the bubble: a reaction strip, reply in thread, and more (copy, what it did). */
+/** Compact actions beside the bubble: a reaction strip, reply, and more (copy, what it did). */
 function MessageActions({ visible, className, reactions, reply, trace, copy }: {
   visible: boolean
   className: string
@@ -437,7 +394,7 @@ function MessageActions({ visible, className, reactions, reply, trace, copy }: {
       <button ref={smile} className="message-action" title="Add reaction" aria-label="Add reaction" onClick={() => setMenu('reactions')}>
         <Icon name="face.smiling" size={14} />
       </button>
-      {reply ? <IconButton title="Reply in thread" icon="arrowshape.turn.up.left" size={26} onClick={reply} /> : null}
+      {reply ? <IconButton title="Reply" icon="arrowshape.turn.up.left" size={26} onClick={reply} /> : null}
       <button ref={more} className="message-action" title="More message actions" aria-label="More message actions" onClick={() => setMenu('more')}>
         <Icon name="ellipsis" size={14} />
       </button>
@@ -449,5 +406,24 @@ function MessageActions({ visible, className, reactions, reply, trace, copy }: {
         items={() => [{ title: 'Copy', icon: 'square.on.square', action: copy }, ...(trace ? [{ title: 'Show what it did', icon: 'list.bullet', action: trace }] : [])]}
       />
     </div>
+  )
+}
+
+/** A tool call as one row in the chat: "Edited kith-sessions.py  +6 -2"; it opens the command and output. */
+export function ToolRowItem({ entry }: { entry: Entry }) {
+  const m = toolRowOf(entry)
+  return (
+    <div className="chat-tool">
+      <ToolRow verb={m.verb} object={m.object} result={m.result} state={m.state} detail={m.command || m.output ? { command: m.command, output: m.output } : undefined} />
+    </div>
+  )
+}
+
+/** The steps of a long run folded away; it opens the full conversation. */
+export function EarlierSteps({ count, open }: { count: number; open: () => void }) {
+  return (
+    <button className="chat-earlier" onClick={open}>
+      {count === 1 ? '1 earlier step' : `${count} earlier steps`}
+    </button>
   )
 }
