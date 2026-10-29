@@ -29,7 +29,8 @@ it calls approve instead of refusing. The tool sends the host one line over the 
   {"token", "method": "requestPermission", "tool", "input"}
 and takes one line back, {"ok", "behavior": "allow"|"deny", "message"}. The host turns the ask into an approval card
 for whoever may answer it, waits its live window, and says no with "waiting on <approver>, end your turn" when nobody
-answered, so the agent ends its turn instead of hanging. Anything that is not a clear allow is a deny: no socket, no
+answered (with "waiting": true), so the agent ends its turn instead of hanging; a run `kith ask` started (KITH_ASK_ID)
+then marks that ask parked, and kith ask says "waiting" with its id instead of an answer. Anything that is not a clear allow is a deny: no socket, no
 token, a reply that doesn't parse. On allow, updatedInput is the input exactly as asked: the grant is what the card showed.
 
 Which token: a guest run has KITH_RUN_TOKEN and KITH_RUN_SOCKET (the host gave them); an owner run has KITH_ASK_TOKEN
@@ -78,12 +79,44 @@ def decide(tool, tool_input, env=os.environ):
         return deny('The approval service gave no clear answer; the action was refused.')
     message = reply.get('message')
     message = message if isinstance(message, str) and message else None
+    if reply.get('waiting') is True:
+        park(env)
     if reply.get('ok') is True and reply.get('behavior') == 'allow':
         return {'behavior': 'allow', 'updatedInput': tool_input}
     if reply.get('ok') is True and reply.get('behavior') == 'deny':
         return deny(message or 'Not approved.')
     err = reply.get('error')
     return deny(message or (err if isinstance(err, str) and err else 'The approval service refused the request.'))
+
+
+def ask_box():
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+    from kith_paths import paths
+    return paths()['KITH_MACHINE'] / 'live' / 'ask'
+
+
+def asked_by(mid):
+    """The agent whose kith ask mid is (its registration), '' for a terminal."""
+    try:
+        reg = json.loads((ask_box() / ('%s.reg' % mid)).read_text())
+    except (OSError, ValueError):
+        return ''
+    who = reg.get('agent') if isinstance(reg, dict) else None
+    return who if isinstance(who, str) and re.fullmatch(r'[a-z0-9][a-z0-9._-]{0,63}', who) else ''
+
+
+def park(env=os.environ):
+    """The card outlived its live window and the run is ending its turn on it: the kith ask that started the run (KITH_ASK_ID)
+    gets "waiting" and the card's later answer instead of this turn's words (kith-ask)."""
+    mid = env.get('KITH_ASK_ID') or ''
+    if not re.fullmatch(r'[A-Za-z0-9._-]{1,64}', mid):
+        return
+    try:
+        box = ask_box()
+        box.mkdir(parents=True, exist_ok=True)
+        (box / ('%s.parked' % mid)).write_text('')
+    except OSError:
+        pass
 
 
 def tool_def():
@@ -341,7 +374,13 @@ def host_call(method, body, timeout=8):
 def issue(agent, session, pid):
     """export lines for sh, or exit 1 with one stderr line. Never raises: an owner run goes on without a prompt tool."""
     import shlex
-    r = host_call('issueAskToken', {'agent': agent, 'session': session, 'pid': int(pid)})
+    body = {'agent': agent, 'session': session, 'pid': int(pid)}
+    # A run `kith ask` started: its cards remember that ask, and who asked (its registration), so a later answer goes back
+    # to it (kith-ask).
+    mid = os.environ.get('KITH_ASK_ID') or ''
+    if re.fullmatch(r'[A-Za-z0-9._-]{1,64}', mid):
+        body.update(replyTo=mid, askedBy=asked_by(mid))
+    r = host_call('issueAskToken', body)
     env = r.get('env') if isinstance(r, dict) else None
     if not (isinstance(env, dict) and env.get('KITH_ASK_TOKEN') and env.get('KITH_ASK_SOCKET')):
         print('kith: no approval cards for this run (the Kith host gave no ask token); asks are refused', file=sys.stderr)

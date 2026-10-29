@@ -265,8 +265,8 @@ extension AccountStore {
     ```
     """
 
-    /// The `chat` demo: a bot with two folded threads, one held by a terminal, and the newest one open with a
-    /// tool row, a reply and a question waiting.
+    /// The `chat` demo: a bot with four tasks, one held by a terminal, and the newest with a tool row, a reply and a
+    /// question waiting; the flat chat shows all their replies in time order.
     @MainActor
     static func seedChat(_ store: BotStore, now: Int64) {
         let id = DemoScreens.chatBotId

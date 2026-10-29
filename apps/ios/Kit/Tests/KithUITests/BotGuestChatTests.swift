@@ -45,21 +45,6 @@ private func decodeBot(_ extra: String) throws -> Bot {
     #expect(CrewRowModel(id: "i", shape: .agent(CrewFace(portrait: nil)), name: "personal").tag == nil)
 }
 
-private func notice(_ thread: String?) throws -> Entry {
-    let t = thread.map { #","thread":\#($0)"# } ?? ""
-    let json = #"{"id":"n1","seq":1,"botId":"c1","rev":1,"kind":"notice","turn":0,"data":{"text":"from Grok · Kai's Grok","style":"info"\#(t)},"createdAt":1,"updatedAt":1}"#
-    return try JSONDecoder().decode(Entry.self, from: Data(json.utf8))
-}
-
-@Test func aNoticeWithAThreadGetsAChipAndOthersDoNot() throws {
-    let thread = #"{"count":2,"lastAt":5,"authors":["user"],"unread":1,"origin":"bot","originLabel":"from Grok · Kai's Grok","originBot":{"provider":"grok","owner":null,"name":"Grok"}}"#
-    let with = try notice(thread)
-    #expect(ChatRow.chipSummary(with, canOpen: true)?.count == 2)
-    #expect(ChatRow.chipSummary(with, canOpen: false) == nil)
-    #expect(ChatRow.chipSummary(try notice(nil), canOpen: true) == nil)
-    #expect(ChatRow.chipSummary(try notice(#"{"count":0,"lastAt":5,"authors":[]}"#), canOpen: true) == nil)
-}
-
 @Test func aConversationRowOpensWhenTheStoreHasItsChat() throws {
     let chat = try decodeBot("")
     let row = BotGuestConversation(conversation: "cv", agent: "personal", chatBotId: "c1", threadRoot: "n1")

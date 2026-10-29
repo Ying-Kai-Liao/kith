@@ -518,6 +518,11 @@ fi
 # An ask token (the owner's approval cards, KITH_ASK_*) belongs to one run: a helper this run starts, or any run for a person
 # who isn't the owner, never inherits it. A helper of the owner's asks the host for its own below.
 [[ $nested -eq 1 || $p_owner == 0 ]] && unset KITH_ASK_TOKEN KITH_ASK_SOCKET HQ_ASK_TOKEN HQ_ASK_SOCKET   # (kith_env_sync would fill the KITH_ names back from the HQ_ ones)
+# The kith ask this run answers (kith-ask sets KITH_LAUNCH_ASK_ID for the one run it starts): the ask token below carries it,
+# so a card the run parks on answers that ask later (kith-ask). The owner's runs only; a run this one starts never has it.
+ask_id=${KITH_LAUNCH_ASK_ID:-}
+unset KITH_LAUNCH_ASK_ID KITH_ASK_ID HQ_LAUNCH_ASK_ID HQ_ASK_ID
+[[ $p_owner == 1 && -z ${KITH_PERSON:-} && -n $ask_id ]] && export KITH_ASK_ID=$ask_id
 if [[ $launch -eq 1 ]]; then
   case $harness in claude|codex) ;; *) echo "kith: $agent runs on $harness; --launch-json covers claude and codex only for now" >&2; exit $([[ -n $backup ]] && echo 4 || echo 1) ;; esac
   out_format="" resume=""; unset KITH_CLAUDE_ARGS HQ_CLAUDE_ARGS
@@ -611,6 +616,14 @@ else
 fi
 [[ $p_owner == 1 ]] && writable="$home/memory"$'\n'"$home_real/memory" \
   || writable=$(printf '%s\n' "$mem" "$(real "$mem")" "$shared" "$(real "$shared")" "$files" "$(real "$files")")
+# The run's outbox (KITH_RUN_OUTBOX, made by whoever started the run: kith-sched, kith serve): kith-send leaves its
+# messages there for the app. Anyone but the owner writes that one folder of <machine>/outbox and nothing else in it.
+run_outbox=""
+if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KITH_MACHINE/outbox ]]; then
+  ob=$(cd "$KITH_RUN_OUTBOX" && pwd -P)
+  [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
+fi
+[[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
 fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
 $learned
 $state_projects" python3 -c '
@@ -764,7 +777,7 @@ if [[ $p_owner == 0 && $harness == claude ]]; then
   [[ $wide == 1 && $PWD != "$files" ]] && { echo "kith: working directory $PWD is wider than a guest may read; working in $files" >&2; cd "$files"; }
   read_dirs=$PWD
   for ((i = 1; i < ${#dirs[@]}; i += 2)); do read_dirs+=$'\n'"${dirs[i]}"; done
-  READ_DIRS=$read_dirs GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -c '
+  READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -c '
 import json, os, re, sys
 f = sys.argv[1]
 s = json.load(open(f))
@@ -781,6 +794,8 @@ for d in os.environ["READ_DIRS"].split("\n"):
 for d in (os.environ.get("UV_CACHE_DIR"), home + "/.local/share/uv", home + "/.local/bin"):
     if d:
         allow += both(d)
+if os.environ.get("RUN_OUTBOX"):   # its own outbox, which kith-send writes (made writable above)
+    allow += both(os.environ["RUN_OUTBOX"])
 try:   # the developer shims of macOS look the toolchain up here, which can sit on another volume
     import subprocess
     dev = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True, timeout=5).stdout.strip()

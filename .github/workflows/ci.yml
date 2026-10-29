@@ -76,7 +76,6 @@ jobs:
               - 'THIRD_PARTY_NOTICES.md'
               - 'scripts/notices/**'
               - 'apps/packaging/cua-driver/LICENSE'
-              - 'serve/host/crates/memory/LICENSE'
               - 'apps/ios/Kit/Sources/KithKit/Resources/ThirdPartyNotices/**'
               - 'apps/ios/Kit/Sources/KithUI/Resources/Mermaid/**'
               - '.github/workflows/ci.yml'
@@ -211,6 +210,8 @@ jobs:
         run: kernel/tests/kith-sched-person-check
       - name: Schedule jobs file check
         run: kernel/tests/kith-sched-jobs-check
+      - name: Send check
+        run: kernel/tests/kith-send-check
       - name: Terminal flags check
         run: kernel/tests/kith-terminal-flags-check
       - uses: oven-sh/setup-bun@v2

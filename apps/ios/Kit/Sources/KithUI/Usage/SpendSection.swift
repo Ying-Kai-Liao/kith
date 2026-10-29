@@ -369,7 +369,7 @@ struct LimitSheet: View {
                 HStack(spacing: 12) {
                     if let bot { BotAvatar(bot: bot, size: 36) }
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Monthly limit").kithText(.agentName).foregroundStyle(Palette.ink)
+                        Text("Monthly limit").kithText(.topBar).foregroundStyle(Palette.ink)
                         Text("\(bot?.name ?? view.agent) · starts again \(Spend.nextMonthStart())").kithText(.secondary).foregroundStyle(Palette.muted)
                     }
                 }

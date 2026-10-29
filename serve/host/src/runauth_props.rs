@@ -67,6 +67,7 @@ fn build(specs: &[(usize, usize, usize)], bind: bool) -> (Arc<TokenTable>, Vec<L
                 scope: TokenScope::Guest,
                 session: format!("run:s{i}"),
                 project: PROJECTS[(p + i) % PROJECTS.len()].map(Into::into),
+                reply: None,
             };
             let grant = RunGrant::issue(&table, identity.clone()).unwrap();
             let pid = BASE + u32::try_from(i).unwrap() * SPACING;
@@ -589,7 +590,7 @@ pub fn prop_only_recall_is_authorized() -> Result<(), String> {
             }
             // An owner token (cards only) is refused all three.
             let owner = Arc::new(TokenTable::with_ancestry(descends_window));
-            let token = owner.insert_ask(ask_identity("echo", "s"), BASE, Duration::from_secs(60)).unwrap();
+            let token = owner.insert_ask(ask_identity("echo", "s", None), BASE, Duration::from_secs(60)).unwrap();
             for m in ["recall", "memorySearch", "projectId"] {
                 let line = request(&json!(token), &json!(m), vec![json!("zebra")], &[]);
                 prop_assert!(authorize(&owner, &line, PeerInfo { pid: Some(BASE) }).is_err(), "owner token got {m}");

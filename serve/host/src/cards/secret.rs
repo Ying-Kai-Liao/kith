@@ -263,6 +263,8 @@ pub async fn request(hub: &Arc<Hub>, o: &Origin, service: &str, purpose: &str) -
         resource: format!("secret:{service}"),
         shown: format!("{service}\n\nWhy: {purpose}"),
         deadline: now.saturating_add(cfg.expiry_ms),
+        reply_to: None,
+        asked_by: None,
     };
     let card = match hub.store.card_open(&new, now) {
         Ok(Opened::New(c) | Opened::Joined(c) | Opened::Granted(c)) => c,

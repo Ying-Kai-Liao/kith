@@ -164,7 +164,7 @@ function PanelRows({ items, onDismiss, after, dismissOnActivate = false }: { ite
 
 /** The roster's right-click actions, shared by pointer and keyboard. */
 export function DesktopActionMenu({ items, onDismiss, style }: { items: MenuItem[]; onDismiss: () => void; style: React.CSSProperties }) {
-  const rows = items.map<PanelItem>((m) => ({ title: m.title, icon: m.icon ?? 'circle', destructive: m.destructive, action: m.action }))
+  const rows = items.map<PanelItem>((m) => ({ title: m.title, icon: m.icon ?? 'circle', destructive: m.destructive, disabled: m.disabled, action: m.action }))
   return (
     <div className="action-menu" style={style}>
       <PanelRows

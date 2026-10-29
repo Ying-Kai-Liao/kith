@@ -402,6 +402,8 @@ impl World {
                     resource: format!("k-{id}"),
                     shown: String::new(),
                     deadline: i64::MAX,
+                    reply_to: None,
+                    asked_by: None,
                 };
                 let card = match store.card_open(&new, 1).unwrap() {
                     crate::store::Opened::New(c)

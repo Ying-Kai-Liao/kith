@@ -3,6 +3,7 @@
 
 import type { GrantedAgent } from './mac-role.ts'
 import { decodeBotStatus, type BotStatus, type Entry as ContractEntry, type Received } from './host-contract.gen.ts'
+import type { RichCard } from './rich-card.ts'
 import type { SecretAccount, SecretRequest } from './secret-card.ts'
 import { normalizeFolder, type PlaceFolder } from './place-folders.ts'
 
@@ -299,10 +300,14 @@ export interface EntryData {
   person?: string
   personName?: string
   agent?: string
+  /** permission, from a run `kith ask` started: "<agent>, asked by <caller agent>" (or "a terminal"). */
+  chain?: string
   /** permission, answered: an old run still holds the session this approval resumes in (null/absent otherwise; an older host never sends it). */
   held?: HeldRun | null
   /** permission: an Access or Key card for a service key (shared/secret-card.ts). Never a value. */
   card?: 'account' | 'key'
+  /** A card drawn over the entry, its `text` being the twin (shared/rich-card.ts). Not the permission `card` above. */
+  richCard?: RichCard
   secret?: SecretRequest
   accounts?: SecretAccount[]
   entries?: PlanItem[]

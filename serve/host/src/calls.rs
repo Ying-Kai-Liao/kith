@@ -197,7 +197,12 @@ pub fn env_for(hub: &Hub, bot: &str) -> Vec<(String, String)> {
 /// The same for a run that doesn't come from an app chat (a channel's): the agent's main chat with the person it
 /// serves (`None` is the owner). Nothing when that person has no app chat with the agent, so it can't ring.
 pub fn run_env(hub: &Hub, agent: &str, person: Option<&str>) -> Vec<(String, String)> {
-    let chat = hub.store.bots().ok().and_then(|rows| {
+    chat_of(hub, agent, person).map(|c| env_for(hub, &c)).unwrap_or_default()
+}
+
+/// The agent's main chat with `person` (`None` is the owner): never a group.
+pub fn chat_of(hub: &Hub, agent: &str, person: Option<&str>) -> Option<String> {
+    hub.store.bots().ok().and_then(|rows| {
         rows.into_iter()
             .find(|r| {
                 !r.deleted
@@ -206,8 +211,7 @@ pub fn run_env(hub: &Hub, agent: &str, person: Option<&str>) -> Vec<(String, Str
                     && r.config.person.as_deref() == person
             })
             .map(|r| r.config.id)
-    });
-    chat.map(|c| env_for(hub, &c)).unwrap_or_default()
+    })
 }
 
 /// An agent rings its person. `bot_id` is the chat the agent works in, which also says who is called. The answer's

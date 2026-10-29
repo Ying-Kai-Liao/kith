@@ -10,14 +10,15 @@ KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-person.XXXXXX"); T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1
-unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_SCHED_PERMISSION_MODE
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_SCHED_PERMISSION_MODE KITH_RUN_OUTBOX HQ_RUN_OUTBOX
 mkdir -p "$HOME" "$KITH_STATE" "$KITH_SERVE_DIR" "$T/k/bin" "$KITH_HOME/agents/house/role"
 printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
 ln -s "$KERNEL/lib" "$T/k/lib"
 for b in kith-sched kith-ask kith-remote kith-auth; do cp "$KERNEL/bin/$b" "$T/k/bin/$b"; done
 cat > "$T/k/bin/kith" <<'STUB'
 #!/bin/sh
-# stub: records who the run is for (owner when KITH_PERSON is unset)
+# stub: records who the run is for (owner when KITH_PERSON is unset) and its outbox
+echo "${KITH_RUN_OUTBOX:-}" > "$KITH_STATE/box-$KITH_SCHED_JOB"
 echo "${KITH_PERSON:-owner}" > "$KITH_STATE/ran-$KITH_SCHED_JOB"
 STUB
 chmod +x "$T/k/bin/kith"
@@ -43,10 +44,32 @@ KITH_PERSON=kai S add house "0 8 * * *" "owner as a person" --id kais >/dev/null
 check "a job added from the owner's run records no person" "[ -z \"\$(person_of mine)\" ]"
 check "a job added from a guest's run records them" "[ \"\$(person_of sams)\" = sam ]"
 
+# A change made from a run with an outbox (an app chat's) leaves {id, op} there, for the app's Schedule card.
+mkdir -p "$T/box"
+items() { python3 -c "import glob,json,sys; print(' '.join('%(id)s:%(op)s' % json.load(open(f))['schedule'] for f in sorted(glob.glob(sys.argv[1] + '/*.json'))))" "$T/box"; }
+KITH_RUN_OUTBOX=$T/box S add house "0 9 * * *" "boxed" --id boxed >/dev/null
+KITH_RUN_OUTBOX=$T/box S add house "0 10 * * *" "boxed again" --id boxed >/dev/null
+KITH_RUN_OUTBOX=$T/box S pause house boxed >/dev/null
+KITH_RUN_OUTBOX=$T/box S resume house boxed >/dev/null
+KITH_RUN_OUTBOX=$T/box S rm house boxed >/dev/null
+check "each change leaves its op in the run's outbox" "[ \"\$(items)\" = 'boxed:added boxed:updated boxed:paused boxed:resumed boxed:removed' ]"
+check "only whole items are left" "[ -z \"\$(find $T/box -name '*.tmp')\" ]"
+KITH_RUN_OUTBOX=$T/nowhere S add house "0 9 * * *" "no box" --id nobox >/dev/null
+check "no outbox folder: the change is made, nothing is left" "grep -q '\"nobox\"' $KITH_HOME/agents/house/jobs.json && [ ! -e $T/nowhere ]"
+S rm house nobox >/dev/null
+
 S run house sams >/dev/null 2>&1
 check "the guest's job runs for them" "[ \"\$(ran sams)\" = sam ]"
-S run house mine >/dev/null 2>&1
+# Its outbox: a fresh folder of <machine>/outbox, and beside it who the run is for, where the run can't write.
+box=$(cat "$KITH_STATE/box-sams")
+meta() { python3 -c "import json,sys; m=json.load(open(sys.argv[1]+'.json')); print(m['agent'], m['person'], m['via'], m['job'])" "$1"; }
+check "a scheduled run gets an outbox of its own" "[ -d \"$box\" ] && [ \"\$(dirname \"$box\")\" = \"$KITH_STATE/outbox\" ]"
+check "beside it: the agent, the job's person and the job" "[ \"\$(meta \"$box\")\" = 'house sam schedule sams' ]"
+check "and the job's schedule" "[ \"\$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[\"cron\"])' \"$box.json\")\" = '0 8 * * *' ]"
+KITH_RUN_OUTBOX=/elsewhere S run house mine >/dev/null 2>&1
 check "a job with no person runs as the owner" "[ \"\$(ran mine)\" = owner ]"
+box=$(cat "$KITH_STATE/box-mine")
+check "an owner's job: its own outbox (not the one it was started with), for the owner" "[ \"\$(dirname \"$box\")\" = \"$KITH_STATE/outbox\" ] && [ \"\$(meta \"$box\")\" = 'house None schedule mine' ]"
 S run house kais >/dev/null 2>&1
 check "a job the owner added as a person runs for that person" "[ \"\$(ran kais)\" = kai ]"
 

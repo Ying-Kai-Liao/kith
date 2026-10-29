@@ -11,7 +11,7 @@ use crate::runauth::{TokenScope, ask_identity};
 use std::time::Duration;
 
 pub(super) fn owner_run(session: &str) -> RunIdentity {
-    ask_identity("house", session)
+    ask_identity("house", session, None)
 }
 
 pub(super) fn guest_run(person: &str, room: &str) -> RunIdentity {
@@ -23,6 +23,7 @@ pub(super) fn guest_run(person: &str, room: &str) -> RunIdentity {
         scope: TokenScope::Guest,
         session: format!("run:{room}"),
         project: None,
+        reply: None,
     }
 }
 
@@ -92,7 +93,7 @@ async fn an_owner_run_gets_a_card_and_a_yes_in_the_window_continues_the_same_run
     assert!(roles::offered(&entry.data, "allow") && roles::offered(&entry.data, "deny"));
 
     assert_eq!(answer(&r.hub, &entry.id, Some("allow"), "owner").unwrap(), Outcome::Recorded { forward: false });
-    assert_eq!(call.await.unwrap(), Decision { allow: true, message: "Approved.".into() });
+    assert_eq!(call.await.unwrap(), Decision { allow: true, message: "Approved.".into(), waiting: false });
     // C3: the live yes spent the grant; no resume, nothing left to use (A4).
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Used);
     assert_eq!(r.hub.store.cards_awaiting_resume(0).len(), 0);
@@ -130,7 +131,7 @@ async fn no_answer_in_the_window_tells_the_run_to_end_its_turn_and_a_later_yes_i
     window(&r.hub, 1);
     assert!(!request_permission(&r.hub, &owner_run("other"), "Bash", &ls()).await.allow);
     let again = request_permission(&r.hub, &owner_run("s1"), "Bash", &ls()).await;
-    assert_eq!(again, Decision { allow: true, message: "Allowed once.".into() });
+    assert_eq!(again, Decision { allow: true, message: "Allowed once.".into(), waiting: false });
     assert!(!request_permission(&r.hub, &owner_run("s1"), "Bash", &ls()).await.allow, "the grant was spent");
 }
 
@@ -450,6 +451,8 @@ async fn a_bot_chat_card_answered_after_its_process_is_gone_is_recorded() {
         resource: "Bash:x".into(),
         shown: "x".into(),
         deadline: now_ms() + 60_000,
+        reply_to: None,
+        asked_by: None,
     };
     let Opened::New(card) = r.hub.store.card_open(&new, now_ms()).unwrap() else { panic!() };
     r.hub.store.card_live(&card.id, Some(&entry.id), None).unwrap();
@@ -520,6 +523,8 @@ async fn a_parallel_ask_cannot_take_the_grant_a_live_asker_is_given() {
         resource: card.resource.clone(),
         shown: card.shown.clone(),
         deadline: now_ms() + 60_000,
+        reply_to: None,
+        asked_by: None,
     };
     assert!(matches!(r.hub.store.card_open(&again, now_ms()).unwrap(), Opened::New(_)));
     assert!(call.await.unwrap().allow);
@@ -552,6 +557,8 @@ async fn a_turn_that_ends_with_a_question_open_parks_it() {
         resource: "Bash:y".into(),
         shown: "y".into(),
         deadline: now_ms() + 60_000,
+        reply_to: None,
+        asked_by: None,
     };
     let Opened::New(card) = r.hub.store.card_open(&new, now_ms()).unwrap() else { panic!() };
     r.hub.store.card_live(&card.id, Some(&entry.id), None).unwrap();

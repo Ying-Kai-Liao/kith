@@ -8,6 +8,7 @@ import { FALLBACK_PAIR } from '../../components/kith/pair.ts'
 import { Icon } from '../../components/Icon'
 import { HStack, VStack } from '../../components/Stack'
 import { Text } from '../../components/Text'
+import { alwaysAllowLabel } from './permission-labels.ts'
 import { permissionOutcome } from './permission-outcome.ts'
 import './permission-card.css'
 
@@ -74,7 +75,7 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
     pair,
     title: permissionHeadline(d.toolKind),
     subject: d.title ?? '',
-    place: `Runs on ${hostName}${cwd}`,
+    place: `Runs on ${hostName}${cwd}${d.chain ? ` · ${d.chain}` : ''}`,
     waiting,
     outcome: pending ? undefined : permissionOutcome(entry),
     held: held?.model ? <HeldRow model={held.model} onStop={() => setConfirming(true)} /> : undefined,
@@ -99,6 +100,8 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
           pending={answering !== null ? true : null}
           onAllow={() => respond(byKind('allow_once')!.optionId)}
           onDeny={() => respond(byKind('reject_once')!.optionId)}
+          allowLabel="Allow once"
+          alwaysLabel={alwaysAllowLabel(d.cwd)}
           onAlways={byKind('allow_always') ? () => respond(byKind('allow_always')!.optionId) : undefined}
         />
       ) : (

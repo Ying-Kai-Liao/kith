@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 7;
+const SCHEMA: i64 = 8;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -17,6 +17,7 @@ const SCHEMA: i64 = 7;
 /// accepted, the people it made and the audit log of what non-owners asked.
 /// 6: bot guests (docs/kith-bot-guests.md 4.3): the bots, their invites and conversations, and `people.auto_bots`.
 /// 7: approval cards (host card store): what a run asked for beyond its limits, and what became of it.
+/// 8: a card asked from a `kith ask` run answers that ask (`cards.reply_to`, `cards.asked_by`).
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
         c.query_row("SELECT CAST(v AS INTEGER) FROM kv WHERE k = 'schema'", [], |r| r.get(0)).optional()?.unwrap_or(0);
@@ -35,7 +36,21 @@ fn migrate(c: &Connection) -> Result<()> {
     if version < 6 {
         migrate_6(c)?;
     }
-    migrate_7(c)
+    if version < 7 {
+        migrate_7(c)?;
+    }
+    migrate_8(c)
+}
+
+fn migrate_8(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         ALTER TABLE cards ADD COLUMN reply_to TEXT;
+         ALTER TABLE cards ADD COLUMN asked_by TEXT;
+         INSERT INTO kv(k, v) VALUES('schema', '8') ON CONFLICT(k) DO UPDATE SET v = '8';
+         COMMIT;",
+    )?;
+    Ok(())
 }
 
 fn migrate_7(c: &Connection) -> Result<()> {
@@ -196,13 +211,14 @@ mod tests {
             c.execute_batch(
                 "DROP TABLE invites; DROP TABLE people; DROP TABLE memberships; DROP TABLE audit;
                  ALTER TABLE devices DROP COLUMN proven; ALTER TABLE devices DROP COLUMN person_id;
+                 ALTER TABLE cards DROP COLUMN reply_to; ALTER TABLE cards DROP COLUMN asked_by;
                  INSERT INTO devices VALUES('old', 'Phone', 'ios', 'local', NULL, '[\"control\"]', NULL, 1, NULL);
                  UPDATE kv SET v = '4' WHERE k = 'schema';",
             )
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("7"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("8"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -223,7 +239,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("7"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("8"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         drop(s);
         let s = Store::open(&db).unwrap();

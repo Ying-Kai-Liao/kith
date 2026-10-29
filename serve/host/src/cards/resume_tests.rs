@@ -37,6 +37,7 @@ fn guest(person: &str, session: &str) -> RunIdentity {
         scope: TokenScope::Guest,
         session: format!("run:g:{}:{person}:{session}", person.len()),
         project: None,
+        reply: None,
     }
 }
 
@@ -91,6 +92,8 @@ fn blank() -> Card {
         state: CardState::Approved,
         created_at: 0,
         deadline: i64::MAX,
+        reply_to: None,
+        asked_by: None,
         answer: None,
         allowed: Some(true),
         answered_by: None,
@@ -399,4 +402,92 @@ async fn stop_holder_is_the_owners_alone_and_ends_only_the_live_holder_it_judged
 
     // A path is no session id.
     assert!(dispatch(&r.hub, &Caller::Local, "stopHolder", json!({"session": "../x"})).await.is_err());
+}
+
+// ---- rule 7: a `kith ask` run that parks is a job; its card answers the asker
+
+fn asked_run(session: &str, id: &str) -> RunIdentity {
+    crate::runauth::ask_identity("house", session, crate::runauth::AskReply::parse(id, Some("architect")))
+}
+
+#[tokio::test]
+async fn a_kith_ask_run_that_parks_is_told_it_waits_and_a_no_is_the_askers_answer() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    window(&r.hub, 0);
+    let who = asked_run("job-a", "ask-p1-a");
+    let first = request_permission(&r.hub, &who, "Bash", &ls()).await;
+    assert!(!first.allow && first.waiting, "{first:?}");
+    let card = shown(&r.hub).await;
+    assert_eq!((card.reply_to.as_deref(), card.asked_by.as_deref()), (Some("ask-p1-a"), Some("architect")));
+    let entry = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap();
+    assert_eq!(entry.data["chain"], "house, asked by architect", "the approver sees whose request it is");
+    assert_eq!(chain_of(&blank()), None, "a card no kith ask opened shows no chain");
+
+    run_exited(&r.hub, &who.run_id);
+    answer(&r.hub, &entry.id, Some("deny"), "owner").unwrap();
+    let told = tests_seen::answers_to("ask-p1-a");
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert_eq!(&told[0][..6], ["ask", "--answer", "ask-p1-a", "--as", "house", "--"]);
+    assert!(told[0][6].contains("was denied"), "{}", told[0][6]);
+}
+
+#[tokio::test]
+async fn a_no_the_live_run_hears_is_not_sent_to_the_asker_too() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    window(&r.hub, 20);
+    let call = ask(&r.hub, asked_run("job-b", "ask-p1-b"), "Bash", ls());
+    let card = shown(&r.hub).await;
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), "owner").unwrap();
+    let d = call.await.unwrap();
+    assert!(!d.allow && !d.waiting, "{d:?}");
+    assert!(tests_seen::answers_to("ask-p1-b").is_empty(), "the run answers in its own turn");
+}
+
+#[tokio::test]
+async fn an_expired_card_of_a_kith_ask_run_answers_the_asker() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    window(&r.hub, 0);
+    let who = asked_run("job-c", "ask-p1-c");
+    assert!(request_permission(&r.hub, &who, "Bash", &ls()).await.waiting);
+    let card = shown(&r.hub).await;
+    run_exited(&r.hub, &who.run_id);
+    expire(&r.hub, now_ms() + 25 * 3_600_000);
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Expired);
+    let told = tests_seen::answers_to("ask-p1-c");
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(told[0][6].contains("expired without an answer"), "{}", told[0][6]);
+}
+
+#[tokio::test]
+async fn a_yes_to_a_kith_ask_run_resumes_it_through_kith_ask_reply() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = approved_while_gone(&r, asked_run("job-d", "ask-p1-d"), ls()).await;
+    assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
+    let spawned = tests_seen::spawns_for("job-d");
+    assert_eq!(spawned.len(), 1);
+    assert_eq!(&spawned[0].args[..7], ["ask", "--reply", "ask-p1-d", "house", "--resume", "job-d", "--"]);
+    assert!(tests_seen::answers_to("ask-p1-d").is_empty(), "the resumed turn's words are the answer, not the card's");
+}
+
+#[tokio::test]
+async fn an_ask_token_takes_only_a_kith_ask_id_to_reply_to() {
+    let r = Rig::new().await;
+    let bad = json!({"agent": "house", "session": "s", "pid": std::process::id(), "replyTo": "../x"});
+    let err = dispatch(&r.hub, &Caller::Local, "issueAskToken", bad).await.unwrap_err();
+    assert!(format!("{err:#}").contains("replyTo"), "{err:#}");
+    let parse = crate::runauth::AskReply::parse;
+    assert_eq!(parse("ask-1", Some("architect")).unwrap().asked_by.as_deref(), Some("architect"));
+    assert_eq!(parse("ask-1", Some("")).unwrap().asked_by, None, "a terminal");
+    assert_eq!(parse("ask-1", Some("Not An Agent")).unwrap().asked_by, None);
+    assert!(parse("", None).is_none() && parse(&"a".repeat(65), None).is_none() && parse("a/b", None).is_none());
 }
