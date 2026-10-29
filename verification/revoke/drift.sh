@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below (see the skill's "Sync commit").
-SYNC=5a7898911c39987b89fb6099843df3f374e51f2f
+SYNC=fb5f140f6c84bc079684575a8ce93373eba51275
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
