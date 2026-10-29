@@ -3,7 +3,7 @@ import { GrantedAgentsChat } from './computers/GrantedAgentsChat'
 import { InviteJoinSheet } from './settings/InviteJoinSheet'
 import type { WindowCommand } from '@shared/ipc'
 import { isSSHConnecting, showsChat as shouldShowChat } from '@shared/ssh-startup'
-import { draftOf, type Bot, type BotDraft } from '@shared/models'
+import { draftOf, isGroup, isWorking, type Bot, type BotDraft } from '@shared/models'
 import { LiveBot } from '../components/Avatar'
 import { Icon } from '../components/Icon'
 import { ChoicePicker, ResizeHandle } from '../components/Controls'
@@ -22,6 +22,7 @@ import { ThreadView } from './thread/ThreadView'
 import { canShareAgent, ShareAgentSheet } from './ShareAgentSheet'
 import { peopleFor } from '../store/people-store'
 import { NewChatView } from './bots/NewChatView'
+import { newChatMenu } from '../lib/new-chat-menu'
 import { BotEditorView } from './bots/BotEditorView'
 import { MarketplaceView } from './marketplace/MarketplaceView'
 import type { SettingsPage } from '@shared/settings-pages'
@@ -269,10 +270,12 @@ function ChatSplitView() {
     }
   })
 
-  const newItems = (): MenuItem[] => [
-    { title: 'New chat', icon: 'square.and.pencil', action: () => compose() },
-    { title: 'New group chat', icon: 'person.2', action: () => compose(true) },
-  ]
+  const newItems = (): MenuItem[] => newChatMenu({
+    agent: () => compose(),
+    person: () => setSettings('people'),
+    bot: () => setSettings('bots'),
+    group: () => compose(true),
+  })
   const filterNeeded = app.computers.length > 1 || ssh.state.profiles.length > 0 || stores.some((s) => s.shownConnection.kind !== 'online')
 
   const openMarketplace = () => setMarketplace(([selectedStore, app.local, ...onlineStores].find((s) => s?.isOwner)?.computer.id) ?? null)
@@ -284,7 +287,12 @@ function ChatSplitView() {
     { title: bot.pinned ? 'Unpin' : 'Pin', icon: 'pin', action: () => store.setPinned(bot, !bot.pinned) },
     { title: 'Mark as Read', icon: 'bell.badge', action: () => store.markAllRead(bot.id) },
     ...(canShareAgent(store, bot) ? [{ title: 'Share access…', icon: 'person.crop.circle.badge.plus', action: () => setSharingBot({ bot, store }) }] : []),
-    { title: 'Edit Profile…', icon: 'square.and.pencil', divider: true, action: () => setEditing({ id: crypto.randomUUID(), draft: draftOf(bot), store }) },
+    // Agents only: the colour lives in the profile editor; Sleep stops what the agent is running.
+    ...(isGroup(bot) ? [] : [
+      { title: 'Colour…', icon: 'paintpalette', divider: true, action: () => setEditing({ id: crypto.randomUUID(), draft: draftOf(bot), store }) },
+      { title: 'Sleep', icon: 'moon', disabled: !isWorking(bot), action: () => store.stop(bot.id) },
+    ]),
+    { title: 'Edit Profile…', icon: 'square.and.pencil', divider: isGroup(bot), action: () => setEditing({ id: crypto.randomUUID(), draft: draftOf(bot), store }) },
     { title: 'Copy conversation ID', icon: 'square.on.square', divider: true, action: () => window.kith.app.copy(bot.id) },
     { title: 'New session', icon: 'arrow.counterclockwise', action: () => setNewSessionBot({ bot, store }) },
     { title: 'Hide from sidebar', icon: 'eye.slash', divider: true, action: () => store.setHidden(bot, true) },
