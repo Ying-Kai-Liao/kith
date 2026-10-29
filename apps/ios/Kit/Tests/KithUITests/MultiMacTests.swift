@@ -151,6 +151,32 @@ private func card(_ id: String, chat: String, status: String = "pending", approv
     #expect(GuestPrompt.pending(in: entries, known: ["chat-sam", "chat-ann", "mine"]).isEmpty)
 }
 
+@MainActor @Test func anEdgeCardShowsEachOfTheHostsOptionsInItsWords() throws {
+    // The host's card for Sam's run reaching a host that is part of a job not on for Sam (cards/edge.rs, cards/mod.rs).
+    var entry = card("p1", chat: "chat-sam")
+    entry.data.options = [
+        PermissionOption(optionId: "allow", name: "Just this once", kind: "allow_once"),
+        PermissionOption(optionId: "kith-always", name: "Always for Sam", kind: "allow_always"),
+        PermissionOption(optionId: "kith-job", name: "Turn on Make videos: fonts.example.org, money", kind: "allow_always"),
+        PermissionOption(optionId: "deny", name: "No", kind: "reject_once"),
+    ]
+    entry.data.edge = try JSONDecoder().decode(PermissionEdge.self, from: Data(#"""
+        {"kind":"domains","value":"fonts.example.org","job":"make-videos","shown":{"domains":["fonts.example.org"],"helpers":["money"],"doors":[]}}
+        """#.utf8))
+    let names = ["Just this once", "Always for Sam", "Turn on Make videos: fonts.example.org, money", "No"]
+    let ids = ["allow", "kith-always", "kith-job", "deny"]
+    // In the chat, and in the owner's list of guests' prompts.
+    let chat = PermissionCard(entry: entry, hostName: "Mac", respond: { _ in }).cardModel.options
+    let board = DecisionCardModel(guest: GuestPrompt(entry)).options
+    for options in [chat, board] {
+        #expect(options.map(\.title) == names)
+        #expect(options.map(\.id) == ids)
+    }
+    // An agent's own card goes by kind.
+    entry.data.edge = nil
+    #expect(PermissionCard(entry: entry, hostName: "Mac", respond: { _ in }).cardModel.options.map(\.title) == ["Allow once", "Always allow", "Always allow", "Deny"])
+}
+
 @Test func theInviteesChatShowsWaitingTextInPlaceOfButtons() {
     let waiting = card("p1", chat: "c")
     #expect(GuestPrompt.waitingText(for: waiting, activity: "Waiting for Kai", isOwner: false) == "Waiting for Kai")

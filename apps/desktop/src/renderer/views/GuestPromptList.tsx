@@ -10,7 +10,7 @@ import { useModel } from '../lib/observable'
 import { botGuestsFor } from '../store/bot-guests-store'
 import type { BotStore } from '../store/bot-store'
 import { LimitCard } from './thread/LimitCard'
-import { optionLabel, sortedOptions } from './thread/PermissionCard'
+import { optionLabel, sortedOptions } from './thread/permission-options.ts'
 import { agentBot } from './usage/SpendSection'
 
 /**
@@ -58,7 +58,7 @@ function GuestPromptRow({ prompt, answering, respond }: { prompt: GuestPrompt; a
             disabled={answering !== null}
             onClick={() => respond(o.optionId)}
           >
-            <Text size="body" weight={o.kind === 'allow_once' ? 'semibold' : 'regular'} tone={o.kind.startsWith('allow') ? 'text' : 'danger'} className="permission-option-label">{optionLabel(o)}</Text>
+            <Text size="body" weight={o.kind === 'allow_once' ? 'semibold' : 'regular'} tone={o.kind.startsWith('allow') ? 'text' : 'danger'} className="permission-option-label">{optionLabel(o, prompt.entry.data.edge)}</Text>
             {answering === o.optionId ? <Spinner size={14} /> : null}
           </button>
         ))}

@@ -63,6 +63,12 @@ public struct GuestPrompt: Identifiable, Hashable, Sendable {
         }
     }
 
+    /// An edge card is labelled in the host's words, since its two allow_always ("Always for Sam", "Turn on <job>")
+    /// grant different things. Any other card goes by kind.
+    public static func label(_ option: PermissionOption, edge: PermissionEdge?) -> String {
+        edge != nil && !option.name.isEmpty ? option.name : label(option)
+    }
+
     /// Pending cards that wait for the owner, in an invitee's chat the owner has no bot for, oldest first.
     /// `known` is the owner's own bots: a card in one of those is that bot's card, not a guest's.
     public static func pending(in entries: [String: [Entry]], known: Set<String>) -> [GuestPrompt] {
