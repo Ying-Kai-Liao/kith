@@ -497,6 +497,7 @@ fn router_methods() -> BTreeSet<String> {
         include_str!("remote.rs"),
         include_str!("people.rs"),
         include_str!("botguests.rs"),
+        include_str!("peers.rs"),
         include_str!("threads.rs"),
     ];
     let mut out = BTreeSet::new();

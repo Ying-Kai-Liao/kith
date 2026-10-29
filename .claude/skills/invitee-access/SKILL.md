@@ -37,6 +37,10 @@ Bot guests, host, `serve/host/src/api/botguests_props.rs` (the real `dispatch` a
 19. At most ten live bots per owner, counted per owner (the eleventh gets `tooMany`, another owner's bots do not count, removing one makes room). Harm: unbounded bots.
 20. A bot never reads another bot's conversation (`botAsk`/`botThread` with its id is `notFound`).
 
+Paired computers (Mac link), host, `serve/host/src/api/peers_tests.rs` (the real `dispatch` and `principal` on the `Rig`; examples and by-name sweeps, not generated):
+
+29. (L8) A key of a computer paired here (`peers_in`) is `Principal::Peer`, decided before the no-person device row that would make it the owner, and only while the pairing is there; it reaches only `PEER_METHODS`, which are on neither `MEMBER_METHODS` nor `BOT_METHODS`; every other router method and every `LOCAL_ONLY` one is refused and audited as `peer:<computer>`; it gets no event stream; `peerAgents` lists the owner's agents only, never a person's bot. Harm: another Mac of the account, or whoever holds its key, drives this one as its owner.
+
 kith-auth, `kernel/tests/kith-auth-props.py` (generated command sequences on a throwaway auth.json):
 
 10. A person is allowed only through their own row or the `*` row; an unknown id never.
@@ -84,6 +88,7 @@ How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechec
 | serve/host/src/api/devices.rs | `bot_principal` | 15, 16 |
 | serve/host/src/store/botguests.rs | `live_bot_count`, `bot_guest_of_device`, `end_bot_guest` (through the handlers) | 16, 19 |
 | serve/host/src/agent/folder.rs | `Change::from_args` (used as the oracle for send) | 4 |
+| serve/host/src/api/devices.rs, api/peers.rs | `principal`'s Peer arm, `peer_call`, `peer_method`, `owner_agents`; `PEER_METHODS` (kith_wire) | 29 |
 | serve/host/src/api/mod.rs | `member_call` (guard before route) | read, not run: see not covered |
 | kernel/bin/kith-auth | `resolve`, `resolve_bot`, `may`, `bot_may`, `bot_row`, `cmd_person --rm`, `cmd_member`, `cmd_bot`, `cmd_bots_cap`, `retired`, `need_free` | 10-13, 27 |
 | | `cmd_access` (C2), the access cap in `resolve_bot`, `check_env_key`, the `--trusted` free-shell rule, `forget`, `cmd_person --revoke/--unrevoke` | 12, 23-26 |
@@ -114,6 +119,7 @@ A failure prints a shrunk case. Reproduce it by hand: write the person and bot r
 
 - A new `MEMBER_METHODS` entry: add it with a reason in `roles.rs`, then say here which guard branch covers it; if it names a chat by a new field, teach `by_entry`/`body` in `roles_props.rs` that field, or property 1 passes by never exercising it.
 - A new event type, shaped answer or bot-guest role (`BOT_METHODS`, bot principal): add a generator and a property, then a broken variant that fails it.
+- A new `PEER_METHODS` entry: answer it in `api/peers.rs` `peer_method`; the sweep of property 29 then checks it is off the member and bot lists and that nothing else opened.
 - kith-auth rules: change the Python oracle in the same commit as the rule.
 - Move the sync commit only after you confirm the properties still describe the code at the new commit (re-read the covered functions, run both commands, and for each new branch see a broken variant fail). `/maintain-formal-verification-skill` (pstack) brings this in line after changes that did not recheck it.
 

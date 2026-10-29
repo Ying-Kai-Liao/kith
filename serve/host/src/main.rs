@@ -133,6 +133,27 @@ enum Sub {
         #[arg(long)]
         confirm_owner: bool,
     },
+    /// Pair with another computer of this account (Mac link), list them, or answer one asking to pair with this one.
+    Link {
+        #[arg(long, default_value_t = service::DEFAULT_PORT)]
+        port: u16,
+        /// The other computer, by name or id. Without it, lists the account's computers and who asks to pair.
+        computer: Option<String>,
+        /// Allow a computer asking to pair with this one, by typing the code it shows (asked for when left out).
+        /// Refused when stdin is not a terminal.
+        #[arg(long, num_args = 0..=1, value_name = "CODE", conflicts_with = "deny")]
+        #[allow(clippy::option_option)] // clap's flag with an optional value
+        accept: Option<Option<String>>,
+        /// Refuse a computer asking to pair with this one.
+        #[arg(long)]
+        deny: bool,
+    },
+    /// End this computer's pairing with another one, both ways.
+    Unlink {
+        #[arg(long, default_value_t = service::DEFAULT_PORT)]
+        port: u16,
+        computer: String,
+    },
     /// Install and start the host as a background service (launchd / systemd --user).
     Install {
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
@@ -393,6 +414,19 @@ async fn main() -> Result<()> {
             }
         },
         Sub::Access { port, action } => access(port, action.unwrap_or(AccessAction::List)).await,
+        Sub::Link { port, computer, accept, deny } => match (accept, deny) {
+            (Some(code), _) => answer_link(port, computer, LinkAnswer::Accept(code)).await,
+            (None, true) => answer_link(port, computer, LinkAnswer::Deny).await,
+            (None, false) => match computer {
+                Some(c) => link(port, &c).await,
+                None => links(port).await,
+            },
+        },
+        Sub::Unlink { port, computer } => {
+            local_call(port, "unlinkComputer", json!({ "computerId": computer })).await?;
+            println!("Unpaired.");
+            Ok(())
+        }
         Sub::Cloud { port, enable, disable, approval, confirm_owner } => {
             if let Some(approval) = approval {
                 local_call(port, "setApproval", json!({ "approval": approval })).await?;
@@ -767,6 +801,134 @@ async fn access(port: u16, action: AccessAction) -> Result<()> {
     let id = r["requestId"].as_str().unwrap_or_default();
     local_call(port, "decideAccessRequest", json!({"requestId": id, "approve": approve})).await?;
     println!("{}", if approve { "Approved." } else { "Denied." });
+    Ok(())
+}
+
+/// `kith link`: the account's other computers, and the ones asking to pair with this one.
+async fn links(port: u16) -> Result<()> {
+    let list = local_call(port, "peerComputers", json!({})).await?;
+    let computers = list["computers"].as_array().cloned().unwrap_or_default();
+    if computers.is_empty() {
+        println!("This account has no other computer.");
+    }
+    for c in &computers {
+        let mut says = match c["link"].as_str() {
+            Some("paired") => "paired".to_owned(),
+            Some("pending") => "pairing".to_owned(),
+            _ => "not paired".to_owned(),
+        };
+        if c["letsIn"] == true {
+            says.push_str(", lets it ask here");
+        }
+        println!(
+            "{}  {}  ({says})",
+            c["computerId"].as_str().unwrap_or_default(),
+            c["name"].as_str().unwrap_or_default()
+        );
+    }
+    for r in local_call(port, "peerRequests", json!({})).await?["requests"].as_array().into_iter().flatten() {
+        println!(
+            "{} asks to pair with this computer. Allow it with `kith link --accept`.",
+            r["name"].as_str().unwrap_or_default()
+        );
+    }
+    Ok(())
+}
+
+/// `kith link NAME`: starts pairing and follows it until the other computer said yes or no.
+async fn link(port: u16, which: &str) -> Result<()> {
+    let mut v = local_call(port, "linkComputer", json!({ "computer": which })).await?;
+    let cid = v["computerId"].as_str().unwrap_or_default().to_owned();
+    let name = v["name"].as_str().unwrap_or(which).to_owned();
+    let deadline = std::time::Instant::now() + Duration::from_secs(15 * 60);
+    let mut said = String::new();
+    loop {
+        let state = v["state"].as_str().unwrap_or_default().to_owned();
+        if state != said {
+            match state.as_str() {
+                "waiting" => println!("Asked {name}. Waiting for it to answer…"),
+                "code" => println!(
+                    "Code {}. Check that {name} shows the same code, then type it there: kith link --accept",
+                    v["code"].as_str().unwrap_or_default()
+                ),
+                "connecting" => println!("{name} said yes. Connecting to it…"),
+                _ => {}
+            }
+            said = state.clone();
+        }
+        match state.as_str() {
+            "paired" => {
+                let agents: Vec<&str> =
+                    v["agents"].as_array().into_iter().flatten().filter_map(|a| a["agent"].as_str()).collect();
+                println!(
+                    "Paired with {name}. Its agents: {}.",
+                    if agents.is_empty() { "none".into() } else { agents.join(", ") }
+                );
+                return Ok(());
+            }
+            "denied" => anyhow::bail!("{name} refused the pairing."),
+            "expired" | "none" => {
+                anyhow::bail!("The pairing with {name} ended before it finished. Run `kith link {which}` again.")
+            }
+            _ => {}
+        }
+        if std::time::Instant::now() > deadline {
+            anyhow::bail!("{name} hasn't finished pairing. `kith link {which}` again picks it up.");
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        v = local_call(port, "linkStatus", json!({ "computerId": cid })).await?;
+    }
+}
+
+enum LinkAnswer {
+    /// With the code, or asked for at the terminal.
+    Accept(Option<String>),
+    Deny,
+}
+
+/// `kith link --accept [CODE]` / `--deny`: answers a computer asking to pair with this one. A yes needs the code the
+/// other computer shows, typed by a person at this one.
+async fn answer_link(port: u16, which: Option<String>, answer: LinkAnswer) -> Result<()> {
+    use std::io::{BufRead, IsTerminal, Write};
+    if matches!(answer, LinkAnswer::Accept(_)) && !std::io::stdin().is_terminal() {
+        anyhow::bail!("A pairing is accepted by a person: run `kith link --accept` in a terminal on this computer.");
+    }
+    let list = local_call(port, "peerRequests", json!({})).await?;
+    let requests = list["requests"].as_array().cloned().unwrap_or_default();
+    let matching: Vec<&serde_json::Value> = requests
+        .iter()
+        .filter(|r| {
+            which
+                .as_deref()
+                .is_none_or(|w| r["computerId"] == w || r["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(w)))
+        })
+        .collect();
+    let r = match matching.as_slice() {
+        [r] => *r,
+        [] => anyhow::bail!("No computer is asking to pair with this one."),
+        _ => anyhow::bail!("More than one computer asks to pair: name one, e.g. `kith link --accept <name>`."),
+    };
+    let id = r["requestId"].as_str().unwrap_or_default();
+    let name = r["name"].as_str().unwrap_or_default();
+    let LinkAnswer::Accept(code) = answer else {
+        local_call(port, "decidePeerRequest", json!({"requestId": id, "decision": "deny"})).await?;
+        println!("Refused {name}.");
+        return Ok(());
+    };
+    let code = if let Some(c) = code {
+        c
+    } else {
+        let Some(shown) = r["code"].as_str() else {
+            anyhow::bail!("{name} hasn't shown its code yet. Try again in a moment.");
+        };
+        print!("{name} asks to pair. This computer shows code {shown}. Type the code {name} shows to allow it: ");
+        std::io::stdout().flush()?;
+        let mut line = String::new();
+        std::io::stdin().lock().read_line(&mut line)?;
+        line
+    };
+    local_call(port, "decidePeerRequest", json!({"requestId": id, "decision": "approve", "code": code.trim()})).await?;
+    println!("Paired: {name} can ask this computer's agents.");
     Ok(())
 }
 

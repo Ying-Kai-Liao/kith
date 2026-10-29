@@ -69,6 +69,13 @@ pub(super) const LOCAL_ONLY: &[&str] = &[
     "cloudStatus",
     "setCloud",
     "setApproval",
+    // Mac link: pairing is started, and its yes typed, at the computer itself.
+    "peerComputers",
+    "linkComputer",
+    "linkStatus",
+    "peerRequests",
+    "decidePeerRequest",
+    "unlinkComputer",
 ];
 const SCREEN: &[&str] = &["screenPrepare", "screenOffer", "screenClose", "screenTakeover"];
 
@@ -90,6 +97,9 @@ pub enum Principal {
     /// A bot's key that has not shown its invite token or waits for the owner's allow: `hello`, `botStatus` and
     /// `proveBotInvite` only.
     BotPending(String),
+    /// Another computer of the owner's, paired here (Mac link, by computer id): the peer methods only, never the
+    /// owner's, whatever its device has no person on.
+    Peer(String),
     Nobody,
 }
 
@@ -98,17 +108,27 @@ pub fn principal(store: &crate::store::Store, caller: &Caller) -> Principal {
     match caller {
         Caller::Local => Principal::Owner,
         Caller::Pairing { .. } => Principal::Nobody,
-        Caller::Device { key, .. } => store.device(key).map_or(Principal::Nobody, |d| {
-            if d.source == DeviceSource::Bot {
-                return bot_principal(store, key);
+        Caller::Device { key, .. } => {
+            // A paired computer's key is decided first: the no-person default below would make it the owner.
+            if let Some(p) = store.peer_in_by_key(key) {
+                return Principal::Peer(p.computer_id);
             }
-            match d.person_id {
-                None => Principal::Owner,
-                Some(p) if store.device_proven(key) => Principal::Member(p),
-                Some(p) => Principal::Unproven(p),
-            }
-        }),
+            device_principal(store, key)
+        }
     }
+}
+
+fn device_principal(store: &crate::store::Store, key: &str) -> Principal {
+    store.device(key).map_or(Principal::Nobody, |d| {
+        if d.source == DeviceSource::Bot {
+            return bot_principal(store, key);
+        }
+        match d.person_id {
+            None => Principal::Owner,
+            Some(p) if store.device_proven(key) => Principal::Member(p),
+            Some(p) => Principal::Unproven(p),
+        }
+    })
 }
 
 /// A bot key is its bot's only while the bot's row says so; a revoked, denied or unknown bot is nobody.
@@ -210,6 +230,27 @@ pub fn authorize(hub: &Hub, key: &str) -> Result<Device, RejectCode> {
         return Err(RejectCode::LeaseExpired);
     }
     Ok(d)
+}
+
+/// Whether `key` may open a channel: a computer paired here (Mac link) while this host is in sync with the cloud, or
+/// else a device as `authorize` says. Only channels admit peers; a mailbox `send` or a screen viewer never does.
+pub fn admit(hub: &Hub, key: &str) -> Result<Device, RejectCode> {
+    let Some(p) = hub.store.peer_in_by_key(key) else { return authorize(hub, key) };
+    if !hub.cloud_synced.load(Ordering::Acquire) {
+        return Err(RejectCode::LeaseExpired);
+    }
+    Ok(Device {
+        key: p.device_key,
+        name: p.name,
+        platform: "macos".into(),
+        source: DeviceSource::Peer,
+        grant_id: Some(p.grant_id),
+        scopes: vec![Scope::Control],
+        lease_until: None,
+        created_at: p.paired_at,
+        last_seen_at: None,
+        person_id: None,
+    })
 }
 
 // MARK: pairing codes

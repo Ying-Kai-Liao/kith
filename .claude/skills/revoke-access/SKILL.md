@@ -99,6 +99,16 @@ cost (a guest's message is held while nothing is revoked) is real.
 | network up / cloud down / offline | the relay connection (`relay.rs` loop: `set(false)` on every (re)connect until a pull succeeds, `renew` on each ping) | `SetNet` |
 | remove their temp folder (`<machine>/run/t/<p>`, their bots' too) | `people.rs` `cut_off` after `stop_runs` and the bot sweep (`sweep_claims`) -> kith-auth `person <p> --clear-temp`; kith-auth `revoke_person` (not `--local`) and `person --rm` -> `kith_paths.guest_tmp_remove`; a folder with no live record is emptied at the next run (`guest_tmp_ready`) | none: a cleanup, not a door. No turn starts for a revoked person, so nothing can use it; pinned by `kernel/tests/kith-guest-sandbox-check` |
 
+**Paired computers (Mac link, phase 1)** are a new door on B: another of the owner's Macs calling with a device key
+paired by a code typed on B (`remote/peers.rs`, `Principal::Peer`). Until `peerAsk` lands it starts no turn: its only
+method is `peerAgents` (a list of the owner's agents), so no model action yet. Ending it: `kith unlink` on either Mac
+removes the row here first (`peers::unlink`, works without the cloud) and then revokes the grant in the cloud; the
+cloud ends one by no longer listing it (`peers::apply`, never adds one), and an owner change ends all of them
+(`peers::drop_all`, applied in `pull` before anything else). A removed row leaves the relay's signed list of devices
+(`relay.rs` `signed_acl`), which closes that key's socket. Not a person revoke: phase 1 asks carry the owner only. When
+`peerAsk` starts runs for a person, its start gate (paired, same epoch, person allowed, in sync) is a new start action
+here, and the brief's L5 (no run of a peer or person starts after unpair or revoke is applied) a new property.
+
 A check and the act it guards are separate actions in the model (`Start`, `Helper`, `Deliver`). In the code the
 channels check in `handle`, queue in the inbox, and start in `queue.rs` `work`: that is why `work` re-checks (in
 sync), and the answer and each outbox flush re-check again.

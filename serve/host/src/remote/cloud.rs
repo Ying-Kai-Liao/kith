@@ -42,7 +42,7 @@ const SAS_NONCES: &str = "sas_nonces";
 const MEMBER_SAS_NONCES: &str = "member_sas_nonces";
 /// Every host nonce is one guess at the phone's code for whoever controls the cloud, revealed
 /// or not: at most this many per hour keeps a 6-digit SAS out of reach of a search.
-const SAS_NONCES_PER_HOUR: usize = 5;
+pub(super) const SAS_NONCES_PER_HOUR: usize = 5;
 const HOUR_MS: i64 = 60 * 60 * 1000;
 
 /// Whether the cloud is switched off by the environment or by the owner (kv `cloud_enabled`).
@@ -220,6 +220,8 @@ impl Request {
 pub struct Cloud {
     status: Mutex<CloudStatus>,
     requests: Mutex<Vec<Request>>,
+    /// Mac link pairings in progress (memory only).
+    pub(super) pairings: super::peers::Pairings,
     /// One state pull at a time.
     pulling: tokio::sync::Mutex<()>,
     /// Bumped when the cloud is turned on or off or pointed elsewhere: the relay restarts.
@@ -231,6 +233,7 @@ impl Default for Cloud {
         Self {
             status: Mutex::default(),
             requests: Mutex::default(),
+            pairings: super::peers::Pairings::default(),
             pulling: tokio::sync::Mutex::new(()),
             config: watch::Sender::new(0),
         }
@@ -289,7 +292,7 @@ impl std::fmt::Display for CloudError {
 
 impl std::error::Error for CloudError {}
 
-fn cloud_status_of(e: &anyhow::Error) -> Option<u16> {
+pub(super) fn cloud_status_of(e: &anyhow::Error) -> Option<u16> {
     e.downcast_ref::<CloudError>().map(|c| c.status)
 }
 
@@ -316,12 +319,12 @@ pub fn authority(base: &str) -> Result<String> {
     .to_ascii_lowercase())
 }
 
-fn base(hub: &Hub) -> Result<String> {
+pub(super) fn base(hub: &Hub) -> Result<String> {
     url(&hub.store).ok_or_else(|| anyhow!("The Kith cloud is off on this computer."))
 }
 
 /// One signed `/v1/host/*` call.
-async fn call(hub: &Hub, base: &str, method: Method, path: &str, body: Option<&Value>) -> Result<Value> {
+pub(super) async fn call(hub: &Hub, base: &str, method: Method, path: &str, body: Option<&Value>) -> Result<Value> {
     let bytes = body.map(serde_json::to_vec).transpose()?.unwrap_or_default();
     let sig = hub.identity.sign_request(method.as_str(), &authority(base)?, path, &bytes);
     let mut req = crate::http()
@@ -347,7 +350,12 @@ async fn call(hub: &Hub, base: &str, method: Method, path: &str, body: Option<&V
 }
 
 /// One signed `/v1/host/*` call with a contract body, read as the contract's answer.
-async fn send<B: Serialize, T: serde::de::DeserializeOwned>(hub: &Hub, base: &str, path: &str, body: &B) -> Result<T> {
+pub(super) async fn send<B: Serialize, T: serde::de::DeserializeOwned>(
+    hub: &Hub,
+    base: &str,
+    path: &str,
+    body: &B,
+) -> Result<T> {
     let v = call(hub, base, Method::POST, path, Some(&serde_json::to_value(body)?)).await?;
     serde_json::from_value(v).with_context(|| format!("reading the cloud's answer to {path}"))
 }
@@ -437,8 +445,11 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     super::botsync::sync(hub, state.bot_devices.as_deref()).await;
     if held {
         revoke_ungranted(hub, &state.grants)?;
+        // Pairings are the pinned owner's: none outlives a change of owner, and none is made until it is confirmed.
+        super::peers::drop_all(hub)?;
     } else {
         apply_grants(hub, &state.grants, owner_uid.as_deref())?;
+        super::peers::apply(hub, state.peers.as_deref())?;
     }
     update_status(hub, |s| {
         s.owner = owner;
@@ -448,6 +459,8 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     if !held {
         super::account::sync(hub, owner_uid.as_deref()).await;
         sync_requests(hub, base, state.requests, owner_uid.as_deref()).await;
+        // Never approved here: a computer gets in only by a yes typed on this one (`decidePeerRequest`).
+        super::peers::sync(hub, base, state.peer_requests).await;
         let auto = approval(&hub.store) == Approval::Auto;
         // In Code mode every device waits for the owner to compare its code, a member's too: the invite named a person,
         // not a device, and only the code tells that person's device from one the cloud swapped in.
@@ -684,13 +697,13 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<HostAccessRequest>, owne
 }
 
 /// The host nonces sent in the last hour, from the budget kept under `key`.
-fn nonce_budget(store: &Store, key: &str) -> Vec<i64> {
+pub(super) fn nonce_budget(store: &Store, key: &str) -> Vec<i64> {
     let since = now_ms() - HOUR_MS;
     let sent: Vec<i64> = store.kv_get(key).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
     sent.into_iter().filter(|t| *t > since).collect()
 }
 
-fn set_nonce_budget(store: &Store, key: &str, sent: &[i64]) {
+pub(super) fn set_nonce_budget(store: &Store, key: &str, sent: &[i64]) {
     let saved = serde_json::to_string(sent).map_err(anyhow::Error::from).and_then(|v| store.kv_set(key, &v));
     if let Err(e) = saved {
         tracing::warn!(error = format!("{e:#}"), "couldn't save the access request budget");

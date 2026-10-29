@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59'
+export const CONTRACT_SHA256 = 'ef5d2e3d3a3454409ba7906a6dced42d46d275981905452b1cdc157590d4edd5'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -412,6 +412,17 @@ export interface BotSelf {
   minClient: string
 }
 
+/** One agent a paired computer may ask: its name, and the bot's display name when it has one. */
+export interface PeerAgent {
+  agent: string
+  name?: string | null
+}
+
+/** The agents a paired computer may ask here. */
+export interface PeerAgents {
+  agents: PeerAgent[]
+}
+
 /** Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only. */
 export interface BotProof {
   state: BotGuestState
@@ -723,6 +734,9 @@ export interface BotStopParams {
 /** What `botLeave` takes. */
 export type BotLeaveParams = Record<string, never>
 
+/** What `peerAgents` takes. */
+export type PeerAgentsParams = Record<string, never>
+
 export interface Types {
   Empty: Empty
   StoreHealth: StoreHealth
@@ -761,6 +775,8 @@ export interface Types {
   BotGuestAnswer: BotGuestAnswer
   BotOwner: BotOwner
   BotSelf: BotSelf
+  PeerAgent: PeerAgent
+  PeerAgents: PeerAgents
   BotProof: BotProof
   BotAsked: BotAsked
   BotSender: BotSender
@@ -809,6 +825,7 @@ export interface Types {
   BotConversationsParams: BotConversationsParams
   BotStopParams: BotStopParams
   BotLeaveParams: BotLeaveParams
+  PeerAgentsParams: PeerAgentsParams
 }
 export type TypeName = keyof Types
 
@@ -874,6 +891,7 @@ export const METHODS = {
   botConversations: { who: ['bot'], params: 'BotConversationsParams', result: 'BotConversations' },
   botStop: { who: ['bot'], params: 'BotStopParams', result: 'Empty' },
   botLeave: { who: ['bot'], params: 'BotLeaveParams', result: 'Empty' },
+  peerAgents: { who: ['peer'], params: 'PeerAgentsParams', result: 'PeerAgents' },
 } as const
 export type MethodName = keyof typeof METHODS
 
@@ -920,6 +938,7 @@ export interface Params {
   botConversations: BotConversationsParams
   botStop: BotStopParams
   botLeave: BotLeaveParams
+  peerAgents: PeerAgentsParams
 }
 
 /** What each method answers with. */
@@ -965,6 +984,7 @@ export interface Results {
   botConversations: BotConversations
   botStop: Empty
   botLeave: Empty
+  peerAgents: PeerAgents
 }
 
 /** What an invited person may call. */
@@ -978,6 +998,9 @@ export const BOT_METHODS = ['hello', 'botStatus', 'proveBotInvite', 'botAsk', 'b
 
 /** What a bot guest that is still joining or waiting for its owner's allow may call. */
 export const BOT_PENDING_METHODS = ['hello', 'botStatus', 'proveBotInvite'] as const satisfies readonly MethodName[]
+
+/** What another computer of the owner's, paired here (Mac link) may call. */
+export const PEER_METHODS = ['peerAgents'] as const satisfies readonly MethodName[]
 
 // ---- checking and receiving ----
 
@@ -1047,6 +1070,8 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotGuestAnswer: { fields: { bot: 'BotGuest?' } },
     BotOwner: { fields: { name: 'string' } },
     BotSelf: { fields: { botId: 'string', name: 'string', state: 'BotGuestState', owner: 'BotOwner', agents: '[GrantedAgent]', limits: 'BotLimits', version: 'string', minClient: 'string' } },
+    PeerAgent: { fields: { agent: 'string', name: 'string?' }, mayOmit: ['name'] },
+    PeerAgents: { fields: { agents: '[PeerAgent]' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
     BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
     BotSender: { fields: { botId: 'string', name: 'string', speaker: 'string?' } },
@@ -1095,6 +1120,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotConversationsParams: { fields: { limit: 'int?' } },
     BotStopParams: { fields: { conversation: 'string' } },
     BotLeaveParams: { fields: {} },
+    PeerAgentsParams: { fields: {} },
   },
 }
 

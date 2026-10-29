@@ -145,6 +145,8 @@ pub async fn person_of(bin: &Path, who: &Principal) -> Result<String> {
         Principal::Unproven(_) | Principal::BotPending(_) => bail!("this device hasn't shown its invite yet"),
         Principal::Owner => who_owner(bin).await,
         Principal::Nobody => bail!("this device isn't allowed on this computer"),
+        // A paired computer's asks name their person on each request (Mac link); the computer itself is no one.
+        Principal::Peer(_) => bail!("a paired computer acts for no person here"),
     }
 }
 

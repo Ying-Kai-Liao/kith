@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59";
+pub const CONTRACT_SHA256: &str = "ef5d2e3d3a3454409ba7906a6dced42d46d275981905452b1cdc157590d4edd5";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -874,6 +874,22 @@ pub struct BotSelf {
     pub min_client: String,
 }
 
+/// One agent a paired computer may ask: its name, and the bot's display name when it has one.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerAgent {
+    pub agent: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// The agents a paired computer may ask here.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerAgents {
+    pub agents: Vec<PeerAgent>,
+}
+
 /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1327,6 +1343,10 @@ pub struct BotStopParams {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct BotLeaveParams {}
 
+/// What `peerAgents` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct PeerAgentsParams {}
+
 /// Each method's name, as called.
 pub mod method {
     /// The connection handshake; answered to a member or a bot without paths, addresses, backends or screen state, with the agents they hold.
@@ -1411,6 +1431,8 @@ pub mod method {
     pub const BOT_STOP: &str = "botStop";
     /// The bot retires itself, as if its owner removed it.
     pub const BOT_LEAVE: &str = "botLeave";
+    /// The agents another computer of the owner's may ask here (Mac link): the owner's own, by name.
+    pub const PEER_AGENTS: &str = "peerAgents";
 }
 
 /// What an invited person may call.
@@ -1424,6 +1446,9 @@ pub const BOT_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PR
 
 /// What a bot guest that is still joining or waiting for its owner's allow may call.
 pub const BOT_PENDING_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE];
+
+/// What another computer of the owner's, paired here (Mac link) may call.
+pub const PEER_METHODS: &[&str] = &[method::PEER_AGENTS];
 
 /// The contract as data, for `crate::check` (the producer's strict check and the consumer's).
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
@@ -1481,6 +1506,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotGuestAnswer", fields: &[("bot", "BotGuest?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotOwner", fields: &[("name", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotSelf", fields: &[("botId", "string"), ("name", "string"), ("state", "BotGuestState"), ("owner", "BotOwner"), ("agents", "[GrantedAgent]"), ("limits", "BotLimits"), ("version", "string"), ("minClient", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerAgent", fields: &[("agent", "string"), ("name", "string?")], may_omit: &["name"] },
+        crate::check::TypeSchema { name: "PeerAgents", fields: &[("agents", "[PeerAgent]")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
         crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
         crate::check::TypeSchema { name: "BotSender", fields: &[("botId", "string"), ("name", "string"), ("speaker", "string?")], may_omit: &[] },
@@ -1529,6 +1556,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotConversationsParams", fields: &[("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotStopParams", fields: &[("conversation", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotLeaveParams", fields: &[], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerAgentsParams", fields: &[], may_omit: &[] },
     ],
     methods: &[
         crate::check::MethodSchema { name: "hello", who: &["member", "bot", "botPending"], params: "HelloParams", result: "Hello" },
@@ -1572,6 +1600,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "botConversations", who: &["bot"], params: "BotConversationsParams", result: "BotConversations" },
         crate::check::MethodSchema { name: "botStop", who: &["bot"], params: "BotStopParams", result: "Empty" },
         crate::check::MethodSchema { name: "botLeave", who: &["bot"], params: "BotLeaveParams", result: "Empty" },
+        crate::check::MethodSchema { name: "peerAgents", who: &["peer"], params: "PeerAgentsParams", result: "PeerAgents" },
     ],
 };
 
@@ -1615,6 +1644,8 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotGuestAnswer" => serde_json::from_value::<BotGuestAnswer>(value).map(drop),
         "BotOwner" => serde_json::from_value::<BotOwner>(value).map(drop),
         "BotSelf" => serde_json::from_value::<BotSelf>(value).map(drop),
+        "PeerAgent" => serde_json::from_value::<PeerAgent>(value).map(drop),
+        "PeerAgents" => serde_json::from_value::<PeerAgents>(value).map(drop),
         "BotProof" => serde_json::from_value::<BotProof>(value).map(drop),
         "BotAsked" => serde_json::from_value::<BotAsked>(value).map(drop),
         "BotSender" => serde_json::from_value::<BotSender>(value).map(drop),
@@ -1663,6 +1694,7 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotConversationsParams" => serde_json::from_value::<BotConversationsParams>(value).map(drop),
         "BotStopParams" => serde_json::from_value::<BotStopParams>(value).map(drop),
         "BotLeaveParams" => serde_json::from_value::<BotLeaveParams>(value).map(drop),
+        "PeerAgentsParams" => serde_json::from_value::<PeerAgentsParams>(value).map(drop),
         _ => return None,
     })
 }
