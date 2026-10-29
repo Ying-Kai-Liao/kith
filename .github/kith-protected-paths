@@ -1,0 +1,13 @@
+kernel/bin/kith
+kernel/bin/kith-auth
+kernel/bin/kith-permit
+kernel/bin/kith-sessions
+kernel/bin/kith-wake
+serve/host/src/api/roles.rs
+serve/host/src/cards/
+serve/host/src/runauth.rs
+verification/
+.github/workflows/
+packaging/
+serve/cloud/
+.github/kith-protected-paths
