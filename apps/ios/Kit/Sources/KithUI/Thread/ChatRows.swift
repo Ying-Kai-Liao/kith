@@ -10,13 +10,13 @@ struct ChatRow: View {
     /// The bot or group the chat belongs to.
     let chat: Bot?
     let openTrace: () -> Void
-    /// Main chat only: start (or open) the thread on this message.
-    var openThread: ((Entry) -> Void)?
+    /// Reply to this message (a quote over the composer); nil where nothing is sent (read-only chats).
+    var onReply: ((Entry) -> Void)?
     @Environment(BotStore.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let reply = openThread.map { open in { open(entry) } }
+        let reply = onReply.map { reply in { reply(entry) } }
         // The replying agent's colour pair (in a group, the one who wrote it).
         let tint = AgentTint.resolve((entry.data.author.flatMap { model.bots[$0] } ?? chat)?.avatarColor)
         switch entry.kind {
@@ -28,7 +28,6 @@ struct ChatRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 UserBubble(entry: entry, botWorking: chat?.isWorking == true, reply: reply)
                 ReactionsRow(entry: entry)
-                threadChip
             }
             .animation(Motion.reduced(Motion.layout, reduceMotion), value: entry.data.reactions)
             .padding(.top, groupStart ? 12 : 4)
@@ -44,7 +43,6 @@ struct ChatRow: View {
                             .foregroundStyle(Palette.muted)
                     }
                     ReactionsRow(entry: entry)
-                    threadChip
                 }
                 .padding(.leading, chat?.isGroup == true ? 34 : 0)
             }
@@ -77,12 +75,7 @@ struct ChatRow: View {
             } else if let card = entry.data.handoff {
                 HandoffCardRow(entry: entry, card: card).padding(.top, 10)
             } else {
-                // Only a notice that carries a thread (a bot from outside's conversation) gets a chip.
-                VStack(alignment: .leading, spacing: 4) {
-                    NoticeRow(entry: entry)
-                    threadChip
-                }
-                .padding(.top, 10)
+                NoticeRow(entry: entry).padding(.top, 10)
             }
         }
     }
@@ -111,19 +104,6 @@ struct ChatRow: View {
     private var heldElsewhere: Bool {
         guard let root = entry.threadId else { return false }
         return model.allEntries(entry.botId).first { $0.id == root }?.data.thread?.isHeldElsewhere == true
-    }
-
-    /// What hangs under an entry: its thread, when it has replies and this view can open threads. Any kind of entry
-    /// (a message, or a notice a bot from outside's conversation hangs on) gets the same chip.
-    static func chipSummary(_ entry: Entry, canOpen: Bool) -> ThreadSummary? {
-        guard canOpen, let summary = entry.data.thread, summary.count > 0 else { return nil }
-        return summary
-    }
-
-    @ViewBuilder private var threadChip: some View {
-        if let summary = Self.chipSummary(entry, canOpen: openThread != nil), let openThread {
-            ThreadChip(summary: summary, yourTurn: ThreadFeed.hasQuestion(model.replies(entry.botId, root: entry.id), held: summary.isHeldElsewhere)) { openThread(entry) }
-        }
     }
 }
 
@@ -154,25 +134,6 @@ struct AuthorLabel: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Palette.text)
         }
-    }
-}
-
-/// Under a message with a thread: the redesign's chip (who replied, how many, how recently). Tapping either part opens it.
-struct ThreadChip: View {
-    let summary: ThreadSummary
-    var yourTurn = false
-    let open: () -> Void
-    @Environment(BotStore.self) private var model
-
-    var body: some View {
-        let author = summary.authors.lazy.compactMap { model.bots[$0] }.first
-        let chip = ThreadFeed.chip(face: author.map(CrewFace.init(bot:)) ?? CrewFace(portrait: nil),
-                                    tint: AgentTint.resolve(author?.avatarColor), count: summary.count, unread: summary.unread,
-                                    lastAt: summary.lastAt, place: nil, yourTurn: yourTurn,
-                                   summary: summary, mac: model.hostName)
-        ThreadChipView(chip, openLabel: "View thread, \(summary.count) \(summary.count == 1 ? "reply" : "replies")"
-                           + ((summary.unread ?? 0) > 0 ? ", \(summary.unread ?? 0) new" : ""),
-                       onToggle: open, onOpenThread: open)
     }
 }
 
@@ -208,7 +169,7 @@ struct UserBubble: View {
                         MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) },
                         MenuItem("Select Text", icon: "selection.pin.in.out") { selecting = true },
                     ]
-                    if let reply { items.append(MenuItem("Reply in thread", icon: "arrowshape.turn.up.left", action: reply)) }
+                    if let reply { items.insert(MenuItem("Reply", icon: "arrowshape.turn.up.left", action: reply), at: 0) }
                     if entry.data.status == "queued" {
                         items.append(MenuItem("Unsend", icon: "arrow.uturn.backward") { model.unsend(entry) })
                     }
@@ -285,7 +246,7 @@ struct AgentBubble: View {
                         MenuItem("Select Text", icon: "selection.pin.in.out") { selecting = true },
                         MenuItem("Show what it did", icon: "list.bullet", action: openTrace),
                     ]
-                    if let reply { items.insert(MenuItem("Reply in thread", icon: "arrowshape.turn.up.left", action: reply), at: 2) }
+                    if let reply { items.insert(MenuItem("Reply", icon: "arrowshape.turn.up.left", action: reply), at: 0) }
                     return items
                 }
                 .kithSheet(isPresented: $selecting) { SelectTextSheet(text: MarkdownText.plain(entry.data.text ?? "")) }
@@ -501,6 +462,6 @@ struct ReactionsRow: View {
 extension ChatRow: @MainActor Equatable {
     static func == (a: Self, b: Self) -> Bool {
         a.entry == b.entry && a.groupStart == b.groupStart && a.chat?.isGroup == b.chat?.isGroup
-            && a.chat?.isWorking == b.chat?.isWorking && (a.openThread == nil) == (b.openThread == nil)
+            && a.chat?.isWorking == b.chat?.isWorking && (a.onReply == nil) == (b.onReply == nil)
     }
 }
