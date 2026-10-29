@@ -496,19 +496,19 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					907F1F4A709111FC7178EAE9 = {
-						DevelopmentTeam = 7FUM8A8H72;
+						DevelopmentTeam = T6DWQUSF55;
 						ProvisioningStyle = Automatic;
 					};
 					913BDA9F79CE8C35A9E35830 = {
-						DevelopmentTeam = 7FUM8A8H72;
+						DevelopmentTeam = T6DWQUSF55;
 						ProvisioningStyle = Automatic;
 					};
 					A27E4E88D6A5B9850734B594 = {
-						DevelopmentTeam = 7FUM8A8H72;
+						DevelopmentTeam = T6DWQUSF55;
 						ProvisioningStyle = Automatic;
 					};
 					C42E5E078332C6C2B35AF5FA = {
-						DevelopmentTeam = 7FUM8A8H72;
+						DevelopmentTeam = T6DWQUSF55;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -754,7 +754,7 @@
 				CURRENT_PROJECT_VERSION = 24;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 7FUM8A8H72;
+				DEVELOPMENT_TEAM = T6DWQUSF55;
 				KITH_ENTITLEMENTS_SUFFIX_NO = "";
 				KITH_ENTITLEMENTS_SUFFIX_YES = .personal;
 				KITH_PERSONAL_TEAM = NO;
@@ -863,7 +863,7 @@
 				CURRENT_PROJECT_VERSION = 24;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 7FUM8A8H72;
+				DEVELOPMENT_TEAM = T6DWQUSF55;
 				KITH_ENTITLEMENTS_SUFFIX_NO = "";
 				KITH_ENTITLEMENTS_SUFFIX_YES = .personal;
 				KITH_PERSONAL_TEAM = NO;
@@ -1123,7 +1123,7 @@
 				CURRENT_PROJECT_VERSION = 24;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = 7FUM8A8H72;
+				DEVELOPMENT_TEAM = T6DWQUSF55;
 				KITH_ENTITLEMENTS_SUFFIX_NO = "";
 				KITH_ENTITLEMENTS_SUFFIX_YES = .personal;
 				KITH_PERSONAL_TEAM = NO;
@@ -1286,7 +1286,7 @@
 				CURRENT_PROJECT_VERSION = 24;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = 7FUM8A8H72;
+				DEVELOPMENT_TEAM = T6DWQUSF55;
 				KITH_ENTITLEMENTS_SUFFIX_NO = "";
 				KITH_ENTITLEMENTS_SUFFIX_YES = .personal;
 				KITH_PERSONAL_TEAM = NO;
