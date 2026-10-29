@@ -76,3 +76,18 @@ private func rowIds(_ items: [ChatItem]) -> [String] {
     let long = flat("l", "agent", at: 1, text: String(repeating: "a", count: 300), final: true)
     #expect(ReplyQuote.line(of: long)?.count == ReplyQuote.maxLength + 1)
 }
+
+@Test func aSearchResultFindsItsRowInTheFlatChat() {
+    var mine = flat("srv-1", "user", at: 10, text: "Fix it", task: true)
+    mine.data.clientNonce = "n1"
+    let entries = [mine, flat("r1", "tool", at: 12, thread: "srv-1"), flat("r2", "agent", at: 20, thread: "srv-1", text: "Fixed.", final: true)]
+    let items = ChatItem.build(entries, groupingExchanges: true)
+    func row(_ entry: String) -> String? { items.first { $0.holds(entry: entry) }?.id }
+    // A thread reply is its own row; a tool call only answers to its own id.
+    #expect(row("r2") == "r2")
+    #expect(row("r1") == "r1")
+    // A sent message keeps its user-<nonce> row, found by the host id or the row id.
+    #expect(row("srv-1") == "user-n1")
+    #expect(row("user-n1") == "user-n1")
+    #expect(row("nope") == nil)
+}

@@ -64,7 +64,7 @@ struct Composer: View {
         if bot?.isGroup == true { return "Message everyone · @ to ask one bot" }
         if startsNew { return "Tell \(name)…" }
         if working { return "Queue a message for \(name)" }
-        return tasks && place != nil ? "Reply in task…" : "Tell \(name)…"
+        return "Tell \(name)…"
     }
 
     /// The `@partial` being typed at the end, if any.
