@@ -1,0 +1,13 @@
+{
+  "description": "Grok's webhook: an agent pushes a message to the owner's Grok bot with `kith send-to grok \"text\"`; one profile per bot (grok/kai, grok/work). Grok's answer comes back on its bot link, not here",
+  "kind": "cli",
+  "display": "Grok",
+  "secrets": ["GROK_WEBHOOK_URL", "GROK_WEBHOOK_KEY"],
+  "webhook": {
+    "url": "GROK_WEBHOOK_URL",
+    "key": "GROK_WEBHOOK_KEY",
+    "header": "Authorization",
+    "scheme": "Bearer",
+    "text_field": "text"
+  }
+}
