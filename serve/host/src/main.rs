@@ -22,6 +22,7 @@ mod rich_card;
 mod routines;
 mod run_outbox;
 mod runauth;
+mod samples;
 mod screen;
 mod service;
 mod shell;
@@ -132,6 +133,11 @@ enum Sub {
         /// you to type the account at this terminal, and refuses when stdin is not a terminal.
         #[arg(long)]
         confirm_owner: bool,
+    },
+    /// Post one of every card into a "Samples" chat (replacing the last one); their buttons do nothing.
+    SampleCards {
+        #[arg(long, default_value_t = service::DEFAULT_PORT)]
+        port: u16,
     },
     /// Install and start the host as a background service (launchd / systemd --user).
     Install {
@@ -514,6 +520,11 @@ async fn main() -> Result<()> {
                 service::installed(),
                 service::data_dir().display()
             );
+            Ok(())
+        }
+        Sub::SampleCards { port } => {
+            let got = local_call(port, "sampleCards", json!({})).await?;
+            println!("Posted {} sample cards to the Samples chat.", got["cards"]);
             Ok(())
         }
         Sub::Memory { cmd } => std::process::exit(hqmem::run(cmd)?),
