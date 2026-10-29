@@ -39,6 +39,16 @@ public final class BotStore {
     public internal(set) var caughtUp = false
     /// A thread to open once its chat is on screen (the bot's page sends the owner to a conversation); the chat clears it.
     public var pendingThread: PendingThread?
+    /// A message to scroll to and flash when the chat opens (a search result on message text); the chat clears it.
+    public var focusEntry: FocusEntry?
+    public struct FocusEntry: Equatable, Sendable {
+        public var chat: String
+        public var entry: String
+        public init(chat: String, entry: String) {
+            self.chat = chat
+            self.entry = entry
+        }
+    }
     var catchUpRev = Int64.max
     /// The `since` this connection's events stream was opened with; the `hello` that opens its
     /// catch-up reads it (after a mirror reset `rev` no longer says what was requested).
