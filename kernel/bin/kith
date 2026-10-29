@@ -8,7 +8,7 @@
 #   kith account add|list|remove ...                     extra Claude / Codex logins for that chain, one folder each (kith-account)
 #   kith account use <id> [--agent A] | --reset           the main account an agent's runs use; the chain sits on top of it
 #   kith ls [--json]                list agents (--json: name, description, home, model, effort, harness, for programs)
-#   kith send-to <service> "text" [--body FILE|-] [--profile P] [--for A] [--json]   push to a bot's webhook (grok); "sent" is received, not run (kith-send-to)
+#   kith send-to <service> "text" [--body FILE|-] [--profile P] [--for A] [--json]   push to a bot's webhook (grok); "sent" = a run started (success:true), not a reply; Grok caps 200 runs/h per routine, silently (kith-send-to)
 #   kith who <words>               which agent owns this work: skills, tools, "Not yours" lines searched (kith-who)
 #   kith <agent> [-p ID] [-m MODEL] [-e EFFORT] [-H HARNESS] [--permission-mode MODE|--bypass] [task...]  interactive without a task, one-shot with one
 #   kith <agent> --resume|-r THREAD   pick up in this terminal a thread started in the app, or a Claude session id; -r alone: pick from the recent ones; -c: the latest begun here (kith-sessions)

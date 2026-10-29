@@ -17,7 +17,7 @@ KEY="key$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 PATHSEG="p$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
 
 # The stub: logs each request (headers + body) to rec.jsonl; STUB_MODE is read from the file mode, one status per line
-# in script (each request pops the first; the last repeats). A "delay" file holds the request open for a second.
+# in script (201 = a 200 whose body says success:false) (each request pops the first; the last repeats). A "delay" file holds the request open for a second.
 cat > "$T/stub.py" <<'PY'
 import http.server, json, os, sys, time
 T = sys.argv[1]
@@ -32,10 +32,26 @@ class H(http.server.BaseHTTPRequestHandler):
         st = int(lines[0]) if lines else 200
         if len(lines) > 1:
             open(T + '/script', 'w').write('\n'.join(lines[1:]))
+        # the first word of a line is the status; "200f" is a 2xx without success:true. 2xx answers {"success":true,"runUuid"},
+        # 400 echoes the request path and key in its error (the command must scrub both), anything else is plain text.
+        who = 'p2' if self.path.endswith('/two') else 'p1'
+        if st == 200:
+            data = json.dumps({'success': True, 'runUuid': 'run-' + who + '-1234'})
+        elif st == 201:
+            data = json.dumps({'success': False, 'error': 'quota'})
+        elif st == 400:
+            data = json.dumps({'success': False, 'error': 'Automation ' + self.path + ' is disabled ' + (self.headers.get('Authorization') or '')[7:] + ' ' + 'x' * 400})
+        elif st == 401:
+            data = json.dumps({'success': False, 'error': 'Invalid API key'})
+        else:
+            data = 'nope'
+        if st == 201:
+            st = 200
         self.send_response(st)
         if st == 429:
             self.send_header('Retry-After', '0')
-        self.send_header('Content-Length', '4'); self.end_headers(); self.wfile.write(b'nope')
+        b = data.encode()
+        self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
     def log_message(self, *a): pass
 s = http.server.HTTPServer(('127.0.0.1', 0), H)
 open(T + '/port', 'w').write(str(s.server_port))
@@ -46,10 +62,13 @@ for _ in $(seq 50); do [[ -s $T/port ]] && break; sleep 0.1; done
 PORT=$(cat "$T/port")
 URL="http://127.0.0.1:$PORT/$PATHSEG"
 printf 'GROK_WEBHOOK_URL=%s\nGROK_WEBHOOK_KEY=%s\n' "$URL" "$KEY" > "$T/keys.env"
+KEY2="key$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+printf 'GROK_WEBHOOK_URL=%s/two\nGROK_WEBHOOK_KEY=%s\n' "$URL" "$KEY2" > "$T/keys2.env"
 cat > "$KITH_AUTH" <<JSON
 {"profiles": {"grok/kai": {"GROK_WEBHOOK_URL": "env-file:$T/keys.env#GROK_WEBHOOK_URL", "GROK_WEBHOOK_KEY": "env-file:$T/keys.env#GROK_WEBHOOK_KEY"},
-              "grok/empty": {}},
- "grants": {"house": {"grok": "grok/kai"}, "bare": {"grok": "grok/empty"}}}
+              "grok/empty": {},
+              "grok/two": {"GROK_WEBHOOK_URL": "env-file:$T/keys2.env#GROK_WEBHOOK_URL", "GROK_WEBHOOK_KEY": "env-file:$T/keys2.env#GROK_WEBHOOK_KEY"}},
+ "grants": {"house": {"grok": "grok/kai"}, "bare": {"grok": "grok/empty"}, "pair": {"grok": ["grok/kai", "grok/two"]}}}
 JSON
 S() { python3 "$KERNEL/bin/kith-send-to" "$@"; }
 script() { printf '%s\n' "$@" > "$T/script"; : > "$T/rec.jsonl"; }
@@ -59,7 +78,7 @@ last() { tail -n1 "$T/rec.jsonl" | python3 -c "import json,sys; d=json.load(sys.
 
 script 200
 OUT=$(S grok 'hello "there"' --for house 2>"$T/err"); RC=$?
-check "2xx exits 0 with the received-not-run line" "[ $RC = 0 ] && [ \"\$OUT\" = 'sent (Grok received it, not that it ran)' ]"
+check "200 with success:true exits 0 with the started-a-run line and runUuid" "[ $RC = 0 ] && [ \"\$OUT\" = 'sent (Grok started a run, not that it replied) run run-p1-1234' ]"
 check "text goes as {\"text\": ...} JSON" "[ \"\$(last 'json.loads(d[\"body\"])[\"text\"]')\" = 'hello \"there\"' ]"
 check "Content-Type is application/json" "[ \"\$(last 'd[\"ct\"]')\" = application/json ]"
 check "the key is in the Authorization header" "[ \"\$(last 'd[\"auth\"]')\" = 'Bearer $KEY' ]"
@@ -75,6 +94,28 @@ script 200
 check "--body that is not JSON is refused, nothing sent" "! S grok --body '$T/bad.json' --for house && [ ! -s '$T/rec.jsonl' ]"
 head -c 70000 /dev/zero | tr '\0' 'a' | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))" > "$T/big.json"
 check "--body over 64 KiB is refused" "! S grok --body '$T/big.json' --for house"
+
+# wake-shaped body, the path PR 3's host takes
+printf '{"room":"r1","conversation":"c1","epoch":3,"turnKey":"r1:c1:3:9","since":"2026-10-30T01:02:03Z","text":"read and reply"}' > "$T/wake.json"
+script 200
+OUT=$(S grok --body - --for house --json < "$T/wake.json" 2>/dev/null); RC=$?
+check "wake-shaped body: verbatim, and --json carries runUuid" "[ $RC = 0 ] && [ \"\$(last 'd[\"body\"]')\" = \"\$(cat '$T/wake.json')\" ] && python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert d[\"ok\"] and d[\"runUuid\"]==\"run-p1-1234\" and d[\"status\"]==200' \"\$OUT\""
+script 201
+OUT=$(S grok hi --for house 2>&1); RC=$?
+check "200 without success:true is a failure, not 'sent'" "[ $RC != 0 ] && [[ \$OUT == *'did not start a run'* ]] && [[ \$OUT != sent* ]]"
+script 400
+OUT=$(S grok hi --for house 2>&1); RC=$?
+check "400: paused-routine message, no retry" "[ $RC != 0 ] && [[ \$OUT == *'routine is paused (disabled)'* ]] && [ \"\$(wc -l < '$T/rec.jsonl')\" -eq 1 ]"
+check "400: the server's error is capped (200) and has no URL path or key" "[[ \$OUT != *$PATHSEG* ]] && [[ \$OUT != *$KEY* ]] && [ \${#OUT} -lt 420 ]"
+script 401
+OUT=$(S grok hi --for house 2>&1); RC=$?
+check "401: key-refused message with the replace hint, no retry" "[ $RC != 0 ] && [[ \$OUT == *'refused the key (401)'* ]] && [[ \$OUT == *'kith-auth set grok/<account> GROK_WEBHOOK_KEY'* ]] && [ \"\$(wc -l < '$T/rec.jsonl')\" -eq 1 ]"
+script 200
+OUT=$(S grok hi --for pair --profile grok/two 2>&1); RC=$?
+check "--profile picks the chosen grok profile's URL and key" "[ $RC = 0 ] && [[ \$OUT == *run-p2-1234* ]] && [ \"\$(last 'd[\"auth\"]')\" = 'Bearer $KEY2' ] && [ \"\$(last 'd[\"path\"]')\" = '/$PATHSEG/two' ]"
+script 200
+S grok hi --for pair --profile grok/kai >/dev/null 2>&1
+check "--profile grok/kai picks the other one" "[ \"\$(last 'd[\"auth\"]')\" = 'Bearer $KEY' ]"
 
 script 429 200
 OUT=$(S grok hi --for house --json 2>/dev/null); RC=$?
