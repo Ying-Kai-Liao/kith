@@ -22,7 +22,9 @@
 use crate::agent::bot::Cmd;
 use crate::hub::Hub;
 use crate::remote::push::{self, AlertKind};
-use crate::store::{BotConfig, BotKind, ConvState, Conversation, Entry, EntryKind, Lane, Store, is_person_message, now_ms};
+use crate::store::{
+    BotConfig, BotKind, ConvState, Conversation, Entry, EntryKind, Lane, Store, is_person_message, now_ms,
+};
 use anyhow::{Result, bail};
 use std::sync::Arc;
 use tokio::sync::oneshot;
@@ -655,7 +657,9 @@ mod tests {
         fn member_turns(&self) -> usize {
             ["a", "b"]
                 .iter()
-                .map(|id| std::fs::read_to_string(self.dir.join(id).join("prompts.jsonl")).map_or(0, |p| p.lines().count()))
+                .map(|id| {
+                    std::fs::read_to_string(self.dir.join(id).join("prompts.jsonl")).map_or(0, |p| p.lines().count())
+                })
                 .sum()
         }
 
@@ -721,12 +725,8 @@ mod tests {
         // What a host that died after sending `a`'s turn (3 granted, 1 charged) left behind.
         room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "CHATTY @all go", "status": "sent"})).unwrap();
         let conv = room.hub.store.open_conversation(&main, 3, "owner").unwrap();
-        let queue = crate::store::RoomQueue {
-            waiting: vec!["b".into()],
-            current: Some("a".into()),
-            round: 1,
-            spoke: 0,
-        };
+        let queue =
+            crate::store::RoomQueue { waiting: vec!["b".into()], current: Some("a".into()), round: 1, spoke: 0 };
         assert!(room.hub.store.save_conversation(&conv.id, 2, &queue).unwrap());
         assert_eq!(room.member_turns(), 0);
 

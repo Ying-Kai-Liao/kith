@@ -141,7 +141,8 @@ impl Store {
     #[cfg(test)]
     pub fn conversations_of(&self, chat: &str) -> Result<Vec<Conversation>> {
         let c = self.db.locked();
-        let mut st = c.prepare(&format!("SELECT {COLS} FROM conversations WHERE chat = ?1 ORDER BY opened_at, epoch"))?;
+        let mut st =
+            c.prepare(&format!("SELECT {COLS} FROM conversations WHERE chat = ?1 ORDER BY opened_at, epoch"))?;
         Ok(st.query_map([chat], row_conversation)?.collect::<rusqlite::Result<_>>()?)
     }
 
