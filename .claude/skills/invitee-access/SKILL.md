@@ -1,6 +1,6 @@
 ---
 name: invitee-access
-description: Property tests that an invited person and a bot guest never get more than they were granted. Use when a change touches serve/host/src/api/roles.rs (guard, member_may, MEMBER_METHODS, BOT_METHODS, BOT_PENDING_METHODS, bot_may, shape, event_for, event_for_bot, bot_entry, shape_bot, hello_for, own_bot, owned_bot_chat_agent, approves_own, runs_code, stored_member_approver, may_use, may_use_checked, granted_agents), serve/host/src/api/botguests.rs (the five member handlers, end_bot, revoke_owned_by, enforce, bot_call, ask, the ten-bot limit), the bot principal in api/devices.rs (bot_principal), remote/botsync.rs, a router method in serve/host/src/api/ (a new method must stay off the member list unless justified), dispatch/member_call in api/mod.rs, people/proveInvite, the access-request approval (remote/cloud.rs decide/settle, accessRequests/decideAccessRequest in api/remote.rs), event fan-out in api/events.rs (events_stream, event_for), a guest's helpers (kernel/bin/kith-permit ask_helper), who answers a card (cards::approver_of, the run-card branch of guard, cards/access.rs escape cards), or kernel/bin/kith-auth (resolve, resolve_bot, may, person --rm/--revoke, member and its env/mode checks, bot, bots-cap, access, forget).
+description: Property tests that an invited person and a bot guest never get more than they were granted. Use when a change touches serve/host/src/api/roles.rs (guard, member_may, MEMBER_METHODS, BOT_METHODS, BOT_PENDING_METHODS, bot_may, shape, event_for, event_for_bot, bot_entry, shape_bot, hello_for, own_bot, owned_bot_chat_agent, approves_own, runs_code, stored_member_approver, may_use, may_use_checked, granted_agents), serve/host/src/api/botguests.rs (the five member handlers, end_bot, revoke_owned_by, enforce, bot_call, ask, the ten-bot limit), the bot principal in api/devices.rs (bot_principal), remote/botsync.rs, a router method in serve/host/src/api/ (a new method must stay off the member list unless justified), dispatch/member_call in api/mod.rs, people/proveInvite, the access-request approval (remote/cloud.rs decide/settle, accessRequests/decideAccessRequest in api/remote.rs), event fan-out in api/events.rs (events_stream, event_for), a guest's helpers (kernel/bin/kith-permit ask_helper), who answers a card (cards::approver_of, the run-card branch of guard, cards/access.rs escape cards), or kernel/bin/kith-auth (resolve, resolve_bot, may, person --rm/--revoke, member and its env/mode checks, bot, bots-cap, access, forget, retired).
 ---
 
 # Invitee access never exceeds the grant
@@ -47,10 +47,11 @@ kith-auth, `kernel/tests/kith-auth-props.py` (generated command sequences on a t
 24. (F11 step 1) An allowed resolve never runs in a free-shell mode (`bypassPermissions`, `auto`) without `--trusted`, also when auth.json was hand-edited to say so. Harm: a guest's run gets a shell with no prompts.
 25. (membership env) `member ... env.NAME=` refuses a name that changes how the run starts or which kith it talks to (`PATH`, `KITH_HOME`, `DYLD_INSERT_LIBRARIES`), writing nothing, and no allowed resolve carries one, hand edits included. Harm: a membership row runs the agent through another binary or another kith.
 26. (forget) A new person or bot starts with nothing: no membership, grant or invite left behind by an earlier removal of the same id or a hand edit. Harm: an id handed out again inherits the old person's rights.
+27. (retired, access part 6) Removing a person (not a bot) records their id in `retired`, and a retired id is never given to a new person or bot again. Harm: a new invite under the same name reads the old person's memory and files and uses their logins.
 
 A guest's helpers, `kernel/bin/kith-permit` `ask_helper` (it runs `kith-ask` outside the guest sandbox) and the person gate of `kernel/bin/kith`, pinned by examples in `kernel/tests/kith-guest-helper-check`, not generated:
 
-27. A helper never runs wider than its caller's membership (only a helper the membership names, and a helper cannot ask a third agent the caller's membership does not grant), never for a revoked person, never while this Mac is out of sync with the Kith cloud past the hold (`bin/kith` waits while kith-auth says `held`, then refuses; the agent is told to try again), and never with the owner's ask token. Harm: a guest reaches through a helper what their membership does not give them, or the owner's mailbox. The cross-Mac half (a revoke made elsewhere while held) is the revoke-access model's `R5c`.
+28. A helper never runs wider than its caller's membership (only a helper the membership names, and a helper cannot ask a third agent the caller's membership does not grant), never for a revoked person, never while this Mac is out of sync with the Kith cloud past the hold (`bin/kith` waits while kith-auth says `held`, then refuses; the agent is told to try again), and never with the owner's ask token. Harm: a guest reaches through a helper what their membership does not give them, or the owner's mailbox. The cross-Mac half (a revoke made elsewhere while held) is the revoke-access model's `R5c`.
 
 ## Coverage record
 
@@ -82,9 +83,9 @@ How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechec
 | serve/host/src/store/botguests.rs | `live_bot_count`, `bot_guest_of_device`, `end_bot_guest` (through the handlers) | 16, 19 |
 | serve/host/src/agent/folder.rs | `Change::from_args` (used as the oracle for send) | 4 |
 | serve/host/src/api/mod.rs | `member_call` (guard before route) | read, not run: see not covered |
-| kernel/bin/kith-auth | `resolve`, `resolve_bot`, `may`, `bot_may`, `bot_row`, `cmd_person --rm`, `cmd_member`, `cmd_bot`, `cmd_bots_cap` | 10-13 |
+| kernel/bin/kith-auth | `resolve`, `resolve_bot`, `may`, `bot_may`, `bot_row`, `cmd_person --rm`, `cmd_member`, `cmd_bot`, `cmd_bots_cap`, `retired`, `need_free` | 10-13, 27 |
 | | `cmd_access` (C2), the access cap in `resolve_bot`, `check_env_key`, the `--trusted` free-shell rule, `forget`, `cmd_person --revoke/--unrevoke` | 12, 23-26 |
-| kernel/bin/kith-permit, kernel/bin/kith | `ask_helper`; the person gate (`resolve`, the held wait) | 27 (examples) |
+| kernel/bin/kith-permit, kernel/bin/kith | `ask_helper`; the person gate (`resolve`, the held wait) | 28 (examples) |
 
 ## Run
 
@@ -174,6 +175,11 @@ Each is a one-text change to a copy of kith-auth in a scratch folder (the repo c
 | M7 | `cmd_access` skips `need_person` and the owner refusal | `access garden kai domain b.example` accepted for the owner (23) |
 | M8 | `check_env_key` accepts `PATH` | `member garden kai env.PATH=x` accepted (25) |
 | M9 | `mode_of` ignores `--trusted` | "sam runs house in auto without --trusted" (24) |
+| M10 | `person --rm` does not record the id in `retired` (2026-10-29) | "sam: retired False" (27) |
+| M11 | `cmd_person` skips `need_free` for a new person (2026-10-29) | `('person', 'sam')`: "a retired id was given to someone new" (27) |
+| M13 | `retired()` ignores the `retired` table (2026-10-29) | `('person', 'sam')` (27) |
+
+Not caught here: M12, `cmd_bot` skipping `need_free` (the generator makes bots only with `bot-*` ids, never a person's). `kernel/tests/kith-auth-c2-check` pins it ("a bot or a rename can't take it either"), with `--rm --unused` and the ids an older removal left memory or a profile for.
 
 ### Host breaks of the 2026-10-28 additions
 

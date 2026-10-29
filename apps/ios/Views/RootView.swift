@@ -105,7 +105,8 @@ struct RootView: View {
         .kithSheet(item: Binding(get: { app.guestPrompt.map(GuestPromptTarget.init) }, set: { app.guestPrompt = $0?.ref })) { target in
             let ref = target.ref
             if let store = accounts.store(for: ref.computerId) {
-                GuestPromptSheet(store: store, chatId: ref.botId, close: { app.guestPrompt = nil }, openChat: {
+                GuestPromptSheet(store: store, chatId: ref.botId, isOwner: accounts.role(for: ref.computerId) == .owner,
+                                 close: { app.guestPrompt = nil }, openChat: {
                     app.guestPrompt = nil
                     accounts.selection = ref
                 })

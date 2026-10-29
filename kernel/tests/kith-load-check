@@ -11,10 +11,14 @@ trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/dot KITH_AUTH=$T/dot/auth.json
 unset KITH_AGENT KITH_PERSON KITH_ROOM HQ_STATE HQ_HOME KITH_PROJECT
 mkdir -p "$HOME" "$KITH_STATE"
+# people first: an id with memory already under it is a removed person's, and a new person is refused it
+KA=$KERNEL/bin/kith-auth K=$KERNEL/bin/kith
+python3 "$KA" person kai owner >/dev/null; python3 "$KA" person sam >/dev/null
 M=$KITH_HOME/agents/echo/memory
 mkdir -p "$M/shared" "$M/people/sam" "$M/projects/alpha" "$M/projects/beta" "$M/sessions" "$M/rooms/grp1" \
   "$KITH_STATE/people" "$KITH_HOME/agents/echo/role"
 printf -- '---\nname: echo\ndescription: test agent\n---\nYou test.\n' > "$KITH_HOME/agents/echo/role/agent.md"
+python3 "$KA" member echo sam >/dev/null
 echo 'owner memory zebra' > "$M/MEMORY.md"
 echo 'shared craft tip' > "$M/shared/MEMORY.md"
 echo 'sam likes tea' > "$M/people/sam/MEMORY.md"
@@ -27,9 +31,6 @@ echo 'gamma flat note' > "$M/projects/gamma.md"
 echo 'grp1 room note' > "$M/rooms/grp1/MEMORY.md"
 echo 'about the owner' > "$KITH_STATE/user.md"
 echo 'about sam' > "$KITH_STATE/people/sam.md"
-KA=$KERNEL/bin/kith-auth K=$KERNEL/bin/kith
-python3 "$KA" person kai owner >/dev/null; python3 "$KA" person sam >/dev/null
-python3 "$KA" member echo sam >/dev/null
 fails=0
 check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
 # the prompt of a run, as the env given (VAR=value ...)

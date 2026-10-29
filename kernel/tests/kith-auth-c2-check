@@ -41,6 +41,24 @@ check "removing twice is fine" "A person sam --rm"
 check "revoke and member --rm still work on anyone" "A revoke house browser && A member house sam --rm"
 check "the owner is always allowed" "A member house kai"
 
+# a removed person's id is retired: nobody new ever reads their memory and files or uses their logins
+check "a removed person's id is retired" "A retired sam && ! A person sam name=Sam"
+check "a bot or a rename can't take it either" "! A bot sam --of kai && A person zed && ! A person zed id=sam"
+check "an id nobody had is free" "! A retired nobody"
+A person una >/dev/null
+check "--rm --unused frees the id of someone who never had anything" "A person una --rm --unused && ! A retired una && A person una"
+A member house una >/dev/null
+check "--rm --unused refuses someone who has something" "! A person una --rm --unused && A people una"
+mkdir -p "$KITH_HOME/agents/house/memory/people/olda"
+check "memory an older removal left retires the id" "A retired olda && ! A person olda"
+python3 - <<PY
+import json
+d = json.load(open('$KITH_AUTH'))
+d['profiles']['mail/oldb'] = {'person': 'oldb'}
+json.dump(d, open('$KITH_AUTH', 'w'))
+PY
+check "a profile an older removal left retires the id" "A retired oldb && ! A person oldb"
+
 # rows an older kith-auth left for a removed person grant nothing (may() needs a person), and a new person of that id starts clean
 python3 - <<PY
 import json
