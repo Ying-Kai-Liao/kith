@@ -14,6 +14,8 @@ struct ChatRow: View {
     var onReply: ((Entry) -> Void)?
     @Environment(BotStore.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// A tapped agent reply shows its time and context line under it.
+    @State private var showsContext = false
 
     var body: some View {
         let reply = onReply.map { reply in { reply(entry) } }
@@ -33,14 +35,17 @@ struct ChatRow: View {
             .padding(.top, groupStart ? 12 : 4)
         case "agent":
             VStack(alignment: .leading, spacing: 4) {
-                if chat?.isGroup == true, groupStart { AuthorLabel(botId: entry.data.author) }
-                AgentBubble(entry: entry, openTrace: openTrace, reply: reply)
+                if groupStart { AuthorLabel(botId: entry.data.author ?? chat?.id) }
+                AgentBubble(entry: entry, openTrace: openTrace, reply: reply) {
+                    withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { showsContext.toggle() }
+                }
                 Group {
                     AnsweredByLabel(answeredBy: entry.data.answeredBy)
-                    if let percent = entry.data.contextPercent {
-                        Text("context \(percent)%")
-                            .kithText(.secondary)
-                            .foregroundStyle(Palette.muted)
+                    if showsContext, entry.data.status != "streaming" {
+                        ContextLineView(time: Self.clock(entry.date), percent: entry.data.contextPercent)
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.trailing, 40)
+                            .transition(.opacity)
                     }
                     ReactionsRow(entry: entry)
                 }
@@ -51,21 +56,10 @@ struct ChatRow: View {
         case "permission":
             VStack(alignment: .leading, spacing: 4) {
                 if chat?.isGroup == true { AuthorLabel(botId: entry.data.author) }
-                if entry.data.isSecretCard {
-                    secretCard(tint: tint)
-                } else if entry.data.limit != nil {
-                    // An agent at its monthly limit (the owner's message waits under it), or a person at theirs.
-                    LimitCardView(entry: entry, tint: tint, answering: model.answering[entry.id],
-                                  waiting: GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
-                                  time: entry.date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)),
-                                  respond: { option in model.respond(entry, option: option) })
+                if let fold = CardFold.of(entry) {
+                    FoldedCard(fold: fold, time: Self.clock(entry.date)) { permissionBody(tint: tint) }
                 } else {
-                PermissionCard(entry: entry, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
-                               waiting: heldElsewhere ? "Open in the terminal: answer it there."
-                                   : chat?.botGuest.map({ !$0.canAnswer(isOwner: model.isOwner) }) == true ? "Only the computer's owner answers this."
-                                   : GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
-                               respond: { option in model.respond(entry, option: option) },
-                               held: heldModel, stop: { model.stopHolder(for: entry) }, stopped: model.stoppedRuns[entry.id])
+                    permissionBody(tint: tint)
                 }
             }
             .padding(.top, 12)
@@ -77,6 +71,30 @@ struct ChatRow: View {
             } else {
                 NoticeRow(entry: entry).padding(.top, 10)
             }
+        }
+    }
+
+    private static func clock(_ date: Date) -> String {
+        date.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
+    }
+
+    /// The full approval, limit or key/access card.
+    @ViewBuilder private func permissionBody(tint: AgentTint) -> some View {
+        if entry.data.isSecretCard {
+            secretCard(tint: tint)
+        } else if entry.data.limit != nil {
+            // An agent at its monthly limit (the owner's message waits under it), or a person at theirs.
+            LimitCardView(entry: entry, tint: tint, answering: model.answering[entry.id],
+                          waiting: GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
+                          time: Self.clock(entry.date),
+                          respond: { option in model.respond(entry, option: option) })
+        } else {
+            PermissionCard(entry: entry, hostName: model.hostName, tint: tint, answering: model.answering[entry.id],
+                           waiting: heldElsewhere ? "Open in the terminal: answer it there."
+                           : chat?.botGuest.map({ !$0.canAnswer(isOwner: model.isOwner) }) == true ? "Only the computer's owner answers this."
+                           : GuestPrompt.waitingText(for: entry, activity: chat?.activity, isOwner: model.isOwner),
+                           respond: { option in model.respond(entry, option: option) },
+                           held: heldModel, stop: { model.stopHolder(for: entry) }, stopped: model.stoppedRuns[entry.id])
         }
     }
 
@@ -129,10 +147,10 @@ struct AuthorLabel: View {
     var body: some View {
         let bot = botId.flatMap { model.bots[$0] }
         HStack(spacing: 8) {
-            if let bot { CharacterAvatar(bot: bot, size: 26, animated: false) }
+            if let bot { CharacterAvatar(bot: bot, size: 24, animated: false).shadow(color: Palette.ink.opacity(0.12), radius: 4, y: 2) }
             Text(model.authorName(botId))
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(Palette.text)
+                .kithText(.agentName)
+                .foregroundStyle(Palette.ink)
         }
     }
 }
@@ -164,6 +182,7 @@ struct UserBubble: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(Palette.bubbleUser, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
+                .onTapGesture { onTap?() }
                 .contextActions(reactions: model.reactionPick(entry)) {
                     var items = [
                         MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) },
@@ -223,6 +242,8 @@ struct AgentBubble: View {
     let entry: Entry
     let openTrace: () -> Void
     var reply: (() -> Void)?
+    /// A tap on the bubble (links keep their own).
+    var onTap: (() -> Void)?
     @State private var selecting = false
     @Environment(BotStore.self) private var model
 
@@ -423,10 +444,15 @@ struct ReactionsRow: View {
     var body: some View {
         if let reactions = entry.data.reactions, !reactions.isEmpty {
             HStack(spacing: 4) {
-                ForEach(reactions, id: \.self) { emoji in
+                ForEach(ReactionGroups.of(reactions), id: \.emoji) { group in
+                    let emoji = group.emoji
                     Button { model.react(entry, emoji) } label: {
-                        Text(emoji)
-                            .font(.system(size: 15))
+                        HStack(spacing: 4) {
+                            Text(emoji).font(.system(size: 15))
+                            Text("\(group.count)")
+                                .font(.system(size: 13).monospacedDigit())
+                                .foregroundStyle(Palette.ink)
+                        }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 3)
                             .background(Palette.panel, in: Capsule())
@@ -435,7 +461,8 @@ struct ReactionsRow: View {
                     }
                     .buttonStyle(PressScale())
                     .help("Remove \(emoji)")
-                    .accessibilityLabel("Remove reaction \(emoji)")
+                    .accessibilityLabel("\(emoji) \(group.count)")
+                    .accessibilityHint("Removes your reaction")
                     .transition(.scale.combined(with: .opacity))
                 }
                 Menu {
@@ -454,6 +481,29 @@ struct ReactionsRow: View {
                 .accessibilityLabel("Add reaction")
             }
         }
+    }
+}
+
+/// The line under a tapped agent reply: time, a 13 pt ring and "N% context". No percent, time only.
+struct ContextLineView: View {
+    let time: String
+    let percent: Int?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(time).kithText(.code).foregroundStyle(Palette.muted)
+            if let percent {
+                ZStack {
+                    Circle().stroke(Palette.ink.opacity(0.16), lineWidth: 2)
+                    Circle().trim(from: 0, to: ContextLine.fraction(percent))
+                        .stroke(Palette.ink, style: StrokeStyle(lineWidth: 2, lineCap: .butt))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 13, height: 13)
+                Text(ContextLine.label(percent: percent) ?? "").kithText(.code).foregroundStyle(Palette.muted)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
