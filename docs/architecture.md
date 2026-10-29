@@ -71,7 +71,7 @@ Rules that follow from it:
 `<home>/state` (`lib/kith_paths.py`), a git repo of its own. Databases are committed as text dumps (`kith-state dump`).
 Personal details moved out of the packages too (2026-10-14);
 `kith-pkg check --share` guards it. Third-party skills are linked from their repos (skills.json), never copied.
-Published 2026-10-14 with fresh history (MIT). Since 2026-10-25 the license is split: MIT for kernel, bot client, wire crate and docs; FSL-1.1-MIT for host, cloud, relay and apps (see README, Licensing).
+Published 2026-10-14 with fresh history (MIT). The license is split: MIT for kernel, bot client, wire crate and docs; AGPL-3.0-only for host, cloud, relay and apps (see README, Licensing). FSL-1.1-MIT was used for those parts between 2026-10-25 and the move to AGPL.
 
 **Code in kernel/** (2026-10-15). The repo is the kith folder; all code and services moved into `kernel/` (bin, lib,
 adapters, PROTOCOL.md, services), so the top level shows the system's parts: `kernel/`, `agents/`, `state/`. One

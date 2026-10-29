@@ -1,6 +1,6 @@
 # kith-serve
 
-Kith's host: runs coding-agent bots over ACP and serves the Kith apps. FSL-1.1-MIT (Fair Source; the guest and wire crates are MIT): see `../../NOTICE`, `../../THIRD_PARTY_NOTICES.md` and `LICENSE`.
+Kith's host: runs coding-agent bots over ACP and serves the Kith apps. AGPL-3.0-only (the guest and wire crates are MIT): see `../../NOTICE`, `../../THIRD_PARTY_NOTICES.md` and `LICENSE`.
 
 ## One `kith` binary
 
