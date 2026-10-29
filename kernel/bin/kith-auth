@@ -1014,7 +1014,7 @@ def resolve_bot(auth, agent, bot, via, out, once=False):
     mine = j['access']
     out['access'] = mine if owner_parent else {k: [v for v in mine[k] if held(pr.get('access', {}), k, v)] for k in mine}
     out['doors'] = j['doors'] if owner_parent else [d for d in j['doors'] if d in pr.get('doors', [])]
-    out['jobs'] = j['jobs']
+    out['jobs'] = j['jobs'] if owner_parent else [n for n in j['jobs'] if n in pr.get('jobs', [])]
     return out
 
 
@@ -1127,6 +1127,7 @@ def cmd_job(args):
     import kith_jobs
     if flags:
         auth = load_auth(write=True)
+        pid = canonical(auth, pid)
         row = auth['members'].get(agent, {}).get(pid)
         ticks = row.get('jobs') if isinstance(row, dict) and isinstance(row.get('jobs'), dict) else {}
         if ticks.pop(name, None) is not None:
@@ -1168,6 +1169,7 @@ def cmd_helper(args):
     agent, pid, helper = rest
     auth = load_auth(write=True)
     if flags == ['--rm']:
+        pid = canonical(auth, pid)
         row = auth['members'].get(agent, {}).get(pid)
         if isinstance(row, dict) and helper in (row.get('helpers') or []):
             row['helpers'].remove(helper)

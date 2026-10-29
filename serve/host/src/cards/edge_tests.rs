@@ -70,7 +70,11 @@ async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::JOB), "owner").unwrap();
     assert!(call.await.unwrap().allow);
     until(|| job(&r)["ticked"] == true).await;
-    assert_eq!(job(&r)["granted"]["domains"], json!(["registry.npmjs.org", "github.com"]), "the job as the card listed it");
+    assert_eq!(
+        job(&r)["granted"]["domains"],
+        json!(["registry.npmjs.org", "github.com"]),
+        "the job as the card listed it"
+    );
 
     // A host no job holds: once, always and no.
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "SandboxNetworkAccess", net("pypi.org"));
@@ -124,7 +128,10 @@ async fn a_helpers_yes_is_written_before_the_run_hears_it() {
     assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, "deny"]);
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
     assert!(call.await.unwrap().allow);
-    assert!(r.auth_ok(&["may", "sam", "money", "--via", "house", "--once"]), "the once grant is there when the run goes on");
+    assert!(
+        r.auth_ok(&["may", "sam", "money", "--via", "house", "--once"]),
+        "the once grant is there when the run goes on"
+    );
     assert!(!r.auth_ok(&["may", "sam", "money", "--via", "house"]), "and is only a once");
 
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::HELPER_TOOL, input);
@@ -134,11 +141,95 @@ async fn a_helpers_yes_is_written_before_the_run_hears_it() {
     assert!(r.auth_ok(&["may", "sam", "money", "--via", "house"]), "always lands in the row's helpers");
 }
 
+/// A member's app chat asks the owner for a host as the bot actor does: the adapter's sandbox ask is titled with the
+/// host and has no tool name; the entry and the `acp` card carry what `on_permission` gives them.
+async fn app_card(r: &Rig, chat: &str, host: &str) -> (Card, Value) {
+    let call = json!({"toolCallId": "t1", "title": host, "kind": "fetch", "rawInput": {"host": host}});
+    let tool = edge::acp_tool(&call, host).to_owned();
+    let mut options = vec![
+        json!({"optionId": "allow", "name": "Allow", "kind": "allow_once"}),
+        json!({"optionId": "reject", "name": "Reject", "kind": "reject_once"}),
+    ];
+    let (_, kept) = edge::for_acp("sam", "Sam", "house", &tool, &call["rawInput"], &mut options).await.unwrap();
+    let data = json!({"status": "pending", "options": options, "edge": kept});
+    let entry = r.hub.add_entry(&Lane::main(chat), EntryKind::Permission, 1, &data).unwrap();
+    let new = NewCard {
+        session: format!("acp:{chat}:"),
+        source: "acp",
+        bot_id: Some(chat.to_owned()),
+        run_id: None,
+        person: "sam".into(),
+        agent: "house".into(),
+        approver: "owner",
+        tool,
+        input: call["rawInput"].to_string(),
+        resource: format!("net:{host}"),
+        shown: host.into(),
+        deadline: now_ms() + 60_000,
+        reply_to: None,
+        asked_by: None,
+    };
+    let Opened::New(card) = r.hub.store.card_open(&new, now_ms()).unwrap() else { panic!() };
+    r.hub.store.card_live(&card.id, Some(&entry.id), None).unwrap();
+    (r.hub.store.card(&card.id).unwrap(), data)
+}
+
+#[tokio::test]
+async fn a_members_app_chat_ask_keeps_what_the_owner_picked_and_its_agent_hears_its_own_allow_once() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    let _sam = joined(&r, "member").await;
+    caps(&r, CAPS);
+    let domains = || {
+        let v: Value = serde_json::from_str(&r.auth(&["resolve", "house", "--person", "sam"])).unwrap();
+        v["access"]["domains"].clone()
+    };
+
+    let (card, data) = app_card(&r, &chat, "github.com").await;
+    assert_eq!(ids(&data), ["allow", edge::ALWAYS, edge::JOB, "reject"]);
+    assert_eq!(data["edge"]["job"], "make-videos");
+    let entry = card.entry_id.as_ref().unwrap();
+    assert_eq!(answer(&r.hub, entry, Some(edge::ALWAYS), "owner").unwrap(), Outcome::Recorded { forward: true });
+    assert_eq!(edge::adapter_option(&data["options"], edge::ALWAYS), Some("allow"), "the actor sends its allow_once");
+    until(|| domains() == json!(["github.com"])).await;
+    assert_eq!(domains(), json!(["github.com"]), "kith-auth access house sam domain github.com");
+    assert_eq!(job(&r)["ticked"], false);
+
+    let (card, data) = app_card(&r, &chat, "registry.npmjs.org").await;
+    let entry = card.entry_id.as_ref().unwrap();
+    assert_eq!(answer(&r.hub, entry, Some(edge::JOB), "owner").unwrap(), Outcome::Recorded { forward: true });
+    assert_eq!(edge::adapter_option(&data["options"], edge::JOB), Some("allow"));
+    until(|| job(&r)["ticked"] == true).await;
+    assert_eq!(job(&r)["granted"]["domains"], json!(["registry.npmjs.org", "github.com"]), "the job is on");
+}
+
+#[test]
+fn an_always_or_a_job_reaches_the_agent_as_its_own_allow_once() {
+    let offered = json!([
+        {"optionId": "always", "kind": "allow_always"},
+        {"optionId": edge::ALWAYS, "kind": "allow_always"},
+        {"optionId": edge::JOB, "kind": "allow_always"},
+        {"optionId": "once", "kind": "allow_once"},
+        {"optionId": "no", "kind": "reject_once"},
+    ]);
+    assert_eq!(edge::adapter_option(&offered, edge::ALWAYS), Some("once"), "never kith-always or the adapter's always");
+    assert_eq!(edge::adapter_option(&offered, edge::JOB), Some("once"));
+    assert_eq!(edge::adapter_option(&offered, "once"), Some("once"));
+    assert_eq!(edge::adapter_option(&offered, "no"), Some("no"));
+    let no_once =
+        json!([{"optionId": "always", "kind": "allow_always"}, {"optionId": edge::ALWAYS, "kind": "allow_always"}]);
+    assert_eq!(edge::adapter_option(&no_once, edge::ALWAYS), None, "a cancel, not an id the agent never offered");
+}
+
 #[test]
 fn only_a_plain_host_or_a_named_helper_is_an_edge() {
     let d = |h: &str| Some(edge::Edge::Domain(h.into()));
     assert_eq!(edge::of("SandboxNetworkAccess", &json!({"host": "a.org", "port": 443}), ""), d("a.org"));
-    assert_eq!(edge::of("a.org", &json!({"host": "a.org"}), ""), d("a.org"), "a bot chat's ask is titled with its host");
+    assert_eq!(
+        edge::of("a.org", &json!({"host": "a.org"}), ""),
+        d("a.org"),
+        "a bot chat's ask is titled with its host"
+    );
     assert_eq!(edge::of("mcp__x__go", &json!({"host": "a.org"}), ""), None, "another tool with a host field");
     assert_eq!(edge::of("SandboxNetworkAccess", &json!({"host": "a.org", "cmd": "x"}), ""), None);
     assert_eq!(edge::of("SandboxNetworkAccess", &json!({"host": "*.org"}), ""), None);

@@ -196,26 +196,23 @@ impl Actor {
                 "owner"
             });
         }
+        let raw = &tool["rawInput"];
+        let tool_name = crate::cards::edge::acp_tool(tool, &title).to_owned();
         // A host or a helper the owner is asked about can be kept: "Always for <person>", or the job that holds it.
         let mut kept = None;
         if let (Some((person, agent)), Some("owner")) = (&whose, approver) {
-            let name = tool["_meta"]["claudeCode"]["toolName"].as_str().unwrap_or(&title);
-            if let Some(edge) = crate::cards::edge::of(name, &tool["rawInput"], "") {
-                let who = self.hub.store.person(person).map(|p| p.name).filter(|n| !n.is_empty());
-                let who = who.unwrap_or_else(|| person.clone());
-                kept = Some(crate::cards::edge::extras(person, &who, agent, &edge, true).await);
-            }
+            let who = self.hub.store.person(person).map(|p| p.name).filter(|n| !n.is_empty());
+            let who = who.unwrap_or_else(|| person.clone());
+            kept = crate::cards::edge::for_acp(person, &who, agent, &tool_name, raw, &mut options).await;
         }
         let mut detail = json!({"output": "", "diffs": []});
         merge_tool_content(&mut detail, &tool["content"]);
-        if let Some((text, more, _)) = &mut kept {
-            crate::cards::edge::insert(&mut options, std::mem::take(more));
-            if !text.is_empty() {
-                let shown = detail["output"].as_str().unwrap_or_default();
-                detail["output"] = if shown.is_empty() { text.clone() } else { format!("{shown}\n\n{text}") }.into();
-            }
+        if let Some((text, _)) = &kept
+            && !text.is_empty()
+        {
+            let shown = detail["output"].as_str().unwrap_or_default();
+            detail["output"] = if shown.is_empty() { text.clone() } else { format!("{shown}\n\n{text}") }.into();
         }
-        let raw = &tool["rawInput"];
         let command = raw["command"].as_str().map(str::to_owned).or_else(|| {
             raw["command"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "))
         });
@@ -231,7 +228,7 @@ impl Actor {
             "selected": Value::Null,
         });
         let mut data = data;
-        if let Some((_, _, edge)) = kept {
+        if let Some((_, edge)) = kept {
             data["edge"] = edge;
         }
         let mut owner_label = None;
@@ -271,7 +268,7 @@ impl Actor {
             person: whose.as_ref().map(|w| w.0.clone()).unwrap_or_default(),
             agent: whose.as_ref().map(|w| w.1.clone()).or_else(|| self.cfg.hq_agent.clone()).unwrap_or_default(),
             approver: approver_card,
-            tool: tool["_meta"]["claudeCode"]["toolName"].as_str().unwrap_or(&title).to_owned(),
+            tool: tool_name,
             input: raw.to_string(),
             resource,
             shown,
@@ -340,7 +337,7 @@ impl Actor {
     /// The resource key and the text of what a bot's question is about: the real path for a file, else a digest of
     /// its input. A secret or a login is not carded; the agent is told no (A5).
     fn card_resource(tool: &Value, title: &str) -> Option<(String, String)> {
-        let name = tool["_meta"]["claudeCode"]["toolName"].as_str().unwrap_or(title);
+        let name = crate::cards::edge::acp_tool(tool, title);
         let raw = &tool["rawInput"];
         match crate::cards::resource::classify(name, raw, &crate::cards::resource::roots()) {
             crate::cards::resource::Classified::Card { key, shown } => Some((key, shown)),
@@ -371,15 +368,9 @@ impl Actor {
         {
             parked.resume().await;
         }
-        // The host's own "always" and job options are a yes to this one request; what they keep is the card's answer's
-        // to write (cards/edge.rs).
-        let once = self.hub.store.entry(entry_id).and_then(|e| {
-            e.data["options"].as_array()?.iter().find(|o| o["kind"] == "allow_once").map(|o| o["optionId"].clone())
-        });
-        let outcome = match &option_id {
-            Some(o) if matches!(o.as_str(), crate::cards::edge::ALWAYS | crate::cards::edge::JOB) && once.is_some() => {
-                json!({"outcome": {"outcome": "selected", "optionId": once}})
-            }
+        // The host's own "always" and job options reach the agent as its allow_once (cards/edge.rs).
+        let offered = self.hub.store.entry(entry_id).map(|e| e.data["options"].clone()).unwrap_or_default();
+        let outcome = match option_id.as_deref().and_then(|o| crate::cards::edge::adapter_option(&offered, o)) {
             Some(o) => json!({"outcome": {"outcome": "selected", "optionId": o}}),
             None => json!({"outcome": {"outcome": "cancelled"}}),
         };

@@ -171,6 +171,22 @@ expect "and a tick" "$(field "$R" access.domains)" '[]'
 expect "with its helpers" "$(field "$(res sound --person bill --via video)" allowed)" "false"
 "$AUTH" job video ann make-videos --rm >/dev/null
 expect "job --rm" "$(field "$(res video --person ann)" jobs)" '[]'
+"$AUTH" job video ann make-videos >/dev/null
+"$AUTH" helper video ann image >/dev/null
+"$AUTH" person ann id=anne >/dev/null
+"$AUTH" job video ann make-videos --rm >/dev/null
+expect "job --rm by an old id" "$(field "$(res video --person anne)" jobs)" '[]'
+"$AUTH" helper video ann image --rm >/dev/null
+expect "helper --rm by an old id" "$(field "$(res image --person anne --via video)" allowed)" "false"
+
+# --- an invitee's bot: no more jobs than its owner has
+"$AUTH" bot bill-bot --of bill >/dev/null 2>&1
+"$AUTH" member video bill-bot mode=default >/dev/null 2>&1
+"$AUTH" job video bill-bot make-videos >/dev/null
+expect "a bot's tick its owner hasn't is not named" "$(field "$(res video --person bill-bot)" jobs)" '[]'
+"$AUTH" job video bill make-videos >/dev/null
+expect "it is once the owner has it" "$(field "$(res video --person bill-bot)" jobs)" '["make-videos"]'
+"$AUTH" job video bill make-videos --rm >/dev/null
 
 # --- ask_helper: a helper that isn't granted asks the owner (a stub host answers on the run socket)
 SOCK=$T/run.sock

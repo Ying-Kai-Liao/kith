@@ -55,7 +55,8 @@ pub fn of(tool: &str, input: &Value, resource: &str) -> Option<Edge> {
     let obj = input.as_object()?;
     let host = obj.get("host")?.as_str()?;
     let only_host = obj.keys().all(|k| k == "host" || k == "port");
-    (only_host && (tool == NETWORK_TOOL || tool == host) && access::valid_domain(host)).then(|| Edge::Domain(host.to_owned()))
+    (only_host && (tool == NETWORK_TOOL || tool == host) && access::valid_domain(host))
+        .then(|| Edge::Domain(host.to_owned()))
 }
 
 /// What the owner's card adds for an edge: a line of text, the options to put before its No, and what they grant
@@ -89,15 +90,52 @@ pub async fn extras(person: &str, name: &str, agent: &str, edge: &Edge, always: 
     (text, options, kept)
 }
 
+/// The tool a bot chat's (ACP) ask is about: Claude Code's tool name, else its title (a sandbox network ask is titled
+/// with its host). The card keeps it as its `tool`, which is what [`of`] reads again at the answer.
+pub fn acp_tool<'a>(tool: &'a Value, title: &'a str) -> &'a str {
+    tool["_meta"]["claudeCode"]["toolName"].as_str().unwrap_or(title)
+}
+
+/// What a bot chat's card for an edge the owner is asked about adds: its options go before the No in `options`, and
+/// the line of text and what they keep come back. None when the ask is not an edge.
+pub async fn for_acp(
+    person: &str,
+    name: &str,
+    agent: &str,
+    tool: &str,
+    input: &Value,
+    options: &mut Vec<Value>,
+) -> Option<(String, Value)> {
+    let edge = of(tool, input, "")?;
+    let (text, more, kept) = extras(person, name, agent, &edge, true).await;
+    insert(options, more);
+    Some((text, kept))
+}
+
+/// The option a bot chat's agent is sent for the answer `chosen` to its card. The host's "always" and job options are
+/// a yes to this one request (what they keep is the card's answer's to write), so the agent gets its own allow_once:
+/// never an id it didn't offer, and never its allow_always. None: it offered no allow_once, so it can only be cancelled.
+pub fn adapter_option<'a>(options: &'a Value, chosen: &'a str) -> Option<&'a str> {
+    if !matches!(chosen, ALWAYS | JOB) {
+        return Some(chosen);
+    }
+    options.as_array()?.iter().find(|o| o["kind"] == "allow_once")?["optionId"].as_str()
+}
+
 /// Puts `more` before the first No of `options`.
 pub fn insert(options: &mut Vec<Value>, more: Vec<Value>) {
-    let at = options.iter().position(|o| o["kind"].as_str().is_some_and(|k| k.starts_with("reject"))).unwrap_or(options.len());
+    let at = options
+        .iter()
+        .position(|o| o["kind"].as_str().is_some_and(|k| k.starts_with("reject")))
+        .unwrap_or(options.len());
     options.splice(at..at, more);
 }
 
 /// The pieces of a job, as a card lists them: hosts, helpers, then doors by name.
 fn listed(pieces: &Value) -> String {
-    let names = |k: &str| pieces[k].as_array().cloned().unwrap_or_default().into_iter().filter_map(|v| v.as_str().map(str::to_owned));
+    let names = |k: &str| {
+        pieces[k].as_array().cloned().unwrap_or_default().into_iter().filter_map(|v| v.as_str().map(str::to_owned))
+    };
     let doors = names("doors").map(|d| d.split('@').next().unwrap_or_default().to_owned());
     names("domains").chain(names("helpers")).chain(doors).collect::<Vec<_>>().join(", ")
 }
@@ -109,7 +147,8 @@ async fn job_of(agent: &str, person: &str, edge: &Edge) -> Option<Value> {
         Edge::Domain(_) => "--domain",
         Edge::Helper(_) => "--helper",
     };
-    let out = crate::channels::hq::output(&bin, &["jobs", agent, "--person", person, flag, edge.value(), "--json"]).await?;
+    let out =
+        crate::channels::hq::output(&bin, &["jobs", agent, "--person", person, flag, edge.value(), "--json"]).await?;
     if !out.status.success() {
         return None;
     }

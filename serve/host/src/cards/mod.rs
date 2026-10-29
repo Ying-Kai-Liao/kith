@@ -298,7 +298,8 @@ pub(super) async fn edge_extras(hub: &Hub, who: &RunIdentity, card: &Card) -> Op
         return None;
     }
     let e = edge::of(&card.tool, &serde_json::from_str(&card.input).unwrap_or(Value::Null), &card.resource)?;
-    let name = hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| who.person.clone());
+    let name =
+        hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| who.person.clone());
     Some(edge::extras(&who.person, &name, &who.agent, &e, card.tool != access::TOOL).await)
 }
 
