@@ -610,6 +610,20 @@ export class BotStore extends BotSync {
     return value
   }
 
+  stageFiles(botId: string, files: { name: string; data: Uint8Array }[]) {
+    this.stagedFiles.set(botId, [...(this.stagedFiles.get(botId) ?? []), ...files])
+    this.changed()
+  }
+
+  takeStagedFiles(botId: string) {
+    const files = this.stagedFiles.get(botId)
+    if (files) {
+      this.stagedFiles.delete(botId)
+      this.changed()
+    }
+    return files
+  }
+
   setRoutineDraft(botId: string, text: string) {
     this.routineDrafts.set(botId, text)
     this.changed()

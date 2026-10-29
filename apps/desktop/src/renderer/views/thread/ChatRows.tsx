@@ -1,7 +1,9 @@
 import { SharedFileView } from './SharedImage'
 import { memo, useEffect, useRef, useState } from 'react'
-import { isGroup, isWorking, needsInput, type Bot, type Entry, type ThreadSummary } from '@shared/models'
+import { isGroup, isWorking, needsInput, type Bot, type Entry } from '@shared/models'
 import { BotAvatar } from '../../components/Avatar'
+import { BotAvatar as KithBot } from '../../components/kith'
+import { avatarImage } from '@shared/crew'
 import { Hairline, IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { AnchoredMenu, useContextMenu, type MenuItem, type ReactionPick } from '../../components/Overlay'
@@ -23,13 +25,15 @@ import { confirmMessage, confirmTitle, heldIcon, heldRowOf, stoppedDivider } fro
 import { ConnectionRequestCard } from '../marketplace/ConnectionRequestCard'
 import { HandoffNotice } from './HandoffNotice'
 import { AnsweredBy } from './AnsweredBy'
-import { contextLabel } from './context-hint'
+import { contextLine } from './context-hint'
+import { groupReactions } from './reaction-groups'
+import { FoldedPill } from './FoldedCard'
+import { foldOf } from './fold-card'
 import { callLineSuffix } from './call-line'
-import { BotGuestAvatar, ThreadChip as KithThreadChip, pairOf, type Origin, type Place } from '../../components/kith'
-import { noticeThreadChip } from './notice-thread'
-import { botGuestSender, botOriginLabel } from '@shared/bot-guest-chat'
-import { runLabel, threadOrigin } from '@shared/thread-writer'
-import { avatarImage } from '@shared/crew'
+import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
+import { toolRowOf } from '@shared/thread-feed'
+import { botGuestSender } from '@shared/bot-guest-chat'
+import { quoteOf, quotesOf } from './reply-quote'
 import { richCardOf, type RichCard } from '@shared/rich-card'
 import { NewsCard, ScheduleCard } from './RichCards'
 
@@ -37,21 +41,17 @@ export function reactionPick(store: BotStore, entry: Entry): ReactionPick {
   return { emoji: QUICK_REACTIONS, chosen: entry.data.reactions ?? [], toggle: (e) => store.react(entry, e) }
 }
 
-/** One chat-visible entry in a chat or a thread, with what can be done to it. */
-export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrace, openThread, replyInThread, openId = null }: {
+/** One chat-visible entry in the flat chat, with what can be done to it. */
+export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrace }: {
   entry: Entry
   groupStart: boolean
   chat: Bot | null
   openTrace: () => void
-  /** Main chat only: start (or open) the thread on this message. */
-  openThread?: (e: Entry) => void
-  /** "Reply in thread": opens the thread, never folds one that is open. */
-  replyInThread?: (e: Entry) => void
-  /** The thread open under its message: its chip tints in the agent's colours. */
-  openId?: string | null
 }) {
-  const reply = openThread ? () => (replyInThread ?? openThread)(entry) : undefined
-  const chip = (entry.kind === 'notice' ? noticeThreadChip(entry) : entry.data.thread && entry.data.thread.count > 0) && entry.data.thread && openThread ? <ThreadChip summary={entry.data.thread} open={() => openThread(entry)} isOpen={openId === entry.id} chat={chat} /> : null
+  const store = useStore()
+  // Reply is a quote above the composer; the host has no reply link.
+  const quote = quoteOf(entry.data.text)
+  const reply = quote && !chat?.botGuest ? () => quotesOf(store).set(entry.botId, quote) : undefined
   const guestSender = botGuestSender(chat, entry)
   switch (entry.kind) {
     case 'user':
@@ -66,7 +66,6 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
             <VStack gap={4} className="chat-row-indent">
               <GuestBotBubble entry={entry} reply={reply} />
               <ReactionsRow entry={entry} />
-              {chip}
             </VStack>
           </VStack>
         )
@@ -75,20 +74,17 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
         <VStack align="flex-end" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
           <UserBubble entry={entry} botWorking={!!chat && isWorking(chat)} reply={reply} />
           <ReactionsRow entry={entry} />
-          {chip}
         </VStack>
       )
     case 'agent': {
       const card = richCardOf(entry.data)
       return (
         <VStack align="flex-start" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
-          {chat && isGroup(chat) && groupStart ? <AuthorLabel botId={entry.data.author} /> : null}
+          {groupStart ? <AuthorLabel botId={entry.data.author ?? entry.botId} /> : null}
           {card ? <AgentCard entry={entry} card={card} openTrace={openTrace} reply={reply} /> : <AgentBubble entry={entry} openTrace={openTrace} reply={reply} />}
           <VStack gap={4} className={chat && isGroup(chat) ? 'chat-row-indent' : undefined}>
             <AnsweredBy answeredBy={entry.data.answeredBy} />
-            <ContextHint contextPercent={entry.data.contextPercent} />
             <ReactionsRow entry={entry} />
-            {chip}
           </VStack>
         </VStack>
       )
@@ -106,7 +102,7 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
       // A routine's "Created routine" notice is its Schedule card.
       if (richCardOf(entry.data)?.type === 'schedule') return <div className="chat-row group-start"><div className="agent-inset"><ScheduleCard entry={entry} card={richCardOf(entry.data)!} /></div></div>
       // Any notice that roots a thread (a bot guest's conversation) opens it like a message does.
-      return <div className="chat-row notice">{chip && entry.data.thread?.origin === 'bot' ? null : <NoticeRow entry={entry} />}{chip ? <div className="notice-thread-chip">{chip}</div> : null}</div>
+      return <div className="chat-row notice"><NoticeRow entry={entry} /></div>
   }
 })
 
@@ -124,14 +120,47 @@ function AgentCard({ entry, card, openTrace, reply }: { entry: Entry; card: Rich
   )
 }
 
-/** A quiet "context N%" under the reply; the host sets it only above its threshold. */
-function ContextHint({ contextPercent }: { contextPercent: unknown }) {
-  const label = contextLabel(contextPercent)
-  return label ? <Text size="footnote" tone="tertiary">{label}</Text> : null
+/** Under a tapped reply, at its bottom right: the time, then a 13 pt ring and "N% context" when the host sent a percent. */
+function ContextLine({ entry }: { entry: Entry }) {
+  const line = contextLine(relativeTime.time(entry.createdAt), entry.data.contextPercent)
+  const r = 5.5
+  const c = 2 * Math.PI * r
+  return (
+    <div className="context-line">
+      <span className="context-line-time">{line.time}</span>
+      {line.fill !== null && line.label ? (
+        <>
+          <svg className="context-ring" width={13} height={13} viewBox="0 0 13 13" aria-hidden>
+            <circle cx="6.5" cy="6.5" r={r} className="context-ring-track" />
+            <circle cx="6.5" cy="6.5" r={r} className="context-ring-arc" strokeDasharray={`${line.fill * c} ${c}`} transform="rotate(-90 6.5 6.5)" />
+          </svg>
+          <span className="context-line-label">{line.label}</span>
+        </>
+      ) : null}
+    </div>
+  )
 }
 
 /** Follows the store: the card shows a spinner while its answer is on its way. */
 function LivePermission({ entry }: { entry: Entry }) {
+  const store = useLiveStore()
+  const [open, setOpen] = useState(false)
+  const fold = foldOf(entry)
+  // An approved card that still holds its old run keeps its Stop row, so it stays a card.
+  const folded = fold && !(entry.data.held || store.stoppedRuns.get(entry.id))
+  if (folded) {
+    return (
+      <div className="agent-inset">
+        <FoldedPill fold={fold} time={relativeTime.time(entry.createdAt)} open={open} toggle={() => setOpen((o) => !o)} />
+        {open ? <div className="folded-card-body"><OpenCard entry={entry} /></div> : null}
+      </div>
+    )
+  }
+  return <OpenCard entry={entry} />
+}
+
+/** The full card for an entry, pending or answered. */
+function OpenCard({ entry }: { entry: Entry }) {
   const store = useLiveStore()
   const ownerName = ownerNameFrom(store.bots.get(entry.botId)?.activity)
   // A key request is its own card; an entry without data.card (or an old one) is the approval card as before.
@@ -175,50 +204,15 @@ function heldFor(entry: Entry, store: BotStore, ownerName: string | null): HeldC
   }
 }
 
-/** Who wrote a message in a group: their avatar and name in their color. */
+/** Who wrote a message: the bot at 24 (no tile, soft shadow) and its name in Nunito 800. */
 export function AuthorLabel({ botId }: { botId?: string | null }) {
   const store = useStore()
   const bot = botId ? store.bots.get(botId) : undefined
   return (
     <HStack gap={8}>
-      {bot ? <BotAvatar bot={bot} size={26} animated={false} /> : null}
-      <Text size="subheadline" weight="medium" tone="secondary">{store.authorName(botId)}</Text>
+      {bot ? <KithBot face={isGroup(bot) ? 'group' : (avatarImage(bot) ?? 'group')} color={bot.avatarColor} id={bot.id} size={24} animated={false} /> : null}
+      <span className="kith-text-agent-name author-name">{store.authorName(botId)}</span>
     </HStack>
-  )
-}
-
-/**
- * Under a message with a thread: where it works (grey), then the pill with the agent's face, the reply count and
- * when. While the thread is open under its message the pill tints in the agent's colours.
- */
-export function ThreadChip({ summary, open, isOpen = false, chat }: { summary: ThreadSummary; open: () => void; isOpen?: boolean; chat: Bot | null }) {
-  const store = useStore()
-  const author = summary.authors.map((id) => store.bots.get(id)).find((b): b is Bot => !!b) ?? (chat && !isGroup(chat) ? chat : null)
-  const folder = chat?.folder
-  const place: Place | undefined = folder && folder.kind !== 'workspace' && folder.name ? { kind: folder.kind === 'project' ? 'project' : 'folder', name: folder.name } : undefined
-  const image = author ? avatarImage(author) : null
-  // A thread started outside the app (a terminal, a channel) says so; an origin this app doesn't know shows nothing.
-  const origin = threadOrigin(summary)
-  const tag: Origin | undefined = origin === 'terminal' || origin === 'bot' || origin === 'discord' || origin === 'telegram' || origin === 'slack' ? origin : undefined
-  return (
-    <div className={`thread-meta ${chat && isGroup(chat) ? 'start' : ''}`}>
-      <KithThreadChip
-        thread={{
-          replies: summary.count,
-          newCount: summary.unread ?? 0,
-          time: relativeTime.day(summary.lastAt),
-          open: isOpen,
-          // Without a face (a deleted bot) the chip still counts; the pill just has no picture.
-          agent: { face: image ?? 'group', color: author?.avatarColor, id: author?.id ?? 'unknown' },
-          pair: pairOf(author?.avatarColor),
-          place,
-          origin: tag,
-          originLabel: origin === 'bot' ? botOriginLabel(summary) : runLabel(summary),
-          onToggle: open,
-          onOpen: open,
-        }}
-      />
-    </div>
   )
 }
 
@@ -256,8 +250,8 @@ export function UserBubble({ entry, botWorking, reply }: { entry: Entry; botWork
             className="bubble user selectable"
             reactions={reactionPick(store, entry)}
             items={() => [
+              ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
               { title: 'Copy', icon: 'square.on.square', action: copy },
-              ...(reply ? [{ title: 'Reply in thread', icon: 'arrowshape.turn.up.left', action: reply }] : []),
               ...(status === 'queued' ? [{ title: 'Unsend', icon: 'arrow.uturn.backward', action: () => store.unsend(entry) }] : []),
             ]}
           >
@@ -299,7 +293,7 @@ function UserStatus({ entry, botWorking, hovering }: { entry: Entry; botWorking:
   }
 }
 
-/** An outside bot's message: an agent-style bubble on the left (copy and thread, no queue or unsend). */
+/** An outside bot's message: an agent-style bubble on the left (reply and copy, no queue or unsend). */
 function GuestBotBubble({ entry, reply }: { entry: Entry; reply?: () => void }) {
   const store = useStore()
   const copy = () => entry.data.text && window.kith.app.copy(entry.data.text)
@@ -310,8 +304,8 @@ function GuestBotBubble({ entry, reply }: { entry: Entry; reply?: () => void }) 
           className="bubble agent selectable"
           reactions={reactionPick(store, entry)}
           items={() => [
+            ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
             { title: 'Copy', icon: 'square.on.square', action: copy },
-            ...(reply ? [{ title: 'Reply in thread', icon: 'arrowshape.turn.up.left', action: reply }] : []),
           ]}
         >
           <MarkdownText text={entry.data.text ?? ''} />
@@ -324,21 +318,36 @@ function GuestBotBubble({ entry, reply }: { entry: Entry; reply?: () => void }) 
 export function AgentBubble({ entry, openTrace, reply }: { entry: Entry; openTrace: () => void; reply?: () => void }) {
   const store = useStore()
   const [hovering, setHovering] = useState(false)
+  const [line, setLine] = useState(false)
   const copy = () => entry.data.text && window.kith.app.copy(entry.data.text)
+  // Scrolling the chat takes the line away again.
+  useEffect(() => {
+    if (!line) return
+    const hide = () => setLine(false)
+    window.addEventListener('scroll', hide, true)
+    return () => window.removeEventListener('scroll', hide, true)
+  }, [line])
+  // A tap on the reply itself; links, buttons and a text selection keep their own meaning.
+  const tap = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('a, button, input, textarea, summary, [role="button"]')) return
+    if (window.getSelection()?.toString()) return
+    setLine((v) => !v)
+  }
   return (
     <div className="message agent" title={fullDate.format(entry.createdAt)} onMouseEnter={() => setHovering(true)} onMouseLeave={() => setHovering(false)}>
-      <div className="message-body">
+      <div className="message-body" onClick={tap}>
         <Bubble
           className={entry.data.files?.length ? "file-message" : "bubble agent"}
           reactions={reactionPick(store, entry)}
           items={() => [
+            ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
             { title: 'Copy', icon: 'square.on.square', action: copy },
-            ...(reply ? [{ title: 'Reply in thread', icon: 'arrowshape.turn.up.left', action: reply }] : []),
             { title: 'Show what it did', icon: 'list.bullet', action: openTrace },
           ]}
         >
           {entry.data.files?.length ? <div className="file-message-cards">{entry.data.files.map((file) => <SharedFileView key={file.id} entry={entry} file={file} />)}</div> : <MarkdownText text={entry.data.text ?? ''} />}
         </Bubble>
+        {line ? <ContextLine entry={entry} /> : null}
         <MessageActions className="trailing" visible={hovering} reactions={reactionPick(store, entry)} reply={reply} trace={openTrace} copy={copy} />
       </div>
     </div>
@@ -426,20 +435,21 @@ function Timer({ since }: { since: number }) {
 /** The user's reactions under a message; clicking one takes it back. */
 export function ReactionsRow({ entry }: { entry: Entry }) {
   const store = useStore()
-  const reactions = entry.data.reactions
-  if (!reactions?.length) return null
+  const groups = groupReactions(entry.data.reactions)
+  if (!groups.length) return null
   return (
     <HStack align="stretch" gap={4}>
-      {reactions.map((emoji) => (
-        <button key={emoji} className="press reaction-chip" title={`Remove ${emoji}`} aria-label={`Remove reaction ${emoji}`} onClick={() => store.react(entry, emoji)}>
+      {groups.map(({ emoji, count, mine }) => (
+        <button key={emoji} className={mine ? 'press reaction-chip mine' : 'press reaction-chip'} title={`Remove ${emoji}`} aria-label={`Remove reaction ${emoji}`} onClick={() => store.react(entry, emoji)}>
           <Text size="body">{emoji}</Text>
+          <span className="reaction-count">{count}</span>
         </button>
       ))}
     </HStack>
   )
 }
 
-/** Compact actions beside the bubble: a reaction strip, reply in thread, and more (copy, what it did). */
+/** Compact actions beside the bubble: a reaction strip, reply, and more (copy, what it did). */
 function MessageActions({ visible, className, reactions, reply, trace, copy }: {
   visible: boolean
   className: string
@@ -457,7 +467,7 @@ function MessageActions({ visible, className, reactions, reply, trace, copy }: {
       <button ref={smile} className="message-action" title="Add reaction" aria-label="Add reaction" onClick={() => setMenu('reactions')}>
         <Icon name="face.smiling" size={14} />
       </button>
-      {reply ? <IconButton title="Reply in thread" icon="arrowshape.turn.up.left" size={26} onClick={reply} /> : null}
+      {reply ? <IconButton title="Reply" icon="arrowshape.turn.up.left" size={26} onClick={reply} /> : null}
       <button ref={more} className="message-action" title="More message actions" aria-label="More message actions" onClick={() => setMenu('more')}>
         <Icon name="ellipsis" size={14} />
       </button>
@@ -469,5 +479,24 @@ function MessageActions({ visible, className, reactions, reply, trace, copy }: {
         items={() => [{ title: 'Copy', icon: 'square.on.square', action: copy }, ...(trace ? [{ title: 'Show what it did', icon: 'list.bullet', action: trace }] : [])]}
       />
     </div>
+  )
+}
+
+/** A tool call as one row in the chat: "Edited kith-sessions.py  +6 -2"; it opens the command and output. */
+export function ToolRowItem({ entry }: { entry: Entry }) {
+  const m = toolRowOf(entry)
+  return (
+    <div className="chat-tool">
+      <ToolRow verb={m.verb} object={m.object} result={m.result} state={m.state} detail={m.command || m.output ? { command: m.command, output: m.output } : undefined} />
+    </div>
+  )
+}
+
+/** The steps of a long run folded away; it opens the full conversation. */
+export function EarlierSteps({ count, open }: { count: number; open: () => void }) {
+  return (
+    <button className="chat-earlier" onClick={open}>
+      {count === 1 ? '1 earlier step' : `${count} earlier steps`}
+    </button>
   )
 }

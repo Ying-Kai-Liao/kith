@@ -9,6 +9,7 @@ import { Text } from '../../components/Text'
 import { useStore } from '../../store/context'
 import type { KithInfoStore } from '../../store/kith-info-store'
 import { BotSettingsPanel } from '../bots/BotEditorView'
+import { AccessTab } from '../bots/kith/AccessTab'
 import { KithDetails, KithHeader } from '../bots/kith/KithDetails'
 import { useKithInfo } from '../bots/kith/use-kith'
 import { MemoryCard } from '../bots/MemoryView'
@@ -18,11 +19,12 @@ import '../bots/bots.css'
 import './details-panel.css'
 import './agent-sheet.css'
 
-export type DetailsTab = 'details' | 'memory' | 'settings'
+export type DetailsTab = 'details' | 'memory' | 'access' | 'settings'
 
 const TABS: { id: DetailsTab; label: string }[] = [
   { id: 'details', label: 'Details' },
   { id: 'memory', label: 'Memory' },
+  { id: 'access', label: 'Access' },
   { id: 'settings', label: 'Settings' },
 ]
 
@@ -44,6 +46,10 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
   const bot = store.bots.get(botId) ?? null
   const group = !!bot && isGroup(bot)
   const kith = useKithInfo(botId, true)
+  // Access is the owner's page on a Kith agent whose host knows kith details; every other bot keeps its tabs.
+  const hasAccess = !!bot?.hqAgent && store.isOwner && !!kith && !kith.unsupported
+  const tabs = hasAccess ? TABS : TABS.filter((t) => t.id !== 'access')
+  const shownTab = tabs.some((t) => t.id === tab) ? tab : 'details'
   return (
     <div className="details-panel">
       <div className="details-drag" />
@@ -68,12 +74,14 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
           <GroupMembersList group={bot} editGroup={editGroup} />
         ) : (
           <>
-            <TabChoice label="Conversation details" selection={tab} options={TABS} onChange={setTab} />
-            <div key={tab} className="details-tab fade-in">
-              {tab === 'details' ? (
+            <TabChoice label="Conversation details" selection={shownTab} options={tabs} onChange={setTab} />
+            <div key={shownTab} className="details-tab fade-in">
+              {shownTab === 'details' ? (
                 <DetailsBody botId={botId} routineId={routineId} kith={kith} />
-              ) : tab === 'memory' ? (
+              ) : shownTab === 'memory' ? (
                 <MemoryCard botId={botId} />
+              ) : shownTab === 'access' && kith && bot?.hqAgent ? (
+                <AccessTab agent={bot.hqAgent} kith={kith} />
               ) : (
                 <BotSettingsPanel botId={botId} part="rarely" />
               )}

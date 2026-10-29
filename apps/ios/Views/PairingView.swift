@@ -24,7 +24,7 @@ struct PairingView<Leading: View>: View {
                 if step == .install { BackButton { go(.scan) } } else { leading }
             } title: {
                 Text(step == .install ? "Install Kith" : "Add a Mac")
-                    .font(.system(size: 16, weight: .semibold))
+                    .kithText(.topBar)
                     .foregroundStyle(Palette.text)
                     .accessibilityAddTraits(.isHeader)
             } trailing: {
@@ -48,7 +48,7 @@ struct PairingView<Leading: View>: View {
                 Button {
                     withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { onSkip?() }
                 } label: {
-                    Text("Skip for now").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
+                    Text("Skip for now").kithText(.topBar).frame(maxWidth: .infinity, minHeight: 50)
                 }
                 .buttonStyle(.line)
                 .accessibilityHint("Add a Mac later from Settings, Account.")
@@ -57,7 +57,7 @@ struct PairingView<Leading: View>: View {
                 .transition(.opacity)
             }
         }
-        .background(Palette.background)
+        .background { SkyBackground() }
     }
 
     private func go(_ next: Step) {
@@ -91,8 +91,8 @@ private struct CardRow: View {
             HStack(spacing: 14) {
                 Image(systemName: systemImage).font(.title3).foregroundStyle(Palette.text).frame(width: 28)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.body).foregroundStyle(Palette.text)
-                    Text(detail).font(.subheadline).foregroundStyle(Palette.secondary)
+                    Text(title).kithText(.body).foregroundStyle(Palette.text)
+                    Text(detail).kithText(.body).foregroundStyle(Palette.mutedOnSky)
                 }
                 .multilineTextAlignment(.leading)
                 Spacer(minLength: 8)
@@ -143,8 +143,8 @@ private struct InstallPage: View {
 
                     // Copied here, pasted on the computer (Universal Clipboard or a message to yourself).
                     Text("Copy here, paste on the computer: Universal Clipboard, or send it to yourself.")
-                        .font(.subheadline)
-                        .foregroundStyle(Palette.secondary)
+                        .kithText(.body)
+                        .foregroundStyle(Palette.mutedOnSky)
                         .padding(.horizontal, 4)
 
                     CardRow(title: "Setup guide", detail: "github.com/Ying-Kai-Liao/kith", systemImage: "book.closed") {
@@ -156,7 +156,7 @@ private struct InstallPage: View {
             }
 
             Button(action: next) {
-                Text("Scan the code").font(.headline).frame(maxWidth: .infinity, minHeight: 50)
+                Text("Scan the code").kithText(.topBar).frame(maxWidth: .infinity, minHeight: 50)
             }
             .buttonStyle(.ink)
             .padding(.horizontal, 24)
@@ -181,7 +181,7 @@ private struct InstallStep: View {
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 6) {
                 Text(title).font(.body.weight(.semibold)).foregroundStyle(Palette.text)
-                if let note { Text(note).font(.subheadline).foregroundStyle(Palette.secondary) }
+                if let note { Text(note).kithText(.body).foregroundStyle(Palette.mutedOnSky) }
                 CommandBlock(command).padding(.top, 2)
             }
         }
@@ -258,8 +258,8 @@ private struct ScanPage: View {
                     Text(os == .mac
                          ? "On your Mac, click Kith in the menu bar, then Pair iPhone."
                          : "On your computer, run this in a terminal:")
-                        .font(.subheadline)
-                        .foregroundStyle(Palette.secondary)
+                        .kithText(.body)
+                        .foregroundStyle(Palette.mutedOnSky)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                     if os == .linux { CommandBlock("~/.kith/serve/bin/kith-serve pair") }
@@ -274,8 +274,8 @@ private struct ScanPage: View {
                             Text(error).font(.system(size: 14, weight: .semibold)).foregroundStyle(Palette.danger)
                             // The usual cause: the phone has no road to the computer yet.
                             Text("Check that this iPhone and the computer are on the same Wi-Fi or both on Tailscale, or that “Reach from anywhere” is on in Kith on the computer.")
-                                .font(.footnote)
-                                .foregroundStyle(Palette.secondary)
+                                .kithText(.secondary)
+                                .foregroundStyle(Palette.mutedOnSky)
                         }
                     }
                     .padding(14)
@@ -304,11 +304,11 @@ private struct ScanPage: View {
                 // Signed in, account computers show up and ask for access themselves.
                 if !inModal && account.isConfigured && !account.isSignedIn {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("Or sign in").font(.footnote.weight(.semibold)).foregroundStyle(Palette.secondary).textCase(.uppercase)
+                        Text("Or sign in").font(.footnote.weight(.semibold)).foregroundStyle(Palette.mutedOnSky).textCase(.uppercase)
                         SignInButtons()
                         Text("Signed in, the Macs on your account show up without a code.")
-                            .font(.footnote)
-                            .foregroundStyle(Palette.secondary)
+                            .kithText(.secondary)
+                            .foregroundStyle(Palette.mutedOnSky)
                     }
                 }
 
@@ -325,7 +325,7 @@ private struct ScanPage: View {
                         .buttonStyle(PressScale())
                     }
                 }
-                .font(.footnote)
+                .kithText(.secondary)
                 .foregroundStyle(Palette.tertiary)
             }
             .padding(.horizontal, 24)
@@ -357,7 +357,7 @@ private struct ScanPage: View {
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "qrcode.viewfinder").font(.system(size: 44, weight: .light))
-                    Text("Camera not available. Paste the link below.").font(.footnote)
+                    Text("Camera not available. Paste the link below.").kithText(.secondary)
                 }
                 .foregroundStyle(Palette.tertiary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -450,7 +450,7 @@ private struct PairedCover: View {
                 Image(systemName: "checkmark.circle").font(.system(size: 46, weight: .light))
                 Text("Paired with \(summary.name)").font(.system(size: 17, weight: .semibold)).multilineTextAlignment(.center)
                 if summary.agents > 0 {
-                    Text(summary.agents == 1 ? "1 agent is ready" : "\(summary.agents) agents are ready").font(.subheadline).opacity(0.8)
+                    Text(summary.agents == 1 ? "1 agent is ready" : "\(summary.agents) agents are ready").kithText(.body).opacity(0.8)
                     HStack(spacing: -6) {
                         ForEach(summary.portraits, id: \.self) { CharacterAvatar(portrait: $0, size: 30) }
                     }
