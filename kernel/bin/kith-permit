@@ -233,8 +233,8 @@ def ask_helper(a, env=os.environ):
 
 
 def helper_card(person, caller, agent, task, env):
-    """A helper the caller's membership doesn't grant is asked of the owner on a card while this call waits (Just this once,
-    Always for <person>, No): the host writes the grant through kith-auth before it answers yes, and the helper's launch
+    """A helper the caller's membership doesn't grant is asked of the owner on a card while this call waits (<helper>, once,
+    for <person>'s <agent> in the next 5 minutes; Always for <person>; No): the host writes the grant through kith-auth before it answers yes, and the helper's launch
     checks it again (and uses up a once) with revoke. None: go on and ask; else what the agent is told. A person who may
     not use the caller gets no card: kith ask refuses them in its own words."""
     auth = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth')

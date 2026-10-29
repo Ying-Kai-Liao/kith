@@ -314,13 +314,20 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
         return hub.store.card_live(&card.id, None, Some(&who.run_id)).ok().flatten();
     }
     let chat = chat_for(hub, &who.person, &who.agent)?;
+    let person_name = hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty());
     let escape = card.tool == access::TOOL;
     let (title, kind) = (title_of(&card.tool, &card.shown), tool_kind(&card.tool));
     let (title, mut detail, mut options) = if escape {
         let name = hub.store.person(&card.person).map(|p| p.name).filter(|n| !n.is_empty());
         access::entry_view(card, &name.unwrap_or_else(|| card.person.clone()))
     } else {
-        let (yes, no) = if extra.is_some() { ("Just this once", "No") } else { ("Allow once", "Deny") };
+        let (yes, no) = match &extra {
+            Some((_, _, kept)) => {
+                let name = person_name.clone().unwrap_or_else(|| who.person.clone());
+                (edge::once_label(kept, &name, &who.agent), "No")
+            }
+            None => ("Allow once".into(), "Deny"),
+        };
         (
             title,
             crate::agent::acp::truncate(&card.shown, 6000),
@@ -363,9 +370,8 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
         data["chain"] = chain.into();
     }
     if !who.person.is_empty() {
-        let name = hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty());
         data["person"] = who.person.as_str().into();
-        data["personName"] = name.unwrap_or_else(|| who.person.clone()).into();
+        data["personName"] = person_name.unwrap_or_else(|| who.person.clone()).into();
     }
     let lane = Lane::main(&chat.id);
     let turn = hub.store.max_turn(&chat.id);
