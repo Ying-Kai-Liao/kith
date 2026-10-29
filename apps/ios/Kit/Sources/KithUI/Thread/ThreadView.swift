@@ -2,9 +2,9 @@ import KithKit
 import SwiftUI
 import UIKit
 
-/// One endless conversation with a bot or a group chat. Only deliberate messages show
-/// here; tool calls and thinking live in the "Full conversation" sheet. Any message can
-/// start a thread, which opens over it.
+/// One endless, flat conversation with a bot or a group chat: messages, the replies of every task, and the tool
+/// calls under the reply that made them, in time order. Thinking lives in the "Full conversation" sheet. Any message
+/// can be replied to (a quote over the composer).
 public struct ThreadView: View {
     let botId: String
 
@@ -18,7 +18,6 @@ public struct ThreadView: View {
     @Environment(BotStore.self) var model
     @Environment(\.dismiss) var dismiss
     @State var showTrace = false
-    @State var openThread: ThreadTarget?
     @State var botChat: BotChatTarget?
     @State var editingGroup = false
     @State var details: DetailsRequest?
@@ -28,15 +27,10 @@ public struct ThreadView: View {
     /// The chat stays on the newest message until the reader scrolls away.
     @State var following = true
     @State var loadingEarlier = false
-    /// Tasks the user opened or folded on this device; the rest follow their state.
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var bot: Bot? { model.bots[botId] }
 
-
-    func closeThread() {
-        withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { openThread = nil }
-    }
 
     /// The messages (each platform's own `transcript`, in its `ThreadView+` file) and the
     /// composer, without the platform's top chrome.
@@ -87,8 +81,7 @@ public struct ThreadView: View {
         chrome(chat)
             .readingConversation(botId)
             .kithSheet(item: Binding<FileDownloads.Export?>(get: {
-                guard let item = model.fileDownloads.export, item.botId == botId,
-                      item.isPresentedByChat(openThread: openThread?.id) else { return nil }
+                guard let item = model.fileDownloads.export, item.botId == botId else { return nil }
                 return item
             }, set: { if $0 == nil { model.fileDownloads.dismissExport() } })) { item in
                 FileExportSheet(url: item.url) { model.fileDownloads.dismissExport() }
@@ -125,18 +118,14 @@ public struct ThreadView: View {
             TimeSeparator(date: date)
         case .exchanges(let group):
             BotMessageRow(group: group) { botChat = BotChatTarget(id: group.peerId) }
-        case .task(let root):
-            if let bot {
-                TaskRow(root: root, bot: bot, newest: root.id == Tasks.current(in: model.chat(botId))?.id,
-                        choice: Binding(get: { model.taskChoices[root.id] }, set: { model.taskChoices[root.id] = $0 })) {
-                    showTrace = true
-                } openThread: {
-                    withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { openThread = ThreadTarget(id: root.id) }
-                }
-            } else {
-                // Without its bot (deleted) a task is just its first message.
-                ChatRow(entry: root, groupStart: true, chat: bot) { showTrace = true }
+        case .tool(let e):
+            ToolCallRow(ThreadFeed.toolRow(e)).padding(.top, 4)
+        case .earlier(let count):
+            Button { showTrace = true } label: {
+                Text(count == 1 ? "1 earlier step" : "\(count) earlier steps")
+                    .kithText(.secondary).foregroundStyle(Palette.muted).frame(minHeight: 32, alignment: .leading)
             }
+            .buttonStyle(.plain)
         case .entry(let e, let groupStart):
             if e.kind == "notice", let id = e.data.routineId {
                 Button {
@@ -146,14 +135,31 @@ public struct ThreadView: View {
                         .font(.footnote).foregroundStyle(Palette.secondary).padding(.vertical, 10)
                 }.buttonStyle(.plain)
             } else {
-                ChatRow(entry: e, groupStart: groupStart, chat: bot) {
-                    showTrace = true
-                } openThread: { root in
-                    withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { openThread = ThreadTarget(id: root.id) }
-                }
+                ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: canReply(e) ? reply : nil)
                     .equatable()
+                    .task(id: missingReplies(e)) {
+                        // Its thread's older replies are not here yet: bring them in, so the chat has them in order.
+                        if missingReplies(e) { await model.loadThread(botId, root: e.id) }
+                    }
             }
         }
+    }
+
+    /// Reply goes to the composer, so it needs one: not a read-only chat, nor a message in a thread a terminal holds.
+    func canReply(_ entry: Entry) -> Bool {
+        guard bot != nil, bot?.isReadOnly != true, bot?.botGuest == nil, ReplyQuote.line(of: entry) != nil else { return false }
+        guard let root = entry.threadId else { return true }
+        return model.allEntries(botId).first { $0.id == root }?.data.thread?.isHeldElsewhere != true
+    }
+
+    func reply(_ entry: Entry) {
+        model.replyQuotes[botId] = entry
+    }
+
+    /// A message that starts a thread whose replies were not all loaded (only live ones arrived).
+    func missingReplies(_ entry: Entry) -> Bool {
+        guard entry.threadId == nil, let summary = entry.data.thread else { return false }
+        return ThreadFeed.isMissingReplies(model.replies(botId, root: entry.id), summary: summary)
     }
 
     // MARK: chrome
@@ -223,8 +229,10 @@ struct ChatItem: Identifiable {
         case entry(Entry, groupStart: Bool)
         /// Main chat only: consecutive bot-to-bot exchanges with one peer.
         case exchanges(BotExchangeGroup)
-        /// Main chat only: a task's first message, shown with its thread or as a card (`TaskRow`).
-        case task(Entry)
+        /// Main chat only: one tool call, under the reply that made it.
+        case tool(Entry)
+        /// Main chat only: a run of tool calls longer than `ThreadFeed.visibleSteps` folds its older steps into this line.
+        case earlier(count: Int)
     }
 
     let id: String
@@ -232,17 +240,35 @@ struct ChatItem: Identifiable {
 
     /// Chat-visible entries plus time separators (gaps > 1 h) and author grouping. A bot's
     /// messages arrive whole (Grok Bot's `send_message`); what it writes along the way is trace.
+    ///
+    /// `groupingExchanges` builds the main chat, which is flat: every thread's replies and every tool call are
+    /// interleaved with the chat's own messages by time (the host keeps its task and thread model; this is only how
+    /// it is shown). Pass all of the chat's entries, threads included.
     static func build(_ entries: [Entry], groupingExchanges: Bool = false) -> [ChatItem] {
         var out: [ChatItem] = []
         var lastDate: Date?
         var lastAuthor: String?
-        var slots = groupingExchanges ? BotExchangeGroup.collapse(entries) : entries.filter(\.isChat).map(BotExchangeGroup.Item.entry)
-        // A task still talking after the chat's last message sits at the end, not at its old root.
-        var moved: Set<String> = []
-        if groupingExchanges { (slots, moved) = Tasks.place(slots) }
-        for slot in slots {
-            var date = slot.date
-            if case .entry(let e) = slot, moved.contains(e.id) { date = Date(timeIntervalSince1970: Double(Tasks.lastAt(e)) / 1000) }
+        var tools: [Entry] = []
+        // A run of tool calls: the last few show, the older ones fold.
+        func flushTools() {
+            guard !tools.isEmpty else { return }
+            if tools.count > ThreadFeed.visibleSteps, let first = tools.first {
+                out.append(ChatItem(id: "earlier-\(first.id)", kind: .earlier(count: tools.count - ThreadFeed.visibleSteps)))
+                tools.suffix(ThreadFeed.visibleSteps).forEach { out.append(ChatItem(id: $0.id, kind: .tool($0))) }
+            } else {
+                tools.forEach { out.append(ChatItem(id: $0.id, kind: .tool($0))) }
+            }
+            tools = []
+        }
+        let flat = groupingExchanges ? flatSlots(entries) : entries.filter(\.isChat).map { Flat.slot(.entry($0)) }
+        for flatSlot in flat {
+            if case .tool(let e) = flatSlot {
+                tools.append(e)
+                continue
+            }
+            guard case .slot(let slot) = flatSlot else { continue }
+            flushTools()
+            let date = slot.date
             // Bot-originated messages carry an empty nonce. Their entry IDs
             // distinguish them; only real nonces identify optimistic echoes.
             let id = if case .entry(let e) = slot, e.kind == "user", let nonce = e.data.clientNonce, !nonce.isEmpty { "user-\(nonce)" } else { slot.id }
@@ -255,9 +281,6 @@ struct ChatItem: Identifiable {
             case .exchanges(let group):
                 out.append(ChatItem(id: id, kind: .exchanges(group)))
                 lastAuthor = nil
-            case .entry(let e) where groupingExchanges && e.isTask:
-                out.append(ChatItem(id: id, kind: .task(e)))
-                lastAuthor = nil
             case .entry(let e):
                 // In a group each bot is its own author.
                 let author = e.kind == "user" ? "user" : e.kind == "agent" ? "agent:\(e.data.author ?? "")" : e.kind
@@ -265,21 +288,48 @@ struct ChatItem: Identifiable {
                 lastAuthor = (author == "user" || e.kind == "agent") ? author : nil
             }
         }
+        flushTools()
         return out
     }
 
-    /// Whether this row shows the entry (a search result's message may be a task's first message).
+    private enum Flat {
+        case slot(BotExchangeGroup.Item)
+        case tool(Entry)
+    }
+
+    /// The flat chat's order: the main chat's slots, every thread's chat-visible replies and every tool call, by time
+    /// (ties keep arrival order). An entry that arrived both in the chat and in a thread fetch shows once.
+    private static func flatSlots(_ entries: [Entry]) -> [Flat] {
+        var seen = Set<String>()
+        let unique = entries.filter { seen.insert(ThreadFeed.stableId($0)).inserted }
+        var all: [Flat] = BotExchangeGroup.collapse(unique.filter { $0.threadId == nil }).map { .slot($0) }
+        for e in unique {
+            if e.kind == "tool" { all.append(.tool(e)) } else if e.threadId != nil, e.isChat { all.append(.slot(.entry(e))) }
+        }
+        func date(_ f: Flat) -> Date {
+            switch f {
+            case .slot(let s): s.date
+            case .tool(let e): e.date
+            }
+        }
+        return all.enumerated().sorted { a, b in
+            let (da, db) = (date(a.element), date(b.element))
+            return da == db ? a.offset < b.offset : da < db
+        }.map(\.element)
+    }
+
+    /// Whether this row shows the entry (a search result's message, or a thread reply or tool call in the flat chat).
     func holds(entry id: String) -> Bool {
         switch kind {
-        case let .entry(entry, _), let .task(entry): entry.id == id
-        case .exchanges, .separator: false
+        case let .entry(entry, _): entry.id == id || ThreadFeed.stableId(entry) == id
+        case let .tool(entry): entry.id == id
+        case .exchanges, .separator, .earlier: false
         }
     }
 
     var isUserMessage: Bool {
         switch kind {
         case let .entry(entry, _): entry.kind == "user"
-        case .task: true
         default: false
         }
     }
@@ -354,21 +404,35 @@ extension ThreadView {
             .onChange(of: model.pendingThread, initial: true) { _, pending in
                 guard let pending, pending.chat == botId else { return }
                 model.pendingThread = nil
-                openThread = ThreadTarget(id: pending.root)
+                // The same path as a search result: the list waits for the row, scrolls to it and flashes it once.
+                model.focusEntry = BotStore.FocusEntry(chat: botId, entry: pending.root)
             }
-            .kithSheet(item: $openThread) { target in
-                RepliesView(botId: botId, rootId: target.id) { closeThread() }
+            // The threads the reader has unread replies in are on screen too: read them.
+            .background {
+                ForEach(readThreads, id: \.self) { Color.clear.readingConversation(botId, thread: $0) }
             }
     }
 
-    private var working: Bool { bot?.isWorking(in: botId, thread: nil) == true && !model.isOffline }
+    /// Roots of the threads this chat shows replies of that have something unread, and the current task.
+    private var readThreads: [String] {
+        let roots = model.chat(botId).filter { ($0.data.thread?.unread ?? 0) > 0 }.map(\.id)
+        return Array(Set(roots + [Tasks.current(in: model.chat(botId))?.id].compactMap { $0 }))
+    }
+
+    /// What is working in this chat: the main conversation, the current task's lane, or any other lane of the chat
+    /// (an older task still going). The chat's one working line shows it.
+    private var workingLane: WorkingLane? {
+        guard let bot, !model.isOffline else { return nil }
+        let lanes = [WorkingLane(chat: botId, thread: nil), WorkingLane(chat: botId, thread: Tasks.current(in: model.chat(botId))?.id)]
+        if let lane = lanes.first(where: { bot.isWorking(in: $0.chat, thread: $0.thread) }) { return lane }
+        return bot.workingLanes?.first { $0.chat == botId }
+    }
 
     /// iPhone's messages: all this device has, earlier ones from the computer as the reader
     /// scrolls up; the chat follows the newest message until they scroll away, and a reply is
     /// revealed steadily as it's written.
     var transcript: some View {
-        let thread = model.chat(botId)
-        let items = ChatItem.build(thread, groupingExchanges: true)
+        let items = ChatItem.build(model.allEntries(botId), groupingExchanges: true)
         var rows: [ConversationRow] = []
         if moreOnComputer {
             rows.append(ConversationRow("earlier") {
@@ -387,9 +451,9 @@ extension ThreadView {
         }
         rows += items.map { item in ConversationRow(item.id, isUserMessage: item.isUserMessage) { row(item) } }
         // Offline, "working" is only what the computer last said; don't show it as live.
-        if let bot, working {
+        if let bot, let lane = workingLane {
             rows.append(ConversationRow("working") {
-                WorkingIndicator(bot: bot, thinking: model.currentThinking(botId, thread: nil))
+                WorkingIndicator(bot: bot, thinking: model.currentThinking(botId, thread: lane.thread))
                     .padding(.top, 6)
             })
         }

@@ -145,6 +145,8 @@ struct Composer: View {
             if case .success(let urls) = result { add(urls) }
         }
         .photosPicker(isPresented: $pickingPhotos, selection: $photoItems, maxSelectionCount: 10, matching: .images)
+        // Replying to a message puts the cursor in the box.
+        .onChange(of: model.replyQuotes[botId]?.id) { _, id in if id != nil { focused = true } }
         .onChange(of: photoItems) { _, items in
             guard !items.isEmpty else { return }
             photoItems = []
@@ -192,6 +194,9 @@ struct Composer: View {
     /// Above the field, inside the dock: the new-task chip and the files going out.
     private var accessory: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let quote {
+                quoteChip(quote).transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if showsNewTaskChip {
                 newTaskChip.transition(.move(edge: .bottom).combined(with: .opacity))
             }
@@ -217,6 +222,21 @@ struct Composer: View {
             dictatedAfter = draft
             Task { await dictation.start { said in draft = Dictation.join(dictatedAfter, said) } }
         }
+    }
+
+    /// The line being replied to (main chat only; a thread has its own box).
+    private var quote: String? { thread == nil ? model.replyQuotes[botId].flatMap(ReplyQuote.line(of:)) : nil }
+
+    /// Over the box while replying to a message; its x drops the quote.
+    private func quoteChip(_ line: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrowshape.turn.up.left").font(.caption).foregroundStyle(Palette.muted)
+            Text(line).kithText(.secondary).foregroundStyle(Palette.ink).lineLimit(1)
+            Spacer(minLength: 0)
+            IconButton("Cancel reply", systemImage: "xmark") { model.replyQuotes[botId] = nil }
+        }
+        .padding(.leading, 14)
+        .padding(.top, 8)
     }
 
     /// Over the box while the next message starts a new task; its x goes back to the current one.
