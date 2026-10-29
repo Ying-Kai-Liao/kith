@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '5aa41228fc447623c0111891615c570477f9508add3ea88310cf1176d1b02e33'
+export const CONTRACT_SHA256 = '8816a5c4b430db848eca31d6aca93d967fc69bfe446563667005f23860b76a39'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -85,7 +85,7 @@ export type BotEntryKind = (typeof BotEntryKindValues)[number]
 export const decodeBotEntryKind = (raw: unknown): BotEntryKind | 'unknown' => known(BotEntryKindValues, raw, 'unknown')
 
 /** The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status. */
-export const BotErrorCodeValues = ['pending', 'notGranted', 'rateLimited', 'busy', 'notFound', 'badRequest', 'tooLong', 'notSupported', 'syncing', 'heldByOtherWriter', 'tooMany'] as const
+export const BotErrorCodeValues = ['pending', 'notGranted', 'rateLimited', 'busy', 'notFound', 'badRequest', 'tooLong', 'notSupported', 'syncing', 'heldByOtherWriter', 'tooMany', 'nonceReused'] as const
 export type BotErrorCode = (typeof BotErrorCodeValues)[number]
 /** How a consumer reads a BotErrorCode word: one this version doesn't know is 'unknown'. */
 export const decodeBotErrorCode = (raw: unknown): BotErrorCode | 'unknown' => known(BotErrorCodeValues, raw, 'unknown')
