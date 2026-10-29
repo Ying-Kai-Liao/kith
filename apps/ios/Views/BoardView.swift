@@ -139,7 +139,7 @@ struct BoardView: View {
                             .font(.system(size: 18, weight: .regular)).foregroundStyle(Palette.muted)
                             .frame(width: KithSize.botAvatar)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(project.name).kithText(.agentName).foregroundStyle(Palette.ink).lineLimit(1)
+                            Text(project.name).kithText(.topBar).foregroundStyle(Palette.ink).lineLimit(1)
                             Text(projectDetail(project)).kithText(.body).foregroundStyle(Palette.mutedOnSky).lineLimit(1)
                         }
                         Spacer(minLength: 0)
@@ -169,7 +169,7 @@ struct BoardView: View {
                             .font(.system(size: 18, weight: .regular)).foregroundStyle(Palette.muted)
                             .frame(width: KithSize.botAvatar)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(wait.title).kithText(.agentName).foregroundStyle(Palette.ink).lineLimit(1)
+                            Text(wait.title).kithText(.topBar).foregroundStyle(Palette.ink).lineLimit(1)
                             Text(wait.detail).kithText(.body).foregroundStyle(Palette.mutedOnSky).lineLimit(2)
                         }
                         Spacer(minLength: 6)

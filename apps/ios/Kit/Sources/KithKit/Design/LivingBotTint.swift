@@ -12,8 +12,9 @@ enum LivingBotTint {
     /// The stored `avatarColor` of a palette pick is `kith:<id>`; anything else is the untouched body.
     static let prefix = "kith:"
 
+    /// The id the drawing code carries: `<id>`, or `<id>:plain` for a flat fill.
     static func paletteId(_ stored: String?) -> String? {
-        AvatarPalette.pick(stored)
+        AvatarPalette.parse(stored).map { $0.plain ? $0.id + ":plain" : $0.id }
     }
 
     // MARK: Cache
@@ -30,8 +31,11 @@ enum LivingBotTint {
         let key = "\(asset)|\(paletteId ?? "")" as NSString
         if let hit = cache.object(forKey: key) { return hit.image }
         let image: CGImage?
-        if let paletteId, let rig = LivingBotData.rig(forAsset: asset), rig.tint,
-           let pair = LivingBotData.palette.first(where: { $0.id == paletteId }) {
+        let plain = paletteId?.hasSuffix(":plain") == true
+        let bare = paletteId.map { plain ? String($0.dropLast(6)) : $0 }
+        if let bare, let rig = LivingBotData.rig(forAsset: asset), rig.tint,
+           let found = LivingBotData.palette.first(where: { $0.id == bare }) {
+            let pair = plain ? PalettePair(id: found.id, a: found.a, b: found.a) : found
             image = recolour(asset: asset, pair: pair, detail: rig.detail) ?? original(asset)
         } else {
             image = original(asset)

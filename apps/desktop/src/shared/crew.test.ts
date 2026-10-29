@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { avatarImage, CREW, crewName, SPARES } from './crew.ts'
-import { PALETTE, paletteColor, paletteValue, rigOf } from './living-bots.ts'
+import { PALETTE, paletteColor, paletteValue, parseColor, rigOf } from './living-bots.ts'
 
 const bot = (id: string, name: string, kind = 'agent', avatarSource?: string) => ({ id, name, kind, avatarSource })
 
@@ -59,6 +59,15 @@ test('an avatar colour is a `kith:` palette pick; empty and old ids keep the ori
   assert.equal(paletteValue('coral'), 'kith:coral')
   // Old bots carry bare ids, some of which (blue, green, cyan, violet) are also palette names: they must not recolour.
   for (const old of ['', 'black', 'brown', 'red', 'orange', 'yellow', 'magenta', 'gray', 'blue', 'green', 'cyan', 'violet', 'coral', 'kith:nope', 'kith:', undefined]) assert.equal(paletteColor(old), null)
+})
+
+test('plain is `kith:<id>:plain`, a flat fill of the pair; gradient and old values are unchanged', () => {
+  const coral = PALETTE.find((c) => c.id === 'coral')!
+  assert.equal(paletteValue('coral', true), 'kith:coral:plain')
+  assert.deepEqual(parseColor('kith:coral'), { pair: coral, plain: false })
+  assert.deepEqual(parseColor('kith:coral:plain'), { pair: coral, plain: true })
+  assert.deepEqual(paletteColor('kith:coral:plain'), coral)
+  for (const none of ['', 'coral', 'blue', 'kith:blue:soft', 'kith:nope:plain', 'kith::plain', 'kith:plain', undefined, null]) assert.equal(parseColor(none), null)
 })
 
 test('an image this app does not know falls back to auto', () => {

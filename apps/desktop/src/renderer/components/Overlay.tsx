@@ -202,6 +202,8 @@ export interface MenuItem {
   leading?: ReactNode
   selected?: boolean
   destructive?: boolean
+  /** Greyed out and inert (the roster's context menu). */
+  disabled?: boolean
   divider?: boolean
   action: () => void
 }

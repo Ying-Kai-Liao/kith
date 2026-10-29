@@ -228,7 +228,6 @@ export const LiveBot = memo(function LiveBot({
       data-reduce={reduce || undefined}
       style={style}
     >
-      {group ? <span className="kb-tile" /> : null}
       <div className="kb-rig" style={rigStyle}>
         <div className="kb-body">
           <img className="kb-img" src={src} alt="" draggable={false} />
@@ -265,7 +264,7 @@ export function BotAvatar({ bot, size = 40, animated = true }: { bot: Bot; size?
   return <LiveBot face={face} color={bot.avatarColor} mood={moodOf(bot, animated)} size={size} id={bot.id} animated={animated} />
 }
 
-/** A group chat's face: the kith cube on its soft tile, which holds the crew. */
+/** A group chat's face: the kith cube, no tile. */
 export function GroupAvatar({ size = 40, animated = true }: { members?: Bot[]; size?: number; animated?: boolean }) {
   return (
     <div aria-hidden className="avatar-frame" style={{ width: size, height: size }}>
