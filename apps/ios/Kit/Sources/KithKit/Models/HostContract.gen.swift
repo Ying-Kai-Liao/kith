@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "8816a5c4b430db848eca31d6aca93d967fc69bfe446563667005f23860b76a39"
+    public static let sha256 = "8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59"
 }
 
 extension HostContract {
@@ -1017,8 +1017,9 @@ extension HostContract {
         public var project: String?
         public var folder: String?
         public var clear: Bool?
+        public var budget: Int64?
 
-        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil) {
+        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil) {
             self.botId = botId
             self.text = text
             self.clientNonce = clientNonce
@@ -1030,6 +1031,7 @@ extension HostContract {
             self.project = project
             self.folder = folder
             self.clear = clear
+            self.budget = budget
         }
     }
 

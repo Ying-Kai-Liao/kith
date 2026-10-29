@@ -44,6 +44,9 @@ fn restore(enhanced: bool) {
     let _ = terminal::disable_raw_mode();
 }
 
+/// `kith tui --budget N`: the turn budget every message to a group asks for.
+pub static GROUP_BUDGET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+
 pub async fn run(url: String, token: Option<String>) -> Result<()> {
     let client = net::Client::new(&url, token.as_deref());
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
