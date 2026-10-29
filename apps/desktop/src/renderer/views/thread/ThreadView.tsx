@@ -5,8 +5,12 @@ import { currentTask } from '@shared/tasks'
 import { BotAvatar, GroupAvatar } from '../../components/Avatar'
 import { DropdownMenu, Spinner } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
+import { StatusChip } from '../../components/kith'
+import { SHOW_COMPUTER_EVENT } from '../../lib/computer-event'
+import type { BotStore } from '../../store/bot-store'
+import { chatSubtitle, showsComputerItem } from './chat-subtitle'
 import { Sheet, usePresence } from '../../components/Overlay'
-import { HStack, IconSlot, Spacer } from '../../components/Stack'
+import { HStack, Spacer } from '../../components/Stack'
 import { Text } from '../../components/Text'
 import { prefs, usePref } from '../../lib/prefs'
 import { useStore } from '../../store/context'
@@ -195,6 +199,8 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
     />
   )
 
+  const computerItem = showsComputerItem(computerFacts(store, botId))
+
   return (
     <div className="thread-view" ref={root}>
       <div className="conversation">
@@ -209,13 +215,14 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
                   <Icon name="phone.fill" size={15} weight="medium" />
                 </button>
               ) : null}
-              {(!showSettings || !wide) && !compactDetails && canShare ? (
+              {(!showSettings || !wide) && !compactDetails && (canShare || computerItem) ? (
                 <DropdownMenu
                   className="top-pair-button"
                   title="More"
                   items={() => [
                     { title: 'Conversation details', icon: 'info.circle', action: toggleDetails },
-                    { title: 'Share access…', icon: 'person.crop.circle.badge.plus', action: () => setSharing(true) },
+                    ...(canShare ? [{ title: 'Share access…', icon: 'person.crop.circle.badge.plus', action: () => setSharing(true) }] : []),
+                    ...(computerItem ? [{ title: 'Show the computer', icon: 'display', action: showComputer }] : []),
                   ]}
                 >
                   <Icon name="ellipsis" size={15} weight="medium" />
@@ -238,7 +245,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
                 <Icon name="chevron.down" size={10} weight="semibold" color="var(--secondary)" />
               </span>
             </HStack>
-            {store.shownConnection.kind !== 'online' || store.mismatch ? <ConnectionSubtitle /> : null}
+            <ChatSubtitle botId={botId} />
           </button>
           {bot && !isGroup(bot) && !guestChat ? (
             <div className={`place-chip-row ${calling ? 'hidden-by-call' : ''}`} inert={calling}>
@@ -304,32 +311,41 @@ function TopFade() {
   return <div className="top-fade" />
 }
 
-function ConnectionSubtitle() {
+/** Under the name: a status chip when the connection isn't Live, "using the computer" while the agent drives the screen. */
+function ChatSubtitle({ botId }: { botId: string }) {
   const store = useStore()
-  const connecting = store.shownConnection.kind === 'connecting'
-  const symbol = store.connection.kind !== 'online' ? 'wifi.slash' : store.hostRoute === 'relay' ? 'cloud' : store.hostRoute === 'direct' ? 'wifi' : store.hostRoute === 'loopback' ? 'desktopcomputer' : 'network'
-  const description = (() => {
-    switch (store.shownConnection.kind) {
-      case 'connecting':
-        return 'Connecting'
-      case 'computerOffline':
-      case 'offline':
-        return 'Offline'
-      case 'unauthorized':
-        return 'No access'
-      case 'unpaired':
-        return 'Not paired'
-    }
-    if (store.mismatch) return 'Needs update'
-    return store.hostRoute === 'relay' ? 'Connected through Cloudflare' : store.hostRoute === 'direct' ? 'Connected over Wi-Fi or Tailscale' : store.hostRoute === 'loopback' ? 'Connected locally' : 'Connected'
-  })()
+  const facts = computerFacts(store, botId)
+  const subtitle = chatSubtitle(facts, store.shownConnection, !!store.mismatch, store.hostName)
+  if (!subtitle) return null
+  if (subtitle.kind === 'chip') {
+    return (
+      <span className="title-pill-subtitle" title={`${store.hostName} · ${store.connectionLabel}`}>
+        <StatusChip kind={subtitle.chip} detail={subtitle.detail} />
+      </span>
+    )
+  }
   return (
-    <HStack as="span" gap={6} className="title-pill-subtitle" title={`${store.hostName} · ${description}`} aria-label={`${store.hostName}, ${description}`}>
-      <IconSlot width={12}>{connecting ? <Spinner size={8} /> : <Icon name={symbol} size={8} weight="medium" />}</IconSlot>
-      <Text size="caption" weight="medium" truncate>{store.connectionLabel}</Text>
-    </HStack>
+    <span
+      role="button"
+      tabIndex={0}
+      className="title-pill-subtitle title-pill-using"
+      title="Show the computer"
+      onClick={(e) => { e.stopPropagation(); showComputer() }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); showComputer() } }}
+    >
+      <HStack as="span" gap={5}>
+        <Icon name="display" size={10} weight="medium" />
+        <Text size="caption" weight="medium" truncate>using the computer</Text>
+      </HStack>
+    </span>
   )
 }
+
+function computerFacts(store: BotStore, botId: string) {
+  return { bot: store.bots.get(botId), isLoopback: store.isLoopback, isOwner: store.isOwner, screen: store.screen }
+}
+
+const showComputer = () => window.dispatchEvent(new Event(SHOW_COMPUTER_EVENT))
 
 /** The messages: every loaded message, brought to the newest as it changes while the reader is at the bottom. */
 const PAGE = 40

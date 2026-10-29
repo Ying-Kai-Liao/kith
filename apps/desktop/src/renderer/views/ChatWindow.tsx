@@ -10,6 +10,7 @@ import { ChoicePicker, ResizeHandle } from '../components/Controls'
 import { Dialog, ModalHeader, Sheet, type MenuItem } from '../components/Overlay'
 import { HStack } from '../components/Stack'
 import { Text } from '../components/Text'
+import { SHOW_COMPUTER_EVENT } from '../lib/computer-event'
 import { useModels } from '../lib/observable'
 import { prefs, stepTextSize, usePref, DEFAULT_TEXT_SIZE } from '../lib/prefs'
 import { useApp, StoreContext } from '../store/context'
@@ -54,6 +55,13 @@ export function ChatWindow() {
   useSSHAttachments(app)
   const ssh = useSSH()
   const showsChat = shouldShowChat(app.host.state.kind, app.computers.length, ssh.state)
+
+  // The chat's "Show the computer" opens Computer access, the Mac app's screen view.
+  useEffect(() => {
+    const show = () => setShowAccess(true)
+    window.addEventListener(SHOW_COMPUTER_EVENT, show)
+    return () => window.removeEventListener(SHOW_COMPUTER_EVENT, show)
+  }, [])
 
   useEffect(
     () =>
