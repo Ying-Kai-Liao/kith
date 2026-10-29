@@ -60,21 +60,21 @@ public extension ToggleStyle where Self == KithSwitch {
 
 // MARK: - Buttons
 
-/// The filled call-to-action: accent capsule with press feedback.
+/// The filled call-to-action: ink capsule (white in dark mode) with press feedback.
 public struct PrimaryButtonStyle: ButtonStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
-        StyledButton(configuration: configuration, fill: Palette.accentFill, foreground: Palette.onAccent)
+        StyledButton(configuration: configuration, fill: Palette.text, foreground: Palette.background, edge: nil)
     }
 }
 
-/// A quieter filled button next to a primary one.
+/// The button next to a primary one: background fill, ink text, a hairline edge.
 public struct SecondaryButtonStyle: ButtonStyle {
     public init() {}
 
     public func makeBody(configuration: Configuration) -> some View {
-        StyledButton(configuration: configuration, fill: Palette.bubbleUser, foreground: Palette.text)
+        StyledButton(configuration: configuration, fill: Palette.background, foreground: Palette.text, edge: Palette.border)
     }
 }
 
@@ -120,6 +120,7 @@ private struct StyledButton: View {
     let configuration: ButtonStyleConfiguration
     let fill: Color
     let foreground: Color
+    let edge: Color?
     @Environment(\.isEnabled) private var isEnabled
 
     var body: some View {
@@ -129,6 +130,7 @@ private struct StyledButton: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 11)
             .background(fill, in: Capsule())
+            .overlay { if let edge { Capsule().strokeBorder(edge, lineWidth: 1) } }
             .opacity(isEnabled ? (configuration.isPressed ? 0.85 : 1) : 0.4)
             .scaleEffect(configuration.isPressed ? Motion.pressScale : 1)
             .animation(Motion.press, value: configuration.isPressed)

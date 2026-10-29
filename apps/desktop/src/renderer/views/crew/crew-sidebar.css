@@ -73,13 +73,13 @@ html:not([data-platform='darwin']) .cs-profile {
   height: 32px;
 }
 
-/* ---- Crew rows (the bot at 40, no tile) ---- */
+/* ---- Crew rows (the bot at 48, no tile) ---- */
 .cs-row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 7px 8px;
+  padding: 9px 8px;
   min-width: 0;
 }
 .cs-row-main {

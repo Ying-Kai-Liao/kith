@@ -20,6 +20,7 @@
 .kith-model { display: flex; justify-content: space-between; gap: 12px; min-width: 0; }
 .kith-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .kith-access-row { align-items: center; }
+.kith-access-person { display: flex; flex-direction: column; gap: 6px; }
 .kith-access-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 
 .kith-schedule { display: flex; flex-direction: column; gap: 4px; }

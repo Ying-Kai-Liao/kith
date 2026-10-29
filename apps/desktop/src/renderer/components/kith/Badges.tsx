@@ -4,11 +4,11 @@ import { pairStyle, type Pair } from './pair.ts'
 import './kith.css'
 
 /** Ink pill with the number in white Inter 11 bold, tabular figures. 18 tall (16 on Board). Hidden at 0, `99+` above 99. */
-export function CountBadge({ count, size = 18, label }: { count: number; size?: 18 | 16; label?: string }) {
+export function CountBadge({ count, size = 18, label, inverted = false }: { count: number; size?: 18 | 16; label?: string; /** White pill with dark digits, for a black ground (the notch island). */ inverted?: boolean }) {
   const text = countLabel(count)
   if (!text) return null
   return (
-    <span className="kc-count" style={{ height: size, minWidth: size }} role="img" aria-label={label ?? `${text} waiting`}>
+    <span className={inverted ? 'kc-count inverted' : 'kc-count'} style={{ height: size, minWidth: size }} role="img" aria-label={label ?? `${text} waiting`}>
       {text}
     </span>
   )

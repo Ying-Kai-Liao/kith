@@ -4,15 +4,14 @@ import { LiveBot, type Mood } from '../../components/Avatar'
 import { Icon } from '../../components/Icon'
 import { ThinkingOrb } from '../../components/ThinkingOrb'
 import { useArrivals, useFlip } from './island-motion'
-import { avatarColor, palette, withAlpha } from '../../lib/theme'
+import { avatarColor, withAlpha } from '../../lib/theme'
 
 // Pieces the island's views share: the big character with its glow and
 // badge, the agent row, the column of other bots and the key hint on a button.
 
 export type Badge = 'working' | 'needsInput' | 'finished' | 'failed' | null
 
-/** State colors: amber needs you, green done, red failed (Kith's palette has no others). */
-export const AMBER = palette(true).warning
+/** State colors: green done, red failed (Kith's palette has no others). Needs you is white, the inverted badge. */
 export const GREEN = '#34D399'
 export const RED = '#F4505E'
 
@@ -30,7 +29,7 @@ export const badgeOf = (bot: Pick<IslandBot, 'status'>): Badge =>
 function glowOf(badge: Badge, color: string) {
   switch (badge) {
     case 'needsInput':
-      return AMBER
+      return avatarColor(color)
     case 'finished':
       return GREEN
     case 'failed':
@@ -89,7 +88,7 @@ export function StateBadge({ badge, small = false }: { badge: Badge; small?: boo
       </span>
     )
   }
-  const color = badge === 'needsInput' ? AMBER : badge === 'finished' ? GREEN : RED
+  const color = badge === 'needsInput' ? '#F5F6F8' : badge === 'finished' ? GREEN : RED
   const label = badge === 'needsInput' ? 'Needs you' : badge === 'finished' ? 'Done' : 'Failed'
   return (
     <span className={`island-badge ${small ? 'small' : ''}`} style={{ background: color }} aria-label={label}>
@@ -126,9 +125,9 @@ export function MiniColumn({ bots, onOpen }: { bots: IslandBot[]; onOpen: (ref: 
   )
 }
 
-/** A small dot on a mini character: amber needs you, white working, red failed. */
+/** A small dot on a mini character: white needs you, white working, red failed. */
 export function StatusDot({ bot }: { bot: Pick<IslandBot, 'status'> }) {
-  const color = bot.status === 'needsInput' ? AMBER : bot.status === 'working' ? '#F5F6F8' : bot.status === 'error' ? RED : null
+  const color = bot.status === 'needsInput' ? '#F5F6F8' : bot.status === 'working' ? '#F5F6F8' : bot.status === 'error' ? RED : null
   return color ? <span className="island-status-dot" style={{ background: color }} /> : null
 }
 

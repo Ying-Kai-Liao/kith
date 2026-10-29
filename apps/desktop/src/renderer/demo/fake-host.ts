@@ -28,6 +28,11 @@ export class FakeHost {
     { personId: 'leo', name: 'Leo', agents: { pacer: 'guest' }, projects: [], joined: false, openInvites: 0, devices: [], autoBots: false },
   ]
   private invites: Record<string, unknown>[] = []
+  /** The grants ledger as `accessLedger` returns it (fake people, folders and sites). */
+  private grants: { key: string; kind: string; agent: string; person: string; name: string; target: string; since: number | null }[] = [
+    { key: 'g1', kind: 'read', agent: 'pacer', person: 'mia', name: 'Mia', target: '~/docs', since: Date.now() - 12 * 86_400_000 },
+    { key: 'g2', kind: 'domain', agent: 'pacer', person: 'mia', name: 'Mia', target: 'pypi.org', since: null },
+  ]
   /** Saved keys as `listKeys` returns them: names and who holds them, never a value (fake accounts only). */
   private keys: { profile: string; service: string; account: string; owner: string; vars: string[]; agents: string[]; last_used: string | null }[] = [
     { profile: 'github/work', service: 'github', account: 'work', owner: 'kai', vars: ['GITHUB_TOKEN'], agents: ['scout', 'reviewer'], last_used: new Date(Date.now() - 3_600_000).toISOString() },
@@ -244,6 +249,13 @@ export class FakeHost {
         return this.provideSecret(str('entryId'), str('account'), (b.values ?? {}) as Record<string, unknown>)
       case 'listKeys':
         return { keys: this.keys }
+      case 'accessLedger':
+        return { grants: this.grants.filter((g) => !b.agent || g.agent === b.agent) }
+      case 'removeGrant':
+        this.grants = this.grants.filter((g) => g.key !== str('key'))
+        return { ok: true }
+      case 'agentPeople':
+        return { agent: str('agent'), month: new Date().toISOString().slice(0, 7), people: { owner: 4.2, mia: 20.1 }, budgets: { mia: 20 } }
       case 'revokeKey': {
         const key = this.keys.find((k) => k.profile === str('profile') && k.service === str('service'))
         if (key) key.agents = key.agents.filter((a) => a !== str('agent'))
