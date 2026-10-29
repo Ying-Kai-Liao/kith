@@ -65,7 +65,7 @@ pub fn of(tool: &str, input: &Value, resource: &str) -> Option<Edge> {
         .then(|| Edge::Domain(host.to_owned()))
 }
 
-/// An agent, job or door name (kith_jobs' AGENT rule): letters, digits, `.`, `_` and `-`, no `:` or `@`.
+/// An agent, job or door name (the AGENT rule of `kith_jobs`): letters, digits, `.`, `_` and `-`, no `:` or `@`.
 fn plain_name(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
@@ -145,8 +145,9 @@ pub async fn for_acp(
 }
 
 /// The option a bot chat's agent is sent for the answer `chosen` to its card. The host's "always" and job options are
-/// a yes to this one request (what they keep is the card's answer's to write), so the agent gets its own allow_once:
-/// never an id it didn't offer, and never its allow_always. None: it offered no allow_once, so it can only be cancelled.
+/// a yes to this one request (what they keep is the card's answer's to write), so the agent gets its own `allow_once`:
+/// never an id it didn't offer, and never its `allow_always`. None: it offered no `allow_once`, so it can only be
+/// cancelled.
 pub fn adapter_option<'a>(options: &'a Value, chosen: &'a str) -> Option<&'a str> {
     if !matches!(chosen, ALWAYS | JOB) {
         return Some(chosen);

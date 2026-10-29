@@ -1,4 +1,4 @@
-//! A guest's doors (kernel/lib/kith_door.py): fixed commands kith-permit runs for a member in a sandbox of their own,
+//! A guest's doors (`kernel/lib/kith_door.py`): fixed commands kith-permit runs for a member in a sandbox of their own,
 //! such as video's render. Each running door leaves a claim; `kith door sweep` kills the doors of the listed people,
 //! every door whose supervisor is gone (a kith-permit or host killed with -9), and every door its person may no longer
 //! run (D1). The host sweeps when it cuts someone off or narrows their access, at start, and every minute.
