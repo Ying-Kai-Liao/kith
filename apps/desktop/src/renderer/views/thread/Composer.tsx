@@ -88,11 +88,11 @@ function DestinationComposer({ botId, onCall, onInterrupt }: {
   // Files picked in the sidebar's dock arrive here once their chat is open.
   const staged = store.stagedFiles.get(botId)
   useEffect(() => {
-    if (thread || !staged) return
+    if (!staged) return
     const incoming = store.takeStagedFiles(botId)
     if (incoming) appendRef.current(incoming)
     field.current?.focus()
-  }, [staged, thread, botId, store])
+  }, [staged, botId, store])
 
   // Measure a separate, wrapping copy: collapsing the live textarea to zero breaks its
   // height transition, caret scroll and IME composition. Observe font/width changes too.
