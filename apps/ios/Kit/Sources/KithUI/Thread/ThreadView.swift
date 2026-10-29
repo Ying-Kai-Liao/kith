@@ -268,6 +268,14 @@ struct ChatItem: Identifiable {
         return out
     }
 
+    /// Whether this row shows the entry (a search result's message may be a task's first message).
+    func holds(entry id: String) -> Bool {
+        switch kind {
+        case let .entry(entry, _), let .task(entry): entry.id == id
+        case .exchanges, .separator: false
+        }
+    }
+
     var isUserMessage: Bool {
         switch kind {
         case let .entry(entry, _): entry.kind == "user"
@@ -385,8 +393,11 @@ extension ThreadView {
                     .padding(.top, 6)
             })
         }
+        // The row holding the message a search result pointed at.
+        let focus = model.focusEntry.flatMap { $0.chat == botId ? $0.entry : nil }
+            .flatMap { entry in items.first { $0.holds(entry: entry) }?.id }
         // Pull to refresh reconnects, like Reconnect in the computer menu, until the link is back.
-        return ConversationList(rows: rows, following: $following, nearTop: { showEarlier() }, refresh: {
+        return ConversationList(rows: rows, following: $following, focus: focus, focused: { model.focusEntry = nil }, nearTop: { showEarlier() }, refresh: {
             model.restartStream()
             _ = try? await model.ready()
         })

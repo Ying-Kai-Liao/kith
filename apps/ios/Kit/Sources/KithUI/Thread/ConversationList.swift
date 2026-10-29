@@ -25,6 +25,9 @@ struct ConversationRow {
 struct ConversationList: View {
     let rows: [ConversationRow]
     @Binding var following: Bool
+    /// A row to scroll to and flash once (a search result's message); `focused` is called when it has.
+    var focus: String?
+    var focused: (() -> Void)?
     /// The reader scrolled up near the top: time to bring in earlier messages.
     var nearTop: (() -> Void)?
     /// Letting go of a full pull past the top: the force refresh, its indicator held until it returns.
@@ -42,7 +45,7 @@ struct ConversationList: View {
             .ignoresSafeArea()
             // The list itself stays inside the safe area (so its rows never see one) and
             // reaches out past it.
-            ConversationCollection(rows: rows, following: $following, nearTop: nearTop, refresh: refresh, pull: pull,
+            ConversationCollection(rows: rows, following: $following, focus: focus, focused: focused, nearTop: nearTop, refresh: refresh, pull: pull,
                                    outsets: UIEdgeInsets(top: max(0, safeFrame.minY - fullFrame.minY), left: 0,
                                                          bottom: max(0, fullFrame.maxY - safeFrame.maxY), right: 0))
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { safeFrame = $0 }
@@ -59,6 +62,8 @@ struct ConversationList: View {
 private struct ConversationCollection: UIViewRepresentable {
     let rows: [ConversationRow]
     @Binding var following: Bool
+    let focus: String?
+    let focused: (() -> Void)?
     let nearTop: (() -> Void)?
     let refresh: (() async -> Void)?
     let pull: PullToRefresh
@@ -86,6 +91,7 @@ private struct ConversationCollection: UIViewRepresentable {
         /// What the list is telling `following` (it reaches the binding after the update).
         private var pending: Bool?
         private var lastId: String?
+        private var revealed: String?
         private var lastOffset: CGFloat = 0
         private var reduceMotion = false
 
@@ -182,6 +188,23 @@ private struct ConversationCollection: UIViewRepresentable {
                 applyKeepingPlace(snapshot)
             }
             if jump || sent { view.scrollToEnd(animated: !reduceMotion) }
+            if let focus = parent.focus, !jump, !sent { reveal(focus) } else if parent.focus == nil { revealed = nil }
+        }
+
+        /// Lands on a row a search result pointed at: the chat stops following the end, the row is centred and
+        /// flashes once. Once per request; the owner clears it through `focused`.
+        private func reveal(_ id: String) {
+            guard revealed != id, let path = dataSource.indexPath(for: id) else { return }
+            revealed = id
+            view.cancelScrollingToEnd()
+            setFollowing(false)
+            view.layoutIfNeeded()
+            view.scrollToItem(at: path, at: .centeredVertically, animated: false)
+            DispatchQueue.main.async { [weak self] in
+                self?.parent?.focused?()
+                self?.view.layoutIfNeeded()
+                self?.view.cellForItem(at: path)?.contentView.flash()
+            }
         }
 
         /// Rows going in or out above: the first row on screen stays where it is.
@@ -405,5 +428,14 @@ struct JumpToLatest: View {
             }
         }
         .animation(Motion.reduced(Motion.layout, reduceMotion), value: visible)
+    }
+}
+
+private extension UIView {
+    /// A soft wash that fades out: where a search result landed.
+    func flash() {
+        layer.cornerRadius = 12
+        backgroundColor = UIColor.tintColor.withAlphaComponent(0.22)
+        UIView.animate(withDuration: 1.4, delay: 0.3, options: [.allowUserInteraction]) { self.backgroundColor = .clear }
     }
 }
