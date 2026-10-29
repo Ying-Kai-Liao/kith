@@ -157,7 +157,9 @@ async fn bot_answers(r: &Rig) -> BTreeMap<&'static str, (&'static str, Value)> {
     r.hub.add_entry(&Lane::main(&room), EntryKind::User, 1, &json!({"text": "hello crew", "status": "sent"})).unwrap();
     let read = call(r, &rex, "botRoomRead", json!({"room": room})).await;
     got.insert("botRoomRead", ("botRoomRead", read));
-    let post = json!({"room": room, "conversation": "cv_none", "epoch": 1, "text": "hi from outside", "clientNonce": "p1"});
+    // An open conversation (no loop started): the bot speaks up in it, one turn off its budget.
+    let open = r.hub.store.open_conversation(&Lane::main(&room), 5, "owner").unwrap();
+    let post = json!({"room": room, "conversation": open.id, "epoch": open.epoch, "text": "hi from outside", "clientNonce": "p1"});
     got.insert("botPost", ("botPost", call(r, &rex, "botPost", post).await));
     got.insert("botConversations", ("botConversations", call(r, &rex, "botConversations", json!({})).await));
     got.insert("botStop", ("botStop", call(r, &rex, "botStop", json!({"conversation": conv})).await));
