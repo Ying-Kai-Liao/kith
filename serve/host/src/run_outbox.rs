@@ -324,12 +324,32 @@ fn post_schedule(
         return Ok(());
     };
     data["outbox"] = outbox(meta, sender);
-    hub.add_entry_once(id, &Lane::main(chat), EntryKind::Agent, &data)?;
+    let (_, added) = hub.add_entry_once(id, &Lane::main(chat), EntryKind::Agent, &data)?;
+    // Its words in their chat on Telegram, Discord or Slack too, unless they turned that off; the card stays either way.
+    if added && schedule_messages(&hub.store, meta.person.as_deref()) {
+        let text = data["text"].as_str().unwrap_or_default().to_owned();
+        crate::channels::tell(meta.person.clone(), meta.agent.clone(), text);
+    }
     if let Some(mut prior) = prior {
         prior.data["richCard"]["snapshot"]["folded"] = json!(if op.op == "removed" { "removed" } else { "changed" });
         hub.set_entry(&prior.id, &prior.data);
     }
     hub.store.kv_set(&key, id)
+}
+
+fn schedule_messages_key(person: Option<&str>) -> String {
+    format!("schedule_messages.{}", person.unwrap_or("-"))
+}
+
+/// Whether `person`'s (`None` is the owner) Schedule cards are also said in their chat-channel thread with the agent:
+/// on unless they turned it off.
+pub fn schedule_messages(store: &crate::store::Store, person: Option<&str>) -> bool {
+    store.kv_get(&schedule_messages_key(person)).as_deref() != Some("off")
+}
+
+pub fn set_schedule_messages(store: &crate::store::Store, person: Option<&str>, on: bool) -> Result<()> {
+    let key = schedule_messages_key(person);
+    if on { store.kv_delete(&key) } else { store.kv_set(&key, "off") }
 }
 
 #[cfg(test)]

@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = 'a6ae2111c2122330d16e32c704a35c4590dc633e7fc86fde85f75e34ca2cfe64'
+export const CONTRACT_SHA256 = '8816a5c4b430db848eca31d6aca93d967fc69bfe446563667005f23860b76a39'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -331,6 +331,10 @@ export interface LinkCode {
   expiresAt: number
 }
 
+export interface ScheduleMessages {
+  on: boolean
+}
+
 /** The chat the accepted call belongs to. */
 export interface CallAccepted {
   botId: string
@@ -600,6 +604,11 @@ export interface SetThreadProjectsParams {
 /** What `linkCode` takes. */
 export type LinkCodeParams = Record<string, never>
 
+/** What `scheduleMessages` takes. */
+export interface ScheduleMessagesParams {
+  on?: boolean | null
+}
+
 /** What `callAccept` takes. */
 export interface CallAcceptParams {
   id: string
@@ -740,6 +749,7 @@ export interface Types {
   CitedThread: CitedThread
   Citation: Citation
   LinkCode: LinkCode
+  ScheduleMessages: ScheduleMessages
   CallAccepted: CallAccepted
   Proven: Proven
   BotInviteCreated: BotInviteCreated
@@ -777,6 +787,7 @@ export interface Types {
   ThreadProjectsParams: ThreadProjectsParams
   SetThreadProjectsParams: SetThreadProjectsParams
   LinkCodeParams: LinkCodeParams
+  ScheduleMessagesParams: ScheduleMessagesParams
   CallAcceptParams: CallAcceptParams
   CallDeclineParams: CallDeclineParams
   CallGreetParams: CallGreetParams
@@ -841,6 +852,7 @@ export const METHODS = {
   threadProjects: { who: ['member'], params: 'ThreadProjectsParams', result: 'ThreadProjects' },
   setThreadProjects: { who: ['member'], params: 'SetThreadProjectsParams', result: 'ThreadProjectsSet' },
   linkCode: { who: ['member'], params: 'LinkCodeParams', result: 'LinkCode' },
+  scheduleMessages: { who: ['member'], params: 'ScheduleMessagesParams', result: 'ScheduleMessages' },
   callAccept: { who: ['member'], params: 'CallAcceptParams', result: 'CallAccepted' },
   callDecline: { who: ['member'], params: 'CallDeclineParams', result: 'Empty' },
   callGreet: { who: ['member'], params: 'CallGreetParams', result: 'Empty' },
@@ -886,6 +898,7 @@ export interface Params {
   threadProjects: ThreadProjectsParams
   setThreadProjects: SetThreadProjectsParams
   linkCode: LinkCodeParams
+  scheduleMessages: ScheduleMessagesParams
   callAccept: CallAcceptParams
   callDecline: CallDeclineParams
   callGreet: CallGreetParams
@@ -930,6 +943,7 @@ export interface Results {
   threadProjects: ThreadProjects
   setThreadProjects: ThreadProjectsSet
   linkCode: LinkCode
+  scheduleMessages: ScheduleMessages
   callAccept: CallAccepted
   callDecline: Empty
   callGreet: Empty
@@ -953,7 +967,7 @@ export interface Results {
 }
 
 /** What an invited person may call. */
-export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation'] as const satisfies readonly MethodName[]
+export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'scheduleMessages', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation'] as const satisfies readonly MethodName[]
 
 /** What an invited person's unproven device may call. */
 export const UNPROVEN_METHODS = ['proveInvite'] as const satisfies readonly MethodName[]
@@ -1021,6 +1035,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     CitedThread: { fields: { id: 'string', botId: 'string', rootId: 'string?' } },
     Citation: { fields: { thread: 'CitedThread?', seq: 'int?', at: 'string?', entries: '[Entry]?', error: 'CitationError?' }, mayOmit: ['thread', 'seq', 'at', 'entries', 'error'] },
     LinkCode: { fields: { code: 'string', expiresAt: 'int' } },
+    ScheduleMessages: { fields: { on: 'bool' } },
     CallAccepted: { fields: { botId: 'string' } },
     Proven: { fields: { proven: 'bool' } },
     BotInviteCreated: { fields: { botId: 'string', inviteId: 'string', expiresAt: 'int', link: 'string', kithLink: 'string', share: 'string' } },
@@ -1058,6 +1073,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     ThreadProjectsParams: { fields: { botId: 'string', threadId: 'string?' } },
     SetThreadProjectsParams: { fields: { botId: 'string', threadId: 'string?', projects: '[string]' } },
     LinkCodeParams: { fields: {} },
+    ScheduleMessagesParams: { fields: { on: 'bool?' } },
     CallAcceptParams: { fields: { id: 'string' } },
     CallDeclineParams: { fields: { id: 'string' } },
     CallGreetParams: { fields: { id: 'string' } },

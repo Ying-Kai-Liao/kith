@@ -79,3 +79,49 @@ async fn incremental_sync_replays_deletions_only_after_the_saved_cursor() {
     assert_eq!(events[1]["rev"], deleted_rev);
     assert_eq!(f.catch_up(deleted_rev).await.len(), 1);
 }
+
+/// Members' access requests reach the owner's other devices (the phone may answer them), the owner's own device
+/// requests only this computer, and a member nothing (invitee-access property 6).
+#[tokio::test]
+async fn access_requests_reach_the_owners_devices_only_and_a_phone_only_members() {
+    use crate::store::{Device, DeviceSource, Scope, now_ms};
+    let f = Fixture::new();
+    for (key, person) in [("owner-phone", None), ("sam-phone", Some("sam"))] {
+        f.hub
+            .store
+            .put_device(&Device {
+                key: key.into(),
+                name: key.into(),
+                platform: "ios".into(),
+                source: DeviceSource::Account,
+                grant_id: Some(format!("grt_{key}")),
+                scopes: vec![Scope::Control],
+                lease_until: Some(now_ms() + 60_000),
+                created_at: now_ms(),
+                last_seen_at: None,
+                person_id: person.map(str::to_owned),
+            })
+            .unwrap();
+    }
+    f.hub.store.set_device_proven("sam-phone").unwrap();
+    let device = |key: &str| Caller::Device { key: key.into(), scopes: vec![Scope::Control] };
+    let streams = [Caller::Local, device("owner-phone"), device("sam-phone")]
+        .map(|caller| events_stream(&f.hub, i64::MAX, None, &caller).unwrap());
+    let requests = json!([{"requestId": "req_owner", "personId": null}, {"requestId": "req_sam", "personId": "sam"}]);
+    f.hub.events.send(json!({"type": "accessRequests", "requests": requests})).unwrap();
+    let mut seen = vec![];
+    for stream in streams {
+        tokio::pin!(stream);
+        let mut ids = None;
+        while let Ok(Some(event)) = tokio::time::timeout(std::time::Duration::from_millis(50), stream.next()).await {
+            if event["type"] == "accessRequests" {
+                let list = event["requests"].as_array().unwrap().iter();
+                ids = Some(list.map(|r| r["requestId"].as_str().unwrap().to_owned()).collect::<Vec<_>>());
+            }
+        }
+        seen.push(ids);
+    }
+    assert_eq!(seen[0].as_deref(), Some(&["req_owner".to_owned(), "req_sam".to_owned()][..]), "this computer: all");
+    assert_eq!(seen[1].as_deref(), Some(&["req_sam".to_owned()][..]), "the owner's phone: members' only");
+    assert_eq!(seen[2], None, "a member: none");
+}

@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "a6ae2111c2122330d16e32c704a35c4590dc633e7fc86fde85f75e34ca2cfe64"
+    public static let sha256 = "8816a5c4b430db848eca31d6aca93d967fc69bfe446563667005f23860b76a39"
 }
 
 extension HostContract {
@@ -702,6 +702,14 @@ extension HostContract {
         }
     }
 
+    public struct ScheduleMessages: Codable, Hashable, Sendable {
+        public var on: Bool
+
+        public init(on: Bool) {
+            self.on = on
+        }
+    }
+
     /// The chat the accepted call belongs to.
     public struct CallAccepted: Codable, Hashable, Sendable {
         public var botId: String
@@ -1208,6 +1216,15 @@ extension HostContract {
         }
     }
 
+    /// What `scheduleMessages` takes.
+    public struct ScheduleMessagesParams: Codable, Hashable, Sendable {
+        public var on: Bool?
+
+        public init(on: Bool? = nil) {
+            self.on = on
+        }
+    }
+
     /// What `callAccept` takes.
     public struct CallAcceptParams: Codable, Hashable, Sendable {
         public var id: String
@@ -1439,6 +1456,7 @@ extension HostContract {
         case threadProjects
         case setThreadProjects
         case linkCode
+        case scheduleMessages
         case callAccept
         case callDecline
         case callGreet
@@ -1462,7 +1480,7 @@ extension HostContract {
     }
 
     /// What an invited person may call.
-    public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation]
+    public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation]
 
     /// What an invited person's unproven device may call.
     public static let unprovenMethods: [Method] = [.proveInvite]
@@ -1503,6 +1521,7 @@ extension HostContract {
         case "CitedThread": _ = try d.decode(CitedThread.self, from: data)
         case "Citation": _ = try d.decode(Citation.self, from: data)
         case "LinkCode": _ = try d.decode(LinkCode.self, from: data)
+        case "ScheduleMessages": _ = try d.decode(ScheduleMessages.self, from: data)
         case "CallAccepted": _ = try d.decode(CallAccepted.self, from: data)
         case "Proven": _ = try d.decode(Proven.self, from: data)
         case "BotInviteCreated": _ = try d.decode(BotInviteCreated.self, from: data)
@@ -1540,6 +1559,7 @@ extension HostContract {
         case "ThreadProjectsParams": _ = try d.decode(ThreadProjectsParams.self, from: data)
         case "SetThreadProjectsParams": _ = try d.decode(SetThreadProjectsParams.self, from: data)
         case "LinkCodeParams": _ = try d.decode(LinkCodeParams.self, from: data)
+        case "ScheduleMessagesParams": _ = try d.decode(ScheduleMessagesParams.self, from: data)
         case "CallAcceptParams": _ = try d.decode(CallAcceptParams.self, from: data)
         case "CallDeclineParams": _ = try d.decode(CallDeclineParams.self, from: data)
         case "CallGreetParams": _ = try d.decode(CallGreetParams.self, from: data)

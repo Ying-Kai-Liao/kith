@@ -1,0 +1,8 @@
+{
+  "name": "kith-ios-mermaid",
+  "private": true,
+  "description": "Pins the mermaid.js the iOS app bundles (Sources/KithUI/Resources/Mermaid/mermaid.min.js, a copy of node_modules/mermaid/dist/mermaid.min.js; CI checks they match) and lists its licenses for scripts/notices.",
+  "dependencies": {
+    "mermaid": "11.17.2"
+  }
+}

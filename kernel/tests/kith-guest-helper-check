@@ -73,6 +73,27 @@ has "a revoked person reaches nothing, helper or not" "$(ask ex front helper "sa
 "$AUTH" person ex --unrevoke >/dev/null 2>&1
 has "and gets exactly what they had back" "$(ask ex front helper "say pong")" "pong from helper for ex"
 
+# out of sync with the Kith cloud (kith serve's lease ran out: kith-auth says held), a revoke made elsewhere may not be
+# here yet (revoke-person R5c): bin/kith waits for the sync, then refuses; the owner never waits
+export KITH_SERVE_DIR=$T/serve; mkdir -p "$KITH_SERVE_DIR"
+lease() { printf '{"linked": true, "until": %s}\n' "$(python3 -c 'import sys, time; print(int(time.time() * 1000) + int(sys.argv[1]))' "$1")" > "$KITH_SERVE_DIR/cloud-sync.json"; }
+lease -1000
+held_out=$(ask guest front helper "say pong" KITH_SYNC_HOLD=0)
+has "held: the helper is refused and the agent is told why" "$held_out" "out of sync with the Kith cloud"
+has "and to try again" "$held_out" "Try again in a minute"
+expect "and the helper did not run" "${held_out//pong/RAN}" "$held_out"
+( sleep 3; lease 60000 ) &
+start=$SECONDS
+has "held, then in sync within the hold: the helper runs" "$(ask guest front helper "say pong" KITH_SYNC_HOLD=30)" "pong from helper for guest"
+expect "after waiting for the sync" "$((SECONDS - start >= 2))" 1
+wait
+lease -1000
+"$AUTH" person kai owner >/dev/null 2>&1
+start=$SECONDS
+has "held: the owner's run (KITH_PERSON is the owner) does not wait" "$(KITH_PERSON=kai KITH_SYNC_HOLD=30 "$KERNEL/bin/kith" helper "say pong" 2>&1)" "pong from helper for kai"
+expect "and is not held at all" "$((SECONDS - start < 2))" 1
+rm "$KITH_SERVE_DIR/cloud-sync.json"
+
 # the tool is listed for a run that has a person and for none else
 tools() { env "$@" python3 -c '
 import importlib.machinery, importlib.util, sys

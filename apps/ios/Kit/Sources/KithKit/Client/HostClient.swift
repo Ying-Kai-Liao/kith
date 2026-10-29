@@ -418,6 +418,14 @@ public extension HostClient {
         try await call(.linkCode)
     }
 
+    /// Whether this person's Schedule cards are also said in their Telegram or Discord chat (on by default); `on`
+    /// sets it first. An older host answers with `HostError.http(404, …)`.
+    func scheduleMessages(on: Bool? = nil) async throws -> Bool {
+        struct Body: Encodable { var on: Bool? }
+        let res: HostContract.ScheduleMessages = try await call(.scheduleMessages, Body(on: on))
+        return res.on
+    }
+
     // MARK: kith bot details (serve/docs/bot-info.md)
 
     func kithInfo(botId: String, refresh: Bool = false) async throws -> KithInfoResponse {
@@ -436,6 +444,13 @@ public extension HostClient {
     func kithSetCallModel(botId: String, model: String) async throws -> KithInfoResponse {
         struct Body: Encodable { var botId: String; var model: String }
         return try await call("kithSetCallModel", Body(botId: botId, model: model), timeout: 60)
+    }
+
+    /// A Schedule card's button on a Kith job (`kith-sched pause|resume|run|rm`): `op` is pause, resume, run or remove.
+    /// Owner only; the answer is hq's info read back.
+    func kithSchedule(botId: String, id: String, op: String) async throws -> KithInfoResponse {
+        struct Body: Encodable { var botId: String; var id: String; var op: String }
+        return try await call("kithSchedule", Body(botId: botId, id: id, op: op), timeout: 60)
     }
 
     /// The grants ledger: every lasting grant for anyone but the owner, of one agent and/or one person. Owner only: a

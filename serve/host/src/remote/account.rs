@@ -170,6 +170,22 @@ pub async fn link_code(hub: &Hub, caller: &Caller) -> Result<Value> {
     Ok(json!({"code": code, "expiresAt": now_ms() + i64::from(LINK_MINUTES) * 60_000}))
 }
 
+/// `scheduleMessages`: whether the caller's Schedule cards are also said in their Telegram, Discord or Slack chat with
+/// the agent, set first when `on` is given. It never stops a run's own messages or the card in the app.
+pub fn schedule_messages(hub: &Hub, caller: &Caller, on: Option<bool>) -> Result<Value> {
+    let person = match devices::principal(&hub.store, caller) {
+        Principal::Owner => None,
+        Principal::Member(person) => Some(person),
+        Principal::Nobody | Principal::Unproven(_) | Principal::Bot { .. } | Principal::BotPending(_) => {
+            bail!("this device isn't allowed on this computer")
+        }
+    };
+    if let Some(on) = on {
+        crate::run_outbox::set_schedule_messages(&hub.store, person.as_deref(), on)?;
+    }
+    Ok(json!({"on": crate::run_outbox::schedule_messages(&hub.store, person.as_deref())}))
+}
+
 /// Tests that point `KITH_AUTH` somewhere hold this: the environment is process-wide.
 #[cfg(test)]
 pub(crate) static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());

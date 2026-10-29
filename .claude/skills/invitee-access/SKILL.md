@@ -1,6 +1,6 @@
 ---
 name: invitee-access
-description: Property tests that an invited person and a bot guest never get more than they were granted. Use when a change touches serve/host/src/api/roles.rs (guard, member_may, MEMBER_METHODS, BOT_METHODS, BOT_PENDING_METHODS, bot_may, shape, event_for, event_for_bot, bot_entry, shape_bot, hello_for, own_bot, owned_bot_chat_agent, approves_own, runs_code, stored_member_approver, may_use, may_use_checked, granted_agents), serve/host/src/api/botguests.rs (the five member handlers, end_bot, revoke_owned_by, enforce, bot_call, ask, the ten-bot limit), the bot principal in api/devices.rs (bot_principal), remote/botsync.rs, a router method in serve/host/src/api/ (a new method must stay off the member list unless justified), dispatch/member_call in api/mod.rs, people/proveInvite, event fan-out in api/events.rs, who answers a card (cards::approver_of, the run-card branch of guard, cards/access.rs escape cards), or kernel/bin/kith-auth (resolve, resolve_bot, may, person --rm/--revoke, member and its env/mode checks, bot, bots-cap, access, forget, retired).
+description: Property tests that an invited person and a bot guest never get more than they were granted. Use when a change touches serve/host/src/api/roles.rs (guard, member_may, MEMBER_METHODS, BOT_METHODS, BOT_PENDING_METHODS, bot_may, shape, event_for, event_for_bot, bot_entry, shape_bot, hello_for, own_bot, owned_bot_chat_agent, approves_own, runs_code, stored_member_approver, may_use, may_use_checked, granted_agents), serve/host/src/api/botguests.rs (the five member handlers, end_bot, revoke_owned_by, enforce, bot_call, ask, the ten-bot limit), the bot principal in api/devices.rs (bot_principal), remote/botsync.rs, a router method in serve/host/src/api/ (a new method must stay off the member list unless justified), dispatch/member_call in api/mod.rs, people/proveInvite, the access-request approval (remote/cloud.rs decide/settle, accessRequests/decideAccessRequest in api/remote.rs), event fan-out in api/events.rs (events_stream, event_for), a guest's helpers (kernel/bin/kith-permit ask_helper), who answers a card (cards::approver_of, the run-card branch of guard, cards/access.rs escape cards), or kernel/bin/kith-auth (resolve, resolve_bot, may, person --rm/--revoke, member and its env/mode checks, bot, bots-cap, access, forget, retired).
 ---
 
 # Invitee access never exceeds the grant
@@ -11,14 +11,16 @@ Tool: property tests with generated inputs. Rust has no cheap verifier that runs
 
 ## Properties (what, and the harm if it breaks)
 
+Numbers are stable names, not an order (10-13 and 23-26 are kith-auth's, 14-20 the bot guests').
+
 Host, `serve/host/src/api/roles_props.rs`:
 
 1. `guard` lets a proven person through only for a method on `MEMBER_METHODS`; for a method that names a chat, that chat is theirs, not deleted, and kith-auth allows its agent right now. Harm: someone reads or drives another person's or the owner's chat.
-2. An unproven device may only call `proveInvite`. A member's device counts as proven when it shows the invite token or when the owner approved its access request by hand on the Mac (`cloud::decide`; never auto mode, where nobody compares the code). Harm: an invite link alone, or the cloud alone, opens the host.
+2. An unproven device may only call `proveInvite`; a proven one that calls it again is refused with "already shown its invite" (the words the apps wait for). A member's device counts as proven when it shows the invite token or when the owner approved its access request by hand, on the Mac or from the owner's phone (`cloud::decide`, behind `decideAccessRequest`, which the owner's other devices may call only for a member's request); never when auto mode approved it, where nobody compares the code. Generated in two halves: `guard` here, and the approval in `serve/host/src/remote/cloud.rs` `a_members_device_is_proven_only_by_the_owners_own_approval` (any request, settled by the owner or by auto mode, yes or no: the device's `principal` is `Member` only for the owner's own yes, `Unproven` for auto mode's, nothing without the code or a live membership). Harm: an invite link alone, or the cloud alone, opens the host.
 3. `respondPermission` passes only for a card of kind permission, raised by that chat, and only when kith-auth says preset `member`. Harm: a guest approves their own agent's dangerous action; a prompt of another chat is answered.
 4. `send` passes with no folder or clear, and a project only if it is in the person's shared projects (checked with the handler's own `Change::from_args`). Harm: a guest picks a folder on the owner's Mac.
 5. The same call after the grant is removed is refused (kith-auth is asked every call). Harm: a revoked person keeps access.
-6. `event_for`: a person gets only `bot`/`entry`/`resync` events of their own chats whose agent is still in their person row, never usage, screens or cloud events, and no `cwd`/`command`/`folder`; the owner sees an invitee's chat only as permission prompts. Harm: leaks of other people's chats and of the Mac.
+6. `event_for`: a person gets only `bot`/`entry`/`resync` events of their own chats whose agent is still in their person row, never usage, screens or cloud events, and no `cwd`/`command`/`folder`; the owner sees an invitee's chat only as permission prompts. In the stream (`events_stream`, before `event_for`), `accessRequests` reach this computer whole, the owner's other devices with members' requests only, and a member never (`events::tests::access_requests_reach_the_owners_devices_only_and_a_phone_only_members`, an example, not generated). Harm: leaks of other people's chats and of the Mac.
 7. `shape` (hello, projects, history, thread, kithInfo), `shape_bot`, `hello_for` leave no folder, cwd, command, path or error text (also on a real `bot_json`). Harm: file paths of the Mac shown to a guest.
 8. kith-auth fails closed: `may_use` is true only for `allowed: true` and not owner; `may_use_checked` is `Some(true)` exactly when `may_use` is true and `None` (never a yes) when kith-auth gave no answer or named the owner; `approves_own` never allows `Bash`; failure, empty or garbage output, `"true"` or `1` for allowed, truncated JSON are all a no; `approves_own` is true only for preset exactly `member`; `granted_agents` never lists an agent kith-auth denies. Harm: a broken kith-auth opens every door.
 9. Calls that must pass do pass (`guard_lets_a_granted_member_use_their_own_chat`), so "refuse everything" cannot satisfy the rest.
@@ -47,15 +49,24 @@ kith-auth, `kernel/tests/kith-auth-props.py` (generated command sequences on a t
 26. (forget) A new person or bot starts with nothing: no membership, grant or invite left behind by an earlier removal of the same id or a hand edit. Harm: an id handed out again inherits the old person's rights.
 27. (retired, access part 6) Removing a person (not a bot) records their id in `retired`, and a retired id is never given to a new person or bot again. Harm: a new invite under the same name reads the old person's memory and files and uses their logins.
 
+A guest's helpers, `kernel/bin/kith-permit` `ask_helper` (it runs `kith-ask` outside the guest sandbox) and the person gate of `kernel/bin/kith`, pinned by examples in `kernel/tests/kith-guest-helper-check`, not generated:
+
+28. A helper never runs wider than its caller's membership (only a helper the membership names, and a helper cannot ask a third agent the caller's membership does not grant), never for a revoked person, never while this Mac is out of sync with the Kith cloud past the hold (`bin/kith` waits while kith-auth says `held`, then refuses; the agent is told to try again), and never with the owner's ask token. Harm: a guest reaches through a helper what their membership does not give them, or the owner's mailbox. The cross-Mac half (a revoke made elsewhere while held) is the revoke-access model's `R5c`.
+
 ## Coverage record
 
-Sync commit: `60d2031e3cd6446d5a1f0de8132077507a8a91f9` (2026-10-28: origin/main `b241d7bb` plus the `guard` fix for finding 1 below; `roles_props`, `botguests_props` and `kernel/tests/kith-auth-props.py` pass there). If `git diff 60d2031e -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
+Sync commit: `fa36279b68fba905e19f57d5fd52347ab583696e` (2026-10-29: origin/main `bc3d92b8` plus the helper's in-sync wait and this re-sync's tests; `roles_props`, `botguests_props`, the property-2 and fan-out tests above and `kernel/tests/kith-auth-props.py` pass there). If `git diff fa36279b -- <file>` shows changes in a covered file, the check needs another look before you trust a pass.
+
+Moved from `60d2031e` (2026-10-28): since then the covered files gained the owner-approved proven device and the phone's answer to members' requests (#382, #387: property 2 reworded and now generated), the `accessRequests` fan-out in `events_stream` and `accessRequests`/`decideAccessRequest` off `LOCAL_ONLY` (#387: property 6's stream sentence and its test; `decideAccessRequest` from a device other than this computer is refused for an owner device's request, `remote.rs`), the `proveInvite` branch of `guard` for a proven device (#378: property 2, generated), `ask_helper` for guests (#380: property 27), and in `cards/` rule 7 (#392: a card a `kith ask` run opened carries `reply_to`/`asked_by`, shown to the approver as a chain and answered back to the asker; who may answer is unchanged, so 21 and 22 stand); `kernel/bin/kith-auth` changed in comments only.
 
 How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechecked against `ed2ceb63`, where the properties and generators were brought up to the code (21-26 and the rows below are new) and property 21 failed on the code for the escape card and for Read/Edit outside the bot's folders. `6fc50729` (on main) bounded the bot owner's answer by the bot's grant folders, which fixed the Read/Edit cases; `60d2031e` refuses the bot owner its bot's escape card, which fixed the last one.
 
 | File | Functions | Properties |
 |---|---|---|
-| serve/host/src/api/roles.rs | `guard`, `member_may`, `MEMBER_METHODS`, `UNPROVEN_METHODS` | 1, 2, 3, 4, 5, 9 |
+| serve/host/src/api/roles.rs | `guard` (incl. the proven `proveInvite` branch), `member_may`, `MEMBER_METHODS`, `UNPROVEN_METHODS` | 1, 2, 3, 4, 5, 9 |
+| serve/host/src/remote/cloud.rs | `decide`, `settle` (`by_owner`: the proven device), `is_member_request`, `requests_json_for` | 2 |
+| serve/host/src/api/remote.rs, api/devices.rs | `accessRequests`, `decideAccessRequest` (a device other than this computer: members' requests only), `LOCAL_ONLY` | 2, 6 (examples: `cloud::tests::the_owners_phone_sees_and_may_answer_only_members_requests`) |
+| serve/host/src/api/events.rs | `events_stream`: the `accessRequests` fan-out, `LOCAL_EVENTS` | 6 (example) |
 | | `own_bot`, `may_use`, `may_use_checked`, `resolve` (private), `approves_own`, `granted_agents` | 1, 3, 5, 8 |
 | | `runs_code`, `stored_member_approver`, `owned_bot_chat_agent`, the run-card branch of `guard`, `secret_card` | 21, 22 |
 | | `within`, `grant_roots` (the approver a card is stored with; the test home has no grant folders, so every named file is outside) | 21 (through `cards::approver_of`'s rule, written in the test) |
@@ -74,10 +85,12 @@ How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechec
 | serve/host/src/api/mod.rs | `member_call` (guard before route) | read, not run: see not covered |
 | kernel/bin/kith-auth | `resolve`, `resolve_bot`, `may`, `bot_may`, `bot_row`, `cmd_person --rm`, `cmd_member`, `cmd_bot`, `cmd_bots_cap`, `retired`, `need_free` | 10-13, 27 |
 | | `cmd_access` (C2), the access cap in `resolve_bot`, `check_env_key`, the `--trusted` free-shell rule, `forget`, `cmd_person --revoke/--unrevoke` | 12, 23-26 |
+| kernel/bin/kith-permit, kernel/bin/kith | `ask_helper`; the person gate (`resolve`, the held wait) | 28 (examples) |
 
 ## Run
 
-- Host, only these tests: `cd serve/host && cargo test --bin kith -- roles_props botguests_props` (`--bin kith` builds the test binary once; without it cargo also builds the other targets; roles_props about 10 s of run time, botguests_props about 1.5 minutes because every case runs kith-auth as a subprocess; `PROPTEST_CASES=1000` for more, which is slow for the bot sequences). They run in the normal host `cargo test` in CI. The Mac is often loaded: prefer CI for the first compile.
+- Host, only these tests: `cd serve/host && cargo test --bin kith -- roles_props botguests_props a_members_device_is_proven access_requests_reach` (`--bin kith` builds the test binary once; without it cargo also builds the other targets; roles_props about 10 s of run time, botguests_props about 1.5 minutes because every case runs kith-auth as a subprocess; `PROPTEST_CASES=1000` for more, which is slow for the bot sequences). They run in the normal host `cargo test` in CI. The Mac is often loaded: prefer CI for the first compile.
+- Helpers (27): `kernel/tests/kith-guest-helper-check` (a few seconds, plus about 3 s for the held wait).
 - kith-auth: `kernel/tests/kith-auth-props` (seconds; `PROPS_EXAMPLES=3000` for more). Needs `uv`. CI runs it as the "Auth property check" step of the kernel job, right after "Auth check".
 
 ## Bounds and assumptions
