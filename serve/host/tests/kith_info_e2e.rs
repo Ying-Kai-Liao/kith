@@ -91,7 +91,8 @@ async fn a_non_kith_bot_has_no_info_and_no_memory_to_read() {
 #[tokio::test]
 async fn a_schedule_button_runs_kith_sched_as_the_jobs_person() {
     let s = start().await;
-    let jobs = json!([{"id": "news", "person": "sam", "paused": false}, {"id": "mine", "person": null, "paused": false}]);
+    let jobs =
+        json!([{"id": "news", "person": "sam", "paused": false}, {"id": "mine", "person": null, "paused": false}]);
     std::fs::write(s.home.join("schedules.json"), jobs.to_string()).unwrap();
     let got = s.host.call("kithSchedule", json!({"botId": s.id, "id": "news", "op": "pause", "person": "kai"})).await;
     assert_eq!(got["info"]["schedules"][0]["paused"], true, "the job as it is now: {got}");
@@ -99,8 +100,11 @@ async fn a_schedule_button_runs_kith_sched_as_the_jobs_person() {
     assert_eq!(got["info"]["schedules"].as_array().unwrap().len(), 1);
 
     let text = std::fs::read_to_string(s.home.join("calls.jsonl")).unwrap();
-    let calls: Vec<Value> =
-        text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).filter(|c| c["args"][0] == "schedule").collect();
+    let calls: Vec<Value> = text
+        .lines()
+        .map(|l| serde_json::from_str::<Value>(l).unwrap())
+        .filter(|c| c["args"][0] == "schedule")
+        .collect();
     assert_eq!(calls[0]["args"], json!(["schedule", "pause", "house", "news"]));
     assert_eq!(calls[0]["person"], "sam", "as the job's person");
     assert_eq!(calls[1]["args"], json!(["schedule", "rm", "house", "mine"]));

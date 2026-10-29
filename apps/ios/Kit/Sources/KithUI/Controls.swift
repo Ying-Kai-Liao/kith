@@ -96,6 +96,15 @@ public struct LineButtonStyle: ButtonStyle {
     }
 }
 
+/// A confirm that removes something: red fill, white text.
+public struct DangerButtonStyle: ButtonStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        SquareButton(configuration: configuration, fill: Palette.negative, foreground: .white, edge: nil)
+    }
+}
+
 private struct SquareButton: View {
     let configuration: ButtonStyleConfiguration
     let fill: Color
@@ -146,6 +155,10 @@ public extension ButtonStyle where Self == InkButtonStyle {
 
 public extension ButtonStyle where Self == LineButtonStyle {
     static var line: LineButtonStyle { LineButtonStyle() }
+}
+
+public extension ButtonStyle where Self == DangerButtonStyle {
+    static var danger: DangerButtonStyle { DangerButtonStyle() }
 }
 
 public extension ButtonStyle where Self == SecondaryButtonStyle {

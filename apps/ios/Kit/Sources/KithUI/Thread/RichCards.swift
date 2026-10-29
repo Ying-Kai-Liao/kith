@@ -166,6 +166,8 @@ struct ScheduleCard: View {
                 }
                 .buttonStyle(.plain)
             }
+            ScheduleButtons(view: view, ownerName: ScheduleFoot.ownerName(from: model.bots[entry.botId]?.activity),
+                            act: model.isOwner && canAct ? { try await act($0) } : nil)
         }
         .accessibilityLabel("Schedule: \(view.name)")
     }
@@ -217,10 +219,110 @@ struct ScheduleCard: View {
             return
         }
         guard let id = refString("id"), let bot = jobBot else { return }
-        let store = kith ?? KithInfoStore(botId: bot.id) { try await model.ready() }
-        kith = store
+        let store = kithStore(bot)
         await store.load()
         if let info = store.info { live = .some(ScheduleLive.kith(info.schedules, id: id)) }
+    }
+
+    private func kithStore(_ bot: Bot) -> KithInfoStore {
+        let store = kith ?? KithInfoStore(botId: bot.id) { try await model.ready() }
+        kith = store
+        return store
+    }
+
+    private var canAct: Bool {
+        refString("routine") != nil ? refString("bot") != nil : refString("id") != nil && jobBot != nil
+    }
+
+    /// The owner's buttons: the routines API for a routine, kith-sched for a Kith job. The card then shows the job
+    /// read back, also after a failed call.
+    private func act(_ op: ScheduleOp) async throws {
+        if let routine = refString("routine") {
+            guard let bot = refString("bot"), let client = model.client else { return }
+            let method = switch op {
+            case .pause, .resume: "setRoutineEnabled"
+            case .run: "runRoutine"
+            case .remove: "deleteRoutine"
+            }
+            do {
+                try await client.routineAction(method, botId: bot, id: routine,
+                                               enabled: op == .pause || op == .resume ? op == .resume : nil)
+            } catch {
+                await read()
+                throw error
+            }
+            await read()
+            return
+        }
+        guard let id = refString("id"), let bot = jobBot else { return }
+        let store = kithStore(bot)
+        try await store.schedule(id, op: op)
+        if let info = store.info { live = .some(ScheduleLive.kith(info.schedules, id: id)) }
+    }
+}
+
+/// The card's foot: Pause / Run now and the trash for the owner (Remove asks inside the card), a line for anyone else.
+private struct ScheduleButtons: View {
+    let view: ScheduleCardModel
+    let ownerName: String?
+    /// The owner's buttons; nil for anyone else. Throws why a call failed; the card then shows the job read back.
+    let act: ((ScheduleOp) async throws -> Void)?
+    @State private var confirming = false
+    @State private var busy: ScheduleOp?
+    @State private var error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            switch ScheduleFoot(view, owner: act != nil, ownerName: ownerName, confirming: confirming, busy: busy) {
+            case let .note(text):
+                Text(text).font(.caption).foregroundStyle(Palette.muted)
+            case let .confirm(question, removing):
+                Text(question).kithText(.secondary).foregroundStyle(Palette.ink)
+                HStack(spacing: 8) {
+                    Button { press(.remove) } label: { label("Remove") }.buttonStyle(.danger)
+                    Button { confirming = false; error = nil } label: { label("Cancel") }.buttonStyle(.line)
+                }
+                .disabled(removing)
+            case let .buttons(toggle, run, runDisabled, busy):
+                HStack(spacing: 8) {
+                    if toggle.ink {
+                        Button { press(toggle.op) } label: { label(toggle.label) }.buttonStyle(.ink).disabled(busy)
+                    } else {
+                        Button { press(toggle.op) } label: { label(toggle.label) }.buttonStyle(.line).disabled(busy)
+                    }
+                    Button { press(.run) } label: { label(run) }.buttonStyle(.line).disabled(runDisabled)
+                    Spacer(minLength: 0)
+                    Button { confirming = true; error = nil } label: {
+                        Image(systemName: "trash").font(.footnote).foregroundStyle(Palette.muted).frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(busy)
+                    .accessibilityLabel("Remove \(view.name)")
+                }
+            }
+            if let error {
+                Text(error).font(.caption).foregroundStyle(Palette.negative)
+            }
+        }
+    }
+
+    private func label(_ text: String) -> some View {
+        Text(text).kithText(.secondary).fontWeight(.medium).padding(.horizontal, 14).frame(minHeight: 32)
+    }
+
+    private func press(_ op: ScheduleOp) {
+        guard let act, busy == nil else { return }
+        busy = op
+        error = nil
+        Task {
+            do {
+                try await act(op)
+                confirming = false
+            } catch {
+                self.error = error.localizedDescription
+            }
+            busy = nil
+        }
     }
 }
 
