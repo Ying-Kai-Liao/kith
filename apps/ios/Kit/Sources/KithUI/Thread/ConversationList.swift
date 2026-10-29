@@ -25,6 +25,8 @@ struct ConversationRow {
 struct ConversationList: View {
     let rows: [ConversationRow]
     @Binding var following: Bool
+    /// The reader started dragging the list.
+    var onUserScroll: (() -> Void)?
     /// A row to scroll to and flash once (a search result's message); `focused` is called when it has.
     var focus: String?
     var focused: (() -> Void)?
@@ -45,7 +47,7 @@ struct ConversationList: View {
             .ignoresSafeArea()
             // The list itself stays inside the safe area (so its rows never see one) and
             // reaches out past it.
-            ConversationCollection(rows: rows, following: $following, focus: focus, focused: focused, nearTop: nearTop, refresh: refresh, pull: pull,
+            ConversationCollection(rows: rows, following: $following, onUserScroll: onUserScroll, focus: focus, focused: focused, nearTop: nearTop, refresh: refresh, pull: pull,
                                    outsets: UIEdgeInsets(top: max(0, safeFrame.minY - fullFrame.minY), left: 0,
                                                          bottom: max(0, fullFrame.maxY - safeFrame.maxY), right: 0))
                 .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { safeFrame = $0 }
@@ -62,6 +64,7 @@ struct ConversationList: View {
 private struct ConversationCollection: UIViewRepresentable {
     let rows: [ConversationRow]
     @Binding var following: Bool
+    let onUserScroll: (() -> Void)?
     let focus: String?
     let focused: (() -> Void)?
     let nearTop: (() -> Void)?
@@ -240,6 +243,7 @@ private struct ConversationCollection: UIViewRepresentable {
 
         func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
             view.cancelScrollingToEnd()
+            parent?.onUserScroll?()
             lastOffset = scrollView.contentOffset.y
         }
 

@@ -3,6 +3,11 @@ import SwiftUI
 
 /// The rows a conversation is made of.
 
+/// Which reply's context line is open: a tap opens that one (closing any other) or closes it if open.
+enum ContextLineToggle {
+    static func tapped(_ id: String, open: String?) -> String? { open == id ? nil : id }
+}
+
 /// One chat-visible entry in a chat or a thread, with what can be done to it.
 struct ChatRow: View {
     let entry: Entry
@@ -14,8 +19,10 @@ struct ChatRow: View {
     var onReply: ((Entry) -> Void)?
     @Environment(BotStore.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// A tapped agent reply shows its time and context line under it.
-    @State private var showsContext = false
+    /// A tapped agent reply shows its time and context line under it. The chat holds which one is open
+    /// (one at a time, closed by scrolling), so the row only gets whether it is this one.
+    var showsContext = false
+    var toggleContext: () -> Void = {}
 
     var body: some View {
         let reply = onReply.map { reply in { reply(entry) } }
@@ -37,7 +44,7 @@ struct ChatRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 if groupStart { AuthorLabel(botId: entry.data.author ?? chat?.id) }
                 AgentBubble(entry: entry, openTrace: openTrace, reply: reply) {
-                    withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { showsContext.toggle() }
+                    withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { toggleContext() }
                 }
                 Group {
                     AnsweredByLabel(answeredBy: entry.data.answeredBy)
@@ -513,5 +520,6 @@ extension ChatRow: @MainActor Equatable {
     static func == (a: Self, b: Self) -> Bool {
         a.entry == b.entry && a.groupStart == b.groupStart && a.chat?.isGroup == b.chat?.isGroup
             && a.chat?.isWorking == b.chat?.isWorking && (a.onReply == nil) == (b.onReply == nil)
+            && a.showsContext == b.showsContext
     }
 }

@@ -26,6 +26,8 @@ public struct ThreadView: View {
     @State var calling = false
     /// The chat stays on the newest message until the reader scrolls away.
     @State var following = true
+    /// The reply whose time and context line is showing; scrolling closes it.
+    @State var contextLineEntry: String?
     @State var loadingEarlier = false
     @Environment(\.accessibilityReduceMotion) var reduceMotion
 
@@ -143,7 +145,9 @@ public struct ThreadView: View {
     func entryRow(_ e: Entry, groupStart: Bool) -> some View {
         let replyAction: ((Entry) -> Void)? = canReply(e) ? { reply($0) } : nil
         let missing = missingReplies(e)
-        return ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: replyAction)
+        return ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: replyAction,
+                       showsContext: contextLineEntry == e.id,
+                       toggleContext: { contextLineEntry = ContextLineToggle.tapped(e.id, open: contextLineEntry) })
             .equatable()
             .task(id: missing) {
                 // Its thread's older replies are not here yet: bring them in, so the chat has them in order.
@@ -467,7 +471,7 @@ extension ThreadView {
         let focus = model.focusEntry.flatMap { $0.chat == botId ? $0.entry : nil }
             .flatMap { entry in items.first { $0.holds(entry: entry) }?.id }
         // Pull to refresh reconnects, like Reconnect in the computer menu, until the link is back.
-        return ConversationList(rows: rows, following: $following, focus: focus, focused: { model.focusEntry = nil }, nearTop: { showEarlier() }, refresh: {
+        return ConversationList(rows: rows, following: $following, onUserScroll: { contextLineEntry = nil }, focus: focus, focused: { model.focusEntry = nil }, nearTop: { showEarlier() }, refresh: {
             model.restartStream()
             _ = try? await model.ready()
         })
