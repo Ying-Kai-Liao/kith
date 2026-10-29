@@ -352,9 +352,22 @@
   color: var(--text);
 }
 .reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 3px 8px;
   border-radius: var(--radius-pill);
-  background: var(--surface);
+  background: var(--kith-panel);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+/* Yours carries a 1 px ink outline, not the accent. */
+.reaction-chip.mine {
+  box-shadow: inset 0 0 0 1px var(--kith-ink);
+}
+.reaction-count {
+  color: var(--kith-ink);
 }
 .thread-chip {
   display: flex;
@@ -470,4 +483,61 @@
 /* "using the computer": taps open the screen view; the chip variant above is a plain label. */
 .title-pill-using {
   cursor: pointer;
+}
+
+/* Agent names: Nunito 800, the one place the rounded face appears. */
+.author-name {
+  color: var(--kith-ink);
+}
+/* Tap an agent reply: a line under its bottom right (time, ring 13, "31% context"); the bubble keeps its size. */
+.context-line {
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--kith-muted);
+}
+.context-line-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.context-ring-track {
+  fill: none;
+  stroke: var(--kith-ink);
+  stroke-opacity: 0.16;
+  stroke-width: 2;
+}
+.context-ring-arc {
+  fill: none;
+  stroke: var(--kith-ink);
+  stroke-width: 2;
+}
+/* An answered card folded to one pill line. */
+.folded-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 12px;
+  border-radius: var(--kith-radius-chip);
+  background: var(--kith-panel);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+  color: var(--kith-ink);
+  font-size: 13px;
+}
+.folded-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folded-pill-time {
+  flex: none;
+  color: var(--kith-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.folded-card-body {
+  margin-top: 6px;
 }
