@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '8816a5c4b430db848eca31d6aca93d967fc69bfe446563667005f23860b76a39'
+export const CONTRACT_SHA256 = '8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -503,6 +503,7 @@ export interface SendParams {
   project?: string | null
   folder?: string | null
   clear?: boolean | null
+  budget?: number | null
 }
 
 /** What `thread` takes. */
@@ -1056,7 +1057,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HelloParams: { fields: {} },
     KithInfoParams: { fields: { botId: 'string', refresh: 'bool?' } },
     StartChatParams: { fields: { agent: 'string' } },
-    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?' } },
+    SendParams: { fields: { botId: 'string', text: 'string', clientNonce: 'string?', threadId: 'string?', attachments: '[string]?', pasted: '[string]?', newTask: 'bool?', via: 'MessageVia?', project: 'string?', folder: 'string?', clear: 'bool?', budget: 'int?' } },
     ThreadParams: { fields: { botId: 'string', rootId: 'string' } },
     HistoryParams: { fields: { botId: 'string', beforeSeq: 'int?', limit: 'int?' } },
     NewSessionParams: { fields: { botId: 'string' } },

@@ -338,7 +338,7 @@ impl Actor {
                         unreachable!("front is a group turn")
                     };
                     // A newer message in the room (or Stop) ended the room turn that queued this.
-                    if turn.reply.is_closed() || !self.hub.groups.current(&turn.lane, turn.epoch) {
+                    if turn.reply.is_closed() || !crate::chat::group::current(&self.hub.store, &turn.lane, turn.epoch) {
                         continue;
                     }
                     let (lane, prompt) = (turn.lane.clone(), turn.prompt.clone());

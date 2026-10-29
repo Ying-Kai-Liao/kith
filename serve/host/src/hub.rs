@@ -57,7 +57,6 @@ pub struct Hub {
     pub analytics: crate::analytics::Analytics,
     pub routines: crate::routines::Routines,
     pub team: crate::chat::team::Requests,
-    pub groups: crate::chat::group::Rooms,
     pub calls: crate::calls::Calls,
     pub store: Store,
     pub host_id: String,
@@ -152,7 +151,6 @@ impl Hub {
             analytics: crate::analytics::Analytics::load(&store),
             routines: crate::routines::Routines::default(),
             team: crate::chat::team::Requests::default(),
-            groups: crate::chat::group::Rooms::default(),
             calls: crate::calls::Calls::for_host(),
             store,
             host_id,
@@ -196,6 +194,8 @@ impl Hub {
             }
         }
         self.spawn_unsaved_retry();
+        // Room turns a restart cut off go on (their speaker first, not charged again).
+        crate::chat::group::resume(self)?;
         tokio::spawn(crate::agent::gate::run(self.gate.clone(), Arc::downgrade(self)));
         crate::routines::start(self);
         crate::run_outbox::start(self);
@@ -325,7 +325,7 @@ impl Hub {
     pub fn delete_bot(&self, id: &str) -> Result<()> {
         self.routines.disable_bot(&self.store, id)?;
         self.team.cancel_bot(id);
-        self.groups.stop(self, id);
+        crate::chat::group::stop(self, id);
         self.remove_bot_actors(id);
         {
             let _g = self.emit_lock.locked();

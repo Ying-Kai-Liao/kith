@@ -411,7 +411,7 @@
       "result": "BotAnswer"
     },
     "send": {
-      "doc": "A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member.",
+      "doc": "A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10.",
       "who": ["member"],
       "params": {
         "botId": "string",
@@ -424,7 +424,8 @@
         "via": "MessageVia?",
         "project": "string?",
         "folder": "string?",
-        "clear": "bool?"
+        "clear": "bool?",
+        "budget": "int?"
       },
       "result": "EntryAnswer"
     },
