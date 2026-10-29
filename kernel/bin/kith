@@ -214,8 +214,18 @@ if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/
 nested=0; [[ -n ${KITH_AGENT:-} ]] && nested=1   # started by another run (KITH_AGENT is exported further down)
 caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trusted=0 p_mode="" p_model="" p_deny="" p_line="" p_env_names="" p_rooms=""
 if [[ -n ${KITH_PERSON:-} ]]; then
-  res=$("$KITH/bin/kith-auth" resolve "$agent" ${caller:+--via "$caller"}) \
-    || { echo "kith: can't check whether ${KITH_PERSON} may use $agent (kith-auth resolve failed)" >&2; exit 1; }
+  # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
+  # kith-auth says held, a revoke made in the app or on another Mac may not be here yet, so ask again every 2 s for up
+  # to KITH_SYNC_HOLD s (default 120), then refuse; as the channels' resolve_in_sync, for every spawn (a guest's helper,
+  # a schedule). kith-auth never holds the owner.
+  hold=${KITH_SYNC_HOLD:-120}; [[ $hold =~ ^[0-9]+$ ]] || hold=120; held_until=$((SECONDS + hold))
+  while :; do
+    res=$("$KITH/bin/kith-auth" resolve "$agent" ${caller:+--via "$caller"}) \
+      || { echo "kith: can't check whether ${KITH_PERSON} may use $agent (kith-auth resolve failed)" >&2; exit 1; }
+    RES=$res python3 -c 'import json, os, sys; sys.exit(0 if json.loads(os.environ["RES"]).get("held") else 1)' || break
+    (( SECONDS < held_until )) || { echo "kith: out of sync with the Kith cloud, so ${KITH_PERSON} can't use $agent on this computer yet; try again in a minute" >&2; exit 3; }
+    sleep 2
+  done
   eval "$(RES=$res python3 -c '
 import json, os, re, shlex, sys
 r = json.loads(os.environ["RES"])

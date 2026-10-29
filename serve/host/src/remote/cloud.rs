@@ -985,6 +985,57 @@ mod tests {
         assert!(!hub.cloud.is_member_request("req_gone"));
     }
 
+    /// invitee-access property 2, generated: whatever the request and however it is settled, a member's device counts
+    /// as proven only when the owner approved it by hand (`decide`, from the Mac or the owner's phone), never when auto
+    /// mode approved it, and nothing but an approved request with its code shown adds a device.
+    #[test]
+    fn a_members_device_is_proven_only_by_the_owners_own_approval() {
+        use crate::api::devices::{Caller, Principal, principal};
+        use proptest::prelude::*;
+        use proptest::test_runner::{Config, TestRunner};
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let base = rt.block_on(fake_cloud(Arc::new(FakeCloud::default())));
+        let mut config = Config { failure_persistence: None, ..Config::default() };
+        if std::env::var_os("PROPTEST_CASES").is_none() {
+            config.cases = 64;
+        }
+        let case = (any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>());
+        TestRunner::new(config)
+            .run(&case, |(member_request, still_member, web, code_shown, approve, by_owner)| {
+                let hub = temp_hub();
+                hub.store.kv_set("test_cloud_url", &base).unwrap();
+                if still_member {
+                    add_member(&hub);
+                }
+                let key = crypto::random();
+                hub.cloud.requests.locked().push(Request {
+                    id: "req".into(),
+                    device_key: key,
+                    device_name: "Kith".into(),
+                    platform: if web { "web" } else { "ios" }.into(),
+                    email: None,
+                    commit: [0; 32],
+                    host_nonce: [0; 32],
+                    code: code_shown.then(|| "123456".into()),
+                    person: member_request.then(|| "sam".into()),
+                    created_at: now_ms(),
+                    expires_at: now_ms() + HOUR_MS,
+                });
+                drop(rt.block_on(settle(&hub, "req", approve, by_owner)));
+                let added = approve && code_shown && if member_request { still_member } else { !web };
+                let want = match (added, member_request) {
+                    (false, _) => Principal::Nobody,
+                    (true, false) => Principal::Owner,
+                    (true, true) if by_owner => Principal::Member("sam".into()),
+                    (true, true) => Principal::Unproven("sam".into()),
+                };
+                let caller = Caller::Device { key: b64(&key), scopes: vec![Scope::Control] };
+                prop_assert_eq!(principal(&hub.store, &caller), want);
+                Ok(())
+            })
+            .unwrap();
+    }
+
     #[test]
     fn state_only_renews_or_removes() {
         let hub = temp_hub();
