@@ -463,6 +463,12 @@ def reply(argv):
 def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip()); return 0
+    # A guest's shell cannot start a run (no network, login or agents folder in its sandbox): the helper its membership
+    # grants is asked through a tool that runs outside, as the kith launcher says too.
+    if guest_sandbox():
+        print('kith ask: from a guest\'s shell a helper is asked with the ask_helper tool '
+              '(mcp__kithpermit__ask_helper: agent and task), for a helper your membership grants.', file=sys.stderr)
+        return 2
     bg = '--bg' in argv   # anywhere before the task's `--`
     if bg:
         argv = [a for a in argv if a != '--bg']

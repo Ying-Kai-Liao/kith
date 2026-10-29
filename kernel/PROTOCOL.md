@@ -47,8 +47,9 @@ Below are your memory, your project notes and the project's start files (session
 - The agent the task came in on owns it. Another specialist's lane: call it as a helper (`kith:<name>`) with the
   facts it needs, check what it returns, give the final answer. `{{KITH}}/bin/kith-who <words>` names the owner;
   your own skills and instructions are builder's.
-- Code changes are coder's: `{{KITH}}/bin/kith ask --bg coder -p <ID> "what, where, acceptance"` (`--wait <id>`,
-  `--to <id> "…"`), and pass its PR link on; no coder: hand it back to the user. Never start flow yourself.
+- Code changes are coder's unless the user asked you to make them yourself: `{{KITH}}/bin/kith ask --bg coder -p <ID>
+  "what, where, acceptance"` (`--wait <id>`, `--to <id> "…"`), and pass its PR link on; no coder: hand it back to the
+  user. Never start flow yourself.
 - "yes", "ok" or "go" to your offer: do it now. Never end a turn without a reply.
 - As a helper you work for the caller: return the result (files by path), ask it, not the user. From a chat
   (`KITH_VIA`): one status line, `{{KITH}}/bin/kith-send --as {{AGENT}} "…"`.
@@ -63,7 +64,7 @@ Read `{{KITH}}/skills/<name>/SKILL.md` when its case comes up.
 | Case | Skill |
 |---|---|
 | A key or secret you need | `kith-keys` |
-| A result or file for the user's phone | `kith-send` |
+| A result or file for the user's phone, a push to the owner's Grok bot | `kith-send` |
 | Something that needs the person's voice now | `kith-call` |
 | A group room, room notes, who may see what | `kith-rooms` |
 | Not the owner's run, a refused action, a bug in Kith | `kith-guests` |

@@ -58,6 +58,8 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           undo brings back every row as it was. On a Mac linked to the Kith cloud it
                                           goes through kith serve to every Mac of yours, and is refused while the cloud
                                           can't be reached (--local: this Mac's file only, what kith serve writes)
+  kith-auth person <id> --clear-temp        removes their runs' Claude Code temp folder (<machine>/run/t/<id>);
+                                          --rm and a revoke do it too, kith serve once it has stopped their runs
   kith-auth person <id> id=<new>            rename: memberships, grants, owned profiles and invites come along; the
                                           old id stays as an alias (chat threads they started stay theirs)
   kith-auth bot <id> --of <person> [name=.. provider=..] [--rm]   a cloud agent that joins as a guest of that person (a
@@ -155,7 +157,7 @@ KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
 SERVICES = KITH / 'services'
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
-from kith_paths import guest_sandbox, paths, sync_env  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import guest_sandbox, guest_scrub, guest_tmp_remove, in_guest_folders, paths, sync_env  # noqa: E402  the one place that knows where kith's folders are
 STATE_ROOT, AGENTS = paths()['KITH_STATE'], paths()['KITH_AGENTS']  # <home>/state, <home>/agents
 
 
@@ -684,6 +686,15 @@ def cmd_exec(args):
     auth = load_auth()
     profile = grant_for(auth, agent, svc)
     env = sync_env({**os.environ, **settings(auth, agent, svc), **secrets(auth, svc, profile, agent)})
+    person = acting(auth)
+    if not is_owner(auth, person) and person != '-':
+        # A guest's server runs outside their sandbox: nothing in its environment or its working folder may lead into a
+        # folder they write (a planted npx package, Chrome, .npmrc or node_modules would run as the owner).
+        extra = access_of(row_of(auth, agent, person) or {})['write']
+        env = guest_scrub(env, person, extra)
+        if in_guest_folders(os.getcwd(), person, extra):
+            os.chdir(Path.home())
+        env['PWD'] = os.getcwd()
     audit(agent, svc, profile, 'exec')
     os.execvpe(cmd[0], cmd, env)
 
@@ -1396,6 +1407,11 @@ def cmd_person(args):
         die('a person id is lowercase letters, digits and -, e.g. sam', 2)
     if flags & {'--revoke', '--unrevoke'}:
         return revoke_person(pid, '--revoke' in flags, '--local' in flags)
+    if '--clear-temp' in flags:   # their bots' runs stop with theirs, so their temp folders go too
+        auth = load_auth()
+        for x in [pid] + bots_of(auth, canonical(auth, pid)):
+            guest_tmp_remove(x)
+        return
     auth = load_auth(write=True)
     if 'id' in kv:
         return rename(auth, pid, kv.pop('id'))
@@ -1416,6 +1432,8 @@ def cmd_person(args):
             auth['people'].pop(x, None)
         forget(auth, gone)
         save_auth(auth)
+        for x in gone:   # Claude Code's temp folder of their runs goes now; their memory and files stay (below)
+            guest_tmp_remove(x)
         kept = sorted({label for label, _ in person_folders(pid)})
         print(f'{pid} removed, with their memberships and grants' + (f' and bots ({", ".join(gone[1:])})' if gone[1:] else '')
               + ' (profiles they own are kept); the id is retired, a new person gets another'
@@ -1500,6 +1518,9 @@ def revoke_person(pid, revoke, local):
         p.pop('revoked', None)
     save_auth(auth)
     bots = bots_of(auth, pid)
+    if revoke and not local:   # kith serve's own --local call removes them itself, once it has stopped their runs
+        for x in [pid] + bots:
+            guest_tmp_remove(x)
     print(f'{pid}: access removed; their rows, accounts' + (f' and bots ({", ".join(bots)}, dormant)' if bots else '')
           + f' are kept (undo: kith-auth person {pid} --unrevoke)' if revoke
           else f'{pid}: access back as it was' + (f', bots too ({", ".join(bots)})' if bots else ''))
