@@ -78,8 +78,8 @@ mkdir -p "$PREFIX/bin" "$PREFIX/share/kith"
 cat > "$WORK/swap.sh" <<'SWAP'
 set -eu
 cp "$SRC/bin/kith" "$PREFIX/bin/.kith.new.$$" && chmod 755 "$PREFIX/bin/.kith.new.$$" && mv -f "$PREFIX/bin/.kith.new.$$" "$PREFIX/bin/kith"
-for part in kernel .claude-plugin install.sh LICENSE LICENSE.serve NOTICE THIRD_PARTY_NOTICES.md README.md; do
-  # Tarballs from before LICENSE.serve, NOTICE and THIRD_PARTY_NOTICES.md shipped lack them.
+for part in kernel .claude-plugin install.sh LICENSE NOTICE THIRD_PARTY_NOTICES.md README.md; do
+  # Tarballs from before NOTICE and THIRD_PARTY_NOTICES.md shipped lack them.
   [ -e "$SRC/share/kith/$part" ] || continue
   rm -rf "$PREFIX/share/kith/$part"
   cp -R "$SRC/share/kith/$part" "$PREFIX/share/kith/$part"

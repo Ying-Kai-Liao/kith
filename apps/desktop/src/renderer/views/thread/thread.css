@@ -109,14 +109,6 @@
   color: var(--text);
   white-space: nowrap;
 }
-.title-pill-thread {
-  font-size: 13px;
-  color: var(--secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  min-width: 0;
-}
 .title-pill-chevron {
   display: flex;
 }
@@ -360,9 +352,22 @@
   color: var(--text);
 }
 .reaction-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 3px 8px;
   border-radius: var(--radius-pill);
-  background: var(--surface);
+  background: var(--kith-panel);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+/* Yours carries a 1 px ink outline, not the accent. */
+.reaction-chip.mine {
+  box-shadow: inset 0 0 0 1px var(--kith-ink);
+}
+.reaction-count {
+  color: var(--kith-ink);
 }
 .thread-chip {
   display: flex;
@@ -407,57 +412,21 @@
   color: var(--secondary);
 }
 
-/* Thread, hanging under its message: a 2 px line in the agent's colours on the left. */
-.inline-thread {
-  margin: 6px 0 6px 4px;
-  padding-left: 14px;
-  border-left: 2px solid transparent;
-  border-image: linear-gradient(180deg, var(--pair-a), var(--pair-b)) 1;
-  animation: fade-in 0.18s var(--ease-out) both;
-  /* Opening or growing a thread never moves what the reader is looking at above it. */
-  overflow-anchor: none;
-  /* The composer floats over the bottom of the transcript: scrolling this into view stops above it. */
-  scroll-margin-block: 8px calc(var(--composer-height, 70px) + 16px);
+/* A tool call in the chat: a quiet row under the reply that made it, inset like the agent's bubbles. */
+.chat-tool {
+  padding: 4px 40px 0 0;
 }
-.inline-thread-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 28px;
-}
-.inline-thread-label {
-  white-space: nowrap;
-}
-.inline-thread-spacer {
-  flex: 1;
-}
-.inline-thread-more {
-  height: 24px;
-  padding: 0 6px;
-  border-radius: 12px;
-  color: var(--tertiary);
-  font-size: 11px;
-  letter-spacing: 1px;
-}
-.inline-thread-more:hover {
-  color: var(--text);
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-}
-.inline-thread-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.inline-thread .kc-tool {
+.chat-tool .kc-tool {
   min-height: 34px;
 }
-.inline-thread-earlier {
-  align-self: flex-start;
+.chat-earlier {
+  display: block;
+  margin-top: 4px;
   min-height: 28px;
   color: var(--tertiary);
   font-size: var(--text-footnote);
 }
-.inline-thread-earlier:hover {
+.chat-earlier:hover {
   color: var(--secondary);
 }
 
@@ -503,45 +472,6 @@
   }
 }
 
-/* A task in the chat: a card once idle, its thread inline while it goes on. Opening or folding one fades it in. */
-.task-card,
-.task-open {
-  animation: fade-in 0.18s var(--ease-out) both;
-}
-.task-card {
-  display: block;
-  width: 100%;
-  padding: 10px 14px;
-  margin: 4px 0;
-  border-radius: var(--radius-l);
-  background: var(--surface);
-  text-align: left;
-}
-.task-open {
-  display: flex;
-  flex-direction: column;
-  margin: 4px 0;
-}
-.task-header {
-  padding: 2px 0 6px;
-}
-.task-action {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  color: var(--secondary);
-}
-/* Unread replies of a task placed at the end of the chat for its latest activity. */
-.task-unread {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent, #0a84ff);
-  flex: none;
-}
-
 .composer-read-only {
   position: relative;
   width: 100%;
@@ -549,8 +479,65 @@
   padding: 10px 16px 14px;
   text-align: center;
 }
-.notice-thread-chip {
+
+/* "using the computer": taps open the screen view; the chip variant above is a plain label. */
+.title-pill-using {
+  cursor: pointer;
+}
+
+/* Agent names: Nunito 800, the one place the rounded face appears. */
+.author-name {
+  color: var(--kith-ink);
+}
+/* Tap an agent reply: a line under its bottom right (time, ring 13, "31% context"); the bubble keeps its size. */
+.context-line {
+  align-self: flex-end;
   display: flex;
-  justify-content: center;
-  padding-top: 4px;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--kith-muted);
+}
+.context-line-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.context-ring-track {
+  fill: none;
+  stroke: var(--kith-ink);
+  stroke-opacity: 0.16;
+  stroke-width: 2;
+}
+.context-ring-arc {
+  fill: none;
+  stroke: var(--kith-ink);
+  stroke-width: 2;
+}
+/* An answered card folded to one pill line. */
+.folded-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 6px 12px;
+  border-radius: var(--kith-radius-chip);
+  background: var(--kith-panel);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+  color: var(--kith-ink);
+  font-size: 13px;
+}
+.folded-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folded-pill-time {
+  flex: none;
+  color: var(--kith-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.folded-card-body {
+  margin-top: 6px;
 }

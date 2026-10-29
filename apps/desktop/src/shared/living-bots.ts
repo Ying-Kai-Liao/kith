@@ -39,14 +39,27 @@ export const PALETTE: readonly PaletteColor[] = eyes.palette
 
 /** What avatarColor holds for a palette pick. Bare ids (`blue`, `green`...) are the old colours, not picks. */
 export const PALETTE_PREFIX = 'kith:'
-export const paletteValue = (id: string) => `${PALETTE_PREFIX}${id}`
+/** Plain (a flat fill of the pair's first colour) is `kith:<id>:plain`; `kith:<id>` stays the gradient. iOS writes the same. */
+export const PLAIN_SUFFIX = ':plain'
+export const paletteValue = (id: string, plain = false) => `${PALETTE_PREFIX}${id}${plain ? PLAIN_SUFFIX : ''}`
 
-/** The pair for an avatarColor, or null for the original body (empty, an old bare id, or an id this app doesn't know). */
-export function paletteColor(value: string | undefined | null): PaletteColor | null {
-  if (!value?.startsWith(PALETTE_PREFIX)) return null
-  const id = value.slice(PALETTE_PREFIX.length)
-  return PALETTE.find((c) => c.id === id) ?? null
+export interface ColorPick {
+  pair: PaletteColor
+  plain: boolean
 }
+
+/** The one parse of an avatarColor: the pair and gradient or plain, or null for the original body (empty, an old bare id, or an id this app doesn't know). */
+export function parseColor(value: string | undefined | null): ColorPick | null {
+  if (!value?.startsWith(PALETTE_PREFIX)) return null
+  let id = value.slice(PALETTE_PREFIX.length)
+  const plain = id.endsWith(PLAIN_SUFFIX)
+  if (plain) id = id.slice(0, -PLAIN_SUFFIX.length)
+  const pair = PALETTE.find((c) => c.id === id)
+  return pair ? { pair, plain } : null
+}
+
+/** The pair for an avatarColor, or null for the original body. */
+export const paletteColor = (value: string | undefined | null): PaletteColor | null => parseColor(value)?.pair ?? null
 
 /** The rig of a crew member, a spare, or `kith` (the cube). */
 export function rigOf(name: string): Rig | null {
