@@ -1,7 +1,7 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { botGuestReadOnlyLine } from '@shared/bot-guest-chat'
-import { draftOf, isGroup, isWorkingIn, type Bot, type BotDraft, type Entry } from '@shared/models'
-import { currentTask } from '@shared/tasks'
+import { draftOf, isGroup, type Bot, type BotDraft } from '@shared/models'
+import { workingThreadIn } from '@shared/tasks'
 import { BotAvatar, GroupAvatar } from '../../components/Avatar'
 import { DropdownMenu, Spinner } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
@@ -17,15 +17,12 @@ import { useStore } from '../../store/context'
 import { UpdateNeededCard } from '../UpdateNeededCard'
 import { buildChat, rowIn, useArrivals, type ChatItem } from './chat-items'
 import { BotConversationView, BotMessageRow } from './BotConversation'
-import { ChatRow, TimeSeparator, WorkingIndicator } from './ChatRows'
+import { ChatRow, EarlierSteps, TimeSeparator, ToolRowItem, WorkingIndicator } from './ChatRows'
 import { Composer } from './Composer'
 import { ChatSidePanel } from './ChatSidePanel'
 import { DetailsPanel, type DetailsTab } from './DetailsPanel'
-import { InlineThread } from './InlineThread'
-import { TaskRow } from './TaskRow'
 import { TraceView } from './TraceView'
 import { useReading } from './reading'
-import { routesOf, type TaskRoutes } from './task-routing'
 import { PlaceFolderControl } from '../bots/PlaceFolderPicker'
 import { GroupEditorView } from '../bots/GroupEditorView'
 import { BotTemplateView } from '../bots/BotTemplateView'
@@ -41,23 +38,16 @@ import './chat-controls.css'
 const WIDE = 680
 
 /**
- * One endless conversation with a bot or a group chat. Only deliberate messages show here; tool
- * calls and thinking live in the "Full conversation" sheet. Any message can start a thread,
- * which hangs under that message.
+ * One endless, flat conversation with a bot or a group chat: messages, the replies of every task and thread in time
+ * order, and tool calls as rows. Thinking lives in the "Full conversation" sheet.
  */
 export const ThreadView = memo(function ThreadView({ botId }: { botId: string }) {
   const store = useStore()
   const bot = store.bots.get(botId) ?? null
   const [showTrace, setShowTrace] = useState(false)
-  const [openThread, setOpenThread] = useState<string | null>(null)
+  // A conversation opened from elsewhere (the bot detail, a notification): the chat scrolls to its first message.
+  const [focusId, setFocusId] = useState<string | null>(null)
   const [botChat, setBotChat] = useState<string | null>(null)
-  // Back in the main chat after a thread, the next message is not a reply there (see task-routing).
-  const routes = routesOf(store)
-  const wasOpen = useRef(false)
-  useEffect(() => {
-    if (wasOpen.current && !openThread && bot?.tasks && !isGroup(bot)) routes.leave(botId)
-    wasOpen.current = !!openThread
-  }, [openThread, routes, botId, bot])
   const [editingGroup, setEditingGroup] = useState(false)
   const [sharing, setSharing] = useState(false)
   const canShare = useCanShareAgent(store, bot)
@@ -145,24 +135,12 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
   )
 
   const openTrace = useCallback(() => setShowTrace(true), [])
-  // A chip (or "Reply in thread") opens the thread under its message; the same one again folds it. A double click
-  // lands twice within a blink: the second is the same gesture, not a fold.
-  const lastOpened = useRef({ id: '', at: 0 })
-  const openThreadOn = useCallback((root: { id: string }) => {
-    const now = Date.now()
-    if (lastOpened.current.id === root.id && now - lastOpened.current.at < 350) return
-    lastOpened.current = { id: root.id, at: now }
-    setOpenThread((open) => (open === root.id ? null : root.id))
-  }, [])
-  // "Reply in thread" only ever opens; folding is the chip's job.
-  const replyInThread = useCallback((root: { id: string }) => setOpenThread(root.id), [])
-  const closeThread = useCallback(() => setOpenThread(null), [])
-  // The bot detail opens a conversation: its chat, then its thread.
+  // The bot detail opens a conversation: the chat, at that message.
   useEffect(() => {
     const want = store.pendingThread
     if (want && want.botId === botId) {
       store.pendingThread = null
-      setOpenThread(want.root)
+      setFocusId(want.root)
     }
   }, [store, botId, store.pendingThread])
 
@@ -173,10 +151,6 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
     setShowSettings(true)
     if (!wide) setCompactDetails(true)
   }, [wide])
-
-  // An open thread adds its first message to the pill ("designer · App direction").
-  const threadRoot = openThread ? store.chat(botId).find((e) => e.id === openThread) : undefined
-  const threadTitle = threadRoot?.data.text ? threadRoot.data.text.replace(/\s+/g, ' ').slice(0, 40) : null
 
   const details = (
     <DetailsPanel
@@ -240,7 +214,6 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
             <HStack as="span" gap={7}>
               {bot ? isGroup(bot) ? <GroupAvatar members={store.members(bot)} size={26} /> : <BotAvatar bot={bot} size={26} /> : null}
               <span className="title-pill-name">{bot?.name ?? ''}</span>
-              {threadTitle ? <span className="title-pill-thread">{`· ${threadTitle}`}</span> : null}
               <span className="title-pill-chevron">
                 <Icon name="chevron.down" size={10} weight="semibold" color="var(--secondary)" />
               </span>
@@ -254,7 +227,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
           ) : null}
           </div>
         </div>
-        <Transcript botId={botId} openId={openThread} closeThread={closeThread} openTrace={openTrace} openThread={openThreadOn} replyInThread={replyInThread} openRoutine={presentRoutine} openBotChat={setBotChat} />
+        <Transcript botId={botId} focusId={focusId} openTrace={openTrace} openRoutine={presentRoutine} openBotChat={setBotChat} />
         <div className="composer-dock" ref={dock}>
           <div className="composer-fade" />
           {bot && guestChat ? (
@@ -266,7 +239,6 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
           ) : (
             <Composer
               botId={botId}
-              thread={openThread}
               onCall={!calling && bot && !callBlocked ? startCall : null}
               onInterrupt={callSpeaking ? () => interruptCall.current?.() : null}
             />
@@ -350,14 +322,15 @@ const showComputer = () => window.dispatchEvent(new Event(SHOW_COMPUTER_EVENT))
 /** The messages: every loaded message, brought to the newest as it changes while the reader is at the bottom. */
 const PAGE = 40
 
-const Transcript = memo(function Transcript({ botId, openId, closeThread, openTrace, openThread, replyInThread, openRoutine, openBotChat }: { botId: string; openId: string | null; closeThread: () => void; openTrace: () => void; openThread: (e: { id: string }) => void; replyInThread: (e: { id: string }) => void; openRoutine: (id: string | null) => void; openBotChat: (peerId: string) => void }) {
+const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRoutine, openBotChat }: { botId: string; focusId: string | null; openTrace: () => void; openRoutine: (id: string | null) => void; openBotChat: (peerId: string) => void }) {
   const store = useStore()
   const bot = store.bots.get(botId) ?? null
-  const live = !!bot && isWorkingIn(bot, botId, null) && !store.isOffline
+  // The turn at work, wherever it runs (the chat, a task, a thread): one indicator at the end.
+  const working = bot ? workingThreadIn(bot, botId) : undefined
+  const live = !!bot && working !== undefined && !store.isOffline
   // Rebuilt only when this chat changes: the store replaces a chat's list on every change.
   const entries = store.allEntries(botId)
-  const all = useMemo(() => buildChat(store.chat(botId), true), [store, botId, entries])
-  const tasks = useTasks(store.chat(botId), routesOf(store))
+  const all = useMemo(() => buildChat(entries), [entries])
   // The newest 40 items first; older pages come in near the top.
   const [firstShown, setFirstShown] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -375,6 +348,8 @@ const Transcript = memo(function Transcript({ botId, openId, closeThread, openTr
   const keepPlace = useRef<number | null>(null)
   const last = items[items.length - 1]
   const jump = usePresence(!following && items.length > 0, 200)
+  // The replies of threads on screen are read here, in the chat.
+  const unread = items.flatMap((i) => (i.kind === 'entry' && (i.entry.data.thread?.unread ?? 0) > 0 ? [i.entry.id] : []))
   const arrivals = useArrivals([...items.map((i) => i.id), ...(live ? ['working'] : [])], following)
 
   const toBottom = (smooth = false) => {
@@ -396,22 +371,39 @@ const Transcript = memo(function Transcript({ botId, openId, closeThread, openTr
     if (at === 0) {
       const anchor = list[0]?.id
       await store.loadOlder(botId)
-      list = buildChat(store.chat(botId), true)
+      list = buildChat(store.allEntries(botId))
       at = anchor ? Math.max(0, list.findIndex((i) => i.id === anchor)) : 0
     }
     if (at > 0) setFirstShown(list[Math.max(0, at - PAGE)]!.id)
     setLoadingEarlier(false)
   }
 
-  // Opening a thread grows the feed below the message the reader clicked: stay put, don't chase the bottom.
-  // A reader already following the end (or opening the very last row) keeps following the new replies.
+  // Every thread's replies are part of this chat: fetch the ones of the messages on screen that aren't here yet.
+  const asked = useRef(new Set<string>())
+  useEffect(() => {
+    for (const item of items) {
+      if (item.kind !== 'entry') continue
+      const count = item.entry.data.thread?.count ?? 0
+      const key = `${item.entry.id}:${count}`
+      if (count === 0 || asked.current.has(key) || store.replies(botId, item.entry.id).length >= count) continue
+      asked.current.add(key)
+      void store.loadThread(botId, item.entry.id)
+    }
+  })
+
+  // A conversation opened from the bot detail or a notification: its first message into view, the chat left there.
   useLayoutEffect(() => {
-    const lastRow = last?.kind === 'entry' || last?.kind === 'task' ? last.entry.id : null
-    if (openId && !followingRef.current && lastRow !== openId) {
-      followingRef.current = false
-      setFollowing(false)
-    } else if (openId && lastRow === openId) setFollowing(true)
-  }, [openId])
+    if (!focusId) return
+    const at = all.findIndex((i) => i.kind === 'entry' && i.entry.id === focusId)
+    if (at < 0) {
+      void store.loadThread(botId, focusId)
+      return
+    }
+    setFollowing(false)
+    followingRef.current = false
+    if (at < start) setFirstShown(all[Math.max(0, at - 3)]!.id)
+    requestAnimationFrame(() => scroller.current?.querySelector(`[data-item="${CSS.escape(all[at]!.id)}"]`)?.scrollIntoView({ block: 'start' }))
+  }, [focusId, all])
 
   // Earlier messages going in above keep the reader's place; a follower stays at the bottom.
   useLayoutEffect(() => {
@@ -465,30 +457,14 @@ const Transcript = memo(function Transcript({ botId, openId, closeThread, openTr
           ) : null}
           {items.length === 0 && bot ? <div className="transcript-intro">{isGroup(bot) ? <GroupIntroCard group={bot} /> : <IntroCard bot={bot} />}</div> : null}
           {items.map((item) => (
-            <div key={item.id} className={arrivals.has(item.id) ? rowIn(item) : undefined}>
-              {item.kind === 'task' && bot ? (
-                <TaskRow
-                  root={item.entry}
-                  bot={bot}
-                  newest={item.entry.id === tasks.newest}
-                  now={tasks.now}
-                  choice={tasks.choices.get(item.entry.id)}
-                  setChoice={(open) => {
-                    tasks.choose(item.entry.id, open)
-                    if (open && item.entry.id === tasks.newest) routesOf(store).stay(botId)
-                    if (!open && openId === item.entry.id) closeThread()
-                  }}
-                  openTrace={openTrace}
-                  openThread={openThread}
-                />
-              ) : (
-                <Row item={item} chat={bot} openId={openId} closeThread={closeThread} openTrace={openTrace} openThread={openThread} replyInThread={replyInThread} openRoutine={openRoutine} openBotChat={openBotChat} />
-              )}
+            <div key={item.id} data-item={item.id} className={arrivals.has(item.id) ? rowIn(item) : undefined}>
+              <Row item={item} chat={bot} openTrace={openTrace} openRoutine={openRoutine} openBotChat={openBotChat} />
             </div>
           ))}
+          {unread.map((id) => <ReadingThread key={id} botId={botId} root={id} />)}
           {bot && live ? (
             <div className={arrivals.has('working') ? 'chat-working row-in' : 'chat-working'}>
-              <WorkingIndicator bot={bot} thinking={store.currentThinking(botId, null)} />
+              <WorkingIndicator bot={bot} thinking={store.currentThinking(botId, working ?? null)} />
             </div>
           ) : null}
           <div className="chat-end" />
@@ -511,28 +487,19 @@ const Transcript = memo(function Transcript({ botId, openId, closeThread, openTr
   )
 })
 
-/**
- * The chat's tasks on this device: the newest, which ones the user opened or folded, and the time, ticking so an
- * idle task folds on its own.
- */
-function useTasks(chat: Entry[], routes: TaskRoutes) {
-  useSyncExternalStore(routes.subscribe, routes.getVersion)
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 30_000)
-    return () => clearInterval(tick)
-  }, [])
-  const choose = useCallback((id: string, open: boolean) => routes.choose(id, open), [routes])
-  return { newest: currentTask(chat)?.id ?? null, now, choices: routes.choices, choose }
+/** A thread's replies are on screen in the chat: they are read. */
+function ReadingThread({ botId, root }: { botId: string; root: string }) {
+  useReading(useStore(), botId, root)
+  return null
 }
 
-function Row({ item, chat, openId, closeThread, openTrace, openThread, replyInThread, openRoutine, openBotChat }: { item: ChatItem; chat: Bot | null; openId: string | null; closeThread: () => void; openTrace: () => void; openThread: (e: { id: string }) => void; replyInThread: (e: { id: string }) => void; openRoutine: (id: string | null) => void; openBotChat: (peerId: string) => void }) {
+function Row({ item, chat, openTrace, openRoutine, openBotChat }: { item: ChatItem; chat: Bot | null; openTrace: () => void; openRoutine: (id: string | null) => void; openBotChat: (peerId: string) => void }) {
   if (item.kind === 'separator') {
     return <TimeSeparator date={item.date} />
   }
   if (item.kind === 'exchanges') return <BotMessageRow exchanges={item.exchanges} open={openBotChat} />
-  // Without its bot (deleted) a task is just its first message.
-  if (item.kind === 'task') return <ChatRow entry={item.entry} groupStart chat={chat} openTrace={openTrace} />
+  if (item.kind === 'tool') return <ToolRowItem entry={item.entry} />
+  if (item.kind === 'earlier') return <EarlierSteps count={item.count} open={openTrace} />
   const e = item.entry
   if (e.kind === 'notice' && e.data.routineId) {
     return (
@@ -542,12 +509,7 @@ function Row({ item, chat, openId, closeThread, openTrace, openThread, replyInTh
       </button>
     )
   }
-  return (
-    <>
-      <ChatRow entry={e} groupStart={item.groupStart} chat={chat} openTrace={openTrace} openThread={openThread} replyInThread={replyInThread} openId={openId} />
-      {openId === e.id && chat ? <InlineThread key={e.id} botId={chat.id} rootId={e.id} close={closeThread} /> : null}
-    </>
-  )
+  return <ChatRow entry={e} groupStart={item.groupStart} chat={chat} openTrace={openTrace} />
 }
 
 /** The start of an empty group chat: who's in it and how the room works. */
