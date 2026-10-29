@@ -601,6 +601,7 @@ fn nothing_to_check(m: &str) -> bool {
         "hello"
             | "projects"
             | "linkCode"
+            | "scheduleMessages"
             | "startChat"
             | "callAccept"
             | "callDecline"

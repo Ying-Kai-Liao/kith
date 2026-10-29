@@ -412,6 +412,7 @@ struct LinkChatSection: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(busy)
+                ScheduleMessagesToggle(store: store)
             }
         }
     }
@@ -428,6 +429,45 @@ struct LinkChatSection: View {
             // An older host doesn't know the method: the row goes away rather than failing.
             unsupported = true
         } catch {
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+/// Whether a Schedule card's words also go to their Telegram or Discord chat with the agent; the card stays in the app
+/// either way. Hidden until the host answers, so an older host never shows it.
+struct ScheduleMessagesToggle: View {
+    let store: BotStore
+    @State private var on: Bool?
+    @State private var error: String?
+
+    var body: some View {
+        Group {
+            if let on {
+                Toggle(isOn: Binding(get: { on }, set: { next in Task { await set(next) } })) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Schedule changes there too")
+                        Text(error ?? "When an agent adds, changes or removes a scheduled job")
+                            .font(.footnote)
+                            .foregroundStyle(error == nil ? Palette.secondary : Palette.attention)
+                    }
+                }
+                .toggleStyle(.kithGreen)
+            }
+        }
+        .task(id: store.computer.id) {
+            on = try? await store.client?.scheduleMessages()
+        }
+    }
+
+    private func set(_ next: Bool) async {
+        guard let client = store.client else { return }
+        on = next
+        error = nil
+        do {
+            on = try await client.scheduleMessages(on: next)
+        } catch {
+            on = !next
             self.error = error.localizedDescription
         }
     }

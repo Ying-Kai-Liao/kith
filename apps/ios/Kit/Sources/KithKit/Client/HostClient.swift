@@ -418,6 +418,14 @@ public extension HostClient {
         try await call(.linkCode)
     }
 
+    /// Whether this person's Schedule cards are also said in their Telegram or Discord chat (on by default); `on`
+    /// sets it first. An older host answers with `HostError.http(404, …)`.
+    func scheduleMessages(on: Bool? = nil) async throws -> Bool {
+        struct Body: Encodable { var on: Bool? }
+        let res: HostContract.ScheduleMessages = try await call(.scheduleMessages, Body(on: on))
+        return res.on
+    }
+
     // MARK: kith bot details (serve/docs/bot-info.md)
 
     func kithInfo(botId: String, refresh: Bool = false) async throws -> KithInfoResponse {

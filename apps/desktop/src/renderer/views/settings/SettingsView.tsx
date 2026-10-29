@@ -22,7 +22,7 @@ import { MyBotsPage } from './BotGuestsView'
 import { PeopleView } from './PeopleView'
 import { ProfileImagePicker } from './ProfileImagePicker'
 import { KeysView } from './KeysView'
-import { LinkChatRow } from './LinkChatRow'
+import { LinkChatRow, ScheduleMessagesRow } from './LinkChatRow'
 import { errorText, isMac, thisMac } from './parts'
 import { BackupChains } from './BackupChain'
 import { UsageLimits } from './UsageLimits'
@@ -228,6 +228,7 @@ function CrewSettings() {
           <ChoicePicker selection={crewOrder} options={[{ id: 'automatic', label: 'Automatic' }, { id: 'manual', label: 'Manual' }]} onChange={setCrewOrder} />
         </ValueRow>
         <LinkChatRow />
+        <ScheduleMessagesRow />
         <button className="settings-row settings-nav-row" onClick={() => setBackups(true)}>
           <VStack grow className="settings-stack">
             <span>Backups</span>
