@@ -301,5 +301,9 @@ fn only_a_plain_host_or_a_named_helper_is_an_edge() {
     assert_eq!(edge::of(edge::HELPER_TOOL, &json!({"agent": "money"}), ""), Some(edge::Edge::Helper("money".into())));
     assert_eq!(edge::of(edge::HELPER_TOOL, &json!({"agent": "a:b"}), ""), None);
     assert_eq!(edge::of(edge::DOOR_TOOL, &json!({"door": "render"}), ""), Some(edge::Edge::Door("render".into())));
-    assert_eq!(edge::of(edge::DOOR_TOOL, &json!({"door": "render@abc"}), ""), None, "a card names the door, not a digest");
+    assert_eq!(
+        edge::of(edge::DOOR_TOOL, &json!({"door": "render@abc"}), ""),
+        None,
+        "a card names the door, not a digest"
+    );
 }
