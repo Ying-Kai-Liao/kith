@@ -6,7 +6,7 @@
   kith_paths.py --json   the same as JSON (the Claude Code adapter)
   kith_paths.py --bin    the kith program (Rust), or nothing when this Mac has none
   kith_paths.py --guest-sandbox   exit 0 inside the sandbox of a run for anyone but the owner, else 1
-
+  kith_paths.py --guest-tmp ID    makes that guest's Claude Code temp folder and prints it (nothing: no short one fits)
 Two places, like ~/.claude for Claude Code:
 
   ~/kith  KITH_HOME, the Kith folder (a link to it, so it can live anywhere, an external disk included): kernel/
@@ -41,7 +41,7 @@ Environment: every HQ_<X> variable is the old name of KITH_<X>. sync_env() makes
 other fills in, so the kernel reads KITH_<X> only while agent role repos that read HQ_<X> keep working. Importing
 this module syncs os.environ; the bash twin is lib/kith-env.sh.
 """
-import json, os, shlex, shutil, sys
+import json, os, re, shlex, shutil, sys
 from pathlib import Path
 
 KERNEL = Path(__file__).resolve().parent.parent
@@ -185,6 +185,68 @@ def guest_sandbox():
         return True
 
 
+def guest_tmp(pid):
+    """Claude Code's own temp folder for a guest's runs: <machine>/run/t/<pid>, or an 8-hex hash of the id when that is
+    too long. Claude Code keeps it for its commands only if <dir>/claude-<uid> fits in 44 bytes (it puts sockets there)
+    and otherwise falls back to /tmp, which a guest's sandbox closes. None when even the hash is too long. The real
+    path: the sandbox matches resolved paths, and the length is of the path Claude Code is given."""
+    import hashlib
+    base = os.path.join(os.path.realpath(paths()['KITH_MACHINE']), 'run', 't')
+    for name in (pid, hashlib.sha256(pid.encode()).hexdigest()[:8]):
+        if len(os.fsencode(f'{base}/{name}/claude-{os.getuid()}')) <= 44:
+            return os.path.join(base, name)
+    return None
+
+
+def _tmp_record(d):
+    """Whose run/t/<name> is: run/t-who/<name>, out of the guest's reach (only run/t/<name> is theirs to write)."""
+    return Path(os.path.dirname(d) + '-who') / os.path.basename(d)
+
+
+def _rm(d):
+    import subprocess
+    subprocess.run(['/bin/rm', '-rf', '--', d], capture_output=True)   # rm -rf removes a link inside, never what it names
+
+
+def guest_tmp_ready(pid):
+    """Makes the guest's temp folder for a run and returns it (None as guest_tmp). Only this Mac account reads run/t and
+    each folder in it (0700). A folder whose record names someone else (another id with the same hash) or no one (a
+    removal that didn't finish, a former person of this id) is emptied first."""
+    d = guest_tmp(pid)
+    if not d:
+        return None
+    rec = _tmp_record(d)
+    for p in (os.path.dirname(d), str(rec.parent)):
+        os.makedirs(p, mode=0o700, exist_ok=True)
+        os.chmod(p, 0o700)
+    try:
+        theirs = rec.read_text() == pid
+    except OSError:
+        theirs = False
+    if not theirs or os.path.islink(d):
+        _rm(d)
+        rec.write_text(pid)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    os.chmod(d, 0o700)
+    return d
+
+
+def guest_tmp_remove(pid):
+    """Removes the guest's temp folder once their runs are stopped (a revoke, a removal): the record first, so whatever a
+    late write left is emptied before their next run. A folder recorded as someone else's (same hash) stays."""
+    d = guest_tmp(pid)
+    if not d:
+        return
+    rec = _tmp_record(d)
+    try:
+        if rec.read_text() != pid:
+            return
+    except OSError:
+        pass
+    rec.unlink(missing_ok=True)
+    _rm(d)
+
+
 def with_old_names(p):
     """p plus every KITH_<X> under its old name HQ_<X>, for agents' tools that still read those."""
     return {**p, **{'HQ_' + k[5:]: v for k, v in p.items()}}
@@ -199,6 +261,11 @@ if __name__ == '__main__':
         print(kith_bin())
     elif arg == '--guest-sandbox':
         sys.exit(0 if guest_sandbox() else 1)
+    elif arg == '--guest-tmp':
+        pid = sys.argv[2] if len(sys.argv) > 2 else ''
+        if not re.fullmatch(r'[a-z][a-z0-9-]*', pid):
+            sys.exit('kith_paths.py: --guest-tmp <person id>')
+        print(guest_tmp_ready(pid) or '')
     elif arg == '--json':
         print(json.dumps(p))
     else:

@@ -68,6 +68,14 @@ launch_env() { (cd "$KITH_HOME/agents/echo" && "$KITH" echo --launch-json 2>/dev
 import json,sys
 print(json.load(sys.stdin).get("env",{}).get("CLAUDE_CODE_ARTIFACT","unset"))'; }
 expect "owner: launch env enables the Artifact tools" "$(launch_env)" 1
+expect "owner: no Bash hook that allows" "$(q "$OWNER" "any(h.get('matcher') == 'Bash' for h in s.get('hooks', {}).get('PreToolUse', []))")" False
+lj() { (cd "$KITH_HOME/agents/echo" && "$KITH" echo --launch-json 2>/dev/null) | python3 -c "import json,sys; j=json.load(sys.stdin); e=j.get('env',{}); print($1)"; }
+expect "owner: no workspace env, no limits note" "$(lj "[k for k in ('TMPDIR','CLAUDE_CODE_TMPDIR','npm_config_cache','NODE_USE_ENV_PROXY') if k in e], '<limits>' in j['system_prompt']")" "[] False"
+expect "guest: the launch env carries the workspace" "$(KITH_PERSON=guest lj "e.get('TMPDIR','').endswith('/people/guest/.work/tmp'), e.get('npm_config_cache','').endswith('/.work/cache/npm'), e.get('NODE_USE_ENV_PROXY')")" "True True 1"
+expect "guest: told its limits at launch" "$(KITH_PERSON=guest lj "all(x in j['system_prompt'] for x in ('<limits>', 'request_access', 'ask_helper', '/people/guest'))")" True
+# Claude Code keeps its own temp folder only when <dir>/claude-<uid> fits in 44 bytes; this test's folders are longer, so
+# the run gets none (never /tmp) and its limits note says why.
+expect "guest, Kith folder too long for Claude Code's temp: no CLAUDE_CODE_TMPDIR, said in the note" "$(KITH_PERSON=guest lj "'CLAUDE_CODE_TMPDIR' in e, 'fit in 44 bytes' in j['system_prompt']")" "False True"
 expect "guest: launch env enables the Artifact tools" "$(KITH_PERSON=guest launch_env)" 1
 expect "bot guest: launch env enables the Artifact tools" "$(KITH_PERSON=bot-3f9a1c2e launch_env)" 1
 
@@ -76,7 +84,11 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: sandbox on, fail closed, no escape hatch" "$(q "$S" '(sb.get("enabled"), sb.get("failIfUnavailable"), sb.get("allowUnsandboxedCommands"))')" "(True, True, False)"
   expect "$who: no excluded commands" "$(q "$S" '"excludedCommands" in sb')" False
   expect "$who: no network but the fixed host socket (both spellings), even with no KITH_RUN_SOCKET" "$(q "$S" "sb['network']['allowUnixSockets'] == ['$T/linked state/run/host.sock', '$T/real state/run/host.sock']")" True
-  expect "$who: allowLocalBinding never set" "$(q "$S" '"allowLocalBinding" in sb["network"] or "allowedDomains" in sb["network"]')" False
+  expect "$who: loopback servers (a render preview), no domains beyond the allowlist" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(True, False)"
+  W=$KITH_HOME/agents/echo/files/people/$who/.work
+  expect "$who: the workspace is writable, tool caches and temp files in it" "$(q "$S" "'$W' in aw and (s['env']['TMPDIR'], s['env']['XDG_CACHE_HOME'], s['env']['npm_config_cache'], s['env']['PUPPETEER_CACHE_DIR'], s['env']['NODE_USE_ENV_PROXY']) == ('$W/tmp', '$W/cache', '$W/cache/npm', '$W/cache/puppeteer', '1')")" True
+  expect "$who: nothing of <machine>/run is readable or writable but its socket" "$(q "$S" "not any('/run/t' in a or a.rstrip('/').endswith('/run') for a in aw + fs['allowRead'])")" True
+  expect "$who: shell commands in the sandbox run without asking (a PreToolUse Bash hook allows)" "$(q "$S" "any(h.get('matcher') == 'Bash' and 'allow' in h['hooks'][0]['command'] for h in s['hooks']['PreToolUse'])")" True
   for root in "$T/linked state" "$T/real state"; do
     for f in index serve secrets browsers bridge room-ledger; do
       expect "$who: denyRead $root/$f" "$(q "$S" "'$root/$f' in dr")" True
@@ -247,6 +259,35 @@ ALLOWED=$(cd "$KITH_HOME/agents/echo" && KITH_PERSON=guest "$KITH" echo --launch
 expect "guest: the launch's allowed tools carry mcp__kithpermit__ask_helper" "$ALLOWED" True
 OWNER_ALLOWED=$(cd "$KITH_HOME/agents/echo" && "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print("mcp__kithpermit__ask_helper" in json.load(sys.stdin).get("allowed_tools",""))')
 expect "owner: no ask_helper tool, nothing new" "$OWNER_ALLOWED" False
+
+# Claude Code's temp folder, with a machine folder short enough for it: <machine>/run/t/<id> (an 8-hex hash for a long id),
+# 0700 and theirs alone; a revoke, a removal or --clear-temp deletes it, and one recorded as someone else's is emptied first.
+ST=$(mktemp -d /tmp/kXXX); ST=$(cd "$ST" && pwd -P)
+trap 'rm -rf "$T" "$ST"' EXIT
+LONG=someone-with-a-long-id
+for p in "$LONG" gone; do "$AUTH" person $p name=P >/dev/null 2>&1; "$AUTH" member echo $p mode=default >/dev/null 2>&1; done
+expect "guest: CLAUDE_CODE_TMPDIR is <machine>/run/t/<id>" "$(KITH_STATE=$ST KITH_PERSON=guest lj "e.get('CLAUDE_CODE_TMPDIR')")" "$ST/run/t/guest"
+S=$(KITH_STATE=$ST KITH_PERSON=guest settings)
+expect "guest: its temp folder is readable and writable, run/t around it is not" "$(q "$S" "'$ST/run/t/guest' in aw and '$ST/run/t/guest' in fs['allowRead'] and not any(a in ('$ST/run', '$ST/run/t', '$ST/run/t-who') for a in aw + fs['allowRead'])")" True
+expect "guest: run/t, its folder and the records are 0700" "$(python3 -c 'import os,sys; print({oct(os.stat(p).st_mode & 0o777) for p in sys.argv[1:]})' "$ST/run/t" "$ST/run/t/guest" "$ST/run/t-who")" "{'0o700'}"
+H=$(KITH_STATE=$ST KITH_PERSON=$LONG lj "e.get('CLAUDE_CODE_TMPDIR')")
+expect "a long id: an 8-hex hash of it" "$(python3 -c 'import hashlib,sys; print(sys.argv[1] == sys.argv[2] + "/" + hashlib.sha256(sys.argv[3].encode()).hexdigest()[:8])' "$H" "$ST/run/t" "$LONG")" True
+: > "$ST/run/t/guest/left"; echo other > "$ST/run/t-who/guest"
+KITH_STATE=$ST KITH_PERSON=guest lj 1 >/dev/null
+expect "a folder recorded as someone else's is emptied before the run, and recorded as theirs" "$([ -e "$ST/run/t/guest/left" ] && echo kept || echo gone) $(cat "$ST/run/t-who/guest")" "gone guest"
+echo other > "$ST/run/t-who/guest"; KITH_STATE=$ST "$AUTH" person guest --clear-temp >/dev/null 2>&1
+expect "--clear-temp leaves a folder recorded as someone else's" "$([ -d "$ST/run/t/guest" ] && echo kept || echo gone)" kept
+"$AUTH" bot gbot --of guest >/dev/null 2>&1; KITH_STATE=$ST python3 "$KERNEL/lib/kith_paths.py" --guest-tmp gbot >/dev/null
+expect "a bot of theirs has a temp folder of its own" "$([ -d "$ST/run/t/gbot" ] && echo there)" there
+printf guest > "$ST/run/t-who/guest"; KITH_STATE=$ST "$AUTH" person guest --clear-temp >/dev/null 2>&1
+expect "--clear-temp removes their own, record first" "$([ -e "$ST/run/t/guest" ] || [ -e "$ST/run/t-who/guest" ] && echo kept || echo gone)" gone
+expect "--clear-temp removes their bots' too" "$([ -e "$ST/run/t/gbot" ] && echo kept || echo gone)" gone
+"$AUTH" bot gbot --rm >/dev/null 2>&1
+KITH_STATE=$ST KITH_PERSON=$LONG lj 1 >/dev/null; KITH_STATE=$ST "$AUTH" person "$LONG" --revoke >/dev/null 2>&1
+expect "a revoke (no cloud link) removes it" "$([ -e "$H" ] && echo kept || echo gone)" gone
+KITH_STATE=$ST KITH_PERSON=gone lj 1 >/dev/null; KITH_STATE=$ST "$AUTH" person gone --rm >/dev/null 2>&1
+expect "person --rm removes it" "$([ -e "$ST/run/t/gone" ] && echo kept || echo gone)" gone
+rm -rf "$ST"
 
 # --- The real thing (KITH_REAL_SANDBOX=1, macOS, a logged-in claude): a guest run under Claude Code's own sandbox ------------
 # Everything above reads the generated JSON; this runs a real `claude -p` as the guest (the model is told to run one probe

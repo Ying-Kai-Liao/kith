@@ -432,6 +432,12 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
     }
     super::botguests::enforce(hub, person).await;
     stop_runs(hub, person, false).await;
+    // Once nothing of theirs runs: the Claude Code temp folder their runs wrote in (<machine>/run/t/<id>).
+    if let Some(bin) = account::bin().await
+        && let Err(e) = account::run(&bin, &["person", person, "--clear-temp"]).await
+    {
+        tracing::warn!(error = format!("{e:#}"), person, "couldn't remove a revoked person's temp folder");
+    }
     // Their bots' runs a restarted host no longer knows, found by their claims.
     let bots: Vec<String> = hub
         .store
