@@ -47,6 +47,8 @@ export class BotMirror extends Observable {
   /** Agents ringing the person right now (see `shared/incoming-call`). */
   incomingCalls: IncomingCall[] = []
   routineDrafts = new Map<string, string>()
+  /** Files picked in the sidebar's dock for a chat; its composer takes them. */
+  stagedFiles = new Map<string, { name: string; data: Uint8Array }[]>()
   readonly composerDrafts: ComposerDrafts
   lastError: string | null = null
   /** A kit view selected a bot on this store (new chat, editor); the account picks it up. */

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { normalizeBot, type Entry } from './models.ts'
-import { TASK_IDLE_MS, chatAndTasks, currentTask, placeTasks, taskOpen, taskStatus, taskTitle } from './tasks.ts'
+import { chatAndTasks, currentTask, taskStatus, taskTitle, workingThreadIn } from './tasks.ts'
 
 const entry = (id: string, kind: Entry['kind'], data: Entry['data'], threadId: string | null = null): Entry =>
   ({ id, seq: 0, botId: 'b', threadId, rev: 1, kind, turn: 1, data, createdAt: 0, updatedAt: 0 })
@@ -39,17 +39,6 @@ test('a finished task takes the host\'s status, and an older host falls back to 
   assert.equal(taskStatus(idle, thread('working'), []), 'done', 'a stale working is not taken')
 })
 
-test('a task shows inline while busy and while the newest is fresh; the user can open or fold any', () => {
-  const now = 100 * TASK_IDLE_MS
-  assert.ok(taskOpen('done', true, now - 60_000, now))
-  assert.ok(!taskOpen('done', true, now - TASK_IDLE_MS, now), 'ten quiet minutes fold it')
-  assert.ok(!taskOpen('done', false, now - 60_000, now), 'an older task is a card')
-  assert.ok(taskOpen('working', false, now - 5 * TASK_IDLE_MS, now), 'a working task stays open')
-  assert.ok(taskOpen('needsYou', false, 0, now))
-  assert.ok(!taskOpen('working', true, now, now, false), 'folded by hand')
-  assert.ok(taskOpen('done', false, 0, now, true), 'opened by hand')
-})
-
 test('a voice call follows the chat and its tasks, not other threads', () => {
   const task = entry('t', 'user', { text: 'deploy', task: true })
   const plain = entry('p', 'agent', { text: 'hello' })
@@ -70,22 +59,9 @@ test('a task a terminal is mid-turn in is working, though the host runs no lane 
   assert.equal(taskStatus(idle, thread('app', true), []), 'done', "an app turn is the host's lane to report")
 })
 
-test('a task still talking after the chat last message moves to the end, by its latest reply', () => {
-  const at = (e: Entry, createdAt: number, thread?: Entry['data']['thread']): Entry => ({ ...e, createdAt, data: { ...e.data, thread } })
-  const old = at(entry('old', 'user', { task: true }), 10, { count: 5, lastAt: 500, authors: [] })
-  const quiet = at(entry('quiet', 'user', { task: true }), 20, { count: 1, lastAt: 25, authors: [] })
-  const note = at(entry('n', 'notice', { text: 'Voice chat' }), 300)
-  const slots = [old, quiet, note].map((entry) => ({ entry }))
-  const placed = placeTasks(slots)
-  assert.deepEqual(placed.slots.map((s) => s.entry.id), ['quiet', 'n', 'old'])
-  assert.deepEqual([...placed.moved], ['old'])
-})
-
-test('a chat whose only row is the task root keeps it, and a settled chat is not reordered', () => {
-  const root = { ...entry('t', 'user', { task: true, thread: { count: 3, lastAt: 90, authors: [] } }), createdAt: 1 }
-  assert.deepEqual(placeTasks([{ entry: root }]).slots.map((s) => s.entry.id), ['t'])
-  const later = { ...entry('m', 'user', { text: 'hi' }), createdAt: 100 }
-  const p = placeTasks([{ entry: root }, { entry: later }])
-  assert.deepEqual(p.slots.map((s) => s.entry.id), ['t', 'm'])
-  assert.equal(p.moved.size, 0)
+test('the flat chat finds where its turn runs, in a thread or in the chat itself', () => {
+  assert.equal(workingThreadIn(normalizeBot({ id: 'b', workingLanes: [{ chat: 'b', thread: 't' }] }), 'b'), 't')
+  assert.equal(workingThreadIn(normalizeBot({ id: 'b', workingLanes: [{ chat: 'b' }] }), 'b'), null)
+  assert.equal(workingThreadIn(normalizeBot({ id: 'b', workingLanes: [{ chat: 'other' }] }), 'b'), undefined)
+  assert.equal(workingThreadIn(normalizeBot({ id: 'b', workingLanes: [] }), 'b'), undefined)
 })

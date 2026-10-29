@@ -63,6 +63,10 @@ struct BotListView: View {
     @GestureState private var touching = false
     @State private var scrolling = false
     @State private var hold = CrewOrderHold()
+    /// Results group under People, Groups, Agents, Topics once the list scrolls (the keyboard drops); typing ranks again.
+    @State private var grouped = false
+    /// Agents put to sleep from their menu, by row id, until they next work or get a message.
+    @State private var sleepers: [String: CrewSleep] = [:]
 
     fileprivate struct CallTarget: Identifiable {
         let store: BotStore
@@ -129,20 +133,69 @@ struct BotListView: View {
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var searching: Bool { !trimmedQuery.isEmpty }
 
-    /// The rooms as shown: the crew's order, or the dock's ranking while something is typed.
-    private func displayed(_ all: [Room]) -> [Room] {
+    private func ordered(_ all: [Room]) -> [Room] {
         let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let ordered = hold.resolved(computed: computedOrder, frozen: frozen).compactMap { byId[$0] }
-        guard searching else { return ordered }
-        let entries = ordered.map { CrewRows.searchEntry($0.item, store: $0.store, team: $0.team) }
-        return CrewSearch.rank(entries, query: trimmedQuery).compactMap { byId[$0] }
+        return hold.resolved(computed: computedOrder, frozen: frozen).compactMap { byId[$0] }
+    }
+
+    /// What the dock's box found, best first (empty when nothing is typed).
+    private func found(_ all: [Room]) -> [CrewSearchHit] {
+        guard searching else { return [] }
+        let entries = ordered(all).map { CrewRows.searchEntry($0.item, store: $0.store, team: $0.team) }
+        return CrewSearch.hits(entries, query: trimmedQuery)
+    }
+
+    /// The rooms as shown: the crew's order, or the dock's ranking while something is typed.
+    private func displayed(_ all: [Room], found hits: [CrewSearchHit]? = nil) -> [Room] {
+        guard searching else { return ordered(all) }
+        let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return (hits ?? found(all)).compactMap { byId[$0.id] }
+    }
+
+    /// Where opening a result lands: the message the match was in, by room.
+    private func landing(_ hits: [CrewSearchHit]) -> [String: CrewSearchMessage] {
+        Dictionary(hits.compactMap { hit in hit.message.map { (hit.id, $0) } }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// The results under their headers, once the list has scrolled.
+    private func sections(_ hits: [CrewSearchHit], in shown: [Room]) -> [(group: CrewSearchGroup, rooms: [Room])] {
+        guard searching, grouped else { return [] }
+        let byId = Dictionary(shown.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return CrewSearch.grouped(hits).map { ($0.group, $0.hits.compactMap { byId[$0.id] }) }
+    }
+
+    /// A slept room's state as the sleep tracking reads it.
+    private struct SleepProbe: Equatable {
+        let id: String
+        let working: Bool
+        let lastAt: Int64
+    }
+
+    private var sleepProbe: [SleepProbe] {
+        rooms.filter { sleepers[$0.id] != nil }.map { SleepProbe(id: $0.id, working: $0.item.bot.isWorking, lastAt: $0.item.bot.lastAt) }
+    }
+
+    private func observeSleepers() {
+        let present = Set(rooms.map(\.id))
+        for probe in sleepProbe { sleepers[probe.id]?.observe(working: probe.working, lastAt: probe.lastAt) }
+        sleepers = sleepers.filter { present.contains($0.key) && !$0.value.awake }
+    }
+
+    /// Sleep: ends what the agent is doing (nothing to end when it is idle) and shows it asleep until it next works.
+    private func sleep(_ room: Room) {
+        let bot = room.item.bot
+        guard sleepers[room.id] == nil else { return }
+        if bot.isWorking || bot.needsInput { room.store.stop(bot.id) }
+        sleepers[room.id] = CrewSleep(lastAt: bot.lastAt)
     }
 
     // MARK: body
 
     var body: some View {
         let all = rooms
-        let shown = displayed(all)
+        let hits = found(all)
+        let shown = displayed(all, found: hits)
+        let landing = landing(hits)
         let pinned = searching ? [] : shown.filter { $0.item.bot.pinned }
         let rest = searching ? shown : shown.filter { !$0.item.bot.pinned }
         let board = boardModel
@@ -150,7 +203,7 @@ struct BotListView: View {
         ZStack(alignment: .top) {
             SkyBackground(.home)
             ZStack(alignment: .top) {
-                crewList(all: all, shown: shown, pinned: pinned, rest: rest)
+                crewList(all: all, shown: shown, pinned: pinned, rest: rest, landing: landing, sections: sections(hits, in: shown))
                     .offset(x: tab == .crew ? 0 : -pageWidth)
                     .opacity(tab == .crew ? 1 : 0)
                     .allowsHitTesting(tab == .crew)
@@ -172,7 +225,7 @@ struct BotListView: View {
             VStack(spacing: 8) {
                 AccessBanners()
                 if tab == .crew {
-                    dock(leading: leads(!shown.isEmpty)) { submit(shown) }
+                    dock(leading: leads(!shown.isEmpty)) { submit(shown, landing: landing) }
                 } else {
                     dock(leading: leads(shownBoard.top != nil)) { submitBoard(shownBoard) }
                 }
@@ -184,6 +237,8 @@ struct BotListView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: computedOrder, initial: true) { _, _ in syncOrder() }
         .onChange(of: frozen) { _, _ in syncOrder() }
+        .onChange(of: query) { _, _ in grouped = false }
+        .onChange(of: sleepProbe) { _, _ in observeSleepers() }
         .modifier(HomeSheets(
             editing: $editing, editingGroup: $editingGroup, confirmDelete: $confirmDelete, newChat: $newChat,
             inviting: $inviting, botSheet: $botSheet, sharingAgent: $sharingAgent, allStores: allStores, query: $query, files: $files, picking: $picking, calling: $calling,
@@ -206,7 +261,8 @@ struct BotListView: View {
         }
     }
 
-    private func crewList(all: [Room], shown: [Room], pinned: [Room], rest: [Room]) -> some View {
+    private func crewList(all: [Room], shown: [Room], pinned: [Room], rest: [Room], landing: [String: CrewSearchMessage],
+                          sections: [(group: CrewSearchGroup, rooms: [Room])]) -> some View {
         List {
             Group {
                 if !searching {
@@ -225,10 +281,27 @@ struct BotListView: View {
                         .padding(.horizontal, KithSpacing.gutter).padding(.vertical, 18)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                ForEach(pinned) { row($0, in: pinned) }
-                    .onMove(perform: movePinned(pinned))
-                ForEach(rest) { row($0, in: rest) }
-                    .onMove(perform: searching || mode == .automatic ? nil : moveRest(pinned: pinned, rest: rest))
+                if searching && grouped {
+                    ForEach(sections, id: \.group) { section in
+                        Text(section.group.title)
+                            .kithText(.secondary).fontWeight(.semibold)
+                            .foregroundStyle(Palette.muted)
+                            .padding(.horizontal, KithSpacing.gutter)
+                            .padding(.top, 10)
+                            .padding(.bottom, 4)
+                            .accessibilityAddTraits(.isHeader)
+                        ForEach(section.rooms) { row($0, in: section.rooms, landing: landing) }
+                    }
+                } else if !searching && mode == .automatic {
+                    // One list, so a room dragged up into the pinned ones can be pinned there.
+                    ForEach(pinned + rest) { row($0, in: $0.item.bot.pinned ? pinned : rest, landing: landing) }
+                        .onMove(perform: moveAutomatic(pinned: pinned, rest: rest))
+                } else {
+                    ForEach(pinned) { row($0, in: pinned, landing: landing) }
+                        .onMove(perform: movePinned(pinned))
+                    ForEach(rest) { row($0, in: rest, landing: landing) }
+                        .onMove(perform: searching ? nil : moveRest(pinned: pinned, rest: rest))
+                }
             }
             .listRowInsets(EdgeInsets())
             .listRowSeparator(.hidden)
@@ -239,7 +312,10 @@ struct BotListView: View {
         .environment(\.defaultMinListRowHeight, 0)
         .scrollDismissesKeyboard(.immediately)
         .onDisappear { dictation.stop() }
-        .onScrollPhaseChange { _, phase in scrolling = phase != .idle }
+        .onScrollPhaseChange { _, phase in
+            scrolling = phase != .idle
+            if searching && phase == .interacting { grouped = true }
+        }
         .simultaneousGesture(DragGesture(minimumDistance: 0).updating($touching) { _, state, _ in state = true })
         .refreshable {
             for computer in accounts.computers { accounts.store(for: computer.id)?.restartStream() }
@@ -288,19 +364,21 @@ struct BotListView: View {
 
     // MARK: rows
 
-    private func row(_ room: Room, in section: [Room]) -> some View {
-        let item = room.item, store = room.store, bot = item.bot
+    private func row(_ room: Room, in section: [Room], landing: [String: CrewSearchMessage]) -> some View {
+        let item = room.item, bot = item.bot
         let reorderable = !searching && CrewOrder.canReorder(pinned: bot.pinned, mode: mode)
+        let draggable = reorderable || (!searching && !bot.isReadOnly && CrewOrder.canDragToPin(pinned: bot.pinned, mode: mode))
+        let message = landing[room.id]
         let card = RoundedRectangle(cornerRadius: 16, style: .continuous)
         // A plain button instead of a NavigationLink: same push, no chevron.
-        return Button { open(item.ref) } label: {
-            CrewRow(CrewRows.model(for: item, store: store, team: room.team))
+        return Button { open(item.ref, focus: message?.id) } label: {
+            CrewRow(rowModel(room, found: message))
         }
         .buttonStyle(.plain)
         .background(lifted == room.id ? Palette.surface : .clear, in: card)
         .contentShape([.dragPreview, .contextMenuPreview], card)
-        .modifier(LiftIfReorderable(reorderable: reorderable) { lift(room.id) })
-        .alignmentGuide(.listRowSeparatorLeading) { _ in KithSpacing.gutter + 54 + 14 }
+        .modifier(LiftIfReorderable(reorderable: draggable) { lift(room.id) })
+        .alignmentGuide(.listRowSeparatorLeading) { _ in KithSpacing.gutter + 48 + 14 }
         .listRowSeparator(.visible)
         .listRowSeparatorTint(Palette.ink.opacity(0.08))
         .accessibilityLabel(accessibilityName(room))
@@ -310,18 +388,25 @@ struct BotListView: View {
                 Button("Move down") { shift(room, by: 1, in: section) }
             }
         }
-        .contextMenu { menu(item, store: store) }
+        .contextMenu { menu(room) }
+    }
+
+    private func rowModel(_ room: Room, found message: CrewSearchMessage?) -> CrewRowModel {
+        var model = CrewRows.model(for: room.item, store: room.store, team: room.team, asleep: sleepers[room.id] != nil)
+        // A result found in what was said shows the line it was found in.
+        if let message { model.status = MessagePreview.text(message.text) }
+        return model
     }
 
     private func accessibilityName(_ room: Room) -> String {
         accounts.computers.count > 1 ? "\(room.item.bot.name), on \(room.store.hostName)" : room.item.bot.name
     }
 
-    @ViewBuilder private func menu(_ item: RosterItem, store: BotStore) -> some View {
-        if item.bot.isReadOnly {
-            readOnlyMenu(item, store: store)
+    @ViewBuilder private func menu(_ room: Room) -> some View {
+        if room.item.bot.isReadOnly {
+            readOnlyMenu(room.item, store: room.store)
         } else {
-            fullMenu(item, store: store)
+            fullMenu(room)
         }
     }
 
@@ -334,8 +419,8 @@ struct BotListView: View {
         }
     }
 
-    @ViewBuilder private func fullMenu(_ item: RosterItem, store: BotStore) -> some View {
-        let bot = item.bot
+    @ViewBuilder private func fullMenu(_ room: Room) -> some View {
+        let item = room.item, store = room.store, bot = item.bot
         Button(bot.pinned ? "Unpin" : "Pin", systemImage: bot.pinned ? "pin.slash" : "pin") { store.setPinned(bot, !bot.pinned) }
         Menu("Colour", systemImage: "paintpalette") {
             ForEach(AvatarPalette.colors) { swatch in
@@ -353,6 +438,11 @@ struct BotListView: View {
            let agent = bot.hqAgent, AgentShare.canShare(hqAgent: agent) {
             Button("Share access…", systemImage: "person.badge.plus") { sharingAgent = ShareAgentTarget(store: store, agent: agent, name: bot.name) }
         }
+        // Agents only: a group or a team room has no single agent to put to sleep.
+        if !bot.isGroup, !room.team {
+            Button("Sleep", systemImage: "moon.zzz") { sleep(room) }
+                .disabled(sleepers[room.id] != nil)
+        }
         Button("Mark as read", systemImage: "checkmark.message") { store.markAllRead(bot.id) }
         Button("Hide from list", systemImage: "eye.slash") { store.setHidden(bot, true) }
         Divider()
@@ -360,9 +450,11 @@ struct BotListView: View {
     }
 
     /// A card lane's or a guest's chat opens its waiting card (see `AppStore.openBot`).
-    private func open(_ ref: BotReference) {
+    /// `focus` is a message the search found: the chat lands on it, and the query stays so Back returns to the results.
+    private func open(_ ref: BotReference, focus: String? = nil) {
         dictation.stop()
-        query = ""
+        accounts.store(for: ref.computerId)?.focusEntry = focus.map { .init(chat: ref.botId, entry: $0) }
+        if focus == nil { query = "" }
         app.openBot(ref)
     }
 
@@ -393,6 +485,29 @@ struct BotListView: View {
             var after = pinned
             after.move(fromOffsets: source, toOffset: destination)
             writeOrder(pinned: after, unpinned: nil)
+        }
+    }
+
+    /// Automatic: pinned and the rest are one list. Dragging a room up into the pinned ones pins it there (saved as
+    /// the Pin menu item saves it, then the pinned order); the unpinned order is never written.
+    private func moveAutomatic(pinned: [Room], rest: [Room]) -> (IndexSet, Int) -> Void {
+        { source, destination in
+            guard let from = source.first else { return }
+            switch CrewOrder.drop(pinnedCount: pinned.count, source: from, destination: destination) {
+            case let .reorderPinned(from, to):
+                var after = pinned
+                after.move(fromOffsets: IndexSet(integer: from), toOffset: to)
+                writeOrder(pinned: after, unpinned: nil)
+            case let .pin(index, at):
+                guard rest.indices.contains(index), !rest[index].item.bot.isReadOnly else { return }
+                let room = rest[index]
+                room.store.setPinned(room.item.bot, true)
+                var after = pinned
+                after.insert(room, at: min(at, after.count))
+                writeOrder(pinned: after, unpinned: nil)
+            case .ignore:
+                break
+            }
         }
     }
 
@@ -536,10 +651,10 @@ struct BotListView: View {
     }
 
     /// Return and the send arrow: open the top match, or, with nothing to open, pick an agent for a new session.
-    private func submit(_ matches: [Room]) {
+    private func submit(_ matches: [Room], landing: [String: CrewSearchMessage]) {
         dictation.stop()
         if leads(!matches.isEmpty), let top = matches.first {
-            open(top.item.ref)
+            open(top.item.ref, focus: landing[top.id]?.id)
         } else if searching || !files.isEmpty {
             picking = .send
         }
@@ -797,7 +912,7 @@ private struct EmptyRoster: View {
     var body: some View {
         VStack(spacing: 14) {
             CharacterAvatar(portrait: "spare-cloud", size: 72)
-            Text("No agents yet").kithText(.agentName).foregroundStyle(Palette.ink)
+            Text("No agents yet").kithText(.topBar).foregroundStyle(Palette.ink)
             Text(hasComputer
                  ? "Make an agent for each kind of work: a reviewer, a fixer, a docs writer. Point it at a project."
                  : "Ask one of your account's computers for access, or pair one with its code.")

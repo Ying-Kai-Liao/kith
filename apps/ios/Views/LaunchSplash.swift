@@ -25,7 +25,7 @@ struct LaunchSplash: View {
         .scaleEffect(shown || reduceMotion ? 1 : 0.85)
         .opacity(shown ? 1 : 0)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Palette.background)
+        .background { SkyBackground() }
         .accessibilityLabel("Connecting")
         .task {
             withAnimation(.easeOut(duration: 0.4)) { shown = true }

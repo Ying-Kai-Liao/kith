@@ -79,6 +79,8 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var at: Int64?
     /// permission: `account` (pick an account for a service) or `key` (type the key). Nil on every other card. Never a value.
     public var card: String?
+    /// A card drawn over the entry, its `text` being the twin (see `RichCard`). Not the permission `card` above.
+    public var richCard: RichCard?
     /// permission with `card`: what the agent needs a key for (host `cards/secret.rs`).
     public var secret: SecretRequest?
     /// permission with `card` `account`: the owner's accounts for that service, each with the agents holding it.

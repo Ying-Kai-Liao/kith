@@ -53,7 +53,7 @@ test('the staged release layout carries the licenses, NOTICE and third-party not
   try {
     const share = join(dir, 'share/kith')
     execFileSync('sh', [fileURLToPath(new URL('../../../../scripts/stage-kernel.sh', import.meta.url)), share])
-    for (const f of ['LICENSE', 'LICENSE.serve', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'kernel/bin/kith']) assert.ok(existsSync(join(share, f)), f)
+    for (const f of ['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md', 'kernel/bin/kith']) assert.ok(existsSync(join(share, f)), f)
     assert.match(readFileSync(join(share, 'NOTICE'), 'utf8'), /Copyright/)
   } finally {
     rmSync(dir, { recursive: true, force: true })

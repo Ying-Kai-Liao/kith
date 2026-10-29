@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # kith-send-check — started from a Kith app chat (KITH_VIA=serve) kith-send hints at send_file but does not refuse
-# (routines and bot-to-bot requests share that env); a channel's outbox still works. No network, no secrets.
+# (routines and bot-to-bot requests share that env); a channel's outbox still works. A run with an outbox of its own
+# (KITH_RUN_OUTBOX) leaves each message there for the app, and on Telegram too when a bot is set up; `--to dm` is
+# Telegram only. No network (curl is a stub), no secrets: a throwaway HOME and KITH_STATE.
 #
 #   kernel/tests/kith-send-check
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 send="$here/../bin/kith-send"
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
-unset KITH_DISCORD_WEBHOOK_URL KITH_DISCORD_THREAD_ID KITH_BRIDGE_OUTBOX KITH_TELEGRAM_BOT_TOKEN KITH_TELEGRAM_CHAT_ID
-export KITH_VIA=serve KITH_TELEGRAM_ENV_FILE=/nonexistent
+unset KITH_DISCORD_WEBHOOK_URL KITH_DISCORD_THREAD_ID KITH_BRIDGE_OUTBOX KITH_TELEGRAM_BOT_TOKEN KITH_TELEGRAM_CHAT_ID \
+  KITH_RUN_OUTBOX HQ_RUN_OUTBOX HQ_TELEGRAM_BOT_TOKEN HQ_TELEGRAM_CHAT_ID KITH_HOME HQ_HOME HQ_STATE
+export KITH_VIA=serve KITH_TELEGRAM_ENV_FILE=/nonexistent HOME=$tmp/home KITH_STATE=$tmp/state KITH_AGENT=echo
+mkdir -p "$HOME" "$KITH_STATE"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -20,3 +24,35 @@ mkdir "$tmp/box"
 KITH_BRIDGE_OUTBOX="$tmp/box" "$send" "to a channel" >/dev/null || fail "a channel's outbox stopped working"
 ls "$tmp/box"/*.json >/dev/null || fail "nothing in the outbox"
 echo "ok: kith-send hints in an app chat, still reaches Telegram and channel outboxes"
+
+# The run's outbox. item N: the Nth item's JSON, oldest first.
+run=$tmp/state/outbox/r1; mkdir -p "$run"
+item() { python3 -c 'import glob,json,sys; f=sorted(glob.glob(sys.argv[1]+"/*.json"), key=lambda p: int(p.rsplit("/",1)[1][:-5])); print(json.dumps(json.load(open(f[int(sys.argv[2])]))))' "$run" "$1"; }
+out=$(KITH_RUN_OUTBOX=$run "$send" "the news" 2>&1) || fail "a run's outbox with no Telegram bot failed: $out"
+[[ $out != *send_file* ]] || fail "hinted at send_file though the app gets it: $out"
+[[ $(item 0) == *'"as": "echo"'*'"text": "the news"'* ]] || fail "text item: $(item 0)"
+
+printf 'a chart' > "$tmp/chart one.txt"
+KITH_RUN_OUTBOX=$run "$send" --as image --caption "here" "$tmp/chart one.txt" >/dev/null || fail "a file to the run's outbox failed"
+got=$(item 1)
+[[ $got == *'"as": "image"'*'"caption": "here"'*'"name": "chart one.txt"'* ]] || fail "file item: $got"
+stored=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["files"][0]["file"])' "$got")
+[[ $(cat "$run/$stored") == "a chart" ]] || fail "the file was not copied into the outbox"
+[[ $stored =~ ^[0-9]+-0$ ]] || fail "a stored name the host would refuse: $stored"
+ls "$run"/*.tmp >/dev/null 2>&1 && fail "a half-written item was left"
+
+# With a Telegram bot as well, it goes to both; a Telegram failure doesn't fail a send the app already has.
+mkdir "$tmp/bin"
+printf '#!/bin/sh\necho "$*" >> "%s/curl.log"\necho "${CURL_SAYS:-{\\"ok\\": true}}"\n' "$tmp" > "$tmp/bin/curl"; chmod +x "$tmp/bin/curl"
+export PATH="$tmp/bin:$PATH" KITH_TELEGRAM_BOT_TOKEN=t0k KITH_TELEGRAM_CHAT_ID=42
+KITH_RUN_OUTBOX=$run "$send" "both" >/dev/null || fail "outbox and Telegram failed"
+[[ $(item 2) == *'"text": "both"'* ]] || fail "not in the outbox with Telegram set up"
+grep -q 'text=both' "$tmp/curl.log" || fail "not sent to Telegram"
+CURL_SAYS='{"ok": false, "description": "down"}' KITH_RUN_OUTBOX=$run "$send" "tg down" >/dev/null 2>&1 \
+  || fail "a Telegram failure failed a send the outbox had"
+[[ $(item 3) == *'"text": "tg down"'* ]] || fail "not in the outbox when Telegram is down"
+
+KITH_RUN_OUTBOX=$run "$send" --to dm "only telegram" >/dev/null || fail "--to dm failed"
+grep -q 'text=only telegram' "$tmp/curl.log" || fail "--to dm didn't reach Telegram"
+[[ $(ls "$run"/*.json | wc -l) -eq 4 ]] || fail "--to dm left an item for the app"
+echo "ok: a run's outbox gets each message (files copied in), Telegram too; --to dm is Telegram only"

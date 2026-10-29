@@ -33,22 +33,6 @@
   --d-needs: 0ms;
 }
 
-/* The group's tile: logo gradient at 45% over #F6F6FA (LAYERS.md section 5), square, masked round. */
-.kb-tile {
-  position: absolute;
-  inset: 0;
-  border-radius: 22%;
-  background: #f6f6fa;
-  overflow: hidden;
-}
-.kb-tile::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  opacity: 0.45;
-  background: linear-gradient(135deg, #8fc7fc, #a67efc, #f281f3, #fdcec0);
-}
-
 .kb-rig,
 .kb-body,
 .kb-gaze {

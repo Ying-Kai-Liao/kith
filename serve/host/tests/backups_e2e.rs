@@ -297,9 +297,9 @@ async fn the_state_survives_a_restart_of_the_host() {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    // The startup sync turns tasks on once for a bot that has them off (see `hub::hq`); this test reads the main chat.
-    s.host.wait_tasks_on(&s.bot).await;
-    s.host.call("updateBot", json!({"id": s.bot, "tasks": false})).await;
+    // The user's "off" survives the restart's sync (see `hub::hq`): this test reads the main chat.
+    let roster = s.host.roster().await;
+    assert!(roster.iter().any(|b| b["id"] == s.bot.as_str() && b["tasks"] == false), "tasks came back on: {roster:?}");
     s.ask("after the restart").await;
 
     assert_eq!(s.prompts("primary").len(), 1, "still out: not asked again");

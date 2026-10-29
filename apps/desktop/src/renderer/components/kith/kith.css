@@ -82,6 +82,11 @@
   }
 }
 
+.kc-count.inverted {
+  background: #fff;
+  color: #0b0c0e;
+}
+
 /* ---- StatusChip, WriterChip, OriginTag ---- */
 .kc-chip {
   display: inline-flex;
@@ -387,6 +392,11 @@
   background: var(--kith-panel);
   box-shadow: inset 0 0 0 1px var(--kith-line);
 }
+/* Waiting on you: the pair at low strength over the panel. Ink text stays well above 4.5:1 on it. */
+.kc-decision.asking {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--pair-a) 14%, transparent), color-mix(in srgb, var(--pair-b) 14%, transparent)), var(--kith-panel);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pair-b) 30%, transparent);
+}
 .kc-decision-heading {
   color: var(--kith-muted);
   overflow-wrap: anywhere;
@@ -460,8 +470,10 @@
   opacity: 0.55;
   cursor: default;
 }
-.kc-decision.permission .kc-decision-button.plain:nth-child(2) {
+.kc-decision-button.deny {
+  background: var(--kith-ground);
   color: var(--kith-negative);
+  box-shadow: inset 0 0 0 1.5px var(--kith-negative);
 }
 
 /* ---- TranscriptTurn ---- */
