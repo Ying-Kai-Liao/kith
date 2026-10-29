@@ -182,7 +182,6 @@ struct UserBubble: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
                 .background(Palette.bubbleUser, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
-                .onTapGesture { onTap?() }
                 .contextActions(reactions: model.reactionPick(entry)) {
                     var items = [
                         MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) },
@@ -261,6 +260,7 @@ struct AgentBubble: View {
                         .background(Palette.bubbleAgent, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
                 }
             }
+                .onTapGesture { onTap?() }
                 .contextActions(reactions: model.reactionPick(entry)) {
                     var items = [
                         MenuItem("Copy", icon: "square.on.square") { Pasteboard.copy(entry.data.text) },
