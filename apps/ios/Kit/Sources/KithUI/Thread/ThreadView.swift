@@ -135,14 +135,20 @@ public struct ThreadView: View {
                         .font(.footnote).foregroundStyle(Palette.secondary).padding(.vertical, 10)
                 }.buttonStyle(.plain)
             } else {
-                ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: canReply(e) ? reply : nil)
-                    .equatable()
-                    .task(id: missingReplies(e)) {
-                        // Its thread's older replies are not here yet: bring them in, so the chat has them in order.
-                        if missingReplies(e) { await model.loadThread(botId, root: e.id) }
-                    }
+                entryRow(e, groupStart: groupStart)
             }
         }
+    }
+
+    func entryRow(_ e: Entry, groupStart: Bool) -> some View {
+        let replyAction: ((Entry) -> Void)? = canReply(e) ? { reply($0) } : nil
+        let missing = missingReplies(e)
+        return ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: replyAction)
+            .equatable()
+            .task(id: missing) {
+                // Its thread's older replies are not here yet: bring them in, so the chat has them in order.
+                if missing { await model.loadThread(botId, root: e.id) }
+            }
     }
 
     /// Reply goes to the composer, so it needs one: not a read-only chat, nor a message in a thread a terminal holds.

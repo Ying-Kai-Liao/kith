@@ -50,7 +50,7 @@ private func rowIds(_ items: [ChatItem]) -> [String] {
     // The reply arrives in the chat's entries and again from the thread fetch.
     let items = ChatItem.build([flat("t1", "user", at: 99, text: "Go", task: true)] + tools + [reply, reply], groupingExchanges: true)
     #expect(rowIds(items) == ["t1", "earlier-x1", "x4", "x5", "x6", "x7", "done"])
-    guard case let .earlier(count) = items.first(where: { $0.id == "earlier-x1" })?.kind else { return Issue.record("no fold") }
+    guard case let .earlier(count) = items.first(where: { $0.id == "earlier-x1" })?.kind else { Issue.record("no fold"); return }
     #expect(count == 3)
 }
 
