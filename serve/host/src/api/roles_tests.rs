@@ -320,9 +320,11 @@ async fn create_invite_refuses_and_leaves_nothing_half_made() {
     assert!(format!("{e:#}").contains("cloud"), "{e:#}");
     assert!(!r.auth_ok(&["people", "kim"]));
     assert!(r.hub.store.invites().unwrap().is_empty() && r.hub.store.person("kim").is_none());
+    assert!(!r.auth_ok(&["retired", "kim"]), "no link went out, so the id is free again");
     // An existing person keeps what they had when a new grant is rolled back.
     r.fake.refuse_invites.store(false, std::sync::atomic::Ordering::Relaxed);
-    call(&r, &Caller::Local, "createInvite", invite("Kim", json!({"house": "guest"}))).await.unwrap();
+    let made = call(&r, &Caller::Local, "createInvite", invite("Kim", json!({"house": "guest"}))).await.unwrap();
+    assert_eq!(made["personId"], "kim");
     r.fake.refuse_invites.store(true, std::sync::atomic::Ordering::Relaxed);
     assert!(call(&r, &Caller::Local, "createInvite", invite("Kim", json!({"money": "member"}))).await.is_err());
     assert!(r.allowed("kim", "house") && !r.allowed("kim", "money"));
@@ -332,6 +334,28 @@ async fn create_invite_refuses_and_leaves_nothing_half_made() {
     r.auth(&["person", "kai", "--rm"]);
     let e = call(&r, &Caller::Local, "createInvite", invite("Lee", json!({"house": "guest"}))).await.unwrap_err();
     assert!(format!("{e:#}").contains("owner"), "{e:#}");
+}
+
+#[tokio::test]
+async fn a_removed_persons_id_never_goes_to_a_new_invite_and_their_old_link_binds_nobody() {
+    let r = Rig::new().await;
+    let invite = |name: &str| json!({"name": name, "agents": {"house": "guest"}});
+    let made = call(&r, &Caller::Local, "createInvite", invite("Sam")).await.unwrap();
+    assert_eq!(made["personId"], "sam");
+    r.auth(&["person", "sam", "--rm"]);
+    // The same name again is someone new: another id, so none of sam's memory, files or logins.
+    let again = call(&r, &Caller::Local, "createInvite", invite("Sam")).await.unwrap();
+    assert_eq!(again["personId"], "sam-2");
+    // Sam's link, accepted after the removal, binds nobody and doesn't bring sam back.
+    let late = Listed {
+        membership_id: "mem_late".into(),
+        user_id: "user_late".into(),
+        invite_id: made["inviteId"].as_str().unwrap().into(),
+        ..Default::default()
+    };
+    members::apply(&r.hub, Some(r.bin.as_path()), &[late], Some("user_owner")).await.unwrap();
+    assert!(r.who("user_late")["person"].is_null() && !r.auth_ok(&["people", "sam"]));
+    assert_eq!(r.hub.store.memberships().unwrap(), []);
 }
 
 #[tokio::test]

@@ -202,6 +202,24 @@ async fn no_account_yet_asks_for_a_key_with_one_field_per_missing_variable() {
     assert_eq!(chat.kind, "permission");
 }
 
+/// Rule 5: with no chat with the agent on this computer, the key card goes to the owner's Needs-you list, never to a
+/// member's devices.
+#[tokio::test]
+async fn with_no_chat_the_key_card_is_in_the_agents_card_lane_for_the_owner_only() {
+    let f = Fake::new().await;
+    for row in f.r.hub.store.bots().unwrap() {
+        f.r.hub.delete_bot(&row.config.id).unwrap();
+    }
+    f.state(NONE);
+    assert_eq!(f.ask("github").await["carded"], true);
+    let (card, _) = f.open();
+    let entry = f.r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap();
+    assert_eq!(entry.bot_id, "cards:house");
+    let event = json!({"type": "entry", "rev": entry.rev, "entry": entry});
+    assert!(roles::event_for(&f.r.hub.store, None, event.clone()).is_some());
+    assert!(roles::event_for(&f.r.hub.store, Some("sam"), event).is_none());
+}
+
 #[tokio::test]
 async fn existing_accounts_without_a_grant_make_an_access_card() {
     let f = Fake::new().await;
@@ -240,27 +258,6 @@ async fn a_repeat_in_the_same_session_is_the_same_card_and_a_new_session_a_new_o
     let other = request(&f.r.hub, &Origin::run(&owner_run("another-session")), "github", "x").await;
     assert_eq!(other["carded"], true);
     assert_eq!(f.r.hub.store.cards_open(None).len(), 2);
-}
-
-#[tokio::test]
-async fn a_chat_with_nobody_to_show_it_to_is_a_refusal() {
-    let r = Rig::new().await;
-    let dir = r.dir.join("fake");
-    std::fs::create_dir_all(&dir).unwrap();
-    let bin = r.dir.join("kith-auth-fake");
-    std::fs::write(&bin, STUB).unwrap();
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-    *TEST_BIN.lock().unwrap() = Some(bin);
-    TEST_ENV.lock().unwrap().push(("KITH_FAKE", dir.clone()));
-    std::fs::write(dir.join("state.json"), NONE).unwrap();
-    let got = request(&r.hub, &Origin::run(&owner_run(SESSION)), "github", "x").await;
-    assert_eq!(got["ok"], false, "{got}");
-    assert!(
-        r.hub.store.cards_open(None).is_empty() || r.hub.store.cards_open(None).iter().all(|c| c.entry_id.is_none())
-    );
 }
 
 #[tokio::test]

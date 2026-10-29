@@ -393,8 +393,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             }
             // The card store decides whether the answer counts (A1) and records it; an answer for a process that is up
             // goes on to the bot's actor, which holds the request id.
-            let by = b["asPerson"].as_str().unwrap_or("owner");
-            match crate::cards::answer(hub, entry_id, option_id.as_deref(), by)? {
+            match crate::cards::answer(hub, entry_id, option_id.as_deref(), b["asPerson"].as_str())? {
                 crate::cards::Outcome::Closed => json!({"closed": true}),
                 crate::cards::Outcome::Recorded { forward } => {
                     if forward

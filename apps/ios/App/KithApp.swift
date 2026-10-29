@@ -368,8 +368,8 @@ final class AppStore {
         }
     }
 
-    /// Opens a bot's chat. A chat the account has no bot for, on a computer it owns, is a guest's: its push is for the
-    /// request waiting there, which shows as a card instead of a chat that isn't the owner's.
+    /// Opens a bot's chat. An agent's card lane, or a chat the account has no bot for on a computer it owns (a guest's),
+    /// is not a chat: its push is for the request waiting there, which shows as a card.
     func openBot(_ ref: BotReference) {
         if accounts.opensGuestPrompt(ref) {
             accounts.selection = nil

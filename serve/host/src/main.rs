@@ -1,5 +1,6 @@
 //! `kith-serve`: runs coding-agent bots over ACP and serves the Kith apps.
 
+mod access;
 mod agent;
 mod analytics;
 mod api;

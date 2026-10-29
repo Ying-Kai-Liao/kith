@@ -94,6 +94,7 @@ impl Actor {
         hidden: bool,
         done_tx: &mpsc::UnboundedSender<Done>,
     ) -> Result<()> {
+        self.start_entries = entry_ids.to_vec();
         let stopping = |c: &Cmd| matches!(c, Cmd::Stop | Cmd::Shutdown);
         let cancelled = self.deferred.iter().any(stopping);
         if !cancelled && let Some(mut rx) = self.cmd_rx.take() {
@@ -344,6 +345,7 @@ impl Actor {
         }
         // Written before this returns, so a Stop right after is sent after the prompt.
         let answer = acp.send("session/prompt", params).await?;
+        crate::cards::resume::turn_started(&self.hub, &self.start_entries);
         if !self.turn_memory_revision.is_empty()
             && let Err(error) = memory::mark_announced(&self.hub.store, &self.cfg.id, &sid, &self.turn_memory_revision)
         {

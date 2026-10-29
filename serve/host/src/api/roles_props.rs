@@ -143,8 +143,9 @@ struct CardSpec {
     run: bool,
     /// Whose run it was: 0 and 1 the people, 2 a bot guest's person (see `Ids::card_person`), 3 nobody we know.
     person: usize,
-    /// The approver the host stored when it made the card (`cards::approver_of`).
-    member: bool,
+    /// Who the host stored as its answerer when it made the card (`access::approver`): an index into `PEOPLE`, None the
+    /// owner alone.
+    answerer: Option<usize>,
     agent: usize,
 }
 
@@ -222,8 +223,8 @@ fn scenario() -> impl Strategy<Value = Scenario> {
     });
     let card = proptest::option::weighted(
         0.6,
-        (proptest::bool::weighted(0.7), 0..4usize, any::<bool>(), 0..2usize)
-            .prop_map(|(run, person, member, agent)| CardSpec { run, person, member, agent }),
+        (proptest::bool::weighted(0.7), 0..4usize, proptest::option::of(0..2usize), 0..2usize)
+            .prop_map(|(run, person, answerer, agent)| CardSpec { run, person, answerer, agent }),
     );
     let entry = (
         0..=BOTS,
@@ -396,7 +397,8 @@ impl World {
                     run_id: c.run.then(|| format!("r-{id}")),
                     person: card_person(sc, &bot_people, c),
                     agent: AGENTS[c.agent].to_owned(),
-                    approver: if c.member { "member" } else { "owner" },
+                    answerable_by: c.answerer.map(|p| PEOPLE[p].to_owned()),
+                    in_grants: c.answerer.is_some(),
                     tool: t.name.to_owned(),
                     input: t.input.to_owned(),
                     resource: format!("k-{id}"),
@@ -646,31 +648,22 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
             if entry.kind != "permission" {
                 return Err(fail("respondPermission let through for a card that is not a permission request"));
             }
-            // (21) The card of a `claude -p` run names whose run it was; the chat it shows in says nothing.
-            if let Some(c) = spec.card.as_ref().filter(|c| c.run) {
-                return check_run_card(world, sc, call, &entry.id, c, t);
+            // (21) Who answers is stored on the card when it opens (`access::approver`), wherever it shows: the person
+            // it names, while kith-auth says they are a member of its agent now (A7). What the card names is the
+            // producer's to judge (code, files outside the grants, escape cards: cards/tests.rs), not the guard's.
+            let Some(c) = &spec.card else {
+                return Err(fail("respondPermission let through a card with no card-store row"));
+            };
+            if c.answerer != Some(call.person) {
+                return Err(fail(format!("respondPermission let {me} answer a card naming {:?}", c.answerer)));
             }
-            // (22) F11 step 1: a tool that runs code is the owner's to allow, whoever asked; and an approver stored as
-            // the owner (`cards::approver_of`: a file outside the run's grants, a guest's run) stays the owner's.
-            if t.code {
+            if !sc.grants[call.person][c.agent].member() {
                 return Err(fail(format!(
-                    "respondPermission let {me} allow {:?} ({}), which runs code",
-                    t.name, t.kind
+                    "{me} answered a card of {} without being a member of it now",
+                    AGENTS[c.agent]
                 )));
             }
-            if spec.approver == 2 {
-                return Err(fail(format!(
-                    "respondPermission let {me} answer a card stored with the owner as approver"
-                )));
-            }
-            if let Some(a) = entry.data["author"].as_str()
-                && a != entry.bot_id
-            {
-                return Err(fail("respondPermission let through for a card another bot raised"));
-            }
-            if entry.data["author"].as_str().is_none() && !entry.data["author"].is_null() {
-                return Err(fail("respondPermission let through for a card with a non-string author"));
-            }
+            return Ok(());
         }
         entry.bot_id
     } else {
@@ -682,22 +675,14 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
         return Err(fail("guard let through a deleted chat"));
     }
     if row.config.person.as_deref() != Some(me) {
-        // The one way into a chat that is not theirs: answering the permission prompt of a bot guest of theirs, as a
-        // member of the agent that bot runs.
+        // The one way into a chat that is not theirs (a card naming them aside, checked above):
         let theirs = row
             .config
             .person
             .as_deref()
             .and_then(|bot| world.hub.store.bot_guest_of_person(bot))
             .is_some_and(|g| g.owner_person.as_deref() == Some(me));
-        let agent = row.config.hq_agent.as_deref().and_then(agent_index);
-        let prompt =
-            world.hub.store.entry(body["entryId"].as_str().unwrap_or_default()).is_some_and(|e| e.kind == "permission");
-        let member = agent.is_some_and(|a| sc.grants[call.person][a].member());
-        if method == "respondPermission" && theirs && prompt && member {
-            return Ok(());
-        }
-        // ...and reading the chat of a bot guest of theirs, which no write method reaches.
+        // ...reading the chat of a bot guest of theirs, which no write method reaches.
         if theirs && ["history", "thread", "kithInfo", "threadProjects"].contains(&method) {
             return Ok(());
         }
@@ -709,9 +694,6 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
     let ans = &sc.grants[call.person][agent];
     if !ans.allowed() {
         return Err(fail(format!("kith-auth says {ans:?} for {me}/{} and guard let through", AGENTS[agent])));
-    }
-    if method == "respondPermission" && !ans.member() {
-        return Err(fail(format!("respondPermission let through for a non-member answer {ans:?}")));
     }
     if method == "send" {
         match Change::from_args(body) {
@@ -728,53 +710,6 @@ fn check_guard_ok(world: &World, sc: &Scenario, call: &CallSpec, ids: &Ids, body
         }
     }
     let _ = ids;
-    Ok(())
-}
-
-/// (21) Who may answer the card of a `claude -p` run. A member answers their own run's card when the host stored them as
-/// its approver. A bot guest's owner answers their bot's card (docs/kith-bot-guests.md 7.6) only for what they could answer
-/// for their own run: not code (F11 step 1), not a file outside the bot's grant folders (step 2a: `cards::approver_of`,
-/// "a file outside the run's grants is the owner's to allow, whoever the run is for"), and not an escape card (step 2b:
-/// its yes widens the bot's next activation past its box, and a bot never gets more than its owner holds, which
-/// `kith-auth access` enforces for an always and nothing enforces for a once). Either way only while kith-auth says
-/// member now (A7).
-fn check_run_card(
-    w: &World,
-    sc: &Scenario,
-    call: &CallSpec,
-    entry: &str,
-    c: &CardSpec,
-    t: &Tool,
-) -> Result<(), TestCaseError> {
-    let me = PEOPLE[call.person];
-    let member = sc.grants[call.person][c.agent].member();
-    let whose = w.hub.store.card_by_entry(entry).map(|card| card.person).unwrap_or_default();
-    let own = whose == me && c.member;
-    let their_bot = w.hub.store.bot_guest_of_person(&whose).is_some_and(|g| g.owner_person.as_deref() == Some(me));
-    if t.code {
-        return Err(fail(format!("{me} allowed {:?} ({}) on a run card: it runs code", t.name, t.kind)));
-    }
-    if !member {
-        return Err(fail(format!("{me} answered a run card of {} without being a member of it now", AGENTS[c.agent])));
-    }
-    if own {
-        return Ok(());
-    }
-    if !their_bot {
-        return Err(fail(format!("{me} answered a run card of someone else's run ({c:?})")));
-    }
-    if t.escape {
-        return Err(fail(format!(
-            "{me} answered their bot guest's escape card ({}): its yes widens the bot's next run past what {me} holds",
-            t.name
-        )));
-    }
-    if t.outside {
-        return Err(fail(format!(
-            "{me} answered their bot guest's {} card for a file outside the bot's grant folders ({}): the owner's to allow",
-            t.name, t.input
-        )));
-    }
     Ok(())
 }
 
@@ -846,9 +781,12 @@ fn entry(bot: usize, permission: bool, author: usize, secret: usize) -> EntrySpe
 #[test]
 fn guard_lets_a_granted_member_use_their_own_chat() {
     let w = World::new();
-    let run = |person: usize, member: bool, tool: usize| EntrySpec {
+    let card = |run: bool, person: usize, answerer: Option<usize>, agent: usize| {
+        Some(CardSpec { run, person, answerer, agent })
+    };
+    let run = |person: usize, answerer: Option<usize>, tool: usize| EntrySpec {
         tool,
-        card: Some(CardSpec { run: true, person, member, agent: 0 }),
+        card: card(true, person, answerer, 0),
         ..entry(0, true, 1, 0)
     };
     let sc = Scenario {
@@ -864,36 +802,24 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
             BotSpec { owner: 3, deleted: false, agent: 1 },
         ],
         entries: vec![
-            entry(0, true, 1, 0),
+            EntrySpec { card: card(false, 0, Some(0), 0), ..entry(0, true, 1, 0) },
             entry(1, true, 0, 0),
             entry(0, false, 1, 0),
             entry(0, true, 2, 0),
             entry(0, true, 1, 1),
             entry(0, true, 0, 2),
-            // 6..: cards of `claude -p` runs (a1, where p1 is a member), and tool rules on chat cards.
-            run(0, true, 1),
-            run(0, true, 5),
-            run(0, false, 1),
-            run(1, true, 1),
-            run(2, false, 1),
-            run(2, false, 5),
+            // 6..: cards of `claude -p` runs, by who the host stored as their answerer.
+            run(0, Some(0), 1),
+            run(0, None, 1),
+            run(1, Some(1), 1),
+            run(2, Some(0), 1),
+            EntrySpec { card: card(true, 0, Some(0), 1), ..entry(0, true, 1, 0) },
+            // 11..: chat cards.
             EntrySpec { tool: 5, ..entry(0, true, 1, 0) },
             EntrySpec { tool: 1, approver: 2, ..entry(0, true, 1, 0) },
-            EntrySpec {
-                tool: 10,
-                card: Some(CardSpec { run: false, person: 0, member: true, agent: 0 }),
-                ..entry(0, true, 1, 0)
-            },
-            EntrySpec {
-                tool: 1,
-                approver: 1,
-                card: Some(CardSpec { run: false, person: 0, member: true, agent: 0 }),
-                ..entry(0, true, 1, 0)
-            },
-            // 16..: their bot guest's run cards past the bot's box: an escape card, and file tools outside its grants.
-            run(2, false, 9),
-            run(2, false, 2),
-            run(2, false, 3),
+            EntrySpec { tool: 10, card: card(false, 0, Some(0), 0), ..entry(0, true, 1, 0) },
+            EntrySpec { tool: 1, approver: 1, card: card(false, 0, Some(0), 0), ..entry(0, true, 1, 0) },
+            EntrySpec { tool: 1, approver: 1, ..entry(0, true, 1, 0) },
         ],
     };
     let ids = w.load(&sc);
@@ -918,32 +844,21 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
     }
     assert!(go("send", json!({"botId": ids.bots[4]})).is_err(), "a deleted chat");
     let answer = |i: usize| go("respondPermission", json!({"entryId": ids.entries[i]}));
-    assert!(answer(6).is_ok(), "a member answers their own run's card");
-    assert!(answer(7).is_err(), "Bash on their own run's card is the owner's (F11 step 1)");
-    assert!(answer(8).is_err(), "a run card stored with the owner as approver");
-    assert!(answer(9).is_err(), "another person's run card");
-    assert!(answer(10).is_ok(), "the bot guest's owner answers its WebFetch card (7.6)");
-    assert!(answer(11).is_err(), "Bash on their bot's run card is the owner's");
-    assert!(answer(12).is_err(), "Bash in their own chat is the owner's");
-    assert!(answer(13).is_err(), "a chat card stored with the owner as approver");
+    assert!(answer(6).is_ok(), "a member answers a run card naming them");
+    assert!(answer(7).is_err(), "a run card stored with the owner alone");
+    assert!(answer(8).is_err(), "a run card naming someone else");
+    assert!(answer(9).is_ok(), "the bot guest's owner answers the card naming them (7.6)");
+    assert!(answer(10).is_err(), "a card naming p1 for an agent they are no longer a member of");
+    assert!(answer(11).is_err(), "a chat card with no card-store row is the owner's");
+    assert!(answer(12).is_err(), "a chat card stored with the owner as approver");
     for m in ["respondPermission", "react", "editHandoff", "keepConversation"] {
         assert!(
-            go(m, json!({"entryId": ids.entries[14]})).is_err(),
+            go(m, json!({"entryId": ids.entries[13]})).is_err(),
             "{m} on a card whose card-store tool asks for a key"
         );
     }
-    assert!(answer(15).is_ok(), "a chat card with a member approver and its card-store row");
-    // (21) What p1 couldn't answer on their own run they can't answer on their bot's: F11 steps 2a and 2b.
-    let past_the_box: Vec<&str> = [
-        (16, "their bot guest's escape card (its yes widens the bot's next run past its box)"),
-        (17, "Read outside their bot guest's grant folders (F11 step 2a)"),
-        (18, "Edit outside their bot guest's grant folders (F11 step 2a)"),
-    ]
-    .into_iter()
-    .filter(|(i, _)| answer(*i).is_ok())
-    .map(|(_, what)| what)
-    .collect();
-    assert!(past_the_box.is_empty(), "p1 answered, as their bot guest's owner, what is the owner's: {past_the_box:#?}");
+    assert!(answer(14).is_ok(), "a chat card naming p1 in its card-store row");
+    assert!(answer(15).is_err(), "an older card that says member but has no card-store row");
     // Every method off the member list is refused, one by one (a random draw hits a single method too rarely).
     for m in router_methods().iter().filter(|m| !MEMBER_METHODS.contains(&m.as_str())) {
         let body = json!({"botId": ids.bots[0], "entryId": ids.entries[0]});
@@ -953,6 +868,24 @@ fn guard_lets_a_granted_member_use_their_own_chat() {
     w.write_grants(&[[Ans::Denied(false), Ans::Denied(false)], [Ans::Denied(false), Ans::Denied(false)]]);
     assert!(go("send", json!({"botId": ids.bots[0]})).is_err(), "a revoked grant still sends");
     assert!(go("history", json!({"botId": ids.bots[1]})).is_err(), "a revoked grant still reads");
+    assert!(answer(6).is_err(), "a revoked member still answers the card naming them");
+}
+
+/// (21) What a card names is judged once, when it opens (`access::tool_in_grants`): a person can answer it only when it
+/// runs no code and names no file outside the run's grant folders (F11 steps 1 and 2a). Escape and key cards never ask.
+#[test]
+fn a_card_is_within_a_persons_grants_only_when_the_f11_rules_say_so() {
+    let _w = World::new();
+    for t in TOOLS.iter().filter(|t| !t.escape && !t.secret) {
+        let input: Value = serde_json::from_str(t.input).unwrap();
+        assert_eq!(
+            crate::access::tool_in_grants("p1", "a1", t.name, t.kind, &input),
+            !t.code && !t.outside,
+            "{} ({})",
+            t.name,
+            t.kind
+        );
+    }
 }
 
 /// (7) kith-auth's answer, every kind: only a grant counts, anything unreadable is a no, a member alone approves.
@@ -965,12 +898,18 @@ fn kith_auth_answers_fail_closed() {
     all.extend((0..OTHER_PRESETS.len()).map(Ans::Other));
     for a in all {
         w.write_grants(&[[a.clone(), Ans::Fail], [Ans::Fail, Ans::Fail]]);
-        let (may, checked, approves, code) = w.rt.block_on(async {
+        let ask = |in_grants| crate::access::Request {
+            person: "p1",
+            agent: "a1",
+            owner_run: false,
+            ask: crate::access::Ask::Tool { in_grants },
+        };
+        let (may, checked, approves, outside) = w.rt.block_on(async {
             (
                 roles::may_use("p1", "a1").await,
                 roles::may_use_checked("p1", "a1").await,
-                roles::approves_own("p1", "a1", "Edit", "edit").await,
-                roles::approves_own("p1", "a1", "Bash", "execute").await,
+                crate::access::approver(&w.hub.store, &ask(true)).await,
+                crate::access::approver(&w.hub.store, &ask(false)).await,
             )
         });
         assert_eq!(may, a.allowed(), "may_use for {a:?}");
@@ -980,8 +919,8 @@ fn kith_auth_answers_fail_closed() {
         if matches!(a, Ans::Fail | Ans::OwnerTrue) {
             assert_eq!(checked, None, "may_use_checked for {a:?}");
         }
-        assert_eq!(approves, a.member(), "approves_own for {a:?}");
-        assert!(!code, "approves_own let a member allow Bash for {a:?}");
+        assert_eq!(approves.is_some(), a.member(), "approver for {a:?}");
+        assert_eq!(outside, None, "a member answered what is not within their grants for {a:?}");
         // An agent or person the table doesn't list is a failure of kith-auth: denied.
         assert!(!w.rt.block_on(roles::may_use("p1", "a2")));
         assert!(!w.rt.block_on(roles::may_use("nobody", "a1")));
