@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "ce851f4736935ee5d980c73e627004cd277ae05da7fa15138eb686a8db369f87";
+pub const CONTRACT_SHA256: &str = "a6ae2111c2122330d16e32c704a35c4590dc633e7fc86fde85f75e34ca2cfe64";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -391,6 +391,8 @@ pub enum BotErrorCode {
     HeldByOtherWriter,
     #[serde(rename = "tooMany")]
     TooMany,
+    #[serde(rename = "nonceReused")]
+    NonceReused,
     /// A value this version doesn't know.
     #[default]
     #[serde(rename = "unknown", other)]
@@ -411,6 +413,7 @@ impl BotErrorCode {
             Self::Syncing => "syncing",
             Self::HeldByOtherWriter => "heldByOtherWriter",
             Self::TooMany => "tooMany",
+            Self::NonceReused => "nonceReused",
             Self::Unknown => "unknown",
         }
     }
@@ -1420,7 +1423,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::EnumSchema { name: "CitationError", values: &["not_shared"], unknown: "not_shared" },
         crate::check::EnumSchema { name: "ConversationState", values: &["running", "waitingApproval", "queued", "stopped", "idle"], unknown: "running" },
         crate::check::EnumSchema { name: "BotEntryKind", values: &["user", "agent", "notice", "waiting"], unknown: "unknown" },
-        crate::check::EnumSchema { name: "BotErrorCode", values: &["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany"], unknown: "unknown" },
+        crate::check::EnumSchema { name: "BotErrorCode", values: &["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany", "nonceReused"], unknown: "unknown" },
     ],
     types: &[
         crate::check::TypeSchema { name: "Empty", fields: &[], may_omit: &[] },
