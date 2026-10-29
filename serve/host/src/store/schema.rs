@@ -285,6 +285,7 @@ mod tests {
                  ALTER TABLE cards DROP COLUMN reply_to; ALTER TABLE cards DROP COLUMN asked_by;
                  ALTER TABLE cards DROP COLUMN answerable_by; ALTER TABLE cards DROP COLUMN in_grants;
                  ALTER TABLE cards DROP COLUMN applied_at;
+                 ALTER TABLE bot_guests DROP COLUMN turn_timeout_s; ALTER TABLE bot_guests DROP COLUMN wake_profile;
                  INSERT INTO devices VALUES('old', 'Phone', 'ios', 'local', NULL, '[\"control\"]', NULL, 1, NULL);
                  UPDATE kv SET v = '4' WHERE k = 'schema';",
             )
@@ -305,7 +306,11 @@ mod tests {
             let s = Store::open(&db).unwrap();
             drop(s);
             let c = Connection::open(&db).unwrap();
-            c.execute_batch("DROP TABLE conversations; UPDATE kv SET v = '10' WHERE k = 'schema';").unwrap();
+            c.execute_batch(
+                "DROP TABLE conversations; ALTER TABLE bot_guests DROP COLUMN turn_timeout_s;
+                 ALTER TABLE bot_guests DROP COLUMN wake_profile; UPDATE kv SET v = '10' WHERE k = 'schema';",
+            )
+            .unwrap();
         }
         let s = Store::open(&db).unwrap();
         assert_eq!(s.kv_get("schema").as_deref(), Some("12"));
