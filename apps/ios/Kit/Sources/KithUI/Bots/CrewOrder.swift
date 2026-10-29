@@ -64,6 +64,48 @@ public enum CrewOrder {
 
     /// Whether dragging (and Move up / Move down) is offered for a room: always on pinned rooms, on every room in Manual.
     public static func canReorder(pinned: Bool, mode: CrewOrderMode) -> Bool { pinned || mode == .manual }
+
+    /// Whether an unpinned room can be dragged up into the pinned area to pin it: Automatic only (Manual drags
+    /// already move everything, and a drop there never changes what is pinned).
+    public static func canDragToPin(pinned: Bool, mode: CrewOrderMode) -> Bool { !pinned && mode == .automatic }
+
+    /// What a drop means in Automatic, where pinned and unpinned rooms are one list (pinned first). `source` and
+    /// `destination` are the `onMove` indexes into that list. A pinned room stays among the pinned; an unpinned one
+    /// dropped strictly inside the pinned area is pinned there; anywhere else nothing changes, so a drop on the
+    /// boundary never pins by accident and the automatic order never takes a manual position.
+    public static func drop(pinnedCount: Int, source: Int, destination: Int) -> Drop {
+        if source < pinnedCount { return .reorderPinned(from: source, to: min(destination, pinnedCount)) }
+        return destination < pinnedCount ? .pin(unpinnedIndex: source - pinnedCount, at: max(destination, 0)) : .ignore
+    }
+
+    public enum Drop: Equatable, Sendable {
+        /// Move within the pinned rooms (`Array.move(fromOffsets:toOffset:)` semantics).
+        case reorderPinned(from: Int, to: Int)
+        /// Pin the unpinned room at this index of the unpinned rooms, as the pinned room at index `at`.
+        case pin(unpinnedIndex: Int, at: Int)
+        case ignore
+    }
+}
+
+/// An agent put to sleep from its menu: shown asleep until it next works or gets a message. The host's `stop` ends
+/// what it is doing, which can itself bring the agent idle and a notice with it, so the first idle reading only
+/// settles the baseline; anything after that wakes it.
+public struct CrewSleep: Equatable, Sendable {
+    public private(set) var lastAt: Int64
+    public private(set) var settled = false
+    public private(set) var awake = false
+
+    public init(lastAt: Int64) { self.lastAt = lastAt }
+
+    /// Feed the agent's current state each time it changes.
+    public mutating func observe(working: Bool, lastAt now: Int64) {
+        guard !awake else { return }
+        if !settled {
+            if !working { settled = true; lastAt = now }
+            return
+        }
+        if working || now > lastAt { awake = true }
+    }
 }
 
 /// Holds the list still while a finger is on it: while `frozen`, rooms keep the order they were shown in (rooms that
@@ -90,18 +132,38 @@ public struct CrewOrderHold: Equatable, Sendable {
     }
 }
 
+/// One message of a room the dock's box can find, and land on in the chat.
+public struct CrewSearchMessage: Equatable, Sendable {
+    /// The chat entry's id.
+    public var id: String
+    public var text: String
+
+    public init(id: String, text: String) {
+        self.id = id
+        self.text = text
+    }
+}
+
 /// What the dock's box searches: one room's names and status.
 public struct CrewSearchEntry: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable { case agent, team, group }
+
     public var id: String
+    public var kind: Kind
     public var name: String
     /// The person a team room is shared with, or a group's member names.
     public var people: [String]
     public var status: String
     /// Folder, harness and the like: matched last.
     public var extras: [String]
+    /// The room's messages, newest first.
+    public var messages: [CrewSearchMessage]
 
-    public init(id: String, name: String, people: [String] = [], status: String = "", extras: [String] = []) {
+    public init(id: String, kind: Kind = .agent, name: String, people: [String] = [], status: String = "", extras: [String] = [],
+                messages: [CrewSearchMessage] = []) {
         self.id = id
+        self.kind = kind
+        self.messages = messages
         self.name = name
         self.people = people
         self.status = status
@@ -109,22 +171,84 @@ public struct CrewSearchEntry: Equatable, Sendable {
     }
 }
 
+/// Where a result sits once the list is grouped (the keyboard dropped).
+public enum CrewSearchGroup: CaseIterable, Equatable, Sendable {
+    case people, groups, agents, topics
+
+    public var title: String {
+        switch self {
+        case .people: "People"
+        case .groups: "Groups"
+        case .agents: "Agents"
+        case .topics: "Topics"
+        }
+    }
+}
+
+/// One matching room: where it groups, and the message the match was in (the chat lands there) when the room was
+/// found by what was said in it and not by its name, person or status.
+public struct CrewSearchHit: Equatable, Sendable {
+    public var id: String
+    public var group: CrewSearchGroup
+    public var message: CrewSearchMessage?
+}
+
 public enum CrewSearch {
     /// Ids of the rooms matching `query`, best first. Every word of the query must match somewhere. A name beats a
-    /// person, which beats the status line, which beats the rest; at equal rank the list keeps the order it came in.
+    /// person, which beats the status line, which beats the rest, which beats a message; at equal rank the list
+    /// keeps the order it came in.
     public static func rank(_ entries: [CrewSearchEntry], query: String) -> [String] {
+        hits(entries, query: query).map(\.id)
+    }
+
+    /// `rank` with each room's group and matching message.
+    public static func hits(_ entries: [CrewSearchEntry], query: String) -> [CrewSearchHit] {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
-        guard !words.isEmpty else { return entries.map(\.id) }
-        let scored = entries.enumerated().compactMap { index, entry -> (Int, Int, String)? in
+        guard !words.isEmpty else { return entries.map { CrewSearchHit(id: $0.id, group: group(of: $0), message: nil) } }
+        let scored = entries.enumerated().compactMap { index, entry -> (Int, Int, CrewSearchHit)? in
             var total = 0
+            var direct = true
             for word in words {
                 let score = score(word, in: entry)
-                if score == 0 { return nil }
-                total += score
+                if score > 0 {
+                    total += score
+                } else if entry.messages.contains(where: { $0.text.lowercased().contains(word) }) {
+                    // Not in the room's names: what was said in it has the word.
+                    direct = false
+                    total += 1
+                } else {
+                    return nil
+                }
             }
-            return (total, index, entry.id)
+            let hit = direct ? CrewSearchHit(id: entry.id, group: group(of: entry), message: nil)
+                : CrewSearchHit(id: entry.id, group: .topics, message: message(in: entry, words: words))
+            return (total, index, hit)
         }
         return scored.sorted { $0.0 != $1.0 ? $0.0 > $1.0 : $0.1 < $1.1 }.map(\.2)
+    }
+
+    /// The hits under People, Groups, Agents and Topics, in that order; a group with nothing in it is left out.
+    public static func grouped(_ hits: [CrewSearchHit]) -> [(group: CrewSearchGroup, hits: [CrewSearchHit])] {
+        CrewSearchGroup.allCases.compactMap { group in
+            let inGroup = hits.filter { $0.group == group }
+            return inGroup.isEmpty ? nil : (group, inGroup)
+        }
+    }
+
+    private static func group(of entry: CrewSearchEntry) -> CrewSearchGroup {
+        switch entry.kind {
+        case .agent: .agents
+        case .team: .people
+        case .group: .groups
+        }
+    }
+
+    /// The newest message holding every word; nil when the words are spread over several messages.
+    private static func message(in entry: CrewSearchEntry, words: [String]) -> CrewSearchMessage? {
+        entry.messages.first { message in
+            let text = message.text.lowercased()
+            return words.allSatisfy { text.contains($0) }
+        }
     }
 
     private static func score(_ word: String, in entry: CrewSearchEntry) -> Int {
