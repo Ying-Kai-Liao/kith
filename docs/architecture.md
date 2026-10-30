@@ -280,11 +280,29 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   id. The card keeps the id and shows "<agent>, asked by <caller>". The resumed turn runs as `kith ask --reply` and
   its words are that id's answer (`kith ask --wait` returns it, or the caller's session is woken, also when it ended
   with the answer unread, M8); a no or an expiry is the answer instead. Tool-prompt cards of owner runs only.
-- **8. Lifecycle owns every stop.** Not built (below).
+- **8. Lifecycle owns every stop.** Built as F12 (designs/2026-10-24-lifecycle.md; `kernel/lib/kith_lifecycle.py`,
+  `kernel/bin/kith-lifecycle`, `kernel/tests/kith-lifecycle-check`). The writer claim (`live/terminal/<sid>.claim`) is the
+  lease. Every Kith stop writes `sessions/intent/<sid>.json` (why, at, pid and start time) before the signal: the wrapper's
+  idle stop and Kai's `/exit`, the host's idle release and Stop, a revoke's kill; a process taking the claim clears it, and a
+  session gone with no intent reads as a crash (none, from before this: unknown, never ended). A human session sleeps only
+  through the `kith-sessions run` wrapper: after 60 minutes since the latest of its last turn, its start and the last
+  keystroke, with nothing outstanding (a background shell with no task-notification, an `mcp-tasks` sidecar, a running
+  subagent, a detached child), the wrapper stops its own child; no sweep signals a terminal process and a bare `claude` is
+  never slept by a timer. For a session no process runs, `kith-wake drain` starts `kith-lifecycle sweep`, which decides
+  once per idle period, from structure only, at 0.9 of the cache life (none on a 5-minute cache: it decides as the
+  session goes to sleep): compact (over 100k tokens and a sign of return), stay asleep, or end. `/compact` runs as
+  `claude -p --resume SID /compact` only under the writer claim, after checking again under it; "end" is recorded only
+  under it too; any resume clears the decision. Host ACP sessions keep the host's own compactor (rule 6: one per session);
+  its idle release writes the intent first and doesn't stop the compaction (compacting is a turn that starts the agent
+  again). Rule T: Kith delivers only results of waits it registered; an MCP task sidecar is Claude's, and Kith only
+  counts it as outstanding work.
 
 **Planned (agreed, not built yet).**
-- Rule 8: every stop of a session goes through the session lifecycle (lease, intent first) once F12 is built;
-  today a stop is a claim release and a kill (`kith-sessions` has writer claims only).
+- Guest waiters (F12 rule 10): `kith-wake wait` is still refused for a guest. A waiter is code of the owner's tick, there
+  is no per-wake sandbox to run its check in (`kith_door` runs only a declared door), and a guest's shell cannot write
+  the state folder; it needs a kith-permit tool and a sandboxed check first.
+- Host-side `/compact` decisions for sessions the terminal registry doesn't list, through one decision instead of two
+  compactors, once the host takes wakes for those.
 
 **Must stay true** (beyond A1-A9 and C1-C8): buttons iff the answer would be accepted; no card is stranded; a yes
 recorded before the deadline is in the session's next activation; every lasting grant is listed and removable;

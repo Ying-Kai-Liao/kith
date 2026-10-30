@@ -192,9 +192,15 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
     }
     let me = std::process::id();
     let mut victims: Vec<u32> = Vec::new();
-    for (_, claim) in &holders {
+    for (path, claim) in &holders {
         if claim.pid == me || claim.pid <= 1 {
             continue;
+        }
+        // A session's holder gets its intent before the signal (F12 rule 8); a proc claim names no session.
+        if let Some(sid) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_suffix(".claim"))
+            && !sid.starts_with("proc-")
+        {
+            super::intent::write(state, sid.strip_suffix(".takeover").unwrap_or(sid), "access revoked", claim.pid);
         }
         // Children first found while the parent still lives; a one-shot's claimer is claude itself (the launcher's shell
         // exec'd), so the claim's pid is the writing process and its children are what it started.
@@ -291,6 +297,8 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
     }
     let mut victims = children_of(claim.pid, 3);
     victims.insert(0, claim.pid);
+    // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
+    super::intent::write(state, sid, "stopped from the app", claim.pid);
     signal(&victims, libc::SIGTERM);
     let deadline = std::time::Instant::now() + grace;
     while std::time::Instant::now() < deadline && victims.iter().any(|p| pid_runs(*p)) {

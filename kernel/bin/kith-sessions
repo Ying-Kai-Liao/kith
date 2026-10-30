@@ -43,6 +43,15 @@ import datetime as dt, fcntl, json, os, signal, subprocess, sys, time, urllib.er
 from pathlib import Path
 
 
+def lifecycle():
+    """kernel/lib/kith_lifecycle.py: intent, the idle clock, outstanding work (F12)."""
+    lib = str(Path(__file__).resolve().parent.parent / 'lib')
+    if lib not in sys.path:
+        sys.path.insert(0, lib)
+    import kith_lifecycle
+    return kith_lifecycle
+
+
 def now():
     return dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
@@ -238,10 +247,11 @@ def claim_live(c):
     return not (claimed and actual) or ' '.join(claimed.split()) == actual
 
 
-def take_claim(sid, pid, kind='terminal', person=None, agent=None):
+def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_owner=False):
     """Take the writer claim on sid for pid. Returns None when taken, else the live claim that holds it. The claim is made
     whole in a temp file and linked into place (exclusive); a stale one is removed and replaced under a lock file next
-    to it, so two takers never both judge it stale and one deletes the other's fresh claim."""
+    to it, so two takers never both judge it stale and one deletes the other's fresh claim. A taker ends the session's intent and
+    pending decision (F12 rules 12, 14); kith-lifecycle, taking it to compact or end, is the one that keeps them."""
     dest = claim_path(sid)
     dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     mine = {'pid': pid, 'procStart': proc_start(pid), 'at': now(), 'kind': kind}
@@ -263,6 +273,8 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None):
                 os.close(lock)
                 lock = None
                 prune_stale(dest)
+                if not lifecycle_owner:   # a taker ends the intent and the 54-minute decision of the period before it (rules 12, 14)
+                    lifecycle().taken(sid)
                 return None
             except FileExistsError:
                 pass
@@ -564,6 +576,67 @@ def resolve(agent, thread, claimer=None, wait=0):
     print(f'r_sid={q(sid)} r_cwd={q(cwd)} r_from={q(sid)}')
 
 
+def idle_poll():
+    """Seconds between the wrapper's looks at its child's idle clock (KITH_IDLE_POLL, default 30)."""
+    try:
+        return max(0.05, float(os.environ.get('KITH_IDLE_POLL', '30')))
+    except ValueError:
+        return 30.0
+
+
+def entry_of(pid):
+    """The registry entry of the session this process runs (the newest one naming it), else None."""
+    d = reg_dir()
+    last = None
+    for f in (d.glob('*.json') if d and d.is_dir() else ()):
+        try:
+            e = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if e.get('pid') == pid and e.get('sessionId') and (last is None or e.get('startedAt', '') >= last.get('startedAt', '')):
+            last = e
+    return last
+
+
+def idle_stop(child, born):
+    """Rule 3: the one place a human session sleeps. The idle clock is the latest of the last turn, the process start and
+    the last keystroke (the terminal's access time); after `sleep_after` of it, with nothing outstanding (rule 7), the
+    wrapper writes its intent and ends its own child. Nothing outside the terminal's own process tree ever signals a
+    terminal session on a timer. True once the signal is sent."""
+    try:
+        lc, e = lifecycle(), None
+        e = entry_of(child)
+        if not e or not e.get('transcriptPath'):
+            return False   # not a session we can judge (not listed, or it has not written yet): never slept
+        key = os.fstat(0).st_atime if os.isatty(0) else None
+        since = lc.idle_since(e['transcriptPath'], born, key)
+        if time.time() - since < lc.sleep_after() or lc.outstanding(e['transcriptPath'], child):
+            return False
+        lc.write_intent(e['sessionId'], 'idle', child)
+        os.kill(child, signal.SIGTERM)
+        return True
+    except Exception as ex:  # noqa: BLE001 — a failing check must never end a session
+        print(f'kith-sessions: idle check: {ex}', file=sys.stderr)
+        return False
+
+
+def asleep(child):
+    """The wrapper just put its session to sleep: on a 5-minute cache there is no timer, so the decision to compact is made
+    now (F12 rule 5). Detached; a cache with a timer needs nothing here, the tick decides at 54 minutes."""
+    e = entry_of(child)
+    if not e or lifecycle().cache_life() > lifecycle().SHORT_CACHE:
+        return
+    subprocess.Popen([sys.executable, str(Path(__file__).resolve().parent / 'kith-lifecycle'), 'sweep', '--session', e['sessionId'],
+                      '--at-sleep'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                     start_new_session=True)
+
+
+def record_quit(child):
+    e = entry_of(child)
+    if e and not lifecycle().read_intent(e['sessionId']):
+        lifecycle().write_intent(e['sessionId'], 'quit', child)
+
+
 def run(agent, cmd):
     """Run cmd as a child of ours so the take-over note can follow it. The child gets the default signals back; we ignore ^C
     (the child decides what it means), pass TERM/HUP on and return its exit code (128+n for a signal)."""
@@ -579,17 +652,27 @@ def run(agent, cmd):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     for s in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(s, lambda n, _f: os.kill(child, n))
-    st = 0
+    st, born, stopped = 0, time.time(), False
+    next_check = born + idle_poll()
     while True:
         try:
-            _, st = os.waitpid(child, 0)
-            break
+            done, st = os.waitpid(child, os.WNOHANG)
+            if done:
+                break
+            time.sleep(0.25)
+            if not stopped and time.time() >= next_check:
+                next_check = time.time() + idle_poll()
+                stopped = idle_stop(child, born)
         except InterruptedError:
             continue
         except ChildProcessError:
             break
     try:
+        if not stopped and os.WIFEXITED(st) and os.WEXITSTATUS(st) == 0:
+            record_quit(child)   # Kai's own /exit: not a crash (rule 8)
         release_claims(os.getpid())
+        if stopped:
+            asleep(child)
         if not taken_note(agent, child):
             resume_note(agent, child)
         wake_owed()

@@ -142,6 +142,10 @@ pub fn at_turn_end(c: &Conversation, now: i64) -> Decision {
 
 /// While nothing runs: compact a large conversation just before a one-hour cache expires, which is cheaper than
 /// reading it cold when the user returns. A five-minute cache expires before this pays off.
+///
+/// The host's compactor for its own (ACP bot) sessions. The kernel's `kith-lifecycle` decides the same thing for
+/// sessions with a terminal registry file and no live process; the two sets never overlap (rule 6, one compactor per
+/// session), and the writer claim a host turn takes keeps them off one session at once.
 pub fn while_idle(c: &Conversation, life: CacheLife, now: i64) -> Decision {
     let idle = now - c.last_turn;
     let due = life == CacheLife::OneHour
