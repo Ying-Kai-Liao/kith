@@ -412,6 +412,8 @@ fn route(store: &Store, who: Option<&str>, v: Value) -> Option<Value> {
         "resync" => return Some(v),
         // A room turn waiting on an outside bot is for that bot alone.
         "turn" => return None,
+        // Where a room's conversation stands: seen by whoever sees that room's entries, and never by a bot.
+        "conversation" => v["chat"].as_str().map(str::to_owned),
         // A call goes to whoever the chat belongs to, never to the owner for an invitee's chat.
         "call" => v["call"]["botId"].as_str().map(str::to_owned),
         _ => return who.is_none().then_some(v),
@@ -489,16 +491,20 @@ fn room_event(store: &Store, bot_id: &str, v: &Value) -> Option<Value> {
         return None;
     }
     let bot = store.bot_guest(bot_id)?;
-    let shaped = room_entry(store, e, &bot_waits_on(store, &bot))?;
+    let shaped = room_entry(store, bot_id, e, &bot_waits_on(store, &bot))?;
     Some(json!({
         "type": "entry", "rev": v["rev"], "conversation": shaped["conversation"], "room": chat, "entry": shaped,
     }))
 }
 
 /// [`bot_entry`] for a line of a room: it also says which room, the epoch of the lane's newest conversation and who
-/// spoke. The caller has checked the bot belongs to the room.
-pub fn room_entry(store: &Store, e: &Value, waits_on: &str) -> Option<Value> {
+/// spoke. The caller has checked the bot belongs to the room. Nothing inserted at or before the bot's join point is
+/// shown, whatever has been done to it since ("from now on").
+pub fn room_entry(store: &Store, bot_id: &str, e: &Value, waits_on: &str) -> Option<Value> {
     let chat = e["botId"].as_str()?;
+    if e["seq"].as_i64()? <= store.room_bot_floor(chat, bot_id) {
+        return None;
+    }
     let lane = crate::store::Lane { chat: chat.to_owned(), thread: e["threadId"].as_str().map(str::to_owned) };
     let conv = store.newest_conversation(&lane);
     let mut shaped = bot_entry(e, conv.as_ref().map_or("", |c| c.id.as_str()), waits_on)?;

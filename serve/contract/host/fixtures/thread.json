@@ -2,6 +2,18 @@
   "method": "thread",
   "type": "Entries",
   "body": {
-    "entries": []
+    "entries": [],
+    "conversation": {
+      "conversation": "da87a88f-4022-4c8e-b7b3-06706b627103",
+      "chat": "af7ef632-4f99-4394-80af-10a3f55db724",
+      "lane": "50bd90c2-0952-4fb8-a48d-627e715f288f",
+      "budget": 10,
+      "left": 10,
+      "state": "open",
+      "endedWhy": null,
+      "current": null,
+      "waitUntil": null,
+      "opening": "50bd90c2-0952-4fb8-a48d-627e715f288f"
+    }
   }
 }
