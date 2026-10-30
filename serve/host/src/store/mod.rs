@@ -13,6 +13,7 @@ mod devices;
 mod entries;
 mod memory;
 mod model;
+mod peers;
 mod people;
 mod schema;
 mod threads;
@@ -26,6 +27,7 @@ pub use devices::{Device, DeviceSource, Scope};
 #[cfg(test)]
 pub use model::Permission;
 pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, is_person_message, lane_key};
+pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
 
 use crate::LockExt;

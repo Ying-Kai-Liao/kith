@@ -308,8 +308,21 @@ export async function unclaim(env: Env, id: string, actor: string, now: number):
     .bind(id)
     .all<{ bot_device_id: string; sign_pub: string }>();
   const blocked = [...(blocks.get(id) ?? []), ...bots.map((d) => ({ dk: d.sign_pub, grantId: `bot:${d.bot_device_id}` }))];
+  // A Mac link needs both computers in one account, so every pairing this computer is on ends too.
+  const { results: peers } = await env.DB.prepare(
+    "SELECT id, from_computer_id, to_computer_id, device_key FROM peer_grants WHERE status = 'active' AND (from_computer_id = ?1 OR to_computer_id = ?1)",
+  )
+    .bind(id)
+    .all<{ id: string; from_computer_id: string; to_computer_id: string; device_key: string }>();
+  for (const g of peers) if (g.to_computer_id === id) blocked.push({ dk: g.device_key, grantId: g.id });
   await env.DB.batch([
     ...stmts,
+    env.DB.prepare(
+      "UPDATE peer_grants SET status = 'revoked', revoked_at = ?1, revoked_reason = 'unclaimed' WHERE status = 'active' AND (from_computer_id = ?2 OR to_computer_id = ?2)",
+    ).bind(now, id),
+    env.DB.prepare(
+      "UPDATE peer_requests SET status = 'cancelled', decided_at = ?1 WHERE status = 'pending' AND (from_computer_id = ?2 OR to_computer_id = ?2)",
+    ).bind(now, id),
     env.DB.prepare("UPDATE computers SET owner_user_id = NULL, claimed_at = NULL, updated_at = ? WHERE id = ?").bind(now, id),
     env.DB.prepare(
       "UPDATE access_requests SET status = 'cancelled', decided_at = ? WHERE computer_id = ? AND status = 'pending'",
@@ -322,6 +335,11 @@ export async function unclaim(env: Env, id: string, actor: string, now: number):
     audit(env, actor, "computer.unclaim", id, "ok", now),
   ]);
   await notify(env, id, blocked);
+  // The other end of each pairing: an answering computer closes the asker's socket, an asking one re-reads its state.
+  for (const g of peers) {
+    if (g.to_computer_id === id) await notify(env, g.from_computer_id);
+    else await notify(env, g.to_computer_id, [{ dk: g.device_key, grantId: g.id }]);
+  }
 }
 
 

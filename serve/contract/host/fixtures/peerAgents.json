@@ -1,0 +1,12 @@
+{
+  "method": "peerAgents",
+  "type": "PeerAgents",
+  "body": {
+    "agents": [
+      {
+        "agent": "house",
+        "name": "house"
+      }
+    ]
+  }
+}

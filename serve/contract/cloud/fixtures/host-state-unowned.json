@@ -6,6 +6,8 @@
     "requests": [],
     "memberships": [],
     "botDevices": [],
+    "peerRequests": [],
+    "peers": [],
     "revoked": []
   }
 }

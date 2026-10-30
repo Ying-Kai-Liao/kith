@@ -5,7 +5,7 @@ import Foundation
 
 /// The cloud contract these types were made from.
 public enum CloudContract {
-    public static let sha256 = "3508398770f9ec4df5154235c1c9ff6db1e22c3faa7f17261fa87878a6b6a113"
+    public static let sha256 = "0c5a1e624112809e89829ddfc89c784ff5e09aa201a157f1aa7cf54b05814888"
 }
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
@@ -483,7 +483,7 @@ public struct BotDevice: Codable, Hashable, Sendable {
     }
 }
 
-/// GET /v1/host/state. memberships, botDevices and revoked are absent from a cloud that predates them: then the host leaves what it knows alone.
+/// GET /v1/host/state. memberships, botDevices, revoked, peerRequests and peers are absent from a cloud that predates them: then the host leaves what it knows alone.
 public struct HostState: Codable, Hashable, Sendable {
     public var owner: Owner?
     public var grants: [HostGrant]
@@ -491,14 +491,96 @@ public struct HostState: Codable, Hashable, Sendable {
     public var memberships: [Membership]?
     public var botDevices: [BotDevice]?
     public var revoked: [String]?
+    public var peerRequests: [HostPeerRequest]?
+    public var peers: [HostPeer]?
 
-    public init(owner: Owner? = nil, grants: [HostGrant], requests: [HostAccessRequest], memberships: [Membership]? = nil, botDevices: [BotDevice]? = nil, revoked: [String]? = nil) {
+    public init(owner: Owner? = nil, grants: [HostGrant], requests: [HostAccessRequest], memberships: [Membership]? = nil, botDevices: [BotDevice]? = nil, revoked: [String]? = nil, peerRequests: [HostPeerRequest]? = nil, peers: [HostPeer]? = nil) {
         self.owner = owner
         self.grants = grants
         self.requests = requests
         self.memberships = memberships
         self.botDevices = botDevices
         self.revoked = revoked
+        self.peerRequests = peerRequests
+        self.peers = peers
+    }
+}
+
+/// Another computer of this computer's account, which it may ask to pair with (Mac link).
+public struct PeerComputer: Codable, Hashable, Sendable {
+    public var computerId: String
+    public var name: String
+    public var platform: String?
+    public var signKey: String
+
+    public init(computerId: String, name: String, platform: String? = nil, signKey: String) {
+        self.computerId = computerId
+        self.name = name
+        self.platform = platform
+        self.signKey = signKey
+    }
+}
+
+public struct PeerComputerList: Codable, Hashable, Sendable {
+    public var computers: [PeerComputer]
+
+    public init(computers: [PeerComputer]) {
+        self.computers = computers
+    }
+}
+
+/// The asking computer's device key for the link and its SAS commit (base64url, 32 bytes each).
+public struct CreatePeerRequest: Codable, Hashable, Sendable {
+    public var computerId: String
+    public var deviceKey: String
+    public var commit: String
+
+    public init(computerId: String, deviceKey: String, commit: String) {
+        self.computerId = computerId
+        self.deviceKey = deviceKey
+        self.commit = commit
+    }
+}
+
+/// A pending pairing request from another computer of the account, as the answering host sees it.
+public struct HostPeerRequest: Codable, Hashable, Sendable {
+    public var requestId: String
+    public var computerId: String
+    public var name: String
+    public var deviceKey: String
+    public var commit: String
+    public var hostNonce: String?
+    public var deviceNonce: String?
+    public var createdAt: Int64
+    public var expiresAt: Int64
+
+    public init(requestId: String, computerId: String, name: String, deviceKey: String, commit: String, hostNonce: String? = nil, deviceNonce: String? = nil, createdAt: Int64, expiresAt: Int64) {
+        self.requestId = requestId
+        self.computerId = computerId
+        self.name = name
+        self.deviceKey = deviceKey
+        self.commit = commit
+        self.hostNonce = hostNonce
+        self.deviceNonce = deviceNonce
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+    }
+}
+
+/// An active pairing this computer is on: fromComputerId asks toComputerId's agents with deviceKey. name is the other computer's.
+public struct HostPeer: Codable, Hashable, Sendable {
+    public var grantId: String
+    public var fromComputerId: String
+    public var toComputerId: String
+    public var name: String
+    public var deviceKey: String
+
+    public init(grantId: String, fromComputerId: String, toComputerId: String, name: String, deviceKey: String) {
+        self.grantId = grantId
+        self.fromComputerId = fromComputerId
+        self.toComputerId = toComputerId
+        self.name = name
+        self.deviceKey = deviceKey
     }
 }
 
@@ -651,6 +733,14 @@ public enum CloudPath {
     public static func hostNonce(_ requestId: String) -> String { "v1/host/access-requests/\(requestId)/nonce" }
     public static func hostDecision(_ requestId: String) -> String { "v1/host/access-requests/\(requestId)/decision" }
     public static func hostRevokeGrant(_ grantId: String) -> String { "v1/host/grants/\(grantId)/revoke" }
+    public static let hostPeerComputers = "v1/host/peer-computers"
+    public static let hostCreatePeerRequest = "v1/host/peer-requests"
+    public static func hostGetPeerRequest(_ requestId: String) -> String { "v1/host/peer-requests/\(requestId)" }
+    public static func hostRevealPeerRequest(_ requestId: String) -> String { "v1/host/peer-requests/\(requestId)/reveal" }
+    public static func hostCancelPeerRequest(_ requestId: String) -> String { "v1/host/peer-requests/\(requestId)" }
+    public static func hostPeerNonce(_ requestId: String) -> String { "v1/host/peer-requests/\(requestId)/nonce" }
+    public static func hostPeerDecision(_ requestId: String) -> String { "v1/host/peer-requests/\(requestId)/decision" }
+    public static func hostRevokePeer(_ grantId: String) -> String { "v1/host/peers/\(grantId)/revoke" }
     public static let hostUnclaim = "v1/host/unclaim"
     public static let hostCreateInvite = "v1/host/invites"
     public static func hostRevokeInvite(_ inviteId: String) -> String { "v1/host/invites/\(inviteId)/revoke" }
@@ -771,6 +861,11 @@ extension CloudContract {
         case "Membership": _ = try d.decode(Membership.self, from: data)
         case "BotDevice": _ = try d.decode(BotDevice.self, from: data)
         case "HostState": _ = try d.decode(HostState.self, from: data)
+        case "PeerComputer": _ = try d.decode(PeerComputer.self, from: data)
+        case "PeerComputerList": _ = try d.decode(PeerComputerList.self, from: data)
+        case "CreatePeerRequest": _ = try d.decode(CreatePeerRequest.self, from: data)
+        case "HostPeerRequest": _ = try d.decode(HostPeerRequest.self, from: data)
+        case "HostPeer": _ = try d.decode(HostPeer.self, from: data)
         case "ScreenIceRequest": _ = try d.decode(ScreenIceRequest.self, from: data)
         case "IceServer": _ = try d.decode(IceServer.self, from: data)
         case "IceConfig": _ = try d.decode(IceConfig.self, from: data)

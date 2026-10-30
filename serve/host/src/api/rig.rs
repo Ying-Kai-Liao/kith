@@ -19,6 +19,8 @@ pub struct FakeCloud {
     pub state: Mutex<Value>,
     pub posts: Mutex<Vec<(String, Value)>>,
     pub refuse_invites: std::sync::atomic::AtomicBool,
+    /// What a path answers instead of the defaults below, for GET and POST alike.
+    pub answers: Mutex<std::collections::HashMap<String, Value>>,
 }
 
 pub struct Rig {
@@ -141,7 +143,7 @@ impl Drop for Rig {
 async fn fake_cloud(fake: Arc<FakeCloud>) -> String {
     use axum::extract::{OriginalUri, State as Ax};
     use axum::http::StatusCode;
-    use axum::routing::{get, post};
+    use axum::routing::get;
     let app = axum::Router::new()
         .route(
             "/v1/host/state",
@@ -149,15 +151,25 @@ async fn fake_cloud(fake: Arc<FakeCloud>) -> String {
         )
         .route(
             "/v1/host/{*rest}",
-            post(
+            get(|Ax(f): Ax<Arc<FakeCloud>>, OriginalUri(uri): OriginalUri| async move {
+                match f.answers.lock().unwrap().get(uri.path()) {
+                    Some(v) => (StatusCode::OK, axum::Json(v.clone())),
+                    None => (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "not_found", "message": "no"}}))),
+                }
+            })
+            .post(
                 |Ax(f): Ax<Arc<FakeCloud>>, OriginalUri(uri): OriginalUri, axum::Json(b): axum::Json<Value>| async move {
                     let path = uri.path().to_owned();
                     f.posts.lock().unwrap().push((path.clone(), b.clone()));
+                    if let Some(v) = f.answers.lock().unwrap().get(&path) {
+                        return (StatusCode::OK, axum::Json(v.clone()));
+                    }
                     if path == "/v1/host/invites" && f.refuse_invites.load(std::sync::atomic::Ordering::Relaxed) {
                         return (StatusCode::FORBIDDEN, axum::Json(json!({"error": {"code": "forbidden", "message": "no"}})));
                     }
                     let answer = if path.ends_with("/decision") && b["decision"] == "approve" {
-                        json!({"status": "approved", "grantId": "grt_new"})
+                        let grant = if path.starts_with("/v1/host/peer-requests/") { "pgr_new" } else { "grt_new" };
+                        json!({"status": "approved", "grantId": grant})
                     } else {
                         json!({"ok": true})
                     };

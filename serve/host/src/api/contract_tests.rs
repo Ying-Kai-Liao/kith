@@ -215,6 +215,34 @@ async fn the_bot_methods_answer_as_the_contract_and_its_fixtures_say() {
     answers_are_their_fixtures("bot", &answers);
 }
 
+#[tokio::test]
+async fn the_peer_methods_answer_as_the_contract_and_its_fixtures_say() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let peer = crate::store::PeerIn {
+        computer_id: "cmp_studio".into(),
+        name: "Studio".into(),
+        device_key: b64(&crypto::random::<32>()),
+        epoch: "epoch".into(),
+        grant_id: "pgr_studio".into(),
+        paired_at: 1,
+    };
+    r.hub.store.put_peer_in(&peer).unwrap();
+    let studio = Caller::Device { key: peer.device_key, scopes: vec![Scope::Control] };
+    let mut answers = BTreeMap::new();
+    answers.insert("peerAgents", ("peerAgents", call(&r, &studio, "peerAgents", json!({})).await));
+    let methods: std::collections::BTreeSet<_> = answers.values().map(|(m, _)| *m).collect();
+    assert_eq!(methods, rpc::PEER_METHODS.iter().copied().collect(), "a fixture for every peer method");
+    answers_are_their_fixtures("peer", &answers);
+}
+
+#[test]
+fn the_peer_lists_are_the_contracts() {
+    for m in SCHEMA.methods {
+        assert_eq!(m.who.contains(&"peer"), rpc::PEER_METHODS.contains(&m.name), "{}", m.name);
+    }
+}
+
 #[test]
 fn the_member_lists_are_the_contracts() {
     for m in rpc::MEMBER_METHODS {
