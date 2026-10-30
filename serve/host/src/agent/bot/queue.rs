@@ -77,7 +77,7 @@ impl Actor {
                 }
                 let _ = reply.send(self.send_to_user(text));
             }
-            Cmd::SendFile { path, name, cancelled, reply } => self.begin_file(path, name, cancelled, reply),
+            Cmd::SendFile { paths, name, cancelled, reply } => self.begin_file(paths, name, cancelled, reply),
             Cmd::Stop => self.stop().await,
             Cmd::IdleFor(reply) => {
                 let _ = reply.send(self.idle_for());

@@ -147,9 +147,14 @@ async fn call(port: u16, token: &str, actor: &str, params: &Value, server: Serve
         Server::Connectors => ("connectorCall", Duration::from_secs(90)),
         Server::Routines => ("routineCall", Duration::from_secs(30)),
         Server::Computer => ("computerCall", Duration::from_secs(60)),
-        Server::Chat | Server::Files => {
-            ("chatCall", Duration::from_secs(if params["name"] == "send_file" { 70 } else { 30 }))
-        }
+        Server::Chat | Server::Files => (
+            "chatCall",
+            Duration::from_secs(if params["name"] == "send_file" {
+                crate::chat::outbox::SEND_FILE_TIMEOUT.as_secs() + 10
+            } else {
+                30
+            }),
+        ),
         Server::Team => ("teamCall", crate::chat::team::ASK_TIMEOUT + Duration::from_secs(30)),
         Server::Memory => ("memoryCall", Duration::from_secs(120)),
         Server::Composio => ("composioCall", Duration::from_secs(120)),

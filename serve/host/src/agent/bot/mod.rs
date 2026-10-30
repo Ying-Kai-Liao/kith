@@ -90,7 +90,7 @@ pub enum Cmd {
         reply: tokio::sync::oneshot::Sender<Result<()>>,
     },
     SendFile {
-        path: String,
+        paths: Vec<String>,
         name: Option<String>,
         cancelled: Arc<std::sync::atomic::AtomicBool>,
         reply: tokio::sync::oneshot::Sender<Result<()>>,

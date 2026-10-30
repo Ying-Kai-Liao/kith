@@ -110,3 +110,21 @@ fn names_never_carry_path_or_drive_syntax() {
     }
     assert_eq!(name(".hidden").unwrap(), ".hidden");
 }
+
+#[test]
+fn snapshot_all_keeps_order_and_a_bad_path_leaves_nothing() {
+    let temp = Temp::new();
+    let root = temp.0.join("snapshots");
+    for n in ["a", "b", "c"] {
+        std::fs::write(temp.0.join(n), n).unwrap();
+    }
+    let paths = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+    let cancelled = AtomicBool::new(false);
+    let saved = snapshot_all(&root, &temp.0, &paths(&["c", "a", "b", "a"]), None, &cancelled).unwrap();
+    let names: Vec<_> = saved.iter().map(|s| s.meta.name.as_str()).collect();
+    assert_eq!(names, ["c", "a", "b", "a"]);
+    drop(saved);
+    let error = snapshot_all(&root, &temp.0, &paths(&["a", "missing", "b"]), None, &cancelled).err().unwrap();
+    assert!(format!("{error:#}").contains("missing"));
+    assert_eq!(std::fs::read_dir(root).unwrap().count(), 0);
+}

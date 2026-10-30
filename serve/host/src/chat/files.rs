@@ -120,6 +120,25 @@ pub fn snapshot(
     Ok(owned)
 }
 
+/// Most files one `send_file` call may carry.
+pub const MAX_BATCH: usize = 10;
+
+/// Snapshots `sources` in order, all or nothing: the first failure names its path, and the copies already made
+/// are dropped uncommitted (so removed). `display` renames a single source only.
+pub fn snapshot_all(
+    root: &Path,
+    cwd: &Path,
+    sources: &[String],
+    display: Option<&str>,
+    cancelled: &AtomicBool,
+) -> Result<Vec<Snapshot>> {
+    let mut saved = Vec::with_capacity(sources.len());
+    for source in sources {
+        saved.push(snapshot(root, cwd, source, display, cancelled).with_context(|| format!("sharing {source}"))?);
+    }
+    Ok(saved)
+}
+
 fn copy(
     input: &mut impl std::io::Read,
     output: &mut impl std::io::Write,
