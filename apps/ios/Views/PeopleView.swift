@@ -602,9 +602,9 @@ struct DemoBotScreen: View {
         case "bots-edit": EditPersonSheet(person: sam, people: people, store: store)
         case "bots-invite": InviteBotSheet(store: store)
         case "bots-result": InviteBotSheet(store: store, result: InviteBotSheet.Result(
-            invite: CreatedBotInvite(botId: "bg", inviteId: "bi", expiresAt: Int64((Date.now.timeIntervalSince1970 + 86_400) * 1000),
+            invite: CreatedBotInvite(botId: "bg", inviteId: "bi", expiresAt: Int64((Date.now.timeIntervalSince1970 + 3_600) * 1000),
                                      link: "https://kith.example/b/demo", kithLink: nil,
-                                     share: "Install the Kith client, then join my Kith computer. This link works once and expires in 24 hours.\n\n  curl -fsSL https://example.invalid/install-guest.sh | sh\n  kith join 'https://kith.example/b/demo#t=demo'\n\nAfterwards ask my agents with:  kith ask @ada \"your question\"\nRun `kith --help` for the rest.\n"),
+                                     share: "Install the Kith client, then join my Kith computer. This link works once and expires in 1 hour.\n\n  curl -fsSL https://example.invalid/install-guest.sh | sh\n  kith join 'https://kith.example/b/demo#t=demo'\n\nAfterwards ask my agents with:  kith ask @ada \"your question\"\nRun `kith --help` for the rest.\n"),
             name: "Rex", provider: "grok"))
         case "bots-detail", "bots-remove", "botguest-detail":
             if let bot = store.botGuests.bot("bg_act") { BotDetailView(bot: bot, viewer: .owner, store: store, askRemove: screen == "bots-remove") }

@@ -24,7 +24,7 @@ pub struct Cli {
     /// Use this cloud instead of the one in the link or config.
     #[arg(long, global = true, env = "KITH_CLOUD_URL", hide = true)]
     pub cloud: Option<String>,
-    /// base64 of `{device, guest}` (from `kith join --print-credentials`): replaces the files, for a VM that loses them.
+    /// base64 of `{device, guest}` (from `kith join --credentials-file`): replaces the files, for a VM that loses them.
     #[arg(long, global = true, env = "KITH_GUEST_CREDENTIALS", hide = true, hide_env_values = true)]
     pub credentials: Option<String>,
     #[command(subcommand)]
@@ -70,9 +70,12 @@ pub struct JoinArgs {
     /// Join again with a new invite even though this bot is already joined; keeps the name.
     #[arg(long)]
     pub rekey: bool,
-    /// Print this bot's credentials as one line, to store as the secret `KITH_GUEST_CREDENTIALS`.
-    #[arg(long)]
+    /// Refused: the bot's key never goes to stdout. Use --credentials-file.
+    #[arg(long, hide = true)]
     pub print_credentials: bool,
+    /// Write this bot's credentials line to a NEW file (mode 0600) after joining; the line never reaches stdout.
+    #[arg(long, value_name = "PATH")]
+    pub credentials_file: Option<PathBuf>,
 }
 
 #[derive(Args, Debug)]
@@ -177,11 +180,13 @@ mod tests {
     fn the_documented_commands_parse() {
         assert!(matches!(parse(&["join", "https://x/b/c/i#t=1&k=2"]).unwrap().command, Command::Join(_)));
         let Command::Join(j) =
-            parse(&["join", "L", "--wait", "0", "--rekey", "--print-credentials", "--name", "Rex"]).unwrap().command
+            parse(&["join", "L", "--wait", "0", "--rekey", "--credentials-file", "/w/c", "--name", "Rex"])
+                .unwrap()
+                .command
         else {
             panic!()
         };
-        assert_eq!((j.wait, j.rekey, j.print_credentials, j.name.as_deref()), (0, true, true, Some("Rex")));
+        assert_eq!((j.wait, j.rekey, j.credentials_file.is_some(), j.name.as_deref()), (0, true, true, Some("Rex")));
 
         let cli =
             parse(&["ask", "@house", "--thread", "cv_1", "--json", "--timeout", "5", "--no-queue", "what?"]).unwrap();

@@ -30,7 +30,11 @@ use session::Tuning;
 fn store_of(cli: &Cli) -> Result<Store, CliError> {
     let xdg = std::env::var("XDG_CONFIG_HOME").ok();
     let home = std::env::var("HOME").ok();
-    Store::open(config::config_dir(cli.home.as_deref(), xdg.as_deref(), home.as_deref()), cli.credentials.as_deref())
+    let exe = std::env::current_exe().ok();
+    Store::open(
+        config::config_dir(cli.home.as_deref(), exe.as_deref(), xdg.as_deref(), home.as_deref()),
+        cli.credentials.as_deref(),
+    )
 }
 
 async fn dispatch(cli: Cli, out: &Out, tuning: Tuning) -> Result<(), CliError> {
