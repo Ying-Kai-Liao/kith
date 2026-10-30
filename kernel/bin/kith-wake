@@ -33,6 +33,10 @@ deliverer died is answered when that marker is in the session's transcript (the 
 is not. W3, never two writers: a turn starts only on a session nobody holds, and what comes in meanwhile merges into
 the next turn. A woken turn runs as the person the session serves (decisions 2026-10-26), whoever caused the wake.
 
+Rule T: Kith delivers only the results of waits it registered (a waiter, Kith's own long jobs). A Claude MCP task (the
+sidecar under <session>/mcp-tasks/) is Claude's to deliver in the session's own turn: nothing here reads, waits on or
+removes it, and a headless wake doesn't claim it (kith-lifecycle only counts it as outstanding work).
+
 A waiter is code, not a model: the tick checks it and, when what it waits for happened or its timeout passed, it becomes
 one wake request (WaiterResult) and is gone. A CI wake's id names the PR's head commit, so two waiters on one PR wake the
 session once. Waiters come from the owner's terminal and one-shot runs for now: a host chat's or a guest's session wakes
@@ -385,10 +389,20 @@ def spawn_drain():
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
 
 
+def spawn_lifecycle():
+    """The tick also lets kith-lifecycle make the 54-minute decision of sessions nobody runs (F12 rule 5); detached, so a
+    compaction never holds the tick up."""
+    if os.environ.get('KITH_WAKE_NO_KICK'):
+        return
+    subprocess.Popen([sys.executable, str(BIN / 'kith-lifecycle'), 'sweep'], stdin=subprocess.DEVNULL,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+
+
 def drain():
     """The tick: fire waiters whose thing happened, recover dead turns of every door, then start each run-door session
     that is owed and free."""
     poll_waits()
+    spawn_lifecycle()
     due = []
     with locked():
         for path, it in items():
@@ -479,13 +493,20 @@ def parse_on(on):
             except ValueError:
                 raise SystemExit(f'kith-wake: at:{arg} is not a time (+30m, or 2026-10-27T15:00)') from None
         return {'kind': 'at', 'at': t}
+    if kind in ('task', 'mcp', 'mcp-task'):   # rule T: a result reaches a session once, from whoever registered the wait
+        raise SystemExit('kith-wake: an MCP task is Claude\'s to deliver (its sidecar, in the session\'s own turn); Kith never '
+                         'waits on or delivers it. Use a waiter on a process, a PR or a time instead')
     raise SystemExit(f'kith-wake: can\'t wait on {on!r}: ci:OWNER/REPO#PR, pid:N or at:TIME')
 
 
 def wait(on, session, agent, why='', note='', timeout=WAIT_TIMEOUT):
     """Set a waiter for session. One session waiting twice on the same thing keeps the first waiter."""
     if os.environ.get('KITH_PERSON'):
-        raise SystemExit('kith-wake: a guest\'s session can\'t set waiters yet')
+        # Rule 10 wants a guest's waiter checked inside that person's sandbox. None exists to run it in: a waiter here is code of
+        # this tick, which runs as the owner outside every guest sandbox (a guest's ci: would reach GitHub as the owner, a pid:
+        # would probe the owner's processes); kith_door runs only a door a job declared; and a guest's shell cannot write this
+        # state folder at all, so it would need a kith-permit tool first.
+        raise SystemExit('kith-wake: a guest\'s session can\'t set waiters yet: the check would run as the owner, outside their sandbox')
     via = os.environ.get('KITH_VIA') or 'terminal'
     if via not in RUN_VIAS:
         raise SystemExit(f'kith-wake: a {via} session wakes through the host, which doesn\'t take wakes yet')

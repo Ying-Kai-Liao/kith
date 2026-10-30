@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""kith-lifecycle — what Kith does with a session no process runs (F12, designs/2026-10-24-lifecycle.md).
+
+  kith-lifecycle sweep [--session SID] [--at-sleep]
+                          the tick (kith-wake drain starts it): for each listed session with no live writer, the 54-minute
+                          decision of its idle period, once (rule 5): compact, sleep or end. Compact runs
+                          `claude -p --resume SID "/compact"` only while holding the session's writer claim and after
+                          checking again under it (rule 11); end is written only under the claim too (rule 12). Prints one
+                          line per session it acted on. --at-sleep: ask now (a 5-minute cache has no timer; the wrapper
+                          calls it as a session goes to sleep).
+  kith-lifecycle status SID   what is known: how it ended (idle, quit, ... or crash), the decision, outstanding work
+  kith-lifecycle intent SID WHY PID   write an intent (before a signal; the host's stop paths do the same in Rust)
+
+Rules this keeps: one compactor per session: only a session with no live process and no claim is touched, and a live
+interactive one compacts itself at 54 minutes (Claude's own idle compaction); the compaction's own write is no turn, so it
+never restarts the idle clock; nothing here signals any process. Host bot sessions (ACP) have no registry file, so this
+never sees them; a session the host keeps a conversation for (resolveThread knows it) is skipped too: the host's own
+compactor (memory/compaction.rs while_idle) keeps those. A failed /compact is tried once per idle period. One sweep at a time
+(flock sessions/lifecycle.lock).
+"""
+import argparse, fcntl, importlib.machinery, importlib.util, json, os, shutil, subprocess, sys, time
+from pathlib import Path
+
+BIN = Path(__file__).resolve().parent
+sys.path.insert(0, str(BIN.parent / 'lib'))
+import kith_lifecycle as lc  # noqa: E402
+
+KINDS = ('terminal', 'ask', 'schedule', 'helper')
+COMPACT_TIMEOUT = 900
+
+
+def sessions_mod():
+    loader = importlib.machinery.SourceFileLoader('kith_sessions', str(BIN / 'kith-sessions'))
+    spec = importlib.util.spec_from_loader('kith_sessions', loader)
+    mod = importlib.util.module_from_spec(spec)
+    loader.exec_module(mod)
+    return mod
+
+
+def entries(ks):
+    d = ks.reg_dir()
+    for f in sorted(d.glob('*.json')) if d and d.is_dir() else ():
+        try:
+            e = json.loads(f.read_text())
+        except (OSError, ValueError):
+            continue
+        if isinstance(e, dict) and e.get('sessionId') and e.get('kind', 'terminal') in KINDS and e.get('transcriptPath'):
+            yield e
+
+
+def waiting(sid):
+    """A parked wake request or a waiter is still open for the session (a sign it will be back)."""
+    s = lc.state_dir()
+    if not s:
+        return False
+    for f in (s / 'sessions' / 'waits').glob('*.json'):
+        try:
+            if json.loads(f.read_text()).get('session') == sid:
+                return True
+        except (OSError, ValueError):
+            pass
+    for f in (s / 'sessions' / 'queue').glob('*.json'):
+        try:
+            if f.name != 'answered.json' and sid in f.read_text(errors='replace'):
+                return True
+        except OSError:
+            pass   # delivered and removed since the listing
+    return False
+
+
+def host_owns(ks, sid):
+    """The host keeps a conversation for this session (an app thread, or a terminal session it imported): its own compactor
+    (memory::compaction::while_idle) handles that one, so this never does (rule 6, one compactor per session). False when the
+    host is down or doesn't know it. The host does not report open/pinned/closed threads, so those signals are not used."""
+    r = ks.host_call('resolveThread', {'thread': sid})
+    return bool(r and not r.get('error') and r.get('sessionId'))
+
+
+def writer_free(ks, e):
+    """Nobody else writes the session: no live claim but our own, no live claude process."""
+    sid = e['sessionId']
+    mine = lambda c: c and c.get('pid') == os.getpid()
+    claims = [c for c in (ks.read_claim(ks.claim_path(sid)), ks.read_claim(ks.claim_path(sid, True))) if not mine(c)]
+    return not (any(ks.claim_live(c) for c in claims) or ks.live_pid(e))
+
+
+def decide_for(ks, e, at=None):
+    t, sid, kind = e['transcriptPath'], e['sessionId'], e.get('kind') or 'terminal'
+    if lc.decide(t, kind, False, None, at=at) is None:
+        return None   # too early: the host is not asked
+    return lc.decide(t, kind, waiting(sid), None, at=at)
+
+
+def settled(sid, since, decision=None):
+    """This idle period already has its decision acted on (a compaction done, or ended)."""
+    d = lc.read_decision(sid)
+    return bool(d and d.get('idleSince') == since and (d.get('compacted') or d.get('failed') or d.get('decision') == 'end' and d.get('ended')))
+
+
+def still(ks, e, want, since, at=None):
+    """The checks under the claim (rules 11, 12): nothing changed since the decision was made."""
+    sid, t = e['sessionId'], e['transcriptPath']
+    d = lc.read_decision(sid)
+    if not d or d.get('decision') != want or d.get('idleSince') != since or d.get('compacted'):
+        return False   # cleared by a resume, or already done this period
+    if lc.last_turn_at(t) != since or not writer_free(ks, e):
+        return False
+    if lc.compacted_since(t, since) and want == 'compact':
+        return False   # Claude compacted it itself since (rule 6, belt and braces)
+    if want == 'compact' and lc.context_tokens(t) < lc.FLOOR_TOKENS:
+        return False
+    return decide_for(ks, e, at) == want
+
+
+def failed(sid, why):
+    """One try per idle period: a failed /compact is recorded and not retried until the session has a new turn."""
+    lc.write_decision(sid, {**(lc.read_decision(sid) or {}), 'failed': why, 'failedAt': time.time()})
+    return f'failed: {why}'
+
+
+def compact(ks, e, since, at):
+    sid, t = e['sessionId'], e['transcriptPath']
+    if ks.take_claim(sid, os.getpid(), 'oneshot', lifecycle_owner=True):
+        return 'held'
+    try:
+        if not still(ks, e, 'compact', since, at):
+            return 'skipped'
+        if not (e.get('cwd') and os.path.isdir(e['cwd'])):
+            return failed(sid, 'the session\'s folder is gone')   # --resume would look in the wrong project
+        claude = os.environ.get('KITH_CLAUDE') or shutil.which('claude') or 'claude'
+        env = {k: v for k, v in os.environ.items() if k not in ('KITH_PERSON', 'KITH_VIA', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT')}
+        env['CLAUDE_CONFIG_DIR'] = str(Path(t).parents[2])   # the login the session was made under
+        try:
+            r = subprocess.run([claude, '-p', '--resume', sid, '/compact'], cwd=e['cwd'], env=env, stdin=subprocess.DEVNULL,
+                               capture_output=True, text=True, timeout=COMPACT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return failed(sid, 'timed out')
+        except OSError as x:   # claude not on PATH
+            return failed(sid, str(x))
+        if r.returncode == 0:
+            lc.write_decision(sid, {**(lc.read_decision(sid) or {}), 'compacted': True, 'compactedAt': time.time()})
+            return 'compacted'
+        return failed(sid, f'exit {r.returncode}')
+    finally:
+        ks.release_claims(os.getpid())
+
+
+def end(ks, e, since, at):
+    sid = e['sessionId']
+    if ks.take_claim(sid, os.getpid(), 'oneshot', lifecycle_owner=True):
+        return 'held'
+    try:
+        if not still(ks, e, 'end', since, at):
+            return 'skipped'
+        lc.write_decision(sid, {**(lc.read_decision(sid) or {}), 'ended': True, 'endedAt': time.time()})
+        return 'ended'
+    finally:
+        ks.release_claims(os.getpid())
+
+
+def decided_at(d):
+    return max(float(d.get(k) or 0) for k in ('at', 'compactedAt', 'endedAt', 'failedAt'))
+
+
+def quiet(e):
+    """Nothing to look at: a decision (or a finished compaction, end or failure) is on record for this idle period and the
+    transcript has not been written since, so the file is not parsed again. A pending 'compact' is always looked at."""
+    d = lc.read_decision(e['sessionId'])
+    try:
+        fresh = os.path.getmtime(e['transcriptPath']) <= decided_at(d or {})
+    except OSError:
+        return True
+    return bool(d and fresh and (d.get('decision') != 'compact' or d.get('compacted') or d.get('failed')))
+
+
+def one(ks, e, at_sleep):
+    sid = e['sessionId']
+    since = lc.last_turn_at(e['transcriptPath'])
+    if since is None or settled(sid, since):
+        return None
+    at = since + lc.cache_life() if at_sleep else None
+    want = decide_for(ks, e, at)
+    if not want or host_owns(ks, sid):
+        return None
+    old = lc.read_decision(sid)
+    if not old or old.get('idleSince') != since or old.get('decision') != want:
+        lc.write_decision(sid, {'decision': want, 'at': time.time(), 'idleSince': since, 'compacted': False})
+        if want == 'sleep':
+            return (sid, want, 'asleep')
+    elif want == 'sleep':
+        return None
+    if want == 'compact':
+        return (sid, want, compact(ks, e, since, at))
+    return (sid, want, end(ks, e, since, at))
+
+
+def sweep(only=None, at_sleep=False):
+    """One sweep at a time (a non-blocking lock: the tick starts one every minute and a compaction can take minutes);
+    one session failing never ends the sweep."""
+    s = lc.state_dir()
+    if not s:
+        return []
+    (s / 'sessions').mkdir(mode=0o700, parents=True, exist_ok=True)
+    lock = os.open(s / 'sessions' / 'lifecycle.lock', os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(lock)
+        return []
+    ks, out = sessions_mod(), []
+    try:
+        for e in entries(ks):
+            if only and e['sessionId'] != only or (not only and quiet(e)) or not writer_free(ks, e):
+                continue
+            try:
+                got = one(ks, e, at_sleep)
+            except Exception as x:  # noqa: BLE001
+                got = (e['sessionId'], '?', f'error: {x}')
+            if got:
+                out.append(got)
+    finally:
+        os.close(lock)
+    return out
+
+
+def status(sid):
+    ks = sessions_mod()
+    e = next((x for x in entries(ks) if x['sessionId'] == sid), None)
+    why = lc.how_it_ended(sid, bool(e) and not ks.live_pid(e), e and e.get('pid'), e and e.get('procStart'))
+    print(json.dumps({'session': sid, 'ended': why, 'decision': lc.read_decision(sid),
+                      'outstanding': lc.outstanding(e['transcriptPath']) if e else []}))
+
+
+def main(argv):
+    p = argparse.ArgumentParser(prog='kith-lifecycle', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest='cmd', required=True)
+    s = sub.add_parser('sweep')
+    s.add_argument('--session')
+    s.add_argument('--at-sleep', action='store_true')
+    st = sub.add_parser('status')
+    st.add_argument('session')
+    i = sub.add_parser('intent')
+    i.add_argument('session')
+    i.add_argument('why')
+    i.add_argument('pid', type=int)
+    a = p.parse_args(argv)
+    if a.cmd == 'sweep':
+        for sid, want, did in sweep(a.session, a.at_sleep):
+            print(f'{sid} {want} {did}')
+    elif a.cmd == 'status':
+        status(a.session)
+    elif a.cmd == 'intent':
+        lc.write_intent(a.session, a.why, a.pid)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

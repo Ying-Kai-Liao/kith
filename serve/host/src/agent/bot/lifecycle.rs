@@ -4,6 +4,15 @@
 //! the agent stops with its process group.
 //! The next message starts the agent again and loads the session, so the conversation carries on.
 //! Agents that can't load a session keep everything: stopping them would lose the conversation.
+//!
+//! This is the host's side of the one session lifecycle (F12, designs/2026-10-24-lifecycle.md). Every stop writes its
+//! intent first (`terminal::intent`, rule 8) and never happens with work outstanding (`background_work`, rule 7). The
+//! release does not beat the 54-minute compaction: compacting is a turn (`start_compaction` -> `start_turn`), which starts
+//! the released agent and loads the session again, so the idle release and `memory::compaction::while_idle` are
+//! independent, and a session sitting idle past `idle_shutdown_minutes` is still compacted before its cache expires.
+//! Host bot sessions keep this one compactor (rule 6: one per session, never both): they have no terminal registry
+//! file, so the kernel's `kith-lifecycle sweep` never sees them, and a session a terminal also holds is kept apart by
+//! the writer claim a host turn takes.
 
 use super::Actor;
 use serde_json::json;
@@ -72,9 +81,7 @@ impl Actor {
         match release {
             Release::Agent => {
                 tracing::info!(bot = %self.cfg.id, "stopping an idle agent");
-                if let Some(conn) = self.conn.take() {
-                    conn.acp.kill().await;
-                }
+                self.stop_agent("idle release").await;
             }
             Release::Sessions(sessions) => {
                 for sid in sessions {
@@ -83,6 +90,21 @@ impl Actor {
             }
             Release::Nothing => {}
         }
+    }
+
+    /// Ends the agent process. Its intent comes first, for each session it has loaded (F12 rule 8): the stop is the
+    /// host's own, so a session that is gone afterwards reads as stopped on purpose, not as a crash. The process is
+    /// only ever stopped here when nothing is outstanding (`background_work`) and the bot is at rest, which every caller
+    /// has checked; the sessions it held stay loadable.
+    async fn stop_agent(&mut self, why: &str) {
+        let Some(conn) = self.conn.take() else { return };
+        if let Some(pid) = conn.acp.pid() {
+            let state = self.hub.terminal.env().state;
+            for sid in conn.loaded.keys() {
+                crate::terminal::intent::write(&state, sid, why, pid);
+            }
+        }
+        conn.acp.kill().await;
     }
 
     /// How long this actor has been at rest with an agent that could be stopped and loaded again, for the gate to
@@ -105,9 +127,7 @@ impl Actor {
             return false;
         }
         tracing::info!(bot = %self.cfg.id, "stopping an idle agent to make room");
-        if let Some(conn) = self.conn.take() {
-            conn.acp.kill().await;
-        }
+        self.stop_agent("stopped to make room").await;
         true
     }
 
@@ -161,9 +181,7 @@ impl Actor {
         let alone = conn.loaded.keys().all(|s| s == sid) && self.queue.is_empty();
         if alone && !background_work(conn.acp.pid()).await {
             tracing::info!(bot = %self.cfg.id, "stopping the agent after its routine run");
-            if let Some(conn) = self.conn.take() {
-                conn.acp.kill().await;
-            }
+            self.stop_agent("routine run ended").await;
         } else {
             self.close_reloadable(sid).await;
         }

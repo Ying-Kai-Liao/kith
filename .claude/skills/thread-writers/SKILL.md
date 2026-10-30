@@ -84,6 +84,8 @@ a turn refused by a held claim (a pass elsewhere is not vacuous).
 | `agent/bot/session.rs` `forget_loaded()` ("a turn running there is left alone"), `hub/actors.rs` `Cmd::ForgetLoaded` | `Forgets` |
 | `api/botguests.rs` `ask` -> `terminal::bot_gate` (under `thread_lock`, `writer()`: a `Kind::Bot` claim is the bot's own turn and queues; a terminal refuses `heldByOtherWriter`); the claim at turn start as above; `liveWriter` is display only | `BotGate_` (`BotEnabled`, `BotGate = "live"`) |
 
+| `kernel/bin/kith-lifecycle` `compact()` / `end()` (F12): `take_claim(sid, own pid, 'oneshot', lifecycle_owner=True)`, the checks again under it (`still`: decision unchanged, last turn unchanged, no live writer but its own, not compacted since, over the floor), `claude -p --resume SID /compact`, `release_claims`. A claim-only start of a session nobody holds, like any one-shot; `lifecycle_owner` only keeps the intent and decision that `take_claim` clears for every other taker (rules 12, 14). Not in the model's scope as a separate action: `TermLaunch` (`FreshClaims`) with a one-shot kind covers the claim; the re-check only ever refuses more | `TermLaunch`, `TermUp`, `TermExit` |
+
 One step in the code is one action here. A check followed later by the act it guards is two actions
 (`AppGate` then `Enqueue` then `HostStart` then `HostClaim`; `TermClaim` then `TermResolve` then `TermUp`;
 `TakeRecheck` then `TakeSignal`), because another writer can act between them.
