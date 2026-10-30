@@ -84,6 +84,7 @@ jobs:
               - 'verification/threads/**'
               - '.claude/skills/thread-writers/**'
               - 'kernel/bin/kith-sessions'
+              - 'kernel/bin/kith-lifecycle'
               - 'kernel/bin/kith'
               - 'serve/host/src/terminal/**'
               - 'serve/host/src/api/threads.rs'
@@ -206,6 +207,8 @@ jobs:
         run: kernel/tests/kith-ask-check
       - name: Wake check
         run: kernel/tests/kith-wake-check
+      - name: Lifecycle check
+        run: kernel/tests/kith-lifecycle-check
       - name: Schedule person check
         run: kernel/tests/kith-sched-person-check
       - name: Schedule jobs file check
