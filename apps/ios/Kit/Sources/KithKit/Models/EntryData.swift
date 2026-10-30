@@ -22,6 +22,9 @@ public struct EntryData: Codable, Hashable, Sendable {
     /// user: queued | sent | cancelled | failed · tool: pending | in_progress | completed | failed · permission: pending | answered | cancelled | expired
     public var status: String?
     public var clientNonce: String?
+    /// user, queued: what the message waits for. `terminal`: a terminal holds the thread and the message goes out
+    /// when it lets go (host `cards/resume.rs`). Nil otherwise, and from an older host.
+    public var waitsFor: String?
     public var title: String?
     public var toolKind: String?
     public var output: String?

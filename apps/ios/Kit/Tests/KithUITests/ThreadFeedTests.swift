@@ -119,9 +119,9 @@ private func summary(origin: String? = nil, writer: String? = nil, busy: Bool? =
     #expect(ThreadFeed.writerPhase(held, taking: false, failed: false, unreachable: true) == .unreachable)
 }
 
-@Test func aHeldThreadKeepsTheBannerAndAddsANewTaskComposer() {
+@Test func aHeldThreadKeepsTheBannerAndTheComposerWhoseMessagesWait() {
     let root = entry(1, "user")
-    #expect(ThreadFeed.chatBottom(held: root, mismatch: false, guest: false) == .writerBannerAndNewTask(rootId: "e1"))
+    #expect(ThreadFeed.chatBottom(held: root, mismatch: false, guest: false) == .writerBannerAndComposer(rootId: "e1"))
     #expect(ThreadFeed.chatBottom(held: nil, mismatch: false, guest: false) == .composer)
     // Read-only and update-needed stay as they were.
     #expect(ThreadFeed.chatBottom(held: root, mismatch: false, guest: true) == .writerBanner(rootId: "e1"))

@@ -83,6 +83,29 @@ impl Actor {
         Ok(prompt)
     }
 
+    /// A start the terminal's hold refused: the owner's own messages go to the wake queue, quietly (no notice, not
+    /// failed), and the queue runs them as the thread's next turn. Whether they all did.
+    async fn wait_for_terminal(&self, held: &crate::terminal::HeldByWriter, entry_ids: &[String]) -> bool {
+        let owners_own = self.cfg.person.is_none()
+            && held.code == "liveInTerminal"
+            && self.active_request.is_none()
+            && self.active_group.is_none()
+            && self.active_routine.is_none()
+            && !entry_ids.is_empty();
+        let Some(agent) = self.cfg.hq_agent.as_deref().filter(|_| owners_own) else { return false };
+        let users = |id: &String| self.hub.store.entry(id).is_some_and(|e| e.kind == EntryKind::User.as_str());
+        if !entry_ids.iter().all(users) {
+            return false;
+        }
+        for id in entry_ids {
+            if let Err(error) = crate::cards::resume::wait_for_terminal(&self.hub, agent, id).await {
+                tracing::warn!(error = format!("{error:#}"), "couldn't queue a message for a terminal thread");
+                return false;
+            }
+        }
+        true
+    }
+
     /// Starts a turn in `lane` for the given user entries (none for a hidden turn). Stop and Shutdown still work
     /// while it starts (an install or a slow session load takes minutes): they end the start, and the agent process
     /// with it. Other commands wait until it is over, in order.
@@ -163,6 +186,11 @@ impl Actor {
             });
         };
         if let Err(held) = crate::terminal::start_gate(&self.hub, &lane, begin).await {
+            // The owner's own messages wait for the terminal as wakes instead of failing: the queue starts their turn
+            // once it lets go. Anything else (a bot guest's thread, a person's chat, a hidden or room turn) is refused.
+            if self.wait_for_terminal(&held, entry_ids).await {
+                return Err(held.into());
+            }
             for id in entry_ids {
                 if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
                     e.data["status"] = json!(crate::chat::team::RequestStatus::Failed);
@@ -193,6 +221,10 @@ impl Actor {
             // Bot-message notices belong to `chat::team`; writing them here would race its final status.
             if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
                 e.data["status"] = json!(crate::chat::team::RequestStatus::Sent);
+                // It no longer waits for a terminal (it did, if a wake brought it here).
+                if let Some(data) = e.data.as_object_mut() {
+                    data.remove("waitsFor");
+                }
                 if let Some(turn) = &self.project_turn {
                     e.data["projects"] = json!(turn.projects);
                 }
