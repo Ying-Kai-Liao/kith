@@ -132,8 +132,20 @@ pub(super) fn router_methods() -> BTreeSet<String> {
         }
     }
     out.extend(crate::chat::memory::HQ_METHODS.iter().map(|m| (*m).to_owned()));
+    out.extend(crate::chat::topics::METHODS.iter().map(|m| (*m).to_owned()));
     out.insert("readFile".into());
     out
+}
+
+#[tokio::test]
+async fn a_member_cannot_make_rename_or_unfold_a_topic() {
+    let r = Rig::new().await;
+    r.auth(&["person", "sam"]);
+    let sam = r.device("sam-phone", Some("sam"));
+    for m in crate::chat::topics::METHODS {
+        let e = call(&r, &sam, m, json!({"botId": "house", "entryId": "e", "title": "t"})).await.unwrap_err();
+        assert!(denied(&e), "{m}: {e:#}");
+    }
 }
 
 #[tokio::test]

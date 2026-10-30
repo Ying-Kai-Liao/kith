@@ -112,6 +112,24 @@ impl Store {
         Ok(c.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?1"), [id], row_entry).optional()?)
     }
 
+    /// Every entry of the chat (main chat and threads) made at or after `from` (ms), oldest first: what a topic folds.
+    pub fn entries_from(&self, bot_id: &str, from: i64) -> Result<Vec<Entry>> {
+        let c = self.db.locked();
+        let mut st = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND created_at >= ?2 ORDER BY created_at, seq"
+        ))?;
+        Ok(st.query_map(params![bot_id, from], row_entry)?.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// The entries of the chat that start a topic.
+    pub fn topic_roots(&self, bot_id: &str) -> Result<Vec<Entry>> {
+        let c = self.db.locked();
+        let mut st = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND json_type(data, '$.topic') = 'object' ORDER BY created_at, seq"
+        ))?;
+        Ok(st.query_map([bot_id], row_entry)?.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn entry(&self, id: &str) -> Option<Entry> {
         let c = self.db.locked();
         let row = c.query_row(&format!("SELECT {ENTRY_COLS} FROM entries WHERE id = ?1"), [id], row_entry);

@@ -549,6 +549,24 @@
       "params": { "entryId": "string" },
       "result": "MaybeEntry"
     },
+    "makeTopic": {
+      "doc": "Folds the room from entryId (a message of botId's chat, or a task or thread reply in it) up to its newest line into a topic card titled title, stored as data.topic on that entry. A view over existing messages: no turn, no new line, nothing re-parented. Refused for an empty or over-80-character title, an entry of another chat, an entry inside a topic, a range holding another topic's first message, or an entry that already starts a topic.",
+      "who": ["owner"],
+      "params": { "botId": "string", "entryId": "string", "title": "string" },
+      "result": "MaybeEntry"
+    },
+    "renameTopic": {
+      "doc": "Retitles the topic that starts at entryId (the same title rules as makeTopic).",
+      "who": ["owner"],
+      "params": { "botId": "string", "entryId": "string", "title": "string" },
+      "result": "MaybeEntry"
+    },
+    "unfoldTopic": {
+      "doc": "Takes data.topic off the entry that starts a topic: its lines show in the room again.",
+      "who": ["owner"],
+      "params": { "botId": "string", "entryId": "string" },
+      "result": "MaybeEntry"
+    },
     "projects": {
       "doc": "Only the project folders the owner shared with them.",
       "who": ["member"],
