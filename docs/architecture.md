@@ -292,6 +292,16 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   id. The card keeps the id and shows "<agent>, asked by <caller>". The resumed turn runs as `kith ask --reply` and
   its words are that id's answer (`kith ask --wait` returns it, or the caller's session is woken, also when it ended
   with the answer unread, M8); a no or an expiry is the answer instead. Tool-prompt cards of owner runs only.
+  Every ask id has one **delegation record** (`live/ask/<id>.reg`, made as the ask begins, under the box lock): who
+  asked, `reply_to` (the caller's session and ask; the only place the answer's address lives, cards never carry it), the
+  chain (the root ask's id, inherited through `KITH_ASK_ID`, or sent along to another Mac), the hop (0 at the root), its
+  cost and its state (open, answered, capped, stopped). A reply is an `answer` or a `progress` note: only the final answer
+  wakes the caller, once; notes wait in the mailbox for `--wait` and ride on the answer's wake. A chain may go 8 asks
+  deep on one Mac and cross to another Mac at most twice, and may cost US$5 (`delegation.chain_cost_cap_usd` in
+  `~/.kith/settings.json`, `kith ask --cap`): an ask past a cap is refused (exit 4, "ask the user before starting another
+  chain"), asks already running finish, and the host (`delegation.rs`) puts one Needs-you card in front of the owner,
+  read from `kith ask delegations --json` through the kernel contract. Without a host the refusal alone says so. Not yet
+  in the architect's model (ChainDesign.tla): reply kinds, built from Kai's standing default.
 - **8. Lifecycle owns every stop.** Built as F12 (designs/2026-10-24-lifecycle.md; `kernel/lib/kith_lifecycle.py`,
   `kernel/bin/kith-lifecycle`, `kernel/tests/kith-lifecycle-check`). The writer claim (`live/terminal/<sid>.claim`) is the
   lease. Every Kith stop writes `sessions/intent/<sid>.json` (why, at, pid and start time) before the signal: the wrapper's

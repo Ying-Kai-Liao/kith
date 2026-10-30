@@ -90,7 +90,7 @@ expect "the run was started with that id" "$(cat "$KITH_STATE/stub-askid")" "$p1
 json=$(cd "$T" && "$ASK" echo --json park 2>/dev/null)
 expect "--json says waiting" "$(printf '%s' "$json" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["waiting"], d["answer"], bool(d["id"]))')" "True None True"
 (cd "$T" && "$ASK" echo hi >/dev/null 2>&1)
-expect "a run that did not park leaves no registration" "$(ls "$BOX" | grep -c "$(cat "$KITH_STATE/stub-askid")")" 0
+expect "a run that did not park keeps its record, with nothing left to wake" "$(python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); print(r["state"], r["delivered"])' "$BOX/$(cat "$KITH_STATE/stub-askid").reg")" "answered True"
 
 # the asker is a shell (no session): the later answer waits for --wait, once
 "$ASK" --answer "$p1" --as echo -- "the card was approved" >/dev/null
@@ -190,5 +190,124 @@ expect "a person can't send to the owner's job" "$(KITH_PERSON=bob "$ASK" --to "
 "$T/k/bin/kith-wake" withdraw sp >/dev/null
 expect "a withdrawn message sent again: duplicate" "$("$ASK" --to "$pj" "hi" 2>"$T/err")" duplicate
 expect "and says it was withdrawn" "$(grep -c withdrawn "$T/err")" 1
+
+
+# --- the delegation record (one per ask id): chain, hop, reply_to, caps, reply kinds ---
+export KITH_WAKE_NO_KICK=1
+rec() { "$ASK" delegations --json | python3 -c '
+import json, sys
+rows = {r["id"]: r for r in json.load(sys.stdin)["delegations"]}
+r = rows.get(sys.argv[1])
+for path in sys.argv[2:]:
+    v = r
+    for k in path.split("."): v = v[k] if v is not None else None
+    print(v)' "$@"; }
+lastid() { cat "$KITH_STATE/stub-askid"; }
+
+out=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-r KITH_AGENT=architect "$ASK" echo "root job" 2>/dev/null)
+r0=$(lastid)
+expect "an ask has a record: chain is its own id, hop 0" "$(rec "$r0" chain hop crossed | tr '\n' ' ')" "$r0 0 False "
+expect "its caller and where the answer goes (reply_to) are on it" "$(rec "$r0" caller.agent reply_to.session reply_to.ask | tr '\n' ' ')" "architect sess-r None "
+expect "it is answered, with the run's cost" "$(rec "$r0" state cost_micro_usd | tr '\n' ' ')" "answered 10000 "
+expect "the default cap is US\$5" "$(rec "$r0" cap_micro_usd)" 5000000
+# a run kith ask started asks again (KITH_ASK_ID): the chain and the hop follow
+(cd "$T" && KITH_ASK_ID=$r0 "$ASK" echo "second" >/dev/null 2>&1); r1=$(lastid)
+(cd "$T" && KITH_ASK_ID=$r1 "$ASK" echo "third" >/dev/null 2>&1); r2=$(lastid)
+expect "a nested ask is one hop on, in the same chain" "$(rec "$r1" chain hop reply_to.ask | tr '\n' ' ')" "$r0 1 $r0 "
+expect "and so on" "$(rec "$r2" chain hop | tr '\n' ' ')" "$r0 2 "
+expect "the chain's cost adds up" "$(rec "$r2" chain_cost_micro_usd)" 30000
+# the same hop, started together: neither reads the other's hop
+(cd "$T" && KITH_ASK_ID=$r2 STUB_SLEEP=1 "$ASK" echo "twin a" >/dev/null 2>&1 &)
+(cd "$T" && KITH_ASK_ID=$r2 STUB_SLEEP=1 "$ASK" echo "twin b" >/dev/null 2>&1 &)
+sleep 3
+expect "two asks at once both land on the next hop" "$("$ASK" delegations --json | python3 -c '
+import json, sys
+print(sorted(r["hop"] for r in json.load(sys.stdin)["delegations"] if r["chain"] == sys.argv[1] and r["hop"] == 3))' "$r0")" "[3, 3]"
+# hop cap: 8 on one Mac
+p=$r2
+for n in 3 4 5 6 7 8; do (cd "$T" && KITH_ASK_ID=$p "$ASK" echo "hop $n" >/dev/null 2>&1); p=$(lastid); done
+expect "hop 8 is allowed" "$(rec "$p" hop)" 8
+out=$(cd "$T" && KITH_ASK_ID=$p "$ASK" echo "hop 9" 2>&1); code=$?
+expect "hop 9 is refused (exit 4)" "$code" 4
+expect "with the reason" "$(printf '%s' "$out" | grep -c 'delegation hop limit.*ask the user before starting another chain')" 1
+# old data: a registration from before the record is a root ask at hop 0, cost unknown, and still wakes
+printf '{"asked":"echo","session":"sess-old","agent":"architect","person":null,"via":"terminal","at":%s}' "$(date +%s)" > "$BOX/ask-old-1.reg"
+expect "an old registration reads as a root ask, cost unknown" "$(rec ask-old-1 chain hop state cost_micro_usd reply_to.session | tr '\n' ' ')" "ask-old-1 0 open None sess-old "
+expect "and still wakes its session" "$("$ASK" --answer ask-old-1 --as echo -- "oldanswer")" woke
+expect "with the answer" "$(queued | tr ' ' '\n' | grep -c '^sess-old:oldanswer$')" 1
+
+# cross-Mac: the record is made before anything leaves, and the chain goes with the request; 2 crossings at most
+cat > "$T/k/bin/kith-remote" <<'RSTUB'
+#!/bin/sh
+printf '%s' "$KITH_ASK_RECORD" > "$KITH_STATE/stub-record"
+exit 0
+RSTUB
+chmod +x "$T/k/bin/kith-remote"
+(cd "$T" && "$ASK" echo@mini "far" >/dev/null 2>&1); c1=$(cat "$KITH_STATE/stub-record")
+expect "an ask across Macs has a record: crossed, one cross hop" "$(rec "$c1" crossed cross_hops hop agent | tr '\n' ' ')" "True 1 0 echo@mini "
+(cd "$T" && KITH_ASK_ID=$c1 "$ASK" echo@mini "farther" >/dev/null 2>&1); cx2=$(cat "$KITH_STATE/stub-record")
+expect "a second crossing is allowed, one hop on" "$(rec "$cx2" cross_hops hop chain | tr '\n' ' ')" "2 1 $c1 "
+rm "$KITH_STATE/stub-record"
+out=$(cd "$T" && KITH_ASK_ID=$cx2 "$ASK" echo@mini "too far" 2>&1); code=$?
+expect "a third crossing is refused (exit 4)" "$code" 4
+expect "with the reason, and nothing sent" "$(printf '%s' "$out" | grep -c 'delegation hop limit.*crossed to another Mac 2 times'): $([ -e "$KITH_STATE/stub-record" ] && echo sent)" "1: "
+bgc=$(cd "$T" && "$ASK" --bg echo@mini "far, in the background" | idof)
+ended "$bgc"
+expect "a --bg ask across Macs has its record under its bg id" "$(rec "$bgc" crossed chain | tr '\n' ' ')" "True $bgc "
+# the Mac an ask arrives on gets the chain in KITH_ASK_*
+(cd "$T" && KITH_ASK_CHAIN=chain-far KITH_ASK_HOP=1 KITH_ASK_CROSS=1 KITH_ASK_FROM=ask-far-1 KITH_ASK_COST=1.5 "$ASK" echo "arrived" >/dev/null 2>&1); a1=$(lastid)
+expect "it carries the chain, hop and where it came from" "$(rec "$a1" chain hop crossed reply_to.ask | tr '\n' ' ')" "chain-far 1 True ask-far-1 "
+expect "and the cost the chain had already spent" "$(rec "$a1" chain_cost_micro_usd)" 1510000
+(cd "$T" && KITH_ASK_ID=$a1 "$ASK" echo "nested there" >/dev/null 2>&1)
+expect "a nested ask there is one hop on" "$(rec "$(lastid)" chain hop cross_hops | tr '\n' ' ')" "chain-far 2 1 "
+
+# reply kinds: progress is kept and never wakes; the answer wakes once, with the notes before it
+pk=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-k KITH_AGENT=architect "$ASK" echo park 2>/dev/null | waitid)
+expect "progress for a gone asker wakes no one" "$("$ASK" --answer "$pk" --as echo --progress -- "halfway there")" kept
+"$ASK" --sweep >/dev/null
+expect "not even at the sweep" "$(queued | tr ' ' '\n' | grep -c '^sess-k:')" 0
+expect "--wait shows it, but it is not the answer (exit 3)" "$("$ASK" --wait "$pk" --timeout 0 2>/dev/null; echo "exit $?")" "(progress) halfway there
+exit 3"
+"$ASK" --answer "$pk" --as echo --progress -- "nearly" >/dev/null
+expect "the answer wakes" "$("$ASK" --answer "$pk" --as echo -- "done42")" woke
+expect "once, carrying the notes not yet read" "$(queued | grep -o 'sess-k:(progress) nearly|done42' | wc -l | tr -d ' ')" 1
+expect "the same answer again is a duplicate" "$("$ASK" --answer "$pk" --as echo -- "done42")" duplicate
+rm -f "$BOX/$pk.read"   # a restart that lost the count: the answer is handed over again, and the wake is dropped as seen
+"$ASK" --sweep >/dev/null
+expect "after a restart the answer is still one wake" "$(queued | tr ' ' '\n' | grep -c '^sess-k:')" 1
+expect "the record is answered" "$(rec "$pk" state)" answered
+# --wait: the notes, then the answer
+pw=$(cd "$T" && "$ASK" echo park 2>/dev/null | waitid)
+"$ASK" --answer "$pw" --as echo --progress -- "reading" >/dev/null
+"$ASK" --answer "$pw" --as echo -- "all read" >/dev/null
+expect "--wait: notes then the answer, exit 0" "$("$ASK" --wait "$pw" --timeout 5 2>/dev/null)" "(progress) reading
+all read"
+# kith-send --progress writes a note, not an answer
+pn=$(cd "$T" && "$ASK" echo park 2>/dev/null | waitid)
+"$KERNEL/bin/kith-send" --as echo --to "ask:$pn" --progress "from kith-send" >/dev/null 2>&1
+expect "kith-send --progress is a progress row" "$(python3 -c 'import json,sys; print(json.loads(open(sys.argv[1]).read().splitlines()[0])["kind"])' "$BOX/$pn.jsonl")" progress
+
+# cost cap: a chain that reaches it starts no new ask; the record says so once; raising the cap lifts it
+"$ASK" --cap 0.025 >/dev/null
+expect "the cap is shown" "$("$ASK" --cap)" 0.025
+(cd "$T" && "$ASK" echo "cap root" >/dev/null 2>&1); cr=$(lastid)
+(cd "$T" && KITH_ASK_ID=$cr "$ASK" echo "cap two" >/dev/null 2>&1); cq2=$(lastid)
+expect "under the cap: not capped" "$(rec "$cq2" state capped_ms | tr '\n' ' ')" "answered None "
+(cd "$T" && KITH_ASK_ID=$cq2 "$ASK" echo "cap three" >/dev/null 2>&1); cq3=$(lastid)
+expect "the run that reaches the cap is marked" "$(rec "$cq3" state chain_cost_micro_usd | tr '\n' ' ')" "capped 30000 "
+expect "marked once" "$("$ASK" delegations --json | python3 -c '
+import json, sys
+print(sum(1 for r in json.load(sys.stdin)["delegations"] if r["chain"] == sys.argv[1] and r["capped_ms"]))' "$cr")" 1
+out=$(cd "$T" && KITH_ASK_ID=$cq3 "$ASK" echo "cap four" 2>&1); code=$?
+expect "a new ask in a capped chain is refused (exit 4)" "$code" 4
+expect "with the reason" "$(printf '%s' "$out" | grep -c 'delegation cost cap.*ask the user')" 1
+expect "a new chain is not affected" "$(cd "$T" && "$ASK" echo "fresh" 2>/dev/null | head -1)" "answer to: fresh"
+"$ASK" --cap-told "$cr"
+expect "the host's card is noted on the record" "$([ "$(rec "$cq3" cap_card_ms)" != None ] && echo yes)" yes
+"$ASK" --cap 5 >/dev/null
+expect "raising the cap lets the chain go on" "$(cd "$T" && KITH_ASK_ID=$cq3 "$ASK" echo "cap five" 2>/dev/null | head -1)" "answer to: cap five"
+expect "none turns the cap off" "$("$ASK" --cap none)" none
+"$ASK" --cap default >/dev/null
+expect "default brings it back" "$("$ASK" --cap)" 5
 
 [ "$fails" = 0 ] && echo "all kith-ask checks passed" || { echo "$fails check(s) failed"; exit 1; }

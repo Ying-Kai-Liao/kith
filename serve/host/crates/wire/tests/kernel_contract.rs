@@ -6,7 +6,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use kith_wire::check::Mode;
-use kith_wire::kernel::{self, Agent, Harness, Launch, PermissionMode, Projects, SCHEMA};
+use kith_wire::kernel::{self, Agent, DelegationState, Delegations, Harness, Launch, PermissionMode, Projects, SCHEMA};
 use serde_json::Value;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -91,6 +91,13 @@ fn the_kernels_own_output_reads_as_it_was_printed() {
         (owner.permission_mode, owner.harness, owner.cost_tag.person),
         (Some(PermissionMode::Auto), Some(Harness::Claude), None)
     );
+    let delegations: Delegations = fixture("fixtures", "delegations.json");
+    let capped = &delegations.delegations[0];
+    assert_eq!(
+        (capped.state, capped.chain_cost_micro_usd, capped.cap_micro_usd),
+        (DelegationState::Capped, Some(5_250_000), Some(5_000_000))
+    );
+    assert_eq!(delegations.delegations[1].cost_micro_usd, None, "an ask from before the record has no cost");
     let person: Launch = fixture("fixtures", "launch-as-person.json");
     assert_eq!(
         (person.permission_mode, person.cost_tag.person.as_deref()),
@@ -109,6 +116,8 @@ fn a_newer_kernels_words_read_as_their_enum_declares() {
         "a mode this version doesn't know asks before every change"
     );
     assert_eq!((launch.harness, launch.provider), (Some(Harness::Unknown), Some(Harness::Unknown)));
+    let delegations: Delegations = fixture("unknown", "delegations-new-state.json");
+    assert_eq!(delegations.delegations[0].state, DelegationState::Unknown, "a state this version doesn't know is left alone");
 }
 
 #[test]
@@ -119,12 +128,16 @@ fn an_older_kernels_output_leaves_out_what_it_didnt_have() {
     assert_eq!((launch.harness, launch.provider, launch.backup, launch.call_model), (None, None, None, None));
     let projects: Projects = fixture("compat", "project-ls-before-parents.json");
     assert_eq!((projects.projects[0].home.as_deref(), projects.projects[0].parent.as_deref()), (None, None));
+    let delegations: Delegations = fixture("compat", "delegations-optional-left-out.json");
+    let d = &delegations.delegations[0];
+    assert_eq!((d.cost_micro_usd, d.cap_micro_usd, d.reply_to.session.as_deref(), d.caller.agent.as_deref()), (None, None, None, None));
 }
 
 #[test]
 fn the_commands_are_the_kernels_arguments() {
     assert_eq!(kernel::command::ls(), ["ls", "--json"]);
     assert_eq!(kernel::command::project_ls(), ["project", "ls", "--json"]);
+    assert_eq!(kernel::command::delegations(), ["ask", "delegations", "--json"]);
     assert_eq!(kernel::command::launch("echo", None, None), ["echo", "--launch-json"]);
     assert_eq!(
         kernel::command::launch("echo", Some("codex-1"), Some("alpha")),

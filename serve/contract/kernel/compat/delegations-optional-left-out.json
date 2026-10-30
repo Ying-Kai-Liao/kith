@@ -1,0 +1,20 @@
+{
+  "command": "delegations",
+  "type": "Delegations",
+  "body": {
+    "delegations": [
+      {
+        "id": "ask-old-2",
+        "agent": "echo",
+        "chain": "ask-old-2",
+        "hop": 0,
+        "cross_hops": 0,
+        "crossed": false,
+        "caller": {},
+        "reply_to": {},
+        "state": "open",
+        "started_ms": 1767225000000
+      }
+    ]
+  }
+}

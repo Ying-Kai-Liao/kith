@@ -17,7 +17,12 @@
                                       call prints it again), then what each turn its --to messages woke said
   kith ask --answer ID [--as AGENT] -- TEXT   hand TEXT to whoever asked ID: their answers while they still wait,
                                       else a wake of their session (the host, for a parked card's later turn or no)
+  kith ask --answer ID --progress -- TEXT   a progress note instead: kept for --wait (and carried by the answer's wake),
+                                      it never wakes anyone. `kith-send --to ask:ID --progress TEXT` does the same
   kith ask --sweep                      answers nobody read whose asker's session has ended become its wake (the tick)
+  kith ask delegations --json           the delegation records on this Mac, newest first (the host reads them)
+  kith ask --cap [N|none]               the cost cap of a delegation chain in dollars (default 5; settings.json
+                                      delegation.chain_cost_cap_usd): shows it, or sets it for this Mac
 
 Options: -c/--continue, --as NAME (a named conversation: -c --as NAME picks it up from anywhere, in its folder),
 -C/--dir DIR (work in DIR), -p PROJECT (its memory, and its folder unless -C says; the current one if it has none),
@@ -51,8 +56,16 @@ the conversation it continues is still running does the same instead of being re
 
 Conversations: ~/.kith/ask.json (agent + directory, or --as NAME → session id). A conversation belongs to the
 directory it ran in, so after -C or -p, `-c` from inside that folder (or with the same -C/-p) continues it.
-Answers: ~/.kith/live/ask/ID.jsonl (ID.read: how many the caller has had), ID.reg who asked (the caller's session,
-agent and person), ID.parked while the run waits on a card. One lock (.lock) over reading, appending and handing over.
+Answers: ~/.kith/live/ask/ID.jsonl (ID.read: how many the caller has had), ID.parked while the run waits on a card.
+A row is an answer or a progress note (kind): only an answer wakes the caller, once; notes wait in the mailbox.
+Delegation record: ID.reg, one per ask id (foreground, --bg, agent@machine), made as the ask begins. It holds who asked
+(agent, person), reply_to (the caller's session and ask: the one place the answer's address lives), the chain (the root
+ask's id, inherited by asks a run makes through KITH_ASK_ID, or handed to another Mac), the hop (0 at the root), whether
+it crossed Macs, its cost, its state (open, answered, capped, stopped) and times. A chain may go 8 asks deep on one Mac
+and cross to another at most twice, and may cost US$5 (kith ask --cap): an ask past a cap is refused, exit 4, with
+"ask the user before starting another chain"; asks already running finish, and the host raises one Needs-you card when
+the cap is reached (without a host the refusal alone says so). A registration from before the record reads as a root ask
+at hop 0 with its cost unknown. One lock (.lock) over reading, appending, the records and handing over.
 """
 import datetime as dt, fcntl, hashlib, importlib.util, json, os, re, subprocess, sys, time
 from contextlib import contextmanager
@@ -62,12 +75,16 @@ from pathlib import Path
 KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 from kith_paths import guest_sandbox, paths  # noqa: E402  the one place that knows where kith's folders are
+import kith_settings  # noqa: E402  the chain cost cap
 KEPT = paths()['KITH_MACHINE'] / 'ask.json'
 BG = paths()['KITH_MACHINE'] / 'ask-bg'
 BOX = paths()['KITH_MACHINE'] / 'live' / 'ask'
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 ID = re.compile(r'[A-Za-z0-9._-]{1,64}')
-KEEP_DAYS = 31   # a registration outlives the longest card (cards.expiry_hours, at most 720 h)
+KEEP_DAYS = 31   # a delegation record outlives the longest card (cards.expiry_hours, at most 720 h) and its chain's cost
+MAX_LOCAL_HOPS = 8   # asks deep in a chain on one Mac (as the host's bot requests: serve/host/src/chat/team/requests.rs)
+MAX_CROSS_HOPS = 2   # asks in a chain that cross to another Mac
+REFUSED = 4          # exit code of an ask a cap refused: not the agent failing, and not "still waiting" (3)
 
 
 def load():
@@ -116,24 +133,190 @@ def box(mid, ext):
     return BOX / ('%s.%s' % (mid, ext))
 
 
+def upgrade(mid, raw):
+    """A delegation record as the code below reads it. A registration made before the record existed has no chain, hop or
+    cost: it reads as a root ask at hop 0 with its cost unknown, and keeps working with --wait, --to and --sweep."""
+    reg = dict(raw)
+    session = reg.pop('session', None)   # the caller's session now lives in reply_to, and only there
+    if not isinstance(reg.get('reply_to'), dict):
+        reg['reply_to'] = {'session': session, 'ask': None}
+    reg.setdefault('chain', mid)
+    for key in ('hop', 'cross_hops'):
+        reg.setdefault(key, 0)
+    reg.setdefault('crossed', False)
+    reg.setdefault('cost', None)
+    reg.setdefault('state', 'answered' if reg.get('done') else 'open')
+    return reg
+
+
 def read_reg(mid):
     try:
         reg = json.loads(box(mid, 'reg').read_text())
     except (OSError, ValueError):
         return None
-    return reg if isinstance(reg, dict) else None
+    return upgrade(mid, reg) if isinstance(reg, dict) else None
 
 
-def register(mid, asked):
-    """The caller's wait registration: whose session a later answer to mid wakes once nobody waits for it. A caller with
-    no kith session (a plain shell) or a person's run (whose wake only the host can start) keeps the answers here only."""
+def write_reg(mid, reg):
+    """Under box_locked: the record, replaced whole and atomically."""
     BOX.mkdir(parents=True, exist_ok=True)
-    reg = {'asked': asked, 'session': os.environ.get('CLAUDE_CODE_SESSION_ID') or None,
-           'agent': os.environ.get('KITH_AGENT') or None, 'person': os.environ.get('KITH_PERSON') or None,
-           'via': os.environ.get('KITH_VIA') or 'terminal', 'at': time.time()}
     tmp = box(mid, 'reg.tmp')
     tmp.write_text(json.dumps(reg))
     tmp.replace(box(mid, 'reg'))
+
+
+def patch_reg(mid, **changes):
+    """Under box_locked: change fields of mid's record; nothing when it has none."""
+    reg = read_reg(mid)
+    if reg is not None:
+        reg.update(changes)
+        write_reg(mid, reg)
+    return reg
+
+
+def records():
+    """Under box_locked: {ask id: record} of every delegation record on this Mac."""
+    out = {}
+    for f in sorted(BOX.glob('*.reg')) if BOX.is_dir() else ():
+        reg = read_reg(f.name[:-len('.reg')])
+        if reg:
+            out[f.name[:-len('.reg')]] = reg
+    return out
+
+
+def chain_cost(chain):
+    """Under box_locked: what the chain has cost, US$: what a Mac it crossed from had spent when it came here, plus the
+    runs of its records here (a record from before costs were kept counts nothing)."""
+    recs = [r for r in records().values() if r['chain'] == chain]
+    return max([r.get('cost_base') or 0 for r in recs] or [0]) + sum(r.get('cost') or 0 for r in recs)
+
+
+def refuse(why):
+    print('kith ask: %s' % why, file=sys.stderr)
+    sys.exit(REFUSED)
+
+
+def lineage(crossing):
+    """Where the ask being made now sits in its chain: the ask whose run is making it (KITH_ASK_ID, which only a run kith
+    ask started has) gives the chain and the hop. A run on another Mac that asked across is handed them in KITH_ASK_*.
+    Anything else starts a chain, at hop 0."""
+    mine = os.environ.get('KITH_ASK_ID') or ''
+    parent = read_reg(mine) if ID.fullmatch(mine) else None
+    if parent:
+        return dict(chain=parent['chain'], hop=parent['hop'] + 1, cross_hops=parent['cross_hops'] + (1 if crossing else 0),
+                    ask=mine, cost_base=0, crossed=bool(crossing))
+    chain = os.environ.get('KITH_ASK_CHAIN') or ''
+    if ID.fullmatch(chain):   # the sender's own record is this hop: it is not counted twice
+        try:
+            hop, cross = int(os.environ.get('KITH_ASK_HOP') or 0), int(os.environ.get('KITH_ASK_CROSS') or 1)
+            base = float(os.environ.get('KITH_ASK_COST') or 0)
+        except ValueError:
+            hop, cross, base = 0, 1, 0.0
+        return dict(chain=chain, hop=hop, cross_hops=cross, cost_base=base, crossed=True,
+                    ask=os.environ.get('KITH_ASK_FROM') or None)
+    return dict(chain=None, hop=0, cross_hops=1 if crossing else 0, ask=None, cost_base=0, crossed=bool(crossing))
+
+
+def open_record(mid, asked, crossing=False):
+    """The delegation record of ask mid, made as the ask begins and under the box lock (M8): who asked, the address of the
+    answer (reply_to: the caller's session and ask, and nowhere else), its chain and hop. Refuses (exit 4) an ask that
+    would take its chain over the hop caps or past its cost cap. The caller's wait registration is this same file."""
+    with box_locked():
+        place = lineage(crossing)
+        chain = place['chain'] or mid
+        if place['cross_hops'] > MAX_CROSS_HOPS:
+            refuse('delegation hop limit: this chain has already crossed to another Mac %d times (at most %d); ask the '
+                   'user before starting another chain' % (MAX_CROSS_HOPS, MAX_CROSS_HOPS))
+        if max(0, place['hop'] - place['cross_hops']) > MAX_LOCAL_HOPS:
+            refuse('delegation hop limit: this chain is already %d asks deep on this Mac (at most %d); ask the user '
+                   'before starting another chain' % (MAX_LOCAL_HOPS, MAX_LOCAL_HOPS))
+        cap = kith_settings.chain_cost_cap()
+        spent = chain_cost(chain) if place['chain'] else 0
+        if place['chain'] and cap is not None and spent + place['cost_base'] >= cap:
+            refuse('delegation cost cap: chain %s has spent US$%.2f of its US$%g cap; ask the user before starting '
+                   'another ask (raise the cap: kith ask --cap N)' % (chain, spent + place['cost_base'], cap))
+        reg = {'asked': asked, 'agent': os.environ.get('KITH_AGENT') or None, 'person': os.environ.get('KITH_PERSON') or None,
+               'via': os.environ.get('KITH_VIA') or 'terminal',
+               'reply_to': {'session': os.environ.get('CLAUDE_CODE_SESSION_ID') or None, 'ask': place['ask']},
+               'chain': chain, 'hop': place['hop'], 'cross_hops': place['cross_hops'], 'crossed': place['crossed'],
+               'cost': 0.0, 'cost_base': place['cost_base'], 'state': 'open', 'at': time.time()}
+        write_reg(mid, reg)
+        return reg
+
+
+def sync_state(mid):
+    """Under box_locked: an id with an answer in its mailbox is answered (kith-send --to ask:ID writes without telling us)."""
+    reg = read_reg(mid)
+    if reg and reg['state'] == 'open' and any(kind_of(r) == 'answer' for r in lines_of(mid)):
+        patch_reg(mid, state='answered', answered_at=time.time())
+
+
+def settle(mid, cost, state=None):
+    """The run behind mid ended a turn at cost US$: it joins its chain's cost, and a chain that reaches its cap with this
+    turn is marked (capped_at, once per cap: the host raises one Needs-you card for it). state: answered, or stopped when
+    the run gave no answer; None while it still waits on a card. Runs already going finish; new asks are refused."""
+    with box_locked():
+        reg = read_reg(mid)
+        if not reg:
+            return
+        reg['cost'] = round((reg.get('cost') or 0) + (cost or 0), 6)
+        write_reg(mid, reg)
+        cap = kith_settings.chain_cost_cap()
+        tipped = cap is not None and chain_cost(reg['chain']) >= cap and \
+            not any((r.get('cap_usd') or 0) >= cap for r in records().values() if r['chain'] == reg['chain'] and r.get('capped_at'))
+        if tipped:
+            reg.update(capped_at=time.time(), cap_usd=cap)
+        if state and reg['state'] == 'open':
+            reg.update(state='capped' if tipped else state, answered_at=time.time())
+        if tipped or state:
+            write_reg(mid, reg)
+
+
+def cap_told(chain):
+    """kith ask --cap-told CHAIN: the host raised the chain's cap card; it is not raised again for this cap."""
+    with box_locked():
+        for mid, reg in records().items():
+            if reg['chain'] == chain and reg.get('capped_at'):
+                patch_reg(mid, cap_card_at=time.time())
+
+
+def delegation_of(mid):
+    """What kith-remote hands the other Mac so its run continues this chain (lineage reads it as KITH_ASK_*): the chain,
+    this record's hop and cross hops, the record to answer, and the chain's cost so far."""
+    with box_locked():
+        reg = read_reg(mid)
+        if not reg:
+            return None
+        return {'chain': reg['chain'], 'hop': reg['hop'], 'cross': reg['cross_hops'], 'from': mid,
+                'cost': round(chain_cost(reg['chain']), 6)}
+
+
+def view(mid, reg):
+    """A record as the host reads it (serve/contract/kernel/contract.json, Delegation): times in ms, money in
+    micro-dollars, a cost that was never kept as null."""
+    def ms(t):
+        return int(t * 1000) if t else None
+
+    def micro(usd):
+        return None if usd is None else int(round(usd * 1e6))
+    cap = kith_settings.chain_cost_cap()
+    return {'id': mid, 'agent': reg.get('asked') or '', 'chain': reg['chain'], 'hop': reg['hop'],
+            'cross_hops': reg['cross_hops'], 'crossed': bool(reg['crossed']),
+            'caller': {'agent': reg.get('agent'), 'person': reg.get('person'), 'via': reg.get('via')},
+            'reply_to': {'session': reg['reply_to'].get('session'), 'ask': reg['reply_to'].get('ask')},
+            'state': reg['state'], 'cost_micro_usd': micro(reg['cost']),
+            'chain_cost_micro_usd': micro(chain_cost(reg['chain'])), 'cap_micro_usd': micro(cap),
+            'started_ms': ms(reg.get('at')) or 0, 'answered_ms': ms(reg.get('answered_at')),
+            'capped_ms': ms(reg.get('capped_at')), 'cap_card_ms': ms(reg.get('cap_card_at'))}
+
+
+def delegations():
+    """kith ask delegations --json: every delegation record on this Mac, newest first."""
+    with box_locked():
+        rows = [view(mid, reg) for mid, reg in records().items()]
+    rows.sort(key=lambda r: r['started_ms'], reverse=True)
+    print(json.dumps({'delegations': rows}, ensure_ascii=False))
+    return 0
 
 
 def wake_queue():
@@ -155,6 +338,14 @@ def read_count(mid):
         return 0
 
 
+def kind_of(row):
+    """progress or answer (the default: a row from before kinds, or from kith-send, is an answer)."""
+    try:
+        return 'progress' if json.loads(row).get('kind') == 'progress' else 'answer'
+    except (ValueError, AttributeError):
+        return 'answer'
+
+
 def said(row):
     try:
         item = json.loads(row)
@@ -165,55 +356,63 @@ def said(row):
 
 
 def hand_over(mid):
-    """Under box_locked: the answers to mid nobody has read go to the caller's session as a wake when that session has
-    ended (no writer holds it), and count as read. While it is open they stay here for `--wait`. One wake id per answer,
-    so a crash between the wake and the count sends nothing twice (kith-wake rule 13)."""
+    """Under box_locked: once an answer to mid is in, what nobody has read of its mailbox (the progress before it, and
+    the answer) goes to the caller's session as a wake when that session has ended (no writer holds it), and counts as
+    read. A mailbox with progress only wakes no one. While the session is open they stay here for `--wait`. One wake id
+    per row, so a crash between the wake and the count sends nothing twice (kith-wake rule 13)."""
+    sync_state(mid)
     reg = read_reg(mid)
-    if not reg or not (reg.get('session') and reg.get('agent')):
+    session = (reg or {}).get('reply_to', {}).get('session')
+    if not reg or reg.get('delivered') or not (session and reg.get('agent')):
         return 'kept'
     wake = wake_queue()
-    if wake.writer_live(reg['session']):
+    if wake.writer_live(session):
         return 'kept'
     rows, done = lines_of(mid), read_count(mid)
-    if len(rows) <= done:
+    last = max([i for i in range(done, len(rows)) if kind_of(rows[i]) == 'answer'], default=None)
+    if last is None:
         return 'kept'
     person = reg.get('person')
     door = 'run' if not person and reg.get('via') in wake.RUN_VIAS else 'host'
-    for n, row in enumerate(rows[done:], done + 1):
+    for n in range(done + 1, last + 2):
+        row = rows[n - 1]
         text = said(row)
         if text is None:
             continue
         who = (json.loads(row).get('as') or reg.get('asked') or 'the agent')
+        progress = kind_of(row) == 'progress'
         try:
-            wake.enqueue(reg['session'], 'ask:%s/%d' % (mid, n), reg['agent'], text, person=person, door=door,
-                         why='%s answered your kith ask %s' % (who, mid))
+            wake.enqueue(session, 'ask:%s/%d' % (mid, n), reg['agent'], ('(progress) ' if progress else '') + text,
+                         person=person, door=door,
+                         why='%s %s your kith ask %s' % (who, 'reported on' if progress else 'answered', mid))
         except SystemExit as e:
             print('kith ask: %s stays unread: %s' % (mid, e), file=sys.stderr)
             return 'kept'
-    box(mid, 'read').write_text(str(len(rows)))
+    box(mid, 'read').write_text(str(last + 1))
     return 'woke'
 
 
-def answer(mid, text, who):
-    """kith ask --answer: one answer to mid, appended and handed over in the same step."""
+def answer(mid, text, who, kind='answer'):
+    """kith ask --answer: one reply to mid, appended and handed over in the same step. The same answer again is a
+    duplicate and wakes no one twice; a progress reply is stored and wakes no one."""
     with box_locked():
+        if kind == 'answer' and any(kind_of(r) == 'answer' and said(r) == text for r in lines_of(mid)):
+            return 'duplicate'
         with open(box(mid, 'jsonl'), 'a') as f:
-            f.write(json.dumps({'as': who, 'text': text, 'at': dt.datetime.now().isoformat(timespec='seconds')},
+            f.write(json.dumps({'as': who, 'text': text, 'kind': kind, 'at': dt.datetime.now().isoformat(timespec='seconds')},
                                ensure_ascii=False) + '\n')
         return hand_over(mid)
 
 
 def finished(mid):
-    """The asked run ended without a card open: no answer comes after this one, so the registration can go once read."""
-    reg = read_reg(mid)
-    if reg:
-        reg['done'] = True
-        box(mid, 'reg').write_text(json.dumps(reg))
+    """The asked run ended without a card open: no answer comes after this one."""
+    with box_locked():
+        patch_reg(mid, done=True)
 
 
 def sweep():
-    """CallerLeave (M8): every registration whose caller's session ended with answers unread wakes it. A done one
-    with nothing unread, or one older than KEEP_DAYS, is forgotten (its answers stay)."""
+    """CallerLeave (M8): every record whose caller's session ended with answers unread wakes it. A record older than
+    KEEP_DAYS is forgotten (its answers stay); until then its cost counts towards its chain's cap."""
     out = {}
     if not BOX.is_dir():
         return out
@@ -222,8 +421,7 @@ def sweep():
             mid = reg_file.name[:-len('.reg')]
             out[mid] = hand_over(mid)
             reg = read_reg(mid) or {}
-            unread = len(lines_of(mid)) > read_count(mid)
-            if (reg.get('done') and not unread) or time.time() - reg.get('at', 0) > KEEP_DAYS * 86400:
+            if time.time() - reg.get('at', 0) > KEEP_DAYS * 86400:
                 reg_file.unlink(missing_ok=True)
                 box(mid, 'parked').unlink(missing_ok=True)
     return out
@@ -387,6 +585,7 @@ def wait_bg(mid, timeout):
 def background(argv):
     """Run this same call detached; print its id at once. The wrapper writes the exit code last, atomically."""
     mid = new_id('bg')
+    open_record(mid, argv[0], crossing='@' in argv[0])   # a refused ask says so now, not in a log
     BG.mkdir(parents=True, exist_ok=True)
     (BG / (mid + '.cmd')).write_text(' '.join(argv) + '\n')
     base = str(BG / mid)
@@ -408,10 +607,13 @@ def wait(argv):
     end = time.time() + timeout
     if (BG / (mid + '.cmd')).exists():
         code = wait_bg(mid, timeout)
-        # A --bg run that parked on a card (exit 3, with its id registered) has its answer still to come: below.
-        if not (code == 3 and (BG / (mid + '.exit')).exists() and box(mid, 'reg').exists()):
+        # A --bg run that parked on a card (exit 3, its record not marked delivered) has its answer still to come: below.
+        reg = read_reg(mid)
+        if not (code == 3 and (BG / (mid + '.exit')).exists() and reg and not reg.get('delivered')):
             return follow_ups(mid, end, code) if (BG / (mid + '.exit')).exists() else code
-    while len(lines_of(mid)) <= read_count(mid) and time.time() < end:
+    def answered():
+        return any(kind_of(r) == 'answer' for r in lines_of(mid)[read_count(mid):])
+    while not answered() and time.time() < end:
         time.sleep(2)
     with box_locked():   # the sweep may have handed them to a wake meanwhile
         rows, done = lines_of(mid), read_count(mid)
@@ -421,20 +623,41 @@ def wait(argv):
         for row in rows[done:]:
             text = said(row)
             if text is not None:
-                print(text)
+                print(('(progress) ' if kind_of(row) == 'progress' else '') + text)
         box(mid, 'read').write_text(str(len(rows)))
+        sync_state(mid)
+        if not any(kind_of(r) == 'answer' for r in rows[done:]):   # progress is not the answer: still waiting
+            print('kith ask: no answer to %s yet; ask again with: kith ask --wait %s' % (mid, mid), file=sys.stderr)
+            return 3
     return 0
 
 
 def answer_cmd(argv):
-    """kith ask --answer ID [--as AGENT] -- TEXT"""
-    usage = 'usage: kith ask --answer ID [--as AGENT] -- TEXT'
+    """kith ask --answer ID [--as AGENT] [--progress] -- TEXT"""
+    usage = 'usage: kith ask --answer ID [--as AGENT] [--progress] -- TEXT'
     if '--' not in argv:
         sys.exit(usage)
     head, text = argv[:argv.index('--')], ' '.join(argv[argv.index('--') + 1:]).strip()
-    if not text or not head or not ID.fullmatch(head[0]) or not (len(head) == 1 or (len(head) == 3 and head[1] == '--as')):
+    if not text or not head or not ID.fullmatch(head[0]):
         sys.exit(usage)
-    print(answer(head[0], text, head[2] if len(head) == 3 else None))
+    who, kind, i = None, 'answer', 1
+    while i < len(head):
+        if head[i] == '--as' and i + 1 < len(head): who = head[i + 1]; i += 2
+        elif head[i] == '--progress': kind = 'progress'; i += 1
+        else: sys.exit(usage)
+    print(answer(head[0], text, who, kind))
+    return 0
+
+
+def cap_cmd(argv):
+    """kith ask --cap [N|none]: the cost cap of a delegation chain, US$ (shown, or set for this Mac)."""
+    if argv:
+        try:
+            kith_settings.set_chain_cost_cap(argv[0])
+        except ValueError as e:
+            sys.exit('kith ask: %s' % e)
+    cap = kith_settings.chain_cost_cap()
+    print('none' if cap is None else '%g' % cap)
     return 0
 
 
@@ -453,6 +676,7 @@ def reply(argv):
     except ValueError:   # never started (the session is held, ...): the host tries again, nothing is answered
         sys.stderr.write((proc.stderr or proc.stdout or 'kith ask: %s gave no answer\n' % agent)[-3000:])
         return proc.returncode or 1
+    settle(mid, res.get('total_cost_usd'))
     if box(mid, 'parked').exists():
         return 0
     answer(mid, res.get('result') or '%s ended its turn without an answer' % agent, agent)
@@ -484,13 +708,27 @@ def main(argv):
         return answer_cmd(argv[1:])
     if argv[0] == '--reply':
         return reply(argv[1:])
+    if argv[0] == '--cap':
+        return cap_cmd(argv[1:])
+    if argv[0] == '--cap-told' and len(argv) == 2 and ID.fullmatch(argv[1]):
+        cap_told(argv[1]); return 0
+    if argv[0] == 'delegations':   # --json is the only form
+        return delegations()
     if argv[0] == '--sweep':
         for mid, what in sweep().items():
             if what == 'woke':
                 print('%s: answers handed to its asker\'s session as a wake' % mid)
         return 0
     if '@' in argv[0]:  # an agent on another machine
-        os.execv(str(KITH / 'bin/kith-remote'), [str(KITH / 'bin/kith-remote'), 'ask', *argv])
+        if bg:
+            return background(argv)
+        # The record is made here (the hop caps and the cost cap apply before anything leaves); kith-remote sends the chain
+        # along and settles the record with the other Mac's cost.
+        mid = os.environ.pop('KITH_ASK_BG', None) or new_id('ask')
+        if read_reg(mid) is None:
+            open_record(mid, argv[0], crossing=True)
+        os.execve(str(KITH / 'bin/kith-remote'), [str(KITH / 'bin/kith-remote'), 'ask', *argv],
+                  dict(os.environ, KITH_ASK_RECORD=mid))
     agent, rest = argv[0], argv[1:]
     cont, name, as_json, where, kith_opts, words, i = False, None, False, None, [], [], 0
     while i < len(rest):
@@ -567,20 +805,29 @@ def main(argv):
     if bg_id:
         note_job(bg_id, agent, key)
         env['KITH_LAUNCH_SID_FILE'] = str(BG / (bg_id + '.sid'))
-    register(mid, agent)
+    if read_reg(mid) is None:   # a --bg call made it when it began
+        open_record(mid, agent)
+    # A run kith-remote started for another Mac's ask got its chain in KITH_ASK_*: the record holds it now, and the run's
+    # own asks find it through KITH_ASK_ID.
+    for k in ('KITH_ASK_CHAIN', 'KITH_ASK_HOP', 'KITH_ASK_CROSS', 'KITH_ASK_FROM', 'KITH_ASK_COST'):
+        env.pop(k, None)
     env['KITH_LAUNCH_ASK_ID'] = mid
     proc = subprocess.run([str(KITH / 'bin/kith'), agent, *kith_opts, '--', task], env=env, stdin=subprocess.DEVNULL,
                           capture_output=True, text=True)
     if bg_id:
         kick_wakes(job_session(bg_id, wait=0))
     parked = box(mid, 'parked').exists()
-    if not parked:
-        box(mid, 'reg').unlink(missing_ok=True)
     try:
         res = json.loads(proc.stdout)
     except ValueError:
+        settle(mid, 0, None if parked else 'stopped')
         sys.stderr.write((proc.stderr or proc.stdout or 'kith ask: %s gave no answer\n' % agent)[-3000:])
         return proc.returncode or 1
+    # Not parked: the answer goes straight back to this call, so nothing is left for a wake. Parked: the card's answer comes.
+    settle(mid, res.get('total_cost_usd'), None if parked else ('stopped' if res.get('is_error') else 'answered'))
+    if not parked:
+        with box_locked():
+            patch_reg(mid, done=True, delivered=True)
 
     sid, text = res.get('session_id'), res.get('result') or ''
     turns = (prev or {}).get('turns', 0) + 1
