@@ -47,6 +47,8 @@ const CLAIM_WAIT_S: u64 = 5;
 const EARLY_EXIT: Duration = Duration::from_secs(CLAIM_WAIT_S + 3);
 /// A turn the host took and heard nothing of this long is given back (an actor that shut down, a lost callback).
 const TAKEN_TTL: Duration = Duration::from_secs(30 * 60);
+/// Even a turn the bot's actor or a channel run still seems to hold is given back after this long: its callback was lost.
+const TRACKED_TTL: Duration = Duration::from_secs(6 * 3600);
 /// How soon the taker looks after a request arrives, so cards answered together share one turn.
 const SETTLE: Duration = Duration::from_millis(300);
 /// How often the taker looks at the queue's folder (a `kith ask` answer comes from outside the host); it starts a
@@ -63,8 +65,6 @@ static ENTRIES: LazyLock<Mutex<HashMap<String, Carried>>> = LazyLock::new(|| Mut
 static TAKEN: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 /// The runs a channel thread holds, until its turn starts or doesn't: a turn queued behind a long channel run is not lost.
 static CHANNEL_RUNS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
-/// Cards of the kernel's run door whose request ended as failed: said once, not looked at again.
-static GAVE_UP: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 static KICK: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 struct Carried {
@@ -266,8 +266,8 @@ pub(crate) async fn enqueue(hub: &Arc<Hub>, card: &Card, door: &Door) -> anyhow:
         let (st, rid) = (state.clone(), id.clone());
         match wake::blocking(move || wake::status(&st, &rid)).await.flatten().as_deref() {
             Some("answered" | "recovered" | "withdrawn") => applied(hub, std::slice::from_ref(&card.id)),
-            // It failed after its tries: not delivered, so not applied; said once.
-            Some("failed") => tracing::warn!(card = %card.id, "a card's wake failed in the queue and is not delivered"),
+            // It failed after its tries: not delivered, so not applied, and not owed any more either.
+            Some("failed") => failed(hub, card),
             Some("queued" | "running") => {}
             other => anyhow::bail!("the queue's answer about {id} was {other:?}"),
         }
@@ -277,48 +277,59 @@ pub(crate) async fn enqueue(hub: &Arc<Hub>, card: &Card, door: &Door) -> anyhow:
         let (st, key, rid) = (state, key, id);
         wake::spawn(move || wake::withdraw(&st, &key, Some(&rid)));
     } else if kernel_door {
-        look_at(hub, card).await;
+        show_holder(hub, card).await;
     } else {
         KICK.notify_one();
     }
     Ok(())
 }
 
-/// A card the kernel's run door carries: delivered once the queue says so (its turn commits at its end, W2), else the
-/// card shows who holds the session (L2).
-async fn look_at(hub: &Arc<Hub>, card: &Card) {
-    let (st, rid) = (state_of(hub), request_id(card));
-    let how = wake::blocking(move || wake::status(&st, &rid)).await.flatten();
-    match how.as_deref() {
-        Some("answered" | "recovered" | "withdrawn") => {
-            applied(hub, std::slice::from_ref(&card.id));
-            clear_held(hub, std::slice::from_ref(card));
+/// The card of a kernel run-door wake says who holds its session while the wake waits for the writer (L2).
+async fn show_holder(hub: &Arc<Hub>, card: &Card) {
+    let Some(Door::Run { session }) = door_of(card) else { return };
+    let (state, sid) = (state_of(hub), session.clone());
+    let held = wake::blocking(move || crate::terminal::claim::holder(&state, &sid)).await.flatten();
+    match held {
+        Some(h) => set_held(hub, card, Some((&session, &h))),
+        None => clear_held(hub, std::slice::from_ref(card)),
+    }
+}
+
+/// The queue gave up on this card's wake (it failed after its tries) or no longer knows it: it is not delivered, so the
+/// card ends instead of staying approved past its deadline ("silence is no").
+fn failed(hub: &Hub, card: &Card) {
+    tracing::warn!(card = %card.id, "a card's wake is not delivered; the card ends");
+    end_for_stop(hub, card);
+}
+
+/// Settles the cards the queue holds: delivered ones are applied; a failed one, or one the queue has forgotten after its
+/// deadline, ends (it would stay approved forever otherwise); a kernel run-door one shows who holds its session. Reads
+/// the queue's files, so it starts no process.
+pub(crate) async fn settle_queue(hub: &Arc<Hub>) {
+    settle_queue_at(hub, now_ms()).await;
+}
+
+pub(crate) async fn settle_queue_at(hub: &Arc<Hub>, now: i64) {
+    let cards: Vec<Card> = hub.store.cards_unapplied().into_iter().filter(|c| c.resumed_at.is_some()).collect();
+    if cards.is_empty() {
+        return;
+    }
+    let state = state_of(hub);
+    let known = wake::blocking(move || wake::statuses(&state)).await.unwrap_or_default();
+    for card in &cards {
+        let how = known.get(&request_id(card)).map(String::as_str);
+        // Failed, or forgotten by the queue (its memory is a week) once the card's deadline has passed: nothing can come.
+        if how == Some("failed") || (how.is_none() && now > card.deadline) {
+            failed(hub, card);
+            continue;
         }
-        Some("failed") => failed_once(card),
-        Some(_) => {
-            let Door::Run { session } = door_of(card).unwrap_or(Door::Channel(String::new())) else { return };
-            let (state, sid) = (state_of(hub), session.clone());
-            let held = wake::blocking(move || crate::terminal::claim::holder(&state, &sid)).await.flatten();
-            match held {
-                Some(h) => set_held(hub, card, Some((&session, &h))),
-                None => clear_held(hub, std::slice::from_ref(card)),
+        match how {
+            Some("answered" | "recovered" | "withdrawn") => {
+                applied(hub, std::slice::from_ref(&card.id));
+                clear_held(hub, std::slice::from_ref(card));
             }
-        }
-        None => {}
-    }
-}
-
-fn failed_once(card: &Card) {
-    if lock(&GAVE_UP).insert(card.id.clone()) {
-        tracing::warn!(card = %card.id, "a card's wake failed in the queue and is not delivered");
-    }
-}
-
-/// Looks at every card the kernel's run door carries and the queue has not delivered yet.
-pub(crate) async fn settle_kernel(hub: &Arc<Hub>) {
-    for card in hub.store.cards_unapplied().iter().filter(|c| c.resumed_at.is_some() && kernel_door(c)) {
-        if !lock(&GAVE_UP).contains(&card.id) {
-            look_at(hub, card).await;
+            Some(_) if kernel_door(card) => show_holder(hub, card).await,
+            _ => {}
         }
     }
 }
@@ -376,14 +387,23 @@ fn reap(hub: &Hub) {
 }
 
 fn reap_after(hub: &Hub, ttl: Duration) {
+    reap_with(hub, ttl, TRACKED_TTL);
+}
+
+fn reap_with(hub: &Hub, ttl: Duration, tracked: Duration) {
     let stale: Vec<String> = lock(&TAKEN)
         .iter()
         .filter(|(_, at)| at.elapsed() >= ttl)
-        .map(|(run, _)| run.clone())
-        .filter(|run| !lock(&ENTRIES).values().any(|c| c.run == *run) && !lock(&CHANNEL_RUNS).contains(run))
+        .map(|(run, at)| (run.clone(), at.elapsed() >= tracked))
+        .filter(|(run, long)| {
+            *long || (!lock(&ENTRIES).values().any(|c| c.run == *run) && !lock(&CHANNEL_RUNS).contains(run))
+        })
+        .map(|(run, _)| run)
         .collect();
     for run in stale {
         lock(&TAKEN).remove(&run);
+        lock(&ENTRIES).retain(|_, c| c.run != run);
+        lock(&CHANNEL_RUNS).remove(&run);
         let st = state_of(hub);
         wake::spawn(move || wake::back(&st, &run, true));
     }
@@ -407,7 +427,7 @@ pub fn run_taker(hub: &Arc<Hub>) {
                     attempt(&hub, &card.id).await;
                 }
             }
-            settle_kernel(&hub).await;
+            settle_queue(&hub).await;
             drive(&hub).await;
         }
     });
@@ -592,6 +612,12 @@ pub fn refused(hub: &Arc<Hub>, entry_ids: &[String], session: Option<&str>) {
     }
 }
 
+/// A bot's actor shut down with these entries still queued: their wakes go back to the queue (it keeps them for the
+/// next actor or a restart), instead of staying "taken" by a host that never starts them.
+pub fn actor_gone(hub: &Arc<Hub>, entry_ids: &[String]) {
+    not_started(hub, entry_ids, true);
+}
+
 /// A wake turn on a bot's actor failed to start for another reason. `again`: it is owed again (the queue pauses
 /// before it comes back); after a Stop it is dropped, and the stopped yes does not come back.
 pub fn not_started(hub: &Arc<Hub>, entry_ids: &[String], again: bool) {
@@ -754,6 +780,12 @@ async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&st
 #[cfg(test)]
 pub(crate) fn reap_for_test(hub: &Hub, ttl: Duration) {
     reap_after(hub, ttl);
+}
+
+/// Gives back even the turns a door seems to hold, as if the upper bound had passed.
+#[cfg(test)]
+pub(crate) fn reap_long_for_test(hub: &Hub) {
+    reap_with(hub, Duration::ZERO, Duration::ZERO);
 }
 
 /// A taken turn the host has no door callback for.

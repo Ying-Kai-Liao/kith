@@ -117,6 +117,33 @@ pub fn status(state: &Path, id: &str) -> Option<String> {
     Some(text.split_whitespace().next()?.trim_end_matches(',').to_owned())
 }
 
+/// Where every request the queue knows is: queued, running, or how it was answered. Read from the queue's files, so
+/// many cards cost no process; a request the queue has forgotten (its memory is a week) is missing.
+pub fn statuses(state: &Path) -> std::collections::HashMap<String, String> {
+    let dir = state.join("sessions/queue");
+    let mut out = std::collections::HashMap::new();
+    let read = |p: &Path| std::fs::read(p).ok().and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+    if let Some(answered) = read(&dir.join("answered.json")) {
+        for (id, v) in answered.as_object().into_iter().flatten() {
+            let how = v["how"].as_str().and_then(|h| h.split_whitespace().next()).unwrap_or_default();
+            out.insert(id.clone(), how.trim_end_matches(',').to_owned());
+        }
+    }
+    for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+        let name = e.file_name();
+        let name = name.to_string_lossy();
+        if !name.ends_with(".json") || name == "answered.json" || name.starts_with('.') {
+            continue;
+        }
+        for r in read(&e.path()).iter().flat_map(|it| it["requests"].as_array().into_iter().flatten()) {
+            if let Some(id) = r["id"].as_str() {
+                out.insert(id.to_owned(), if r["run"].is_null() { "queued" } else { "running" }.to_owned());
+            }
+        }
+    }
+    out
+}
+
 /// Whether the queue holds anything at all: a look at its folder, so an idle host starts no process.
 pub fn has_items(state: &Path) -> bool {
     std::fs::read_dir(state.join("sessions/queue")).is_ok_and(|dir| {

@@ -152,7 +152,16 @@ impl Actor {
             }
             Cmd::ResetPlace { lane } => self.reset_place(&lane).await,
             Cmd::ForgetLoaded { lane } => self.forget_loaded(&lane),
-            Cmd::Shutdown => return false,
+            Cmd::Shutdown => {
+                // A card's wake queued here never starts: the wake queue gets it back.
+                let mut gone: Vec<String> = self.start_entries.clone();
+                gone.extend(self.queue.iter().filter_map(|q| match q {
+                    Queued::User { entry_id, .. } => Some(entry_id.clone()),
+                    _ => None,
+                }));
+                crate::cards::resume::actor_gone(&self.hub, &gone);
+                return false;
+            }
         }
         true
     }

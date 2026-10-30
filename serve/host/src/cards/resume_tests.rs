@@ -274,7 +274,7 @@ async fn an_approval_after_the_park_resumes_the_session_exactly_once_even_with_a
     let turn = crate::wake::take_session(&state(&r), "once-a");
     assert!(turn.unwrap().is_none(), "the run door's item is the kernel's, not the host's to take");
     commit_kernel_turn(&r, &card);
-    resume::settle_kernel(&r.hub).await;
+    resume::settle_queue(&r.hub).await;
     assert!(r.hub.store.card(&card.id).unwrap().applied_at.is_some());
     assert!(r.hub.store.cards_restart(now_ms()).is_ok());
     assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 0);
@@ -324,12 +324,12 @@ async fn a_held_session_keeps_its_wake_in_the_queue_and_shows_the_holder_until_i
     // The holder exits: the card no longer says held, and a second try finds nothing owed.
     signal(pid);
     sh.wait().unwrap();
-    resume::settle_kernel(&r.hub).await;
+    resume::settle_queue(&r.hub).await;
     assert!(r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().data["held"].is_null());
     assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
     assert_eq!(tests_seen::of(&card.session).len(), 1, "one wake");
     commit_kernel_turn(&r, &card);
-    resume::settle_kernel(&r.hub).await;
+    resume::settle_queue(&r.hub).await;
     assert!(r.hub.store.card(&card.id).unwrap().applied_at.is_some());
 }
 
@@ -964,4 +964,55 @@ async fn a_stop_that_races_a_take_runs_nothing() {
     drive(&r.hub).await;
     assert!(bot_seen(&card).is_empty());
     queue_says_eventually(&r, &card, "withdrawn").await;
+}
+
+#[tokio::test]
+async fn a_card_whose_wake_failed_or_was_forgotten_ends_instead_of_staying_approved() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    // A host-door wake that failed after its tries, and a kernel run-door one: both end.
+    let host = bot_card_approved(&r, &chat, "");
+    let kernel = approved_while_gone(&r, owner_run("fail-k"), ls()).await;
+    attempt(&r.hub, &host.id).await;
+    attempt(&r.hub, &kernel.id).await;
+    for card in [&host, &kernel] {
+        let session = if card.id == host.id { format!("acp:{chat}:") } else { "fail-k".into() };
+        crate::wake::withdraw(&state(&r), &session, None); // the item is gone; now it is recorded as failed
+        answered_in_queue(&r, &format!("card:{}", card.id), "failed");
+    }
+    resume::settle_queue(&r.hub).await;
+    assert_eq!(r.hub.store.card(&host.id).unwrap().state, CardState::Withdrawn);
+    assert_eq!(r.hub.store.card(&kernel.id).unwrap().state, CardState::Withdrawn);
+    // The queue forgot the id (its memory is a week) and the deadline passed: the card ends too; before that it waits.
+    let forgotten = bot_card_approved(&r, &chat, "f");
+    assert!(r.hub.store.card_resume_claim(&forgotten.id, now_ms()).unwrap());
+    resume::settle_queue(&r.hub).await;
+    assert_eq!(r.hub.store.card(&forgotten.id).unwrap().state, CardState::Approved, "before its deadline it waits");
+    resume::settle_queue_at(&r.hub, now_ms() + 120_000).await;
+    assert_eq!(r.hub.store.card(&forgotten.id).unwrap().state, CardState::Withdrawn);
+}
+
+#[tokio::test]
+async fn a_bot_actor_that_shuts_down_gives_its_queued_wake_back_and_a_lost_tracked_turn_is_given_back_in_the_end() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = bot_card_approved(&r, &chat, "");
+    attempt(&r.hub, &card.id).await;
+    drive(&r.hub).await;
+    let entry = bot_seen(&card)[0].entry.clone().unwrap();
+    assert_eq!(queue_says(&r, &card), "running");
+    resume::actor_gone(&r.hub, &[entry]);
+    queue_says_eventually(&r, &card, "queued").await;
+    // A tracked turn whose callback never comes is given back after the upper bound (here: no wait at all).
+    pause_over(&r);
+    drive(&r.hub).await;
+    assert_eq!(queue_says(&r, &card), "running");
+    resume::reap_for_test(&r.hub, Duration::ZERO);
+    queue_says_eventually(&r, &card, "running").await;
+    resume::reap_long_for_test(&r.hub);
+    queue_says_eventually(&r, &card, "queued").await;
 }
