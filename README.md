@@ -211,7 +211,8 @@ kernel/                    the code
   bin/kith-memory            search the agents' memory and shared notes
   bin/kith-sched             scheduled agent jobs (cron, launchd)
   bin/kith-account           extra Claude / Codex logins and the backup chain: kith account add, kith backup list|add|remove
-  PROTOCOL.md              memory rules, appended to every agent's prompt
+  PROTOCOL.md              the core memory rules, appended to every agent's prompt
+  skills/<name>/SKILL.md   kernel skills an agent reads when the case comes up (keys, rooms, guests, calls…)
   services/<name>.json     shared services (MCP servers, APIs, logins): how to start them, which secrets by name
 
 agents/                    the agents folder (ignored by this repo; your hq-agents repo)

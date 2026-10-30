@@ -154,11 +154,16 @@ def notes(ids):
     if not home:
         return 0
     room = os.environ.get('KITH_ROOM') or kith_facets.own_room(agent, reader)
-    out = kith_facets.project_notes(agent, home, reader, room, [i for i in ids if kith_facets.ID.match(i)])
+    ids = [i for i in ids if kith_facets.ID.match(i)]
+    out = kith_facets.project_notes(agent, home, reader, room, ids)
     if out['block']:
         print(out['block'])
         if out['more']:
             print('(%d more project notes: kith recall <words> --project <id>)' % out['more'])
+    for i in ids:
+        start = kith_facets.start_files(agent, home, reader, room, i, members=None, state=p['KITH_STATE'])
+        if start:
+            print(start)
     return 0
 
 
