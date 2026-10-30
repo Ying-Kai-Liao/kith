@@ -323,7 +323,17 @@ export interface EntryData {
   at?: number
   author?: string
   /** user, in a bot-guest chat: the outside bot (and the person speaking for it) that wrote this message. */
-  sender?: { botId?: string; name?: string; speaker?: string }
+  sender?: { botId?: string; name?: string; speaker?: string; provider?: string }
+  /** agent reply and a bot's post in a group: the room conversation it belongs to (absent from an older host). */
+  conversation?: string
+  /** A reply that came after its run was over; `lateWhy` says why (absent from an older host). */
+  late?: boolean
+  lateWhy?: string
+  /** A bot's post with nothing open: kept, not late. */
+  unprompted?: boolean
+  /** notice: botJoined | botLeft | botPassed | botTimedOut, with the bot it is about. */
+  notice?: string
+  bot?: { botId?: string; name?: string; provider?: string }
   thread?: ThreadSummary
   /** user, in the main chat: the first message of a task; the task goes on in its thread (see `tasks`). */
   task?: boolean

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Entry } from '../../../shared/models.ts'
 import { buildChat } from './flat-chat.ts'
+import { parseConversation } from '../../../shared/conversation.ts'
 
 const entry = (id: string, kind: Entry['kind'], at: number, data: Entry['data'] = {}, threadId: string | null = null, rev = 1): Entry =>
   ({ id, seq: at, botId: 'b', threadId, rev, kind, turn: 1, data, createdAt: at * 1000, updatedAt: 0 })
@@ -73,4 +74,25 @@ test('author grouping and time separators', () => {
 test('tools before a gap of over an hour stay above the next message\'s separator', () => {
   const items = buildChat([entry('a', 'agent', 1, { final: true, author: 'x' }), entry('t', 'tool', 2), entry('b', 'agent', 20_000, { final: true, author: 'x' })])
   assert.deepEqual(items.map((i) => (i.kind === 'separator' ? 'sep' : i.id)), ['sep', 'a', 'steps-t', 'sep', 'b'])
+})
+
+const ended = (over: Record<string, unknown>) => parseConversation({ conversation: 'c1', chat: 'g', budget: 10, left: 4, state: 'ended', endedWhy: 'quiet', opening: 'u', ...over })!
+
+test('a run\'s end line goes after its last reply, not after a late one', () => {
+  const entries = [
+    entry('u', 'user', 1, { text: 'go' }),
+    entry('a', 'agent', 2, { final: true, author: 'x', conversation: 'c1' }),
+    entry('b', 'agent', 3, { final: true, author: 'y', conversation: 'c1' }),
+    entry('l', 'agent', 4, { final: true, author: 'x', conversation: 'c1', late: true, lateWhy: 'ended' }),
+  ]
+  const items = buildChat(entries, [ended({})])
+  assert.deepEqual(items.filter((i) => i.kind !== 'separator').map((i) => i.id), ['u', 'a', 'b', 'end-c1', 'l'])
+  const line = items.find((i) => i.kind === 'ending')
+  assert.equal(line?.kind === 'ending' && line.text, 'Worked it out · 6 of 10 turns')
+})
+
+test('a run nobody answered ends after the message that opened it, and one that isn\'t loaded has no line', () => {
+  const items = buildChat([entry('u', 'user', 1, { text: 'go' })], [ended({ endedWhy: 'stopped', state: 'stopped' })])
+  assert.deepEqual(items.filter((i) => i.kind !== 'separator').map((i) => i.id), ['u', 'end-c1'])
+  assert.deepEqual(buildChat([entry('x', 'user', 1)], [ended({ opening: 'gone' })]).map((i) => i.id).filter((id) => id.startsWith('end')), [])
 })

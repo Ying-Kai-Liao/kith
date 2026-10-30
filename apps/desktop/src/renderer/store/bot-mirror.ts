@@ -1,3 +1,4 @@
+import { ConversationBook } from '@shared/conversation'
 import type { IncomingCall } from '@shared/incoming-call'
 import { mirrorStamp } from '@shared/mirror-stamp'
 import { checkHost, PROTOCOL, type HostVersion, type VersionMismatch } from '@shared/compat'
@@ -39,6 +40,8 @@ export class BotMirror extends Observable {
   hostVersion: HostVersion | null = null
   bots = new Map<string, Bot>()
   entries = new Map<string, Entry[]>()
+  /** The room conversations of the group chats (owner's app only: the host sends them to nobody else). */
+  conversations = new ConversationBook()
   usage: Usage = { providers: [] }
   screen: ScreenState | null = null
   accessRequests: AccessRequest[] = []

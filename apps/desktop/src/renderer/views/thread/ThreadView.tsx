@@ -17,8 +17,12 @@ import { useStore } from '../../store/context'
 import { UpdateNeededCard } from '../UpdateNeededCard'
 import { buildChat, rowIn, useArrivals, type ChatItem } from './chat-items'
 import { BotConversationView, BotMessageRow } from './BotConversation'
-import { ChatRow, StepsRow, TimeSeparator, WorkingIndicator } from './ChatRows'
+import { ChatRow, lateQuoteOf, StepsRow, TimeSeparator, WorkingIndicator } from './ChatRows'
+import { AddToRoomSheet } from './AddToRoomSheet'
 import { Composer } from './Composer'
+import { EndLine, LiveLine } from './ConversationLine'
+import { isOpen } from '@shared/conversation'
+import { botGuestsFor } from '../../store/bot-guests-store'
 import { ChatSidePanel } from './ChatSidePanel'
 import { DetailsPanel, type DetailsTab } from './DetailsPanel'
 import { TraceView } from './TraceView'
@@ -49,6 +53,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
   const [focusId, setFocusId] = useState<string | null>(null)
   const [botChat, setBotChat] = useState<string | null>(null)
   const [editingGroup, setEditingGroup] = useState(false)
+  const [addingMember, setAddingMember] = useState(false)
   const [sharing, setSharing] = useState(false)
   const canShare = useCanShareAgent(store, bot)
   const [templateDraft, setTemplateDraft] = useState<BotDraft | null>(null)
@@ -59,6 +64,17 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
   const [callSpeaking, setCallSpeaking] = useState(false)
   const interruptCall = useRef<(() => void) | null>(null)
   const guestChat = bot?.botGuest ?? null
+  // A group's room run: the live line above the box while one is open in this chat's main lane (nothing in a 1:1 chat).
+  const group = !!bot && isGroup(bot)
+  const run = group ? store.conversations.inLane(botId, null) : null
+  const liveRun = run && isOpen(run) && !store.isOffline ? run : null
+  // What the run did while this window was away comes from the host, and the owner's bots list names who is in the room.
+  const online = store.connection.kind === 'online'
+  useEffect(() => {
+    if (!group || !online) return
+    void store.refreshConversation(botId)
+    void botGuestsFor(store).load()
+  }, [store, botId, group, online])
   // A bot guest's chat is read-only here (v1): no calls, no composer, no place picker.
   const callBlocked = guestChat ? 'Read only' : callBlockedReason(store)
   // One call per chat window: a second press (double click, or the details page while in a call) does nothing.
@@ -162,6 +178,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
       tab={detailsTab}
       setTab={setDetailsTab}
       editGroup={() => setEditingGroup(true)}
+      addMember={() => setAddingMember(true)}
       share={() => {
         setCompactDetails(false)
         if (bot) setTemplateDraft(draftOf(bot))
@@ -237,11 +254,15 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
               <UpdateNeededCard />
             </div>
           ) : (
+            <>
+            {liveRun ? <LiveLine conversation={liveRun} botId={botId} lane={null} /> : null}
             <Composer
               botId={botId}
               onCall={!calling && bot && !callBlocked ? startCall : null}
               onInterrupt={callSpeaking ? () => interruptCall.current?.() : null}
+              liveLine={!!liveRun}
             />
+            </>
           )}
         </div>
         {calling ? (
@@ -271,6 +292,9 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
         {templateDraft ? <BotTemplateView draft={templateDraft} /> : null}
       </Sheet>
       {bot && canShare ? <ShareAgentSheet store={store} bot={bot} open={sharing} onClose={() => setSharing(false)} /> : null}
+      <Sheet open={addingMember} onClose={() => setAddingMember(false)} width={420} height={620}>
+        {bot && isGroup(bot) ? <AddToRoomSheet group={bot} /> : null}
+      </Sheet>
       <Sheet open={editingGroup} onClose={() => setEditingGroup(false)} width={420} height={560}>
         <GroupEditorView group={bot} />
       </Sheet>
@@ -327,10 +351,13 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
   const bot = store.bots.get(botId) ?? null
   // The turn at work, wherever it runs (the chat, a task, a thread): one indicator at the end.
   const working = bot ? workingThreadIn(bot, botId) : undefined
-  const live = !!bot && working !== undefined && !store.isOffline
+  // The room's live line above the box says who is up, so the working indicator would say it twice.
+  const run = bot && isGroup(bot) ? store.conversations.inLane(botId, null) : null
+  const live = !!bot && working !== undefined && !store.isOffline && !(run && isOpen(run))
   // Rebuilt only when this chat changes: the store replaces a chat's list on every change.
   const entries = store.allEntries(botId)
-  const all = useMemo(() => buildChat(entries), [entries])
+  const endVersion = store.conversations.version
+  const all = useMemo(() => buildChat(entries, store.conversations.endedIn(botId)), [entries, botId, endVersion]) // eslint-disable-line react-hooks/exhaustive-deps
   // The newest 40 items first; older pages come in near the top.
   const [firstShown, setFirstShown] = useState<string | null>(null)
   const [loadingEarlier, setLoadingEarlier] = useState(false)
@@ -371,7 +398,7 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
     if (at === 0) {
       const anchor = list[0]?.id
       await store.loadOlder(botId)
-      list = buildChat(store.allEntries(botId))
+      list = buildChat(store.allEntries(botId), store.conversations.endedIn(botId))
       at = anchor ? Math.max(0, list.findIndex((i) => i.id === anchor)) : 0
     }
     if (at > 0) setFirstShown(list[Math.max(0, at - PAGE)]!.id)
@@ -494,11 +521,13 @@ function ReadingThread({ botId, root }: { botId: string; root: string }) {
 }
 
 function Row({ item, chat, openTrace, openRoutine, openBotChat }: { item: ChatItem; chat: Bot | null; openTrace: () => void; openRoutine: (id: string | null) => void; openBotChat: (peerId: string) => void }) {
+  const store = useStore()
   if (item.kind === 'separator') {
     return <TimeSeparator date={item.date} />
   }
   if (item.kind === 'exchanges') return <BotMessageRow exchanges={item.exchanges} open={openBotChat} />
   if (item.kind === 'steps') return <StepsRow entries={item.entries} openTrace={openTrace} />
+  if (item.kind === 'ending') return chat ? <EndLine botId={chat.id} text={item.text} more={item.more} /> : null
   const e = item.entry
   if (e.kind === 'notice' && e.data.routineId) {
     return (
@@ -508,7 +537,7 @@ function Row({ item, chat, openTrace, openRoutine, openBotChat }: { item: ChatIt
       </button>
     )
   }
-  return <ChatRow entry={e} groupStart={item.groupStart} chat={chat} openTrace={openTrace} />
+  return <ChatRow entry={e} groupStart={item.groupStart} chat={chat} openTrace={openTrace} lateQuote={lateQuoteOf(store, e)} />
 }
 
 /** The start of an empty group chat: who's in it and how the room works. */

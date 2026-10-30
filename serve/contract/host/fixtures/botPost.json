@@ -2,12 +2,14 @@
   "method": "botPost",
   "type": "BotPosted",
   "body": {
-    "entryId": "aeba2736-6295-4cec-bd45-3d8bb43f613a",
-    "seq": 25,
+    "entryId": "860fae36-2507-4ed4-a762-5d5330cced3f",
+    "seq": 26,
     "turn": 1,
-    "room": "3c3da365-4f90-4101-b97a-6e2cc0258ec1",
-    "conversation": "7df9bafe-29d8-45c0-b3a8-d7410a775bfa",
+    "room": "50719603-0b25-49b2-9142-d4e46e845efb",
+    "conversation": "6cb44982-70e4-4574-b3a4-b4ad4f7a2460",
     "replied": false,
-    "late": false
+    "late": false,
+    "unprompted": false,
+    "lateWhy": null
   }
 }

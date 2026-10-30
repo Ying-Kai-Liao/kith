@@ -277,7 +277,7 @@ mod tests {
             [mk(1, 0, "user", None), mk(2, 4, "agent", None), mk(3, 5, "agent", Some("t")), mk(4, 4, "tool", None)];
         assert_eq!(running_turns(&range, std::slice::from_ref(&main)), [4]);
         assert_eq!(running_turns(&range, &[Lane::in_thread("a", "t"), main]), [4, 5]);
-        assert!(running_turns(&range, &[]).is_empty());
+        assert_eq!(running_turns(&range, &[]), Vec::<i64>::new());
         let t = json!({"untilAt": 40, "turns": [4]});
         assert!(folds(&t, 10, &mk(9, 4, "agent", None)), "later line of a kept turn");
         assert!(!folds(&t, 10, &mk(9, 7, "agent", None)));

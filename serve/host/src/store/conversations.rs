@@ -36,6 +36,31 @@ impl ConvState {
     }
 }
 
+/// Why a conversation is no longer open (the wire word of `endedWhy`). A newer person message ending it (`newer`) is
+/// written by `open_conversation` itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EndedWhy {
+    /// The budget ran out.
+    Spent,
+    /// A round where everyone passed.
+    Quiet,
+    /// A person's Stop (or the group was deleted).
+    Stopped,
+    /// Nobody moved it for a day.
+    Idle,
+}
+
+impl EndedWhy {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Spent => "spent",
+            Self::Quiet => "quiet",
+            Self::Stopped => "stopped",
+            Self::Idle => "idle",
+        }
+    }
+}
+
 /// The room turn's place, written with each step.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 pub struct RoomQueue {
@@ -56,6 +81,9 @@ pub struct RoomQueue {
     /// That bot's wake went out already: a restart waits for the post again but does not wake it twice.
     #[serde(default)]
     pub woke: bool,
+    /// When that bot's turn times out (unix ms), for the apps' line; `None` while no outside bot is awaited.
+    #[serde(default)]
+    pub wait_until: Option<i64>,
 }
 
 /// What charging a turn to a conversation came to.
@@ -81,9 +109,14 @@ pub struct Conversation {
     pub opened_at: i64,
     pub last_at: i64,
     pub queue: RoomQueue,
+    /// Why it is not open any more (`None` while open, and for conversations that ended before this was kept).
+    pub ended_why: Option<String>,
+    /// The entry of the person message that opened it.
+    pub opening: Option<String>,
 }
 
-const COLS: &str = "id, chat, thread, epoch, budget, left, state, opened_by, opened_at, last_at, queue";
+const COLS: &str =
+    "id, chat, thread, epoch, budget, left, state, opened_by, opened_at, last_at, queue, ended_why, opening";
 
 fn row_conversation(r: &rusqlite::Row) -> rusqlite::Result<Conversation> {
     let thread: String = r.get(2)?;
@@ -99,6 +132,8 @@ fn row_conversation(r: &rusqlite::Row) -> rusqlite::Result<Conversation> {
         opened_at: r.get(8)?,
         last_at: r.get(9)?,
         queue: serde_json::from_str(&queue).unwrap_or_default(),
+        ended_why: r.get(11)?,
+        opening: r.get(12)?,
     })
 }
 
@@ -113,7 +148,8 @@ impl Store {
         let tx = c.transaction()?;
         let thread = thread_of(lane);
         tx.execute(
-            "UPDATE conversations SET state = 'ended' WHERE chat = ?1 AND thread = ?2 AND state = 'open'",
+            "UPDATE conversations SET state = 'ended', ended_why = 'newer'
+             WHERE chat = ?1 AND thread = ?2 AND state = 'open'",
             params![lane.chat, thread],
         )?;
         let epoch: i64 = tx.query_row(
@@ -140,7 +176,16 @@ impl Store {
             opened_at: now,
             last_at: now,
             queue: RoomQueue::default(),
+            ended_why: None,
+            opening: None,
         })
+    }
+
+    /// Records the person message that opened conversation `id`.
+    pub fn set_opening(&self, id: &str, entry_id: &str) -> Result<()> {
+        let c = self.db.locked();
+        c.execute("UPDATE conversations SET opening = ?2 WHERE id = ?1", params![id, entry_id])?;
+        Ok(())
     }
 
     /// The lane's epoch: 0 before any conversation, then the newest one's.
@@ -269,9 +314,12 @@ impl Store {
     }
 
     /// Closes an open conversation (no-op if it already is closed).
-    pub fn end_conversation(&self, id: &str, state: ConvState) -> Result<()> {
+    pub fn end_conversation(&self, id: &str, state: ConvState, why: EndedWhy) -> Result<()> {
         let c = self.db.locked();
-        c.execute("UPDATE conversations SET state = ?2 WHERE id = ?1 AND state = 'open'", params![id, state.as_str()])?;
+        c.execute(
+            "UPDATE conversations SET state = ?2, ended_why = ?3 WHERE id = ?1 AND state = 'open'",
+            params![id, state.as_str(), why.as_str()],
+        )?;
         Ok(())
     }
 
@@ -279,7 +327,7 @@ impl Store {
     pub fn stop_conversations(&self, chat: &str) -> Result<usize> {
         let c = self.db.locked();
         Ok(c.execute(
-            "UPDATE conversations SET state = 'stopped', epoch = epoch + 1, last_at = ?2
+            "UPDATE conversations SET state = 'stopped', ended_why = 'stopped', epoch = epoch + 1, last_at = ?2
              WHERE chat = ?1 AND state = 'open'",
             params![chat, now_ms()],
         )?)
