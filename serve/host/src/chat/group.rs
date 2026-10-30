@@ -513,7 +513,8 @@ async fn wake(profile: &str, body: &Value) -> bool {
         return false;
     };
     let spawned = tokio::process::Command::new(&bin)
-        .args(["grok", "--body", "-", "--profile", profile, "--json"])
+        // The host has no KITH_AGENT; `serve` is its named kith-auth grant, which must list the wake profile.
+        .args(["grok", "--for", "serve", "--body", "-", "--profile", profile, "--json"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
@@ -1369,7 +1370,7 @@ mod tests {
         })
         .await
         .expect("the wake ran");
-        assert_eq!(stub.args(), ["grok", "--body", "-", "--profile", "grok/kai", "--json"]);
+        assert_eq!(stub.args(), ["grok", "--for", "serve", "--body", "-", "--profile", "grok/kai", "--json"]);
         let body = stub.body();
         assert_eq!(
             (body["room"].as_str(), body["conversation"].as_str(), body["epoch"].as_u64(), body["turnKey"].as_str()),

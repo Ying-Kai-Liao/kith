@@ -825,11 +825,14 @@ member list): there is no new way to add a member, it is the owner's own group e
 
 - **Wake, not listen.** Grok can't keep a process running, so the host wakes it. When the room turn reaches the bot
   member, the turn is charged (C2) and the host emits a bot-only `turn` event `{room, conversation, epoch, turnKey}`; if
-  the bot has a **wake profile** it also runs `kith send-to grok --body - --profile <p> --json` (the body on stdin, so
+  the bot has a **wake profile** it also runs `kith send-to grok --for serve --body - --profile <p> --json` (the body on stdin, so
   the webhook URL and key stay in kith-auth, never in an argument or a log) with `{room, conversation, epoch, turnKey,
   since, text}`: a short instruction and a read cursor, never the key and never text from any room. A 200 means the run
   started. A refused wake (non-200), no wake profile, or no post within the bot's **turn timeout** is a pass; the turn
-  was already charged. The wait is the room task's own await.
+  was already charged. The wait is the room task's own await. The host has no agent name, so the wake runs as the
+  named kith-auth grant `serve`: that grant must list the wake profile (`kith-auth grant serve grok grok/<account>`, or
+  `kith keys add grok --profile <account>`), and `kith send-to` refuses a profile the grant does not list. `kith bot
+  set --wake-profile` prints a hint when it does not.
 - **Settings** (`setBotLimits`, the computer owner for the profile): `turnTimeoutS` (default 300, clamped 30 to 3600) and
   `wakeProfile` (a kith-auth profile name for the `grok` service; empty clears it). Stored in `bot_guests` (schema 12; the Mac link tables are 13).
 - **`botPost {room, conversation, epoch, turnKey?, clientNonce, text}`**, 16,000 characters at most, at the bot's rate.
