@@ -94,15 +94,21 @@ public enum Topics {
     }
 
     public static func summary(of group: TopicGroup) -> TopicSummary {
-        let said = group.members.filter { $0.kind == "user" || ($0.kind == "agent" && $0.data.final == true) }
+        // Same set as the desktop card: every user and agent entry, streaming or not.
+        let said = group.members.filter { $0.kind == "user" || $0.kind == "agent" }
         var authors: [String] = []
         for e in said {
             let key = e.kind == "user" ? "user" : "agent:\(e.data.author ?? "")"
             if !authors.contains(key) { authors.append(key) }
             if authors.count == 2 { break }
         }
-        let latest = said.last
-        let line = (latest?.data.text ?? "").split(whereSeparator: \.isNewline).first.map { String($0).trimmingCharacters(in: .whitespaces) } ?? ""
+        // Newest entry with text; tool-only agent rows have none and never become the latest line.
+        var latest: Entry?
+        var line = ""
+        for e in said.reversed() {
+            let l = plainLine(e.data.text ?? "")
+            if !l.isEmpty { latest = e; line = l; break }
+        }
         return TopicSummary(
             authors: authors, latest: latest, latestLine: line, count: said.count,
             date: (group.members.last ?? group.root).date,
@@ -110,6 +116,22 @@ public enum Topics {
             working: group.members.contains {
                 ($0.kind == "agent" && $0.data.status == "streaming") || ($0.kind == "tool" && $0.data.status == "in_progress")
             })
+    }
+
+    /// The first line of `text` with inline markdown removed: code spans, bold/italic, links, and leading #/>/- markers.
+    public static func plainLine(_ text: String) -> String {
+        guard let first = text.split(whereSeparator: \.isNewline).first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) else { return "" }
+        var s = String(first).trimmingCharacters(in: .whitespaces)
+        func sub(_ pattern: String, _ template: String) {
+            s = s.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
+        }
+        sub(#"^(?:#{1,6}\s+|>\s*|[-*+]\s+)+"#, "")
+        sub(#"!?\[([^\]]*)\]\([^)]*\)"#, "$1")
+        sub(#"`+([^`]*)`+"#, "$1")
+        sub(#"(\*\*|__)(.+?)\1"#, "$2")
+        sub(#"\*([^*\s][^*]*?)\*"#, "$1")
+        sub(#"(?<![A-Za-z0-9])_([^_\s][^_]*?)_(?![A-Za-z0-9])"#, "$1")
+        return s.trimmingCharacters(in: .whitespaces)
     }
 
     /// The prefilled title for a topic made from `entry`: its first line, trimmed to the host's 80 characters.

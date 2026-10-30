@@ -70,6 +70,26 @@ private func folded(_ entries: [Entry]) -> [String] {
     #expect(summary.needsYou.map(\.id) == ["p"])
 }
 
+@Test func aStreamingAgentMessageCountsAndAToolOnlyOneIsNeverTheLatestLine() {
+    let all = [
+        root(),
+        entry("a", "agent", at: 120) { $0.author = "designer"; $0.text = "Still typing" },
+        entry("empty", "agent", at: 130) { $0.author = "designer"; $0.text = "" },
+    ]
+    let summary = Topics.summary(of: Topics.groups(in: all)[0])
+    #expect(summary.count == 3)
+    #expect(summary.authors == ["user", "agent:designer"])
+    #expect(summary.latest?.id == "a")
+    #expect(summary.latestLine == "Still typing")
+}
+
+@Test func theLatestLineIsPlainText() {
+    #expect(Topics.plainLine("## **Safe** enough at `0.85`") == "Safe enough at 0.85")
+    #expect(Topics.plainLine("- see [the doc](https://x.io/a_b) and *this* and _that_") == "see the doc and this and that")
+    #expect(Topics.plainLine("> quoted\nsecond") == "quoted")
+    #expect(Topics.plainLine("snake_case_name stays") == "snake_case_name stays")
+}
+
 @Test func theSuggestedTitleIsTheFirstLineTrimmedToEighty() {
     #expect(Topics.suggestedTitle(for: root()) == "Pick a margin")
     let long = entry("l", at: 1) { $0.text = String(repeating: "x", count: 120) }
