@@ -79,6 +79,7 @@ pub fn stop(hub: &Hub, group: &str) {
         .filter(|c| c.lane.chat == group)
         .map(|c| c.id)
         .collect();
+    crate::cards::resume::stopped_chat(hub, group);
     if let Err(error) = hub.store.stop_conversations(group) {
         tracing::warn!(group, error = format!("{error:#}"), "couldn't stop the room's conversations");
     }

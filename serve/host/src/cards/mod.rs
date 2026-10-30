@@ -706,6 +706,7 @@ pub fn start(hub: &Arc<Hub>) {
     for card in hub.store.cards_awaiting_resume(now_ms()) {
         follow_up(hub, &card);
     }
+    resume::run_taker(hub);
     let weak = Arc::downgrade(hub);
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SWEEP_EVERY);

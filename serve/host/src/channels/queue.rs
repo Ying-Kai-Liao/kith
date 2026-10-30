@@ -313,6 +313,15 @@ impl Core {
 
     /// Empties the inbox and ends the running turn, or the one about to start.
     pub(super) async fn stop(&self, ad: &Arc<dyn Adapter>, wk: &str, m: Option<&Incoming>) -> anyhow::Result<()> {
+        // Stop wins over a yes already given (R8): a card's wake still in the inbox never runs, and what the thread is
+        // owed in the kernel's wake queue is withdrawn.
+        let notes = self.with(|i| i.st.wakes.remove(wk).unwrap_or_default());
+        for note in &notes {
+            self.wake_not_run(note, false);
+        }
+        if let Some(hub) = crate::runauth::hub() {
+            crate::cards::resume::stopped_thread(&hub, wk);
+        }
         let active = self.with(|i| {
             i.st.inbox.insert(wk.to_owned(), Vec::new());
             i.save();

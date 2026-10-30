@@ -651,6 +651,31 @@ impl Store {
         Ok(self.db.locked().execute(sql, params![now, id])? == 1)
     }
 
+    /// The approved cards whose wake no started turn carries yet, owed or already in the kernel's wake queue: what a
+    /// Stop has to end (R8).
+    pub fn cards_unapplied(&self) -> Vec<Card> {
+        let c = self.db.locked();
+        super::logged(
+            "unapplied cards",
+            list(
+                &c,
+                "WHERE answered_parked = 1 AND granted_at IS NOT NULL AND applied_at IS NULL
+                    AND (state = 'approved' OR (state = 'used' AND used_by_ask = 1)) ORDER BY answered_at",
+                params![],
+            ),
+        )
+        .unwrap_or_default()
+    }
+
+    /// A Stop ends an approved card whose turn had not started, claimed or not: it is withdrawn, not merely released,
+    /// so a restart has nothing to offer and another yes in the session does not bring this one back.
+    pub fn card_resume_close(&self, id: &str) -> Result<bool> {
+        Ok(self.db.locked().execute(
+            "UPDATE cards SET state = 'withdrawn' WHERE id = ?1 AND applied_at IS NULL AND state IN ('approved','used')",
+            [id],
+        )? == 1)
+    }
+
     /// An owed resume that can't happen (the person lost the agent, the session is gone): the card ends.
     pub fn card_resume_drop(&self, id: &str) -> Result<bool> {
         Ok(self.db.locked().execute(

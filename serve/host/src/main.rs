@@ -34,6 +34,7 @@ mod update;
 mod usage;
 mod voice;
 mod voice_local;
+mod wake;
 mod watchdog;
 
 use agent::backends;

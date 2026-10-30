@@ -319,17 +319,18 @@ async fn a_key_is_written_to_stdin_only_and_then_the_card_is_saved_and_the_agent
     );
     // The resume tells the session what was saved, never the value.
     for _ in 0..200 {
-        if !tests_seen::spawns_for(SESSION).is_empty() {
+        if !tests_seen::of(&format!("run:o:{SESSION}")).is_empty() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    let spawns = tests_seen::spawns_for(SESSION);
+    // The owner's plain session wakes through the kernel's queue: the host's word is the request's text.
+    let spawns = tests_seen::of(&format!("run:o:{SESSION}"));
     assert_eq!(spawns.len(), 1, "one resume");
-    let note = spawns[0].args.last().unwrap();
+    let note = &spawns[0].note;
     assert_eq!(
         note,
-        "[Kith] the owner saved GITHUB_TOKEN (github/work) for you. Use it through kith-auth exec; never print it."
+        "the owner saved GITHUB_TOKEN (github/work) for you. Use it through kith-auth exec; never print it."
     );
     assert!(!format!("{:?}", spawns[0]).contains(&m));
 }
@@ -524,14 +525,14 @@ async fn choosing_an_account_grants_it_saves_the_card_and_resumes_the_agent() {
         (Some("saved"), Some("github/work"))
     );
     for _ in 0..200 {
-        if !tests_seen::spawns_for(session).is_empty() {
+        if !tests_seen::of(&format!("run:o:{session}")).is_empty() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    let spawns = tests_seen::spawns_for(session);
+    let spawns = tests_seen::of(&format!("run:o:{session}"));
     assert_eq!(spawns.len(), 1);
-    assert!(spawns[0].args.last().unwrap().contains("saved GITHUB_TOKEN (github/work)"), "{:?}", spawns[0].args);
+    assert!(spawns[0].note.contains("saved GITHUB_TOKEN (github/work)"), "{:?}", spawns[0]);
     // A second device answering finds it closed.
     assert_eq!(respond(&f.r.hub, &id, Some("profile:github/home")).await.unwrap(), json!({"closed": true}));
     assert_eq!(f.log("calls.log").lines().count(), 1);
@@ -709,7 +710,7 @@ async fn the_key_is_in_the_keychain_call_alone_and_nowhere_the_host_kept_or_sent
     assert!(!format!("{e:#}").contains(&m));
     f.flag("fail", false);
     for _ in 0..200 {
-        if !tests_seen::spawns_for(session).is_empty() {
+        if !tests_seen::of(session).is_empty() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
