@@ -119,6 +119,7 @@ extension AccountStore {
         for b in bots { store.bots[b.id] = b }
         seedChat(store, now: now)
         seedBoard(store, now: now)
+        seedRoom(store, now: now)
         if DemoScreens.name?.hasPrefix("bots-") == true || DemoScreens.name?.hasPrefix("botguest") == true {
             store.botGuests.seedDemo(DemoScreens.demoBots(now: now))
         }

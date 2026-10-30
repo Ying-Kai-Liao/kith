@@ -89,10 +89,30 @@ pub enum Store {
 
 pub type Loaded = (SigningKey, Guest);
 
-/// `$KITH_GUEST_HOME`, else `$XDG_CONFIG_HOME/kith`, else `~/.config/kith`.
-pub fn config_dir(home_override: Option<&Path>, xdg: Option<&str>, home: Option<&str>) -> Option<PathBuf> {
+/// The `.kith` folder beside an install prefix: `<prefix>/bin/kith` -> `<prefix>/.kith`. The installer makes it when it
+/// is given an explicit prefix (a VM whose only lasting disk is under that prefix), so the home is chosen once, at install,
+/// and found the same way in every fresh shell. No such folder means an older install, which keeps `~/.config/kith`.
+pub fn prefix_home(exe: &Path) -> Option<PathBuf> {
+    let bin = exe.parent()?;
+    if bin.file_name()? != "bin" {
+        return None;
+    }
+    let dir = bin.parent()?.join(".kith");
+    dir.is_dir().then_some(dir)
+}
+
+/// `$KITH_GUEST_HOME`, else the `.kith` folder next to the install prefix, else `$XDG_CONFIG_HOME/kith`, else `~/.config/kith`.
+pub fn config_dir(
+    home_override: Option<&Path>,
+    exe: Option<&Path>,
+    xdg: Option<&str>,
+    home: Option<&str>,
+) -> Option<PathBuf> {
     if let Some(h) = home_override.filter(|p| !p.as_os_str().is_empty()) {
         return Some(h.to_path_buf());
+    }
+    if let Some(d) = exe.and_then(prefix_home) {
+        return Some(d);
     }
     if let Some(x) = xdg.filter(|x| !x.is_empty()) {
         return Some(Path::new(x).join("kith"));
@@ -126,6 +146,23 @@ pub fn credentials_line(key: &SigningKey, guest: &Guest) -> String {
     guest.token = None;
     let json = serde_json::to_vec(&Credentials { device: b64(&key.to_bytes()), guest }).unwrap_or_default();
     b64(&json)
+}
+
+/// Writes `credentials_line` to a new file at `path` (mode 0600), for a VM that loses its files: the line never goes to
+/// stdout, stderr or a log. Refuses an existing path (a symlink included) rather than following or replacing it.
+pub fn write_credentials_file(path: &Path, key: &SigningKey, guest: &Guest) -> Result<(), CliError> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    // create_new is O_EXCL, which also refuses a symlink at the path.
+    let mut f =
+        fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).map_err(|e| match e.kind() {
+            std::io::ErrorKind::AlreadyExists => CliError::usage(format!(
+                "{} already exists: pick a path that doesn't, so no existing file is overwritten.",
+                path.display()
+            )),
+            _ => io_err(path, &e),
+        })?;
+    f.write_all(credentials_line(key, guest).as_bytes()).map_err(|e| io_err(path, &e))
 }
 
 impl Store {
@@ -261,10 +298,10 @@ mod tests {
     #[test]
     fn dir_precedence() {
         let p = Path::new("/h");
-        assert_eq!(config_dir(Some(p), Some("/x"), Some("/u")), Some(PathBuf::from("/h")));
-        assert_eq!(config_dir(None, Some("/x"), Some("/u")), Some(PathBuf::from("/x/kith")));
-        assert_eq!(config_dir(None, Some(""), Some("/u")), Some(PathBuf::from("/u/.config/kith")));
-        assert_eq!(config_dir(None, None, None), None);
+        assert_eq!(config_dir(Some(p), None, Some("/x"), Some("/u")), Some(PathBuf::from("/h")));
+        assert_eq!(config_dir(None, None, Some("/x"), Some("/u")), Some(PathBuf::from("/x/kith")));
+        assert_eq!(config_dir(None, None, Some(""), Some("/u")), Some(PathBuf::from("/u/.config/kith")));
+        assert_eq!(config_dir(None, None, None, None), None);
     }
 
     #[cfg(unix)]
@@ -337,5 +374,34 @@ mod tests {
     fn bad_credentials_are_a_usage_error() {
         assert_eq!(Store::open(None, Some("!!!")).unwrap_err().exit, crate::exit::Exit::Usage);
         assert_eq!(Store::open(None, Some(&b64(b"{}"))).unwrap_err().exit, crate::exit::Exit::Usage);
+    }
+
+    #[test]
+    fn the_home_is_the_kith_folder_beside_the_install_prefix_when_it_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        let exe = tmp.path().join("bin").join("kith");
+        // No folder: an older install, which keeps ~/.config/kith.
+        assert_eq!(prefix_home(&exe), None);
+        assert_eq!(config_dir(None, Some(&exe), None, Some("/u")), Some(PathBuf::from("/u/.config/kith")));
+        fs::create_dir_all(tmp.path().join(".kith")).unwrap();
+        assert_eq!(config_dir(None, Some(&exe), Some("/x"), Some("/u")), Some(tmp.path().join(".kith")));
+        // An explicit home still wins; a binary outside a bin/ folder isn't matched.
+        assert_eq!(config_dir(Some(Path::new("/h")), Some(&exe), None, None), Some(PathBuf::from("/h")));
+        assert_eq!(prefix_home(&tmp.path().join("kith")), None);
+    }
+
+    #[test]
+    fn credentials_file_is_new_only_mode_0600_and_reads_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("c");
+        write_credentials_file(&p, &key(), &guest()).unwrap();
+        assert_eq!(std::os::unix::fs::PermissionsExt::mode(&fs::metadata(&p).unwrap().permissions()) & 0o777, 0o600);
+        let line = fs::read_to_string(&p).unwrap();
+        assert!(Store::open(None, Some(&line)).unwrap().is_env());
+        assert!(write_credentials_file(&p, &key(), &guest()).is_err());
+        let l = tmp.path().join("l");
+        std::os::unix::fs::symlink(tmp.path().join("t"), &l).unwrap();
+        assert!(write_credentials_file(&l, &key(), &guest()).is_err());
+        assert!(!tmp.path().join("t").exists());
     }
 }

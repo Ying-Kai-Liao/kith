@@ -194,6 +194,8 @@ extension BotStore {
             Task { [weak self] in await self?.botGuests.refresh() }
         case let .accessRequests(requests):
             accessRequests = requests
+        case let .conversation(conversation):
+            roomConversations.note(conversation)
         case let .undecodable(type):
             // Never skip past data we couldn't read: rewind once and fetch everything again.
             log.error("undecodable \(type) event")
@@ -226,6 +228,7 @@ extension BotStore {
         rev = 0
         hostId = nil
         historyComplete = []
+        roomConversations = RoomConversations()
         windowFloors = [:]
         screen = nil
         incomingCalls = []

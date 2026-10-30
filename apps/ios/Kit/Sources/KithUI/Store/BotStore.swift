@@ -89,6 +89,8 @@ public final class BotStore {
     /// Installed on the computer, for the Plugins screen and bot settings.
     public internal(set) var installedConnectors: [InstalledConnector] = []
     public internal(set) var installedSkills: [InstalledSkill] = []
+    /// The group rooms' conversations the host told this app about (turns, whose turn, how each ended).
+    public internal(set) var roomConversations = RoomConversations()
     /// Bots whose older history has been fully paged in.
     public internal(set) var historyComplete: Set<String> = []
     var composerDrafts: [String: String] = [:]
@@ -146,6 +148,8 @@ public final class BotStore {
     @ObservationIgnored var outgoingStarts: [String: FolderChoice] = [:]
     /// Messages not delivered yet that start a task: a retry must start one too, not continue the current task.
     @ObservationIgnored var outgoingNewTasks: Set<String> = []
+    /// The turns a group message was sent with (by client nonce): a retry gives the room the same.
+    @ObservationIgnored var outgoingBudgets: [String: Int] = [:]
 
     var rev: Int64 = 0
     var hostId: String?
@@ -282,6 +286,11 @@ public final class BotStore {
 
     /// A group's bots that still exist.
     public func members(of group: Bot) -> [Bot] { group.members.compactMap { bots[$0] } }
+
+    /// The outside bots a person brought into the group (the owner's own; they are members by id, with no roster row).
+    public func guestMembers(of group: Bot) -> [BotGuest] {
+        group.members.filter { bots[$0] == nil }.compactMap { botGuests.bot($0) }
+    }
 
     /// Display name of an entry's author in a group chat.
     public func authorName(_ id: String?) -> String { id.flatMap { bots[$0]?.name } ?? "A deleted bot" }

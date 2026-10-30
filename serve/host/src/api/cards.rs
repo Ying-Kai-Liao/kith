@@ -89,6 +89,16 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, mut b: Value) -> Result<C
             }
             crate::cards::secret::provide(hub, &entry_id, account.as_deref(), values).await?
         }
+        // The owner's own `kith keys add`: opens a key card for a named profile. Owner only, like provideSecret.
+        "openKeyCard" => {
+            crate::cards::secret::open_key_card(
+                hub,
+                str_arg(&b, "service")?,
+                str_arg(&b, "profile")?,
+                b["grant"].as_str().unwrap_or("serve"),
+            )
+            .await?
+        }
         "listKeys" => crate::cards::secret::list_keys().await?,
         "revokeKey" => {
             crate::cards::secret::revoke_key(str_arg(&b, "agent")?, str_arg(&b, "service")?, str_arg(&b, "profile")?)

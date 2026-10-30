@@ -64,6 +64,31 @@ enum ThreadFeed {
         }
     }
 
+    // MARK: rooms
+
+    /// Who wrote an entry, for grouping a run of messages under one name: an outside bot's post is its own author,
+    /// not the owner's (the host stores it as a user entry).
+    static func authorKey(_ e: Entry) -> String {
+        if e.isRoomBotPost { return "bot:\(e.data.roomBot?.botId ?? "")" }
+        return e.kind == "user" ? "user" : e.kind == "agent" ? "agent:\(e.data.author ?? "")" : e.kind
+    }
+
+    /// Where each ended run's closing line goes: after the last reply of that run that was not late (a late reply
+    /// comes after the stop line), or after the message that opened it when nobody answered. Runs whose place isn't in
+    /// the loaded chat get none.
+    static func endLines(_ items: [ChatItem], conversations: [RoomConversation]) -> [String: [RoomConversation]] {
+        var out: [String: [RoomConversation]] = [:]
+        for run in conversations where run.endLine != nil {
+            let replied = items.last { item in
+                guard case let .entry(e, _) = item.kind else { return false }
+                return e.data.conversation == run.conversation && !e.data.isLate
+            }
+            let anchor = replied ?? run.opening.flatMap { opening in items.first { $0.holds(entry: opening) } }
+            if let anchor { out[anchor.id, default: []].append(run) }
+        }
+        return out
+    }
+
     // MARK: tool rows
 
     private static let verbs = [
@@ -224,9 +249,9 @@ enum ThreadFeed {
                 }
                 lastDate = e.date
             }
-            let author = e.kind == "user" ? "user" : e.kind == "agent" ? "agent:\(e.data.author ?? "")" : e.kind
+            let author = authorKey(e)
             out.append(.entry(e, groupStart: author != lastAuthor))
-            lastAuthor = (author == "user" || e.kind == "agent") ? author : nil
+            lastAuthor = (e.kind == "user" || e.kind == "agent") ? author : nil
         }
         flush()
         return out

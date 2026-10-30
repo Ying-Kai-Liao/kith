@@ -46,10 +46,16 @@ extension BotGuestState: Codable {
 public struct BotGuestLimits: Codable, Hashable, Sendable {
     public var ratePerHour: Int
     public var concurrent: Int
+    /// How long a room waits for the bot's post on its turn (seconds); nil from an older host.
+    public var turnTimeoutS: Int?
+    /// The profile the host wakes it through on its turn; nil or empty: no wake, so its turn is a pass.
+    public var wakeProfile: String?
 
-    public init(ratePerHour: Int, concurrent: Int) {
+    public init(ratePerHour: Int, concurrent: Int, turnTimeoutS: Int? = nil, wakeProfile: String? = nil) {
         self.ratePerHour = ratePerHour
         self.concurrent = concurrent
+        self.turnTimeoutS = turnTimeoutS
+        self.wakeProfile = wakeProfile
     }
 }
 

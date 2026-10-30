@@ -142,6 +142,15 @@ def main(argv):
         out(f'the body is over {MAX_BODY // 1024} KiB', 2, as_json)
     env = dict(os.environ)
     if profile:
+        # kith-auth honours KITH_AUTH_PROFILE only for a list grant; a string grant would quietly send with its own key.
+        want = profile if '/' in profile else f'{svc}/{profile}'
+        g = subprocess.run([sys.executable, str(AUTH), 'granted'] + (['--for', agent] if agent else []) + [svc],
+                           env=env, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        have = g.stdout.split()
+        if have and want not in have:   # no grant at all falls through to kith-auth's own message
+            out(f"not sent: {want} is not among the profiles granted for {svc} ({', '.join(have)}); "
+                f"grant it with: kith-auth grant {agent or '<agent>'} {svc} {want}", 1, as_json, status=0, attempts=0)
+        profile = want
         env['KITH_AUTH_PROFILE'] = profile   # kith-auth's grant lookup honours it for several granted profiles
     with tempfile.TemporaryDirectory() as d:
         bf = Path(d) / 'body.json'
