@@ -4,7 +4,7 @@ import { isGroup, isWorking, needsInput, type Bot, type Entry } from '@shared/mo
 import { BotAvatar } from '../../components/Avatar'
 import { BotAvatar as KithBot } from '../../components/kith'
 import { avatarImage } from '@shared/crew'
-import { Hairline, IconButton } from '../../components/Controls'
+import { Hairline, IconButton, Spinner } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { AnchoredMenu, useContextMenu, type MenuItem, type ReactionPick } from '../../components/Overlay'
 import { HStack, VStack } from '../../components/Stack'
@@ -31,7 +31,7 @@ import { FoldedPill } from './FoldedCard'
 import { foldOf } from './fold-card'
 import { callLineSuffix } from './call-line'
 import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
-import { toolRowOf } from '@shared/thread-feed'
+import { toolRowOf, VISIBLE_STEPS } from '@shared/thread-feed'
 import { botGuestSender } from '@shared/bot-guest-chat'
 import { quoteOf, quotesOf } from './reply-quote'
 import { richCardOf, type RichCard } from '@shared/rich-card'
@@ -498,5 +498,35 @@ export function EarlierSteps({ count, open }: { count: number; open: () => void 
     <button className="chat-earlier" onClick={open}>
       {count === 1 ? '1 earlier step' : `${count} earlier steps`}
     </button>
+  )
+}
+
+/**
+ * A run of tool calls as one quiet row: "3 steps", "Working · 3 steps", "3 steps · 1 failed". It opens the steps
+ * inline; the newest `VISIBLE_STEPS` show and "N earlier steps" above them opens the full trace.
+ */
+export function StepsRow({ entries, openTrace }: { entries: Entry[]; openTrace: () => void }) {
+  const [open, setOpen] = useState(false)
+  const states = entries.map((e) => toolRowOf(e).state)
+  const failed = states.filter((s) => s === 'error').length
+  const working = states.includes('running')
+  const n = entries.length
+  const count = n === 1 ? '1 step' : `${n} steps`
+  const earlier = n - VISIBLE_STEPS
+  return (
+    <div className="chat-steps">
+      <button className="chat-earlier chat-steps-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {working ? <Spinner size={12} /> : null}
+        <span>{working ? `Working · ${count}` : count}</span>
+        {failed ? <span className="chat-steps-failed"> · {failed} failed</span> : null}
+        <Icon name="chevron.right" size={9} weight="semibold" className={open ? 'chat-steps-chevron open' : 'chat-steps-chevron'} />
+      </button>
+      {open ? (
+        <div className="chat-steps-list">
+          {earlier > 0 ? <EarlierSteps count={earlier} open={openTrace} /> : null}
+          {entries.slice(-VISIBLE_STEPS).map((e) => <ToolRowItem key={e.id} entry={e} />)}
+        </div>
+      ) : null}
+    </div>
   )
 }

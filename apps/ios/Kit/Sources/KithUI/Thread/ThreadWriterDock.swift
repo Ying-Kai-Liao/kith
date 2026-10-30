@@ -49,6 +49,25 @@ struct ThreadWriterDock: View {
     }
 }
 
+/// What fills the space under a chat.
+enum ChatBottom: Equatable {
+    case updateNeeded
+    /// The banner only: a bot guest's chat is read-only even while a terminal holds its thread.
+    case writerBanner(rootId: String)
+    /// The banner, and under it a composer whose every message starts a new task (the held thread stays single-writer).
+    case writerBannerAndNewTask(rootId: String)
+    case readOnly
+    case composer
+}
+
+extension ThreadFeed {
+    static func chatBottom(held: Entry?, mismatch: Bool, guest: Bool) -> ChatBottom {
+        if mismatch { return .updateNeeded }
+        if let held { return guest ? .writerBanner(rootId: held.id) : .writerBannerAndNewTask(rootId: held.id) }
+        return guest ? .readOnly : .composer
+    }
+}
+
 extension ThreadFeed {
     /// The command that continues a thread in a terminal; empty when the root or the bot is gone.
     static func resumeCommand(root: Entry?, bot: Bot?) -> String {

@@ -17,7 +17,7 @@ import { useStore } from '../../store/context'
 import { UpdateNeededCard } from '../UpdateNeededCard'
 import { buildChat, rowIn, useArrivals, type ChatItem } from './chat-items'
 import { BotConversationView, BotMessageRow } from './BotConversation'
-import { ChatRow, EarlierSteps, TimeSeparator, ToolRowItem, WorkingIndicator } from './ChatRows'
+import { ChatRow, StepsRow, TimeSeparator, WorkingIndicator } from './ChatRows'
 import { Composer } from './Composer'
 import { ChatSidePanel } from './ChatSidePanel'
 import { DetailsPanel, type DetailsTab } from './DetailsPanel'
@@ -498,8 +498,7 @@ function Row({ item, chat, openTrace, openRoutine, openBotChat }: { item: ChatIt
     return <TimeSeparator date={item.date} />
   }
   if (item.kind === 'exchanges') return <BotMessageRow exchanges={item.exchanges} open={openBotChat} />
-  if (item.kind === 'tool') return <ToolRowItem entry={item.entry} />
-  if (item.kind === 'earlier') return <EarlierSteps count={item.count} open={openTrace} />
+  if (item.kind === 'steps') return <StepsRow entries={item.entries} openTrace={openTrace} />
   const e = item.entry
   if (e.kind === 'notice' && e.data.routineId) {
     return (
