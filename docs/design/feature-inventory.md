@@ -172,6 +172,7 @@ Paths are relative to `apps/ios/`. `KUI` = `Kit/Sources/KithUI`, `KK` = `Kit/Sou
 | I-J5 | Usage limits sheet (computer picker, per provider percentages, collapse; empty "No usage yet") | `Views/RootView.swift` (`UsageSheet`), `Views/UsageView.swift` | Usage limits (`kith://usage`) | None in DESIGN.md | OPEN: needs a home (header button lives on the State tab today; proposal: Profile menu > Usage) |
 | I-J6 | Push notifications with actions: Open conversation, Review request; categories done, needsInput, failed; service extension for rich content | `App/KithApp.swift`, `App/Push.swift`, `NotificationService/NotificationService.swift` | Alerts | none | keep |
 | I-J7 | Deep links: `kith://pair`, `bot`, `plugins`, `usage`, `computers`, `screen`; OAuth return | `App/KithApp.swift` (`open`) | Entry points | none; targets must land on new screens | keep (re-point `usage`, `plugins`, `computers`) |
+| I-J8 | Share extension: "Kith" in other apps' share sheets takes a link or text, a note and a chat; the app sends it when it next opens | `ShareExtension/ShareViewController.swift`, `ShareComposer.swift`, `KK/Client/ShareInbox.swift`, `App/KithApp.swift` (`deliverShares`) | Send a page from Safari to an agent | none; the sheet stays system-styled | keep |
 
 ### I-K. Shared controls
 
