@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# kith-keys-check — `kith keys add` against a stub host: the call it makes (service, profile, grant, nothing else), its
+# printed line, --json, the host's refusals, host down, a bad token, and that no value is ever asked for or sent. Throwaway
+# dirs and a stub on a free port (KITH_SERVE_DIR / KITH_SERVE_PORT), never ~/.kith or the real host.
+#
+#   kernel/tests/kith-keys-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-keys.XXXXXX"); T=$(cd "$T" && pwd -P)
+SRV=
+trap '[[ -n $SRV ]] && kill $SRV 2>/dev/null; rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_SERVE_DIR=$T/serve
+unset KITH_STATE HQ_STATE KITH_AGENTS
+mkdir -p "$HOME" "$KITH_SERVE_DIR"
+echo "tok-$$" > "$KITH_SERVE_DIR/token"
+
+# The stub host: POST /api/openKeyCard is recorded to rec.jsonl; refuse.txt makes it answer 400 with its text; rotate
+# makes the answer say the profile exists.
+cat > "$T/stub.py" <<'PY'
+import http.server, json, os, sys
+T = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.headers.get('Authorization') != 'Bearer ' + sys.argv[2]:
+            self.send_response(401); self.send_header('Content-Length', '0'); self.end_headers(); return
+        n = int(self.headers.get('Content-Length', 0)); body = json.loads(self.rfile.read(n) or b'{}')
+        m = self.path.rsplit('/', 1)[1]
+        with open(T + '/rec.jsonl', 'a') as f:
+            f.write(json.dumps({'m': m, 'body': body}) + '\n')
+        st, out = 200, {}
+        if os.path.exists(T + '/refuse.txt'):
+            st, out = 400, {'error': open(T + '/refuse.txt').read().strip()}
+        elif m == 'openKeyCard':
+            acct = body['profile'].split('/')[-1]
+            out = {'opened': True, 'profile': body['service'] + '/' + acct, 'service': body['service'], 'grant': body['grant'],
+                   'vars': ['GROK_WEBHOOK_URL', 'GROK_WEBHOOK_KEY'], 'replaces': os.path.exists(T + '/rotate'),
+                   'chat': 'House', 'chatId': 'c1'}
+        b = json.dumps(out).encode()
+        self.send_response(st); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+open(T + '/port', 'w').write(str(s.server_port))
+s.serve_forever()
+PY
+python3 "$T/stub.py" "$T" "tok-$$" & SRV=$!
+for _ in $(seq 50); do [[ -s $T/port ]] && break; sleep 0.1; done
+export KITH_SERVE_PORT=$(cat "$T/port")
+K() { python3 "$KERNEL/bin/kith-keys" "$@"; }
+rec() { : > "$T/rec.jsonl"; }
+lastbody() { tail -n1 "$T/rec.jsonl" | python3 -c "import json,sys; d=json.load(sys.stdin)['body']; print($1)"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+
+rec; OUT=$(K add grok --profile work 2>&1 </dev/null); RC=$?
+check "add: exit 0, says where the card is and that nothing is typed here" "[[ \$RC == 0 && \$OUT == *'Open the Kith app'* && \$OUT == *'House'* && \$OUT == *'add grok/work for serve'* && \$OUT == *'nothing is entered in this terminal'* ]]"
+check "add: the host gets service, profile and the default grant serve, and no value" "[[ \$(lastbody 'sorted(d.items())') == \"[('grant', 'serve'), ('profile', 'work'), ('service', 'grok')]\" ]]"
+rec; OUT=$(K add grok --profile grok/kai --for house 2>&1 </dev/null); RC=$?
+check "service/account and --for are passed through"     "[[ \$RC == 0 && \$(lastbody 'd[\"profile\"], d[\"grant\"]') == \"grok/kai house\" ]]"
+touch "$T/rotate"
+OUT=$(K add grok --profile work 2>&1 </dev/null)
+check "an existing profile says replace"                 "[[ \$OUT == *'to replace grok/work'* ]]"
+rm "$T/rotate"
+OUT=$(K add grok --profile work --json 2>&1 </dev/null)
+check "--json prints the host's answer"                  "python3 -c 'import json,sys; assert json.loads(sys.argv[1])[\"opened\"]' \"\$OUT\""
+
+echo "That service doesn't take a key here." > "$T/refuse.txt"
+OUT=$(K add nope --profile work 2>&1 </dev/null); RC=$?
+check "a host refusal prints its fixed text, exit 1"      "[[ \$RC == 1 && \$OUT == *\"doesn't take a key\"* && \$OUT != *Traceback* ]]"
+rm "$T/refuse.txt"
+
+rec; OUT=$(K add grok 2>&1 </dev/null); RC=$?
+check "no --profile: usage, exit 2, nothing sent"        "[[ \$RC == 2 && ! -s $T/rec.jsonl && \$OUT != *Traceback* ]]"
+OUT=$(K add 2>&1 </dev/null); RC=$?
+check "no service: exit 2"                               "[[ \$RC == 2 ]]"
+OUT=$(K add grok --profile work --value s3cret 2>&1 </dev/null); RC=$?
+check "there is no way to pass a value: exit 2, nothing sent" "[[ \$RC == 2 && ! -s $T/rec.jsonl ]]"
+OUT=$(K 2>&1); RC=$?
+check "no arguments: usage, exit 2"                      "[[ \$RC == 2 && \$OUT == *'kith keys add'* ]]"
+OUT=$(K --help 2>&1); RC=$?
+check "--help: usage, exit 0"                            "[[ \$RC == 0 && \$OUT == *'--profile'* ]]"
+
+echo wrong > "$KITH_SERVE_DIR/token"
+OUT=$(K add grok --profile work 2>&1 </dev/null); RC=$?
+check "a refused token: exit 1, no traceback"            "[[ \$RC == 1 && \$OUT != *Traceback* && \$OUT == *'kith serve'* ]]"
+echo "tok-$$" > "$KITH_SERVE_DIR/token"
+kill $SRV; wait $SRV 2>/dev/null; SRV=
+OUT=$(K add grok --profile work 2>&1 </dev/null); RC=$?
+check "host down: exit 1, no traceback"                  "[[ \$RC == 1 && \$OUT == *'not reachable'* && \$OUT != *Traceback* ]]"
+check "kith routes keys here"                            "grep -q 'keys) .*kith-keys' '$KERNEL/bin/kith'"
+
+exit $fail
