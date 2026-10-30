@@ -6,7 +6,7 @@
   kith-wake withdraw SESSION [--id ID]   Stop: drop what SESSION is still owed (not what a running turn already holds)
   kith-wake take --holder PID [--session SESSION] [--sid CLAUDE_SID]
                                   the host starts a host-door turn: prints it as JSON (exit 1 when nothing is owed)
-  kith-wake done RUN              the turn RUN ended: what it carried is answered
+  kith-wake done RUN [--how HOW]  the turn RUN ended: what it carried is answered (--how withdrawn: dropped, not delivered)
   kith-wake back RUN [--held]     the turn RUN did not start: what it carried is owed again (--held: a writer had it)
   kith-wake drain                 deliver what run-door sessions are owed and recover turns whose deliverer died (the tick)
   kith-wake wait --on WHAT [--timeout 6h] [--why WHY] [--session S] [--agent A] [NOTE]
@@ -24,7 +24,12 @@ Doors: `run` — the kernel resumes the owner's ended session itself, `kith AGEN
 session's writer claim (#324's live/terminal/<sid>.claim, bin/kith-sessions) is free; a terminal holding it keeps the wake queued until it
 lets go, so a reply to a terminal's session waits for it instead of being typed in. `host` — the host runs the turn
 (a bot chat, a channel thread, a person's session: only the host can give a person's run its token); it takes the item
-here and says done or back. Either way the queue is the record and the only one.
+here (`take`), runs it through its bot or channel door and says done when the turn has STARTED (M5: the host proves a
+start with the card's applied_at, so a restart doesn't run it twice), or back when it could not (a writer held the
+session, the start failed). That differs from the run door, whose turn commits when it ENDS (W2, below). Either way the
+queue is the record and the only one. A request from the host door that lands on a run-door item makes it a host-door
+one, also while a run-door turn is running (the host can do whatever the kernel's door does, and a `kith ask --reply`
+card needs it).
 
 The model is designs/2026-10-25-all-together/model/Lifecycle.tla. W2, an event wakes its session exactly once, also
 across a restart: a request leaves the queue only when its turn ends (TurnCommit), never when the turn starts
@@ -40,7 +45,7 @@ removes it, and a headless wake doesn't claim it (kith-lifecycle only counts it 
 A waiter is code, not a model: the tick checks it and, when what it waits for happened or its timeout passed, it becomes
 one wake request (WaiterResult) and is gone. A CI wake's id names the PR's head commit, so two waiters on one PR wake the
 session once. Waiters come from the owner's terminal and one-shot runs for now: a host chat's or a guest's session wakes
-through the host, which doesn't take wakes yet, and a guest's `ci:` would reach GitHub as the owner (rule 10).
+through the host, which takes host-door items but doesn't set waiters yet, and a guest's `ci:` would reach GitHub as the owner (rule 10).
 
 Files: $KITH_STATE/sessions/queue/<hash>.json one item per session, queue/answered.json the ids answered or withdrawn
 (kept KEEP_DAYS, with the turn that carried each), sessions/waits/<id>.json one per waiter, sessions/log.jsonl every
@@ -57,6 +62,7 @@ from kith_paths import paths  # noqa: E402
 KEEP_DAYS = 7
 MAX_TRIES = 5                     # a run-door turn that fails this often without reaching the session ends as failed
 FIRST_RETRY, MAX_RETRY = 5, 600   # seconds, doubling
+HELD_PAUSE = 10                   # seconds a held session waits before it is offered again (not a failed try)
 WAIT_TIMEOUT = '6h'               # a waiter always has one (v2 design §7)
 CI_POLL = 50                      # seconds between two looks at a PR's checks (the tick is a minute)
 RUN_VIAS = ('terminal', 'ask', 'schedule', 'wake')   # runs whose ended session the run door resumes
@@ -238,6 +244,8 @@ def enqueue(session, rid, agent, text, person=None, room=None, door='run', why='
         if it and it.get('agent') != agent:
             raise SystemExit(f'kith-wake: {session} belongs to {it.get("agent")}, not {agent}')
         merged = bool(it)
+        if it and it['door'] == 'run' and door == 'host':
+            it['door'] = 'host'
         if not it:
             it = {'v': 1, 'session': session, 'agent': agent, 'person': person or None, 'room': room or None,
                   'door': door, 'requests': [], 'turn': None, 'tries': 0, 'next': 0}
@@ -289,7 +297,8 @@ def start_turn(path, it, holder, sid=None):
     save(path, it)
     log('turn', session=it['session'], run=run, ids=[r['id'] for r in owed])
     return {'run': run, 'session': it['session'], 'agent': it['agent'], 'person': it['person'], 'room': it['room'],
-            'door': it['door'], 'ids': [r['id'] for r in owed], 'note': note_for(run, owed)}
+            'door': it['door'], 'ids': [r['id'] for r in owed], 'note': note_for(run, owed),
+            'requests': [{'id': r['id'], 'why': r['why'], 'text': r['text']} for r in owed]}
 
 
 def find_run(run):
@@ -339,6 +348,8 @@ def release(path, it, held, why):
             save(path, it)
             return True
         it['next'] = now() + min(MAX_RETRY, FIRST_RETRY * 2 ** (it['tries'] - 1))
+    else:
+        it['next'] = now() + HELD_PAUSE   # the one who takes it asks again soon, not in a tight loop
     for r in carried:
         r['run'] = None
     save(path, it)
@@ -509,7 +520,7 @@ def wait(on, session, agent, why='', note='', timeout=WAIT_TIMEOUT):
         raise SystemExit('kith-wake: a guest\'s session can\'t set waiters yet: the check would run as the owner, outside their sandbox')
     via = os.environ.get('KITH_VIA') or 'terminal'
     if via not in RUN_VIAS:
-        raise SystemExit(f'kith-wake: a {via} session wakes through the host, which doesn\'t take wakes yet')
+        raise SystemExit(f'kith-wake: a {via} session wakes through the host, which doesn\'t set waiters yet')
     if not session or not agent:
         raise SystemExit('kith-wake: no session to wake: run it in a kith agent\'s session, or pass --session and --agent')
     w = parse_on(on)
@@ -643,6 +654,7 @@ def main(argv):
     t.add_argument('--sid')
     d = sub.add_parser('done')
     d.add_argument('run')
+    d.add_argument('--how', default='answered')
     b = sub.add_parser('back')
     b.add_argument('run')
     b.add_argument('--held', action='store_true')
@@ -672,7 +684,7 @@ def main(argv):
             return 1
         print(json.dumps(turn, ensure_ascii=False))
     elif a.cmd == 'done':
-        return 0 if commit(a.run) else 1
+        return 0 if commit(a.run, a.how) else 1
     elif a.cmd == 'back':
         return 0 if give_back(a.run, a.held) else 1
     elif a.cmd == 'drain':

@@ -148,7 +148,10 @@ impl Hub {
             Cmd::CancelGroup { chat } => {
                 self.each_actor(bot_id, |home| home.chat == chat, || Cmd::CancelGroup { chat: chat.clone() })
             }
-            Cmd::Stop => self.each_actor(bot_id, |_| true, || Cmd::Stop),
+            Cmd::Stop => {
+                crate::cards::resume::stopped_bot(self, bot_id);
+                self.each_actor(bot_id, |_| true, || Cmd::Stop)
+            }
             Cmd::RefreshTools => self.each_actor(bot_id, |_| true, || Cmd::RefreshTools),
             Cmd::Shutdown => self.each_actor(bot_id, |_| true, || Cmd::Shutdown),
             Cmd::Reconfigure(cfg) => self.each_actor(bot_id, |_| true, || Cmd::Reconfigure(cfg.clone())),
@@ -202,6 +205,8 @@ impl Hub {
 
     /// Stop in one place: the actor there, and an actor whose turn talks there (a routine run in its thread).
     pub fn stop_place(&self, bot_id: &str, lane: &Lane) -> Result<()> {
+        // Stop wins over a yes already given: the place's owed card wakes are withdrawn first (R8).
+        crate::cards::resume::stopped_lane(self, lane);
         let running: Vec<String> = self
             .runtime
             .locked()

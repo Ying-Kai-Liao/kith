@@ -257,11 +257,16 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   the grants only when it started with them; a failed load leaves them for the next activation (M4). Each loaded
   app-chat session keeps a profile digest, compared at every turn (M6); a yes, a removed grant or a demotion reloads
   that session alone before its next turn, never the agent process. A narrowing never waits: the next turn runs on
-  the new profile (M7). A card's wake is taken off the owed list when a door queues it, and is `applied` only when
-  the turn that carries it has started: the bot's prompt was sent, the channel's process spawned, the `-p` run got
-  past its claim wait (M5). A turn that doesn't start gives the wake back; a host start gives back every wake that
-  wasn't applied and offers it again (the channel inbox drops its saved copy, so it runs once). After a Stop a
-  given-back wake waits for the next offer instead.
+  the new profile (M7). A card's wake is one request in the kernel's wake queue (`kith-wake`, id `card:<card id>`): the host
+  enqueues it and keeps no queue or retry list of its own. The owner's plain session wakes through the queue's run door;
+  a bot chat, a channel thread, a person's session and a `kith ask --reply` are host-door items that the host takes
+  (`kith-wake take`), runs through its bot, channel or `-p` door, and tells the queue `done` once the turn that carries
+  them has started (M5: the bot's prompt was sent, the channel's process spawned, the `-p` run got past its claim wait;
+  the card's `applied_at` is the proof a restart reads) or `back` when it didn't (a held writer waits ten seconds and is
+  not a failed try). A host start gives back every wake that wasn't applied and offers it again under the same id, which
+  the queue drops if it still holds it. Stop wins: every Stop path withdraws what its session is owed from the queue
+  (ids kept) and ends the approved cards whose turn had not started, so neither a restart nor another yes brings the
+  stopped turn back.
 - **5. Somewhere to ask.** Host down: when `kith-permit issue` finds nothing on the host's port, it restarts the
   host's launchd job as the Mac app does (loaded from its plist when launchd doesn't know it, then kickstarted), waits
   for the port and asks for the ask token once more; still none, the run's asks are refused with "the Kith host isn't

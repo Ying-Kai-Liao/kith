@@ -590,7 +590,9 @@ impl Store {
         let c = self.db.locked();
         move_where(
             &c,
-            "deadline < ?1 AND state IN ('pending','live','parked','approved')",
+            // An approved card whose wake is in the queue stays until a turn carried it: expiring it would lose the yes.
+            "deadline < ?1 AND state IN ('pending','live','parked','approved')
+                AND NOT (state = 'approved' AND resumed_at IS NOT NULL AND applied_at IS NULL)",
             params![now],
             CardState::Expired,
         )
@@ -599,14 +601,27 @@ impl Store {
     /// After a host restart: live waits are gone, so live cards park; an approved card whose grant was not recorded
     /// gets it (C4); a resume a door took whose turn never started (the queue it waited in is gone) is owed again
     /// (M5). Returns the cards that parked.
+    #[cfg(test)]
     pub fn cards_restart(&self, now: i64) -> Result<Vec<Card>> {
+        self.cards_restart_keeping(now, &[])
+    }
+
+    /// [`Self::cards_restart`], except the claims of the cards in `queued` stay: the kernel's queue still holds their
+    /// request, so releasing the claim would let the sweep expire a card past its deadline whose wake is yet to come.
+    pub fn cards_restart_keeping(&self, now: i64, queued: &[String]) -> Result<Vec<Card>> {
         let c = self.db.locked();
         let parked = move_where(&c, "state IN ('pending','live')", params![], CardState::Parked)?;
         c.execute(
             "UPDATE cards SET granted_at = ?1 WHERE state = 'approved' AND allowed = 1 AND granted_at IS NULL",
             [now],
         )?;
-        c.execute("UPDATE cards SET resumed_at = NULL WHERE resumed_at IS NOT NULL AND applied_at IS NULL", [])?;
+        let claimed: Vec<String> = {
+            let mut q = c.prepare("SELECT id FROM cards WHERE resumed_at IS NOT NULL AND applied_at IS NULL")?;
+            q.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        for id in claimed.iter().filter(|id| !queued.contains(id)) {
+            c.execute("UPDATE cards SET resumed_at = NULL WHERE id = ?1", [id])?;
+        }
         Ok(parked)
     }
 
@@ -649,6 +664,41 @@ impl Store {
     pub fn card_resume_applied(&self, id: &str, now: i64) -> Result<bool> {
         let sql = "UPDATE cards SET applied_at = ?1 WHERE id = ?2 AND resumed_at IS NOT NULL AND applied_at IS NULL";
         Ok(self.db.locked().execute(sql, params![now, id])? == 1)
+    }
+
+    /// The approved cards whose wake no started turn carries yet, owed or already in the kernel's wake queue: what a
+    /// Stop has to end (R8).
+    pub fn cards_unapplied(&self) -> Vec<Card> {
+        let c = self.db.locked();
+        super::logged(
+            "unapplied cards",
+            list(
+                &c,
+                "WHERE answered_parked = 1 AND granted_at IS NOT NULL AND applied_at IS NULL
+                    AND (state = 'approved' OR (state = 'used' AND used_by_ask = 1)) ORDER BY answered_at",
+                params![],
+            ),
+        )
+        .unwrap_or_default()
+    }
+
+    /// A Stop on a saved key's card: its record stays, but no turn is owed for it any more (claimed and applied), so
+    /// neither a restart nor a late request brings the stopped turn back.
+    pub fn card_resume_stop(&self, id: &str, now: i64) -> Result<bool> {
+        Ok(self.db.locked().execute(
+            "UPDATE cards SET resumed_at = COALESCE(resumed_at, ?1), applied_at = ?1
+             WHERE id = ?2 AND applied_at IS NULL AND state IN ('approved','used')",
+            params![now, id],
+        )? == 1)
+    }
+
+    /// A Stop ends an approved card whose turn had not started, claimed or not: it is withdrawn, not merely released,
+    /// so a restart has nothing to offer and another yes in the session does not bring this one back.
+    pub fn card_resume_close(&self, id: &str) -> Result<bool> {
+        Ok(self.db.locked().execute(
+            "UPDATE cards SET state = 'withdrawn' WHERE id = ?1 AND applied_at IS NULL AND state IN ('approved','used')",
+            [id],
+        )? == 1)
     }
 
     /// An owed resume that can't happen (the person lost the agent, the session is gone): the card ends.
