@@ -449,12 +449,13 @@ struct BotListView: View {
         Button("Delete", systemImage: "trash", role: .destructive) { confirmDelete = item }
     }
 
+    /// A card lane's or a guest's chat opens its waiting card (see `AppStore.openBot`).
     /// `focus` is a message the search found: the chat lands on it, and the query stays so Back returns to the results.
     private func open(_ ref: BotReference, focus: String? = nil) {
         dictation.stop()
         accounts.store(for: ref.computerId)?.focusEntry = focus.map { .init(chat: ref.botId, entry: $0) }
         if focus == nil { query = "" }
-        accounts.selection = ref
+        app.openBot(ref)
     }
 
     /// The system asks for a row's item as it lifts; the row shows as lifted until it lets go.
@@ -568,7 +569,7 @@ struct BotListView: View {
         }
     }
 
-    /// Guests' requests waiting for this account's answer, on the shown computers it owns, ahead of the rooms.
+    /// Cards outside this account's chats that wait for its answer (guests' and card lanes'), ahead of the rooms.
     @ViewBuilder private var needsYourOK: some View {
         let waiting = shownStores.flatMap { store in
             accounts.guestPrompts(for: store.computer.id).map { (store, $0) }
@@ -603,8 +604,12 @@ struct BotListView: View {
                     if accounts.computers.count > 1 {
                         Text(store.hostName).kithText(.secondary).foregroundStyle(Palette.muted)
                     }
-                    DecisionCard(DecisionCardModel(guest: prompt), answering: store.answering[prompt.entry.id]) {
-                        store.respond(prompt.entry, option: $0)
+                    if prompt.entry.data.isSecretCard {
+                        SecretPromptCard(prompt: prompt, store: store)
+                    } else {
+                        DecisionCard(DecisionCardModel(guest: prompt), answering: store.answering[prompt.entry.id]) {
+                            store.respond(prompt.entry, option: $0)
+                        }
                     }
                 }
                 .padding(.horizontal, KithSpacing.gutter)

@@ -287,6 +287,12 @@ impl Core {
                 b.waiting = false;
                 let q = i.st.inbox.get_mut(wk).filter(|q| !q.is_empty())?; // Stop emptied it while it waited
                 let batch = q.remove(0);
+                if let Some(notes) = i.st.wakes.get_mut(wk) {
+                    notes.retain(|n| !batch.contains(n));
+                    if notes.is_empty() {
+                        i.st.wakes.remove(wk);
+                    }
+                }
                 let b = i.busy.get_mut(wk)?;
                 b.cont = false; // whatever is queued now came in before this turn started
                 let redo = std::mem::take(&mut b.redo);
@@ -408,7 +414,7 @@ impl Core {
     /// (the inbox is emptied before a run starts): `claim` is the card's compare-and-set, taken only once the thread
     /// and its connection are known to be here, so a refusal leaves the resume owed. It returns the ids of the cards it
     /// took (none: someone else did). If the turn that carries `text` then fails to start (the session is held, the
-    /// spawn failed), [`Self::settle_wake`] gives the cards back to the store, so the resume stays owed (C5).
+    /// spawn failed), [`Self::wake_not_run`] gives the cards back to the store, so the resume stays owed (C5).
     pub fn wake(self: &Arc<Self>, wk: &str, text: &str, claim: impl FnOnce() -> Vec<String>) -> Wake {
         let (key, agent) = wk.rsplit_once('#').unwrap_or((wk, ""));
         let ad =
@@ -424,6 +430,7 @@ impl Core {
             }
             self.wakes.locked().push((text.to_owned(), cards));
             i.st.inbox.entry(wk.to_owned()).or_default().push(vec![text.to_owned()]);
+            i.st.wakes.entry(wk.to_owned()).or_default().push(text.to_owned());
             let spawn = !i.busy.contains_key(wk);
             if spawn {
                 i.busy.insert(wk.to_owned(), Busy::default());
@@ -440,6 +447,34 @@ impl Core {
                 }
                 Wake::Queued
             }
+        }
+    }
+
+    /// The process of the turn that carries `task` is up: its wakes are delivered (M5). Their record stays until the
+    /// turn is over, as a run the kernel then refuses (a held session) gives them back.
+    pub(super) fn wake_started(&self, task: &str) {
+        let ids: Vec<String> = self
+            .wakes
+            .locked()
+            .iter()
+            .filter(|(note, _)| task.contains(note.as_str()))
+            .flat_map(|(_, cards)| cards.clone())
+            .collect();
+        if !ids.is_empty()
+            && let Some(hub) = crate::runauth::hub()
+        {
+            crate::cards::resume::channel_started(&hub, &ids);
+        }
+    }
+
+    /// The turn that carries `task` didn't run: its wakes go back to the store as owed. `again`: offered again now;
+    /// after a Stop they wait for the next offer.
+    pub(super) fn wake_not_run(&self, task: &str, again: bool) {
+        let back = self.settle_wake(task, false);
+        if !back.is_empty()
+            && let Some(hub) = crate::runauth::hub()
+        {
+            crate::cards::resume::channel_failed(&hub, &back, again);
         }
     }
 

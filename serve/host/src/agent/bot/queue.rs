@@ -338,7 +338,7 @@ impl Actor {
                         unreachable!("front is a group turn")
                     };
                     // A newer message in the room (or Stop) ended the room turn that queued this.
-                    if turn.reply.is_closed() || !self.hub.groups.current(&turn.lane, turn.epoch) {
+                    if turn.reply.is_closed() || !crate::chat::group::current(&self.hub.store, &turn.lane, turn.epoch) {
                         continue;
                     }
                     let (lane, prompt) = (turn.lane.clone(), turn.prompt.clone());
@@ -444,11 +444,13 @@ impl Actor {
         } else if e.is::<crate::terminal::HeldByWriter>() {
             // `start_turn` already put the notice in the thread. A card's resume that was behind this turn is owed
             // again (the claim was refused, so its marker goes back) and shows who holds the session.
-            crate::cards::resume::refused(&self.hub, &self.turn_entries, self.turn_session.as_deref());
+            crate::cards::resume::refused(&self.hub, &self.start_entries, self.turn_session.as_deref());
         } else if !self.invite_sign_in(e) {
             // `{:#}` keeps the reason ("starting `npx …`: EACCES"), not just "agent process exited".
             self.notice(&format!("Couldn't start the agent: {e:#}"), NoticeStyle::Error);
         }
+        // Any other start that failed gives its wake back too (M5); one the person stopped isn't offered again now.
+        crate::cards::resume::not_started(&self.hub, &self.start_entries, !stopped);
         self.release_turn_claim();
         self.turn = None;
         if self.routine_completion.is_none() {

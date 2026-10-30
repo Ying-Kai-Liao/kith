@@ -66,15 +66,29 @@ private struct MarkdownBlock: View {
                 .foregroundStyle(Palette.secondary)
                 .padding(.leading, 10)
                 .overlay(alignment: .leading) { Rectangle().fill(Palette.border).frame(width: 3) }
-        case let .code(t, _):
-            ScrollView(.horizontal, showsIndicators: false) {
-                Text(t)
-                    .font(.system(.footnote, design: .monospaced))
-                    .foregroundStyle(Palette.text)
-                    .padding(10)
+        case let .code(t, language, closed):
+            // A fence still streaming stays code until it closes.
+            if closed, language.trimmingCharacters(in: .whitespaces).lowercased() == "mermaid" {
+                MermaidBlock(source: t)
+            } else {
+                CodeBlock(text: t)
             }
-            .background(Palette.codeBackground, in: RoundedRectangle(cornerRadius: 8))
         }
+    }
+}
+
+/// A fenced code block; wide lines scroll sideways.
+struct CodeBlock: View {
+    let text: String
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(text)
+                .font(.system(.footnote, design: .monospaced))
+                .foregroundStyle(Palette.text)
+                .padding(10)
+        }
+        .background(Palette.codeBackground, in: RoundedRectangle(cornerRadius: 8))
     }
 }
 

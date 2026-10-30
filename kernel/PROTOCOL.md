@@ -175,7 +175,8 @@ updated: YYYY-MM-DD   by: <agent>
   changes in a repo are coder's (when it is installed): unless the user asked you to make them yourself, send it a
   bounded request (what to change, where, acceptance criteria) with `{{KITH}}/bin/kith ask --bg coder -p <ID> "…"`, which
   returns at once with an id (`{{KITH}}/bin/kith ask --wait <id>` for its answer, which
-  arrives when its run ends), and pass its PR link on. Without `--bg`, `kith ask` waits for the answer. No coder:
+  arrives when its run ends), and pass its PR link on. To add to that job, `{{KITH}}/bin/kith ask --to <id> "…"`: it
+  reaches the job when its turn ends, and `--wait` returns that answer too. Without `--bg`, `kith ask` waits for the answer. No coder:
   hand the request back to the user. You don't start flow yourself.
 
 ## End of every call
@@ -185,6 +186,8 @@ then report back: what you did, files changed, and anything that needs the user.
 ## Keys (the owner types them; you never see them)
 
 Need a service's key (`kith-auth` knows which services declare one)? Call `request_secret(service, purpose)` (or `requestSecret` on the run socket in an owner `-p` run) once and end your turn. The owner gets an Access card (pick an existing account) or a Key card (a private field) in their chat with you; the host saves it with `kith-auth` and you are resumed with the names only (`[Kith] Kai saved GITHUB_TOKEN (github/work) for you. ...`). Use it through `kith-auth exec`; never print it. A no ends it. Keys are profiles `<service>/<account>` (`^[a-z0-9][a-z0-9._-]{0,39}$`), granted per agent.
+
+An agent with `grok` in its `needs:` pushes to the owner's Grok bot with `kith send-to grok "text"` (`--body FILE|-` for a raw JSON body, `--profile` to pick a bot); "sent" means Grok answered 200 with `"success":true` and started a run (its `runUuid` is printed), not that it replied; a 400 is a paused routine, a 401 a refused key, neither retried; Grok allows 300 runs/hour overall and 200 per routine and over a cap the run fails silently, so a 200 can still end in no run. The answer comes back on the bot's own link.
 
 Contract for the host and the apps (owner only; owner devices with Control scope over E2E):
 - `kith-auth set <profile> --stdin-json [--grant <agent>]` (stdin `{"VAR":"value"}`, each value at most 1536 bytes, never argv/env; stdout `{"profile","service","vars","granted"}`); `account-state <agent> <service> --json` -> `{declared, secrets, granted, missing, profiles:[{profile, account, owner, agents}]}` (`missing` is judged against the agent's first granted profile); `keys --json`; `grant <agent> <service> <profile>`; `revoke <agent> <service> [--profile P]`.

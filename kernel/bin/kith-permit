@@ -2,7 +2,8 @@
 """kith-permit — the permission prompt tool of every `claude -p` run kith starts (claude --permission-prompt-tool).
 
   kith-permit                          stdio MCP server with one tool, approve(tool_name, input, tool_use_id)
-  kith-permit issue AGENT SESSION PID  ask the host for an owner ask token bound to PID; prints export lines for sh
+  kith-permit issue AGENT SESSION PID  ask the host for an owner ask token bound to PID; prints export lines for sh. A host
+                                       that isn't up gets its launchd job restarted and is asked once more
   kith-permit apply SETTINGS_FILE      a guest run's launch, after its session claim (or a --launch-json run's, whose settings
                                        go to the host): ask the host for the access this session was given (a yes on an
                                        escape card, an "always") and add it to the settings file
@@ -42,6 +43,8 @@ import json, os, re, socket, subprocess, sys
 SERVER, TOOL = 'kithpermit', 'approve'
 # The host waits its live window (default 90 s, at most 600) before it answers; a little longer than that.
 WAIT_S = 660
+# How long a restarted host gets to open its port before the ask token is asked for again.
+HOST_START_S = 15
 
 
 def credentials(env=os.environ):
@@ -220,6 +223,9 @@ def ask_helper(a, env=os.environ):
         return '%s did not answer in time; carry on without it.' % agent
     except OSError as e:
         return 'Could not ask %s (%s).' % (agent, e.strerror or type(e).__name__)
+    if r.returncode != 0 and 'out of sync with the Kith cloud' in (r.stderr or ''):
+        return ('%s did not run: Kith on this computer is out of sync with the Kith cloud, so it cannot tell yet whether '
+                'you may still use it. Try again in a minute.' % agent)
     if r.returncode != 0:
         return 'Could not ask %s: %s' % (agent, (r.stderr or r.stdout or 'no answer').strip()[-1500:])
     return r.stdout.strip() or '%s gave no answer.' % agent
@@ -352,16 +358,22 @@ def serve():
     return 0
 
 
+def endpoint():
+    """(data dir, port) of this Mac's host: KITH_SERVE_DIR and KITH_SERVE_PORT, else what `kith-serve endpoint` says."""
+    data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
+    if not (data and port):
+        d, p = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-serve'), 'endpoint'],
+                              capture_output=True, text=True, timeout=4, check=True).stdout.split()
+        data, port = data or d, port or p
+    return data, port
+
+
 def host_call(method, body, timeout=8):
     """The host's local API over loopback with the serve token (as kith-recall does). None when it can't be reached."""
     import urllib.request
     from pathlib import Path
     try:
-        data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
-        if not (data and port):
-            d, p = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-serve'), 'endpoint'],
-                                  capture_output=True, text=True, timeout=4, check=True).stdout.split()
-            data, port = data or d, port or p
+        data, port = endpoint()
         token = (Path(data) / 'token').read_text().strip()
         req = urllib.request.Request('http://127.0.0.1:%s/api/%s' % (port, method), json.dumps(body).encode(),
                                      {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'})
@@ -369,6 +381,47 @@ def host_call(method, body, timeout=8):
             return json.load(r)
     except Exception:  # noqa: BLE001
         return None
+
+
+def host_up():
+    """The host's port takes a connection (a host that answers no to a request is up)."""
+    try:
+        with socket.create_connection(('127.0.0.1', int(endpoint()[1])), timeout=2):
+            return True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
+def restart_host():
+    """Restarts the host's launchd job as the Mac app does (apps/desktop host-service.ts): a job that was stopped is loaded
+    from its plist first, then kickstarted. Then waits for its port. False when that didn't bring it up."""
+    import time
+    from pathlib import Path
+    if sys.platform != 'darwin':
+        return False
+    try:
+        data = endpoint()[0]
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+    label = 'dev.kith.serve.main' if Path(data).name == 'serve-main' else 'dev.kith.serve'
+    domain = 'gui/%d' % os.getuid()
+    launchctl = os.environ.get('KITH_LAUNCHCTL') or 'launchctl'
+    run = lambda *a: subprocess.run([launchctl, *a], capture_output=True, timeout=10).returncode  # noqa: E731
+    try:
+        if run('print', '%s/%s' % (domain, label)) != 0:
+            plist = Path.home() / 'Library' / 'LaunchAgents' / (label + '.plist')
+            if run('bootstrap', domain, str(plist)) != 0:
+                return False
+        if run('kickstart', '-k', '%s/%s' % (domain, label)) != 0:
+            return False
+    except (OSError, subprocess.SubprocessError):
+        return False
+    deadline = time.monotonic() + HOST_START_S
+    while time.monotonic() < deadline:
+        if host_up():
+            return True
+        time.sleep(0.3)
+    return False
 
 
 def issue(agent, session, pid):
@@ -381,6 +434,12 @@ def issue(agent, session, pid):
     if re.fullmatch(r'[A-Za-z0-9._-]{1,64}', mid):
         body.update(replyTo=mid, askedBy=asked_by(mid))
     r = host_call('issueAskToken', body)
+    if r is None and not host_up():
+        # The host is down: its job is restarted once (rule 5) and asked again, else nothing can show a card.
+        if not restart_host():
+            print("kith: no approval cards for this run: the Kith host isn't running; asks are refused", file=sys.stderr)
+            return 1
+        r = host_call('issueAskToken', body)
     env = r.get('env') if isinstance(r, dict) else None
     if not (isinstance(env, dict) and env.get('KITH_ASK_TOKEN') and env.get('KITH_ASK_SOCKET')):
         print('kith: no approval cards for this run (the Kith host gave no ask token); asks are refused', file=sys.stderr)

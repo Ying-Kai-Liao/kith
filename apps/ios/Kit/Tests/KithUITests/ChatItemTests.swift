@@ -39,6 +39,12 @@ import Testing
     ])
 }
 
+/// A fence still open at the end (a reply that's streaming) is marked, so a diagram waits for its closing fence.
+@Test func markdownBlocksMarkAnUnclosedFence() {
+    #expect(MarkdownBlocks.parse("```mermaid\ngraph TD\nA-->B\n```") == [.code("graph TD\nA-->B", language: "mermaid")])
+    #expect(MarkdownBlocks.parse("```mermaid\ngraph TD\nA-->") == [.code("graph TD\nA-->", language: "mermaid", closed: false)])
+}
+
 /// "Select Text" shows a reply as it reads: no Markdown marks, list items on their own lines.
 @Test func selectTextShowsAReplyWithoutMarkdownMarks() {
     let plain = MarkdownText.plain("""

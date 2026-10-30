@@ -130,6 +130,20 @@ impl Store {
         logged("entry by nonce", row.optional()).flatten()
     }
 
+    /// The ask this bot guest already sent with `nonce`, in any of its conversations (a bot's nonce is its own across
+    /// agents, which `find_by_nonce` by chat row can't see).
+    pub fn find_bot_guest_nonce(&self, bot_guest_id: &str, nonce: &str) -> Option<Entry> {
+        let c = self.db.locked();
+        let row = c.query_row(
+            &format!(
+                "SELECT {ENTRY_COLS} FROM entries WHERE kind = 'user' AND json_extract(data, '$.sender.botId') = ?1 AND json_extract(data, '$.clientNonce') = ?2 ORDER BY seq LIMIT 1"
+            ),
+            params![bot_guest_id, nonce],
+            row_entry,
+        );
+        logged("entry by bot guest nonce", row.optional()).flatten()
+    }
+
     pub fn max_turn(&self, bot_id: &str) -> i64 {
         let c = self.db.locked();
         let n = c.query_row("SELECT COALESCE(MAX(turn), 0) FROM entries WHERE bot_id = ?1", [bot_id], |r| r.get(0));

@@ -94,6 +94,7 @@ impl Actor {
         hidden: bool,
         done_tx: &mpsc::UnboundedSender<Done>,
     ) -> Result<()> {
+        self.start_entries = entry_ids.to_vec();
         let stopping = |c: &Cmd| matches!(c, Cmd::Stop | Cmd::Shutdown);
         let cancelled = self.deferred.iter().any(stopping);
         if !cancelled && let Some(mut rx) = self.cmd_rx.take() {
@@ -344,6 +345,7 @@ impl Actor {
         }
         // Written before this returns, so a Stop right after is sent after the prompt.
         let answer = acp.send("session/prompt", params).await?;
+        crate::cards::resume::turn_started(&self.hub, &self.start_entries);
         if !self.turn_memory_revision.is_empty()
             && let Err(error) = memory::mark_announced(&self.hub.store, &self.cfg.id, &sid, &self.turn_memory_revision)
         {
@@ -478,6 +480,13 @@ impl Actor {
             let text = e.data["text"].as_str().map(str::to_owned);
             // A pass in a room stays in the trace; the room doesn't see it.
             if !(grouped && text.as_deref().is_none_or(crate::chat::group::is_pass)) {
+                // A room turn that a newer message or Stop moved on from: the reply is kept, marked, and wakes nobody.
+                if let Some(g) = &self.active_group
+                    && !crate::chat::group::current(&self.hub.store, &g.lane, g.epoch)
+                {
+                    // Saved with the `final` mark just below (a room turn is never a delegated ask).
+                    e.data["late"] = true.into();
+                }
                 // An ask's answer belongs to its requesting bot and exchange notice.
                 // Independent messages still report to the user in this chat.
                 if !delegated {

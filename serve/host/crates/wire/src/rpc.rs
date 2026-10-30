@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "ce851f4736935ee5d980c73e627004cd277ae05da7fa15138eb686a8db369f87";
+pub const CONTRACT_SHA256: &str = "8ae922621ac1e0c2e19db16eb25abb888cae710479dc3e49f6176952ec8fcb59";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -391,6 +391,8 @@ pub enum BotErrorCode {
     HeldByOtherWriter,
     #[serde(rename = "tooMany")]
     TooMany,
+    #[serde(rename = "nonceReused")]
+    NonceReused,
     /// A value this version doesn't know.
     #[default]
     #[serde(rename = "unknown", other)]
@@ -411,6 +413,7 @@ impl BotErrorCode {
             Self::Syncing => "syncing",
             Self::HeldByOtherWriter => "heldByOtherWriter",
             Self::TooMany => "tooMany",
+            Self::NonceReused => "nonceReused",
             Self::Unknown => "unknown",
         }
     }
@@ -757,6 +760,12 @@ pub struct LinkCode {
     pub expires_at: i64,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleMessages {
+    pub on: bool,
+}
+
 /// The chat the accepted call belongs to.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -997,6 +1006,8 @@ pub struct SendParams {
     pub folder: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clear: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<i64>,
 }
 
 /// What `thread` takes.
@@ -1141,6 +1152,14 @@ pub struct SetThreadProjectsParams {
 /// What `linkCode` takes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct LinkCodeParams {}
+
+/// What `scheduleMessages` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleMessagesParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
 
 /// What `callAccept` takes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
@@ -1316,7 +1335,7 @@ pub mod method {
     pub const KITH_INFO: &str = "kithInfo";
     /// Their own chat with an agent they hold, one per agent: made on first use.
     pub const START_CHAT: &str = "startChat";
-    /// A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member.
+    /// A message in their own chat. attachments are upload ids; pasted is what was pasted rather than typed. A new thread starts in project (for a member, one shared with them); folder and clear are the owner's and refused to a member. budget (a group only) is how many agent turns the message may cause, rounds included; default 10.
     pub const SEND: &str = "send";
     /// A thread's replies (its newest 500); the root is in the main chat.
     pub const THREAD: &str = "thread";
@@ -1350,6 +1369,8 @@ pub mod method {
     pub const SET_THREAD_PROJECTS: &str = "setThreadProjects";
     /// The code that links their own Telegram, Discord or Slack account to their person.
     pub const LINK_CODE: &str = "linkCode";
+    /// Whether their own Schedule cards are also said in their Telegram, Discord or Slack chat with the agent (on unless they turn it off), set first when on is given. The card in the app and a run's own messages stay either way.
+    pub const SCHEDULE_MESSAGES: &str = "scheduleMessages";
     /// Answers an incoming call from their own agent; the host checks the call is theirs.
     pub const CALL_ACCEPT: &str = "callAccept";
     /// Declines an incoming call from their own agent.
@@ -1393,7 +1414,7 @@ pub mod method {
 }
 
 /// What an invited person may call.
-pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION];
+pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::SCHEDULE_MESSAGES, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION];
 
 /// What an invited person's unproven device may call.
 pub const UNPROVEN_METHODS: &[&str] = &[method::PROVE_INVITE];
@@ -1420,7 +1441,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::EnumSchema { name: "CitationError", values: &["not_shared"], unknown: "not_shared" },
         crate::check::EnumSchema { name: "ConversationState", values: &["running", "waitingApproval", "queued", "stopped", "idle"], unknown: "running" },
         crate::check::EnumSchema { name: "BotEntryKind", values: &["user", "agent", "notice", "waiting"], unknown: "unknown" },
-        crate::check::EnumSchema { name: "BotErrorCode", values: &["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany"], unknown: "unknown" },
+        crate::check::EnumSchema { name: "BotErrorCode", values: &["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany", "nonceReused"], unknown: "unknown" },
     ],
     types: &[
         crate::check::TypeSchema { name: "Empty", fields: &[], may_omit: &[] },
@@ -1449,6 +1470,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "CitedThread", fields: &[("id", "string"), ("botId", "string"), ("rootId", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "Citation", fields: &[("thread", "CitedThread?"), ("seq", "int?"), ("at", "string?"), ("entries", "[Entry]?"), ("error", "CitationError?")], may_omit: &["thread", "seq", "at", "entries", "error"] },
         crate::check::TypeSchema { name: "LinkCode", fields: &[("code", "string"), ("expiresAt", "int")], may_omit: &[] },
+        crate::check::TypeSchema { name: "ScheduleMessages", fields: &[("on", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "CallAccepted", fields: &[("botId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "Proven", fields: &[("proven", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotInviteCreated", fields: &[("botId", "string"), ("inviteId", "string"), ("expiresAt", "int"), ("link", "string"), ("kithLink", "string"), ("share", "string")], may_omit: &[] },
@@ -1469,7 +1491,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "HelloParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "KithInfoParams", fields: &[("botId", "string"), ("refresh", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "StartChatParams", fields: &[("agent", "string")], may_omit: &[] },
-        crate::check::TypeSchema { name: "SendParams", fields: &[("botId", "string"), ("text", "string"), ("clientNonce", "string?"), ("threadId", "string?"), ("attachments", "[string]?"), ("pasted", "[string]?"), ("newTask", "bool?"), ("via", "MessageVia?"), ("project", "string?"), ("folder", "string?"), ("clear", "bool?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "SendParams", fields: &[("botId", "string"), ("text", "string"), ("clientNonce", "string?"), ("threadId", "string?"), ("attachments", "[string]?"), ("pasted", "[string]?"), ("newTask", "bool?"), ("via", "MessageVia?"), ("project", "string?"), ("folder", "string?"), ("clear", "bool?"), ("budget", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "ThreadParams", fields: &[("botId", "string"), ("rootId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "HistoryParams", fields: &[("botId", "string"), ("beforeSeq", "int?"), ("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "NewSessionParams", fields: &[("botId", "string")], may_omit: &[] },
@@ -1486,6 +1508,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "ThreadProjectsParams", fields: &[("botId", "string"), ("threadId", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "SetThreadProjectsParams", fields: &[("botId", "string"), ("threadId", "string?"), ("projects", "[string]")], may_omit: &[] },
         crate::check::TypeSchema { name: "LinkCodeParams", fields: &[], may_omit: &[] },
+        crate::check::TypeSchema { name: "ScheduleMessagesParams", fields: &[("on", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "CallAcceptParams", fields: &[("id", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "CallDeclineParams", fields: &[("id", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "CallGreetParams", fields: &[("id", "string")], may_omit: &[] },
@@ -1528,6 +1551,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "threadProjects", who: &["member"], params: "ThreadProjectsParams", result: "ThreadProjects" },
         crate::check::MethodSchema { name: "setThreadProjects", who: &["member"], params: "SetThreadProjectsParams", result: "ThreadProjectsSet" },
         crate::check::MethodSchema { name: "linkCode", who: &["member"], params: "LinkCodeParams", result: "LinkCode" },
+        crate::check::MethodSchema { name: "scheduleMessages", who: &["member"], params: "ScheduleMessagesParams", result: "ScheduleMessages" },
         crate::check::MethodSchema { name: "callAccept", who: &["member"], params: "CallAcceptParams", result: "CallAccepted" },
         crate::check::MethodSchema { name: "callDecline", who: &["member"], params: "CallDeclineParams", result: "Empty" },
         crate::check::MethodSchema { name: "callGreet", who: &["member"], params: "CallGreetParams", result: "Empty" },
@@ -1580,6 +1604,7 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "CitedThread" => serde_json::from_value::<CitedThread>(value).map(drop),
         "Citation" => serde_json::from_value::<Citation>(value).map(drop),
         "LinkCode" => serde_json::from_value::<LinkCode>(value).map(drop),
+        "ScheduleMessages" => serde_json::from_value::<ScheduleMessages>(value).map(drop),
         "CallAccepted" => serde_json::from_value::<CallAccepted>(value).map(drop),
         "Proven" => serde_json::from_value::<Proven>(value).map(drop),
         "BotInviteCreated" => serde_json::from_value::<BotInviteCreated>(value).map(drop),
@@ -1617,6 +1642,7 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "ThreadProjectsParams" => serde_json::from_value::<ThreadProjectsParams>(value).map(drop),
         "SetThreadProjectsParams" => serde_json::from_value::<SetThreadProjectsParams>(value).map(drop),
         "LinkCodeParams" => serde_json::from_value::<LinkCodeParams>(value).map(drop),
+        "ScheduleMessagesParams" => serde_json::from_value::<ScheduleMessagesParams>(value).map(drop),
         "CallAcceptParams" => serde_json::from_value::<CallAcceptParams>(value).map(drop),
         "CallDeclineParams" => serde_json::from_value::<CallDeclineParams>(value).map(drop),
         "CallGreetParams" => serde_json::from_value::<CallGreetParams>(value).map(drop),

@@ -13,6 +13,8 @@
                                   wake this session once WHAT happened: ci:OWNER/REPO#PR (its checks finished, or it was
                                   merged or closed), pid:N (the process exited), at:TIME (+30m, or local 2026-10-27T15:00)
   kith-wake ls [--json]           what is owed (and, without --json, what is waited for)
+  kith-wake status ID             where request ID is: queued, running, how it was answered (answered, failed, withdrawn,
+                                  ...) or unknown, and the turn that carried it
 
 A wake request is one thing that happened for a session: a card answered, a waiter fired, a reply came. Requests for one
 session merge into one item and one turn (S5). Every request carries an id; one whose id is already queued, answered or
@@ -37,8 +39,8 @@ session once. Waiters come from the owner's terminal and one-shot runs for now: 
 through the host, which doesn't take wakes yet, and a guest's `ci:` would reach GitHub as the owner (rule 10).
 
 Files: $KITH_STATE/sessions/queue/<hash>.json one item per session, queue/answered.json the ids answered or withdrawn
-(kept KEEP_DAYS), sessions/waits/<id>.json one per waiter, sessions/log.jsonl every enqueue, turn, wait and drop. Logs of
-run-door turns: <logs>/wake/RUN.log.
+(kept KEEP_DAYS, with the turn that carried each), sessions/waits/<id>.json one per waiter, sessions/log.jsonl every
+enqueue, turn, wait and drop. Run-door turns: <logs>/wake/RUN.log what the turn said, RUN.err the rest.
 """
 import argparse, datetime as dt, fcntl, hashlib, json, os, re, shutil, subprocess, sys, time, uuid
 from contextlib import contextmanager
@@ -129,17 +131,28 @@ def save(path, it):
 
 
 def answered():
-    """id -> {how, at}; pruned past KEEP_DAYS on every read under the lock."""
+    """id -> {how, t, run}; pruned past KEEP_DAYS on every read under the lock."""
     a = read_json(qdir() / 'answered.json', {})
     cut = now() - KEEP_DAYS * 86400
     return {k: v for k, v in a.items() if isinstance(v, dict) and v.get('t', 0) >= cut}
 
 
-def mark_answered(ids, how):
+def mark_answered(ids, how, run=None):
     a = answered()
     for i in ids:
-        a[i] = {'how': how, 't': now()}
+        a[i] = {'how': how, 't': now(), 'run': run}
     write_atomic(qdir() / 'answered.json', a)
+
+
+def status(rid):
+    """(queued | running | how it was answered | unknown, the turn's run or None) for request rid."""
+    with locked():
+        for _, it in items():
+            for r in it['requests']:
+                if r['id'] == rid:
+                    return ('running' if r['run'] else 'queued'), r['run']
+        a = answered().get(rid)
+        return (a['how'], a.get('run')) if a else ('unknown', None)
 
 
 def log(event, **kw):
@@ -291,7 +304,7 @@ def commit(run, how='answered'):
         ids = [r['id'] for r in it['requests'] if r['run'] == run]
         it['requests'] = [r for r in it['requests'] if r['run'] != run]
         it['turn'], it['tries'], it['next'] = None, 0, 0
-        mark_answered(ids, how)
+        mark_answered(ids, how, run)
         save(path, it)
         log('done', session=it['session'], run=run, ids=ids, how=how)
         return True
@@ -315,7 +328,7 @@ def release(path, it, held, why):
         it['tries'] = it.get('tries', 0) + 1
         if it['tries'] >= MAX_TRIES:
             ids = [r['id'] for r in carried]
-            mark_answered(ids, 'failed')
+            mark_answered(ids, 'failed', run)
             it['requests'] = [r for r in it['requests'] if r not in carried]
             it['tries'], it['next'] = 0, 0
             log('failed', session=it['session'], run=run, ids=ids, why=why)
@@ -342,7 +355,7 @@ def recover(path, it):
         ids = [r['id'] for r in it['requests'] if r['run'] == t['run']]
         it['requests'] = [r for r in it['requests'] if r['run'] != t['run']]
         it['turn'], it['tries'], it['next'] = None, 0, 0
-        mark_answered(ids, 'recovered')
+        mark_answered(ids, 'recovered', t['run'])
         save(path, it)
         log('done', session=it['session'], run=t['run'], ids=ids, how='recovered')
     else:
@@ -410,11 +423,11 @@ def deliver(session):
     env = {**os.environ, 'KITH_VIA': 'wake', 'KITH_CLAIM_WAIT': '0'}
     for k in ('KITH_PERSON', 'KITH_ROOM', 'KITH_RESUME', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT'):
         env.pop(k, None)
-    out = logs_dir() / f'{turn["run"]}.log'
-    with open(out, 'w') as f:
+    out, err = logs_dir() / f'{turn["run"]}.log', logs_dir() / f'{turn["run"]}.err'
+    with open(out, 'w') as f, open(err, 'w') as e:
         rc = subprocess.run([kith, turn['agent'], '--resume', session, turn['note']], stdin=subprocess.DEVNULL,
-                            stdout=f, stderr=subprocess.STDOUT, env=env).returncode
-    said = out.read_text(errors='replace')[-4000:]
+                            stdout=f, stderr=e, env=env).returncode
+    said = (err.read_text(errors='replace') + out.read_text(errors='replace'))[-4000:]
     if rc == 0 or transcript_has(session, f'[kith wake {turn["run"]}]'):
         commit(turn['run'], 'answered' if rc == 0 else f'answered, exit {rc}')
     else:
@@ -622,6 +635,8 @@ def main(argv):
     wt.add_argument('--session', default=os.environ.get('CLAUDE_CODE_SESSION_ID'))
     wt.add_argument('--agent', default=os.environ.get('KITH_AGENT'))
     wt.add_argument('note', nargs='*')
+    st = sub.add_parser('status')
+    st.add_argument('id')
     ls = sub.add_parser('ls')
     ls.add_argument('--json', action='store_true')
     a = p.parse_args(argv)
@@ -651,6 +666,9 @@ def main(argv):
             f'when {what(w)}, or at {stamp(w["until"])} if that hasn\'t happened'
         print(f'waiting {w["id"]}: this session gets a turn {when}; while a terminal holds it, the turn waits for '
               f'the terminal to close')
+    elif a.cmd == 'status':
+        how, run = status(a.id)
+        print(f'{how} {run}' if run else how)
     elif a.cmd == 'ls':
         rows = [it for _, it in items()]
         if a.json:

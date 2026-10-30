@@ -48,7 +48,7 @@ async fn approved_while_gone(r: &Rig, who: RunIdentity, input: Value) -> Card {
     assert!(!request_permission(&r.hub, &who, "Bash", &input).await.allow);
     let card = shown(&r.hub).await;
     run_exited(&r.hub, &run_id);
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     let kept = r.hub.store.card(&card.id).unwrap();
     assert!(kept.state == CardState::Approved && kept.answered_parked, "{kept:?}");
     kept
@@ -84,6 +84,8 @@ fn blank() -> Card {
         person: String::new(),
         agent: "house".into(),
         approver: "owner".into(),
+        answerable_by: None,
+        in_grants: false,
         tool: "Bash".into(),
         input: "{}".into(),
         resource: "r".into(),
@@ -101,6 +103,7 @@ fn blank() -> Card {
         answered_parked: true,
         granted_at: Some(0),
         resumed_at: None,
+        applied_at: None,
     }
 }
 
@@ -147,7 +150,7 @@ async fn an_approval_after_the_park_resumes_the_session_exactly_once_even_with_a
     assert!(!request_permission(&r.hub, &who, "Bash", &ls()).await.allow);
     let card = shown(&r.hub).await;
     run_exited(&r.hub, &who.run_id);
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     eventually("the resume", || !tests_seen::of(&card.session).is_empty()).await;
     // A door's copy, a retry and a restart's re-derive all race: the claim lets one through.
     let hub = r.hub.clone();
@@ -160,6 +163,10 @@ async fn an_approval_after_the_park_resumes_the_session_exactly_once_even_with_a
     assert!(seen[0].note.contains("allowed") && seen[0].note.contains("go on"), "{}", seen[0].note);
     assert_eq!(seen[0].door, "run");
     assert!(r.hub.store.card(&card.id).unwrap().resumed_at.is_some());
+    assert!(r.hub.store.card(&card.id).unwrap().applied_at.is_some(), "the run started: the wake is applied (M5)");
+    assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 0);
+    // A restart owes it no more: the run that carried the yes started.
+    assert!(r.hub.store.cards_restart(now_ms()).is_ok());
     assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 0);
     // The grant is still there for the resumed run's own ask, which uses it once (L3: no profile carries it).
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved);
@@ -175,7 +182,7 @@ async fn a_live_yes_is_not_resumed() {
     window(&r.hub, 20);
     let call = ask(&r.hub, owner_run("live-a"), "Bash", ls());
     let card = shown(&r.hub).await;
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     assert!(call.await.unwrap().allow);
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(tests_seen::of(&card.session).is_empty(), "C3: the live run continued itself");
@@ -240,10 +247,33 @@ async fn a_channel_wake_whose_turn_never_started_stays_owed() {
     // The wake went into the channel inbox: claimed. The turn then fails to start.
     assert!(r.hub.store.card_resume_claim(&card.id, now_ms()).unwrap());
     assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 0);
-    resume::channel_failed(&r.hub, std::slice::from_ref(&card.id));
+    resume::channel_failed(&r.hub, std::slice::from_ref(&card.id), true);
     assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 1, "owed again, so the retry can deliver it");
     // No channel core in this test: each retry finds the connection offline and waits, the card stays owed.
     assert_eq!(attempt(&r.hub, &card.id).await, Step::Retry);
+    assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 1);
+}
+
+#[tokio::test]
+async fn a_host_that_stops_before_the_wake_turn_starts_offers_it_again() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let started = approved_while_gone(&r, owner_run("tg:1#house"), ls()).await;
+    let lost = approved_while_gone(&r, owner_run("tg:2#house"), ls()).await;
+    // Both wakes went into a door's queue; only the first one's turn started before the host stopped.
+    assert!(r.hub.store.card_resume_claim(&started.id, now_ms()).unwrap());
+    assert!(r.hub.store.card_resume_claim(&lost.id, now_ms()).unwrap());
+    resume::channel_started(&r.hub, std::slice::from_ref(&started.id));
+    assert!(r.hub.store.card(&started.id).unwrap().applied_at.is_some());
+    assert!(r.hub.store.card(&lost.id).unwrap().applied_at.is_none());
+    r.hub.store.cards_restart(now_ms()).unwrap();
+    let owed: Vec<String> = r.hub.store.cards_awaiting_resume(now_ms()).into_iter().map(|c| c.id).collect();
+    assert_eq!(owed, vec![lost.id.clone()], "only the wake whose turn never started is owed again");
+    // A Stop gives the claim back without offering it now: it waits, owed, for the next offer.
+    assert!(r.hub.store.card_resume_claim(&lost.id, now_ms()).unwrap());
+    resume::channel_failed(&r.hub, std::slice::from_ref(&lost.id), false);
     assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 1);
 }
 
@@ -427,7 +457,7 @@ async fn a_kith_ask_run_that_parks_is_told_it_waits_and_a_no_is_the_askers_answe
     assert_eq!(chain_of(&blank()), None, "a card no kith ask opened shows no chain");
 
     run_exited(&r.hub, &who.run_id);
-    answer(&r.hub, &entry.id, Some("deny"), "owner").unwrap();
+    answer(&r.hub, &entry.id, Some("deny"), None).unwrap();
     let told = tests_seen::answers_to("ask-p1-a");
     assert_eq!(told.len(), 1, "{told:?}");
     assert_eq!(&told[0][..6], ["ask", "--answer", "ask-p1-a", "--as", "house", "--"]);
@@ -441,7 +471,7 @@ async fn a_no_the_live_run_hears_is_not_sent_to_the_asker_too() {
     window(&r.hub, 20);
     let call = ask(&r.hub, asked_run("job-b", "ask-p1-b"), "Bash", ls());
     let card = shown(&r.hub).await;
-    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), "owner").unwrap();
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     let d = call.await.unwrap();
     assert!(!d.allow && !d.waiting, "{d:?}");
     assert!(tests_seen::answers_to("ask-p1-b").is_empty(), "the run answers in its own turn");

@@ -1,5 +1,6 @@
 //! `kith-serve`: runs coding-agent bots over ACP and serves the Kith apps.
 
+mod access;
 mod agent;
 mod analytics;
 mod api;
@@ -193,6 +194,9 @@ enum Sub {
         token: Option<String>,
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
         port: u16,
+        /// Agent turns each message to a group may cause, rounds included (default 10).
+        #[arg(long)]
+        budget: Option<i64>,
     },
     /// npm on this computer's Node, else on Kith's own (downloaded first): what setup
     /// terminals install npm CLIs with.
@@ -540,7 +544,10 @@ async fn main() -> Result<()> {
         Sub::Mcp { server: McpServer::Composio { bot, port } } => mcp::serve(bot, port, mcp::Server::Composio).await,
         Sub::Mcp { server: McpServer::Local { connector, port } } => mcp::serve_local(connector, port).await,
         Sub::Mcp { server: McpServer::Remote { connector, port } } => mcp::serve_remote(connector, port).await,
-        Sub::Tui { url, token, port } => {
+        Sub::Tui { url, token, port, budget } => {
+            if let Some(budget) = budget {
+                let _ = tui::GROUP_BUDGET.set(budget);
+            }
             tui::run(url.unwrap_or_else(|| format!("http://127.0.0.1:{port}")), token).await
         }
     }

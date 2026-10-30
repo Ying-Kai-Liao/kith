@@ -339,12 +339,17 @@ impl Online {
 
 impl Drop for Online {
     fn drop(&mut self) {
-        let mut map = self.0.connected.locked();
-        if let Some(n) = map.get_mut(&self.1) {
-            *n -= 1;
-            if *n == 0 {
-                map.remove(&self.1);
+        {
+            let mut map = self.0.connected.locked();
+            if let Some(n) = map.get_mut(&self.1) {
+                *n -= 1;
+                if *n == 0 {
+                    map.remove(&self.1);
+                }
             }
+        }
+        if let Err(error) = self.0.store.touch_device(&self.1) {
+            tracing::warn!(error = format!("{error:#}"), "couldn't record when a device was last seen");
         }
     }
 }
@@ -976,6 +981,29 @@ mod tests {
         assert_eq!(p.call(1, "screenOffer", json!({})).await["err"]["status"], 403, "no screen scope");
         let (code, reject) = p.recv().await.unwrap_err();
         assert_eq!((code, reject["code"].as_str()), (4001, Some("leaseExpired")), "closed when the lease ran out");
+    }
+
+    #[test]
+    fn a_device_is_stamped_as_seen_when_its_channel_closes() {
+        let hub = temp_hub();
+        let device = Device {
+            key: "web".into(),
+            name: "Browser".into(),
+            platform: "web".into(),
+            source: DeviceSource::Account,
+            grant_id: Some("grt_web".into()),
+            scopes: vec![Scope::Control],
+            lease_until: None,
+            created_at: now_ms(),
+            last_seen_at: Some(1),
+            person_id: Some("sam".into()),
+        };
+        hub.store.put_device(&device).unwrap();
+        let online = Online::new(hub.clone(), "web".into());
+        hub.store.exec_for_test("UPDATE devices SET last_seen_at = 1");
+        drop(online);
+        assert!(hub.store.device("web").unwrap().last_seen_at.unwrap() > 1, "closing counts as the last use");
+        assert!(hub.connected.locked().is_empty());
     }
 
     #[tokio::test]
