@@ -455,6 +455,8 @@ async fn a_bots_owner_answers_its_run_cards_only_inside_the_bots_folders() {
             cloud_device: None,
             rate_per_hour: 0,
             concurrent: 0,
+            turn_timeout_s: 300,
+            wake_profile: None,
             created_at: 0,
             joined_at: None,
             decided_at: None,

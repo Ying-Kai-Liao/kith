@@ -447,6 +447,8 @@ pub(super) fn bot_guest(bot_id: &str, person_id: &str, owner_person: Option<Stri
         cloud_device: None,
         rate_per_hour: 0,
         concurrent: 0,
+        turn_timeout_s: 300,
+        wake_profile: None,
         created_at: 0,
         joined_at: None,
         decided_at: None,

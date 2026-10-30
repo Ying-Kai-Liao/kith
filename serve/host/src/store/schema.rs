@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 12;
+const SCHEMA: i64 = 13;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -24,7 +24,9 @@ const SCHEMA: i64 = 12;
 /// again after a restart. Resumes claimed before this version count as applied.
 /// 11: room conversations (`conversations`): a person's message to a group opens one with a turn budget; its queue and
 /// what is left are written with each step so a restart resumes it, and its epoch (per lane) only grows.
-/// 12: Mac link (designs/2026-10-29-mac-link): the owner's computers let in here (`peers_in`) and the ones this
+/// 12: a bot guest's room settings: how long a room waits for its post (`turn_timeout_s`) and the kith-auth profile
+/// the host wakes it through (`wake_profile`, NULL: no wake).
+/// 13: Mac link (designs/2026-10-29-mac-link): the owner's computers let in here (`peers_in`) and the ones this
 /// computer may ask (`peers_out`), each pinned to the keys of its code exchange.
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
@@ -59,10 +61,13 @@ fn migrate(c: &Connection) -> Result<()> {
     if version < 11 {
         migrate_11(c)?;
     }
-    migrate_12(c)
+    if version < 12 {
+        migrate_12(c)?;
+    }
+    migrate_13(c)
 }
 
-fn migrate_12(c: &Connection) -> Result<()> {
+fn migrate_13(c: &Connection) -> Result<()> {
     c.execute_batch(
         "BEGIN;
          CREATE TABLE IF NOT EXISTS peers_in(
@@ -72,6 +77,17 @@ fn migrate_12(c: &Connection) -> Result<()> {
             computer_id TEXT PRIMARY KEY, name TEXT NOT NULL, sign_key TEXT NOT NULL, device_key TEXT NOT NULL,
             request_id TEXT, epoch TEXT, grant_id TEXT,
             state TEXT NOT NULL CHECK (state IN ('pending','paired')), created_at INTEGER NOT NULL);
+         INSERT INTO kv(k, v) VALUES('schema', '13') ON CONFLICT(k) DO UPDATE SET v = '13';
+         COMMIT;",
+    )?;
+    Ok(())
+}
+
+fn migrate_12(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         ALTER TABLE bot_guests ADD COLUMN turn_timeout_s INTEGER NOT NULL DEFAULT 300;
+         ALTER TABLE bot_guests ADD COLUMN wake_profile TEXT;
          INSERT INTO kv(k, v) VALUES('schema', '12') ON CONFLICT(k) DO UPDATE SET v = '12';
          COMMIT;",
     )?;
@@ -290,13 +306,14 @@ mod tests {
                  ALTER TABLE cards DROP COLUMN reply_to; ALTER TABLE cards DROP COLUMN asked_by;
                  ALTER TABLE cards DROP COLUMN answerable_by; ALTER TABLE cards DROP COLUMN in_grants;
                  ALTER TABLE cards DROP COLUMN applied_at;
+                 ALTER TABLE bot_guests DROP COLUMN turn_timeout_s; ALTER TABLE bot_guests DROP COLUMN wake_profile;
                  INSERT INTO devices VALUES('old', 'Phone', 'ios', 'local', NULL, '[\"control\"]', NULL, 1, NULL);
                  UPDATE kv SET v = '4' WHERE k = 'schema';",
             )
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("12"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("13"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -310,10 +327,14 @@ mod tests {
             let s = Store::open(&db).unwrap();
             drop(s);
             let c = Connection::open(&db).unwrap();
-            c.execute_batch("DROP TABLE conversations; UPDATE kv SET v = '10' WHERE k = 'schema';").unwrap();
+            c.execute_batch(
+                "DROP TABLE conversations; ALTER TABLE bot_guests DROP COLUMN turn_timeout_s;
+                 ALTER TABLE bot_guests DROP COLUMN wake_profile; UPDATE kv SET v = '10' WHERE k = 'schema';",
+            )
+            .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("12"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("13"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -321,6 +342,23 @@ mod tests {
         drop(s);
         let s = Store::open(&db).unwrap();
         assert_eq!(s.open_conversations().unwrap().len(), 1, "reopening keeps the table and its rows");
+    }
+
+    #[test]
+    fn schema_thirteen_adds_the_peer_tables_to_a_v12_database() {
+        let dir = std::env::temp_dir().join(format!("kith-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db = dir.join("t.db");
+        {
+            let s = Store::open(&db).unwrap();
+            drop(s);
+            let c = Connection::open(&db).unwrap();
+            c.execute_batch("DROP TABLE peers_in; DROP TABLE peers_out; UPDATE kv SET v = '12' WHERE k = 'schema';")
+                .unwrap();
+        }
+        let s = Store::open(&db).unwrap();
+        assert_eq!(s.kv_get("schema").as_deref(), Some("13"));
+        assert!(s.peers_in().unwrap().is_empty() && s.peers_out().unwrap().is_empty());
     }
 
     #[test]
@@ -339,7 +377,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("12"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("13"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         drop(s);
         let s = Store::open(&db).unwrap();

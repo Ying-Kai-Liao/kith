@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "ef5d2e3d3a3454409ba7906a6dced42d46d275981905452b1cdc157590d4edd5"
+    public static let sha256 = "357563e54b3cdccb8f5f5a6717715ed875d4cfb53bd3d63bc69b8b61a11ad2f9"
 }
 
 extension HostContract {
@@ -755,13 +755,18 @@ extension HostContract {
         }
     }
 
+    /// A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host.
     public struct BotLimits: Codable, Hashable, Sendable {
         public var ratePerHour: Int64
         public var concurrent: Int64
+        public var turnTimeoutS: Int64?
+        public var wakeProfile: String?
 
-        public init(ratePerHour: Int64, concurrent: Int64) {
+        public init(ratePerHour: Int64, concurrent: Int64, turnTimeoutS: Int64? = nil, wakeProfile: String? = nil) {
             self.ratePerHour = ratePerHour
             self.concurrent = concurrent
+            self.turnTimeoutS = turnTimeoutS
+            self.wakeProfile = wakeProfile
         }
     }
 
@@ -901,8 +906,9 @@ extension HostContract {
         public var state: ConversationState
         public var queued: Int64
         public var duplicate: Bool?
+        public var room: String?
 
-        public init(conversation: String, entryId: String, turn: Int64, seq: Int64, state: ConversationState, queued: Int64, duplicate: Bool? = nil) {
+        public init(conversation: String, entryId: String, turn: Int64, seq: Int64, state: ConversationState, queued: Int64, duplicate: Bool? = nil, room: String? = nil) {
             self.conversation = conversation
             self.entryId = entryId
             self.turn = turn
@@ -910,6 +916,47 @@ extension HostContract {
             self.state = state
             self.queued = queued
             self.duplicate = duplicate
+            self.room = room
+        }
+    }
+
+    /// A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current). A retry with the same clientNonce and text answers the same, marked duplicate.
+    public struct BotPosted: Codable, Hashable, Sendable {
+        public var entryId: String
+        public var seq: Int64
+        public var turn: Int64
+        public var room: String
+        public var conversation: String
+        public var replied: Bool
+        public var late: Bool
+        public var duplicate: Bool?
+
+        public init(entryId: String, seq: Int64, turn: Int64, room: String, conversation: String, replied: Bool, late: Bool, duplicate: Bool? = nil) {
+            self.entryId = entryId
+            self.seq = seq
+            self.turn = turn
+            self.room = room
+            self.conversation = conversation
+            self.replied = replied
+            self.late = late
+            self.duplicate = duplicate
+        }
+    }
+
+    /// A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next.
+    public struct BotRoom: Codable, Hashable, Sendable {
+        public var room: String
+        public var conversation: String?
+        public var epoch: Int64?
+        public var entries: [BotEntry]
+        public var cursor: Int64
+
+        public init(room: String, conversation: String? = nil, epoch: Int64? = nil, entries: [BotEntry], cursor: Int64) {
+            self.room = room
+            self.conversation = conversation
+            self.epoch = epoch
+            self.entries = entries
+            self.cursor = cursor
         }
     }
 
@@ -938,8 +985,11 @@ extension HostContract {
         public var sender: BotSender?
         public var final: Bool?
         public var error: Bool?
+        public var room: String?
+        public var epoch: Int64?
+        public var author: String?
 
-        public init(id: String, seq: Int64, turn: Int64, at: Int64, conversation: String, kind: BotEntryKind, text: String, sender: BotSender? = nil, final: Bool? = nil, error: Bool? = nil) {
+        public init(id: String, seq: Int64, turn: Int64, at: Int64, conversation: String, kind: BotEntryKind, text: String, sender: BotSender? = nil, final: Bool? = nil, error: Bool? = nil, room: String? = nil, epoch: Int64? = nil, author: String? = nil) {
             self.id = id
             self.seq = seq
             self.turn = turn
@@ -950,6 +1000,9 @@ extension HostContract {
             self.sender = sender
             self.final = final
             self.error = error
+            self.room = room
+            self.epoch = epoch
+            self.author = author
         }
     }
 
@@ -1351,11 +1404,15 @@ extension HostContract {
         public var botId: String
         public var ratePerHour: Int64?
         public var concurrent: Int64?
+        public var turnTimeoutS: Int64?
+        public var wakeProfile: String?
 
-        public init(botId: String, ratePerHour: Int64? = nil, concurrent: Int64? = nil) {
+        public init(botId: String, ratePerHour: Int64? = nil, concurrent: Int64? = nil, turnTimeoutS: Int64? = nil, wakeProfile: String? = nil) {
             self.botId = botId
             self.ratePerHour = ratePerHour
             self.concurrent = concurrent
+            self.turnTimeoutS = turnTimeoutS
+            self.wakeProfile = wakeProfile
         }
     }
 
@@ -1416,6 +1473,38 @@ extension HostContract {
             self.speaker = speaker
             self.clientNonce = clientNonce
             self.noQueue = noQueue
+        }
+    }
+
+    /// What `botPost` takes.
+    public struct BotPostParams: Codable, Hashable, Sendable {
+        public var room: String
+        public var conversation: String
+        public var epoch: Int64
+        public var turnKey: String?
+        public var text: String
+        public var clientNonce: String
+
+        public init(room: String, conversation: String, epoch: Int64, turnKey: String? = nil, text: String, clientNonce: String) {
+            self.room = room
+            self.conversation = conversation
+            self.epoch = epoch
+            self.turnKey = turnKey
+            self.text = text
+            self.clientNonce = clientNonce
+        }
+    }
+
+    /// What `botRoomRead` takes.
+    public struct BotRoomReadParams: Codable, Hashable, Sendable {
+        public var room: String
+        public var since: Int64?
+        public var limit: Int64?
+
+        public init(room: String, since: Int64? = nil, limit: Int64? = nil) {
+            self.room = room
+            self.since = since
+            self.limit = limit
         }
     }
 
@@ -1501,6 +1590,8 @@ extension HostContract {
         case botStatus
         case proveBotInvite
         case botAsk
+        case botPost
+        case botRoomRead
         case botThread
         case botConversations
         case botStop
@@ -1515,7 +1606,7 @@ extension HostContract {
     public static let unprovenMethods: [Method] = [.proveInvite]
 
     /// What a bot guest (the pending ones too: see botPending) may call.
-    public static let botMethods: [Method] = [.hello, .botStatus, .proveBotInvite, .botAsk, .botThread, .botConversations, .botStop, .botLeave]
+    public static let botMethods: [Method] = [.hello, .botStatus, .proveBotInvite, .botAsk, .botPost, .botRoomRead, .botThread, .botConversations, .botStop, .botLeave]
 
     /// What a bot guest that is still joining or waiting for its owner's allow may call.
     public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
@@ -1568,6 +1659,8 @@ extension HostContract {
         case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
         case "BotProof": _ = try d.decode(BotProof.self, from: data)
         case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
+        case "BotPosted": _ = try d.decode(BotPosted.self, from: data)
+        case "BotRoom": _ = try d.decode(BotRoom.self, from: data)
         case "BotSender": _ = try d.decode(BotSender.self, from: data)
         case "BotEntry": _ = try d.decode(BotEntry.self, from: data)
         case "BotThread": _ = try d.decode(BotThread.self, from: data)
@@ -1610,6 +1703,8 @@ extension HostContract {
         case "BotStatusParams": _ = try d.decode(BotStatusParams.self, from: data)
         case "ProveBotInviteParams": _ = try d.decode(ProveBotInviteParams.self, from: data)
         case "BotAskParams": _ = try d.decode(BotAskParams.self, from: data)
+        case "BotPostParams": _ = try d.decode(BotPostParams.self, from: data)
+        case "BotRoomReadParams": _ = try d.decode(BotRoomReadParams.self, from: data)
         case "BotThreadParams": _ = try d.decode(BotThreadParams.self, from: data)
         case "BotConversationsParams": _ = try d.decode(BotConversationsParams.self, from: data)
         case "BotStopParams": _ = try d.decode(BotStopParams.self, from: data)

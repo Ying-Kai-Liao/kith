@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "ef5d2e3d3a3454409ba7906a6dced42d46d275981905452b1cdc157590d4edd5";
+pub const CONTRACT_SHA256: &str = "357563e54b3cdccb8f5f5a6717715ed875d4cfb53bd3d63bc69b8b61a11ad2f9";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -798,11 +798,16 @@ pub struct Revoked {
     pub revoked: bool,
 }
 
+/// A bot's limits. turnTimeoutS is how long a room waits for its post when it is a member's turn (30 to 3600, default 300; a miss is a pass). wakeProfile is the kith-auth profile the host pushes a wake through at that turn (null: no wake, so the turn is a pass). Absent from an older host.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct BotLimits {
     pub rate_per_hour: i64,
     pub concurrent: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_timeout_s: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_profile: Option<String>,
 }
 
 /// A bot guest. personId and conversations are the computer owner's.
@@ -915,6 +920,36 @@ pub struct BotAsked {
     pub queued: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicate: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
+}
+
+/// A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current). A retry with the same clientNonce and text answers the same, marked duplicate.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotPosted {
+    pub entry_id: String,
+    pub seq: i64,
+    pub turn: i64,
+    pub room: String,
+    pub conversation: String,
+    pub replied: bool,
+    pub late: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate: Option<bool>,
+}
+
+/// A room as a bot member reads it: the entries after the cursor (the newest few on a first read), the room's newest conversation and its epoch (what a post names), and the cursor to read from next.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotRoom {
+    pub room: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<i64>,
+    pub entries: Vec<BotEntry>,
+    pub cursor: i64,
 }
 
 /// Who sent an ask: the bot, and the person it spoke for when it said.
@@ -944,6 +979,12 @@ pub struct BotEntry {
     pub r#final: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epoch: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 /// A bot's conversation since afterSeq. done: the last ask has its final answer, an error notice, or was taken back; turn is the last ask's.
@@ -1264,6 +1305,10 @@ pub struct SetBotLimitsParams {
     pub rate_per_hour: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrent: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_timeout_s: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wake_profile: Option<String>,
 }
 
 /// What `resolveCitation` takes.
@@ -1311,6 +1356,30 @@ pub struct BotAskParams {
     pub client_nonce: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub no_queue: Option<bool>,
+}
+
+/// What `botPost` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotPostParams {
+    pub room: String,
+    pub conversation: String,
+    pub epoch: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_key: Option<String>,
+    pub text: String,
+    pub client_nonce: String,
+}
+
+/// What `botRoomRead` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BotRoomReadParams {
+    pub room: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub since: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<i64>,
 }
 
 /// What `botThread` takes.
@@ -1411,7 +1480,7 @@ pub mod method {
     pub const REVOKE_BOT: &str = "revokeBot";
     /// Their own bot guests, newest first.
     pub const MY_BOTS: &str = "myBots";
-    /// One of their bots' limits; a limit left out stays.
+    /// One of their bots' limits; a limit left out stays. turnTimeoutS is clamped to 30 to 3600. wakeProfile (the computer's owner only) is a kith-auth profile name for the grok service; an empty string clears it.
     pub const SET_BOT_LIMITS: &str = "setBotLimits";
     /// A kith://thread/<id>#entry=<seq> link: the thread when it is theirs, else a stable not_shared.
     pub const RESOLVE_CITATION: &str = "resolveCitation";
@@ -1421,8 +1490,12 @@ pub mod method {
     pub const BOT_STATUS: &str = "botStatus";
     /// A bot's new key shows the invite token from its link, which the cloud never saw; until then it can call nothing else. Proving twice is fine.
     pub const PROVE_BOT_INVITE: &str = "proveBotInvite";
-    /// Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room is refused (notSupported).
+    /// Asks an agent in a conversation of the bot's own, made on first use (agent names it then). clientNonce makes a retry safe. room (a room this bot is a member of) turns the ask into one turn of the agent it @-mentions there: no conversation opens, the agent's reply wakes nobody, and an open conversation's budget is charged.
     pub const BOT_ASK: &str = "botAsk";
+    /// Posts into a room the bot is a member of. conversation and epoch say which turn it answers; with the turnKey of the turn the room is waiting on it is the member's reply, without one it is an unprompted post (charged one turn; wakes only the members it @-mentions, only while the conversation is open with budget left). Anything else is kept as late and wakes nobody. clientNonce makes a retry post once; the same nonce with other text is nonceReused. A post never opens or tops up a budget. A room the bot is not in is notFound.
+    pub const BOT_POST: &str = "botPost";
+    /// What a bot member may read of a room: its entries after the cursor, shaped as for a bot, with the newest conversation and epoch to post under. A room the bot is not in is notFound.
+    pub const BOT_ROOM_READ: &str = "botRoomRead";
     /// What a bot may read of its own conversation, after afterSeq.
     pub const BOT_THREAD: &str = "botThread";
     /// A bot's own conversations, newest first.
@@ -1442,7 +1515,7 @@ pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::
 pub const UNPROVEN_METHODS: &[&str] = &[method::PROVE_INVITE];
 
 /// What a bot guest (the pending ones too: see botPending) may call.
-pub const BOT_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE, method::BOT_ASK, method::BOT_THREAD, method::BOT_CONVERSATIONS, method::BOT_STOP, method::BOT_LEAVE];
+pub const BOT_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE, method::BOT_ASK, method::BOT_POST, method::BOT_ROOM_READ, method::BOT_THREAD, method::BOT_CONVERSATIONS, method::BOT_STOP, method::BOT_LEAVE];
 
 /// What a bot guest that is still joining or waiting for its owner's allow may call.
 pub const BOT_PENDING_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE];
@@ -1500,7 +1573,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "Proven", fields: &[("proven", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotInviteCreated", fields: &[("botId", "string"), ("inviteId", "string"), ("expiresAt", "int"), ("link", "string"), ("kithLink", "string"), ("share", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "Revoked", fields: &[("revoked", "bool")], may_omit: &[] },
-        crate::check::TypeSchema { name: "BotLimits", fields: &[("ratePerHour", "int"), ("concurrent", "int")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotLimits", fields: &[("ratePerHour", "int"), ("concurrent", "int"), ("turnTimeoutS", "int?"), ("wakeProfile", "string?")], may_omit: &["turnTimeoutS", "wakeProfile"] },
         crate::check::TypeSchema { name: "BotGuest", fields: &[("botId", "string"), ("name", "string"), ("provider", "BotProvider"), ("state", "BotGuestState"), ("ownerPerson", "string?"), ("ownerName", "string?"), ("agents", "[string]"), ("limits", "BotLimits"), ("connected", "bool"), ("createdAt", "int"), ("joinedAt", "int?"), ("decidedAt", "int?"), ("decidedBy", "string?"), ("lastSeenAt", "int?"), ("revokedAt", "int?"), ("revokedWhy", "string?"), ("personId", "string?"), ("conversations", "json?")], may_omit: &["personId", "conversations"] },
         crate::check::TypeSchema { name: "BotGuests", fields: &[("bots", "[BotGuest]")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotGuestAnswer", fields: &[("bot", "BotGuest?")], may_omit: &[] },
@@ -1509,9 +1582,11 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "PeerAgent", fields: &[("agent", "string"), ("name", "string?")], may_omit: &["name"] },
         crate::check::TypeSchema { name: "PeerAgents", fields: &[("agents", "[PeerAgent]")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
-        crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
+        crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?"), ("room", "string?")], may_omit: &["duplicate", "room"] },
+        crate::check::TypeSchema { name: "BotPosted", fields: &[("entryId", "string"), ("seq", "int"), ("turn", "int"), ("room", "string"), ("conversation", "string"), ("replied", "bool"), ("late", "bool"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
+        crate::check::TypeSchema { name: "BotRoom", fields: &[("room", "string"), ("conversation", "string?"), ("epoch", "int?"), ("entries", "[BotEntry]"), ("cursor", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotSender", fields: &[("botId", "string"), ("name", "string"), ("speaker", "string?")], may_omit: &[] },
-        crate::check::TypeSchema { name: "BotEntry", fields: &[("id", "string"), ("seq", "int"), ("turn", "int"), ("at", "int"), ("conversation", "string"), ("kind", "BotEntryKind"), ("text", "string"), ("sender", "BotSender?"), ("final", "bool?"), ("error", "bool?")], may_omit: &["sender", "final", "error"] },
+        crate::check::TypeSchema { name: "BotEntry", fields: &[("id", "string"), ("seq", "int"), ("turn", "int"), ("at", "int"), ("conversation", "string"), ("kind", "BotEntryKind"), ("text", "string"), ("sender", "BotSender?"), ("final", "bool?"), ("error", "bool?"), ("room", "string?"), ("epoch", "int?"), ("author", "string?")], may_omit: &["sender", "final", "error", "room", "epoch", "author"] },
         crate::check::TypeSchema { name: "BotThread", fields: &[("conversation", "string"), ("entries", "[BotEntry]"), ("done", "bool"), ("turn", "int?"), ("state", "ConversationState")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotConversation", fields: &[("conversation", "string"), ("agent", "string"), ("ref", "string?"), ("originLabel", "string"), ("lastAt", "int"), ("state", "ConversationState")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotConversations", fields: &[("conversations", "[BotConversation]")], may_omit: &[] },
@@ -1546,12 +1621,14 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "RevokeBotInviteParams", fields: &[("inviteId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "RevokeBotParams", fields: &[("botId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "MyBotsParams", fields: &[], may_omit: &[] },
-        crate::check::TypeSchema { name: "SetBotLimitsParams", fields: &[("botId", "string"), ("ratePerHour", "int?"), ("concurrent", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "SetBotLimitsParams", fields: &[("botId", "string"), ("ratePerHour", "int?"), ("concurrent", "int?"), ("turnTimeoutS", "int?"), ("wakeProfile", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "ResolveCitationParams", fields: &[("citation", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "ProveInviteParams", fields: &[("inviteId", "string"), ("token", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotStatusParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "ProveBotInviteParams", fields: &[("inviteId", "string"), ("token", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotAskParams", fields: &[("agent", "string?"), ("text", "string"), ("conversation", "string?"), ("ref", "string?"), ("room", "string?"), ("speaker", "string?"), ("clientNonce", "string"), ("noQueue", "bool?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotPostParams", fields: &[("room", "string"), ("conversation", "string"), ("epoch", "int"), ("turnKey", "string?"), ("text", "string"), ("clientNonce", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "BotRoomReadParams", fields: &[("room", "string"), ("since", "int?"), ("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotThreadParams", fields: &[("conversation", "string"), ("afterSeq", "int?"), ("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotConversationsParams", fields: &[("limit", "int?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotStopParams", fields: &[("conversation", "string")], may_omit: &[] },
@@ -1596,6 +1673,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "botStatus", who: &["bot", "botPending"], params: "BotStatusParams", result: "BotSelf" },
         crate::check::MethodSchema { name: "proveBotInvite", who: &["bot", "botPending"], params: "ProveBotInviteParams", result: "BotProof" },
         crate::check::MethodSchema { name: "botAsk", who: &["bot"], params: "BotAskParams", result: "BotAsked" },
+        crate::check::MethodSchema { name: "botPost", who: &["bot"], params: "BotPostParams", result: "BotPosted" },
+        crate::check::MethodSchema { name: "botRoomRead", who: &["bot"], params: "BotRoomReadParams", result: "BotRoom" },
         crate::check::MethodSchema { name: "botThread", who: &["bot"], params: "BotThreadParams", result: "BotThread" },
         crate::check::MethodSchema { name: "botConversations", who: &["bot"], params: "BotConversationsParams", result: "BotConversations" },
         crate::check::MethodSchema { name: "botStop", who: &["bot"], params: "BotStopParams", result: "Empty" },
@@ -1648,6 +1727,8 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "PeerAgents" => serde_json::from_value::<PeerAgents>(value).map(drop),
         "BotProof" => serde_json::from_value::<BotProof>(value).map(drop),
         "BotAsked" => serde_json::from_value::<BotAsked>(value).map(drop),
+        "BotPosted" => serde_json::from_value::<BotPosted>(value).map(drop),
+        "BotRoom" => serde_json::from_value::<BotRoom>(value).map(drop),
         "BotSender" => serde_json::from_value::<BotSender>(value).map(drop),
         "BotEntry" => serde_json::from_value::<BotEntry>(value).map(drop),
         "BotThread" => serde_json::from_value::<BotThread>(value).map(drop),
@@ -1690,6 +1771,8 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotStatusParams" => serde_json::from_value::<BotStatusParams>(value).map(drop),
         "ProveBotInviteParams" => serde_json::from_value::<ProveBotInviteParams>(value).map(drop),
         "BotAskParams" => serde_json::from_value::<BotAskParams>(value).map(drop),
+        "BotPostParams" => serde_json::from_value::<BotPostParams>(value).map(drop),
+        "BotRoomReadParams" => serde_json::from_value::<BotRoomReadParams>(value).map(drop),
         "BotThreadParams" => serde_json::from_value::<BotThreadParams>(value).map(drop),
         "BotConversationsParams" => serde_json::from_value::<BotConversationsParams>(value).map(drop),
         "BotStopParams" => serde_json::from_value::<BotStopParams>(value).map(drop),

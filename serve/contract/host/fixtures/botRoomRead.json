@@ -1,0 +1,22 @@
+{
+  "method": "botRoomRead",
+  "type": "BotRoom",
+  "body": {
+    "room": "3c3da365-4f90-4101-b97a-6e2cc0258ec1",
+    "conversation": null,
+    "epoch": null,
+    "entries": [
+      {
+        "id": "839d09fb-4769-422c-a8dd-c2c5ece3e22c",
+        "seq": 24,
+        "turn": 1,
+        "at": 1793298791882,
+        "conversation": "",
+        "kind": "user",
+        "text": "hello crew",
+        "room": "3c3da365-4f90-4101-b97a-6e2cc0258ec1"
+      }
+    ],
+    "cursor": 24
+  }
+}
