@@ -1,3 +1,4 @@
+import { clampTurns, parseConversation, type Conversation } from '@shared/conversation'
 import { parseCall, type IncomingCall } from '@shared/incoming-call'
 import { parseAgentPeople, parseAgentUsage, parseBotsCap, parseUsageReport, type AgentPeople, type AgentUsage, type AtLimit, type BotsCap, type Period, type UsageReport } from '@shared/usage-limits'
 import type { CallError } from '@shared/ipc'
@@ -143,6 +144,8 @@ export type HostEvent =
   | { type: 'accessRequests'; requests: AccessRequest[] }
   | { type: 'cloud'; cloud: CloudStatus }
   | { type: 'resync' }
+  /** A room conversation opened, was charged, changed speaker or ended (owner's apps only). */
+  | { type: 'conversation'; conversation: Conversation }
   /** A bot from outside asks the owner to let it in; only a trigger to read `bots` again. */
   | { type: 'botRequest'; bot: BotGuest }
   /** A bot guest changed state (owner of the computer and the bot's owner get it). */
@@ -192,6 +195,11 @@ export function parseEvent(line: string): HostEvent | null {
       return raw.cloud ? { type, cloud: raw.cloud as CloudStatus } : null
     case 'resync':
       return { type }
+    case 'conversation': {
+      // An unreadable one is skipped: the live line comes back with the next report or the next history read.
+      const conversation = parseConversation(raw)
+      return conversation ? { type, conversation } : null
+    }
     case 'botRequest': {
       const bot = parseBotRequest(raw.bot)
       return bot ? { type, bot } : null
@@ -272,9 +280,14 @@ export class HostClient {
   }
 
   /** `folder`: where the thread works; absent from a host without place folders. */
-  async thread(botId: string, rootId: string): Promise<{ entries: Entry[]; folder?: unknown }> {
+  async thread(botId: string, rootId: string): Promise<{ entries: Entry[]; folder?: unknown; conversation: Conversation | null }> {
     const got = await this.callHost('thread', { botId, rootId })
-    return { ...got, entries: got.entries.map(asEntry) }
+    return { ...got, entries: got.entries.map(asEntry), conversation: parseConversation(got.conversation) }
+  }
+
+  /** The room conversation of a group's main lane that opened last; null when it never had one or the host is from before. */
+  async conversationOf(botId: string): Promise<Conversation | null> {
+    return parseConversation((await this.callHost('history', { botId, beforeSeq: Number.MAX_SAFE_INTEGER, limit: 1 })).conversation)
   }
 
   async botConversation(botId: string, peerId: string) {
@@ -282,9 +295,9 @@ export class HostClient {
   }
 
   /** `pasted`: what the user pasted rather than typed, which memory never takes as their own words. */
-  async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null) {
+  async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null) {
     try {
-      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}) })).entry)
+      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}), ...(budget !== null ? { budget: clampTurns(budget) } : {}) })).entry)
     } catch (e) {
       throw typedWriterError(e)
     }

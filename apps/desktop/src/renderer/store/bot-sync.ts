@@ -232,6 +232,9 @@ export class BotSync extends BotMirror {
         this.bump(event.entry.rev)
         this.acknowledgeVisible(event.entry.botId, event.entry)
         break
+      case 'conversation':
+        this.conversations.apply(event.conversation)
+        break
       case 'usage':
         this.usage = event.usage
         break
@@ -281,6 +284,7 @@ export class BotSync extends BotMirror {
     this.hostId = null
     this.historyComplete = new Set()
     this.floors = new Map()
+    this.conversations.clear()
     this.screen = null
     this.incomingCalls = []
     this.saveCache()

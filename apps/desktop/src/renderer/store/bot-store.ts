@@ -18,6 +18,7 @@ import { normalizeFolder, type PlaceFolder, type PlaceSelection, type StartingFo
 import { partialUpdate } from '@shared/optimistic'
 import { expireCalls, type IncomingCall } from '@shared/incoming-call'
 import { failureOf, OWN_TURN, type HeldPhase } from '@shared/held-run'
+import { DEFAULT_TURNS } from '@shared/conversation'
 import { FileDownloads } from './file-downloads'
 import { BotSync, sleep } from './bot-sync'
 
@@ -47,17 +48,20 @@ export class BotStore extends BotSync {
   private outgoingFiles = new Map<string, OutgoingFile[]>()
   /** The folder picked for a message that has not reached the host yet, so Resend keeps it. */
   private outgoingPlaces = new Map<string, StartingFolder>()
+  /** The turns picked for a group message that has not reached the host yet, so Resend keeps them. */
+  private outgoingBudgets = new Map<string, number>()
 
   /** Where each thread works, as the host last said (`thread`, `setPlaceFolder`); keyed `bot:root`. */
   private threadFolders = new Map<string, PlaceFolder | null>()
   threadFolder(botId: string, root: string) { return this.threadFolders.get(`${botId}:${root}`) ?? null }
 
   /** `newTask`: in a bot's chat, start a task rather than go on with the current one. */
-  send(text: string, botId: string, thread: string | null = null, files: OutgoingFile[] = [], nonce: string = crypto.randomUUID(), pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null) {
+  send(text: string, botId: string, thread: string | null = null, files: OutgoingFile[] = [], nonce: string = crypto.randomUUID(), pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null) {
     const trimmed = text.trim()
     if ((!trimmed && !files.length) || this.retired) return
     const data: Entry['data'] = { text: trimmed, status: 'sending', clientNonce: nonce }
     if (place) this.outgoingPlaces.set(nonce, place)
+    if (budget !== null) this.outgoingBudgets.set(nonce, budget)
     if (files.length) {
       data.attachments = files.map((f) => ({ id: f.id, name: f.name, size: f.data.length }))
       this.outgoingFiles.set(nonce, files)
@@ -82,10 +86,11 @@ export class BotStore extends BotSync {
               ids.push(id)
             }
           }
-          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via)
+          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via, budget)
         }, true)
         this.outgoingFiles.delete(nonce)
         this.outgoingPlaces.delete(nonce)
+        this.outgoingBudgets.delete(nonce)
         this.upsert(e)
         this.changed()
       } catch (error) {
@@ -101,13 +106,15 @@ export class BotStore extends BotSync {
     if (!text && !files.length) return
     this.entries.set(entry.botId, this.allEntries(entry.botId).filter((e) => e.id !== entry.id))
     const place = (entry.data.clientNonce && this.outgoingPlaces.get(entry.data.clientNonce)) || null
-    this.send(text, entry.botId, entry.threadId ?? null, files, entry.data.clientNonce ?? crypto.randomUUID(), [], false, place)
+    const budget = (entry.data.clientNonce ? this.outgoingBudgets.get(entry.data.clientNonce) : undefined) ?? null
+    this.send(text, entry.botId, entry.threadId ?? null, files, entry.data.clientNonce ?? crypto.randomUUID(), [], false, place, null, budget)
   }
 
   discard(entry: Entry) {
     if (entry.data.clientNonce) {
       this.outgoingFiles.delete(entry.data.clientNonce)
       this.outgoingPlaces.delete(entry.data.clientNonce)
+      this.outgoingBudgets.delete(entry.data.clientNonce)
     }
     this.entries.set(entry.botId, this.allEntries(entry.botId).filter((e) => e.id !== entry.id))
     this.changed()
@@ -152,6 +159,22 @@ export class BotStore extends BotSync {
   /** Stops the bot in its chat, or in the thread on `thread`; its other places keep working. */
   stop(botId: string, thread: string | null = null) {
     this.perform((c) => c.callHost('stop', thread ? { botId, threadId: thread } : { botId }), true)
+  }
+
+  /** "Give them 10 more": an ordinary message with turns, from the person (only a person tops a run up). */
+  keepGoing(botId: string, turns = DEFAULT_TURNS) {
+    this.send('Keep going', botId, null, [], undefined, [], false, null, null, turns)
+  }
+
+  /** Reads the group's main-lane conversation again (opening the chat, reconnecting): events alone miss a run that began while away. */
+  async refreshConversation(botId: string) {
+    const client = this.live
+    if (!client) return
+    try {
+      if (this.conversations.apply(await client.conversationOf(botId))) this.changed()
+    } catch {
+      // A host from before has no conversation; the live line simply stays away.
+    }
   }
 
   newSession(botId: string) {
@@ -498,6 +521,7 @@ export class BotStore extends BotSync {
     try {
       const res = await this.client.thread(botId, root)
       for (const e of res.entries) this.upsert(e)
+      this.conversations.apply(res.conversation)
       this.threadFolders.set(`${botId}:${root}`, normalizeFolder(res.folder))
       this.changed()
     } catch (error) {
