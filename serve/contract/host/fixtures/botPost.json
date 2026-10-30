@@ -1,0 +1,13 @@
+{
+  "method": "botPost",
+  "type": "BotPosted",
+  "body": {
+    "entryId": "aeba2736-6295-4cec-bd45-3d8bb43f613a",
+    "seq": 25,
+    "turn": 1,
+    "room": "3c3da365-4f90-4101-b97a-6e2cc0258ec1",
+    "conversation": "7df9bafe-29d8-45c0-b3a8-d7410a775bfa",
+    "replied": false,
+    "late": false
+  }
+}

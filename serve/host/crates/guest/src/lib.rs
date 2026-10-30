@@ -17,6 +17,7 @@ pub mod join;
 pub mod link;
 pub mod output;
 pub mod relay;
+pub mod room;
 pub mod session;
 pub mod thread;
 
@@ -42,6 +43,7 @@ async fn dispatch(cli: Cli, out: &Out, tuning: Tuning) -> Result<(), CliError> {
         Command::Read(args) => commands::read(args, store, cloud, out, tuning).await,
         Command::Threads => commands::threads(store, cloud, out, tuning).await,
         Command::Stop(args) => commands::stop(args, store, cloud, out, tuning).await,
+        Command::Room(cmd) => room::run(cmd, store, cloud, out, tuning).await,
         Command::Agents => commands::agents(store, cloud, out, tuning).await,
         Command::Status => commands::status(store, cloud, out, tuning).await,
         Command::Leave => commands::leave(store, cloud, out, tuning).await,
