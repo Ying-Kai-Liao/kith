@@ -431,7 +431,11 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
     setFollowing(false)
     followingRef.current = false
     if (at < start) setFirstShown(all[Math.max(0, at - 3)]!.id)
-    requestAnimationFrame(() => scroller.current?.querySelector(`[data-item="${CSS.escape(all[at]!.id)}"]`)?.scrollIntoView({ block: 'start' }))
+    // Inside a topic the card has opened by now: the row itself, else the card.
+    requestAnimationFrame(() => {
+      const find = (id: string) => scroller.current?.querySelector(`[data-item="${CSS.escape(id)}"]`)
+      ;(find(focusId) ?? find(all[at]!.id))?.scrollIntoView({ block: 'start' })
+    })
   }, [focusId, all])
 
   // Earlier messages going in above keep the reader's place; a follower stays at the bottom.
@@ -487,7 +491,7 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
           {items.length === 0 && bot ? <div className="transcript-intro">{isGroup(bot) ? <GroupIntroCard group={bot} /> : <IntroCard bot={bot} />}</div> : null}
           {items.map((item) => (
             <div key={item.id} data-item={item.id} className={arrivals.has(item.id) ? rowIn(item) : undefined}>
-              <Row item={item} chat={bot} openTrace={openTrace} openRoutine={openRoutine} openBotChat={openBotChat} />
+              <Row item={item} chat={bot} focusId={focusId} openTrace={openTrace} openRoutine={openRoutine} openBotChat={openBotChat} />
             </div>
           ))}
           {unread.map((id) => <ReadingThread key={id} botId={botId} root={id} />)}
@@ -523,14 +527,14 @@ function ReadingThread({ botId, root }: { botId: string; root: string }) {
   return null
 }
 
-function Row({ item, chat, openTrace, openRoutine, openBotChat }: { item: ChatItem; chat: Bot | null; openTrace: () => void; openRoutine: (id: string | null) => void; openBotChat: (peerId: string) => void }) {
+function Row({ item, chat, focusId, openTrace, openRoutine, openBotChat }: { item: ChatItem; chat: Bot | null; focusId?: string | null; openTrace: () => void; openRoutine: (id: string | null) => void; openBotChat: (peerId: string) => void }) {
   const store = useStore()
   if (item.kind === 'separator') {
     return <TimeSeparator date={item.date} />
   }
   if (item.kind === 'exchanges') return <BotMessageRow exchanges={item.exchanges} open={openBotChat} />
   if (item.kind === 'steps') return <StepsRow entries={item.entries} openTrace={openTrace} />
-  if (item.kind === 'topic') return <TopicCard item={item} renderRow={(row) => <Row item={row} chat={chat} openTrace={openTrace} openRoutine={openRoutine} openBotChat={openBotChat} />} />
+  if (item.kind === 'topic') return <TopicCard item={item} focusId={focusId} renderRow={(row) => <Row item={row} chat={chat} openTrace={openTrace} openRoutine={openRoutine} openBotChat={openBotChat} />} />
   if (item.kind === 'ending') return chat ? <EndLine botId={chat.id} text={item.text} more={item.more} /> : null
   const e = item.entry
   if (e.kind === 'notice' && e.data.routineId) {

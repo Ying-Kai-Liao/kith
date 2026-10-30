@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useState, type ReactNode } from 'react'
 import { isWorking, type Entry } from '@shared/models'
 import { avatarImage } from '@shared/crew'
 import { BotAvatar, SkyPatch, pairOf } from '../../components/kith'
@@ -41,11 +41,16 @@ const firstLine = (text: string | undefined) => (text ?? '').trim().split('\n')[
  * messages, the time). A question inside that waits on the owner rises onto the card. Tap opens the rows as normal
  * chat rows, in place; the room goes on below. No context ring: a topic isn't a session.
  */
-export function TopicCard({ item, renderRow }: { item: TopicItem; renderRow: (item: ChatItem) => ReactNode }) {
+export function TopicCard({ item, renderRow, focusId }: { item: TopicItem; renderRow: (item: ChatItem) => ReactNode; focusId?: string | null }) {
   const store = useLiveStore()
   const [open, setOpen] = useState(false)
   const menu = useContextMenu()
   const { root, topic, entries } = item
+  // A jump to a message inside the topic (search, a notification) opens the card so the row itself can be reached.
+  const holdsFocus = !!focusId && entries.some((e) => e.id === focusId)
+  useLayoutEffect(() => {
+    if (holdsFocus) setOpen(true)
+  }, [holdsFocus, focusId])
   const said = entries.filter((e) => e.kind === 'user' || e.kind === 'agent')
   const faces = new Map<string, ReturnType<typeof authorOf>>()
   for (const e of said) {
