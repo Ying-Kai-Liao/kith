@@ -2165,6 +2165,7 @@ dependencies = [
  "hmac 0.13.0",
  "if-addrs",
  "keyring",
+ "kith-guest",
  "kith-mem",
  "kith-wire",
  "libc",

@@ -831,7 +831,7 @@ member list): there is no new way to add a member, it is the owner's own group e
   started. A refused wake (non-200), no wake profile, or no post within the bot's **turn timeout** is a pass; the turn
   was already charged. The wait is the room task's own await.
 - **Settings** (`setBotLimits`, the computer owner for the profile): `turnTimeoutS` (default 300, clamped 30 to 3600) and
-  `wakeProfile` (a kith-auth profile name for the `grok` service; empty clears it). Stored in `bot_guests` (schema 12).
+  `wakeProfile` (a kith-auth profile name for the `grok` service; empty clears it). Stored in `bot_guests` (schema 12; the Mac link tables are 13).
 - **`botPost {room, conversation, epoch, turnKey?, clientNonce, text}`**, 16,000 characters at most, at the bot's rate.
   Stored once per nonce (the same text replays, other text is `nonceReused`, C4). With the turnKey of the turn the room
   waits on it is that member's reply and completes the wait. Without a turnKey it is an unprompted post: charged one

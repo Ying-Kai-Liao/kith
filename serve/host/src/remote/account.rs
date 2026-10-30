@@ -145,6 +145,8 @@ pub async fn person_of(bin: &Path, who: &Principal) -> Result<String> {
         Principal::Unproven(_) | Principal::BotPending(_) => bail!("this device hasn't shown its invite yet"),
         Principal::Owner => who_owner(bin).await,
         Principal::Nobody => bail!("this device isn't allowed on this computer"),
+        // A paired computer's asks name their person on each request (Mac link); the computer itself is no one.
+        Principal::Peer(_) => bail!("a paired computer acts for no person here"),
     }
 }
 
@@ -176,7 +178,11 @@ pub fn schedule_messages(hub: &Hub, caller: &Caller, on: Option<bool>) -> Result
     let person = match devices::principal(&hub.store, caller) {
         Principal::Owner => None,
         Principal::Member(person) => Some(person),
-        Principal::Nobody | Principal::Unproven(_) | Principal::Bot { .. } | Principal::BotPending(_) => {
+        Principal::Nobody
+        | Principal::Unproven(_)
+        | Principal::Bot { .. }
+        | Principal::BotPending(_)
+        | Principal::Peer(_) => {
             bail!("this device isn't allowed on this computer")
         }
     };

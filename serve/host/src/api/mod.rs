@@ -23,6 +23,9 @@ mod host;
 mod http;
 mod kith_info;
 mod marketplace;
+mod peers;
+#[cfg(test)]
+mod peers_tests;
 pub(crate) mod people;
 #[cfg(test)]
 mod people_tests;
@@ -171,6 +174,7 @@ async fn run_dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, mut b: Valu
         bot @ (Principal::Bot { .. } | Principal::BotPending(_)) => {
             return botguests::bot_call(hub, caller, bot, method, b, permitted).await;
         }
+        Principal::Peer(computer) => return peers::peer_call(hub, caller, &computer, method, &b, permitted),
     }
     let observed = crate::analytics::observe_call(hub, caller, method, &b);
     let result = route(hub, caller, method, b).await;
@@ -242,6 +246,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match botguests::call(hub, caller, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match peers::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

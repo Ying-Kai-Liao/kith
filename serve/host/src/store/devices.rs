@@ -18,6 +18,10 @@ pub enum DeviceSource {
     /// A bot guest's own key (docs/kith-bot-guests.md): admitted from the cloud's bot list, no lease; every call
     /// re-checks the bot's row instead.
     Bot,
+    /// Another computer of the owner's (Mac link): never a device row, only made from its `peers_in` row while a
+    /// channel is admitted. Never read back from the table, so a stored `peer` decodes as nothing it could mean.
+    #[serde(skip_deserializing)]
+    Peer,
 }
 
 /// What a device may do (wire values `control` / `screen`).

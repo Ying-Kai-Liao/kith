@@ -44,6 +44,7 @@
 #   kith cost [agents|agent <name>|...]                  what the agents cost, from the usage ledger (kith-cost)
 #   kith ask <agent> [-c] [--as NAME] "task"            ask an agent, get its answer back; -c continues (kith-ask)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
+#   kith link [NAME] [--accept [CODE] | --deny] | unlink NAME   pair this Mac with another of your account's (kith-serve)
 #   kith memory search <words> [--agent NAME|--all]      search what the agents wrote down (kith-memory)
 #   kith recall <query> [--project p] [--room r] [--thread t] [--tier 2|3|all] [--json]   search notes within what you may see (kith-recall)
 #   kith summarise --thread <id>                         (owner) write a thread's summary now; kith forget --thread <id> drops its summary and recall rows (kith-recall)
@@ -120,6 +121,7 @@ case $1 in
   wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   serve)              shift; exec "$KITH/bin/kith-serve" "${@:-help}" ;;
+  link|unlink)        exec "$KITH/bin/kith-serve" "$@" ;;
 esac
 
 # An agent is a folder in the agents folder: its role (role/, its own repo: agent.md, skills, tools) next to its life

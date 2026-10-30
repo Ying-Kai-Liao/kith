@@ -85,6 +85,11 @@ async function deleteAccount(env: Env, userId: string, now: number): Promise<voi
     env.DB.prepare(`UPDATE bot_invites SET revoked_at = ?1 WHERE accepted_at IS NULL AND revoked_at IS NULL AND ${mine}`).bind(now, userId),
     env.DB.prepare(`UPDATE bot_devices SET revoked_at = ?1 WHERE revoked_at IS NULL AND ${mine}`).bind(now, userId),
     env.DB.prepare(`UPDATE access_requests SET status = 'cancelled', decided_at = ?1 WHERE status = 'pending' AND ${mine}`).bind(now, userId),
+    // Mac link pairings between the computers it leaves (each host drops its peers when they stop being listed).
+    env.DB.prepare(
+      `UPDATE peer_grants SET status = 'revoked', revoked_at = ?1, revoked_reason = 'accountDeleted'
+       WHERE status = 'active' AND to_computer_id IN (SELECT id FROM computers WHERE owner_user_id = ?2)`,
+    ).bind(now, userId),
     env.DB.prepare("UPDATE computers SET owner_user_id = NULL, claimed_at = NULL, updated_at = ? WHERE owner_user_id = ?").bind(
       now,
       userId,
