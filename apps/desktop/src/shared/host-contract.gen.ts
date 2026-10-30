@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '707086a46c066282ca2a5b5f411cf6bbac0b5cd989c5b76d6feaf24cd7598336'
+export const CONTRACT_SHA256 = '4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -680,6 +680,26 @@ export interface KeepConversationParams {
   entryId: string
 }
 
+/** What `makeTopic` takes. */
+export interface MakeTopicParams {
+  botId: string
+  entryId: string
+  title: string
+}
+
+/** What `renameTopic` takes. */
+export interface RenameTopicParams {
+  botId: string
+  entryId: string
+  title: string
+}
+
+/** What `unfoldTopic` takes. */
+export interface UnfoldTopicParams {
+  botId: string
+  entryId: string
+}
+
 /** What `projects` takes. */
 export interface ProjectsParams {
   refresh?: boolean | null
@@ -909,6 +929,9 @@ export interface Types {
   RespondPermissionParams: RespondPermissionParams
   EditHandoffParams: EditHandoffParams
   KeepConversationParams: KeepConversationParams
+  MakeTopicParams: MakeTopicParams
+  RenameTopicParams: RenameTopicParams
+  UnfoldTopicParams: UnfoldTopicParams
   ProjectsParams: ProjectsParams
   ThreadProjectsParams: ThreadProjectsParams
   SetThreadProjectsParams: SetThreadProjectsParams
@@ -977,6 +1000,9 @@ export const METHODS = {
   respondPermission: { who: ['member'], params: 'RespondPermissionParams', result: 'PermissionAnswered' },
   editHandoff: { who: ['member'], params: 'EditHandoffParams', result: 'MaybeEntry' },
   keepConversation: { who: ['member'], params: 'KeepConversationParams', result: 'MaybeEntry' },
+  makeTopic: { who: ['owner'], params: 'MakeTopicParams', result: 'MaybeEntry' },
+  renameTopic: { who: ['owner'], params: 'RenameTopicParams', result: 'MaybeEntry' },
+  unfoldTopic: { who: ['owner'], params: 'UnfoldTopicParams', result: 'MaybeEntry' },
   projects: { who: ['member'], params: 'ProjectsParams', result: 'Projects' },
   threadProjects: { who: ['member'], params: 'ThreadProjectsParams', result: 'ThreadProjects' },
   setThreadProjects: { who: ['member'], params: 'SetThreadProjectsParams', result: 'ThreadProjectsSet' },
@@ -1026,6 +1052,9 @@ export interface Params {
   respondPermission: RespondPermissionParams
   editHandoff: EditHandoffParams
   keepConversation: KeepConversationParams
+  makeTopic: MakeTopicParams
+  renameTopic: RenameTopicParams
+  unfoldTopic: UnfoldTopicParams
   projects: ProjectsParams
   threadProjects: ThreadProjectsParams
   setThreadProjects: SetThreadProjectsParams
@@ -1074,6 +1103,9 @@ export interface Results {
   respondPermission: PermissionAnswered
   editHandoff: MaybeEntry
   keepConversation: MaybeEntry
+  makeTopic: MaybeEntry
+  renameTopic: MaybeEntry
+  unfoldTopic: MaybeEntry
   projects: Projects
   threadProjects: ThreadProjects
   setThreadProjects: ThreadProjectsSet
@@ -1103,6 +1135,9 @@ export interface Results {
   botLeave: Empty
   peerAgents: PeerAgents
 }
+
+/** What the owner alone (a method no one else may call; the owner may call every method) may call. */
+export const OWNER_METHODS = ['makeTopic', 'renameTopic', 'unfoldTopic'] as const satisfies readonly MethodName[]
 
 /** What an invited person may call. */
 export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread', 'history', 'newSession', 'unsend', 'markRead', 'stop', 'upload', 'readUpload', 'react', 'respondPermission', 'editHandoff', 'keepConversation', 'projects', 'threadProjects', 'setThreadProjects', 'linkCode', 'scheduleMessages', 'callAccept', 'callDecline', 'callGreet', 'logCall', 'startCall', 'endCall', 'createBotInvite', 'revokeBotInvite', 'revokeBot', 'myBots', 'setBotLimits', 'resolveCitation'] as const satisfies readonly MethodName[]
@@ -1220,6 +1255,9 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     RespondPermissionParams: { fields: { entryId: 'string', optionId: 'string?' } },
     EditHandoffParams: { fields: { entryId: 'string', text: 'string' } },
     KeepConversationParams: { fields: { entryId: 'string' } },
+    MakeTopicParams: { fields: { botId: 'string', entryId: 'string', title: 'string' } },
+    RenameTopicParams: { fields: { botId: 'string', entryId: 'string', title: 'string' } },
+    UnfoldTopicParams: { fields: { botId: 'string', entryId: 'string' } },
     ProjectsParams: { fields: { refresh: 'bool?' } },
     ThreadProjectsParams: { fields: { botId: 'string', threadId: 'string?' } },
     SetThreadProjectsParams: { fields: { botId: 'string', threadId: 'string?', projects: '[string]' } },

@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "707086a46c066282ca2a5b5f411cf6bbac0b5cd989c5b76d6feaf24cd7598336"
+    public static let sha256 = "4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8"
 }
 
 extension HostContract {
@@ -1366,6 +1366,43 @@ extension HostContract {
         }
     }
 
+    /// What `makeTopic` takes.
+    public struct MakeTopicParams: Codable, Hashable, Sendable {
+        public var botId: String
+        public var entryId: String
+        public var title: String
+
+        public init(botId: String, entryId: String, title: String) {
+            self.botId = botId
+            self.entryId = entryId
+            self.title = title
+        }
+    }
+
+    /// What `renameTopic` takes.
+    public struct RenameTopicParams: Codable, Hashable, Sendable {
+        public var botId: String
+        public var entryId: String
+        public var title: String
+
+        public init(botId: String, entryId: String, title: String) {
+            self.botId = botId
+            self.entryId = entryId
+            self.title = title
+        }
+    }
+
+    /// What `unfoldTopic` takes.
+    public struct UnfoldTopicParams: Codable, Hashable, Sendable {
+        public var botId: String
+        public var entryId: String
+
+        public init(botId: String, entryId: String) {
+            self.botId = botId
+            self.entryId = entryId
+        }
+    }
+
     /// What `projects` takes.
     public struct ProjectsParams: Codable, Hashable, Sendable {
         public var refresh: Bool?
@@ -1683,6 +1720,9 @@ extension HostContract {
         case respondPermission
         case editHandoff
         case keepConversation
+        case makeTopic
+        case renameTopic
+        case unfoldTopic
         case projects
         case threadProjects
         case setThreadProjects
@@ -1712,6 +1752,9 @@ extension HostContract {
         case botLeave
         case peerAgents
     }
+
+    /// What the owner alone (a method no one else may call; the owner may call every method) may call.
+    public static let ownerMethods: [Method] = [.makeTopic, .renameTopic, .unfoldTopic]
 
     /// What an invited person may call.
     public static let memberMethods: [Method] = [.hello, .kithInfo, .startChat, .send, .thread, .history, .newSession, .unsend, .markRead, .stop, .upload, .readUpload, .react, .respondPermission, .editHandoff, .keepConversation, .projects, .threadProjects, .setThreadProjects, .linkCode, .scheduleMessages, .callAccept, .callDecline, .callGreet, .logCall, .startCall, .endCall, .createBotInvite, .revokeBotInvite, .revokeBot, .myBots, .setBotLimits, .resolveCitation]
@@ -1799,6 +1842,9 @@ extension HostContract {
         case "RespondPermissionParams": _ = try d.decode(RespondPermissionParams.self, from: data)
         case "EditHandoffParams": _ = try d.decode(EditHandoffParams.self, from: data)
         case "KeepConversationParams": _ = try d.decode(KeepConversationParams.self, from: data)
+        case "MakeTopicParams": _ = try d.decode(MakeTopicParams.self, from: data)
+        case "RenameTopicParams": _ = try d.decode(RenameTopicParams.self, from: data)
+        case "UnfoldTopicParams": _ = try d.decode(UnfoldTopicParams.self, from: data)
         case "ProjectsParams": _ = try d.decode(ProjectsParams.self, from: data)
         case "ThreadProjectsParams": _ = try d.decode(ThreadProjectsParams.self, from: data)
         case "SetThreadProjectsParams": _ = try d.decode(SetThreadProjectsParams.self, from: data)
