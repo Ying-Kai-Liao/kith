@@ -848,6 +848,22 @@ member list): there is no new way to add a member, it is the owner's own group e
 - **Restart.** A bot turn in progress resumes by waiting again under the same turnKey; the wake is not sent twice (it is
   marked sent before it goes out) and nothing is charged again.
 
+**The owner's commands** (`kernel/bin/kith-group`, over the host's local API; not the guest client of 9.2):
+
+- `kith group add-bot <room> <bot>`: adds one of your own bot guests to a group room and prints `<Bot> will see this room
+  from now on`. Already a member: says so, no write. `kith group remove-bot <room> <bot>`: takes it out (not a member:
+  exit 1; the last member: the host's "a group needs at least one bot", exit 1).
+- `kith bot set <bot> [--wake-profile P] [--turn-timeout S]`: `setBotLimits`; at least one flag; `--wake-profile ''` clears.
+  It prints what the host stored (`bot.limits`). `P` is a kith-auth profile of the `grok` service, the one `kith send-to
+  grok --profile P` uses.
+- `<room>` and `<bot>` are an id or a name (case-insensitive, exact); unknown or ambiguous is exit 2 with the candidates.
+  Host refusals (someone else's bot, one that isn't active) and an unreachable host print the host's text, exit 1.
+  `--json` prints the host's answer.
+- How it works: there is no method that lists rooms, so the command reads the `/events?since=0` catch-up (the `bot`
+  events; the latest per id wins) until the stream is quiet for a second (it has no end marker; 10 s at most). It then
+  sends the **full** member list (agents and bots) with `updateBot`: read-modify-write, so two edits at the same moment
+  are last write wins.
+
 ### 7.10 Linked Grok accounts
 
 - `botLinkRequest {speaker, label?}` (a bot method) -> `{code:"K7M-4QX2", expiresAt}` (10 min, single use, 40 bits,
