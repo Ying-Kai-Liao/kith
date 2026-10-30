@@ -1,6 +1,8 @@
 import { endLine, type Conversation } from '../../../shared/conversation.ts'
 import { isChat, type Entry } from '../../../shared/models.ts'
 import { isDeliveryTool } from '../../../shared/thread-feed.ts'
+import { foldTopics } from '../../../shared/topics.ts'
+import type { Topic } from '../../../shared/topics.ts'
 import { groupExchanges, type BotExchange } from './bot-exchange.ts'
 
 export type ChatItem =
@@ -9,6 +11,8 @@ export type ChatItem =
   | { id: string; kind: 'exchanges'; entry: Entry; exchanges: BotExchange[] }
   /** The tool calls between two messages as one collapsed "N steps" row; `id` is `steps-<first tool entry id>`. */
   | { id: string; kind: 'steps'; entries: Entry[] }
+  /** A run the owner folded into one card; `entries` are its rows (the root first) and `inner` how they read when it is open. */
+  | { id: string; kind: 'topic'; topic: Topic; root: Entry; entries: Entry[]; inner: ChatItem[] }
   /** Where a room run ended: "Used all 10 turns", "Worked it out · 6 of 10 turns", "You stopped it · 4 of 10 turns used". */
   | { id: string; kind: 'ending'; conversation: Conversation; text: string; more: boolean }
 
@@ -34,7 +38,7 @@ export function flatEntries(entries: Entry[]): Entry[] {
  * whole (Grok Bot's `send_message`); what it writes along the way is trace, except its tool calls: a run of them
  * is one collapsed steps item (file deliveries left out; a run of only those shows nothing). Runs of bot exchanges with one peer become one item.
  */
-export function buildChat(entries: Entry[], endings: Conversation[] = []): ChatItem[] {
+export function buildChat(entries: Entry[], endings: Conversation[] = [], fold = true): ChatItem[] {
   const out: ChatItem[] = []
   let lastDate: number | null = null
   let lastAuthor: string | null = null
@@ -46,7 +50,20 @@ export function buildChat(entries: Entry[], endings: Conversation[] = []): ChatI
     if (entries.length) out.push({ id: `steps-${run[0]!.id}`, kind: 'steps', entries })
     run = []
   }
-  for (const { entry: e, exchanges } of groupExchanges(flatEntries(entries), true)) {
+  const flat = flatEntries(entries)
+  // A topic's rows leave the room's list for its card (and read as a flat chat again inside it, with no topics of its own).
+  const { folds, hidden } = fold ? foldTopics(flat) : { folds: new Map<string, Entry[]>(), hidden: new Set<Entry>() }
+  for (const { entry: e, exchanges } of groupExchanges(hidden.size ? flat.filter((x) => !hidden.has(x)) : flat, true)) {
+    const members = folds.get(e.id)
+    if (members) {
+      const newest = members.reduce((m, x) => Math.max(m, x.createdAt), e.createdAt)
+      flush()
+      if (lastDate === null || e.createdAt - lastDate > 3_600_000) out.push({ id: `sep-${e.id}`, kind: 'separator', date: e.createdAt })
+      out.push({ id: `topic-${stableId(e)}`, kind: 'topic', topic: e.data.topic!, root: e, entries: members, inner: buildChat(members, [], false).filter((i) => i.kind !== 'separator') })
+      lastAuthor = null
+      lastDate = newest
+      continue
+    }
     if (e.kind === 'tool') {
       run.push(e)
       // A long run counts as activity, so it doesn't make a gap of its own.

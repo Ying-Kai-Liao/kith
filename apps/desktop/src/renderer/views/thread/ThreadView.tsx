@@ -17,6 +17,8 @@ import { useStore } from '../../store/context'
 import { UpdateNeededCard } from '../UpdateNeededCard'
 import { buildChat, rowIn, useArrivals, type ChatItem } from './chat-items'
 import { BotConversationView, BotMessageRow } from './BotConversation'
+import { TopicCard } from './TopicCard'
+import { TopicPromptHost } from './TopicPrompt'
 import { ChatRow, lateQuoteOf, StepsRow, TimeSeparator, WorkingIndicator } from './ChatRows'
 import { AddToRoomSheet } from './AddToRoomSheet'
 import { Composer } from './Composer'
@@ -421,7 +423,7 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
   // A conversation opened from the bot detail or a notification: its first message into view, the chat left there.
   useLayoutEffect(() => {
     if (!focusId) return
-    const at = all.findIndex((i) => i.kind === 'entry' && i.entry.id === focusId)
+    const at = all.findIndex((i) => (i.kind === 'entry' && i.entry.id === focusId) || (i.kind === 'topic' && i.entries.some((e) => e.id === focusId)))
     if (at < 0) {
       void store.loadThread(botId, focusId)
       return
@@ -495,6 +497,7 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
             </div>
           ) : null}
           <div className="chat-end" />
+          <TopicPromptHost />
         </div>
       </div>
       {jump.mounted ? (
@@ -527,6 +530,7 @@ function Row({ item, chat, openTrace, openRoutine, openBotChat }: { item: ChatIt
   }
   if (item.kind === 'exchanges') return <BotMessageRow exchanges={item.exchanges} open={openBotChat} />
   if (item.kind === 'steps') return <StepsRow entries={item.entries} openTrace={openTrace} />
+  if (item.kind === 'topic') return <TopicCard item={item} renderRow={(row) => <Row item={row} chat={chat} openTrace={openTrace} openRoutine={openRoutine} openBotChat={openBotChat} />} />
   if (item.kind === 'ending') return chat ? <EndLine botId={chat.id} text={item.text} more={item.more} /> : null
   const e = item.entry
   if (e.kind === 'notice' && e.data.routineId) {

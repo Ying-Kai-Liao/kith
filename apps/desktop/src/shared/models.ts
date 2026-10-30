@@ -6,6 +6,7 @@ import { decodeBotStatus, type BotStatus, type Entry as ContractEntry, type Rece
 import type { RichCard } from './rich-card.ts'
 import type { SecretAccount, SecretRequest } from './secret-card.ts'
 import { normalizeFolder, type PlaceFolder } from './place-folders.ts'
+import type { Topic } from './topics.ts'
 
 export type { PlaceFolder } from './place-folders.ts'
 
@@ -321,6 +322,8 @@ export interface EntryData {
   writerChange?: string
   /** notice: when the writer changed, in ms. */
   at?: number
+  /** On a topic's first message: the run the owner folded into one card in the room (see shared/topics.ts). */
+  topic?: Topic
   author?: string
   /** user, in a bot-guest chat: the outside bot (and the person speaking for it) that wrote this message. */
   sender?: { botId?: string; name?: string; speaker?: string; provider?: string }

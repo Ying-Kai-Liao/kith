@@ -38,6 +38,7 @@ import { richCardOf, type RichCard } from '@shared/rich-card'
 import { NewsCard, ScheduleCard } from './RichCards'
 import { lateOf } from '@shared/conversation'
 import { BotTag, LateTag } from './Tags'
+import { topicMenuItems } from './TopicPrompt'
 
 /** The first line of the message that opened the run a reply belongs to, for a late reply to quote; null when unknown. */
 export function lateQuoteOf(store: BotStore, entry: Entry): string | null {
@@ -178,7 +179,7 @@ function LivePermission({ entry }: { entry: Entry }) {
 }
 
 /** The full card for an entry, pending or answered. */
-function OpenCard({ entry }: { entry: Entry }) {
+export function OpenCard({ entry }: { entry: Entry }) {
   const store = useLiveStore()
   const ownerName = ownerNameFrom(store.bots.get(entry.botId)?.activity)
   // A key request is its own card; an entry without data.card (or an old one) is the approval card as before.
@@ -272,6 +273,7 @@ export function UserBubble({ entry, botWorking, reply }: { entry: Entry; botWork
               ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
               { title: 'Copy', icon: 'square.on.square', action: copy },
               ...(status === 'queued' ? [{ title: 'Unsend', icon: 'arrow.uturn.backward', action: () => store.unsend(entry) }] : []),
+              ...topicMenuItems(store, entry),
             ]}
           >
             {entry.data.text}
@@ -362,6 +364,7 @@ export function AgentBubble({ entry, openTrace, reply }: { entry: Entry; openTra
             ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
             { title: 'Copy', icon: 'square.on.square', action: copy },
             { title: 'Show what it did', icon: 'list.bullet', action: openTrace },
+            ...topicMenuItems(store, entry),
           ]}
         >
           {entry.data.files?.length ? <div className="file-message-cards">{entry.data.files.map((file) => <SharedFileView key={file.id} entry={entry} file={file} />)}</div> : <MarkdownText text={entry.data.text ?? ''} />}

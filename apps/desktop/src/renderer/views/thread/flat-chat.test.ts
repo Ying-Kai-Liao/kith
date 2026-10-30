@@ -96,3 +96,24 @@ test('a run nobody answered ends after the message that opened it, and one that 
   assert.deepEqual(items.filter((i) => i.kind !== 'separator').map((i) => i.id), ['u', 'end-c1'])
   assert.deepEqual(buildChat([entry('x', 'user', 1)], [ended({ opening: 'gone' })]).map((i) => i.id).filter((id) => id.startsWith('end')), [])
 })
+
+test('a topic folds its run into one card at its root, and the room goes on after it', () => {
+  const topic = { id: 't', title: 'Draft card', untilId: 'c', untilAt: 4000, turns: [], createdAt: 1000 }
+  const entries = [
+    entry('a', 'user', 0.5, { text: 'before' }),
+    entry('root', 'user', 1, { text: 'How risky?', topic }),
+    entry('tool', 'tool', 2, {}),
+    entry('b', 'agent', 3, { text: 'Safe enough.', final: true }),
+    entry('c', 'user', 4, { text: 'ok' }),
+    entry('after', 'agent', 5, { text: 'later', final: true }),
+  ]
+  const items = buildChat(entries).filter((i) => i.kind !== 'separator')
+  assert.deepEqual(items.map((i) => i.id), ['a', 'topic-root', 'after'])
+  const card = items[1]!
+  assert.equal(card.kind === 'topic' && card.entries.length, 4)
+  assert.deepEqual(card.kind === 'topic' && card.inner.map((i) => i.id), ['root', 'steps-tool', 'b', 'c'])
+})
+
+test('a topic whose root is not loaded leaves its rows in the room', () => {
+  assert.deepEqual(ids([entry('b', 'agent', 3, { text: 'x', final: true }), entry('c', 'user', 4, { text: 'y' })]), ['b', 'c'])
+})
