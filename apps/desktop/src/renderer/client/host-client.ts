@@ -465,7 +465,7 @@ export class HostClient {
     return this.call<{ bot: Bot }>('startChat', { agent }, 60_000)
   }
 
-  // Service keys (kernel/PROTOCOL.md, "Keys"). Owner only. No call here ever returns a value.
+  // Service keys (docs/reference/keys.md). Owner only. No call here ever returns a value.
   /** Saves a typed key to the Keychain. `values` is sent once and kept nowhere: not logged, not stored, not replayed. */
   provideSecret(entryId: string, account: string, values: Record<string, string>): Promise<{ saved: { service: string; vars: string[]; profile: string }; resumed: boolean }> {
     return this.call('provideSecret', { entryId, account, values }, 30_000)

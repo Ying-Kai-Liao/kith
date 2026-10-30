@@ -1,0 +1,13 @@
+{
+  "type": "PeerComputerList",
+  "body": {
+    "computers": [
+      {
+        "computerId": "bWluaSBjb21wdXRlciBpZCE",
+        "name": "Mac mini",
+        "platform": "macos",
+        "signKey": "BAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ"
+      }
+    ]
+  }
+}

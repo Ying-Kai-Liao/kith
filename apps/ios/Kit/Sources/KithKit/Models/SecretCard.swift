@@ -1,6 +1,6 @@
 import Foundation
 
-// Access and Key cards (host `cards/secret.rs`, kernel PROTOCOL "Keys"): the agent needs a service's key. The owner
+// Access and Key cards (host `cards/secret.rs`, docs/reference/keys.md): the agent needs a service's key. The owner
 // picks an account or types the key into a secure field. These types carry names and states only, never a value.
 
 /// `data.secret` of a card with `data.card` `account` or `key`.

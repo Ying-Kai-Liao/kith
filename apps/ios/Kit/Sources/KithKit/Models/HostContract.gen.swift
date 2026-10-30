@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "e70b86d635ebb0d98f6655571824268167f7ea15a2ccc72ace9d10433cd572f8"
+    public static let sha256 = "357563e54b3cdccb8f5f5a6717715ed875d4cfb53bd3d63bc69b8b61a11ad2f9"
 }
 
 extension HostContract {
@@ -862,6 +862,26 @@ extension HostContract {
         }
     }
 
+    /// One agent a paired computer may ask: its name, and the bot's display name when it has one.
+    public struct PeerAgent: Codable, Hashable, Sendable {
+        public var agent: String
+        public var name: String?
+
+        public init(agent: String, name: String? = nil) {
+            self.agent = agent
+            self.name = name
+        }
+    }
+
+    /// The agents a paired computer may ask here.
+    public struct PeerAgents: Codable, Hashable, Sendable {
+        public var agents: [PeerAgent]
+
+        public init(agents: [PeerAgent]) {
+            self.agents = agents
+        }
+    }
+
     /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
     public struct BotProof: Codable, Hashable, Sendable {
         public var state: BotGuestState
@@ -1525,6 +1545,12 @@ extension HostContract {
         }
     }
 
+    /// What `peerAgents` takes.
+    public struct PeerAgentsParams: Codable, Hashable, Sendable {
+        public init() {
+        }
+    }
+
     /// Each method's name, as called.
     public enum Method: String, CaseIterable, Sendable {
         case hello
@@ -1570,6 +1596,7 @@ extension HostContract {
         case botConversations
         case botStop
         case botLeave
+        case peerAgents
     }
 
     /// What an invited person may call.
@@ -1583,6 +1610,9 @@ extension HostContract {
 
     /// What a bot guest that is still joining or waiting for its owner's allow may call.
     public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
+
+    /// What another computer of the owner's, paired here (Mac link) may call.
+    public static let peerMethods: [Method] = [.peerAgents]
 
     /// Decodes `data` as the contract type `name`; false when the contract has no such type. For the fixtures' tests.
     public static func decode(_ name: String, _ data: Data) throws -> Bool {
@@ -1625,6 +1655,8 @@ extension HostContract {
         case "BotGuestAnswer": _ = try d.decode(BotGuestAnswer.self, from: data)
         case "BotOwner": _ = try d.decode(BotOwner.self, from: data)
         case "BotSelf": _ = try d.decode(BotSelf.self, from: data)
+        case "PeerAgent": _ = try d.decode(PeerAgent.self, from: data)
+        case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
         case "BotProof": _ = try d.decode(BotProof.self, from: data)
         case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
         case "BotPosted": _ = try d.decode(BotPosted.self, from: data)
@@ -1677,6 +1709,7 @@ extension HostContract {
         case "BotConversationsParams": _ = try d.decode(BotConversationsParams.self, from: data)
         case "BotStopParams": _ = try d.decode(BotStopParams.self, from: data)
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
+        case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
         default: return false
         }
         return true

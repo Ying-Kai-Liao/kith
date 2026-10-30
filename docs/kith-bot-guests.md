@@ -831,7 +831,7 @@ member list): there is no new way to add a member, it is the owner's own group e
   started. A refused wake (non-200), no wake profile, or no post within the bot's **turn timeout** is a pass; the turn
   was already charged. The wait is the room task's own await.
 - **Settings** (`setBotLimits`, the computer owner for the profile): `turnTimeoutS` (default 300, clamped 30 to 3600) and
-  `wakeProfile` (a kith-auth profile name for the `grok` service; empty clears it). Stored in `bot_guests` (schema 12).
+  `wakeProfile` (a kith-auth profile name for the `grok` service; empty clears it). Stored in `bot_guests` (schema 12; the Mac link tables are 13).
 - **`botPost {room, conversation, epoch, turnKey?, clientNonce, text}`**, 16,000 characters at most, at the bot's rate.
   Stored once per nonce (the same text replays, other text is `nonceReused`, C4). With the turnKey of the turn the room
   waits on it is that member's reply and completes the wait. Without a turnKey it is an unprompted post: charged one
@@ -847,6 +847,22 @@ member list): there is no new way to add a member, it is the owner's own group e
   opens, the reply wakes nobody. An open conversation's budget is charged; the bot's ask rate always is.
 - **Restart.** A bot turn in progress resumes by waiting again under the same turnKey; the wake is not sent twice (it is
   marked sent before it goes out) and nothing is charged again.
+
+**The owner's commands** (`kernel/bin/kith-group`, over the host's local API; not the guest client of 9.2):
+
+- `kith group add-bot <room> <bot>`: adds one of your own bot guests to a group room and prints `<Bot> will see this room
+  from now on`. Already a member: says so, no write. `kith group remove-bot <room> <bot>`: takes it out (not a member:
+  exit 1; the last member: the host's "a group needs at least one bot", exit 1).
+- `kith bot set <bot> [--wake-profile P] [--turn-timeout S]`: `setBotLimits`; at least one flag; `--wake-profile ''` clears.
+  It prints what the host stored (`bot.limits`). `P` is a kith-auth profile of the `grok` service, the one `kith send-to
+  grok --profile P` uses.
+- `<room>` and `<bot>` are an id or a name (case-insensitive, exact); unknown or ambiguous is exit 2 with the candidates.
+  Host refusals (someone else's bot, one that isn't active) and an unreachable host print the host's text, exit 1.
+  `--json` prints the host's answer.
+- How it works: there is no method that lists rooms, so the command reads the `/events?since=0` catch-up (the `bot`
+  events; the latest per id wins) until the stream is quiet for a second (it has no end marker; 10 s at most). It then
+  sends the **full** member list (agents and bots) with `updateBot`: read-modify-write, so two edits at the same moment
+  are last write wins.
 
 ### 7.10 Linked Grok accounts
 

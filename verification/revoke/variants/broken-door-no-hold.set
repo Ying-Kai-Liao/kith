@@ -1,0 +1,3 @@
+\* the door start reads may() only, not "in sync" (GuestDoor.tla nohold)
+DoorNoHold = TRUE
+GuestDoor = TRUE

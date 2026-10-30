@@ -10,6 +10,7 @@ export * from "./routes/account";
 export * from "./routes/botguests";
 export * from "./routes/host";
 export * from "./routes/invites";
+export * from "./routes/peers";
 export * from "./routes/relay";
 export * from "./routes/webhooks";
 

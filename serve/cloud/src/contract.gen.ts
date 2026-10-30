@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '3508398770f9ec4df5154235c1c9ff6db1e22c3faa7f17261fa87878a6b6a113'
+export const CONTRACT_SHA256 = '0c5a1e624112809e89829ddfc89c784ff5e09aa201a157f1aa7cf54b05814888'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -251,7 +251,7 @@ export interface BotDevice {
   createdAt: number
 }
 
-/** GET /v1/host/state. memberships, botDevices and revoked are absent from a cloud that predates them: then the host leaves what it knows alone. */
+/** GET /v1/host/state. memberships, botDevices, revoked, peerRequests and peers are absent from a cloud that predates them: then the host leaves what it knows alone. */
 export interface HostState {
   owner?: Owner | null
   grants: HostGrant[]
@@ -259,6 +259,49 @@ export interface HostState {
   memberships?: Membership[] | null
   botDevices?: BotDevice[] | null
   revoked?: string[] | null
+  peerRequests?: HostPeerRequest[] | null
+  peers?: HostPeer[] | null
+}
+
+/** Another computer of this computer's account, which it may ask to pair with (Mac link). */
+export interface PeerComputer {
+  computerId: string
+  name: string
+  platform?: string | null
+  signKey: string
+}
+
+export interface PeerComputerList {
+  computers: PeerComputer[]
+}
+
+/** The asking computer's device key for the link and its SAS commit (base64url, 32 bytes each). */
+export interface CreatePeerRequest {
+  computerId: string
+  deviceKey: string
+  commit: string
+}
+
+/** A pending pairing request from another computer of the account, as the answering host sees it. */
+export interface HostPeerRequest {
+  requestId: string
+  computerId: string
+  name: string
+  deviceKey: string
+  commit: string
+  hostNonce?: string | null
+  deviceNonce?: string | null
+  createdAt: number
+  expiresAt: number
+}
+
+/** An active pairing this computer is on: fromComputerId asks toComputerId's agents with deviceKey. name is the other computer's. */
+export interface HostPeer {
+  grantId: string
+  fromComputerId: string
+  toComputerId: string
+  name: string
+  deviceKey: string
 }
 
 export interface ScreenIceRequest {
@@ -354,6 +397,11 @@ export interface Types {
   Membership: Membership
   BotDevice: BotDevice
   HostState: HostState
+  PeerComputer: PeerComputer
+  PeerComputerList: PeerComputerList
+  CreatePeerRequest: CreatePeerRequest
+  HostPeerRequest: HostPeerRequest
+  HostPeer: HostPeer
   ScreenIceRequest: ScreenIceRequest
   IceServer: IceServer
   IceConfig: IceConfig
@@ -416,6 +464,14 @@ export const ROUTES = {
   hostNonce: { method: 'POST', path: 'v1/host/access-requests/{requestId}/nonce', pattern: /^\/v1\/host\/access-requests\/([A-Za-z0-9_-]{1,64})\/nonce$/, kind: 'json', request: 'HostNonce', response: 'EmptyAnswer' },
   hostDecision: { method: 'POST', path: 'v1/host/access-requests/{requestId}/decision', pattern: /^\/v1\/host\/access-requests\/([A-Za-z0-9_-]{1,64})\/decision$/, kind: 'json', request: 'HostDecision', response: 'Decided' },
   hostRevokeGrant: { method: 'POST', path: 'v1/host/grants/{grantId}/revoke', pattern: /^\/v1\/host\/grants\/([A-Za-z0-9_-]{1,64})\/revoke$/, kind: 'json', response: 'EmptyAnswer' },
+  hostPeerComputers: { method: 'GET', path: 'v1/host/peer-computers', pattern: /^\/v1\/host\/peer-computers$/, kind: 'json', response: 'PeerComputerList' },
+  hostCreatePeerRequest: { method: 'POST', path: 'v1/host/peer-requests', pattern: /^\/v1\/host\/peer-requests$/, kind: 'json', request: 'CreatePeerRequest', response: 'AccessRequestCreated' },
+  hostGetPeerRequest: { method: 'GET', path: 'v1/host/peer-requests/{requestId}', pattern: /^\/v1\/host\/peer-requests\/([A-Za-z0-9_-]{1,64})$/, kind: 'json', response: 'AccessStatus' },
+  hostRevealPeerRequest: { method: 'POST', path: 'v1/host/peer-requests/{requestId}/reveal', pattern: /^\/v1\/host\/peer-requests\/([A-Za-z0-9_-]{1,64})\/reveal$/, kind: 'json', request: 'Reveal', response: 'EmptyAnswer' },
+  hostCancelPeerRequest: { method: 'DELETE', path: 'v1/host/peer-requests/{requestId}', pattern: /^\/v1\/host\/peer-requests\/([A-Za-z0-9_-]{1,64})$/, kind: 'json', response: 'EmptyAnswer' },
+  hostPeerNonce: { method: 'POST', path: 'v1/host/peer-requests/{requestId}/nonce', pattern: /^\/v1\/host\/peer-requests\/([A-Za-z0-9_-]{1,64})\/nonce$/, kind: 'json', request: 'HostNonce', response: 'EmptyAnswer' },
+  hostPeerDecision: { method: 'POST', path: 'v1/host/peer-requests/{requestId}/decision', pattern: /^\/v1\/host\/peer-requests\/([A-Za-z0-9_-]{1,64})\/decision$/, kind: 'json', request: 'HostDecision', response: 'Decided' },
+  hostRevokePeer: { method: 'POST', path: 'v1/host/peers/{grantId}/revoke', pattern: /^\/v1\/host\/peers\/([A-Za-z0-9_-]{1,64})\/revoke$/, kind: 'json', response: 'EmptyAnswer' },
   hostUnclaim: { method: 'POST', path: 'v1/host/unclaim', pattern: /^\/v1\/host\/unclaim$/, kind: 'json', response: 'EmptyAnswer' },
   hostCreateInvite: { method: 'POST', path: 'v1/host/invites', pattern: /^\/v1\/host\/invites$/, kind: 'json', request: 'CreateInvite', response: 'OkAnswer' },
   hostRevokeInvite: { method: 'POST', path: 'v1/host/invites/{inviteId}/revoke', pattern: /^\/v1\/host\/invites\/([A-Za-z0-9_-]{1,64})\/revoke$/, kind: 'json', response: 'OkAnswer' },
@@ -463,6 +519,14 @@ export interface Responses {
   hostNonce: EmptyAnswer
   hostDecision: Decided
   hostRevokeGrant: EmptyAnswer
+  hostPeerComputers: PeerComputerList
+  hostCreatePeerRequest: AccessRequestCreated
+  hostGetPeerRequest: AccessStatus
+  hostRevealPeerRequest: EmptyAnswer
+  hostCancelPeerRequest: EmptyAnswer
+  hostPeerNonce: EmptyAnswer
+  hostPeerDecision: Decided
+  hostRevokePeer: EmptyAnswer
   hostUnclaim: EmptyAnswer
   hostCreateInvite: OkAnswer
   hostRevokeInvite: OkAnswer
@@ -488,6 +552,10 @@ export interface Requests {
   hostScreenIce: ScreenIceRequest
   hostNonce: HostNonce
   hostDecision: HostDecision
+  hostCreatePeerRequest: CreatePeerRequest
+  hostRevealPeerRequest: Reveal
+  hostPeerNonce: HostNonce
+  hostPeerDecision: HostDecision
   hostCreateInvite: CreateInvite
   hostRevokePerson: PersonRevoke
   hostUnrevokePerson: PersonRevoke
@@ -525,6 +593,14 @@ export const paths = {
   hostNonce: (requestId: string) => `v1/host/access-requests/${requestId}/nonce`,
   hostDecision: (requestId: string) => `v1/host/access-requests/${requestId}/decision`,
   hostRevokeGrant: (grantId: string) => `v1/host/grants/${grantId}/revoke`,
+  hostPeerComputers: () => `v1/host/peer-computers`,
+  hostCreatePeerRequest: () => `v1/host/peer-requests`,
+  hostGetPeerRequest: (requestId: string) => `v1/host/peer-requests/${requestId}`,
+  hostRevealPeerRequest: (requestId: string) => `v1/host/peer-requests/${requestId}/reveal`,
+  hostCancelPeerRequest: (requestId: string) => `v1/host/peer-requests/${requestId}`,
+  hostPeerNonce: (requestId: string) => `v1/host/peer-requests/${requestId}/nonce`,
+  hostPeerDecision: (requestId: string) => `v1/host/peer-requests/${requestId}/decision`,
+  hostRevokePeer: (grantId: string) => `v1/host/peers/${grantId}/revoke`,
   hostUnclaim: () => `v1/host/unclaim`,
   hostCreateInvite: () => `v1/host/invites`,
   hostRevokeInvite: (inviteId: string) => `v1/host/invites/${inviteId}/revoke`,
@@ -628,7 +704,12 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     HostAccessRequest: { fields: { requestId: 'string', userId: 'string?', deviceKey: 'string', deviceName: 'string', platform: 'string', email: 'string?', commit: 'string', hostNonce: 'string?', deviceNonce: 'string?', createdAt: 'int', expiresAt: 'int' }, mayOmit: ['hostNonce', 'deviceNonce'] },
     Membership: { fields: { membershipId: 'string', userId: 'string', inviteId: 'string', email: 'string?' } },
     BotDevice: { fields: { botDeviceId: 'string', inviteId: 'string', deviceKey: 'string', name: 'string', provider: 'string?', createdAt: 'int' } },
-    HostState: { fields: { owner: 'Owner?', grants: '[HostGrant]', requests: '[HostAccessRequest]', memberships: '[Membership]?', botDevices: '[BotDevice]?', revoked: '[string]?' } },
+    HostState: { fields: { owner: 'Owner?', grants: '[HostGrant]', requests: '[HostAccessRequest]', memberships: '[Membership]?', botDevices: '[BotDevice]?', revoked: '[string]?', peerRequests: '[HostPeerRequest]?', peers: '[HostPeer]?' } },
+    PeerComputer: { fields: { computerId: 'string', name: 'string', platform: 'string?', signKey: 'string' } },
+    PeerComputerList: { fields: { computers: '[PeerComputer]' } },
+    CreatePeerRequest: { fields: { computerId: 'string', deviceKey: 'string', commit: 'string' } },
+    HostPeerRequest: { fields: { requestId: 'string', computerId: 'string', name: 'string', deviceKey: 'string', commit: 'string', hostNonce: 'string?', deviceNonce: 'string?', createdAt: 'int', expiresAt: 'int' }, mayOmit: ['hostNonce', 'deviceNonce'] },
+    HostPeer: { fields: { grantId: 'string', fromComputerId: 'string', toComputerId: 'string', name: 'string', deviceKey: 'string' } },
     ScreenIceRequest: { fields: { deviceKey: 'string' } },
     IceServer: { fields: { urls: '[string]', username: 'string?', credential: 'string?' }, mayOmit: ['username', 'credential'] },
     IceConfig: { fields: { iceServers: '[IceServer]', expiresAt: 'int' } },

@@ -194,6 +194,8 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             let args = b.get("arguments").filter(|a| a.is_object()).cloned().unwrap_or_else(|| json!({}));
             crate::screen::computer(hub, str_arg(&b, "botId")?, str_arg(&b, "name")?, args).await?
         }
+        // Owner only: on no guest list.
+        "sampleCards" => crate::samples::post(hub)?,
         _ => return Ok(ControlFlow::Continue(b)),
     }))
 }

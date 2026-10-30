@@ -3,6 +3,7 @@
 import { b64url, computerIdFor, fromB64url, randomId, sha256 } from "../auth";
 import { activeBotDevices } from "./botguests";
 import { revokedOf } from "./invites";
+import { peerState } from "./peers";
 import {
   ApiError,
   audit,
@@ -173,6 +174,8 @@ export async function hostState(c: Ctx): Promise<Responses["hostState"]> {
     botDevices: await activeBotDevices(c, comp.id),
     // Accounts this computer's owner revoked, on any of their computers (R6). Older hosts ignore it.
     revoked: await revokedOf(c, comp.owner_user_id),
+    // Mac link pairings (designs/2026-10-29-mac-link), apart from grants so an older host never reads one as a device.
+    ...(await peerState(c, comp)),
   };
 }
 

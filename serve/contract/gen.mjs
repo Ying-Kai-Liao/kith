@@ -75,6 +75,7 @@ const ROLE_WHO = {
   unproven: "an invited person's unproven device",
   bot: "a bot guest (the pending ones too: see botPending)",
   botPending: "a bot guest that is still joining or waiting for its owner's allow",
+  peer: "another computer of the owner's, paired here (Mac link)",
 };
 const ROLES = new Set(Object.keys(ROLE_WHO));
 

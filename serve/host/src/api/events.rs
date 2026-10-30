@@ -98,7 +98,7 @@ pub fn events_stream(
         Principal::Owner => None,
         Principal::Member(p) => Some(p),
         Principal::Bot { bot_id, .. } => return Ok(Either::Left(bot_events(hub, since, &bot_id))),
-        Principal::Nobody | Principal::Unproven(_) | Principal::BotPending(_) => {
+        Principal::Nobody | Principal::Unproven(_) | Principal::BotPending(_) | Principal::Peer(_) => {
             anyhow::bail!("this device isn't allowed on this computer")
         }
     };

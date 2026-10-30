@@ -9,6 +9,7 @@ pub mod crypto;
 pub mod identity;
 pub mod members;
 pub mod owner;
+pub mod peers;
 pub mod push;
 pub mod relay;
 pub mod sync_lease;

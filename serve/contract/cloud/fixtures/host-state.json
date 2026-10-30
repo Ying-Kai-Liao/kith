@@ -49,6 +49,28 @@
         "createdAt": 1792500000000
       }
     ],
+    "peerRequests": [
+      {
+        "requestId": "prq_2k3l",
+        "computerId": "bGFwdG9wIGNvbXB1dGVyIGlk",
+        "name": "Kai’s MacBook",
+        "deviceKey": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+        "commit": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "hostNonce": "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE",
+        "deviceNonce": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM",
+        "createdAt": 1793000000000,
+        "expiresAt": 1793000600000
+      }
+    ],
+    "peers": [
+      {
+        "grantId": "pgr_4m5n",
+        "fromComputerId": "bGFwdG9wIGNvbXB1dGVyIGlk",
+        "toComputerId": "bWluaSBjb21wdXRlciBpZCE",
+        "name": "Kai’s MacBook",
+        "deviceKey": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI"
+      }
+    ],
     "revoked": [
       "user_9xyz"
     ]

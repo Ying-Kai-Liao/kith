@@ -58,6 +58,31 @@ check "project in both layouts: both load, no duplicates" \
   "[ \"\$(grep -c 'gamma flat note' <<<\"\$PG2\")\" = 1 ] && [ \"\$(grep -c 'gamma folder note' <<<\"\$PG2\")\" = 1 ]"
 check "owner output without that project is unchanged" "[ \"\$(P)\" = \"\$OWN\" ]"
 
+# the project's start files: the session file, codebase.md, decisions (the last 30 lines, own open lines from before)
+D=$KITH_STATE/projects/alpha; mkdir -p "$D" "$M/people/sam/sessions"
+echo 'alpha codebase map' > "$D/codebase.md"
+{ for i in $(seq 1 12); do echo "2026-10-01 · echo · open: echo question $i · ctx"; done
+  echo '2026-10-01 · other · open: other agent question · ctx'
+  for i in $(seq 1 40); do echo "2026-10-02 · other · decision $i · why"; done; } > "$D/decisions.md"
+echo 'alpha owner session' > "$M/sessions/alpha.md"; echo 'alpha sam session' > "$M/people/sam/sessions/alpha.md"
+SF=$(env "$K" echo -p alpha --print 2>&1)
+check "start files: the owner's session file and codebase.md load with the project" \
+  "grep -q 'alpha owner session' <<<\"\$SF\" && grep -q 'alpha codebase map' <<<\"\$SF\" && ! grep -q 'alpha sam session' <<<\"\$SF\""
+check "start files: the last 30 decision lines, not older ones" \
+  "grep -q 'decision 40 ' <<<\"\$SF\" && grep -q 'decision 11 ' <<<\"\$SF\" && ! grep -q 'decision 10 ' <<<\"\$SF\""
+check "start files: only this agent's own older open lines, the newest 10 with the count" \
+  "grep -q 'echo question 12 ' <<<\"\$SF\" && grep -q 'echo question 3 ' <<<\"\$SF\" && ! grep -q 'echo question 2 ' <<<\"\$SF\" && ! grep -q 'other agent question' <<<\"\$SF\" && grep -q '(12, the newest 10 here' <<<\"\$SF\""
+check "start files: none without a project, or for another project" \
+  "! grep -qE 'alpha (owner session|codebase)|decision 40' <<<\"\$(P)\" && ! grep -q 'alpha codebase' <<<\"\$PG2\""
+SFS=$(env KITH_PERSON=sam "$K" echo -p alpha --print 2>&1)
+check "start files, invitee: their own session file, never the owner's" \
+  "grep -q 'alpha sam session' <<<\"\$SFS\" && ! grep -q 'alpha owner session' <<<\"\$SFS\" && grep -q 'alpha codebase map' <<<\"\$SFS\""
+SFG=$(env KITH_ROOM=grp1 "$K" echo -p alpha --print 2>&1)
+check "start files, group room: no session file; the shared project files still load" \
+  "! grep -q 'alpha owner session' <<<\"\$SFG\" && grep -q 'alpha codebase map' <<<\"\$SFG\" && grep -q 'decision 40 ' <<<\"\$SFG\""
+check "start files, owner-only group: the owner's session file loads" \
+  "env KITH_ROOM=grp1 KITH_ROOM_OWNER_ONLY=1 \"$K\" echo -p alpha --print 2>&1 | grep -q 'alpha owner session'"
+
 SAM=$(P KITH_PERSON=sam)
 check "invitee 1:1: shared then their own memory, and about them" \
   "[ \"\$(grep -n -o 'about sam\|shared craft tip\|sam likes tea' <<<\"\$SAM\" | cut -d: -f2 | paste -sd, -)\" = 'about sam,shared craft tip,sam likes tea' ]"

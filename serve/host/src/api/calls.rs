@@ -24,7 +24,11 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             let who = match principal(&hub.store, caller) {
                 Principal::Owner => None,
                 Principal::Member(person) => Some(person),
-                Principal::Nobody | Principal::Unproven(_) | Principal::Bot { .. } | Principal::BotPending(_) => {
+                Principal::Nobody
+                | Principal::Unproven(_)
+                | Principal::Bot { .. }
+                | Principal::BotPending(_)
+                | Principal::Peer(_) => {
                     bail!("this device isn't allowed on this computer")
                 }
             };

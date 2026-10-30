@@ -29,7 +29,7 @@ public struct GuestPromptCard: View {
                     if i > 0 { Rectangle().fill(Palette.border).frame(height: 0.5) }
                     Button { respond(option.optionId) } label: {
                         HStack(spacing: 8) {
-                            Text(GuestPrompt.label(option))
+                            Text(GuestPrompt.label(option, edge: prompt.entry.data.edge))
                                 .font(.body.weight(option.kind == "allow_once" ? .semibold : .regular))
                                 .foregroundStyle(option.kind.hasPrefix("allow") ? Palette.text : Palette.danger)
                             Spacer(minLength: 0)

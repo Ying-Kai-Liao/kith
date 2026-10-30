@@ -90,7 +90,7 @@ async fn schedule_messages_are_on_until_the_person_turns_their_own_off() {
 }
 
 /// Every method name the router has an arm for, read from the api sources.
-fn router_methods() -> BTreeSet<String> {
+pub(super) fn router_methods() -> BTreeSet<String> {
     let sources = [
         include_str!("bots.rs"),
         include_str!("calls.rs"),
@@ -103,6 +103,7 @@ fn router_methods() -> BTreeSet<String> {
         include_str!("remote.rs"),
         include_str!("people.rs"),
         include_str!("botguests.rs"),
+        include_str!("peers.rs"),
         include_str!("threads.rs"),
     ];
     let mut out = BTreeSet::new();

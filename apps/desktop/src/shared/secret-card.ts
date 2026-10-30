@@ -1,4 +1,4 @@
-// The Access and Key cards: a permission entry whose `data.card` is "account" or "key" (kernel/PROTOCOL.md, "Keys").
+// The Access and Key cards: a permission entry whose `data.card` is "account" or "key" (docs/reference/keys.md).
 // The entry never holds a value. The one place a value lives is the Key card's own state while it is being typed.
 
 import type { Entry } from './models.ts'

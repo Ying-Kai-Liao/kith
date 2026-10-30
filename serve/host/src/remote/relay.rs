@@ -447,7 +447,7 @@ fn signed_acl(hub: &Hub) -> Result<Value> {
     hub.store.kv_set("acl_ver", &ver.to_string())?;
     // A bot guest's key is listed with its kind so the relay can give bots their own, tighter limits. Only a bot
     // this host admitted has a device row at all (`remote::botsync`), so only those are listed.
-    let devices: Vec<Value> = hub
+    let mut devices: Vec<Value> = hub
         .store
         .devices()?
         .into_iter()
@@ -459,6 +459,8 @@ fn signed_acl(hub: &Hub) -> Result<Value> {
             entry
         })
         .collect();
+    // A paired computer's key gets device limits; what it may call is `Principal::Peer`'s.
+    devices.extend(hub.store.peers_in()?.into_iter().map(|p| json!({"dk": p.device_key, "grant": p.grant_id})));
     let offers: Vec<Value> =
         hub.pairing.locked().offers().into_iter().map(|(id, exp)| json!({"id": id, "exp": exp})).collect();
     let acl = json!({
@@ -772,6 +774,27 @@ mod tests {
         let close = sent.iter().find(|v| v["t"] == "close").unwrap();
         assert_eq!(close["code"], 4002, "hello.dk must match the link's open.dk");
         assert!(hub.cloud.status().connected);
+    }
+
+    #[test]
+    fn a_paired_computer_is_listed_with_device_limits() {
+        let hub = temp_hub();
+        let peer = crate::store::PeerIn {
+            computer_id: "cmp_a".into(),
+            name: "Studio".into(),
+            device_key: "peer-dk".into(),
+            epoch: "e".into(),
+            grant_id: "pgr_1".into(),
+            paired_at: now_ms(),
+        };
+        hub.store.put_peer_in(&peer).unwrap();
+        let msg = signed_acl(&hub).unwrap();
+        let acl: Value = serde_json::from_slice(&crypto::unb64(msg["d"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(acl["devices"], json!([{"dk": "peer-dk", "grant": "pgr_1"}]), "no kind: a device's limits");
+        hub.store.remove_peer_in("cmp_a").unwrap();
+        let msg = signed_acl(&hub).unwrap();
+        let acl: Value = serde_json::from_slice(&crypto::unb64(msg["d"].as_str().unwrap()).unwrap()).unwrap();
+        assert_eq!(acl["devices"], json!([]), "unpaired: the relay closes its socket");
     }
 
     #[tokio::test]

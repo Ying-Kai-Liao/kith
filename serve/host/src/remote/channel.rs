@@ -280,7 +280,7 @@ async fn handshake(
         }
         None
     } else {
-        match devices::authorize(hub, &dk) {
+        match devices::admit(hub, &dk) {
             Ok(d) => Some(d),
             Err(code) => {
                 send_reject(out, code).await;
@@ -408,14 +408,14 @@ impl Channel {
 
     /// Re-checks the device; on failure sends `reject` and says how to close.
     async fn recheck(&mut self) -> Result<(), CloseWith> {
-        let mut checked = devices::authorize(&self.hub, &self.key);
+        let mut checked = devices::admit(&self.hub, &self.key);
         // Out of sync only until the pull runs: wait for it, then judge the device on the state it applied (a device it
         // removed is refused then, never served on the old state).
         if matches!(checked, Err(RejectCode::LeaseExpired))
             && !self.hub.cloud_synced.load(std::sync::atomic::Ordering::Acquire)
             && crate::remote::sync_lease::wait(&self.hub, SYNC_WAIT).await
         {
-            checked = devices::authorize(&self.hub, &self.key);
+            checked = devices::admit(&self.hub, &self.key);
         }
         match checked {
             Ok(d) => {
@@ -424,7 +424,8 @@ impl Channel {
                 // A running event stream was cut for the role it opened with (owner or an invited person); a device that
                 // became someone else, or nobody, must reconnect. Proving an invite or a bot joining only widens a role the
                 // channel never streamed under.
-                if matches!(before, Principal::Owner | Principal::Member(_)) && before != self.who {
+                if matches!(before, Principal::Owner | Principal::Member(_) | Principal::Peer(_)) && before != self.who
+                {
                     tracing::info!(device = self.key, "closing channel: the device's person or role changed");
                     return Err((close::REKEY, "rekey"));
                 }

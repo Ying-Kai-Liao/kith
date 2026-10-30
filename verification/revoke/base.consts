@@ -8,3 +8,7 @@ NoDeliverRecheck = FALSE
 RevokeDeletesRows = FALSE
 BotIgnoresOwner = FALSE
 HelperNoSync = FALSE
+GuestDoor = FALSE
+DoorNoHold = FALSE
+DoorSplit = FALSE
+NoDoorSweep = FALSE

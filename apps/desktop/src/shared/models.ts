@@ -304,6 +304,8 @@ export interface EntryData {
   agent?: string
   /** permission, from a run `kith ask` started: "<agent>, asked by <caller agent>" (or "a terminal"). */
   chain?: string
+  /** permission, the owner's card for a guest's run reaching a host or helper: what its options grant (host `cards/edge.rs`). Its options are labelled by name. */
+  edge?: { kind: string; value: string; job?: string }
   /** permission, answered: an old run still holds the session this approval resumes in (null/absent otherwise; an older host never sends it). */
   held?: HeldRun | null
   /** permission: an Access or Key card for a service key (shared/secret-card.ts). Never a value. */
