@@ -142,6 +142,9 @@ const bridge: KithBridge = {
     kept: (computerId) => ipcRenderer.invoke('invite:kept', computerId),
     forget: (computerId) => ipcRenderer.invoke('invite:forget', computerId),
   },
+  shares: {
+    takePending: () => ipcRenderer.invoke('share:takePending'),
+  },
   updates: {
     state: () => ipcRenderer.invoke('updates:state'),
     onChange: (cb) => listen('updates:change', cb),

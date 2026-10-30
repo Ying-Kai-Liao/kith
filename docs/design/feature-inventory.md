@@ -471,6 +471,7 @@ Windows are routed by `?window=` in `apps/desktop/src/renderer/main.tsx`: `chat`
 | D-207 | Kith Screen agent | `M/screen.ts` | Registers the macOS launchd helper (SMAppService) for remote screen; "requires approval" surfaces in tray and Computer access. | n/a (invisible) | keep |
 | D-208 | SSH tunnels | `M/ssh.ts`, `M/ssh-command.ts` | Opens ssh tunnels to remote kith-serve, host-key trust, status events consumed by SSH rows. | n/a (invisible) | keep |
 | D-209 | On-device speech helper | `M/speech.ts` | Spawns `kith-speech` (Swift SFSpeechRecognizer) and streams partial/final text to dictation and calls. | n/a (invisible) | keep |
+| D-210 | Receive shared links | `M/shares.ts`, `M/auth.ts` `handleURL`, `shared/share-link.ts`, `views/ShareSheet.tsx` | `kith://share?url=&title=&text=` (from the Mac share extension, a Shortcut or `open`) opens a sheet: note, chat, Send; the chat opens. Twin of iOS I-J8. | n/a (system-styled sheet) | keep |
 
 
 Desktop notes from the survey: there are no native OS notifications in the desktop app (only the tray alert icon and the island); every menu except the tray and the app menu is a custom React overlay; the only global shortcuts are Alt+Y / Alt+N while an island approval shows; calls are an overlay inside the thread, not a window.

@@ -244,6 +244,7 @@ const bridge: KithBridge = {
     kept: (slot) => keys.keptInvite(slot),
     forget: (slot) => keys.forgetInvite(slot),
   },
+  shares: { takePending: async () => null },
   updates: { state: async () => updates, onChange: none, check() {}, install() {}, setAutoCheck() {}, setAutoDownload() {} },
   files: { begin: unavailable, write: async () => {}, finish: async () => {}, cancel: async () => {} },
   app: {
