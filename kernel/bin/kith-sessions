@@ -274,7 +274,10 @@ def take_claim(sid, pid, kind='terminal', person=None, agent=None, lifecycle_own
                 lock = None
                 prune_stale(dest)
                 if not lifecycle_owner:   # a taker ends the intent and the 54-minute decision of the period before it (rules 12, 14)
-                    lifecycle().taken(sid)
+                    try:
+                        lifecycle().taken(sid)
+                    except Exception:  # noqa: BLE001 — bookkeeping (even a missing lib) must never stop a session from starting
+                        pass
                 return None
             except FileExistsError:
                 pass
@@ -613,6 +616,10 @@ def idle_stop(child, born):
         if time.time() - since < lc.sleep_after() or lc.outstanding(e['transcriptPath'], child):
             return False
         lc.write_intent(e['sessionId'], 'idle', child)
+        # Kai may have typed since the check above: looked at again just before the signal (S2).
+        if os.isatty(0) and os.fstat(0).st_atime > (key or 0):
+            lc.clear_intent(e['sessionId'])
+            return False
         os.kill(child, signal.SIGTERM)
         return True
     except Exception as ex:  # noqa: BLE001 — a failing check must never end a session

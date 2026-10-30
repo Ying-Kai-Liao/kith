@@ -111,12 +111,16 @@ def clear_intent(sid):
         (d / f'{sid}.json').unlink(missing_ok=True)
 
 
-def how_it_ended(sid, had_process=True):
+def how_it_ended(sid, had_process=True, pid=None, start=None):
     """Why a session with no process stopped: the intent's reason ('idle', 'quit', 'revoked', ...), or 'crash' when a process
-    ran and ended with none (SessionEnd always says "other", so only the intent tells). A session we never saw run (old data,
-    from before intents) is None: nothing is claimed about it."""
+    ran and ended with none (SessionEnd always says "other", so only the intent tells). The intent must be for the process
+    that ended (its pid, and its start time when both sides know it): an older one is not this process' reason. A session we
+    never saw run (old data, from before intents) is None: nothing is claimed about it."""
     i = read_intent(sid)
-    return i.get('why') if i else ('crash' if had_process else None)
+    if i and (pid is None or i.get('pid') is None or i['pid'] == pid) \
+            and not (start and i.get('procStart') and ' '.join(start.split()) != i['procStart']):
+        return i.get('why')
+    return 'crash' if had_process else None
 
 
 # --- decisions (rules 5, 11, 12) -----------------------------------------------------------------------------------------

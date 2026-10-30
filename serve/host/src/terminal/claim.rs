@@ -142,6 +142,11 @@ pub fn take_as(
         Ok(Err(Held(read(&dest).unwrap_or_else(|| mine.clone()))))
     })();
     let _ = std::fs::remove_file(&tmp);
+    // A process that took the session ends the intent of the one before it and the decision of its idle period (F12 rules
+    // 12, 14), as the kernel's take_claim does; a take-over claim is the host's step towards a stop, not a new writer.
+    if matches!(result, Ok(Ok(()))) && !takeover {
+        super::intent::taken(state, sid);
+    }
     result
 }
 

@@ -38,6 +38,15 @@ pub fn write(state: &Path, session: &str, why: &str, pid: u32) -> bool {
     made && std::fs::rename(&tmp, &p).is_ok()
 }
 
+/// A process took the session's writer claim: its intent and the pending 54-minute decision (`sessions/decisions`, written
+/// by `kith-lifecycle`) are over.
+pub fn taken(state: &Path, session: &str) {
+    if safe_id(session) {
+        let _ = std::fs::remove_file(path(state, session));
+        let _ = std::fs::remove_file(state.join("sessions").join("decisions").join(format!("{session}.json")));
+    }
+}
+
 /// The intent on record for `session`: its reason (the kernel is the reader in production; the host's tests read it too).
 #[cfg(test)]
 pub fn read(state: &Path, session: &str) -> Option<String> {
@@ -64,6 +73,20 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(path(&dir, "s-1")).unwrap()).unwrap();
         assert_eq!(v["pid"], std::process::id());
         assert!(v["at"].as_str().is_some_and(|at| at.ends_with('Z')));
+    }
+
+    #[test]
+    fn taking_the_claim_clears_the_intent_and_the_decision() {
+        let dir = scratch();
+        assert!(write(&dir, "s-2", "idle release", 1));
+        let decision = dir.join("sessions").join("decisions");
+        std::fs::create_dir_all(&decision).unwrap();
+        std::fs::write(decision.join("s-2.json"), "{}").unwrap();
+        super::super::claim::take(&dir, "s-2", super::super::claim::Kind::Bot, std::process::id(), false)
+            .unwrap()
+            .unwrap();
+        assert_eq!(read(&dir, "s-2"), None);
+        assert!(!decision.join("s-2.json").exists());
     }
 
     #[test]

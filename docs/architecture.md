@@ -292,7 +292,7 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   once per idle period, from structure only, at 0.9 of the cache life (none on a 5-minute cache: it decides as the
   session goes to sleep): compact (over 100k tokens and a sign of return), stay asleep, or end. `/compact` runs as
   `claude -p --resume SID /compact` only under the writer claim, after checking again under it; "end" is recorded only
-  under it too; any resume clears the decision. Host ACP sessions keep the host's own compactor (rule 6: one per session);
+  under it too; any resume clears the decision. Host ACP sessions, and any session the host keeps a conversation for, keep the host's own compactor (rule 6: one per session; the sweep skips what `resolveThread` knows, and tries a failed `/compact` once per idle period);
   its idle release writes the intent first and doesn't stop the compaction (compacting is a turn that starts the agent
   again). Rule T: Kith delivers only results of waits it registered; an MCP task sidecar is Claude's, and Kith only
   counts it as outstanding work.
