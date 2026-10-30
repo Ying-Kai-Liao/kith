@@ -41,7 +41,7 @@ extension BotStore {
     /// Transfer to the outbox now; an eventual acknowledgement must not erase a newer draft.
     @discardableResult
     func sendComposerDraft(to botId: String, thread: String? = nil, files: [OutgoingFile] = [], newTask: Bool = false,
-                           start: FolderChoice? = nil) -> Bool {
+                           start: FolderChoice? = nil, budget: Int? = nil) -> Bool {
         let typed = composerDraft(for: botId, thread: thread)
         guard !retired, !typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !files.isEmpty else { return false }
         // A reply quotes its message; with nothing typed (files only) there is nothing to attach it to.
@@ -49,7 +49,7 @@ extension BotStore {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? typed : ReplyQuote.compose(quote: quote, text: typed)
         let pasted = composerPasted[composerKey(botId, thread)] ?? []
         send(text, to: botId, thread: thread, nonce: UUID().uuidString, files: files, pasted: pasted, newTask: newTask,
-             start: start)
+             start: start, budget: budget)
         replyQuotes[botId] = nil
         setComposerDraft("", for: botId, thread: thread)
         return true
@@ -58,8 +58,10 @@ extension BotStore {
     /// `thread`: reply in the thread on that main-chat message.
     /// `newTask`: starts a new task (a fresh session) instead of going on with the current one, as the composer's
     /// "new task" does.
-    public func send(_ text: String, to botId: String, thread: String? = nil, files: [OutgoingFile] = [], newTask: Bool = false) {
-        send(text, to: botId, thread: thread, nonce: UUID().uuidString, files: files, newTask: newTask)
+    /// `budget`: to a group, the turns this message gives the room (1...100); a chat with one agent ignores it.
+    public func send(_ text: String, to botId: String, thread: String? = nil, files: [OutgoingFile] = [], newTask: Bool = false,
+                     budget: Int? = nil) {
+        send(text, to: botId, thread: thread, nonce: UUID().uuidString, files: files, newTask: newTask, budget: budget)
     }
 
     /// A message spoken in a voice call: the agent answers it for the ear, on its call model (`via: "call"`).
@@ -68,7 +70,8 @@ extension BotStore {
     }
 
     private func send(_ text: String, to botId: String, thread: String?, nonce: String, files: [OutgoingFile] = [],
-                      pasted: [String] = [], newTask: Bool = false, start: FolderChoice? = nil, via: String? = nil) {
+                      pasted: [String] = [], newTask: Bool = false, start: FolderChoice? = nil, via: String? = nil,
+                      budget: Int? = nil) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !files.isEmpty, !retired else { return }
         var data = EntryData(text: trimmed, status: "sending", clientNonce: nonce)
@@ -85,16 +88,21 @@ extension BotStore {
         if let bot = bots[botId] { onSent?(bot, .sending) }
         if let start { outgoingStarts[nonce] = start }
         if newTask { outgoingNewTasks.insert(nonce) }
-        // The relay mailbox holds text only: files and a starting folder wait for the computer.
-        if canQueue, files.isEmpty, start == nil, let remote = transport as? any RemoteTransport {
+        // Only a group has turns. The standard ten is the host's own default, so it never needs to travel.
+        let turns = bots[botId]?.isGroup == true ? budget.map(Turns.clamp) : nil
+        if let turns { outgoingBudgets[nonce] = turns }
+        // The relay mailbox holds text only: files, a starting folder and a chosen number of turns wait for the computer.
+        if canQueue, files.isEmpty, start == nil, (turns ?? Turns.standard) == Turns.standard,
+           let remote = transport as? any RemoteTransport {
             enqueue(remote, text: trimmed, botId: botId, thread: thread, nonce: nonce)
             return
         }
-        deliver(trimmed, botId: botId, thread: thread, nonce: nonce, pasted: pasted, newTask: newTask, start: start, via: via)
+        deliver(trimmed, botId: botId, thread: thread, nonce: nonce, pasted: pasted, newTask: newTask, start: start, via: via,
+                budget: turns)
     }
 
     private func deliver(_ text: String, botId: String, thread: String?, nonce: String, pasted: [String] = [],
-                         newTask: Bool = false, start: FolderChoice? = nil, via: String? = nil) {
+                         newTask: Bool = false, start: FolderChoice? = nil, via: String? = nil, budget: Int? = nil) {
         Task {
             do {
                 // Safe to repeat: the computer skips a nonce it already has.
@@ -111,10 +119,11 @@ extension BotStore {
                         }
                     }
                     return try await client.send(botId: botId, text: text, clientNonce: nonce, threadId: thread, attachments: ids,
-                                                 pasted: pasted, newTask: newTask, start: start, via: via)
+                                                 pasted: pasted, newTask: newTask, start: start, via: via, budget: budget)
                 }
                 outgoingFiles[nonce] = nil
                 outgoingStarts[nonce] = nil
+                outgoingBudgets[nonce] = nil
                 outgoingNewTasks.remove(nonce)
                 upsert(e)
                 if let bot = bots[botId] { onSent?(bot, .delivered) }
@@ -223,7 +232,8 @@ extension BotStore {
         // skips a nonce it has). Every seal still takes a fresh ephemeral key (§6.4).
         send(text, to: entry.botId, thread: entry.threadId, nonce: entry.data.clientNonce ?? UUID().uuidString, files: files,
              newTask: entry.data.clientNonce.map { outgoingNewTasks.contains($0) } ?? false,
-             start: entry.data.clientNonce.flatMap { outgoingStarts[$0] })
+             start: entry.data.clientNonce.flatMap { outgoingStarts[$0] },
+             budget: entry.data.clientNonce.flatMap { outgoingBudgets[$0] })
     }
 
     /// A sent file's bytes: on disk after the first fetch (sent files never change).
@@ -247,7 +257,7 @@ extension BotStore {
     }
 
     public func discard(_ entry: Entry) {
-        if let nonce = entry.data.clientNonce { outgoingFiles[nonce] = nil }
+        if let nonce = entry.data.clientNonce { outgoingFiles[nonce] = nil; outgoingBudgets[nonce] = nil }
         entries[entry.botId]?.removeAll { $0.id == entry.id }
         scheduleSave()
     }

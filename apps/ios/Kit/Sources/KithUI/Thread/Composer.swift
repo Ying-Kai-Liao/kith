@@ -37,6 +37,8 @@ struct Composer: View {
     /// Where the new task starts, when picked up front; nil follows the bot's default.
     @State private var startFolder: FolderChoice?
     @State private var pickingFolder = false
+    /// In a group: the turns this message gives the room. Each message starts at the standard number; it never sticks.
+    @State private var turns = Turns.standard
 
     private var bot: Bot? { model.bots[botId] }
     private var tasks: Bool { thread == nil && bot?.usesTasks == true }
@@ -49,6 +51,10 @@ struct Composer: View {
     /// The chip is for a task asked for or one reached by leaving a thread; a folded task just changes the placeholder.
     private var showsNewTaskChip: Bool { startsNew && (alwaysNewTask || newTask || model.leftThread.contains(botId)) }
     private var working: Bool { !startsNew && bot?.isWorking(in: botId, thread: place) == true }
+    /// The run in progress in this room, whose line (with its Stop) sits above the box.
+    private var openConversation: RoomConversation? {
+        bot?.isGroup == true ? model.roomConversations.open(chat: botId, lane: thread) : nil
+    }
 
     private var isEmpty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && files.isEmpty }
 
@@ -93,6 +99,10 @@ struct Composer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let conversation = openConversation {
+                RoomLiveLineView(conversation: conversation) { model.stop(botId, thread: thread) }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
             if !commands.isEmpty {
                 CommandList(commands: commands, pick: run)
                     .padding(.horizontal, 16)
@@ -117,6 +127,7 @@ struct Composer: View {
         }
         .animation(Motion.layout, value: suggestions.map(\.id))
         .animation(Motion.layout, value: commands.map(\.id))
+        .animation(Motion.reduced(Motion.layout, reduceMotion), value: openConversation?.conversation)
     }
 
     /// The chat box: the redesign's `ChatDock`, with this composer's features in its slots and bindings.
@@ -134,7 +145,7 @@ struct Composer: View {
                  },
                  onFiles: { pickingFiles = true },
                  extraActions: extraActions, micListening: dictation.listening, micWithText: true, canSend: canSend,
-                 showsPlus: canAttach, stop: stop, focus: $focused) {
+                 showsPlus: canAttach, stop: stop, turns: bot?.isGroup == true && thread == nil ? $turns : nil, focus: $focused) {
             accessory
         }
         .animation(Motion.layout, value: files.map(\.id))
@@ -164,6 +175,7 @@ struct Composer: View {
             dictation.stop()
             draft = model.composerDraft(for: botId, thread: thread)
         }
+        .onAppear { if DemoScreens.name == "room-turns" { turns = 25 } }
         .onDisappear { dictation.stop() }
         .onChange(of: draft) { _, value in
             model.setComposerDraft(value, for: botId, thread: thread)
@@ -212,7 +224,8 @@ struct Composer: View {
     /// Beside the mic while the box is empty: cut the voice off in a call, or stop the bot's work here.
     private var stop: ChatDockStop? {
         if let onInterrupt { return ChatDockStop("Interrupt", urgent: true, action: onInterrupt) }
-        if working { return ChatDockStop("Stop") { model.stop(botId, thread: place) } }
+        // The live line above the box carries the group's Stop while its run is open.
+        if working, openConversation == nil { return ChatDockStop("Stop") { model.stop(botId, thread: place) } }
         return nil
     }
 
@@ -360,7 +373,9 @@ struct Composer: View {
         guard canSend else { return }
         withAnimation(Motion.reduced(Motion.conversation, reduceMotion)) {
             guard model.sendComposerDraft(to: botId, thread: thread, files: files, newTask: startsNew,
-                                           start: startsNew ? startFolder : nil) else { return }
+                                           start: startsNew ? startFolder : nil,
+                                           budget: bot?.isGroup == true ? turns : nil) else { return }
+            turns = Turns.standard
             draft = ""
             files = []
             newTask = false

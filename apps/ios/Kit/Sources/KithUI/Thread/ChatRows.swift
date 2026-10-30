@@ -23,6 +23,8 @@ struct ChatRow: View {
     /// (one at a time, closed by scrolling), so the row only gets whether it is this one.
     var showsContext = false
     var toggleContext: () -> Void = {}
+    /// A late reply: the first line of the message it answers, when that is known.
+    var lateQuote: String?
 
     var body: some View {
         let reply = onReply.map { reply in { reply(entry) } }
@@ -33,6 +35,10 @@ struct ChatRow: View {
             // The outside bot talking: the other party, so leading with its own avatar, not Kai's bubble.
             BotSenderBubble(entry: entry, name: BotGuestSender.label(entry, inBotGuestChat: true) ?? "", provider: chat?.botGuest?.provider ?? "")
                 .padding(.top, groupStart ? 12 : 4)
+        case "user" where chat?.isGroup == true && entry.isRoomBotPost:
+            // An outside bot someone brought into the room: its own face, name in Inter and the Bot tag.
+            RoomBotRow(entry: entry, groupStart: groupStart, lateQuote: lateQuote)
+                .padding(.top, groupStart || entry.data.isLate ? 12 : 4)
         case "user":
             VStack(alignment: .trailing, spacing: 4) {
                 UserBubble(entry: entry, botWorking: chat?.isWorking == true, reply: reply)
@@ -42,15 +48,16 @@ struct ChatRow: View {
             .padding(.top, groupStart ? 12 : 4)
         case "agent":
             VStack(alignment: .leading, spacing: 4) {
-                if groupStart { AuthorLabel(botId: entry.data.author ?? chat?.id) }
+                if groupStart || entry.data.isLate { AuthorLabel(botId: entry.data.author ?? chat?.id, late: entry.data.isLate) }
                 if let card = entry.data.richCard, card.drawsInChat {
                     if card.type == "news" { NewsCard(entry: entry, card: card) } else { ScheduleCard(entry: entry, card: card) }
                 } else {
-                    AgentBubble(entry: entry, openTrace: openTrace, reply: reply) {
+                    AgentBubble(entry: entry, openTrace: openTrace, reply: reply, late: entry.data.isLate, lateQuote: lateQuote) {
                         withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { toggleContext() }
                     }
                 }
                 Group {
+                    if entry.data.isLate { LateReasonLine(reason: entry.data.lateReason) }
                     AnsweredByLabel(answeredBy: entry.data.answeredBy)
                     if showsContext, entry.data.status != "streaming" {
                         ContextLineView(time: Self.clock(entry.date), percent: entry.data.contextPercent)
@@ -63,7 +70,7 @@ struct ChatRow: View {
                 .padding(.leading, chat?.isGroup == true ? 34 : 0)
             }
             .animation(Motion.reduced(Motion.layout, reduceMotion), value: entry.data.reactions)
-            .padding(.top, groupStart ? 12 : 4)
+            .padding(.top, groupStart || entry.data.isLate ? 12 : 4)
         case "permission":
             VStack(alignment: .leading, spacing: 4) {
                 if chat?.isGroup == true { AuthorLabel(botId: entry.data.author) }
@@ -156,6 +163,8 @@ struct TimeSeparator: View {
 /// Who wrote a message in a group: their avatar and name in their color.
 struct AuthorLabel: View {
     let botId: String?
+    /// The reply came after its run was over: the Late tag follows the name.
+    var late = false
     @Environment(BotStore.self) private var model
 
     var body: some View {
@@ -165,6 +174,7 @@ struct AuthorLabel: View {
             Text(model.authorName(botId))
                 .kithText(.agentName)
                 .foregroundStyle(Palette.ink)
+            if late { LateTag() }
         }
     }
 }
@@ -255,6 +265,9 @@ struct AgentBubble: View {
     let entry: Entry
     let openTrace: () -> Void
     var reply: (() -> Void)?
+    /// A late reply: outlined, with the line it answers when that is known.
+    var late = false
+    var lateQuote: String?
     /// A tap on the bubble (links keep their own).
     var onTap: (() -> Void)?
     @State private var selecting = false
@@ -274,6 +287,10 @@ struct AgentBubble: View {
                         ForEach(parts.others) { file in SharedFileView(entry: entry, file: file) }
                     } else {
                         ForEach(files) { file in SharedFileView(entry: entry, file: file) }
+                    }
+                } else if late {
+                    LateBubble(quote: lateQuote) {
+                        MarkdownText(entry.data.text ?? "").equatable().fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
                     MarkdownText(entry.data.text ?? "").equatable()
@@ -301,6 +318,35 @@ struct AgentBubble: View {
     }
 }
 
+
+/// An outside bot's message in a group room. Late ones are outlined and say why; unprompted ones look like any other.
+struct RoomBotRow: View {
+    let entry: Entry
+    let groupStart: Bool
+    var lateQuote: String?
+
+    var body: some View {
+        let late = entry.data.isLate
+        VStack(alignment: .leading, spacing: 4) {
+            if let sender = entry.data.roomBot, groupStart || late { RoomBotLabel(sender: sender, late: late) }
+            if late {
+                LateBubble(quote: lateQuote) { text }
+                LateReasonLine(reason: entry.data.lateReason)
+            } else {
+                text
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Palette.bubbleAgent, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.trailing, 40)
+    }
+
+    private var text: some View {
+        Text(entry.data.text ?? "").kithText(.body).foregroundStyle(Palette.ink).textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
 
 /// A message an outside bot wrote in a bot-guest chat: leading, with the bot's avatar and name. Read-only, so no reply menu.
 struct BotSenderBubble: View {
@@ -335,7 +381,9 @@ struct NoticeRow: View {
 
     var body: some View {
         let text = entry.data.text ?? ""
-        if let kind = ThreadFeed.writerDivider(entry, mac: model.hostName) {
+        if entry.isRoomNotice {
+            RoomNoticeLine(entry: entry)
+        } else if let kind = ThreadFeed.writerDivider(entry, mac: model.hostName) {
             WriterDivider(kind, time: entry.date.formatted(date: .omitted, time: .shortened))
         } else if let line = VoiceCallLine.suffix(entry.data, at: entry.date) {
             Label("\(text)\(line)", systemImage: "waveform")
@@ -537,6 +585,6 @@ extension ChatRow: @MainActor Equatable {
     static func == (a: Self, b: Self) -> Bool {
         a.entry == b.entry && a.groupStart == b.groupStart && a.chat?.isGroup == b.chat?.isGroup
             && a.chat?.isWorking == b.chat?.isWorking && (a.onReply == nil) == (b.onReply == nil)
-            && a.showsContext == b.showsContext
+            && a.showsContext == b.showsContext && a.lateQuote == b.lateQuote
     }
 }

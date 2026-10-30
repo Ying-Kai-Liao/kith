@@ -176,3 +176,52 @@ private func summary(origin: String? = nil, writer: String? = nil, busy: Bool? =
     let plain = ThreadFeed.chip(face: CrewFace(portrait: nil), tint: .neutral, count: 1, unread: 0, lastAt: 0, place: nil, yourTurn: false, summary: summary(origin: "terminal"))
     #expect(plain.originLabel == nil)
 }
+
+// MARK: rooms (agent conversations)
+
+private func roomEntry(_ id: String, kind: String = "agent", ago: Int64 = 0, _ configure: (inout EntryData) -> Void = { _ in }) -> Entry {
+    var data = EntryData()
+    configure(&data)
+    return Entry(id: id, seq: Int64(id.utf8.reduce(0) { $0 &* 31 &+ Int($1) } & 0xffff), botId: "room", threadId: nil, rev: 1, kind: kind,
+                 turn: 1, data: data, createdAt: 1_000_000 - ago, updatedAt: 0)
+}
+
+private func run(_ why: String, left: Int = 4, opening: String = "o1") throws -> RoomConversation {
+    let json = #"{"conversation":"cv1","chat":"room","budget":10,"left":\#(left),"state":"ended","endedWhy":"\#(why)","opening":"\#(opening)"}"#
+    return try JSONDecoder().decode(RoomConversation.self, from: Data(json.utf8))
+}
+
+@Test func theEndLineGoesAfterTheLastReplyThatWasNotLate() throws {
+    let entries = [
+        roomEntry("o1", kind: "user", ago: 40) { $0.text = "Plan it" },
+        roomEntry("a1", ago: 30) { $0.text = "one"; $0.final = true; $0.conversation = "cv1" },
+        roomEntry("a2", ago: 20) { $0.text = "two"; $0.final = true; $0.conversation = "cv1" },
+        roomEntry("a3", ago: 10) { $0.text = "late"; $0.final = true; $0.conversation = "cv1"; $0.late = true; $0.lateWhy = "stopped" },
+    ]
+    let items = ChatItem.build(entries)
+    let placed = ThreadFeed.endLines(items, conversations: [try run("stopped", left: 6)])
+    #expect(placed.keys.sorted() == ["a2"])
+}
+
+@Test func aRunNobodyAnsweredEndsUnderTheMessageThatOpenedIt() throws {
+    let items = ChatItem.build([roomEntry("o1", kind: "user") { $0.text = "Plan it" }])
+    #expect(ThreadFeed.endLines(items, conversations: [try run("stopped")]).keys.sorted() == ["o1"])
+}
+
+@Test func aRunWhoseMessagesArentLoadedOrNeedsNoLineGetsNone() throws {
+    let items = ChatItem.build([roomEntry("a1") { $0.text = "x"; $0.final = true }])
+    #expect(ThreadFeed.endLines(items, conversations: [try run("spent", opening: "gone")]).isEmpty)
+    #expect(ThreadFeed.endLines(items, conversations: [try run("idle", opening: "a1")]).isEmpty)
+}
+
+@Test func aBotsPostIsItsOwnAuthorNotTheOwners() {
+    let me = roomEntry("m1", kind: "user") { $0.text = "hi" }
+    let grok = roomEntry("g1", kind: "user") { $0.text = "hello"; $0.sender = EntrySender(botId: "bg1", name: "Grok", provider: "grok") }
+    let ada = roomEntry("a1") { $0.text = "yo"; $0.final = true; $0.author = "ada" }
+    #expect(ThreadFeed.authorKey(me) == "user" && ThreadFeed.authorKey(grok) == "bot:bg1" && ThreadFeed.authorKey(ada) == "agent:ada")
+    let items = ChatItem.build([me, grok, ada])
+    let starts = items.compactMap { item -> Bool? in if case let .entry(_, groupStart) = item.kind { groupStart } else { nil } }
+    #expect(starts == [true, true, true])
+    // Only the owner's own message is "a message of yours" to the scroll.
+    #expect(items.filter { if case .entry = $0.kind { true } else { false } }.map(\.isUserMessage) == [true, false, false])
+}
