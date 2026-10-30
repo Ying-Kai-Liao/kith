@@ -18,6 +18,8 @@ public struct ThreadView: View {
     @Environment(BotStore.self) var model
     @Environment(\.dismiss) var dismiss
     @State var showTrace = false
+    /// Runs of steps opened inline, by run id. Not persisted: a run starts collapsed.
+    @State var expandedSteps: Set<String> = []
     @State var botChat: BotChatTarget?
     @State var editingGroup = false
     @State var details: DetailsRequest?
@@ -127,14 +129,9 @@ public struct ThreadView: View {
             TimeSeparator(date: date)
         case .exchanges(let group):
             BotMessageRow(group: group) { botChat = BotChatTarget(id: group.peerId) }
-        case .tool(let e):
-            ToolCallRow(ThreadFeed.toolRow(e)).padding(.top, 4)
-        case .earlier(let count):
-            Button { showTrace = true } label: {
-                Text(count == 1 ? "1 earlier step" : "\(count) earlier steps")
-                    .kithText(.secondary).foregroundStyle(Palette.muted).frame(minHeight: 32, alignment: .leading)
-            }
-            .buttonStyle(.plain)
+        case .steps(let run):
+            StepsRow(run: run, expanded: expandedSteps.contains(run.id),
+                     toggle: { toggleSteps(run.id) }, openTrace: { showTrace = true })
         case .entry(let e, let groupStart):
             if e.kind == "notice", let id = e.data.routineId {
                 Button {
@@ -146,6 +143,12 @@ public struct ThreadView: View {
             } else {
                 entryRow(e, groupStart: groupStart)
             }
+        }
+    }
+
+    func toggleSteps(_ id: String) {
+        withAnimation(Motion.reduced(Motion.layout, reduceMotion)) {
+            if !expandedSteps.insert(id).inserted { expandedSteps.remove(id) }
         }
     }
 
@@ -246,10 +249,8 @@ struct ChatItem: Identifiable {
         case entry(Entry, groupStart: Bool)
         /// Main chat only: consecutive bot-to-bot exchanges with one peer.
         case exchanges(BotExchangeGroup)
-        /// Main chat only: one tool call, under the reply that made it.
-        case tool(Entry)
-        /// Main chat only: a run of tool calls longer than `ThreadFeed.visibleSteps` folds its older steps into this line.
-        case earlier(count: Int)
+        /// Main chat only: a run of tool calls under the reply that made it, behind one collapsed "N steps" row.
+        case steps(ThreadFeed.StepsRun)
     }
 
     let id: String
@@ -266,15 +267,9 @@ struct ChatItem: Identifiable {
         var lastDate: Date?
         var lastAuthor: String?
         var tools: [Entry] = []
-        // A run of tool calls: the last few show, the older ones fold.
+        // A run of tool calls becomes one collapsed row (nothing when it only delivered files).
         func flushTools() {
-            guard !tools.isEmpty else { return }
-            if tools.count > ThreadFeed.visibleSteps, let first = tools.first {
-                out.append(ChatItem(id: "earlier-\(first.id)", kind: .earlier(count: tools.count - ThreadFeed.visibleSteps)))
-                tools.suffix(ThreadFeed.visibleSteps).forEach { out.append(ChatItem(id: $0.id, kind: .tool($0))) }
-            } else {
-                tools.forEach { out.append(ChatItem(id: $0.id, kind: .tool($0))) }
-            }
+            if let run = ThreadFeed.StepsRun(tools) { out.append(ChatItem(id: run.id, kind: .steps(run))) }
             tools = []
         }
         let flat = groupingExchanges ? flatSlots(entries) : entries.filter(\.isChat).map { Flat.slot(.entry($0)) }
@@ -339,8 +334,8 @@ struct ChatItem: Identifiable {
     func holds(entry id: String) -> Bool {
         switch kind {
         case let .entry(entry, _): entry.id == id || ThreadFeed.stableId(entry) == id
-        case let .tool(entry): entry.id == id
-        case .exchanges, .separator, .earlier: false
+        case let .steps(run): run.steps.contains { $0.id == id }
+        case .exchanges, .separator: false
         }
     }
 
