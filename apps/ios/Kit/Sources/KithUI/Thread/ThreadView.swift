@@ -40,19 +40,26 @@ public struct ThreadView: View {
         transcript
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 6) {
-                if let mismatch = model.mismatch {
+                switch ThreadFeed.chatBottom(held: ThreadFeed.heldTask(in: model.chat(botId)),
+                                             mismatch: model.mismatch != nil, guest: bot?.botGuest != nil) {
+                case .updateNeeded:
                     // Nothing sent now could be read on the other side.
-                    UpdateNeededCard(store: model, mismatch: mismatch)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 8)
-                        .transition(.opacity)
-                } else if let held = ThreadFeed.heldTask(in: model.chat(botId)) {
-                    // A terminal holds the thread the box would go on with.
-                    ThreadWriterDock(botId: botId, rootId: held.id)
-                } else if let guest = bot?.botGuest {
+                    if let mismatch = model.mismatch {
+                        UpdateNeededCard(store: model, mismatch: mismatch)
+                            .padding(.horizontal, 16)
+                            .padding(.bottom, 8)
+                            .transition(.opacity)
+                    }
+                case .writerBanner(let rootId):
+                    ThreadWriterDock(botId: botId, rootId: rootId)
+                case .writerBannerAndNewTask(let rootId):
+                    // A terminal holds the thread the box would go on with: the box starts new tasks instead.
+                    ThreadWriterDock(botId: botId, rootId: rootId)
+                    Composer(botId: botId, alwaysNewTask: true)
+                case .readOnly:
                     // A bot from outside's conversation: the owner reads along, nothing is sent here.
-                    ReadOnlyLine(text: guest.readOnlyLine)
-                } else {
+                    if let guest = bot?.botGuest { ReadOnlyLine(text: guest.readOnlyLine) }
+                case .composer:
                     // The phone is in the top bar, so the dock has no call button.
                     Composer(botId: botId)
                 }
