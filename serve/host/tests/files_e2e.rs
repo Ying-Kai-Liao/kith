@@ -198,7 +198,8 @@ async fn several_paths_publish_one_entry_in_order_and_a_bad_path_publishes_nothi
     host.call("send", json!({"botId":bot,"text":"multi-files"})).await;
     let entries = ready(&host, bot, 1).await;
     let entry = entries.iter().find(|e| e["data"]["files"].is_array()).unwrap();
-    let names: Vec<_> = entry["data"]["files"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    let names: Vec<_> =
+        entry["data"]["files"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["report.pdf", ".hidden", "empty"]);
     assert_eq!(entry["data"]["text"], "3 files: report.pdf, .hidden, empty");
     let results: Value = serde_json::from_slice(&std::fs::read(cwd.join("file-results.json")).unwrap()).unwrap();
