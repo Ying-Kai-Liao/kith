@@ -1,4 +1,5 @@
 import type { LinkCode } from '@shared/host-contract.gen'
+import type { HostClient } from '../client/host-client'
 import {
   asEntry,
   isWorking,
@@ -386,6 +387,27 @@ export class BotStore extends BotSync {
       this.changed()
       return false
     }
+  }
+
+  /** Folds the room from this message on into a topic card (owner only); a refusal throws the host's own text. */
+  makeTopic(entry: Entry, title: string) {
+    return this.topicCall((c) => c.callHost('makeTopic', { botId: entry.botId, entryId: entry.id, title }))
+  }
+
+  renameTopic(entry: Entry, title: string) {
+    return this.topicCall((c) => c.callHost('renameTopic', { botId: entry.botId, entryId: entry.id, title }))
+  }
+
+  /** Puts a topic's rows back in the room as they were. */
+  unfoldTopic(entry: Entry) {
+    return this.topicCall((c) => c.callHost('unfoldTopic', { botId: entry.botId, entryId: entry.id }))
+  }
+
+  /** A topic call, not replayed; the answer's entry goes in at once (the host's event for it is the same revision). */
+  private async topicCall(op: (c: HostClient) => Promise<{ entry?: Parameters<typeof asEntry>[0] | null }>) {
+    const res = await this.withLink(op)
+    if (res.entry) this.upsert(asEntry(res.entry))
+    this.changed()
   }
 
   /** Carries on with the bot's current conversation instead of the handoff. */

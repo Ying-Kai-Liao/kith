@@ -65,7 +65,8 @@ export class FakeHost {
     }
     // `?room=live|livebot|idle|spent|quiet|stopped|late|bot` puts a room run in the Ship room (screenshots of the agent conversations).
     const room = typeof location !== 'undefined' ? /[?&]room=(\w+)/.exec(location.search)?.[1] : undefined
-    if (room) this.seedRoom(room, now)
+    if (room === 'topic' || room === 'topicwait') this.seedTopic(room === 'topicwait', now)
+    else if (room) this.seedRoom(room, now)
     for (const b of this.bots.values()) {
       this.refreshPreview(b)
       b.rev = ++this.rev
@@ -79,6 +80,21 @@ export class FakeHost {
   private setConversation(c: Record<string, unknown>, emit = true) {
     this.conversations.set(`${c.chat}\u0000${(c.lane as string | null) ?? ''}`, c)
     if (emit) this.emit({ type: 'conversation', ...c })
+  }
+
+  /** `?room=topic` folds the Ship room's first exchange into a topic card; `topicwait` has a question inside it waiting on you (screenshots of topic cards). */
+  private seedTopic(waiting: boolean, now: number) {
+    const root = this.entries.find((e) => e.id === 'g1')
+    const last = this.entries.find((e) => e.id === 'g3')
+    if (!root || !last) return
+    let until = last
+    if (waiting) {
+      until = this.add({
+        botId: 'ship', threadId: null, kind: 'permission',
+        data: { title: 'Edit src/pace.js', toolKind: 'edit', status: 'pending', author: 'reviewer', options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }, { optionId: 'deny', name: 'Deny', kind: 'reject_once' }] },
+      }, 'topic-perm', now - 18.5 * 60_000, false)
+    }
+    root.data = { ...root.data, topic: { id: 'topic-1', title: 'Is weeklyTotals ready to ship?', untilId: until.id, untilAt: until.createdAt, turns: [], createdAt: now } }
   }
 
   /** One run of the Ship room in a state; the entries it left are in the story's room already. */
@@ -349,6 +365,30 @@ export class FakeHost {
         const reactions = new Set(e.data.reactions ?? [])
         if (!reactions.delete(str('emoji'))) reactions.add(str('emoji'))
         e.data = { ...e.data, reactions: [...reactions] }
+        this.emitEntry(e)
+        return { entry: e }
+      }
+      case 'makeTopic':
+      case 'renameTopic':
+      case 'unfoldTopic': {
+        const e = this.entries.find((x) => x.id === str('entryId') && x.botId === str('botId'))
+        if (!e) throw fail('That message is gone.')
+        const title = str('title').trim()
+        if (method !== 'unfoldTopic') {
+          if (!title) throw fail('A topic needs a title.')
+          if ([...title].length > 80) throw fail('A topic title can be at most 80 characters.')
+        }
+        if (method === 'makeTopic') {
+          if (e.data.topic) throw fail('That message already starts a topic. Rename it instead.')
+          const inside = this.entries.some((r) => r.botId === e.botId && r.data.topic && r.createdAt <= e.createdAt && e.createdAt <= r.data.topic.untilAt)
+          if (inside) throw fail('That message is already inside a topic.')
+          const last = this.entries.filter((x) => x.botId === e.botId).reduce((m, x) => (x.createdAt > m.createdAt ? x : m), e)
+          e.data = { ...e.data, topic: { id: crypto.randomUUID(), title, untilId: last.id, untilAt: last.createdAt, turns: [], createdAt: Date.now() } }
+        } else {
+          if (!e.data.topic) throw fail("That message doesn't start a topic.")
+          const { topic: current, ...rest } = e.data
+          e.data = method === 'renameTopic' ? { ...rest, topic: { ...current, title } } : rest
+        }
         this.emitEntry(e)
         return { entry: e }
       }
