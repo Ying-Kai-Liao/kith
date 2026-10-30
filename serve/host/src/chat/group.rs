@@ -1292,11 +1292,16 @@ mod tests {
             let hold = WAKE_LOCK.lock().await;
             let dir = dir.join("wake");
             std::fs::create_dir_all(&dir).unwrap();
+            // A second stub in the same room must not see the first one's arguments.
+            let _ = std::fs::remove_file(dir.join("args"));
+            let _ = std::fs::remove_file(dir.join("body.json"));
             let script = dir.join("kith-send-to");
+            // Each file lands by a rename, so a poll for `args` never reads a half-written file, and `body.json` is
+            // in place before `args` appears: whoever sees the arguments can read the body.
             std::fs::write(
                 &script,
                 format!(
-                    "#!/bin/sh\nprintf '%s\\n' \"$@\" >> '{d}/args'\ncat > '{d}/body.json'\necho '{answer}'\nexit {code}\n",
+                    "#!/bin/sh\ncat > '{d}/body.tmp' && mv '{d}/body.tmp' '{d}/body.json'\nprintf '%s\\n' \"$@\" > '{d}/args.tmp' && mv '{d}/args.tmp' '{d}/args'\necho '{answer}'\nexit {code}\n",
                     d = dir.display()
                 ),
             )
@@ -2146,7 +2151,10 @@ mod tests {
             (turn["conversation"].as_str().unwrap().to_owned(), turn["turnKey"].as_str().unwrap().to_owned());
         room.bot_post(&bot, &conv, 1, Some(&key), "ok", "w1").await.unwrap();
         let again = room.bot_post(&bot, &conv, 1, Some(&key), "again", "w2").await.unwrap();
-        assert_eq!((again["late"].as_bool(), again["lateWhy"].as_str()), (Some(true), Some("noTurn")));
+        // Late either way: the key is answered and nobody waits on it (noTurn), or the conversation has already closed
+        // quietly after the reply (ended). Which one shows depends on when the closing round runs.
+        assert_eq!(again["late"].as_bool(), Some(true));
+        assert!(matches!(again["lateWhy"].as_str(), Some("noTurn" | "ended")), "{again}");
         room.settle().await;
         // ended: the conversation is over (spent, quiet or idle) but still the lane's newest.
         let ended = room.bot_post(&bot, &conv, 1, Some("k"), "too late", "w3").await.unwrap();
