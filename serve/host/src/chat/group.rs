@@ -876,7 +876,7 @@ mod tests {
         let hub = &room.hub;
         let user = hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "hello"})).unwrap();
         hub.add_entry(&main, EntryKind::Agent, 2, &json!({"text": "hi", "author": "a"})).unwrap();
-        let guest = json!({"text": "psst", "sender": {"botId": "bg1", "name": "Grok"}});
+        let guest = json!({"text": "psst", "sender": {"botId": room.bg.as_str(), "name": "Grok"}});
         let ask = hub.add_entry(&main, EntryKind::User, 3, &guest).unwrap();
         let since = since_last_user_message(hub, &main).unwrap();
         assert_eq!(since.first().map(|e| e.id.clone()), Some(user.id), "the guest's ask is not the user's message");
@@ -911,6 +911,9 @@ mod tests {
         hub: Arc<Hub>,
         dir: PathBuf,
         group: String,
+        /// The outside bot's id: its own per room, because `turns()` is process-wide and ending or revoking a bot
+        /// cancels the waiting turns of that id in every test running beside this one.
+        bg: String,
     }
 
     impl Room {
@@ -946,7 +949,7 @@ mod tests {
                 )
                 .unwrap();
             let group = group["id"].as_str().unwrap().to_owned();
-            Self { hub, dir, group }
+            Self { hub, dir, group, bg: format!("bg-{}", uuid::Uuid::new_v4()) }
         }
 
         async fn send(&self, text: &str, thread: Option<&str>) -> Entry {
@@ -1352,9 +1355,9 @@ mod tests {
     }
 
     impl Room {
-        /// The owner's bot `bg1` ("Grok"), let in and holding a key, as a third member. Returns what it calls with.
+        /// The owner's bot `self.bg` ("Grok"), let in and holding a key, as a third member. Returns what it calls with.
         fn join_bot(&self, timeout: i64, wake: Option<&str>) -> Caller {
-            let g = guest("bg1", None, BotState::Active, timeout, wake);
+            let g = guest(&self.bg, None, BotState::Active, timeout, wake);
             self.hub.store.put_bot_guest(&g).unwrap();
             let key = g.device_key.clone().unwrap();
             self.hub
@@ -1374,7 +1377,7 @@ mod tests {
                 .unwrap();
             self.hub.store.set_device_proven(&key).unwrap();
             self.hub.cloud_synced.store(true, std::sync::atomic::Ordering::Release);
-            self.hub.update_bot(&json!({"id": self.group, "members": ["a", "b", "bg1"]})).unwrap();
+            self.hub.update_bot(&json!({"id": self.group, "members": ["a", "b", self.bg]})).unwrap();
             Caller::Device { key, scopes: vec![Scope::Control] }
         }
 
@@ -1403,7 +1406,7 @@ mod tests {
                 .messages_after(&Lane::main(&self.group), 0, 100)
                 .unwrap()
                 .into_iter()
-                .filter(|e| e.data["sender"]["botId"] == "bg1")
+                .filter(|e| e.data["sender"]["botId"] == self.bg.as_str())
                 .collect()
         }
     }
@@ -1434,7 +1437,10 @@ mod tests {
         let mut events = room.hub.events.subscribe();
         room.send("@Grok what do you think?", None).await;
         let turn = next_turn(&mut events).await;
-        assert_eq!((turn["botId"].as_str(), turn["room"].as_str()), (Some("bg1"), Some(room.group.as_str())));
+        assert_eq!(
+            (turn["botId"].as_str(), turn["room"].as_str()),
+            (Some(room.bg.as_str()), Some(room.group.as_str()))
+        );
         let (conv, epoch, key) = (
             turn["conversation"].as_str().unwrap(),
             turn["epoch"].as_u64().unwrap(),
@@ -1468,7 +1474,7 @@ mod tests {
         let mut events = room.hub.events.subscribe();
         // The outside bot answers each of its turns as soon as the room tells it.
         let (hub, group) = (room.hub.clone(), room.group.clone());
-        let caller = Caller::Device { key: "key-bg1".into(), scopes: vec![Scope::Control] };
+        let caller = Caller::Device { key: format!("key-{}", room.bg), scopes: vec![Scope::Control] };
         let answering = tokio::spawn(async move {
             let mut turns = 0;
             while let Ok(v) = events.recv().await {
@@ -1685,7 +1691,7 @@ mod tests {
         let hidden =
             room.hub.add_entry(&main, EntryKind::Thought, 1, &json!({"text": "thinking", "author": "a"})).unwrap();
         let event = |e: &Entry| json!({"type": "entry", "rev": e.rev, "entry": e});
-        let seen = |e: &Entry| crate::api::roles::event_for_bot(&room.hub.store, "bg1", event(e));
+        let seen = |e: &Entry| crate::api::roles::event_for_bot(&room.hub.store, room.bg.as_str(), event(e));
         let first = seen(&said).expect("a member sees the room");
         assert_eq!(
             (first["room"].as_str(), first["entry"]["text"].as_str()),
@@ -1710,16 +1716,16 @@ mod tests {
         room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b"]})).unwrap();
         assert!(seen(&said).is_none());
         let gap = room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "while it was out"})).unwrap();
-        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "bg1"]})).unwrap();
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", room.bg.as_str()]})).unwrap();
         // Back in, it starts again from now: what came before, the gap included, stays unread.
         assert!(seen(&said).is_none() && seen(&gap).is_none());
         let after = room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "welcome back"})).unwrap();
         assert!(seen(&after).is_some());
         // Revoked: nothing more, and a turn event too.
-        crate::api::botguests::end_bot(&room.hub, "bg1", BotState::Revoked, "kai", "kai").await;
+        crate::api::botguests::end_bot(&room.hub, room.bg.as_str(), BotState::Revoked, "kai", "kai").await;
         assert!(seen(&said).is_none() && seen(&agent).is_none(), "a revoked bot gets no more room events");
-        let turn = json!({"type": "turn", "botId": "bg1", "room": room.group, "conversation": "c", "epoch": 1, "turnKey": "k"});
-        assert!(crate::api::roles::event_for_bot(&room.hub.store, "bg1", turn).is_none());
+        let turn = json!({"type": "turn", "botId": room.bg.as_str(), "room": room.group, "conversation": "c", "epoch": 1, "turnKey": "k"});
+        assert!(crate::api::roles::event_for_bot(&room.hub.store, room.bg.as_str(), turn).is_none());
         room.shutdown().await;
     }
 
@@ -1835,7 +1841,7 @@ mod tests {
         let conv = room.hub.store.open_conversation(&main, 3, "owner").unwrap();
         let queue = crate::store::RoomQueue {
             waiting: vec![],
-            current: Some("bg1".into()),
+            current: Some(room.bg.as_str().into()),
             round: 1,
             spoke: 0,
             turn_key: Some("key-before".into()),
@@ -1933,13 +1939,15 @@ mod tests {
         let joined = notices(&room, "botJoined");
         assert_eq!(joined.len(), 1);
         assert_eq!(joined[0].data["text"], "Grok joined · sees this room from now on");
-        assert_eq!(joined[0].data["bot"], json!({"botId": "bg1", "name": "Grok", "provider": "grok"}));
-        let point = room.hub.store.room_bot_point(&room.group, "bg1").unwrap();
+        assert_eq!(joined[0].data["bot"], json!({"botId": room.bg.as_str(), "name": "Grok", "provider": "grok"}));
+        let point = room.hub.store.room_bot_point(&room.group, room.bg.as_str()).unwrap();
         assert_eq!((point.seq, point.rev), (joined[0].seq, joined[0].rev), "the join line is the point");
         // The same members again: nothing moves and nothing is written.
-        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b", "bg1"], "name": "Crew 2"})).unwrap();
+        room.hub
+            .update_bot(&json!({"id": room.group, "members": ["a", "b", room.bg.as_str()], "name": "Crew 2"}))
+            .unwrap();
         assert_eq!(notices(&room, "botJoined").len(), 1);
-        assert_eq!(room.hub.store.room_bot_point(&room.group, "bg1"), Some(point));
+        assert_eq!(room.hub.store.room_bot_point(&room.group, room.bg.as_str()), Some(point));
         // It reads nothing from before, even with the cursor at the start, and a cursor below the point is lifted.
         let new = room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "fresh"})).unwrap();
         for since in [0, 1, before.rev - 1] {
@@ -1964,10 +1972,10 @@ mod tests {
             (left.len(), left[0].data["why"].as_str(), left[0].data["text"].as_str()),
             (1, Some("removed"), Some("Grok left"))
         );
-        assert!(room.hub.store.room_bot_point(&room.group, "bg1").is_none());
-        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b", "bg1"]})).unwrap();
+        assert!(room.hub.store.room_bot_point(&room.group, room.bg.as_str()).is_none());
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b", room.bg.as_str()]})).unwrap();
         assert_eq!(notices(&room, "botJoined").len(), 2);
-        assert!(room.hub.store.room_bot_point(&room.group, "bg1").unwrap().seq > point.seq);
+        assert!(room.hub.store.room_bot_point(&room.group, room.bg.as_str()).unwrap().seq > point.seq);
         room.shutdown().await;
     }
 
@@ -1978,14 +1986,16 @@ mod tests {
         let other = room
             .hub
             .create_bot(
-                serde_json::from_value(json!({"id": "", "kind": "group", "name": "Other", "members": ["a", "bg1"]}))
-                    .unwrap(),
+                serde_json::from_value(
+                    json!({"id": "", "kind": "group", "name": "Other", "members": ["a", room.bg.as_str()]}),
+                )
+                .unwrap(),
             )
             .unwrap();
         let other = other["id"].as_str().unwrap().to_owned();
-        let guest = room.hub.store.bot_guest("bg1").unwrap();
-        crate::api::botguests::end_bot(&room.hub, "bg1", BotState::Revoked, "bot", "bg1").await;
-        crate::api::botguests::end_bot(&room.hub, "bg1", BotState::Revoked, "bot", "bg1").await;
+        let guest = room.hub.store.bot_guest(room.bg.as_str()).unwrap();
+        crate::api::botguests::end_bot(&room.hub, room.bg.as_str(), BotState::Revoked, "bot", room.bg.as_str()).await;
+        crate::api::botguests::end_bot(&room.hub, room.bg.as_str(), BotState::Revoked, "bot", room.bg.as_str()).await;
         let _ = guest;
         let lines = |chat: &str| -> Vec<Value> {
             room.hub
@@ -2002,7 +2012,7 @@ mod tests {
             assert_eq!(l.len(), 1, "{chat}");
             assert_eq!((l[0]["why"].as_str(), l[0]["text"].as_str()), (Some("left"), Some("Grok left")));
         }
-        assert_eq!(room.hub.store.rooms_of_bot("bg1"), Vec::<String>::new());
+        assert_eq!(room.hub.store.rooms_of_bot(room.bg.as_str()), Vec::<String>::new());
         // A later edit that drops the revoked member writes nothing more.
         room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b"]})).unwrap();
         assert_eq!(lines(&room.group).len(), 1);
@@ -2044,7 +2054,7 @@ mod tests {
         // A message after it joined does wake it.
         let mut events = room.hub.events.subscribe();
         room.send("@Grok now you", None).await;
-        assert_eq!(next_turn(&mut events).await["botId"], "bg1");
+        assert_eq!(next_turn(&mut events).await["botId"], room.bg.as_str());
         room.settle().await;
         room.shutdown().await;
     }
@@ -2084,7 +2094,7 @@ mod tests {
         assert!(crate::api::roles::event_for(store, Some("sam"), last.clone()).is_none());
         let bot = room.join_bot(300, None);
         let _ = bot;
-        assert!(crate::api::roles::event_for_bot(store, "bg1", last.clone()).is_none());
+        assert!(crate::api::roles::event_for_bot(store, room.bg.as_str(), last.clone()).is_none());
         // The history answer says the same, for a reconnecting app.
         let history =
             crate::api::dispatch(&room.hub, &Caller::Local, "history", json!({"botId": room.group})).await.unwrap();
