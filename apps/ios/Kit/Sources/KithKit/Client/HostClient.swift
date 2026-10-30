@@ -16,6 +16,8 @@ public enum HostEvent: Sendable {
     case botUpdated
     /// Members' devices waiting for the owner's OK, the whole list each time.
     case accessRequests([MemberAccessRequest])
+    /// A group room's conversation opened, spent a turn, changed speaker or ended (owner's apps only).
+    case conversation(RoomConversation)
     /// An event this app version couldn't decode (host newer/older than the app).
     case undecodable(type: String)
 }
@@ -24,6 +26,21 @@ public enum HostEvent: Sendable {
 public enum TermEvent: Sendable {
     case output(Data)
     case exit(Int)
+}
+
+/// A `history` response: the entries and the conversation of the chat's main lane. Neither the field's absence (an older
+/// host) nor its null (never had one) is an error.
+struct HistoryPage: Decodable {
+    var entries: [Entry]
+    var conversation: RoomConversation?
+
+    private enum CodingKeys: String, CodingKey { case entries, conversation }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        entries = try c.decode([Entry].self, forKey: .entries)
+        conversation = try? c.decodeIfPresent(RoomConversation.self, forKey: .conversation)
+    }
 }
 
 /// A `thread` response: the replies and, from a host that has place folders, where the thread works.
@@ -182,6 +199,8 @@ public struct HostClient: Sendable {
             return .botUpdated
         case "accessRequests":
             return (try? d.decode(RequestsWrap.self, from: data)).map { .accessRequests($0.requests) }
+        case "conversation":
+            return (try? d.decode(HostContract.ConversationEvent.self, from: data)).map { .conversation(RoomConversation($0)) }
         default:
             return nil
         }
@@ -194,10 +213,15 @@ public extension HostClient {
     func hello() async throws -> Hello { try await call(.hello) }
 
     func history(botId: String, beforeSeq: Int64, limit: Int = 100) async throws -> [Entry] {
+        try await historyPage(botId: botId, beforeSeq: beforeSeq, limit: limit).entries
+    }
+
+    /// A page of the chat and, from a host that keeps room conversations, the conversation of its main lane that was
+    /// opened last (nil when the chat never had one, and from an older host).
+    func historyPage(botId: String, beforeSeq: Int64, limit: Int = 100) async throws -> (entries: [Entry], conversation: RoomConversation?) {
         struct Body: Encodable { var botId: String; var beforeSeq: Int64; var limit: Int }
-        struct Res: Decodable { var entries: [Entry] }
-        let res: Res = try await call(.history, Body(botId: botId, beforeSeq: beforeSeq, limit: limit))
-        return res.entries
+        let res: HistoryPage = try await call(.history, Body(botId: botId, beforeSeq: beforeSeq, limit: limit))
+        return (res.entries, res.conversation)
     }
 
     /// A thread's replies (the root is in the main chat).
@@ -281,16 +305,20 @@ public extension HostClient {
     /// `newTask`: start a task of its own rather than go on with the current one.
     /// `start`: the project or folder the place this message runs in starts in.
     /// `via`: "call" for a message spoken in a voice call (an older computer ignores it).
+    /// `budget`: to a group only, the turns this message gives the room (clamped to 1...100).
     func send(botId: String, text: String, clientNonce: String, threadId: String? = nil, attachments: [String]? = nil,
-              pasted: [String]? = nil, newTask: Bool = false, start: FolderChoice? = nil, via: String? = nil) async throws -> Entry {
+              pasted: [String]? = nil, newTask: Bool = false, start: FolderChoice? = nil, via: String? = nil,
+              budget: Int? = nil) async throws -> Entry {
         struct Body: Encodable {
             var botId: String; var text: String; var clientNonce: String; var threadId: String?; var attachments: [String]?
             var pasted: [String]?; var newTask: Bool?; var project: String?; var folder: String?; var via: String?
+            var budget: Int?
         }
         struct Res: Decodable { var entry: Entry }
         let body = Body(botId: botId, text: text, clientNonce: clientNonce, threadId: threadId, attachments: attachments,
                         pasted: pasted?.isEmpty == false ? pasted : nil, newTask: newTask ? true : nil,
-                        project: start?.projectId, folder: start?.folderPath, via: via)
+                        project: start?.projectId, folder: start?.folderPath, via: via,
+                        budget: budget.map(Turns.clamp))
         do {
             let res: Res = try await call(.send, body)
             return res.entry
