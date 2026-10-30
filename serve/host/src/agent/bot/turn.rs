@@ -78,7 +78,7 @@ impl Actor {
         }
         if remind_files && self.active_group.is_none() && self.active_request.is_none() && self.active_routine.is_none()
         {
-            prompt.push_str("\n\n[Kith: send_file(path, name?) shares any regular file up to 100 MiB as a downloadable card. Use it instead of sending a local path.]");
+            prompt.push_str("\n\n[Kith: send_file(path, name?) shares any regular file up to 100 MiB as a downloadable card. Use it instead of sending a local path. To share several files at once, pass them in one call with send_file(paths) (up to 10): they show as one group.]");
         }
         Ok(prompt)
     }
