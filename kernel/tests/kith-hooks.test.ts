@@ -223,12 +223,21 @@ async function spawnHelper(t: ReturnType<typeof setup>) {
   return spawn(t.$, { subagentType: 'kith:builder', prompt: 'do the thing', cwd: t.root }, async (x: any) => ({ agentId: 'a1', prompt: x.prompt }))
 }
 
-test('owner helper gets the owner memory', async () => {
-  const t = setup()
+test('owner helper gets the owner load: memory and start files, as bin/kith', async () => {
+  const t = setup({}, withFacets(null, '<long-term-memory>OWNER-LOAD</long-term-memory>'))
+  const started = await spawnHelper(t)
+  expect(started.prompt).toContain('OWNER-LOAD')
+  expect(started.prompt).toContain(join(t.agents, 'builder/memory/sessions/kith.md'))
+  const f = t.calls.find((c) => c.join(' ').includes('kith_facets'))!
+  expect(f[f.indexOf('--kind') + 1]).toBe('owner')
+  expect(f[f.indexOf('--project') + 1]).toBe('kith')
+  expect(f[f.indexOf('--person-file') + 1]).toBe(join(t.state, 'user.md'))
+})
+
+test('owner helper falls back to its MEMORY.md when the load fails', async () => {
+  const t = setup({}, withFacets(null, null))
   const started = await spawnHelper(t)
   expect(started.prompt).toContain('OWNER-SECRET')
-  expect(started.prompt).toContain(join(t.agents, 'builder/memory/sessions/kith.md'))
-  expect(t.calls.some((c) => c.join(' ').includes('kith_facets'))).toBe(false)
 })
 
 test('a person helper gets the person memory and none of the owner\'s', async () => {

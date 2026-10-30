@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Entry, FileDiff, PermissionOption } from '@shared/models'
+import type { Entry, FileDiff } from '@shared/models'
 import type { HeldRowModel } from '@shared/held-run'
 import { Disclosure } from '../../components/Controls'
 import { DecisionCard, HeldRow, StoppedDivider, type Pair } from '../../components/kith'
@@ -10,6 +10,7 @@ import { HStack, VStack } from '../../components/Stack'
 import { Text } from '../../components/Text'
 import { alwaysAllowLabel } from './permission-labels.ts'
 import { permissionOutcome } from './permission-outcome.ts'
+import { permissionChoices, sortedOptions } from './permission-options.ts'
 import './permission-card.css'
 
 /** What the agent wants, from the tool's kind (also the notch island's headline). */
@@ -31,26 +32,6 @@ export const permissionHeadline = (toolKind?: string) => {
   }
 }
 
-const rank: Record<string, number> = { allow_once: 0, allow_always: 1, reject_once: 2, reject_always: 3 }
-
-/** Allow before deny, once before always. */
-export const sortedOptions = (options: PermissionOption[]) => [...options].sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9))
-
-export function optionLabel(o: PermissionOption) {
-  switch (o.kind) {
-    case 'allow_once':
-      return 'Allow once'
-    case 'allow_always':
-      return 'Always allow'
-    case 'reject_once':
-      return 'Deny'
-    case 'reject_always':
-      return 'Never'
-    default:
-      return o.name
-  }
-}
-
 /**
  * Approval card (the kith DecisionCard): what the agent wants, where it runs, the answers, tinted in the agent's pair.
  * `waiting`: the owner's name when this card is for them to answer (a guest's run); the buttons are theirs, not this person's.
@@ -69,8 +50,7 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
   const options = sortedOptions(d.options ?? [])
   const cwd = d.cwd ? ` · ${d.cwd.split('/').filter(Boolean).pop() ?? d.cwd}` : ''
   const byKind = (kind: string) => options.find((o) => o.kind === kind)
-  // Allow / Deny / Always when the host offers exactly those; any other set shows every option as its own button.
-  const plain = options.length > 0 && options.every((o) => ['allow_once', 'allow_always', 'reject_once'].includes(o.kind)) && !!byKind('allow_once') && !!byKind('reject_once')
+  const choices = permissionChoices(d)
   const common = {
     pair,
     title: permissionHeadline(d.toolKind),
@@ -93,7 +73,7 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
   // answering !== null disables every button, so a double click answers once.
   return (
     <div className="agent-inset">
-      {plain ? (
+      {choices === null ? (
         <DecisionCard
           kind="permission"
           {...common}
@@ -108,7 +88,7 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
         <DecisionCard
           kind="question"
           {...common}
-          options={options.map((o) => ({ id: o.optionId, label: optionLabel(o) }))}
+          options={choices}
           onChoose={(id) => respond(id)}
         />
       )}

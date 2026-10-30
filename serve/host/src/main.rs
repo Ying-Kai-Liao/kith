@@ -10,6 +10,7 @@ mod cards;
 mod channels;
 mod chat;
 mod compat;
+mod doors;
 mod environment;
 mod hqmem;
 mod hub;
@@ -22,6 +23,7 @@ mod rich_card;
 mod routines;
 mod run_outbox;
 mod runauth;
+mod samples;
 mod screen;
 mod service;
 mod shell;
@@ -154,6 +156,11 @@ enum Sub {
         #[arg(long, default_value_t = service::DEFAULT_PORT)]
         port: u16,
         computer: String,
+    },
+    /// Post one of every card into a "Samples" chat (replacing the last one); their buttons do nothing.
+    SampleCards {
+        #[arg(long, default_value_t = service::DEFAULT_PORT)]
+        port: u16,
     },
     /// Install and start the host as a background service (launchd / systemd --user).
     Install {
@@ -551,6 +558,14 @@ async fn main() -> Result<()> {
                 "installed: {}\nrunning:   {running}\nport:      {port}\ndata:      {}",
                 service::installed(),
                 service::data_dir().display()
+            );
+            Ok(())
+        }
+        Sub::SampleCards { port } => {
+            let got = local_call(port, "sampleCards", json!({})).await?;
+            println!(
+                "Posted {} sample cards to the Samples chat. Its approval cards show under Needs you until you delete the chat.",
+                got["cards"]
             );
             Ok(())
         }

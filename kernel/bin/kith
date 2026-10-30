@@ -40,6 +40,7 @@
 #   kith search [words] [--mine]                         find agents on GitHub (repos tagged hq-agent)
 #   kith deps <agent>|--all [--install]                  programs an agent runs that this Mac lacks; --install adds them
 #   kith auth [ls|grant|revoke|set ...]                  which agent may use which service, as which account (kith-auth)
+#   kith door prepare AGENT DOOR|sweep|ls               a guest's doors: prepare one's cache (owner), stop them, list them (kith-door)
 #   kith cost [agents|agent <name>|...]                  what the agents cost, from the usage ledger (kith-cost)
 #   kith ask <agent> [-c] [--as NAME] "task"            ask an agent, get its answer back; -c continues (kith-ask)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
@@ -60,8 +61,8 @@
 # version once they pass checks; running sessions keep theirs. Shared services and their secrets come from
 # bin/kith-auth: only the ones the agent needs and is granted, secrets injected into the server process only.
 #
-# Same prompt the Claude Code plugin gives kith:<agent>: agent.md + PROTOCOL.md, plus the
-# agent's MEMORY.md and the project:
+# Same prompt the Claude Code plugin gives kith:<agent>: agent.md + PROTOCOL.md (the core; the rest is in
+# kernel/skills/), plus the agent's memory, the project's start files and the project:
 # -p ID, else the project whose remote/path matches the current directory, else none.
 # agents/<name>/settings.json is merged over your global Claude Code settings.
 # Model and effort: `model:` and `effort:` in agent.md's frontmatter (the same fields the kith:<name> subagent uses),
@@ -99,6 +100,7 @@ case $1 in
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
   rollback)           shift; exec "$KITH/bin/kith-pkg" pin "$@" ;;
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
+  door)               shift; exec "$KITH/bin/kith-door" "${@:---help}" ;;
   cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
@@ -214,7 +216,8 @@ if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/
 
 # Who the run is for: KITH_PERSON, set by the entry point (the bridge, a schedule) and inherited by every helper, so
 # access follows the person who asked however deep the calls go. Unset is the owner and changes nothing. A helper is
-# checked as one (--via the agent that called it). Fails closed: no answer from kith-auth, no run.
+# checked as one (--via the agent that called it; --take-once uses up a "just this once" from the helper card). Fails
+# closed: no answer from kith-auth, no run.
 nested=0; [[ -n ${KITH_AGENT:-} ]] && nested=1   # started by another run (KITH_AGENT is exported further down)
 caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trusted=0 p_mode="" p_model="" p_deny="" p_line="" p_env_names="" p_rooms=""
 if [[ -n ${KITH_PERSON:-} ]]; then
@@ -224,7 +227,7 @@ if [[ -n ${KITH_PERSON:-} ]]; then
   # a schedule). kith-auth never holds the owner.
   hold=${KITH_SYNC_HOLD:-120}; [[ $hold =~ ^[0-9]+$ ]] || hold=120; held_until=$((SECONDS + hold))
   while :; do
-    res=$("$KITH/bin/kith-auth" resolve "$agent" ${caller:+--via "$caller"}) \
+    res=$("$KITH/bin/kith-auth" resolve "$agent" ${caller:+--via "$caller" --take-once}) \
       || { echo "kith: can't check whether ${KITH_PERSON} may use $agent (kith-auth resolve failed)" >&2; exit 1; }
     RES=$res python3 -c 'import json, os, sys; sys.exit(0 if json.loads(os.environ["RES"]).get("held") else 1)' || break
     (( SECONDS < held_until )) || { echo "kith: out of sync with the Kith cloud, so ${KITH_PERSON} can't use $agent on this computer yet; try again in a minute" >&2; exit 3; }
@@ -434,7 +437,8 @@ held=$([[ -n $project ]] && env -u KITH_RUN_TOKEN "$KITH/bin/project-id" --child
 # same one the host's runs get through KITH_ROOM). The owner's run: about them, the agent's memory, then the shared part
 # when there is one. Anyone else's: about them, the shared part and their own. In a group room only what everyone there
 # may see; a bot guest (bot-<hex>) is shared craft and its own room's notes. A person the host's KITH_ROOM_MEMBERS names
-# is in that room (kith_facets.py; kith-auth keeps no room membership, so p_rooms is empty today).
+# is in that room (kith_facets.py; kith-auth keeps no room membership, so p_rooms is empty today). Then the project's
+# start files the same filter allows: the session file, codebase.md, the last 30 decision lines and the agent's own open lines.
 load_kind=person; [[ $p_owner == 1 ]] && load_kind=owner; [[ ${p_id:-} == bot-* ]] && load_kind=guest
 load_out=$(python3 "$KITH/lib/kith_facets.py" load --agent "$agent" --home "$home" --person-file "$person_file" \
   --kind "$load_kind" --person "${p_id:-}" --rooms "$p_rooms" --room "${KITH_ROOM:-}" --project "$project" \
