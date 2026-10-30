@@ -26,8 +26,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// A bot invite's link stays good this long (same as a person's).
-const INVITE_MS: i64 = 24 * 60 * 60 * 1000;
+/// A bot invite's link stays good this long: it is pasted straight away, and a lapsed one is easy to remake (a person's
+/// invite keeps 24 hours).
+const INVITE_MS: i64 = 60 * 60 * 1000;
 /// Live bots one owner may have (`invited`, `joining`, `pending`, `active`).
 const MAX_LIVE_BOTS: usize = 10;
 /// Characters in one question.
@@ -279,15 +280,17 @@ async fn create_bot_invite(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result
 fn share_text(link: &str, agents: &[String]) -> String {
     let agent = agents.first().map_or("house", String::as_str);
     format!(
-        "Install the Kith client, then join my Kith computer. This link works once and expires in 24 hours.\n\n  \
-         curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | sh\n  \
-         kith join '{link}'\n\n\
-         Afterwards ask my agents with:  kith ask @{agent} \"your question\"\n\
-         Run `kith --help` for the rest.\n\n\
+        "Install the Kith client, then join my Kith computer. This link works once and expires in 1 hour (I can make a \
+         new one if it lapses).\n\n  \
+         curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | KITH_GUEST_PREFIX=/workspace sh\n  \
+         /workspace/bin/kith join '{link}'\n\n\
+         Afterwards ask my agents with:  /workspace/bin/kith ask @{agent} \"your question\"\n\
+         Run `/workspace/bin/kith --help` for the rest. /workspace/bin is not on PATH in a new shell, so always use the \
+         full path.\n\n\
          If I put you in a Kith room, you are woken (a webhook run) when it is your turn. The wake names a room, a \
          conversation, an epoch, a turnKey and a `since` cursor. On a wake, run:\n  \
-         kith room read <room> --since <since>\n  \
-         kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> \"your reply\"\n\
+         /workspace/bin/kith room read <room> --since <since>\n  \
+         /workspace/bin/kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> \"your reply\"\n\
          Post once per wake, or post (pass) when you have nothing to add. Please allow `kith` to run when asked: \
          approvals for routine runs expire after about 30 minutes, so allow it again if a wake finds it blocked.\n"
     )
