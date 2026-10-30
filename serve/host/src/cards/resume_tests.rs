@@ -1337,3 +1337,104 @@ async fn one_attempt_marks_every_card_of_its_session_and_counts_per_queue() {
     assert!(!resume::enqueuing_for_test(&a.id) && !resume::enqueuing_for_test(&b.id), "no mark is left behind");
     assert!(resume::enqueued_for_test(&r.hub) >= before + 2);
 }
+
+fn status_of(r: &Rig, e: &Value) -> (String, Option<String>) {
+    let now = r.hub.store.entry(e["id"].as_str().unwrap()).unwrap();
+    (now.data["status"].as_str().unwrap().to_owned(), now.data["waitsFor"].as_str().map(str::to_owned))
+}
+
+#[tokio::test]
+async fn a_wake_turn_that_fails_to_start_leaves_its_messages_waiting_not_sent() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let (a, b) = (send_to(&r, &chat, &root, "one", "n1").await, send_to(&r, &chat, &root, "two", "n2").await);
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    // With the actor: still queued (its prompt has not gone), not waiting for the terminal any more.
+    assert_eq!(status_of(&r, &a), ("queued".into(), Some("turn".into())));
+    let entries: Vec<String> = messages_seen(&chat, &root).iter().map(|s| s.entry.clone().unwrap()).collect();
+    assert_eq!(entries.len(), 2);
+    // The start failed (the terminal got in again): both go back to waiting for it, and the queue has them.
+    resume::refused(&r.hub, &entries, None);
+    assert_eq!(status_of(&r, &a), ("queued".into(), Some("terminal".into())));
+    assert_eq!(status_of(&r, &b), ("queued".into(), Some("terminal".into())));
+    queue_says_of(&r, &format!("msg:{}", a["id"].as_str().unwrap()), "queued").await;
+    pause_over(&r);
+    drive(&r.hub).await;
+    assert_eq!(messages_seen(&chat, &root).len(), 4, "offered again as one turn");
+}
+
+#[tokio::test]
+async fn the_run_is_answered_only_when_every_message_of_it_has_started() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let (a, b) = (send_to(&r, &chat, &root, "one", "n1").await, send_to(&r, &chat, &root, "two", "n2").await);
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    let (ia, ib) = (a["id"].as_str().unwrap().to_owned(), b["id"].as_str().unwrap().to_owned());
+    // The actor started a turn with the first only: the second is still in its queue.
+    resume::turn_started(&r.hub, std::slice::from_ref(&ia));
+    assert_eq!(status_of(&r, &a).0, "sent");
+    assert_eq!(
+        status_of(&r, &b),
+        ("queued".into(), Some("turn".into())),
+        "not marked sent while it waits in the actor"
+    );
+    queue_says_of(&r, &format!("msg:{ib}"), "running").await;
+    resume::turn_started(&r.hub, std::slice::from_ref(&ib));
+    assert_eq!(status_of(&r, &b).0, "sent");
+    queue_says_of(&r, &format!("msg:{ib}"), "answered").await;
+}
+
+#[tokio::test]
+async fn a_message_taken_back_from_the_actor_frees_its_run_for_later_wakes() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let a = send_to(&r, &chat, &root, "one", "n1").await;
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    assert_eq!(messages_seen(&chat, &root).len(), 1);
+    let id = a["id"].as_str().unwrap().to_owned();
+    // The actor's unsend: the run is settled, not held for hours.
+    resume::unsent(&r.hub, &id);
+    assert!(!resume::wake_carries(&id));
+    queue_says_of(&r, &format!("msg:{id}"), "withdrawn").await;
+    // A message sent afterwards is not blocked behind it.
+    assert!(claim::take(&state(&r), "held-s", Kind::Terminal, pid, false).unwrap().is_ok());
+    let c = send_to(&r, &chat, &root, "later", "n3").await;
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    let seen = messages_seen(&chat, &root);
+    assert_eq!(seen.iter().map(|s| s.note.as_str()).collect::<Vec<_>>(), ["one", "later"], "{seen:?}");
+    assert_eq!(seen.last().unwrap().entry.as_deref(), c["id"].as_str());
+}
+
+#[tokio::test]
+async fn a_refused_start_of_a_card_and_messages_together_puts_each_back_where_it_came_from() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let e = send_to(&r, &chat, &root, "carry on", "n1").await;
+    let card = bot_card_approved(&r, &chat, &root);
+    attempt(&r.hub, &card.id).await;
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    let entries: Vec<String> = tests_seen::of(&card.session).iter().map(|s| s.entry.clone().unwrap()).collect();
+    assert_eq!(entries.len(), 2, "the card's notice and the message");
+    // The actor batched both, the gate refused: the message waits again, the card's wake is owed again.
+    resume::refused(&r.hub, &entries, Some("held-s"));
+    assert_eq!(status_of(&r, &e), ("queued".into(), Some("terminal".into())));
+    queue_says_eventually(&r, &card, "queued").await;
+    queue_says_of(&r, &format!("msg:{}", e["id"].as_str().unwrap()), "queued").await;
+}

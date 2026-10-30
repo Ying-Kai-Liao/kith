@@ -34,6 +34,15 @@ impl Actor {
                     self.next_in_queue(done_tx).await;
                 }
             }
+            Cmd::WakeBatch { lane, items } => {
+                // All of them before the first start, so an idle actor takes them as one turn.
+                for (entry_id, text) in items {
+                    self.queue.push_back(Queued::User { lane: lane.clone(), entry_id, text, alone: false });
+                }
+                if self.turn.is_none() {
+                    self.next_in_queue(done_tx).await;
+                }
+            }
             Cmd::Routed { entry_id, route } => self.apply_route(&entry_id, route).await,
             Cmd::Unsend { entry_id, reply } => {
                 let _ = reply.send(self.unsend(&entry_id));
@@ -201,6 +210,8 @@ impl Actor {
     fn unsend(&mut self, entry_id: &str) -> bool {
         let Some(p) = self.queued_at(entry_id) else { return false };
         self.queue.remove(p);
+        // A wake carried it: the queue is told it is not coming.
+        crate::cards::resume::unsent(&self.hub, entry_id);
         self.set_user_status(entry_id, RequestStatus::Cancelled);
         true
     }
@@ -375,21 +386,22 @@ impl Actor {
             }
             // Messages sent while the agent worked go out together as its next turn
             // without crossing a bot request or another lane: each gets its own reply.
-            let Some(Queued::User { lane, .. }) = self.queue.front() else { continue };
-            let lane = lane.clone();
-            let mut batch = Vec::new();
-            // A message on a different subject goes alone.
-            while let Some(Queued::User { lane: l, alone, .. }) = self.queue.front()
-                && *l == lane
-                && (batch.is_empty() || !*alone)
-            {
-                let alone = *alone;
-                if let Some(Queued::User { entry_id, text, .. }) = self.queue.pop_front() {
-                    batch.push((entry_id, text));
+            let Some((lane, mut batch)) = take_batch(&mut self.queue) else { continue };
+            // A message taken back or stopped while it waited is not part of the turn.
+            batch.retain(|(id, _)| {
+                let wanted = self
+                    .hub
+                    .store
+                    .entry(id)
+                    .is_none_or(|e| e.kind != EntryKind::User.as_str() || e.data["status"] != "cancelled");
+                if !wanted {
+                    // A wake carried it: the queue is told it is not coming.
+                    crate::cards::resume::unsent(&self.hub, id);
                 }
-                if alone {
-                    break;
-                }
+                wanted
+            });
+            if batch.is_empty() {
+                continue;
             }
             let ids: Vec<String> = batch.iter().map(|(id, _)| id.clone()).collect();
             let text = batch.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n\n");
@@ -590,5 +602,59 @@ impl Actor {
         if let Err(error) = self.hub.store.kv_set(&inflight_key(&self.rt), &value) {
             tracing::warn!(bot = %self.cfg.id, error = format!("{error:#}"), "couldn't record the running turn");
         }
+    }
+}
+
+/// The messages at the front of the queue that go out together as the next turn, with their lane: the same lane, up to
+/// and including one on a different subject (which goes alone). None when the front is not a user message.
+fn take_batch(queue: &mut std::collections::VecDeque<Queued>) -> Option<(Lane, Vec<(String, String)>)> {
+    let Some(Queued::User { lane, .. }) = queue.front() else { return None };
+    let lane = lane.clone();
+    let mut batch = Vec::new();
+    while let Some(Queued::User { lane: l, alone, .. }) = queue.front()
+        && *l == lane
+        && (batch.is_empty() || !*alone)
+    {
+        let alone = *alone;
+        if let Some(Queued::User { entry_id, text, .. }) = queue.pop_front() {
+            batch.push((entry_id, text));
+        }
+        if alone {
+            break;
+        }
+    }
+    Some((lane, batch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    fn user(lane: &Lane, id: &str, alone: bool) -> Queued {
+        Queued::User { lane: lane.clone(), entry_id: id.into(), text: format!("t-{id}"), alone }
+    }
+
+    #[test]
+    fn a_wake_batch_queued_together_starts_as_one_turn() {
+        let lane = Lane::in_thread("bot", "root");
+        // What `Cmd::WakeBatch` pushes: a card's notice and two messages that waited for a terminal.
+        let mut queue: VecDeque<Queued> = ["notice", "m1", "m2"].iter().map(|id| user(&lane, id, false)).collect();
+        queue.push_back(user(&Lane::main("bot"), "other", false));
+        let (got, batch) = take_batch(&mut queue).unwrap();
+        assert_eq!(got, lane);
+        assert_eq!(batch.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(), ["notice", "m1", "m2"]);
+        assert_eq!(queue.len(), 1, "another lane's message waits for its own turn");
+    }
+
+    #[test]
+    fn a_message_on_another_subject_goes_alone() {
+        let lane = Lane::main("bot");
+        let mut queue: VecDeque<Queued> =
+            VecDeque::from([user(&lane, "a", false), user(&lane, "b", true), user(&lane, "c", false)]);
+        assert_eq!(take_batch(&mut queue).unwrap().1.len(), 1, "b is alone, so a stops before it");
+        assert_eq!(take_batch(&mut queue).unwrap().1.len(), 1);
+        assert_eq!(take_batch(&mut queue).unwrap().1.len(), 1);
+        assert!(take_batch(&mut queue).is_none());
     }
 }

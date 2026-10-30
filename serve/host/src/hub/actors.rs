@@ -130,7 +130,7 @@ impl Hub {
     pub fn send_cmd(&self, bot_id: &str, cmd: Cmd) -> Result<()> {
         match cmd {
             // To the actor already talking there (a routine run in a thread), so one session never runs twice.
-            Cmd::Send { ref lane, .. } => {
+            Cmd::Send { ref lane, .. } | Cmd::WakeBatch { ref lane, .. } => {
                 let key = self.actor_in(bot_id, lane);
                 self.send_to_actor(&key, cmd)
             }

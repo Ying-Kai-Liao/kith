@@ -93,11 +93,13 @@ impl Actor {
             && self.active_routine.is_none()
             && !entry_ids.is_empty();
         let Some(agent) = self.cfg.hq_agent.as_deref().filter(|_| owners_own) else { return false };
-        let users = |id: &String| self.hub.store.entry(id).is_some_and(|e| e.kind == EntryKind::User.as_str());
-        if !entry_ids.iter().all(users) {
+        // A wake's batch can mix a card's notice (the queue gives that one back by itself, see `start_failed`) with the
+        // messages; any other entry is not ours to hold.
+        let is_user = |id: &String| self.hub.store.entry(id).is_some_and(|e| e.kind == EntryKind::User.as_str());
+        if !entry_ids.iter().all(|id| is_user(id) || crate::cards::resume::wake_carries(id)) {
             return false;
         }
-        for id in entry_ids {
+        for id in entry_ids.iter().filter(|id| is_user(id)) {
             if let Err(error) = crate::cards::resume::wait_for_terminal(&self.hub, agent, id).await {
                 tracing::warn!(error = format!("{error:#}"), "couldn't queue a message for a terminal thread");
                 return false;
@@ -220,10 +222,10 @@ impl Actor {
         for id in entry_ids {
             // Bot-message notices belong to `chat::team`; writing them here would race its final status.
             if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
-                e.data["status"] = json!(crate::chat::team::RequestStatus::Sent);
-                // It no longer waits for a terminal (it did, if a wake brought it here).
-                if let Some(data) = e.data.as_object_mut() {
-                    data.remove("waitsFor");
+                // A wake's message is sent once its prompt is (`turn_started`): until then a failed start gives it
+                // back to the queue, still waiting.
+                if !crate::cards::resume::wake_carries(id) {
+                    e.data["status"] = json!(crate::chat::team::RequestStatus::Sent);
                 }
                 if let Some(turn) = &self.project_turn {
                     e.data["projects"] = json!(turn.projects);

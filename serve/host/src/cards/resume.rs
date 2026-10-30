@@ -549,6 +549,16 @@ async fn handle(hub: &Arc<Hub>, turn: Turn) {
             Some(true) => {}
         }
     }
+    // The terminal's hold is asked before anything is read below: the last await, so a Stop or an unsend that raced
+    // the take is seen by what follows, which does not wait again before the actor has the messages.
+    let first_message =
+        turn.ids.iter().filter_map(|i| i.strip_prefix("msg:")).filter_map(|id| hub.store.entry(id)).find(waits);
+    if let Some(e) = first_message
+        && terminal_holds(hub, &lane_of_message(&e)).await
+    {
+        // The terminal still has it: back to the queue, which asks again after its pause.
+        return unstarted(hub, &turn.run, true, true);
+    }
     // Looked at last, after the awaits: a Stop that raced the take has closed its cards by now (R8).
     let live: Vec<Card> = carried.iter().filter_map(|c| hub.store.card(&c.id)).filter(wanted).collect();
     // The app messages that still wait (one Stopped or taken back is no longer wanted), with what each asked.
@@ -574,10 +584,6 @@ async fn handle(hub: &Arc<Hub>, turn: Turn) {
         };
         match door {
             Some(Door::Bot { bot, lane }) => {
-                if !messages.is_empty() && terminal_holds(hub, &lane).await {
-                    // The terminal still has it: back to the queue, which asks again after its pause.
-                    return unstarted(hub, &turn.run, true, true);
-                }
                 bot_door(hub, &turn.run, &live, &bot, &lane, &note, &messages);
             }
             _ => unstarted(hub, &turn.run, true, false),
@@ -706,32 +712,71 @@ fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, n
     }
     for (entry, prompt) in messages {
         lock(&ENTRIES).insert(entry.id.clone(), Carried { run: run.to_owned(), cards: Vec::new() });
+        // With the actor now: still queued until its prompt is sent, no longer waiting for the terminal.
+        set_waits(hub, &entry.id, "turn");
         #[cfg(test)]
         tests_seen::record("bot", &session_key(lane), prompt, Some(&entry.id));
         sends.push((entry.id.clone(), prompt.clone()));
     }
+    // One command, so an idle actor starts the notice and the messages as one turn.
     #[cfg(not(test))]
-    for (entry_id, text) in sends {
-        let cmd = crate::agent::bot::Cmd::Send { lane: lane.clone(), entry_id: entry_id.clone(), text, route: false };
-        if let Err(error) = hub.send_cmd(bot, cmd) {
+    {
+        let ids: Vec<String> = sends.iter().map(|(id, _)| id.clone()).collect();
+        if let Err(error) = hub.send_cmd(bot, crate::agent::bot::Cmd::WakeBatch { lane: lane.clone(), items: sends }) {
             tracing::warn!(error = format!("{error:#}"), "couldn't queue a wake turn");
-            // Those already sent stay with the actor (it asks the queue again for them if it can't start); the rest
-            // go back now.
-            lock(&ENTRIES).remove(&entry_id);
-            return unstarted(hub, run, true, false);
+            for id in &ids {
+                lock(&ENTRIES).remove(id);
+                set_waits(hub, id, "terminal");
+            }
+            unstarted(hub, run, true, false);
         }
     }
     #[cfg(test)]
     drop(sends);
 }
 
+/// Whether a wake's entry is with a bot's actor right now.
+pub fn wake_carries(entry_id: &str) -> bool {
+    lock(&ENTRIES).contains_key(entry_id)
+}
+
+/// What a waiting message waits for, on its entry: `terminal` (the thread is held) or `turn` (the actor has it).
+fn set_waits(hub: &Hub, entry_id: &str, what: &str) {
+    if let Some(mut e) = hub.store.entry(entry_id).filter(waits) {
+        e.data["waitsFor"] = what.into();
+        hub.set_entry(entry_id, &e.data);
+    }
+}
+
+/// An actor took a message back (unsend) that a wake carried: the wake is no longer waiting on it, and the queue is told
+/// when it was the last of its turn.
+pub fn unsent(hub: &Hub, entry_id: &str) {
+    let Some(c) = lock(&ENTRIES).remove(entry_id) else { return };
+    if !lock(&ENTRIES).values().any(|other| other.run == c.run) {
+        give_up(hub, &c.run);
+    }
+}
+
 /// The bot's turn for these entries started (its prompt went to the agent): a wake among them is delivered. Called
 /// from the actor once the prompt is sent.
 pub fn turn_started(hub: &Hub, entry_ids: &[String]) {
+    let mut runs: Vec<String> = Vec::new();
     for entry in entry_ids {
         let Some(c) = lock(&ENTRIES).remove(entry) else { continue };
         clear_held(hub, &cards_of(hub, &c.cards));
-        started(hub, &c.run, &c.cards);
+        applied(hub, &c.cards);
+        if let Some(e) = hub.store.entry(entry) {
+            end_message(hub, &e, MessageEnd::Sent);
+        }
+        if !runs.contains(&c.run) {
+            runs.push(c.run);
+        }
+    }
+    // A run is answered when the last of its entries has started: messages the actor kept for a later turn still wait.
+    for run in runs {
+        if !lock(&ENTRIES).values().any(|c| c.run == run) {
+            started(hub, &run, &[]);
+        }
     }
 }
 
@@ -749,6 +794,8 @@ pub fn refused(hub: &Arc<Hub>, entry_ids: &[String], session: Option<&str>) {
         for card in cards_of(hub, &c.cards) {
             set_held(hub, &card, holder.as_ref().map(|(sid, c)| (*sid, c)));
         }
+        // A message of the wake waits for the terminal again.
+        set_waits(hub, entry, "terminal");
         unstarted(hub, &c.run, true, true);
     }
 }
