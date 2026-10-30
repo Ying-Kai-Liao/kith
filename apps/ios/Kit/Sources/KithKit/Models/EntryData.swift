@@ -93,6 +93,16 @@ public struct EntryData: Codable, Hashable, Sendable {
     /// permission: an agent at its monthly limit (an owner's run waits under it) or a person at their budget
     /// (host `limits.rs`). Nil on every other card.
     public var limit: LimitCardData?
+    /// agent reply or bot post, in a group room: the room conversation it belongs to (host `chat/group.rs`). Nil from an
+    /// older host and on entries from before. A bot-guest chat's notice carries its own bot conversation id here.
+    public var conversation: String?
+    /// agent reply or bot post: it came after the run it answers was over, so it started nothing. `lateWhy` says why.
+    public var late: Bool?
+    public var lateWhy: String?
+    /// bot post: a post nobody asked for while no conversation was open. Not late: the room was simply quiet.
+    public var unprompted: Bool?
+    /// notice: `botJoined`, `botLeft`, `botPassed` or `botTimedOut` (a bot in a group room); its words are in `text`.
+    public var notice: String?
 
     public init(text: String? = nil, status: String? = nil, clientNonce: String? = nil) {
         self.text = text
@@ -106,6 +116,8 @@ public struct EntrySender: Codable, Hashable, Sendable {
     public var name: String?
     /// The person speaking through the bot, when it says.
     public var speaker: String?
+    /// `grok`, `other` or one this version doesn't know; picks the bot's face. Nil from an older host.
+    public var provider: String?
 }
 
 /// What an edge card's options grant: a host (`domains`) or a helper (`helpers`), and the job it is part of when the

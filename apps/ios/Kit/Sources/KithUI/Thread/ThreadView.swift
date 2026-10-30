@@ -26,6 +26,7 @@ public struct ThreadView: View {
     @State var titling: TopicTitling?
     @State var botChat: BotChatTarget?
     @State var editingGroup = false
+    @State var roomInfo = false
     @State var details: DetailsRequest?
     @State var confirmNewSession = false
     @State var confirmDelete: Bot?
@@ -95,6 +96,15 @@ public struct ThreadView: View {
     var conversation: some View {
         chrome(chat)
             .readingConversation(botId)
+            // Where the room's run stands: on opening it and after every reconnect. The bots in it are named under the title.
+            .task(id: model.connection) {
+                guard bot?.isGroup == true else { return }
+                await model.botGuests.refresh()
+                await model.refreshConversation(botId)
+            }
+            .kithSheet(isPresented: $roomInfo) {
+                RoomInfoView(groupId: botId)
+            }
             .kithSheet(item: Binding<FileDownloads.Export?>(get: {
                 guard let item = model.fileDownloads.export, item.botId == botId else { return nil }
                 return item
@@ -205,12 +215,21 @@ public struct ThreadView: View {
             ? { titling = TopicTitling(entry: $0, current: Topics.suggestedTitle(for: $0), isNew: true) } : nil
         return ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: replyAction, onMakeTopic: topicAction,
                        showsContext: contextLineEntry == e.id,
-                       toggleContext: { contextLineEntry = ContextLineToggle.tapped(e.id, open: contextLineEntry) })
+                       toggleContext: { contextLineEntry = ContextLineToggle.tapped(e.id, open: contextLineEntry) },
+                       lateQuote: lateQuote(e))
             .equatable()
             .task(id: missing) {
                 // Its thread's older replies are not here yet: bring them in, so the chat has them in order.
                 if missing { await model.loadThread(botId, root: e.id) }
             }
+    }
+
+    /// What a late reply answers: the first line of the message that opened its conversation, when both are known.
+    func lateQuote(_ entry: Entry) -> String? {
+        guard entry.data.isLate, let id = entry.data.conversation,
+              let opening = model.roomConversations.conversation(id)?.opening,
+              let message = model.allEntries(botId).first(where: { $0.id == opening }) else { return nil }
+        return ReplyQuote.line(of: message)
     }
 
     /// Reply goes to the composer, so it needs one: not a read-only chat, nor a message in a thread a terminal holds.
@@ -366,9 +385,9 @@ struct ChatItem: Identifiable {
                 lastAuthor = nil
             case .entry(let e):
                 // In a group each bot is its own author.
-                let author = e.kind == "user" ? "user" : e.kind == "agent" ? "agent:\(e.data.author ?? "")" : e.kind
+                let author = ThreadFeed.authorKey(e)
                 out.append(ChatItem(id: id, kind: .entry(e, groupStart: author != lastAuthor)))
-                lastAuthor = (author == "user" || e.kind == "agent") ? author : nil
+                lastAuthor = (e.kind == "user" || e.kind == "agent") ? author : nil
             }
         }
         flushTools()
@@ -416,7 +435,7 @@ struct ChatItem: Identifiable {
 
     var isUserMessage: Bool {
         switch kind {
-        case let .entry(entry, _): entry.kind == "user"
+        case let .entry(entry, _): entry.kind == "user" && !entry.isRoomBotPost
         default: false
         }
     }
@@ -536,9 +555,23 @@ extension ThreadView {
                 if bot.isGroup { GroupIntroCard(group: bot).padding(.top, 40) } else { IntroCard(bot: bot).padding(.top, 40) }
             })
         }
-        rows += items.map { item in ConversationRow(item.id, isUserMessage: item.isUserMessage) { row(item) } }
-        // Offline, "working" is only what the computer last said; don't show it as live.
-        if let bot, let lane = workingLane {
+        let ends = ThreadFeed.endLines(items, conversations: bot?.isGroup == true ? model.roomConversations.ended(chat: botId, lane: nil) : [])
+        // Only the newest run offers more turns, and only while no run is open.
+        let newest = model.roomConversations.open(chat: botId, lane: nil) == nil ? model.roomConversations.latest(chat: botId, lane: nil)?.conversation : nil
+        for item in items {
+            rows.append(ConversationRow(item.id, isUserMessage: item.isUserMessage) { row(item) })
+            for run in ends[item.id] ?? [] {
+                guard let line = run.endLine else { continue }
+                rows.append(ConversationRow("end-\(run.conversation)") {
+                    RoomEndLineView(line: line, more: run.conversation == newest ? {
+                        model.send(RoomEndLine.moreText, to: botId, budget: RoomEndLine.moreTurns)
+                    } : nil)
+                })
+            }
+        }
+        // Offline, "working" is only what the computer last said; don't show it as live. In a group the live line above
+        // the box says who is working, so the chat shows it once.
+        if let bot, let lane = workingLane, !(bot.isGroup && model.roomConversations.open(chat: botId, lane: nil) != nil) {
             rows.append(ConversationRow("working") {
                 WorkingIndicator(bot: bot, thinking: model.currentThinking(botId, thread: lane.thread))
                     .padding(.top, 6)
@@ -660,8 +693,18 @@ extension ThreadView {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("\(bot?.name ?? "Conversation"), details")
+            if let names = groupNames {
+                Text(names).kithText(.secondary).foregroundStyle(Palette.muted).lineLimit(1)
+            }
             statusLine
         }
+    }
+
+    /// Under a group's title: who is in it, agents then the bots someone brought in. Nil when the title already says so.
+    private var groupNames: String? {
+        guard let bot, bot.isGroup else { return nil }
+        let names = (model.members(of: bot).map(\.name) + model.guestMembers(of: bot).map(\.name)).joined(separator: ", ")
+        return names.isEmpty || names == bot.name ? nil : names
     }
 
     /// Whether this bot is operating the computer's screen right now.
@@ -711,7 +754,7 @@ extension ThreadView {
 
     private func openDetails() {
         guard bot?.isReadOnly != true else { return }
-        if bot?.isGroup == true { editingGroup = true } else { details = DetailsRequest() }
+        if bot?.isGroup == true { roomInfo = true } else { details = DetailsRequest() }
     }
 
     func openSettings() {

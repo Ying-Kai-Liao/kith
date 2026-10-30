@@ -466,6 +466,15 @@ extension BotStore {
         }
     }
 
+    /// Reads where the group's conversation stands: on opening the room and after every reconnect, so a run that
+    /// started or ended while the app was away is drawn. An older host answers without one: nothing changes.
+    public func refreshConversation(_ botId: String) async {
+        guard !retired, bots[botId]?.isGroup == true, let client = live else { return }
+        guard let page = try? await client.historyPage(botId: botId, beforeSeq: Int64.max, limit: 1),
+              let conversation = page.conversation, !retired else { return }
+        roomConversations.note(conversation, newest: true)
+    }
+
     public func loadOlder(_ botId: String) async {
         guard let client, !historyComplete.contains(botId) else { return }
         let first: Int64 = chat(botId).first(where: { $0.seq > 0 && $0.seq != Int64.max })?.seq ?? Int64.max

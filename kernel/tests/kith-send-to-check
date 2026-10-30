@@ -117,6 +117,22 @@ script 200
 S grok hi --for pair --profile grok/kai >/dev/null 2>&1
 check "--profile grok/kai picks the other one" "[ \"\$(last 'd[\"auth\"]')\" = 'Bearer $KEY' ]"
 
+script 200
+OUT=$(S grok hi --for house --profile grok/two 2>&1); RC=$?
+check "string grant, other profile: refused naming profile and grant command, nothing sent" "[ $RC = 1 ] && [[ \$OUT == *grok/two* ]] && [[ \$OUT == *'kith-auth grant house grok grok/two'* ]] && [[ \$OUT != *$KEY* ]] && [ ! -s '$T/rec.jsonl' ]"
+OUT=$(S grok hi --for house --profile two --json 2>&1); RC=$?
+check "same with a bare account and --json" "[ $RC = 1 ] && python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert not d[\"ok\"]' \"\$OUT\" && [ ! -s '$T/rec.jsonl' ]"
+S grok hi --for house --profile grok/kai >/dev/null 2>&1
+check "string grant, matching profile sends with its key" "[ \"\$(last 'd[\"auth\"]')\" = 'Bearer $KEY' ]"
+script 200
+S grok hi --for pair --profile two >/dev/null 2>&1
+check "bare account is read as grok/<account> (list grant pick)" "[ \"\$(last 'd[\"auth\"]')\" = 'Bearer $KEY2' ]"
+script 200
+S grok hi --for pair >/dev/null 2>&1
+check "no --profile still sends with the first granted profile" "[ \"\$(last 'd[\"auth\"]')\" = 'Bearer $KEY' ]"
+OUT=$(S grok hi --for pair --profile grok/empty 2>&1); RC=$?
+check "list grant without the profile is refused too" "[ $RC = 1 ] && [[ \$OUT == *grok/empty* ]]"
+
 script 429 200
 OUT=$(S grok hi --for house --json 2>/dev/null); RC=$?
 check "429 then 200 retries and succeeds (--json: ok, status 200, 2 attempts)" \

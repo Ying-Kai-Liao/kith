@@ -40,7 +40,8 @@ private func decodeAsTheAppDoes(_ method: String, _ body: Data) throws -> Bool {
     switch HostContract.Method(rawValue: method) {
     case .hello: _ = try d.decode(Hello.self, from: body)
     case .startChat: _ = try d.decode(BotRes.self, from: body)
-    case .history, .thread: _ = try d.decode(ThreadPage.self, from: body)
+    case .history: _ = try d.decode(HistoryPage.self, from: body)
+    case .thread: _ = try d.decode(ThreadPage.self, from: body)
     case .react, .unsend, .send: _ = try d.decode(EntryRes.self, from: body)
     case .myBots: _ = try d.decode(BotsRes.self, from: body)
     case .linkCode: _ = try d.decode(LinkCode.self, from: body)
@@ -102,8 +103,8 @@ func everyHostAnswerDecodes(_ sub: String) throws {
     #expect(hello.grantedAgents == nil)
 }
 
-@Test func everyContractMethodIsAMembersAnOwnersAnUnprovenDevicesOrABots() {
-    let all = HostContract.memberMethods + HostContract.ownerMethods + HostContract.peerMethods + HostContract.unprovenMethods + HostContract.botMethods
+@Test func everyContractMethodIsAMembersAnUnprovenDevicesABotsOrAPeers() {
+    let all = HostContract.memberMethods + HostContract.ownerMethods + HostContract.unprovenMethods + HostContract.botMethods + HostContract.peerMethods
     #expect(Set(HostContract.Method.allCases) == Set(all))
     #expect(Set(HostContract.botPendingMethods).isSubset(of: Set(HostContract.botMethods)))
 }
