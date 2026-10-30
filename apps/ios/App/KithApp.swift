@@ -95,6 +95,8 @@ private struct DebugHooks: ViewModifier {
     @State private var shareScreen: String?
     /// The bot guest demo shots (`bots-people`, `bots-edit`, `bots-invite`, `bots-result`, `bots-detail`, `bots-remove`).
     @State private var botScreen: String?
+    /// The group room demo shots over the open room (`room-add`, `room-info`).
+    @State private var roomScreen: String?
 
     func body(content: Content) -> some View {
         content
@@ -116,6 +118,11 @@ private struct DebugHooks: ViewModifier {
         .kithSheet(isPresented: Binding(get: { botScreen != nil }, set: { if !$0 { botScreen = nil } })) {
             if let screen = botScreen, let computer = app.accounts.computers.first, let store = app.accounts.store(for: computer.id) {
                 DemoBotScreen(store: store, screen: screen).environment(app.accounts)
+            }
+        }
+        .kithSheet(isPresented: Binding(get: { roomScreen != nil }, set: { if !$0 { roomScreen = nil } })) {
+            if let screen = roomScreen, let computer = app.accounts.computers.first, let store = app.accounts.store(for: computer.id) {
+                DemoRoomSheet(store: store, screen: screen)
             }
         }
         .overlay {
@@ -177,6 +184,14 @@ private struct DebugHooks: ViewModifier {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: "ada")
                     }
                 case "keys-list": app.showSettings = true
+                case "room-turns", "room-working", "room-stopped", "room-spent", "room-grok", "room-add", "room-info":
+                    if let computer = app.accounts.computers.first {
+                        app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: DemoScreens.roomId)
+                    }
+                    if screen == "room-add" || screen == "room-info" {
+                        try? await Task.sleep(for: .seconds(1))
+                        roomScreen = screen
+                    }
                 case "share-chat":
                     if let computer = app.accounts.computers.first {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: "ada")

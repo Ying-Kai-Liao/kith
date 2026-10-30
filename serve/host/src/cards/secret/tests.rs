@@ -784,3 +784,140 @@ fn the_owner_is_told_the_card_exists_and_no_one_else() {
         json!({"id": "e", "rev": 1, "turn": 1, "createdAt": 1, "kind": "permission", "data": {"status": "pending"}});
     assert!(roles::bot_entry(&plain, "c", "the owner").is_some());
 }
+
+// ---- the owner's own entry point (`kith keys add`)
+
+const GROK_NEW: &str = r#"{"declared":true,"secrets":["GROK_WEBHOOK_URL","GROK_WEBHOOK_KEY"],"granted":[],"missing":["GROK_WEBHOOK_URL","GROK_WEBHOOK_KEY"],"profiles":[]}"#;
+const GROK_HAS: &str = r#"{"declared":true,"secrets":["GROK_WEBHOOK_URL","GROK_WEBHOOK_KEY"],"granted":[],"missing":["GROK_WEBHOOK_URL","GROK_WEBHOOK_KEY"],
+  "profiles":[{"profile":"grok/work","account":"work","owner":"sam","agents":["house"]}]}"#;
+
+fn grok_pairs<'a>(url: &'a str, key: &'a str) -> [(&'a str, &'a str); 2] {
+    [("GROK_WEBHOOK_URL", url), ("GROK_WEBHOOK_KEY", key)]
+}
+
+#[tokio::test]
+async fn the_owner_opens_a_fixed_profile_key_card_for_a_new_profile_and_grants_it_to_serve() {
+    let f = Fake::new().await;
+    f.state(GROK_NEW);
+    // `serve` is no chat agent: the card lands in the owner's first chat, with no agent run to resume.
+    let got = open_key_card(&f.r.hub, "grok", "work", "serve").await.unwrap();
+    assert_eq!(
+        (got["profile"].as_str(), got["replaces"].as_bool(), got["chat"].as_str()),
+        (Some("grok/work"), Some(false), Some("house"))
+    );
+    let (card, data) = f.open();
+    assert_eq!((card.agent.as_str(), card.approver.as_str(), card.person.as_str()), ("serve", "owner", ""));
+    assert_eq!(data["card"], "key");
+    assert_eq!(data["secret"]["profile"], "grok/work");
+    assert_eq!(data["secret"]["account"], "work");
+    assert_eq!(data["secret"]["replaces"], true);
+    assert_eq!(data["secret"]["vars"], json!(["GROK_WEBHOOK_URL", "GROK_WEBHOOK_KEY"]));
+    assert_eq!(data["options"], json!([{"optionId": "deny", "name": "Not now", "kind": "reject_once"}]));
+    assert_eq!(data["detail"], OLD_APP_DETAIL);
+    // `service/account` spells the same card, and it is the same one (no second writer).
+    open_key_card(&f.r.hub, "grok", "grok/work", "serve").await.unwrap();
+    assert_eq!(f.r.hub.store.cards_open(None).len(), 1);
+    // The owner is not asked for an account name: a given one is ignored.
+    let (url, key) = (marker(), marker());
+    let done = f.provide(&card, Some("other"), &grok_pairs(&url, &key)).await.unwrap();
+    assert_eq!(done["saved"]["profile"], "grok/work");
+    assert_eq!(done["resumed"], false);
+    assert_eq!(f.log("calls.log").trim(), r#"["set", "grok/work", "--stdin-json", "--grant", "serve"]"#);
+    assert!(
+        f.log("stdin.log").contains(&key) && !f.log("calls.log").contains(&key) && !f.log("env.log").contains(&key)
+    );
+    assert_eq!(f.card(&card).state, CardState::Used);
+}
+
+#[tokio::test]
+async fn an_existing_profile_is_rotated_even_one_a_person_owns_and_a_chat_agent_gets_its_own_chat() {
+    let f = Fake::new().await;
+    f.state(GROK_HAS);
+    let got = open_key_card(&f.r.hub, "grok", "work", "house").await.unwrap();
+    assert_eq!(got["replaces"], true);
+    let (card, data) = f.open();
+    assert_eq!(data["secret"]["replaces"], true);
+    assert_eq!(card.source, "acp");
+    assert!(card.session.starts_with("acp:") && card.bot_id.is_some());
+    let (url, key) = (marker(), marker());
+    f.provide(&card, None, &grok_pairs(&url, &key)).await.unwrap();
+    assert_eq!(f.log("calls.log").trim(), r#"["set", "grok/work", "--stdin-json", "--grant", "house"]"#);
+}
+
+#[tokio::test]
+async fn an_owner_card_never_joins_an_agents_card_for_the_service_and_a_no_writes_nothing() {
+    let f = Fake::new().await;
+    f.state(GROK_NEW);
+    f.ask("grok").await;
+    open_key_card(&f.r.hub, "grok", "work", "serve").await.unwrap();
+    open_key_card(&f.r.hub, "grok", "kai", "serve").await.unwrap();
+    let open: Vec<_> = f.r.hub.store.cards_open(None).into_iter().filter(|c| c.tool == TOOL).collect();
+    assert_eq!(open.len(), 3, "the agent's card and one per profile");
+    let owner = open.iter().find(|c| c.agent == "serve").unwrap();
+    deny(&f.r.hub, owner, None).unwrap();
+    assert_eq!(f.sets(), 0);
+    let e = f.provide(owner, None, &grok_pairs("u", "k")).await.unwrap_err();
+    assert_eq!(said(&e), CLOSED);
+    assert_eq!(f.sets(), 0);
+}
+
+#[tokio::test]
+async fn the_owner_entry_refuses_what_it_cannot_card() {
+    let f = Fake::new().await;
+    f.state(UNDECLARED);
+    let no = |r: anyhow::Result<Value>| said(&r.unwrap_err());
+    assert_eq!(no(open_key_card(&f.r.hub, "grok", "work", "serve").await), "That service doesn't take a key here.");
+    f.state(GROK_NEW);
+    assert_eq!(no(open_key_card(&f.r.hub, "grok", "Bad Name", "serve").await), BAD_ACCOUNT);
+    assert_eq!(no(open_key_card(&f.r.hub, "grok", "slack/work", "serve").await), BAD_ACCOUNT);
+    assert_eq!(no(open_key_card(&f.r.hub, "Grok", "work", "serve").await), "Name the service in lowercase, like grok.");
+    for agent in ["", "-x", "a/b", "a b"] {
+        assert_eq!(
+            no(open_key_card(&f.r.hub, "grok", "work", agent).await),
+            "That agent name can't be used",
+            "{agent:?}"
+        );
+    }
+    f.state(r#"{"declared":true,"secrets":[],"granted":[],"missing":[],"profiles":[]}"#);
+    assert!(open_key_card(&f.r.hub, "grok", "work", "serve").await.is_err());
+    assert_eq!(f.r.hub.store.cards_open(None).len(), 0);
+}
+
+#[tokio::test]
+async fn open_key_card_is_the_owners_alone_and_leaks_no_value() {
+    let f = Fake::new().await;
+    f.state(GROK_NEW);
+    let r = &f.r;
+    let stub = TEST_BIN.lock().unwrap().replace(r.bin.clone());
+    let member = joined(r, "member").await;
+    *TEST_BIN.lock().unwrap() = stub;
+    let body = json!({"service": "grok", "profile": "work", "grant": "serve"});
+    let e = dispatch(&r.hub, &member, "openKeyCard", body.clone()).await.unwrap_err();
+    assert!(e.is::<crate::api::devices::NotAllowed>() || e.is::<Forbidden>(), "{e:#}");
+    assert!(dispatch(&r.hub, &Caller::Pairing { key: "p".into() }, "openKeyCard", body.clone()).await.is_err());
+    assert!(!roles::member_may("openKeyCard") && !roles::bot_may("openKeyCard"));
+    assert_eq!(r.hub.store.cards_open(None).len(), 0);
+    // The owner's phone may; the card, its entry and the events carry names only.
+    let mut events = r.hub.events.subscribe();
+    let phone = r.device("owner-phone", None);
+    let got = dispatch(&r.hub, &phone, "openKeyCard", body).await.unwrap();
+    assert_eq!(got["opened"], true);
+    let (card, _) = f.open();
+    let (url, key) = (marker(), marker());
+    let done = dispatch(
+        &r.hub,
+        &phone,
+        "provideSecret",
+        json!({"entryId": card.entry_id, "values": {"GROK_WEBHOOK_URL": url, "GROK_WEBHOOK_KEY": key}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(done["saved"]["profile"], "grok/work");
+    let mut seen = got.to_string() + &done.to_string();
+    while let Ok(ev) = events.try_recv() {
+        seen.push_str(&ev.to_string());
+    }
+    let _ = std::fmt::Write::write_fmt(&mut seen, format_args!("{:?}{:?}", f.card(&card), f.entry(&card)));
+    assert!(!seen.contains(&url) && !seen.contains(&key));
+    assert!(!f.log("calls.log").contains(&key) && !f.log("env.log").contains(&key));
+}

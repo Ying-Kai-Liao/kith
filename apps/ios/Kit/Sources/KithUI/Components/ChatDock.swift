@@ -94,6 +94,8 @@ public struct ChatDock<Accessory: View>: View {
     let canSend: Bool
     let showsPlus: Bool
     let stop: ChatDockStop?
+    /// In a group: the turns the message gives the room, shown as a chip before Send while writing.
+    let turns: Binding<Int>?
     let focus: FocusState<Bool>.Binding?
     let accessory: Accessory
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -103,7 +105,7 @@ public struct ChatDock<Accessory: View>: View {
                 onPhotos: @escaping () -> Void = {}, onCamera: @escaping () -> Void = {}, onFiles: @escaping () -> Void = {},
                 sendStyle: ChatDockSendStyle = .ink, extraActions: [ChatDockAction] = [], micListening: Bool = false,
                 micWithText: Bool = false, canSend: Bool = true, showsPlus: Bool = true, stop: ChatDockStop? = nil,
-                focus: FocusState<Bool>.Binding? = nil, @ViewBuilder accessory: () -> Accessory) {
+                turns: Binding<Int>? = nil, focus: FocusState<Bool>.Binding? = nil, @ViewBuilder accessory: () -> Accessory) {
         _text = text
         self.placeholder = placeholder
         self.showsCall = showsCall
@@ -121,6 +123,7 @@ public struct ChatDock<Accessory: View>: View {
         self.canSend = canSend
         self.showsPlus = showsPlus
         self.stop = stop
+        self.turns = turns
         self.focus = focus
         self.accessory = accessory()
     }
@@ -142,6 +145,7 @@ public struct ChatDock<Accessory: View>: View {
                         .padding(.vertical, 8)
                         .disabled(micListening)
                         .modifier(OptionalFocus(binding: focus))
+                    if let turns, trailing.contains(.send), !micListening { TurnsChip(count: turns) }
                     ForEach(trailing, id: \.self) { button in
                         switch button {
                         case .mic: micButton
@@ -262,11 +266,11 @@ public extension ChatDock where Accessory == EmptyView {
          onPhotos: @escaping () -> Void = {}, onCamera: @escaping () -> Void = {}, onFiles: @escaping () -> Void = {},
          sendStyle: ChatDockSendStyle = .ink, extraActions: [ChatDockAction] = [], micListening: Bool = false,
          micWithText: Bool = false, canSend: Bool = true, showsPlus: Bool = true, stop: ChatDockStop? = nil,
-         focus: FocusState<Bool>.Binding? = nil) {
+         turns: Binding<Int>? = nil, focus: FocusState<Bool>.Binding? = nil) {
         self.init(text: text, placeholder: placeholder, showsCall: showsCall, hasAttachment: hasAttachment, onSend: onSend,
                   onMic: onMic, onCall: onCall, onPhotos: onPhotos, onCamera: onCamera, onFiles: onFiles,
                   sendStyle: sendStyle, extraActions: extraActions, micListening: micListening, micWithText: micWithText,
-                  canSend: canSend, showsPlus: showsPlus, stop: stop, focus: focus) { EmptyView() }
+                  canSend: canSend, showsPlus: showsPlus, stop: stop, turns: turns, focus: focus) { EmptyView() }
     }
 }
 

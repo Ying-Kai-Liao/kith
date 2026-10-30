@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""kith-keys — the owner hands a key to Kith through a card in the app, never through the terminal.
+
+  kith keys add <service> --profile <account|service/account> [--for AGENT] [--json]
+        open a Key card in the Kith app for exactly that profile (e.g. grok --profile work -> grok/work). The key is
+        granted to AGENT (default: serve, the host's own reads, like the Grok wake). A profile that exists is rotated
+        (its key replaced); a new one is created. Open the Kith app and type the values into the card.
+
+The values are never asked for here: not on the command line, not on stdin, not in this terminal. They go from the app to
+the host to the Keychain. Run it on the Mac whose host will use the key.
+Exit: 0 card opened, 1 refused or host unreachable (the host's text), 2 usage."""
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def host_endpoint():
+    """(data dir, port) of this install's kith serve. kith-serve owns the rule (dev 19224 / packaged main 19225); the
+    env overrides win. Same as kith-group."""
+    data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
+    if not (data and port):
+        try:
+            d, p = subprocess.run([str(Path(__file__).resolve().parent / 'kith-serve'), 'endpoint'], capture_output=True,
+                                  text=True, timeout=4, check=True).stdout.split()
+        except Exception:  # noqa: BLE001 — fall back to the dev defaults
+            d, p = str(Path.home() / '.kith' / 'serve'), '19224'
+        data, port = data or d, port or p
+    return Path(data), port
+
+
+def host_call(method, body):
+    """The host's local API (owner token over loopback). (answer, None), or (None, why it couldn't be reached)."""
+    import urllib.error
+    import urllib.request
+    try:
+        data, port = host_endpoint()
+        token = (data / 'token').read_text().strip()
+        req = urllib.request.Request(f'http://127.0.0.1:{port}/api/{method}', json.dumps(body).encode(),
+                                     {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.load(r), None
+    except urllib.error.HTTPError as e:
+        try:
+            why = json.load(e).get('error')
+            return None, why if isinstance(why, str) and why else f'kith serve answered {e.code}'
+        except (ValueError, AttributeError):
+            return None, f'kith serve answered {e.code}'
+    except Exception as e:  # noqa: BLE001
+        return None, f'kith serve is not reachable ({e.__class__.__name__})'
+
+
+def die(msg, code=1):
+    print(f'kith: {msg}', file=sys.stderr)
+    sys.exit(code)
+
+
+class Parser(argparse.ArgumentParser):
+    def error(self, message):
+        die(f'{message}. See: kith keys --help', 2)
+
+
+def cmd_add(args):
+    ans, why = host_call('openKeyCard', {'service': args.service, 'profile': args.profile, 'grant': args.agent})
+    if why:
+        die(why)
+    if args.json:
+        print(json.dumps(ans))
+        return 0
+    a = ans or {}
+    verb = 'replace' if a.get('replaces') else 'add'
+    names = ', '.join(a.get('vars') or [])
+    print(f"Open the Kith app: a Key card in {a.get('chat') or 'your chat'} is waiting to {verb} {a.get('profile')} "
+          f"for {a.get('grant')} ({names}). Type the values there; nothing is entered in this terminal.")
+    return 0
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help') or sys.argv[1:2] == ['add'] and {'-h', '--help'} & set(sys.argv):
+        print(__doc__)
+        sys.exit(0 if len(sys.argv) > 1 else 2)
+    ap = Parser(prog='kith keys')
+    p = ap.add_subparsers(dest='verb', required=True).add_parser('add')
+    p.add_argument('service')
+    p.add_argument('--profile', required=True)
+    p.add_argument('--for', dest='agent', default='serve')
+    p.add_argument('--json', action='store_true')
+    sys.exit(cmd_add(ap.parse_args()))
+
+
+if __name__ == '__main__':
+    main()
