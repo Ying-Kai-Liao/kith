@@ -1368,7 +1368,7 @@ async fn secret_fetch(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
         && bot.owner_person.is_none();
     if !mine
         || !crate::chat::group::is_room_member(&hub.store, &row.room, &bot.bot_id)
-        || !row.notice_seq.is_some_and(|n| n > hub.store.room_bot_floor(&row.room, &bot.bot_id))
+        || row.notice_seq.is_none_or(|n| n <= hub.store.room_bot_floor(&row.room, &bot.bot_id))
     {
         return Err(gone());
     }

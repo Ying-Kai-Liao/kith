@@ -308,7 +308,7 @@ mod tests {
         assert_eq!(s.room_secret("rs_a").unwrap().state, "pending");
         // A restart left it `taking`; the clock ends it.
         assert!(s.claim_room_secret("rs_a", 1));
-        assert!(s.expire_room_secrets(10).is_empty());
+        assert_eq!(s.expire_room_secrets(10).len(), 0);
         assert_eq!(s.expire_room_secrets(50), vec!["rs_a".to_owned()]);
         assert_eq!(s.room_secret("rs_a").unwrap().state, "expired");
     }
@@ -328,6 +328,6 @@ mod tests {
         assert_eq!(by_member, vec!["rs_c".to_owned()], "the sender leaving ends it");
         assert_eq!(s.drop_room_secrets(Some("r1"), None), vec!["rs_a".to_owned()], "a deleted room");
         assert_eq!(s.drop_room_secrets(None, Some("b1")), vec!["rs_b".to_owned()], "a bot ended anywhere");
-        assert!(s.pending_room_secrets("r1", "b1").is_empty());
+        assert_eq!(s.pending_room_secrets("r1", "b1").len(), 0);
     }
 }

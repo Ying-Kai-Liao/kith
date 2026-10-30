@@ -2,7 +2,7 @@
 //! file under the rig's temp folder). The value is a marker built at run time; most tests look for it everywhere.
 //! Nothing here touches the real `~/.kith` or Keychain.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::many_single_char_names)]
 
 use super::room_secret::{self, recipient};
 use super::secret::kith_auth;
@@ -19,7 +19,7 @@ use std::time::Duration;
 
 /// `security`: add-generic-password through `-i`, find-generic-password, delete-generic-password. `sleep` in the rec
 /// folder holds a delete for that many seconds, so a test can end a bot while a fetch has the value in hand.
-const STUB: &str = r#"#!/usr/bin/env python3
+const STUB: &str = r"#!/usr/bin/env python3
 import fcntl, json, os, sys, time
 rec = os.environ['STUB_REC']
 lock = open(rec + '/lock', 'w')
@@ -49,7 +49,7 @@ elif a[:1] == ['delete-generic-password']:
     json.dump(db, open(store, 'w'))
 else:
     sys.exit(2)
-"#;
+";
 
 /// Points the rig's kith-auth at a stand-in Keychain in the rig's folder; returns the folder it keeps its items in.
 pub(crate) fn keychain(r: &Rig) -> PathBuf {
@@ -140,6 +140,7 @@ impl World {
         Caller::Device { key: key.into(), scopes: vec![Scope::Control] }
     }
 
+    #[allow(clippy::unused_self)]
     pub(crate) fn bot(&self, key: &str) -> Caller {
         Caller::Device { key: key.into(), scopes: vec![Scope::Control] }
     }
@@ -254,7 +255,7 @@ async fn the_owner_hands_a_bot_a_secret_once_and_the_room_shows_a_quiet_line() {
     );
     assert_eq!(w.row(&id).state, "taken");
     assert!(!w.items().contains(&m), "taken: the Keychain item is gone");
-    assert!(w.held().await.is_empty());
+    assert_eq!(w.held().await.len(), 0);
     let again = dispatch(&w.r.hub, &w.bot("bot-key"), "botSecretFetch", json!({"id": id})).await.unwrap_err();
     assert!(not_found(&again), "{again:#}");
 }
@@ -271,7 +272,7 @@ async fn a_send_to_someone_who_is_no_member_stores_nothing() {
         assert_eq!(e.to_string(), "Couldn't send the secret", "{to}");
     }
     assert!(w.items().is_empty() && w.held().await.is_empty(), "no put for a plain mistake");
-    assert!(w.r.hub.store.room_secrets_of(&w.room, 10).is_empty());
+    assert_eq!(w.r.hub.store.room_secrets_of(&w.room, 10).len(), 0);
     // Bad values and times are refused with plain words, before anything is stored.
     for (value, ttl) in [("", 600), ("a", 30), ("a", 7200)] {
         let body = json!({"room": w.room, "to": "bg1", "value": value, "ttlS": ttl});
@@ -279,7 +280,7 @@ async fn a_send_to_someone_who_is_no_member_stores_nothing() {
     }
     let long = "x".repeat(2000);
     assert!(w.send("bg1", &long).await.is_err());
-    assert!(w.items().is_empty());
+    assert_eq!(w.items().len(), 0);
 }
 
 #[tokio::test]
@@ -395,7 +396,7 @@ async fn another_bots_fetch_and_a_wrong_id_are_the_same_not_found() {
     let id = w.send("bg1", &marker()).await.unwrap()["id"].as_str().unwrap().to_owned();
     for call in [(&other, id.as_str()), (&w.bot("bot-key"), "rs_ffffffffffffffff"), (&w.bot("bot-key"), "")] {
         let e = dispatch(&w.r.hub, call.0, "botSecretFetch", json!({"id": call.1})).await.unwrap_err();
-        assert!(not_found(&e), "{:#}", e);
+        assert!(not_found(&e), "{e:#}");
     }
     let e = dispatch(&w.r.hub, &w.bot("bot-key"), "botSecretFetch", json!({})).await.unwrap_err();
     assert!(not_found(&e));
@@ -509,7 +510,7 @@ async fn expiry_ends_pending_and_stale_taking_rows_and_the_orphan_sweep_waits_ou
     j["once"][orphan]["created"] = json!(now_ms() - 10 * 60 * 1000);
     std::fs::write(&auth, j.to_string()).unwrap();
     room_secret::sweep(&w.r.hub).await;
-    assert!(w.held().await.is_empty());
+    assert_eq!(w.held().await.len(), 0);
 }
 
 // ---- a Kith agent recipient
@@ -527,7 +528,7 @@ async fn a_kith_agent_is_told_in_its_prompt_and_the_sweep_sees_it_used() {
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains(&id) && lines[0].contains("grok key") && lines[0].contains("kith-auth exec --secret"));
     assert!(!lines[0].contains(&m));
-    assert!(room_secret::prompt_lines(&w.r.hub, &w.room, "someone else").is_empty());
+    assert_eq!(room_secret::prompt_lines(&w.r.hub, &w.room, "someone else").len(), 0);
     // A bot can't fetch an agent's secret, and the owner's list shows it without a value.
     let e = dispatch(&w.r.hub, &w.bot("bot-key"), "botSecretFetch", json!({"id": id})).await.unwrap_err();
     assert!(not_found(&e));
@@ -700,7 +701,11 @@ async fn the_value_is_nowhere_the_host_kept_or_sent_except_the_fetch_answer() {
     }
     // The stand-in Keychain was given it by hex on stdin and never on an argv or in an env.
     let calls = std::fs::read_to_string(w.rec.join("calls.log")).unwrap();
-    let hex: String = m.bytes().map(|b| format!("{b:02x}")).collect();
+    let hex: String = m.bytes().fold(String::new(), |mut h, b| {
+        use std::fmt::Write;
+        let _ = write!(h, "{b:02x}");
+        h
+    });
     if calls.contains(&m) || calls.contains(&hex) {
         found.push("an argv or env of security");
     }

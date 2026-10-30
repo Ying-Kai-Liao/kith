@@ -54,7 +54,7 @@ pub fn recipient(store: &Store, room: &str, to: &str) -> Option<Recipient> {
             && guest.state == BotState::Active
             && crate::chat::group::is_room_member(store, room, to)
             && store.room_bot_point(room, to).is_some();
-        return ok.then(|| Recipient { kind: SecretTo::Bot, agent: None, name: guest.name });
+        return ok.then_some(Recipient { kind: SecretTo::Bot, agent: None, name: guest.name });
     }
     let cfg = store.bot(to).ok().flatten().filter(|r| !r.deleted && r.config.kind == BotKind::Agent)?.config;
     let agent = cfg.hq_agent.clone()?;
