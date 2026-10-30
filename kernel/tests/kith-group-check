@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# kith-group-check — `kith group add-bot|remove-bot` and `kith bot set` against a stub host: every command, id and name
+# resolution, the /events catch-up read (held open, so the idle-timeout path runs), and each error path. Throwaway dirs
+# and a stub on a free port (KITH_SERVE_DIR / KITH_SERVE_PORT), never ~/.kith or the real host.
+#
+#   kernel/tests/kith-group-check     ~20 seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-group.XXXXXX"); T=$(cd "$T" && pwd -P)
+SRV=
+trap '[[ -n $SRV ]] && kill $SRV 2>/dev/null; rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_SERVE_DIR=$T/serve KITH_GROUP_IDLE_S=0.4
+unset KITH_STATE HQ_STATE KITH_AGENTS
+mkdir -p "$HOME" "$KITH_SERVE_DIR"
+echo "tok-$$" > "$KITH_SERVE_DIR/token"
+
+# The stub host. /events: hello, then bot events (a group, the same group again with newer members, a deleted group, a
+# plain agent), then the stream stays open with nothing more, like the real one. POST /api/<m>: recorded to rec.jsonl,
+# answered from the table; refuse.txt makes updateBot answer 400 with its text.
+cat > "$T/stub.py" <<'PY'
+import http.server, json, os, sys, time
+T = sys.argv[1]
+def bot(i, name, kind='agent', members=None, deleted=False):
+    return {'type': 'bot', 'rev': 1, 'bot': {'id': i, 'name': name, 'kind': kind, 'members': members or [], 'deleted': deleted}}
+GUESTS = [{'botId': 'bg_grok', 'name': 'Grok', 'state': 'active', 'ownerPerson': None, 'limits': {'turnTimeoutS': 300, 'wakeProfile': None}},
+          {'botId': 'bg_other', 'name': 'Other', 'state': 'active', 'ownerPerson': 'sam', 'limits': {}},
+          {'botId': 'bg_twin1', 'name': 'Twin', 'state': 'active', 'ownerPerson': None, 'limits': {}},
+          {'botId': 'bg_twin2', 'name': 'twin', 'state': 'active', 'ownerPerson': None, 'limits': {}}]
+class H(http.server.BaseHTTPRequestHandler):
+    def authed(self):
+        ok = self.headers.get('Authorization') == 'Bearer ' + sys.argv[2]
+        if not ok:
+            self.send_response(401); self.send_header('Content-Length', '0'); self.end_headers()
+        return ok
+    def do_GET(self):
+        if not self.authed():
+            return
+        if not self.path.startswith('/events?since=0'):
+            self.send_response(404); self.end_headers(); return
+        self.send_response(200); self.send_header('Content-Type', 'text/event-stream'); self.end_headers()
+        evs = [{'type': 'hello', 'rev': 9}, bot('house', 'House'), bot('grp1', 'Team', 'group', ['house']),
+               bot('grp2', 'Old', 'group', ['house']), bot('grp1', 'Team', 'group', ['house', 'bg_twin1']),
+               bot('grp2', 'Old', 'group', ['house'], True), bot('grp3', 'Solo', 'group', ['house']),
+               bot('grp4', 'Pair', 'group', ['house']), bot('grp5', 'pair', 'group', ['house']), {'type': 'entry', 'rev': 5, 'entry': {}}]
+        if os.path.exists(T + '/empty'):
+            evs = evs[:1]
+        for e in evs:
+            self.wfile.write(('data: ' + json.dumps(e) + '\n\n').encode()); self.wfile.flush()
+        time.sleep(30)  # held open: the client has to stop on its own
+    def do_POST(self):
+        if not self.authed():
+            return
+        n = int(self.headers.get('Content-Length', 0)); body = json.loads(self.rfile.read(n) or b'{}')
+        m = self.path.rsplit('/', 1)[1]
+        with open(T + '/rec.jsonl', 'a') as f:
+            f.write(json.dumps({'m': m, 'body': body}) + '\n')
+        st, out = 200, {}
+        if m == 'bots':
+            out = {'bots': GUESTS}
+        elif m == 'updateBot':
+            if os.path.exists(T + '/refuse.txt'):
+                st, out = 400, {'error': open(T + '/refuse.txt').read().strip()}
+            else:
+                out = {'bot': {'id': body['id'], 'members': body['members']}}
+        elif m == 'setBotLimits':
+            out = {'bot': {'limits': {'turnTimeoutS': min(max(body.get('turnTimeoutS', 300), 30), 3600),
+                                      'wakeProfile': body.get('wakeProfile') or None}}}
+        b = json.dumps(out).encode()
+        self.send_response(st); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
+    def log_message(self, *a): pass
+s = http.server.ThreadingHTTPServer(('127.0.0.1', 0), H)
+s.daemon_threads = True
+open(T + '/port', 'w').write(str(s.server_port))
+s.serve_forever()
+PY
+python3 "$T/stub.py" "$T" "tok-$$" & SRV=$!
+for _ in $(seq 50); do [[ -s $T/port ]] && break; sleep 0.1; done
+export KITH_SERVE_PORT=$(cat "$T/port")
+G() { python3 "$KERNEL/bin/kith-group" "$@"; }
+rec() { : > "$T/rec.jsonl"; }
+lastbody() { grep "\"m\": \"$1\"" "$T/rec.jsonl" | tail -n1 | python3 -c "import json,sys; d=json.load(sys.stdin)['body']; print($2)"; }
+nowrite() { ! grep -q '"m": "\(updateBot\|setBotLimits\)"' "$T/rec.jsonl"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+
+rec; OUT=$(G group add-bot Team Grok 2>&1); RC=$?
+check "add-bot by names prints the line, exit 0"          "[[ \$RC == 0 && \$OUT == 'Grok will see this room from now on' ]]"
+check "add-bot sends the full list (latest catch-up event wins)" "[[ \$(lastbody updateBot 'd[\"id\"], d[\"members\"]') == \"grp1 ['house', 'bg_twin1', 'bg_grok']\" ]]"
+rec; OUT=$(G group add-bot grp1 bg_twin1 2>&1); RC=$?
+check "already a member: says so, exit 0, no write"      "[[ \$RC == 0 && \$OUT == 'Twin is already in Team' ]] && nowrite"
+rec; OUT=$(G group remove-bot team bg_twin1 2>&1); RC=$?
+check "remove-bot by id (case-insensitive name room)"    "[[ \$RC == 0 && \$OUT == 'Twin removed from Team' && \$(lastbody updateBot 'd[\"members\"]') == \"['house']\" ]]"
+rec; OUT=$(G group remove-bot Team Grok 2>&1); RC=$?
+check "remove-bot of a non-member: exit 1, no write"     "[[ \$RC == 1 && \$OUT == *'not in Team'* ]] && nowrite"
+rec; OUT=$(G group add-bot Old Grok 2>&1); RC=$?
+check "a deleted room is unknown (exit 2)"               "[[ \$RC == 2 && \$OUT == *\"no room called 'Old'\"* ]] && nowrite"
+rec; OUT=$(G group add-bot House Grok 2>&1); RC=$?
+check "a non-group is refused (exit 2)"                  "[[ \$RC == 2 && \$OUT == *'not a group room'* ]] && nowrite"
+rec; OUT=$(G group add-bot house Grok 2>&1); RC=$?
+check "a non-group by id too"                            "[[ \$RC == 2 && \$OUT == *'not a group room'* ]]"
+rec; OUT=$(G group add-bot pair Grok 2>&1); RC=$?
+check "ambiguous room name: exit 2, candidates listed"   "[[ \$RC == 2 && \$OUT == *grp4* && \$OUT == *grp5* ]] && nowrite"
+rec; OUT=$(G group add-bot Team twin 2>&1); RC=$?
+check "ambiguous bot name: exit 2, candidates listed"    "[[ \$RC == 2 && \$OUT == *bg_twin1* && \$OUT == *bg_twin2* ]] && nowrite"
+rec; OUT=$(G group add-bot Team Nobody 2>&1); RC=$?
+check "unknown bot: exit 2, known ones listed"           "[[ \$RC == 2 && \$OUT == *Grok* ]] && nowrite"
+
+echo "a group needs at least one bot" > "$T/refuse.txt"
+rec; OUT=$(G group remove-bot Solo house 2>&1); RC=$?
+check "a host refusal prints its text, exit 1"           "[[ \$RC == 1 && \$OUT == *'a group needs at least one bot'* && \$OUT != *Traceback* ]]"
+echo "Other belongs to someone else. A room takes only your own bots." > "$T/refuse.txt"
+OUT=$(G group add-bot Team bg_other 2>&1); RC=$?
+check "someone else's bot: the host's text, exit 1"      "[[ \$RC == 1 && \$OUT == *'belongs to someone else'* ]]"
+rm "$T/refuse.txt"
+
+rec; OUT=$(G group add-bot Team Grok --json 2>&1); RC=$?
+check "--json prints the host's answer"                  "[[ \$RC == 0 ]] && python3 -c 'import json,sys; assert json.loads(sys.argv[1])[\"bot\"][\"id\"]==\"grp1\"' \"\$OUT\""
+OUT=$(G group add-bot Team bg_twin1 --json 2>&1)
+check "--json when already a member"                     "python3 -c 'import json,sys; assert json.loads(sys.argv[1])[\"unchanged\"]' \"\$OUT\""
+
+rec; OUT=$(G bot set Grok --wake-profile kai --turn-timeout 600 2>&1); RC=$?
+check "bot set sends both and prints what was stored"    "[[ \$RC == 0 && \$OUT == 'Grok: wake profile kai, turn timeout 600s' && \$(lastbody setBotLimits 'd') == \"{'botId': 'bg_grok', 'wakeProfile': 'kai', 'turnTimeoutS': 600}\" ]]"
+OUT=$(G bot set bg_grok --turn-timeout 5 2>&1)
+check "the stored value (clamped by the host) is printed" "[[ \$OUT == *'turn timeout 30s'* ]]"
+rec; OUT=$(G bot set grok --wake-profile '' 2>&1); RC=$?
+check "--wake-profile '' clears"                         "[[ \$RC == 0 && \$OUT == *'(none)'* && -z \$(lastbody setBotLimits 'd[\"wakeProfile\"]') ]]"
+rec; OUT=$(G bot set Grok 2>&1); RC=$?
+check "bot set without a flag: exit 2, nothing sent"     "[[ \$RC == 2 ]] && nowrite"
+OUT=$(G bot set Grok --turn-timeout x 2>&1); RC=$?
+check "a non-number timeout: exit 2"                     "[[ \$RC == 2 && \$OUT != *Traceback* ]]"
+OUT=$(G bot set Grok --wake-profile k --json 2>&1)
+check "bot set --json"                                   "python3 -c 'import json,sys; assert json.loads(sys.argv[1])[\"bot\"][\"limits\"][\"wakeProfile\"]==\"k\"' \"\$OUT\""
+
+: > "$T/empty"
+OUT=$(G group add-bot Team Grok 2>&1); RC=$?
+check "a catch-up with no rooms: unknown room, exit 2"   "[[ \$RC == 2 && \$OUT == *'no room'* ]]"
+rm "$T/empty"
+check "the read ends on the idle timeout, not the 10 s cap" "(s=\$SECONDS; G group add-bot Team Grok >/dev/null; [[ \$((SECONDS - s)) -lt 6 ]])"
+
+echo wrong > "$KITH_SERVE_DIR/token"
+OUT=$(G group add-bot Team Grok 2>&1); RC=$?
+check "a refused token: exit 1, no traceback"            "[[ \$RC == 1 && \$OUT != *Traceback* && \$OUT == *'kith serve'* ]]"
+OUT=$(G bot set Grok --turn-timeout 60 2>&1); RC=$?
+check "same for a method call"                           "[[ \$RC == 1 && \$OUT != *Traceback* ]]"
+echo "tok-$$" > "$KITH_SERVE_DIR/token"
+kill $SRV; wait $SRV 2>/dev/null; SRV=
+OUT=$(G group add-bot Team Grok 2>&1); RC=$?
+check "host down: exit 1, no traceback"                  "[[ \$RC == 1 && \$OUT == *'not reachable'* && \$OUT != *Traceback* ]]"
+OUT=$(G bot set Grok --turn-timeout 60 2>&1); RC=$?
+check "host down, bot set"                               "[[ \$RC == 1 && \$OUT == *'not reachable'* ]]"
+OUT=$(G 2>&1); RC=$?
+check "no arguments: usage, exit 2"                      "[[ \$RC == 2 && \$OUT == *'add-bot'* ]]"
+check "kith routes group and bot here"                   "grep -q 'group|bot) .*kith-group' '$KERNEL/bin/kith'"
+
+exit $fail
