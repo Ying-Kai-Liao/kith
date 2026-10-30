@@ -17,5 +17,7 @@ description: A run needs a service's key or secret it doesn't have. How to ask t
 
 Keys are profiles `<service>/<account>` (`^[a-z0-9][a-z0-9._-]{0,39}$`), granted per agent.
 
+The owner can also hand a key over without any agent asking: `kith keys add <service> --profile <account> [--for AGENT]` opens the same Key card (default AGENT `serve`). That is the owner's command, not yours.
+
 The host and app side of this (the `kith-auth` commands the host calls, the card shapes, `provideSecret`, errors) is
 `docs/reference/keys.md` in the kith repo.
