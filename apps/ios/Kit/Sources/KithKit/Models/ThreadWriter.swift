@@ -21,6 +21,15 @@ public extension EntryData {
     var writerChangeKind: WriterChange? { WriterChange(writerChange) }
 }
 
+/// What a queued message of the user's says under it.
+public enum UserStatusLine {
+    /// It waits for a terminal that holds its thread, for the bot's running turn, or just for its turn.
+    public static func queued(waitsFor: String?, botWorking: Bool) -> String {
+        if waitsFor == "terminal" { return "Waits until the terminal session ends" }
+        return botWorking ? "Queued until this response finishes" : "Queued"
+    }
+}
+
 /// What `takeOverThread` answers. `tookOver` is false when there was nothing to take (already closed, or a second tap).
 public struct TakeOverResult: Codable, Hashable, Sendable {
     public var liveWriter: String?

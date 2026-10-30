@@ -73,6 +73,13 @@ pub enum Cmd {
         /// Typed by the user: while the bot works in this lane, the router decides what it means for that work.
         route: bool,
     },
+    /// A wake's entries (a notice for cards, the user's messages that waited for a terminal), `(entry id, words)` in
+    /// order, queued together so they start as one turn.
+    #[cfg_attr(test, allow(dead_code, reason = "only the wake's real door sends it; its tests see the stub"))]
+    WakeBatch {
+        lane: Lane,
+        items: Vec<(String, String)>,
+    },
     /// The router's answer for a message sent while the bot worked (see `chat::router`).
     Routed {
         entry_id: String,

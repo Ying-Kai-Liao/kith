@@ -29,13 +29,12 @@
 use super::Card;
 use crate::channels::Wake;
 use crate::hub::Hub;
-use crate::store::{CardState, EntryKind, Lane, now_ms};
+use crate::store::{CardState, Entry, EntryKind, Lane, now_ms};
 use crate::wake::{self, Queued, Request, Turn};
 use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -172,6 +171,13 @@ fn end_all(hub: &Hub, cards: &[Card]) {
     }
 }
 
+/// Cards a taken turn had re-claimed (`handle`) end with it: `end_owed` only acts on a card nobody holds.
+fn end_claimed(hub: &Hub, cards: &[Card]) {
+    for c in cards {
+        end_for_stop(hub, c);
+    }
+}
+
 fn end_owed(hub: &Hub, card: &Card) {
     let _ = hub.store.card_resume_drop(&card.id);
 }
@@ -225,6 +231,9 @@ pub async fn attempt(hub: &Arc<Hub>, id: &str) -> Step {
             }
         }
     }
+    // Every card of the group is marked before any is claimed: one claimed but not yet queued is not "forgotten".
+    let state = state_of(hub);
+    let _marks: Vec<Enqueuing> = group.iter().map(|c| Enqueuing::mark(&state, &c.id)).collect();
     let claimed = claim_all(hub, &group);
     let mut step = Step::Done;
     for c in &claimed {
@@ -241,7 +250,7 @@ pub async fn attempt(hub: &Arc<Hub>, id: &str) -> Step {
 /// session itself once nobody holds it); everything the host must start (a person's run, a `kith ask` reply, a bot's
 /// chat, a channel thread) is a host-door item.
 pub(crate) async fn enqueue(hub: &Arc<Hub>, card: &Card, door: &Door) -> anyhow::Result<()> {
-    let _marker = Enqueuing::mark(&card.id);
+    let _marker = Enqueuing::mark(&state_of(hub), &card.id);
     let kernel_door = matches!(door, Door::Run { .. }) && card.person.is_empty() && card.reply_to.is_none();
     let text = note_of(hub, card).await;
     let (state, key, id) = (state_of(hub), key_of(door, card), request_id(card));
@@ -295,29 +304,43 @@ pub(crate) async fn enqueue(hub: &Arc<Hub>, card: &Card, door: &Door) -> anyhow:
     Ok(())
 }
 
-/// Cards whose request is on its way into the queue. [`settle_queue_at`] must not read "not in the queue" as "forgotten"
-/// for these: the item is written a moment after the claim. `DONE` counts finished enqueues, so a settle whose read
-/// overlapped one can tell.
-static ENQUEUING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
-static ENQUEUED: AtomicUsize = AtomicUsize::new(0);
-/// Cards the queue's files did not show at the last settle (neither queued nor answered). A commit writes the answer
+/// Requests (cards, waiting messages) on their way into the queue, each with how many callers mark it.
+/// [`settle_queue_at`] must not read "not in the queue" as "forgotten" for these: the item is written a moment after
+/// the claim. `ENQUEUED` counts finished enqueues per state folder (a host's queue), so a settle whose read overlapped
+/// one can tell, and a second host in the same process (a test) never makes it unsure.
+static ENQUEUING: LazyLock<Mutex<HashMap<String, usize>>> = LazyLock::new(Mutex::default);
+static ENQUEUED: LazyLock<Mutex<HashMap<PathBuf, usize>>> = LazyLock::new(Mutex::default);
+/// Requests the queue's files did not show at the last settle (neither queued nor answered). A commit writes the answer
 /// before it removes the item, but a read of the files is not atomic across them, so one miss is not yet an answer.
 static MISSED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
 
-struct Enqueuing(String);
+struct Enqueuing {
+    id: String,
+    state: PathBuf,
+}
 
 impl Enqueuing {
-    fn mark(id: &str) -> Self {
-        lock(&ENQUEUING).insert(id.to_owned());
-        Self(id.to_owned())
+    fn mark(state: &Path, id: &str) -> Self {
+        *lock(&ENQUEUING).entry(id.to_owned()).or_default() += 1;
+        Self { id: id.to_owned(), state: state.to_owned() }
     }
 }
 
 impl Drop for Enqueuing {
     fn drop(&mut self) {
-        lock(&ENQUEUING).remove(&self.0);
-        ENQUEUED.fetch_add(1, Ordering::SeqCst);
+        let mut marks = lock(&ENQUEUING);
+        if let Some(n) = marks.get_mut(&self.id) {
+            *n -= 1;
+            if *n == 0 {
+                marks.remove(&self.id);
+            }
+        }
+        *lock(&ENQUEUED).entry(self.state.clone()).or_default() += 1;
     }
+}
+
+fn enqueued(state: &Path) -> usize {
+    lock(&ENQUEUED).get(state).copied().unwrap_or_default()
 }
 
 /// The card of a kernel run-door wake says who holds its session while the wake waits for the writer (L2).
@@ -347,17 +370,22 @@ pub(crate) async fn settle_queue(hub: &Arc<Hub>) {
 
 pub(crate) async fn settle_queue_at(hub: &Arc<Hub>, now: i64) {
     let cards: Vec<Card> = hub.store.cards_unapplied().into_iter().filter(|c| c.resumed_at.is_some()).collect();
-    if cards.is_empty() {
+    let waiting = hub.store.waiting_for_terminal().unwrap_or_default();
+    if cards.is_empty() && waiting.is_empty() {
+        lock(&MISSED).clear();
         return;
     }
     let state = state_of(hub);
-    let (before, count) = (lock(&ENQUEUING).clone(), ENQUEUED.load(Ordering::SeqCst));
-    let known = wake::blocking(move || wake::statuses(&state)).await.unwrap_or_default();
+    let (before, count) = (lock(&ENQUEUING).keys().cloned().collect::<HashSet<_>>(), enqueued(&state));
+    let known = {
+        let state = state.clone();
+        wake::blocking(move || wake::statuses(&state)).await.unwrap_or_default()
+    };
     // An enqueue that began, ran or ended during the read may have written its item after the read saw the folder.
-    let racing = count != ENQUEUED.load(Ordering::SeqCst);
+    let racing = count != enqueued(&state);
     for card in &cards {
         let how = known.get(&request_id(card)).map(String::as_str);
-        let unsure = racing || before.contains(&card.id) || lock(&ENQUEUING).contains(&card.id);
+        let unsure = racing || before.contains(&card.id) || lock(&ENQUEUING).contains_key(&card.id);
         if how.is_some() || unsure {
             lock(&MISSED).remove(&card.id);
         }
@@ -378,6 +406,27 @@ pub(crate) async fn settle_queue_at(hub: &Arc<Hub>, now: i64) {
             _ => {}
         }
     }
+    for entry in &waiting {
+        let rid = message_id(&entry.id);
+        let how = known.get(&rid).map(String::as_str);
+        let unsure = racing || before.contains(&rid) || lock(&ENQUEUING).contains_key(&rid);
+        if how.is_some() || unsure {
+            lock(&MISSED).remove(&rid);
+        }
+        let gone = how.is_none() && !unsure && !lock(&MISSED).insert(rid.clone());
+        match how {
+            Some("failed") => end_message(hub, entry, MessageEnd::Failed),
+            None if gone => end_message(hub, entry, MessageEnd::Failed),
+            Some("withdrawn") => end_message(hub, entry, MessageEnd::Cancelled),
+            // A turn carried it: the actor's start marks it sent, a recovered one already ran.
+            Some("answered" | "recovered") => end_message(hub, entry, MessageEnd::Sent),
+            _ => {}
+        }
+    }
+    // A card or message that left the set takes its miss with it.
+    lock(&MISSED).retain(|id| {
+        cards.iter().any(|c| c.id == *id) || id.strip_prefix("msg:").is_some_and(|e| waiting.iter().any(|w| w.id == e))
+    });
 }
 
 /// Whether the kernel's run door carries this card's wake.
@@ -487,7 +536,7 @@ async fn handle(hub: &Arc<Hub>, turn: Turn) {
     // The door comes from any card of the turn: a request that isn't a card (a `ci:` result, a kith ask answer) still
     // goes where the session is, even if the cards beside it died.
     let door_card = carried.first().cloned();
-    let others = turn.ids.iter().filter(|i| !i.starts_with("card:")).count();
+    let others = turn.ids.iter().filter(|i| !i.starts_with("card:") && !i.starts_with("msg:")).count();
     let person = turn.person.clone().filter(|p| !p.is_empty());
     // A7 again, at the door: a person's access can end between the yes and the turn.
     if let Some(person) = &person {
@@ -500,22 +549,43 @@ async fn handle(hub: &Arc<Hub>, turn: Turn) {
             Some(true) => {}
         }
     }
+    // The terminal's hold is asked before anything is read below: the last await, so a Stop or an unsend that raced
+    // the take is seen by what follows, which does not wait again before the actor has the messages.
+    let first_message =
+        turn.ids.iter().filter_map(|i| i.strip_prefix("msg:")).filter_map(|id| hub.store.entry(id)).find(waits);
+    if let Some(e) = first_message
+        && terminal_holds(hub, &lane_of_message(&e)).await
+    {
+        // The terminal still has it: back to the queue, which asks again after its pause.
+        return unstarted(hub, &turn.run, true, true);
+    }
     // Looked at last, after the awaits: a Stop that raced the take has closed its cards by now (R8).
     let live: Vec<Card> = carried.iter().filter_map(|c| hub.store.card(&c.id)).filter(wanted).collect();
+    // The app messages that still wait (one Stopped or taken back is no longer wanted), with what each asked.
+    let messages = waiting_messages(hub, &turn);
     // Every card was withdrawn, expired, Stopped or already carried by a turn that started, and nothing else was asked.
-    if live.is_empty() && others == 0 {
+    if live.is_empty() && others == 0 && messages.is_empty() {
         return give_up(hub, &turn.run);
     }
-    // What a card already carried is not said again; every other request's words stand.
-    let note = if live.len() + others == turn.ids.len() { turn.note.clone() } else { rebuilt(&turn, &live) };
+    // What a card already carried is not said again; every other request's words stand. The messages are not in the
+    // note at all: they go to the agent as the user's own messages, one each.
+    let sent = turn.ids.iter().filter(|i| i.starts_with("msg:")).count();
+    let note =
+        if sent == 0 && live.len() + others == turn.ids.len() { turn.note.clone() } else { rebuilt(&turn, &live) };
     for c in &live {
         let _ = hub.store.card_resume_claim(&c.id, now_ms()); // a restart gave the claim back: it is held again
     }
     let ids = card_ids(&live);
     let session = turn.session.as_str();
     if session.starts_with("acp:") {
-        match door_card.as_ref().and_then(door_of) {
-            Some(Door::Bot { bot, lane }) => bot_door(hub, &turn.run, &live, &bot, &lane, &note),
+        let door = match door_card.as_ref().and_then(door_of) {
+            Some(door) => Some(door),
+            None => messages.first().map(|(e, _)| Door::Bot { bot: e.bot_id.clone(), lane: lane_of_message(e) }),
+        };
+        match door {
+            Some(Door::Bot { bot, lane }) => {
+                bot_door(hub, &turn.run, &live, &bot, &lane, &note, &messages);
+            }
             _ => unstarted(hub, &turn.run, true, false),
         }
     } else if session.contains('#') {
@@ -535,7 +605,11 @@ fn rebuilt(turn: &Turn, live: &[Card]) -> String {
         .requests
         .iter()
         .filter(|r| r.id.strip_prefix("card:").is_none_or(|id| live.iter().any(|c| c.id == id)))
+        .filter(|r| !r.id.starts_with("msg:"))
         .collect();
+    if keep.is_empty() {
+        return String::new();
+    }
     let words = |r: &wake::Asked| if r.why.is_empty() { r.text.clone() } else { format!("{}: {}", r.why, r.text) };
     let head = format!("[kith wake {}]", turn.run);
     if let [one] = keep.as_slice() {
@@ -612,43 +686,97 @@ fn left_room(hub: &Hub, bot: &str, lane: &Lane) -> bool {
     }
 }
 
-fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, note: &str) {
+/// The turn goes to the bot's actor: a notice for the cards (when the turn carries any), then the app messages that
+/// waited, each as the entry it is. The actor merges them into the one turn, in this order.
+fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, note: &str, messages: &[Message]) {
     let alive = hub.store.bot(bot).ok().flatten().is_some_and(|b| !b.deleted);
     if !alive || left_room(hub, bot, lane) {
-        end_all(hub, group);
+        // The cards were re-claimed by `handle`: only a close ends a claimed card.
+        end_claimed(hub, group);
+        for (entry, _) in messages {
+            end_message(hub, entry, MessageEnd::Cancelled);
+        }
         return give_up(hub, run);
     }
-    let turn = hub.store.max_turn(&lane.chat);
-    let shown = note.split_once("] ").map_or(note, |(_, rest)| rest);
-    let Some(entry) = hub.add_entry(lane, EntryKind::Notice, turn, &json!({"text": shown, "style": "info"})) else {
-        return unstarted(hub, run, true, false);
-    };
-    lock(&ENTRIES).insert(entry.id.clone(), Carried { run: run.to_owned(), cards: card_ids(group) });
-    #[cfg(test)]
-    tests_seen::record("bot", group.first().map_or(run, |c| c.session.as_str()), note, Some(&entry.id));
+    let mut sends: Vec<(String, String)> = Vec::new();
+    if !note.is_empty() {
+        let turn = hub.store.max_turn(&lane.chat);
+        let shown = note.split_once("] ").map_or(note, |(_, rest)| rest);
+        let Some(entry) = hub.add_entry(lane, EntryKind::Notice, turn, &json!({"text": shown, "style": "info"})) else {
+            return unstarted(hub, run, true, false);
+        };
+        lock(&ENTRIES).insert(entry.id.clone(), Carried { run: run.to_owned(), cards: card_ids(group) });
+        #[cfg(test)]
+        tests_seen::record("bot", group.first().map_or(run, |c| c.session.as_str()), note, Some(&entry.id));
+        sends.push((entry.id, note.to_owned()));
+    }
+    for (entry, prompt) in messages {
+        lock(&ENTRIES).insert(entry.id.clone(), Carried { run: run.to_owned(), cards: Vec::new() });
+        // With the actor now: still queued until its prompt is sent, no longer waiting for the terminal.
+        set_waits(hub, &entry.id, "turn");
+        #[cfg(test)]
+        tests_seen::record("bot", &session_key(lane), prompt, Some(&entry.id));
+        sends.push((entry.id.clone(), prompt.clone()));
+    }
+    // One command, so an idle actor starts the notice and the messages as one turn.
     #[cfg(not(test))]
     {
-        let cmd = crate::agent::bot::Cmd::Send {
-            lane: lane.clone(),
-            entry_id: entry.id.clone(),
-            text: note.to_owned(),
-            route: false,
-        };
-        if let Err(error) = hub.send_cmd(bot, cmd) {
-            tracing::warn!(error = format!("{error:#}"), "couldn't queue a card's resume");
-            lock(&ENTRIES).remove(&entry.id);
+        let ids: Vec<String> = sends.iter().map(|(id, _)| id.clone()).collect();
+        if let Err(error) = hub.send_cmd(bot, crate::agent::bot::Cmd::WakeBatch { lane: lane.clone(), items: sends }) {
+            tracing::warn!(error = format!("{error:#}"), "couldn't queue a wake turn");
+            for id in &ids {
+                lock(&ENTRIES).remove(id);
+                set_waits(hub, id, "terminal");
+            }
             unstarted(hub, run, true, false);
         }
+    }
+    #[cfg(test)]
+    drop(sends);
+}
+
+/// Whether a wake's entry is with a bot's actor right now.
+pub fn wake_carries(entry_id: &str) -> bool {
+    lock(&ENTRIES).contains_key(entry_id)
+}
+
+/// What a waiting message waits for, on its entry: `terminal` (the thread is held) or `turn` (the actor has it).
+fn set_waits(hub: &Hub, entry_id: &str, what: &str) {
+    if let Some(mut e) = hub.store.entry(entry_id).filter(waits) {
+        e.data["waitsFor"] = what.into();
+        hub.set_entry(entry_id, &e.data);
+    }
+}
+
+/// An actor took a message back (unsend) that a wake carried: the wake is no longer waiting on it, and the queue is told
+/// when it was the last of its turn.
+pub fn unsent(hub: &Hub, entry_id: &str) {
+    let Some(c) = lock(&ENTRIES).remove(entry_id) else { return };
+    if !lock(&ENTRIES).values().any(|other| other.run == c.run) {
+        give_up(hub, &c.run);
     }
 }
 
 /// The bot's turn for these entries started (its prompt went to the agent): a wake among them is delivered. Called
 /// from the actor once the prompt is sent.
 pub fn turn_started(hub: &Hub, entry_ids: &[String]) {
+    let mut runs: Vec<String> = Vec::new();
     for entry in entry_ids {
         let Some(c) = lock(&ENTRIES).remove(entry) else { continue };
         clear_held(hub, &cards_of(hub, &c.cards));
-        started(hub, &c.run, &c.cards);
+        applied(hub, &c.cards);
+        if let Some(e) = hub.store.entry(entry) {
+            end_message(hub, &e, MessageEnd::Sent);
+        }
+        if !runs.contains(&c.run) {
+            runs.push(c.run);
+        }
+    }
+    // A run is answered when the last of its entries has started: messages the actor kept for a later turn still wait.
+    for run in runs {
+        if !lock(&ENTRIES).values().any(|c| c.run == run) {
+            started(hub, &run, &[]);
+        }
     }
 }
 
@@ -666,6 +794,8 @@ pub fn refused(hub: &Arc<Hub>, entry_ids: &[String], session: Option<&str>) {
         for card in cards_of(hub, &c.cards) {
             set_held(hub, &card, holder.as_ref().map(|(sid, c)| (*sid, c)));
         }
+        // A message of the wake waits for the terminal again.
+        set_waits(hub, entry, "terminal");
         unstarted(hub, &c.run, true, true);
     }
 }
@@ -699,7 +829,7 @@ fn channel_door(hub: &Arc<Hub>, run: &str, group: &[Card], card_ids: &[String], 
         Wake::Queued => clear_held(hub, group),
         Wake::Claimed => {}
         Wake::NoThread => {
-            end_all(hub, group);
+            end_claimed(hub, group);
             give_up(hub, run);
         }
         // The connection isn't up (yet): the queue keeps it and asks again after its pause.
@@ -775,7 +905,7 @@ async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&st
     let session = turn.session.as_str();
     let ids = card_ids(live);
     if !crate::terminal::claim::safe_session(session) {
-        end_all(hub, live);
+        end_claimed(hub, live);
         return give_up(hub, &turn.run);
     }
     // A live writer on the session keeps the resume owed (the kernel's one-shot would wait and then refuse).
@@ -851,6 +981,30 @@ pub(crate) fn reap_long_for_test(hub: &Hub) {
     reap_with(hub, Duration::ZERO, Duration::ZERO);
 }
 
+/// Whether the settle remembers a miss for this card or message request.
+#[cfg(test)]
+pub(crate) fn missed_for_test(id: &str) -> bool {
+    lock(&MISSED).contains(id)
+}
+
+/// How many enqueues finished against this host's queue.
+#[cfg(test)]
+pub(crate) fn enqueued_for_test(hub: &Hub) -> usize {
+    enqueued(&state_of(hub))
+}
+
+/// One enqueue finishing against another queue.
+#[cfg(test)]
+pub(crate) fn enqueue_elsewhere_for_test(state: &Path) {
+    drop(Enqueuing::mark(state, "elsewhere"));
+}
+
+/// Whether any request is marked as on its way into the queue.
+#[cfg(test)]
+pub(crate) fn enqueuing_for_test(id: &str) -> bool {
+    lock(&ENQUEUING).contains_key(id)
+}
+
 /// A taken turn the host has no door callback for.
 #[cfg(test)]
 pub(crate) fn lose_track_of(run: &str) {
@@ -862,6 +1016,171 @@ pub(crate) fn lose_track_of(run: &str) {
 pub(crate) fn forget_in_flight() {
     lock(&ENTRIES).clear();
     lock(&TAKEN).clear();
+}
+
+// ---- app messages that wait for a terminal
+
+/// A user message of an app chat with the words the agent is told for it.
+type Message = (Entry, String);
+
+/// The wake request of a user message that waits for the terminal holding its thread.
+fn message_id(entry_id: &str) -> String {
+    format!("msg:{entry_id}")
+}
+
+/// The place a message's turn runs in: a task's first message starts its own thread.
+fn lane_of_message(e: &Entry) -> Lane {
+    match &e.thread_id {
+        Some(root) => Lane::in_thread(&e.bot_id, root),
+        None if e.data["task"] == true => Lane::in_thread(&e.bot_id, &e.id),
+        None => Lane::main(&e.bot_id),
+    }
+}
+
+/// The wake queue's key for a bot's place: the one cards use too, so a card answered meanwhile shares the turn.
+fn session_key(lane: &Lane) -> String {
+    format!("acp:{}:{}", lane.chat, lane.thread.as_deref().unwrap_or_default())
+}
+
+/// A message waits while it is queued and flagged: a Stop, an unsend or a failure has changed its status otherwise.
+fn waits(e: &Entry) -> bool {
+    e.kind == EntryKind::User.as_str() && e.data["status"] == "queued" && !e.data["waitsFor"].is_null()
+}
+
+/// The messages of a taken turn that are still wanted, oldest first, with what the agent is told for each.
+fn waiting_messages(hub: &Hub, turn: &Turn) -> Vec<Message> {
+    turn.ids
+        .iter()
+        .filter_map(|i| i.strip_prefix("msg:"))
+        .filter_map(|id| hub.store.entry(id))
+        .filter(waits)
+        .filter_map(|e| {
+            let cfg = hub.store.bot(&e.bot_id).ok().flatten().filter(|r| !r.deleted)?.config;
+            let prompt = crate::chat::prompt::of_entry(&hub.store, &cfg, &e.data);
+            Some((e, prompt))
+        })
+        .collect()
+}
+
+/// Whether a terminal (or a take-over) still holds the thread `lane` runs in. When nobody does, the terminal's last
+/// lines are imported first, so the turn carries on from the whole conversation (the same step as a send's).
+async fn terminal_holds(hub: &Arc<Hub>, lane: &Lane) -> bool {
+    let Some(root) = &lane.thread else { return false };
+    // A bot guest's writer is an error here: not ours to run into, so it waits like a terminal.
+    crate::terminal::send_gate(hub, &lane.chat, root, true)
+        .await
+        .map_or(true, |g| g == crate::terminal::SendGate::Waits)
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MessageEnd {
+    /// A turn carried it.
+    Sent,
+    /// Stop, or unsend: the user does not want it.
+    Cancelled,
+    /// The queue gave up on it, or lost it.
+    Failed,
+}
+
+/// A waiting message is over: its entry says how, and no longer says it waits.
+fn end_message(hub: &Hub, entry: &Entry, how: MessageEnd) {
+    let Some(mut e) = hub.store.entry(&entry.id).filter(waits) else { return };
+    e.data["status"] = match how {
+        MessageEnd::Sent => "sent",
+        MessageEnd::Cancelled => "cancelled",
+        MessageEnd::Failed => "failed",
+    }
+    .into();
+    if let Some(data) = e.data.as_object_mut() {
+        data.remove("waitsFor");
+    }
+    hub.set_entry(&e.id, &e.data);
+}
+
+/// Wakes the taker now (a message was queued, a take-over ended).
+pub fn kick() {
+    KICK.notify_one();
+}
+
+/// A user message to a thread a terminal holds: it waits as a wake until the terminal lets go, is never typed into the
+/// terminal and never starts a second writer. Door: the host's, because only the host can run the thread's turn (its
+/// bot, its session and the entries the apps show); the kernel's run door would resume the Claude session on its own and
+/// leave the entry behind. Several messages merge into the thread's one next turn, in order, and share it with a card
+/// answered meanwhile. An error leaves the message not queued at all: the caller fails it.
+pub async fn wait_for_terminal(hub: &Arc<Hub>, agent: &str, entry_id: &str) -> anyhow::Result<()> {
+    // Already carried by a wake (a turn of its own start was refused): the queue has it.
+    if lock(&ENTRIES).contains_key(entry_id) {
+        return Ok(());
+    }
+    let entry = hub.store.entry(entry_id).ok_or_else(|| anyhow::anyhow!("unknown message"))?;
+    let (state, id) = (state_of(hub), message_id(entry_id));
+    let _marker = Enqueuing::mark(&state, &id);
+    let lane = lane_of_message(&entry);
+    let cfg =
+        hub.store.bot(&entry.bot_id)?.filter(|r| !r.deleted).ok_or_else(|| anyhow::anyhow!("unknown bot"))?.config;
+    let (key, prompt, agent) =
+        (session_key(&lane), crate::chat::prompt::of_entry(&hub.store, &cfg, &entry.data), agent.to_owned());
+    let mut data = entry.data.clone();
+    data["waitsFor"] = "terminal".into();
+    hub.set_entry(entry_id, &data);
+    let queued = wake::blocking(move || {
+        wake::enqueue(
+            &state,
+            &Request {
+                session: &key,
+                id: &id,
+                agent: &agent,
+                person: None,
+                room: None,
+                host_door: true,
+                why: "",
+                text: &prompt,
+            },
+        )
+    })
+    .await
+    .ok_or_else(|| anyhow::anyhow!("the wake call didn't finish"));
+    if let Err(error) = queued.and_then(|r| r) {
+        let mut data = entry.data;
+        if let Some(d) = data.as_object_mut() {
+            d.remove("waitsFor");
+        }
+        hub.set_entry(entry_id, &data);
+        return Err(error);
+    }
+    kick();
+    Ok(())
+}
+
+/// Takes back a message that waits in the queue: whether it did. One a turn already carries is the actor's to take back.
+pub async fn unsend_waiting(hub: &Arc<Hub>, entry: &Entry) -> bool {
+    if !waits(entry) {
+        return false;
+    }
+    let (state, key, id) = (state_of(hub), session_key(&lane_of_message(entry)), message_id(&entry.id));
+    let gone = wake::blocking(move || {
+        wake::withdraw(&state, &key, Some(&id));
+        wake::status(&state, &id)
+    })
+    .await
+    .flatten();
+    if gone.as_deref() != Some("withdrawn") {
+        return false;
+    }
+    end_message(hub, entry, MessageEnd::Cancelled);
+    true
+}
+
+/// Stop: the messages that wait in `matches` places are dropped; their wakes are withdrawn with the rest of the place's
+/// (the caller's key list), and the entries say they were not sent.
+fn cancel_waiting(hub: &Hub, matches: impl Fn(&Lane) -> bool) {
+    for e in hub.store.waiting_for_terminal().unwrap_or_default() {
+        if matches(&lane_of_message(&e)) {
+            end_message(hub, &e, MessageEnd::Cancelled);
+            let (state, key, id) = (state_of(hub), session_key(&lane_of_message(&e)), message_id(&e.id));
+            wake::spawn(move || wake::withdraw(&state, &key, Some(&id)));
+        }
+    }
 }
 
 // ---- Stop
@@ -889,17 +1208,19 @@ pub fn stopped(hub: &Hub, keys: &[String], matches: impl Fn(&Door) -> bool) {
 
 /// Stop in one place of a bot (its chat or one thread).
 pub fn stopped_lane(hub: &Hub, lane: &Lane) {
-    let key = format!("acp:{}:{}", lane.chat, lane.thread.as_deref().unwrap_or_default());
-    stopped(hub, &[key], |d| matches!(d, Door::Bot { lane: l, .. } if l == lane));
+    cancel_waiting(hub, |l| l == lane);
+    stopped(hub, &[session_key(lane)], |d| matches!(d, Door::Bot { lane: l, .. } if l == lane));
 }
 
 /// Stop everywhere in a chat (a group stops as a whole).
 pub fn stopped_chat(hub: &Hub, chat: &str) {
+    cancel_waiting(hub, |l| l.chat == chat);
     stopped(hub, &[], |d| matches!(d, Door::Bot { lane, .. } if lane.chat == chat));
 }
 
 /// Stop everywhere a bot talks.
 pub fn stopped_bot(hub: &Hub, bot_id: &str) {
+    cancel_waiting(hub, |l| l.chat == bot_id);
     stopped(hub, &[], |d| matches!(d, Door::Bot { bot, .. } if bot == bot_id));
 }
 
@@ -916,7 +1237,7 @@ enum Exec {
 }
 
 #[cfg(not(test))]
-async fn exec(bin: &std::path::Path, spawn: &Spawn, grant: Option<crate::runauth::RunGrant>) -> Exec {
+async fn exec(bin: &Path, spawn: &Spawn, grant: Option<crate::runauth::RunGrant>) -> Exec {
     use std::process::Stdio;
     use tokio::io::AsyncReadExt as _;
     let mut cmd = tokio::process::Command::new(bin);

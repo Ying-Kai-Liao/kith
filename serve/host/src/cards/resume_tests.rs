@@ -130,6 +130,11 @@ fn edit_items(r: &Rig, f: impl Fn(&mut Value)) {
 
 /// A yes to a card of a bot's chat (or one of its threads) that arrived while the process was gone.
 fn bot_card_approved(r: &Rig, chat: &str, thread: &str) -> Card {
+    bot_card_in(r, chat, chat, thread)
+}
+
+/// An approved card of `bot`'s turn in `chat` (a room, or the bot's own chat).
+fn bot_card_in(r: &Rig, chat: &str, bot: &str, thread: &str) -> Card {
     let lane = if thread.is_empty() { Lane::main(chat) } else { Lane::in_thread(chat, thread) };
     let entry = r
         .hub
@@ -143,7 +148,7 @@ fn bot_card_approved(r: &Rig, chat: &str, thread: &str) -> Card {
     let new = NewCard {
         session: format!("acp:{chat}:{thread}"),
         source: "acp",
-        bot_id: Some(chat.to_owned()),
+        bot_id: Some(bot.to_owned()),
         run_id: None,
         person: String::new(),
         agent: "house".into(),
@@ -159,7 +164,7 @@ fn bot_card_approved(r: &Rig, chat: &str, thread: &str) -> Card {
     };
     let Opened::New(card) = r.hub.store.card_open(&new, now_ms()).unwrap() else { panic!() };
     r.hub.store.card_live(&card.id, Some(&entry.id), None).unwrap();
-    bot_exited(&r.hub, chat);
+    bot_exited(&r.hub, bot);
     answer(&r.hub, &entry.id, Some("allow"), None).unwrap();
     let kept = r.hub.store.card(&card.id).unwrap();
     assert!(kept.state == CardState::Approved && kept.answered_parked, "{kept:?}");
@@ -1061,4 +1066,375 @@ async fn a_bot_actor_that_shuts_down_gives_its_queued_wake_back_and_a_lost_track
     queue_says_eventually(&r, &card, "running").await;
     resume::reap_long_for_test(&r.hub);
     queue_says_eventually(&r, &card, "queued").await;
+}
+
+// ---- an app message to a thread a terminal holds waits as a wake
+
+/// A task thread of the owner's bot whose session `held-s` a live terminal holds. Keep the child alive.
+fn held_thread(r: &Rig, chat: &str) -> (String, std::process::Child, u32) {
+    let root = r
+        .hub
+        .add_entry(&Lane::main(chat), EntryKind::User, 1, &json!({"text": "start", "status": "sent", "task": true}))
+        .unwrap()
+        .id;
+    let lane = Lane::in_thread(chat, &root);
+    r.hub.store.kv_set(&crate::store::lane_key("session", chat, &lane), "held-s").unwrap();
+    let (child, pid) = sleeper();
+    assert!(claim::take(&state(r), "held-s", Kind::Terminal, pid, false).unwrap().is_ok());
+    (root, child, pid)
+}
+
+async fn send_to(r: &Rig, chat: &str, root: &str, text: &str, nonce: &str) -> Value {
+    let out = dispatch(
+        &r.hub,
+        &Caller::Local,
+        "send",
+        json!({"botId": chat, "threadId": root, "text": text, "clientNonce": nonce}),
+    )
+    .await
+    .unwrap();
+    out["entry"].clone()
+}
+
+fn waiting_ids(r: &Rig) -> Vec<String> {
+    let mut ids: Vec<String> = crate::wake::ls(&state(r))
+        .iter()
+        .flat_map(|i| i["requests"].as_array().unwrap().iter().map(|q| q["id"].as_str().unwrap().to_owned()))
+        .collect();
+    ids.sort();
+    ids
+}
+
+fn messages_seen(chat: &str, root: &str) -> Vec<tests_seen::Seen> {
+    tests_seen::of(&format!("acp:{chat}:{root}")).into_iter().filter(|s| s.door == "bot").collect()
+}
+
+#[tokio::test]
+async fn messages_to_a_held_thread_wait_and_go_out_as_one_turn_once_the_terminal_lets_go() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let (a, b) = (send_to(&r, &chat, &root, "first", "n1").await, send_to(&r, &chat, &root, "second", "n2").await);
+    for e in [&a, &b] {
+        assert_eq!(e["data"]["status"], "queued", "queued, not failed: {e}");
+        assert_eq!(e["data"]["waitsFor"], "terminal");
+    }
+    let ids = |e: &Value| format!("msg:{}", e["id"].as_str().unwrap());
+    let mut both = vec![ids(&a), ids(&b)];
+    both.sort();
+    assert_eq!(waiting_ids(&r), both, "one item for the thread, one request each");
+    // A double send is the same message.
+    assert_eq!(send_to(&r, &chat, &root, "first", "n1").await["id"], a["id"]);
+    assert_eq!(waiting_ids(&r).len(), 2);
+    // The terminal still holds it: the take is given back, held, and nothing reaches an actor.
+    drive(&r.hub).await;
+    assert!(messages_seen(&chat, &root).is_empty());
+    for _ in 0..200 {
+        if crate::wake::ls(&state(&r)).iter().all(|i| i["turn"].is_null()) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    pause_over(&r);
+    drive(&r.hub).await;
+    assert!(messages_seen(&chat, &root).is_empty(), "still held");
+    // The terminal ends.
+    claim::release(&state(&r), "held-s", pid, false);
+    pause_over(&r);
+    drive(&r.hub).await;
+    let seen = messages_seen(&chat, &root);
+    assert_eq!(seen.iter().map(|s| s.note.as_str()).collect::<Vec<_>>(), vec!["first", "second"], "in order");
+    let entries: Vec<String> = seen.iter().map(|s| s.entry.clone().unwrap()).collect();
+    assert_eq!(entries, vec![a["id"].as_str().unwrap(), b["id"].as_str().unwrap()]);
+    // The actor starts the turn for both, once.
+    resume::turn_started(&r.hub, &entries);
+    queue_says_of(&r, &ids(&a), "answered").await;
+    queue_says_of(&r, &ids(&b), "answered").await;
+    drive(&r.hub).await;
+    resume::kick();
+    drive(&r.hub).await;
+    assert_eq!(messages_seen(&chat, &root).len(), 2, "delivered once, not again when the queue runs");
+}
+
+#[tokio::test]
+async fn a_message_and_a_card_answered_meanwhile_share_one_turn() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let e = send_to(&r, &chat, &root, "carry on", "n1").await;
+    let card = bot_card_approved(&r, &chat, &root);
+    attempt(&r.hub, &card.id).await;
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    let seen = tests_seen::of(&card.session);
+    assert_eq!(seen.len(), 2, "{seen:?}");
+    assert!(seen[0].note.contains(&card.shown) && !seen[0].note.contains("carry on"), "the notice is the card's only");
+    assert_eq!(seen[1].note, "carry on");
+    assert_eq!(seen[1].entry.as_deref(), e["id"].as_str());
+}
+
+#[tokio::test]
+async fn stop_cancels_the_messages_that_wait_and_withdraws_their_wake() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let e = send_to(&r, &chat, &root, "never mind", "n1").await;
+    let id = e["id"].as_str().unwrap().to_owned();
+    dispatch(&r.hub, &Caller::Local, "stop", json!({"botId": chat, "threadId": root})).await.unwrap();
+    let after = r.hub.store.entry(&id).unwrap();
+    assert_eq!(after.data["status"], "cancelled");
+    assert!(after.data["waitsFor"].is_null());
+    queue_says_of(&r, &format!("msg:{id}"), "withdrawn").await;
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    assert!(messages_seen(&chat, &root).is_empty(), "Stop wins: the freed thread runs nothing");
+}
+
+#[tokio::test]
+async fn a_waiting_message_can_be_taken_back_and_a_restart_keeps_it() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let kept = send_to(&r, &chat, &root, "keep", "n1").await;
+    let unsent = send_to(&r, &chat, &root, "undo", "n2").await;
+    // A restart closes ordinary queued sends, not these: the queue is their record.
+    let plain =
+        r.hub.add_entry(&Lane::main(&chat), EntryKind::User, 3, &json!({"text": "x", "status": "queued"})).unwrap();
+    r.hub.store.expire_pending().unwrap();
+    assert_eq!(r.hub.store.entry(&plain.id).unwrap().data["status"], "failed");
+    assert_eq!(r.hub.store.entry(kept["id"].as_str().unwrap()).unwrap().data["status"], "queued");
+    let out =
+        dispatch(&r.hub, &Caller::Local, "unsend", json!({"botId": chat, "entryId": unsent["id"]})).await.unwrap();
+    assert_eq!(out["entry"]["data"]["status"], "cancelled");
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    let seen = messages_seen(&chat, &root);
+    assert_eq!(seen.iter().map(|s| s.note.as_str()).collect::<Vec<_>>(), vec!["keep"]);
+}
+
+#[tokio::test]
+async fn a_message_the_actor_found_the_thread_held_for_becomes_a_wake_instead_of_failing() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, _pid) = held_thread(&r, &chat);
+    // The message was accepted before the terminal took the thread: queued with no wake, as `send` leaves it.
+    let lane = Lane::in_thread(&chat, &root);
+    let e = r
+        .hub
+        .add_entry(&lane, EntryKind::User, 2, &json!({"text": "late", "status": "queued", "attachments": []}))
+        .unwrap();
+    resume::wait_for_terminal(&r.hub, "house", &e.id).await.unwrap();
+    let kept = r.hub.store.entry(&e.id).unwrap();
+    assert_eq!((kept.data["status"].as_str(), kept.data["waitsFor"].as_str()), (Some("queued"), Some("terminal")));
+    assert_eq!(waiting_ids(&r), vec![format!("msg:{}", e.id)]);
+    // Asked again for the same message (the start was refused once more): the queue already has it.
+    resume::wait_for_terminal(&r.hub, "house", &e.id).await.unwrap();
+    assert_eq!(waiting_ids(&r).len(), 1);
+}
+
+#[tokio::test]
+async fn a_guest_or_another_writer_still_gets_the_refusal() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let refused = crate::terminal::send_gate(&r.hub, &chat, &root, false).await.unwrap_err();
+    assert_eq!(refused.downcast_ref::<crate::terminal::HeldByWriter>().unwrap().code, "liveInTerminal");
+    // A bot guest's turn holds it: even the owner's wait is not for that writer.
+    claim::release(&state(&r), "held-s", pid, false);
+    assert!(claim::take(&state(&r), "held-s", Kind::Bot, pid, false).unwrap().is_ok());
+    let refused = crate::terminal::send_gate(&r.hub, &chat, &root, true).await.unwrap_err();
+    assert_eq!(refused.downcast_ref::<crate::terminal::HeldByWriter>().unwrap().code, "heldByOtherWriter");
+    // An invited person's chat is not the owner's: no wait either.
+    claim::release(&state(&r), "held-s", pid, false);
+    assert!(claim::take(&state(&r), "held-s", Kind::Terminal, pid, false).unwrap().is_ok());
+    let cfg: crate::store::BotConfig = serde_json::from_value(json!({
+        "id": "", "name": "mia's house", "backend": "claude", "cwd": r.dir.to_string_lossy(), "hqAgent": "house",
+        "person": "mia", "permission": "default", "tasks": false, "connectors": [], "skills": [],
+    }))
+    .unwrap();
+    let theirs = r.hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned();
+    // The same live claim holds their thread's session too.
+    let their_root = r
+        .hub
+        .add_entry(&Lane::main(&theirs), EntryKind::User, 1, &json!({"text": "start", "status": "sent", "task": true}))
+        .unwrap()
+        .id;
+    let their_lane = Lane::in_thread(&theirs, &their_root);
+    r.hub.store.kv_set(&crate::store::lane_key("session", &theirs, &their_lane), "held-s").unwrap();
+    let member =
+        dispatch(&r.hub, &Caller::Local, "send", json!({"botId": theirs, "threadId": their_root, "text": "hi"}))
+            .await
+            .unwrap_err();
+    assert!(member.to_string().starts_with("liveInTerminal"), "{member}");
+    assert_eq!(waiting_ids(&r).len(), 0);
+}
+
+#[tokio::test]
+async fn a_bot_that_left_the_room_closes_the_cards_its_turn_had_claimed() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    let other = r.owner_bot("other");
+    claims(&r);
+    off(&r.hub);
+    let group: crate::store::BotConfig = serde_json::from_value(json!({
+        "id": "", "name": "room", "kind": "group", "backend": "claude", "cwd": r.dir.to_string_lossy(),
+        "permission": "default", "tasks": false, "connectors": [], "skills": [], "members": [chat],
+    }))
+    .unwrap();
+    let room = r.hub.create_bot(group).unwrap()["id"].as_str().unwrap().to_owned();
+    let card = bot_card_in(&r, &room, &chat, "");
+    assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
+    assert_eq!(queue_says(&r, &card), "queued");
+    r.hub.update_bot(&json!({"id": room, "members": [other]})).unwrap();
+    drive(&r.hub).await;
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn, "claimed and still closed");
+    queue_says_eventually(&r, &card, "withdrawn").await;
+    assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 0);
+}
+
+#[tokio::test]
+async fn the_forgotten_cards_miss_is_dropped_when_the_card_leaves_the_set() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = bot_card_approved(&r, &chat, "");
+    assert!(r.hub.store.card_resume_claim(&card.id, now_ms()).unwrap());
+    let late = now_ms() + 120_000;
+    resume::settle_queue_at(&r.hub, late).await;
+    assert!(resume::missed_for_test(&card.id), "one miss is remembered");
+    // The card ends some other way (a Stop): its miss goes with it, not kept for ever.
+    r.hub.store.card_resume_close(&card.id).unwrap();
+    resume::settle_queue_at(&r.hub, late).await;
+    assert!(!resume::missed_for_test(&card.id));
+}
+
+#[tokio::test]
+async fn one_attempt_marks_every_card_of_its_session_and_counts_per_queue() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (a, b) = (bot_card_approved(&r, &chat, ""), bot_card_approved(&r, &chat, ""));
+    let before = resume::enqueued_for_test(&r.hub);
+    // Another host's queue (here: a state folder of nobody's) finishing enqueues does not make this one's settle unsure.
+    resume::enqueue_elsewhere_for_test(&r.dir.join("elsewhere"));
+    assert_eq!(resume::enqueued_for_test(&r.hub), before, "per queue");
+    assert_eq!(attempt(&r.hub, &a.id).await, Step::Done);
+    assert_eq!((queue_says(&r, &a), queue_says(&r, &b)), ("queued".into(), "queued".into()), "one attempt, both cards");
+    assert!(!resume::enqueuing_for_test(&a.id) && !resume::enqueuing_for_test(&b.id), "no mark is left behind");
+    assert!(resume::enqueued_for_test(&r.hub) >= before + 2);
+}
+
+fn status_of(r: &Rig, e: &Value) -> (String, Option<String>) {
+    let now = r.hub.store.entry(e["id"].as_str().unwrap()).unwrap();
+    (now.data["status"].as_str().unwrap().to_owned(), now.data["waitsFor"].as_str().map(str::to_owned))
+}
+
+#[tokio::test]
+async fn a_wake_turn_that_fails_to_start_leaves_its_messages_waiting_not_sent() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let (a, b) = (send_to(&r, &chat, &root, "one", "n1").await, send_to(&r, &chat, &root, "two", "n2").await);
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    // With the actor: still queued (its prompt has not gone), not waiting for the terminal any more.
+    assert_eq!(status_of(&r, &a), ("queued".into(), Some("turn".into())));
+    let entries: Vec<String> = messages_seen(&chat, &root).iter().map(|s| s.entry.clone().unwrap()).collect();
+    assert_eq!(entries.len(), 2);
+    // The start failed (the terminal got in again): both go back to waiting for it, and the queue has them.
+    resume::refused(&r.hub, &entries, None);
+    assert_eq!(status_of(&r, &a), ("queued".into(), Some("terminal".into())));
+    assert_eq!(status_of(&r, &b), ("queued".into(), Some("terminal".into())));
+    queue_says_of(&r, &format!("msg:{}", a["id"].as_str().unwrap()), "queued").await;
+    pause_over(&r);
+    drive(&r.hub).await;
+    assert_eq!(messages_seen(&chat, &root).len(), 4, "offered again as one turn");
+}
+
+#[tokio::test]
+async fn the_run_is_answered_only_when_every_message_of_it_has_started() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let (a, b) = (send_to(&r, &chat, &root, "one", "n1").await, send_to(&r, &chat, &root, "two", "n2").await);
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    let (ia, ib) = (a["id"].as_str().unwrap().to_owned(), b["id"].as_str().unwrap().to_owned());
+    // The actor started a turn with the first only: the second is still in its queue.
+    resume::turn_started(&r.hub, std::slice::from_ref(&ia));
+    assert_eq!(status_of(&r, &a).0, "sent");
+    assert_eq!(
+        status_of(&r, &b),
+        ("queued".into(), Some("turn".into())),
+        "not marked sent while it waits in the actor"
+    );
+    queue_says_of(&r, &format!("msg:{ib}"), "running").await;
+    resume::turn_started(&r.hub, std::slice::from_ref(&ib));
+    assert_eq!(status_of(&r, &b).0, "sent");
+    queue_says_of(&r, &format!("msg:{ib}"), "answered").await;
+}
+
+#[tokio::test]
+async fn a_message_taken_back_from_the_actor_frees_its_run_for_later_wakes() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let a = send_to(&r, &chat, &root, "one", "n1").await;
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    assert_eq!(messages_seen(&chat, &root).len(), 1);
+    let id = a["id"].as_str().unwrap().to_owned();
+    // The actor's unsend: the run is settled, not held for hours.
+    resume::unsent(&r.hub, &id);
+    assert!(!resume::wake_carries(&id));
+    queue_says_of(&r, &format!("msg:{id}"), "withdrawn").await;
+    // A message sent afterwards is not blocked behind it.
+    assert!(claim::take(&state(&r), "held-s", Kind::Terminal, pid, false).unwrap().is_ok());
+    let c = send_to(&r, &chat, &root, "later", "n3").await;
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    let seen = messages_seen(&chat, &root);
+    assert_eq!(seen.iter().map(|s| s.note.as_str()).collect::<Vec<_>>(), ["one", "later"], "{seen:?}");
+    assert_eq!(seen.last().unwrap().entry.as_deref(), c["id"].as_str());
+}
+
+#[tokio::test]
+async fn a_refused_start_of_a_card_and_messages_together_puts_each_back_where_it_came_from() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (root, _terminal, pid) = held_thread(&r, &chat);
+    let e = send_to(&r, &chat, &root, "carry on", "n1").await;
+    let card = bot_card_approved(&r, &chat, &root);
+    attempt(&r.hub, &card.id).await;
+    claim::release(&state(&r), "held-s", pid, false);
+    drive(&r.hub).await;
+    let entries: Vec<String> = tests_seen::of(&card.session).iter().map(|s| s.entry.clone().unwrap()).collect();
+    assert_eq!(entries.len(), 2, "the card's notice and the message");
+    // The actor batched both, the gate refused: the message waits again, the card's wake is owed again.
+    resume::refused(&r.hub, &entries, Some("held-s"));
+    assert_eq!(status_of(&r, &e), ("queued".into(), Some("terminal".into())));
+    queue_says_eventually(&r, &card, "queued").await;
+    queue_says_of(&r, &format!("msg:{}", e["id"].as_str().unwrap()), "queued").await;
 }

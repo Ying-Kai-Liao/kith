@@ -701,25 +701,44 @@ pub fn host_turn_ended(hub: &Hub, lane: &Lane) {
 /// A message to the thread `root` when it is a terminal thread: refused while another writer holds it. A closed
 /// terminal's last lines are imported first, and the thread's actor loads the session again if the terminal wrote
 /// to it, so the host carries on from the whole conversation.
+#[cfg(test)]
 pub async fn before_send(hub: &Arc<Hub>, bot: &str, root: &str) -> Result<()> {
+    send_gate(hub, bot, root, false).await.map(|_| ())
+}
+
+/// What a send into a thread does now.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendGate {
+    /// Nobody else writes: the turn starts now.
+    Free,
+    /// A terminal (or a take-over) holds the thread: the message waits as a wake until it lets go. Only said when the
+    /// caller `may_wait`.
+    Waits,
+}
+
+/// [`before_send`] for a caller whose message may wait for a terminal instead of being refused (the owner's own app
+/// chat: the wake runs as the person the session serves, rule of 2026-10-26). A bot guest's writer is never waited for.
+pub async fn send_gate(hub: &Arc<Hub>, bot: &str, root: &str, may_wait: bool) -> Result<SendGate> {
     let t = Thread { bot: bot.to_owned(), root: root.to_owned() };
     let hub = hub.clone();
     // File and process reads: off the runtime.
-    tokio::task::spawn_blocking(move || before_send_blocking(&hub, &t)).await?
+    tokio::task::spawn_blocking(move || send_gate_blocking(&hub, &t, may_wait)).await?
 }
 
-fn before_send_blocking(hub: &Hub, t: &Thread) -> Result<()> {
+fn send_gate_blocking(hub: &Hub, t: &Thread, may_wait: bool) -> Result<SendGate> {
     // The same lock `resolve` (hostBusy) and a turn's start take: a claim, a resume and a start see each other in order.
     let lock = hub.terminal.thread_lock(&t.key());
     let _one = lock.locked();
-    if let Some(w) = writer(hub, t) {
-        return Err(HeldByWriter { code: w.code() }.into());
+    match writer(hub, t) {
+        Some(Writer::Terminal) if may_wait => return Ok(SendGate::Waits),
+        Some(w) => return Err(HeldByWriter { code: w.code() }.into()),
+        None => {}
     }
     sync_one(hub, t);
     if hub.store.kv_get(&stale_key(t)).is_some() && hub.store.kv_delete(&stale_key(t)).is_ok() {
         forget_loaded(hub, t);
     }
-    Ok(())
+    Ok(SendGate::Free)
 }
 
 /// Who holds a thread, as far as a send into it is concerned.
@@ -919,7 +938,12 @@ pub async fn take_over(hub: &Arc<Hub>, bot: &str, root: &str) -> Result<Value> {
     }
     // Dropped with the request, the key must still go, or the thread refuses every send until a restart.
     let _taking = TakingGuard { hub: hub.clone(), key: t.key() };
-    take_over_inner(hub, &t).await
+    let taken = take_over_inner(hub, &t).await?;
+    if taken["tookOver"] == true {
+        // Messages that waited for the terminal go out now, as the next turn: the queue is their only way in.
+        crate::cards::resume::kick();
+    }
+    Ok(taken)
 }
 
 struct TakingGuard {

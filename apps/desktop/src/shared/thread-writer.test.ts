@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { normalizeBot, type Entry, type ThreadSummary } from './models.ts'
 import { taskStatus } from './tasks.ts'
 import {
-  isHeldByTerminal, isHeldElsewhere, isTerminalOrigin, resumeCommand, runLabel, threadOrigin, threadWriterCode, threadWriterMessage, writerChange,
+  isHeldByTerminal, isHeldElsewhere, isTerminalOrigin, queuedLine, resumeCommand, runLabel, threadOrigin, threadWriterCode, threadWriterMessage, writerChange,
 } from './thread-writer.ts'
 
 const base: ThreadSummary = { count: 2, lastAt: 5, authors: ['b'] }
@@ -74,4 +74,11 @@ test('a mirrored one-shot says who started it; a real terminal and other origins
   assert.equal(runLabel({ origin: 'terminal', originLabel: '  ' }), undefined)
   assert.equal(runLabel({ origin: 'discord', originLabel: "Sam's server" }), undefined)
   assert.equal(runLabel(undefined), undefined)
+})
+
+test('a queued message says what it waits for', () => {
+  assert.equal(queuedLine('terminal', false), 'Waits until the terminal session ends')
+  assert.equal(queuedLine('terminal', true), 'Waits until the terminal session ends')
+  assert.equal(queuedLine(undefined, true), 'Queued until this response finishes')
+  assert.equal(queuedLine(undefined, false), 'Queued')
 })

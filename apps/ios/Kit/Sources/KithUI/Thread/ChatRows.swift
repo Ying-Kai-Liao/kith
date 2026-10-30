@@ -231,7 +231,7 @@ struct UserBubble: View {
             Text("Sending…").font(.caption2).foregroundStyle(Palette.tertiary)
         case "queued":
             HStack(spacing: 10) {
-                Text(botWorking ? "Queued until this response finishes" : "Queued").foregroundStyle(Palette.tertiary)
+                Text(UserStatusLine.queued(waitsFor: entry.data.waitsFor, botWorking: botWorking)).foregroundStyle(Palette.tertiary)
                 Button("Unsend", systemImage: "arrow.uturn.backward") { model.unsend(entry) }
                     .labelStyle(.iconOnly)
                     .help("Unsend")

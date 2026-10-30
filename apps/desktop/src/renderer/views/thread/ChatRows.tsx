@@ -33,6 +33,7 @@ import { callLineSuffix } from './call-line'
 import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
 import { toolRowOf, VISIBLE_STEPS } from '@shared/thread-feed'
 import { botGuestSender } from '@shared/bot-guest-chat'
+import { queuedLine } from '@shared/thread-writer'
 import { quoteOf, quotesOf } from './reply-quote'
 import { richCardOf, type RichCard } from '@shared/rich-card'
 import { NewsCard, ScheduleCard } from './RichCards'
@@ -295,7 +296,7 @@ function UserStatus({ entry, botWorking, hovering }: { entry: Entry; botWorking:
     case 'queued':
       return (
         <HStack as="span" gap={2}>
-          <Text size="caption2" tone="tertiary">{botWorking ? 'Queued until this response finishes' : 'Queued'}</Text>
+          <Text size="caption2" tone="tertiary">{queuedLine(entry.data.waitsFor, botWorking)}</Text>
           <IconButton title="Unsend" icon="arrow.uturn.backward" size={24} onClick={() => store.unsend(entry)} />
         </HStack>
       )

@@ -22,6 +22,13 @@ pub fn of_message(store: &Store, cfg: &BotConfig, text: &str, attachments: &[Val
     prompt
 }
 
+/// What a saved user message asks the agent, as `send` built it: for a message that waited in a queue other than the
+/// actor's, which only has the entry to go on.
+pub fn of_entry(store: &Store, cfg: &BotConfig, data: &Value) -> String {
+    let attachments: Vec<Value> = data["attachments"].as_array().cloned().unwrap_or_default();
+    of_message(store, cfg, data["text"].as_str().unwrap_or_default(), &attachments, data["via"] == "call")
+}
+
 /// The instruction for a voice turn: the reply is spoken aloud, so it is made for the ear.
 fn call_note() -> &'static str {
     "[Kith: You are on a live voice call with the person. Your reply is spoken aloud. Answer in short spoken \
