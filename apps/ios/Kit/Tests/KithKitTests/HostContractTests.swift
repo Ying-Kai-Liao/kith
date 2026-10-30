@@ -103,8 +103,8 @@ func everyHostAnswerDecodes(_ sub: String) throws {
     #expect(hello.grantedAgents == nil)
 }
 
-@Test func everyContractMethodIsAMembersAnUnprovenDevicesOrABots() {
-    let all = HostContract.memberMethods + HostContract.unprovenMethods + HostContract.botMethods
+@Test func everyContractMethodIsAMembersAnUnprovenDevicesABotsOrAPeers() {
+    let all = HostContract.memberMethods + HostContract.unprovenMethods + HostContract.botMethods + HostContract.peerMethods
     #expect(Set(HostContract.Method.allCases) == Set(all))
     #expect(Set(HostContract.botPendingMethods).isSubset(of: Set(HostContract.botMethods)))
 }
