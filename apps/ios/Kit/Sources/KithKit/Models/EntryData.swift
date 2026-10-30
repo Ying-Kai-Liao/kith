@@ -43,6 +43,9 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var agent: String?
     /// permission, from a run `kith ask` started: "<agent>, asked by <caller agent>" (or "a terminal").
     public var chain: String?
+    /// permission, the owner's card for a guest's run reaching a host or helper: what its options grant (host
+    /// `cards/edge.rs`). Its options are labelled by name. Nil on every other card.
+    public var edge: PermissionEdge?
     public var entries: [PlanItem]?
     /// notice: info | error | divider
     public var style: String?
@@ -101,6 +104,14 @@ public struct EntrySender: Codable, Hashable, Sendable {
     public var name: String?
     /// The person speaking through the bot, when it says.
     public var speaker: String?
+}
+
+/// What an edge card's options grant: a host (`domains`) or a helper (`helpers`), and the job it is part of when the
+/// card offers to turn that on.
+public struct PermissionEdge: Codable, Hashable, Sendable {
+    public var kind: String?
+    public var value: String?
+    public var job: String?
 }
 
 /// A memory line from an older host, known only to keep it out of the chat.

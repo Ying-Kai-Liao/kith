@@ -7,7 +7,8 @@ import { useModels } from '../lib/observable'
 import { refKey, type AppModel, type RosterItem } from '../store/app-model'
 import type { BotStore } from '../store/bot-store'
 import { botDetail } from './tray-summary'
-import { optionLabel, permissionHeadline, sortedOptions } from './thread/PermissionCard'
+import { permissionHeadline } from './thread/PermissionCard'
+import { optionLabel, sortedOptions } from './thread/permission-options.ts'
 
 /** Tool calls in the island's ticker. */
 const STEPS = 3
@@ -91,7 +92,7 @@ function pendingCards({ ref, bot, store }: RosterItem): IslandPermission[] {
         bot: { name: author.name, image: avatarImage(author) ?? DEFAULT_IMAGE, color: author.avatarColor, backend: store.backendName(author.backend) },
         headline: permissionHeadline(e.data.toolKind),
         title: e.data.title ?? '',
-        options: sortedOptions(e.data.options ?? []).map((o) => ({ id: o.optionId, label: optionLabel(o), kind: o.kind })),
+        options: sortedOptions(e.data.options ?? []).map((o) => ({ id: o.optionId, label: optionLabel(o, e.data.edge), kind: o.kind })),
         answering: store.answering.get(e.id) ?? null,
       }
     })

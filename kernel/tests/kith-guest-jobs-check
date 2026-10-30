@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+# kith-guest-jobs-check — an agent's jobs (capabilities.yaml `jobs:`, guest workbench step 1.3) and the edge grants of
+# step 1.4: a tick grants the job as it was ticked, cut to what the package still declares; a package update never widens
+# a tick (it shows as `added`, asked once per hash); ticks sit on a person's own row only; a helper run uses its caller's
+# row and package; a helper's "just this once" is used up by the launch that checks revoke (resolve --take-once); ticks
+# and helpers are ledger grants that revoke and `ledger --rm` take back. ask_helper asks the owner on a card (a stub host)
+# for a helper that isn't granted. No real claude. Throwaway HOME and KITH_HOME.
+#
+#   kernel/tests/kith-guest-jobs-check     a few seconds; exits 1 when a check fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-guest-jobs-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME="$T/kith" KITH_STATE=$T/state KITH_AUTH=$T/auth.json
+unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE KITH_RESUME CLAUDE_CONFIG_DIR HQ_HOME HQ_STATE \
+  KITH_SERVE_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ASK_TOKEN KITH_ASK_SOCKET KITH_VIA KITH_ASK_ID
+mkdir -p "$HOME" "$T/bin" "$KITH_STATE/projects" "$KITH_STATE/logs"
+for a in video sound image branding; do
+  mkdir -p "$KITH_HOME/agents/$a/role"
+  printf -- '---\nname: %s\ndescription: test agent\n---\nYou are %s.\n' "$a" "$a" > "$KITH_HOME/agents/$a/role/agent.md"
+done
+CAPS=$KITH_HOME/agents/video/role/capabilities.yaml
+cat > "$CAPS" <<'YAML'
+helpers: [sound, image, branding]
+doors:
+  - name: render
+    npm: [hyperframes@0.4.1]
+    lockfile: render.lock.json
+    tools: [node]
+    bin: hyperframes/bin/hyperframes.mjs
+    args: [render]
+    writes: [renders]
+jobs:   # ticked at share
+  - name: make-videos
+    label: Make videos
+    domains: [registry.npmjs.org, cdn.jsdelivr.net, github.com]
+    helpers: [sound]
+    doors: [render]
+  - name: send-results
+    label: Send results
+  - name: bad-domain
+    domains: [*.evil.com, 10.0.0.1]
+  - name: bad-helper
+    helpers: [coder]
+  - name: make-videos
+  - name: has:colon
+  - name: extra
+    argv: [rm, -rf]
+YAML
+echo '{"lockfileVersion":3}' > "$KITH_HOME/agents/video/role/render.lock.json"
+# a helper's own package declares a job too: it must never add to its caller's grants
+printf 'jobs:\n  - name: sound-web\n    domains: [freesound.org]\n' > "$KITH_HOME/agents/sound/role/capabilities.yaml"
+cat > "$T/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+[[ $1 == --version ]] && { echo "2.1.309 (Claude Code)"; exit 0; }
+[[ $1 == plugin ]] && { echo '[]'; exit 0; }
+printf '{"result":"pong from %s for %s","session_id":"s1","total_cost_usd":0}' "$KITH_AGENT" "$KITH_PERSON"
+STUB
+chmod +x "$T/bin/claude"
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
+export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH
+
+AUTH=$KERNEL/bin/kith-auth
+fails=0
+expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (got $2, want $3)"; fails=$((fails + 1)); fi; }
+has() { case $2 in *"$3"*) echo "ok   $1" ;; *) echo "FAIL $1 ('$3' not in: $2)"; fails=$((fails + 1)) ;; esac; }
+lacks() { case $2 in *"$3"*) echo "FAIL $1 ('$3' in: $2)"; fails=$((fails + 1)) ;; *) echo "ok   $1" ;; esac; }
+field() { python3 -c 'import json,sys; v=json.loads(sys.argv[1])
+for k in sys.argv[2].split("."): v=v[k] if not isinstance(v,list) else v[int(k)]
+if isinstance(v,list) and all(isinstance(x,str) for x in v): v=sorted(v)
+print(json.dumps(v,sort_keys=True) if not isinstance(v,str) else v)' "$1" "$2"; }
+res() { "$AUTH" resolve "$@"; }
+
+"$AUTH" person kai name=Kai owner >/dev/null 2>&1
+"$AUTH" person bill name=Bill >/dev/null 2>&1
+"$AUTH" member video bill mode=default >/dev/null 2>&1
+"$AUTH" person ann name=Ann >/dev/null 2>&1
+"$AUTH" member video ann mode=default >/dev/null 2>&1
+
+# --- the schema
+J=$("$AUTH" jobs video --json)
+expect "the valid jobs, in package order" "$(field "$J" jobs | python3 -c 'import json,sys; print(" ".join(j["name"] for j in json.load(sys.stdin)))')" "make-videos send-results"
+P=$(field "$J" problems)
+has "a wildcard or address is not a host name" "$P" "job bad-domain: not a plain host name"
+has "a helper the package doesn't declare" "$P" "job bad-helper: not among the package helpers"
+has "a second job of one name" "$P" "job make-videos: a second job"
+has "a name with a ':' (ledger keys split on it)" "$P" "job has:colon: no name"
+has "a key a job doesn't have is never read in part" "$P" "job extra: a line it does not read"
+DOOR=$(field "$J" jobs.0.doors.0)
+has "a door is kept with the digest of its declaration" "$DOOR" "render@"
+
+# --- a tick
+R=$(res video --person bill)
+lacks "unticked: no job domain" "$(field "$R" access.domains)" "registry.npmjs.org"
+"$AUTH" job video bill make-videos >/dev/null
+R=$(res video --person bill)
+expect "ticked: the job's domains" "$(field "$R" access.domains)" '["cdn.jsdelivr.net", "github.com", "registry.npmjs.org"]'
+expect "ticked: its helpers" "$(field "$R" helpers)" '["sound"]'
+expect "ticked: its doors (inert until step 2)" "$(field "$R" doors)" "[\"$DOOR\"]"
+expect "ticked: the job named" "$(field "$R" jobs)" '["make-videos"]'
+lacks "another person's row is untouched" "$(field "$(res video --person ann)" access.domains)" "github.com"
+"$AUTH" member video '*' mode=default >/dev/null 2>&1
+expect "a tick on the * row is refused" "$("$AUTH" job video '*' make-videos >/dev/null 2>&1; echo $?)" "1"
+expect "nothing ticked on *" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["members"]["video"]["*"].get("jobs"))' "$KITH_AUTH")" "None"
+"$AUTH" member video '*' --rm >/dev/null 2>&1
+has "the owner is not ticked" "$("$AUTH" job video kai make-videos 2>&1)" "is the owner"
+has "a job the package doesn't declare" "$("$AUTH" job video bill nope 2>&1)" "declares no job 'nope'"
+"$AUTH" job video ann make-videos --shown '{"domains":["github.com","evil.com"],"helpers":["image"]}' >/dev/null
+R=$(res video --person ann)
+expect "a tick keeps what the card showed, cut to the job" "$(field "$R" access.domains)" '["github.com"]'
+expect "never a piece the job doesn't hold" "$(field "$R" helpers)" '[]'
+
+# --- a helper run: the caller's row and package
+R=$(res sound --person bill --via video)
+expect "a ticked job's helper may run" "$(field "$R" allowed)" "true"
+expect "with the caller's job domains" "$(field "$R" access.domains)" '["cdn.jsdelivr.net", "github.com", "registry.npmjs.org"]'
+lacks "the helper's own package adds nothing" "$(field "$R" access.domains)" "freesound.org"
+expect "an unticked helper may not" "$(field "$(res image --person bill --via video)" allowed)" "false"
+
+# --- the package changes after the tick
+python3 - "$CAPS" <<'PY'
+import sys; p = sys.argv[1]; t = open(p).read()
+t = t.replace('domains: [registry.npmjs.org, cdn.jsdelivr.net, github.com]', 'domains: [registry.npmjs.org, cdn.jsdelivr.net, storage.googleapis.com]')
+open(p, 'w').write(t)
+PY
+R=$(res video --person bill)
+expect "an update narrows a tick, never widens it" "$(field "$R" access.domains)" '["cdn.jsdelivr.net", "registry.npmjs.org"]'
+V=$("$AUTH" jobs video --person bill --domain storage.googleapis.com --json)
+expect "the card finds the job that holds a domain" "$(field "$V" jobs.0.name)" "make-videos"
+expect "and what the update added" "$(field "$V" jobs.0.added.domains)" '["storage.googleapis.com"]'
+H=$(field "$V" jobs.0.hash)
+expect "not declined yet" "$(field "$V" jobs.0.declined)" "false"
+"$AUTH" job video bill make-videos --decline "$H" >/dev/null
+expect "No keeps that widening from asking again" "$(field "$("$AUTH" jobs video --person bill --domain storage.googleapis.com --json)" jobs.0.declined)" "true"
+expect "and the tick stays as it was" "$(field "$(res video --person bill)" access.domains)" '["cdn.jsdelivr.net", "registry.npmjs.org"]'
+expect "a path names no job" "$(field "$("$AUTH" jobs video --person bill --domain /Users/x --json)" jobs)" '[]'
+python3 - "$CAPS" <<'PY'
+import sys; p = sys.argv[1]; t = open(p).read()
+open(p, 'w').write(t.replace('args: [render]', 'args: [render, --quality, draft]'))
+PY
+R=$(res video --person bill)
+expect "a changed argv is a new door: not in the old tick" "$(field "$R" doors)" '[]'
+has "it shows as added" "$(field "$("$AUTH" jobs video --person bill --json)" jobs.0.added.doors)" "render@"
+"$AUTH" job video bill make-videos --shown "$(field "$("$AUTH" jobs video --json)" jobs.0)" >/dev/null
+R=$(res video --person bill)
+expect "Keep it on: the job as the card showed it" "$(field "$R" access.domains)" '["cdn.jsdelivr.net", "registry.npmjs.org", "storage.googleapis.com"]'
+expect "the declined hash goes with the old tick" "$(field "$("$AUTH" jobs video --person bill --json)" jobs.0.hash)" ""
+
+# --- helper grants: once and always
+"$AUTH" helper video bill image --once >/dev/null
+expect "a once isn't seen by a plain resolve" "$(field "$(res image --person bill --via video)" allowed)" "false"
+R=$(res image --person bill --via video --take-once)
+expect "the launch takes it" "$(field "$R" allowed)" "true"
+has "and says so" "$(field "$R" why)" "just this once"
+expect "used up" "$(field "$(res image --person bill --via video --take-once)" allowed)" "false"
+"$AUTH" helper video bill image --once >/dev/null
+"$AUTH" person bill --revoke >/dev/null 2>&1
+expect "a revoke beats a once" "$(field "$(res image --person bill --via video --take-once)" allowed)" "false"
+"$AUTH" person bill --unrevoke >/dev/null 2>&1
+has "the once was not spent by the refused launch" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["members"]["video"]["bill"].get("helper_once"))' "$KITH_AUTH")" "image"
+"$AUTH" helper video bill branding >/dev/null
+expect "Always: every run of the person's" "$(field "$(res branding --person bill --via video)" allowed)" "true"
+has "a helper that isn't an agent" "$("$AUTH" helper video bill nobody 2>&1)" "no agent 'nobody'"
+has "the agent itself" "$("$AUTH" helper video bill video 2>&1)" "no agent 'video'"
+
+# --- the ledger
+L=$("$AUTH" ledger --json)
+has "a tick is a ledger grant" "$L" '"key": "job:video:bill:make-videos"'
+has "an always helper is one" "$L" '"key": "helper:video:bill:branding"'
+"$AUTH" ledger --rm helper:video:bill:branding >/dev/null
+expect "ledger --rm takes a helper back" "$(field "$(res branding --person bill --via video)" allowed)" "false"
+"$AUTH" ledger --rm job:video:bill:make-videos >/dev/null
+R=$(res video --person bill)
+expect "and a tick" "$(field "$R" access.domains)" '[]'
+expect "with its helpers" "$(field "$(res sound --person bill --via video)" allowed)" "false"
+"$AUTH" job video ann make-videos --rm >/dev/null
+expect "job --rm" "$(field "$(res video --person ann)" jobs)" '[]'
+"$AUTH" job video ann make-videos >/dev/null
+"$AUTH" helper video ann image >/dev/null
+"$AUTH" person ann id=anne >/dev/null
+"$AUTH" job video ann make-videos --rm >/dev/null
+expect "job --rm by an old id" "$(field "$(res video --person anne)" jobs)" '[]'
+"$AUTH" helper video ann image --rm >/dev/null
+expect "helper --rm by an old id" "$(field "$(res image --person anne --via video)" allowed)" "false"
+
+# --- an invitee's bot: no more jobs than its owner has
+"$AUTH" bot bill-bot --of bill >/dev/null 2>&1
+"$AUTH" member video bill-bot mode=default >/dev/null 2>&1
+"$AUTH" job video bill-bot make-videos >/dev/null
+expect "a bot's tick its owner hasn't is not named" "$(field "$(res video --person bill-bot)" jobs)" '[]'
+"$AUTH" job video bill make-videos >/dev/null
+expect "it is once the owner has it" "$(field "$(res video --person bill-bot)" jobs)" '["make-videos"]'
+"$AUTH" job video bill make-videos --rm >/dev/null
+
+# --- ask_helper: a helper that isn't granted asks the owner (a stub host answers on the run socket)
+SOCK=$T/run.sock
+host() {   # host ANSWER: one requestPermission, answered allow|deny|waiting; the request goes to $T/asked
+  python3 - "$SOCK" "$1" "$T/asked" <<'PY' &
+import json, os, socket, sys
+path, answer, log = sys.argv[1:4]
+if os.path.exists(path): os.unlink(path)
+s = socket.socket(socket.AF_UNIX); s.bind(path); s.listen(1); s.settimeout(20)
+c, _ = s.accept(); buf = b''
+while not buf.endswith(b'\n'): buf += c.recv(65536)
+open(log, 'w').write(buf.decode())
+if answer == 'grant':   # the host writes the once grant before it answers allow
+    import subprocess; subprocess.run([os.environ['AUTH'], 'helper', 'video', 'bill', 'image', '--once'], capture_output=True)
+    answer = 'allow'
+r = {'ok': True, 'behavior': 'deny', 'waiting': True, 'message': 'waiting on the owner, end your turn'} if answer == 'waiting' else {'ok': True, 'behavior': answer}
+c.sendall(json.dumps(r).encode() + b'\n'); c.close()
+PY
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -S "$SOCK" ] && break; /bin/sleep 0.1; done
+}
+ask() {   # ask CALLER AGENT
+  env KITH_PERSON=bill KITH_AGENT="$1" KITH_RUN_TOKEN=t KITH_RUN_SOCKET="$SOCK" python3 -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+print(kp.ask_helper({"agent": sys.argv[2], "task": "say pong"}))' "$KERNEL/bin/kith-permit" "$2"
+}
+export AUTH
+rm -f "$SOCK"
+python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); a["members"]["video"]["bill"].pop("helper_once",None); json.dump(a,open(sys.argv[1],"w"))' "$KITH_AUTH"
+host grant
+expect "an ungranted helper: the owner says yes on the card, it runs once" "$(ask video image)" "pong from image for bill"
+wait
+has "the card names the helper and the task" "$(<"$T/asked")" '"tool": "mcp__kithpermit__ask_helper"'
+expect "the once is used up by that launch" "$(field "$(res image --person bill --via video --take-once)" allowed)" "false"
+host deny
+has "No: it doesn't run" "$(ask video image)" "Not approved"
+wait
+host waiting
+has "no answer in the window: end the turn" "$(ask video image)" "waiting on the owner"
+wait
+"$AUTH" job video bill make-videos >/dev/null
+rm -f "$T/asked"
+expect "a granted helper runs without a card" "$(ask video sound)" "pong from sound for bill"
+expect "no card was asked" "$([ -e "$T/asked" ] && echo asked || echo none)" "none"
+has "a person who may not use the caller gets no card" "$(env KITH_PERSON=stranger KITH_AGENT=video python3 -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+print(kp.ask_helper({"agent": "image", "task": "say pong"}))' "$KERNEL/bin/kith-permit")" "Could not ask image"
+
+[ "$fails" -eq 0 ] && echo "all ok" || { echo "$fails FAIL"; exit 1; }

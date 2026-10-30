@@ -458,6 +458,7 @@ pub(crate) async fn cut_off(hub: &Hub, person: &str) {
     if !bots.is_empty() {
         super::botguests::sweep_claims(hub, bots, false).await;
     }
+    crate::doors::sweep(&[person.to_owned()]).await;
     // Once nothing of theirs runs: the Claude Code temp folder their runs wrote in (<machine>/run/t/<id>).
     if let Some(bin) = account::bin().await
         && let Err(e) = account::run(&bin, &["person", person, "--clear-temp"]).await

@@ -95,8 +95,25 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           approved it (themselves, or their bot's owner), refused unless they are a
                                           member of the agent now; without it the owner did. A member made a guest
                                           loses the entries they approved.
+  kith-auth jobs <agent> [--person ID] [--domain HOST | --helper NAME | --door NAME[@DIGEST]] [--json]
+                                          read-only: the jobs the agent's capabilities.yaml declares (domains, helpers,
+                                          doors), for a person ticked or not and what a package update added since the
+                                          tick (added, hash, declined); --domain/--helper/--door: only the job that holds it
+  kith-auth door <agent> <id> <door@digest> [--json]
+                                          read-only: may the person's runs of the agent start this door now (ok, or
+                                          owner, revoked, not-allowed, held, stale, no-job, not-ticked, widened,
+                                          declined); a door's start asks it under the auth lock (kith_door)
+  kith-auth job <agent> <id> <job> [--shown JSON | --decline HASH | --rm]
+                                          tick a job for a person's own row (never `*` or the owner): their runs of the
+                                          agent get its pieces as they are now, or as --shown listed them, and never more
+                                          when the package grows (`resolve` lists jobs, doors and the domains in access).
+                                          --decline: the No of the card that offers what an update added
+  kith-auth helper <agent> <id> <helper> [--once | --rm]
+                                          "always" on a helper card: their runs of agent may call helper (the row's
+                                          helpers). --once: one launch within five minutes, used up by `resolve --take-once`
   kith-auth ledger [--person ID] [--agent AGENT] [--json]   read-only: the grants ledger, every lasting grant for anyone
-                                          but the owner: the access above (kind read|write|domain) and a person's own
+                                          but the owner: the access above (kind read|write|domain), ticked jobs (job),
+                                          the helpers a row may call (helper) and a person's own
                                           service grants (<agent>@<person>, kind service, target the profile). --json:
                                           [{key, kind, agent, person, name, target, since, approved_by}] (since: ms or
                                           null; approved_by: owner, a person id, or null for an entry from before it
@@ -108,9 +125,11 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           default: logins and browser profiles are the owner's, keys and bots shared
   kith-auth share <profile> <id>[,..] [--rm]   it stays its owner's, and these people's runs may use it too (through
                                           the agents granted it that they may use)
-  kith-auth may <id> <agent> [--via AGENT]  exit 0 if the person may use the agent (--via: called as AGENT's helper)
-  kith-auth resolve <agent> [--person ID] [--via AGENT]   the run's effective person settings, as JSON (bin/kith uses it);
-                                          held as in `who` (the channels wait for the cloud sync before they serve)
+  kith-auth may <id> <agent> [--via AGENT] [--once]   exit 0 if the person may use the agent (--via: called as AGENT's
+                                          helper; --once: a `helper --once` not used yet counts)
+  kith-auth resolve <agent> [--person ID] [--via AGENT] [--take-once]   the run's effective person settings, as JSON
+                                          (bin/kith uses it); held as in `who` (the channels wait for the cloud sync
+                                          before they serve). --take-once: a helper launch may use up a `helper --once`
 
 Three layers, so sharing an agent never shares an account:
   kernel/services/<name>.json   what a service is: kind (mcp | cli | login), how to start it, which env vars it needs.
@@ -260,6 +279,43 @@ def needs(agent):
     return [s.strip() for s in m.group(1).split(',') if s.strip()] if m else []
 
 
+_JOBS = {}
+
+
+def jobs_of(agent):
+    """The jobs the agent's package declares (kith_jobs), by name: what a tick may grant. Read from the same file as needs()."""
+    if agent not in _JOBS:
+        import kith_jobs
+        _JOBS[agent] = {j['name']: j for j in kith_jobs.read(agent_dirs().get(agent, AGENTS / agent) / 'capabilities.yaml')[0]}
+    return _JOBS[agent]
+
+
+def job_grants(auth, pkg, person):
+    """What the person's ticks on their own row of pkg grant: each tick's snapshot cut to pkg's package as it is now. pkg is
+    the agent whose row a run uses (the caller's, for a helper), so a helper's package never adds to a tick. The `*` row
+    holds no ticks."""
+    import kith_jobs
+    own = auth['members'].get(pkg, {}).get(person) if person != EVERYONE else None
+    ticks = own.get('jobs') if isinstance(own, dict) and isinstance(own.get('jobs'), dict) else {}
+    out = {k: [] for k in kith_jobs.PIECES}
+    for name, tick in ticks.items():
+        for k, v in kith_jobs.effective(tick, jobs_of(pkg).get(name)).items():
+            out[k] += [x for x in v if x not in out[k]]
+    return out
+
+
+def helpers_in(auth, pkg, person, row, once=False):
+    """The helpers a run on this membership row (of pkg) may call: the row's list, the person's ticked jobs' and, with
+    once, an unused "just this once" on their own row that hasn't run out (resolve --take-once uses it up)."""
+    if not isinstance(row, dict):
+        return []
+    out = list(row.get('helpers', [])) + job_grants(auth, pkg, person)['helpers']
+    own = auth['members'].get(pkg, {}).get(person)
+    left = own.get('helper_once') if once and isinstance(own, dict) and isinstance(own.get('helper_once'), dict) else {}
+    out += [h for h, until in left.items() if isinstance(until, (int, float)) and until > time.time() * 1000]
+    return list(dict.fromkeys(out))
+
+
 def agents():
     return sorted(agent_dirs())
 
@@ -374,8 +430,9 @@ def row_of(auth, agent, person):
     return rows.get(person, rows.get(EVERYONE))
 
 
-def may(auth, person, agent, via=None):
-    """(allowed, why). Access is a membership row; a helper is allowed when the caller's membership lists it."""
+def may(auth, person, agent, via=None, once=False):
+    """(allowed, why). Access is a membership row; a helper is allowed when the caller's membership lists it or a ticked
+    job of it does (once: or a "just this once" on it, see helpers_in)."""
     person = canonical(auth, person)
     if is_owner(auth, person):
         return True, 'owner'
@@ -385,10 +442,10 @@ def may(auth, person, agent, via=None):
         # before any row, the `*` row included: revoke beats every row, and undo finds them all as they were
         return False, f"{person}'s access was removed"
     if auth['people'][person].get('bot_of'):
-        return bot_may(auth, person, agent, via)
+        return bot_may(auth, person, agent, via, once)
     if row_of(auth, agent, person) is not None:
         return True, 'member' if person in auth['members'].get(agent, {}) else 'member (everyone)'
-    if via and agent in (row_of(auth, via, person) or {}).get('helpers', []):
+    if via and agent in helpers_in(auth, via, person, row_of(auth, via, person), once):
         return True, f'helper of {via}'
     return False, f'{person} may not use {agent}' + (f' (not in their {via} helpers)' if via else '')
 
@@ -396,24 +453,24 @@ def may(auth, person, agent, via=None):
 SHARED = '*'      # a profile's person: shared on purpose, even for a service whose profiles are personal
 
 
-def bot_row(auth, agent, bot, via=None):
+def bot_row(auth, agent, bot, via=None, once=False):
     """The bot's own membership row for agent, else the caller's (a helper runs with the caller's row). The `*` row
     never reaches a bot: a bot gets an agent only by name."""
     own = auth['members'].get(agent, {}).get(bot)
     if own is not None:
         return own
-    if via and agent in (auth['members'].get(via, {}).get(bot) or {}).get('helpers', []):
+    if via and agent in helpers_in(auth, via, bot, auth['members'].get(via, {}).get(bot), once):
         return auth['members'][via][bot]
     return None
 
 
-def bot_may(auth, bot, agent, via=None):
+def bot_may(auth, bot, agent, via=None, once=False):
     """A bot may use an agent only with a row of its own AND while its owner may use it right now (so an owner who
     loses an agent takes it from their bots at once). No owner left, no access."""
     parent = parent_of(auth, bot)
     if parent not in auth['people']:
         return False, f"{bot}'s owner '{auth['people'][bot]['bot_of']}' is gone"
-    if bot_row(auth, agent, bot, via) is None:
+    if bot_row(auth, agent, bot, via, once) is None:
         return False, f'{bot} may not use {agent}'
     ok, why = may(auth, parent, agent, via)
     if not ok:
@@ -902,44 +959,55 @@ def preset(auth, name):
     return auth['presets'].get(name) or PRESETS.get(name) or die(f"no preset '{name}' (kith-auth preset {name} mode=..)")
 
 
-def resolve(auth, agent, person, via=None):
+def resolve(auth, agent, person, via=None, once=False):
     """What a run of agent for person gets: whether it may run, and the person's settings over the agent's. A helper
     reached through the caller's helpers list runs with the caller's membership, so calling one never loosens it."""
     person = canonical(auth, person)
-    ok, why = may(auth, person, agent, via)
+    ok, why = may(auth, person, agent, via, once)
     me = auth['people'].get(person, {})
     out = {'person': person, 'owner': is_owner(auth, person), 'allowed': ok, 'why': why,
            **{k: me[k] for k in ('name', 'lang', 'tz') if k in me}}
     if not ok or out['owner']:
         return out
     if me.get('bot_of'):
-        return resolve_bot(auth, agent, person, via, out)
-    row = row_of(auth, agent, person)
+        return resolve_bot(auth, agent, person, via, out, once)
+    row, pkg = row_of(auth, agent, person), agent
     if row is None:
-        row = row_of(auth, via, person)
+        row, pkg = row_of(auth, via, person), via
     p = preset(auth, row.get('preset', 'guest'))
     out.update(preset=row.get('preset', 'guest'), mode=mode_of(row, p),
                deny=list(dict.fromkeys(p.get('deny', []) + row.get('deny', []))),
-               model=row.get('model', ''), env=row.get('env', {}), helpers=row.get('helpers', []),
+               model=row.get('model', ''), env=row.get('env', {}), helpers=helpers_in(auth, pkg, person, row),
                budget=row.get('budget', ''), budget_agent=agent if row_of(auth, agent, person) is not None else via,
                was=auth['people'].get(person, {}).get('was', []))
     out['trusted'] = bool(row.get('trusted') or p.get('trusted'))
-    out['access'] = access_of(row)
+    out.update(with_jobs(auth, pkg, person, access_of(row)))
     asked = row.get('mode') or p.get('mode')
     if asked in FREE_SHELL and out['mode'] != asked:
         out['downgraded'] = asked   # shown in the listing, so the fall back to default isn't silent
     return out
 
 
-def resolve_bot(auth, agent, bot, via, out):
+def with_jobs(auth, pkg, person, access):
+    """The run's access with its ticked jobs' domains added, its doors (inert until the render door, step 2) and the
+    names of its ticks, all from the person's own row of pkg."""
+    g = job_grants(auth, pkg, person)
+    own = auth['members'].get(pkg, {}).get(person)
+    ticks = own.get('jobs') if isinstance(own, dict) and isinstance(own.get('jobs'), dict) else {}
+    return {'access': {**access, 'domains': list(dict.fromkeys(access['domains'] + g['domains']))},
+            'doors': g['doors'], 'jobs': sorted(n for n in ticks if n in jobs_of(pkg))}
+
+
+def resolve_bot(auth, agent, bot, via, out, once=False):
     """A bot's run: a guest, inside what its owner gets. It spends from its owner's budget, counted with everything
     else the owner's line holds (`was`), which bin/kith already checks with kith-cost spent."""
-    row = bot_row(auth, agent, bot, via)
+    row = bot_row(auth, agent, bot, via, once)
+    pkg = agent if auth['members'].get(agent, {}).get(bot) is not None else via
     parent = parent_of(auth, bot)
     pr = resolve(auth, agent, parent, via)
     p = preset(auth, 'guest')
     owner_parent = is_owner(auth, parent)
-    helpers = row.get('helpers', [])
+    helpers = helpers_in(auth, pkg, bot, row)
     if not owner_parent:
         helpers = [h for h in helpers if h in pr.get('helpers', [])]
     others = [b for b in bots_of(auth, parent) if b != bot]
@@ -956,8 +1024,11 @@ def resolve_bot(auth, agent, bot, via, out):
                model=row.get('model') or pr.get('model', ''), env=row.get('env', {}), helpers=helpers,
                budget=budget, budget_agent=budget_agent, was=list(dict.fromkeys(was)))
     # never more than the owner holds: Kai's own bots are capped by nothing, an invitee's by that invitee's access
-    mine = access_of(row)
+    j = with_jobs(auth, pkg, bot, access_of(row))
+    mine = j['access']
     out['access'] = mine if owner_parent else {k: [v for v in mine[k] if held(pr.get('access', {}), k, v)] for k in mine}
+    out['doors'] = j['doors'] if owner_parent else [d for d in j['doors'] if d in pr.get('doors', [])]
+    out['jobs'] = j['jobs'] if owner_parent else [n for n in j['jobs'] if n in pr.get('jobs', [])]
     return out
 
 
@@ -1089,7 +1160,202 @@ def remove_access(agent, pid, kind, value):
     print(f'{pid} no longer has {kind} {value} beyond the box for {agent}')
 
 
-LEDGER_KINDS = (*ACCESS_KINDS, 'service')
+def own_row(auth, agent, pid):
+    """The C2 checks of a grant on a person's own row, in the locked step that writes it: a person, not the owner, with
+    a row of their own (never the `*` row) and access to agent now. Returns (canonical id, row)."""
+    need_person(auth, pid)
+    pid = canonical(auth, pid)
+    if is_owner(auth, pid):
+        die(f'{pid} is the owner: nothing is boxed for them')
+    row = auth['members'].get(agent, {}).get(pid)
+    if not isinstance(row, dict):
+        die(f'{pid} has no membership of their own for {agent}')
+    if not may(auth, pid, agent)[0]:
+        die(f'{pid} may not use {agent} now')
+    return pid, row
+
+
+def cmd_job(args):
+    """A tick at share, or the Yes of a card that offers the job: the job as the owner saw it (--shown, the pieces the
+    share sheet or card listed), cut to what the package declares now. --decline: the No of a widening card, so that
+    package update isn't asked again (the pieces it added still ask one by one)."""
+    opts, rest = take_opts(args, {'--shown', '--decline'})
+    flags = rest[3:]
+    if len(rest) < 3 or flags not in ([], ['--rm']) or (flags and opts) or len(opts) > 1 or not AGENT_RE.match(rest[0]):
+        die('job <agent> <id> <job> [--shown JSON | --decline HASH | --rm]', 2)
+    agent, pid, name = rest[:3]
+    import kith_jobs
+    if flags:
+        auth = load_auth(write=True)
+        pid = canonical(auth, pid)
+        row = auth['members'].get(agent, {}).get(pid)
+        ticks = row.get('jobs') if isinstance(row, dict) and isinstance(row.get('jobs'), dict) else {}
+        if ticks.pop(name, None) is not None:
+            save_auth(auth)
+        print(f'{pid} no longer has the job {name} for {agent}')
+        return
+    job = jobs_of(agent).get(name) or die(f"{agent} declares no job '{name}' (capabilities.yaml jobs:)", 2)
+    auth = load_auth(write=True)
+    pid, row = own_row(auth, agent, pid)
+    ticks = row['jobs'] if isinstance(row.get('jobs'), dict) else {}
+    if '--decline' in opts:
+        tick = ticks.get(name) if isinstance(ticks.get(name), dict) else die(f'{pid} has no tick of {name} on {agent}')
+        tick['declined'] = list(dict.fromkeys((tick.get('declined') or []) + [opts['--decline']]))
+        save_auth(auth)
+        print(f"{pid}'s {name} on {agent} stays as it was ticked")
+        return
+    try:
+        shown = json.loads(opts['--shown']) if '--shown' in opts else kith_jobs.snapshot(job)
+    except ValueError:
+        die('--shown is JSON: {"domains": [..], "helpers": [..], "doors": [..]}', 2)
+    if not isinstance(shown, dict):
+        die('--shown is JSON: {"domains": [..], "helpers": [..], "doors": [..]}', 2)
+    ticks[name] = {'snapshot': kith_jobs.effective({'snapshot': shown}, job), 'since': int(time.time() * 1000)}
+    row['jobs'] = ticks
+    save_auth(auth)
+    print(f'{pid} has the job {name} for {agent}')
+
+
+HELPER_ONCE_MS = 300_000   # a "just this once" waits this long for its launch: at once, or the resumed turn of a late yes
+
+
+def cmd_helper(args):
+    """The always (and --once) of a helper card: the person's runs of agent may call helper. Always lands in the row's
+    helpers; --once is used up by the helper's launch (resolve --take-once), in the step that checks revoke."""
+    rest = [a for a in args if a not in ('--rm', '--once')]
+    flags = [a for a in args if a in ('--rm', '--once')]
+    if len(rest) != 3 or len(flags) > 1:
+        die('helper <agent> <id> <helper> [--once | --rm]', 2)
+    agent, pid, helper = rest
+    auth = load_auth(write=True)
+    if flags == ['--rm']:
+        pid = canonical(auth, pid)
+        row = auth['members'].get(agent, {}).get(pid)
+        if isinstance(row, dict) and helper in (row.get('helpers') or []):
+            row['helpers'].remove(helper)
+            if isinstance(row.get('helper_since'), dict):
+                row['helper_since'].pop(helper, None)
+            save_auth(auth)
+        print(f"{pid}'s runs of {agent} may no longer call {helper}")
+        return
+    if helper not in agents() or helper == agent:
+        die(f"no agent '{helper}' to call from {agent}", 2)
+    pid, row = own_row(auth, agent, pid)
+    parent = parent_of(auth, pid)
+    if parent and not is_owner(auth, parent) and helper not in resolve(auth, agent, parent).get('helpers', []):
+        die(f"{pid} is a bot: it can't be given more than its owner {parent} holds")
+    if flags == ['--once']:
+        left = row['helper_once'] if isinstance(row.get('helper_once'), dict) else {}
+        now = time.time() * 1000
+        row['helper_once'] = {h: t for h, t in left.items() if isinstance(t, (int, float)) and t > now}
+        row['helper_once'][helper] = int(now + HELPER_ONCE_MS)
+        save_auth(auth)
+        print(f"{pid}'s run of {agent} may call {helper} once")
+        return
+    if helper not in (row.get('helpers') or []):
+        row['helpers'] = (row.get('helpers') or []) + [helper]
+        if not isinstance(row.get('helper_since'), dict):
+            row['helper_since'] = {}
+        row['helper_since'][helper] = int(time.time() * 1000)
+    save_auth(auth)
+    print(f"{pid}'s runs of {agent} may call {helper}")
+
+
+def take_once(auth, person, agent, via):
+    """Use up the "just this once" that let this helper launch, in the locked step that ran may() (resolve --take-once).
+    True when one was used. The bot's own row, or the person's, of the caller."""
+    own = auth['members'].get(via or '', {}).get(person)
+    left = own.get('helper_once') if isinstance(own, dict) and isinstance(own.get('helper_once'), dict) else {}
+    if agent in left:
+        del left[agent]
+        return True
+    return False
+
+
+def job_view(auth, agent, person, job):
+    """A job as the share sheet and the cards show it for one person: its pieces, whether it is ticked, and what a package
+    update added since the tick (with its hash, and whether the owner said No to that one)."""
+    import kith_jobs
+    own = auth['members'].get(agent, {}).get(person) if person else None
+    ticks = own.get('jobs') if isinstance(own, dict) and isinstance(own.get('jobs'), dict) else {}
+    tick = ticks.get(job['name']) if isinstance(ticks.get(job['name']), dict) else None
+    added, h = kith_jobs.widening(tick, job) if tick else ({k: [] for k in kith_jobs.PIECES}, '')
+    return {**job, 'ticked': tick is not None, 'since': tick.get('since') if tick else None,
+            'granted': kith_jobs.effective(tick, job) if tick else {k: [] for k in kith_jobs.PIECES},
+            'added': added, 'hash': h, 'declined': bool(h) and h in (tick.get('declined') or [])}
+
+
+def cmd_jobs(args):
+    """Read-only: the agent's jobs (for one person: ticked or not, and what a package update added), and why any job in
+    the file was left out. --domain/--helper: only the job that holds it (a card's "part of <job>"); a path holds none."""
+    opts, rest = take_opts(args, {'--person', '--domain', '--helper', '--door'})
+    if (len(rest) not in (1, 2) or rest[1:] not in ([], ['--json'])
+            or len(set(opts) & {'--domain', '--helper', '--door'}) > 1 or not AGENT_RE.match(rest[0])):
+        die('jobs <agent> [--person ID] [--domain HOST | --helper NAME | --door NAME[@DIGEST]] [--json]', 2)
+    import kith_jobs
+    agent = rest[0]
+    auth = load_auth()
+    person = canonical(auth, opts['--person']) if opts.get('--person') else None
+    listed = list(jobs_of(agent).values())
+    for flag, kind in (('--domain', 'domains'), ('--helper', 'helpers'), ('--door', 'doors')):
+        if flag in opts:
+            j = kith_jobs.holding(listed, kind, opts[flag])
+            listed = [j] if j else []
+    views = [job_view(auth, agent, person, j) for j in listed]
+    caps = agent_dirs().get(agent, AGENTS / agent) / 'capabilities.yaml'
+    if rest[1:]:
+        print(json.dumps({'jobs': views, 'problems': kith_jobs.read(caps)[1]}))
+        return
+    for v in views:
+        mark = '[x]' if v['ticked'] else '[ ]'
+        print(f"{mark} {v['name']}  {v['label']}  " + '  '.join(f"{k}: {', '.join(v[k])}" for k in kith_jobs.PIECES if v[k]))
+    for p in kith_jobs.read(caps)[1]:
+        print(f'left out: {p}', file=sys.stderr)
+
+
+def door_state(auth, agent, person, piece):
+    """Whether the person's runs of agent may start the door `piece` (name@digest, from the run's pinned package) now:
+    {ok, state, why, job, label}. Read-only: kith_door's start runs it under the auth lock (D2), and its sweep to judge a
+    running door (every state but held ends one)."""
+    import kith_jobs
+    person = canonical(auth, person)
+    name = kith_jobs.door_name(piece)
+    out = {'ok': False, 'job': None, 'label': None}
+    if is_owner(auth, person):
+        return {**out, 'state': 'owner', 'why': 'doors are for the people an agent is shared with'}
+    ok, why = may(auth, person, agent)
+    if not ok:
+        return {**out, 'state': 'revoked' if cut_off(auth, person) else 'not-allowed', 'why': why}
+    if bridge_held(auth, person):
+        return {**out, 'state': 'held', 'why': "this Mac is not in sync with the Kith cloud; try again in a minute"}
+    listed = list(jobs_of(agent).values())
+    job = next((j for j in listed if piece in j['doors']), None)
+    if not job:
+        stale = kith_jobs.holding(listed, 'doors', name)
+        return {**out, 'state': 'stale' if stale else 'no-job',
+                'why': f'{agent} was updated since this chat started; start a new chat to use {name}' if stale
+                else f'no job of {agent} includes the door {name}'}
+    out.update(job=job['name'], label=job['label'])
+    if piece in job_grants(auth, agent, person)['doors']:
+        return {**out, 'ok': True, 'state': 'ok', 'why': f"part of {job['label']}"}
+    view = job_view(auth, agent, person, job)
+    if not view['ticked']:
+        return {**out, 'state': 'not-ticked', 'why': f"{job['label']} was not given to {person}"}
+    return {**out, 'state': 'declined' if view['declined'] else 'widened',
+            'why': f"{name} changed since {job['label']} was given" + (', and the owner kept it as it was' if view['declined'] else '')}
+
+
+def cmd_door(args):
+    """Read-only: may the person's runs of agent start the door piece now (door_state)."""
+    if len(args) not in (3, 4) or args[3:] not in ([], ['--json']) or not AGENT_RE.match(args[0]):
+        die('door <agent> <id> <door@digest> [--json]', 2)
+    v = door_state(load_auth(), *args[:3])
+    print(json.dumps(v) if args[3:] else f"{v['state']}: {v['why']}")
+    if not v['ok'] and not args[3:]:
+        sys.exit(1)
+
+
+LEDGER_KINDS = (*ACCESS_KINDS, 'service', 'job', 'helper')
 
 
 def ledger_key(kind, agent, pid, target):
@@ -1100,7 +1366,8 @@ def ledger_key(kind, agent, pid, target):
 
 def ledger(auth):
     """The grants ledger: every grant that outlives one run, for anyone but the owner. The always answers of escape cards
-    (a membership row's access, the `*` row's included) and a person's own service grants (`<agent>@<person>`)."""
+    (a membership row's access, the `*` row's included), the jobs ticked and helpers listed on a row, and a person's own
+    service grants (`<agent>@<person>`)."""
     out = []
 
     def add(kind, agent, pid, target, since=None, by=None):
@@ -1119,6 +1386,13 @@ def ledger(auth):
                     k = f'{kind}:{v}'
                     # null in access_by is the owner's yes; no value at all is an entry from before it was recorded
                     add(kind, agent, pid, v, since.get(k), ('owner' if by[k] is None else by[k]) if k in by else None)
+            ticks = row.get('jobs') if isinstance(row.get('jobs'), dict) else {}
+            for name, tick in ticks.items():
+                add('job', agent, pid, name, tick.get('since') if isinstance(tick, dict) else None)
+            hsince = row.get('helper_since') if isinstance(row.get('helper_since'), dict) else {}
+            for h in row.get('helpers') or []:
+                if isinstance(h, str):
+                    add('helper', agent, pid, h, hsince.get(h))
     for k, svcs in auth['grants'].items():
         agent, at, pid = k.partition('@')
         if not at or not isinstance(svcs, dict) or is_owner(auth, canonical(auth, pid)):
@@ -1150,6 +1424,17 @@ def remove_grant(key):
                     svcs.pop(svc)
         if gone and not svcs:
             auth['grants'].pop(f'{agent}@{pid}')
+    elif kind in ('job', 'helper'):
+        row = auth['members'].get(agent, {}).get(pid)
+        row = row if isinstance(row, dict) else {}
+        if kind == 'job' and isinstance(row.get('jobs'), dict) and target in row['jobs']:
+            gone = True
+            row['jobs'].pop(target)
+        if kind == 'helper' and isinstance(row.get('helpers'), list) and target in row['helpers']:
+            gone = True
+            row['helpers'].remove(target)
+            if isinstance(row.get('helper_since'), dict):
+                row['helper_since'].pop(target, None)
     else:
         row = auth['members'].get(agent, {}).get(pid)
         have = row.get('access') if isinstance(row, dict) and isinstance(row.get('access'), dict) else {}
@@ -2020,22 +2305,44 @@ def main(argv):
     elif cmd == 'share':
         cmd_share(rest)
     elif cmd in ('may', 'resolve'):
+        once = '--take-once' in rest if cmd == 'resolve' else '--once' in rest
+        rest = [a for a in rest if a not in ('--take-once', '--once')]
         opts, rest = take_opts(rest, {'--via', '--person'})
         auth = load_auth()
         if cmd == 'may' and len(rest) == 2:
-            ok, why = may(auth, rest[0], rest[1], opts.get('--via'))
+            # --once: a "just this once" counts (kith-permit's ask_helper, so a yes answered late isn't asked again)
+            ok, why = may(auth, rest[0], rest[1], opts.get('--via'), once)
             print(why)
             sys.exit(0 if ok else 1)
         if cmd == 'resolve' and len(rest) == 1:
-            person = opts.get('--person') or acting(auth)
+            person, via = opts.get('--person') or acting(auth), opts.get('--via') or None
+            res = resolve(auth, rest[0], person, via)
+            held = bridge_held(auth, person)
+            # not while held: bin/kith asks again until in sync, and the once goes to the launch that runs
+            if once and via and not res['allowed'] and not held:
+                # --take-once (bin/kith's helper launch): a "just this once" lets it run and is used up in one locked
+                # step with the check of revoke and access, so a removal between the card and the launch still wins
+                auth = load_auth(write=True)
+                res = resolve(auth, rest[0], person, via, once=True)
+                if res['allowed'] and take_once(auth, res['person'], rest[0], via):
+                    save_auth(auth)
+                    res['why'] += ' (just this once)'
             # held: as in `who`, this Mac is out of sync with the Kith cloud and person isn't the owner (R8)
-            print(json.dumps({**resolve(auth, rest[0], person, opts.get('--via') or None), 'held': bridge_held(auth, person)}))
+            print(json.dumps({**res, 'held': held}))
             return
         die(f'{cmd}: see kith-auth --help', 2)
     elif cmd == 'access':
         cmd_access(rest)
     elif cmd == 'ledger':
         cmd_ledger(rest)
+    elif cmd == 'job':
+        cmd_job(rest)
+    elif cmd == 'jobs':
+        cmd_jobs(rest)
+    elif cmd == 'helper':
+        cmd_helper(rest)
+    elif cmd == 'door':
+        cmd_door(rest)
     elif cmd == 'mcp-config' and len(rest) == 1:
         cmd_mcp_config(rest[0])
     elif cmd == 'mcp-names' and len(rest) == 1:
