@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "b39eab5139e62892e0e80a681689fa4549b5a2c86e1a524b014784809680bb78";
+pub const CONTRACT_SHA256: &str = "4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -366,6 +366,81 @@ impl BotEntryKind {
     }
 }
 
+/// Where a room conversation is in its life. One this version doesn't know reads as ended: the app stops drawing a live line.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RoomConversationState {
+    #[serde(rename = "open")]
+    Open,
+    #[serde(rename = "stopped")]
+    Stopped,
+    /// Also what a value this version doesn't know is read as.
+    #[default]
+    #[serde(rename = "ended", other)]
+    Ended,
+}
+
+impl RoomConversationState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Ended => "ended",
+            Self::Stopped => "stopped",
+        }
+    }
+}
+
+/// Why a room conversation is over. One this version doesn't know is its own word: the app shows it plainly as over.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RoomConversationEnd {
+    #[serde(rename = "spent")]
+    Spent,
+    #[serde(rename = "quiet")]
+    Quiet,
+    #[serde(rename = "stopped")]
+    Stopped,
+    #[serde(rename = "idle")]
+    Idle,
+    #[serde(rename = "newer")]
+    Newer,
+    /// A value this version doesn't know.
+    #[default]
+    #[serde(rename = "unknown", other)]
+    Unknown,
+}
+
+impl RoomConversationEnd {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Spent => "spent",
+            Self::Quiet => "quiet",
+            Self::Stopped => "stopped",
+            Self::Idle => "idle",
+            Self::Newer => "newer",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// What speaks in a room conversation: one of the room's own agents, or an outside bot. One this version doesn't know reads as agent.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RoomSpeakerKind {
+    #[serde(rename = "bot")]
+    Bot,
+    /// Also what a value this version doesn't know is read as.
+    #[default]
+    #[serde(rename = "agent", other)]
+    Agent,
+}
+
+impl RoomSpeakerKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Bot => "bot",
+        }
+    }
+}
+
 /// The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum BotErrorCode {
@@ -617,13 +692,67 @@ pub struct Entry {
     pub updated_at: i64,
 }
 
-/// A page of a chat or a thread. folder is where it works on this computer: the owner's alone.
+/// A page of a chat or a thread. folder is where it works on this computer: the owner's alone. conversation is the room conversation of that lane (the chat's main lane, or the thread) that was opened last, so a reconnecting app can draw the live line; null when the lane never had one. A host from before it leaves the field out.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct Entries {
     pub entries: Vec<Entry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub folder: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<RoomConversation>,
+}
+
+/// Where a room conversation stands: what one person message to a group set going. budget is the turns that message granted and left what remains; current is whoever speaks now and waitUntil (unix ms) when an outside bot's turn times out; endedWhy says why it is over (spent: the turns ran out, quiet: a round where everyone passed, stopped: a person's Stop, idle: nobody moved it for a day, newer: a newer person message took the lane); opening is the entry of the person message that opened it. lane is the thread's id, null for the room's main lane. endedWhy is null for a conversation that is open or that ended before hosts kept the reason.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomConversation {
+    pub conversation: String,
+    pub chat: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<String>,
+    pub budget: i64,
+    pub left: i64,
+    pub state: RoomConversationState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_why: Option<RoomConversationEnd>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<RoomSpeaker>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening: Option<String>,
+}
+
+/// Who speaks now in a room conversation.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RoomSpeaker {
+    pub id: String,
+    pub kind: RoomSpeakerKind,
+    pub name: String,
+}
+
+/// The `conversation` event the owner's apps (and no one else) get on the event stream: a room conversation's RoomConversation fields, sent when it opens, at each charge, each change of speaker and when it ends.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationEvent {
+    pub r#type: String,
+    pub conversation: String,
+    pub chat: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<String>,
+    pub budget: i64,
+    pub left: i64,
+    pub state: RoomConversationState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ended_why: Option<RoomConversationEnd>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<RoomSpeaker>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wait_until: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opening: Option<String>,
 }
 
 /// The entry a call wrote.
@@ -924,7 +1053,7 @@ pub struct BotAsked {
     pub room: Option<String>,
 }
 
-/// A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current). A retry with the same clientNonce and text answers the same, marked duplicate.
+/// A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current); lateWhy says which: stopped (after a Stop), newer (a newer person message moved the epoch), ended (the conversation ended: spent, quiet or idle), noTurn (a keyed post nobody waits for any more). unprompted: a post with no turn key while no conversation is open, kept, not late, and it woke nobody and cost nothing. A retry with the same clientNonce and text answers the same, marked duplicate.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct BotPosted {
@@ -935,6 +1064,10 @@ pub struct BotPosted {
     pub conversation: String,
     pub replied: bool,
     pub late: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub late_why: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unprompted: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duplicate: Option<bool>,
 }
@@ -1574,6 +1707,9 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::EnumSchema { name: "CitationError", values: &["not_shared"], unknown: "not_shared" },
         crate::check::EnumSchema { name: "ConversationState", values: &["running", "waitingApproval", "queued", "stopped", "idle"], unknown: "running" },
         crate::check::EnumSchema { name: "BotEntryKind", values: &["user", "agent", "notice", "waiting"], unknown: "unknown" },
+        crate::check::EnumSchema { name: "RoomConversationState", values: &["open", "ended", "stopped"], unknown: "ended" },
+        crate::check::EnumSchema { name: "RoomConversationEnd", values: &["spent", "quiet", "stopped", "idle", "newer"], unknown: "unknown" },
+        crate::check::EnumSchema { name: "RoomSpeakerKind", values: &["agent", "bot"], unknown: "agent" },
         crate::check::EnumSchema { name: "BotErrorCode", values: &["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany", "nonceReused"], unknown: "unknown" },
     ],
     types: &[
@@ -1588,7 +1724,10 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "Bot", fields: &[("id", "string"), ("kind", "BotKind"), ("members", "[string]"), ("name", "string"), ("description", "string"), ("avatarColor", "string"), ("avatarShape", "string"), ("avatarSource", "string"), ("backend", "string"), ("command", "string?"), ("cwd", "string?"), ("permission", "Permission"), ("model", "string?"), ("modelOptions", "{string}"), ("fastMode", "bool"), ("pinned", "bool"), ("position", "int"), ("hidden", "bool"), ("notify", "bool?"), ("connectors", "[string]"), ("skills", "[string]"), ("computer", "bool"), ("sharedMemory", "bool?"), ("harnessMemory", "bool?"), ("rowShowsSummary", "bool"), ("autoName", "bool"), ("tasks", "bool?"), ("hqAgent", "string?"), ("project", "string?"), ("person", "string?"), ("createdAt", "int"), ("managedWorkspace", "bool"), ("folder", "json?"), ("memoryRev", "int?"), ("workingLanes", "[WorkingLane]"), ("rev", "int"), ("deleted", "bool"), ("status", "BotStatus"), ("activity", "string"), ("startedAt", "int?"), ("workingChat", "string?"), ("workingThread", "string?"), ("fastModeSupport", "string"), ("fastModeIssue", "string?"), ("unread", "int"), ("lastMessage", "string?"), ("lastAt", "int"), ("botGuest", "BotGuestRef?")], may_omit: &["command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "project", "person", "botGuest"] },
         crate::check::TypeSchema { name: "BotAnswer", fields: &[("bot", "Bot")], may_omit: &[] },
         crate::check::TypeSchema { name: "Entry", fields: &[("id", "string"), ("seq", "int"), ("botId", "string"), ("threadId", "string?"), ("rev", "int"), ("kind", "EntryKind"), ("turn", "int"), ("data", "json"), ("createdAt", "int"), ("updatedAt", "int")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Entries", fields: &[("entries", "[Entry]"), ("folder", "json?")], may_omit: &["folder"] },
+        crate::check::TypeSchema { name: "Entries", fields: &[("entries", "[Entry]"), ("folder", "json?"), ("conversation", "RoomConversation?")], may_omit: &["folder", "conversation"] },
+        crate::check::TypeSchema { name: "RoomConversation", fields: &[("conversation", "string"), ("chat", "string"), ("lane", "string?"), ("budget", "int"), ("left", "int"), ("state", "RoomConversationState"), ("endedWhy", "RoomConversationEnd?"), ("current", "RoomSpeaker?"), ("waitUntil", "int?"), ("opening", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "RoomSpeaker", fields: &[("id", "string"), ("kind", "RoomSpeakerKind"), ("name", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "ConversationEvent", fields: &[("type", "string"), ("conversation", "string"), ("chat", "string"), ("lane", "string?"), ("budget", "int"), ("left", "int"), ("state", "RoomConversationState"), ("endedWhy", "RoomConversationEnd?"), ("current", "RoomSpeaker?"), ("waitUntil", "int?"), ("opening", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "EntryAnswer", fields: &[("entry", "Entry")], may_omit: &[] },
         crate::check::TypeSchema { name: "MaybeEntry", fields: &[("entry", "Entry?")], may_omit: &[] },
         crate::check::TypeSchema { name: "CallEnded", fields: &[("entry", "Entry?")], may_omit: &["entry"] },
@@ -1618,7 +1757,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "PeerAgents", fields: &[("agents", "[PeerAgent]")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
         crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?"), ("room", "string?")], may_omit: &["duplicate", "room"] },
-        crate::check::TypeSchema { name: "BotPosted", fields: &[("entryId", "string"), ("seq", "int"), ("turn", "int"), ("room", "string"), ("conversation", "string"), ("replied", "bool"), ("late", "bool"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
+        crate::check::TypeSchema { name: "BotPosted", fields: &[("entryId", "string"), ("seq", "int"), ("turn", "int"), ("room", "string"), ("conversation", "string"), ("replied", "bool"), ("late", "bool"), ("lateWhy", "string?"), ("unprompted", "bool?"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
         crate::check::TypeSchema { name: "BotRoom", fields: &[("room", "string"), ("conversation", "string?"), ("epoch", "int?"), ("entries", "[BotEntry]"), ("cursor", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotSender", fields: &[("botId", "string"), ("name", "string"), ("speaker", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotEntry", fields: &[("id", "string"), ("seq", "int"), ("turn", "int"), ("at", "int"), ("conversation", "string"), ("kind", "BotEntryKind"), ("text", "string"), ("sender", "BotSender?"), ("final", "bool?"), ("error", "bool?"), ("room", "string?"), ("epoch", "int?"), ("author", "string?")], may_omit: &["sender", "final", "error", "room", "epoch", "author"] },
@@ -1739,6 +1878,9 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotAnswer" => serde_json::from_value::<BotAnswer>(value).map(drop),
         "Entry" => serde_json::from_value::<Entry>(value).map(drop),
         "Entries" => serde_json::from_value::<Entries>(value).map(drop),
+        "RoomConversation" => serde_json::from_value::<RoomConversation>(value).map(drop),
+        "RoomSpeaker" => serde_json::from_value::<RoomSpeaker>(value).map(drop),
+        "ConversationEvent" => serde_json::from_value::<ConversationEvent>(value).map(drop),
         "EntryAnswer" => serde_json::from_value::<EntryAnswer>(value).map(drop),
         "MaybeEntry" => serde_json::from_value::<MaybeEntry>(value).map(drop),
         "CallEnded" => serde_json::from_value::<CallEnded>(value).map(drop),

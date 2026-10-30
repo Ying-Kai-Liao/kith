@@ -36,35 +36,51 @@ import { botGuestSender } from '@shared/bot-guest-chat'
 import { quoteOf, quotesOf } from './reply-quote'
 import { richCardOf, type RichCard } from '@shared/rich-card'
 import { NewsCard, ScheduleCard } from './RichCards'
+import { lateOf } from '@shared/conversation'
+import { BotTag, LateTag } from './Tags'
+
+/** The first line of the message that opened the run a reply belongs to, for a late reply to quote; null when unknown. */
+export function lateQuoteOf(store: BotStore, entry: Entry): string | null {
+  if (entry.data.late !== true) return null
+  const opening = store.conversations.get(entry.data.conversation)?.opening
+  return opening ? quoteOf(store.allEntries(entry.botId).find((e) => e.id === opening)?.data.text) : null
+}
 
 export function reactionPick(store: BotStore, entry: Entry): ReactionPick {
   return { emoji: QUICK_REACTIONS, chosen: entry.data.reactions ?? [], toggle: (e) => store.react(entry, e) }
 }
 
 /** One chat-visible entry in the flat chat, with what can be done to it. */
-export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrace }: {
+export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrace, lateQuote = null }: {
   entry: Entry
   groupStart: boolean
   chat: Bot | null
   openTrace: () => void
+  /** A late reply's quote of the message that opened its run (the row can't follow the store itself). */
+  lateQuote?: string | null
 }) {
   const store = useStore()
   // Reply is a quote above the composer; the host has no reply link.
   const quote = quoteOf(entry.data.text)
   const reply = quote && !chat?.botGuest ? () => quotesOf(store).set(entry.botId, quote) : undefined
   const guestSender = botGuestSender(chat, entry)
+  const botPost = entry.kind === 'user' ? botPostOf(chat, entry, guestSender?.name) : null
   switch (entry.kind) {
     case 'user':
-      // The outside bot's own message in its read-only chat: the other party, on the left with its picture.
-      if (guestSender && chat?.botGuest) {
+      // An outside bot's own message (in its read-only chat, or in a group it was added to): the other party, on the
+      // left with its picture, its name in Inter and a Bot capsule.
+      if (botPost) {
+        const late = lateOf(entry.data)
         return (
-          <VStack align="flex-start" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
+          <VStack align="flex-start" gap={4} className={groupStart || late ? 'chat-row group-start' : 'chat-row'}>
             <HStack gap={8}>
-              <BotGuestAvatar provider={chat.botGuest.provider} size={24} />
-              <Text size="subheadline" weight="medium" tone="secondary">{guestSender.name}</Text>
+              <BotGuestAvatar provider={botPost.provider} size={24} />
+              <span className="bot-name">{botPost.name}</span>
+              <BotTag />
+              {late ? <LateTag /> : null}
             </HStack>
             <VStack gap={4} className="chat-row-indent">
-              <GuestBotBubble entry={entry} reply={reply} />
+              {late ? <LateBubble entry={entry} reason={late.reason} quote={lateQuote} reply={reply} /> : <GuestBotBubble entry={entry} reply={reply} />}
               <ReactionsRow entry={entry} />
             </VStack>
           </VStack>
@@ -78,10 +94,12 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
       )
     case 'agent': {
       const card = richCardOf(entry.data)
+      // A late reply always names its author: it sits outside the flow it arrived in.
+      const late = lateOf(entry.data)
       return (
-        <VStack align="flex-start" gap={4} className={groupStart ? 'chat-row group-start' : 'chat-row'}>
-          {groupStart ? <AuthorLabel botId={entry.data.author ?? entry.botId} /> : null}
-          {card ? <AgentCard entry={entry} card={card} openTrace={openTrace} reply={reply} /> : <AgentBubble entry={entry} openTrace={openTrace} reply={reply} />}
+        <VStack align="flex-start" gap={4} className={groupStart || late ? 'chat-row group-start' : 'chat-row'}>
+          {groupStart || late ? <AuthorLabel botId={entry.data.author ?? entry.botId}>{late ? <LateTag /> : null}</AuthorLabel> : null}
+          {card ? <AgentCard entry={entry} card={card} openTrace={openTrace} reply={reply} /> : late ? <LateBubble entry={entry} reason={late.reason} quote={lateQuote} reply={reply} /> : <AgentBubble entry={entry} openTrace={openTrace} reply={reply} />}
           <VStack gap={4} className={chat && isGroup(chat) ? 'chat-row-indent' : undefined}>
             <AnsweredBy answeredBy={entry.data.answeredBy} />
             <ReactionsRow entry={entry} />
@@ -205,13 +223,14 @@ function heldFor(entry: Entry, store: BotStore, ownerName: string | null): HeldC
 }
 
 /** Who wrote a message: the bot at 24 (no tile, soft shadow) and its name in Nunito 800. */
-export function AuthorLabel({ botId }: { botId?: string | null }) {
+export function AuthorLabel({ botId, children }: { botId?: string | null; children?: React.ReactNode }) {
   const store = useStore()
   const bot = botId ? store.bots.get(botId) : undefined
   return (
     <HStack gap={8}>
       {bot ? <KithBot face={isGroup(bot) ? 'group' : (avatarImage(bot) ?? 'group')} color={bot.avatarColor} id={bot.id} size={24} animated={false} /> : null}
       <span className="kith-text-agent-name author-name">{store.authorName(botId)}</span>
+      {children}
     </HStack>
   )
 }
@@ -356,6 +375,7 @@ export function AgentBubble({ entry, openTrace, reply }: { entry: Entry; openTra
 
 export function NoticeRow({ entry }: { entry: Entry }) {
   const text = entry.data.text ?? ''
+  if (ROOM_NOTICES.has(entry.data.notice ?? '')) return <RoomNotice text={text} bot={entry.data.bot} />
   const call = callLineSuffix(entry.data, entry.createdAt)
   if (call !== null) {
     return (
@@ -527,6 +547,60 @@ export function StepsRow({ entries, openTrace }: { entries: Entry[]; openTrace: 
           {entries.slice(-VISIBLE_STEPS).map((e) => <ToolRowItem key={e.id} entry={e} />)}
         </div>
       ) : null}
+    </div>
+  )
+}
+
+/** What the host writes into a group when an outside bot joins, leaves, passes or doesn't answer. */
+const ROOM_NOTICES = new Set(['botJoined', 'botLeft', 'botPassed', 'botTimedOut'])
+
+/** A quiet room line; the bot's name in it carries its Bot capsule. */
+function RoomNotice({ text, bot }: { text: string; bot?: { name?: string } }) {
+  const name = bot?.name?.trim()
+  const named = !!name && text.startsWith(name)
+  return (
+    <HStack gap={10} className="chat-notice-divider">
+      <Hairline grow />
+      <Text size="caption2" tone="tertiary" className="chat-notice-divider-text">
+        {named ? <>{name}<BotTag />{text.slice(name.length)}</> : text}
+      </Text>
+      <Hairline grow />
+    </HStack>
+  )
+}
+
+/** Who wrote an outside bot's message and what to call it: its bot-guest chat, or a group it is in. */
+function botPostOf(chat: Bot | null, entry: Entry, guestName: string | undefined): { name: string; provider: string } | null {
+  const sender = entry.data.sender
+  if (!sender?.botId || !chat || !(chat.botGuest || isGroup(chat))) return null
+  return { name: guestName ?? (sender.name?.trim() || 'Bot'), provider: chat.botGuest?.provider ?? sender.provider ?? '' }
+}
+
+/** A reply that came after its run was over: an outlined bubble that quotes the message it answers, and why it starts nothing. */
+function LateBubble({ entry, reason, quote, reply }: { entry: Entry; reason: string | null; quote: string | null; reply?: () => void }) {
+  const store = useStore()
+  const copy = () => entry.data.text && window.kith.app.copy(entry.data.text)
+  return (
+    <div className="message agent" title={fullDate.format(entry.createdAt)}>
+      <div className="message-body">
+        <Bubble
+          className="bubble agent late selectable"
+          reactions={reactionPick(store, entry)}
+          items={() => [
+            ...(reply ? [{ title: 'Reply', icon: 'arrowshape.turn.up.left', action: reply }] : []),
+            { title: 'Copy', icon: 'square.on.square', action: copy },
+          ]}
+        >
+          {quote ? (
+            <div className="late-quote">
+              <Icon name="arrowshape.turn.up.left" size={10} color="var(--secondary)" />
+              <span>{quote}</span>
+            </div>
+          ) : null}
+          <MarkdownText text={entry.data.text ?? ''} />
+        </Bubble>
+        {reason ? <Text as="div" size="footnote" tone="secondary" className="late-reason">{reason}</Text> : null}
+      </div>
     </div>
   )
 }

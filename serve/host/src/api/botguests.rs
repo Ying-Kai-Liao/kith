@@ -614,6 +614,8 @@ pub(crate) async fn end_bot(hub: &Hub, bot_id: &str, final_state: BotState, why:
     }
     // A room waiting on this bot's post stops waiting: its turn ends as a pass.
     crate::chat::group::cancel_bot_turns(|t| t.bot_id == bot.bot_id);
+    // Each room it was in says so, once, and its points go (a repeat of this call never gets here).
+    crate::chat::group::left_rooms(hub, &bot, if why == "bot" { "left" } else { "revoked" });
     // What the bot had asked its owner for ends with it (A7).
     crate::cards::withdraw_person(hub, &bot.person_id, None);
     if let Some(key) = &bot.device_key
@@ -1155,8 +1157,11 @@ async fn ask_room(
         return Err(BotError::err(403, Code::NotGranted, format!("This bot may not use {}.", agent.name)));
     }
     let lane = Lane::main(room);
-    if hub.store.open_conversation_of(&lane).is_some() && hub.store.charge_lane(&lane)?.is_none() {
-        return Err(BotError::err(409, Code::Busy, "This room's turn budget is spent."));
+    if let Some(open) = hub.store.open_conversation_of(&lane) {
+        if hub.store.charge_lane(&lane)?.is_none() {
+            return Err(BotError::err(409, Code::Busy, "This room's turn budget is spent."));
+        }
+        crate::chat::group::emit_conversation(hub, &open.id);
     }
     let sender = json!({
         "botId": bot.bot_id, "name": bot.name, "provider": bot.provider,
@@ -1230,16 +1235,31 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
     let replies =
         live && turn_key.is_some_and(|k| crate::chat::group::bot_turn_waits(k, &bot.bot_id, &conv.id, conv.epoch));
     let mut charged = false;
-    let mut after_the_fact = !live;
-    if live && !replies {
+    let mut late_why: Option<&str> = None;
+    let mut unprompted = false;
+    if !live {
+        // A post with no turn while nothing is open in the lane is the bot speaking up to an empty room: kept, not late.
+        if turn_key.is_none() && hub.store.open_conversation_of(&lane).is_none() {
+            unprompted = true;
+        } else {
+            let fresh = hub.store.conversation(&conv.id);
+            late_why = Some(match fresh.as_ref().map(|c| (c.state, c.ended_why.as_deref())) {
+                Some((crate::store::ConvState::Stopped, _)) => "stopped",
+                Some((crate::store::ConvState::Ended, Some("spent" | "quiet" | "idle"))) => "ended",
+                // A newer person message moved the epoch, or the post named an epoch that isn't the lane's.
+                _ => "newer",
+            });
+        }
+    } else if !replies {
         // Without a key it is the bot speaking up: one turn off the budget, if there is one. With a key nobody waits on
         // any more (answered already, or timed out) it is late.
         if turn_key.is_some() {
-            after_the_fact = true;
+            late_why = Some("noTurn");
         } else if hub.store.charge_lane(&lane)?.is_some() {
             charged = true;
+            crate::chat::group::emit_conversation(hub, &conv.id);
         } else {
-            after_the_fact = true;
+            late_why = Some("ended");
         }
     }
     let sender = json!({"botId": bot.bot_id, "name": bot.name, "provider": bot.provider, "owner": bot.owner_person});
@@ -1251,8 +1271,12 @@ async fn post(hub: &Arc<Hub>, caller: &Caller, bot: &BotGuest, b: &Value) -> Res
     if let Some(k) = turn_key {
         data["turnKey"] = k.into();
     }
-    if after_the_fact {
+    if let Some(why) = late_why {
         data["late"] = true.into();
+        data["lateWhy"] = why.into();
+    }
+    if unprompted {
+        data["unprompted"] = true.into();
     }
     let entry = hub
         .add_entry(&lane, EntryKind::User, hub.store.max_turn(room), &data)
@@ -1273,7 +1297,8 @@ fn posted(e: &Entry, duplicate: bool) -> Value {
     let mut v = json!({
         "entryId": e.id, "seq": e.rev, "turn": e.turn, "room": e.bot_id,
         "conversation": e.data["conversation"], "replied": e.data["replied"] == true,
-        "late": e.data["late"] == true,
+        "late": e.data["late"] == true, "unprompted": e.data["unprompted"] == true,
+        "lateWhy": e.data["lateWhy"],
     });
     if duplicate {
         v["duplicate"] = true.into();
@@ -1298,12 +1323,14 @@ async fn room_read(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
     }
     let since = b["since"].as_i64().unwrap_or(0).max(0);
     let limit = b["limit"].as_i64().unwrap_or(50).clamp(1, 200);
-    let rows = hub.store.chat_entries_since(room, since, limit)?;
+    // Only what was said after it joined; an older cursor is lifted to that, not refused.
+    let rows = hub.store.chat_entries_since(room, since, limit, hub.store.room_bot_floor(room, &bot.bot_id))?;
     let waits_on = match &bot.owner_person {
         Some(p) => hub.store.person(p).map_or_else(|| "the owner".to_owned(), |p| p.name),
         None => "the owner".to_owned(),
     };
-    let entries: Vec<Value> = rows.iter().filter_map(|e| roles::room_entry(&hub.store, &json!(e), &waits_on)).collect();
+    let entries: Vec<Value> =
+        rows.iter().filter_map(|e| roles::room_entry(&hub.store, &bot.bot_id, &json!(e), &waits_on)).collect();
     let cursor = rows.iter().map(|e| e.rev).max().unwrap_or(0).max(since);
     let newest = hub.store.newest_conversation(&Lane::main(room));
     Ok(json!({
@@ -1410,13 +1437,23 @@ async fn thread(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
     let after = b["afterSeq"].as_i64().unwrap_or(0);
     let limit = b["limit"].as_i64().unwrap_or(200).clamp(1, 500);
     let all = hub.store.thread(&conv.chat_bot_id, &conv.thread_root, 500)?;
+    // A conversation's thread is in an agent's chat; were it ever a room's, the bot's join point holds there too.
+    let floor = if hub.store.bot(&conv.chat_bot_id)?.is_some_and(|r| r.config.is_group()) {
+        hub.store.room_bot_floor(&conv.chat_bot_id, &bot.bot_id)
+    } else {
+        0
+    };
     let waits_on = match &bot.owner_person {
         Some(p) => hub.store.person(p).map_or_else(|| "the owner".to_owned(), |p| p.name),
         None => "the owner".to_owned(),
     };
     let shape = |e: &Entry| roles::bot_entry(&json!(e), &conv.conversation_id, &waits_on);
-    let entries: Vec<Value> =
-        all.iter().filter(|e| e.rev > after).filter_map(shape).take(usize::try_from(limit).unwrap_or(200)).collect();
+    let entries: Vec<Value> = all
+        .iter()
+        .filter(|e| e.rev > after && e.seq > floor)
+        .filter_map(shape)
+        .take(usize::try_from(limit).unwrap_or(200))
+        .collect();
     // Done: the last ask has its final answer, or a terminal notice, or was taken back.
     let last = all.iter().rev().find(|e| e.kind == EntryKind::User.as_str());
     let done = last.is_none_or(|u| {

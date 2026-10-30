@@ -70,6 +70,21 @@
       "values": ["user", "agent", "notice", "waiting"],
       "unknown": "unknown"
     },
+    "RoomConversationState": {
+      "doc": "Where a room conversation is in its life. One this version doesn't know reads as ended: the app stops drawing a live line.",
+      "values": ["open", "ended", "stopped"],
+      "unknown": "ended"
+    },
+    "RoomConversationEnd": {
+      "doc": "Why a room conversation is over. One this version doesn't know is its own word: the app shows it plainly as over.",
+      "values": ["spent", "quiet", "stopped", "idle", "newer"],
+      "unknown": "unknown"
+    },
+    "RoomSpeakerKind": {
+      "doc": "What speaks in a room conversation: one of the room's own agents, or an outside bot. One this version doesn't know reads as agent.",
+      "values": ["agent", "bot"],
+      "unknown": "agent"
+    },
     "BotErrorCode": {
       "doc": "The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status.",
       "values": ["pending", "notGranted", "rateLimited", "busy", "notFound", "badRequest", "tooLong", "notSupported", "syncing", "heldByOtherWriter", "tooMany", "nonceReused"],
@@ -211,9 +226,44 @@
       }
     },
     "Entries": {
-      "doc": "A page of a chat or a thread. folder is where it works on this computer: the owner's alone.",
-      "fields": { "entries": "[Entry]", "folder": "json?" },
-      "mayOmit": ["folder"]
+      "doc": "A page of a chat or a thread. folder is where it works on this computer: the owner's alone. conversation is the room conversation of that lane (the chat's main lane, or the thread) that was opened last, so a reconnecting app can draw the live line; null when the lane never had one. A host from before it leaves the field out.",
+      "fields": { "entries": "[Entry]", "folder": "json?", "conversation": "RoomConversation?" },
+      "mayOmit": ["folder", "conversation"]
+    },
+    "RoomConversation": {
+      "doc": "Where a room conversation stands: what one person message to a group set going. budget is the turns that message granted and left what remains; current is whoever speaks now and waitUntil (unix ms) when an outside bot's turn times out; endedWhy says why it is over (spent: the turns ran out, quiet: a round where everyone passed, stopped: a person's Stop, idle: nobody moved it for a day, newer: a newer person message took the lane); opening is the entry of the person message that opened it. lane is the thread's id, null for the room's main lane. endedWhy is null for a conversation that is open or that ended before hosts kept the reason.",
+      "fields": {
+        "conversation": "string",
+        "chat": "string",
+        "lane": "string?",
+        "budget": "int",
+        "left": "int",
+        "state": "RoomConversationState",
+        "endedWhy": "RoomConversationEnd?",
+        "current": "RoomSpeaker?",
+        "waitUntil": "int?",
+        "opening": "string?"
+      }
+    },
+    "RoomSpeaker": {
+      "doc": "Who speaks now in a room conversation.",
+      "fields": { "id": "string", "kind": "RoomSpeakerKind", "name": "string" }
+    },
+    "ConversationEvent": {
+      "doc": "The `conversation` event the owner's apps (and no one else) get on the event stream: a room conversation's RoomConversation fields, sent when it opens, at each charge, each change of speaker and when it ends.",
+      "fields": {
+        "type": "string",
+        "conversation": "string",
+        "chat": "string",
+        "lane": "string?",
+        "budget": "int",
+        "left": "int",
+        "state": "RoomConversationState",
+        "endedWhy": "RoomConversationEnd?",
+        "current": "RoomSpeaker?",
+        "waitUntil": "int?",
+        "opening": "string?"
+      }
     },
     "EntryAnswer": { "doc": "The entry a call wrote.", "fields": { "entry": "Entry" } },
     "MaybeEntry": { "doc": "The entry a call changed; null when it wasn't saved.", "fields": { "entry": "Entry?" } },
@@ -363,7 +413,7 @@
       "mayOmit": ["duplicate", "room"]
     },
     "BotPosted": {
-      "doc": "A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current). A retry with the same clientNonce and text answers the same, marked duplicate.",
+      "doc": "A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current); lateWhy says which: stopped (after a Stop), newer (a newer person message moved the epoch), ended (the conversation ended: spent, quiet or idle), noTurn (a keyed post nobody waits for any more). unprompted: a post with no turn key while no conversation is open, kept, not late, and it woke nobody and cost nothing. A retry with the same clientNonce and text answers the same, marked duplicate.",
       "fields": {
         "entryId": "string",
         "seq": "int",
@@ -372,6 +422,8 @@
         "conversation": "string",
         "replied": "bool",
         "late": "bool",
+        "lateWhy": "string?",
+        "unprompted": "bool?",
         "duplicate": "bool?"
       },
       "mayOmit": ["duplicate"]

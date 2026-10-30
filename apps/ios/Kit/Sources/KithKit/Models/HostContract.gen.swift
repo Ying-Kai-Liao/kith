@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "b39eab5139e62892e0e80a681689fa4549b5a2c86e1a524b014784809680bb78"
+    public static let sha256 = "4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8"
 }
 
 extension HostContract {
@@ -186,6 +186,45 @@ extension HostContract {
         /// A value this version doesn't know is `.unknown`.
         public init(from decoder: Decoder) throws {
             self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        }
+    }
+
+    /// Where a room conversation is in its life. One this version doesn't know reads as ended: the app stops drawing a live line.
+    public enum RoomConversationState: String, Codable, Hashable, Sendable {
+        case `open`
+        case ended
+        case stopped
+
+        /// A value this version doesn't know is `.ended`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .ended
+        }
+    }
+
+    /// Why a room conversation is over. One this version doesn't know is its own word: the app shows it plainly as over.
+    public enum RoomConversationEnd: String, Codable, Hashable, Sendable {
+        case spent
+        case quiet
+        case stopped
+        case idle
+        case newer
+        /// A value this version doesn't know.
+        case unknown
+
+        /// A value this version doesn't know is `.unknown`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
+        }
+    }
+
+    /// What speaks in a room conversation: one of the room's own agents, or an outside bot. One this version doesn't know reads as agent.
+    public enum RoomSpeakerKind: String, Codable, Hashable, Sendable {
+        case agent
+        case bot
+
+        /// A value this version doesn't know is `.agent`.
+        public init(from decoder: Decoder) throws {
+            self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .agent
         }
     }
 
@@ -526,14 +565,85 @@ extension HostContract {
         }
     }
 
-    /// A page of a chat or a thread. folder is where it works on this computer: the owner's alone.
+    /// A page of a chat or a thread. folder is where it works on this computer: the owner's alone. conversation is the room conversation of that lane (the chat's main lane, or the thread) that was opened last, so a reconnecting app can draw the live line; null when the lane never had one. A host from before it leaves the field out.
     public struct Entries: Codable, Hashable, Sendable {
         public var entries: [Entry]
         public var folder: JSONValue?
+        public var conversation: RoomConversation?
 
-        public init(entries: [Entry], folder: JSONValue? = nil) {
+        public init(entries: [Entry], folder: JSONValue? = nil, conversation: RoomConversation? = nil) {
             self.entries = entries
             self.folder = folder
+            self.conversation = conversation
+        }
+    }
+
+    /// Where a room conversation stands: what one person message to a group set going. budget is the turns that message granted and left what remains; current is whoever speaks now and waitUntil (unix ms) when an outside bot's turn times out; endedWhy says why it is over (spent: the turns ran out, quiet: a round where everyone passed, stopped: a person's Stop, idle: nobody moved it for a day, newer: a newer person message took the lane); opening is the entry of the person message that opened it. lane is the thread's id, null for the room's main lane. endedWhy is null for a conversation that is open or that ended before hosts kept the reason.
+    public struct RoomConversation: Codable, Hashable, Sendable {
+        public var conversation: String
+        public var chat: String
+        public var lane: String?
+        public var budget: Int64
+        public var left: Int64
+        public var state: RoomConversationState
+        public var endedWhy: RoomConversationEnd?
+        public var current: RoomSpeaker?
+        public var waitUntil: Int64?
+        public var opening: String?
+
+        public init(conversation: String, chat: String, lane: String? = nil, budget: Int64, left: Int64, state: RoomConversationState, endedWhy: RoomConversationEnd? = nil, current: RoomSpeaker? = nil, waitUntil: Int64? = nil, opening: String? = nil) {
+            self.conversation = conversation
+            self.chat = chat
+            self.lane = lane
+            self.budget = budget
+            self.left = left
+            self.state = state
+            self.endedWhy = endedWhy
+            self.current = current
+            self.waitUntil = waitUntil
+            self.opening = opening
+        }
+    }
+
+    /// Who speaks now in a room conversation.
+    public struct RoomSpeaker: Codable, Hashable, Sendable {
+        public var id: String
+        public var kind: RoomSpeakerKind
+        public var name: String
+
+        public init(id: String, kind: RoomSpeakerKind, name: String) {
+            self.id = id
+            self.kind = kind
+            self.name = name
+        }
+    }
+
+    /// The `conversation` event the owner's apps (and no one else) get on the event stream: a room conversation's RoomConversation fields, sent when it opens, at each charge, each change of speaker and when it ends.
+    public struct ConversationEvent: Codable, Hashable, Sendable {
+        public var type: String
+        public var conversation: String
+        public var chat: String
+        public var lane: String?
+        public var budget: Int64
+        public var left: Int64
+        public var state: RoomConversationState
+        public var endedWhy: RoomConversationEnd?
+        public var current: RoomSpeaker?
+        public var waitUntil: Int64?
+        public var opening: String?
+
+        public init(type: String, conversation: String, chat: String, lane: String? = nil, budget: Int64, left: Int64, state: RoomConversationState, endedWhy: RoomConversationEnd? = nil, current: RoomSpeaker? = nil, waitUntil: Int64? = nil, opening: String? = nil) {
+            self.type = type
+            self.conversation = conversation
+            self.chat = chat
+            self.lane = lane
+            self.budget = budget
+            self.left = left
+            self.state = state
+            self.endedWhy = endedWhy
+            self.current = current
+            self.waitUntil = waitUntil
+            self.opening = opening
         }
     }
 
@@ -920,7 +1030,7 @@ extension HostContract {
         }
     }
 
-    /// A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current). A retry with the same clientNonce and text answers the same, marked duplicate.
+    /// A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current); lateWhy says which: stopped (after a Stop), newer (a newer person message moved the epoch), ended (the conversation ended: spent, quiet or idle), noTurn (a keyed post nobody waits for any more). unprompted: a post with no turn key while no conversation is open, kept, not late, and it woke nobody and cost nothing. A retry with the same clientNonce and text answers the same, marked duplicate.
     public struct BotPosted: Codable, Hashable, Sendable {
         public var entryId: String
         public var seq: Int64
@@ -929,9 +1039,11 @@ extension HostContract {
         public var conversation: String
         public var replied: Bool
         public var late: Bool
+        public var lateWhy: String?
+        public var unprompted: Bool?
         public var duplicate: Bool?
 
-        public init(entryId: String, seq: Int64, turn: Int64, room: String, conversation: String, replied: Bool, late: Bool, duplicate: Bool? = nil) {
+        public init(entryId: String, seq: Int64, turn: Int64, room: String, conversation: String, replied: Bool, late: Bool, lateWhy: String? = nil, unprompted: Bool? = nil, duplicate: Bool? = nil) {
             self.entryId = entryId
             self.seq = seq
             self.turn = turn
@@ -939,6 +1051,8 @@ extension HostContract {
             self.conversation = conversation
             self.replied = replied
             self.late = late
+            self.lateWhy = lateWhy
+            self.unprompted = unprompted
             self.duplicate = duplicate
         }
     }
@@ -1673,6 +1787,9 @@ extension HostContract {
         case "BotAnswer": _ = try d.decode(BotAnswer.self, from: data)
         case "Entry": _ = try d.decode(Entry.self, from: data)
         case "Entries": _ = try d.decode(Entries.self, from: data)
+        case "RoomConversation": _ = try d.decode(RoomConversation.self, from: data)
+        case "RoomSpeaker": _ = try d.decode(RoomSpeaker.self, from: data)
+        case "ConversationEvent": _ = try d.decode(ConversationEvent.self, from: data)
         case "EntryAnswer": _ = try d.decode(EntryAnswer.self, from: data)
         case "MaybeEntry": _ = try d.decode(MaybeEntry.self, from: data)
         case "CallEnded": _ = try d.decode(CallEnded.self, from: data)
