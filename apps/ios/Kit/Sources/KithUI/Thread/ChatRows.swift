@@ -264,7 +264,17 @@ struct AgentBubble: View {
         VStack(alignment: .leading, spacing: 4) {
             Group {
                 if let files = entry.data.files, !files.isEmpty {
-                    ForEach(files) { file in SharedFileView(entry: entry, file: file) }
+                    let parts = ImageGridPlan.split(files)
+                    if parts.images.count >= 2 {
+                        ImageGrid(images: parts.images.map { file in
+                            GalleryImage(id: file.id, name: file.name) { [model, entry] in
+                                await model.fileDownloads.bytes(client: model.client, entry: entry, file: file)
+                            }
+                        }, fill: Palette.bubbleAgent)
+                        ForEach(parts.others) { file in SharedFileView(entry: entry, file: file) }
+                    } else {
+                        ForEach(files) { file in SharedFileView(entry: entry, file: file) }
+                    }
                 } else {
                     MarkdownText(entry.data.text ?? "").equatable()
                         // A reply is never cut: take the height the text needs, whatever the row proposes.
