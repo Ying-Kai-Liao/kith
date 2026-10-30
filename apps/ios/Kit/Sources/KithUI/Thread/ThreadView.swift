@@ -59,10 +59,11 @@ public struct ThreadView: View {
                     }
                 case .writerBanner(let rootId):
                     ThreadWriterDock(botId: botId, rootId: rootId)
-                case .writerBannerAndNewTask(let rootId):
-                    // A terminal holds the thread the box would go on with: the box starts new tasks instead.
+                case .writerBannerAndComposer(let rootId):
+                    // A terminal holds the thread the box goes on with: a message waits until it lets go (the host
+                    // queues it), and the box's New task still starts another.
                     ThreadWriterDock(botId: botId, rootId: rootId)
-                    Composer(botId: botId, alwaysNewTask: true)
+                    Composer(botId: botId)
                 case .readOnly:
                     // A bot from outside's conversation: the owner reads along, nothing is sent here.
                     if let guest = bot?.botGuest { ReadOnlyLine(text: guest.readOnlyLine) }

@@ -10,6 +10,8 @@ set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below. It is one commit of origin/main:
 # after the writer claims (#324: every Claude start claims its session; a host turn takes the claim or is refused).
+# (Not moved by the wake-terminal-reply change: its covered edits only add a waiting branch to the send gate, see the
+# skill's coverage rows; the other changes since this commit have not been re-read.)
 SYNC=ed2ceb6356599bbf65756709b3b91966c9ff8cc5
 
 FILES=(
@@ -24,6 +26,7 @@ FILES=(
   serve/host/src/agent/bot/turn.rs    # start_turn_inner: start_gate, claim_for_turn (the CAS), release_turn_claim
   serve/host/src/agent/bot/session.rs # forget_loaded
   serve/host/src/api/botguests.rs     # ask: terminal::bot_gate (the bot's writer gate)
+  serve/host/src/cards/resume.rs      # bot_door: a waiting message's wake re-runs the send gate (terminal_holds) before Cmd::Send
   serve/host/src/terminal/claim.rs    # the writer claim: take_as, holder, is_live, Kind::Bot
   serve/host/src/hub/actors.rs        # working_lanes, Cmd::ForgetLoaded fan-out
 )

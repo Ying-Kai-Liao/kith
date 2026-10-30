@@ -24,7 +24,7 @@ mod tests;
 
 #[cfg(test)]
 pub use sync::scan;
-pub use sync::{before_send, bot_gate, carry_over, host_turn_ended, resolve, start, start_gate, take_over};
+pub use sync::{SendGate, bot_gate, carry_over, host_turn_ended, resolve, send_gate, start, start_gate, take_over};
 
 use std::collections::HashSet;
 use std::path::PathBuf;

@@ -54,8 +54,9 @@ enum ChatBottom: Equatable {
     case updateNeeded
     /// The banner only: a bot guest's chat is read-only even while a terminal holds its thread.
     case writerBanner(rootId: String)
-    /// The banner, and under it a composer whose every message starts a new task (the held thread stays single-writer).
-    case writerBannerAndNewTask(rootId: String)
+    /// The banner, and under it the composer: a message to the held thread waits for the terminal (the host queues it,
+    /// the thread stays single-writer), and New task starts another.
+    case writerBannerAndComposer(rootId: String)
     case readOnly
     case composer
 }
@@ -63,7 +64,7 @@ enum ChatBottom: Equatable {
 extension ThreadFeed {
     static func chatBottom(held: Entry?, mismatch: Bool, guest: Bool) -> ChatBottom {
         if mismatch { return .updateNeeded }
-        if let held { return guest ? .writerBanner(rootId: held.id) : .writerBannerAndNewTask(rootId: held.id) }
+        if let held { return guest ? .writerBanner(rootId: held.id) : .writerBannerAndComposer(rootId: held.id) }
         return guest ? .readOnly : .composer
     }
 }

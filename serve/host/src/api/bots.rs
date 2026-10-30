@@ -216,9 +216,17 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 }
                 None => None,
             };
-            // A terminal thread belongs to the terminal while it lives there; nothing is saved then.
+            // A terminal thread belongs to the terminal while it lives there. The owner's own message to an agent's
+            // thread then waits as a wake until the terminal lets go (never typed in, never a second writer); anyone
+            // else's is refused, and nothing is saved.
+            let mut waits = false;
             if let Some(root) = &thread {
-                crate::terminal::before_send(hub, bot, root).await?;
+                let may_wait = row.config.person.is_none()
+                    && !row.config.is_group()
+                    && row.config.hq_agent.is_some()
+                    && b["asMember"].is_null()
+                    && hub.store.bot_conversation_of_thread(bot, root).is_none();
+                waits = crate::terminal::send_gate(hub, bot, root, may_wait).await? == crate::terminal::SendGate::Waits;
             }
             let starts_task = thread.is_none() && row.config.uses_tasks();
             let lane = Lane { chat: bot.to_owned(), thread };
@@ -279,6 +287,17 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let scope = lane.thread.as_deref().map_or(ReadScope::Chat, ReadScope::Thread);
             if let Err(error) = hub.mark_read(bot, scope) {
                 tracing::warn!(%error, bot, "couldn't mark bot read after send");
+            }
+            if waits {
+                let agent = row.config.hq_agent.as_deref().unwrap_or_default();
+                if let Err(error) = crate::cards::resume::wait_for_terminal(hub, agent, &e.id).await {
+                    // Nothing will run it: say so rather than leave it queued for good.
+                    let mut data = e.data.clone();
+                    data["status"] = "failed".into();
+                    hub.set_entry(&e.id, &data);
+                    return Err(error.context("couldn't queue the message for the terminal's thread"));
+                }
+                return Ok(ControlFlow::Break(json!({"entry": hub.store.entry(&e.id).unwrap_or(e)})));
             }
             if row.config.is_group() {
                 // The sender grants the turn budget (rule C1); a plain message gets today's ten.
@@ -355,8 +374,9 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let (bot, entry_id) = (str_arg(&b, "botId")?, str_arg(&b, "entryId")?);
             let e = hub.store.entry(entry_id).filter(|e| e.bot_id == bot && e.kind == EntryKind::User.as_str());
             let e = e.ok_or_else(|| anyhow!("unknown message"))?;
-            let unsent =
-                e.data["status"] == "cancelled" || (e.data["status"] == "queued" && hub.unsend(bot, entry_id).await?);
+            let unsent = e.data["status"] == "cancelled"
+                || (e.data["status"] == "queued"
+                    && (hub.unsend(bot, entry_id).await? || crate::cards::resume::unsend_waiting(hub, &e).await));
             if !unsent {
                 bail!("This message already went to the bot. Stop ends its turn.");
             }

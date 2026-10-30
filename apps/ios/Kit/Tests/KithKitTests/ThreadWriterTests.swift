@@ -109,3 +109,10 @@ private actor Canned: HostTransport {
     #expect(try summary(#"{\#(base),"origin":"terminal","originLabel":"  "}"#).runLabel == nil)
     #expect(try summary(#"{\#(base),"origin":"discord","originLabel":"Sam's server"}"#).runLabel == nil)
 }
+
+@Test func aQueuedMessageSaysWhatItWaitsFor() {
+    #expect(UserStatusLine.queued(waitsFor: "terminal", botWorking: false) == "Waits until the terminal session ends")
+    #expect(UserStatusLine.queued(waitsFor: "terminal", botWorking: true) == "Waits until the terminal session ends")
+    #expect(UserStatusLine.queued(waitsFor: nil, botWorking: true) == "Queued until this response finishes")
+    #expect(UserStatusLine.queued(waitsFor: nil, botWorking: false) == "Queued")
+}

@@ -266,7 +266,14 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   not a failed try). A host start gives back every wake that wasn't applied and offers it again under the same id, which
   the queue drops if it still holds it. Stop wins: every Stop path withdraws what its session is owed from the queue
   (ids kept) and ends the approved cards whose turn had not started, so neither a restart nor another yes brings the
-  stopped turn back.
+  stopped turn back. The same queue carries an owner's app message to a thread a terminal holds (the old F6, typing
+  the reply into the terminal, is gone): the message is saved as `queued` with `waitsFor: "terminal"` and enqueued as
+  request `msg:<entry id>` on the thread's `acp:<chat>:<thread>` key, a host-door item. The host takes it, finds the
+  terminal still holding the thread and gives it back held; once the terminal lets go (or is taken over) the next take
+  runs every waiting message of the thread, and any card answered meanwhile, as one turn on the thread's own session, in
+  order. A message the actor found the thread held for at its start becomes the same wake instead of failing. Stop
+  cancels the waiting entries and withdraws their requests. A bot guest's thread and an invited person's chat keep the
+  refusal (`heldByOtherWriter`, `liveInTerminal`): their wake would have to run as them.
 - **5. Somewhere to ask.** Host down: when `kith-permit issue` finds nothing on the host's port, it restarts the
   host's launchd job as the Mac app does (loaded from its plist when launchd doesn't know it, then kickstarted), waits
   for the port and asks for the ask token once more; still none, the run's asks are refused with "the Kith host isn't

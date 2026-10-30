@@ -284,6 +284,8 @@ export interface EntryData {
   /** user: queued | sent | cancelled | failed · tool: pending | in_progress | completed | failed · permission: pending | answered | cancelled | expired */
   status?: string
   clientNonce?: string
+  /** user, queued: what the message waits for. `terminal`: a terminal holds the thread and it goes out when it lets go. */
+  waitsFor?: string
   title?: string
   toolKind?: string
   output?: string

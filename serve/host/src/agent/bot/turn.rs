@@ -83,6 +83,31 @@ impl Actor {
         Ok(prompt)
     }
 
+    /// A start the terminal's hold refused: the owner's own messages go to the wake queue, quietly (no notice, not
+    /// failed), and the queue runs them as the thread's next turn. Whether they all did.
+    async fn wait_for_terminal(&self, held: &crate::terminal::HeldByWriter, entry_ids: &[String]) -> bool {
+        let owners_own = self.cfg.person.is_none()
+            && held.code == "liveInTerminal"
+            && self.active_request.is_none()
+            && self.active_group.is_none()
+            && self.active_routine.is_none()
+            && !entry_ids.is_empty();
+        let Some(agent) = self.cfg.hq_agent.as_deref().filter(|_| owners_own) else { return false };
+        // A wake's batch can mix a card's notice (the queue gives that one back by itself, see `start_failed`) with the
+        // messages; any other entry is not ours to hold.
+        let is_user = |id: &String| self.hub.store.entry(id).is_some_and(|e| e.kind == EntryKind::User.as_str());
+        if !entry_ids.iter().all(|id| is_user(id) || crate::cards::resume::wake_carries(id)) {
+            return false;
+        }
+        for id in entry_ids.iter().filter(|id| is_user(id)) {
+            if let Err(error) = crate::cards::resume::wait_for_terminal(&self.hub, agent, id).await {
+                tracing::warn!(error = format!("{error:#}"), "couldn't queue a message for a terminal thread");
+                return false;
+            }
+        }
+        true
+    }
+
     /// Starts a turn in `lane` for the given user entries (none for a hidden turn). Stop and Shutdown still work
     /// while it starts (an install or a slow session load takes minutes): they end the start, and the agent process
     /// with it. Other commands wait until it is over, in order.
@@ -163,6 +188,11 @@ impl Actor {
             });
         };
         if let Err(held) = crate::terminal::start_gate(&self.hub, &lane, begin).await {
+            // The owner's own messages wait for the terminal as wakes instead of failing: the queue starts their turn
+            // once it lets go. Anything else (a bot guest's thread, a person's chat, a hidden or room turn) is refused.
+            if self.wait_for_terminal(&held, entry_ids).await {
+                return Err(held.into());
+            }
             for id in entry_ids {
                 if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
                     e.data["status"] = json!(crate::chat::team::RequestStatus::Failed);
@@ -192,7 +222,11 @@ impl Actor {
         for id in entry_ids {
             // Bot-message notices belong to `chat::team`; writing them here would race its final status.
             if let Some(mut e) = self.hub.store.entry(id).filter(|e| e.kind == EntryKind::User.as_str()) {
-                e.data["status"] = json!(crate::chat::team::RequestStatus::Sent);
+                // A wake's message is sent once its prompt is (`turn_started`): until then a failed start gives it
+                // back to the queue, still waiting.
+                if !crate::cards::resume::wake_carries(id) {
+                    e.data["status"] = json!(crate::chat::team::RequestStatus::Sent);
+                }
                 if let Some(turn) = &self.project_turn {
                     e.data["projects"] = json!(turn.projects);
                 }

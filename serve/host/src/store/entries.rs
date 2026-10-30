@@ -389,6 +389,20 @@ impl Store {
         Ok(serde_json::json!({"count": count, "lastAt": last_at, "authors": authors, "unread": unread}))
     }
 
+    /// The user's messages that wait in the kernel's wake queue for a terminal to let go of their thread
+    /// (`data.waitsFor`). A restart keeps them: the queue is the record, not this process.
+    pub fn waiting_for_terminal(&self) -> Result<Vec<Entry>> {
+        let ids: Vec<String> = {
+            let c = self.db.locked();
+            let mut st = c.prepare(
+                "SELECT id FROM entries WHERE kind = 'user' AND json_extract(data, '$.status') = 'queued'
+                   AND json_extract(data, '$.waitsFor') IS NOT NULL ORDER BY seq",
+            )?;
+            st.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        Ok(ids.iter().filter_map(|id| self.entry(id)).collect())
+    }
+
     /// Permission cards left `pending` (and sends left `queued`) by a crash or restart
     /// can never be honored (unless the card store still holds the card open, parked); returns how many were closed out.
     pub fn expire_pending(&self) -> Result<usize> {
@@ -398,7 +412,8 @@ impl Store {
                 "SELECT id FROM entries WHERE (kind = 'permission' AND json_extract(data, '$.status') = 'pending'
                       AND NOT EXISTS (SELECT 1 FROM cards WHERE cards.entry_id = entries.id
                                       AND cards.state IN ('pending','live','parked')))
-                  OR (kind = 'user' AND json_extract(data, '$.status') = 'queued')
+                  OR (kind = 'user' AND json_extract(data, '$.status') = 'queued'
+                      AND json_extract(data, '$.waitsFor') IS NULL)
                   OR (kind = 'notice' AND json_extract(data, '$.delegationId') IS NOT NULL
                       AND json_extract(data, '$.status') IN ('queued', 'sent'))",
             )?;

@@ -34,6 +34,10 @@ export const isBusyInTerminal = (t: Pick<ThreadSummary, 'liveWriter' | 'liveBusy
 
 export const isHeldByTerminal = (t: Pick<ThreadSummary, 'liveWriter'> | undefined | null) => t?.liveWriter === 'terminal'
 
+/** What a queued message of the user's says under it: it waits for a terminal, for the bot's turn, or just for its turn. */
+export const queuedLine = (waitsFor: string | undefined, botWorking: boolean) =>
+  waitsFor === 'terminal' ? 'Waits until the terminal session ends' : botWorking ? 'Queued until this response finishes' : 'Queued'
+
 /** For a thread's root entry: the command that continues it in a terminal. */
 export const resumeCommand = (agent: string, root: Pick<Entry, 'id'>) => `kith ${agent} --resume ${root.id}`
 
