@@ -183,6 +183,7 @@ async fn run_dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, mut b: Valu
 }
 
 async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Result<Value> {
+    crate::samples::refuse(hub, method, &b)?;
     if method.contains("onnector")
         || method.starts_with("composio")
         || method == "setComposioKey"

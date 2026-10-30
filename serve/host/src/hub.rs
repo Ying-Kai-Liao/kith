@@ -242,6 +242,20 @@ impl Hub {
         Ok(self.bot_value(&cfg.id).unwrap_or(Value::Null))
     }
 
+    /// Adds a group the host made itself (`samples`), as it is: none of `create_bot`'s checks or reuse.
+    pub fn add_host_group(&self, mut cfg: BotConfig) -> Result<()> {
+        if !cfg.is_group() {
+            bail!("only a group");
+        }
+        cfg.position = self.new_bot_position()?;
+        {
+            let _g = self.emit_lock.locked();
+            self.store.save_bot(&cfg)?;
+        }
+        self.emit_bot(&cfg.id);
+        Ok(())
+    }
+
     pub fn update_bot(&self, patch: &Value) -> Result<Value> {
         let id = patch["id"].as_str().ok_or_else(|| anyhow!("id required"))?.to_owned();
         let row = self.store.bot(&id)?.filter(|b| !b.deleted).ok_or_else(|| anyhow!("unknown bot"))?;

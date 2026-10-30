@@ -11,6 +11,7 @@
 #   kith serve relay [URL]          show or set the relay URL (~/.kith/serve/config.json); restart for it to take effect
 #   kith serve cloud [...]          the host's cloud status and settings; --confirm-owner accepts an owner change by
 #                                   typing the account at a terminal (refused when stdin is not a terminal)
+#   kith serve sample-cards         post one of every card into a "Samples" chat (replacing the last one); their buttons do nothing
 #
 # Data dir ~/.kith/serve, port 19224, launchd label dev.kith.serve, logs inside the data dir. The host's own
 # subcommands (install, stop, status) do the launchd work. `kith serve ...` is the same command.
@@ -27,7 +28,7 @@ PORT=19224
 # The build runs inside serve/host, so a relative target dir is fixed against the caller's folder first.
 case ${CARGO_TARGET_DIR:-/} in /*) ;; *) export CARGO_TARGET_DIR=$PWD/$CARGO_TARGET_DIR ;; esac
 
-usage() { sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
 
 find_cargo() {
   command -v cargo 2>/dev/null && return 0
@@ -212,6 +213,7 @@ case ${1:-help} in
              fi
            done
            "$BIN" cloud --port $PORT "$@" ;;
+  sample-cards) [ -x "$BIN" ] || { echo "kith serve: not installed" >&2; exit 1; }; "$BIN" sample-cards --port $PORT ;;
   # Where this install's host lives, for kith-sessions: one rule, the one above.
   endpoint) echo "$DATA $PORT" ;;
   help|-h|--help) usage ;;
