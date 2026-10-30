@@ -12,6 +12,7 @@
     clippy::semicolon_if_nothing_returned
 )]
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -565,11 +566,20 @@ async fn invite_problems_are_exit_4_and_not_joined_is_exit_3() {
 async fn credentials_from_the_environment_stand_in_for_the_files() {
     let server = Server::start(|_| {}).await;
     let home = tempfile::tempdir().unwrap();
-    let (code, line, err) =
-        kith(&server, home.path(), &["join", &server.link(), "--wait", "5", "--print-credentials"]).await;
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("creds");
+    let (code, out, err) = kith(
+        &server,
+        home.path(),
+        &["join", &server.link(), "--wait", "5", "--credentials-file", file.to_str().unwrap()],
+    )
+    .await;
     assert_eq!(code, 0, "{err}");
-    let creds = line.trim().to_string();
+    let creds = std::fs::read_to_string(&file).unwrap().trim().to_string();
     assert!(!creds.contains(TOKEN) && !creds.is_empty());
+    // The key is nowhere in what the command printed.
+    assert!(!out.contains(&creds) && !err.contains(&creds), "{out}{err}");
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
 
     // A new VM: no files, only the secret.
     let fresh = tempfile::tempdir().unwrap();
@@ -577,6 +587,73 @@ async fn credentials_from_the_environment_stand_in_for_the_files() {
         kith(&server, fresh.path(), &["--credentials", &creds, "ask", "house", "hi", "--wait"]).await;
     assert_eq!((code, out.as_str()), (0, "Hello there\n"), "{err}");
     assert!(!fresh.path().join("guest.json").exists(), "never written back");
+}
+
+#[tokio::test]
+async fn credentials_file_is_new_only_and_the_json_names_the_path_not_the_key() {
+    let server = Server::start(|_| {}).await;
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let file = dir.path().join("creds");
+    let path = file.to_str().unwrap();
+    let (code, out, err) =
+        kith(&server, home.path(), &["--json", "join", &server.link(), "--wait", "5", "--credentials-file", path])
+            .await;
+    assert_eq!(code, 0, "{err}");
+    let creds = std::fs::read_to_string(&file).unwrap();
+    let event: Value = serde_json::from_str(out.lines().last().unwrap()).unwrap();
+    assert_eq!(event["credentialsFile"], path);
+    assert!(event.get("credentials").is_none());
+    assert!(!out.contains(creds.trim()) && !err.contains(creds.trim()), "{out}{err}");
+    let device = std::fs::read_to_string(home.path().join("device.key")).unwrap();
+    assert!(!out.contains(device.trim()) && !err.contains(device.trim()));
+
+    // The same path again is refused and the file is untouched.
+    let again = tempfile::tempdir().unwrap();
+    let (code, _, err) =
+        kith(&server, again.path(), &["join", &server.link(), "--wait", "5", "--credentials-file", path]).await;
+    assert_eq!(code, 2, "{err}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), creds);
+
+    // A symlink is refused, and what it points at is not written.
+    let target = dir.path().join("target");
+    let link = dir.path().join("link");
+    std::os::unix::fs::symlink(&target, &link).unwrap();
+    let (code, _, _) = kith(
+        &server,
+        again.path(),
+        &["join", &server.link(), "--wait", "5", "--credentials-file", link.to_str().unwrap()],
+    )
+    .await;
+    assert_eq!(code, 2);
+    assert!(!target.exists());
+}
+
+#[tokio::test]
+async fn credentials_file_needs_a_finished_join_and_print_credentials_is_refused() {
+    let server = Server::start(|_| {}).await;
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let file = dir.path().join("creds");
+    let path = file.to_str().unwrap();
+    let (code, _, _) =
+        kith(&server, home.path(), &["join", &server.link(), "--wait", "0", "--credentials-file", path]).await;
+    assert_eq!(code, 2);
+    let (code, out, err) = kith(&server, home.path(), &["join", &server.link(), "--print-credentials"]).await;
+    assert_eq!(code, 2, "{err}");
+    assert!(out.is_empty() && err.contains("--credentials-file"), "{err}");
+    assert!(!file.exists() && !home.path().join("device.key").exists());
+
+    // A join that fails writes no file.
+    let down = Server::start(|s| {
+        s.accept_override =
+            Some((410, json!({"error": {"code": "inviteExpired", "message": "This invite has expired"}})))
+    })
+    .await;
+    let (code, _, _) =
+        kith(&down, home.path(), &["join", &down.link(), "--wait", "5", "--credentials-file", path]).await;
+    assert_eq!(code, 4);
+    assert!(!file.exists());
 }
 
 #[tokio::test]

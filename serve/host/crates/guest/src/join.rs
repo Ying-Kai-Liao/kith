@@ -10,7 +10,7 @@ use tokio::time::{Instant, sleep};
 
 use crate::cli::JoinArgs;
 use crate::cloud;
-use crate::config::{GUEST_FILE_VERSION, Guest, State, Store, credentials_line};
+use crate::config::{GUEST_FILE_VERSION, Guest, State, Store, write_credentials_file};
 use crate::exit::{CliError, Exit};
 use crate::link;
 use crate::output::Out;
@@ -59,6 +59,20 @@ pub async fn run(
     out: &Out,
     tuning: Tuning,
 ) -> Result<(), CliError> {
+    if args.print_credentials {
+        return Err(CliError::usage(
+            "--print-credentials is gone: the bot's key must not reach stdout or a chat. Use `--credentials-file PATH` (a new file).",
+        ));
+    }
+    if let Some(path) = &args.credentials_file {
+        if args.wait == 0 {
+            return Err(CliError::usage("--credentials-file needs the join to finish: drop --wait 0."));
+        }
+        // Checked before the network, so a taken path doesn't cost a join; the write itself is O_EXCL.
+        if path.symlink_metadata().is_ok() {
+            return Err(CliError::usage(format!("{} already exists: pick a path that doesn't.", path.display())));
+        }
+    }
     let invite = link::parse(&args.link)?;
     if store.is_env() {
         return Err(CliError::usage(
@@ -155,20 +169,18 @@ pub async fn run(
     status?;
 
     let guest = &client.guest;
-    let credentials = args.print_credentials.then(|| credentials_line(&client.key, guest));
+    if let Some(path) = &args.credentials_file {
+        write_credentials_file(path, &client.key, guest)?;
+    }
+    // Only the path is named, never the credentials.
     out.event(&json!({
         "type": "joined", "state": guest.state.as_str(), "botId": guest.bot_id, "name": guest.name,
-        "owner": guest.owner, "agents": guest.agents, "credentials": credentials,
+        "owner": guest.owner, "agents": guest.agents, "credentialsFile": args.credentials_file,
     }));
     if !out.json {
-        match &credentials {
-            // stdout is exactly the credentials line, so `$(kith join ... --print-credentials)` is the secret and nothing else.
-            Some(line) => {
-                out.info(&joined_line(guest));
-                out.info("The line on stdout is this bot's key: keep it as a secret and pass it as KITH_GUEST_CREDENTIALS if this VM loses its files.");
-                out.stdout(&format!("{line}\n"));
-            }
-            None => out.stdout(&format!("{}\n", joined_line(guest))),
+        out.stdout(&format!("{}\n", joined_line(guest)));
+        if let Some(path) = &args.credentials_file {
+            out.info(&format!("Credentials written to {} (mode 0600). Keep that file secret.", path.display()));
         }
     }
     Ok(())
