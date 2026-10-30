@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { GrantedAgentsChat } from './computers/GrantedAgentsChat'
 import { InviteJoinSheet } from './settings/InviteJoinSheet'
+import { ShareSheet } from './ShareSheet'
 import type { WindowCommand } from '@shared/ipc'
 import { isSSHConnecting, showsChat as shouldShowChat } from '@shared/ssh-startup'
 import { draftOf, isGroup, isWorking, type Bot, type BotDraft } from '@shared/models'
@@ -152,6 +153,7 @@ export function ChatWindow() {
       />
       {/* Approving a device: the code the device shows must match (spec §4.2 B). Closing puts it off. */}
       <InviteJoinSheet />
+      <ShareSheet />
       <Sheet open={approval !== null} onClose={() => approval && app.deferApproval(approval)}>
         {approval ? <ApprovalSheet key={approval.id} approval={approval} /> : null}
       </Sheet>

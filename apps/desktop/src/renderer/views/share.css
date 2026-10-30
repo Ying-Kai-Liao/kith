@@ -1,0 +1,25 @@
+/* The sheet for something shared to Kith from another app. */
+.share-body {
+  padding: 4px 20px 20px;
+}
+.share-clip {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  word-break: break-all;
+}
+.share-note {
+  width: 100%;
+  resize: none;
+  font: inherit;
+  color: var(--text);
+  background: var(--background);
+  border: 1px solid var(--separator, rgba(128, 128, 128, 0.3));
+  border-radius: var(--radius-s);
+  padding: 8px 10px;
+}
+.share-chats {
+  max-height: 240px;
+  overflow-y: auto;
+}
