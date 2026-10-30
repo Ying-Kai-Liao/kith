@@ -94,10 +94,18 @@ struct AttachmentList: View {
     let attachments: [Attachment]
     let botId: String
     @State private var viewing: Attachment?
+    @Environment(BotStore.self) private var model
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
-            ForEach(attachments) { file in
+            let images = attachments.filter(\.isImage)
+            let grouped = images.count >= 2
+            if grouped {
+                ImageGrid(images: images.map { file in
+                    GalleryImage(id: file.id, name: file.name) { [model, botId] in await model.attachmentData(file, bot: botId) }
+                }, trailing: true, fill: Palette.bubbleUser)
+            }
+            ForEach(grouped ? attachments.filter { !$0.isImage } : attachments) { file in
                 if file.isImage {
                     AttachmentImage(file: file, botId: botId, maxPixels: 720)
                         .frame(maxWidth: 220, maxHeight: 280)

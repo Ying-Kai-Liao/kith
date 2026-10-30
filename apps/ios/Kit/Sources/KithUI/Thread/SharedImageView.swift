@@ -8,10 +8,10 @@ struct SharedFileView: View {
     let entry: Entry
     let file: SharedFile
     /// Past this a picture stays a card: it would take long to load and hold a lot of memory.
-    private static let maxInlineBytes: Int64 = 25_000_000
+    static let maxInlineBytes: Int64 = 25_000_000
 
     var body: some View {
-        if Attachment(id: file.id, name: file.name, size: file.size).isImage, file.size > 0, file.size <= Self.maxInlineBytes {
+        if ImageGridPlan.isInline(file) {
             SharedImage(entry: entry, file: file)
         } else {
             FileDownloadCard(entry: entry, file: file)
