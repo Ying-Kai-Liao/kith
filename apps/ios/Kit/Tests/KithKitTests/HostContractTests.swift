@@ -103,7 +103,7 @@ func everyHostAnswerDecodes(_ sub: String) throws {
 }
 
 @Test func everyContractMethodIsAMembersAnUnprovenDevicesOrABots() {
-    let all = HostContract.memberMethods + HostContract.unprovenMethods + HostContract.botMethods
+    let all = HostContract.memberMethods + HostContract.unprovenMethods + HostContract.botMethods + HostContract.peerMethods
     #expect(Set(HostContract.Method.allCases) == Set(all))
     #expect(Set(HostContract.botPendingMethods).isSubset(of: Set(HostContract.botMethods)))
 }
