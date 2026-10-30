@@ -6,7 +6,7 @@ audiences in the WHERE next to the FTS match, so a row the caller may not see ca
 (note | summary | trajectory): notes from the memory files, summaries and trajectory from the host store and the harness
 logs (kith_trajectory).
 """
-import contextlib, fcntl, hashlib, json, os, re, sqlite3, subprocess, sys, time
+import contextlib, errno, fcntl, hashlib, json, os, re, sqlite3, subprocess, sys, time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -39,8 +39,17 @@ def db_path():
     return index_dir() / 'memory.db'
 
 
+def _unreadable(path, folder=False):
+    """Is there something at path that this process cannot read (or, for a folder, enter)? Checked with access, not
+    exists(): on Python 3.14 exists() answers False for a file under a folder it cannot enter, which reads as absent."""
+    return os.path.lexists(path) and not os.access(path, os.R_OK | (os.X_OK if folder else 0))
+
+
 def _private_dir():
     d = index_dir()
+    if _unreadable(d, folder=True):
+        # never chmod a folder we cannot reach: that would reopen what its owner closed
+        raise PermissionError(errno.EACCES, 'index folder is not readable', str(d))
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(d, 0o700)
     return d
@@ -212,10 +221,13 @@ def update(db):
 
 
 def open_index():
-    """A connection to an up-to-date index: built on first use, rebuilt when its schema is old or the file is corrupt."""
+    """A connection to an up-to-date index: built on first use, rebuilt when its schema is old or the file is corrupt.
+    An index this process cannot read raises PermissionError and is left alone: it is never rebuilt or chmod-ed."""
     for attempt in (0, 1):
         try:
-            if not db_path().exists():
+            if _unreadable(index_dir(), folder=True) or _unreadable(db_path()):
+                raise PermissionError(errno.EACCES, 'index is not readable', str(db_path()))
+            if not os.path.lexists(db_path()):
                 rebuild()
             db = _connect(db_path())
             if db.execute('PRAGMA user_version').fetchone()[0] != VERSION:
