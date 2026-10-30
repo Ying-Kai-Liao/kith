@@ -70,6 +70,10 @@ pub struct BotGuest {
     pub cloud_device: Option<String>,
     pub rate_per_hour: i64,
     pub concurrent: i64,
+    /// How long a room waits for this bot's post on its turn before it counts as a pass (seconds).
+    pub turn_timeout_s: i64,
+    /// The kith-auth profile the host wakes this bot through at its room turn; None: no wake.
+    pub wake_profile: Option<String>,
     pub created_at: i64,
     pub joined_at: Option<i64>,
     pub decided_at: Option<i64>,
@@ -118,7 +122,8 @@ pub struct BotConversation {
 }
 
 const GUEST_COLS: &str = "bot_id, person_id, owner_person, name, provider, agents, state, device_key, cloud_device, \
-     rate_per_hour, concurrent, created_at, joined_at, decided_at, decided_by, last_seen_at, revoked_at, revoked_why";
+     rate_per_hour, concurrent, created_at, joined_at, decided_at, decided_by, last_seen_at, revoked_at, revoked_why, \
+     turn_timeout_s, wake_profile";
 
 fn row_guest(r: &rusqlite::Row) -> rusqlite::Result<BotGuest> {
     let (agents, state): (String, String) = (r.get(5)?, r.get(6)?);
@@ -141,6 +146,8 @@ fn row_guest(r: &rusqlite::Row) -> rusqlite::Result<BotGuest> {
         last_seen_at: r.get(15)?,
         revoked_at: r.get(16)?,
         revoked_why: r.get(17)?,
+        turn_timeout_s: r.get(18)?,
+        wake_profile: r.get(19)?,
     })
 }
 
@@ -180,7 +187,7 @@ fn row_conv(r: &rusqlite::Row) -> rusqlite::Result<BotConversation> {
 impl Store {
     pub fn put_bot_guest(&self, g: &BotGuest) -> Result<()> {
         self.db.locked().execute(
-            &format!("INSERT INTO bot_guests({GUEST_COLS}) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"),
+            &format!("INSERT INTO bot_guests({GUEST_COLS}) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20)"),
             params![
                 g.bot_id,
                 g.person_id,
@@ -199,7 +206,9 @@ impl Store {
                 g.decided_by,
                 g.last_seen_at,
                 g.revoked_at,
-                g.revoked_why
+                g.revoked_why,
+                g.turn_timeout_s,
+                g.wake_profile
             ],
         )?;
         Ok(())
@@ -291,6 +300,15 @@ impl Store {
         self.db.locked().execute(
             "UPDATE bot_guests SET rate_per_hour = ?2, concurrent = ?3 WHERE bot_id = ?1",
             params![id, rate_per_hour, concurrent],
+        )?;
+        Ok(())
+    }
+
+    /// A bot's room settings: how long a room waits for its post, and the profile it is woken through.
+    pub fn set_bot_room_settings(&self, id: &str, turn_timeout_s: i64, wake_profile: Option<&str>) -> Result<()> {
+        self.db.locked().execute(
+            "UPDATE bot_guests SET turn_timeout_s = ?2, wake_profile = ?3 WHERE bot_id = ?1",
+            params![id, turn_timeout_s, wake_profile],
         )?;
         Ok(())
     }
@@ -479,6 +497,8 @@ mod tests {
             cloud_device: None,
             rate_per_hour: 60,
             concurrent: 2,
+            turn_timeout_s: 300,
+            wake_profile: None,
             created_at: 1,
             joined_at: None,
             decided_at: None,

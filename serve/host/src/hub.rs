@@ -312,6 +312,8 @@ impl Hub {
         }
         if cfg.is_group() {
             self.close_group_places(&id, &cfg.members);
+            // An outside bot taken out of the room is no longer waited for.
+            crate::chat::group::cancel_bot_turns(|t| t.lane.chat == id && !cfg.members.contains(&t.bot_id));
         } else {
             if crate::chat::memory::shared(&cfg) != crate::chat::memory::shared(&row.config) {
                 crate::chat::memory::changed(self, Some(&id));

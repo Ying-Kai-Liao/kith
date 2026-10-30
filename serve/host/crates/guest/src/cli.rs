@@ -43,6 +43,9 @@ pub enum Command {
     Threads,
     /// Stop the running turn of a conversation.
     Stop(StopArgs),
+    /// Read or post in a room this bot is a member of (what a woken bot runs on its turn).
+    #[command(subcommand)]
+    Room(RoomCommand),
     /// List the agents this bot may ask.
     Agents,
     /// Show this bot's state and whether the computer is reachable.
@@ -125,6 +128,43 @@ pub struct StopArgs {
     pub conversation: String,
 }
 
+#[derive(Subcommand, Debug)]
+pub enum RoomCommand {
+    /// Print what a room said since a cursor, and the new cursor.
+    Read(RoomReadArgs),
+    /// Post one message into a room (a reply to your turn, or speaking up).
+    Post(RoomPostArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct RoomReadArgs {
+    /// The room (a group's id, as the wake names it).
+    pub room: String,
+    /// Only entries after this cursor (the `since` of the wake, or the `cursor` the last read printed).
+    #[arg(long, value_name = "CURSOR")]
+    pub since: Option<u64>,
+}
+
+#[derive(Args, Debug)]
+pub struct RoomPostArgs {
+    /// The room.
+    pub room: String,
+    /// The conversation the wake named.
+    #[arg(long, value_name = "CONVERSATION")]
+    pub conversation: String,
+    /// The epoch the wake named.
+    #[arg(long, value_name = "EPOCH")]
+    pub epoch: u64,
+    /// The turn key the wake named: with it this post is your reply to your turn.
+    #[arg(long, value_name = "KEY")]
+    pub turn_key: Option<String>,
+    /// A key that makes a repeated post (even from a new process) post once; default: a hash of the post.
+    #[arg(long, value_name = "KEY")]
+    pub nonce: Option<String>,
+    /// The message; `-` reads it from stdin. `(pass)` when you have nothing to add.
+    pub text: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +197,8 @@ mod tests {
         }
         parse(&["read", "cv_1", "--after", "4", "--wait"]).unwrap();
         parse(&["stop", "cv_1"]).unwrap();
+        parse(&["room", "read", "rm_1", "--since", "12", "--json"]).unwrap();
+        parse(&["room", "post", "rm_1", "--conversation", "c", "--epoch", "2", "--turn-key", "k", "hi"]).unwrap();
     }
 
     #[test]
@@ -166,6 +208,8 @@ mod tests {
             &["ask", "house", "--thread", "cv_1", "--ref", "x", "y"][..],
             &["ask", "house", "--thread", "cv_1", "--room", "rm_1", "y"][..],
             &["ask"][..],
+            &["room", "post", "rm_1", "--epoch", "2", "hi"][..],
+            &["room", "listen", "rm_1"][..],
             &["nonsense"][..],
         ] {
             let e = parse(args).unwrap_err();
