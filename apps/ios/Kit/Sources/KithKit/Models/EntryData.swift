@@ -9,6 +9,8 @@ public struct EntryData: Codable, Hashable, Sendable {
     public var compaction: Compaction?
     /// notice: the bot's chat starts over with this handoff.
     public var handoff: HandoffCard?
+    /// The first message of a topic: what folds into one card (see `Topics`). Nil on every other entry and from older hosts.
+    public var topic: EntryTopic?
     public var routineId: String?
     public var runId: String?
     public var text: String?
