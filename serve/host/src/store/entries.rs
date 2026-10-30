@@ -170,6 +170,23 @@ impl Store {
         Ok(st.query_map(params![since, cap], row_entry)?.collect::<rusqlite::Result<_>>()?)
     }
 
+    /// The entries of one chat (a room, threads included) after `since`, oldest first, at most `cap`. A fresh reader
+    /// (`since == 0`) gets the newest `cap`; one with a cursor gets the next `cap` after it, so it skips nothing.
+    pub fn chat_entries_since(&self, chat: &str, since: i64, cap: i64) -> Result<Vec<Entry>> {
+        let c = self.db.locked();
+        let newest = since == 0;
+        let mut st = c.prepare(&format!(
+            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND rev > ?2 ORDER BY seq {} LIMIT ?3",
+            if newest { "DESC" } else { "ASC" }
+        ))?;
+        let mut rows: Vec<Entry> =
+            st.query_map(params![chat, since, cap], row_entry)?.collect::<rusqlite::Result<_>>()?;
+        if newest {
+            rows.reverse();
+        }
+        Ok(rows)
+    }
+
     /// Older main-chat entries (threads load whole with [`Self::thread`]).
     pub fn history(&self, bot_id: &str, before_seq: i64, limit: i64) -> Result<Vec<Entry>> {
         let c = self.db.locked();
@@ -299,6 +316,19 @@ impl Store {
             .collect::<rusqlite::Result<_>>()?;
         rows.reverse();
         Ok(rows)
+    }
+
+    /// The `rev` of the last entry bot guest `bot_guest_id` wrote in `chat` (0 if it never has): where its next read
+    /// of the room starts.
+    pub fn last_rev_of_bot_guest(&self, chat: &str, bot_guest_id: &str) -> i64 {
+        let c = self.db.locked();
+        let n = c.query_row(
+            "SELECT COALESCE(MAX(rev), 0) FROM entries WHERE bot_id = ?1 AND kind = 'user'
+               AND json_extract(data, '$.sender.botId') = ?2",
+            params![chat, bot_guest_id],
+            |r| r.get(0),
+        );
+        logged("last rev of bot guest", n).unwrap_or(0)
     }
 
     /// The `seq` of `bot`'s last reply in `lane` (0 if it hasn't spoken there).

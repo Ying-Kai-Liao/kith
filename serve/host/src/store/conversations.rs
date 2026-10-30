@@ -50,6 +50,23 @@ pub struct RoomQueue {
     pub round: u32,
     #[serde(default)]
     pub spoke: u32,
+    /// An outside bot's turn (`current`) is posted under this key.
+    #[serde(default)]
+    pub turn_key: Option<String>,
+    /// That bot's wake went out already: a restart waits for the post again but does not wake it twice.
+    #[serde(default)]
+    pub woke: bool,
+}
+
+/// What charging a turn to a conversation came to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Charge {
+    /// One turn taken; this many are left.
+    Charged(i64),
+    /// Nothing left (the conversation is open).
+    Spent,
+    /// Not open any more: a newer message or Stop took the lane.
+    Closed,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,8 +170,88 @@ impl Store {
         Ok(st.query_map([], row_conversation)?.collect::<rusqlite::Result<_>>()?)
     }
 
-    /// Writes a step of an open conversation. False when it is no longer open (a newer message or Stop took the lane),
-    /// so a superseded room turn can't write over its successor.
+    /// The conversation `id`, open or not.
+    pub fn conversation(&self, id: &str) -> Option<Conversation> {
+        let c = self.db.locked();
+        c.query_row(&format!("SELECT {COLS} FROM conversations WHERE id = ?1"), [id], row_conversation).ok()
+    }
+
+    /// The lane's newest conversation (the highest epoch), open or not.
+    pub fn newest_conversation(&self, lane: &Lane) -> Option<Conversation> {
+        let c = self.db.locked();
+        c.query_row(
+            &format!("SELECT {COLS} FROM conversations WHERE chat = ?1 AND thread = ?2 ORDER BY epoch DESC LIMIT 1"),
+            params![lane.chat, thread_of(lane)],
+            row_conversation,
+        )
+        .ok()
+    }
+
+    /// Takes one turn from an open conversation and writes the room turn's `queue` in the same step, so a restart
+    /// never sees a turn charged but not queued (or the other way round). Every door that spends a conversation's
+    /// turns goes through here or [`Store::charge_lane`].
+    pub fn charge_turn(&self, id: &str, queue: &RoomQueue) -> Result<Charge> {
+        let c = self.db.locked();
+        let json = serde_json::to_string(queue)?;
+        let n = c.execute(
+            "UPDATE conversations SET left = left - 1, queue = ?2, last_at = ?3 WHERE id = ?1 AND state = 'open' AND left > 0",
+            params![id, json, now_ms()],
+        )?;
+        if n > 0 {
+            return Ok(Charge::Charged(
+                c.query_row("SELECT left FROM conversations WHERE id = ?1", [id], |r| r.get(0))?,
+            ));
+        }
+        let open: i64 =
+            c.query_row("SELECT COUNT(*) FROM conversations WHERE id = ?1 AND state = 'open'", [id], |r| r.get(0))?;
+        Ok(if open > 0 { Charge::Spent } else { Charge::Closed })
+    }
+
+    /// Takes one turn from the lane's open conversation for a turn that is not the room turn's own (an outside bot's
+    /// post or ask). `None` when the lane has no open conversation or nothing is left; the room turn writes the
+    /// remaining count back as it goes, so this and [`Store::charge_turn`] never lose a charge.
+    pub fn charge_lane(&self, lane: &Lane) -> Result<Option<Conversation>> {
+        let c = self.db.locked();
+        let n = c.execute(
+            "UPDATE conversations SET left = left - 1 WHERE chat = ?1 AND thread = ?2 AND state = 'open' AND left > 0",
+            params![lane.chat, thread_of(lane)],
+        )?;
+        if n == 0 {
+            return Ok(None);
+        }
+        Ok(c.query_row(
+            &format!("SELECT {COLS} FROM conversations WHERE chat = ?1 AND thread = ?2 AND state = 'open'"),
+            params![lane.chat, thread_of(lane)],
+            row_conversation,
+        )
+        .ok())
+    }
+
+    /// The lane's open conversation, if any.
+    pub fn open_conversation_of(&self, lane: &Lane) -> Option<Conversation> {
+        let c = self.db.locked();
+        c.query_row(
+            &format!("SELECT {COLS} FROM conversations WHERE chat = ?1 AND thread = ?2 AND state = 'open'"),
+            params![lane.chat, thread_of(lane)],
+            row_conversation,
+        )
+        .ok()
+    }
+
+    /// Writes where the room turn stands (without touching what is left). False when the conversation is no longer
+    /// open (a newer message or Stop took the lane), so a superseded room turn can't write over its successor.
+    pub fn save_queue(&self, id: &str, queue: &RoomQueue) -> Result<bool> {
+        let c = self.db.locked();
+        let queue = serde_json::to_string(queue)?;
+        let n = c.execute(
+            "UPDATE conversations SET queue = ?2, last_at = ?3 WHERE id = ?1 AND state = 'open'",
+            params![id, queue, now_ms()],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Sets a step of an open conversation outright, `left` included (tests build the state a restart finds).
+    #[cfg(test)]
     pub fn save_conversation(&self, id: &str, left: i64, queue: &RoomQueue) -> Result<bool> {
         let c = self.db.locked();
         let queue = serde_json::to_string(queue)?;
