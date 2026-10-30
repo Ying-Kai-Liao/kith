@@ -27,5 +27,13 @@ Profiles are `<service>/<account>` (`^[a-z0-9][a-z0-9._-]{0,39}$`), granted per 
   written (`verification/secrets/`).
 
 ## Other calls
+- `openKeyCard {service, profile, grant?}` -> `{opened, profile, service, grant, vars, replaces, chat, chatId}` (owner only; off the
+  member and bot lists): the owner's own door, behind `kith keys add <service> --profile <account|service/account> [--for AGENT]`
+  (`grant` defaults to `serve`, the host's own reads such as the Grok wake). Opens an ordinary key card with `replaces: true`
+  and the profile fixed (the apps ask for no account name), so an existing profile is rotated (even one a person owns: the
+  owner may) and a new one is created; the key is granted to `grant`. Lands in the owner's chat with `grant` when it is a
+  chat agent (answering resumes it with the usual names-only note), else (`serve`) in the owner's first chat by name, with
+  no resume. Resource `secret:<profile>><grant>`: a repeat joins the same card, and it never joins an agent's `secret:<service>` card.
+  Refusals (400, fixed text): bad service/account/agent name, undeclared service or one with no secrets.
 - `listKeys {}` -> `{keys:[...]}`; `revokeKey {agent, service, profile}` -> `{ok:true}`.
 - Run socket `requestSecret {token, service, purpose}` -> `{ok, carded, message}` (owner token only).

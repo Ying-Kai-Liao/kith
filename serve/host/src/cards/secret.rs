@@ -18,7 +18,7 @@
 //!
 //! "Secrets are never carded" (`resource::classify`) is the other direction: no card lets an agent READ a secret.
 
-use super::{Card, chat_for, follow_up, settings};
+use super::{Card, chat_for, follow_up, lane_of, settings};
 use crate::api::UserError;
 use crate::hub::Hub;
 use crate::runauth::RunIdentity;
@@ -274,7 +274,7 @@ pub async fn request(hub: &Arc<Hub>, o: &Origin, service: &str, purpose: &str) -
             return refused("Keys aren't available right now.");
         }
     };
-    if !show(hub, &chat, &card, service, &purpose, &plan) {
+    if !show(hub, &chat, &card, service, &purpose, &plan, None) {
         return refused("Keys aren't available right now.");
     }
     let owner = crate::api::roles::owner_name(&o.agent).await.unwrap_or_else(|| "the owner".into());
@@ -309,6 +309,7 @@ fn show(
     service: &str,
     purpose: &str,
     plan: &Plan,
+    title: Option<String>,
 ) -> bool {
     if let Some(entry_id) = &card.entry_id
         && let Some(mut e) = hub.store.entry(entry_id)
@@ -318,11 +319,11 @@ fn show(
         hub.set_entry(entry_id, &e.data);
         return hub.store.card_live(&card.id, None, card.run_id.as_deref()).ok().flatten().is_some();
     }
-    let title = match (plan.card, plan.replaces) {
+    let title = title.unwrap_or_else(|| match (plan.card, plan.replaces) {
         ("account", _) => format!("{} wants access to {service}", chat.name),
         (_, true) => format!("{} needs a new key for {service}", chat.name),
         _ => format!("{} needs a key for {service}", chat.name),
-    };
+    });
     let detail = if plan.card == "account" {
         format!("Choose which {service} account {} may use.", chat.name)
     } else {
@@ -660,6 +661,100 @@ pub async fn revoke_key(agent: &str, service: &str, profile: &str) -> anyhow::Re
         return Err(UserError("Couldn't remove access right now".into()).into());
     }
     Ok(json!({"ok": true}))
+}
+
+// ---- the owner's own entry point
+
+/// The owner's chat a key card for `agent` lands in: their chat with it when it is a chat agent (and the answer resumes
+/// that chat), else (`serve`, which has no chat) the owner's first chat by name, so the card is where they already look.
+fn owner_chat(hub: &Hub, agent: &str) -> (crate::store::BotConfig, bool) {
+    let mut mine: Vec<_> = hub
+        .store
+        .bots()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| !r.deleted)
+        .map(|r| r.config)
+        .filter(|c| c.person.is_none() && !c.is_group() && c.hq_agent.is_some())
+        .collect();
+    if let Some(own) = mine.iter().find(|c| c.hq_agent.as_deref() == Some(agent)) {
+        return (own.clone(), true);
+    }
+    mine.sort_by(|a, b| (&a.name, &a.id).cmp(&(&b.name, &b.id)));
+    (mine.into_iter().next().unwrap_or_else(|| lane_of(agent)), false)
+}
+
+/// `openKeyCard {service, profile, grant}` (`kith keys add`): the owner opens a Key card for exactly one profile and
+/// grants it to `grant`. `profile` is `account` or `service/account`. The card is an ordinary key card with the profile
+/// fixed (`replaces`: the apps ask for no account name); a profile that exists is rotated, a new one is created. An
+/// existing profile that belongs to a person is rotated too: this is the owner's own door. Never carries a value.
+pub async fn open_key_card(hub: &Arc<Hub>, service: &str, profile: &str, grant: &str) -> anyhow::Result<Value> {
+    let user = |m: &str| -> anyhow::Error { UserError(m.into()).into() };
+    let service = service.trim();
+    if !label_ok(service) {
+        return Err(user("Name the service in lowercase, like grok."));
+    }
+    let account = match profile.split_once('/') {
+        Some((s, a)) if s == service && label_ok(a) => a,
+        None if label_ok(profile) => profile,
+        _ => return Err(user(BAD_ACCOUNT)),
+    };
+    let profile = format!("{service}/{account}");
+    if !agent_ok(grant) {
+        return Err(user("That agent name can't be used"));
+    }
+    let Some(state) = account_state(grant, service).await else { return Err(user("Keys aren't available right now.")) };
+    if !state.declared || state.secrets.is_empty() || !state.secrets.iter().all(|v| var_ok(v)) {
+        return Err(user("That service doesn't take a key here."));
+    }
+    let exists = state.profiles.iter().any(|p| p.profile == profile);
+    let (chat, own) = owner_chat(hub, grant);
+    let (session, source, bot_id) = if own {
+        // The chat's own session: answering it resumes the agent with a note of names.
+        (format!("acp:{}:", chat.id), "acp", Some(chat.id.clone()))
+    } else {
+        (format!("owner-keys:{grant}"), "acp", None)
+    };
+    let plan = Plan {
+        card: "key",
+        vars: state.secrets.clone(),
+        profile: Some(profile.clone()),
+        account: Some(account.to_owned()),
+        replaces: true,
+        accounts: Vec::new(),
+    };
+    let now = now_ms();
+    let new = NewCard {
+        session,
+        source,
+        bot_id,
+        run_id: None,
+        person: String::new(),
+        agent: grant.to_owned(),
+        answerable_by: None,
+        in_grants: false,
+        tool: TOOL.to_owned(),
+        input: json!({"service": service, "profile": profile, "purpose": ""}).to_string(),
+        // Its own resource, so it never joins an agent's `secret:<service>` card; one writer per profile and agent.
+        resource: format!("secret:{profile}>{grant}"),
+        shown: format!("{profile}\n\nFor: {grant}"),
+        deadline: now.saturating_add(settings(&hub.store).expiry_ms),
+        reply_to: None,
+        asked_by: None,
+    };
+    let card = match hub.store.card_open(&new, now) {
+        Ok(Opened::New(c) | Opened::Joined(c) | Opened::Granted(c)) => c,
+        Err(error) => {
+            tracing::error!(error = format!("{error:#}"), "couldn't store a key card");
+            return Err(user("Keys aren't available right now."));
+        }
+    };
+    let title = format!("{} {profile} key for {grant}", if exists { "Replace the" } else { "Add the" });
+    if !show(hub, &chat, &card, service, "", &plan, Some(title)) {
+        return Err(user("Keys aren't available right now."));
+    }
+    Ok(json!({"opened": true, "profile": profile, "service": service, "grant": grant, "vars": state.secrets,
+              "replaces": exists, "chat": chat.name, "chatId": chat.id}))
 }
 
 // ---- the chat tool
