@@ -108,6 +108,7 @@ const bridge: KithBridge = {
   },
   invites: { takePending: async () => null, keep: async () => {}, has: async () => false,
     kept: async () => null, forget: async () => {} },
+  shares: { takePending: async () => null },
   updates: { state: async () => updates, onChange: none, check() {}, install() {}, setAutoCheck() {}, setAutoDownload() {} },
   files: { begin: unavailable, write: async () => {}, finish: async () => {}, cancel: async () => {} },
   app: {

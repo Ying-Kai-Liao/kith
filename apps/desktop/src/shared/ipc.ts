@@ -7,6 +7,7 @@ import type { CallAnswer, IncomingPanelCall } from './incoming-call'
 import type { IslandRect, IslandScreen, IslandSummary } from './island'
 import type { ErrorReport } from './error-report'
 import type { InviteLink } from './invite'
+import type { SharedItem } from './share-link'
 import type { AccessProgress, AccessTicket, CloudResult, RelayCallError, RelayComputer, RelayState } from './relay'
 
 // The bridge between the main process (host lifecycle, loopback HTTP, tray, windows)
@@ -87,6 +88,8 @@ export type WindowCommand =
   | { kind: 'newChat' }
   /** An invite link arrived; the window takes it with `invites.takePending`. */
   | { kind: 'joinInvite' }
+  /** Something was shared to Kith (`kith://share?...`); the window takes it with `shares.takePending`. */
+  | { kind: 'shareReceived' }
   | { kind: 'search' }
   /** View > Crew / Board: the home sidebar's list. */
   | { kind: 'sidebarMode'; mode: 'crew' | 'board' }
@@ -255,6 +258,10 @@ export interface KithBridge {
     has(computerId: string): Promise<boolean>
     kept(computerId: string): Promise<{ inviteId: string; token: string } | null>
     forget(computerId: string): Promise<void>
+  }
+  /** What was shared to Kith from another app, waiting for the window to offer it to a chat. */
+  shares: {
+    takePending(): Promise<SharedItem | null>
   }
   updates: {
     state(): Promise<UpdateState>

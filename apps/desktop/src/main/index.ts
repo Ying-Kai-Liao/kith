@@ -15,6 +15,7 @@ import { AccountService } from './account'
 import { Updates } from './updates'
 import { handleURL, registerAuthIPC, registerSchemes, urlFromArgv } from './auth'
 import { onInviteLink, registerInviteIPC } from './invites'
+import { onShare, registerShareIPC } from './shares'
 import { registerSpeech } from './speech'
 import { registerScreenIPC } from './screen'
 import { registerCloud } from './cloud'
@@ -287,6 +288,8 @@ if (!app.requestSingleInstanceLock()) {
     registerAuthIPC()
     registerInviteIPC()
     onInviteLink(() => send({ kind: 'joinInvite' }))
+    registerShareIPC()
+    onShare(() => send({ kind: 'shareReceived' }))
     registerSpeech()
     registerScreenIPC()
     registerRelay(registerCloud(account))

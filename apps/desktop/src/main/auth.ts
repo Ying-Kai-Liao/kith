@@ -1,6 +1,7 @@
 import { app, ipcMain, shell } from 'electron'
 import { identity } from './environment'
 import { handleInviteURL } from './invites'
+import { handleShareURL } from './shares'
 
 // Browser sign-ins that come back to this app on a custom scheme (ASWebAuthenticationSession's
 // job on the iPhone): connector OAuth (`kith://oauth`) and the account (`kith://callback`).
@@ -32,6 +33,8 @@ export function registerSchemes() {
 export function handleURL(url: string) {
   // An invite link is not a sign-in return: the window runs the join (main/invites.ts).
   if (handleInviteURL(url, SCHEMES)) return
+  // Something shared to Kith is not a sign-in return either: the window offers it to a chat (main/shares.ts).
+  if (handleShareURL(url, SCHEMES)) return
   const scheme = url.split(':')[0]?.toLowerCase()
   if (pending && scheme === pending.scheme.toLowerCase()) {
     clearTimeout(pending.timer)
