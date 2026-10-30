@@ -128,14 +128,14 @@ fn refused(why: &str) -> Value {
 // ---- kith-auth
 
 /// What a `kith-auth` child came to. Its stderr is never read: nothing it says reaches a person, a log or an agent.
-struct Ran {
-    ok: bool,
-    stdout: Vec<u8>,
+pub(super) struct Ran {
+    pub(super) ok: bool,
+    pub(super) stdout: Vec<u8>,
 }
 
 /// Runs `kith-auth args`, with `stdin` (when given) as its whole standard input. Nothing secret is ever an argument.
 /// None when kith-auth can't be found or started or ran out of time.
-async fn kith_auth(args: &[&str], stdin: Option<Zeroizing<Vec<u8>>>) -> Option<Ran> {
+pub(super) async fn kith_auth(args: &[&str], stdin: Option<Zeroizing<Vec<u8>>>) -> Option<Ran> {
     let bin = crate::remote::account::bin().await?;
     let mut cmd = tokio::process::Command::new(bin);
     #[cfg(test)]

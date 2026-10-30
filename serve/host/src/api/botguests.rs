@@ -789,6 +789,7 @@ async fn bot_method(
         "botAsk" => ask(hub, caller, bot, b).await,
         "botPost" => post(hub, caller, bot, b).await,
         "botRoomRead" => room_read(hub, bot, b).await,
+        "botSecretFetch" => secret_fetch(hub, bot, b).await,
         "botThread" => thread(hub, bot, b).await,
         "botConversations" => conversations(hub, bot, b),
         "botStop" => stop(hub, bot, b),
@@ -1336,10 +1337,79 @@ async fn room_read(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
         rows.iter().filter_map(|e| roles::room_entry(&hub.store, &bot.bot_id, &json!(e), &waits_on)).collect();
     let cursor = rows.iter().map(|e| e.rev).max().unwrap_or(0).max(since);
     let newest = hub.store.newest_conversation(&Lane::main(room));
+    // The secrets waiting for this bot here, so a bot that is only woken by a webhook still learns of them (no value).
+    let waiting = crate::cards::room_secret::pending_for_bot(hub, room, &bot.bot_id);
+    let from = if waiting.is_empty() { String::new() } else { owner_label(hub, bot).await };
+    let secrets: Vec<Value> = waiting.iter().map(|s| crate::cards::room_secret::bot_view(s, &from)).collect();
     Ok(json!({
         "room": room, "conversation": newest.as_ref().map(|c| c.id.clone()), "epoch": newest.as_ref().map(|c| c.epoch),
-        "entries": entries, "cursor": cursor,
+        "entries": entries, "cursor": cursor, "secrets": secrets,
     }))
+}
+
+/// `botSecretFetch {id}`: the secret the owner handed this bot in a room, once. Everything that is not this bot's to
+/// have is the same 404, so ids can't be probed: no such row, another bot's, already taken, lapsed, sent before the bot
+/// joined (or while it had no point), or the bot is no member (any more). Then the claim, the take and the finish, in
+/// this order (the design's section 3 and the architect's fix 3):
+///  1. `pending -> taking`, a compare-and-set: two fetches never both take;
+///  2. `kith-auth once take`, which deletes the item before it prints it;
+///  3. the bot is still active and still a member (an `end_bot` that ran meanwhile wins: the value is dropped);
+///  4. `taking -> taken`, a compare-and-set: the answer goes out only if this step won. A removal that ended the row
+///     meanwhile, or the sweep expiring it, makes it lose and nothing is answered.
+async fn secret_fetch(hub: &Hub, bot: &BotGuest, b: &Value) -> Result<Value> {
+    let gone = || BotError::err(404, Code::NotFound, "No such secret.");
+    let id = b["id"].as_str().filter(|i| !i.is_empty() && i.len() <= 64).ok_or_else(gone)?;
+    let row = hub.store.room_secret(id).ok_or_else(gone)?;
+    // `owner_person.is_none()`: a secret goes to the owner's own bot only, whatever else a room may one day take.
+    let mine = row.recipient_kind == "bot"
+        && row.recipient == bot.bot_id
+        && row.state == "pending"
+        && row.expires_at > now_ms()
+        && bot.owner_person.is_none();
+    if !mine
+        || !crate::chat::group::is_room_member(&hub.store, &row.room, &bot.bot_id)
+        || !row.notice_seq.is_some_and(|n| n > hub.store.room_bot_floor(&row.room, &bot.bot_id))
+    {
+        return Err(gone());
+    }
+    // Like reading a room: only in sync with the cloud, so a bot revoked there takes nothing more.
+    if !crate::remote::sync_lease::wait(hub, SYNC_WAIT).await {
+        return Err(BotError::err(
+            503,
+            Code::Syncing,
+            "This computer is catching up with the Kith cloud. Try again in a moment.",
+        ));
+    }
+    if !hub.store.claim_room_secret(id, now_ms()) {
+        return Err(gone());
+    }
+    let Some(value) = crate::cards::room_secret::take(id, &bot.bot_id).await else {
+        // The item isn't there (or kith-auth failed). Back to pending only if kith-auth still holds it; else it is over.
+        let held = crate::cards::room_secret::held().await.is_some_and(|l| l.iter().any(|i| i["id"] == id));
+        if held {
+            hub.store.finish_room_secret(id, false);
+        } else {
+            hub.store.drop_room_secret(id);
+        }
+        return Err(gone());
+    };
+    let still = hub.store.bot_guest(&bot.bot_id).is_some_and(|g| g.state == BotState::Active)
+        && crate::chat::group::is_room_member(&hub.store, &row.room, &bot.bot_id);
+    if !still {
+        drop(value);
+        hub.store.drop_room_secret(id);
+        return Err(Forbidden.into());
+    }
+    if !hub.store.finish_room_secret(id, true) {
+        drop(value);
+        return Err(gone());
+    }
+    let from = if row.sender_kind == "owner" {
+        owner_label(hub, bot).await
+    } else {
+        hub.store.bot(&row.sender).ok().flatten().map_or_else(|| "a member".to_owned(), |r| r.config.name)
+    };
+    Ok(json!({"id": row.id, "room": row.room, "from": from, "label": row.label, "value": value.as_str()}))
 }
 
 /// A new conversation: its root line in the chat's main lane (the thread) and the mapping row. The root carries the

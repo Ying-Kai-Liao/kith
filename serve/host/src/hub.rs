@@ -333,6 +333,9 @@ impl Hub {
         self.team.cancel_bot(id);
         crate::chat::group::stop(self, id);
         self.store.drop_room(id)?;
+        // Secrets of this room (if a group), and any this bot sent or was handed in another room (if a member).
+        crate::cards::room_secret::end(self, Some(id), None);
+        crate::cards::room_secret::end(self, None, Some(id));
         self.remove_bot_actors(id);
         {
             let _g = self.emit_lock.locked();
@@ -506,6 +509,51 @@ impl Hub {
             self.update_thread_summary(e);
         }
         added
+    }
+
+    /// A room secret's send, in one step under `emit_lock` (the lock every room edit is saved under): `still_a_member`
+    /// is judged on the room as saved right now, then the row and its quiet line are written. A removal and a
+    /// re-add can't slip in between, so nothing is committed to a member who has since left (the architect's fix 1;
+    /// the caller put the value into kith-auth first, so a refusal here has an item to drop). Returns the line.
+    pub fn commit_room_secret(
+        &self,
+        secret: &crate::store::RoomSecret,
+        still_a_member: impl FnOnce(&Store) -> bool,
+        notice: &Value,
+    ) -> Result<Entry> {
+        let (entry, mut landed) = {
+            let _g = self.emit_lock.locked();
+            if !still_a_member(&self.store) {
+                bail!("not a member");
+            }
+            let landed = self.flush_unsaved();
+            if !self.unsaved.locked().queue.is_empty() {
+                bail!("the store is not writing");
+            }
+            self.store.put_room_secret(secret)?;
+            let line = PendingEntry {
+                id: uuid::Uuid::new_v4().to_string(),
+                lane: Lane::main(&secret.room),
+                kind: EntryKind::Notice,
+                turn: self.store.max_turn(&secret.room),
+                data: notice.clone(),
+                at: crate::store::now_ms(),
+            };
+            let written =
+                self.write_pending(&line).and_then(|e| self.store.set_secret_notice(&secret.id, e.seq).map(|()| e));
+            match written {
+                Ok(e) => (e, landed),
+                Err(error) => {
+                    self.store.drop_room_secret(&secret.id);
+                    return Err(error);
+                }
+            }
+        };
+        landed.push(entry.clone());
+        for e in &landed {
+            self.update_thread_summary(e);
+        }
+        Ok(entry)
     }
 
     /// Writes and broadcasts one entry, under `emit_lock`. Clears the store flag when the write lands.

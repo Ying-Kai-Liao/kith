@@ -16,6 +16,7 @@ mod model;
 mod peers;
 mod people;
 mod room_bots;
+mod room_secrets;
 mod schema;
 mod threads;
 
@@ -31,6 +32,7 @@ pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, i
 pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
 pub use room_bots::RoomPoint;
+pub use room_secrets::{RoomSecret, SecretTo};
 
 use crate::LockExt;
 use anyhow::Result;
