@@ -37,6 +37,8 @@ struct ShareContent {
 
     var isEmpty: Bool { link == nil && (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
+    // Main-actor isolated so the non-Sendable NSExtensionItem array never crosses actors (Swift 6 strict concurrency).
+    @MainActor
     static func load(from items: [NSExtensionItem]) async -> ShareContent {
         var content = ShareContent()
         content.title = items.compactMap { $0.attributedTitle?.string }.first
