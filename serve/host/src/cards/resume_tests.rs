@@ -990,8 +990,54 @@ async fn a_card_whose_wake_failed_or_was_forgotten_ends_instead_of_staying_appro
     assert!(r.hub.store.card_resume_claim(&forgotten.id, now_ms()).unwrap());
     resume::settle_queue(&r.hub).await;
     assert_eq!(r.hub.store.card(&forgotten.id).unwrap().state, CardState::Approved, "before its deadline it waits");
+    // One miss is not enough (a commit in progress is in neither file for a moment): the second pass ends it.
+    resume::settle_queue_at(&r.hub, now_ms() + 120_000).await;
+    assert_eq!(r.hub.store.card(&forgotten.id).unwrap().state, CardState::Approved, "one miss is not an answer");
     resume::settle_queue_at(&r.hub, now_ms() + 120_000).await;
     assert_eq!(r.hub.store.card(&forgotten.id).unwrap().state, CardState::Withdrawn);
+}
+
+#[tokio::test]
+async fn a_restart_keeps_the_claim_of_a_card_the_queue_holds_past_its_deadline() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = bot_card_approved(&r, &chat, "");
+    attempt(&r.hub, &card.id).await;
+    assert_eq!(queue_says(&r, &card), "queued");
+    host_crashed(&r);
+    let queued = resume::queued_cards(&r.hub);
+    r.hub.store.cards_restart_keeping(now_ms(), &queued).unwrap();
+    // The deadline passes (a long terminal hold): the sweep leaves the claimed card alone and the take delivers it once.
+    let late = now_ms() + 3 * 3_600_000;
+    r.hub.store.cards_sweep(late).unwrap();
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved);
+    resume::settle_queue_at(&r.hub, late).await;
+    resume::settle_queue_at(&r.hub, late).await;
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved, "the queue still holds it");
+    drive(&r.hub).await;
+    assert_eq!(bot_seen(&card).len(), 1);
+}
+
+#[tokio::test]
+async fn a_bot_that_left_the_group_is_known_to_have_left() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    let other = r.owner_bot("other");
+    claims(&r);
+    off(&r.hub);
+    let group: crate::store::BotConfig = serde_json::from_value(json!({
+        "id": "", "name": "room", "kind": "group", "backend": "claude", "cwd": r.dir.to_string_lossy(),
+        "permission": "default", "tasks": false, "connectors": [], "skills": [], "members": [other],
+    }))
+    .unwrap();
+    let room = r.hub.create_bot(group).unwrap()["id"].as_str().unwrap().to_owned();
+    // `chat` is not a member of the room: the door gives the turn up.
+    let lane = Lane::main(&room);
+    assert!(resume::left_room_for_test(&r.hub, &chat, &lane));
+    assert!(!resume::left_room_for_test(&r.hub, &other, &lane));
+    assert!(!resume::left_room_for_test(&r.hub, &chat, &Lane::main(&chat)));
 }
 
 #[tokio::test]

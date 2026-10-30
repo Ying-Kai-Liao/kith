@@ -35,6 +35,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
@@ -130,6 +131,15 @@ fn request_id(card: &Card) -> String {
     format!("card:{}", card.id)
 }
 
+/// The cards whose request the queue holds right now (queued or in a turn), for a restart to keep their claims.
+pub(crate) fn queued_cards(hub: &Hub) -> Vec<String> {
+    wake::statuses(&state_of(hub))
+        .into_iter()
+        .filter(|(_, how)| matches!(how.as_str(), "queued" | "running"))
+        .filter_map(|(id, _)| id.strip_prefix("card:").map(str::to_owned))
+        .collect()
+}
+
 fn state_of(hub: &Hub) -> PathBuf {
     hub.terminal.env().state
 }
@@ -201,8 +211,8 @@ pub async fn attempt(hub: &Arc<Hub>, id: &str) -> Step {
         return Step::Done;
     };
     match &door {
-        Door::Bot { bot, .. } => {
-            if hub.store.bot(bot).ok().flatten().is_none_or(|b| b.deleted) {
+        Door::Bot { bot, lane } => {
+            if hub.store.bot(bot).ok().flatten().is_none_or(|b| b.deleted) || left_room(hub, bot, lane) {
                 end_all(hub, &group);
                 return Step::Done;
             }
@@ -231,6 +241,7 @@ pub async fn attempt(hub: &Arc<Hub>, id: &str) -> Step {
 /// session itself once nobody holds it); everything the host must start (a person's run, a `kith ask` reply, a bot's
 /// chat, a channel thread) is a host-door item.
 pub(crate) async fn enqueue(hub: &Arc<Hub>, card: &Card, door: &Door) -> anyhow::Result<()> {
+    let _marker = Enqueuing::mark(&card.id);
     let kernel_door = matches!(door, Door::Run { .. }) && card.person.is_empty() && card.reply_to.is_none();
     let text = note_of(hub, card).await;
     let (state, key, id) = (state_of(hub), key_of(door, card), request_id(card));
@@ -284,6 +295,31 @@ pub(crate) async fn enqueue(hub: &Arc<Hub>, card: &Card, door: &Door) -> anyhow:
     Ok(())
 }
 
+/// Cards whose request is on its way into the queue. [`settle_queue_at`] must not read "not in the queue" as "forgotten"
+/// for these: the item is written a moment after the claim. `DONE` counts finished enqueues, so a settle whose read
+/// overlapped one can tell.
+static ENQUEUING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
+static ENQUEUED: AtomicUsize = AtomicUsize::new(0);
+/// Cards the queue's files did not show at the last settle (neither queued nor answered). A commit writes the answer
+/// before it removes the item, but a read of the files is not atomic across them, so one miss is not yet an answer.
+static MISSED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
+
+struct Enqueuing(String);
+
+impl Enqueuing {
+    fn mark(id: &str) -> Self {
+        lock(&ENQUEUING).insert(id.to_owned());
+        Self(id.to_owned())
+    }
+}
+
+impl Drop for Enqueuing {
+    fn drop(&mut self) {
+        lock(&ENQUEUING).remove(&self.0);
+        ENQUEUED.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 /// The card of a kernel run-door wake says who holds its session while the wake waits for the writer (L2).
 async fn show_holder(hub: &Arc<Hub>, card: &Card) {
     let Some(Door::Run { session }) = door_of(card) else { return };
@@ -315,11 +351,21 @@ pub(crate) async fn settle_queue_at(hub: &Arc<Hub>, now: i64) {
         return;
     }
     let state = state_of(hub);
+    let (before, count) = (lock(&ENQUEUING).clone(), ENQUEUED.load(Ordering::SeqCst));
     let known = wake::blocking(move || wake::statuses(&state)).await.unwrap_or_default();
+    // An enqueue that began, ran or ended during the read may have written its item after the read saw the folder.
+    let racing = count != ENQUEUED.load(Ordering::SeqCst);
     for card in &cards {
         let how = known.get(&request_id(card)).map(String::as_str);
+        let unsure = racing || before.contains(&card.id) || lock(&ENQUEUING).contains(&card.id);
+        if how.is_some() || unsure {
+            lock(&MISSED).remove(&card.id);
+        }
         // Failed, or forgotten by the queue (its memory is a week) once the card's deadline has passed: nothing can come.
-        if how == Some("failed") || (how.is_none() && now > card.deadline) {
+        // "Forgotten" must be seen on two passes in a row: a commit in progress is in neither file for a moment.
+        let gone = how.is_none() && !unsure && now > card.deadline && !lock(&MISSED).insert(card.id.clone());
+        if how == Some("failed") || gone {
+            lock(&MISSED).remove(&card.id);
             failed(hub, card);
             continue;
         }
@@ -554,9 +600,21 @@ fn end_for_stop(hub: &Hub, card: &Card) {
 
 // ---- door (a): a bot's chat
 
+/// Whether `bot` has left (or never was in) the group the lane is in: sending there would start a fresh actor in a room
+/// the bot no longer belongs to. A chat that is not a group (the bot's own chat, anything unknown) is never judged.
+fn left_room(hub: &Hub, bot: &str, lane: &Lane) -> bool {
+    if lane.chat == bot {
+        return false;
+    }
+    match hub.store.bot(&lane.chat).ok().flatten() {
+        Some(row) if row.config.is_group() => row.deleted || !row.config.members.iter().any(|m| m == bot),
+        _ => false,
+    }
+}
+
 fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, note: &str) {
     let alive = hub.store.bot(bot).ok().flatten().is_some_and(|b| !b.deleted);
-    if !alive {
+    if !alive || left_room(hub, bot, lane) {
         end_all(hub, group);
         return give_up(hub, run);
     }
@@ -777,6 +835,11 @@ async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&st
 }
 
 /// Gives back what the host took and lost track of, as if `ttl` had passed.
+#[cfg(test)]
+pub(crate) fn left_room_for_test(hub: &Hub, bot: &str, lane: &Lane) -> bool {
+    left_room(hub, bot, lane)
+}
+
 #[cfg(test)]
 pub(crate) fn reap_for_test(hub: &Hub, ttl: Duration) {
     reap_after(hub, ttl);

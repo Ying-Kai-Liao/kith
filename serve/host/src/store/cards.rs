@@ -601,14 +601,27 @@ impl Store {
     /// After a host restart: live waits are gone, so live cards park; an approved card whose grant was not recorded
     /// gets it (C4); a resume a door took whose turn never started (the queue it waited in is gone) is owed again
     /// (M5). Returns the cards that parked.
+    #[cfg(test)]
     pub fn cards_restart(&self, now: i64) -> Result<Vec<Card>> {
+        self.cards_restart_keeping(now, &[])
+    }
+
+    /// [`Self::cards_restart`], except the claims of the cards in `queued` stay: the kernel's queue still holds their
+    /// request, so releasing the claim would let the sweep expire a card past its deadline whose wake is yet to come.
+    pub fn cards_restart_keeping(&self, now: i64, queued: &[String]) -> Result<Vec<Card>> {
         let c = self.db.locked();
         let parked = move_where(&c, "state IN ('pending','live')", params![], CardState::Parked)?;
         c.execute(
             "UPDATE cards SET granted_at = ?1 WHERE state = 'approved' AND allowed = 1 AND granted_at IS NULL",
             [now],
         )?;
-        c.execute("UPDATE cards SET resumed_at = NULL WHERE resumed_at IS NOT NULL AND applied_at IS NULL", [])?;
+        let claimed: Vec<String> = {
+            let mut q = c.prepare("SELECT id FROM cards WHERE resumed_at IS NOT NULL AND applied_at IS NULL")?;
+            q.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        for id in claimed.iter().filter(|id| !queued.contains(id)) {
+            c.execute("UPDATE cards SET resumed_at = NULL WHERE id = ?1", [id])?;
+        }
         Ok(parked)
     }
 
