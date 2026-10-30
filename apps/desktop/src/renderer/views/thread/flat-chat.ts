@@ -1,4 +1,5 @@
-import type { Entry } from '../../../shared/models.ts'
+import { endLine, type Conversation } from '../../../shared/conversation.ts'
+import { isChat, type Entry } from '../../../shared/models.ts'
 import { isDeliveryTool } from '../../../shared/thread-feed.ts'
 import { groupExchanges, type BotExchange } from './bot-exchange.ts'
 
@@ -8,6 +9,8 @@ export type ChatItem =
   | { id: string; kind: 'exchanges'; entry: Entry; exchanges: BotExchange[] }
   /** The tool calls between two messages as one collapsed "N steps" row; `id` is `steps-<first tool entry id>`. */
   | { id: string; kind: 'steps'; entries: Entry[] }
+  /** Where a room run ended: "Used all 10 turns", "Worked it out · 6 of 10 turns", "You stopped it · 4 of 10 turns used". */
+  | { id: string; kind: 'ending'; conversation: Conversation; text: string; more: boolean }
 
 /** Your own message keeps its `user-<nonce>` id when the host confirms it, so the row doesn't redraw. */
 export const stableId = (e: Entry) => (e.kind === 'user' && e.data.clientNonce ? `user-${e.data.clientNonce}` : e.id)
@@ -31,7 +34,7 @@ export function flatEntries(entries: Entry[]): Entry[] {
  * whole (Grok Bot's `send_message`); what it writes along the way is trace, except its tool calls: a run of them
  * is one collapsed steps item (file deliveries left out; a run of only those shows nothing). Runs of bot exchanges with one peer become one item.
  */
-export function buildChat(entries: Entry[]): ChatItem[] {
+export function buildChat(entries: Entry[], endings: Conversation[] = []): ChatItem[] {
   const out: ChatItem[] = []
   let lastDate: number | null = null
   let lastAuthor: string | null = null
@@ -65,11 +68,31 @@ export function buildChat(entries: Entry[]): ChatItem[] {
       continue
     }
     // In a group each bot is its own author.
-    const author = e.kind === 'user' ? 'user' : e.kind === 'agent' ? `agent:${e.data.author ?? ''}` : e.kind
+    const author = e.kind === 'user' ? (e.data.sender?.botId ? `bot:${e.data.sender.botId}` : 'user') : e.kind === 'agent' ? `agent:${e.data.author ?? ''}` : e.kind
     out.push({ id, kind: 'entry', entry: e, groupStart: author !== lastAuthor })
-    lastAuthor = author === 'user' || e.kind === 'agent' ? author : null
+    lastAuthor = author === 'user' || e.kind === 'agent' || e.kind === 'user' ? author : null
     lastDate = at
   }
   flush()
-  return out
+  return endings.length ? withEndings(out, entries, endings) : out
+}
+
+/**
+ * Each ended run's line goes after the last reply that belonged to it (a late one came after the end, so it doesn't
+ * count), or after the message that opened it when nobody answered. A run whose messages aren't loaded has no place.
+ */
+function withEndings(items: ChatItem[], entries: Entry[], endings: Conversation[]): ChatItem[] {
+  const flat = flatEntries(entries)
+  const after = new Map<string, ChatItem[]>()
+  for (const c of endings) {
+    const line = endLine(c)
+    if (!line) continue
+    const replies = flat.filter((e) => e.data.conversation === c.id && e.data.late !== true && isChat(e))
+    const anchor = replies.at(-1) ?? flat.find((e) => e.id === c.opening)
+    if (!anchor) continue
+    const key = stableId(anchor)
+    after.set(key, [...(after.get(key) ?? []), { id: `end-${c.id}`, kind: 'ending', conversation: c, ...line }])
+  }
+  if (!after.size) return items
+  return items.flatMap((item) => (item.kind === 'entry' && after.has(item.id) ? [item, ...after.get(item.id)!] : [item]))
 }

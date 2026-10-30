@@ -15,6 +15,8 @@ import { pluginsFor } from '../marketplace/plugins'
 import { quotesOf, withQuote } from './reply-quote'
 import { composerEnter } from './composer-keyboard'
 import { CommandMenu, useCommandMenu } from './CommandMenu'
+import { TurnsChip, TurnsPopover } from './ConversationLine'
+import { clampTurns, DEFAULT_TURNS } from '@shared/conversation'
 import { ComposerAttachment } from './ComposerAttachment'
 import { useDictation } from './dictation'
 import { builtInCommand, slashCommands, slashQuery, type SlashCommand } from './slash-commands'
@@ -25,8 +27,10 @@ type Trailing = 'interrupt' | 'stop' | 'call' | 'send'
  * The message box under a chat: send, or stop while the bot (or the group) is
  * working there. In a group, typing `@` suggests its bots; with one bot, a leading `/` lists its commands.
  */
-export function Composer({ botId, onCall, onInterrupt }: {
+export function Composer({ botId, onCall, onInterrupt, liveLine = false }: {
   botId: string
+  /** The room's live line is up above the box and carries Stop, so the box's own doesn't. */
+  liveLine?: boolean
   /** Starts a voice call; while the box is empty it takes the send button's place. */
   onCall?: (() => void) | null
   /** Interrupts the bot while it is speaking in a voice call. */
@@ -35,11 +39,11 @@ export function Composer({ botId, onCall, onInterrupt }: {
   const store = useStore()
   // Remount transient editor state (selection, attachments, IME) when its destination changes.
   return <DestinationComposer key={JSON.stringify([store.contextId, store.computer.id, botId])}
-    botId={botId} onCall={onCall} onInterrupt={onInterrupt} />
+    botId={botId} onCall={onCall} onInterrupt={onInterrupt} liveLine={liveLine} />
 }
 
-function DestinationComposer({ botId, onCall, onInterrupt }: {
-  botId: string; onCall?: (() => void) | null; onInterrupt?: (() => void) | null
+function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
+  botId: string; onCall?: (() => void) | null; onInterrupt?: (() => void) | null; liveLine: boolean
 }) {
   const store = useStore()
   const plugins = useModel(pluginsFor(store))
@@ -67,7 +71,11 @@ function DestinationComposer({ botId, onCall, onInterrupt }: {
   const quote = quotes.get(botId)
   // The folder the next new task starts in; the chat's own shows until one is picked.
   const [taskFolder, setTaskFolder] = useState<StartingPick | null>(null)
-  const working = !!bot && (isWorkingIn(bot, botId, place) || isWorkingIn(bot, botId, null)) && !startsNew
+  const working = !!bot && (isWorkingIn(bot, botId, place) || isWorkingIn(bot, botId, null)) && !startsNew && !liveLine
+  // In a group, how many turns this message gives the room; it starts at 10 for every message.
+  const inGroup = !!bot && isGroup(bot)
+  const [turns, setTurns] = useState(DEFAULT_TURNS)
+  const [turnsOpen, setTurnsOpen] = useState(false)
   const empty = !draft.trim() && !files.length
   const canSend = !empty && (store.connection.kind === 'online' || (store.canQueue && !files.length))
   const canAttach = !!bot
@@ -172,7 +180,9 @@ function DestinationComposer({ botId, onCall, onInterrupt }: {
     const command = files.length ? null : builtInCommand(bot, draft)
     if (command) return run(command)
     if (!canSend) return
-    store.send(withQuote(draft, quote), botId, null, files, undefined, pasted.current, startsNew, newTask ? (taskFolder?.start ?? null) : null)
+    store.send(withQuote(draft, quote), botId, null, files, undefined, pasted.current, startsNew, newTask ? (taskFolder?.start ?? null) : null, null, inGroup ? clampTurns(turns) : null)
+    setTurns(DEFAULT_TURNS)
+    setTurnsOpen(false)
     pasted.current = []
     quotes.set(botId, null)
     setNewTask(false)
@@ -216,6 +226,7 @@ function DestinationComposer({ botId, onCall, onInterrupt }: {
         }}
       >
         <div className="composer-surface">
+          {inGroup && !empty && turnsOpen ? <TurnsPopover turns={turns} setTurns={setTurns} close={() => { setTurnsOpen(false); field.current?.focus() }} /> : null}
           <CommandMenu commands={menu.shown} index={menu.index} hover={menu.hover} pick={run} />
           <ComposerReveal open={!!quote}>
             <div className="reply-chip">
@@ -278,6 +289,12 @@ function DestinationComposer({ botId, onCall, onInterrupt }: {
                   if (skillsShown && e.target.value === '/') void plugins.refresh()
                 }}
                 onKeyDown={(e) => {
+                  // With the turns popover open, Up and Down step the number; Return still sends.
+                  if (turnsOpen && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+                    e.preventDefault()
+                    setTurns((n) => clampTurns(n + (e.key === 'ArrowUp' ? 1 : -1)))
+                    return
+                  }
                   if (menu.onKey(e, composing.current || e.nativeEvent.isComposing || e.keyCode === 229)) return
                   // Return sends, Shift-Return adds a line; an input method's Return picks its candidate.
                   const action = composerEnter({ key: e.key, shiftKey: e.shiftKey, altKey: e.altKey, repeat: e.repeat, isComposing: composing.current || e.nativeEvent.isComposing, keyCode: e.keyCode })
@@ -318,6 +335,7 @@ function DestinationComposer({ botId, onCall, onInterrupt }: {
                 <Icon name={dictation.listening ? 'stop.fill' : 'mic'} size={dictation.listening ? 11 : 13} weight="medium" />
               </button>
             ) : null}
+            {inGroup && !empty ? <TurnsChip turns={turns} open={turnsOpen} toggle={() => setTurnsOpen((o) => !o)} /> : null}
             <button
               className={trailing === 'interrupt' ? 'press composer-send interrupt' : 'press composer-send'}
               disabled={!enabled}

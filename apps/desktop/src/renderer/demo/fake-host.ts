@@ -48,6 +48,9 @@ export class FakeHost {
     revokedAt: state === 'revoked' ? Date.now() - 3_600_000 : null, revokedWhy: null, personId: `bot-${i}`, conversations: [],
   }))
 
+  /** Room conversations by `chat`+lane, as the host's `conversation` event has them. */
+  private conversations = new Map<string, Record<string, unknown>>()
+
   constructor(
     readonly version: string,
     now = Date.now(),
@@ -60,10 +63,63 @@ export class FakeHost {
     if (typeof location !== 'undefined' && /[?&]secrets\b/.test(location.search)) {
       for (const s of story.secretEntries) this.add({ botId: s.botId, threadId: null, kind: s.kind, data: s.data }, s.id, now - s.at * 60_000, false)
     }
+    // `?room=live|livebot|idle|spent|quiet|stopped|late|bot` puts a room run in the Ship room (screenshots of the agent conversations).
+    const room = typeof location !== 'undefined' ? /[?&]room=(\w+)/.exec(location.search)?.[1] : undefined
+    if (room) this.seedRoom(room, now)
     for (const b of this.bots.values()) {
       this.refreshPreview(b)
       b.rev = ++this.rev
     }
+  }
+
+  private conversationOf(chat: string, lane: string | null) {
+    return this.conversations.get(`${chat}\u0000${lane ?? ''}`) ?? null
+  }
+
+  private setConversation(c: Record<string, unknown>, emit = true) {
+    this.conversations.set(`${c.chat}\u0000${(c.lane as string | null) ?? ''}`, c)
+    if (emit) this.emit({ type: 'conversation', ...c })
+  }
+
+  /** One run of the Ship room in a state; the entries it left are in the story's room already. */
+  private seedRoom(kind: string, now: number) {
+    const min = (n: number) => now - n * 60_000
+    const bot = kind === 'livebot' || kind === 'bot'
+    const grok = { botId: 'bg_grok', name: 'Grok', provider: 'grok' }
+    const ship = this.bots.get('ship')
+    this.botGuests.push({
+      botId: 'bg_grok', name: 'Grok', provider: 'grok', state: 'active', ownerPerson: null, ownerName: null, agents: [], limits: { ratePerHour: 60, concurrent: 2 },
+      connected: true, createdAt: min(3000), joinedAt: min(3000), decidedAt: min(3000), decidedBy: 'kai', lastSeenAt: min(2), revokedAt: null, revokedWhy: null, personId: 'bot-grok', conversations: [],
+    })
+    if (bot && ship) ship.members = [...ship.members, 'bg_grok']
+    const add = (id: string, kind: Entry['kind'], at: number, data: Entry['data']) => this.add({ botId: 'ship', threadId: null, kind, data }, id, at, false)
+    if (bot) add('room-join', 'notice', min(14), { notice: 'botJoined', bot: grok, style: 'info', text: 'Grok joined · sees this room from now on' })
+    add('room-u1', 'user', min(12), { text: bot ? '@Grok what do people say about the name "Your crew"?' : 'Fine, static on mobile. Now the copy block.', status: 'sent' })
+    if (bot) {
+      add('room-g1', 'user', min(11), { text: 'Mostly warm. "Crew" reads as people you trust; two replies called it a gaming word. Nobody confused it with a product.', status: 'sent', sender: grok, conversation: 'rc1' })
+      add('room-g2', 'user', min(5), { text: 'One more thing: nobody asked, but the domain is free.', status: 'sent', sender: grok, unprompted: true })
+    }
+    add('room-a1', 'agent', min(10), { text: bot ? 'Good. Keeping it. @Grok any name clash in the AI space?' : 'The copy block is two lines: what it is, and who it is for.', final: true, author: 'scout', conversation: 'rc1' })
+    if (kind === 'late' || kind === 'stopped') {
+      add('room-a2', 'agent', min(9), { text: 'Yes, but still: the first frame only, no motion under 600 px.', final: true, author: 'reviewer', conversation: 'rc1' })
+    }
+    if (kind === 'late') {
+      add('room-late', 'agent', min(6), { text: 'Then mobile is a static PNG, 20 minutes more. I will draft the copy block next.', final: true, author: 'scout', conversation: 'rc1', late: true, lateWhy: 'stopped' })
+      add('room-late-bot', 'user', min(4), { text: 'Also: it clashes with a small startup, but not in this space.', status: 'sent', sender: grok, conversation: 'rc1', late: true, lateWhy: 'ended' })
+    }
+    const base = { conversation: 'rc1', chat: 'ship', lane: null, budget: 10, opening: 'room-u1', waitUntil: null, current: null }
+    const states: Record<string, Record<string, unknown>> = {
+      live: { ...base, left: 6, state: 'open', endedWhy: null, current: { id: 'scout', kind: 'agent', name: 'scout' } },
+      livebot: { ...base, left: 7, state: 'open', endedWhy: null, current: { id: 'bg_grok', kind: 'bot', name: 'Grok' }, waitUntil: now + 5 * 60_000 },
+      bot: { ...base, left: 7, state: 'open', endedWhy: null, current: { id: 'bg_grok', kind: 'bot', name: 'Grok' }, waitUntil: now + 5 * 60_000 },
+      idle: { ...base, left: 8, state: 'open', endedWhy: null },
+      spent: { ...base, left: 0, state: 'ended', endedWhy: 'spent' },
+      quiet: { ...base, left: 4, state: 'ended', endedWhy: 'quiet' },
+      stopped: { ...base, left: 6, state: 'stopped', endedWhy: 'stopped' },
+      late: { ...base, left: 6, state: 'stopped', endedWhy: 'stopped' },
+    }
+    const c = states[kind]
+    if (c) this.setConversation(c, false)
   }
 
   // MARK: events
@@ -175,13 +231,13 @@ export class FakeHost {
   }
 
   /** One bot answers in a chat or thread after a short "Typing…". */
-  private async answer(responder: string, chat: string, thread: string | null, text: string) {
+  private async answer(responder: string, chat: string, thread: string | null, text: string, conversation?: string) {
     const turn = (this.turns.get(responder) ?? 0) + 1
     this.turns.set(responder, turn)
     this.setStatus(responder, 'working', 'Typing…', chat, thread)
     await sleep(TYPING_MS + Math.random() * 600)
     if (this.turns.get(responder) !== turn) return
-    this.add({ botId: chat, threadId: thread, kind: 'agent', data: { text, final: true, author: responder } })
+    this.add({ botId: chat, threadId: thread, kind: 'agent', data: { text, final: true, author: responder, ...(conversation ? { conversation } : {}) } })
     this.settle(responder)
   }
 
@@ -191,6 +247,29 @@ export class FakeHost {
     const i = this.nextReply.get(botId) ?? 0
     this.nextReply.set(botId, i + 1)
     return pool[i % pool.length]!
+  }
+
+  /** A message to a group with turns: a run that charges one turn per reply and ends when they are spent. */
+  private async runRoom(chat: Bot, thread: string | null, opening: Entry, budget: number) {
+    const old = this.conversationOf(chat.id, thread)
+    if (old?.state === 'open') this.setConversation({ ...old, state: 'ended', endedWhy: 'newer', current: null, waitUntil: null })
+    const id = crypto.randomUUID()
+    const run = { conversation: id, chat: chat.id, lane: thread, budget, left: budget, state: 'open', endedWhy: null, current: null, waitUntil: null, opening: opening.id }
+    this.setConversation(run)
+    const members = chat.members.filter((m) => this.bots.has(m))
+    for (let left = budget; left > 0; ) {
+      for (const m of members.slice(0, 2)) {
+        if (left <= 0) break
+        const now = this.conversationOf(chat.id, thread)
+        if (now?.conversation !== id || now.state !== 'open') return
+        this.setConversation({ ...run, left, current: { id: m, kind: 'agent', name: this.bots.get(m)!.name } })
+        await this.answer(m, chat.id, thread, this.replyText(m), id)
+        const after = this.conversationOf(chat.id, thread)
+        if (after?.conversation !== id || after.state !== 'open') return
+        left--
+      }
+    }
+    this.setConversation({ ...run, left: 0, state: 'ended', endedWhy: 'spent' })
   }
 
   private async converse(chat: Bot, thread: string | null, text: string) {
@@ -226,15 +305,16 @@ export class FakeHost {
       case 'usage':
         return story.usage(Date.now())
       case 'history':
-        return { entries: [] }
+        return { entries: [], conversation: this.conversationOf(str('botId'), null) }
       case 'thread':
-        return { entries: this.entries.filter((e) => e.botId === str('botId') && e.threadId === str('rootId')) }
+        return { entries: this.entries.filter((e) => e.botId === str('botId') && e.threadId === str('rootId')), conversation: this.conversationOf(str('botId'), str('rootId') || null) }
       case 'send': {
         const chat = this.bots.get(str('botId'))
         if (!chat) throw fail('That bot was deleted.')
         const thread = str('threadId') || null
         const entry = this.add({ botId: chat.id, threadId: thread, kind: 'user', data: { text: str('text'), status: 'sent', clientNonce: str('clientNonce') } })
-        void this.converse(chat, thread, str('text'))
+        if (chat.kind === 'group' && typeof b.budget === 'number') void this.runRoom(chat, thread, entry, b.budget)
+        else void this.converse(chat, thread, str('text'))
         return { entry }
       }
       case 'markRead': {
@@ -274,6 +354,9 @@ export class FakeHost {
       }
       case 'stop': {
         const id = str('botId')
+        const run = this.conversationOf(id, str('threadId') || null)
+        if (run?.state === 'open') this.setConversation({ ...run, state: 'stopped', endedWhy: 'stopped', current: null, waitUntil: null })
+        for (const m of this.bots.get(id)?.members ?? []) this.turns.set(m, (this.turns.get(m) ?? 0) + 1)
         this.turns.set(id, (this.turns.get(id) ?? 0) + 1)
         this.settle(id)
         return {}
