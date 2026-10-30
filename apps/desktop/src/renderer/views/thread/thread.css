@@ -429,6 +429,21 @@
 .chat-earlier:hover {
   color: var(--secondary);
 }
+.chat-steps-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.chat-steps-failed {
+  color: var(--danger);
+  white-space: pre;
+}
+.chat-steps-chevron {
+  transition: transform 0.15s ease;
+}
+.chat-steps-chevron.open {
+  transform: rotate(90deg);
+}
 
 /* The conversation's room for the panel changes in one step; the panel itself slides over it, out
    of the flow, so a long chat is laid out once per open or close, not on every frame. */
