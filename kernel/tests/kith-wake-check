@@ -140,6 +140,21 @@ python3 "$W" enqueue run-s1 --id ask:1/1 --agent designer -- answer >/dev/null
 is "a host-door request makes a run-door item a host-door one" "$(python3 "$W" enqueue run-s1 --id card:13 --agent designer --door host -- allowed)/$(python3 "$W" ls --json | python3 -c 'import json,sys; print([i["door"] for i in json.load(sys.stdin) if i["session"]=="run-s1"][0])')" "merged/host"
 python3 "$W" withdraw run-s1 >/dev/null
 
+# --- take lists the requests, and a host-door request upgrades the item also while a turn runs -------------------------
+python3 "$W" enqueue acp:c5:t1 --id card:20 --agent designer --door host --why 'card answered' -- allowed >/dev/null
+python3 "$W" enqueue acp:c5:t1 --id ci:o/r#1@aaaa/s --agent designer --door host -- 'checks passed' >/dev/null
+turn=$(python3 "$W" take --holder $$ --session acp:c5:t1)
+is "take lists each request with its words" "$(python3 -c 'import json,sys; print([(r["id"], r["why"], r["text"]) for r in json.loads(sys.argv[1])["requests"]])' "$turn")" "[('card:20', 'card answered', 'allowed'), ('ci:o/r#1@aaaa/s', '', 'checks passed')]"
+python3 "$W" done "$(field "$turn" run)"
+python3 "$W" enqueue run-s2 --id ask:2/1 --agent designer -- answer >/dev/null
+python3 - "$W" <<'PY'
+import importlib.machinery as m, importlib.util as u, sys
+l = m.SourceFileLoader('w', sys.argv[1]); sp = u.spec_from_loader('w', l); w = u.module_from_spec(sp); l.exec_module(w)
+p = w.item_path('run-s2'); it = w.read_json(p, {}); w.start_turn(p, it, 1)   # a run-door turn is running
+PY
+python3 "$W" enqueue run-s2 --id card:21 --agent designer --door host -- 'asker must hear' >/dev/null
+is "a host-door request upgrades the item also while a run-door turn runs" "$(python3 "$W" ls --json | python3 -c 'import json,sys; print([i["door"] for i in json.load(sys.stdin) if i["session"]=="run-s2"][0])')" host
+
 # --- the deliverer died (host or Mac restart): answered from the transcript, or owed again ---------------------------
 python3 "$W" enqueue acp:c2:t1 --id card:9 --agent designer --door host -- seen >/dev/null
 gone=$(dead_pid)

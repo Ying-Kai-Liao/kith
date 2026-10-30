@@ -79,17 +79,17 @@ fn state(r: &Rig) -> std::path::PathBuf {
 
 /// Where the kernel's queue has a request: queued, running, or how it was answered.
 fn queue_says(r: &Rig, card: &Card) -> String {
-    crate::wake::status(&state(r), &format!("card:{}", card.id))
+    crate::wake::status(&state(r), &format!("card:{}", card.id)).unwrap_or_default()
 }
 
 async fn queue_says_of(r: &Rig, id: &str, want: &str) {
     for _ in 0..200 {
-        if crate::wake::status(&state(r), id) == want {
+        if crate::wake::status(&state(r), id).as_deref() == Some(want) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
-    panic!("the queue never said {want} of {id}: {}", crate::wake::status(&state(r), id));
+    panic!("the queue never said {want} of {id}: {:?}", crate::wake::status(&state(r), id));
 }
 
 async fn queue_says_eventually(r: &Rig, card: &Card, want: &str) {
@@ -262,9 +262,20 @@ async fn an_approval_after_the_park_resumes_the_session_exactly_once_even_with_a
     assert_eq!(queue_says(&r, &card), "queued", "the kernel's queue holds it, once");
     assert_eq!(crate::wake::ls(&state(&r)).iter().map(|i| i["requests"].as_array().unwrap().len()).sum::<usize>(), 1);
     assert!(r.hub.store.card(&card.id).unwrap().resumed_at.is_some());
-    assert!(r.hub.store.card(&card.id).unwrap().applied_at.is_some(), "the queue has it: the host owes nothing (M5)");
+    assert!(r.hub.store.card(&card.id).unwrap().applied_at.is_none(), "the kernel's turn has not ended yet (W2)");
     assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 0);
-    // A restart owes it no more: the run that carried the yes started.
+    // A restart offers it again under the same id: the queue drops the copy, so there is still one wake.
+    assert!(r.hub.store.cards_restart(now_ms()).is_ok());
+    assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 1);
+    assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
+    assert_eq!(tests_seen::of(&card.session).len(), 1);
+    assert_eq!(crate::wake::ls(&state(&r)).iter().map(|i| i["requests"].as_array().unwrap().len()).sum::<usize>(), 1);
+    // Once the kernel's turn commits, the card is delivered and a restart owes it no more.
+    let turn = crate::wake::take_session(&state(&r), "once-a");
+    assert!(turn.unwrap().is_none(), "the run door's item is the kernel's, not the host's to take");
+    commit_kernel_turn(&r, &card);
+    resume::settle_kernel(&r.hub).await;
+    assert!(r.hub.store.card(&card.id).unwrap().applied_at.is_some());
     assert!(r.hub.store.cards_restart(now_ms()).is_ok());
     assert_eq!(r.hub.store.cards_awaiting_resume(now_ms()).len(), 0);
     // The grant is still there for the resumed run's own ask, which uses it once (L3: no profile carries it).
@@ -288,7 +299,7 @@ async fn a_live_yes_is_not_resumed() {
 }
 
 #[tokio::test]
-async fn a_held_session_keeps_the_resume_owed_and_shows_the_holder_until_it_exits() {
+async fn a_held_session_keeps_its_wake_in_the_queue_and_shows_the_holder_until_it_exits() {
     let r = Rig::new().await;
     r.owner_bot("house");
     let state = claims(&r);
@@ -297,24 +308,55 @@ async fn a_held_session_keeps_the_resume_owed_and_shows_the_holder_until_it_exit
     let (mut sh, pid) = sleeper();
     claim::take(&state, "held-a", Kind::Terminal, pid, false).unwrap().unwrap();
 
-    assert_eq!(attempt(&r.hub, &card.id).await, Step::Retry);
-    assert!(tests_seen::of(&card.session).is_empty());
-    assert!(r.hub.store.card(&card.id).unwrap().resumed_at.is_none(), "a refused claim does not set the marker");
+    // The kernel's queue waits for the writer (the host does not), and the card says who holds the session.
+    assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
+    assert_eq!(queue_says(&r, &card), "queued");
+    assert!(r.hub.store.card(&card.id).unwrap().resumed_at.is_some());
     let held = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().data["held"].clone();
     assert_eq!(
         (held["pid"].as_u64(), held["kind"].as_str(), held["session"].as_str()),
         (Some(u64::from(pid)), Some("terminal"), Some("held-a"))
     );
+    // Its deadline passes while it waits: the yes is not silently lost to the sweep.
+    sweep_at(&r.hub, now_ms() + 25 * 3_600_000);
+    assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Approved, "an enqueued yes is not expired");
 
-    // The holder exits: the next try goes through, once, and the card no longer says held.
+    // The holder exits: the card no longer says held, and a second try finds nothing owed.
     signal(pid);
     sh.wait().unwrap();
-    assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
-    assert_eq!(tests_seen::of(&card.session).len(), 1);
-    assert_eq!(attempt(&r.hub, &card.id).await, Step::Done, "a second try finds nothing owed");
-    assert_eq!(tests_seen::of(&card.session).len(), 1);
-    assert_eq!(queue_says(&r, &card), "queued");
+    resume::settle_kernel(&r.hub).await;
     assert!(r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap().data["held"].is_null());
+    assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
+    assert_eq!(tests_seen::of(&card.session).len(), 1, "one wake");
+    commit_kernel_turn(&r, &card);
+    resume::settle_kernel(&r.hub).await;
+    assert!(r.hub.store.card(&card.id).unwrap().applied_at.is_some());
+}
+
+/// The kernel delivered a run-door turn and its turn ended (W2): what the run door's `deliver` does, without a claude.
+fn commit_kernel_turn(r: &Rig, card: &Card) {
+    let item = crate::wake::ls(&state(r))
+        .into_iter()
+        .find(|i| i["requests"].as_array().unwrap().iter().any(|q| q["id"] == format!("card:{}", card.id)));
+    let session = item.unwrap()["session"].as_str().unwrap().to_owned();
+    let st = state(r);
+    // deliver = take for the run door: the test is the deliverer.
+    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith-wake");
+    let out = Command::new("python3")
+        .arg("-c")
+        .arg(
+            "import sys, importlib.machinery as m, importlib.util as u\n\
+             l = m.SourceFileLoader('w', sys.argv[1]); sp = u.spec_from_loader('w', l); w = u.module_from_spec(sp); l.exec_module(w)\n\
+             p = w.item_path(sys.argv[2]); it = w.read_json(p, {})\n\
+             t = w.start_turn(p, it, 1)\n\
+             w.commit(t['run'])",
+        )
+        .arg(&script)
+        .arg(&session)
+        .env("KITH_STATE", &st)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
 }
 
 fn signal(pid: u32) {
@@ -796,4 +838,130 @@ async fn an_ask_token_takes_only_a_kith_ask_id_to_reply_to() {
     assert_eq!(parse("ask-1", Some("")).unwrap().asked_by, None, "a terminal");
     assert_eq!(parse("ask-1", Some("Not An Agent")).unwrap().asked_by, None);
     assert!(parse("", None).is_none() && parse(&"a".repeat(65), None).is_none() && parse("a/b", None).is_none());
+}
+
+// ---- review of #473
+
+/// What the queue says of a card the host never enqueued itself: written as the kernel would have left it.
+fn answered_in_queue(r: &Rig, id: &str, how: &str) {
+    let path = state(r).join("sessions/queue/answered.json");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let mut all: Value = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(json!({}));
+    all[id] = json!({"how": how, "t": now_ms() / 1000, "run": null});
+    std::fs::write(&path, all.to_string()).unwrap();
+}
+
+#[tokio::test]
+async fn a_card_the_queue_answered_is_applied_but_one_it_failed_or_could_not_be_asked_about_is_not() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let (done, failed) = (bot_card_approved(&r, &chat, "a"), bot_card_approved(&r, &chat, "b"));
+    answered_in_queue(&r, &format!("card:{}", done.id), "answered, exit 1");
+    answered_in_queue(&r, &format!("card:{}", failed.id), "failed");
+    assert_eq!(attempt(&r.hub, &done.id).await, Step::Done);
+    assert!(r.hub.store.card(&done.id).unwrap().applied_at.is_some(), "answered: a restart owes it no more");
+    assert_eq!(attempt(&r.hub, &failed.id).await, Step::Done);
+    let f = r.hub.store.card(&failed.id).unwrap();
+    assert!(f.applied_at.is_none() && f.resumed_at.is_some(), "a failed wake is not delivered, so not applied: {f:?}");
+    // A status call that fails says nothing about the request: it is None, not "unknown", and the card stays owed.
+    let not_a_folder = r.dir.join("a-file");
+    std::fs::write(&not_a_folder, "x").unwrap();
+    assert_eq!(crate::wake::status(&not_a_folder, "card:x"), None);
+}
+
+#[tokio::test]
+async fn the_other_requests_of_a_turn_are_said_even_when_its_cards_died() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let _sam = joined(&r, "member").await;
+    let card = approved_while_gone(&r, guest("sam", "mixed-a"), ls()).await;
+    assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
+    // A kith ask answer for the same session merges into the item; then Stop closes the card.
+    let ask = crate::wake::Request {
+        session: "mixed-a",
+        id: "ask:job-1/1",
+        agent: "house",
+        person: Some("sam"),
+        room: None,
+        host_door: true,
+        why: "architect answered",
+        text: "use the staging box",
+    };
+    assert_eq!(crate::wake::enqueue(&state(&r), &ask).unwrap(), crate::wake::Queued::New);
+    r.hub.store.card_resume_close(&card.id).unwrap();
+    drive(&r.hub).await;
+    let spawned = tests_seen::spawns_for("mixed-a");
+    assert_eq!(spawned.len(), 1, "the ask answer is delivered");
+    let note = &spawned[0].args[3];
+    assert!(note.contains("use the staging box"), "{note}");
+    assert!(!note.contains(&card.shown) && !note.contains("0 things"), "{note}");
+    assert_eq!(crate::wake::status(&state(&r), "ask:job-1/1").as_deref(), Some("answered"));
+    assert_eq!(crate::wake::status(&state(&r), &format!("card:{}", card.id)).as_deref(), Some("answered"));
+}
+
+#[tokio::test]
+async fn a_stopped_saved_key_card_is_not_woken_later_even_if_its_request_was_on_its_way() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = bot_card_approved(&r, &chat, "");
+    // Stop closes it while an attempt had already claimed it and is about to enqueue (the stale copy below).
+    assert!(r.hub.store.card_resume_claim(&card.id, now_ms()).unwrap());
+    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    let door = door_of(&card).unwrap();
+    resume::enqueue(&r.hub, &card, &door).await.unwrap();
+    queue_says_eventually(&r, &card, "withdrawn").await;
+    drive(&r.hub).await;
+    assert!(bot_seen(&card).is_empty(), "the stopped turn did not run");
+    // The same for a card that keeps its record: the store marks it not owed instead of withdrawing it.
+    let kept = bot_card_approved(&r, &chat, "k");
+    assert!(r.hub.store.card_resume_stop(&kept.id, now_ms()).unwrap());
+    let after = r.hub.store.card(&kept.id).unwrap();
+    assert_eq!(after.state, CardState::Approved, "still shows as saved");
+    assert!(after.applied_at.is_some() && r.hub.store.cards_awaiting_resume(now_ms()).is_empty());
+    r.hub.store.cards_restart(now_ms()).unwrap();
+    assert!(r.hub.store.cards_awaiting_resume(now_ms()).is_empty(), "a restart doesn't bring it back");
+}
+
+#[tokio::test]
+async fn a_turn_waiting_behind_a_long_actor_turn_is_not_given_back_but_a_lost_one_is() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = bot_card_approved(&r, &chat, "");
+    attempt(&r.hub, &card.id).await;
+    drive(&r.hub).await;
+    assert_eq!(bot_seen(&card).len(), 1);
+    // Long after, the actor still has it (its entry is known): nothing is sent twice.
+    resume::reap_for_test(&r.hub, Duration::ZERO);
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert_eq!(queue_says(&r, &card), "running", "the actor has it");
+    // A turn nobody holds a callback for is given back.
+    let lost = bot_card_approved(&r, &chat, "t");
+    attempt(&r.hub, &lost.id).await;
+    let turn = crate::wake::take_session(&state(&r), &format!("acp:{chat}:t")).unwrap().unwrap();
+    resume::lose_track_of(&turn.run);
+    resume::reap_for_test(&r.hub, Duration::ZERO);
+    queue_says_eventually(&r, &lost, "queued").await;
+}
+
+#[tokio::test]
+async fn a_stop_that_races_a_take_runs_nothing() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    claims(&r);
+    off(&r.hub);
+    let card = bot_card_approved(&r, &chat, "");
+    attempt(&r.hub, &card.id).await;
+    // The card was closed after the queue had it but before the host's door looked (the withdraw is still on its way).
+    r.hub.store.card_resume_close(&card.id).unwrap();
+    drive(&r.hub).await;
+    assert!(bot_seen(&card).is_empty());
+    queue_says_eventually(&r, &card, "withdrawn").await;
 }

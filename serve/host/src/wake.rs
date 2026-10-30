@@ -21,8 +21,19 @@ pub struct Turn {
     pub person: Option<String>,
     #[serde(default)]
     pub ids: Vec<String>,
+    /// What was asked, one entry per request, so the host can leave out the ones that are no longer wanted.
+    #[serde(default)]
+    pub requests: Vec<Asked>,
     /// The words the agent is told, starting with the `[kith wake RUN]` marker kith-wake proves delivery by.
     pub note: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Asked {
+    pub id: String,
+    #[serde(default)]
+    pub why: String,
+    pub text: String,
 }
 
 /// A request for one turn of a session.
@@ -68,7 +79,12 @@ fn command(state: &Path) -> Option<Command> {
 }
 
 fn run(state: &Path, args: &[&str]) -> anyhow::Result<std::process::Output> {
-    let mut cmd = command(state).ok_or_else(|| anyhow::anyhow!("no kith-wake found"))?;
+    let Some(mut cmd) = command(state) else {
+        // Said once, loudly: every card answer waits on it, and the taker would repeat this every few seconds.
+        static SAID: std::sync::Once = std::sync::Once::new();
+        SAID.call_once(|| tracing::error!("kith-wake not found: card answers and wakes can't reach their sessions"));
+        anyhow::bail!("no kith-wake found");
+    };
     Ok(cmd.args(args).output()?)
 }
 
@@ -94,13 +110,22 @@ pub fn enqueue(state: &Path, r: &Request<'_>) -> anyhow::Result<Queued> {
 }
 
 /// Where request `id` is: queued, running, how it was answered (answered, recovered, failed, withdrawn) or unknown.
-pub fn status(state: &Path, id: &str) -> String {
-    run(state, &["status", id])
-        .ok()
-        .and_then(|o| {
-            String::from_utf8_lossy(&o.stdout).split_whitespace().next().map(|w| w.trim_end_matches(',').to_owned())
+/// None: the call itself failed, which says nothing about the request.
+pub fn status(state: &Path, id: &str) -> Option<String> {
+    let out = run(state, &["status", id]).ok().filter(|o| o.status.success())?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    Some(text.split_whitespace().next()?.trim_end_matches(',').to_owned())
+}
+
+/// Whether the queue holds anything at all: a look at its folder, so an idle host starts no process.
+pub fn has_items(state: &Path) -> bool {
+    std::fs::read_dir(state.join("sessions/queue")).is_ok_and(|dir| {
+        dir.flatten().any(|e| {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            name.ends_with(".json") && name != "answered.json" && !name.starts_with('.')
         })
-        .unwrap_or_else(|| "unknown".into())
+    })
 }
 
 /// Starts the next owed host-door turn, held by this process. None: nothing is owed (or nothing is due yet).
@@ -127,9 +152,13 @@ pub fn back(state: &Path, run_id: &str, held: bool) {
     log_failure("back", run(state, &args));
 }
 
-/// Stop: `session`'s requests that no running turn carries are dropped, their ids kept.
-pub fn withdraw(state: &Path, session: &str) {
-    log_failure("withdraw", run(state, &["withdraw", session]));
+/// Stop: `session`'s requests that no running turn carries are dropped, their ids kept. `id`: only that request.
+pub fn withdraw(state: &Path, session: &str, id: Option<&str>) {
+    let mut args = vec!["withdraw", session];
+    if let Some(id) = id {
+        args.extend(["--id", id]);
+    }
+    log_failure("withdraw", run(state, &args));
 }
 
 fn log_failure(what: &str, out: anyhow::Result<std::process::Output>) {

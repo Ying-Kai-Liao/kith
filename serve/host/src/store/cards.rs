@@ -590,7 +590,9 @@ impl Store {
         let c = self.db.locked();
         move_where(
             &c,
-            "deadline < ?1 AND state IN ('pending','live','parked','approved')",
+            // An approved card whose wake is in the queue stays until a turn carried it: expiring it would lose the yes.
+            "deadline < ?1 AND state IN ('pending','live','parked','approved')
+                AND NOT (state = 'approved' AND resumed_at IS NOT NULL AND applied_at IS NULL)",
             params![now],
             CardState::Expired,
         )
@@ -665,6 +667,16 @@ impl Store {
             ),
         )
         .unwrap_or_default()
+    }
+
+    /// A Stop on a saved key's card: its record stays, but no turn is owed for it any more (claimed and applied), so
+    /// neither a restart nor a late request brings the stopped turn back.
+    pub fn card_resume_stop(&self, id: &str, now: i64) -> Result<bool> {
+        Ok(self.db.locked().execute(
+            "UPDATE cards SET resumed_at = COALESCE(resumed_at, ?1), applied_at = ?1
+             WHERE id = ?2 AND applied_at IS NULL AND state IN ('approved','used')",
+            params![now, id],
+        )? == 1)
     }
 
     /// A Stop ends an approved card whose turn had not started, claimed or not: it is withdrawn, not merely released,
