@@ -71,6 +71,7 @@ const PRIMS = new Set(["string", "int", "bool", "json"]);
 const RESERVED = "unknown";
 /** Who may call a method, each with the words its list is documented with. */
 const ROLE_WHO = {
+  owner: "the owner alone (a method no one else may call; the owner may call every method)",
   member: "an invited person",
   unproven: "an invited person's unproven device",
   bot: "a bot guest (the pending ones too: see botPending)",

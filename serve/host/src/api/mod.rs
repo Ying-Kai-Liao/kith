@@ -208,6 +208,9 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
     if method == "readFile" {
         return files::read(hub, &b).await;
     }
+    if let Some(answer) = crate::chat::topics::call(hub, method, &b) {
+        return answer;
+    }
     // Each method group answers its own methods and hands the body back otherwise.
     let b = match host::call(hub, caller, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),

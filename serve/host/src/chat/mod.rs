@@ -15,4 +15,5 @@ pub mod prompt;
 pub mod router;
 pub mod tasks;
 pub mod team;
+pub mod topics;
 pub mod uploads;

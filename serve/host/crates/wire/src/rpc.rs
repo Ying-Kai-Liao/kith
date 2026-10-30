@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "a3b16d95d7b2f70c7c3f9f038ad8152714631b78abfca12c184c5189562f7a17";
+pub const CONTRACT_SHA256: &str = "48d644505434cb1fdeb551847b3cd755b42be8394aa600d31e9b4d69400e0a55";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1337,6 +1337,32 @@ pub struct KeepConversationParams {
     pub entry_id: String,
 }
 
+/// What `makeTopic` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MakeTopicParams {
+    pub bot_id: String,
+    pub entry_id: String,
+    pub title: String,
+}
+
+/// What `renameTopic` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameTopicParams {
+    pub bot_id: String,
+    pub entry_id: String,
+    pub title: String,
+}
+
+/// What `unfoldTopic` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UnfoldTopicParams {
+    pub bot_id: String,
+    pub entry_id: String,
+}
+
 /// What `projects` takes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1615,6 +1641,12 @@ pub mod method {
     pub const EDIT_HANDOFF: &str = "editHandoff";
     /// Keeps the conversation a handoff card offered to move on from.
     pub const KEEP_CONVERSATION: &str = "keepConversation";
+    /// Folds the room from entryId (a message of botId's chat, or a task or thread reply in it) up to its newest line into a topic card titled title, stored as data.topic on that entry. A view over existing messages: no turn, no new line, nothing re-parented. Refused for an empty or over-80-character title, an entry of another chat, an entry inside a topic, a range holding another topic's first message, or an entry that already starts a topic.
+    pub const MAKE_TOPIC: &str = "makeTopic";
+    /// Retitles the topic that starts at entryId (the same title rules as makeTopic).
+    pub const RENAME_TOPIC: &str = "renameTopic";
+    /// Takes data.topic off the entry that starts a topic: its lines show in the room again.
+    pub const UNFOLD_TOPIC: &str = "unfoldTopic";
     /// Only the project folders the owner shared with them.
     pub const PROJECTS: &str = "projects";
     /// The project of their own chat's thread (threadId; the main chat without it).
@@ -1674,6 +1706,9 @@ pub mod method {
     /// The agents another computer of the owner's may ask here (Mac link): the owner's own, by name.
     pub const PEER_AGENTS: &str = "peerAgents";
 }
+
+/// What the owner alone (a method no one else may call; the owner may call every method) may call.
+pub const OWNER_METHODS: &[&str] = &[method::MAKE_TOPIC, method::RENAME_TOPIC, method::UNFOLD_TOPIC];
 
 /// What an invited person may call.
 pub const MEMBER_METHODS: &[&str] = &[method::HELLO, method::KITH_INFO, method::START_CHAT, method::SEND, method::THREAD, method::HISTORY, method::NEW_SESSION, method::UNSEND, method::MARK_READ, method::STOP, method::UPLOAD, method::READ_UPLOAD, method::REACT, method::RESPOND_PERMISSION, method::EDIT_HANDOFF, method::KEEP_CONVERSATION, method::PROJECTS, method::THREAD_PROJECTS, method::SET_THREAD_PROJECTS, method::LINK_CODE, method::SCHEDULE_MESSAGES, method::CALL_ACCEPT, method::CALL_DECLINE, method::CALL_GREET, method::LOG_CALL, method::START_CALL, method::END_CALL, method::CREATE_BOT_INVITE, method::REVOKE_BOT_INVITE, method::REVOKE_BOT, method::MY_BOTS, method::SET_BOT_LIMITS, method::RESOLVE_CITATION];
@@ -1781,6 +1816,9 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "RespondPermissionParams", fields: &[("entryId", "string"), ("optionId", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "EditHandoffParams", fields: &[("entryId", "string"), ("text", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "KeepConversationParams", fields: &[("entryId", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "MakeTopicParams", fields: &[("botId", "string"), ("entryId", "string"), ("title", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "RenameTopicParams", fields: &[("botId", "string"), ("entryId", "string"), ("title", "string")], may_omit: &[] },
+        crate::check::TypeSchema { name: "UnfoldTopicParams", fields: &[("botId", "string"), ("entryId", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "ProjectsParams", fields: &[("refresh", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "ThreadProjectsParams", fields: &[("botId", "string"), ("threadId", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "SetThreadProjectsParams", fields: &[("botId", "string"), ("threadId", "string?"), ("projects", "[string]")], may_omit: &[] },
@@ -1828,6 +1866,9 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "respondPermission", who: &["member"], params: "RespondPermissionParams", result: "PermissionAnswered" },
         crate::check::MethodSchema { name: "editHandoff", who: &["member"], params: "EditHandoffParams", result: "MaybeEntry" },
         crate::check::MethodSchema { name: "keepConversation", who: &["member"], params: "KeepConversationParams", result: "MaybeEntry" },
+        crate::check::MethodSchema { name: "makeTopic", who: &["owner"], params: "MakeTopicParams", result: "MaybeEntry" },
+        crate::check::MethodSchema { name: "renameTopic", who: &["owner"], params: "RenameTopicParams", result: "MaybeEntry" },
+        crate::check::MethodSchema { name: "unfoldTopic", who: &["owner"], params: "UnfoldTopicParams", result: "MaybeEntry" },
         crate::check::MethodSchema { name: "projects", who: &["member"], params: "ProjectsParams", result: "Projects" },
         crate::check::MethodSchema { name: "threadProjects", who: &["member"], params: "ThreadProjectsParams", result: "ThreadProjects" },
         crate::check::MethodSchema { name: "setThreadProjects", who: &["member"], params: "SetThreadProjectsParams", result: "ThreadProjectsSet" },
@@ -1932,6 +1973,9 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "RespondPermissionParams" => serde_json::from_value::<RespondPermissionParams>(value).map(drop),
         "EditHandoffParams" => serde_json::from_value::<EditHandoffParams>(value).map(drop),
         "KeepConversationParams" => serde_json::from_value::<KeepConversationParams>(value).map(drop),
+        "MakeTopicParams" => serde_json::from_value::<MakeTopicParams>(value).map(drop),
+        "RenameTopicParams" => serde_json::from_value::<RenameTopicParams>(value).map(drop),
+        "UnfoldTopicParams" => serde_json::from_value::<UnfoldTopicParams>(value).map(drop),
         "ProjectsParams" => serde_json::from_value::<ProjectsParams>(value).map(drop),
         "ThreadProjectsParams" => serde_json::from_value::<ThreadProjectsParams>(value).map(drop),
         "SetThreadProjectsParams" => serde_json::from_value::<SetThreadProjectsParams>(value).map(drop),
