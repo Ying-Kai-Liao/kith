@@ -41,6 +41,8 @@ pub mod roles;
 mod roles_props;
 #[cfg(test)]
 mod roles_tests;
+#[cfg(test)]
+mod room_points_props;
 mod threads;
 
 pub use events::{events_stream, term_events};

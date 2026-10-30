@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 13;
+const SCHEMA: i64 = 14;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -64,7 +64,43 @@ fn migrate(c: &Connection) -> Result<()> {
     if version < 12 {
         migrate_12(c)?;
     }
-    migrate_13(c)
+    migrate_13(c)?;
+    migrate_14(c)
+}
+
+fn migrate_14(c: &Connection) -> Result<()> {
+    // Run again by a test that sets the version back, so a column already there is left alone.
+    let has = |col: &str| -> Result<bool> {
+        Ok(c.query_row("SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = ?1", [col], |r| {
+            r.get::<_, i64>(0)
+        })? > 0)
+    };
+    for col in ["ended_why", "opening"] {
+        if !has(col)? {
+            c.execute_batch(&format!("ALTER TABLE conversations ADD COLUMN {col} TEXT;"))?;
+        }
+    }
+    c.execute_batch(
+        "BEGIN;
+         CREATE TABLE IF NOT EXISTS room_bots(
+            room TEXT NOT NULL, bot_id TEXT NOT NULL, point_seq INTEGER NOT NULL, point_rev INTEGER NOT NULL,
+            added_at INTEGER NOT NULL, PRIMARY KEY(room, bot_id));",
+    )?;
+    // Bots in a room today lose its back history: their point is now.
+    c.execute(
+        "INSERT OR IGNORE INTO room_bots(room, bot_id, point_seq, point_rev, added_at)
+         SELECT b.id, m.value, (SELECT COALESCE(MAX(seq), 0) FROM entries),
+                (SELECT COALESCE(CAST(v AS INTEGER), 0) FROM kv WHERE k = 'rev'), ?1
+         FROM bots b, json_each(b.config, '$.members') m
+         WHERE b.deleted = 0 AND json_extract(b.config, '$.kind') = 'group'
+           AND m.value IN (SELECT bot_id FROM bot_guests)",
+        [super::now_ms()],
+    )?;
+    c.execute_batch(
+        "INSERT INTO kv(k, v) VALUES('schema', '14') ON CONFLICT(k) DO UPDATE SET v = '14';
+         COMMIT;",
+    )?;
+    Ok(())
 }
 
 fn migrate_13(c: &Connection) -> Result<()> {
@@ -313,7 +349,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("13"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -334,7 +370,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("13"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -357,7 +393,7 @@ mod tests {
                 .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("13"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
         assert!(s.peers_in().unwrap().is_empty() && s.peers_out().unwrap().is_empty());
     }
 
@@ -377,7 +413,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("13"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         drop(s);
         let s = Store::open(&db).unwrap();

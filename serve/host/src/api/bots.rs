@@ -11,6 +11,11 @@ use serde_json::{Value, json};
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
+/// The lane's newest conversation as the apps draw it, `null` when it never had one.
+fn lane_conversation(hub: &Hub, lane: &Lane) -> Value {
+    hub.store.newest_conversation(lane).map_or(Value::Null, |c| crate::chat::group::conversation_view(hub, &c))
+}
+
 pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
     Ok(ControlFlow::Break(match method {
         "routineSchedule" => crate::routines::schedule_preview(&b, now_ms())?,
@@ -65,7 +70,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let limit = b["limit"].as_i64().unwrap_or(100).clamp(1, 500);
             let mut entries = hub.store.history(bot, before, limit)?;
             crate::chat::memory::summary::hide_forgotten(&hub.store, &mut entries);
-            json!({"entries": entries, "folder": hub.place_folder(bot, &Lane::main(bot)).await?})
+            let conversation = lane_conversation(hub, &Lane::main(bot));
+            json!({"entries": entries, "folder": hub.place_folder(bot, &Lane::main(bot)).await?, "conversation": conversation})
         }
         // A thread's replies (its newest 500); the root is in the main chat.
         "thread" => {
@@ -73,7 +79,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let lane = Lane::in_thread(bot, root);
             let mut entries = hub.store.thread(bot, root, 500)?;
             crate::chat::memory::summary::hide_forgotten(&hub.store, &mut entries);
-            json!({"entries": entries, "folder": hub.place_folder(bot, &lane).await?})
+            let conversation = lane_conversation(hub, &lane);
+            json!({"entries": entries, "folder": hub.place_folder(bot, &lane).await?, "conversation": conversation})
         }
         // Notices between a bot and one peer (the newest 200), for the read-only bot conversation sheet.
         "botConversation" => {
@@ -276,7 +283,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             if row.config.is_group() {
                 // The sender grants the turn budget (rule C1); a plain message gets today's ten.
                 let budget = crate::chat::group::budget_of(b["budget"].as_i64());
-                crate::chat::group::start(hub, &lane, budget, b["asMember"].as_str().unwrap_or("owner"))?;
+                crate::chat::group::start(hub, &lane, budget, b["asMember"].as_str().unwrap_or("owner"), &e.id)?;
             } else {
                 hub.send_cmd(bot, Cmd::Send { lane: turn_lane, entry_id: e.id.clone(), text: prompt, route: true })?;
             }

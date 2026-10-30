@@ -481,11 +481,20 @@ impl Actor {
             // A pass in a room stays in the trace; the room doesn't see it.
             if !(grouped && text.as_deref().is_none_or(crate::chat::group::is_pass)) {
                 // A room turn that a newer message or Stop moved on from: the reply is kept, marked, and wakes nobody.
-                if let Some(g) = &self.active_group
-                    && !crate::chat::group::current(&self.hub.store, &g.lane, g.epoch)
-                {
+                if let Some(g) = &self.active_group {
                     // Saved with the `final` mark just below (a room turn is never a delegated ask).
-                    e.data["late"] = true.into();
+                    if let Some(conversation) = &g.conversation {
+                        e.data["conversation"] = conversation.clone().into();
+                    }
+                    if !crate::chat::group::current(&self.hub.store, &g.lane, g.epoch) {
+                        e.data["late"] = true.into();
+                        let stopped = g
+                            .conversation
+                            .as_deref()
+                            .and_then(|c| self.hub.store.conversation(c))
+                            .is_some_and(|c| c.state == crate::store::ConvState::Stopped);
+                        e.data["lateWhy"] = if stopped { "stopped" } else { "newer" }.into();
+                    }
                 }
                 // An ask's answer belongs to its requesting bot and exchange notice.
                 // Independent messages still report to the user in this chat.

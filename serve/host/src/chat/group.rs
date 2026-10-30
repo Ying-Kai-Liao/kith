@@ -22,8 +22,9 @@
 use crate::agent::bot::Cmd;
 use crate::hub::Hub;
 use crate::remote::push::{self, AlertKind};
+use crate::store::RoomPoint;
 use crate::store::{
-    BotConfig, BotGuest, BotKind, BotState, Charge, ConvState, Conversation, Entry, EntryKind, Lane, Store,
+    BotConfig, BotGuest, BotKind, BotState, Charge, ConvState, Conversation, EndedWhy, Entry, EntryKind, Lane, Store,
     is_person_message, now_ms,
 };
 use anyhow::{Result, bail};
@@ -51,6 +52,8 @@ pub struct GroupTurn {
     pub prompt: String,
     /// The room turn that asked; a member skips it once a newer one started (see [`current`]).
     pub epoch: u64,
+    /// The conversation this turn belongs to, named on the reply it stores (`data.conversation`).
+    pub conversation: Option<String>,
     /// The reply the room sees, or `None` for a pass.
     pub reply: oneshot::Sender<Result<Option<String>>>,
 }
@@ -68,8 +71,19 @@ pub fn current(store: &Store, lane: &Lane, epoch: u64) -> bool {
 /// Stop: ends every conversation in `group` (main chat and threads), moving their epochs, and cancels the member
 /// turns in it.
 pub fn stop(hub: &Hub, group: &str) {
+    let open: Vec<String> = hub
+        .store
+        .open_conversations()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|c| c.lane.chat == group)
+        .map(|c| c.id)
+        .collect();
     if let Err(error) = hub.store.stop_conversations(group) {
         tracing::warn!(group, error = format!("{error:#}"), "couldn't stop the room's conversations");
+    }
+    for id in &open {
+        emit_conversation(hub, id);
     }
     // An outside bot has no actor to cancel: its waiting turn ends as a pass.
     cancel_bot_turns(|t| t.lane.chat == group);
@@ -215,11 +229,52 @@ pub fn with_members(store: &Store, members: &[String]) -> Result<Option<String>>
 }
 
 /// A person wrote in a group lane: open a conversation there (ending the one still open) and run its room turn.
-pub fn start(hub: &Arc<Hub>, lane: &Lane, budget: i64, opened_by: &str) -> Result<()> {
+pub fn start(hub: &Arc<Hub>, lane: &Lane, budget: i64, opened_by: &str, opening: &str) -> Result<()> {
+    let older = hub.store.open_conversation_of(lane).map(|c| c.id);
     let conv = hub.store.open_conversation(lane, budget, opened_by)?;
+    hub.store.set_opening(&conv.id, opening)?;
     // The older conversation's outside bot (if the room was waiting on one) is not waited for any more.
     cancel_bot_turns(|t| t.lane == *lane);
+    if let Some(older) = older {
+        emit_conversation(hub, &older);
+    }
+    emit_conversation(hub, &conv.id);
     spawn(hub, conv);
+    Ok(())
+}
+
+/// The conversation as an app draws its live line (`conversation` of a chat's history, and the body of the
+/// `conversation` event): the budget and what is left, who speaks now and until when an outside bot is waited for, and
+/// how it ended.
+pub fn conversation_view(hub: &Hub, c: &Conversation) -> Value {
+    let open = c.state == ConvState::Open;
+    let current = c.queue.current.as_deref().filter(|_| open).map(|id| {
+        let guest = hub.store.bot_guest(id);
+        let name = guest.as_ref().map_or_else(|| hub.bot_name(id), |g| g.name.clone());
+        json!({"id": id, "kind": if guest.is_some() { "bot" } else { "agent" }, "name": name})
+    });
+    let wait_until = c.queue.wait_until.filter(|_| open && current.as_ref().is_some_and(|c| c["kind"] == "bot"));
+    json!({
+        "conversation": c.id, "chat": c.lane.chat, "lane": c.lane.thread, "budget": c.budget, "left": c.left,
+        "state": c.state.as_str(), "endedWhy": c.ended_why, "current": current, "waitUntil": wait_until,
+        "opening": c.opening,
+    })
+}
+
+/// Tells the owner's apps where conversation `id` stands now (read fresh from the store): on open, each charge, each
+/// change of speaker and its end.
+pub fn emit_conversation(hub: &Hub, id: &str) {
+    if let Some(c) = hub.store.conversation(id) {
+        let mut v = conversation_view(hub, &c);
+        v["type"] = "conversation".into();
+        let _ = hub.events.send(v);
+    }
+}
+
+/// Ends conversation `id` for `why` and tells the apps.
+fn end(hub: &Hub, id: &str, state: ConvState, why: EndedWhy) -> Result<()> {
+    hub.store.end_conversation(id, state, why)?;
+    emit_conversation(hub, id);
     Ok(())
 }
 
@@ -228,7 +283,11 @@ pub fn resume(hub: &Arc<Hub>) -> Result<()> {
     for conv in hub.store.open_conversations()? {
         let gone = hub.store.bot(&conv.lane.chat)?.is_none_or(|r| r.deleted);
         if gone || now_ms() - conv.last_at > IDLE_MS {
-            hub.store.end_conversation(&conv.id, if gone { ConvState::Stopped } else { ConvState::Ended })?;
+            if gone {
+                end(hub, &conv.id, ConvState::Stopped, EndedWhy::Stopped)?;
+            } else {
+                end(hub, &conv.id, ConvState::Ended, EndedWhy::Idle)?;
+            }
             continue;
         }
         spawn(hub, conv);
@@ -262,11 +321,11 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
             return Ok(());
         }
         if now_ms() - conv.last_at > IDLE_MS {
-            hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+            end(hub, &conv.id, ConvState::Ended, EndedWhy::Idle)?;
             break;
         }
         let Some(group) = hub.store.bot(&group_id)?.filter(|r| !r.deleted).map(|r| r.config) else {
-            hub.store.end_conversation(&conv.id, ConvState::Stopped)?;
+            end(hub, &conv.id, ConvState::Stopped, EndedWhy::Stopped)?;
             bail!("group deleted");
         };
         let members = members(hub, &group);
@@ -277,6 +336,10 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                 conv.queue.waiting.push(id);
             }
         }
+        // An outside bot is woken only by something said after it joined (a bot taken out and put back may still be
+        // queued from before).
+        let latest = latest_message_seq(hub, &lane);
+        conv.queue.waiting.retain(|id| sees(hub, &group_id, id, latest));
         // The speaker a restart interrupted goes first, already charged. Otherwise the next in the queue, charged now:
         // a turn that is sent costs one even if the member passes, times out or fails.
         let member_id = if let Some(id) = conv.queue.current.clone() {
@@ -288,12 +351,15 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         } else {
             if conv.queue.waiting.is_empty() {
                 if conv.queue.round > 0 && conv.queue.spoke == 0 {
-                    hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+                    end(hub, &conv.id, ConvState::Ended, EndedWhy::Quiet)?;
                     break;
                 }
                 let since_user = since_last_user_message(hub, &lane)?;
                 let mut speakers: Vec<String> =
                     responders(&members, &since_user).into_iter().map(|m| m.id.clone()).collect();
+                // The person message this round answers: an outside bot that joined after it never saw it.
+                let trigger = since_user.first().map_or(0, |e| e.seq);
+                speakers.retain(|id| sees(hub, &group_id, id, trigger));
                 // An outside bot whose own post is the room's latest line has nothing new to read: waking it
                 // again would only spend its owner's Grok runs.
                 speakers.retain(|id| !spoke_last(hub, &lane, id));
@@ -306,7 +372,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                 conv.queue.round += 1;
                 conv.queue.spoke = 0;
                 if conv.queue.waiting.is_empty() {
-                    hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+                    end(hub, &conv.id, ConvState::Ended, EndedWhy::Quiet)?;
                     break;
                 }
             }
@@ -321,9 +387,10 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
                 Charge::Charged(left) => {
                     conv.left = left;
                     conv.queue = next;
+                    emit_conversation(hub, &conv.id);
                 }
                 Charge::Spent => {
-                    hub.store.end_conversation(&conv.id, ConvState::Ended)?;
+                    end(hub, &conv.id, ConvState::Ended, EndedWhy::Spent)?;
                     break;
                 }
                 Charge::Closed => return Ok(()),
@@ -340,7 +407,8 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         } else {
             let prompt = member_prompt(hub, &group, &members, member, &lane)?;
             let (reply, answer) = oneshot::channel();
-            let turn = GroupTurn { lane: lane.clone(), prompt, epoch: conv.epoch, reply };
+            let turn =
+                GroupTurn { lane: lane.clone(), prompt, epoch: conv.epoch, conversation: Some(conv.id.clone()), reply };
             if hub.send_cmd(&member.id, Cmd::Group(turn)).is_err() {
                 None
             } else {
@@ -354,6 +422,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         conv.queue.current = None;
         conv.queue.turn_key = None;
         conv.queue.woke = false;
+        conv.queue.wait_until = None;
         // Moved while the member worked: its reply is stored late and wakes nobody.
         if !current(&hub.store, &lane, conv.epoch) {
             return Ok(());
@@ -361,10 +430,12 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         if let Some(text) = text {
             conv.queue.spoke += 1;
             // Agents the reply @-mentions are woken after everyone already queued.
+            let latest = latest_message_seq(hub, &lane);
             let woken: Vec<String> = members
                 .iter()
                 .filter(|m| m.id != member.id && !conv.queue.waiting.contains(&m.id))
                 .filter(|m| handles(&m.name).iter().any(|h| mentions(&text, h)))
+                .filter(|m| sees(hub, &group_id, &m.id, latest))
                 .map(|m| m.id.clone())
                 .collect();
             conv.queue.waiting.extend(woken);
@@ -373,6 +444,7 @@ async fn run_steps(hub: &Arc<Hub>, conv: &mut Conversation) -> Result<()> {
         if !hub.store.save_queue(&conv.id, &conv.queue)? {
             return Ok(());
         }
+        emit_conversation(hub, &conv.id);
         conv.last_at = now_ms();
     }
     if let Some((from, name, text)) = last_reply
@@ -396,7 +468,8 @@ pub fn ask_agent(hub: &Arc<Hub>, room: &str, agent_id: &str) -> Result<()> {
     let prompt = member_prompt(hub, &group, &members, agent, &lane)?;
     let (reply, answer) = oneshot::channel();
     let epoch = hub.store.lane_epoch(&lane);
-    hub.send_cmd(agent_id, Cmd::Group(GroupTurn { lane, prompt, epoch, reply }))?;
+    let conversation = hub.store.newest_conversation(&lane).map(|c| c.id);
+    hub.send_cmd(agent_id, Cmd::Group(GroupTurn { lane, prompt, epoch, conversation, reply }))?;
     // The turn is skipped once nobody holds its reply, so something has to.
     tokio::spawn(async move {
         let _ = tokio::time::timeout(crate::chat::team::ASK_TIMEOUT, answer).await;
@@ -455,25 +528,111 @@ async fn bot_turn(
         "type": "turn", "botId": guest.bot_id, "room": conv.lane.chat, "thread": conv.lane.thread,
         "conversation": conv.id, "epoch": conv.epoch, "turnKey": key,
     }));
+    let wait = Duration::from_secs(u64::try_from(guest.turn_timeout_s).unwrap_or(300));
     if !conv.queue.woke {
         // Written before the wake goes out: a restart waits again but never wakes the bot twice.
         conv.queue.woke = true;
+        conv.queue.wait_until = Some(now_ms() + i64::try_from(wait.as_millis()).unwrap_or(i64::MAX / 2));
         if !hub.store.save_queue(&conv.id, &conv.queue)? {
             return Ok(None);
         }
+        emit_conversation(hub, &conv.id);
         if let Some(profile) = guest.wake_profile.as_deref() {
-            let since = hub.store.last_rev_of_bot_guest(&conv.lane.chat, &guest.bot_id);
+            // Never from before the bot joined, whatever it wrote last.
+            let floor = hub.store.room_bot_point(&conv.lane.chat, &guest.bot_id).map_or(0, |p| p.rev);
+            let since = hub.store.last_rev_of_bot_guest(&conv.lane.chat, &guest.bot_id).max(floor);
             let body = wake_body(group, conv, &key, since);
             if !wake(profile, &body).await {
+                bot_notice(hub, &conv.lane, guest, "botTimedOut", Some(&conv.id), "didn't answer");
                 return Ok(None);
             }
         }
     }
-    let wait = Duration::from_secs(u64::try_from(guest.turn_timeout_s).unwrap_or(300));
-    Ok(match tokio::time::timeout(wait, answer).await {
-        Ok(Ok(text)) if !is_pass(&text) => Some(text),
-        _ => None,
-    })
+    let (notice, text) = match tokio::time::timeout(wait, answer).await {
+        Ok(Ok(text)) if is_pass(&text) => (Some(("botPassed", "passed")), None),
+        Ok(Ok(text)) => (None, Some(text)),
+        // The room moved on (a newer message, Stop, the bot left): nothing to say about the bot.
+        Ok(Err(_)) => (None, None),
+        Err(_) => (Some(("botTimedOut", "didn't answer")), None),
+    };
+    if let Some((notice, what)) = notice
+        && current(&hub.store, &conv.lane, conv.epoch)
+    {
+        bot_notice(hub, &conv.lane, guest, notice, Some(&conv.id), what);
+    }
+    Ok(text)
+}
+
+/// The bot as a notice names it.
+fn bot_ref(g: &BotGuest) -> Value {
+    json!({"botId": g.bot_id, "name": g.name, "provider": g.provider})
+}
+
+/// A quiet line in the room about an outside bot's pass or silence (`botPassed`, `botTimedOut`). It is a notice: it
+/// wakes nobody, opens or tops up nothing, and is not a person's message.
+fn bot_notice(hub: &Hub, lane: &Lane, g: &BotGuest, notice: &str, conversation: Option<&str>, what: &str) {
+    let data = json!({
+        "notice": notice, "bot": bot_ref(g), "conversation": conversation, "style": "info",
+        "text": format!("{} {what}", g.name),
+    });
+    hub.add_entry(lane, EntryKind::Notice, hub.store.max_turn(&lane.chat), &data);
+}
+
+/// A quiet line in a room's main lane when an outside bot joins or leaves it (`botJoined`, `botLeft`). Returns the
+/// entry, whose place is the bot's point when it joined.
+fn membership_notice(hub: &Hub, room: &str, g: &BotGuest, notice: &str, why: Option<&str>) -> Option<Entry> {
+    let text = if notice == "botJoined" {
+        format!("{} joined · sees this room from now on", g.name)
+    } else {
+        format!("{} left", g.name)
+    };
+    let mut data = json!({"notice": notice, "bot": bot_ref(g), "style": "info", "text": text});
+    if let Some(why) = why {
+        data["why"] = why.into();
+    }
+    hub.add_entry(&Lane::main(room), EntryKind::Notice, hub.store.max_turn(room), &data)
+}
+
+/// The room `room` went from members `before` to `after` (a group made or edited): each outside bot that came in gets
+/// its point, just at its join line, and each one that went out loses it. Members that stay change nothing, so a
+/// repeated edit writes no second line.
+pub fn members_changed(hub: &Hub, room: &str, before: &[String], after: &[String]) {
+    for id in after.iter().filter(|m| !before.contains(m)) {
+        let Some(guest) = guest_member(hub, id) else { continue };
+        // Until the point is stored the bot reads nothing of the room (`room_bot_floor`).
+        let at = membership_notice(hub, room, &guest, "botJoined", None)
+            .map_or_else(|| hub.store.newest_point(), |e| RoomPoint { seq: e.seq, rev: e.rev });
+        if let Err(error) = hub.store.put_room_bot(room, id, at) {
+            tracing::warn!(error = format!("{error:#}"), room, bot = id.as_str(), "couldn't store a bot's point");
+        }
+    }
+    for id in before.iter().filter(|m| !after.contains(m)) {
+        // A bot revoked meanwhile said so when it went (`left_rooms`).
+        let was_there = hub.store.drop_room_bot(room, id).unwrap_or(false);
+        if let Some(guest) = hub.store.bot_guest(id).filter(|g| was_there && is_owners_active_bot(g)) {
+            membership_notice(hub, room, &guest, "botLeft", Some("removed"));
+        }
+    }
+}
+
+/// An outside bot ended or left: one `botLeft` line in each room it was a member of, and its points go.
+pub fn left_rooms(hub: &Hub, guest: &BotGuest, why: &str) {
+    for room in hub.store.rooms_of_bot(&guest.bot_id) {
+        if hub.store.drop_room_bot(&room, &guest.bot_id).unwrap_or(false) {
+            membership_notice(hub, &room, guest, "botLeft", Some(why));
+        }
+    }
+}
+
+/// The `seq` of the room's latest chat-visible line in `lane` (0 for none).
+fn latest_message_seq(hub: &Hub, lane: &Lane) -> i64 {
+    hub.store.messages_after(lane, 0, 1).ok().and_then(|m| m.last().map(|e| e.seq)).unwrap_or(0)
+}
+
+/// Whether `id` may be woken by the line at `trigger_seq` in room `room`: an agent always, an outside bot only when the
+/// line came after it joined.
+fn sees(hub: &Hub, room: &str, id: &str, trigger_seq: i64) -> bool {
+    hub.store.bot_guest(id).is_none() || hub.store.room_bot_floor(room, id) < trigger_seq
 }
 
 /// What the wake carries: where to post and a cursor to read from, in words a bot with a shell can act on. Never a key,
@@ -1424,9 +1583,10 @@ mod tests {
         let main = Lane::main(&room.group);
         // A conversation that is over: the post is kept, and nothing starts.
         let old = room.hub.store.open_conversation(&main, 5, "owner").unwrap();
-        room.hub.store.end_conversation(&old.id, ConvState::Ended).unwrap();
+        room.hub.store.end_conversation(&old.id, ConvState::Ended, EndedWhy::Spent).unwrap();
         let post = room.bot_post(&bot, &old.id, old.epoch, None, "@a look at this", "u1").await.unwrap();
-        assert_eq!(post["late"], true);
+        assert_eq!((post["late"].as_bool(), post["unprompted"].as_bool()), (Some(false), Some(true)));
+        assert_eq!(room.bot_entries()[0].data["unprompted"], true);
         tokio::time::sleep(Duration::from_millis(500)).await;
         assert_eq!(room.member_turns(), 0);
         assert_eq!(room.hub.store.conversation(&old.id).unwrap().left, 5, "a late post costs nothing");
@@ -1542,8 +1702,12 @@ mod tests {
         // Out of the group: events stop at once.
         room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b"]})).unwrap();
         assert!(seen(&said).is_none());
+        let gap = room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "while it was out"})).unwrap();
         room.hub.update_bot(&json!({"id": room.group, "members": ["a", "bg1"]})).unwrap();
-        assert!(seen(&said).is_some());
+        // Back in, it starts again from now: what came before, the gap included, stays unread.
+        assert!(seen(&said).is_none() && seen(&gap).is_none());
+        let after = room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "welcome back"})).unwrap();
+        assert!(seen(&after).is_some());
         // Revoked: nothing more, and a turn event too.
         crate::api::botguests::end_bot(&room.hub, "bg1", BotState::Revoked, "kai", "kai").await;
         assert!(seen(&said).is_none() && seen(&agent).is_none(), "a revoked bot gets no more room events");
@@ -1669,6 +1833,7 @@ mod tests {
             spoke: 0,
             turn_key: Some("key-before".into()),
             woke: true,
+            wait_until: None,
         };
         assert!(room.hub.store.save_conversation(&conv.id, 2, &queue).unwrap());
         let mut events = room.hub.events.subscribe();
@@ -1738,5 +1903,314 @@ mod tests {
             assert!(is_pass(t), "{t:?}");
         }
         assert!(!is_pass("I'll pass this to Bob"));
+    }
+
+    // MARK: host gaps (from now on, the conversation event, late reasons, join/leave/pass lines)
+
+    fn notices(room: &Room, kind: &str) -> Vec<Entry> {
+        room.hub
+            .store
+            .chat_entries_since(&room.group, 0, 200, 0)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "notice" && e.data["notice"] == kind)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn joining_writes_one_quiet_line_that_is_the_bots_point_and_a_repeat_edit_writes_nothing() {
+        let room = Room::new();
+        let main = Lane::main(&room.group);
+        let before = room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "old news"})).unwrap();
+        let bot = room.join_bot(300, None);
+        let joined = notices(&room, "botJoined");
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].data["text"], "Grok joined · sees this room from now on");
+        assert_eq!(joined[0].data["bot"], json!({"botId": "bg1", "name": "Grok", "provider": "grok"}));
+        let point = room.hub.store.room_bot_point(&room.group, "bg1").unwrap();
+        assert_eq!((point.seq, point.rev), (joined[0].seq, joined[0].rev), "the join line is the point");
+        // The same members again: nothing moves and nothing is written.
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b", "bg1"], "name": "Crew 2"})).unwrap();
+        assert_eq!(notices(&room, "botJoined").len(), 1);
+        assert_eq!(room.hub.store.room_bot_point(&room.group, "bg1"), Some(point));
+        // It reads nothing from before, even with the cursor at the start, and a cursor below the point is lifted.
+        let new = room.hub.add_entry(&main, EntryKind::User, 1, &json!({"text": "fresh"})).unwrap();
+        for since in [0, 1, before.rev - 1] {
+            let read =
+                crate::api::dispatch(&room.hub, &bot, "botRoomRead", json!({"room": room.group, "since": since}))
+                    .await
+                    .unwrap();
+            let texts: Vec<_> = read["entries"].as_array().unwrap().iter().map(|e| e["text"].clone()).collect();
+            assert_eq!(texts, [json!("fresh")], "since {since}");
+        }
+        // An old entry edited later (a new rev) is still old.
+        room.hub.set_entry(&before.id, &json!({"text": "old news", "edited": true})).unwrap();
+        let read = crate::api::dispatch(&room.hub, &bot, "botRoomRead", json!({"room": room.group, "limit": 200}))
+            .await
+            .unwrap();
+        assert_eq!(read["entries"].as_array().unwrap().len(), 1);
+        assert!(new.rev > point.rev);
+        // Taking it out and putting it back starts a new point; each is one line.
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b"]})).unwrap();
+        let left = notices(&room, "botLeft");
+        assert_eq!(
+            (left.len(), left[0].data["why"].as_str(), left[0].data["text"].as_str()),
+            (1, Some("removed"), Some("Grok left"))
+        );
+        assert!(room.hub.store.room_bot_point(&room.group, "bg1").is_none());
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b", "bg1"]})).unwrap();
+        assert_eq!(notices(&room, "botJoined").len(), 2);
+        assert!(room.hub.store.room_bot_point(&room.group, "bg1").unwrap().seq > point.seq);
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_bot_leaving_or_revoked_writes_one_line_per_room_and_a_repeat_writes_none() {
+        let room = Room::new();
+        let _bot = room.join_bot(300, None);
+        let other = room
+            .hub
+            .create_bot(
+                serde_json::from_value(json!({"id": "", "kind": "group", "name": "Other", "members": ["a", "bg1"]}))
+                    .unwrap(),
+            )
+            .unwrap();
+        let other = other["id"].as_str().unwrap().to_owned();
+        let guest = room.hub.store.bot_guest("bg1").unwrap();
+        crate::api::botguests::end_bot(&room.hub, "bg1", BotState::Revoked, "bot", "bg1").await;
+        crate::api::botguests::end_bot(&room.hub, "bg1", BotState::Revoked, "bot", "bg1").await;
+        let _ = guest;
+        let lines = |chat: &str| -> Vec<Value> {
+            room.hub
+                .store
+                .chat_entries_since(chat, 0, 200, 0)
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.data["notice"] == "botLeft")
+                .map(|e| e.data)
+                .collect()
+        };
+        for chat in [room.group.as_str(), other.as_str()] {
+            let l = lines(chat);
+            assert_eq!(l.len(), 1, "{chat}");
+            assert_eq!((l[0]["why"].as_str(), l[0]["text"].as_str()), (Some("left"), Some("Grok left")));
+        }
+        assert_eq!(room.hub.store.rooms_of_bot("bg1"), Vec::<String>::new());
+        // A later edit that drops the revoked member writes nothing more.
+        room.hub.update_bot(&json!({"id": room.group, "members": ["a", "b"]})).unwrap();
+        assert_eq!(lines(&room.group).len(), 1);
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn notices_wake_nobody_open_nothing_and_are_not_a_persons_message() {
+        let room = Room::new();
+        let _bot = room.join_bot(300, None);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(room.conversations().is_empty(), "a join line opens no conversation");
+        assert_eq!(room.member_turns(), 0);
+        let main = Lane::main(&room.group);
+        let line = notices(&room, "botJoined").remove(0);
+        assert!(!is_person_message(&line));
+        assert!(room.hub.store.messages_after(&main, 0, 10).unwrap().iter().all(|e| e.id != line.id));
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_bot_added_mid_conversation_is_not_woken_by_a_message_from_before_it_joined() {
+        let room = Room::new();
+        let mut events = room.hub.events.subscribe();
+        room.send("@a BLOCK hold the floor", None).await;
+        let hub = room.hub.clone();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hub.bot_runtime("a").status != BotStatus::Working {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("a starts");
+        let _bot = room.join_bot(300, None);
+        std::fs::write(room.dir.join("a/release"), "").unwrap();
+        room.settle().await;
+        let seen: Vec<_> = std::iter::from_fn(|| events.try_recv().ok()).filter(|v| v["type"] == "turn").collect();
+        assert!(seen.is_empty(), "the bot was woken by a message it never saw: {seen:?}");
+        // A message after it joined does wake it.
+        let mut events = room.hub.events.subscribe();
+        room.send("@Grok now you", None).await;
+        assert_eq!(next_turn(&mut events).await["botId"], "bg1");
+        room.settle().await;
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn the_conversation_event_follows_open_charge_speaker_and_end_and_reaches_only_the_owner() {
+        let room = Room::new();
+        let mut events = room.hub.events.subscribe();
+        room.send("@a hello", None).await;
+        room.settle().await;
+        let closed = room.closed().await;
+        let mut all = vec![];
+        while let Ok(v) = events.try_recv() {
+            if v["type"] == "conversation" {
+                all.push(v);
+            }
+        }
+        let first = &all[0];
+        assert_eq!(
+            (first["state"].as_str(), first["budget"].as_i64(), first["left"].as_i64(), first["lane"].is_null()),
+            (Some("open"), Some(DEFAULT_BUDGET), Some(DEFAULT_BUDGET), true)
+        );
+        assert_eq!(first["chat"], room.group.as_str());
+        assert!(first["opening"].is_string() && first["endedWhy"].is_null());
+        assert!(all.iter().any(|v| v["current"]["name"] == "a" && v["current"]["kind"] == "agent"), "{all:?}");
+        assert!(all.iter().any(|v| v["left"] == DEFAULT_BUDGET - 1), "a charge is announced");
+        let last = all.last().unwrap();
+        assert_eq!((last["state"].as_str(), last["endedWhy"].as_str()), (Some("ended"), Some("quiet")));
+        assert_eq!(last["conversation"], closed.id.as_str());
+        assert_eq!(
+            kith_wire::rpc::SCHEMA.check("ConversationEvent", last, kith_wire::check::Mode::Producer),
+            Vec::<String>::new()
+        );
+        // Who gets it: the owner; an invited person only when they get that room's entries; a bot never.
+        let store = &room.hub.store;
+        assert!(crate::api::roles::event_for(store, None, last.clone()).is_some());
+        assert!(crate::api::roles::event_for(store, Some("sam"), last.clone()).is_none());
+        let bot = room.join_bot(300, None);
+        let _ = bot;
+        assert!(crate::api::roles::event_for_bot(store, "bg1", last.clone()).is_none());
+        // The history answer says the same, for a reconnecting app.
+        let history =
+            crate::api::dispatch(&room.hub, &Caller::Local, "history", json!({"botId": room.group})).await.unwrap();
+        assert_eq!(history["conversation"]["conversation"], closed.id.as_str());
+        let fresh = Lane::main("nobody");
+        assert!(room.hub.store.newest_conversation(&fresh).is_none());
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_bot_turn_shows_who_is_up_and_until_when_and_a_pass_or_silence_leaves_a_line() {
+        let room = Room::new();
+        let bot = room.join_bot(300, None);
+        let mut events = room.hub.events.subscribe();
+        room.send("@Grok your move", None).await;
+        let turn = next_turn(&mut events).await;
+        let (conv, key) = (turn["conversation"].as_str().unwrap(), turn["turnKey"].as_str().unwrap());
+        let live = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(v) = events.recv().await
+                    && v["type"] == "conversation"
+                    && v["waitUntil"].is_i64()
+                {
+                    return v;
+                }
+            }
+        })
+        .await
+        .expect("a conversation event with waitUntil");
+        assert_eq!((live["current"]["kind"].as_str(), live["current"]["name"].as_str()), (Some("bot"), Some("Grok")));
+        assert!(live["waitUntil"].as_i64().unwrap() > now_ms());
+        room.bot_post(&bot, conv, 1, Some(key), "(pass)", "ps1").await.unwrap();
+        room.closed().await;
+        room.settle().await;
+        let passed = notices(&room, "botPassed");
+        assert_eq!(passed.len(), 1);
+        assert_eq!(passed[0].data["text"], "Grok passed");
+        assert_eq!(passed[0].data["conversation"], conv);
+        room.shutdown().await;
+
+        let room = Room::new();
+        let _bot = room.join_bot(1, None);
+        let mut events = room.hub.events.subscribe();
+        room.send("@Grok anyone?", None).await;
+        next_turn(&mut events).await;
+        room.closed().await;
+        room.settle().await;
+        let silent = notices(&room, "botTimedOut");
+        assert_eq!((silent.len(), silent[0].data["text"].as_str()), (1, Some("Grok didn't answer")));
+        // An agent that passes stays silent.
+        assert!(notices(&room, "botPassed").is_empty());
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_late_post_says_why() {
+        let room = Room::new();
+        let bot = room.join_bot(300, None);
+        let mut events = room.hub.events.subscribe();
+        // noTurn: a key nobody waits for any more.
+        room.send("@Grok first", None).await;
+        let turn = next_turn(&mut events).await;
+        let (conv, key) =
+            (turn["conversation"].as_str().unwrap().to_owned(), turn["turnKey"].as_str().unwrap().to_owned());
+        room.bot_post(&bot, &conv, 1, Some(&key), "ok", "w1").await.unwrap();
+        let again = room.bot_post(&bot, &conv, 1, Some(&key), "again", "w2").await.unwrap();
+        assert_eq!((again["late"].as_bool(), again["lateWhy"].as_str()), (Some(true), Some("noTurn")));
+        room.settle().await;
+        // ended: the conversation is over (spent, quiet or idle) but still the lane's newest.
+        let ended = room.bot_post(&bot, &conv, 1, Some("k"), "too late", "w3").await.unwrap();
+        assert_eq!(ended["lateWhy"], "ended");
+        let entry = room.hub.store.entry(ended["entryId"].as_str().unwrap()).unwrap();
+        assert_eq!(entry.data["conversation"], conv.as_str());
+        // newer: a newer person message moved the epoch while the bot was still being waited for.
+        let mut events = room.hub.events.subscribe();
+        room.send("@Grok second", None).await;
+        let second = next_turn(&mut events).await;
+        room.send("@Grok third", None).await;
+        let third = next_turn(&mut events).await;
+        let (c2, k2) = (second["conversation"].as_str().unwrap(), second["turnKey"].as_str().unwrap());
+        let newer =
+            room.bot_post(&bot, c2, second["epoch"].as_u64().unwrap(), Some(k2), "old thread", "w4").await.unwrap();
+        assert_eq!(newer["lateWhy"], "newer");
+        // stopped: after a Stop.
+        let (c3, k3, e3) = (
+            third["conversation"].as_str().unwrap(),
+            third["turnKey"].as_str().unwrap(),
+            third["epoch"].as_u64().unwrap(),
+        );
+        crate::api::dispatch(&room.hub, &Caller::Local, "stop", json!({"botId": room.group})).await.unwrap();
+        room.settle().await;
+        let stopped = room.bot_post(&bot, c3, e3, Some(k3), "after stop", "w5").await.unwrap();
+        assert_eq!(stopped["lateWhy"], "stopped");
+        // An unprompted post with nothing open is not late.
+        let idle = room.bot_post(&bot, c3, e3, None, "hello?", "w6").await.unwrap();
+        assert_eq!(
+            (idle["late"].as_bool(), idle["unprompted"].as_bool(), idle["lateWhy"].is_null()),
+            (Some(false), Some(true), true)
+        );
+        room.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn a_room_reply_names_its_conversation_and_a_late_one_says_why() {
+        let room = Room::new();
+        room.send("@a BLOCK take your time", None).await;
+        let hub = room.hub.clone();
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while hub.bot_runtime("a").status != BotStatus::Working {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("a starts");
+        let first = room.hub.store.newest_conversation(&Lane::main(&room.group)).unwrap();
+        room.send("@a hold on", None).await;
+        std::fs::write(room.dir.join("a/release"), "").unwrap();
+        room.settle().await;
+        let replies: Vec<_> = room
+            .hub
+            .store
+            .messages_after(&Lane::main(&room.group), 0, 100)
+            .unwrap()
+            .into_iter()
+            .filter(|e| e.kind == "agent" && e.data["final"] == true)
+            .collect();
+        let late = replies.iter().find(|e| e.data["late"] == true).expect("a late reply");
+        assert_eq!(
+            (late.data["lateWhy"].as_str(), late.data["conversation"].as_str()),
+            (Some("newer"), Some(first.id.as_str()))
+        );
+        let fresh = replies.iter().find(|e| e.data["late"].is_null()).expect("a current reply");
+        assert!(fresh.data["conversation"].is_string() && fresh.data["lateWhy"].is_null());
+        room.shutdown().await;
     }
 }

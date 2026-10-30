@@ -235,7 +235,9 @@ impl Hub {
             let _g = self.emit_lock.locked();
             self.store.save_bot(&cfg)?;
         }
-        if !cfg.is_group() {
+        if cfg.is_group() {
+            crate::chat::group::members_changed(self, &cfg.id, &[], &cfg.members);
+        } else {
             self.spawn_bot(&cfg);
         }
         self.emit_bot(&cfg.id);
@@ -252,6 +254,7 @@ impl Hub {
             let _g = self.emit_lock.locked();
             self.store.save_bot(&cfg)?;
         }
+        crate::chat::group::members_changed(self, &cfg.id, &[], &cfg.members);
         self.emit_bot(&cfg.id);
         Ok(())
     }
@@ -311,6 +314,7 @@ impl Hub {
             self.reset_inheriting_stored(&cfg);
         }
         if cfg.is_group() {
+            crate::chat::group::members_changed(self, &id, &row.config.members, &cfg.members);
             self.close_group_places(&id, &cfg.members);
             // An outside bot taken out of the room is no longer waited for.
             crate::chat::group::cancel_bot_turns(|t| t.lane.chat == id && !cfg.members.contains(&t.bot_id));
@@ -328,6 +332,7 @@ impl Hub {
         self.routines.disable_bot(&self.store, id)?;
         self.team.cancel_bot(id);
         crate::chat::group::stop(self, id);
+        self.store.drop_room(id)?;
         self.remove_bot_actors(id);
         {
             let _g = self.emit_lock.locked();
