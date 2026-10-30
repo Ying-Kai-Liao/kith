@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>KithEnvironment</key><string>$(KITH_ENV)</string>
+    <key>KithAppGroup</key><string>$(KITH_APP_GROUP)</string>
+    <key>KithURLScheme</key><string>$(KITH_URL_SCHEME)</string>
+    <key>KithAPNSEnvironment</key><string>$(KITH_APNS_ENVIRONMENT)</string>
+	<key>KithKeychainGroup</key>
+	<string>$(AppIdentifierPrefix)$(KITH_KEYCHAIN_GROUP)</string>
+	<key>NSExtension</key>
+	<dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.share-services</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>$(PRODUCT_MODULE_NAME).ShareViewController</string>
+		<key>NSExtensionAttributes</key>
+		<dict>
+			<key>NSExtensionActivationRule</key>
+			<dict>
+				<key>NSExtensionActivationSupportsWebURLWithMaxCount</key>
+				<integer>1</integer>
+				<key>NSExtensionActivationSupportsText</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>

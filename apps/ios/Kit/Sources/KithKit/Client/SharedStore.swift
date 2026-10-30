@@ -37,7 +37,8 @@ public enum SharedStore {
             self.suite = suite
         }
 
-        private static let names = ["computers", "bots", "usage", "lastComputerId", "composerDrafts", "computerOrder"]
+        private static let names = ["computers", "bots", "usage", "lastComputerId", "composerDrafts", "computerOrder",
+                                    "pendingShares", "lastShareTarget"]
         private func key(_ name: String) -> String { accountID == nil ? name : "account.\(id).\(name)" }
         public static func digest(_ value: String) -> String {
             SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
@@ -72,6 +73,17 @@ public enum SharedStore {
         public var composerDrafts: [ComputerID: [String: String]] {
             get { read([ComputerID: [String: String]].self, "composerDrafts") ?? [:] }
             nonmutating set { write(newValue, "composerDrafts") }
+        }
+
+        /// Links shared from other apps (the share extension) that the app has yet to send.
+        public var pendingShares: [PendingShare] {
+            get { read([PendingShare].self, "pendingShares") ?? [] }
+            nonmutating set { write(newValue.isEmpty ? nil : newValue, "pendingShares") }
+        }
+        /// The chat the last share went to; the share sheet starts there.
+        public var lastShareTarget: BotReference? {
+            get { read(BotReference.self, "lastShareTarget") }
+            nonmutating set { write(newValue, "lastShareTarget") }
         }
 
         /// The most recently active computer; the Usage widget shows only this one.
