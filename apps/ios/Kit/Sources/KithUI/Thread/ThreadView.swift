@@ -20,6 +20,10 @@ public struct ThreadView: View {
     @State var showTrace = false
     /// Runs of steps opened inline, by run id. Not persisted: a run starts collapsed.
     @State var expandedSteps: Set<String> = []
+    /// Topic cards opened inline, by card id. Not persisted: a topic starts folded.
+    @State var expandedTopics: Set<String> = []
+    /// The topic whose title is being asked for or changed.
+    @State var titling: TopicTitling?
     @State var botChat: BotChatTarget?
     @State var editingGroup = false
     @State var details: DetailsRequest?
@@ -111,6 +115,13 @@ public struct ThreadView: View {
                     }
                 })
             }
+            .onChange(of: model.focusEntry?.entry) { _, target in
+                // A search result inside a folded topic opens it, so the message can be shown.
+                guard let target, model.focusEntry?.chat == botId,
+                      let group = Topics.groups(in: model.allEntries(botId)).first(where: { $0.contains(target) }) else { return }
+                expandedTopics.insert(group.id)
+            }
+            .kithSheet(item: $titling) { TopicTitleSheet(botId: botId, request: $0) }
             .kithSheet(isPresented: $editingGroup) {
                 GroupEditorView(group: bot)
             }
@@ -123,12 +134,14 @@ public struct ThreadView: View {
 
     // MARK: rows
 
-    @ViewBuilder func row(_ item: ChatItem) -> some View {
+    @ViewBuilder func row(_ item: ChatItem, inTopic: Bool = false) -> some View {
         switch item.kind {
         case .separator(let date):
             TimeSeparator(date: date)
         case .exchanges(let group):
             BotMessageRow(group: group) { botChat = BotChatTarget(id: group.peerId) }
+        case .topic(let group):
+            topicRow(group)
         case .steps(let run):
             StepsRow(run: run, expanded: expandedSteps.contains(run.id),
                      toggle: { toggleSteps(run.id) }, openTrace: { showTrace = true })
@@ -141,8 +154,41 @@ public struct ThreadView: View {
                         .font(.footnote).foregroundStyle(Palette.secondary).padding(.vertical, 10)
                 }.buttonStyle(.plain)
             } else {
-                entryRow(e, groupStart: groupStart)
+                entryRow(e, groupStart: groupStart, inTopic: inTopic)
             }
+        }
+    }
+
+    /// The folded topic: its card, and when opened the entries it holds as ordinary chat rows (so steps still collapse).
+    func topicRow(_ group: TopicGroup) -> some View {
+        let open = isOpen(group)
+        return VStack(spacing: 0) {
+            TopicCard(group: group, chat: bot, expanded: open, toggle: { toggleTopic(group.id) },
+                      rename: { titling = TopicTitling(entry: group.root, current: group.topic.title) },
+                      unfold: { model.unfoldTopic(group.root) })
+            if open {
+                // row -> topicRow -> row is a recursive opaque type; AnyView breaks the cycle.
+                ForEach(openRows(group)) { inner in AnyView(row(inner, inTopic: true)) }
+            }
+        }
+    }
+
+    /// The folded entries as ordinary chat rows (no time separators: the room's own flow carries them).
+    private func openRows(_ group: TopicGroup) -> [ChatItem] {
+        ChatItem.build(group.members, groupingExchanges: true, foldingTopics: false).filter {
+            if case .separator = $0.kind { return false }
+            return true
+        }
+    }
+
+    func isOpen(_ group: TopicGroup) -> Bool {
+        expandedTopics.contains(group.id)
+            || model.focusEntry.map { $0.chat == botId && group.contains($0.entry) } == true
+    }
+
+    func toggleTopic(_ id: String) {
+        withAnimation(Motion.reduced(Motion.layout, reduceMotion)) {
+            if !expandedTopics.insert(id).inserted { expandedTopics.remove(id) }
         }
     }
 
@@ -152,10 +198,12 @@ public struct ThreadView: View {
         }
     }
 
-    func entryRow(_ e: Entry, groupStart: Bool) -> some View {
+    func entryRow(_ e: Entry, groupStart: Bool, inTopic: Bool = false) -> some View {
         let replyAction: ((Entry) -> Void)? = canReply(e) ? { reply($0) } : nil
         let missing = missingReplies(e)
-        return ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: replyAction,
+        let topicAction: ((Entry) -> Void)? = canMakeTopic(e, inTopic: inTopic)
+            ? { titling = TopicTitling(entry: $0, current: Topics.suggestedTitle(for: $0), isNew: true) } : nil
+        return ChatRow(entry: e, groupStart: groupStart, chat: bot, openTrace: { showTrace = true }, onReply: replyAction, onMakeTopic: topicAction,
                        showsContext: contextLineEntry == e.id,
                        toggleContext: { contextLineEntry = ContextLineToggle.tapped(e.id, open: contextLineEntry) })
             .equatable()
@@ -170,6 +218,13 @@ public struct ThreadView: View {
         guard bot != nil, bot?.isReadOnly != true, bot?.botGuest == nil, ReplyQuote.line(of: entry) != nil else { return false }
         guard let root = entry.threadId else { return true }
         return model.allEntries(botId).first { $0.id == root }?.data.thread?.isHeldElsewhere != true
+    }
+
+    /// Only the owner splits topics off, from a settled message that isn't already in or starting one.
+    func canMakeTopic(_ entry: Entry, inTopic: Bool) -> Bool {
+        guard !inTopic, model.isOwner, bot != nil, bot?.isReadOnly != true, bot?.botGuest == nil, entry.data.topic == nil else { return false }
+        guard entry.kind == "user" || entry.kind == "agent" else { return false }
+        return !["sending", "failed", "queued"].contains(entry.data.status ?? "")
     }
 
     func reply(_ entry: Entry) {
@@ -251,6 +306,8 @@ struct ChatItem: Identifiable {
         case exchanges(BotExchangeGroup)
         /// Main chat only: a run of tool calls under the reply that made it, behind one collapsed "N steps" row.
         case steps(ThreadFeed.StepsRun)
+        /// Main chat only: a run the owner split off, folded into one card (see `Topics`).
+        case topic(TopicGroup)
     }
 
     let id: String
@@ -262,7 +319,11 @@ struct ChatItem: Identifiable {
     /// `groupingExchanges` builds the main chat, which is flat: every thread's replies and every tool call are
     /// interleaved with the chat's own messages by time (the host keeps its task and thread model; this is only how
     /// it is shown). Pass all of the chat's entries, threads included.
-    static func build(_ entries: [Entry], groupingExchanges: Bool = false) -> [ChatItem] {
+    static func build(_ allEntries: [Entry], groupingExchanges: Bool = false, foldingTopics: Bool = true) -> [ChatItem] {
+        // A topic's entries leave the flat view; its card stands where the topic starts.
+        let topics = groupingExchanges && foldingTopics ? Topics.groups(in: allEntries) : []
+        let folded = Set(topics.flatMap { $0.members.map(\.id) })
+        let entries = folded.isEmpty ? allEntries : allEntries.filter { !folded.contains($0.id) }
         var out: [ChatItem] = []
         var lastDate: Date?
         var lastAuthor: String?
@@ -272,10 +333,20 @@ struct ChatItem: Identifiable {
             if let run = ThreadFeed.StepsRun(tools) { out.append(ChatItem(id: run.id, kind: .steps(run))) }
             tools = []
         }
-        let flat = groupingExchanges ? flatSlots(entries) : entries.filter(\.isChat).map { Flat.slot(.entry($0)) }
+        let flat = groupingExchanges ? flatSlots(entries, topics: topics) : entries.filter(\.isChat).map { Flat.slot(.entry($0)) }
         for flatSlot in flat {
             if case .tool(let e) = flatSlot {
                 tools.append(e)
+                continue
+            }
+            if case .topic(let group) = flatSlot {
+                flushTools()
+                if lastDate.map({ group.date.timeIntervalSince($0) > 3600 }) ?? true {
+                    out.append(ChatItem(id: "sep-\(group.id)", kind: .separator(group.date)))
+                }
+                lastDate = group.date
+                lastAuthor = nil
+                out.append(ChatItem(id: group.id, kind: .topic(group)))
                 continue
             }
             guard case .slot(let slot) = flatSlot else { continue }
@@ -307,19 +378,22 @@ struct ChatItem: Identifiable {
     private enum Flat {
         case slot(BotExchangeGroup.Item)
         case tool(Entry)
+        case topic(TopicGroup)
     }
 
     /// The flat chat's order: the main chat's slots, every thread's chat-visible replies and every tool call, by time
     /// (ties keep arrival order). An entry that arrived both in the chat and in a thread fetch shows once.
-    private static func flatSlots(_ entries: [Entry]) -> [Flat] {
+    private static func flatSlots(_ entries: [Entry], topics: [TopicGroup] = []) -> [Flat] {
         var seen = Set<String>()
         let unique = entries.filter { seen.insert(ThreadFeed.stableId($0)).inserted }
         var all: [Flat] = BotExchangeGroup.collapse(unique.filter { $0.threadId == nil }).map { .slot($0) }
         for e in unique {
             if e.kind == "tool" { all.append(.tool(e)) } else if e.threadId != nil, e.isChat { all.append(.slot(.entry(e))) }
         }
+        for group in topics { all.append(.topic(group)) }
         func date(_ f: Flat) -> Date {
             switch f {
+            case .topic(let g): g.date
             case .slot(let s): s.date
             case .tool(let e): e.date
             }
@@ -335,6 +409,7 @@ struct ChatItem: Identifiable {
         switch kind {
         case let .entry(entry, _): entry.id == id || ThreadFeed.stableId(entry) == id
         case let .steps(run): run.steps.contains { $0.id == id }
+        case let .topic(group): group.members.contains { $0.id == id || ThreadFeed.stableId($0) == id }
         case .exchanges, .separator: false
         }
     }

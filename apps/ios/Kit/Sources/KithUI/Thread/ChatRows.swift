@@ -17,6 +17,8 @@ struct ChatRow: View {
     let openTrace: () -> Void
     /// Reply to this message (a quote over the composer); nil where nothing is sent (read-only chats).
     var onReply: ((Entry) -> Void)?
+    /// "Make a topic from here" on this message; nil unless the owner may (see `ThreadView.canMakeTopic`).
+    var onMakeTopic: ((Entry) -> Void)?
     @Environment(BotStore.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// A tapped agent reply shows its time and context line under it. The chat holds which one is open
@@ -26,6 +28,7 @@ struct ChatRow: View {
 
     var body: some View {
         let reply = onReply.map { reply in { reply(entry) } }
+        let topicAction = onMakeTopic.map { make in { make(entry) } }
         // The replying agent's colour pair (in a group, the one who wrote it).
         let tint = AgentTint.resolve((entry.data.author.flatMap { model.bots[$0] } ?? chat)?.avatarColor)
         switch entry.kind {
@@ -35,7 +38,7 @@ struct ChatRow: View {
                 .padding(.top, groupStart ? 12 : 4)
         case "user":
             VStack(alignment: .trailing, spacing: 4) {
-                UserBubble(entry: entry, botWorking: chat?.isWorking == true, reply: reply)
+                UserBubble(entry: entry, botWorking: chat?.isWorking == true, reply: reply, makeTopic: topicAction)
                 ReactionsRow(entry: entry)
             }
             .animation(Motion.reduced(Motion.layout, reduceMotion), value: entry.data.reactions)
@@ -46,7 +49,7 @@ struct ChatRow: View {
                 if let card = entry.data.richCard, card.drawsInChat {
                     if card.type == "news" { NewsCard(entry: entry, card: card) } else { ScheduleCard(entry: entry, card: card) }
                 } else {
-                    AgentBubble(entry: entry, openTrace: openTrace, reply: reply) {
+                    AgentBubble(entry: entry, openTrace: openTrace, reply: reply, makeTopic: topicAction) {
                         withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { toggleContext() }
                     }
                 }
@@ -173,6 +176,7 @@ struct UserBubble: View {
     let entry: Entry
     let botWorking: Bool
     var reply: (() -> Void)?
+    var makeTopic: (() -> Void)?
     @State private var selecting = false
     @Environment(BotStore.self) private var model
 
@@ -202,6 +206,7 @@ struct UserBubble: View {
                         MenuItem("Select Text", icon: "selection.pin.in.out") { selecting = true },
                     ]
                     if let reply { items.insert(MenuItem("Reply", icon: "arrowshape.turn.up.left", action: reply), at: 0) }
+                    if let makeTopic { items.append(MenuItem("Make a topic from here", detail: "This and the replies after it", icon: "rectangle.stack", action: makeTopic)) }
                     if entry.data.status == "queued" {
                         items.append(MenuItem("Unsend", icon: "arrow.uturn.backward") { model.unsend(entry) })
                     }
@@ -255,6 +260,7 @@ struct AgentBubble: View {
     let entry: Entry
     let openTrace: () -> Void
     var reply: (() -> Void)?
+    var makeTopic: (() -> Void)?
     /// A tap on the bubble (links keep their own).
     var onTap: (() -> Void)?
     @State private var selecting = false
@@ -292,6 +298,7 @@ struct AgentBubble: View {
                         MenuItem("Show what it did", icon: "list.bullet", action: openTrace),
                     ]
                     if let reply { items.insert(MenuItem("Reply", icon: "arrowshape.turn.up.left", action: reply), at: 0) }
+                    if let makeTopic { items.append(MenuItem("Make a topic from here", detail: "This and the replies after it", icon: "rectangle.stack", action: makeTopic)) }
                     return items
                 }
                 .kithSheet(isPresented: $selecting) { SelectTextSheet(text: MarkdownText.plain(entry.data.text ?? "")) }
@@ -537,6 +544,6 @@ extension ChatRow: @MainActor Equatable {
     static func == (a: Self, b: Self) -> Bool {
         a.entry == b.entry && a.groupStart == b.groupStart && a.chat?.isGroup == b.chat?.isGroup
             && a.chat?.isWorking == b.chat?.isWorking && (a.onReply == nil) == (b.onReply == nil)
-            && a.showsContext == b.showsContext
+            && a.showsContext == b.showsContext && (a.onMakeTopic == nil) == (b.onMakeTopic == nil)
     }
 }

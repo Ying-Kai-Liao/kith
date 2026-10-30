@@ -59,6 +59,8 @@ public struct TopicSummary: Hashable, Sendable {
     public var date: Date
     /// Permission cards waiting on the owner.
     public var needsYou: [Entry]
+    /// A folded reply or tool call is still being written or run.
+    public var working: Bool
 }
 
 public enum Topics {
@@ -104,7 +106,10 @@ public enum Topics {
         return TopicSummary(
             authors: authors, latest: latest, latestLine: line, count: said.count,
             date: (group.members.last ?? group.root).date,
-            needsYou: group.members.filter { $0.kind == "permission" && $0.data.status == "pending" })
+            needsYou: group.members.filter { $0.kind == "permission" && $0.data.status == "pending" },
+            working: group.members.contains {
+                ($0.kind == "agent" && $0.data.status == "streaming") || ($0.kind == "tool" && $0.data.status == "in_progress")
+            })
     }
 
     /// The prefilled title for a topic made from `entry`: its first line, trimmed to the host's 80 characters.
