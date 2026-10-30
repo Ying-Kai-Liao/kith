@@ -1,6 +1,7 @@
 import { useLayoutEffect, useState, type ReactNode } from 'react'
 import { isWorking, type Entry } from '@shared/models'
 import { avatarImage } from '@shared/crew'
+import { plainFirstLine } from '@shared/topics'
 import { BotAvatar, SkyPatch, pairOf } from '../../components/kith'
 import { pairStyle } from '../../components/kith/pair'
 import { Icon } from '../../components/Icon'
@@ -34,7 +35,7 @@ function Face({ store, who }: { store: BotStore; who: ReturnType<typeof authorOf
     : <SkyPatch id={who.key} you={who.key === 'you'} size={24} />
 }
 
-const firstLine = (text: string | undefined) => (text ?? '').trim().split('\n')[0]!.trim()
+const firstLine = plainFirstLine
 
 /**
  * A topic the owner split off: the run folds into this one card (the two faces, its title, the newest line, how many

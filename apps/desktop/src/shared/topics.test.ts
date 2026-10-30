@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Entry } from './models.ts'
-import { foldTopics, inTopic, type Topic } from './topics.ts'
+import { foldTopics, inTopic, plainFirstLine, type Topic } from './topics.ts'
 
 const topic = (over: Partial<Topic> = {}): Topic => ({ id: 't', title: 'Pace', untilId: 'c', untilAt: 30, turns: [], createdAt: 10, ...over })
 const entry = (id: string, at: number, turn = 1, data: Entry['data'] = {}): Entry =>
@@ -46,4 +46,23 @@ test('a topic root inside another topic is an ordinary message', () => {
   const { folds } = foldTopics(flat)
   assert.deepEqual([...folds.keys()], ['r1'])
   assert.deepEqual(folds.get('r1')!.map((e) => e.id), ['r1', 'r2', 'x'])
+})
+
+test('plainFirstLine strips inline markdown and keeps the words', () => {
+  assert.equal(plainFirstLine('Run `npm test` **now** and *then* _again_'), 'Run npm test now and then again')
+  assert.equal(plainFirstLine('See [the docs](https://x.io/a_b) ok'), 'See the docs ok')
+  assert.equal(plainFirstLine('## Heading here'), 'Heading here')
+  assert.equal(plainFirstLine('> quoted'), 'quoted')
+  assert.equal(plainFirstLine('- item'), 'item')
+  assert.equal(plainFirstLine('1. first'), 'first')
+  assert.equal(plainFirstLine('`only code`'), 'only code')
+  assert.equal(plainFirstLine('snake_case_name stays'), 'snake_case_name stays')
+})
+
+test('plainFirstLine takes the first line only and is empty for bare markers', () => {
+  assert.equal(plainFirstLine('one **two**\nthree'), 'one two')
+  assert.equal(plainFirstLine('##'), '')
+  assert.equal(plainFirstLine('---'), '')
+  assert.equal(plainFirstLine('  \n x'), 'x')
+  assert.equal(plainFirstLine(undefined), '')
 })

@@ -51,3 +51,19 @@ export function foldTopics(flat: Entry[]): Folds {
   }
   return { folds, hidden }
 }
+
+/**
+ * The first line of a message as plain text for a one-line preview: inline markdown dropped (code spans keep their
+ * inner text, emphasis and links keep the words) along with a leading heading, quote, bullet or number marker.
+ * Empty when nothing readable is left.
+ */
+export function plainFirstLine(text: string | undefined): string {
+  let line = (text ?? '').trim().split('\n')[0]!.trim()
+  line = line.replace(/^(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)+/, '')
+  line = line.replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1')
+  line = line.replace(/`+([^`]*)`+/g, '$1')
+  line = line.replace(/(\*\*|__)(.+?)\1/g, '$2')
+  line = line.replace(/\*([^*]+)\*/g, '$1')
+  line = line.replace(/(^|[^\w])_([^_]+)_(?=[^\w]|$)/g, '$1$2')
+  return line.replace(/^[#>*_`~\s-]+$/, '').trim()
+}
