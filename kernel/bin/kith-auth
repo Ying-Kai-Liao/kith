@@ -95,10 +95,14 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           approved it (themselves, or their bot's owner), refused unless they are a
                                           member of the agent now; without it the owner did. A member made a guest
                                           loses the entries they approved.
-  kith-auth jobs <agent> [--person ID] [--domain HOST | --helper NAME] [--json]
+  kith-auth jobs <agent> [--person ID] [--domain HOST | --helper NAME | --door NAME[@DIGEST]] [--json]
                                           read-only: the jobs the agent's capabilities.yaml declares (domains, helpers,
                                           doors), for a person ticked or not and what a package update added since the
-                                          tick (added, hash, declined); --domain/--helper: only the job that holds it
+                                          tick (added, hash, declined); --domain/--helper/--door: only the job that holds it
+  kith-auth door <agent> <id> <door@digest> [--json]
+                                          read-only: may the person's runs of the agent start this door now (ok, or
+                                          owner, revoked, not-allowed, held, stale, no-job, not-ticked, widened,
+                                          declined); a door's start asks it under the auth lock (kith_door)
   kith-auth job <agent> <id> <job> [--shown JSON | --decline HASH | --rm]
                                           tick a job for a person's own row (never `*` or the owner): their runs of the
                                           agent get its pieces as they are now, or as --shown listed them, and never more
@@ -1284,16 +1288,16 @@ def job_view(auth, agent, person, job):
 def cmd_jobs(args):
     """Read-only: the agent's jobs (for one person: ticked or not, and what a package update added), and why any job in
     the file was left out. --domain/--helper: only the job that holds it (a card's "part of <job>"); a path holds none."""
-    opts, rest = take_opts(args, {'--person', '--domain', '--helper'})
-    if (len(rest) not in (1, 2) or rest[1:] not in ([], ['--json']) or len(set(opts) & {'--domain', '--helper'}) > 1
-            or not AGENT_RE.match(rest[0])):
-        die('jobs <agent> [--person ID] [--domain HOST | --helper NAME] [--json]', 2)
+    opts, rest = take_opts(args, {'--person', '--domain', '--helper', '--door'})
+    if (len(rest) not in (1, 2) or rest[1:] not in ([], ['--json'])
+            or len(set(opts) & {'--domain', '--helper', '--door'}) > 1 or not AGENT_RE.match(rest[0])):
+        die('jobs <agent> [--person ID] [--domain HOST | --helper NAME | --door NAME[@DIGEST]] [--json]', 2)
     import kith_jobs
     agent = rest[0]
     auth = load_auth()
     person = canonical(auth, opts['--person']) if opts.get('--person') else None
     listed = list(jobs_of(agent).values())
-    for flag, kind in (('--domain', 'domains'), ('--helper', 'helpers')):
+    for flag, kind in (('--domain', 'domains'), ('--helper', 'helpers'), ('--door', 'doors')):
         if flag in opts:
             j = kith_jobs.holding(listed, kind, opts[flag])
             listed = [j] if j else []
@@ -1307,6 +1311,48 @@ def cmd_jobs(args):
         print(f"{mark} {v['name']}  {v['label']}  " + '  '.join(f"{k}: {', '.join(v[k])}" for k in kith_jobs.PIECES if v[k]))
     for p in kith_jobs.read(caps)[1]:
         print(f'left out: {p}', file=sys.stderr)
+
+
+def door_state(auth, agent, person, piece):
+    """Whether the person's runs of agent may start the door `piece` (name@digest, from the run's pinned package) now:
+    {ok, state, why, job, label}. Read-only: kith_door's start runs it under the auth lock (D2), and its sweep to judge a
+    running door (every state but held ends one)."""
+    import kith_jobs
+    person = canonical(auth, person)
+    name = kith_jobs.door_name(piece)
+    out = {'ok': False, 'job': None, 'label': None}
+    if is_owner(auth, person):
+        return {**out, 'state': 'owner', 'why': 'doors are for the people an agent is shared with'}
+    ok, why = may(auth, person, agent)
+    if not ok:
+        return {**out, 'state': 'revoked' if cut_off(auth, person) else 'not-allowed', 'why': why}
+    if bridge_held(auth, person):
+        return {**out, 'state': 'held', 'why': "this Mac is not in sync with the Kith cloud; try again in a minute"}
+    listed = list(jobs_of(agent).values())
+    job = next((j for j in listed if piece in j['doors']), None)
+    if not job:
+        stale = kith_jobs.holding(listed, 'doors', name)
+        return {**out, 'state': 'stale' if stale else 'no-job',
+                'why': f'{agent} was updated since this chat started; start a new chat to use {name}' if stale
+                else f'no job of {agent} includes the door {name}'}
+    out.update(job=job['name'], label=job['label'])
+    if piece in job_grants(auth, agent, person)['doors']:
+        return {**out, 'ok': True, 'state': 'ok', 'why': f"part of {job['label']}"}
+    view = job_view(auth, agent, person, job)
+    if not view['ticked']:
+        return {**out, 'state': 'not-ticked', 'why': f"{job['label']} was not given to {person}"}
+    return {**out, 'state': 'declined' if view['declined'] else 'widened',
+            'why': f"{name} changed since {job['label']} was given" + (', and the owner kept it as it was' if view['declined'] else '')}
+
+
+def cmd_door(args):
+    """Read-only: may the person's runs of agent start the door piece now (door_state)."""
+    if len(args) not in (3, 4) or args[3:] not in ([], ['--json']) or not AGENT_RE.match(args[0]):
+        die('door <agent> <id> <door@digest> [--json]', 2)
+    v = door_state(load_auth(), *args[:3])
+    print(json.dumps(v) if args[3:] else f"{v['state']}: {v['why']}")
+    if not v['ok'] and not args[3:]:
+        sys.exit(1)
 
 
 LEDGER_KINDS = (*ACCESS_KINDS, 'service', 'job', 'helper')
@@ -2295,6 +2341,8 @@ def main(argv):
         cmd_jobs(rest)
     elif cmd == 'helper':
         cmd_helper(rest)
+    elif cmd == 'door':
+        cmd_door(rest)
     elif cmd == 'mcp-config' and len(rest) == 1:
         cmd_mcp_config(rest[0])
     elif cmd == 'mcp-names' and len(rest) == 1:

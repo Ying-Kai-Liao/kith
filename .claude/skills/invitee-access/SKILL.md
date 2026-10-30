@@ -66,6 +66,8 @@ Jobs and helpers (29, 30), checked on the guest workbench branch before it merge
 
 Moved from `60d2031e` (2026-10-28): since then the covered files gained the owner-approved proven device and the phone's answer to members' requests (#382, #387: property 2 reworded and now generated), the `accessRequests` fan-out in `events_stream` and `accessRequests`/`decideAccessRequest` off `LOCAL_ONLY` (#387: property 6's stream sentence and its test; `decideAccessRequest` from a device other than this computer is refused for an owner device's request, `remote.rs`), the `proveInvite` branch of `guard` for a proven device (#378: property 2, generated), `ask_helper` for guests (#380: property 27), and in `cards/` rule 7 (#392: a card a `kith ask` run opened carries `reply_to`/`asked_by`, shown to the approver as a chain and answered back to the asker; who may answer is unchanged, so 21 and 22 stand); `kernel/bin/kith-auth` changed in comments only.
 
+Recheck 2026-10-30 (guest workbench step 2, the door): no covered function's answer changed; doors, `kith-auth door` and the door card are new entry points, checked by example (rows below), not by these properties: a door adds no method, event or row a person reaches, only a card the owner answers and a read-only `kith-auth door`. The props were not rerun for it.
+
 Recheck 2026-10-29 from `60d2031e`: the covered files changed by `proveInvite`'s "already shown" answer (roles.rs), access requests sent to owner devices (events.rs), the `LOCAL_ONLY` removal (devices.rs), the `reply_to`/`asked_by` fields of escape cards (cards/access.rs), and kith-auth `person --clear-temp` plus the temp folder removal in `--rm` and `--revoke`. None gives a person or bot more: the removal deletes a folder of theirs and grants nothing.
 
 How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechecked against `ed2ceb63`, where the properties and generators were brought up to the code (21-26 and the rows below are new) and property 21 failed on the code for the escape card and for Read/Edit outside the bot's folders. `6fc50729` (on main) bounded the bot owner's answer by the bot's grant folders, which fixed the Read/Edit cases; `60d2031e` refuses the bot owner its bot's escape card, which fixed the last one.
@@ -97,6 +99,9 @@ How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechec
 | | `cmd_job`, `cmd_helper`, `own_row`, `job_grants`, `helpers_in`, `with_jobs`, the doors cap in `resolve_bot`, `may(..., once)`, `bot_row(..., once)` | 11, 23, 29, 30 |
 | serve/host/src/cards/edge.rs | `of`, `extras`, `apply` (the owner's edge buttons; every card they go on is the owner's: `edge_extras` requires approver owner) | `cards::edge_tests` (examples) |
 | kernel/bin/kith-permit, kernel/bin/kith | `ask_helper`; the person gate (`resolve`, the held wait) | 28 (examples) |
+| | `Edge::Door` (`run_door`): the job holding the door and No, never once or always; the job is ticked before the run hears yes, and a tick kith-auth refuses is a no | `cards::edge_tests` (examples) |
+| kernel/bin/kith-auth | `door_state`, `cmd_door`, `jobs --door` (read-only: a door starts only for a person, not held, whose tick names the door's digest) | `kernel/tests/kith-guest-door-check` (examples) |
+| kernel/lib/kith_door.py, kernel/bin/kith-permit `run_door` | the door's start (the folder in the person's slice) and its box (writes, reads, network) | `kernel/tests/kith-guest-door-check` (examples; the box part on macOS only); the revoke side in the revoke-access skill |
 
 ## Run
 

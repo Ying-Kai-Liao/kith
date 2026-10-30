@@ -1,0 +1,366 @@
+#!/usr/bin/env bash
+# kith-guest-door-check — doors (guest workbench step 2): the declaration's schema, its digest (a changed argv or
+# lockfile is a new door), the box's profile (no bind, network denies last), and `kith-auth door`, the read the locked
+# start makes. On macOS it also runs a stub door through kith-permit's run_door in its box: it writes only its declared
+# folder, binds nothing, serves on a socket the supervisor passed in, reaches no other port, and a sweep (by person, by a
+# revoke, or after its supervisor was killed with -9) leaves none of its processes, detached ones included. No real
+# claude, npm or Chrome. Throwaway HOME and KITH_HOME.
+#
+#   kernel/tests/kith-guest-door-check     a few seconds; exits 1 when a check fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-guest-door-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'pkill -9 -f "$T/" 2>/dev/null; rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME="$T/kith" KITH_STATE=$T/state KITH_AUTH=$T/auth.json
+unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_AGENT_DIR KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE KITH_RESUME \
+  CLAUDE_CONFIG_DIR HQ_HOME HQ_STATE KITH_SERVE_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ASK_TOKEN KITH_ASK_SOCKET KITH_VIA
+mkdir -p "$HOME" "$KITH_STATE"
+PKG=$KITH_HOME/agents/video/role
+mkdir -p "$PKG"
+printf -- '---\nname: video\ndescription: test agent\n---\nYou are video.\n' > "$PKG/agent.md"
+CAPS=$PKG/capabilities.yaml
+cat > "$CAPS" <<'YAML'
+doors:
+  - name: render
+    label: Render
+    npm: [fake@1.0.0]
+    lockfile: render.lock.json
+    tools: [node]
+    bin: fake/door.mjs
+    args: [render]
+    writes: [renders]
+  - name: cut
+    npm: [fake@1.0.0]
+    lockfile: render.lock.json
+    tools: [node, ffmpeg]
+    bin: fake/door.mjs
+    writes: [renders]
+  - name: spare
+    npm: [fake@1.0.0]
+    lockfile: render.lock.json
+    tools: [node]
+    bin: fake/door.mjs
+    writes: [renders]
+  - name: ranged
+    npm: [fake@^1.0.0]
+    lockfile: render.lock.json
+    tools: [node]
+    bin: fake/door.mjs
+    writes: [renders]
+  - name: outside-lock
+    npm: [fake@1.0.0]
+    lockfile: ../outside.json
+    tools: [node]
+    bin: fake/door.mjs
+    writes: [renders]
+  - name: no-node
+    npm: [fake@1.0.0]
+    lockfile: render.lock.json
+    tools: [ffmpeg]
+    bin: fake/door.mjs
+    writes: [renders]
+  - name: sets-path
+    npm: [fake@1.0.0]
+    lockfile: render.lock.json
+    tools: [node]
+    bin: fake/door.mjs
+    writes: [renders]
+    env: [PATH=/tmp]
+  - name: writes-up
+    npm: [fake@1.0.0]
+    lockfile: render.lock.json
+    tools: [node]
+    bin: fake/door.mjs
+    writes: [..]
+jobs:
+  - name: make-videos
+    label: Make videos
+    doors: [render, cut]
+YAML
+echo '{"lockfileVersion":3}' > "$PKG/render.lock.json"
+echo '{}' > "$KITH_HOME/agents/video/outside.json"
+
+AUTH=$KERNEL/bin/kith-auth
+fails=0
+expect() { if [ "$2" = "$3" ]; then echo "ok   $1"; else echo "FAIL $1 (got $2, want $3)"; fails=$((fails + 1)); fi; }
+has() { case $2 in *"$3"*) echo "ok   $1" ;; *) echo "FAIL $1 ('$3' not in: $2)"; fails=$((fails + 1)) ;; esac; }
+lacks() { case $2 in *"$3"*) echo "FAIL $1 ('$3' in: $2)"; fails=$((fails + 1)) ;; *) echo "ok   $1" ;; esac; }
+field() { python3 -c 'import json,sys; v=json.loads(sys.argv[1])
+for k in sys.argv[2].split("."): v=v[k] if not isinstance(v,list) else v[int(k)]
+print(json.dumps(v,sort_keys=True) if not isinstance(v,str) else v)' "$1" "$2"; }
+py() { python3 -c "import sys; sys.path.insert(0, '$KERNEL/lib'); $1" "${@:2}"; }
+door() { "$AUTH" door video "$1" "$2" --json; }
+piece() { py 'import kith_door; print(kith_door.piece(kith_door.declared(sys.argv[1], sys.argv[2])))' "$CAPS" "$1"; }
+
+"$AUTH" person kai name=Kai owner >/dev/null 2>&1
+"$AUTH" person bill name=Bill >/dev/null 2>&1
+"$AUTH" member video bill mode=default >/dev/null 2>&1
+
+# --- the schema
+P=$(py 'import kith_jobs, json; d, p = kith_jobs.doors(sys.argv[1]); print(json.dumps({"doors": sorted(d), "problems": p}))' "$CAPS")
+expect "the valid doors" "$(field "$P" doors)" '["cut", "render", "spare"]'
+has "a version range is not a pin" "$P" "door ranged: npm lists packages at exact versions"
+has "a lockfile outside the package" "$P" "door outside-lock: lockfile is a file next to capabilities.yaml"
+has "a door without node" "$P" "door no-node: tools are among"
+has "a door can't set PATH" "$P" "door sets-path: env is NAME=value"
+has "writes stay under the folder" "$P" "door writes-up: writes lists folders under the given folder"
+OLD=$(piece render)
+echo '{"lockfileVersion":3,"packages":{}}' > "$PKG/render.lock.json"
+NEW=$(piece render)
+lacks "a changed lockfile is a new door" "$NEW" "$OLD"
+echo '{"lockfileVersion":3}' > "$PKG/render.lock.json"
+expect "the same bytes, the same door" "$(piece render)" "$OLD"
+DOOR=$OLD
+
+# --- the profile
+PROF=$(py 'import kith_door; print(kith_door.profile(dir="/x/proj", reads=["/c"], execs=["/c/node"], writes=["/x/proj/renders", "/t"], ports=[4000, 4001], mark="/r/m.in"))')
+LAST=$(printf '%s\n' "$PROF" | sed '/^$/d' | tail -1)
+expect "the bind deny is the last rule" "$LAST" "(deny network-bind)"
+expect "the network deny comes before its allows" "$(printf '%s\n' "$PROF" | /usr/bin/grep -n 'network' | head -1 | cut -d: -f2)" "(deny network*)"
+has "only the passed ports" "$PROF" '(allow network-outbound (remote ip "localhost:4000") (remote ip "localhost:4001"))'
+has "the serve ports are closed even on a passed port" "$PROF" '(deny network* (local ip "*:19224")'
+lacks "the folder itself is not written" "$PROF" '(subpath "/x/proj") (literal "/dev/null")'
+has "the declared folder is" "$PROF" '(allow file-write* (subpath "/x/proj/renders") (subpath "/t")'
+
+# --- where a tool may be installed: the box reads its install folder
+tree() { py 'import kith_door
+try: print(kith_door._tree("ffmpeg", sys.argv[1]))
+except kith_door.DoorError as e: print("refused:", e)' "$1"; }
+has "a tool in ~/bin would open the home folder" "$(tree "$HOME/bin/ffmpeg")" "refused: ffmpeg is installed in $HOME,"
+has "nor a folder around it" "$(tree "$T/bin/ffmpeg")" "refused:"
+has "nor Kith's folder" "$(tree "$KITH_HOME/bin/ffmpeg")" "refused:"
+has "nor one under the agents' files" "$(tree "$KITH_HOME/agents/video/files/x/bin/ffmpeg")" "refused:"
+has "nor the keys" "$(tree "$KITH_STATE/secrets/x/bin/ffmpeg")" "refused:"
+expect "its own folder in the home folder is" "$(tree "$HOME/.local/ffmpeg/bin/ffmpeg")" "$HOME/.local/ffmpeg"
+expect "Homebrew's is" "$(tree /opt/homebrew/Cellar/ffmpeg/8.0/bin/ffmpeg)" "/opt/homebrew/Cellar/ffmpeg/8.0"
+
+# --- kith-auth door: what the locked start reads
+expect "the owner runs no door" "$(field "$(door kai "$DOOR")" state)" "owner"
+expect "a door no job holds" "$(field "$(door bill "$(piece spare)")" state)" "no-job"
+expect "a job not given to the person" "$(field "$(door bill "$DOOR")" state)" "not-ticked"
+expect "a stranger" "$(field "$(door stranger "$DOOR")" state)" "not-allowed"
+"$AUTH" job video bill make-videos >/dev/null
+V=$(door bill "$DOOR")
+expect "ticked: the door may start" "$(field "$V" ok)" "true"
+expect "named by its job" "$(field "$V" label)" "Make videos"
+expect "exit 1 without --json when it may not" "$("$AUTH" door video kai "$DOOR" >/dev/null 2>&1; echo $?)" "1"
+python3 - "$CAPS" <<'PY'
+import sys; p = sys.argv[1]; t = open(p).read()
+open(p, 'w').write(t.replace('args: [render]', 'args: [render, --quality, draft]'))
+PY
+expect "a chat started before the update names the old door" "$(field "$(door bill "$DOOR")" state)" "stale"
+WIDE=$(piece render)
+expect "the updated door is not in the tick" "$(field "$(door bill "$WIDE")" state)" "widened"
+H=$(field "$("$AUTH" jobs video --person bill --door render --json)" jobs.0.hash)
+"$AUTH" job video bill make-videos --decline "$H" >/dev/null
+expect "No keeps it as it was" "$(field "$(door bill "$WIDE")" state)" "declined"
+python3 - "$CAPS" <<'PY'
+import sys; p = sys.argv[1]; t = open(p).read()
+open(p, 'w').write(t.replace('args: [render, --quality, draft]', 'args: [render]'))
+PY
+expect "back as ticked" "$(field "$(door bill "$DOOR")" ok)" "true"
+# held: a linked Mac whose cloud lease ran out waits (D2), as the channels do
+SERVE=$T/serve
+mkdir -p "$SERVE"
+printf '{"linked": true, "until": 1000}\n' > "$SERVE/cloud-sync.json"
+expect "out of sync with the cloud: held" "$(field "$(KITH_SERVE_DIR=$SERVE KITH_SERVE_PORT=1 door bill "$DOOR")" state)" "held"
+rm -f "$SERVE/cloud-sync.json"
+"$AUTH" person bill --revoke >/dev/null 2>&1
+expect "revoked" "$(field "$(door bill "$DOOR")" state)" "revoked"
+"$AUTH" person bill --unrevoke >/dev/null 2>&1
+expect "kith door ls with no doors" "$("$KERNEL/bin/kith-door" ls)" "[]"
+
+# --- the box (macOS)
+NODE=$(command -v node || true)
+if [ ! -x /usr/bin/sandbox-exec ] || [ -z "$NODE" ]; then
+  expect "no sandbox-exec: a sweep ends nothing" "$("$KERNEL/bin/kith-door" sweep)" '{"ended": []}'
+  [ "$fails" -eq 0 ] && echo "all ok (no box on this machine)" || { echo "$fails FAIL"; exit 1; }
+  exit 0
+fi
+DIR=$KITH_HOME/agents/video/files/people/bill/proj
+mkdir -p "$DIR/renders" "$KITH_HOME/agents/video/files/people/ann/proj/renders"
+echo "$KITH_AUTH" > "$DIR/secret-path.txt"
+CACHE=$(py '
+import kith_door
+for name in ("cut", "render"):
+    c = kith_door.cache_dir("video", kith_door.declared(sys.argv[1], name))
+    (c / "node_modules" / "fake").mkdir(parents=True)
+    for n in (kith_door.PRELOAD, kith_door.WRAPPER):
+        (c / n).write_bytes((kith_door.LIB / n).read_bytes())
+    (c / ".ready").write_text(name + "\n")
+print(c)' "$CAPS")
+cat > "$CACHE/node_modules/fake/door.mjs" <<'JS'
+import fs from 'node:fs';
+import net from 'node:net';
+import dgram from 'node:dgram';
+import { spawn, spawnSync } from 'node:child_process';
+
+const say = (k, v) => console.log(`${k}=${v}`);
+const tried = (f) => { try { f(); return 'ok'; } catch (e) { return e.code; } };
+const connect = (port, host) => new Promise((done) => {
+  const c = net.connect(port, host);
+  c.setTimeout(3000, () => { c.destroy(); done('timeout'); });
+  c.on('connect', () => { c.destroy(); done('ok'); });
+  c.on('error', (e) => done(e.code));
+});
+fs.writeFileSync('renders/out.txt', 'made');
+say('outside', tried(() => fs.writeFileSync('outside.txt', 'x')));
+say('read', tried(() => fs.readFileSync(fs.readFileSync('secret-path.txt', 'utf8').trim())));
+const r = spawnSync('/bin/sleep', ['0']);
+say('exec', r.error ? r.error.code : r.status);
+const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+child.unref();
+fs.writeFileSync('renders/child.pid', String(child.pid));
+say('udp', await new Promise((done) => {
+  const u = dgram.createSocket('udp4');
+  u.on('error', (e) => done(e.code));
+  u.bind(0, '127.0.0.1', () => { u.close(); done('bound'); });
+}));
+const srv = net.createServer((c) => c.end('hi'));
+await new Promise((done) => srv.listen(0, '0.0.0.0', done));
+say('listen', srv.address().address);
+say('served', await new Promise((done) => {
+  const c = net.connect(srv.address().port, '127.0.0.1');
+  let got = '';
+  c.on('data', (d) => { got += d; });
+  c.on('end', () => done(got));
+  c.on('error', (e) => done(e.code));
+}));
+say('serve-port', await connect(19224, '127.0.0.1'));
+say('other-port', await connect(54321, '127.0.0.1'));
+say('lan', await connect(443, '10.255.255.1'));
+if (fs.existsSync('hold')) {
+  fs.writeFileSync('renders/door.pid', String(process.pid));
+  setInterval(() => {}, 1000);
+} else {
+  srv.close();
+}
+JS
+run_door() {   # run_door PERSON FOLDER [DOOR]: what the agent is told (exec: in the background, $! is the supervisor)
+  exec env KITH_PERSON="$1" KITH_AGENT=video KITH_AGENT_DIR="$PKG" python3 -c '
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("kith_permit", sys.argv[1])
+spec = importlib.util.spec_from_loader("kith_permit", loader); kp = importlib.util.module_from_spec(spec); loader.exec_module(kp)
+print(kp.run_door({"door": sys.argv[3], "path": sys.argv[2]}))' "$KERNEL/bin/kith-permit" "$2" "${3:-render}"
+}
+# late_door race|stuck: runs the door in this process, and a SIGTERM lands once the box runs but before run() holds its
+# Popen (as one inside Popen's wait for the exec would). stuck: also no process of the door dies when killed.
+late_door() { py '
+import os, signal, subprocess, time, kith_door
+real, pid_file = subprocess.Popen, sys.argv[2] + "/renders/door.pid"
+class Late(real):
+    def __init__(self, argv, *a, **k):
+        super().__init__(argv, *a, **k)
+        if argv[0] != kith_door.SANDBOX_EXEC:
+            return
+        for _ in range(100):
+            if os.path.exists(pid_file) and os.path.getsize(pid_file): break
+            time.sleep(0.1)
+        os.kill(os.getpid(), signal.SIGTERM)
+kith_door.subprocess.Popen = Late
+if sys.argv[1] == "stuck":
+    kith_door.kill = lambda claim, since, parent=None: kith_door.door_procs(claim, since, parent)
+code, tail = kith_door.run("video", "bill", kith_door.declared(sys.argv[3], "render"), sys.argv[2])
+print(tail.splitlines()[-1], len(kith_door._kept), [c.get("left") for c in kith_door._claims()])
+if sys.argv[1] == "stuck":
+    print(subprocess.run([sys.argv[4] + "/bin/kith-door", "sweep"], capture_output=True, text=True).stdout)' "$1" "$DIR" "$CAPS" "$KERNEL"; }
+alive() { kill -0 "$1" 2>/dev/null && echo alive || echo gone; }
+claims() { python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])))' "$("$KERNEL/bin/kith-door" ls)"; }
+started() { for _ in $(seq 1 100); do [ -s "$DIR/renders/door.pid" ] && return 0; /bin/sleep 0.1; done; return 1; }
+
+OUT=$(run_door bill "$DIR")
+has "the door ran" "$OUT" "render ended"
+expect "it wrote its folder" "$(cat "$DIR/renders/out.txt" 2>/dev/null)" "made"
+has "not the folder around it" "$OUT" "outside=EPERM"
+expect "nothing outside was written" "$([ -e "$DIR/outside.txt" ] && echo written || echo none)" "none"
+has "it reads none of the owner's files" "$OUT" "read=EPERM"
+has "it runs only its tools" "$OUT" "exec=EPERM"
+has "it binds no socket" "$OUT" "udp=EPERM"
+has "a listen takes the passed loopback socket" "$OUT" "listen=127.0.0.1"
+has "and serves on it" "$OUT" "served=hi"
+has "not the host's serve port" "$OUT" "serve-port=EPERM"
+has "no other port of this Mac" "$OUT" "other-port=EPERM"
+has "nor the network" "$OUT" "lan=EPERM"
+expect "its detached child ended with it" "$(alive "$(cat "$DIR/renders/child.pid")")" "gone"
+expect "no claim is left" "$(claims)" "0"
+has "a folder outside the person's" "$(run_door bill "$KITH_HOME/agents/video/files/people/ann/proj")" "must be one of bill's folders"
+ln -s "$KITH_HOME/agents/video/files/people/ann/proj" "$DIR/to-ann"
+has "nor through a link" "$(run_door bill "$DIR/to-ann")" "must be one of bill's folders"
+mkdir -p "$HOME/bin"
+printf '#!/bin/sh\n: > "$0.ran"\n' > "$HOME/bin/ffmpeg"
+chmod +x "$HOME/bin/ffmpeg"
+rm -f "$DIR/renders/out.txt"
+OUT=$(PATH=$HOME/bin:$PATH run_door bill "$DIR" cut)
+has "an ffmpeg in ~/bin: the door refuses" "$OUT" "The door did not run: ffmpeg is installed in $HOME,"
+expect "and never starts" "$([ -e "$DIR/renders/out.txt" ] && echo started || echo none)" "none"
+expect "no claim is made" "$(claims)" "0"
+rm -rf "$HOME/bin"
+
+touch "$DIR/hold"
+rm -f "$DIR/renders/door.pid"
+run_door bill "$DIR" > "$T/held.out" &
+SUP=$!
+started
+expect "a running door has a claim" "$(claims)" "1"
+DPID=$(cat "$DIR/renders/door.pid")
+CPID=$(cat "$DIR/renders/child.pid")
+"$KERNEL/bin/kith-door" sweep >/dev/null
+expect "a sweep leaves a door that may still run" "$(alive "$DPID")" "alive"
+printf '{"linked": true, "until": 1000}\n' > "$SERVE/cloud-sync.json"
+KITH_SERVE_DIR=$SERVE KITH_SERVE_PORT=1 "$KERNEL/bin/kith-door" sweep >/dev/null
+expect "held alone doesn't end a running door" "$(alive "$DPID")" "alive"
+mkdir -p "$DIR-2"    # no hold file: a door that wrongly starts ends instead of waiting
+has "nor does a door start while held" "$(KITH_SERVE_DIR=$SERVE KITH_SERVE_PORT=1 run_door bill "$DIR-2")" "Access is being changed right now"
+rm -f "$SERVE/cloud-sync.json"
+has "a sweep of the person ends it" "$("$KERNEL/bin/kith-door" sweep --person bill)" '"ended": ["'
+wait "$SUP"
+has "the agent is told it was stopped" "$(cat "$T/held.out")" "render was stopped"
+expect "the door is gone" "$(alive "$DPID")" "gone"
+expect "and its detached child" "$(alive "$CPID")" "gone"
+expect "and its claim" "$(claims)" "0"
+
+rm -f "$DIR/renders/door.pid"
+run_door bill "$DIR" > "$T/held.out" &
+SUP=$!
+started
+DPID=$(cat "$DIR/renders/door.pid")
+CPID=$(cat "$DIR/renders/child.pid")
+kill -9 "$SUP"
+wait "$SUP" 2>/dev/null
+expect "a door outlives a supervisor killed with -9" "$(alive "$DPID")" "alive"
+has "a sweep ends a door whose supervisor is gone" "$("$KERNEL/bin/kith-door" sweep)" '"ended": ["'
+expect "the door is gone" "$(alive "$DPID")" "gone"
+expect "and its detached child" "$(alive "$CPID")" "gone"
+expect "and its claim" "$(claims)" "0"
+
+rm -f "$DIR/renders/door.pid"
+has "a SIGTERM before run() holds its Popen still ends the box" "$(late_door race)" "the door was stopped 0 []"
+expect "the door is gone" "$(alive "$(cat "$DIR/renders/door.pid")")" "gone"
+expect "and its detached child" "$(alive "$(cat "$DIR/renders/child.pid")")" "gone"
+expect "and its claim" "$(claims)" "0"
+rm -f "$DIR/renders/door.pid"
+OUT=$(late_door stuck)
+has "a box that would not die keeps its claim and its ports" "$OUT" "the next sweep ends it 4 [True]"
+has "and the next sweep ends it" "$OUT" '"ended": ["'
+expect "the door is gone" "$(alive "$(cat "$DIR/renders/door.pid")")" "gone"
+expect "and its detached child" "$(alive "$(cat "$DIR/renders/child.pid")")" "gone"
+expect "and its claim" "$(claims)" "0"
+
+rm -f "$DIR/renders/door.pid"
+run_door bill "$DIR" > "$T/held.out" &
+SUP=$!
+started
+DPID=$(cat "$DIR/renders/door.pid")
+"$AUTH" person bill --revoke >/dev/null 2>&1
+has "after a revoke, a sweep's recheck ends the door" "$("$KERNEL/bin/kith-door" sweep)" '"ended": ["'
+wait "$SUP"
+expect "the door is gone" "$(alive "$DPID")" "gone"
+has "a revoked person's door doesn't start" "$(run_door bill "$DIR")" "bill's access was removed"
+"$AUTH" person bill --unrevoke >/dev/null 2>&1
+rm -f "$DIR/hold"
+"$AUTH" job video bill make-videos --rm >/dev/null
+lacks "without the job and no host to ask, it doesn't run" "$(run_door bill "$DIR")" "render ended"
+
+[ "$fails" -eq 0 ] && echo "all ok" || { echo "$fails FAIL"; exit 1; }

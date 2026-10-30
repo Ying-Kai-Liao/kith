@@ -9,7 +9,7 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below (see the skill's "Sync commit").
-SYNC=5a7898911c39987b89fb6099843df3f374e51f2f
+SYNC=fb5f140f6c84bc079684575a8ce93373eba51275
 
 FILES=(
   kernel/bin/kith-auth                    # may(), bot_may, cmd_person (--revoke/--unrevoke, --local), who and resolve (revoked, held)
@@ -28,6 +28,8 @@ FILES=(
   serve/cloud/src/routes/invites.ts       # hostRevokePerson, hostUnrevokePerson, revokedOf, acceptInvite refusal
   serve/cloud/src/routes/host.ts          # host state: revoked
   serve/host/src/run_outbox.rs            # a run's outbox into the person's app chat (the app door: the relay's block)
+  kernel/lib/kith_door.py                 # the guest door: run (lock, kith-auth door, claim, start = DoorStart), sweep (DoorSweep)
+  serve/host/src/doors.rs                 # the host's door sweep: on cut_off, the bot-guest sweep and every 60 s (DoorSweep)
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

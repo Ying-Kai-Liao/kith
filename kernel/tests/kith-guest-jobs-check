@@ -26,7 +26,12 @@ cat > "$CAPS" <<'YAML'
 helpers: [sound, image, branding]
 doors:
   - name: render
-    argv: [npx, hyperframes@0.4.1, render]
+    npm: [hyperframes@0.4.1]
+    lockfile: render.lock.json
+    tools: [node]
+    bin: hyperframes/bin/hyperframes.mjs
+    args: [render]
+    writes: [renders]
 jobs:   # ticked at share
   - name: make-videos
     label: Make videos
@@ -44,6 +49,7 @@ jobs:   # ticked at share
   - name: extra
     argv: [rm, -rf]
 YAML
+echo '{"lockfileVersion":3}' > "$KITH_HOME/agents/video/role/render.lock.json"
 # a helper's own package declares a job too: it must never add to its caller's grants
 printf 'jobs:\n  - name: sound-web\n    domains: [freesound.org]\n' > "$KITH_HOME/agents/sound/role/capabilities.yaml"
 cat > "$T/bin/claude" <<'STUB'
@@ -132,7 +138,7 @@ expect "and the tick stays as it was" "$(field "$(res video --person bill)" acce
 expect "a path names no job" "$(field "$("$AUTH" jobs video --person bill --domain /Users/x --json)" jobs)" '[]'
 python3 - "$CAPS" <<'PY'
 import sys; p = sys.argv[1]; t = open(p).read()
-open(p, 'w').write(t.replace('argv: [npx, hyperframes@0.4.1, render]', 'argv: [npx, hyperframes@0.4.2, render]'))
+open(p, 'w').write(t.replace('args: [render]', 'args: [render, --quality, draft]'))
 PY
 R=$(res video --person bill)
 expect "a changed argv is a new door: not in the old tick" "$(field "$R" doors)" '[]'

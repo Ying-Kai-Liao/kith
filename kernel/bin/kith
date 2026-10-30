@@ -40,6 +40,7 @@
 #   kith search [words] [--mine]                         find agents on GitHub (repos tagged hq-agent)
 #   kith deps <agent>|--all [--install]                  programs an agent runs that this Mac lacks; --install adds them
 #   kith auth [ls|grant|revoke|set ...]                  which agent may use which service, as which account (kith-auth)
+#   kith door prepare AGENT DOOR|sweep|ls               a guest's doors: prepare one's cache (owner), stop them, list them (kith-door)
 #   kith cost [agents|agent <name>|...]                  what the agents cost, from the usage ledger (kith-cost)
 #   kith ask <agent> [-c] [--as NAME] "task"            ask an agent, get its answer back; -c continues (kith-ask)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
@@ -80,7 +81,7 @@ set -euo pipefail
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
-[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,55p' "$0" | sed 's/^#   //'; exit 0; }
+[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,56p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
 [[ $1 == migrate ]] && exec "$KITH/bin/kith-migrate" "${@:2}"
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
@@ -98,6 +99,7 @@ case $1 in
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
   rollback)           shift; exec "$KITH/bin/kith-pkg" pin "$@" ;;
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
+  door)               shift; exec "$KITH/bin/kith-door" "${@:---help}" ;;
   cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;

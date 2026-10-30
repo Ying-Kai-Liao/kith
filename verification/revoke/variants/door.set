@@ -1,0 +1,2 @@
+\* the code as built, with the guest door (only the door rows need it)
+GuestDoor = TRUE
