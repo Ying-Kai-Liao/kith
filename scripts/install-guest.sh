@@ -10,7 +10,9 @@
 #
 # Environment:
 #   KITH_VERSION          a release to install (1.2.3 or v1.2.3); default the latest
-#   KITH_GUEST_PREFIX     where to install (bin/kith goes under it); default ~/.local
+#   KITH_GUEST_PREFIX     where to install (bin/kith goes under it); default ~/.local. Given explicitly, it also becomes the bot's
+#                         home: <prefix>/.kith holds device.key and guest.json, and kith finds it from its own path in any
+#                         shell (for a VM that only keeps one folder, e.g. /workspace). KITH_GUEST_HOME still wins.
 #   KITH_REPO             GitHub repo to download from; default Ying-Kai-Liao/kith
 #   KITH_ALLOW_UNSIGNED   1 installs a release with no signature (or no tool to check it) on the checksum alone
 #   KITH_INSTALL_TARBALL  a local kith-guest-<version>-linux-<arch>.tar.gz to install instead of downloading (tests,
@@ -131,6 +133,11 @@ SRC=$(echo "$WORK"/x/kith-guest-*)
 # A new file moved into place by rename, so a running kith is never half-written.
 mkdir -p "$PREFIX/bin"
 cp "$SRC/bin/kith" "$PREFIX/bin/.kith.new.$$" && chmod 755 "$PREFIX/bin/.kith.new.$$" && mv -f "$PREFIX/bin/.kith.new.$$" "$PREFIX/bin/kith"
+# An explicit prefix is the bot's home too: the folder next to bin/ that kith looks for. Chosen once here, so an upgrade
+# keeps it; an existing bot at ~/.config/kith is left where it is, and the default prefix changes nothing.
+if [ -n "${KITH_GUEST_PREFIX:-}" ] && [ ! -e "$PREFIX/.kith" ] && [ ! -f "${XDG_CONFIG_HOME:-$HOME/.config}/kith/device.key" ]; then
+  (umask 077; mkdir -p "$PREFIX/.kith")
+fi
 say "installed kith to $PREFIX/bin/kith"
 case ":$PATH:" in
   *":$PREFIX/bin:"*) ;;

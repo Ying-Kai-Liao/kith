@@ -111,7 +111,14 @@ async fn a_bot_joins_proves_asks_and_is_revoked() {
     let cid = r.hub.identity.computer_id();
     assert!(link.contains(&format!("/b/{cid}/{}#t=", made["inviteId"].as_str().unwrap())), "{link}");
     assert!(link.ends_with(&format!("&k={}", r.hub.identity.sign_pub_b64())), "the host key is pinned in the link");
-    assert!(made["share"].as_str().unwrap().contains("kith join"));
+    let share = made["share"].as_str().unwrap();
+    // Installs under /workspace, uses full paths (it isn't on PATH in a fresh shell), and carries no long-lived secret.
+    assert!(share.contains("KITH_GUEST_PREFIX=/workspace sh") && share.contains("/workspace/bin/kith join"), "{share}");
+    assert!(share.contains("/workspace/bin/kith room read") && share.contains("/workspace/bin/kith room post"));
+    assert!(share.contains("expires in 1 hour") && !share.contains("credentials"), "{share}");
+    // The invite lapses in an hour, not a day.
+    let lasts = made["expiresAt"].as_i64().unwrap() - now_ms();
+    assert!((3_500_000..=3_600_000).contains(&lasts), "{lasts}");
     let posts = r.posts();
     let posted = posts.iter().find(|(p, _)| p == "/v1/host/bot-invites").expect("the cloud was told");
     assert_eq!(posted.1["inviteId"], made["inviteId"]);

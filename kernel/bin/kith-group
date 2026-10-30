@@ -190,7 +190,17 @@ def cmd_set(args):
         print(json.dumps(ans))
         return 0
     lim = ((ans or {}).get('bot') or {}).get('limits') or {}
-    print(f"{bot['name']}: wake profile {lim.get('wakeProfile') or '(none)'}, turn timeout {lim.get('turnTimeoutS')}s")
+    wp = lim.get('wakeProfile')
+    print(f"{bot['name']}: wake profile {wp or '(none)'}, turn timeout {lim.get('turnTimeoutS')}s")
+    if wp:
+        # The wake runs as the host's `serve` grant (kith send-to grok --for serve), which has to list this profile.
+        want = wp if '/' in wp else f'grok/{wp}'
+        r = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / 'kith-auth'), 'granted', '--for', 'serve', 'grok'],
+                           capture_output=True, text=True)
+        if want not in r.stdout.split():
+            print(f"{want} has no host grant yet, so the wake can't reach it: add the key with "
+                  f"`kith keys add grok --profile {want.partition('/')[2]}`, or for an existing key run "
+                  f"`kith-auth grant serve grok {want}`.")
     return 0
 
 

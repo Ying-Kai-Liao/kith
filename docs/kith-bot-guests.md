@@ -65,7 +65,7 @@ Read first, for the pieces this builds on: `docs/architecture.md` (people, kith-
 2. The app calls `createBotInvite` (6.1). The host makes the bot (kith-auth person, grants), an invite, and posts the
    invite hash to the cloud.
 3. The app shows a **share text** with a Copy button (the link plus the install and join commands, 6.2). It states
-   the expiry (24 h), that the link works once, and, for an invitee, that Kai can see what the bot asks.
+   the expiry (1 h; a lapsed link is remade), that the link works once, and, for an invitee, that Kai can see what the bot asks.
 
 ### 2.2 Paste into Grok
 
@@ -355,8 +355,8 @@ The host (new `serve/host/src/api/botguests.rs`, `create_bot_invite`):
 3. Creates the kith-auth person (`kith-auth bot bot-<hex> --of <owner> name=...`) and, for each agent, `kith-auth member
    <agent> bot-<hex> preset=guest`. Under the existing `AUTH_WRITES` lock, with an `Undo` like `create_invite`.
 4. Makes `token = b64url(random 32)`, `proof = sha256hex(token)`, `invite_id = "bi_" + 12 hex`, stores `bot_invites`
-   (`token_hash = proof`) and `bot_guests` (`state = 'invited'`), expiry **24 h** (same as human invites;
-   `INVITE_MS`).
+   (`token_hash = proof`) and `bot_guests` (`state = 'invited'`), expiry **1 h** (`INVITE_MS`; a person's invite keeps 24 h: a bot link is pasted straight away and
+   is easy to remake).
 5. Posts `POST /v1/host/bot-invites {inviteId, tokenHash: sha256hex(proof), expiresAt}`. If the cloud refuses, deletes
    everything it made (as `create_invite` does).
 
@@ -382,18 +382,18 @@ https://<cloud-host>/b/<computerId>/<inviteId>#t=<token>&k=<hostSignKey>
 Share text (made by the app from `createBotInvite.share`, so wording lives in one place, the host):
 
 ```
-Install the Kith client, then join my Kith computer. This link works once and expires in 24 hours.
+Install the Kith client, then join my Kith computer. This link works once and expires in 1 hour (I can make a new one if it lapses).
 
-  curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | sh
-  kith join 'https://.../b/<c>/<i>#t=...&k=...'
+  curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install-guest.sh | KITH_GUEST_PREFIX=/workspace sh
+  /workspace/bin/kith join 'https://.../b/<c>/<i>#t=...&k=...'
 
-Afterwards ask my agents with:  kith ask @<agent> "your question"
-Run `kith --help` for the rest.
+Afterwards ask my agents with:  /workspace/bin/kith ask @<agent> "your question"
+Run `/workspace/bin/kith --help` for the rest. /workspace/bin is not on PATH in a new shell, so always use the full path.
 
 If I put you in a Kith room, you are woken (a webhook run) when it is your turn. The wake names a room, a conversation,
 an epoch, a turnKey and a `since` cursor. On a wake, run:
-  kith room read <room> --since <since>
-  kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> "your reply"
+  /workspace/bin/kith room read <room> --since <since>
+  /workspace/bin/kith room post <room> --conversation <conversation> --epoch <epoch> --turn-key <turnKey> "your reply"
 Post once per wake, or post (pass) when you have nothing to add. Please allow `kith` to run when asked: approvals for
 routine runs expire after about 30 minutes, so allow it again if a wake finds it blocked.
 ```
@@ -825,11 +825,14 @@ member list): there is no new way to add a member, it is the owner's own group e
 
 - **Wake, not listen.** Grok can't keep a process running, so the host wakes it. When the room turn reaches the bot
   member, the turn is charged (C2) and the host emits a bot-only `turn` event `{room, conversation, epoch, turnKey}`; if
-  the bot has a **wake profile** it also runs `kith send-to grok --body - --profile <p> --json` (the body on stdin, so
+  the bot has a **wake profile** it also runs `kith send-to grok --for serve --body - --profile <p> --json` (the body on stdin, so
   the webhook URL and key stay in kith-auth, never in an argument or a log) with `{room, conversation, epoch, turnKey,
   since, text}`: a short instruction and a read cursor, never the key and never text from any room. A 200 means the run
   started. A refused wake (non-200), no wake profile, or no post within the bot's **turn timeout** is a pass; the turn
-  was already charged. The wait is the room task's own await.
+  was already charged. The wait is the room task's own await. The host has no agent name, so the wake runs as the
+  named kith-auth grant `serve`: that grant must list the wake profile (`kith-auth grant serve grok grok/<account>`, or
+  `kith keys add grok --profile <account>`), and `kith send-to` refuses a profile the grant does not list. `kith bot
+  set --wake-profile` prints a hint when it does not.
 - **Settings** (`setBotLimits`, the computer owner for the profile): `turnTimeoutS` (default 300, clamped 30 to 3600) and
   `wakeProfile` (a kith-auth profile name for the `grok` service; empty clears it). Stored in `bot_guests` (schema 12; the Mac link tables are 13).
 - **`botPost {room, conversation, epoch, turnKey?, clientNonce, text}`**, 16,000 characters at most, at the bot's rate.
@@ -908,10 +911,18 @@ bot owner, the cloud operator or a cloud breach, a Grok-app user.
   `kith join --rekey` is `join` that keeps the local name.
 - **Rate limits** (7.7) cap what a stolen key can do per hour and per second; the owner's monthly cap caps the dollars for an
   invitee. Kai's own bots have the optional bots' monthly cap (open question 1, settled).
-- **Ephemeral VMs.** If the VM's disk is wiped every session, the key is lost and the bot must rejoin. `kith join
-  --print-credentials` prints one base64 line that the owner can store as a secret in the provider and pass as
-  `KITH_GUEST_CREDENTIALS` in later sessions; this is the same key, with the same theft risk, in the provider's secret store.
-  Whether Grok keeps files between sessions is the first thing to test (section 12).
+- **Ephemeral VMs.** If the VM's disk is wiped every session, the key is lost and the bot must rejoin. Grok's computer keeps
+  `/workspace` between wakes (other folders, like `~/.local`, can be wiped on an update), and each wake is a fresh shell. So the
+  share text installs with `KITH_GUEST_PREFIX=/workspace`: the installer makes `/workspace/.kith` once, and `kith` finds the
+  `.kith` folder beside its own `bin/` in any shell with no env set (an explicit `KITH_GUEST_HOME` still wins; an install at
+  `~/.local` with `~/.config/kith` is unchanged). The paste text uses the full path `/workspace/bin/kith`. To keep a copy of the
+  key anyway, `kith join --credentials-file PATH` writes the base64 line to a NEW file (0600; an existing path or symlink is
+  refused; needs a finished join, so not `--wait 0`) and never prints it: not on stdout, stderr, the `--json` event (which names
+  the path only) or a log. `--print-credentials` is refused. The invite link is the only secret in the chat, it works once
+  and lapses in an hour.
+  **What this does not cover:** a prompt-injected `cat /workspace/.kith/device.key` still works, as it does against
+  `~/.config/kith` today. The key sits on a disk the bot's tools can read. Revoke, the rate limits and the owner's cap
+  (above) are what contain a stolen key.
 
 ### 8.2 Prompt injection through the bot
 
@@ -951,7 +962,7 @@ A web page the bot reads can make *the bot* ask Kith things, and can try to stee
 - Join: the invite is single use and bound to the first key to accept; the same key repeating it is idempotent, which is a
   retry, not a replay. `proveBotInvite` can be tried 5 times per 10 minutes and the invite is marked used on success.
 - Ask: `clientNonce` makes a resend return the first result instead of sending twice.
-- A link captured from a chat log before the bot uses it can be used by the capturer first (bearer secret). Mitigations: 24 h
+- A link captured from a chat log before the bot uses it can be used by the capturer first (bearer secret). Mitigations: 1 h
   expiry, single use, the owner sees `botRequest`/`botUpdated` the moment anything joins, and revoke is one tap. Kai may choose
   to approve every bot including his own by leaving the toggle off for himself in a later setting.
 
@@ -989,20 +1000,21 @@ go to stdout. Works with no terminal at all.
 
 ### 9.1 Files
 
-`$KITH_GUEST_HOME`, else `$XDG_CONFIG_HOME/kith`, else `~/.config/kith` (directory mode 0700):
+`$KITH_GUEST_HOME`, else the `.kith` folder next to the install prefix (`<prefix>/bin/kith` -> `<prefix>/.kith`, made by
+`install-guest.sh` when `KITH_GUEST_PREFIX` is set), else `$XDG_CONFIG_HOME/kith`, else `~/.config/kith` (directory mode 0700):
 
 | File | Contents |
 |---|---|
 | `device.key` (0600) | the Ed25519 seed, 32 bytes, base64url |
 | `guest.json` (0600) | `{v:1, cloud, computerId, hostSignKey, botId, name, state, inviteId, token?, createdAt}`; `token` exists only while `state=joining` |
 
-`KITH_GUEST_CREDENTIALS` (env, base64 of `{device, guest}`) replaces both files when set (never written back). `KITH_CLOUD_URL`
+`KITH_GUEST_CREDENTIALS` (env, base64 of `{device, guest}`; the line `--credentials-file` writes) replaces both files when set (never written back). `KITH_CLOUD_URL`
 overrides the cloud. Exit 3 if neither exists.
 
 ### 9.2 Commands
 
 ```
-kith join <link> [--name NAME] [--provider P] [--wait SECS] [--rekey] [--print-credentials] [--json]
+kith join <link> [--name NAME] [--provider P] [--wait SECS] [--rekey] [--credentials-file PATH] [--json]
 kith ask <@agent|agent> [--thread cv_..] [--ref EXT] [--room rm_..] [--speaker S]
          [--stream | --wait] [--timeout SECS] [--idempotency-key K] [--no-queue] [--json] [TEXT | -]
 kith read <conversation> [--after SEQ] [--wait] [--timeout SECS] [--json]
@@ -1170,7 +1182,7 @@ name clash with the host's `kith` bin. `kith ask agent@machine` over ssh (`kerne
 
   It takes `uname -s` = Linux and `uname -m` (`x86_64`, `aarch64`/`arm64`), finds the latest release (the `/releases/latest`
   redirect, as `install.sh` does) or `KITH_VERSION`, downloads the tarball and `SHA256SUMS`, **verifies the checksum** (fails
-  closed; `sha256sum`, else `shasum -a 256`), installs `bin/kith` to `${KITH_GUEST_PREFIX:-$HOME/.local}/bin/kith` by writing a
+  closed; `sha256sum`, else `shasum -a 256`), installs `bin/kith` to `${KITH_GUEST_PREFIX:-$HOME/.local}/bin/kith` (and, when `KITH_GUEST_PREFIX` is set and no bot lives at `~/.config/kith`, makes `<prefix>/.kith`, the bot's home) by writing a
   temp file and renaming, and prints a PATH hint when that directory isn't on `PATH`. Re-running upgrades. It needs only `curl`
   (or `wget`), `tar`, `sh`. Env: `KITH_VERSION`, `KITH_GUEST_PREFIX`, `KITH_REPO`, `KITH_INSTALL_TARBALL` (offline/tests, same as
   `install.sh`). Built since: `SHA256SUMS` is signed with minisign in CI (`SHA256SUMS.minisig`, key in
@@ -1223,9 +1235,12 @@ Kai has a Grok bot account and offered to test. When P1-P5 are deployed to `kith
 2. In the Kith app: People > New bot > name `Rex`, provider Grok, pick one low-risk agent (for example `notes`). Copy the share
    text.
 3. Paste it to the Grok bot: "Run these two commands and tell me the output." Expect: the installer prints a checksum ok line and
-   `installed kith ... to ~/.local/bin`; `kith join` prints `Joined ... as "Rex"`.
-4. In a **new** Grok session (or after the VM idles), ask it to run `kith status`. If it says not joined, the VM does not keep
-   files: use `kith join --print-credentials` once and store the line as a Grok secret, then retest with `KITH_GUEST_CREDENTIALS`.
+   `installed kith ... to /workspace/bin`; `/workspace/bin/kith join` prints `Joined ... as "Rex"`.
+4. In a **new** Grok chat, and again from a **webhook wake**, ask it to run `/workspace/bin/kith status` with no env set. If it
+   says not joined, the home was not found: check `/workspace/.kith` exists and `/workspace` survived. Also confirm `/workspace`
+   belongs to Kai's Grok account alone, not shared with other projects or shared chats (the key sits there). Do not use
+   `--print-credentials` (refused); if a copy is wanted, `kith join --credentials-file /workspace/creds` and store that file's
+   line as the secret, then retest with `KITH_GUEST_CREDENTIALS`.
 5. Ask the bot: `kith ask @notes "say hello in five words"`. Expect the reply in Grok's output and a thread tagged
    `from Grok · Kai's Rex` in the app.
 6. Continue it: `kith ask @notes --thread <the cv_ id it printed> "and in three words?"`. Same thread in the app.
