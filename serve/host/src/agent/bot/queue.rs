@@ -152,7 +152,16 @@ impl Actor {
             }
             Cmd::ResetPlace { lane } => self.reset_place(&lane).await,
             Cmd::ForgetLoaded { lane } => self.forget_loaded(&lane),
-            Cmd::Shutdown => return false,
+            Cmd::Shutdown => {
+                // A card's wake queued here never starts: the wake queue gets it back.
+                let mut gone: Vec<String> = self.start_entries.clone();
+                gone.extend(self.queue.iter().filter_map(|q| match q {
+                    Queued::User { entry_id, .. } => Some(entry_id.clone()),
+                    _ => None,
+                }));
+                crate::cards::resume::actor_gone(&self.hub, &gone);
+                return false;
+            }
         }
         true
     }
@@ -170,10 +179,16 @@ impl Actor {
             }
         }
         // Queued messages are dropped too: Stop means "stop everything here".
+        let mut dropped = Vec::new();
         for queued in std::mem::take(&mut self.queue) {
             let Queued::User { entry_id, .. } = queued else { continue };
             self.set_user_status(&entry_id, RequestStatus::Cancelled);
+            dropped.push(entry_id);
         }
+        // A card's wake among them is not delivered later: the wake queue is told it is dropped (R8). Also when the
+        // router's Stop ended this place, which no `stop_place` saw.
+        crate::cards::resume::stopped_lane(&self.hub, &self.home);
+        crate::cards::resume::not_started(&self.hub, &dropped, false);
         self.cancel_turn().await;
     }
 

@@ -1,28 +1,27 @@
 //! The resume half of approval cards (C3-C8, A7, L2): an approved card whose asker was gone owes its session a turn.
 //!
 //! The card store is the record of an owed resume (`Store::cards_awaiting_resume`: approved or used-by-a-later-ask,
-//! granted, not resumed, before the deadline). The doors below only deliver it, and a restart re-derives the whole list
-//! from the store (`cards::start`), never from a door's queue: the channel inbox is emptied before a run starts, so a
-//! crash or a refused claim would drop what it held (C5).
-//!
-//! One resume per card: [`Store::card_resume_claim`] is a compare-and-set on `resumed_at`, taken just before the turn is
-//! handed to a door, so a door's copy and a restart's re-derive can't start two turns. A refused hand-over (the session's
-//! writer claim is held, the bot's actor is gone) gives the claim back and the resume stays owed; it is retried with a
-//! doubling pause (5 s up to 10 min) until it happens or the card expires (silence is no).
-//!
-//! The claim takes the wake off the list, not the yes: the card is `applied` only when the turn that carries it has
-//! started (M5), and a turn that never starts gives the claim back. A host that stops in between loses the door's queue
-//! (the actor's, or a channel thread's) but not the wake: a restart gives back every claim that wasn't applied
-//! (`Store::cards_restart`), and `cards::start` offers those cards again.
+//! granted, not resumed, before the deadline), and the kernel's wake queue (`kith-wake`, [`crate::wake`]) is the one
+//! owner of the wake itself (lifecycle F12): a card answer is `enqueue`d as request `card:<id>` and the host keeps no
+//! queue or retry list of its own. What the store keeps is only whether the request reached the queue
+//! ([`Store::card_resume_claim`], a compare-and-set on `resumed_at`) and whether a turn carrying it has started
+//! (`applied_at`, M5): a restart gives back every claim that wasn't applied (`Store::cards_restart`) and offers those
+//! cards again, which is safe because the queue drops an id it already holds or has answered (rule 13).
 //!
 //! Doors, by where the card came from (its `session`):
-//! - `acp:<chat>:<thread>`: a bot chat's turn. A turn is queued on the bot's actor (`agent/bot/queue.rs`), after a short
-//!   notice in the thread. A held writer claim fails that turn's start; the actor calls [`refused`].
-//! - `run:..:<thread>#<agent>`: a channel thread. The note joins the channel inbox (`Core::wake`).
-//! - `run:..:<claude session>`: a `claude -p` run the kernel started (`kith ask`, `kith-sched`). The host runs
-//!   `kith <agent> --resume <session> "<note>"` with `KITH_PERSON` set to the card's person (absent for the owner). A
-//!   card a `kith ask` run parked on (`reply_to`) runs it as `kith ask --reply <id> ...`: the resumed turn's words are
-//!   that ask's answer (rule 7).
+//! - `acp:<chat>:<thread>`: a bot chat's turn. The host takes the item (`kith-wake take`, [`drive`]) and queues the turn
+//!   on the bot's actor (`agent/bot/queue.rs`), after a short notice in the thread. The actor says when the turn
+//!   started ([`turn_started`]) or could not ([`refused`], [`not_started`]).
+//! - `run:..:<thread>#<agent>`: a channel thread. The note joins the channel inbox (`Core::wake`), and the run says
+//!   the same ([`channel_started`], [`channel_failed`]).
+//! - `run:..:<claude session>`: a `claude -p` run the kernel started (`kith ask`, `kith-sched`). The owner's own session
+//!   is the kernel's run door (`kith-wake` resumes it once nobody holds it); a person's, and a card a `kith ask` run
+//!   parked on (`reply_to`, resumed as `kith ask --reply <id> ...`: the turn's words are that ask's answer, rule 7), go
+//!   through the host door: the host runs `kith <agent> --resume <session> "<note>"` with `KITH_PERSON` set, because
+//!   only it can give a person's run its token.
+//!
+//! Stop wins (R8): [`stopped`] withdraws what the session is owed from the queue and closes the approved cards whose
+//! turn had not started, so neither a restart nor another yes brings the stopped turn back.
 //!
 //! A card used by a later message before its resume still gets the wake, without a grant (C7, A9): the run asks again
 //! if it still needs it.
@@ -31,13 +30,15 @@ use super::Card;
 use crate::channels::Wake;
 use crate::hub::Hub;
 use crate::store::{CardState, EntryKind, Lane, now_ms};
+use crate::wake::{self, Queued, Request, Turn};
 use serde_json::{Value, json};
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, LazyLock, Mutex, Weak};
-use std::time::Duration;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fmt::Write as _;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
 
-const FIRST_RETRY: Duration = Duration::from_secs(5);
-const MAX_RETRY: Duration = Duration::from_secs(600);
 /// How long the kernel's one-shot waits for a held session before it exits 1 with "held by ..." (`KITH_CLAIM_WAIT`, #244,
 /// default 5). The spawn gets it explicitly so the rule below doesn't depend on the kernel's default.
 const CLAIM_WAIT_S: u64 = 5;
@@ -45,12 +46,32 @@ const CLAIM_WAIT_S: u64 = 5;
 /// exited by `CLAIM_WAIT_S`. The two numbers are one rule: raise `CLAIM_WAIT_S` and this follows.
 #[cfg(not(test))]
 const EARLY_EXIT: Duration = Duration::from_secs(CLAIM_WAIT_S + 3);
+/// A turn the host took and heard nothing of this long is given back (an actor that shut down, a lost callback).
+const TAKEN_TTL: Duration = Duration::from_secs(30 * 60);
+/// Even a turn the bot's actor or a channel run still seems to hold is given back after this long: its callback was lost.
+const TRACKED_TTL: Duration = Duration::from_secs(6 * 3600);
+/// How soon the taker looks after a request arrives, so cards answered together share one turn.
+const SETTLE: Duration = Duration::from_millis(300);
+/// How often the taker looks at the queue's folder (a `kith ask` answer comes from outside the host); it starts a
+/// process only when the folder holds something.
+const LOOK_EVERY: Duration = Duration::from_secs(5);
+/// Every this many looks, the cards the queue hasn't got (a kith-wake that failed) are offered again.
+const OFFER_EVERY: u32 = 12;
 
-/// Cards with a retry loop running: an answer, a restart and a refused claim all offer the same card.
-static IN_FLIGHT: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
-/// The entry of a queued wake turn -> the cards it answers, until that turn starts ([`turn_started`]) or doesn't
-/// ([`refused`], [`not_started`]).
-static WAKES: LazyLock<Mutex<HashMap<String, Vec<String>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// A bot's wake turn on its actor: the notice entry that carries it -> the turn it belongs to, until that turn starts
+/// ([`turn_started`]) or doesn't ([`refused`], [`not_started`]). Only the link between the actor's callback and the
+/// queue's run; the queue is the record.
+static ENTRIES: LazyLock<Mutex<HashMap<String, Carried>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The turns this host holds -> when it took them, so one nobody settles is given back ([`TAKEN_TTL`]).
+static TAKEN: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+/// The runs a channel thread holds, until its turn starts or doesn't: a turn queued behind a long channel run is not lost.
+static CHANNEL_RUNS: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+static KICK: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+struct Carried {
+    run: String,
+    cards: Vec<String>,
+}
 
 fn lock<T>(m: &'static Mutex<T>) -> std::sync::MutexGuard<'static, T> {
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -59,9 +80,9 @@ fn lock<T>(m: &'static Mutex<T>) -> std::sync::MutexGuard<'static, T> {
 /// What one attempt came to.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Step {
-    /// Delivered, taken by someone else, dropped or expired: nothing more is owed from this card.
+    /// Queued, taken by someone else, dropped or expired: nothing more is owed from this card.
     Done,
-    /// Still owed: try again after the pause.
+    /// Still owed: tried again at the next look.
     Retry,
 }
 
@@ -96,24 +117,38 @@ pub fn door_of(card: &Card) -> Option<Door> {
     Some(if inner.contains('#') { Door::Channel(inner.to_owned()) } else { Door::Run { session: inner.to_owned() } })
 }
 
-/// A resume is owed for `card`: attempt it now, and again with a doubling pause while it stays owed.
-pub fn offer(hub: &Arc<Hub>, card: &Card) {
-    if !lock(&IN_FLIGHT).insert(card.id.clone()) {
-        return;
+/// The wake queue's key for a card's session: the bot's `acp:<chat>:<thread>`, a channel thread's work key or the
+/// Claude session. (`kith ask` answers for a person's session use the Claude session too, so they merge.)
+fn key_of(door: &Door, card: &Card) -> String {
+    match door {
+        Door::Bot { .. } => card.session.clone(),
+        Door::Channel(wk) => wk.clone(),
+        Door::Run { session } => session.clone(),
     }
-    let (weak, id): (Weak<Hub>, String) = (Arc::downgrade(hub), card.id.clone());
+}
+
+fn request_id(card: &Card) -> String {
+    format!("card:{}", card.id)
+}
+
+/// The cards whose request the queue holds right now (queued or in a turn), for a restart to keep their claims.
+pub(crate) fn queued_cards(hub: &Hub) -> Vec<String> {
+    wake::statuses(&state_of(hub))
+        .into_iter()
+        .filter(|(_, how)| matches!(how.as_str(), "queued" | "running"))
+        .filter_map(|(id, _)| id.strip_prefix("card:").map(str::to_owned))
+        .collect()
+}
+
+fn state_of(hub: &Hub) -> PathBuf {
+    hub.terminal.env().state
+}
+
+/// A resume is owed for `card`: put it in the wake queue now. A refusal leaves it owed for the next look ([`run_taker`]).
+pub fn offer(hub: &Arc<Hub>, card: &Card) {
+    let (hub, id) = (hub.clone(), card.id.clone());
     tokio::spawn(async move {
-        let mut pause = FIRST_RETRY;
-        loop {
-            let Some(hub) = weak.upgrade() else { break };
-            if attempt(&hub, &id).await == Step::Done {
-                break;
-            }
-            drop(hub);
-            tokio::time::sleep(pause).await;
-            pause = (pause * 2).min(MAX_RETRY);
-        }
-        lock(&IN_FLIGHT).remove(&id);
+        attempt(&hub, &id).await;
     });
 }
 
@@ -121,12 +156,6 @@ pub fn offer(hub: &Arc<Hub>, card: &Card) {
 fn claim_all(hub: &Hub, group: &[Card]) -> Vec<Card> {
     let now = now_ms();
     group.iter().filter(|c| hub.store.card_resume_claim(&c.id, now).unwrap_or(false)).cloned().collect()
-}
-
-fn release_all(hub: &Hub, cards: &[Card]) {
-    for c in cards {
-        let _ = hub.store.card_resume_release(&c.id);
-    }
 }
 
 /// The turn that carries these cards' resumes started: they are delivered (M5).
@@ -137,15 +166,24 @@ fn applied(hub: &Hub, ids: &[String]) {
     }
 }
 
-fn ids_of(cards: &[Card]) -> Vec<String> {
-    cards.iter().map(|c| c.id.clone()).collect()
+fn end_all(hub: &Hub, cards: &[Card]) {
+    for c in cards {
+        end_owed(hub, c);
+    }
 }
 
 fn end_owed(hub: &Hub, card: &Card) {
     let _ = hub.store.card_resume_drop(&card.id);
 }
 
-/// One try at the resume of card `id`. Safe to call from anywhere, any number of times: the claim decides.
+/// Whether a card's wake is still wanted: approved (or used by a later ask) and no turn carrying it started.
+/// Withdrawn, expired and Stopped cards are not.
+fn wanted(c: &Card) -> bool {
+    matches!(c.state, CardState::Approved | CardState::Used) && c.granted_at.is_some() && c.applied_at.is_none()
+}
+
+/// One try at the resume of card `id`: it goes into the kernel's queue, once. Safe to call from anywhere, any number of
+/// times: the claim decides, and the queue drops an id it has.
 pub async fn attempt(hub: &Arc<Hub>, id: &str) -> Step {
     let now = now_ms();
     let Some(card) = hub.store.cards_awaiting_resume(now).into_iter().find(|c| c.id == id) else {
@@ -168,76 +206,426 @@ pub async fn attempt(hub: &Arc<Hub>, id: &str) -> Step {
     if !group.iter().any(|c| c.id == card.id) {
         group.push(card.clone());
     }
-    let note = note_for(hub, &group).await;
     let Some(door) = door_of(&card) else {
         end_owed(hub, &card);
         return Step::Done;
     };
-    match door {
-        Door::Bot { bot, lane } => bot_door(hub, &group, &bot, &lane, &note),
-        Door::Channel(wk) => channel_door(hub, &group, &wk, &note),
-        Door::Run { session } => run_door(hub, &card, &group, &session, &note).await,
+    match &door {
+        Door::Bot { bot, lane } => {
+            if hub.store.bot(bot).ok().flatten().is_none_or(|b| b.deleted) || left_room(hub, bot, lane) {
+                end_all(hub, &group);
+                return Step::Done;
+            }
+        }
+        Door::Channel(_) => {}
+        Door::Run { session } => {
+            if !crate::terminal::claim::safe_session(session) {
+                end_all(hub, &group);
+                return Step::Done;
+            }
+        }
+    }
+    let claimed = claim_all(hub, &group);
+    let mut step = Step::Done;
+    for c in &claimed {
+        if let Err(error) = enqueue(hub, c, &door).await {
+            tracing::warn!(card = %c.id, error = format!("{error:#}"), "couldn't queue a card's resume");
+            let _ = hub.store.card_resume_release(&c.id);
+            step = Step::Retry;
+        }
+    }
+    step
+}
+
+/// One card's request into the queue. The owner's plain session wakes through the kernel's run door (it resumes the
+/// session itself once nobody holds it); everything the host must start (a person's run, a `kith ask` reply, a bot's
+/// chat, a channel thread) is a host-door item.
+pub(crate) async fn enqueue(hub: &Arc<Hub>, card: &Card, door: &Door) -> anyhow::Result<()> {
+    let _marker = Enqueuing::mark(&card.id);
+    let kernel_door = matches!(door, Door::Run { .. }) && card.person.is_empty() && card.reply_to.is_none();
+    let text = note_of(hub, card).await;
+    let (state, key, id) = (state_of(hub), key_of(door, card), request_id(card));
+    let (agent, person) = (card.agent.clone(), Some(card.person.clone()).filter(|p| !p.is_empty()));
+    let room = person.as_deref().map(|p| crate::agent::hq::room_of(&card.agent, Some(p), None));
+    let queued = {
+        let (state, text, key, id) = (state.clone(), text.clone(), key.clone(), id.clone());
+        wake::blocking(move || {
+            wake::enqueue(
+                &state,
+                &Request {
+                    session: &key,
+                    id: &id,
+                    agent: &agent,
+                    person: person.as_deref(),
+                    room: room.as_deref(),
+                    host_door: !kernel_door,
+                    why: "",
+                    text: &text,
+                },
+            )
+        })
+        .await
+    };
+    let queued = queued.ok_or_else(|| anyhow::anyhow!("the wake call didn't finish"))??;
+    #[cfg(test)]
+    if kernel_door && queued == Queued::New {
+        tests_seen::record("run", &card.session, &text, None);
+    }
+    if queued == Queued::Duplicate {
+        // The queue has this id. Still queued or in a turn: it is the queue's. Finished or withdrawn: over. The call
+        // failing says nothing, so the card stays owed for the next look (a flaky status must not lose a wake).
+        let (st, rid) = (state.clone(), id.clone());
+        match wake::blocking(move || wake::status(&st, &rid)).await.flatten().as_deref() {
+            Some("answered" | "recovered" | "withdrawn") => applied(hub, std::slice::from_ref(&card.id)),
+            // It failed after its tries: not delivered, so not applied, and not owed any more either.
+            Some("failed") => failed(hub, card),
+            Some("queued" | "running") => {}
+            other => anyhow::bail!("the queue's answer about {id} was {other:?}"),
+        }
+    }
+    // Stop may have come while this was on its way: the request is withdrawn again (the card is closed, R8).
+    if hub.store.card(&card.id).is_none_or(|c| !wanted(&c)) {
+        let (st, key, rid) = (state, key, id);
+        wake::spawn(move || wake::withdraw(&st, &key, Some(&rid)));
+    } else if kernel_door {
+        show_holder(hub, card).await;
+    } else {
+        KICK.notify_one();
+    }
+    Ok(())
+}
+
+/// Cards whose request is on its way into the queue. [`settle_queue_at`] must not read "not in the queue" as "forgotten"
+/// for these: the item is written a moment after the claim. `DONE` counts finished enqueues, so a settle whose read
+/// overlapped one can tell.
+static ENQUEUING: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
+static ENQUEUED: AtomicUsize = AtomicUsize::new(0);
+/// Cards the queue's files did not show at the last settle (neither queued nor answered). A commit writes the answer
+/// before it removes the item, but a read of the files is not atomic across them, so one miss is not yet an answer.
+static MISSED: LazyLock<Mutex<HashSet<String>>> = LazyLock::new(Mutex::default);
+
+struct Enqueuing(String);
+
+impl Enqueuing {
+    fn mark(id: &str) -> Self {
+        lock(&ENQUEUING).insert(id.to_owned());
+        Self(id.to_owned())
     }
 }
 
-/// The words the agent is told: who allowed what, and that it can go on. A used grant is said so (C7).
-async fn note_for(hub: &Hub, group: &[Card]) -> String {
-    let who = super::approver_label(hub, &group[0]).await;
-    let (keys, asks): (Vec<&Card>, Vec<&Card>) = group.iter().partition(|c| c.tool == super::secret::TOOL);
-    let parts: Vec<String> = asks
-        .iter()
-        .map(|c| {
-            let what = super::short(&c.shown, 80);
-            if c.state == CardState::Used {
-                format!(
-                    "{who} allowed {what} once, but a later request already used that; ask again if you still need it"
-                )
-            } else {
-                format!("{who} allowed {what} once")
-            }
-        })
-        .collect();
-    // A saved key is told by name only (never a value); its note stands on its own.
-    let mut note = String::from("[Kith]");
-    if !parts.is_empty() {
-        note.push(' ');
-        note.push_str(&parts.join("; "));
-        note.push_str("; go on.");
+impl Drop for Enqueuing {
+    fn drop(&mut self) {
+        lock(&ENQUEUING).remove(&self.0);
+        ENQUEUED.fetch_add(1, Ordering::SeqCst);
     }
-    for c in keys {
-        note.push(' ');
-        note.push_str(&super::secret::note(hub, &who, c));
+}
+
+/// The card of a kernel run-door wake says who holds its session while the wake waits for the writer (L2).
+async fn show_holder(hub: &Arc<Hub>, card: &Card) {
+    let Some(Door::Run { session }) = door_of(card) else { return };
+    let (state, sid) = (state_of(hub), session.clone());
+    let held = wake::blocking(move || crate::terminal::claim::holder(&state, &sid)).await.flatten();
+    match held {
+        Some(h) => set_held(hub, card, Some((&session, &h))),
+        None => clear_held(hub, std::slice::from_ref(card)),
+    }
+}
+
+/// The queue gave up on this card's wake (it failed after its tries) or no longer knows it: it is not delivered, so the
+/// card ends instead of staying approved past its deadline ("silence is no").
+fn failed(hub: &Hub, card: &Card) {
+    tracing::warn!(card = %card.id, "a card's wake is not delivered; the card ends");
+    end_for_stop(hub, card);
+}
+
+/// Settles the cards the queue holds: delivered ones are applied; a failed one, or one the queue has forgotten after its
+/// deadline, ends (it would stay approved forever otherwise); a kernel run-door one shows who holds its session. Reads
+/// the queue's files, so it starts no process.
+pub(crate) async fn settle_queue(hub: &Arc<Hub>) {
+    settle_queue_at(hub, now_ms()).await;
+}
+
+pub(crate) async fn settle_queue_at(hub: &Arc<Hub>, now: i64) {
+    let cards: Vec<Card> = hub.store.cards_unapplied().into_iter().filter(|c| c.resumed_at.is_some()).collect();
+    if cards.is_empty() {
+        return;
+    }
+    let state = state_of(hub);
+    let (before, count) = (lock(&ENQUEUING).clone(), ENQUEUED.load(Ordering::SeqCst));
+    let known = wake::blocking(move || wake::statuses(&state)).await.unwrap_or_default();
+    // An enqueue that began, ran or ended during the read may have written its item after the read saw the folder.
+    let racing = count != ENQUEUED.load(Ordering::SeqCst);
+    for card in &cards {
+        let how = known.get(&request_id(card)).map(String::as_str);
+        let unsure = racing || before.contains(&card.id) || lock(&ENQUEUING).contains(&card.id);
+        if how.is_some() || unsure {
+            lock(&MISSED).remove(&card.id);
+        }
+        // Failed, or forgotten by the queue (its memory is a week) once the card's deadline has passed: nothing can come.
+        // "Forgotten" must be seen on two passes in a row: a commit in progress is in neither file for a moment.
+        let gone = how.is_none() && !unsure && now > card.deadline && !lock(&MISSED).insert(card.id.clone());
+        if how == Some("failed") || gone {
+            lock(&MISSED).remove(&card.id);
+            failed(hub, card);
+            continue;
+        }
+        match how {
+            Some("answered" | "recovered" | "withdrawn") => {
+                applied(hub, std::slice::from_ref(&card.id));
+                clear_held(hub, std::slice::from_ref(card));
+            }
+            Some(_) if kernel_door(card) => show_holder(hub, card).await,
+            _ => {}
+        }
+    }
+}
+
+/// Whether the kernel's run door carries this card's wake.
+fn kernel_door(card: &Card) -> bool {
+    matches!(door_of(card), Some(Door::Run { .. })) && card.person.is_empty() && card.reply_to.is_none()
+}
+
+/// One card's words: who allowed what, and that the agent can go on. A used grant is said so (C7).
+async fn note_of(hub: &Hub, card: &Card) -> String {
+    let who = super::approver_label(hub, card).await;
+    if card.tool == super::secret::TOOL {
+        // A saved key is told by name only (never a value); its note stands on its own.
+        return super::secret::note(hub, &who, card);
+    }
+    let what = super::short(&card.shown, 80);
+    if card.state == CardState::Used {
+        format!(
+            "{who} allowed {what} once, but a later request already used that; ask again if you still need it; go on."
+        )
+    } else {
+        format!("{who} allowed {what} once; go on.")
+    }
+}
+
+// ---- the host takes its doors' turns
+
+/// Starts the host-door turns that are owed and due, one after another. Called by the taker's loop and by tests.
+pub async fn drive(hub: &Arc<Hub>) {
+    let state = state_of(hub);
+    reap(hub);
+    if !wake::has_items(&state) {
+        return;
+    }
+    loop {
+        let st = state.clone();
+        let taken = match wake::blocking(move || wake::take(&st)).await {
+            Some(Ok(Some(turn))) => turn,
+            Some(Ok(None)) | None => break,
+            Some(Err(error)) => {
+                tracing::warn!(error = format!("{error:#}"), "couldn't take a wake");
+                break;
+            }
+        };
+        handle(hub, taken).await;
+    }
+}
+
+/// A turn the host took and lost track of (a callback that never came) goes back to the queue after [`TAKEN_TTL`]. A
+/// turn that really waits with a bot's actor or a channel run behind a long turn is not one of these: giving that back
+/// would deliver it twice.
+fn reap(hub: &Hub) {
+    reap_after(hub, TAKEN_TTL);
+}
+
+fn reap_after(hub: &Hub, ttl: Duration) {
+    reap_with(hub, ttl, TRACKED_TTL);
+}
+
+fn reap_with(hub: &Hub, ttl: Duration, tracked: Duration) {
+    let stale: Vec<String> = lock(&TAKEN)
+        .iter()
+        .filter(|(_, at)| at.elapsed() >= ttl)
+        .map(|(run, at)| (run.clone(), at.elapsed() >= tracked))
+        .filter(|(run, long)| {
+            *long || (!lock(&ENTRIES).values().any(|c| c.run == *run) && !lock(&CHANNEL_RUNS).contains(run))
+        })
+        .map(|(run, _)| run)
+        .collect();
+    for run in stale {
+        lock(&TAKEN).remove(&run);
+        lock(&ENTRIES).retain(|_, c| c.run != run);
+        lock(&CHANNEL_RUNS).remove(&run);
+        let st = state_of(hub);
+        wake::spawn(move || wake::back(&st, &run, true));
+    }
+}
+
+/// The host's taker: looks at the queue soon after a request arrives and every few seconds otherwise (a look at a
+/// folder, not a process, unless something is queued), offers again the cards the queue hasn't got now and then, and
+/// settles the cards the kernel's run door carried.
+pub fn run_taker(hub: &Arc<Hub>) {
+    let weak = Arc::downgrade(hub);
+    tokio::spawn(async move {
+        let mut looks = 0u32;
+        loop {
+            tokio::select! {
+                () = KICK.notified() => tokio::time::sleep(SETTLE).await,
+                () = tokio::time::sleep(LOOK_EVERY) => looks += 1,
+            }
+            let Some(hub) = weak.upgrade() else { return };
+            if looks.is_multiple_of(OFFER_EVERY) && super::settings(&hub.store).resume {
+                for card in hub.store.cards_awaiting_resume(now_ms()) {
+                    attempt(&hub, &card.id).await;
+                }
+            }
+            settle_queue(&hub).await;
+            drive(&hub).await;
+        }
+    });
+}
+
+/// One taken turn goes through its door.
+async fn handle(hub: &Arc<Hub>, turn: Turn) {
+    lock(&TAKEN).insert(turn.run.clone(), Instant::now());
+    let carried: Vec<Card> =
+        turn.ids.iter().filter_map(|i| i.strip_prefix("card:")).filter_map(|id| hub.store.card(id)).collect();
+    // The door comes from any card of the turn: a request that isn't a card (a `ci:` result, a kith ask answer) still
+    // goes where the session is, even if the cards beside it died.
+    let door_card = carried.first().cloned();
+    let others = turn.ids.iter().filter(|i| !i.starts_with("card:")).count();
+    let person = turn.person.clone().filter(|p| !p.is_empty());
+    // A7 again, at the door: a person's access can end between the yes and the turn.
+    if let Some(person) = &person {
+        match crate::api::roles::may_use_checked(person, &turn.agent).await {
+            Some(false) => {
+                super::withdraw_person(hub, person, Some(&turn.agent));
+                return give_up(hub, &turn.run);
+            }
+            None => return unstarted(hub, &turn.run, true, true),
+            Some(true) => {}
+        }
+    }
+    // Looked at last, after the awaits: a Stop that raced the take has closed its cards by now (R8).
+    let live: Vec<Card> = carried.iter().filter_map(|c| hub.store.card(&c.id)).filter(wanted).collect();
+    // Every card was withdrawn, expired, Stopped or already carried by a turn that started, and nothing else was asked.
+    if live.is_empty() && others == 0 {
+        return give_up(hub, &turn.run);
+    }
+    // What a card already carried is not said again; every other request's words stand.
+    let note = if live.len() + others == turn.ids.len() { turn.note.clone() } else { rebuilt(&turn, &live) };
+    for c in &live {
+        let _ = hub.store.card_resume_claim(&c.id, now_ms()); // a restart gave the claim back: it is held again
+    }
+    let ids = card_ids(&live);
+    let session = turn.session.as_str();
+    if session.starts_with("acp:") {
+        match door_card.as_ref().and_then(door_of) {
+            Some(Door::Bot { bot, lane }) => bot_door(hub, &turn.run, &live, &bot, &lane, &note),
+            _ => unstarted(hub, &turn.run, true, false),
+        }
+    } else if session.contains('#') {
+        channel_door(hub, &turn.run, &live, &ids, session, &note);
+    } else {
+        run_door(hub, &turn, &live, person.as_deref(), &note).await;
+    }
+}
+
+fn card_ids(cards: &[Card]) -> Vec<String> {
+    cards.iter().map(|c| c.id.clone()).collect()
+}
+
+/// The turn's words without the cards that are no longer wanted, in the shape kith-wake writes them.
+fn rebuilt(turn: &Turn, live: &[Card]) -> String {
+    let keep: Vec<&wake::Asked> = turn
+        .requests
+        .iter()
+        .filter(|r| r.id.strip_prefix("card:").is_none_or(|id| live.iter().any(|c| c.id == id)))
+        .collect();
+    let words = |r: &wake::Asked| if r.why.is_empty() { r.text.clone() } else { format!("{}: {}", r.why, r.text) };
+    let head = format!("[kith wake {}]", turn.run);
+    if let [one] = keep.as_slice() {
+        return format!("{head} {}", words(one));
+    }
+    let mut note = format!("{head} {} things happened while this session was idle:", keep.len());
+    for (n, r) in keep.iter().enumerate() {
+        let _ = write!(note, "\n{}. {}", n + 1, words(r));
     }
     note
 }
 
+/// Nothing of this turn will run (every request is withdrawn, or the thread is gone): the queue is told, ids kept.
+fn give_up(hub: &Hub, run: &str) {
+    settled(run);
+    let (state, run) = (state_of(hub), run.to_owned());
+    wake::spawn(move || wake::done(&state, &run, "withdrawn"));
+}
+
+fn settled(run: &str) {
+    lock(&TAKEN).remove(run);
+    lock(&CHANNEL_RUNS).remove(run);
+}
+
+/// The turn `run` started: what it carried is delivered (M5).
+fn started(hub: &Hub, run: &str, cards: &[String]) {
+    settled(run);
+    applied(hub, cards);
+    let (state, run) = (state_of(hub), run.to_owned());
+    wake::spawn(move || wake::done(&state, &run, "answered"));
+}
+
+/// The turn `run` did not start. `again`: it goes back to the queue (`held`: a writer had the session, which is not a
+/// failed try); the next take drops what is no longer wanted and keeps every other request. Otherwise (a Stop) it is
+/// dropped, ids kept: Stop wins over a yes already given (R8), and the closers of [`stopped`] end its cards.
+fn unstarted(hub: &Hub, run: &str, again: bool, held: bool) {
+    settled(run);
+    let (state, run_id) = (state_of(hub), run.to_owned());
+    if again {
+        wake::spawn(move || wake::back(&state, &run_id, held));
+    } else {
+        wake::spawn(move || wake::done(&state, &run_id, "withdrawn"));
+    }
+}
+
+/// A Stop ends the wake of cards its turn carried (those not yet delivered), whatever their kind.
+fn stop_cards(hub: &Hub, ids: &[String]) {
+    for card in cards_of(hub, ids) {
+        end_for_stop(hub, &card);
+    }
+}
+
+/// An approved card whose turn had not started ends: withdrawn, except a saved key's card, which keeps its record and
+/// is marked as not owed any more (secret cards close only through their own steps).
+fn end_for_stop(hub: &Hub, card: &Card) {
+    if card.tool == super::secret::TOOL {
+        let _ = hub.store.card_resume_stop(&card.id, now_ms());
+    } else {
+        let _ = hub.store.card_resume_close(&card.id);
+    }
+}
+
 // ---- door (a): a bot's chat
 
-fn bot_door(hub: &Arc<Hub>, group: &[Card], bot: &str, lane: &Lane, note: &str) -> Step {
-    let alive = hub.store.bot(bot).ok().flatten().is_some_and(|b| !b.deleted);
-    if !alive {
-        for c in group {
-            end_owed(hub, c);
-        }
-        return Step::Done;
+/// Whether `bot` has left (or never was in) the group the lane is in: sending there would start a fresh actor in a room
+/// the bot no longer belongs to. A chat that is not a group (the bot's own chat, anything unknown) is never judged.
+fn left_room(hub: &Hub, bot: &str, lane: &Lane) -> bool {
+    if lane.chat == bot {
+        return false;
     }
-    let claimed = claim_all(hub, group);
-    if claimed.is_empty() {
-        return Step::Done;
+    match hub.store.bot(&lane.chat).ok().flatten() {
+        Some(row) if row.config.is_group() => row.deleted || !row.config.members.iter().any(|m| m == bot),
+        _ => false,
+    }
+}
+
+fn bot_door(hub: &Arc<Hub>, run: &str, group: &[Card], bot: &str, lane: &Lane, note: &str) {
+    let alive = hub.store.bot(bot).ok().flatten().is_some_and(|b| !b.deleted);
+    if !alive || left_room(hub, bot, lane) {
+        end_all(hub, group);
+        return give_up(hub, run);
     }
     let turn = hub.store.max_turn(&lane.chat);
-    let shown = note.trim_start_matches("[Kith] ");
+    let shown = note.split_once("] ").map_or(note, |(_, rest)| rest);
     let Some(entry) = hub.add_entry(lane, EntryKind::Notice, turn, &json!({"text": shown, "style": "info"})) else {
-        release_all(hub, &claimed);
-        return Step::Retry;
+        return unstarted(hub, run, true, false);
     };
-    lock(&WAKES).insert(entry.id.clone(), ids_of(&claimed));
-    clear_held(hub, &claimed);
+    lock(&ENTRIES).insert(entry.id.clone(), Carried { run: run.to_owned(), cards: card_ids(group) });
     #[cfg(test)]
-    {
-        tests_seen::record("bot", &claimed[0].session, note, &[]);
-        Step::Done
-    }
+    tests_seen::record("bot", group.first().map_or(run, |c| c.session.as_str()), note, Some(&entry.id));
     #[cfg(not(test))]
     {
         let cmd = crate::agent::bot::Cmd::Send {
@@ -248,11 +636,9 @@ fn bot_door(hub: &Arc<Hub>, group: &[Card], bot: &str, lane: &Lane, note: &str) 
         };
         if let Err(error) = hub.send_cmd(bot, cmd) {
             tracing::warn!(error = format!("{error:#}"), "couldn't queue a card's resume");
-            lock(&WAKES).remove(&entry.id);
-            release_all(hub, &claimed);
-            return Step::Retry;
+            lock(&ENTRIES).remove(&entry.id);
+            unstarted(hub, run, true, false);
         }
-        Step::Done
     }
 }
 
@@ -260,85 +646,95 @@ fn bot_door(hub: &Arc<Hub>, group: &[Card], bot: &str, lane: &Lane, note: &str) 
 /// from the actor once the prompt is sent.
 pub fn turn_started(hub: &Hub, entry_ids: &[String]) {
     for entry in entry_ids {
-        let Some(ids) = lock(&WAKES).remove(entry) else { continue };
-        applied(hub, &ids);
+        let Some(c) = lock(&ENTRIES).remove(entry) else { continue };
+        clear_held(hub, &cards_of(hub, &c.cards));
+        started(hub, &c.run, &c.cards);
     }
 }
 
-/// A wake turn on a bot's actor could not start because the session's writer is held: the claims go back and the
-/// resume is offered again, with the holder shown on the card. Called from the actor's `start_failed`.
+fn cards_of(hub: &Hub, ids: &[String]) -> Vec<Card> {
+    ids.iter().filter_map(|id| hub.store.card(id)).collect()
+}
+
+/// A wake turn on a bot's actor could not start because the session's writer is held: it is owed again, with the
+/// holder shown on the card. Called from the actor's `start_failed`.
 pub fn refused(hub: &Arc<Hub>, entry_ids: &[String], session: Option<&str>) {
     let holder =
         session.and_then(|sid| crate::terminal::claim::holder(&hub.terminal.env().state, sid).map(|c| (sid, c)));
     for entry in entry_ids {
-        let Some(ids) = lock(&WAKES).remove(entry) else { continue };
-        for id in ids {
-            let Some(card) = hub.store.card(&id) else { continue };
-            let _ = hub.store.card_resume_release(&id);
+        let Some(c) = lock(&ENTRIES).remove(entry) else { continue };
+        for card in cards_of(hub, &c.cards) {
             set_held(hub, &card, holder.as_ref().map(|(sid, c)| (*sid, c)));
-            offer(hub, &card);
         }
+        unstarted(hub, &c.run, true, true);
     }
 }
 
-/// A wake turn on a bot's actor failed to start for another reason: the claims go back. `again`: it is offered again
-/// with the usual pause; after a Stop it is not, and stays owed for the next offer (a restart, or another yes in the
-/// session).
+/// A bot's actor shut down with these entries still queued: their wakes go back to the queue (it keeps them for the
+/// next actor or a restart), instead of staying "taken" by a host that never starts them.
+pub fn actor_gone(hub: &Arc<Hub>, entry_ids: &[String]) {
+    not_started(hub, entry_ids, true);
+}
+
+/// A wake turn on a bot's actor failed to start for another reason. `again`: it is owed again (the queue pauses
+/// before it comes back); after a Stop it is dropped, and the stopped yes does not come back.
 pub fn not_started(hub: &Arc<Hub>, entry_ids: &[String], again: bool) {
     for entry in entry_ids {
-        let Some(ids) = lock(&WAKES).remove(entry) else { continue };
-        given_back(hub, &ids, again);
-    }
-}
-
-fn given_back(hub: &Arc<Hub>, ids: &[String], again: bool) {
-    for id in ids {
-        let _ = hub.store.card_resume_release(id);
-        if again && let Some(card) = hub.store.card(id) {
-            offer(hub, &card);
+        let Some(c) = lock(&ENTRIES).remove(entry) else { continue };
+        if !again {
+            stop_cards(hub, &c.cards);
         }
+        unstarted(hub, &c.run, again, false);
     }
 }
 
 // ---- door (b): a channel thread
 
-fn channel_door(hub: &Arc<Hub>, group: &[Card], wk: &str, note: &str) -> Step {
-    let got = Mutex::new(Vec::new());
-    let result = crate::channels::wake(wk, note, || {
-        let claimed = claim_all(hub, group);
-        let ids = ids_of(&claimed);
-        *got.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = claimed;
-        ids
-    });
-    let claimed = got.into_inner().unwrap_or_default();
-    match result {
-        Wake::Queued => {
-            clear_held(hub, &claimed);
-            Step::Done
-        }
-        Wake::Claimed => Step::Done,
+fn channel_door(hub: &Arc<Hub>, run: &str, group: &[Card], card_ids: &[String], wk: &str, note: &str) {
+    // The channel carries the cards and the turn's run in one list: its run settles both ([`channel_started`]).
+    let mut carried = card_ids.to_vec();
+    carried.push(format!("run:{run}"));
+    lock(&CHANNEL_RUNS).insert(run.to_owned());
+    match crate::channels::wake(wk, note, || carried) {
+        Wake::Queued => clear_held(hub, group),
+        Wake::Claimed => {}
         Wake::NoThread => {
-            for c in group {
-                end_owed(hub, c);
-            }
-            Step::Done
+            end_all(hub, group);
+            give_up(hub, run);
         }
-        Wake::Offline => Step::Retry,
+        // The connection isn't up (yet): the queue keeps it and asks again after its pause.
+        Wake::Offline => unstarted(hub, run, true, true),
     }
 }
 
-/// The channel run that carries these cards' wake started (its process is up).
-pub fn channel_started(hub: &Hub, card_ids: &[String]) {
-    applied(hub, card_ids);
+/// Splits what a channel carries into the cards and the turn's run.
+fn split_run(ids: &[String]) -> (Vec<String>, Option<String>) {
+    let run = ids.iter().find_map(|i| i.strip_prefix("run:")).map(str::to_owned);
+    (ids.iter().filter(|i| !i.starts_with("run:")).cloned().collect(), run)
 }
 
-/// A channel turn carrying a wake never ran (the session was held, the spawn failed, Stop): the claims go back and the
-/// cards stay owed. `again`: offered again with the usual backoff; after a Stop they wait for the next offer.
-pub fn channel_failed(hub: &Arc<Hub>, card_ids: &[String], again: bool) {
-    given_back(hub, card_ids, again);
+/// The channel run that carries these wakes started (its process is up).
+pub fn channel_started(hub: &Hub, ids: &[String]) {
+    let (cards, run) = split_run(ids);
+    match run {
+        Some(run) => started(hub, &run, &cards),
+        None => applied(hub, &cards),
+    }
 }
 
-// ---- door (c): a -p run the kernel started
+/// A channel turn carrying a wake never ran (the session was held, the spawn failed, Stop). `again`: it is owed again
+/// (with the queue's pause); after a Stop it is dropped.
+pub fn channel_failed(hub: &Arc<Hub>, ids: &[String], again: bool) {
+    let (cards, run) = split_run(ids);
+    if let Some(run) = run {
+        if !again {
+            stop_cards(hub, &cards);
+        }
+        unstarted(hub, &run, again, false);
+    }
+}
+
+// ---- door (c): a -p run the host starts (a person's session, a `kith ask` reply)
 
 /// What the host starts for a resumed -p run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -350,93 +746,166 @@ pub struct Spawn {
 /// `kith <agent> --resume <session> "<note>"` as the card's person, with the env the host gives its own runs: a person's
 /// run gets `KITH_PERSON` (the owner's none) so the session doesn't resume under the owner's profile. The run token is
 /// added by the caller. A card with `reply_to` goes through `kith ask --reply`, which hands the turn's answer to the asker.
+#[cfg(test)]
 pub fn spawn_for(card: &Card, session: &str, note: &str) -> Spawn {
+    spawn_with(&card.agent, &card.person, card.reply_to.as_deref(), session, note)
+}
+
+fn spawn_with(agent: &str, person: &str, reply_to: Option<&str>, session: &str, note: &str) -> Spawn {
     let mut env: Vec<(String, String)> = std::env::vars().filter(|(k, _)| crate::channels::run::inherited(k)).collect();
     let mut set = |name: &str, v: &str| env.extend(crate::kernel::both(name, v));
-    set("VIA", "host");
+    // The owner's session is the kernel's own kind of run (a wake), so its turn can still set waiters.
+    set("VIA", if person.is_empty() { "wake" } else { "host" });
     set("CLAIM_WAIT", &CLAIM_WAIT_S.to_string());
-    if card.person.is_empty() {
+    if person.is_empty() {
         // The owner: no person, no room set here.
     } else {
-        set("PERSON", &card.person);
-        set("ROOM", &crate::agent::hq::room_of(&card.agent, Some(&card.person), None));
+        set("PERSON", person);
+        set("ROOM", &crate::agent::hq::room_of(agent, Some(person), None));
     }
-    let resume = [card.agent.as_str(), "--resume", session];
-    let args = match &card.reply_to {
-        Some(id) => {
-            ["ask", "--reply", id.as_str()].into_iter().chain(resume).chain(["--", note]).map(str::to_owned).collect()
-        }
+    let resume = [agent, "--resume", session];
+    let args = match reply_to {
+        Some(id) => ["ask", "--reply", id].into_iter().chain(resume).chain(["--", note]).map(str::to_owned).collect(),
         None => resume.into_iter().chain([note]).map(str::to_owned).collect(),
     };
     Spawn { args, env }
 }
 
-async fn run_door(hub: &Arc<Hub>, card: &Card, group: &[Card], session: &str, note: &str) -> Step {
+async fn run_door(hub: &Arc<Hub>, turn: &Turn, live: &[Card], person: Option<&str>, note: &str) {
+    let session = turn.session.as_str();
+    let ids = card_ids(live);
     if !crate::terminal::claim::safe_session(session) {
-        for c in group {
-            end_owed(hub, c);
-        }
-        return Step::Done;
+        end_all(hub, live);
+        return give_up(hub, &turn.run);
     }
     // A live writer on the session keeps the resume owed (the kernel's one-shot would wait and then refuse).
     let state = hub.terminal.env().state;
     let sid = session.to_owned();
-    let held = tokio::task::spawn_blocking({
+    let held = {
         let (state, sid) = (state.clone(), sid.clone());
-        move || crate::terminal::claim::holder(&state, &sid)
-    })
-    .await
-    .ok()
-    .flatten();
+        wake::blocking(move || crate::terminal::claim::holder(&state, &sid)).await.flatten()
+    };
     if let Some(h) = held {
-        set_held(hub, card, Some((session, &h)));
-        return Step::Retry;
+        for c in live {
+            set_held(hub, c, Some((session, &h)));
+        }
+        return unstarted(hub, &turn.run, true, true);
     }
     #[cfg(not(test))]
-    let Some(bin) = crate::agent::hq::bin() else { return Step::Retry };
-    let claimed = claim_all(hub, group);
-    if claimed.is_empty() {
-        return Step::Done;
-    }
-    let mut spawn = spawn_for(card, session, note);
+    let Some(bin) = crate::agent::hq::bin() else { return unstarted(hub, &turn.run, true, true) };
+    let reply = live.iter().find(|c| c.reply_to.is_some());
+    let mut spawn =
+        spawn_with(&turn.agent, person.unwrap_or_default(), reply.and_then(|c| c.reply_to.as_deref()), session, note);
     // L3, step 4: a file or network card's once grant would be consumed HERE, after the claim and before exec, and
     // the profile built from the consume result. A tool-prompt card consumes it when the resumed run asks (card_open),
     // so no profile carries the grant and the stale-profile race can't happen.
     let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> =
         spawn.env.iter().map(|(k, v)| (k.into(), v.into())).collect();
-    let reply = card.reply_to.as_deref().and_then(|to| crate::runauth::AskReply::parse(to, card.asked_by.as_deref()));
-    let grant = crate::runauth::grant_for_env(&mut env, &card.agent, session, reply);
+    let asked = reply.and_then(|c| crate::runauth::AskReply::parse(c.reply_to.as_deref()?, c.asked_by.as_deref()));
+    let grant = crate::runauth::grant_for_env(&mut env, &turn.agent, session, asked);
     spawn.env = env.iter().filter_map(|(k, v)| Some((k.to_str()?.to_owned(), v.to_str()?.to_owned()))).collect();
     #[cfg(test)]
     {
         let _ = grant;
-        tests_seen::record("run", &card.session, note, &spawn.env);
+        tests_seen::record("run", live.first().map_or(session, |c| c.session.as_str()), note, None);
         tests_seen::spawned(spawn);
-        clear_held(hub, &claimed);
-        applied(hub, &ids_of(&claimed));
-        Step::Done
+        clear_held(hub, live);
+        started(hub, &turn.run, &ids);
     }
     #[cfg(not(test))]
     {
         match exec(&bin, &spawn, grant).await {
             Exec::Running => {
-                clear_held(hub, &claimed);
-                applied(hub, &ids_of(&claimed));
-                Step::Done
+                clear_held(hub, live);
+                started(hub, &turn.run, &ids);
             }
             Exec::Held => {
-                release_all(hub, &claimed);
                 let h = crate::terminal::claim::holder(&state, &sid);
-                set_held(hub, card, h.as_ref().map(|h| (session, h)));
-                Step::Retry
+                for c in live {
+                    set_held(hub, c, h.as_ref().map(|h| (session, h)));
+                }
+                unstarted(hub, &turn.run, true, true);
             }
             Exec::Failed(why) => {
-                tracing::warn!(card = %card.id, why, "couldn't resume a session for an approved card");
-                release_all(hub, &claimed);
-                Step::Retry
+                tracing::warn!(run = %turn.run, why, "couldn't resume a session for an approved card");
+                unstarted(hub, &turn.run, true, false);
             }
         }
     }
+}
+
+/// Gives back what the host took and lost track of, as if `ttl` had passed.
+#[cfg(test)]
+pub(crate) fn left_room_for_test(hub: &Hub, bot: &str, lane: &Lane) -> bool {
+    left_room(hub, bot, lane)
+}
+
+#[cfg(test)]
+pub(crate) fn reap_for_test(hub: &Hub, ttl: Duration) {
+    reap_after(hub, ttl);
+}
+
+/// Gives back even the turns a door seems to hold, as if the upper bound had passed.
+#[cfg(test)]
+pub(crate) fn reap_long_for_test(hub: &Hub) {
+    reap_with(hub, Duration::ZERO, Duration::ZERO);
+}
+
+/// A taken turn the host has no door callback for.
+#[cfg(test)]
+pub(crate) fn lose_track_of(run: &str) {
+    lock(&TAKEN).insert(run.to_owned(), Instant::now());
+}
+
+/// A host that stopped and started again knows nothing of the turns it had taken (the queue recovers them).
+#[cfg(test)]
+pub(crate) fn forget_in_flight() {
+    lock(&ENTRIES).clear();
+    lock(&TAKEN).clear();
+}
+
+// ---- Stop
+
+/// Stop wins over a yes already given (R8): what the stopped places are owed is withdrawn from the queue (their ids
+/// kept, so a late copy doesn't come back), and the approved cards whose turn had not started end, so neither a restart
+/// nor another yes in the session brings the stopped turn back. `keys` are the queue sessions the caller knows it
+/// stops; the cards of `matches` add theirs. A turn the queue already gave to a door is settled by that door's own
+/// Stop ([`not_started`], [`channel_failed`]).
+pub fn stopped(hub: &Hub, keys: &[String], matches: impl Fn(&Door) -> bool) {
+    let mut keys: BTreeSet<String> = keys.iter().cloned().collect();
+    for card in hub.store.cards_unapplied() {
+        let Some(door) = door_of(&card).filter(&matches) else { continue };
+        keys.insert(key_of(&door, &card));
+        // Closed first: a request still on its way into the queue finds the card closed and is withdrawn again.
+        end_for_stop(hub, &card);
+    }
+    let state = state_of(hub);
+    wake::spawn(move || {
+        for k in &keys {
+            wake::withdraw(&state, k, None);
+        }
+    });
+}
+
+/// Stop in one place of a bot (its chat or one thread).
+pub fn stopped_lane(hub: &Hub, lane: &Lane) {
+    let key = format!("acp:{}:{}", lane.chat, lane.thread.as_deref().unwrap_or_default());
+    stopped(hub, &[key], |d| matches!(d, Door::Bot { lane: l, .. } if l == lane));
+}
+
+/// Stop everywhere in a chat (a group stops as a whole).
+pub fn stopped_chat(hub: &Hub, chat: &str) {
+    stopped(hub, &[], |d| matches!(d, Door::Bot { lane, .. } if lane.chat == chat));
+}
+
+/// Stop everywhere a bot talks.
+pub fn stopped_bot(hub: &Hub, bot_id: &str) {
+    stopped(hub, &[], |d| matches!(d, Door::Bot { bot, .. } if bot == bot_id));
+}
+
+/// Stop in a channel thread (its work key).
+pub fn stopped_thread(hub: &Hub, wk: &str) {
+    stopped(hub, &[wk.to_owned()], |d| matches!(d, Door::Channel(w) if w == wk));
 }
 
 #[cfg(not(test))]
@@ -536,6 +1005,8 @@ pub(crate) mod tests_seen {
         pub door: &'static str,
         pub session: String,
         pub note: String,
+        /// The notice entry a bot door queued the turn under.
+        pub entry: Option<String>,
     }
 
     static SEEN: Mutex<Vec<Seen>> = Mutex::new(Vec::new());
@@ -558,11 +1029,12 @@ pub(crate) mod tests_seen {
             .collect()
     }
 
-    pub fn record(door: &'static str, session: &str, note: &str, _env: &[(String, String)]) {
+    pub fn record(door: &'static str, session: &str, note: &str, entry: Option<&str>) {
         SEEN.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(Seen {
             door,
             session: session.to_owned(),
             note: note.to_owned(),
+            entry: entry.map(str::to_owned),
         });
     }
 

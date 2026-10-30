@@ -1088,8 +1088,23 @@ async fn the_sweep_ends_a_left_over_guest_holder_and_its_child_and_keeps_the_own
     assert!(registry::pid_runs(other_guest), "another person's holder is left alone");
     assert!(claim::read(&claim::path(&r.state(), "g1", false)).is_none(), "the ended holder's claim is removed");
     assert!(claim::read(&claim::path(&r.state(), "o1", false)).is_some());
+    // The revoke wrote its intent before the signal (F12 rule 8); nothing was written for the sessions it left alone.
+    assert_eq!(super::intent::read(&r.state(), "g1").as_deref(), Some("access revoked"));
+    assert_eq!(super::intent::read(&r.state(), "o1"), None);
+    assert_eq!(super::intent::read(&r.state(), "x1"), None);
     // Again: nothing left to end.
     assert_eq!(claim::sweep(&r.state(), &["bot-sam".into()], &|_| false, GRACE).len(), 0);
+}
+
+#[tokio::test]
+async fn stopping_a_holder_writes_its_intent_first() {
+    let r = Rig::new();
+    // The holder is the shell's child, so it is not this process' own turn (`OwnTurn`).
+    let (mut shell, held) = shell_with_child();
+    claim::take(&r.state(), "h1", Kind::Terminal, held, false).unwrap().unwrap();
+    assert!(matches!(claim::stop_holder(&r.state(), "h1", GRACE), claim::Stopped::Ended(_)));
+    shell.wait().unwrap();
+    assert_eq!(super::intent::read(&r.state(), "h1").as_deref(), Some("stopped from the app"));
 }
 
 #[tokio::test]

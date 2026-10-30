@@ -699,13 +699,15 @@ pub fn follow_up(hub: &Arc<Hub>, card: &Card) {
 /// At startup: live waits are lost, so live cards park (C4); the grant of an approved card is re-derived and its
 /// follow-up offered again. Then the clock runs.
 pub fn start(hub: &Arc<Hub>) {
-    match hub.store.cards_restart(now_ms()) {
+    let queued = resume::queued_cards(hub);
+    match hub.store.cards_restart_keeping(now_ms(), &queued) {
         Ok(parked) => mark_parked(hub, &parked),
         Err(error) => tracing::warn!(error = format!("{error:#}"), "couldn't restore cards"),
     }
     for card in hub.store.cards_awaiting_resume(now_ms()) {
         follow_up(hub, &card);
     }
+    resume::run_taker(hub);
     let weak = Arc::downgrade(hub);
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(SWEEP_EVERY);

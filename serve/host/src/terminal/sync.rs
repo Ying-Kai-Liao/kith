@@ -955,7 +955,13 @@ async fn take_over_inner(hub: &Arc<Hub>, t: &Thread) -> Result<Value> {
     // Re-checked just before the signal: the pid may have changed hands, or the terminal may have taken a prompt
     // (`liveness` reads the session file's status and checks the process' start time). What is left is the time between
     // this read and `kill(2)`: microseconds, and macOS has no way to signal "this process, if still idle".
-    if registry::liveness(&reg, env.sessions.as_deref()) != Live::Idle || !registry::terminate(reg.pid) {
+    let idle = registry::liveness(&reg, env.sessions.as_deref()) == Live::Idle;
+    // The intent lands before the signal (F12 rule 8): the terminal that goes away was taken over, it did not crash.
+    if idle {
+        super::intent::write(&env.state, &reg.session_id, "taken over in the app", reg.pid);
+    }
+    if !idle || !registry::terminate(reg.pid) {
+        let _ = std::fs::remove_file(super::intent::path(&env.state, &reg.session_id));
         let _ = std::fs::remove_file(&taken);
         return Err(TerminalBusy("terminalBusy: The terminal changed while taking over. Try again.").into());
     }
