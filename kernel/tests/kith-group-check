@@ -9,7 +9,7 @@ KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-group.XXXXXX"); T=$(cd "$T" && pwd -P)
 SRV=
 trap '[[ -n $SRV ]] && kill $SRV 2>/dev/null; rm -rf "$T"' EXIT
-export HOME=$T/home KITH_HOME=$T/kith KITH_SERVE_DIR=$T/serve KITH_GROUP_IDLE_S=0.4
+export HOME=$T/home KITH_HOME=$T/kith KITH_SERVE_DIR=$T/serve KITH_GROUP_IDLE_S=0.4 KITH_AUTH=$T/auth.json
 unset KITH_STATE HQ_STATE KITH_AGENTS
 mkdir -p "$HOME" "$KITH_SERVE_DIR"
 echo "tok-$$" > "$KITH_SERVE_DIR/token"
@@ -118,10 +118,17 @@ check "--json prints the host's answer"                  "[[ \$RC == 0 ]] && pyt
 OUT=$(G group add-bot Team bg_twin1 --json 2>&1)
 check "--json when already a member"                     "python3 -c 'import json,sys; assert json.loads(sys.argv[1])[\"unchanged\"]' \"\$OUT\""
 
-rec; OUT=$(G bot set Grok --wake-profile kai --turn-timeout 600 2>&1); RC=$?
-check "bot set sends both and prints what was stored"    "[[ \$RC == 0 && \$OUT == 'Grok: wake profile kai, turn timeout 600s' && \$(lastbody setBotLimits 'd') == \"{'botId': 'bg_grok', 'wakeProfile': 'kai', 'turnTimeoutS': 600}\" ]]"
+rec; OUT=$(G bot set Grok --wake-profile kai --turn-timeout 600 2>&1); RC=$?; HINT=$OUT
+check "bot set sends both and prints what was stored"    "[[ \$RC == 0 && \$OUT == 'Grok: wake profile kai, turn timeout 600s'* && \$(lastbody setBotLimits 'd') == \"{'botId': 'bg_grok', 'wakeProfile': 'kai', 'turnTimeoutS': 600}\" ]]"
 OUT=$(G bot set bg_grok --turn-timeout 5 2>&1)
 check "the stored value (clamped by the host) is printed" "[[ \$OUT == *'turn timeout 30s'* ]]"
+check "no host grant for the profile: one extra hint line, exit 0" "[[ \$HINT == *'grok/kai has no host grant yet'* && \$HINT == *'kith keys add grok --profile kai'* && \$HINT == *'kith-auth grant serve grok grok/kai'* && \$(printf '%s\\n' \"\$HINT\" | wc -l) -eq 2 ]]"
+echo '{"profiles": {}, "grants": {"serve": {"grok": ["grok/work", "grok/kai"]}}}' > "$T/auth.json"
+OUT=$(G bot set Grok --wake-profile kai 2>&1); RC=$?
+check "bare account granted as grok/kai: no hint"        "[[ \$RC == 0 && \$OUT == 'Grok: wake profile kai, turn timeout 300s' ]]"
+OUT=$(G bot set Grok --wake-profile grok/work 2>&1)
+check "full form granted: no hint"                       "[[ \$OUT != *'no host grant'* ]]"
+rm -f "$T/auth.json"
 rec; OUT=$(G bot set grok --wake-profile '' 2>&1); RC=$?
 check "--wake-profile '' clears"                         "[[ \$RC == 0 && \$OUT == *'(none)'* && -z \$(lastbody setBotLimits 'd[\"wakeProfile\"]') ]]"
 rec; OUT=$(G bot set Grok 2>&1); RC=$?
