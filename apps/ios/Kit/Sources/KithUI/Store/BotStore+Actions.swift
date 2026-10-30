@@ -329,6 +329,33 @@ extension BotStore {
         }
     }
 
+    /// Splits a topic off at this message. The host's reason when it refuses; nil when it did.
+    public func makeTopic(_ entry: Entry, title: String) async -> String? {
+        await topicCall(replay: false) { try await $0.makeTopic(botId: entry.botId, entryId: entry.id, title: title) }
+    }
+
+    /// Changes a topic's title. The host's reason when it refuses; nil when it did.
+    public func renameTopic(_ entry: Entry, title: String) async -> String? {
+        await topicCall { try await $0.renameTopic(botId: entry.botId, entryId: entry.id, title: title) }
+    }
+
+    /// Puts a topic's messages back in the chat.
+    public func unfoldTopic(_ entry: Entry) {
+        Task {
+            if let message = await topicCall({ try await $0.unfoldTopic(botId: entry.botId, entryId: entry.id) }) { lastError = message }
+        }
+    }
+
+    // A repeated makeTopic would only be refused as "already starts a topic", so it isn't replayed.
+    private func topicCall(replay: Bool = true, _ call: @MainActor (HostClient) async throws -> Void) async -> String? {
+        do {
+            try await withLink(replay: replay, call)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     /// Carries on with the bot's current conversation instead of the handoff.
     public func keepConversation(_ entry: Entry) {
         guard answering[entry.id] == nil else { return }
