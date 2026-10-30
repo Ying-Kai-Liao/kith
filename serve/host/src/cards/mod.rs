@@ -12,6 +12,7 @@
 //! `follow_up` is its one call site; the setting `cards.resume` (default on) is the kill switch.
 
 pub mod access;
+pub mod edge;
 pub mod resource;
 pub mod resume;
 pub mod secret;
@@ -243,7 +244,8 @@ async fn request_card(
     };
     // Listening comes first: an answer that lands the moment the card is shown must find this call.
     let (_waiting, rx) = Waiting::new(&card.id);
-    let Some(card) = show(hub, who, &card) else {
+    let extra = edge_extras(hub, who, &card).await;
+    let Some(card) = show(hub, who, &card, extra) else {
         return deny("Approvals aren't available right now.");
     };
     let label = approver_label(hub, &card).await;
@@ -305,8 +307,20 @@ async fn approver_label(hub: &Hub, card: &Card) -> String {
     hub.store.person(p).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| "the member".into())
 }
 
+/// What the owner's card for an edge ask of an invitee's run adds (see `edge`): none for a `kith ask` run's card, whose
+/// grants would land on the helper's row, not the caller's.
+pub(super) async fn edge_extras(hub: &Hub, who: &RunIdentity, card: &Card) -> Option<edge::Extra> {
+    if card.approver != "owner" || who.person.is_empty() || card.reply_to.is_some() {
+        return None;
+    }
+    let e = edge::of(&card.tool, &serde_json::from_str(&card.input).unwrap_or(Value::Null), &card.resource)?;
+    let name =
+        hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty()).unwrap_or_else(|| who.person.clone());
+    Some(edge::extras(&who.person, &name, &who.agent, &e, card.tool != access::TOOL).await)
+}
+
 /// Makes the card live and puts its Permission entry where the approver sees it (a repeat reuses the entry it has).
-fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card) -> Option<Card> {
+fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extra>) -> Option<Card> {
     if let Some(entry_id) = &card.entry_id
         && let Some(mut e) = hub.store.entry(entry_id)
     {
@@ -316,20 +330,39 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card) -> Option<Card> {
         return hub.store.card_live(&card.id, None, Some(&who.run_id)).ok().flatten();
     }
     let chat = chat_for(hub, &who.person, &who.agent);
+    let person_name = hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty());
     let escape = card.tool == access::TOOL;
     let (title, kind) = (title_of(&card.tool, &card.shown), tool_kind(&card.tool));
-    let (title, detail, options) = if escape {
-        access::entry_view(card)
+    let (title, mut detail, mut options) = if escape {
+        let name = hub.store.person(&card.person).map(|p| p.name).filter(|n| !n.is_empty());
+        access::entry_view(card, &name.unwrap_or_else(|| card.person.clone()))
     } else {
-        (
-            title,
-            crate::agent::acp::truncate(&card.shown, 6000),
-            json!([
-                {"optionId": "allow", "name": "Allow once", "kind": "allow_once"},
-                {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
-            ]),
-        )
+        let (yes, no) = match &extra {
+            Some((_, _, kept)) => {
+                let name = person_name.clone().unwrap_or_else(|| who.person.clone());
+                (edge::once_label(kept, &name, &who.agent), "No")
+            }
+            None => ("Allow once".into(), "Deny"),
+        };
+        let mut options = vec![
+            json!({"optionId": "allow", "name": yes, "kind": "allow_once"}),
+            json!({"optionId": "deny", "name": no, "kind": "reject_once"}),
+        ];
+        // A door starts only on its job, ticked: a yes to this one run would be refused at its start.
+        if card.tool == edge::DOOR_TOOL {
+            options.remove(0);
+        }
+        (title, crate::agent::acp::truncate(&card.shown, 6000), Value::Array(options))
     };
+    let kept = extra.map(|(text, more, kept)| {
+        if !text.is_empty() {
+            detail = format!("{detail}\n\n{text}");
+        }
+        if let Some(all) = options.as_array_mut() {
+            edge::insert(all, more);
+        }
+        kept
+    });
     let command = (kind == "execute").then(|| card.shown.clone());
     let mut data = json!({
         "title": title,
@@ -347,13 +380,15 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card) -> Option<Card> {
         "cardId": card.id,
         "source": "run",
     });
+    if let Some(kept) = kept {
+        data["edge"] = kept;
+    }
     if let Some(chain) = chain_of(card) {
         data["chain"] = chain.into();
     }
     if !who.person.is_empty() {
-        let name = hub.store.person(&who.person).map(|p| p.name).filter(|n| !n.is_empty());
         data["person"] = who.person.as_str().into();
-        data["personName"] = name.unwrap_or_else(|| who.person.clone()).into();
+        data["personName"] = person_name.unwrap_or_else(|| who.person.clone()).into();
     }
     let lane = Lane::main(&chat.id);
     let turn = hub.store.max_turn(&chat.id);
@@ -463,29 +498,72 @@ pub fn answer(
         e.data["parked"] = false.into();
         hub.set_entry(entry_id, &e.data);
     }
+    let kept = entry.data.get("edge").filter(|e| e.is_object() && card.approver == "owner").cloned();
+    if let Some(kept) = kept {
+        let (hub, option, person) = (hub.clone(), option_id.map(str::to_owned), person.map(str::to_owned));
+        let door = card.tool == edge::DOOR_TOOL;
+        let helper = (card.tool == edge::HELPER_TOOL || door) && card.source == "run";
+        let card = card.clone();
+        // What the answer keeps is written first; a helper's or door's run is told only then, since kith ask checks it
+        // at launch and a door at its start.
+        tokio::spawn(async move {
+            let mut allow = allow;
+            if let Err(why) = edge::apply(&card, &kept, option.as_deref(), allow).await {
+                tracing::warn!(card = card.id, why, "kith-auth refused what an edge card keeps");
+                if allow && door {
+                    allow = false;
+                    access::not_kept(&hub, &card, &why);
+                } else if allow && matches!(option.as_deref(), Some(edge::ALWAYS | edge::JOB)) {
+                    if helper {
+                        let _ = edge::once_instead(&card).await;
+                    }
+                    access::kept_once(&hub, &card, &why);
+                }
+            }
+            if helper && let Err(error) = settle(&hub, &card, was_live, allow, option.as_deref(), person.as_deref()) {
+                tracing::warn!(error = format!("{error:#}"), card = card.id, "couldn't tell a helper card's answer");
+            }
+        });
+        if helper {
+            return Ok(Outcome::Recorded { forward: false });
+        }
+    }
+    Ok(Outcome::Recorded { forward: settle(hub, &card, was_live, allow, option_id, person)? })
+}
+
+/// Tells whoever waits on an answered card, or owes its session the answer. True for a bot chat's card whose process
+/// was up: the caller forwards the answer to the bot's actor.
+fn settle(
+    hub: &Arc<Hub>,
+    card: &Card,
+    was_live: bool,
+    allow: bool,
+    option_id: Option<&str>,
+    person: Option<&str>,
+) -> anyhow::Result<bool> {
     let mut forward = false;
     let said_no = if option_id.is_some() { "was denied" } else { "was cancelled" };
     if card.tool == access::TOOL {
         // No process waits on an escape card: the yes is applied at the session's next activation (see `access`).
-        access::answered(hub, &card, allow, option_id, person);
+        access::answered(hub, card, allow, option_id, person);
     } else if was_live && card.source == "run" {
         let verdict = if allow { Verdict::Allow } else { Verdict::Deny("The approver said no.".into()) };
         // A yes to a live asker was spent in the answer itself (no parallel ask can take it too); if nobody was
         // there to hear it, it goes back as the answer to a parked card.
         let heard = deliver(&card.id, &verdict);
         if !heard && allow && hub.store.card_undelivered(&card.id)? {
-            follow_up(hub, &card);
+            follow_up(hub, card);
         } else if !heard && !allow {
-            tell_asker(&card, said_no);
+            tell_asker(card, said_no);
         }
     } else if was_live {
         forward = true;
     } else if allow {
-        follow_up(hub, &card);
+        follow_up(hub, card);
     } else {
-        tell_asker(&card, said_no);
+        tell_asker(card, said_no);
     }
-    Ok(Outcome::Recorded { forward })
+    Ok(forward)
 }
 
 /// The bot actor could not hand a yes to its agent (it had no request to answer): the grant goes back.
@@ -682,6 +760,8 @@ fn auth_stamp() -> Vec<Option<std::time::SystemTime>> {
 
 #[cfg(test)]
 mod access_tests;
+#[cfg(test)]
+mod edge_tests;
 #[cfg(test)]
 mod props;
 #[cfg(test)]

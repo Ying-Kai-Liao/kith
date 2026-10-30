@@ -673,6 +673,8 @@ pub(crate) async fn revoke_owned_by(hub: &Hub, person: &str, why: &str) {
 /// that names no agent (from before claims did) cannot be judged and goes.
 pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: bool) {
     let state = hub.terminal.env().state;
+    // Their doors too: all of them, or (access narrowed) those kith-auth no longer allows.
+    let doors_of = if only_denied { Vec::new() } else { persons.clone() };
     let mut allowed: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
     if only_denied {
         let (st, ps) = (state.clone(), persons.clone());
@@ -695,6 +697,7 @@ pub(crate) async fn sweep_claims(hub: &Hub, persons: Vec<String>, only_denied: b
     if !ended.is_empty() {
         tracing::info!(pids = ?ended, "ended runs left over after access was removed");
     }
+    crate::doors::sweep(&doors_of).await;
 }
 
 /// After `person`'s access changed: a bot's turn on an agent its owner no longer holds stops now, so a long turn

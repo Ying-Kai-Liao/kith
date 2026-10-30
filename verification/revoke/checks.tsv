@@ -5,6 +5,7 @@ code	INVARIANT	SyncAgrees	pass
 code	INVARIANT	R2	pass
 code	INVARIANT	R4	pass
 code	INVARIANT	BotBelowOwner	pass
+door	INVARIANT	TypeOK	pass
 code	PROPERTY	R1	pass
 code	PROPERTY	R5	pass
 code	PROPERTY	R5c	pass
@@ -31,6 +32,13 @@ broken-bridge-no-sync	PROPERTY	R5c	fail
 broken-bridge-no-sync	PROPERTY	NeverBridgeInCloudDown	fail
 broken-helper-no-sync	PROPERTY	R5c	fail
 broken-helper-no-sync	PROPERTY	R5	pass
+# --- guest door: start in one locked step (D2), the sweep stops it (D1) ------
+door	PROPERTY	DoorD2	pass
+door	PROPERTY	DoorD2c	pass
+door	PROPERTY	DoorD1	pass
+broken-door-no-hold	PROPERTY	DoorD2c	fail
+broken-door-split	PROPERTY	DoorD2	fail
+broken-no-door-sweep	PROPERTY	DoorD1	fail
 # --- probes: things that should happen do (a probe "fails" = it is reachable) -
 code	INVARIANT	NeverBridgeServed	fail
 code	PROPERTY	NeverAppAfterUndo	fail
@@ -38,3 +46,5 @@ code	INVARIANT	NoBridgeRefusal	fail
 app-only	PROPERTY	NeverQueuedServed	fail
 app-only	PROPERTY	NeverWakeHold	fail
 app-only	PROPERTY	NeverHeldServed	fail
+door	INVARIANT	NeverDoorRuns	fail
+door	INVARIANT	NeverDoorKilled	fail

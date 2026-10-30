@@ -22,8 +22,17 @@ clear allow files it (kernel/lib/kith_bug.py); any other answer keeps the draft 
 A fourth tool, ask_helper(agent, task), is how a guest's run reaches a helper its membership grants (kith-auth member ...
 helpers=): the guest's shell cannot start another run (the OS sandbox closes the network, the login and the other agents'
 folders), so kith-permit, outside the sandbox, runs `kith ask AGENT` as the run's own person and agent (from its environment,
-which the guest cannot change). The kernel decides as for any helper call: a helper not granted is refused, one granted runs
-with the caller's membership, never looser, in its own guest sandbox.
+which the guest cannot change). The kernel decides as for any helper call: one granted (the row's helpers=, or a ticked
+job's) runs with the caller's membership, never looser, in its own guest sandbox. One not granted is asked of the owner on
+a card first (requestPermission, tool mcp__kithpermit__ask_helper, input {agent, task}), which this call waits for: the
+host writes "just this once" or "always for <person>" through kith-auth (helper ...) before it answers yes, and the launch
+checks that grant again with revoke and uses up a once (`kith-auth resolve --take-once`).
+
+A fifth tool, run_door(door, path), runs a door of the run's pinned package (kernel/lib/kith_door.py: a fixed command in
+a sandbox of its own, e.g. video's render) on one folder of the person's files. A door is granted only by a ticked job:
+one not ticked, or ticked at another version of the door, is asked of the owner on a card (tool mcp__kithpermit__run_door,
+input {door, path}) whose only yes turns the job on; the start checks the tick again under the kith-auth lock. A door not
+prepared on this Mac asks the owner a second card (mcp__kithpermit__prepare_door) before it downloads anything.
 
 When Claude Code reaches a permission prompt in a run nobody is watching (an "ask" rule, a tool the mode doesn't allow),
 it calls approve instead of refusing. The tool sends the host one line over the run socket,
@@ -36,7 +45,7 @@ token, a reply that doesn't parse. On allow, updatedInput is the input exactly a
 
 Which token: a guest run has KITH_RUN_TOKEN and KITH_RUN_SOCKET (the host gave them); an owner run has KITH_ASK_TOKEN
 and KITH_ASK_SOCKET (the host gave them, or `issue` got them for a run kith started itself). Secrets and logins are
-never carded: the host denies them at once. See kernel/PROTOCOL.md.
+never carded: the host denies them at once. What the agent is told: kernel/skills/kith-guests/SKILL.md.
 """
 import json, os, re, socket, subprocess, sys
 
@@ -196,7 +205,8 @@ def helper_def():
     return {'name': HELPER,
             'description': 'Ask a helper agent your membership grants and get its answer, as `kith ask AGENT "task"` does '
                            'for an owner. A shell in this run cannot start another agent, so use this tool. Give the helper '
-                           'agent and the whole task; it sees nothing of this conversation. A helper you are not granted is refused.',
+                           'agent and the whole task; it sees nothing of this conversation. A helper you are not granted '
+                           'asks the owner first, and runs only if they say yes.',
             'inputSchema': {'type': 'object',
                             'properties': {'agent': {'type': 'string', 'description': 'the helper agent, e.g. personal'},
                                            'task': {'type': 'string', 'description': 'what to ask it, self-contained'}},
@@ -216,6 +226,9 @@ def ask_helper(a, env=os.environ):
     if agent == env['KITH_AGENT']:
         return 'You are %s; ask another agent.' % agent
     child = {k: v for k, v in env.items() if k not in ('KITH_ASK_TOKEN', 'KITH_ASK_SOCKET', 'HQ_ASK_TOKEN', 'HQ_ASK_SOCKET')}
+    refused = helper_card(env['KITH_PERSON'], env['KITH_AGENT'], agent, task, child)
+    if refused:
+        return refused
     try:
         r = subprocess.run([os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-ask'), agent, '--', task],
                            env=child, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=HELPER_WAIT_S)
@@ -229,6 +242,81 @@ def ask_helper(a, env=os.environ):
     if r.returncode != 0:
         return 'Could not ask %s: %s' % (agent, (r.stderr or r.stdout or 'no answer').strip()[-1500:])
     return r.stdout.strip() or '%s gave no answer.' % agent
+
+
+def helper_card(person, caller, agent, task, env):
+    """A helper the caller's membership doesn't grant is asked of the owner on a card while this call waits (<helper>, once,
+    for <person>'s <agent> in the next 5 minutes; Always for <person>; No): the host writes the grant through kith-auth before it answers yes, and the helper's launch
+    checks it again (and uses up a once) with revoke. None: go on and ask; else what the agent is told. A person who may
+    not use the caller gets no card: kith ask refuses them in its own words."""
+    auth = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'kith-auth')
+
+    def may(*args):
+        try:
+            return subprocess.run([auth, 'may', *args], env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                                  timeout=30).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return True     # kith ask asks kith-auth again and says why
+    if may(person, agent, '--via', caller, '--once') or not may(person, caller):
+        return None
+    d = decide('mcp__kithpermit__ask_helper', {'agent': agent, 'task': task[:2000]}, env)
+    return None if d['behavior'] == 'allow' else d['message']
+
+
+DOOR = 'run_door'
+
+
+def door_def():
+    return {'name': DOOR,
+            'description': 'Run a door your agent declares (a fixed command, such as a video render, that your shell '
+                           'cannot run) on one folder of your person\'s files, and wait for it to end. It has no internet: '
+                           'download assets into the project first. A door the person\'s jobs don\'t turn on asks the '
+                           'owner first.',
+            'inputSchema': {'type': 'object',
+                            'properties': {'door': {'type': 'string', 'description': 'the door, e.g. render'},
+                                           'path': {'type': 'string', 'description': 'the project folder, absolute'}},
+                            'required': ['door', 'path']}}
+
+
+def run_door(a, env=os.environ):
+    """The text the agent is told for one run_door call: how the door ended and its output's tail, or why it didn't run."""
+    name, path = a.get('door'), a.get('path')
+    if not (isinstance(name, str) and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}', name) and isinstance(path, str)
+            and path.startswith('/')):
+        return 'Give the door and the absolute path of the project folder.'
+    person, agent = env.get('KITH_PERSON'), env.get('KITH_AGENT')
+    if not (person and agent and env.get('KITH_AGENT_DIR')):
+        return "Doors are run from a guest's run only."
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+    import kith_door
+    from kith_paths import guest_scrub
+    # nothing of the guest's folders goes to kith-auth, npm or the door's supervisor
+    env = guest_scrub(dict(env), person)
+    try:
+        decl = kith_door.declared(os.path.join(env['KITH_AGENT_DIR'], 'capabilities.yaml'), name)
+        real = os.path.realpath(path)
+        if not (kith_door.in_slice(real, agent, person) and os.path.isdir(real)):
+            return "The folder must be one of %s's folders under files/people/%s." % (person, person)
+        v = kith_door.check(agent, person, kith_door.piece(decl), env)
+        if v.get('state') == 'held':
+            return 'Access is being changed right now; try again in a minute.'
+        if v.get('state') in ('not-ticked', 'widened'):
+            d = decide('mcp__kithpermit__run_door', {'door': name, 'path': real}, env)
+            if d['behavior'] != 'allow':
+                return d['message']
+        elif not v.get('ok'):
+            return v.get('why') or 'This door is not on for %s.' % person
+        if not kith_door.ready(agent, decl):
+            d = decide('mcp__kithpermit__prepare_door', {'door': name, 'downloads': kith_door.describe(decl)}, env)
+            if d['behavior'] != 'allow':
+                return d['message']
+            kith_door.prepare(agent, decl, env=env)
+        code, tail = kith_door.run(agent, person, decl, real, env)
+    except kith_door.DoorError as e:
+        return 'The door did not run: %s' % e
+    if code == 0:
+        return '%s ended. Its output, last lines:\n%s' % (name, tail)
+    return '%s %s. Its output, last lines:\n%s' % (name, 'failed (exit %s)' % code if code is not None else 'was stopped', tail)
 
 
 def call_host(method, body, env=os.environ, timeout=30):
@@ -317,7 +405,7 @@ def handle(msg, env=os.environ):
     elif method == 'tools/list':
         # a key card needs a host to ask, so request_secret is only offered to a run that has a token
         result = {'tools': [tool_def(), access_def(), bug_def()] + ([secret_def()] if credentials(env)[0] else [])
-                           + ([helper_def()] if env.get('KITH_PERSON') else [])}
+                           + ([helper_def(), door_def()] if env.get('KITH_PERSON') else [])}
     elif method == 'ping':
         result = {}
     elif method == 'tools/call':
@@ -329,6 +417,8 @@ def handle(msg, env=os.environ):
             result = {'content': [{'type': 'text', 'text': request_secret(a, env)}]}
         elif p.get('name') == HELPER:
             result = {'content': [{'type': 'text', 'text': ask_helper(a, env)}]}
+        elif p.get('name') == DOOR:
+            result = {'content': [{'type': 'text', 'text': run_door(a, env)}]}
         elif p.get('name') == BUG:
             result = {'content': [{'type': 'text', 'text': report_bug(a, env)}]}
         else:

@@ -1,6 +1,6 @@
 ---
 name: revoke-access
-description: Model-checks (TLA+/TLC) that a revoked person, and their bots, reach nothing on any of the owner's Macs, and that undo restores exactly what they had. Use when a change touches kernel/bin/kith-auth may(), cut_off, bot_may, bridge_held or cmd_person/revoke_person, the helper spawn's in-sync wait in kernel/bin/kith (and kith-permit ask_helper), serve/host/src/api/people.rs revoke_person or cut_off, serve/host/src/remote/{members,cloud,relay,sync_lease}.rs, the bot ask/thread gates in api/botguests.rs, the chat channels' access checks in serve/host/src/channels/ (core.rs handle/held/take/access, queue.rs work, run.rs Recheck/finish/flush, hq.rs who/resolve_in_sync), or the cloud's person revoke in serve/cloud/src/routes/invites.ts. Also use to answer "can a revoked person still get through?".
+description: Model-checks (TLA+/TLC) that a revoked person, and their bots, reach nothing on any of the owner's Macs, and that undo restores exactly what they had. Use when a change touches kernel/bin/kith-auth may(), cut_off, bot_may, bridge_held or cmd_person/revoke_person, the helper spawn's in-sync wait in kernel/bin/kith (and kith-permit ask_helper), serve/host/src/api/people.rs revoke_person or cut_off, serve/host/src/remote/{members,cloud,relay,sync_lease}.rs, the bot ask/thread gates in api/botguests.rs, a guest door's start or sweep (kernel/lib/kith_door.py, serve/host/src/doors.rs), the chat channels' access checks in serve/host/src/channels/ (core.rs handle/held/take/access, queue.rs work, run.rs Recheck/finish/flush, hq.rs who/resolve_in_sync), or the cloud's person revoke in serve/cloud/src/routes/invites.ts. Also use to answer "can a revoked person still get through?".
 ---
 
 # Revoke access: a revoked person reaches nothing, anywhere
@@ -18,7 +18,7 @@ design). This skill is its only documentation.
 ## Run it
 
 ```
-verification/revoke/run.sh                          # every row of checks.tsv (35 rows, about a minute)
+verification/revoke/run.sh                          # every row of checks.tsv (44 rows, about 10 minutes)
 verification/revoke/run.sh --show VARIANT PROPERTY   # TLC's full output (the counterexample) for one row
 verification/revoke/drift.sh                        # covered files changed since the sync commit?
 ```
@@ -40,7 +40,7 @@ cd serve/cloud && npx vitest run test/invites.test.ts   # cloud: every Mac of th
 
 ## Sync commit
 
-**c6d8a1cf2752c84e0ba9339517a9343fa6aa032d** (2026-10-30: origin/main `996b76c0` merged with the guest workbench (#421). #421's changes: the temp folder removal in `cut_off` after the bot sweep and in `revoke_person`/`--rm`, `kith-auth exec` scrubbing paths into a guest's folders, no local servers in a guest's shell; none is a revoke step, rows as expected in `run.sh`. #400's helper in-sync wait in `kernel/bin/kith` stays on every helper spawn, which #421's paths use too.) Earlier: `1f397684bb18` (main `bc3d92b8` plus the helper's in-sync wait) and `892b64dd7d2d` (the workbench without it). History:
+**fb5f140f6c84bc079684575a8ce93373eba51275** (2026-10-30: the guest jobs (#428) at `89162b85` merged into the guest door (#438). The model is the union of both: #428's `HelperNoSync` and its rows with the door's `GuestDoor`, `DoorNoHold`, `DoorSplit`, `NoDoorSweep` and their rows, 44 in all; the cards' `answer` takes the person as an `Option` (None for the owner) and keeps the door's door and helper branch. `run.sh` gave every row as expected.) Earlier: `5a7898911c39` (2026-10-30: origin/main `a9db7339` merged into the guest jobs (#428), over #428's merge of #421. Main's covered changes: the `send-to` dispatch line in `kernel/bin/kith`, and bot `ask` in `botguests.rs` refusing a reused nonce for a different message (`is_retry`), after the sync wait and `roles::may_use`; neither is a revoke step. With #428's jobs and edge grants (below), rows as expected in `run.sh`.) The guest door (#438) was checked on its own branch before it merged this: `961325fb23ac` (2026-10-30: the door's review fixes. A tool installed where the box would read the home folder is refused, and `run()` kills the box whenever its claim was written. A box that would not die keeps its claim (`left`), and the sweep keeps a claim until its kill ends. This makes the code meet `DoorStart`'s one-step claim and the weakly fair `DoorSweep`. No state, row or step changed) and `ab050f9277a3` (2026-10-30: the guest door. A door starts in one locked step under the person's flock that reads `may()` and the held state and claims it (`DoorStart`), and the host's sweep ends a door whose person may no longer run it (`DoorSweep`); new rows `DoorD2`, `DoorD2c`, `DoorD1` behind `GuestDoor`); `run.sh` gave every row as expected at both. Earlier: `c6d8a1cf2752` (2026-10-30: origin/main `996b76c0` merged with the guest workbench (#421). #421's changes: the temp folder removal in `cut_off` after the bot sweep and in `revoke_person`/`--rm`, `kith-auth exec` scrubbing paths into a guest's folders, no local servers in a guest's shell; none is a revoke step, rows as expected in `run.sh`. #400's helper in-sync wait in `kernel/bin/kith` stays on every helper spawn, which #421's paths use too.) Earlier: `1f397684bb18` (main `bc3d92b8` plus the helper's in-sync wait) and `892b64dd7d2d` (the workbench without it). The jobs half of the guest workbench (#428) was checked on its own branch before it merged this: `62f5a5c7c80d` (2026-10-30: an invitee's bot gets only the jobs its owner holds, and `job`/`helper --rm` take a former person id; no state, row or door changed) and `a0b2e759d7b9` (2026-10-30: the jobs and edge grants. A tick (`job`), a helper's always (`helper`) and its once (`helper_once`) are fields of the person's own row, so revoke and undo still touch no row and `may()` still checks the revoked state before any row; the once is used up by `resolve --take-once` in the locked step that runs `may()`, so a revoke between the card and the launch wins (`kith-guest-jobs-check` "a revoke beats a once"; `kith-auth-props` break M15 fails); `run.sh` gave every row as expected at both. History:
 Between `3eb9f9a50c25` (2026-10-28, the channels' revoke checks) and it, the covered files changed by the invite link's
 web origin (`people.rs`, #376), the iPhone's answer to members' access requests, the owner-approved proven device and
 idle web devices (`cloud.rs`, #382/#383/#387; `pull` still applies revoked before memberships), and in `kernel/bin/kith`
@@ -72,10 +72,14 @@ confirmed that the model still describes the covered code (see "When you change 
 | `BotBelowOwner` | I6 | A bot is never allowed where its owner is not. | Their bot keeps working for them. |
 | `SyncAgrees` | | A Mac at the cloud's version agrees with the cloud (the lemma R6c rests on). | |
 | `NeverBridgeInCloudDown` | R8 | The cost, proved: the bridge serves no guest while the Mac can't reach the cloud. | |
+| `DoorD2` | D2 | Once the revoke is on a Mac, no guest door (a declared program run outside the sandbox, `kith_door`) of the person starts there. | A removed person renders on the owner's Mac. |
+| `DoorD2c` | D2, R8 | Same, from the moment the cloud has the revoke, on every Mac: a Mac behind the cloud holds the start. | Same, through a Mac that hasn't heard yet. |
+| `DoorD1` | D1 | A door running for a revoked person is stopped (liveness, given the host's sweep runs). | Their render keeps running, writing, after they were cut off. |
 
 The probes (`Never*` that must fail, and `NoBridgeRefusal`) show the good paths are reachable: the bridge serves a
 guest end to end when in sync, an undo gives app turns back, a queued or held message is served once in sync, and the
-cost (a guest's message is held while nothing is revoked) is real.
+cost (a guest's message is held while nothing is revoked) is real. `NeverDoorRuns` and `NeverDoorKilled` show a
+member's door runs and the sweep does stop one.
 
 ## Coverage record (code -> model action)
 
@@ -97,6 +101,8 @@ cost (a guest's message is held while nothing is revoked) is real.
 | delivery | app: a run's outbox (`run_outbox.rs`, #388) posts into the person's own app chat with no re-check here; their devices are revoked in `cut_off` and blocked by the relay, so it is the app door's `RelayOK`; bridge: `channels/run.rs` `Recheck::still` (via `resolve_in_sync`) at the start of `finish` (the answer) and in `flush` before posting the outbox (refused: the outbox files are deleted, nothing posted); the owner is never re-checked; bot: `botThread` gate; app: the device is revoked here and blocked by the relay | `Deliver` |
 | stop a running turn once the revoke lands | `people.rs` `cut_off`: devices revoked, `botguests::enforce`, `stop_runs`, `sweep_claims` | `Stop` |
 | network up / cloud down / offline | the relay connection (`relay.rs` loop: `set(false)` on every (re)connect until a pull succeeds, `renew` on each ping) | `SetNet` |
+| a guest door starts | `kernel/lib/kith_door.py` `run`: under kith-auth's lock (`auth_lock`), `check` (= `kith-auth door`, `door_state`: `may()`, then `bridge_held` -> held, then the job and its tick), the claim written, then the box started, one step; kith-permit `run_door` asks the owner's job card first when not ticked | `DoorStart` (`DoorGate` = `MayP` and `InSync`) |
+| stop a running guest door | `kith_door.sweep` (under the same lock: every claim of the listed people, of a dead supervisor, and any whose `kith-auth door` is not ok, held excepted) from `serve/host/src/doors.rs` `sweep`: `people.rs` `cut_off`, `botguests.rs` `sweep_claims`, and `sweep_loop` every 60 s | `DoorSweep` (weakly fair) |
 | remove their temp folder (`<machine>/run/t/<p>`, their bots' too) | `people.rs` `cut_off` after `stop_runs` and the bot sweep (`sweep_claims`) -> kith-auth `person <p> --clear-temp`; kith-auth `revoke_person` (not `--local`) and `person --rm` -> `kith_paths.guest_tmp_remove`; a folder with no live record is emptied at the next run (`guest_tmp_ready`) | none: a cleanup, not a door. No turn starts for a revoked person, so nothing can use it; pinned by `kernel/tests/kith-guest-sandbox-check` |
 
 A check and the act it guards are separate actions in the model (`Start`, `Helper`, `Deliver`). In the code the
@@ -124,7 +130,13 @@ The model's "bridge" is this door.
 - Memberships are cut on revoke (the app door is the relay's device block). Undo restores kith-auth rows, bridge
   access and bots; the person's app needs a new invite. The model's app door after undo (`NeverAppAfterUndo`) is the
   re-invited app.
-- Time is not modeled; a finding is an order of steps that can happen. Liveness is not checked.
+- `GuestDoor` (TRUE only in the `door` variants, so the other rows keep their size): one guest door of the person,
+  on m1 only, run at most once, from a live turn of theirs there (any door). The job card and the
+  tick are not modeled (`kith-guest-door-check` and the host's `cards::edge_tests` check them): `DoorGate` is what
+  revoke adds to them.
+- Time is not modeled; a finding is an order of steps that can happen. Liveness is checked only for `DoorD1`, under
+  weak fairness of `DoorSweep`: the host's 60 s loop. While kith serve is down nothing sweeps (a door started before
+  then keeps running until the host is back; its first loop ends it).
 
 ## Findings on the design (rows that fail on purpose)
 
@@ -150,12 +162,17 @@ The model's "bridge" is this door.
 | `broken-bridge-no-sync` | the bridge's in-sync wait | `R6c`, `R6cDown`, `R6cWake`, `R5c`, `NeverBridgeInCloudDown` |
 | `broken-helper-no-sync` | the helper spawn's in-sync wait (`bin/kith`) | `R5c` (`R5` passes) |
 | `terminal-offline` | R9 (terminal revoke needs the cloud) | `R6` |
+| `broken-door-no-hold` | the door start's held (in sync) check (GuestDoor.tla `nohold`) | `DoorD2c` |
+| `broken-door-split` | the one locked step: access read, then claim and start later (GuestDoor.tla `split`) | `DoorD2` |
+| `broken-no-door-sweep` | the sweep of running doors | `DoorD1` |
 
 On the code (dry run at the sync commit, edits dropped after):
 
 - removing the revoked check from kith-auth `may()`: `kith-auth-revoke-check` (6 FAIL), `kith-auth-props` (shrunk to
   `[person sam, member house sam, revoke sam]`) and 5 host tests (`cargo test --bin kith revoke`: 4 of
   `api::revoke_tests` and the bot test below) fail.
+- removing the held check from kith-auth `door_state`: `kith-guest-door-check` fails 2 (`kith-auth door` says ok,
+  and a door starts while the Mac is out of sync).
 - removing the `sync_lease::wait` in bot `ask`: `bot_guests_tests` `a_bot_ask_waits_for_the_cloud...` fails (an ask
   while out of sync is not refused "syncing").
 - removing the in-sync wait in `kernel/bin/kith` (2026-10-29, at `1f397684`): `kith-guest-helper-check` fails 4
