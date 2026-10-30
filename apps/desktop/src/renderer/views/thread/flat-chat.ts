@@ -1,15 +1,13 @@
 import type { Entry } from '../../../shared/models.ts'
-import { VISIBLE_STEPS } from '../../../shared/thread-feed.ts'
+import { isDeliveryTool } from '../../../shared/thread-feed.ts'
 import { groupExchanges, type BotExchange } from './bot-exchange.ts'
 
 export type ChatItem =
   | { id: string; kind: 'separator'; date: number }
   | { id: string; kind: 'entry'; entry: Entry; groupStart: boolean }
   | { id: string; kind: 'exchanges'; entry: Entry; exchanges: BotExchange[] }
-  /** A tool call, one row under the reply that made it. */
-  | { id: string; kind: 'tool'; entry: Entry }
-  /** The steps of a long run that are folded away. */
-  | { id: string; kind: 'earlier'; count: number }
+  /** The tool calls between two messages as one collapsed "N steps" row; `id` is `steps-<first tool entry id>`. */
+  | { id: string; kind: 'steps'; entries: Entry[] }
 
 /** Your own message keeps its `user-<nonce>` id when the host confirms it, so the row doesn't redraw. */
 export const stableId = (e: Entry) => (e.kind === 'user' && e.data.clientNonce ? `user-${e.data.clientNonce}` : e.id)
@@ -31,7 +29,7 @@ export function flatEntries(entries: Entry[]): Entry[] {
 /**
  * Chat-visible entries plus time separators (gaps > 1 h), author grouping and tool rows. A bot's messages arrive
  * whole (Grok Bot's `send_message`); what it writes along the way is trace, except its tool calls: a run of them
- * shows its newest `VISIBLE_STEPS` and folds the rest. Runs of bot exchanges with one peer become one item.
+ * is one collapsed steps item (file deliveries left out; a run of only those shows nothing). Runs of bot exchanges with one peer become one item.
  */
 export function buildChat(entries: Entry[]): ChatItem[] {
   const out: ChatItem[] = []
@@ -41,8 +39,8 @@ export function buildChat(entries: Entry[]): ChatItem[] {
   const flush = () => {
     // Tool steps between two replies break the run: the next agent reply opens a new group.
     if (run.length) lastAuthor = null
-    if (run.length > VISIBLE_STEPS) out.push({ id: `earlier-${run[0]!.id}`, kind: 'earlier', count: run.length - VISIBLE_STEPS })
-    for (const e of run.slice(-VISIBLE_STEPS)) out.push({ id: e.id, kind: 'tool', entry: e })
+    const entries = run.filter((e) => !isDeliveryTool(e))
+    if (entries.length) out.push({ id: `steps-${run[0]!.id}`, kind: 'steps', entries })
     run = []
   }
   for (const { entry: e, exchanges } of groupExchanges(flatEntries(entries), true)) {

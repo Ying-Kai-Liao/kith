@@ -17,15 +17,37 @@ private func tool(_ seq: Int64) -> Entry {
     let replies = [entry(1, "thought") { $0.text = "hm" }, tool(2), entry(3, "agent") { $0.text = "Done."; $0.final = true },
                    entry(4, "plan")]
     let out = ThreadFeed.replies(replies)
-    #expect(out.map(\.id) == ["e2", "e3"])
+    #expect(out.map(\.id) == ["steps-e2", "e3"])
 }
 
-@Test func aLongRunOfToolCallsFoldsIntoOneEarlierLine() {
-    let replies = (1...7).map(tool)
-    let out = ThreadFeed.replies(replies)
-    #expect(out.count == 1 + ThreadFeed.visibleSteps)
-    #expect(out.first == .earlier(count: 3, id: "earlier-e1"))
-    #expect(out.last?.id == "e7")
+@Test func aRunOfToolCallsIsOneStepsReply() {
+    let out = ThreadFeed.replies((1...7).map(tool))
+    #expect(out.count == 1 && out.first?.id == "steps-e1")
+    guard case let .steps(run) = out.first else { Issue.record("no steps"); return }
+    #expect(run.steps.count == 7 && run.hidden == 0)
+}
+
+@Test func aVeryLongRunKeepsTheNewestTwentyAndCountsTheRestAsEarlier() {
+    guard case let .steps(run) = ThreadFeed.replies((1...25).map(tool)).first else { Issue.record("no steps"); return }
+    #expect(run.hidden == 5 && run.shown.count == ThreadFeed.visibleSteps && run.shown.first?.id == "e6")
+}
+
+@Test func deliveryToolsDropOutOfARun() {
+    let send = entry(1, "tool") { $0.title = "Used mcp__kith-files__send_file"; $0.status = "completed" }
+    #expect(ThreadFeed.replies([send]).isEmpty)
+    // Other kith-files tools deliver nothing: they stay.
+    let ask = entry(2, "tool") { $0.title = "Used mcp__kith-files__request_secret"; $0.status = "completed" }
+    #expect(ThreadFeed.replies([send, ask]).map(\.id) == ["steps-e1"])
+}
+
+@Test func mcpToolsReadAsAHumanVerbWithoutTheRawName() {
+    let row = ThreadFeed.toolRow(entry(1, "tool") { $0.title = "Used mcp__kith-files__send_file"; $0.status = "completed" })
+    #expect(row.verb == "Send file" && !row.object.contains("mcp__") && !row.verb.contains("mcp__"))
+    let hyphen = ThreadFeed.toolRow(entry(2, "tool") { $0.title = "mcp__docs__list-pages x"; $0.command = "mcp__docs__list-pages" })
+    #expect(hyphen.verb == "List pages" && hyphen.object == "x")
+    // Named only in the command: the title stays as the object, still without the raw name.
+    let viaCommand = ThreadFeed.toolRow(entry(3, "tool") { $0.title = "Fetch page"; $0.command = "mcp__docs__fetch_page" })
+    #expect(viaCommand.verb == "Fetch page")
 }
 
 @Test func toolRowReadsVerbObjectAndResult() {
@@ -95,6 +117,16 @@ private func summary(origin: String? = nil, writer: String? = nil, busy: Bool? =
     #expect(ThreadFeed.writerPhase(held, taking: true, failed: false, unreachable: false) == .taking)
     #expect(ThreadFeed.writerPhase(held, taking: false, failed: true, unreachable: false) == .failed)
     #expect(ThreadFeed.writerPhase(held, taking: false, failed: false, unreachable: true) == .unreachable)
+}
+
+@Test func aHeldThreadKeepsTheBannerAndAddsANewTaskComposer() {
+    let root = entry(1, "user")
+    #expect(ThreadFeed.chatBottom(held: root, mismatch: false, guest: false) == .writerBannerAndNewTask(rootId: "e1"))
+    #expect(ThreadFeed.chatBottom(held: nil, mismatch: false, guest: false) == .composer)
+    // Read-only and update-needed stay as they were.
+    #expect(ThreadFeed.chatBottom(held: root, mismatch: false, guest: true) == .writerBanner(rootId: "e1"))
+    #expect(ThreadFeed.chatBottom(held: nil, mismatch: false, guest: true) == .readOnly)
+    #expect(ThreadFeed.chatBottom(held: root, mismatch: true, guest: false) == .updateNeeded)
 }
 
 @Test func originAndWriterChipFollowTheSummary() {

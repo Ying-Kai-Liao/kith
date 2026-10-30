@@ -16,7 +16,7 @@ pub(super) struct Completed {
     epoch: u64,
     cancelled: Arc<AtomicBool>,
     reply: Reply,
-    result: Result<Snapshot>,
+    result: Result<Vec<Snapshot>>,
 }
 
 pub(super) struct FileShares {
@@ -54,7 +54,7 @@ impl Drop for FileShares {
 impl Actor {
     pub(super) fn begin_file(
         &mut self,
-        source: String,
+        sources: Vec<String>,
         name: Option<String>,
         cancelled: Arc<AtomicBool>,
         reply: Reply,
@@ -77,7 +77,7 @@ impl Actor {
         tokio::spawn(async move {
             let flag = cancelled.clone();
             let result =
-                tokio::task::spawn_blocking(move || files::snapshot(&root, &cwd, &source, name.as_deref(), &flag))
+                tokio::task::spawn_blocking(move || files::snapshot_all(&root, &cwd, &sources, name.as_deref(), &flag))
                     .await;
             let result = result.map_err(anyhow::Error::from).and_then(std::convert::identity);
             let _ = tx.send(Completed { epoch, cancelled, reply, result });
@@ -104,14 +104,23 @@ impl Actor {
             );
             let turn = self.can_send_file()?;
             ensure!(self.hub.store.bot(&self.cfg.id)?.is_some_and(|bot| !bot.deleted), "bot was deleted");
-            let mut snapshot = completed.result?;
-            let text = format!("{} ({} bytes)", snapshot.meta.name, snapshot.meta.size);
+            let mut snapshots = completed.result?;
+            let text = match snapshots.as_slice() {
+                [one] => format!("{} ({} bytes)", one.meta.name, one.meta.size),
+                many => format!(
+                    "{} files: {}",
+                    many.len(),
+                    many.iter().map(|s| s.meta.name.as_str()).collect::<Vec<_>>().join(", ")
+                ),
+            };
+            let metas: Vec<_> = snapshots.iter().map(|s| &s.meta).collect();
             self.close_seg();
             let entry = self
-                .add(EntryKind::Agent, turn, json!({"text": text, "final": true, "files": [snapshot.meta]}))
+                .add(EntryKind::Agent, turn, json!({"text": text, "final": true, "files": metas}))
                 .ok_or_else(|| anyhow!("couldn't save the file message"))?;
             self.last_agent = Some(entry.id);
-            snapshot.commit();
+            // Only now, with the entry saved, do the copies become permanent.
+            snapshots.iter_mut().for_each(Snapshot::commit);
             self.files.summary = Some(text);
             self.set_activity("Working…");
             Ok(())

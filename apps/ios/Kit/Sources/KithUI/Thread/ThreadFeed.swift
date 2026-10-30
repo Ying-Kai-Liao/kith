@@ -4,8 +4,8 @@ import SwiftUI
 /// Pure mapping from the store's entries onto the redesign's components: the thread chip, tool rows and the order
 /// of an open thread. No views here, so it is tested.
 enum ThreadFeed {
-    /// Tool calls in a row beyond this many fold into "N earlier steps" (a long task can run hundreds).
-    static let visibleSteps = 4
+    /// An opened run of steps shows its newest this many; older ones sit under "N earlier steps" (a long task can run hundreds).
+    static let visibleSteps = 20
 
     // MARK: place
 
@@ -90,17 +90,51 @@ enum ThreadFeed {
         return String(rest)
     }
 
+    /// `mcp__<server>__<tool>` out of a tool entry's title or command; the entry has no tool-name field of its own.
+    static func mcpName(_ entry: Entry) -> (server: String, tool: String)? {
+        for text in [entry.data.title, entry.data.command] {
+            guard let text, let start = text.range(of: "mcp__") else { continue }
+            let word = text[start.upperBound...].prefix { !$0.isWhitespace && $0 != "(" && $0 != "\"" && $0 != "'" }
+            guard let sep = word.range(of: "__"), sep.lowerBound > word.startIndex, sep.upperBound < word.endIndex else { continue }
+            return (String(word[..<sep.lowerBound]), String(word[sep.upperBound...]))
+        }
+        return nil
+    }
+
+    /// A tool whose result is the item it delivered to the chat (a file or image), so the step itself is noise.
+    static func isDelivery(_ entry: Entry) -> Bool {
+        guard let name = mcpName(entry) else { return false }
+        return name.server == "kith-files" && name.tool == "send_file"
+    }
+
+    /// "send_file" -> "Send file".
+    static func humanTool(_ tool: String) -> String {
+        let words = tool.map { $0 == "_" || $0 == "-" ? " " : $0 }
+        let text = String(words).split(separator: " ").joined(separator: " ")
+        return text.prefix(1).uppercased() + text.dropFirst()
+    }
+
+    private static let genericVerbs: Set<String> = ["used", "using", "use", "called", "calling", "call", "ran", "running"]
+
     /// One tool entry as one row: "Edited kith-sessions.py  +6 -2". The sheet gets the command and what it printed.
     static func toolRow(_ entry: Entry, patches withPatches: Bool = true) -> ToolCallRowModel {
         let d = entry.data
-        let verb = verbs[d.toolKind ?? ""] ?? "Used"
+        let mcp = mcpName(entry)
+        let verb = mcp.map { humanTool($0.tool) } ?? verbs[d.toolKind ?? ""] ?? "Used"
         let diffs = d.diffs ?? []
         let object: String
         if let first = diffs.first {
             object = (first.path as NSString).lastPathComponent + (diffs.count > 1 ? " +\(diffs.count - 1)" : "")
         } else {
             let line = (d.title ?? "").split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
-            object = withoutVerb(line, kind: d.toolKind)
+            if mcp != nil {
+                // The verb is the tool; what is left of the title (without the raw name or "Used") is the object.
+                var words = line.split(separator: " ").filter { !$0.contains("mcp__") }
+                if let first = words.first, genericVerbs.contains(first.lowercased()) { words.removeFirst() }
+                object = words.joined(separator: " ")
+            } else {
+                object = withoutVerb(line, kind: d.toolKind)
+            }
         }
         let result: ToolCallRowModel.Result? = switch d.status {
         case "completed": .text(diffs.isEmpty ? "done" : "+\(diffs.map(\.added).reduce(0, +)) -\(diffs.map(\.removed).reduce(0, +))")
@@ -118,20 +152,44 @@ enum ThreadFeed {
     /// What an open thread shows under its first message, in order.
     enum Reply: Identifiable, Equatable {
         case entry(Entry, groupStart: Bool)
-        case tool(Entry)
+        /// A run of tool calls behind one collapsed "N steps" row.
+        case steps(StepsRun)
         /// A gap of more than an hour (thread screen only).
         case separator(Date, id: String)
-        /// A run of tool calls longer than `visibleSteps`: the older ones fold into this line.
-        case earlier(count: Int, id: String)
 
         var id: String {
             switch self {
             case .entry(let e, _): ThreadFeed.stableId(e)
-            case .tool(let e): e.id
+            case .steps(let run): run.id
             case .separator(_, let id): id
-            case .earlier(_, let id): id
             }
         }
+    }
+
+    /// One run of consecutive tool calls between two chat-visible items, as the single "N steps" row it becomes.
+    struct StepsRun: Identifiable, Equatable {
+        /// `steps-<first tool entry of the run, before filtering>`: stable while the run grows or is filtered.
+        let id: String
+        /// The run without delivery tools; never empty.
+        let steps: [Entry]
+        let failed: Int
+        let running: Int
+
+        /// nil when nothing is left after dropping delivery tools (the delivered item stands for them).
+        init?(_ run: [Entry]) {
+            guard let first = run.first else { return nil }
+            let steps = run.filter { !ThreadFeed.isDelivery($0) }
+            guard !steps.isEmpty else { return nil }
+            self.id = "steps-\(first.id)"
+            self.steps = steps
+            failed = steps.filter { $0.data.status == "failed" }.count
+            running = steps.filter { $0.data.status != "completed" && $0.data.status != "failed" }.count
+        }
+
+        var isRunning: Bool { running > 0 }
+        /// Steps past the cap that sit under "N earlier steps" once opened.
+        var hidden: Int { max(0, steps.count - ThreadFeed.visibleSteps) }
+        var shown: [Entry] { Array(steps.suffix(ThreadFeed.visibleSteps)) }
     }
 
     /// Your own message keeps its `user-<nonce>` id when the server confirms it, so the row doesn't redraw or jump
@@ -149,12 +207,7 @@ enum ThreadFeed {
         var lastAuthor: String?
         func flush() {
             guard !run.isEmpty else { return }
-            if run.count > visibleSteps, let first = run.first {
-                out.append(.earlier(count: run.count - visibleSteps, id: "earlier-\(first.id)"))
-                run.suffix(visibleSteps).forEach { out.append(.tool($0)) }
-            } else {
-                run.forEach { out.append(.tool($0)) }
-            }
+            if let steps = StepsRun(run) { out.append(.steps(steps)) }
             run = []
         }
         for e in entries {
