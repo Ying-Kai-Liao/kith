@@ -184,6 +184,31 @@ async fn rejects_invalid_sources_without_a_file_entry() {
     assert!(results.as_array().unwrap().iter().all(|r| r["isError"] == true));
 }
 
+#[tokio::test]
+async fn several_paths_publish_one_entry_in_order_and_a_bad_path_publishes_nothing() {
+    let host = Host::start().await;
+    let cwd = host.home.join("workspace");
+    std::fs::create_dir_all(&cwd).unwrap();
+    for (name, bytes) in [("report.pdf", b"%PDF".to_vec()), (".hidden", vec![13]), ("empty", vec![])] {
+        std::fs::write(cwd.join(name), bytes).unwrap();
+    }
+    let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file_agent.py");
+    let created = host.call("createBot", json!({"name":"Multi", "backend":"custom", "tasks": false, "cwd":cwd, "command":common::python_agent(&agent), "connectors":[], "notify":false})).await;
+    let bot = created["bot"]["id"].as_str().unwrap();
+    host.call("send", json!({"botId":bot,"text":"multi-files"})).await;
+    let entries = ready(&host, bot, 1).await;
+    let entry = entries.iter().find(|e| e["data"]["files"].is_array()).unwrap();
+    let names: Vec<_> =
+        entry["data"]["files"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["report.pdf", ".hidden", "empty"]);
+    assert_eq!(entry["data"]["text"], "3 files: report.pdf, .hidden, empty");
+    let results: Value = serde_json::from_slice(&std::fs::read(cwd.join("file-results.json")).unwrap()).unwrap();
+    let results = results.as_array().unwrap();
+    assert!(results[0]["isError"] != true, "{results:?}");
+    assert_eq!(results[1]["isError"], true);
+    assert!(results[1]["content"][0]["text"].as_str().unwrap().contains("missing"));
+}
+
 async fn rejected(path: &std::path::Path) {
     let waited = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
