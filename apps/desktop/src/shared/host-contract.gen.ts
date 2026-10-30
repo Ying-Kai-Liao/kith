@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '357563e54b3cdccb8f5f5a6717715ed875d4cfb53bd3d63bc69b8b61a11ad2f9'
+export const CONTRACT_SHA256 = '707086a46c066282ca2a5b5f411cf6bbac0b5cd989c5b76d6feaf24cd7598336'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -83,6 +83,24 @@ export const BotEntryKindValues = ['user', 'agent', 'notice', 'waiting'] as cons
 export type BotEntryKind = (typeof BotEntryKindValues)[number]
 /** How a consumer reads a BotEntryKind word: one this version doesn't know is 'unknown'. */
 export const decodeBotEntryKind = (raw: unknown): BotEntryKind | 'unknown' => known(BotEntryKindValues, raw, 'unknown')
+
+/** Where a room conversation is in its life. One this version doesn't know reads as ended: the app stops drawing a live line. */
+export const RoomConversationStateValues = ['open', 'ended', 'stopped'] as const
+export type RoomConversationState = (typeof RoomConversationStateValues)[number]
+/** How a consumer reads a RoomConversationState word: one this version doesn't know is 'ended'. */
+export const decodeRoomConversationState = (raw: unknown): RoomConversationState => known(RoomConversationStateValues, raw, 'ended')
+
+/** Why a room conversation is over. One this version doesn't know is its own word: the app shows it plainly as over. */
+export const RoomConversationEndValues = ['spent', 'quiet', 'stopped', 'idle', 'newer'] as const
+export type RoomConversationEnd = (typeof RoomConversationEndValues)[number]
+/** How a consumer reads a RoomConversationEnd word: one this version doesn't know is 'unknown'. */
+export const decodeRoomConversationEnd = (raw: unknown): RoomConversationEnd | 'unknown' => known(RoomConversationEndValues, raw, 'unknown')
+
+/** What speaks in a room conversation: one of the room's own agents, or an outside bot. One this version doesn't know reads as agent. */
+export const RoomSpeakerKindValues = ['agent', 'bot'] as const
+export type RoomSpeakerKind = (typeof RoomSpeakerKindValues)[number]
+/** How a consumer reads a RoomSpeakerKind word: one this version doesn't know is 'agent'. */
+export const decodeRoomSpeakerKind = (raw: unknown): RoomSpeakerKind => known(RoomSpeakerKindValues, raw, 'agent')
 
 /** The machine word in an error answer of the bot guest methods, {status, message, code}, which a bot acts on (apps ignore it; tooMany answers a person making one bot too many). One this version doesn't know is its own: a bot acts on the answer's HTTP status. */
 export const BotErrorCodeValues = ['pending', 'notGranted', 'rateLimited', 'busy', 'notFound', 'badRequest', 'tooLong', 'notSupported', 'syncing', 'heldByOtherWriter', 'tooMany', 'nonceReused'] as const
@@ -236,10 +254,47 @@ export interface Entry {
   updatedAt: number
 }
 
-/** A page of a chat or a thread. folder is where it works on this computer: the owner's alone. */
+/** A page of a chat or a thread. folder is where it works on this computer: the owner's alone. conversation is the room conversation of that lane (the chat's main lane, or the thread) that was opened last, so a reconnecting app can draw the live line; null when the lane never had one. A host from before it leaves the field out. */
 export interface Entries {
   entries: Entry[]
   folder?: unknown | null
+  conversation?: RoomConversation | null
+}
+
+/** Where a room conversation stands: what one person message to a group set going. budget is the turns that message granted and left what remains; current is whoever speaks now and waitUntil (unix ms) when an outside bot's turn times out; endedWhy says why it is over (spent: the turns ran out, quiet: a round where everyone passed, stopped: a person's Stop, idle: nobody moved it for a day, newer: a newer person message took the lane); opening is the entry of the person message that opened it. lane is the thread's id, null for the room's main lane. endedWhy is null for a conversation that is open or that ended before hosts kept the reason. */
+export interface RoomConversation {
+  conversation: string
+  chat: string
+  lane?: string | null
+  budget: number
+  left: number
+  state: RoomConversationState
+  endedWhy?: RoomConversationEnd | null
+  current?: RoomSpeaker | null
+  waitUntil?: number | null
+  opening?: string | null
+}
+
+/** Who speaks now in a room conversation. */
+export interface RoomSpeaker {
+  id: string
+  kind: RoomSpeakerKind
+  name: string
+}
+
+/** The `conversation` event the owner's apps (and no one else) get on the event stream: a room conversation's RoomConversation fields, sent when it opens, at each charge, each change of speaker and when it ends. */
+export interface ConversationEvent {
+  type: string
+  conversation: string
+  chat: string
+  lane?: string | null
+  budget: number
+  left: number
+  state: RoomConversationState
+  endedWhy?: RoomConversationEnd | null
+  current?: RoomSpeaker | null
+  waitUntil?: number | null
+  opening?: string | null
 }
 
 /** The entry a call wrote. */
@@ -446,7 +501,7 @@ export interface BotAsked {
   room?: string | null
 }
 
-/** A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current). A retry with the same clientNonce and text answers the same, marked duplicate. */
+/** A post into a room, stored: its entry and turn. replied: it was the member's reply that the room was waiting for. late: it is kept in the room but woke nobody and was not charged (the conversation is over, or the epoch or turnKey is no longer current); lateWhy says which: stopped (after a Stop), newer (a newer person message moved the epoch), ended (the conversation ended: spent, quiet or idle), noTurn (a keyed post nobody waits for any more). unprompted: a post with no turn key while no conversation is open, kept, not late, and it woke nobody and cost nothing. A retry with the same clientNonce and text answers the same, marked duplicate. */
 export interface BotPosted {
   entryId: string
   seq: number
@@ -455,6 +510,8 @@ export interface BotPosted {
   conversation: string
   replied: boolean
   late: boolean
+  lateWhy?: string | null
+  unprompted?: boolean | null
   duplicate?: boolean | null
 }
 
@@ -797,6 +854,9 @@ export interface Types {
   BotAnswer: BotAnswer
   Entry: Entry
   Entries: Entries
+  RoomConversation: RoomConversation
+  RoomSpeaker: RoomSpeaker
+  ConversationEvent: ConversationEvent
   EntryAnswer: EntryAnswer
   MaybeEntry: MaybeEntry
   CallEnded: CallEnded
@@ -881,8 +941,8 @@ export interface Types {
 export type TypeName = keyof Types
 
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false
-/** true for an enum whose unknown values are 'unknown': EntryKind, Permission, BotGuestState, MessageVia, BotEntryKind, BotErrorCode. */
-type IsOpen<T> = Same<T, EntryKind> | Same<T, Permission> | Same<T, BotGuestState> | Same<T, MessageVia> | Same<T, BotEntryKind> | Same<T, BotErrorCode>
+/** true for an enum whose unknown values are 'unknown': EntryKind, Permission, BotGuestState, MessageVia, BotEntryKind, RoomConversationEnd, BotErrorCode. */
+type IsOpen<T> = Same<T, EntryKind> | Same<T, Permission> | Same<T, BotGuestState> | Same<T, MessageVia> | Same<T, BotEntryKind> | Same<T, RoomConversationEnd> | Same<T, BotErrorCode>
 /**
  * A type as a consumer receives it (see `receive`): a field of an enum whose unknown values are their own state may
  * also be 'unknown'; any other enum's unknown value already reads as the value the contract names. A `json` value
@@ -1087,6 +1147,9 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     CitationError: { values: CitationErrorValues, unknown: 'not_shared' },
     ConversationState: { values: ConversationStateValues, unknown: 'running' },
     BotEntryKind: { values: BotEntryKindValues, unknown: 'unknown' },
+    RoomConversationState: { values: RoomConversationStateValues, unknown: 'ended' },
+    RoomConversationEnd: { values: RoomConversationEndValues, unknown: 'unknown' },
+    RoomSpeakerKind: { values: RoomSpeakerKindValues, unknown: 'agent' },
     BotErrorCode: { values: BotErrorCodeValues, unknown: 'unknown' },
   },
   types: {
@@ -1101,7 +1164,10 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     Bot: { fields: { id: 'string', kind: 'BotKind', members: '[string]', name: 'string', description: 'string', avatarColor: 'string', avatarShape: 'string', avatarSource: 'string', backend: 'string', command: 'string?', cwd: 'string?', permission: 'Permission', model: 'string?', modelOptions: '{string}', fastMode: 'bool', pinned: 'bool', position: 'int', hidden: 'bool', notify: 'bool?', connectors: '[string]', skills: '[string]', computer: 'bool', sharedMemory: 'bool?', harnessMemory: 'bool?', rowShowsSummary: 'bool', autoName: 'bool', tasks: 'bool?', hqAgent: 'string?', project: 'string?', person: 'string?', createdAt: 'int', managedWorkspace: 'bool', folder: 'json?', memoryRev: 'int?', workingLanes: '[WorkingLane]', rev: 'int', deleted: 'bool', status: 'BotStatus', activity: 'string', startedAt: 'int?', workingChat: 'string?', workingThread: 'string?', fastModeSupport: 'string', fastModeIssue: 'string?', unread: 'int', lastMessage: 'string?', lastAt: 'int', botGuest: 'BotGuestRef?' }, mayOmit: ['command', 'cwd', 'folder', 'sharedMemory', 'memoryRev', 'tasks', 'hqAgent', 'project', 'person', 'botGuest'] },
     BotAnswer: { fields: { bot: 'Bot' } },
     Entry: { fields: { id: 'string', seq: 'int', botId: 'string', threadId: 'string?', rev: 'int', kind: 'EntryKind', turn: 'int', data: 'json', createdAt: 'int', updatedAt: 'int' } },
-    Entries: { fields: { entries: '[Entry]', folder: 'json?' }, mayOmit: ['folder'] },
+    Entries: { fields: { entries: '[Entry]', folder: 'json?', conversation: 'RoomConversation?' }, mayOmit: ['folder', 'conversation'] },
+    RoomConversation: { fields: { conversation: 'string', chat: 'string', lane: 'string?', budget: 'int', left: 'int', state: 'RoomConversationState', endedWhy: 'RoomConversationEnd?', current: 'RoomSpeaker?', waitUntil: 'int?', opening: 'string?' } },
+    RoomSpeaker: { fields: { id: 'string', kind: 'RoomSpeakerKind', name: 'string' } },
+    ConversationEvent: { fields: { type: 'string', conversation: 'string', chat: 'string', lane: 'string?', budget: 'int', left: 'int', state: 'RoomConversationState', endedWhy: 'RoomConversationEnd?', current: 'RoomSpeaker?', waitUntil: 'int?', opening: 'string?' } },
     EntryAnswer: { fields: { entry: 'Entry' } },
     MaybeEntry: { fields: { entry: 'Entry?' } },
     CallEnded: { fields: { entry: 'Entry?' }, mayOmit: ['entry'] },
@@ -1131,7 +1197,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     PeerAgents: { fields: { agents: '[PeerAgent]' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
     BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?', room: 'string?' }, mayOmit: ['duplicate', 'room'] },
-    BotPosted: { fields: { entryId: 'string', seq: 'int', turn: 'int', room: 'string', conversation: 'string', replied: 'bool', late: 'bool', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
+    BotPosted: { fields: { entryId: 'string', seq: 'int', turn: 'int', room: 'string', conversation: 'string', replied: 'bool', late: 'bool', lateWhy: 'string?', unprompted: 'bool?', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
     BotRoom: { fields: { room: 'string', conversation: 'string?', epoch: 'int?', entries: '[BotEntry]', cursor: 'int' } },
     BotSender: { fields: { botId: 'string', name: 'string', speaker: 'string?' } },
     BotEntry: { fields: { id: 'string', seq: 'int', turn: 'int', at: 'int', conversation: 'string', kind: 'BotEntryKind', text: 'string', sender: 'BotSender?', final: 'bool?', error: 'bool?', room: 'string?', epoch: 'int?', author: 'string?' }, mayOmit: ['sender', 'final', 'error', 'room', 'epoch', 'author'] },

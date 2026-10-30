@@ -15,6 +15,13 @@ import { useKithInfo } from '../bots/kith/use-kith'
 import { MemoryCard } from '../bots/MemoryView'
 import { RoutinesView } from '../routines/RoutinesView'
 import { MacChatButton } from './MacChatButton'
+import { BotGuestAvatar } from '../../components/kith'
+import { botGuestsFor } from '../../store/bot-guests-store'
+import { useModel } from '../../lib/observable'
+import { botRowLine } from '@shared/room-join'
+import { roomBotsOf } from './room-bots'
+import { BotTag } from './Tags'
+import './conversation.css'
 import '../bots/bots.css'
 import './details-panel.css'
 import './agent-sheet.css'
@@ -29,7 +36,7 @@ const TABS: { id: DetailsTab; label: string }[] = [
 ]
 
 /** The inspector beside a conversation (Grok Bot's): who the bot is, then its details, memory and settings. */
-export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTab, editGroup, share, close }: {
+export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTab, editGroup, addMember, share, close }: {
   botId: string
   routineId: string | null
   /** Why a call can't start now (offline, no voice); null when it can. */
@@ -39,6 +46,8 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
   tab: DetailsTab
   setTab: (tab: DetailsTab) => void
   editGroup: () => void
+  /** Opens the Add sheet (agents and bots) for this group. */
+  addMember: () => void
   share: () => void
   close: () => void
 }) {
@@ -71,7 +80,7 @@ export function DetailsPanel({ botId, routineId, callBlocked, onCall, tab, setTa
           </div>
         ) : null}
         {bot && group ? (
-          <GroupMembersList group={bot} editGroup={editGroup} />
+          <GroupMembersList group={bot} editGroup={editGroup} addMember={addMember} />
         ) : (
           <>
             <TabChoice label="Conversation details" selection={shownTab} options={tabs} onChange={setTab} />
@@ -132,11 +141,19 @@ function Identity({ bot, kith }: { bot: Bot; kith: KithInfoStore | null }) {
   )
 }
 
-/** A group's bots (Grok Bot's member list); clicking one opens its own chat. */
-function GroupMembersList({ group, editGroup }: { group: Bot; editGroup: () => void }) {
+/** A group's agents and outside bots (Grok Bot's member list); clicking an agent opens its own chat. */
+function GroupMembersList({ group, editGroup, addMember }: { group: Bot; editGroup: () => void; addMember: () => void }) {
   const store = useStore()
+  // The owner's bot list names the outside bots and says where each runs.
+  const guests = useModel(botGuestsFor(store))
+  const outside = roomBotsOf(store, group)
+  const total = group.members.length
   return (
     <div className="details-members">
+      <div className="details-members-head">
+        <Text size="caption" weight="semibold" tone="secondary">AGENTS AND BOTS</Text>
+        {store.isOwner ? <button className="press details-members-add" onClick={addMember}>Add</button> : null}
+      </div>
       {store.members(group).map((bot) => (
         <div key={bot.id} className="member-row removable">
           <button className="member-open press" title={`Open ${bot.name}'s own chat`} onClick={() => store.setSelection(bot.id)}>
@@ -146,14 +163,26 @@ function GroupMembersList({ group, editGroup }: { group: Bot; editGroup: () => v
               {isWorking(bot) ? <Text size="compactSecondary" tone="secondary" className="member-name">{bot.activity || 'Working…'}</Text> : null}
             </VStack>
           </button>
-          {group.members.length > 1 ? <IconButton title={`Remove ${bot.name} from the group`} icon="xmark" onClick={() => store.removeMember(group, bot.id)} /> : null}
+          {total > 1 ? <IconButton title={`Remove ${bot.name} from the group`} icon="xmark" onClick={() => store.removeMember(group, bot.id)} /> : null}
+        </div>
+      ))}
+      {outside.map((bot) => (
+        <div key={bot.id} className="member-row removable bot-member">
+          <div className="member-open">
+            <BotGuestAvatar provider={bot.provider} size={32} />
+            <VStack as="span" gap={1} grow>
+              <span className="member-name"><span className="bot-name">{bot.name}</span><BotTag /></span>
+              <Text size="compactSecondary" tone="secondary">{botRowLine(guests.bots.find((g) => g.botId === bot.id) ?? { provider: bot.provider, ownerName: null, ownerPerson: null })}</Text>
+            </VStack>
+          </div>
+          {store.isOwner ? <button className="press bot-member-remove" onClick={() => store.removeMember(group, bot.id)}>Remove</button> : <span />}
         </div>
       ))}
       <button className="member-row press" onClick={editGroup}>
         <span className="member-add-icon">
-          <Icon name="plus" size={16} color="var(--secondary)" />
+          <Icon name="square.and.pencil" size={14} color="var(--secondary)" />
         </span>
-        <Text tone="secondary" className="member-name">Add Member</Text>
+        <Text tone="secondary" className="member-name">Edit group</Text>
       </button>
     </div>
   )
