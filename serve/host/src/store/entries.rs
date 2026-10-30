@@ -172,15 +172,17 @@ impl Store {
 
     /// The entries of one chat (a room, threads included) after `since`, oldest first, at most `cap`. A fresh reader
     /// (`since == 0`) gets the newest `cap`; one with a cursor gets the next `cap` after it, so it skips nothing.
-    pub fn chat_entries_since(&self, chat: &str, since: i64, cap: i64) -> Result<Vec<Entry>> {
+    /// Only entries inserted after `after_seq` count (an outside bot's join point), however far an edit moved their `rev`.
+    pub fn chat_entries_since(&self, chat: &str, since: i64, cap: i64, after_seq: i64) -> Result<Vec<Entry>> {
         let c = self.db.locked();
         let newest = since == 0;
         let mut st = c.prepare(&format!(
-            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND rev > ?2 ORDER BY seq {} LIMIT ?3",
+            "SELECT {ENTRY_COLS} FROM entries WHERE bot_id = ?1 AND rev > ?2 AND seq > ?4
+             ORDER BY seq {} LIMIT ?3",
             if newest { "DESC" } else { "ASC" }
         ))?;
         let mut rows: Vec<Entry> =
-            st.query_map(params![chat, since, cap], row_entry)?.collect::<rusqlite::Result<_>>()?;
+            st.query_map(params![chat, since, cap, after_seq], row_entry)?.collect::<rusqlite::Result<_>>()?;
         if newest {
             rows.reverse();
         }

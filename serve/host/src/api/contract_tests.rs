@@ -83,6 +83,11 @@ async fn member_answers(r: &Rig, sam: &Caller) -> BTreeMap<&'static str, Value> 
     let said = r.hub.add_entry(&lane, EntryKind::User, 1, &json!({"text": "hi", "author": "sam"})).unwrap();
     let answer =
         r.hub.add_entry(&lane, EntryKind::Agent, 1, &json!({"text": "hello", "final": true, "author": chat})).unwrap();
+    // A conversation in each lane (a person's message in a group opens one; the fixtures show its shape).
+    for lane in [lane.clone(), Lane::in_thread(&chat, &said.id)] {
+        let conv = r.hub.store.open_conversation(&lane, 10, "owner").unwrap();
+        r.hub.store.set_opening(&conv.id, &said.id).unwrap();
+    }
     got.insert("history", call(r, sam, "history", json!({"botId": chat})).await);
     got.insert("thread", call(r, sam, "thread", json!({"botId": chat, "rootId": said.id})).await);
     got.insert("react", call(r, sam, "react", json!({"entryId": answer.id, "emoji": "👍"})).await);

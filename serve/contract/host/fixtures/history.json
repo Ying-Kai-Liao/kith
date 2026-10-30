@@ -4,9 +4,9 @@
   "body": {
     "entries": [
       {
-        "id": "f2a80932-d0f5-462d-b9ec-995efb025a66",
+        "id": "50bd90c2-0952-4fb8-a48d-627e715f288f",
         "seq": 1,
-        "botId": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+        "botId": "af7ef632-4f99-4394-80af-10a3f55db724",
         "threadId": null,
         "rev": 5,
         "kind": "user",
@@ -16,13 +16,13 @@
           "author": "sam",
           "thread": null
         },
-        "createdAt": 1792998619792,
-        "updatedAt": 1792998619792
+        "createdAt": 1793366410340,
+        "updatedAt": 1793366410340
       },
       {
-        "id": "247ca8d2-4373-4f3d-8041-25285b10c02c",
+        "id": "3e492980-b5b0-4f67-81b2-50aa56330598",
         "seq": 2,
-        "botId": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+        "botId": "af7ef632-4f99-4394-80af-10a3f55db724",
         "threadId": null,
         "rev": 6,
         "kind": "agent",
@@ -30,12 +30,24 @@
         "data": {
           "text": "hello",
           "final": true,
-          "author": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+          "author": "af7ef632-4f99-4394-80af-10a3f55db724",
           "thread": null
         },
-        "createdAt": 1792998619793,
-        "updatedAt": 1792998619793
+        "createdAt": 1793366410340,
+        "updatedAt": 1793366410340
       }
-    ]
+    ],
+    "conversation": {
+      "conversation": "013d6dd5-1d0e-414c-b364-8dbb56c11d8f",
+      "chat": "af7ef632-4f99-4394-80af-10a3f55db724",
+      "lane": null,
+      "budget": 10,
+      "left": 10,
+      "state": "open",
+      "endedWhy": null,
+      "current": null,
+      "waitUntil": null,
+      "opening": "50bd90c2-0952-4fb8-a48d-627e715f288f"
+    }
   }
 }
