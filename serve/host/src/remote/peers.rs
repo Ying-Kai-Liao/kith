@@ -27,6 +27,8 @@ use std::time::Duration;
 const PEER_SAS_NONCES: &str = "peer_sas_nonces";
 /// How long A waits for B's channel and its first answer.
 const FIRST_CALL: Duration = Duration::from_secs(15);
+/// Wrong codes typed on B before the request is denied.
+const WRONG_CODES: u8 = 3;
 
 /// Pairings in progress. Their nonces live in memory only: after a restart a pairing starts again.
 #[derive(Default)]
@@ -48,6 +50,8 @@ struct Incoming {
     /// Set with the code, once A revealed a nonce that matches its commit.
     device_nonce: Option<[u8; 32]>,
     code: Option<String>,
+    /// Wrong codes typed here for this request so far.
+    wrong: u8,
     expires_at: i64,
 }
 
@@ -111,6 +115,7 @@ pub(super) async fn sync(hub: &Hub, base: &str, list: Option<Vec<HostPeerRequest
                         host_nonce: crypto::random(),
                         device_nonce: None,
                         code: None,
+                        wrong: 0,
                         expires_at: s.expires_at,
                     });
                 }
@@ -182,25 +187,48 @@ pub fn requests_json(hub: &Hub) -> Vec<Value> {
         .collect()
 }
 
-/// `decidePeerRequest` (on this computer only): a yes needs the code the asking computer shows, typed here.
+/// `decidePeerRequest` (on this computer only): a yes needs the code the asking computer shows, typed here. The code is
+/// six digits, so a request takes [`WRONG_CODES`] wrong ones and is then denied: guessing ends with it.
 pub async fn decide(hub: &Hub, id: &str, approve: bool, code: Option<&str>) -> Result<()> {
     let base = cloud::base(hub)?;
-    let r = hub.cloud.pairings.incoming.locked().iter().find(|r| r.id == id).cloned();
-    let r = r.ok_or_else(|| UserError("No computer is asking to pair with that request.".into()))?;
-    let nd = if approve {
-        if hub.cloud.status().owner_change.is_some() {
-            return Err(Conflict("Confirm this computer's owner first.").into());
-        }
-        let (Some(ours), Some(nd)) = (&r.code, r.device_nonce) else {
-            return Err(Conflict("The other computer hasn't shown its code yet.").into());
+    if approve && hub.cloud.status().owner_change.is_some() {
+        return Err(Conflict("Confirm this computer's owner first.").into());
+    }
+    let (r, ended) = {
+        let mut mine = hub.cloud.pairings.incoming.locked();
+        let i = mine.iter().position(|r| r.id == id);
+        let i = i.ok_or_else(|| UserError("No computer is asking to pair with that request.".into()))?;
+        let r = &mut mine[i];
+        let typed_right = match (&r.code, r.device_nonce) {
+            _ if !approve => true,
+            (Some(ours), Some(_)) => code.is_some_and(|c| crypto::ct_eq(c.trim().as_bytes(), ours.as_bytes())),
+            _ => return Err(Conflict("The other computer hasn't shown its code yet.").into()),
         };
-        if !code.is_some_and(|c| crypto::ct_eq(c.trim().as_bytes(), ours.as_bytes())) {
-            return Err(UserError("That isn't the code this computer shows for the request.".into()).into());
+        if typed_right {
+            (r.clone(), false)
+        } else {
+            r.wrong += 1;
+            let left = WRONG_CODES.saturating_sub(r.wrong);
+            if left > 0 {
+                let tries = if left == 1 { "try" } else { "tries" };
+                let why = format!("That isn't the code the other computer shows. {left} {tries} left.");
+                return Err(UserError(why).into());
+            }
+            (mine.remove(i), true)
         }
-        Some(nd)
-    } else {
-        None
     };
+    if ended {
+        if let Err(e) = decision(hub, &base, id, false).await {
+            tracing::warn!(error = format!("{e:#}"), request_id = id, "couldn't deny a pairing request");
+        }
+        return Err(UserError(
+            "That isn't the code the other computer shows, and it was the last try: the request has ended. Start \
+             pairing again on the other computer."
+                .into(),
+        )
+        .into());
+    }
+    let nd = if approve { r.device_nonce } else { None };
     let answer = decision(hub, &base, id, approve).await;
     hub.cloud.pairings.incoming.locked().retain(|x| x.id != id);
     let answer = answer?;
@@ -594,11 +622,12 @@ mod tests {
         assert_eq!(listed["codeShown"], true);
         assert!(!listed.to_string().contains(code.as_str()), "the code never leaves this host: {listed}");
         assert!(r.hub.store.peer_in("cmp_a").is_none(), "a matching reveal alone lets nobody in");
-        for typed in [None, Some("000000"), Some("")].into_iter().filter(|t| *t != Some(code.as_str())) {
+        for (typed, left) in [(None, "2 tries left"), (Some("x"), "1 try left")] {
             let e = decide(&r.hub, "preq_1", true, typed).await.unwrap_err();
-            assert!(e.is::<UserError>(), "{e:#}");
+            assert!(e.is::<UserError>() && e.to_string().contains("the other computer shows"), "{e:#}");
+            assert!(e.to_string().contains(left), "{e:#}");
         }
-        assert_eq!(requests_json(&r.hub).len(), 1, "a wrong code keeps the request");
+        assert_eq!(requests_json(&r.hub).len(), 1, "a wrong code under the limit keeps the request");
         assert_eq!(decided(&r, "preq_1"), Vec::<String>::new());
         decide(&r.hub, "preq_1", true, Some(&format!(" {code} "))).await.unwrap();
         let row = r.hub.store.peer_in("cmp_a").expect("paired");
@@ -607,6 +636,20 @@ mod tests {
         assert_eq!(principal(&r.hub.store, &a.caller()), Principal::Peer("cmp_a".into()));
         assert_eq!(decided(&r, "preq_1"), ["approve"]);
         assert_eq!(requests_json(&r.hub), Vec::<Value>::new());
+
+        // Guessing: the third wrong code ends the request, and the right one comes too late.
+        let g = Asker::new();
+        let (code, _) = offered(&r, "preq_2", &g).await;
+        for _ in 0..WRONG_CODES - 1 {
+            decide(&r.hub, "preq_2", true, Some("x")).await.unwrap_err();
+        }
+        let e = decide(&r.hub, "preq_2", true, Some("x")).await.unwrap_err();
+        assert!(e.is::<UserError>() && e.to_string().contains("the request has ended"), "{e:#}");
+        assert_eq!(requests_json(&r.hub), Vec::<Value>::new());
+        assert_eq!(decided(&r, "preq_2"), ["deny"]);
+        decide(&r.hub, "preq_2", true, Some(&code)).await.unwrap_err();
+        assert_eq!(decided(&r, "preq_2"), ["deny"], "the right code after the limit sends nothing");
+        assert_eq!(principal(&r.hub.store, &g.caller()), Principal::Nobody);
     }
 
     #[tokio::test]
