@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { normalizeBot, type Entry } from './models.ts'
-import { chatAndTasks, continuingTask, currentTask, foldLine, sendInTask, TASK_IDLE_MS, taskFold, taskHead, taskOf, taskOpen, taskStatus, taskTitle, workingThreadIn } from './tasks.ts'
+import { chatAndTasks, continuingTask, currentTask, foldLine, sendInTask, takesOver, TASK_IDLE_MS, taskFold, taskHead, taskOf, taskOpen, taskStatus, taskTitle, workingThreadIn } from './tasks.ts'
 
 const entry = (id: string, kind: Entry['kind'], data: Entry['data'], threadId: string | null = null): Entry =>
   ({ id, seq: 0, botId: 'b', threadId, rev: 1, kind, turn: 1, data, createdAt: 0, updatedAt: 0 })
@@ -116,22 +116,32 @@ test('the box goes on with the newest task while it works or for ten idle minute
   assert.equal(taskOf(entry('n', 'user', { text: 'plain' })), null)
 })
 
-test('a send to a task an idle terminal holds goes only after the take-over; a failed one sends nothing', async () => {
+test('a send to a picked task an idle terminal holds goes only after the take-over; a failed one sends nothing', async () => {
   const held = { count: 1, lastAt: 1, authors: [], origin: 'terminal', liveWriter: 'terminal', liveBusy: false }
   const calls: string[] = []
-  const ok = await sendInTask(held, async () => { calls.push('take') }, () => calls.push('send'))
-  assert.equal(ok, true)
+  assert.equal(takesOver(held, true), true)
+  const ok = await sendInTask(held, true, async () => { calls.push('take') }, () => calls.push('send'))
+  assert.equal(ok, null)
   assert.deepEqual(calls, ['take', 'send'])
 
   calls.length = 0
-  const failed = await sendInTask(held, async () => { calls.push('take'); throw new Error('terminalBusy') }, () => calls.push('send'))
-  assert.equal(failed, false, 'the caller keeps the text in the box')
+  const failed = await sendInTask(held, true, async () => { calls.push('take'); throw new Error('terminalBusy') }, () => calls.push('send'))
+  assert.equal(failed, 'terminalBusy', 'the caller keeps the text in the box and shows why')
   assert.deepEqual(calls, ['take'], 'never sent, so never a new task')
 
   calls.length = 0
-  await sendInTask({ ...held, liveBusy: true }, async () => { calls.push('take') }, () => calls.push('send'))
+  await sendInTask({ ...held, liveBusy: true }, true, async () => { calls.push('take') }, () => calls.push('send'))
   assert.deepEqual(calls, ['send'], 'a busy terminal is not taken from; the host queues the message')
   calls.length = 0
-  await sendInTask(undefined, async () => { calls.push('take') }, () => calls.push('send'))
+  await sendInTask(undefined, true, async () => { calls.push('take') }, () => calls.push('send'))
   assert.deepEqual(calls, ['send'])
+})
+
+test('a task the box went on with by itself is never taken from a terminal', async () => {
+  const held = { count: 1, lastAt: 1, authors: [], origin: 'app', liveWriter: 'terminal', liveBusy: false }
+  const calls: string[] = []
+  assert.equal(takesOver(held, false), false)
+  const sent = await sendInTask(held, false, async () => { calls.push('take') }, () => calls.push('send'))
+  assert.equal(sent, null)
+  assert.deepEqual(calls, ['send'], 'sent as the host routes it: queued behind the terminal')
 })

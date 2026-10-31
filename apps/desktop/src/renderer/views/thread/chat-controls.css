@@ -68,23 +68,25 @@
   z-index: -1;
   left: 0;
   right: 0;
-  top: -24px;
+  /* Covers everything stacked over the box (live line, pills), then fades out over its top 36px. */
+  top: -36px;
   bottom: 0;
   pointer-events: none;
   backdrop-filter: blur(20px);
-  -webkit-mask-image: linear-gradient(to top, #000 40%, transparent);
-  mask-image: linear-gradient(to top, #000 40%, transparent);
-  background: linear-gradient(to top, color-mix(in srgb, var(--background) 90%, transparent) 0%, color-mix(in srgb, var(--background) 45%, transparent) 40%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to top, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to top, #000 calc(100% - 36px), transparent);
+  background: linear-gradient(to top, color-mix(in srgb, var(--background) 92%, transparent) 0%, color-mix(in srgb, var(--background) 80%, transparent) calc(100% - 36px), transparent 100%);
 }
 @media (prefers-reduced-transparency: reduce) {
   .composer-fade {
     backdrop-filter: none;
-    background: linear-gradient(to top, var(--background) 40%, transparent);
+    background: linear-gradient(to top, var(--background) calc(100% - 36px), transparent);
   }
 }
 .jump-to-latest {
   position: absolute;
-  bottom: calc(var(--composer-height, 70px) + 10px);
+  /* Above everything stacked over the box, on the fade's top edge. */
+  bottom: calc(var(--composer-height, 70px) + 6px);
   left: 50%;
   z-index: 5;
   transform: translateX(-50%);

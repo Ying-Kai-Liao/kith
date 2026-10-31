@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isGroup, isWorkingIn, type Bot } from '@shared/models'
 import { defaultFolderOf } from '@shared/place-folders'
-import { continuingTask, currentTask, isTask, sendInTask, taskTitle } from '@shared/tasks'
+import { currentTask, sendInTask, takesOver, taskTitle } from '@shared/tasks'
+import { threadWriterMessage } from '@shared/thread-writer'
 import { BotAvatar } from '../../components/Avatar'
 import { Icon } from '../../components/Icon'
 import { usePresence } from '../../components/Overlay'
@@ -13,7 +14,7 @@ import { MAX_FILE_SIZE, type OutgoingFile } from '../../store/bot-store'
 import { StartingFolderChip, type StartingPick } from '../bots/PlaceFolderPicker'
 import { pluginsFor } from '../marketplace/plugins'
 import { quotesOf, withQuote } from './reply-quote'
-import { targetsOf } from './task-target'
+import { targetsOf, useDestination } from './task-target'
 import './task-card.css'
 import { composerEnter } from './composer-keyboard'
 import { CommandMenu, useCommandMenu } from './CommandMenu'
@@ -65,15 +66,12 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
   // would route it). "New task" starts another; with no task going on, the message starts one anyway.
   const tasks = !!bot && bot.tasks
   const targets = targetsOf(store)
-  useSyncExternalStore(targets.subscribe, targets.getVersion)
-  const target = tasks ? targets.get(botId) : null
-  const chat = store.chat(botId)
-  const picked = target && target !== 'new' ? chat.find((e) => e.id === target && isTask(e)) ?? null : null
-  const going = tasks ? picked ?? (bot ? continuingTask(bot, chat, Date.now()) : null) : null
-  const newTask = target === 'new'
+  const { going, picked, newTask, target } = useDestination(store, botId)
   const goesOn = newTask ? null : going
+  // Only a task the user picked is taken over from an idle terminal; the pill says so before the send.
+  const takeOver = !!goesOn && takesOver(goesOn.data.thread, picked)
   const startsNew = tasks && newTask
-  const place = tasks ? goesOn?.id ?? currentTask(chat)?.id ?? null : null
+  const place = tasks ? goesOn?.id ?? currentTask(store.chat(botId))?.id ?? null : null
   const [taking, setTaking] = useState(false)
   // "Reply" on a message: its first line, quoted over the box and in front of what is sent.
   const quotes = quotesOf(store)
@@ -81,9 +79,9 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
   const quote = quotes.get(botId)
   // The folder the next new task starts in; the chat's own shows until one is picked.
   const [taskFolder, setTaskFolder] = useState<StartingPick | null>(null)
-  // A task's Stop is on its card's live line.
+  // A task's Stop is on its card; a turn in the chat's own lane has no card, so its Stop stays here.
   const working = !!bot && (isWorkingIn(bot, botId, place) || isWorkingIn(bot, botId, null)) && !startsNew && !liveLine
-  const stopHere = working && !tasks
+  const stopHere = working && (!tasks || isWorkingIn(bot, botId, null))
   // In a group, how many turns this message gives the room; it starts at 10 for every message.
   const inGroup = !!bot && isGroup(bot)
   const [turns, setTurns] = useState(DEFAULT_TURNS)
@@ -195,12 +193,12 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
     const into = goesOn
     const text = withQuote(draft, quote)
     const send = () => store.send(text, botId, into?.id ?? null, files, undefined, pasted.current, startsNew, newTask ? (taskFolder?.start ?? null) : null, null, inGroup ? clampTurns(turns) : null)
-    // A task an idle terminal holds is taken over first; if that fails the text stays here, never sent as a new task.
+    // A picked task an idle terminal holds is taken over first; if that fails the text stays here, never sent as a new task.
     setTaking(true)
-    void sendInTask(into?.data.thread, () => store.ready().then((c) => c.takeOverThread(botId, into!.id)), send).then((sent) => {
+    void sendInTask(into?.data.thread, picked, () => store.ready().then((c) => c.takeOverThread(botId, into!.id)), send).then((failure) => {
       setTaking(false)
-      if (sent) return clear()
-      store.setError("Couldn't take over from the terminal, so nothing was sent. Your message is still in the box.")
+      if (failure === null) return clear()
+      store.setError(`Couldn't take over from the terminal, so nothing was sent (${threadWriterMessage(failure)}). Your message is still in the box.`)
     })
   }
 
@@ -244,6 +242,7 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
             <button className={`press task-pill ${newTask ? '' : 'on'}`} role="radio" aria-checked={!newTask} onClick={() => { targets.set(botId, going.id); field.current?.focus() }}>
               <span aria-hidden>↳</span>
               Continues <b>{taskTitle(going)}</b>
+              {takeOver && !newTask ? <span className="task-pill-note">· takes over from the terminal</span> : null}
             </button>
           ) : null}
           <button className={`press task-pill ${newTask || !goesOn ? 'on' : ''}`} role="radio" aria-checked={newTask || !goesOn} onClick={() => { targets.set(botId, 'new'); field.current?.focus() }}>
@@ -367,7 +366,7 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
               title={label}
               onClick={() => {
                 if (trailing === 'interrupt') onInterrupt?.()
-                else if (trailing === 'stop') store.stop(botId, place)
+                else if (trailing === 'stop') store.stop(botId, tasks ? null : place)
                 else if (trailing === 'call') onCall?.()
                 else submit()
               }}

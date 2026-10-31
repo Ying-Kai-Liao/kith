@@ -120,18 +120,24 @@ export function continuingTask(bot: Bot, chat: Entry[], now: number): Entry | nu
 export const taskOf = (e: Entry): string | null => e.threadId ?? (isTask(e) ? e.id : null)
 
 /**
- * Sends into a task. A task a terminal holds while it is idle is taken over first, and the message goes only once the
- * take-over succeeded: a failed take-over sends nothing (the caller keeps the text in the box). A busy terminal is not
- * taken from; the host queues the message until it lets go.
+ * Whether sending into this task takes it over from a terminal first: only a task the user picked (a Reply), and only
+ * while the terminal is idle. A task the box went on with by itself, or a busy terminal, is sent to as the host routes
+ * it: queued until the terminal lets go.
  */
-export async function sendInTask(thread: ThreadSummary | undefined, takeOver: () => Promise<unknown>, send: () => void): Promise<boolean> {
-  if (isHeldByTerminal(thread) && !isBusyInTerminal(thread)) {
+export const takesOver = (thread: ThreadSummary | undefined, picked: boolean) => picked && isHeldByTerminal(thread) && !isBusyInTerminal(thread)
+
+/**
+ * Sends into a task, taking it over first when `takesOver` says so; the message goes only once the take-over
+ * succeeded. Null when sent; else the host's reason, and nothing was sent (the caller keeps the text in the box).
+ */
+export async function sendInTask(thread: ThreadSummary | undefined, picked: boolean, takeOver: () => Promise<unknown>, send: () => void): Promise<string | null> {
+  if (takesOver(thread, picked)) {
     try {
       await takeOver()
-    } catch {
-      return false
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e)
     }
   }
   send()
-  return true
+  return null
 }

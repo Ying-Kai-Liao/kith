@@ -10,7 +10,7 @@ import { useStore } from '../../store/context'
 import { relativeTime } from './chat-items'
 import { OpenCard, WorkingIndicator } from './ChatRows'
 import type { ChatItem } from './flat-chat'
-import { targetsOf } from './task-target'
+import { targetsOf, useDestination } from './task-target'
 import './task-card.css'
 
 type TaskItem = Extract<ChatItem, { kind: 'task' }>
@@ -49,28 +49,41 @@ export function TaskCard({ item, renderRow, focusId }: { item: TaskItem; renderR
     document.querySelector<HTMLTextAreaElement>('.composer textarea')?.focus()
   }
   const toggle = () => setChoice(!open)
-  const className = ['task-card', open ? 'open' : '', needsYou ? 'needs-you' : '', status === 'working' ? 'live' : ''].filter(Boolean).join(' ')
+  // The card the chat's box sends into carries the ink spine, open or folded.
+  const destination = useDestination(store, root.botId)
+  const target = !destination.newTask && destination.going?.id === root.id
+  const stop = () => store.stop(root.botId, root.id)
+  const className = ['task-card', open ? 'open' : '', needsYou ? 'needs-you' : '', status === 'working' ? 'live' : '', target ? 'target' : ''].filter(Boolean).join(' ')
   return (
     <div className={className} data-task={root.id} style={needsYou ? pairStyle(pairOf(asker?.avatarColor ?? bot?.avatarColor)) : undefined}>
-      <button className="task-head press" onClick={toggle} aria-expanded={open}>
-        {head.held ? (
-          <span className="task-chip">
-            {isBusyInTerminal(root.data.thread) ? <LiveDot pair={pair} /> : <Icon name="terminal" size={10} weight="medium" />}
-            {head.origin}
+      <div className="task-head-row">
+        <button className="task-head press" onClick={toggle} aria-expanded={open}>
+          {head.held ? (
+            <span className="task-held">
+              {isBusyInTerminal(root.data.thread) ? <LiveDot pair={pair} /> : <Icon name="terminal" size={10} weight="medium" />}
+              {head.origin}
+            </span>
+          ) : null}
+          {head.status ? (
+            <span className="task-status">
+              {status === 'working' ? <LiveDot pair={pair} /> : needsYou ? <span className="task-dot" aria-hidden /> : null}
+              {head.status}
+            </span>
+          ) : null}
+          {!head.held && head.origin ? <span className="task-origin">{head.origin}</span> : null}
+          <span className="task-time">{relativeTime.time(root.createdAt)}</span>
+          <span className="task-head-end">
+            <span className={`disclosure-chevron${open ? ' open' : ''}`}><Icon name="chevron.down" size={10} weight="semibold" /></span>
           </span>
+        </button>
+        {/* Folded while it works, the live line is hidden: Stop moves up to the head. */}
+        {!open && working && bot ? (
+          <button className="task-stop press" onClick={stop} aria-label="Stop this task">
+            <Icon name="stop.fill" size={9} />
+            Stop
+          </button>
         ) : null}
-        {head.status ? (
-          <span className="task-status">
-            {status === 'working' ? <LiveDot pair={pair} /> : needsYou ? <span className="task-dot" aria-hidden /> : null}
-            {head.status}
-          </span>
-        ) : null}
-        {!head.held && head.origin ? <span className="task-origin">{head.origin}</span> : null}
-        <span className="task-time">{relativeTime.time(root.createdAt)}</span>
-        <span className="task-head-end">
-          <span className={`disclosure-chevron${open ? ' open' : ''}`}><Icon name="chevron.down" size={10} weight="semibold" /></span>
-        </span>
-      </button>
+      </div>
       <div className="task-rows">
         <div data-item={root.id}>{renderRow(row(root))}</div>
         {open ? (
@@ -90,7 +103,7 @@ export function TaskCard({ item, renderRow, focusId }: { item: TaskItem; renderR
         {open && working && bot ? (
           <div className="task-live">
             <WorkingIndicator bot={bot} thinking={store.currentThinking(root.botId, root.id)} />
-            <button className="task-stop press" onClick={() => store.stop(root.botId, root.id)} aria-label="Stop this task">
+            <button className="task-stop press" onClick={stop} aria-label="Stop this task">
               <Icon name="stop.fill" size={9} />
               Stop
             </button>
