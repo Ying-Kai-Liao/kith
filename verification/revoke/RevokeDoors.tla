@@ -32,6 +32,10 @@
 (*   door (video's render) outside its sandbox, once, on m1 here. Its      *)
 (*   start is one step under kith-auth's lock (D2: allowed, not held =     *)
 (*   in sync); the host's sweep kills it once P may no longer run it (D1). *)
+(* BOT DOOR (N2, 2026-11-01): B's own tick may name a door its owner P     *)
+(*   was not given; the door check cuts B's grants to P's (kith-auth       *)
+(*   owner_cut, the same cut resolve_bot makes), so B never starts a door  *)
+(*   P can't (I6).                                                         *)
 (***************************************************************************)
 EXTENDS Naturals
 
@@ -57,6 +61,8 @@ CONSTANTS
     DoorNoHold,         \* the door start reads may() only, not whether the Mac is in sync (GuestDoor.tla "nohold")
     DoorSplit,          \* the door checks, then claims and starts in a later step (GuestDoor.tla "split")
     NoDoorSweep,        \* nothing kills a running door when its person is revoked
+    BotDoor,            \* TRUE = B's guest door and P's tick of its job are in the model (FALSE in base.consts)
+    BotDoorNoCut,       \* B's door check reads B's own tick only, not cut to what P holds (kith-auth owner_cut)
     \* ---- round 4 ----
     ItemsOn,            \* TRUE = P's devices, memberships and invites are in the model
     DeleteItems,        \* a revoke deletes them instead of parking them (the old people.rs / members.rs end_access)
@@ -117,13 +123,16 @@ VARIABLES
     hrev,          \* hrev[m]: the handle-only person Q is revoked on m
     hat,           \* hat[m]: the stamp of that fact
     clk,           \* a clock for the stamps
-    hops           \* handle changes made (0..2)
+    hops,          \* handle changes made (0..2)
+    bdoor,         \* bdoor[m] \in GDoor: B's guest door on m (its own tick names the door)
+    ptick          \* P holds the door's job (P's tick on P's own row), given and taken back by the owner
 
 AskState == {"none", "open", "answered", "stopped"}
 
 vars == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor,
-          items, parked, gone, ask, wakeOwed, hrev, hat, clk, hops>>
-ext == <<items, parked, gone, ask, wakeOwed, hrev, hat, clk, hops>>
+          items, parked, gone, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+ext4 == <<items, parked, gone, ask, wakeOwed, hrev, hat, clk, hops>>
+ext == <<ext4, bdoor, ptick>>
 auth == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos>>
 
 (* ---- access ---- *)
@@ -195,6 +204,8 @@ Init ==
     /\ hat = [m \in Macs |-> 0]
     /\ clk = 0
     /\ hops = 0
+    /\ bdoor = [m \in Macs |-> "idle"]
+    /\ ptick = FALSE
 
 (* ---- owner ---- *)
 \* From the phone app: the cloud record first; Macs learn by cloud delivery.
@@ -225,7 +236,7 @@ CliRevoke(m) ==
     /\ rows' = IF RevokeDeletesRows THEN [rows EXCEPT ![m] = {}] ELSE rows
     /\ Publish(m, TRUE)
     /\ ItemsRevoke(m)
-    /\ UNCHANGED <<net, undos, turn, door, gdoor, ask, wakeOwed, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<net, undos, turn, door, gdoor, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 
 CliUndo(m) ==
     /\ OwnerCli
@@ -237,7 +248,7 @@ CliUndo(m) ==
     /\ revoked' = [revoked EXCEPT ![m] = FALSE]
     /\ Publish(m, FALSE)
     /\ ItemsUndo(m)
-    /\ UNCHANGED <<rows, net, revokes, turn, door, gdoor, ask, wakeOwed, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<rows, net, revokes, turn, door, gdoor, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 
 (* ---- cloud and network ---- *)
 \* An online Mac with an outbox pushes its flag; the cloud takes it as a new version (last writer wins).
@@ -259,7 +270,7 @@ CloudDeliver(m) ==
     /\ ver' = [ver EXCEPT ![m] = cloudVer]
     /\ rows' = IF RevokeDeletesRows /\ cloudRevoked THEN [rows EXCEPT ![m] = {}] ELSE rows
     /\ ItemsStep(m, cloudRevoked)
-    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ask, wakeOwed, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 
 \* Internet lost, Kith cloud lost (or unreachable from m), or back.
 SetNet(m, n) ==
@@ -378,6 +389,37 @@ DoorSweep(m) ==
     /\ gdoor' = [gdoor EXCEPT ![m] = "killed"]
     /\ UNCHANGED <<auth, turn, door, ext>>
 
+(* ---- a bot's guest door (kith-auth door_state for a bot: owner_cut) ---- *)
+\* B's own tick names the door; P's may not. door_state for B: may() (MayB, so a revoked P's bot is refused), not held
+\* (in sync), then B's ticks cut to what P's run gets (owner_cut, the cut resolve_bot makes). P's bot is an invitee's:
+\* Kai's own bots are not cut, and are not in this model.
+BotDoorGrant(m) == MayB(m) /\ (BotDoorNoCut \/ ptick)
+BotDoorGate(m) == BotDoorGrant(m) /\ InSync(m)
+\* The owner gives P the job, or takes it back (kith-auth job video P make-videos [--rm]).
+OwnerTick ==
+    /\ BotDoor
+    /\ ptick' = ~ptick
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, bdoor>>
+BotDoorStart(m) ==
+    /\ BotDoor
+    /\ m \in BotMacs
+    /\ bdoor[m] = "idle"
+    /\ turn[m]["B"] \in Live
+    /\ BotDoorGate(m)
+    /\ bdoor' = [bdoor EXCEPT ![m] = "running"]
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick>>
+BotDoorEnd(m) ==
+    /\ bdoor[m] = "running"
+    /\ bdoor' = [bdoor EXCEPT ![m] = "done"]
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick>>
+\* The same sweep: a claim whose `kith-auth door` is no longer ok (held excepted) is killed.
+BotDoorSweep(m) ==
+    /\ ~NoDoorSweep
+    /\ bdoor[m] = "running"
+    /\ ~BotDoorGrant(m)
+    /\ bdoor' = [bdoor EXCEPT ![m] = "killed"]
+    /\ UNCHANGED <<auth, turn, door, gdoor, ext4, ptick>>
+
 (* ---- delegations and the wakes their answers make (kith-ask, kith-wake, cards/resume.rs) ---- *)
 \* A live turn of P starts a `kith ask`: its record names P's session as the caller.
 AskStart(m) ==
@@ -387,14 +429,14 @@ AskStart(m) ==
     /\ turn[m]["P"] \in Live
     /\ MayP(m)
     /\ ask' = [ask EXCEPT ![m] = "open"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, wakeOwed, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 \* The asked agent answers; nobody waits, so the answer is a wake of P's session. An ended ask keeps nothing (R8).
 AskAnswer(m) ==
     /\ Asks
     /\ ask[m] = "open" \/ (AnswerIgnoresEnd /\ ask[m] = "stopped")
     /\ ask' = [ask EXCEPT ![m] = IF ask[m] = "open" THEN "answered" ELSE ask[m]]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = TRUE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, hrev, hat, clk, hops, bdoor, ptick>>
 \* The owed wake starts P's turn: the host's Recheck reads may().
 WakeStart(m) ==
     /\ Asks
@@ -403,7 +445,7 @@ WakeStart(m) ==
     /\ MayP(m)
     /\ turn' = [turn EXCEPT ![m]["P"] = "running"]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, ask, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, ask, hrev, hat, clk, hops, bdoor, ptick>>
 \* A revoke on m (cut_off -> sweep_asks): P's open delegation ends (kith ask --end) ...
 AskSweep(m) ==
     /\ Asks
@@ -411,7 +453,7 @@ AskSweep(m) ==
     /\ revoked[m]
     /\ ask[m] = "open"
     /\ ask' = [ask EXCEPT ![m] = "stopped"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, wakeOwed, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 \* ... and the wake owed to P's session is withdrawn (kith-wake withdraw-person).
 WakeWithdraw(m) ==
     /\ Asks
@@ -419,7 +461,7 @@ WakeWithdraw(m) ==
     /\ revoked[m]
     /\ wakeOwed[m]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, hrev, hat, clk, hops, bdoor, ptick>>
 
 (* ---- a person known only by a chat handle (remote/handle_revokes.rs) ---- *)
 \* The owner revokes or undoes Q on m's terminal or app: stamped, kept. With no catch-up the change is sent only now.
@@ -436,7 +478,7 @@ HChange(m) ==
            toAll(n) == n = m \/ (HandleNoCatchup /\ net[m] = "online" /\ net[n] = "online")
        IN /\ hrev' = [n \in Macs |-> IF toAll(n) THEN v ELSE hrev[n]]
           /\ hat' = [n \in Macs |-> IF kept /\ toAll(n) THEN st ELSE hat[n]]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, bdoor, ptick>>
 \* Two paired Macs, both online, exchange their lists (peerRevokes): the latest stamp wins on both.
 HExchange(a, b) ==
     /\ HandleSync
@@ -449,7 +491,7 @@ HExchange(a, b) ==
        ELSE \* the newer stamp wins; an equal one changes nothing (the receiver knows it already)
             /\ hrev' = [n \in Macs |-> IF hat[a] > hat[b] THEN hrev[a] ELSE IF hat[b] > hat[a] THEN hrev[b] ELSE hrev[n]]
             /\ hat' = [n \in Macs |-> IF hat[a] > hat[b] THEN hat[a] ELSE hat[b]]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, clk, hops, bdoor, ptick>>
 \* The same exchange where applying a's newer change on b fails: with the stamp kept first, b then believes it has it.
 HExchangeFails(a, b) ==
     /\ HandleSync
@@ -459,7 +501,7 @@ HExchangeFails(a, b) ==
     /\ net[a] = "online" /\ net[b] = "online"
     /\ hat[a] > hat[b]
     /\ hat' = IF HandleStoreFirst THEN [hat EXCEPT ![b] = hat[a]] ELSE hat
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, hrev, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, hrev, clk, hops, bdoor, ptick>>
 \* A peer sends a stamp from the far future; only a computer that does not bound stamps takes it.
 HForge(m) ==
     /\ HandleSync
@@ -468,7 +510,7 @@ HForge(m) ==
     /\ hat[m] < 9
     /\ hrev' = [hrev EXCEPT ![m] = TRUE]
     /\ hat' = [hat EXCEPT ![m] = 9]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, clk, hops, bdoor, ptick>>
 
 (* ---- removing a revoked person ---- *)
 \* kith-auth `--rm` (or the owner dropping them) while P is revoked: what the revoke parked goes with them, on whichever
@@ -479,13 +521,14 @@ Remove(m) ==
     /\ ~gone[m]
     /\ gone' = [gone EXCEPT ![m] = TRUE]
     /\ parked' = [parked EXCEPT ![m] = IF RemoveKeeps THEN parked[m] ELSE {}]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, ask, wakeOwed, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 
 \* Host restart (round 1's Restart) is left out here: it only aborts live turns, which no property depends on.
 
 Next ==
     \/ AppRevoke
     \/ AppUndo
+    \/ OwnerTick
     \/ \E m \in Macs :
           \/ CliRevoke(m)
           \/ CliUndo(m)
@@ -500,6 +543,9 @@ Next ==
           \/ DoorStart(m)
           \/ DoorEnd(m)
           \/ DoorSweep(m)
+          \/ BotDoorStart(m)
+          \/ BotDoorEnd(m)
+          \/ BotDoorSweep(m)
           \/ AskStart(m)
           \/ AskAnswer(m)
           \/ WakeStart(m)
@@ -544,6 +590,8 @@ TypeOK ==
     /\ hat \in [Macs -> 0..9]
     /\ clk \in 0..2
     /\ hops \in 0..2
+    /\ bdoor \in [Macs -> GDoor]
+    /\ ptick \in BOOLEAN
 
 \* Lemma the fix rests on: a Mac with nothing to push that has the cloud's latest version agrees with the cloud.
 SyncAgrees == \A m \in Macs : (~outbox[m] /\ ver[m] = cloudVer) => revoked[m] = cloudRevoked
@@ -580,6 +628,8 @@ DoorD2 == [][\A m \in Macs : DoorStartOf(m) => ~revoked[m]]_vars
 DoorD2c == [][\A m \in Macs : DoorStartOf(m) => ~cloudRevoked]_vars
 \* DoorD1 (GuestDoor.tla D1): a door running for a revoked P is stopped (or the revoke is undone).
 DoorD1 == \A m \in Macs : (gdoor[m] = "running" /\ revoked[m]) ~> (gdoor[m] # "running" \/ ~revoked[m])
+\* BotDoorCut (I6 for doors): a guest door of B starts only while its owner P holds it.
+BotDoorCut == [][\A m \in Macs : (bdoor[m] # "running" /\ bdoor'[m] = "running") => ptick]_vars
 
 \* ItemsCut: a revoked P's devices, memberships and open invites grant nothing at once.
 ItemsCut == \A m \in Macs : revoked[m] => items[m] = {}
@@ -623,6 +673,10 @@ NoBridgeRefusal == revokes = 0 => \A m \in Macs : turn[m]["P"] # "held"
 NeverDoorRuns == \A m \in Macs : gdoor[m] # "running"
 \* ... and the sweep does stop one (P revoked while the door ran).
 NeverDoorKilled == \A m \in Macs : gdoor[m] # "killed"
+\* B's door does run (P given the job) ...
+NeverBotDoorRuns == \A m \in Macs : bdoor[m] # "running"
+\* ... and the sweep stops it once the owner takes P's job back.
+NeverBotDoorKilled == \A m \in Macs : bdoor[m] # "killed"
 \* Probes of round 4: a parked item does come back; an ask is answered into a wake; Q is revoked on the second Mac.
 NeverItemsBack == ~(undos = 1 /\ \E m \in Macs : parked[m] = {} /\ items[m] = Items0 /\ ~revoked[m] /\ ver[m] = 2)
 NeverAnswerWake == \A m \in Macs : ~wakeOwed[m]

@@ -104,11 +104,11 @@ How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechec
 | serve/host/src/api/mod.rs | `member_call` (guard before route) | read, not run: see not covered |
 | kernel/bin/kith-auth | `resolve`, `resolve_bot`, `may`, `bot_may`, `bot_row`, `cmd_person --rm`, `cmd_member`, `cmd_bot`, `cmd_bots_cap`, `retired`, `need_free` | 10-13, 27 |
 | | `cmd_access` (C2), the access cap in `resolve_bot`, `check_env_key`, the `--trusted` free-shell rule, `forget`, `cmd_person --revoke/--unrevoke` | 12, 23-26 |
-| | `cmd_job`, `cmd_helper`, `own_row`, `job_grants`, `helpers_in`, `with_jobs`, the doors cap in `resolve_bot`, `may(..., once)`, `bot_row(..., once)` | 11, 23, 29, 30 |
+| | `cmd_job`, `cmd_helper`, `own_row`, `job_grants`, `helpers_in`, `with_jobs`, the doors cap in `resolve_bot` (`owner_cut`), `may(..., once)`, `bot_row(..., once)` | 11, 23, 29, 30 |
 | serve/host/src/cards/edge.rs | `of`, `extras`, `apply` (the owner's edge buttons; every card they go on is the owner's: `edge_extras` requires approver owner) | `cards::edge_tests` (examples) |
 | kernel/bin/kith-permit, kernel/bin/kith | `ask_helper`; the person gate (`resolve`, the held wait) | 28 (examples) |
 | | `Edge::Door` (`run_door`): the job holding the door and No, never once or always; the job is ticked before the run hears yes, and a tick kith-auth refuses is a no | `cards::edge_tests` (examples) |
-| kernel/bin/kith-auth | `door_state`, `cmd_door`, `jobs --door` (read-only: a door starts only for a person, not held, whose tick names the door's digest) | `kernel/tests/kith-guest-door-check` (examples) |
+| kernel/bin/kith-auth | `door_state`, `cmd_door`, `jobs --door` (read-only: a door starts only for a person, not held, whose tick names the door's digest; a bot's tick cut to its owner's by `owner_cut`, else `owner-lacks`) | `kernel/tests/kith-guest-door-check` (examples) |
 | kernel/lib/kith_door.py, kernel/bin/kith-permit `run_door` | the door's start (the folder in the person's slice) and its box (writes, reads, network) | `kernel/tests/kith-guest-door-check` (examples; the box part on macOS only); the revoke side in the revoke-access skill |
 
 ## Run
