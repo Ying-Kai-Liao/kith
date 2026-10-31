@@ -5,11 +5,14 @@ import Foundation
 /// one namespace per account context so a signed-out account's data never shows in another.
 public enum SharedStore {
     public static let appGroup = AppEnvironment.current.appGroup
-    /// The APNs push relay (serve/relay in this repo): the build's `KITH_PUSH_RELAY_HOST`, else the old one.
+    /// The APNs push relay (serve/relay in this repo): the build's `KITH_PUSH_RELAY_HOST`, else `defaultRelayURL`.
     public static let relayURL = relayURL(host: Bundle.main.object(forInfoDictionaryKey: "KithPushRelayHost") as? String)
 
+    /// Used when the build names no relay host.
+    static let defaultRelayURL = "https://kith-relay.lykevin890919.workers.dev"
+
     static func relayURL(host: String?) -> String {
-        guard let host = host?.trimmingCharacters(in: .whitespaces), !host.isEmpty, !host.hasPrefix("$(") else { return LegacyCompat.relayURL }
+        guard let host = host?.trimmingCharacters(in: .whitespaces), !host.isEmpty, !host.hasPrefix("$(") else { return defaultRelayURL }
         return "https://\(host)"
     }
 
@@ -108,7 +111,7 @@ public enum SharedStore {
 
         /// The bot a deep link points at, or nil when it belongs to another context or is malformed.
         public func reference(from link: URL) -> BotReference? {
-            let url = LegacyCompat.canonical(link).url
+            let url = link
             guard let scheme = url.scheme, AppEnvironment.current.accepts(scheme: scheme), url.host() == "bot",
                   let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
                   items.first(where: { $0.name == "scope" })?.value == id,
@@ -129,7 +132,7 @@ public enum SharedStore {
             let caches = URL.cachesDirectory
             let marker = "-\(id)-"
             for file in (try? FileManager.default.contentsOfDirectory(atPath: caches.path())) ?? []
-            where (file.hasPrefix("kith-mirror-") || file.hasPrefix(LegacyCompat.oldMirrorPrefix)) && file.contains(marker) {
+            where file.hasPrefix("kith-mirror-") && file.contains(marker) {
                 try? FileManager.default.removeItem(at: caches.appending(path: file))
             }
         }

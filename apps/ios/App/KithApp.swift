@@ -349,7 +349,7 @@ final class AppStore {
     }
 
     func open(_ link: URL) {
-        let url = LegacyCompat.canonical(link).url
+        let url = link
         if url.scheme == Bundle.main.bundleIdentifier {
             Task { await account.handle(url) }
             return

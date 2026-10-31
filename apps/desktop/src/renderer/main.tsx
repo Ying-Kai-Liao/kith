@@ -13,7 +13,6 @@ import { AppContext } from './store/context'
 import { applyTextSize, prefs } from './lib/prefs'
 import { account } from './store/account'
 import { errorReport } from '@shared/error-report'
-import { migrateLegacyStorage } from '@shared/legacy-compat'
 import { parseAppearance } from '@shared/appearance'
 
 // Error tracking: this window's uncaught errors go to the host (shared/error-report.ts).
@@ -22,7 +21,6 @@ const report = (error: unknown, mechanism: string) => window.kith.app.reportErro
 window.addEventListener('error', (e) => { if (e.error != null) report(e.error, 'onerror') })
 window.addEventListener('unhandledrejection', (e) => report(e.reason, 'unhandledrejection'))
 
-migrateLegacyStorage(localStorage)
 // The browser build is one member-only window (src/renderer/web); `?window=` selects nothing there.
 const page = window.kith.platform === 'web' ? 'web' : (new URLSearchParams(location.search).get('window') ?? 'chat')
 document.title = window.kith.appName

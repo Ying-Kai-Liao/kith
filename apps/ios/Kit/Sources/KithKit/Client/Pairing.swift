@@ -1,8 +1,7 @@
 import Foundation
 
 /// A scanned QR / pairing link (§4.1). Short-lived: only the resulting `Computer` is kept.
-/// `kith://pair?v=3&name=…&id=<computerId>&sk=…&bk=…&code=…&urls=a,b&cloud=…` (a host that predates the
-/// Kith rename still shows an old-scheme link, which `LegacyCompat` maps here and pairs with the old crypto labels).
+/// `kith://pair?v=3&name=…&id=<computerId>&sk=…&bk=…&code=…&urls=a,b&cloud=…`.
 public struct Pairing: Hashable, Sendable {
     public var computer: Computer
     public var code: String
@@ -38,7 +37,7 @@ public struct Pairing: Hashable, Sendable {
     }
 
     public static func parse(_ link: URL) throws(Problem) -> Pairing {
-        let (url, legacy) = LegacyCompat.canonical(link)
+        let url = link
         guard let scheme = url.scheme, AppEnvironment.current.accepts(scheme: scheme), url.host() == "pair",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { throw .notPairingLink }
         let q = Dictionary(items.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
@@ -56,8 +55,7 @@ public struct Pairing: Hashable, Sendable {
         }
         guard !urls.isEmpty || cloud != nil else { throw .invalid }
         let name = q["name"].flatMap { $0.isEmpty ? nil : $0 } ?? "My computer"
-        let labels: LabelFamily = legacy ? .legacy : .kith
-        return Pairing(computer: Computer(id: id, name: name, signKey: sk, boxKey: bk, urls: urls, cloud: cloud, labels: labels), code: code)
+        return Pairing(computer: Computer(id: id, name: name, signKey: sk, boxKey: bk, urls: urls, cloud: cloud, labels: .kith), code: code)
     }
 
     init(computer: Computer, code: String) {
