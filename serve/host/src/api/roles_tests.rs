@@ -557,8 +557,9 @@ async fn changing_and_revoking_a_persons_access() {
     assert_eq!(call(&r, &Caller::Local, "revokeInvite", json!({"inviteId": id})).await.unwrap()["revoked"], false);
     assert!(r.posts().iter().any(|(p, _)| p == &format!("/v1/host/invites/{id}/revoke")));
 
-    // Revoking the person: devices and the cloud membership go and kith-auth refuses them; the person, their rows,
-    // their memory and their account handle stay (the bridge tells them, and an undo finds them).
+    // Revoking the person: their devices and membership stop granting anything (kept for the undo, the cloud cuts the
+    // membership itself) and kith-auth refuses them; the person, their rows, their memory and their account handle
+    // stay (the bridge tells them, and an undo finds them).
     let other = r.device("sam-tablet", Some("sam"));
     call(&r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
     call(&r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
@@ -567,10 +568,11 @@ async fn changing_and_revoking_a_persons_access() {
     assert_eq!(r.who("user_sam")["person"], "sam");
     assert_eq!(r.who("user_sam")["revoked"], true);
     assert_eq!(r.hub.store.memberships().unwrap(), []);
-    assert!(r.posts().iter().any(|(p, _)| p == &format!("/v1/host/memberships/{membership}/revoke")));
+    assert_eq!(r.hub.store.suspended_of("sam").unwrap().memberships, 1, "kept for the undo");
+    assert!(r.posts().iter().all(|(p, _)| p != &format!("/v1/host/memberships/{membership}/revoke")));
     assert!(call(&r, &sam, "hello", json!({})).await.is_err() && call(&r, &other, "hello", json!({})).await.is_err());
     assert!(call(&r, &Caller::Local, "revokePerson", json!({"personId": "nobody"})).await.is_err());
-    // The invite that was open is closed with them.
+    // An invite that was open cannot be accepted meanwhile.
     assert!(r.hub.store.invites().unwrap().iter().all(|i| !i.open(now_ms())));
     let _ = Arc::strong_count(&r.hub);
 }

@@ -232,6 +232,8 @@ mod tests {
             answered_ms: None,
             capped_ms: capped.then_some(2),
             cap_card_ms: told.then_some(3),
+            brief: None,
+            session: None,
         }
     }
 
@@ -350,7 +352,8 @@ mod tests {
             std::fs::write(boxdir.join(format!("{id}.reg")), body.to_string()).unwrap();
         };
         let state_of = |id: &str| -> String {
-            let v: Value = serde_json::from_str(&std::fs::read_to_string(boxdir.join(format!("{id}.reg"))).unwrap()).unwrap();
+            let v: Value =
+                serde_json::from_str(&std::fs::read_to_string(boxdir.join(format!("{id}.reg"))).unwrap()).unwrap();
             v["state"].as_str().unwrap().to_owned()
         };
         reg("ask-lane", Some("sess-lane"), None);

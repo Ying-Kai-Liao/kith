@@ -49,8 +49,8 @@ async fn peer_method(hub: &Arc<Hub>, method: &str, b: &Value) -> Result<Value> {
     match method {
         "peerAgents" => Ok(json!({ "agents": owner_agents(hub) })),
         "peerRevokes" => {
-            let sent: kith_wire::rpc::HandleRevokes =
-                serde_json::from_value(b.clone()).map_err(|_| UserError("`handles` is a list of {handle, revoked, at}".into()))?;
+            let sent: kith_wire::rpc::HandleRevokes = serde_json::from_value(b.clone())
+                .map_err(|_| UserError("`handles` is a list of {handle, revoked, at}".into()))?;
             let mine = crate::remote::handle_revokes::exchange_in(hub, sent.handles).await?;
             Ok(json!({ "handles": mine }))
         }

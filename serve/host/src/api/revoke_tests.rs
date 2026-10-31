@@ -61,7 +61,10 @@ async fn a_revoke_goes_through_the_cloud_first_keeps_every_row_and_the_undo_give
     assert!(r.hub.store.devices_of("sam").unwrap().is_empty());
     assert!(r.hub.store.memberships().unwrap().is_empty(), "a membership grants nothing while revoked");
     assert!(r.hub.store.invites().unwrap().iter().all(|i| i.person_id != "sam" || !i.open(crate::store::now_ms())));
-    assert_eq!(r.hub.store.suspended_of("sam").unwrap(), crate::store::Moved { devices: 1, memberships: 1, invites: 0 });
+    assert_eq!(
+        r.hub.store.suspended_of("sam").unwrap(),
+        crate::store::Moved { devices: 1, memberships: 1, invites: 0 }
+    );
     assert!(dispatch(&r.hub, &phone, "hello", json!({})).await.is_err(), "their phone is out");
     let listed = call(&r, "people", json!({})).await.unwrap();
     assert_eq!(listed["people"][0]["revoked"], true);
@@ -164,7 +167,8 @@ async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
     // The cloud's own undo lists the account's membership again; this Mac gives back what the revoke kept.
     let membership = r.hub.store.suspended_of("sam").unwrap();
     assert_eq!(membership.memberships, 1, "the membership waited for the undo");
-    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "grants": [], "requests": [], "revoked": [],
+    r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "requests": [], "revoked": [],
+        "grants": [{"grantId": "grt_sam-phone", "deviceKey": "sam-phone", "userId": "user_sam"}],
         "memberships": [{"membershipId": "mem_sam", "userId": "user_sam", "inviteId": invite_id}]}));
     cloud::pull(&r.hub, &base).await.unwrap();
     assert!(r.allowed("sam", "house"));

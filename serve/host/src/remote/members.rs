@@ -210,16 +210,8 @@ fn set_pending(store: &Store, ids: &[String]) {
     }
 }
 
-/// Tells the cloud a membership ended here; a failure is retried on later pulls (local access is already gone).
-pub async fn revoke_in_cloud(hub: &Hub, membership_id: &str) {
-    let mut ids = pending(&hub.store);
-    if !ids.iter().any(|i| i == membership_id) {
-        ids.push(membership_id.to_owned());
-        set_pending(&hub.store, &ids);
-    }
-    retry_revokes(hub).await;
-}
-
+/// Tells the cloud of memberships that ended here before a revoke kept them (earlier versions queued these); a failure
+/// is retried on later pulls.
 pub async fn retry_revokes(hub: &Hub) {
     let ids = pending(&hub.store);
     if ids.is_empty() {

@@ -110,10 +110,13 @@ impl Store {
     }
 
     /// What is kept for `person`, as counts.
+    #[cfg(test)]
     pub fn suspended_of(&self, person: &str) -> Result<Moved> {
         let c = self.db.locked();
         let n = |table: &str| -> rusqlite::Result<usize> {
-            c.query_row(&format!("SELECT COUNT(*) FROM {table} WHERE person_id = ?1"), [person], |r| r.get::<_, i64>(0).map(|n| usize::try_from(n).unwrap_or(0)))
+            c.query_row(&format!("SELECT COUNT(*) FROM {table} WHERE person_id = ?1"), [person], |r| {
+                r.get::<_, i64>(0).map(|n| usize::try_from(n).unwrap_or(0))
+            })
         };
         Ok(Moved {
             devices: n("suspended_devices")?,
@@ -127,7 +130,9 @@ impl Store {
         let c = self.db.locked();
         let mut st = c.prepare("SELECT handle, revoked, at FROM handle_revokes ORDER BY handle")?;
         Ok(st
-            .query_map([], |r| Ok(HandleRevoke { handle: r.get(0)?, revoked: r.get::<_, i64>(1)? != 0, at: r.get(2)? }))?
+            .query_map([], |r| {
+                Ok(HandleRevoke { handle: r.get(0)?, revoked: r.get::<_, i64>(1)? != 0, at: r.get(2)? })
+            })?
             .collect::<rusqlite::Result<_>>()?)
     }
 

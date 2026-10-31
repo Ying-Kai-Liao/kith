@@ -32,9 +32,9 @@ pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, i
 pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
 pub use room_bots::RoomPoint;
+pub use suspended::HandleRevoke;
 #[cfg(test)]
 pub use suspended::Moved;
-pub use suspended::HandleRevoke;
 
 use crate::LockExt;
 use anyhow::Result;

@@ -234,6 +234,8 @@ async fn the_peer_methods_answer_as_the_contract_and_its_fixtures_say() {
     };
     r.hub.store.put_peer_in(&peer).unwrap();
     let studio = Caller::Device { key: peer.device_key, scopes: vec![Scope::Control] };
+    let known = crate::store::HandleRevoke { handle: "telegram:7".into(), revoked: true, at: 1_761_000_000_000 };
+    r.hub.store.put_handle_revoke(&known).unwrap();
     let mut answers = BTreeMap::new();
     answers.insert("peerAgents", ("peerAgents", call(&r, &studio, "peerAgents", json!({})).await));
     answers.insert("peerRevokes", ("peerRevokes", call(&r, &studio, "peerRevokes", json!({"handles": []})).await));

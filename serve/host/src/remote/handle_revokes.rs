@@ -43,11 +43,15 @@ fn valid(handle: &str) -> bool {
 }
 
 /// The owner revoked or restored a person known only by handle, here: stamped, kept, and sent to the paired computers.
-pub async fn changed(hub: &Arc<Hub>, who: &AuthPerson, revoked: bool) {
+pub fn changed(hub: &Arc<Hub>, who: &AuthPerson, revoked: bool) {
     let at = now_ms();
     for handle in handles_of(who) {
         if let Err(e) = hub.store.put_handle_revoke(&HandleRevoke { handle, revoked, at }) {
-            tracing::warn!(error = format!("{e:#}"), person = who.id, "couldn't keep a handle revoke for the other computers");
+            tracing::warn!(
+                error = format!("{e:#}"),
+                person = who.id,
+                "couldn't keep a handle revoke for the other computers"
+            );
         }
     }
     tokio::spawn(sync_peers(hub.clone()));
@@ -75,12 +79,16 @@ pub async fn exchange_in(hub: &Arc<Hub>, sent: Vec<HandleRevoke>) -> Result<Vec<
         hub.store.put_handle_revoke(&entry)?;
         if let Some(bin) = &bin {
             for p in mine.into_iter().filter(|p| p.revoked_at.is_some() != entry.revoked) {
-                tracing::info!(person = p.id, revoked = entry.revoked, "another of the owner's computers (Mac link) changed this person");
+                tracing::info!(
+                    person = p.id,
+                    revoked = entry.revoked,
+                    "another of the owner's computers (Mac link) changed this person"
+                );
                 local_revoke(hub, bin, &p.id, entry.revoked).await?;
             }
         }
     }
-    Ok(hub.store.handle_revokes()?)
+    hub.store.handle_revokes()
 }
 
 fn newest(list: &[HandleRevoke]) -> i64 {
@@ -131,8 +139,14 @@ pub async fn sync_peers(hub: Arc<Hub>) {
         }
         let peer = p.clone();
         let h = hub.clone();
-        if let Err(e) = exchange_with(&hub, &p.computer_id, |list| async move { over_mac_link(&h, &peer, list).await }).await {
-            tracing::debug!(error = format!("{e:#}"), computer = p.computer_id, "a paired computer wasn't reached for the handle revokes");
+        if let Err(e) =
+            exchange_with(&hub, &p.computer_id, |list| async move { over_mac_link(&h, &peer, list).await }).await
+        {
+            tracing::debug!(
+                error = format!("{e:#}"),
+                computer = p.computer_id,
+                "a paired computer wasn't reached for the handle revokes"
+            );
         }
     }
 }

@@ -419,7 +419,7 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
     local_revoke(hub, &bin, id, revoke).await?;
     if who.kith.is_empty() {
         // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
-        crate::remote::handle_revokes::changed(hub, &who, revoke).await;
+        crate::remote::handle_revokes::changed(hub, &who, revoke);
     }
     Ok(json!({"revoked": revoke, "everywhere": everywhere}))
 }
@@ -444,7 +444,11 @@ pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) 
 pub(crate) fn restored(hub: &Hub, person: &str) {
     match hub.store.restore_person(person) {
         Ok(m) => tracing::info!(person, ?m, "an undone revoke gave back what it kept"),
-        Err(e) => tracing::warn!(error = format!("{e:#}"), person, "couldn't give back a revoked person's devices and invites"),
+        Err(e) => tracing::warn!(
+            error = format!("{e:#}"),
+            person,
+            "couldn't give back a revoked person's devices and invites"
+        ),
     }
     hub.auth_changed();
 }
