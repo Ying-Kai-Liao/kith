@@ -43,3 +43,64 @@ export const accessHidden = (error: unknown): boolean => {
   const status = (error as { status?: number } | null)?.status
   return status === 403 || status === 404 || /unknown method/i.test((error as { message?: string } | null)?.message ?? '')
 }
+
+/** One thing "Always allow" remembered for an agent in auto mode (`allowedRules`). */
+export interface AllowedRule {
+  id: string
+  rule: string
+  kind: 'rule' | 'prose'
+  reason: string
+  added: string | null
+}
+
+export interface AllowedList {
+  rules: AllowedRule[]
+  /** Set when the file could not be read whole; the rules that could be read are still in `rules`. */
+  error: string | null
+}
+
+/** `allowedRules`' answer as rows; anything that is not a rule with an id is dropped. */
+export function parseAllowed(raw: unknown): AllowedList {
+  const o = (raw ?? {}) as { allowed?: unknown; error?: unknown }
+  const list = Array.isArray(o.allowed) ? o.allowed : []
+  const rules = list.flatMap((r): AllowedRule[] => {
+    const e = r as Record<string, unknown>
+    if (typeof e?.id !== 'string' || typeof e.rule !== 'string' || !e.rule) return []
+    return [{
+      id: e.id,
+      rule: e.rule,
+      kind: e.kind === 'prose' ? 'prose' : 'rule',
+      reason: typeof e.reason === 'string' ? e.reason : '',
+      added: typeof e.added === 'string' && !Number.isNaN(Date.parse(e.added)) ? e.added : null,
+    }]
+  })
+  return { rules, error: typeof o.error === 'string' && o.error ? o.error : null }
+}
+
+const PROSE = /with (\S+): ([\s\S]*)\. It is allowed/
+
+/** The action a sentence rule allows, as "Bash: ls /tmp": the tool and the main field of its input. */
+function proseAction(rule: string): string | null {
+  const m = PROSE.exec(rule)
+  if (!m) return null
+  let shown = m[2]!
+  try {
+    const input = JSON.parse(shown) as Record<string, unknown>
+    const main = ['command', 'file_path', 'path', 'url', 'pattern'].map((k) => input[k]).find((v) => typeof v === 'string')
+    shown = typeof main === 'string' ? main : shown
+  } catch { /* not JSON: show it as it is */ }
+  return `${m[1]}: ${shown}`
+}
+
+/** A permission rule as it is; a sentence shown as the action it allows, cut to one short line. */
+export function ruleText(r: Pick<AllowedRule, 'rule' | 'kind'>, max = 90): string {
+  if (r.kind === 'rule') return r.rule
+  const text = proseAction(r.rule) ?? r.rule
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`
+}
+
+/** "Blocked: [Data Exfiltration] · 2 h ago": why it was blocked, and when it was remembered. */
+export function ruleDetail(r: Pick<AllowedRule, 'reason' | 'added'>, now = Date.now()): string {
+  const parts = [r.reason ? `Blocked: ${r.reason}` : '', r.added ? ago(Date.parse(r.added), now) : '']
+  return parts.filter(Boolean).join(' · ')
+}

@@ -2,7 +2,7 @@ import KithKit
 import SwiftUI
 
 /// The agent sheet's Access tab (docs/design/DESIGN.md, mocks/access.jpg): Accounts, Keys, Asks before, People.
-/// "Always allowed" is left out until the host has an API for it.
+/// "Allowed in auto mode" lists what Always allow remembered, with Remove.
 struct AccessTabView: View {
     let store: AccessStore
     let kith: KithInfoStore?
@@ -12,6 +12,7 @@ struct AccessTabView: View {
             accounts
             keys
             asksBefore
+            allowed
             people
             if let error = store.removeError {
                 Text("Not removed: \(error)").font(.footnote).foregroundStyle(Palette.danger)
@@ -71,6 +72,30 @@ struct AccessTabView: View {
                         options: HqSetting.permissionModes.contains { $0.id == current }
                             ? HqSetting.permissionModes : HqSetting.permissionModes + [(id: current, label: HqSetting.permissionLabel(current))],
                         detail: { HqSetting.permissionDetail($0) })
+                }
+            }
+        }
+    }
+
+    // MARK: allowed in auto mode
+
+    @ViewBuilder private var allowed: some View {
+        switch store.allowed {
+        case .hidden: EmptyView()
+        case .loading: CardSection("Allowed in auto mode") { SheetNote(text: "Loading…") }
+        case .failed(let message): CardSection("Allowed in auto mode") { SheetNote(text: "Couldn't read the allowed list: \(message)", danger: true) }
+        case .loaded(let list):
+            CardSection("Allowed in auto mode", footer: list.allowed.isEmpty ? nil : "A removed rule is gone at this agent's next run.") {
+                if list.allowed.isEmpty && list.error == nil {
+                    SheetNote(text: "Nothing yet. “Always allow” on a blocked action lands here.")
+                }
+                ForEach(list.allowed) { rule in
+                    SheetRow(icon: "checkmark.shield", title: rule.text(), detail: rule.detail { kithAgo($0, now: $1) }) {
+                        removeButton(busy: store.removing.contains("allowed/" + rule.id)) { await store.remove(rule) }
+                    }
+                }
+                if let error = list.error {
+                    SheetNote(text: "Some rules could not be read: \(error)", danger: true)
                 }
             }
         }

@@ -379,6 +379,14 @@ export class BotStore extends BotSync {
     return this.withLink((c) => c.revokeKey(agent, service, profile))
   }
 
+  allowedRules(agent: string) {
+    return this.withLink((c) => c.allowedRules(agent))
+  }
+
+  removeAllowedRule(agent: string, id: string) {
+    return this.withLink((c) => c.removeAllowedRule(agent, id))
+  }
+
   /**
    * The owner's Stop on a card's held row: ends the old run holding the card's session. One at a time per session (a second
    * click, or the same session's other card, does nothing while it runs). The rows close when the host clears `held` on

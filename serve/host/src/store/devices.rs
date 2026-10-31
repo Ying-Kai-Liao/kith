@@ -56,6 +56,8 @@ pub struct PushTicket {
     pub push_key: Option<String>,
     pub ctx: Option<String>,
     pub device_key: String,
+    /// The device's `PushKit` ticket, when its app registered one: a call rings it as a `VoIP` push.
+    pub voip_ticket: Option<String>,
 }
 
 const DEVICE_COLS: &str =
@@ -184,18 +186,34 @@ impl Store {
     ) -> Result<()> {
         let mut c = self.db.locked();
         let tx = c.transaction()?;
-        // Relay tickets use a random nonce; registering again must replace this device's old ticket.
+        // Relay tickets use a random nonce; registering again must replace this device's old ticket, but not the
+        // PushKit one next to it: that arrives in a call of its own.
+        let voip: Option<String> = tx
+            .query_row(
+                "SELECT voip_ticket FROM push_tickets WHERE device_key = ?1 AND voip_ticket IS NOT NULL LIMIT 1",
+                [device_key],
+                |r| r.get(0),
+            )
+            .optional()?;
         tx.execute("DELETE FROM push_tickets WHERE device_key = ?1", [device_key])?;
         tx.execute(
-            "INSERT INTO push_tickets(ticket, device_key, push_key, ctx, name, created_at) VALUES(?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(ticket) DO UPDATE SET device_key = ?2, push_key = ?3, ctx = ?4, name = ?5",
-            params![ticket, device_key, push_key, ctx, name, now_ms()],
+            "INSERT INTO push_tickets(ticket, device_key, push_key, ctx, name, created_at, voip_ticket)
+             VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(ticket) DO UPDATE SET device_key = ?2, push_key = ?3, ctx = ?4, name = ?5, voip_ticket = ?7",
+            params![ticket, device_key, push_key, ctx, name, now_ms(), voip],
         )?;
         tx.commit()?;
         Ok(())
     }
 
-    /// Stops alerts to a device (its notification switch is off); Live Activity tickets stay.
+    /// Keeps the `PushKit` ticket for a device that has an alert ticket row (registered first).
+    pub fn set_voip_ticket(&self, device_key: &str, voip_ticket: &str) -> Result<()> {
+        let c = self.db.locked();
+        c.execute("UPDATE push_tickets SET voip_ticket = ?2 WHERE device_key = ?1", [device_key, voip_ticket])?;
+        Ok(())
+    }
+
+    /// Stops alerts and call pushes to a device (its notification switch is off); Live Activity tickets stay.
     pub fn remove_push_tickets(&self, device_key: &str) -> Result<()> {
         let c = self.db.locked();
         c.execute("DELETE FROM push_tickets WHERE device_key = ?1", [device_key])?;
@@ -212,13 +230,15 @@ impl Store {
             [ticket],
         )?;
         c.execute("DELETE FROM activity_tickets WHERE ticket = ?1", [ticket])?;
+        // A dead PushKit ticket is forgotten on its own: the alert ticket beside it still works.
+        c.execute("UPDATE push_tickets SET voip_ticket = NULL WHERE voip_ticket = ?1", [ticket])?;
         Ok(())
     }
 
     pub fn push_tickets(&self) -> Vec<PushTicket> {
         let c = self.db.locked();
-        let rows = c.prepare("SELECT ticket, push_key, ctx, device_key FROM push_tickets WHERE rowid IN (SELECT MAX(rowid) FROM push_tickets GROUP BY device_key) ORDER BY rowid").and_then(|mut st| {
-            st.query_map([], |r| Ok(PushTicket { ticket: r.get(0)?, push_key: r.get(1)?, ctx: r.get(2)?, device_key: r.get(3)? }))?
+        let rows = c.prepare("SELECT ticket, push_key, ctx, device_key, voip_ticket FROM push_tickets WHERE rowid IN (SELECT MAX(rowid) FROM push_tickets GROUP BY device_key) ORDER BY rowid").and_then(|mut st| {
+            st.query_map([], |r| Ok(PushTicket { ticket: r.get(0)?, push_key: r.get(1)?, ctx: r.get(2)?, device_key: r.get(3)?, voip_ticket: r.get(4)? }))?
                 .collect::<rusqlite::Result<Vec<_>>>()
         });
         logged("push tickets", rows).unwrap_or_default()
@@ -340,6 +360,24 @@ mod tests {
         assert_eq!(s.activity_tickets("bot"), ["new-a"]);
         s.remove_push_ticket("new").unwrap();
         assert_eq!(s.push_tickets().iter().map(|ticket| ticket.ticket.as_str()).collect::<Vec<_>>(), ["other"]);
+    }
+
+    #[test]
+    fn a_voip_ticket_survives_the_alert_ticket_being_registered_again_and_dies_alone() {
+        let s = temp_store();
+        s.add_push_ticket("a1", "dk", None, None, "Phone").unwrap();
+        assert_eq!(s.push_tickets()[0].voip_ticket, None);
+        s.set_voip_ticket("dk", "v1").unwrap();
+        s.add_push_ticket("a2", "dk", None, None, "Phone").unwrap();
+        let t = &s.push_tickets()[0];
+        assert_eq!((t.ticket.as_str(), t.voip_ticket.as_deref()), ("a2", Some("v1")));
+        // A dead PushKit ticket is forgotten; the alert ticket stays.
+        s.remove_push_ticket("v1").unwrap();
+        let t = &s.push_tickets()[0];
+        assert_eq!((t.ticket.as_str(), t.voip_ticket.as_deref()), ("a2", None));
+        s.set_voip_ticket("dk", "v2").unwrap();
+        s.remove_push_tickets("dk").unwrap();
+        assert!(s.push_tickets().is_empty());
     }
 
     #[test]

@@ -26,7 +26,7 @@ pub use cards::{Answered, Card, CardState, NewCard, Opened};
 #[cfg(test)]
 pub use conversations::RoomQueue;
 pub use conversations::{Charge, ConvState, Conversation, EndedWhy};
-pub use devices::{Device, DeviceSource, Scope};
+pub use devices::{Device, DeviceSource, PushTicket, Scope};
 #[cfg(test)]
 pub use model::Permission;
 pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, is_person_message, lane_key};

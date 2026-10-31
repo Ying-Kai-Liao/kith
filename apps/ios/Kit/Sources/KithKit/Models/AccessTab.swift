@@ -41,6 +41,12 @@ public enum AccessTab {
         return order.compactMap { byId[$0] }
     }
 
+    /// The host's "Not found" for a rule that is already removed.
+    public static func isNotFound(_ error: Error) -> Bool {
+        guard case let HostError.http(_, message) = error else { return false }
+        return message.localizedCaseInsensitiveContains("not found")
+    }
+
     /// A 403 (not the owner) or 404 (an older host): the section is left out rather than shown as an error.
     public static func isUnavailable(_ error: Error) -> Bool {
         guard case let HostError.http(status, message) = error else { return false }

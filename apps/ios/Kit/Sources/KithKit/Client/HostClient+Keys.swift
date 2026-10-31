@@ -25,4 +25,16 @@ public extension HostClient {
         struct Body: Encodable { var agent: String; var service: String; var profile: String }
         let _: Empty = try await call("revokeKey", Body(agent: agent, service: service, profile: profile), timeout: 30)
     }
+
+    /// What "Always allow" remembered for an agent in auto mode (serve/host/src/cards/autoallow.rs). Owner only.
+    func allowedRules(agent: String) async throws -> AllowedList {
+        struct Body: Encodable { var agent: String }
+        return try await call("allowedRules", Body(agent: agent))
+    }
+
+    /// Forgets one rule; the agent's next run no longer has it. A rule already gone answers "Not found".
+    func removeAllowedRule(agent: String, id: String) async throws {
+        struct Body: Encodable { var agent: String; var id: String }
+        let _: Empty = try await call("removeAllowedRule", Body(agent: agent, id: id), timeout: 30)
+    }
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { accountText, accessHidden, agentKeys, keyDetail, keyName } from '@shared/kith-access'
+import { accountText, accessHidden, agentKeys, keyDetail, keyName, ruleDetail, ruleText, type AllowedList, type AllowedRule } from '@shared/kith-access'
 import type { KeyRow } from '@shared/secret-card'
 import { Button, Spinner } from '../../../components/Controls'
 import { useStore } from '../../../store/context'
@@ -35,6 +35,60 @@ function useAgentKeys(agent: string) {
   }, [store, agent])
   useEffect(() => void load(), [load])
   return { keys, hidden, error, load }
+}
+
+/** "Allowed in auto mode": what Always allow remembered for the agent. Hidden for a member or an older host. */
+function AllowedRules({ agent }: { agent: string }) {
+  const store = useStore()
+  const [list, setList] = useState<AllowedList | null>(null)
+  const [hidden, setHidden] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
+  const load = useCallback(async () => {
+    try {
+      setList(await store.allowedRules(agent))
+      setError(null)
+    } catch (e) {
+      if (accessHidden(e)) setHidden(true)
+      else setError(message(e))
+    }
+  }, [store, agent])
+  useEffect(() => void load(), [load])
+  const remove = async (r: AllowedRule) => {
+    if (removing) return
+    setRemoving(r.id)
+    setRemoveError(null)
+    try {
+      await store.removeAllowedRule(agent, r.id)
+    } catch (e) {
+      // A second tap, or a rule already gone: the list below is what is true now.
+      if (!/not found/i.test(message(e))) setRemoveError(message(e))
+    }
+    await load()
+    setRemoving(null)
+  }
+  if (hidden) return null
+  const rules = list?.rules ?? []
+  return (
+    <Section title="Allowed in auto mode">
+      {list === null && !error ? <p className="kith-muted kith-loading" role="status"><Spinner size={12} /> Loading…</p>
+        : error ? <p className="kith-muted kith-failed" role="alert">Couldn't read the allowed list: {error}</p>
+        : !rules.length ? <p className="kith-muted">Nothing yet. "Always allow" on a blocked action lands here.</p>
+        : rules.map((r) => (
+          <div key={r.id} className="kith-model kith-access-row">
+            <div className="kith-access-text">
+              <span className="kith-ellipsis" title={r.rule}>{ruleText(r)}</span>
+              <span className="kith-muted kith-ellipsis">{ruleDetail(r)}</span>
+            </div>
+            <Button kind="secondary" disabled={removing !== null} onClick={() => void remove(r)}>{removing === r.id ? 'Removing…' : 'Remove'}</Button>
+          </div>
+        ))}
+      {list?.error ? <span className="kith-failed" role="alert">Some rules could not be read: {list.error}</span> : null}
+      {removeError ? <span className="kith-failed" role="alert">Not removed: {removeError}</span> : null}
+      {rules.length ? <span className="kith-muted">A removed rule is gone at this agent's next run.</span> : null}
+    </Section>
+  )
 }
 
 /**
@@ -92,6 +146,7 @@ export function AccessTab({ agent, kith }: { agent: string; kith: KithInfoStore 
           <PermissionRow kith={kith} />
         </Section>
       ) : null}
+      <AllowedRules agent={agent} />
       <AccessGrants agent={agent} title="People" />
     </>
   )

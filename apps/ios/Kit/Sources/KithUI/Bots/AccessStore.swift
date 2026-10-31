@@ -18,6 +18,7 @@ final class AccessStore {
     private let client: () async throws -> HostClient
     private(set) var keys: Section<[KeyRecord]> = .loading
     private(set) var ledger: Section<[AccessGrant]> = .loading
+    private(set) var allowed: Section<AllowedList> = .loading
     private(set) var people: AgentPeople?
     /// Remove calls on their way: "key/<profile>" or "grant/<key>"; their rows are disabled.
     private(set) var removing: Set<String> = []
@@ -41,11 +42,41 @@ final class AccessStore {
 
     func load() async {
         #if DEBUG
-        if DemoAccess.active(agent) { keys = .loaded(DemoAccess.keys); ledger = .loaded(DemoAccess.grants); people = DemoAccess.people; return }
+        if DemoAccess.active(agent) {
+            keys = .loaded(DemoAccess.keys); ledger = .loaded(DemoAccess.grants); people = DemoAccess.people
+            allowed = .loaded(DemoAccess.allowed)
+            return
+        }
         #endif
         async let k: Void = loadKeys()
         async let l: Void = loadLedger()
-        _ = await (k, l)
+        async let a: Void = loadAllowed()
+        _ = await (k, l, a)
+    }
+
+    private func loadAllowed() async {
+        do {
+            allowed = .loaded(try await client().allowedRules(agent: agent))
+        } catch where AccessTab.isUnavailable(error) {
+            allowed = .hidden
+        } catch {
+            if case .loaded = allowed {} else { allowed = .failed(error.localizedDescription) }
+        }
+    }
+
+    func remove(_ rule: AllowedRule) async {
+        let token = "allowed/" + rule.id
+        guard removing.insert(token).inserted else { return }
+        removeError = nil
+        defer { removing.remove(token) }
+        do {
+            try await client().removeAllowedRule(agent: agent, id: rule.id)
+        } catch where AccessTab.isNotFound(error) {
+            // A second tap, or already gone: the refreshed list is what is true now.
+        } catch {
+            removeError = error.localizedDescription
+        }
+        await loadAllowed()
     }
 
     private func loadKeys() async {
@@ -112,6 +143,10 @@ enum DemoAccess {
         AccessGrant(key: "g2", kind: "domain", agent: "coder", person: "sam", name: "Sam", target: "pypi.org"),
         AccessGrant(key: "g3", kind: "write", agent: "coder", person: "jo", name: "Jo", target: "~/notes"),
     ]
+    static let allowed = AllowedList(allowed: [
+        AllowedRule(id: "a1b2c3d4", rule: "Bash(ls /tmp)", reason: "[Data Exfiltration]",
+                    added: ISO8601DateFormatter().string(from: .now.addingTimeInterval(-2 * 3600))),
+    ])
     static let people = try? JSONDecoder().decode(AgentPeople.self, from: Data(
         #"{"agent":"coder","month":"2026-10","people":{"sam":4.2,"jo":0.8},"budgets":{"sam":20,"jo":null}}"#.utf8))
 }

@@ -37,6 +37,38 @@ import Testing
     #expect(AccessTab.people([]).isEmpty)
 }
 
+@Test func anAllowedRuleReadsAsTheRuleItsReasonAndWhenItWasAdded() throws {
+    let json = Data(#"""
+    {"allowed":[{"id":"a1b2","rule":"Bash(ls /tmp)","kind":"rule","reason":"[Data Exfiltration]","added":"2026-10-29T10:00:00Z"},
+                {"id":"p","rule":"\#(String(repeating: "p", count: 200))","kind":"prose","reason":"","added":""}],
+     "error":"allowed.json is not usable"}
+    """#.utf8)
+    let list = try JSONDecoder().decode(AllowedList.self, from: json)
+    #expect(list.error == "allowed.json is not usable")
+    #expect(list.allowed.map(\.id) == ["a1b2", "p"])
+    #expect(list.allowed[0].text() == "Bash(ls /tmp)")
+    #expect(list.allowed[1].text().count == 90 && list.allowed[1].text().hasSuffix("…"))
+    #expect(list.allowed[0].detail { _, _ in "2 h ago" } == "Blocked: [Data Exfiltration] · 2 h ago")
+    #expect(list.allowed[1].detail { _, _ in "x" } == nil)
+    #expect(try JSONDecoder().decode(AllowedList.self, from: Data(#"{"allowed":[]}"#.utf8)) == AllowedList())
+}
+
+@Test func aSentenceRuleShowsTheActionNotTheBoilerplate() {
+    func prose(_ input: String) -> AllowedRule {
+        AllowedRule(id: "p", rule: "The owner approved the agent \"x\" doing exactly this one thing with Bash: \(input). It is allowed, with that input only; it covers nothing else.", kind: "prose")
+    }
+    #expect(prose(#"{"command": "ls -la /tmp"}"#).text() == "Bash: ls -la /tmp")
+    #expect(prose(#"{"a": 1}"#).text() == #"Bash: {"a": 1}"#)
+    let long = prose("{\"command\": \"\(String(repeating: "z", count: 200))\"}").text()
+    #expect(long.hasPrefix("Bash: zzz") && long.count == 90)
+}
+
+@Test func aRuleAlreadyRemovedIsNotAnError() {
+    #expect(AccessTab.isNotFound(HostError.http(400, "Not found: it may already be removed")))
+    #expect(!AccessTab.isNotFound(HostError.http(500, "boom")))
+    #expect(!AccessTab.isNotFound(HostError.unreachable))
+}
+
 @Test func aRefusedOrMissingMethodHidesTheSection() {
     #expect(AccessTab.isUnavailable(HostError.http(403, "Not allowed")))
     #expect(AccessTab.isUnavailable(HostError.http(404, "Not found")))

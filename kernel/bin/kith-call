@@ -10,7 +10,8 @@
 #   ringing 0   accepted 0 (only with --wait)   declined 3   missed 4   busy 5   rate-limited 6 (+ when to retry)
 #   not-allowed 7 (this agent has no Kith chat with the person it runs for)   host unreachable 1   usage 2
 # One call per chat per 10 minutes and 6 a day, whichever agent in a `kith ask` chain rings: the call screen says
-# "coder (for architect)" (KITH_AGENT is sent as `from`, a label the host never counts or trusts). There is no push: an app that isn't open misses the call, and a
+# "coder (for architect)" (KITH_AGENT is sent as `from`, a label the host never counts or trusts). An app that isn't open is pushed to (a VoIP push, or a time-sensitive alert when the
+# phone has no PushKit ticket), and a
 # declined or missed call leaves "<agent> tried to call: <reason>" in the chat. The host puts KITH_CALL_CHAT and
 # KITH_CALL_KEY in the environment of runs it starts (app chats, its routines, Telegram/Discord/Slack), and kith-sched
 # and an owner's terminal run ask it for them (lib/kith_runenv.py): the key proves which person the run serves, so a
