@@ -299,18 +299,39 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+.rc-card.info {
+  --rc-ink-2: #3a3d45;
+  --rc-faint: #b4b8c2;
+}
+@media (prefers-color-scheme: dark) {
+  .rc-card.info {
+    --rc-ink-2: #d5d9e0;
+    --rc-faint: #5b6170;
+  }
+}
+/* 1 pt under the title and 7 pt above the group, on top of the card's 8 pt gap. */
 .rc-sub {
-  margin-top: -4px;
-  color: var(--kith-muted);
+  margin: -7px 0 -1px;
+  color: var(--rc-ink-2);
   font-size: 12.5px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
+/* The label column fits the card's longest label (52 pt up to 40% of the card); rows share it through subgrid. */
+.rc-info {
+  display: grid;
+  grid-template-columns: fit-content(40%) 1fr;
+  column-gap: 12px;
+  border-radius: 12px;
+  background: var(--kith-ground);
+  overflow: hidden;
+}
 .rc-info-row {
-  display: flex;
-  gap: 12px;
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: baseline;
-  padding: 8px 12px;
+  padding: 10px;
   font-size: 13px;
   line-height: 1.35;
   text-align: left;
@@ -319,25 +340,33 @@
   border-top: 1px solid var(--kith-line);
 }
 .rc-info-label {
-  flex: none;
-  width: 34%;
-  min-width: 84px;
+  min-width: 52px;
   color: var(--kith-muted);
   font-size: 12.5px;
   overflow-wrap: anywhere;
 }
 .rc-info-value {
-  flex: 1;
   min-width: 0;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
+.rc-info-value.alone {
+  grid-column: 1 / -1;
+}
 .rc-info-link {
+  display: flex;
+  gap: 12px;
   align-items: center;
-  width: 100%;
+  justify-content: space-between;
 }
 .rc-info-link:hover {
   background: var(--kith-panel);
+}
+.rc-info-link .rc-info-value {
+  flex: 1;
+  color: var(--rc-ink-2);
+  font-size: 12.5px;
+  font-variant-numeric: normal;
 }
 .rc-as-text-link {
   display: inline-flex;
@@ -345,7 +374,7 @@
   align-items: center;
   align-self: flex-start;
   color: var(--kith-muted);
-  font: 12px / 1.3 var(--font-ui);
+  font: 500 11.5px / 1.3 var(--font-ui);
 }
 /* The Plan card (DESIGN.md "Plan"): a 4 pt bar in the agent pair, then steps that change in place. */
 .rc-mono {

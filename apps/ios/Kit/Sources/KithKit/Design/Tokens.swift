@@ -11,6 +11,10 @@ public extension Palette {
     static let muted = Color(light: 0x6B7280, dark: 0xB4BAC4)
     /// Secondary text over the sky.
     static let mutedOnSky = Color(light: 0x4B5160, dark: 0xC3C8D2)
+    /// Secondary ink: the Info card's sub line and link address (darker than muted).
+    static let ink2 = Color(light: 0x3A3D45, dark: 0xD5D9E0)
+    /// The Info card's link arrow.
+    static let faint = Color(light: 0xB4B8C2, dark: 0x5B6170)
     static let line = Color(light: 0xECEDF2, dark: 0x2C303A)
     static let panel = Color(light: 0xF6F6FA, dark: 0x1E2129)
     /// The lighter violet, for accent text and fills on dark grounds.

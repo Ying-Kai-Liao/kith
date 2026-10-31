@@ -191,25 +191,25 @@ export function ResultCard({ card, showText }: { card: RichCard; showText: () =>
   if (!view) return null
   if (view.rows.length) {
     return (
-      <section className="rc-card" aria-label={view.title}>
+      <section className="rc-card info" aria-label={view.title}>
         <div className="rc-head"><span className="rc-name wrap">{view.title}</span></div>
         {view.sub ? <div className="rc-sub">{view.sub}</div> : null}
-        <div className="rc-group">
+        <div className="rc-info">
           {view.rows.map((r, i) => (
             <div key={i} className="rc-info-row">
               {r.label ? <span className="rc-info-label">{r.label}</span> : null}
-              <span className="rc-info-value">{r.value}</span>
+              <span className={r.label ? 'rc-info-value' : 'rc-info-value alone'}>{r.value}</span>
             </div>
           ))}
           {view.links.map((l) => (
             <button key={l.url} className="rc-info-row rc-info-link" title={l.url} onClick={() => window.kith.app.openExternal(l.url)}>
               <span className="rc-info-value">{l.label}</span>
-              <Icon name="arrow.up.right.square" size={11} color="var(--kith-muted)" />
+              <Icon name="arrow.up.right" size={11} color="var(--rc-faint)" />
             </button>
           ))}
         </div>
         <button className="rc-as-text-link" onClick={showText}>
-          <Icon name="doc.text" size={10} color="var(--kith-muted)" />
+          <Icon name="text.alignleft" size={11} color="var(--kith-muted)" />
           Show as text
         </button>
       </section>

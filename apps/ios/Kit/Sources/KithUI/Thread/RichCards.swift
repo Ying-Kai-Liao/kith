@@ -434,51 +434,64 @@ struct ResultCard: View {
 
     private var info: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
+            // 1 pt under the title, 7 pt above the group (the card's 8 less the 1 the sub line pulls back).
+            VStack(alignment: .leading, spacing: 1) {
                 Text(model.title).kithText(.secondary).fontWeight(.semibold).foregroundStyle(Palette.ink)
                 if !model.sub.isEmpty {
-                    Text(model.sub).font(.footnote).foregroundStyle(Palette.muted)
+                    Text(model.sub).font(.footnote).foregroundStyle(Palette.ink2)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            WhiteGroup {
-                ForEach(Array(model.rows.enumerated()), id: \.offset) { _, row in
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        if !row.label.isEmpty {
+            .padding(.bottom, model.sub.isEmpty ? 0 : -1)
+            // The label column sizes to the longest label; dividers run edge to edge past the 10 pt side padding.
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 0) {
+                ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
+                    if index > 0 { Palette.line.frame(height: 1).padding(.horizontal, -10) }
+                    GridRow {
+                        if row.label.isEmpty {
+                            Text(row.value).kithText(.secondary).foregroundStyle(Palette.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .gridCellColumns(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
                             Text(row.label).font(.footnote).foregroundStyle(Palette.muted)
-                                .frame(width: 92, alignment: .leading)
+                            Text(row.value).kithText(.secondary).foregroundStyle(Palette.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        Text(row.value).kithText(.secondary).foregroundStyle(Palette.ink)
-                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
                     .accessibilityElement(children: .combine)
                 }
                 ForEach(model.links) { link in
-                    Button { openURL(link.url) } label: {
-                        HStack(spacing: 8) {
-                            Text(link.label).kithText(.secondary).foregroundStyle(Palette.ink).lineLimit(1)
-                            Spacer(minLength: 0)
-                            Image(systemName: "arrow.up.right").font(.system(size: 9)).foregroundStyle(Palette.muted)
+                    Palette.line.frame(height: 1).padding(.horizontal, -10)
+                    GridRow {
+                        Button { openURL(link.url) } label: {
+                            HStack(spacing: 8) {
+                                Text(link.label).font(.footnote).foregroundStyle(Palette.ink2).lineLimit(1)
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.right").font(.system(size: 11)).foregroundStyle(Palette.faint)
+                            }
+                            .padding(.vertical, 10)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .gridCellColumns(2)
+                        .accessibilityHint(link.url.host() ?? link.label)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityHint(link.url.host() ?? link.label)
                 }
             }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             Button(action: showText) {
                 HStack(spacing: 4) {
-                    Image(systemName: "doc.text").font(.system(size: 10))
-                    Text("Show as text").font(.caption)
+                    Image(systemName: "text.alignleft").font(.system(size: 11))
+                    Text("Show as text").font(.caption).fontWeight(.medium)
                 }
                 .foregroundStyle(Palette.muted)
-                .frame(minHeight: 28)
-                .contentShape(Rectangle())
+                // The tap area stays finger-sized without the 8 pt gap under the group growing.
+                .contentShape(Rectangle().inset(by: -8))
             }
             .buttonStyle(.plain)
         }
