@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # kith-terminal-flags-check — which runs get Claude Code whole and which go lean: the owner at their own terminal keeps
-# slash commands (/plugin, /mcp, their skills) and their own MCP servers; one-shots, helpers, asks, the host's launch-json
-# and anyone else's runs keep --disable-slash-commands and --strict-mcp-config.
+# slash commands (/plugin, /mcp, their skills), their plugins and their own MCP servers; the owner's other runs (one-shots,
+# helpers, asks, the host's launch-json) load skills lazily (no --disable-slash-commands) but keep --strict-mcp-config and
+# the lean plugin list; anyone else's runs keep both flags. Also the permission-mode cap for agents that read other
+# people's text (capabilities.yaml reads_others).
 #
 #   kernel/tests/kith-terminal-flags-check     a few seconds; exits 1 when a check fails
 #
@@ -22,14 +24,15 @@ printf 'global_skills: true\n' > "$KITH_HOME/agents/open/role/capabilities.yaml"
 cat > "$T/bin/claude" <<'STUB'
 #!/usr/bin/env bash
 [[ $1 == --version ]] && { echo "2.1.309 (Claude Code)"; exit 0; }
-[[ $1 == plugin ]] && { echo '[]'; exit 0; }
+[[ $1 == plugin ]] && { echo '[{"id":"mine@elsewhere"}]'; exit 0; }
 printf 'ARG=%s\n' "$@" > "$STUB_OUT"
+while [[ $# -gt 0 ]]; do [[ $1 == --settings ]] && cp "$2" "$STUB_SETTINGS" 2>/dev/null; shift; done
 STUB
 chmod +x "$T/bin/claude"
 # A guest run refuses to start without a kith program that answers `memory hook`; a stub stands in for the host build.
 printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-stub"
 chmod +x "$T/bin/kith-stub"
-export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH STUB_OUT=$T/stub.out
+export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH STUB_OUT=$T/stub.out STUB_SETTINGS=$T/stub.settings
 
 KITH=$KERNEL/bin/kith
 fail=0
@@ -69,24 +72,28 @@ whole() { local a; a=$(args); has "$1: claude ran" "$a" "--append-system-prompt"
 # Both flags: the run is lean.
 lean() { local a; a=$(args); has "$1: claude ran" "$a" "--append-system-prompt"; has "$1: --disable-slash-commands" "$a" "--disable-slash-commands"
   has "$1: --strict-mcp-config" "$a" "--strict-mcp-config"; }
+# The owner's run between agents: skills load lazily (no --disable-slash-commands), MCP stays strict.
+lazy() { local a; a=$(args); has "$1: claude ran" "$a" "--append-system-prompt"; hasnt "$1: no --disable-slash-commands" "$a" "--disable-slash-commands"
+  has "$1: --strict-mcp-config" "$a" "--strict-mcp-config"; }
+setting() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$STUB_SETTINGS" "$1"; }
 
 tty_run "$KITH" echo
 whole "owner at a terminal (kith echo)"
 
 tty_run "$KITH" echo "do it"
-lean "owner, a task given, even with a tty (one-shot)"
+lazy "owner, a task given, even with a tty (one-shot)"
 
 rm -f "$STUB_OUT"; (cd "$T/work" && "$KITH" echo "do it") >/dev/null 2>&1
-lean "owner, no tty (kith ask / schedule shape)"
+lazy "owner, no tty (kith ask / schedule shape)"
 
 tty_run KITH_VIA=ask "$KITH" echo
-lean "KITH_VIA=ask"
+lazy "KITH_VIA=ask"
 
 tty_run KITH_VIA=schedule "$KITH" echo
-lean "KITH_VIA=schedule"
+lazy "KITH_VIA=schedule"
 
 tty_run KITH_AGENT=parent "$KITH" echo
-lean "started by another run (helper)"
+lazy "started by another run (helper)"
 
 "$KERNEL/bin/kith-auth" person guest name=Guest >/dev/null 2>&1
 "$KERNEL/bin/kith-auth" member echo guest mode=default >/dev/null 2>&1
@@ -96,12 +103,46 @@ lean "a guest at a terminal"
 tty_run "$KITH" open
 whole "global_skills: true agent at a terminal"
 
+# A role may keep skills off for its owner runs (global_skills: false); a guest still needs global_skills: true to get them.
+mkdir -p "$KITH_HOME/agents/bare/role"
+printf -- '---\nname: bare\ndescription: test agent\n---\nYou are bare.\n' > "$KITH_HOME/agents/bare/role/agent.md"
+printf 'global_skills: false\n' > "$KITH_HOME/agents/bare/role/capabilities.yaml"
+rm -f "$STUB_OUT"; (cd "$T/work" && "$KITH" bare "do it") >/dev/null 2>&1
+lean "global_skills: false agent, owner one-shot"
+tty_run "$KITH" bare
+whole "global_skills: false agent at the owner terminal (the terminal keeps its slash commands)"
+rm -f "$STUB_OUT"; (cd "$T/work" && KITH_ROOM_MEMBERS=guest "$KITH" echo "do it") >/dev/null 2>&1
+lean "owner run in a room shared with other people"
+
+# Plugins: the owner terminal leaves the owner's installed plugins alone; every other run turns them off.
+tty_run "$KITH" echo
+[[ $(setting '"mine@elsewhere" in d.get("enabledPlugins", {})') == False ]] && ok "terminal: installed plugin not filtered" || bad "terminal: installed plugin not filtered" "$(cat "$STUB_SETTINGS")"
+rm -f "$STUB_OUT"; (cd "$T/work" && "$KITH" echo "do it") >/dev/null 2>&1
+[[ $(setting 'd["enabledPlugins"].get("mine@elsewhere")') == False ]] && ok "owner one-shot: installed plugin off" || bad "owner one-shot: installed plugin off" "$(cat "$STUB_SETTINGS")"
+
+# Permission mode: a reader agent's owner run is held to auto whoever asked for bypass; reads_others: false lifts it.
+mkdir -p "$KITH_HOME/agents/reader/role" "$KITH_HOME/agents/mine/role"
+printf -- '---\nname: reader\ndescription: test agent\n---\nYou read.\n' > "$KITH_HOME/agents/reader/role/agent.md"
+printf -- '---\nname: mine\ndescription: test agent\n---\nYou work on my files.\n' > "$KITH_HOME/agents/mine/role/agent.md"
+printf 'reads_others: false\n' > "$KITH_HOME/agents/mine/role/capabilities.yaml"
+printf '{"permissions": {"defaultMode": "bypassPermissions", "allow": ["Artifact", "ArtifactComments", "ArtifactData"]}}\n' > "$KITH_HOME/agents/reader/role/settings.json"
+mode() { rm -f "$STUB_OUT"; (cd "$T/work" && "$@") >/dev/null 2>&1; args | grep -x -e 'bypassPermissions' -e 'auto' -e 'acceptEdits' | tr '\n' ' '; }
+[[ $(mode "$KITH" reader --bypass "do it") == "auto " ]] && ok "reader: --bypass held to auto" || bad "reader: --bypass held to auto" "$(mode "$KITH" reader --bypass "do it")"
+[[ $(mode env KITH_PERMISSION_MODE=bypassPermissions "$KITH" reader "do it") == "auto " ]] && ok "reader: KITH_PERMISSION_MODE bypass held to auto" || bad "reader: KITH_PERMISSION_MODE bypass held to auto"
+"$KITH" reader set permission bypassPermissions >/dev/null 2>&1
+[[ $(mode "$KITH" reader "do it") == "auto " ]] && ok "reader: this Mac's bypass setting held to auto" || bad "reader: this Mac's bypass setting held to auto"
+"$KITH" reader set permission '' >/dev/null 2>&1
+[[ $(setting 'd["permissions"]["defaultMode"]') == auto ]] && ok "reader: role defaultMode bypass held to auto" || bad "reader: role defaultMode bypass held to auto" "$(cat "$STUB_SETTINGS")"
+[[ $(setting '"Artifact" in d["permissions"]["allow"] and "ArtifactData" in d["permissions"]["allow"]') == True ]] && ok "reader: Artifact allow rules kept (architect publish)" || bad "reader: Artifact allow rules kept"
+[[ $(mode "$KITH" reader --permission-mode acceptEdits "do it") == "acceptEdits " ]] && ok "reader: other modes untouched" || bad "reader: other modes untouched"
+[[ $(mode "$KITH" mine --bypass "do it") == "bypassPermissions " ]] && ok "reads_others: false agent keeps bypass" || bad "reads_others: false agent keeps bypass"
+
 # The host's launch: the JSON says to disable slash commands, and its argv keeps --strict-mcp-config.
 j=$(cd "$T/work" && "$KITH" echo --launch-json 2>/dev/null)
-has "launch-json: disable_slash_commands" "$j" '"disable_slash_commands": true'
+has "launch-json (owner): lazy skills" "$j" '"disable_slash_commands": false'
 has "launch-json: argv has --strict-mcp-config" "$j" '"--strict-mcp-config"'
 j=$(cd "$T/work" && python3 "$T/inpty.py" "$KITH" echo --launch-json 2>/dev/null < /dev/null | tr -d '\r')
-has "launch-json with a tty: disable_slash_commands" "$j" '"disable_slash_commands": true'
+has "launch-json with a tty (owner): lazy skills" "$j" '"disable_slash_commands": false'
 has "launch-json with a tty: argv has --strict-mcp-config" "$j" '"--strict-mcp-config"'
 
 [[ $fail == 0 ]] && echo "all checks passed" || echo "some checks FAILED"
