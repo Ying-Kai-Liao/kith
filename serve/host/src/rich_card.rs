@@ -4,7 +4,9 @@
 //!
 //! The snapshot is the state when the card was posted; an app shows live state from `ref` when it can read it
 //! (`kithInfo` schedules, the routine store) and the snapshot when it can't or the job is gone.
+pub mod jev;
 pub mod news;
+pub mod plan;
 
 use crate::routines::{Routine, Trigger};
 use chrono::{DateTime, Datelike as _, FixedOffset, Local, TimeZone as _, Timelike as _};

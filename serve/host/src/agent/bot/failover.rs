@@ -100,7 +100,9 @@ impl Actor {
                 self.hub.set_entry(&entry_id, &e.data);
             }
         }
+        self.end_plan_card();
         self.plan_entry = None;
+        self.plan_card = None;
         self.last_text = None;
         self.exit_tail = None;
     }

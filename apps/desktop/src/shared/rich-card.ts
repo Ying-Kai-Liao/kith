@@ -5,7 +5,7 @@
 import type { EntryData } from './models.ts'
 
 export interface RichCard {
-  /** schedule · routine · news; open string. */
+  /** schedule · routine · news · result; open string. */
   type: string
   /** The version of that type's shape; an app draws only the versions it knows. */
   v: number
@@ -16,7 +16,7 @@ export interface RichCard {
 }
 
 /** The card types this app draws, each with the newest version it knows. */
-export const KNOWN_CARDS: Readonly<Record<string, number>> = { schedule: 1, news: 1 }
+export const KNOWN_CARDS: Readonly<Record<string, number>> = { schedule: 1, news: 1, result: 1, plan: 1 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
 

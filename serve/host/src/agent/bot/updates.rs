@@ -67,6 +67,18 @@ impl Actor {
         if matches!(u["sessionUpdate"].as_str(), Some("tool_call" | "tool_call_update")) && u["status"] == "completed" {
             self.attempt_effects = true;
         }
+        // Reply cards watch for secrets only when the owner turned them on; the lookup costs a kernel call otherwise.
+        if !self.secrets_turn
+            && matches!(u["sessionUpdate"].as_str(), Some("tool_call" | "tool_call_update"))
+            && !u["rawInput"].is_null()
+            && crate::rich_card::jev::enabled(&self.hub.store)
+        {
+            let name = crate::cards::edge::acp_tool(u, u["title"].as_str().unwrap_or_default());
+            self.secrets_turn = matches!(
+                crate::cards::resource::classify(name, &u["rawInput"], &crate::cards::resource::roots()),
+                crate::cards::resource::Classified::Never
+            );
+        }
         match u["sessionUpdate"].as_str().unwrap_or_default() {
             "agent_message_chunk" => {
                 let t = acp::content_text(&u["content"]);
@@ -158,8 +170,34 @@ impl Actor {
                         }
                     }
                 }
+                self.draw_plan_card(&u["entries"], false);
             }
             _ => {}
+        }
+    }
+
+    /// The turn's Plan card: one notice, posted at the first plan update and rewritten (same entry, new rev) on each
+    /// after, so an app shows the latest state and a reconnect gets no duplicates. Channels hear nothing of it: they
+    /// carry the agent's replies, so a step change never becomes a message.
+    fn draw_plan_card(&mut self, steps: &Value, ended: bool) {
+        let Some(plan) = self.plan_entry.clone() else { return };
+        let Some(mut data) = crate::rich_card::plan::card(steps, &plan, ended) else { return };
+        if let Some(id) = &self.plan_card {
+            data["author"] = self.cfg.id.clone().into();
+            self.hub.set_entry(id, &data);
+        } else {
+            let turn = self.turn.unwrap_or(0);
+            if let Some(e) = self.add(EntryKind::Notice, turn, data) {
+                self.plan_card = Some(e.id);
+            }
+        }
+    }
+
+    /// The turn is over (done, stopped, failed or failing over): the card keeps its last state with nothing spinning.
+    pub(super) fn end_plan_card(&mut self) {
+        let Some(plan) = self.plan_entry.as_ref().and_then(|id| self.hub.store.entry(id)) else { return };
+        if self.plan_card.is_some() {
+            self.draw_plan_card(&plan.data["entries"], true);
         }
     }
 
@@ -255,6 +293,7 @@ impl Actor {
         // The same question again joins the card that is open for it (A6), and a yes already given for it is used.
         let Some((resource, shown)) = Self::card_resource(tool, &title) else {
             // A secret or a login (A5): no card, the agent is told no.
+            self.secrets_turn = true;
             let no = params["options"].as_array().and_then(|all| all.iter().find(|o| o["kind"] == "reject_once"));
             let outcome = match no {
                 Some(o) => json!({"outcome": {"outcome": "selected", "optionId": o["optionId"]}}),

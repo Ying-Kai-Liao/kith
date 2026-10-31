@@ -286,6 +286,13 @@ export class BotStore extends BotSync {
     return this.withLink((c) => c.callHost('scheduleMessages', on === undefined ? {} : { on })).then((r) => r.on)
   }
 
+  /** Whether the host lets Jev sort a finished reply into a Result card (the owner's switch, off by default); `on` sets it first. */
+  replyCards(on?: boolean) {
+    const call = async (c: HostClient) =>
+      (on === undefined ? await c.call<{ enabled: boolean }>('jevCardsStatus', {}) : await c.call<{ enabled: boolean }>('setJevCards', { enabled: on })).enabled
+    return this.ready().then(call)
+  }
+
   /** Fire-and-forget; the host holds it until this computer answers and drops it on a no. */
   track(event: AnalyticsEvent) {
     void this.withLink((c) => c.call('track', { event })).catch((error: unknown) => console.warn(`track ${event} failed`, error))

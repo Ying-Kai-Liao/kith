@@ -211,6 +211,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         seg: Seg::None,
         tools: HashMap::new(),
         plan_entry: None,
+        plan_card: None,
         last_text: None,
         last_agent: None,
         context_show: crate::channels::settings::Settings::load().context_show,
@@ -221,6 +222,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         cmd_rx: None,
         deferred: VecDeque::new(),
         stop_requested: false,
+        secrets_turn: false,
         cancel_deadline: None,
         exit_tail: None,
         conn_started_as: None,
@@ -427,6 +429,8 @@ struct Actor {
     seg: Seg,
     tools: HashMap<String, String>,
     plan_entry: Option<String>,
+    /// The Plan card (a notice) drawn from `plan_entry`, rewritten with each plan update.
+    plan_card: Option<String>,
     last_text: Option<String>,
     /// The turn's last `agent` entry (streamed text, a sent message or a file card): carries the context hint.
     last_agent: Option<String>,
@@ -444,6 +448,8 @@ struct Actor {
     /// Commands that arrived during a start phase, handled in order once it ends.
     deferred: VecDeque<Cmd>,
     stop_requested: bool,
+    /// A tool call of this turn named something on the secrets deny list; watched only while reply cards are on.
+    secrets_turn: bool,
     /// A cancelled turn still running past this stops its agent process.
     cancel_deadline: Option<Instant>,
     /// Last stderr lines of an agent process that just exited.

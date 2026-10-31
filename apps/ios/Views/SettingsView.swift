@@ -54,6 +54,7 @@ struct SettingsView: View {
                 PeopleSection(store: owner)
                 // Owner only: `online` holds the computers this account owns.
                 KeysSection(store: owner)
+                ReplyCardsSection(store: owner)
             }
 
             let memberStores = accounts.computers.filter { accounts.role(for: $0.id) == .member }
@@ -466,6 +467,40 @@ struct ScheduleMessagesToggle: View {
         error = nil
         do {
             on = try await client.scheduleMessages(on: next)
+        } catch {
+            on = !next
+            self.error = error.localizedDescription
+        }
+    }
+}
+
+/// The owner's switch for reply cards: Jev sorts a finished reply that reads like a result into a card, using the
+/// reply's own words (off until turned on). Hidden until the host answers, so an older host never shows it.
+struct ReplyCardsSection: View {
+    let store: BotStore
+    @State private var on: Bool?
+    @State private var error: String?
+
+    var body: some View {
+        if let on {
+            CardSection("Reply cards", footer: error ?? "Lets Jev turn a reply that reads like a result into a card. The card uses the reply's own words and the reply stays one tap away.") {
+                Toggle(isOn: Binding(get: { on }, set: { next in Task { await set(next) } })) {
+                    Text("Result cards for replies")
+                }
+                .toggleStyle(.kithGreen)
+            }
+        } else {
+            Color.clear.frame(height: 0)
+                .task(id: store.computer.id) { on = try? await store.client?.replyCards() }
+        }
+    }
+
+    private func set(_ next: Bool) async {
+        guard let client = store.client else { return }
+        on = next
+        error = nil
+        do {
+            on = try await client.replyCards(enabled: next)
         } catch {
             on = !next
             self.error = error.localizedDescription
