@@ -246,3 +246,57 @@ async fn a_save_that_is_not_what_the_card_offered_writes_nothing() {
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     assert!(!call.await.unwrap().allow);
 }
+
+// ---- the owner's list and Remove (allowedRules, removeAllowedRule)
+
+async fn remember_ls(r: &Rig) {
+    window(&r.hub, 20);
+    let call = ask_auto(&r.hub, owner_run("auto-list"), "Bash", ls());
+    let card = shown(&r.hub).await;
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(autoallow::ALWAYS), None).unwrap();
+    assert!(call.await.unwrap().allow);
+    until(|| !saved(r).is_empty()).await;
+}
+
+#[tokio::test]
+async fn the_owner_lists_and_removes_a_remembered_rule_and_a_second_remove_is_not_found() {
+    use crate::api::{devices::Caller, dispatch};
+    let r = Rig::new().await;
+    let empty = dispatch(&r.hub, &Caller::Local, "allowedRules", json!({"agent": "house"})).await.unwrap();
+    assert_eq!(empty["allowed"], json!([]), "no file is an empty list");
+    remember_ls(&r).await;
+    let listed = dispatch(&r.hub, &Caller::Local, "allowedRules", json!({"agent": "house"})).await.unwrap();
+    let rows = listed["allowed"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "{listed}");
+    assert_eq!((rows[0]["rule"].as_str(), rows[0]["kind"].as_str()), (Some("Bash(ls /tmp)"), Some("rule")));
+    assert_eq!(rows[0]["reason"], REASON);
+    assert!(rows[0]["added"].is_string());
+    let id = rows[0]["id"].as_str().unwrap().to_owned();
+    let gone = dispatch(&r.hub, &Caller::Local, "removeAllowedRule", json!({"agent": "house", "id": id})).await;
+    assert_eq!(gone.unwrap()["ok"], true);
+    assert_eq!(saved(&r).len(), 0);
+    let again = dispatch(&r.hub, &Caller::Local, "removeAllowedRule", json!({"agent": "house", "id": id})).await;
+    assert!(format!("{:#}", again.unwrap_err()).contains("Not found"));
+}
+
+#[tokio::test]
+async fn a_bad_agent_or_id_is_refused_and_a_member_never_reaches_the_methods() {
+    use crate::api::{devices::Caller, dispatch};
+    let r = Rig::new().await;
+    for agent in ["", "-x", "../house", "a/b", "nobody-here"] {
+        let e = dispatch(&r.hub, &Caller::Local, "allowedRules", json!({"agent": agent})).await;
+        assert!(e.is_err(), "{agent:?} listed");
+        let e = dispatch(&r.hub, &Caller::Local, "removeAllowedRule", json!({"agent": agent, "id": "abcd1234"})).await;
+        assert!(e.is_err(), "{agent:?} removed");
+    }
+    let e = dispatch(&r.hub, &Caller::Local, "removeAllowedRule", json!({"agent": "house", "id": "--x"})).await;
+    assert!(e.is_err());
+    r.auth(&["person", "sam"]);
+    let member = r.device("sam-phone", Some("sam"));
+    for (m, body) in [
+        ("allowedRules", json!({"agent": "house"})),
+        ("removeAllowedRule", json!({"agent": "house", "id": "abcd1234"})),
+    ] {
+        assert!(dispatch(&r.hub, &member, m, body).await.is_err(), "{m} reached a member");
+    }
+}

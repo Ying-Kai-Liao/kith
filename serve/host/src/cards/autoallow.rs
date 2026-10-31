@@ -104,3 +104,52 @@ pub fn remembered(hub: &Hub, card: &Card, rule: &str, kind: &str) {
     e.data["outcome"] = format!("Allowed, and remembered for {}: {what}", card.agent).into();
     hub.set_entry(id, &e.data);
 }
+
+// ---- the owner's list in the agent's sheet
+
+/// An agent folder name as `kith allow` takes it (`kith_allowed.AGENT`, checked there again): keeps a flag or a path out
+/// of its argument list.
+fn agent_ok(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && !s.starts_with(['-', '.', '_'])
+        && s.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'-' | b'_' | b'.'))
+}
+
+/// `allowedRules {agent}`: what "Always allow" remembered for the agent, `{"allowed": [{id, rule, kind, reason, added}]}`,
+/// plus `error` when the file could not be read whole (the entries that could be read are still listed).
+pub async fn list(agent: &str) -> anyhow::Result<Value> {
+    let user = |m: &str| anyhow::Error::from(crate::api::UserError(m.into()));
+    if !agent_ok(agent) {
+        return Err(user("No such agent"));
+    }
+    let unavailable = || user("Couldn't read the allowed list right now");
+    let bin = allow_bin(&crate::remote::account::bin().await.ok_or_else(unavailable)?);
+    let out = crate::channels::hq::output_with(&bin, &[agent, "--json"], None).await.ok_or_else(unavailable)?;
+    if !out.status.success() {
+        return Err(user("No such agent"));
+    }
+    let mut v: Value = serde_json::from_slice(&out.stdout).map_err(|_| unavailable())?;
+    anyhow::ensure!(v["allowed"].is_array(), unavailable());
+    let note = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+    if !note.is_empty() {
+        v["error"] = clean_reason(&note).into();
+    }
+    Ok(v)
+}
+
+/// `removeAllowedRule {agent, id}`: forgets one. The agent's next run no longer has it. A second call for the same id
+/// answers "not found".
+pub async fn remove(agent: &str, id: &str) -> anyhow::Result<Value> {
+    let user = |m: &str| anyhow::Error::from(crate::api::UserError(m.into()));
+    if !agent_ok(agent) || id.is_empty() || id.len() > 64 || !id.bytes().all(|c| c.is_ascii_alphanumeric()) {
+        return Err(user("That rule can't be removed"));
+    }
+    let unavailable = || user("Couldn't remove it right now");
+    let bin = allow_bin(&crate::remote::account::bin().await.ok_or_else(unavailable)?);
+    let out = crate::channels::hq::output_with(&bin, &[agent, "--rm", id], None).await.ok_or_else(unavailable)?;
+    if !out.status.success() {
+        return Err(user("Not found: it may already be removed"));
+    }
+    Ok(json!({"ok": true}))
+}

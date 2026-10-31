@@ -124,6 +124,10 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, mut b: Value) -> Result<C
             crate::cards::secret::revoke_key(str_arg(&b, "agent")?, str_arg(&b, "service")?, str_arg(&b, "profile")?)
                 .await?
         }
+        // The owner's auto-mode "Always allow" rules for one agent (cards/autoallow.rs): list and forget. Owner only, on
+        // neither the member nor the bot list.
+        "allowedRules" => crate::cards::autoallow::list(str_arg(&b, "agent")?).await?,
+        "removeAllowedRule" => crate::cards::autoallow::remove(str_arg(&b, "agent")?, str_arg(&b, "id")?).await?,
         "revokeAskToken" => json!({"revoked": crate::runauth::table().revoke_token(str_arg(&b, "token")?)}),
         _ => return Ok(ControlFlow::Continue(b)),
     }))
