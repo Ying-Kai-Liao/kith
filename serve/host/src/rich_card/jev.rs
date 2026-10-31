@@ -2,12 +2,16 @@
 //! (a lookup, a status report, a table of figures) gets a Result card attached to it. The reply stays: `data.text` is the
 //! card's twin, and the apps fold the card back to it ("Show as text").
 //!
-//! Jev only picks. Code splits the reply into numbered blocks; Jev says whether the reply is a result and which block
-//! numbers fill the title, the facts and the links; every string on the card is copied from those blocks (markdown
-//! marks stripped), so Jev never writes a word. Anything short of a clear answer leaves the reply plain, and Jev being
-//! missing or down is never shown to anyone. Asking cards (Key, Access, permission) never come from here.
+//! Jev only picks. Code splits the reply into numbered blocks; in ONE call Jev says whether the reply is a result,
+//! which block is its title, which is its one-line verdict (or none), and, for every block that splits into a label and
+//! a value (a table row, a `Key: value` line or item), how much the reader needs it and whether it is only a log line,
+//! a suggestion or a remark about the assistant. Every string on the card is copied from those blocks (markdown marks
+//! stripped), so Jev never writes a word. Exclusion vetoes, importance ranks. Anything short of a clear answer leaves
+//! the reply plain, and Jev being missing or down is never shown to anyone. Asking cards (Key, Access, permission)
+//! never come from here.
 //!
-//! Method and thresholds from the lab's `jev-reply-cards` experiment (wording v2, kind `info` at 0.85, slots at 0.5).
+//! Method from the lab's `jev-reply-cards` and `jev-result-card-check` experiments (kind `info` at 0.85, links at
+//! 0.5); the v2 picks are justified in the PR from live runs.
 
 use crate::chat::router::Jev;
 use crate::hub::Hub;
@@ -25,15 +29,29 @@ const MIN_CHARS: usize = 150;
 const MAX_BLOCKS: usize = 60;
 /// Each block's text as Jev sees it.
 const SENT_CHARS: usize = 600;
-/// A title or fact longer than this reads as prose, not a card line.
-const TITLE_CHARS: usize = 100;
-const FACT_CHARS: usize = 80;
+/// A title, verdict line, row label or row value longer than this reads as prose, not a card line. The lab found
+/// 80/100 hid 4 of 13 real cards; 160 doubled recall with no loss in precision.
+const TITLE_CHARS: usize = 160;
+const HEADLINE_CHARS: usize = 200;
+const LABEL_CHARS: usize = 40;
+const VALUE_CHARS: usize = 160;
 /// Lab thresholds: the reply is a result at this probability, a block fills a slot at this score.
 const KIND_MIN: f64 = 0.85;
 const TITLE_MIN: f64 = 0.6;
-const SLOT_MIN: f64 = 0.5;
-const MAX_FACTS: usize = 4;
+const LINK_MIN: f64 = 0.5;
+/// The verdict line must be picked at this probability, "none" included in the choices: below it `sub` is left out.
+const HEADLINE_MIN: f64 = 0.6;
+/// A row needs this much "the reader needs it" to be kept (ranked, then cut to [`MAX_ROWS`]) ...
+const IMPORTANT_MIN: f64 = 0.6;
+/// ... and is dropped when its "this is a log line, suggestion or remark about the assistant" reaches this.
+const EXCLUDED_MIN: f64 = 0.7;
+const MIN_ROWS: usize = 1;
+const MAX_ROWS: usize = 5;
+/// A paragraph among the first blocks may offer its first sentence as the title when the whole is too long.
+const OPENING_BLOCKS: usize = 3;
 const MAX_LINKS: usize = 2;
+/// The title and headline questions' "no block does" option.
+const NONE: &str = "none";
 /// Everything Jev-related, key lookup included, ends here.
 const OVERALL: Duration = Duration::from_secs(12);
 
@@ -88,6 +106,9 @@ pub struct Block {
     pub i: usize,
     pub kind: Kind,
     pub text: String,
+    /// The block as a card row: a table row's first cell and the next non-empty one, or the two sides of a
+    /// `Label: value` line or item; marks removed. `None` when it doesn't split that way.
+    pub pair: Option<(String, String)>,
 }
 
 fn list_item(line: &str) -> Option<(usize, &str)> {
@@ -136,11 +157,65 @@ fn table_separator(line: &str) -> bool {
     s.starts_with("--")
 }
 
-fn add(blocks: &mut Vec<Block>, kind: Kind, text: &str) {
+/// `Label: value` in a line without marks: a short label of a few words, then a colon and a space.
+fn label_value(line: &str) -> Option<(String, String)> {
+    let colon = line
+        .char_indices()
+        .take(LABEL_CHARS + 1)
+        .find(|(i, c)| *c == ':' && line[i + 1..].starts_with(char::is_whitespace))
+        .map(|(i, _)| i)?;
+    let label = line[..colon].trim();
+    let value = line[colon + 1..].trim().trim_end_matches('.').trim();
+    let plausible = !label.is_empty()
+        && label.split_whitespace().count() <= 5
+        && label.chars().all(|c| c.is_alphanumeric() || " _/&'-()".contains(c));
+    (plausible && !value.is_empty()).then(|| (label.to_owned(), value.to_owned()))
+}
+
+/// A bare figure: a number with at most a short unit or percent sign after it ("31.1", "about 5.3", "12%").
+fn figure(cell: &str) -> bool {
+    let c = cell.trim().trim_start_matches(['~', '≈']).trim();
+    let c = c.strip_prefix("about ").unwrap_or(c);
+    let digits = c.chars().take_while(|ch| ch.is_ascii_digit() || ".,".contains(*ch)).count();
+    digits > 0 && c[digits..].trim().chars().count() <= 4
+}
+
+/// The unit a table header names for its column ("GB", "Size (GB)"), when it is one of the usual ones.
+fn column_unit(header: &str) -> Option<&str> {
+    const UNITS: [&str; 15] =
+        ["B", "KB", "MB", "GB", "TB", "KiB", "MiB", "GiB", "TiB", "ms", "s", "%", "MHz", "GHz", "kB"];
+    let word = |c: char| !c.is_alphanumeric() && c != '%';
+    header.split(word).find(|t| UNITS.contains(t))
+}
+
+/// A table row as label and value. The label is the first cell, unless that one is a bare figure and another cell is
+/// words (`| GB | What |` tables): then the words label the figure. A figure under a unit header gets the unit.
+fn table_pair(cells: &[&str], header: Option<&[String]>) -> Option<(String, String)> {
+    let cells: Vec<String> = cells.iter().map(|c| plain(c)).collect();
+    let words = |c: &&String| !c.is_empty() && !figure(c);
+    let label_at = if figure(&cells[0]) { cells.iter().position(|c| words(&c)).unwrap_or(0) } else { 0 };
+    let value_at = if label_at == 0 { (1..cells.len()).find(|i| !cells[*i].is_empty())? } else { 0 };
+    if cells[label_at].is_empty() {
+        return None;
+    }
+    let mut value = cells[value_at].clone();
+    let unit = header.and_then(|h| h.get(value_at)).and_then(|h| column_unit(h));
+    if let Some(unit) = unit.filter(|u| figure(&value) && !value.contains(*u)) {
+        value = if unit == "%" { format!("{value}%") } else { format!("{value} {unit}") };
+    }
+    Some((cells[label_at].clone(), value))
+}
+
+fn add_with(blocks: &mut Vec<Block>, kind: Kind, text: &str, pair: Option<(String, String)>) {
     let text = text.trim();
     if !text.is_empty() {
-        blocks.push(Block { i: blocks.len() + 1, kind, text: text.to_owned() });
+        blocks.push(Block { i: blocks.len() + 1, kind, text: text.to_owned(), pair });
     }
+}
+
+fn add(blocks: &mut Vec<Block>, kind: Kind, text: &str) {
+    let pair = matches!(kind, Kind::Item | Kind::Kv).then(|| label_value(&plain(text))).flatten();
+    add_with(blocks, kind, text, pair);
 }
 
 fn flush(blocks: &mut Vec<Block>, para: &mut Vec<&str>) {
@@ -156,8 +231,17 @@ pub fn split(text: &str) -> Vec<Block> {
     let mut blocks: Vec<Block> = Vec::new();
     let mut para: Vec<&str> = Vec::new();
     let mut fence: Option<Vec<&str>> = None;
+    // The previous line was a table row: a separator right after it makes that row the table's header.
+    let mut after_row = false;
+    // The header cells of the table being read (marks removed): the unit of a value column is often only named there.
+    let mut header: Option<Vec<String>> = None;
+    let mut last_cells: Option<Vec<String>> = None;
     let text = text.replace("\r\n", "\n");
     for line in text.split('\n') {
+        let header_candidate = std::mem::take(&mut after_row);
+        if !line.trim_start().starts_with('|') {
+            header = None;
+        }
         if let Some(code) = fence.as_mut() {
             if line.trim().starts_with("```") {
                 let body = code.join("\n");
@@ -178,9 +262,18 @@ pub fn split(text: &str) -> Vec<Block> {
             add(&mut blocks, Kind::Heading, h);
         } else if line.trim_start().starts_with('|') {
             flush(&mut blocks, &mut para);
-            if !table_separator(line) {
+            if table_separator(line) {
+                if header_candidate && blocks.last().is_some_and(|b| b.kind == Kind::Row) {
+                    blocks.pop();
+                    header = last_cells.take();
+                }
+            } else {
                 let cells: Vec<&str> = line.trim().trim_matches('|').split('|').map(str::trim).collect();
-                add(&mut blocks, Kind::Row, &cells.join(" | "));
+                let pair = table_pair(&cells, header.as_deref());
+                let before = blocks.len();
+                add_with(&mut blocks, Kind::Row, &cells.join(" | "), pair);
+                last_cells = Some(cells.iter().map(|c| plain(c)).collect());
+                after_row = blocks.len() > before;
             }
         } else if let Some(quote) = line.trim_start().strip_prefix('>') {
             flush(&mut blocks, &mut para);
@@ -269,17 +362,57 @@ fn link_label(text: &str, url: &str) -> String {
 // ---- asking Jev ----
 
 const KIND_QUESTION: &str = "What kind of message is `reply`, taken as a whole?";
-const FACT_QUESTION: &str =
-    "Does block {n} of `reply` state a figure, a status or a named value about the reply's subject?";
-const LINK_QUESTION: &str = "Is block {n} of `reply` a link that the reader would open to see the result itself?";
 const TITLE_QUESTION: &str = "Which block of `reply` best names what the reply is about, as a title for it?";
+const HEADLINE_QUESTION: &str = "Which block of `reply` is its verdict or summary: the one sentence a reader who reads nothing else should get, such as how things stand overall? Answer none when no block does that.";
+const IMPORTANT_QUESTION: &str = "Does the reader need block {n} of `reply` to know the state of its subject or to decide what to do, such as a figure that changed or is near a limit?";
+const EXCLUDED_QUESTION: &str = "Is block {n} of `reply` a log of what the assistant did or checked, a suggestion or to-do for the reader, or a remark about the assistant, rather than a fact about the subject?";
+const LINK_QUESTION: &str = "Is block {n} of `reply` a link that the reader would open to see the result itself?";
 
-fn eligible(b: &Block, max: usize) -> bool {
-    b.kind != Kind::Code && b.i <= MAX_BLOCKS && plain(&b.text).chars().count() <= max
+/// A block that can name the reply or sum it up: prose or a heading, not code and not a label/value row.
+fn lead(b: &Block, max: usize) -> bool {
+    b.kind != Kind::Code && b.pair.is_none() && b.i <= MAX_BLOCKS && plain(&b.text).chars().count() <= max
 }
 
-/// What Jev is asked: what the reply is (the lab's four-way wording, so a digest or a draft isn't forced into
-/// "result"), then, per block, the slot questions.
+/// The first sentence of `text`: up to the first `.`, `!` or `?` that is followed by whitespace or the end (so
+/// "22.7 GB" and "e.g." don't end it).
+fn first_sentence(text: &str) -> &str {
+    const ABBREVIATIONS: [&str; 7] = ["e.g.", "i.e.", "vs.", "etc.", "approx.", "no.", "st."];
+    for (at, c) in text.char_indices() {
+        if !matches!(c, '.' | '!' | '?') || !text[at + 1..].chars().next().is_none_or(char::is_whitespace) {
+            continue;
+        }
+        let word = text[..=at].rsplit(char::is_whitespace).next().unwrap_or("").to_lowercase();
+        if !ABBREVIATIONS.contains(&word.as_str()) {
+            return &text[..=at];
+        }
+    }
+    text
+}
+
+/// What block `b` offers as the reply's title: its text when short enough, else (for one of the first paragraphs) its
+/// first sentence when that is. Always the reply's own words.
+fn title_of(b: &Block) -> Option<String> {
+    if lead(b, TITLE_CHARS) {
+        return Some(plain(&b.text));
+    }
+    if b.kind != Kind::Para || b.pair.is_some() || b.i > OPENING_BLOCKS {
+        return None;
+    }
+    let text = plain(&b.text);
+    let first = first_sentence(&text);
+    (first.chars().count() <= TITLE_CHARS).then(|| first.to_owned())
+}
+
+/// A block that can be a card row: it splits into a label and a value, both short enough to be a card line.
+fn row(b: &Block) -> Option<&(String, String)> {
+    b.pair
+        .as_ref()
+        .filter(|(l, v)| b.i <= MAX_BLOCKS && l.chars().count() <= LABEL_CHARS && v.chars().count() <= VALUE_CHARS)
+}
+
+/// What Jev is asked, all in one call: what the reply is (the lab's four-way wording, so a digest or a draft isn't
+/// forced into "result"), its title, its verdict line, and per row candidate how much it matters and whether it is a
+/// log line or a suggestion.
 pub fn ask_for(blocks: &[Block]) -> (Value, Map<String, Value>) {
     let shown = &blocks[..blocks.len().min(MAX_BLOCKS)];
     let state = json!({"reply": shown.iter().map(|b| json!({
@@ -297,16 +430,27 @@ pub fn ask_for(blocks: &[Block]) -> (Value, Map<String, Value>) {
             "plain": "An ordinary conversational reply: an explanation, plan, proposal, design discussion or question.",
         }}),
     );
-    let titles: Map<String, Value> =
-        shown.iter().filter(|b| eligible(b, TITLE_CHARS)).map(|b| (b.i.to_string(), json!(plain(&b.text)))).collect();
-    if titles.len() >= 2 {
+    let mut titles: Map<String, Value> =
+        shown.iter().filter_map(|b| Some((b.i.to_string(), json!(title_of(b)?)))).collect();
+    if !titles.is_empty() {
+        // A reply whose only lead is a long sentence is better left plain than titled by it.
+        titles.insert(NONE.into(), json!("None of the blocks works as a title for the reply."));
         q.insert("title".into(), json!({"type": "choice", "instructions": TITLE_QUESTION, "criteria": titles}));
     }
+    let mut headlines: Map<String, Value> =
+        shown.iter().filter(|b| lead(b, HEADLINE_CHARS)).map(|b| (b.i.to_string(), json!(plain(&b.text)))).collect();
+    headlines.insert(NONE.into(), json!("None of the blocks is a verdict or summary of the whole reply."));
+    q.insert("headline".into(), json!({"type": "choice", "instructions": HEADLINE_QUESTION, "criteria": headlines}));
     for b in shown {
-        if b.kind != Kind::Heading && eligible(b, FACT_CHARS) {
+        if row(b).is_some() {
+            let n = b.i.to_string();
             q.insert(
-                format!("fact_{}", b.i),
-                json!({"type": "noul", "instructions": FACT_QUESTION.replace("{n}", &b.i.to_string())}),
+                format!("need_{n}"),
+                json!({"type": "noul", "instructions": IMPORTANT_QUESTION.replace("{n}", &n)}),
+            );
+            q.insert(
+                format!("skip_{n}"),
+                json!({"type": "noul", "instructions": EXCLUDED_QUESTION.replace("{n}", &n)}),
             );
         }
         if !urls(&b.text).is_empty() {
@@ -323,66 +467,100 @@ fn score(answers: &Value, key: &str) -> Option<f64> {
     answers[key]["noul"].as_f64()
 }
 
-/// The Result card for what Jev answered, or `None` when anything is short of its threshold. Every string is a block's
-/// own text.
+/// A choice's block number when it was picked at `min` or better.
+fn picked(answer: &Value, min: f64) -> Option<usize> {
+    let n: usize = answer["choice"].as_str()?.parse().ok()?;
+    (answer["probabilities"][n.to_string()].as_f64()? >= min).then_some(n)
+}
+
+/// The blocks scoring at least `min`, the best `cap` of them, back in reply order.
+fn best(scored: Vec<(&Block, f64)>, min: f64, cap: usize) -> Vec<&Block> {
+    let mut scored: Vec<_> = scored.into_iter().filter(|(_, s)| *s >= min).collect();
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1));
+    scored.truncate(cap);
+    scored.sort_by_key(|(b, _)| b.i);
+    scored.into_iter().map(|(b, _)| b).collect()
+}
+
+/// The Result card (v2) for what Jev answered, or `None` when anything is short of its threshold. Every string is a
+/// block's own text.
 pub fn card_from(blocks: &[Block], answers: &Value) -> Option<Value> {
     let kind = &answers["kind"];
     if kind["choice"] != "info" || kind["probabilities"]["info"].as_f64()? < KIND_MIN {
         return None;
     }
-    let pick = &answers["title"];
-    let title_at: usize = pick["choice"].as_str()?.parse().ok()?;
-    if pick["probabilities"][title_at.to_string()].as_f64()? < TITLE_MIN {
-        return None;
-    }
     let by_number = |n: usize| blocks.iter().find(|b| b.i == n && b.i <= MAX_BLOCKS);
-    let title_block = by_number(title_at).filter(|b| eligible(b, TITLE_CHARS))?;
-    // Highest scores first, then back in reply order.
-    let best = |prefix: &str, cap: usize, allowed: &dyn Fn(&Block) -> bool| -> Vec<&Block> {
-        let mut scored: Vec<(&Block, f64)> = blocks
+    let title_block = by_number(picked(&answers["title"], TITLE_MIN)?)?;
+    let title = title_of(title_block)?;
+    // A verdict that Jev isn't sure of, or that repeats the title, is left out; the card still stands.
+    let headline_block = picked(&answers["headline"], HEADLINE_MIN)
+        .and_then(by_number)
+        .filter(|b| b.i != title_block.i && lead(b, HEADLINE_CHARS) && plain(&b.text) != title);
+    // Exclusion vetoes (a missing answer counts against the row), importance ranks.
+    let rows = best(
+        blocks
             .iter()
-            .filter(|b| b.i <= MAX_BLOCKS && allowed(b))
-            .filter_map(|b| Some((b, score(answers, &format!("{prefix}_{}", b.i))?)))
-            .filter(|(_, s)| *s >= SLOT_MIN)
-            .collect();
-        scored.sort_by(|a, b| b.1.total_cmp(&a.1));
-        scored.truncate(cap);
-        scored.sort_by_key(|(b, _)| b.i);
-        scored.into_iter().map(|(b, _)| b).collect()
-    };
-    // The lab's code rule: the title block is never also a fact.
-    let facts =
-        best("fact", MAX_FACTS, &|b| b.i != title_block.i && b.kind != Kind::Heading && eligible(b, FACT_CHARS));
-    if facts.is_empty() {
+            .filter(|b| row(b).is_some() && b.i != title_block.i && headline_block.is_none_or(|h| h.i != b.i))
+            .filter(|b| score(answers, &format!("skip_{}", b.i)).is_some_and(|s| s < EXCLUDED_MIN))
+            .filter_map(|b| Some((b, score(answers, &format!("need_{}", b.i))?)))
+            .collect(),
+        IMPORTANT_MIN,
+        MAX_ROWS,
+    );
+    if rows.len() < MIN_ROWS {
         return None;
     }
-    let links: Vec<Value> = best("link", MAX_LINKS, &|b| !urls(&b.text).is_empty())
-        .into_iter()
-        .filter_map(|b| {
-            let url = urls(&b.text).into_iter().next()?;
-            Some(json!({"label": link_label(&b.text, &url), "url": url}))
-        })
-        .collect();
-    Some(json!({
-        "type": "result",
-        "v": 1,
-        "snapshot": {
-            "title": plain(&title_block.text),
-            "facts": facts.iter().map(|b| plain(&b.text)).collect::<Vec<_>>(),
-            "links": links,
-        },
-    }))
+    let links: Vec<Value> = best(
+        blocks
+            .iter()
+            .filter(|b| b.i <= MAX_BLOCKS && !urls(&b.text).is_empty())
+            .filter_map(|b| Some((b, score(answers, &format!("link_{}", b.i))?)))
+            .collect(),
+        LINK_MIN,
+        MAX_LINKS,
+    )
+    .into_iter()
+    .filter_map(|b| {
+        let url = urls(&b.text).into_iter().next()?;
+        Some(json!({"label": link_label(&b.text, &url), "url": url}))
+    })
+    .collect();
+    let mut snapshot = json!({
+        "title": title,
+        "rows": rows.iter().filter_map(|b| row(b)).map(|(l, v)| json!({"label": l, "value": v})).collect::<Vec<_>>(),
+        "links": links,
+    });
+    if let Some(h) = headline_block {
+        snapshot["sub"] = json!(plain(&h.text));
+    }
+    Some(json!({"type": "result", "v": 2, "snapshot": snapshot}))
+}
+
+/// What one reply made of Jev: the card, if any, and the answers behind it (`Null` when Jev wasn't asked).
+pub struct Traced {
+    pub card: Option<Value>,
+    pub answers: Value,
+}
+
+/// [`classify`], keeping Jev's answers: for the eval harness and the logs.
+pub async fn classify_traced(jev: &Jev, text: &str) -> anyhow::Result<Traced> {
+    let blocks = split(text);
+    if !prefilter(text, &blocks) {
+        return Ok(Traced { card: None, answers: Value::Null });
+    }
+    let (state, questions) = ask_for(&blocks);
+    let v = jev.ask(state, questions).await?;
+    Ok(Traced { card: card_from(&blocks, &v["answers"]), answers: v["answers"].clone() })
 }
 
 /// The card for `text`, or `None`: too plain, Jev unsure, or Jev failing (which is only logged).
 pub async fn classify(jev: &Jev, text: &str) -> Option<Value> {
-    let blocks = split(text);
-    if !prefilter(text, &blocks) {
-        return None;
-    }
-    let (state, questions) = ask_for(&blocks);
-    match jev.ask(state, questions).await {
-        Ok(v) => card_from(&blocks, &v["answers"]),
+    match classify_traced(jev, text).await {
+        Ok(t) => {
+            // Scores and choices only, never the reply's text.
+            tracing::debug!(answers = %t.answers, carded = t.card.is_some(), "reply card: Jev answered");
+            t.card
+        }
         Err(error) => {
             tracing::info!(error = format!("{error:#}"), "reply card: Jev didn't answer; the reply stays plain");
             None
