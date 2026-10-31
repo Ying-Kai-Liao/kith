@@ -540,26 +540,63 @@ impl State {
 
     /// Every bot, against the model: the store agrees on who is in, the principal follows, and each ask is served only
     /// when the bot is in, was given the agent and its owner holds it now.
+    ///
+    /// Each bot's checks run one after another (its first ask must precede its second), but the bots run together:
+    /// every dispatch that asks kith-auth spawns a python process, and waiting on those dominated the test's wall
+    /// time. Nothing is lost: a bot's checks read only the model as it stood before this call (and its own results),
+    /// write nothing to it, and the updates are applied afterwards in bot order, so the oracle is as deterministic as
+    /// before. The cross-bot checks follow once every bot's conversations are known.
     async fn check_all(&mut self) -> Result<(), String> {
-        for bi in 0..self.bots.len() {
-            let (id, owner, state) = (self.bots[bi].id.clone(), self.bots[bi].owner, self.bots[bi].state);
-            let stored = self.store_state(&id).ok_or("a bot row vanished")?;
-            let agrees = match state {
-                St::Pending => stored == BotState::Pending,
-                St::Active => stored == BotState::Active,
-                St::Ended => matches!(stored, BotState::Revoked | BotState::Denied),
-            };
-            check!(agrees, "bot {id} of {} is {stored:?} in the store, the model has {state:?}", WHO[owner]);
-            let who = principal(&self.r.hub.store, &self.bots[bi].caller);
-            let right = match state {
-                St::Pending => matches!(who, Principal::BotPending(_)),
-                St::Active => matches!(who, Principal::Bot { .. }),
-                St::Ended => who == Principal::Nobody,
-            };
-            check!(right, "bot {id} is {state:?} but its key is {who:?}");
+        let base = self.next_nonce();
+        let results = {
+            let this = &*self;
+            let base = base.as_str();
+            futures::future::join_all((0..this.bots.len()).map(|bi| this.check_bot(bi, base))).await
+        };
+        let mut news = Vec::new();
+        for r in results {
+            news.push(r?);
+        }
+        for (b, (served, new_convs)) in self.bots.iter_mut().zip(news) {
+            b.served = served;
+            b.convs.extend(new_convs);
+        }
+        let this = &*self;
+        let base = base.as_str();
+        let others = futures::future::join_all((0..this.bots.len()).map(|bi| this.check_other(bi, base))).await;
+        others.into_iter().collect()
+    }
+
+    /// One bot against the model; returns whether an ask of it has gone through and the conversations it made.
+    async fn check_bot(&self, bi: usize, base: &str) -> Result<(bool, Vec<(String, usize)>), String> {
+        let (id, owner, state) = (self.bots[bi].id.clone(), self.bots[bi].owner, self.bots[bi].state);
+        let mut served = self.bots[bi].served;
+        let mut convs = self.bots[bi].convs.clone();
+        let mut new_convs = Vec::new();
+        let stored = self.store_state(&id).ok_or("a bot row vanished")?;
+        let agrees = match state {
+            St::Pending => stored == BotState::Pending,
+            St::Active => stored == BotState::Active,
+            St::Ended => matches!(stored, BotState::Revoked | BotState::Denied),
+        };
+        check!(agrees, "bot {id} of {} is {stored:?} in the store, the model has {state:?}", WHO[owner]);
+        let who = principal(&self.r.hub.store, &self.bots[bi].caller);
+        let right = match state {
+            St::Pending => matches!(who, Principal::BotPending(_)),
+            St::Active => matches!(who, Principal::Bot { .. }),
+            St::Ended => who == Principal::Nobody,
+        };
+        check!(right, "bot {id} is {state:?} but its key is {who:?}");
+        // The status read touches nothing the asks and thread reads do, so it runs beside them.
+        let status = async {
+            match state {
+                St::Active => Some(self.call(&self.bots[bi].caller, "botStatus", json!({})).await),
+                _ => None,
+            }
+        };
+        let main = async {
             for ai in 0..2 {
-                let nonce = self.next_nonce();
-                let ask = json!({"agent": AGENTS[ai], "text": "hi", "clientNonce": nonce});
+                let ask = json!({"agent": AGENTS[ai], "text": "hi", "clientNonce": format!("{base}.{bi}.{ai}")});
                 let res = self.call(&self.bots[bi].caller, "botAsk", ask).await;
                 let may = self.bots[bi].agents[ai] && self.holds(owner, ai);
                 match (state, &res) {
@@ -577,17 +614,15 @@ impl State {
                             self.roles[owner],
                             self.removed[owner]
                         );
-                        self.bots[bi].served = true;
-                        self.bots[bi].convs.push((v["conversation"].as_str().unwrap().to_owned(), ai));
+                        served = true;
+                        let conv = (v["conversation"].as_str().unwrap().to_owned(), ai);
+                        convs.push(conv.clone());
+                        new_convs.push(conv);
                         SERVED.fetch_add(1, Ordering::Relaxed);
                     }
                     (St::Active, Err(e)) if may => {
                         check!(!refused(e), "bot {id} may use {} but was refused: {e:#}", AGENTS[ai]);
-                        check!(
-                            self.bots[bi].served,
-                            "the first ask of a bot that may use {} failed: {e:#}",
-                            AGENTS[ai]
-                        );
+                        check!(served, "the first ask of a bot that may use {} failed: {e:#}", AGENTS[ai]);
                     }
                     (St::Active, Err(e)) => check!(
                         error_code(e) == Some("notGranted"),
@@ -600,8 +635,13 @@ impl State {
             // (14) Reading its own conversation is how a bot gets its answers: like an ask, only while it is in, and
             // only while its owner still holds that conversation's agent and the bot was given it (R5: a turn that
             // outlived a revoke delivers nothing).
-            for (conv, ai) in self.bots[bi].convs.clone() {
-                let res = self.call(&self.bots[bi].caller, "botThread", json!({"conversation": conv})).await;
+            let reads = futures::future::join_all(
+                convs
+                    .iter()
+                    .map(|(conv, _)| self.call(&self.bots[bi].caller, "botThread", json!({"conversation": conv}))),
+            )
+            .await;
+            for ((conv, ai), res) in convs.into_iter().zip(reads) {
                 let may = self.bots[bi].agents[ai] && self.holds(owner, ai);
                 match (state, &res) {
                     (St::Ended, Err(e)) => check!(e.is::<Forbidden>(), "an ended bot's botThread: {e:#}"),
@@ -626,45 +666,50 @@ impl State {
                     (_, Ok(_)) => return Err(format!("bot {id} is {state:?} and still read its conversation")),
                 }
             }
-            if state == St::Active {
-                // What it is told it holds is never more than its owner holds.
-                let status = self.call(&self.bots[bi].caller, "botStatus", json!({})).await;
-                let status = status.map_err(|e| format!("botStatus failed for an active bot: {e:#}"))?;
-                let listed: Vec<String> = status["agents"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|a| a["agent"].as_str().unwrap().to_owned())
-                    .collect();
-                for ai in 0..2 {
-                    let may = self.bots[bi].agents[ai] && self.holds(owner, ai);
-                    check!(
-                        listed.iter().any(|a| a == AGENTS[ai]) == may,
-                        "botStatus of {id} lists {listed:?}; it may use {} = {may}",
-                        AGENTS[ai]
-                    );
-                }
-                // Another bot's conversation is a 404 and its words never come back.
-                let other: Option<String> = self
-                    .bots
-                    .iter()
-                    .enumerate()
-                    .find_map(|(j, o)| (j != bi).then(|| o.convs.first().map(|c| c.0.clone())).flatten());
-                if let Some(conv) = other {
-                    let nonce = self.next_nonce();
-                    let ask = json!({"conversation": conv, "text": "mine now", "clientNonce": nonce});
-                    let res = self.call(&self.bots[bi].caller, "botAsk", ask).await;
-                    check!(
-                        res.as_ref().err().is_some_and(|e| error_code(e) == Some("notFound")),
-                        "bot {id} asked into another bot's conversation: {res:?}"
-                    );
-                    let res = self.call(&self.bots[bi].caller, "botThread", json!({"conversation": conv})).await;
-                    check!(
-                        res.as_ref().err().is_some_and(|e| error_code(e) == Some("notFound")),
-                        "bot {id} read another bot's conversation: {res:?}"
-                    );
-                }
+            Ok::<_, String>(())
+        };
+        let (main, status) = Box::pin(futures::future::join(main, status)).await;
+        main?;
+        if let Some(status) = status {
+            // What it is told it holds is never more than its owner holds.
+            let status = status.map_err(|e| format!("botStatus failed for an active bot: {e:#}"))?;
+            let listed: Vec<String> =
+                status["agents"].as_array().unwrap().iter().map(|a| a["agent"].as_str().unwrap().to_owned()).collect();
+            for ai in 0..2 {
+                let may = self.bots[bi].agents[ai] && self.holds(owner, ai);
+                check!(
+                    listed.iter().any(|a| a == AGENTS[ai]) == may,
+                    "botStatus of {id} lists {listed:?}; it may use {} = {may}",
+                    AGENTS[ai]
+                );
             }
+        }
+        Ok((served, new_convs))
+    }
+
+    /// Another bot's conversation is a 404 to an active bot and its words never come back.
+    async fn check_other(&self, bi: usize, base: &str) -> Result<(), String> {
+        if self.bots[bi].state != St::Active {
+            return Ok(());
+        }
+        let id = &self.bots[bi].id;
+        let other: Option<String> = self
+            .bots
+            .iter()
+            .enumerate()
+            .find_map(|(j, o)| (j != bi).then(|| o.convs.first().map(|c| c.0.clone())).flatten());
+        if let Some(conv) = other {
+            let ask = json!({"conversation": conv, "text": "mine now", "clientNonce": format!("{base}.{bi}.x")});
+            let res = self.call(&self.bots[bi].caller, "botAsk", ask).await;
+            check!(
+                res.as_ref().err().is_some_and(|e| error_code(e) == Some("notFound")),
+                "bot {id} asked into another bot's conversation: {res:?}"
+            );
+            let res = self.call(&self.bots[bi].caller, "botThread", json!({"conversation": conv})).await;
+            check!(
+                res.as_ref().err().is_some_and(|e| error_code(e) == Some("notFound")),
+                "bot {id} read another bot's conversation: {res:?}"
+            );
         }
         Ok(())
     }
