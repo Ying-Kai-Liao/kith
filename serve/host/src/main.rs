@@ -867,7 +867,7 @@ async fn link(port: u16, which: &str) -> Result<()> {
             match state.as_str() {
                 "waiting" => println!("Asked {name}. Waiting for it to answer…"),
                 "code" => println!(
-                    "Code {}. Check that {name} shows the same code, then type it there: kith link --accept",
+                    "Code {}. Type it on {name} to allow this computer: kith link --accept",
                     v["code"].as_str().unwrap_or_default()
                 ),
                 "connecting" => println!("{name} said yes. Connecting to it…"),
@@ -937,10 +937,10 @@ async fn answer_link(port: u16, which: Option<String>, answer: LinkAnswer) -> Re
     let code = if let Some(c) = code {
         c
     } else {
-        let Some(shown) = r["code"].as_str() else {
+        if r["codeShown"] != true {
             anyhow::bail!("{name} hasn't shown its code yet. Try again in a moment.");
-        };
-        print!("{name} asks to pair. This computer shows code {shown}. Type the code {name} shows to allow it: ");
+        }
+        print!("{name} asks to pair. Type the code {name} shows to allow it: ");
         std::io::stdout().flush()?;
         let mut line = String::new();
         std::io::stdin().lock().read_line(&mut line)?;
