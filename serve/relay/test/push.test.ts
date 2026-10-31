@@ -41,6 +41,23 @@ const activityTicket = await sealTicket(env, { t: "ab".repeat(32), e: "sandbox",
 assert.equal((await request("/push", { ticket: activityTicket, liveActivity: { event: "start", contentState: state } })).status, 400);
 console.log("push request validation tests ok");
 
+// Alert passthrough for a call alert, and VoIP tickets.
+const callAlert = alertAps({ ...base, category: "call", interruptionLevel: "time-sensitive", sound: "default" });
+assert.equal(callAlert["interruption-level"], "time-sensitive");
+assert.equal(callAlert.category, "call");
+assert.equal("interruption-level" in alertAps(base), false);
+const voipTicket = await sealTicket(env, { t: "ab".repeat(32), e: "sandbox", k: "voip" });
+assert.equal((await request("/push", { ticket: voipTicket, alert: { body: "x" } })).status, 400);
+assert.equal((await request("/push", { ticket: voipTicket })).status, 400);
+assert.equal((await request("/push", { ticket: voipTicket, voip: {} })).status, 400);
+assert.equal((await request("/push", { ticket: voipTicket, voip: { data: [] } })).status, 400);
+assert.equal((await request("/push", { ticket: voipTicket, voip: { data: { aps: {} } } })).status, 400);
+assert.equal((await request("/push", { ticket: voipTicket, voip: { data: { sealed: "x".repeat(4096) } } })).status, 413);
+assert.equal((await request("/push", { ticket, voip: { data: { kind: "call" } } })).status, 400);
+assert.equal((await request("/push", { ticket, alert: { body: "x" }, interruptionLevel: "critical" })).status, 400);
+assert.equal((await request("/push", { ticket, alert: { body: "x" }, sound: "ding" })).status, 400);
+console.log("voip push validation tests ok");
+
 // Old account/device identities may still point to the exact same physical phone.
 assert.deepEqual([...latestTicketIndices([
   { t: "AB", e: "sandbox", k: "alert" },

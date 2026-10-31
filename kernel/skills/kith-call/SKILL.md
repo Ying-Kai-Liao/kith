@@ -7,7 +7,7 @@ description: Ring the person you work for when something needs their voice now (
 `<kernel>` below is the kernel folder this skill sits in (two levels up): the same path your protocol writes before `bin/`.
 
 - `<kernel>/bin/kith-call "short reason"`; in a Kith app chat the same thing is the `call_person(reason)` tool of the
-  `kith-files` server. It shows as an incoming call in their open Kith app (no push).
+  `kith-files` server. It shows as an incoming call in their open Kith app, and as a phone-call push when the app is closed.
 - It prints and exits `ringing` 0, `declined` 3, `missed` 4, `busy` 5, `rate-limited` 6 or `not-allowed` 7.
   `--wait` holds up to 50 s for the answer; otherwise only `ringing` and the refusals come back.
 - `--result "TEXT"` hands the host what the call is about (a bug and its PR link); a declined or missed call then

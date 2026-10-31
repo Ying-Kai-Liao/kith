@@ -4,7 +4,7 @@ Cloudflare Worker that holds the APNs key and forwards pushes for the Kith host.
 The phone exchanges its APNs token for an AES-GCM **ticket** (`POST /register`);
 hosts only ever see tickets (`POST /push`). Only the Worker can decrypt the raw APNs token. Do not log tickets.
 
-A ticket names the one computer the phone registered it for and expires (alerts 90 days, Live Activities 7; the
+A ticket names the one computer the phone registered it for and expires (alerts and VoIP 90 days, Live Activities 7; the
 phone mints a fresh one each time it connects). The host signs each push with its identity key (`Kith-Sig`, as
 for the cloud); the Worker derives the computer id from that key and refuses a ticket pushed by any other computer.
 A refusal that is about the ticket carries `gone: true` and the host forgets it: expired (410), invalid, or
@@ -29,13 +29,19 @@ npx wrangler secret put APNS_KEY_ID        # an APNs Auth Key (Keys → Apple Pu
 npx wrangler secret put APNS_SIGNING_KEY   # contents of the .p8 file
 openssl rand -base64 32 | npx wrangler secret put TICKET_KEY
 npx wrangler secret put FCM_SERVICE_ACCOUNT   # optional: Firebase service-account JSON, for Android pushes
-npm run deploy
+cd serve/relay && npx wrangler deploy
 ```
 
-`wrangler deploy` prints the new `https://kith-relay.<account>.workers.dev` URL. Until the apps are switched to it, the iOS app keeps pointing at the previous Worker; once `kith-relay` has a public URL and the APNs secrets, set `KITH_PUSH_RELAY_HOST` in `apps/project.yml` and `apps/Kith.xcodeproj` to its host and ship the app (phones re-register with it on launch).
-
-Secrets are set per Worker, so `kith-relay` starts with none of the old Worker's: set all of the above (the APNs key and `TICKET_KEY` can be new, but a new `TICKET_KEY` means every phone re-registers on launch).
+Secrets are set per Worker: set all of the above (a new `TICKET_KEY` means every phone re-registers on launch).
 Rotating `TICKET_KEY` invalidates every ticket; phones re-register on launch.
+
+## Call pushes
+
+A ring reaches a phone whose app is closed in one of two ways. A phone that registered a PushKit token
+(`/register` with `kind: "voip"`, APNs only, topic `<bundle>.voip`) gets a VoIP push: `POST /push` with
+`{ticket, voip: {data}}` goes out as `apns-push-type: voip`, priority 10, expiring in 60 s, with `data` as the whole
+payload (no `aps.alert`). A voip ticket pushed without `voip`, or an alert ticket pushed with it, is a 400.
+Any other phone gets a normal alert with `interruptionLevel: "time-sensitive"` and `sound: "default"`.
 
 ## Test
 

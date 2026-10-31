@@ -30,3 +30,15 @@ assert.deepEqual([...latestTicketIndices([
   { t: "ab", e: "sandbox", k: "alert", b: registration.bundleId },
 ])], [0, 1]);
 console.log("development push destinations stay isolated; existing tickets retain production topic");
+
+// VoIP tickets: APNs only, on the `.voip` topic, with the alert lifetime.
+assert.equal(apnsTopic(undefined, "voip"), "com.yingkailiao.kith.ios.voip");
+assert.equal(apnsTopic(registration.bundleId, "voip"), "com.yingkailiao.kith.ios.dev.voip");
+const voip = await worker.fetch(new Request("https://relay.test/register", { method: "POST", body: JSON.stringify({ ...registration, kind: "voip", computerId: "A".repeat(22) }) }), env);
+assert.equal(voip.status, 200);
+const voipPayload = await openTicket(env, (await voip.json() as { ticket: string }).ticket);
+assert.equal(voipPayload?.k, "voip");
+assert.equal(voipPayload && (voipPayload.x! - Math.floor(Date.now() / 1000)) > 89 * 86400, true);
+const fcmVoip = await worker.fetch(new Request("https://relay.test/register", { method: "POST", body: JSON.stringify({ provider: "fcm", token: "a".repeat(30), kind: "voip", ctx: "local", computerId: "A".repeat(22) }) }), env);
+assert.equal(fcmVoip.status, 400);
+console.log("voip tickets ok");

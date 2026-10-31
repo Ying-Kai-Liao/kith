@@ -389,3 +389,48 @@ async fn a_call_that_carried_a_result_leaves_it_in_the_chat_when_declined_or_mis
     assert_eq!(notices(&r, &calm)[0]["text"], "calm tried to call: hi");
     assert!(notices(&r, &calm)[0].get("callResult").is_none());
 }
+
+fn rung_for(id: &str) -> Vec<(String, bool)> {
+    let rings = crate::remote::push::RINGS.locked();
+    rings.iter().filter(|(call, _, _)| call == id).map(|(_, device, voip)| (device.clone(), *voip)).collect()
+}
+
+#[tokio::test]
+async fn a_ringing_call_is_pushed_to_its_persons_devices_only_and_not_while_the_phone_is_open() {
+    let r = Rig::new().await;
+    let mine = r.owner_bot("house");
+    let (_, theirs) = sam(&r).await;
+    let owner = r.device("owner-phone", None);
+    // The owner's phone has a PushKit ticket; the owner's iPad and Sam's phone only an alert one.
+    rpc(&r, &owner, "registerDevice", json!({"ticket": "owner-alert", "voipTicket": "owner-voip"})).await.unwrap();
+    let ipad = r.device("owner-ipad", None);
+    rpc(&r, &ipad, "registerDevice", json!({"ticket": "ipad-alert"})).await.unwrap();
+    r.hub.store.add_push_ticket("sam-alert", "sam-phone", None, None, "Phone").unwrap();
+    // Registering the alert ticket again keeps the PushKit one; an empty voipTicket leaves it alone too.
+    rpc(&r, &owner, "registerDevice", json!({"ticket": "owner-alert-2", "voipTicket": ""})).await.unwrap();
+    let kept = r.hub.store.push_tickets().into_iter().find(|t| t.device_key == "owner-phone").unwrap();
+    assert_eq!(kept.voip_ticket.as_deref(), Some("owner-voip"));
+
+    // The phone app is open: nothing goes out.
+    r.hub.phone_clients.fetch_add(1, Ordering::Relaxed);
+    let open = ring_for(&r, &mine, "app open");
+    r.hub.phone_clients.fetch_sub(1, Ordering::Relaxed);
+    let open_id = open["id"].as_str().unwrap().to_owned();
+    assert!(rung_for(&open_id).is_empty());
+    decline_now(&r, &open_id);
+
+    r.hub.calls.inner.locked().rung.clear();
+    let id = ring_for(&r, &mine, "owner only")["id"].as_str().unwrap().to_owned();
+    let mut got = rung_for(&id);
+    got.sort();
+    assert_eq!(got, [("owner-ipad".to_owned(), false), ("owner-phone".to_owned(), true)]);
+    decline_now(&r, &id);
+
+    r.hub.calls.inner.locked().rung.clear();
+    let sid = ring_for(&r, &theirs, "sam only")["id"].as_str().unwrap().to_owned();
+    assert_eq!(rung_for(&sid), [("sam-phone".to_owned(), false)]);
+
+    // Unregistering forgets the PushKit ticket with the rest.
+    rpc(&r, &owner, "unregisterDevice", json!({})).await.unwrap();
+    assert!(r.hub.store.push_tickets().iter().all(|t| t.device_key != "owner-phone"));
+}
