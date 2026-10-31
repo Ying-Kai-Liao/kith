@@ -9,7 +9,7 @@ export interface ToolDetail {
 }
 
 /** A tool call in the transcript: 44 tall, radius 10, panel fill. Verb and object left, the result right in mono. */
-export function ToolRow({ verb, object, result, state = 'done', detail }: {
+export function ToolRow({ verb, object, result, state = 'done', detail, onPeek }: {
   /** "Edited", "Ran tests". */
   verb: string
   /** The file, command or target. */
@@ -19,9 +19,11 @@ export function ToolRow({ verb, object, result, state = 'done', detail }: {
   state?: 'running' | 'done' | 'error'
   /** With a command or output, the row opens a sheet showing them. */
   detail?: ToolDetail
+  /** A handoff's row: it opens the peek sheet in place of the command and output. */
+  onPeek?: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const openable = !!(detail?.command || detail?.output)
+  const openable = !!(detail?.command || detail?.output || onPeek)
   const label = `${verb}${object ? ` ${object}` : ''}${result ? `, ${result}` : ''}`
   const body = (
     <>
@@ -36,7 +38,7 @@ export function ToolRow({ verb, object, result, state = 'done', detail }: {
   if (!openable) return <div className="kc-tool" aria-label={label}>{body}</div>
   return (
     <>
-      <button className="kc-tool openable" onClick={() => setOpen(true)} aria-label={`${label}. Show details`}>
+      <button className="kc-tool openable" onClick={onPeek ?? (() => setOpen(true))} aria-label={`${label}. ${onPeek ? 'Open the handoff' : 'Show details'}`}>
         {body}
       </button>
       <Sheet open={open} onClose={() => setOpen(false)} width={640} dismissOnDim>

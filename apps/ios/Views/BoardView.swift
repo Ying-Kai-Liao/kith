@@ -12,8 +12,26 @@ struct BoardView: View {
     /// Computer names show on items only when there is more than one.
     let showsHosts: Bool
     let store: (ComputerID) -> BotStore?
+    /// The computers whose open handoffs the owner can peek at (an owner's only; a member's are left out).
+    var handoffStores: [BotStore] = []
     let open: (BoardTarget) -> Void
     let showComputers: () -> Void
+
+    @State private var handoffs: [HandoffRef] = []
+    @State private var peeking: HandoffRef?
+
+    /// One open handoff on one computer.
+    struct HandoffRef: Identifiable {
+        let store: BotStore
+        let peek: HandoffPeek
+        let id: String
+
+        @MainActor init(store: BotStore, peek: HandoffPeek) {
+            self.store = store
+            self.peek = peek
+            id = "\(store.computer.id)/\(peek.id)"
+        }
+    }
 
     var body: some View {
         ScrollView {
@@ -23,6 +41,7 @@ struct BoardView: View {
                 } else {
                     needsYou
                     working
+                    handoffsSection
                     done
                     leftOff
                     projects
@@ -32,6 +51,20 @@ struct BoardView: View {
             .padding(.bottom, 16)
         }
         .scrollDismissesKeyboard(.immediately)
+        .kithSheet(item: $peeking) { ref in
+            HandoffSheet(store: ref.store, id: ref.peek.id).presentationDetents([.medium, .large])
+        }
+        // Read while the Board is on screen; the task ends with the view.
+        .task(id: handoffStores.map(\.computer.id)) {
+            while !Task.isCancelled {
+                var next: [HandoffRef] = []
+                for store in handoffStores where store.isOwner {
+                    next += await store.openHandoffs().map { HandoffRef(store: store, peek: $0) }
+                }
+                if !Task.isCancelled { handoffs = next }
+                try? await Task.sleep(for: .seconds(10))
+            }
+        }
     }
 
     // MARK: sections
@@ -97,6 +130,35 @@ struct BoardView: View {
         if !model.working.isEmpty {
             header("Working", count: model.working.count)
             ForEach(model.working) { item in workRow(item, trailing: nil, state: .working) }
+        }
+    }
+
+    @ViewBuilder private var handoffsSection: some View {
+        if !handoffs.isEmpty {
+            header("Handoffs", count: handoffs.count)
+            ForEach(handoffs) { ref in
+                let line = "\(ref.peek.stateLabel) · \(ref.peek.brief?.split(whereSeparator: \.isNewline).first.map(String.init) ?? "no brief")"
+                Button { peeking = ref } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 18, weight: .regular)).foregroundStyle(Palette.muted)
+                            .frame(width: KithSize.botAvatar)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ref.peek.title).kithText(.topBar).foregroundStyle(Palette.ink).lineLimit(1)
+                            Text(line).kithText(.body).foregroundStyle(ref.peek.state == .needsYou ? Palette.ink : Palette.mutedOnSky).lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, KithSpacing.gutter)
+                    .padding(.vertical, KithSpacing.rowV)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(ref.peek.title), \(line)")
+                .accessibilityHint("Opens the handoff")
+                separator
+            }
         }
     }
 
