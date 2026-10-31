@@ -159,7 +159,7 @@ agent_suggest() {
 
 if [[ $1 == ls && ${2:-} == --json ]]; then
   pkgs=$("$KITH/bin/kith-pkg" list --json) && [[ -n $pkgs ]] || exit 1   # kith-pkg already printed why on stderr
-  python3 -c '
+  python3 -I -c '
 import json, os, re, sys
 def field(text, k):
     m = re.match(r"---\n(.*?)\n---", text, re.S)
@@ -177,7 +177,7 @@ print(json.dumps(out))' <<<"$pkgs"
   exit 0
 fi
 if [[ $1 == ls ]]; then
-  "$KITH/bin/kith-pkg" list --json | python3 -c '
+  "$KITH/bin/kith-pkg" list --json | python3 -I -c '
 import json, re, sys
 for name, o in json.load(sys.stdin).items():
     m = re.search(r"^description:\s*(.*)$", open(o["dir"] + "/agent.md").read(), re.M)
@@ -233,11 +233,11 @@ if [[ -n ${KITH_PERSON:-} ]]; then
   while :; do
     res=$("$KITH/bin/kith-auth" resolve "$agent" ${caller:+--via "$caller" --take-once}) \
       || { echo "kith: can't check whether ${KITH_PERSON} may use $agent (kith-auth resolve failed)" >&2; exit 1; }
-    RES=$res python3 -c 'import json, os, sys; sys.exit(0 if json.loads(os.environ["RES"]).get("held") else 1)' || break
+    RES=$res python3 -I -c 'import json, os, sys; sys.exit(0 if json.loads(os.environ["RES"]).get("held") else 1)' || break
     (( SECONDS < held_until )) || { echo "kith: out of sync with the Kith cloud, so ${KITH_PERSON} can't use $agent on this computer yet; try again in a minute" >&2; exit 3; }
     sleep 2
   done
-  eval "$(RES=$res python3 -c '
+  eval "$(RES=$res python3 -I -c '
 import json, os, re, shlex, sys
 r = json.loads(os.environ["RES"])
 q = lambda v: shlex.quote(str(v))
@@ -268,7 +268,7 @@ print("p_env_names=%s" % q(" ".join(env)))')"
     elif [[ $p_owner == 0 && ! $spent =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
       echo "kith: can't read what ${KITH_PERSON} has spent this month (kith-cost gave '$spent'); not running without the budget check" >&2; exit 3
     fi
-    if python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)' "$spent" "$p_budget"; then
+    if python3 -I -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= float(sys.argv[2]) else 1)' "$spent" "$p_budget"; then
       if [[ -z $p_budget_agent ]]; then   # the owner's bots, capped together on every agent (kith-auth bots-cap)
         printf 'kith: your bots have used $%.2f of their $%s this month together (%s was stopped); the owner can raise it (kith auth bots-cap ..)\n' \
           "$spent" "$p_budget" "$KITH_PERSON" >&2
@@ -335,7 +335,7 @@ template() {
 [[ ${1:-} == --render ]] && { template | fill; exit 0; }
 if [[ ${1:-} == --inspect ]]; then
   KITH_CLAUDE_ARGS="--output-format stream-json --verbose --max-turns 1 --permission-mode bypassPermissions" \
-    "$0" "$agent" "Reply: ok" 2>/dev/null | python3 -c '
+    "$0" "$agent" "Reply: ok" 2>/dev/null | python3 -I -c '
 import collections, json, sys
 for line in sys.stdin:
     try: d = json.loads(line)
@@ -532,7 +532,7 @@ fi
 # Anyone but the owner continues only a session the cost ledger has as theirs (this person or their old ids, this agent):
 # a session id is not a secret, and another person's conversation holds their memory.
 if [[ $p_owner == 0 && -n $resume && $resume != *:* ]]; then
-  PERSONS="$p_id,$p_was" SID=$resume AGENT=$agent DB="$KITH_MACHINE/cost.db" python3 -c '
+  PERSONS="$p_id,$p_was" SID=$resume AGENT=$agent DB="$KITH_MACHINE/cost.db" python3 -I -c '
 import os, sqlite3, sys
 try:
     c = sqlite3.connect(os.environ["DB"]) if os.path.exists(os.environ["DB"]) else None   # not creating the ledger here
@@ -672,7 +672,7 @@ fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
 fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
 $learned
-$state_projects" python3 -c '
+$state_projects" python3 -I -c '
 import json, os, re, sys
 s = json.load(sys.stdin)
 s.setdefault("hooks", {}).setdefault("SessionStart", []).append(
@@ -834,7 +834,7 @@ if [[ $p_owner == 0 && $harness == claude ]]; then
   [[ $wide == 1 && $PWD != "$files" ]] && { echo "kith: working directory $PWD is wider than a guest may read; working in $files" >&2; cd "$files"; }
   read_dirs=$PWD
   for ((i = 1; i < ${#dirs[@]}; i += 2)); do read_dirs+=$'\n'"${dirs[i]}"; done
-  READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox WORK=$work CTMP=$ctmp GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -c '
+  READ_DIRS=$read_dirs RUN_OUTBOX=$run_outbox WORK=$work CTMP=$ctmp GUARD_TREES=$(printf '%s\n' "$KITH" "$src_pkg/role" "$src_pkg/skills" "$pkg" "$src_pkg" "$KITH_STATE/people" "$KITH_STORE") python3 -I -c '
 import json, os, re, sys
 f = sys.argv[1]
 s = json.load(open(f))
@@ -950,7 +950,7 @@ permit_mcp() { printf '{"mcpServers":{"kithpermit":{"command":"%s/bin/kith-permi
 merged_mcp() {
   [[ $p_owner == 0 ]] && { permit_mcp; return; }
   local f=("$runs/$$.mcp.json"); [[ -f $pkg/mcp.json ]] && f+=("$pkg/mcp.json")
-  python3 -c '
+  python3 -I -c '
 import json, sys
 servers = {}
 for f in sys.argv[1:]:
@@ -980,7 +980,7 @@ emit_launch() {
   ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
     BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib \
-    python3 -c '
+    python3 -I -c '
 import json, os
 e = os.environ.get
 import sys
@@ -1099,7 +1099,7 @@ if [[ $harness == claude ]]; then
   done
   if [[ -n $given ]]; then csid=$given
   elif [[ -n $resumed && $fork == 0 ]]; then csid=$resumed
-  elif [[ $cont == 0 || $fork == 1 ]]; then csid=$(python3 -c 'import uuid; print(uuid.uuid4())'); args+=(--session-id "$csid")
+  elif [[ $cont == 0 || $fork == 1 ]]; then csid=$(python3 -I -c 'import uuid; print(uuid.uuid4())'); args+=(--session-id "$csid")
   fi
 fi
 # The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.

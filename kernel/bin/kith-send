@@ -60,7 +60,7 @@ fi
 
 if [[ -n ${KITH_DISCORD_WEBHOOK_URL:-} && -n ${KITH_DISCORD_THREAD_ID:-} ]]; then
   url="$KITH_DISCORD_WEBHOOK_URL?wait=true&thread_id=$KITH_DISCORD_THREAD_ID"
-  json() { python3 -c 'import json,sys; print(json.dumps({"username": sys.argv[1], "content": sys.argv[2][:2000]}))' "$as" "$1"; }
+  json() { python3 -I -c 'import json,sys; print(json.dumps({"username": sys.argv[1], "content": sys.argv[2][:2000]}))' "$as" "$1"; }
   if [[ ! -f $1 ]]; then
     curl -s --fail-with-body --max-time 30 -H 'Content-Type: application/json' -d "$(json "$*")" "$url" >/dev/null
     echo "sent message to thread as $as"; exit 0
@@ -135,7 +135,7 @@ api="https://api.telegram.org/bot$KITH_TELEGRAM_BOT_TOKEN"
 
 # Once it is in the app's outbox, a Telegram failure is reported but does not fail the send (a retry would post twice).
 (( boxed )) && set +eo pipefail
-check() { python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else print("kith-send:", d.get("description"), file=sys.stderr) or 1)'; }
+check() { python3 -I -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else print("kith-send:", d.get("description"), file=sys.stderr) or 1)'; }
 
 if [[ ! -f $1 ]]; then
   curl -s --max-time 30 --data-urlencode "chat_id=$KITH_TELEGRAM_CHAT_ID" --data-urlencode "text=$*" "$api/sendMessage" | check

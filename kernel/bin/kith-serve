@@ -160,7 +160,7 @@ cmd_start() {
 
 relay_url() {
   [ -f "$CONFIG" ] || return 0
-  python3 -c 'import json,sys
+  python3 -I -c 'import json,sys
 try: print(json.load(open(sys.argv[1])).get("relay_url") or "")
 except Exception: pass' "$CONFIG"
 }
