@@ -376,7 +376,9 @@ def hand_over(mid, wake=None):
     reg = read_reg(mid)
     session = (reg or {}).get('reply_to', {}).get('session')
     if not reg or reg.get('delivered') or reg.get('woke_answer') or reg.get('ended_at') or not (session and reg.get('agent')):
-        return 'kept'   # ended_at: Stop, a revoke or a removal ended it; no answer wakes the caller after (R8)   # woke_answer: the answer woke its caller; later ones are for --wait only
+        # ended_at: Stop, a revoke or a removal ended it, so no answer wakes the caller after (R8); woke_answer: the answer
+        # woke its caller already, later ones are for --wait only
+        return 'kept'
     wake = wake or wake_queue()
     if wake.writer_live(session):
         return 'kept'
