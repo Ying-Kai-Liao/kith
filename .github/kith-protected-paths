@@ -1,13 +1,79 @@
+# A PR touching any of these needs the owner's yes before reviewer merges it (kith-merge). One path per line; a line
+# ending in / is a folder. This list counts on both the base branch and the PR, so a PR can't drop an entry to pass.
+
+# who may do what: the kernel's gates
 kernel/bin/kith
 kernel/bin/kith-auth
 kernel/bin/kith-permit
 kernel/bin/kith-sessions
 kernel/bin/kith-wake
+kernel/bin/kith-sched
+kernel/bin/kith-ask
+kernel/bin/kith-send
+kernel/lib/kith_guard.py
+kernel/lib/kith_paths.py
+kernel/lib/guest-env.sh
+
+# the host's gates and the wire
 serve/host/src/api/roles.rs
+serve/host/src/api/devices.rs
+serve/host/src/store/devices.rs
 serve/host/src/cards/
 serve/host/src/runauth.rs
+serve/host/src/remote/
+serve/host/crates/wire/src/rpc.rs
+serve/contract/
+serve/cloud/
+
+# the verify skills, their models and every file they cover (.claude/skills/*/SKILL.md, verification/*/drift.sh)
+.claude/skills/
 verification/
+# revoke-access
+kernel/lib/kith_door.py
+serve/host/src/channels/core.rs
+serve/host/src/channels/queue.rs
+serve/host/src/channels/run.rs
+serve/host/src/channels/hq.rs
+serve/host/src/channels/settings.rs
+serve/host/src/api/people.rs
+serve/host/src/api/botguests.rs
+serve/host/src/run_outbox.rs
+serve/host/src/doors.rs
+kernel/tests/kith-auth-props
+kernel/tests/kith-auth-props.py
+# secret-cards
+serve/host/src/store/cards.rs
+serve/host/src/api/cards.rs
+serve/host/src/api/bots.rs
+# thread-writers
+kernel/bin/kith-lifecycle
+serve/host/src/terminal/mod.rs
+serve/host/src/terminal/registry.rs
+serve/host/src/terminal/sync.rs
+serve/host/src/terminal/claim.rs
+serve/host/src/api/threads.rs
+serve/host/src/agent/bot/queue.rs
+serve/host/src/agent/bot/turn.rs
+serve/host/src/agent/bot/session.rs
+serve/host/src/hub/actors.rs
+# run-tokens
+kernel/bin/kith-recall
+kernel/bin/kith-memory
+kernel/bin/project-id
+kernel/lib/kith_runsocket.py
+kernel/lib/kith_recall.py
+serve/host/src/runauth_props.rs
+# invitee-access
+serve/host/src/agent/folder.rs
+serve/host/src/api/mod.rs
+serve/host/src/api/events.rs
+serve/host/src/api/remote.rs
+serve/host/src/api/peers.rs
+serve/host/src/api/calls.rs
+serve/host/src/store/botguests.rs
+serve/host/src/api/roles_props.rs
+serve/host/src/api/botguests_props.rs
+
 .github/workflows/
 packaging/
-serve/cloud/
 .github/kith-protected-paths
