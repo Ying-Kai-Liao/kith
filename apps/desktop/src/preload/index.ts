@@ -163,6 +163,7 @@ const bridge: KithBridge = {
     reportError: (report) => ipcRenderer.send('app:reportError', report),
     openExternal: (url) => ipcRenderer.send('app:openExternal', url),
     openMemoryFile: (path) => ipcRenderer.send('app:openMemoryFile', path),
+    linkPreview: (url) => ipcRenderer.invoke('app:linkPreview', url),
     copy: (text) => ipcRenderer.send('app:copy', text),
     pickFiles: () => ipcRenderer.invoke('app:pickFiles'),
     pickFolder: (defaultPath) => ipcRenderer.invoke('app:pickFolder', defaultPath ?? null),

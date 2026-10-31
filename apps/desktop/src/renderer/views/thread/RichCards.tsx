@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLinkPictures, useLinkPreview, usePrefetch } from '../../lib/link-preview'
 import type { Entry } from '@shared/models'
 import type { RichCard } from '@shared/rich-card'
 import { ownerNameFrom } from '@shared/mac-role'
@@ -132,7 +133,8 @@ export function ScheduleCard({ entry, card }: { entry: Entry; card: RichCard }) 
 // Links opened this session go quiet, so a second look shows what's left.
 const openedLinks = new Set<string>()
 
-function NewsItem({ row }: { row: NewsRow }) {
+function NewsItem({ row, pictures }: { row: NewsRow; pictures: boolean }) {
+  const { preview, late } = useLinkPreview(row.url, pictures)
   const [quiet, setQuiet] = useState(openedLinks.has(row.url))
   const open = () => {
     openedLinks.add(row.url)
@@ -141,12 +143,20 @@ function NewsItem({ row }: { row: NewsRow }) {
   }
   return (
     <button className={quiet ? 'rc-news-row quiet' : 'rc-news-row'} title={row.url} onClick={open}>
-      <span className="rc-news-title">{row.title}</span>
-      {row.line ? <span className="rc-news-line">{row.line}</span> : null}
-      <span className="rc-news-source">
-        {row.source ? `${row.source} · ` : null}
-        <span className="rc-news-domain">{row.domain}</span>
+      <span className="rc-news-text">
+        <span className="rc-news-title">{row.title}</span>
+        {row.line ? <span className="rc-news-line">{row.line}</span> : null}
+        <span className="rc-news-source">
+          {preview?.icon ? <img className={late ? 'rc-news-icon late' : 'rc-news-icon'} src={preview.icon} alt="" aria-hidden /> : null}
+          {row.source ? `${row.source} · ` : null}
+          <span className="rc-news-domain">{row.domain}</span>
+        </span>
       </span>
+      {preview?.image ? (
+        <span className="rc-news-pic" aria-hidden>
+          <img className={late ? 'late' : undefined} src={preview.image} alt="" />
+        </span>
+      ) : null}
     </button>
   )
 }
@@ -155,7 +165,11 @@ function NewsItem({ row }: { row: NewsRow }) {
 export function NewsCard({ entry, card }: { entry: Entry; card: RichCard }) {
   const [expanded, setExpanded] = useState(false)
   const [opened, setOpened] = useState(false)
+  const store = useStore()
   const view = newsView(card, { postedAt: entry.createdAt, now: Date.now(), expanded, opened })
+  // A folded card fetches nothing until opened; an open one fetches every row, "Show N more" included.
+  const pictures = useLinkPictures(store.isOwner)
+  usePrefetch(view.fold ? [] : view.rows.map((r) => r.url), pictures)
   if (view.fold) {
     const at = new Date(entry.createdAt)
     const trailing = `${at.getHours()}:${String(at.getMinutes()).padStart(2, '0')}`
@@ -169,7 +183,7 @@ export function NewsCard({ entry, card }: { entry: Entry; card: RichCard }) {
         {view.every ? <span className="rc-trailing">{view.every}</span> : null}
       </div>
       <div className="rc-group">
-        {view.shown.map((row, i) => <NewsItem key={`${i}-${row.url}`} row={row} />)}
+        {view.shown.map((row, i) => <NewsItem key={`${i}-${row.url}`} row={row} pictures={pictures} />)}
         {view.more > 0 ? (
           <button className="rc-news-more" onClick={() => setExpanded(true)}>
             {`Show ${view.more} more`}

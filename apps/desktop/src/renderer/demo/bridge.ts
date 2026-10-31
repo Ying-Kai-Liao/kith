@@ -124,6 +124,7 @@ const bridge: KithBridge = {
     onCommand: none,
     resetAllData: async () => {},
     setLaunchAtLogin: async () => false,
+    linkPreview: async () => ({ image: null, icon: null }),
     showInDock: async () => true,
     setShowInDock: async () => true,
     setAppearance: () => {},

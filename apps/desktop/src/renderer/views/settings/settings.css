@@ -308,3 +308,7 @@
   overflow-wrap: anywhere;
   user-select: text;
 }
+
+.card-section-footer p + p {
+  margin-top: 6px;
+}
