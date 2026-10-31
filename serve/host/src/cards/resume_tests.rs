@@ -497,7 +497,7 @@ async fn stop_wins_over_a_yes_already_given_also_across_a_restart() {
     attempt(&r.hub, &card.id).await;
     assert_eq!(queue_says(&r, &card), "queued");
     // The Stop button: `Hub::stop_place` calls this first.
-    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    resume::stopped_lane(&r.hub, &chat, &Lane::main(&chat));
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn, "closed, not merely released");
     queue_says_eventually(&r, &card, "withdrawn").await;
     // Neither a restart nor the host's look brings the stopped turn back.
@@ -516,7 +516,7 @@ async fn after_a_stop_another_yes_makes_only_its_own_turn() {
     off(&r.hub);
     let old = bot_card_approved(&r, &chat, "");
     attempt(&r.hub, &old.id).await;
-    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    resume::stopped_lane(&r.hub, &chat, &Lane::main(&chat));
     queue_says_eventually(&r, &old, "withdrawn").await;
     let new = bot_card_approved(&r, &chat, "");
     assert_eq!(attempt(&r.hub, &new.id).await, Step::Done);
@@ -539,7 +539,7 @@ async fn a_stop_that_finds_a_turn_taken_but_not_started_drops_it() {
     let entry = bot_seen(&card)[0].entry.clone().unwrap();
     assert_eq!(queue_says(&r, &card), "running");
     // The actor's queue held the wake when Stop came: it is dropped, and the card ends.
-    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    resume::stopped_lane(&r.hub, &chat, &Lane::main(&chat));
     resume::not_started(&r.hub, &[entry], false);
     queue_says_eventually(&r, &card, "withdrawn").await;
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn);
@@ -917,7 +917,7 @@ async fn a_stopped_saved_key_card_is_not_woken_later_even_if_its_request_was_on_
     let card = bot_card_approved(&r, &chat, "");
     // Stop closes it while an attempt had already claimed it and is about to enqueue (the stale copy below).
     assert!(r.hub.store.card_resume_claim(&card.id, now_ms()).unwrap());
-    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    resume::stopped_lane(&r.hub, &chat, &Lane::main(&chat));
     let door = door_of(&card).unwrap();
     resume::enqueue(&r.hub, &card, &door).await.unwrap();
     queue_says_eventually(&r, &card, "withdrawn").await;

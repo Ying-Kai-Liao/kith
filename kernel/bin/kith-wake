@@ -282,7 +282,6 @@ def withdraw_person(persons):
     person: it is found by its session. Returns how many requests and waiters went."""
     with locked():
         sessions = [it['session'] for _, it in items() if it.get('person') in persons]
-    sessions += [w['session'] for _, w in waits() if w.get('person') in persons and w['session'] not in sessions]
     return sum(withdraw(s) for s in sessions)
 
 

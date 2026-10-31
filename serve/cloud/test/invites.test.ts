@@ -418,7 +418,8 @@ describe("revoking a person on every computer of the owner (R6, R7)", () => {
     expect(JSON.stringify(r.body)).toContain("access to this computer was removed");
     expect((await unrevoke(b, friend.userId)).body).toEqual({ ok: true });
     for (const h of [a, b]) expect((await state(h)).revoked).toEqual([]);
-    expect((await accept(friend, fresh.inviteId, fresh.token)).status).toBe(200);
+    // The undo gave back the membership on b, so the fresh invite finds the account already a member there.
+    expect((await accept(friend, fresh.inviteId, fresh.token)).status).toBe(409);
   });
 
   it("gives back the memberships the revoke cut when it is undone, and only those", async () => {
@@ -434,6 +435,22 @@ describe("revoking a person on every computer of the owner (R6, R7)", () => {
     await revoke(a, friend.userId);
     await unrevoke(a, friend.userId);
     expect((await state(a)).memberships).toEqual([]);
+  });
+
+  it("grants the account's devices again under new ids when undone, unless the owner had ended the grant", async () => {
+    const { a, b, friend } = await twoMacs();
+    const { grantId } = await grantAccess(friend, b);
+    await revoke(a, friend.userId);
+    expect((await state(b)).grants).toEqual([]);
+    expect((await unrevoke(a, friend.userId)).body).toEqual({ ok: true });
+    const grants = (await state(b)).grants as Json[];
+    expect(grants).toHaveLength(1);
+    expect(grants[0]!.grantId).not.toBe(grantId);
+    // A grant the owner ended on its own stays ended through a revoke and its undo.
+    expect((await call("POST", `/v1/host/grants/${grants[0]!.grantId}/revoke`, { key: b.sign, body: {} })).status).toBe(200);
+    await revoke(a, friend.userId);
+    await unrevoke(a, friend.userId);
+    expect((await state(b)).grants).toEqual([]);
   });
 
   it("is per owner: another owner's computers and lists are untouched", async () => {

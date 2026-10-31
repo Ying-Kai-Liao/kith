@@ -109,6 +109,19 @@ impl Store {
         Ok(())
     }
 
+    /// Everyone something is kept for.
+    pub fn suspended_people(&self) -> Result<Vec<String>> {
+        let c = self.db.locked();
+        let mut out: Vec<String> = Vec::new();
+        for table in ["suspended_devices", "suspended_memberships", "suspended_invites"] {
+            let mut q = c.prepare(&format!("SELECT DISTINCT person_id FROM {table}"))?;
+            out.extend(q.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?);
+        }
+        out.sort();
+        out.dedup();
+        Ok(out)
+    }
+
     /// What is kept for `person`, as counts.
     #[cfg(test)]
     pub fn suspended_of(&self, person: &str) -> Result<Moved> {

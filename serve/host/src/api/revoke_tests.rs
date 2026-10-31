@@ -164,11 +164,12 @@ async fn a_revoke_on_another_mac_arrives_with_the_pull_and_so_does_its_undo() {
     cloud::pull(&r.hub, &base).await.unwrap();
     assert_eq!(r.who("user_sam")["revoked"], true);
 
-    // The cloud's own undo lists the account's membership again; this Mac gives back what the revoke kept.
+    // The cloud's own undo lists the account's membership again, and grants its device anew under another id (the relay
+    // lifts its block only for another grant); this Mac gives back what the revoke kept.
     let membership = r.hub.store.suspended_of("sam").unwrap();
     assert_eq!(membership.memberships, 1, "the membership waited for the undo");
     r.set_cloud_state(json!({"owner": {"userId": "user_owner"}, "requests": [], "revoked": [],
-        "grants": [{"grantId": "grt_sam-phone", "deviceKey": "sam-phone", "userId": "user_sam"}],
+        "grants": [{"grantId": "grt_sam-phone-again", "deviceKey": "sam-phone", "userId": "user_sam"}],
         "memberships": [{"membershipId": "mem_sam", "userId": "user_sam", "inviteId": invite_id}]}));
     cloud::pull(&r.hub, &base).await.unwrap();
     assert!(r.allowed("sam", "house"));
@@ -289,7 +290,21 @@ async fn a_removal_deletes_what_a_revoke_keeps() {
     joined(&r).await;
     call(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap();
     assert_eq!(r.hub.store.suspended_of("sam").unwrap().memberships, 1);
-    // Their membership is gone from the cloud while they are not revoked: that is a removal, and nothing is kept.
+    // Removed while still revoked (kith-auth --rm has no host step): the next pull forgets what was kept.
+    r.auth(&["person", "sam", "--rm"]);
+    r.set_cloud_state(
+        json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": []}),
+    );
+    cloud::pull(&r.hub, &cloud::url(&r.hub.store).unwrap()).await.unwrap();
+    assert_eq!(r.hub.store.suspended_of("sam").unwrap(), crate::store::Moved::default());
+    assert_eq!(r.hub.store.suspended_people().unwrap(), Vec::<String>::new());
+}
+
+#[tokio::test]
+async fn a_membership_gone_from_the_cloud_while_not_revoked_is_a_removal() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    call(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap();
     call(&r, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
     r.set_cloud_state(
         json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": []}),

@@ -68,13 +68,6 @@ async fn end_with(bin: &std::path::Path, sessions: &[String], persons: &[String]
     }
 }
 
-/// [`end`] without waiting, for the sync callers of Stop.
-pub fn end_soon(sessions: Vec<String>, persons: Vec<String>) {
-    if let Ok(rt) = tokio::runtime::Handle::try_current() {
-        drop(rt.spawn(async move { end(&sessions, &persons).await }));
-    }
-}
-
 #[allow(clippy::cast_precision_loss, reason = "micro-dollars far below 2^53")]
 fn usd(micro: i64) -> f64 {
     micro as f64 / 1e6

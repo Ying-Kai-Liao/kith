@@ -464,6 +464,8 @@ def sweep():
 def claim_pid(mid):
     """A --bg call made the record and returned: the detached run's process is the one an end stops."""
     with box_locked():
+        if (read_reg(mid) or {}).get('ended_at'):   # an end came between the record and this claim: the run must not start
+            sys.exit(0)
         patch_reg(mid, pid=os.getpid(), pid_at=time.time())
 
 
@@ -505,11 +507,32 @@ def stop_run(mid, reg):
     pid = reg.get('pid')
     if not pid or int(pid) == os.getpid() or not started_before(pid, reg.get('pid_at') or reg.get('at') or 0):
         return False
-    for victim in descendants(pid)[::-1] + [int(pid)]:
+    victims = descendants(pid)[::-1] + [int(pid)]
+    for victim in victims:
         try:
             os.kill(victim, signal.SIGTERM)
         except OSError:
             pass
+    # SIGTERM can be ignored or take its time: whoever is still there after a short grace is killed, as kith-sessions does.
+    deadline = time.time() + 2
+    while time.time() < deadline and any(alive(v) for v in victims):
+        time.sleep(0.1)
+    for victim in victims:
+        if alive(victim):
+            try:
+                os.kill(victim, signal.SIGKILL)
+            except OSError:
+                pass
+    return True
+
+
+def alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
     return True
 
 

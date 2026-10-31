@@ -26,8 +26,28 @@ pub async fn sync(hub: &Hub, listed: Option<&[Listed]>, owner_uid: Option<&str>)
     if let Err(e) = apply(hub, bin.as_deref(), listed, owner_uid).await {
         tracing::warn!(error = format!("{e:#}"), "couldn't apply the cloud's memberships");
     }
+    if let Some(bin) = bin.as_deref() {
+        forget_removed(hub, bin).await;
+    }
     if let Err(e) = hub.store.audit_prune(now_ms()) {
         tracing::warn!(error = format!("{e:#}"), "couldn't prune the audit log");
+    }
+}
+
+/// A person removed while revoked (kith-auth `--rm`, or the owner dropping them from the list) no longer exists to be
+/// undone: what the revoke kept (device keys, invite token hashes) goes with them, whichever way they were removed.
+async fn forget_removed(hub: &Hub, bin: &Path) {
+    let Ok(kept) = hub.store.suspended_people() else { return };
+    if kept.is_empty() {
+        return;
+    }
+    // Only when kith-auth answers: a failed read must not look like everyone gone.
+    let Ok(people) = auth_people(bin).await else { return };
+    for gone in kept.iter().filter(|k| !people.iter().any(|p| &p.id == *k)) {
+        tracing::info!(person = gone, "a removed person's kept access goes");
+        if let Err(e) = hub.store.forget_suspended(gone) {
+            tracing::warn!(error = format!("{e:#}"), person = gone, "couldn't forget what a removed person kept");
+        }
     }
 }
 
