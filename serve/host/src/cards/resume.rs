@@ -110,7 +110,9 @@ pub fn door_of(card: &Card) -> Option<Door> {
         let len: usize = len.parse().ok()?;
         tail.get(len + 1..).filter(|_| tail.get(..len) == Some(card.person.as_str()))?
     };
-    if inner.is_empty() {
+    // An owner run of the app's chat (`run:o:acp:<chat>:<thread>`, its ask token): no Claude session or channel thread
+    // to wake. The answer is recorded and the agent asks again on its next pass.
+    if inner.is_empty() || inner.starts_with("acp:") {
         return None;
     }
     Some(if inner.contains('#') { Door::Channel(inner.to_owned()) } else { Door::Run { session: inner.to_owned() } })
