@@ -1,0 +1,3 @@
+\* B's door check reads B's own tick only, not cut to what its owner P holds (kith-auth door_state before N2)
+BotDoorNoCut = TRUE
+BotDoor = TRUE
