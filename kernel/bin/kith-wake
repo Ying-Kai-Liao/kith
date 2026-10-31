@@ -295,6 +295,12 @@ def note_for(run, requests):
     return '\n'.join(lines)
 
 
+def claude_session(it):
+    """Whether the item's session is a Claude session id: every run-door item, and a host-door one the host resumes
+    through its run door (not a bot chat's acp:<chat>:<thread>, not a channel thread's owner/repo#n key; resume.rs)."""
+    return it['door'] == 'run' or not (it['session'].startswith('acp:') or '#' in it['session'])
+
+
 def start_turn(path, it, holder, sid=None):
     """TurnStart: the owed requests go into one turn held by holder. Needs queue > 0; the caller has checked the
     session is free (W3). Nothing leaves the queue here (W2)."""
@@ -303,7 +309,7 @@ def start_turn(path, it, holder, sid=None):
     for r in owed:
         r['run'] = run
     it['turn'] = {'run': run, 'pid': holder, 'procStart': proc_start(holder), 'at': stamp(),
-                  'sid': sid or (it['session'] if it['door'] == 'run' else None)}
+                  'sid': sid or (it['session'] if claude_session(it) else None)}
     save(path, it)
     log('turn', session=it['session'], run=run, ids=[r['id'] for r in owed])
     return {'run': run, 'session': it['session'], 'agent': it['agent'], 'person': it['person'], 'room': it['room'],
