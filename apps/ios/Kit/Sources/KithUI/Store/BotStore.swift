@@ -131,6 +131,10 @@ public final class BotStore {
     public var onConnected: (@MainActor (BotStore) -> Void)?
     public var onBotUpdated: (@MainActor (Bot) -> Void)?
     public var onUsageChanged: (@MainActor (ComputerID, Usage) -> Void)?
+    /// Every `call` event, so the system call UI can follow a call the host settles.
+    public var onCallEvent: (@MainActor (IncomingCallEvent) -> Void)?
+    /// Calls the system call UI is answering: the link stays up for them while the app is in the background.
+    var callHolds: Set<String> = []
     /// A message to the bot from this phone moved along (the Live Activity follows it).
     public var onSent: (@MainActor (Bot, SendProgress) -> Void)?
     /// A bot appeared, changed or went away.

@@ -183,6 +183,7 @@ extension BotStore {
         case let .screen(s):
             screen = s
         case let .call(event):
+            onCallEvent?(event)
             if event.ringing && CallPresence.active > 0 {
                 declineCall(event.call)
             } else {

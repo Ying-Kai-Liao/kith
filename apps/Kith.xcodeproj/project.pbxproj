@@ -47,6 +47,7 @@
 		5A4E00000000000000000005 /* ShareComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A4E00000000000000000007 /* ShareComposer.swift */; };
 		5A4E00000000000000000010 /* KithKit in Frameworks */ = {isa = PBXBuildFile; productRef = 5A4E0000000000000000000F /* KithKit */; };
 		89CA3972915769DBA315876F /* Push.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3BF4D3B82FE8274F610C703 /* Push.swift */; };
+		C411A5E7C0DE4B1DA0000001 /* CallKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = C411A5E7C0DE4B1DA0000002 /* CallKit.swift */; };
 		8BB3FC79EB798CE4347E6FD3 /* KithKit in Frameworks */ = {isa = PBXBuildFile; productRef = 50F314172CC2AD1C5CDC916A /* KithKit */; };
 		921ED46A1643AB90BB3D4CF7 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99C11684BFBEB49006600A9 /* Session.swift */; };
 		9638BAA981354C4CE72884A0 /* HostLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CC3E47D480A5F15CA95C504 /* HostLink.swift */; };
@@ -171,6 +172,7 @@
 		DC3927FC6343A00B3970BC08 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		DD3DE9A4EEB369C4F75C9448 /* ActivityGalleryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityGalleryView.swift; sourceTree = "<group>"; };
 		E3BF4D3B82FE8274F610C703 /* Push.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Push.swift; sourceTree = "<group>"; };
+		C411A5E7C0DE4B1DA0000002 /* CallKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKit.swift; sourceTree = "<group>"; };
 		ECD0B4EA4BBA2BB2826C4362 /* PairingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingView.swift; sourceTree = "<group>"; };
 		F21AEC12DC761C28A997BEF3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		F6932F782C1B87C9608359A6 /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
@@ -412,6 +414,7 @@
 				31BFDAD6DCCE1CC98642ACDD /* AccountSession.swift */,
 				A65FE0504B741D0B44DB2516 /* KithApp.swift */,
 				E3BF4D3B82FE8274F610C703 /* Push.swift */,
+				C411A5E7C0DE4B1DA0000002 /* CallKit.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -733,6 +736,7 @@
 				E695251CFD06AC6F4E3396B7 /* OpenBotIntent.swift in Sources */,
 				719EABCBBAC0A973D729363A /* PairingView.swift in Sources */,
 				89CA3972915769DBA315876F /* Push.swift in Sources */,
+				C411A5E7C0DE4B1DA0000001 /* CallKit.swift in Sources */,
 				0631979397E0D6822747E03A /* RootView.swift in Sources */,
 				BF77DD7946621D8818EDAB9B /* SettingsView.swift in Sources */,
 				76E77CC8A2B7C74213512FAB /* SignInButtons.swift in Sources */,
@@ -825,7 +829,7 @@
 				KITH_SCREEN_BUNDLE_ID = com.yingkailiao.kith.dev.screen;
 				KITH_SCREEN_NAME = KithDevScreen;
 				KITH_LEGACY_URL_SCHEME = "codync-dev";
-				KITH_PUSH_RELAY_HOST = codync-relay.kevin2005ha.workers.dev;
+				KITH_PUSH_RELAY_HOST = kith-relay.lykevin890919.workers.dev;
 				KITH_URL_SCHEME = "kith-dev";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 24;
@@ -934,7 +938,7 @@
 				KITH_SCREEN_BUNDLE_ID = com.yingkailiao.kith.screen;
 				KITH_SCREEN_NAME = KithScreen;
 				KITH_LEGACY_URL_SCHEME = codync;
-				KITH_PUSH_RELAY_HOST = codync-relay.kevin2005ha.workers.dev;
+				KITH_PUSH_RELAY_HOST = kith-relay.lykevin890919.workers.dev;
 				KITH_URL_SCHEME = kith;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 24;
@@ -1194,7 +1198,7 @@
 				KITH_SCREEN_BUNDLE_ID = com.yingkailiao.kith.screen;
 				KITH_SCREEN_NAME = KithScreen;
 				KITH_LEGACY_URL_SCHEME = codync;
-				KITH_PUSH_RELAY_HOST = codync-relay.kevin2005ha.workers.dev;
+				KITH_PUSH_RELAY_HOST = kith-relay.lykevin890919.workers.dev;
 				KITH_URL_SCHEME = kith;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 24;
@@ -1357,7 +1361,7 @@
 				KITH_SCREEN_BUNDLE_ID = com.yingkailiao.kith.dev.screen;
 				KITH_SCREEN_NAME = KithDevScreen;
 				KITH_LEGACY_URL_SCHEME = "codync-dev";
-				KITH_PUSH_RELAY_HOST = codync-relay.kevin2005ha.workers.dev;
+				KITH_PUSH_RELAY_HOST = kith-relay.lykevin890919.workers.dev;
 				KITH_URL_SCHEME = "kith-dev";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = 24;
