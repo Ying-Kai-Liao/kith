@@ -19,6 +19,9 @@
                                       else a wake of their session (the host, for a parked card's later turn or no)
   kith ask --answer ID --progress -- TEXT   a progress note instead: kept for --wait (and carried by the answer's wake),
                                       it never wakes anyone. `kith-send --to ask:ID --progress TEXT` does the same
+  kith ask --end [--session S]... [--person P]...   Stop, revoke, removal: ends the delegations those sessions or people
+                                      started (their --bg runs stopped, their records settled `stopped`, no answer wakes the
+                                      caller after), and withdraws the wakes and waiters those callers are owed
   kith ask --sweep                      answers nobody read whose asker's session has ended become its wake (the tick)
   kith ask delegations --json           the delegation records on this Mac, newest first (the host reads them)
   kith ask --cap [N|none]               the cost cap of a delegation chain in dollars (default 5; settings.json
@@ -67,7 +70,7 @@ and cross to another at most twice, and may cost US$5 (kith ask --cap): an ask p
 the cap is reached (without a host the refusal alone says so). A registration from before the record reads as a root ask
 at hop 0 with its cost unknown. One lock (.lock) over reading, appending, the records and handing over.
 """
-import datetime as dt, fcntl, hashlib, importlib.util, json, os, re, subprocess, sys, time
+import datetime as dt, fcntl, hashlib, importlib.util, json, os, re, signal, subprocess, sys, time
 from contextlib import contextmanager
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
@@ -246,7 +249,7 @@ def open_record(mid, asked, crossing=False):
                'via': os.environ.get('KITH_VIA') or 'terminal',
                'reply_to': {'session': os.environ.get('CLAUDE_CODE_SESSION_ID') or None, 'ask': place['ask']},
                'chain': chain, 'hop': place['hop'], 'cross_hops': place['cross_hops'], 'crossed': place['crossed'],
-               'cost': 0.0, 'cost_base': place['cost_base'], 'state': 'open', 'at': time.time()}
+               'cost': 0.0, 'cost_base': place['cost_base'], 'state': 'open', 'at': time.time(), 'pid': os.getpid(), 'pid_at': time.time()}
         write_reg(mid, reg)
         return reg
 
@@ -372,8 +375,8 @@ def hand_over(mid, wake=None):
     sync_state(mid)
     reg = read_reg(mid)
     session = (reg or {}).get('reply_to', {}).get('session')
-    if not reg or reg.get('delivered') or reg.get('woke_answer') or not (session and reg.get('agent')):
-        return 'kept'   # woke_answer: the answer woke its caller; later ones are for --wait only
+    if not reg or reg.get('delivered') or reg.get('woke_answer') or reg.get('ended_at') or not (session and reg.get('agent')):
+        return 'kept'   # ended_at: Stop, a revoke or a removal ended it; no answer wakes the caller after (R8)   # woke_answer: the answer woke its caller; later ones are for --wait only
     wake = wake or wake_queue()
     if wake.writer_live(session):
         return 'kept'
@@ -406,6 +409,8 @@ def answer(mid, text, who, kind='answer'):
     """kith ask --answer: one reply to mid, appended and handed over in the same step. The same answer again is a
     duplicate and wakes no one twice; a progress reply is stored and wakes no one."""
     with box_locked():
+        if (read_reg(mid) or {}).get('ended_at'):
+            return 'stopped'   # Stop wins over an answer on its way (R8): nothing is kept, nothing wakes
         if kind == 'answer' and any(kind_of(r) == 'answer' and said(r) == text for r in lines_of(mid)):
             return 'duplicate'
         with open(box(mid, 'jsonl'), 'a') as f:
@@ -431,7 +436,7 @@ def sweep():
         for reg_file in sorted(BOX.glob('*.reg')):
             mid = reg_file.name[:-len('.reg')]
             reg = read_reg(mid) or {}
-            if len(lines_of(mid)) > read_count(mid) and not (reg.get('delivered') or reg.get('woke_answer')):
+            if len(lines_of(mid)) > read_count(mid) and not (reg.get('delivered') or reg.get('woke_answer') or reg.get('ended_at')):
                 wake = wake or wake_queue()   # loaded once, and only when some mailbox has something unread
                 out[mid] = hand_over(mid, wake)
             else:
@@ -440,6 +445,98 @@ def sweep():
                 reg_file.unlink(missing_ok=True)
                 box(mid, 'parked').unlink(missing_ok=True)
     return out
+
+
+def claim_pid(mid):
+    """A --bg call made the record and returned: the detached run's process is the one an end stops."""
+    with box_locked():
+        patch_reg(mid, pid=os.getpid(), pid_at=time.time())
+
+
+def started_before(pid, t):
+    """Whether pid is a live process that began no later than t: a pid recorded at t and reused since began after it."""
+    try:
+        out = subprocess.run(['ps', '-o', 'etime=', '-p', str(int(pid))], capture_output=True, text=True).stdout.strip()
+        days, _, clock = out.rpartition('-')
+        parts = [int(x) for x in clock.split(':')]
+        secs = sum(n * m for n, m in zip(reversed(parts), (1, 60, 3600))) + (int(days) * 86400 if days else 0)
+    except (OSError, ValueError, TypeError):
+        return False
+    return time.time() - secs <= t + 2
+
+
+def descendants(pid):
+    """pid's children, their children, and so on (one look at the process table)."""
+    try:
+        table = subprocess.run(['ps', '-A', '-o', 'pid=,ppid='], capture_output=True, text=True).stdout.split('\n')
+    except OSError:
+        return []
+    kids = {}
+    for row in table:
+        got = row.split()
+        if len(got) == 2 and all(x.isdigit() for x in got):
+            kids.setdefault(int(got[1]), []).append(int(got[0]))
+    out, todo = [], [int(pid)]
+    while todo:
+        for kid in kids.get(todo.pop(), ()):
+            if kid not in out:
+                out.append(kid)
+                todo.append(kid)
+    return out
+
+
+def stop_run(mid, reg):
+    """Stops the run behind mid if it still goes: the agent and what it started (the children of the kith ask process that
+    waits for it), then that process. Its pid is checked first, so a reused pid is left alone."""
+    pid = reg.get('pid')
+    if not pid or int(pid) == os.getpid() or not started_before(pid, reg.get('pid_at') or reg.get('at') or 0):
+        return False
+    for victim in descendants(pid)[::-1] + [int(pid)]:
+        try:
+            os.kill(victim, signal.SIGTERM)
+        except OSError:
+            pass
+    return True
+
+
+def end_asks(sessions=(), persons=()):
+    """Stop, revoke and removal in one step (R5, R8): every delegation whose caller is one of `sessions` (reply_to.session) or
+    `persons` (the person it was asked for, or the person of the --bg job) ends. Its run is stopped, its record is settled
+    `stopped` and marked ended (nothing answers into it, hands over or resumes it afterwards), what its mailbox holds counts
+    as read, and a card it parked on has nothing to resume. Then the wakes and waiters those callers are owed are withdrawn
+    (a turn already running keeps what it carries: the host's Recheck refuses that one). A record already delivered or
+    answered to its caller is history and stays. A record from before reply_to has no session and belongs to no lane, unless
+    its caller's person is named. Returns the ids ended."""
+    sessions, persons = set(sessions), set(persons)
+    ended, owed = [], set(sessions)
+    wake = wake_queue()
+    with box_locked():
+        for mid, reg in sorted(records().items()):
+            if reg.get('ended_at') or reg.get('delivered') or reg.get('woke_answer'):
+                continue
+            job = job_of(mid) or {}
+            mine = reg['reply_to'].get('session') in sessions if sessions else False
+            mine = mine or (reg.get('person') in persons or job.get('person') in persons if persons else False)
+            if not mine:
+                continue
+            stop_run(mid, reg)
+            box(mid, 'parked').unlink(missing_ok=True)
+            reg.update(state='stopped', ended_at=time.time(), done=True, answered_at=reg.get('answered_at') or time.time())
+            write_reg(mid, reg)
+            box(mid, 'read').write_text(str(len(lines_of(mid))))
+            ended.append(mid)
+            if reg['reply_to'].get('session'):
+                owed.add(reg['reply_to']['session'])
+            try:   # the --bg run's own session is owed follow-ups (kith ask --to): they end with it
+                owed.add(open(BG / (mid + '.sid')).read().strip())
+            except OSError:
+                pass
+    owed.discard('')
+    for session in sorted(owed):
+        wake.withdraw(session)
+    if persons:
+        wake.withdraw_person(sorted(persons))
+    return ended
 
 
 def note_job(mid, agent, key):
@@ -692,6 +789,9 @@ def reply(argv):
     if len(argv) < 6 or not ID.fullmatch(argv[0]) or argv[2] != '--resume' or argv[4] != '--':
         sys.exit('usage: kith ask --reply ID AGENT --resume SESSION -- NOTE')
     mid, agent, session, note = argv[0], argv[1], argv[3], ' '.join(argv[5:])
+    if (read_reg(mid) or {}).get('ended_at'):   # Stop wins over a yes already given (R8): the run is not resumed
+        print('kith ask: %s was ended; nothing to resume' % mid, file=sys.stderr)
+        return 0
     box(mid, 'parked').unlink(missing_ok=True)
     env = dict(os.environ, KITH_OUTPUT='json', KITH_LAUNCH_ASK_ID=mid)
     proc = subprocess.run([str(KITH / 'bin/kith'), agent, '--resume', session, '--', note], env=env,
@@ -741,6 +841,17 @@ def main(argv):
         if from_agent_run():
             sys.exit('kith ask: only the host marks a cap card raised')
         cap_told(argv[1]); return 0
+    if argv[0] == '--end':
+        if from_agent_run():
+            sys.exit('kith ask: only the owner (or the host, on Stop, a revoke or a removal) ends delegations')
+        sessions, persons, i = [], [], 1
+        while i < len(argv):
+            if argv[i] in ('--session', '--person') and i + 1 < len(argv):
+                (sessions if argv[i] == '--session' else persons).append(argv[i + 1]); i += 2
+            else:
+                sys.exit('usage: kith ask --end [--session S]... [--person P]...')
+        print('ended %s' % ' '.join(end_asks(sessions, persons)))
+        return 0
     if argv[0] == 'delegations':   # --json is the only form
         return delegations()
     if argv[0] == '--sweep':
@@ -756,6 +867,8 @@ def main(argv):
         mid = os.environ.pop('KITH_ASK_BG', None) or new_id('ask')
         if read_reg(mid) is None:
             open_record(mid, argv[0], crossing=True)
+        else:
+            claim_pid(mid)
         code = 1
         try:
             code = subprocess.run([str(KITH / 'bin/kith-remote'), 'ask', *argv],
@@ -842,6 +955,8 @@ def main(argv):
         env['KITH_LAUNCH_SID_FILE'] = str(BG / (bg_id + '.sid'))
     if read_reg(mid) is None:   # a --bg call made it when it began
         open_record(mid, agent)
+    elif bg_id:
+        claim_pid(mid)
     # A run kith-remote started for another Mac's ask got its chain in KITH_ASK_*: the record holds it now, and the run's
     # own asks find it through KITH_ASK_ID.
     for k in ('KITH_ASK_CHAIN', 'KITH_ASK_HOP', 'KITH_ASK_CROSS', 'KITH_ASK_FROM', 'KITH_ASK_COST'):

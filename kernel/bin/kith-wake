@@ -4,6 +4,7 @@
   kith-wake enqueue SESSION --id ID --agent AGENT [--person P] [--room R] [--door run|host] [--why WHY] -- TEXT
                                   ask for a turn of SESSION; prints queued, merged or duplicate
   kith-wake withdraw SESSION [--id ID]   Stop: drop what SESSION is still owed (not what a running turn already holds)
+  kith-wake withdraw-person PERSON...    revoke or removal: drop what every session of these people is owed, and their waiters
   kith-wake take --holder PID [--session SESSION] [--sid CLAUDE_SID]
                                   the host starts a host-door turn: prints it as JSON (exit 1 when nothing is owed)
   kith-wake done RUN [--how HOW]  the turn RUN ended: what it carried is answered (--how withdrawn: dropped, not delivered)
@@ -273,6 +274,16 @@ def withdraw(session, rid=None):
         save(path, it)
         log('withdraw', session=session, ids=[r['id'] for r in gone])
         return len(gone) + waits
+
+
+def withdraw_person(persons):
+    """Revoke or removal: everything the sessions of `persons` are owed is withdrawn as Stop does it (a request a running turn
+    carries stays with that turn; the host's Recheck refuses it), and the waiters of those sessions go. A waiter carries no
+    person: it is found by its session. Returns how many requests and waiters went."""
+    with locked():
+        sessions = [it['session'] for _, it in items() if it.get('person') in persons]
+    sessions += [w['session'] for _, w in waits() if w.get('person') in persons and w['session'] not in sessions]
+    return sum(withdraw(s) for s in sessions)
 
 
 def note_for(run, requests):
@@ -648,6 +659,8 @@ def main(argv):
     w = sub.add_parser('withdraw')
     w.add_argument('session')
     w.add_argument('--id')
+    wp = sub.add_parser('withdraw-person')
+    wp.add_argument('persons', nargs='+')
     t = sub.add_parser('take')
     t.add_argument('--holder', type=int, required=True)
     t.add_argument('--session')
@@ -678,6 +691,8 @@ def main(argv):
         print(enqueue(a.session, a.id, a.agent, ' '.join(a.text), a.person, a.room, a.door, a.why))
     elif a.cmd == 'withdraw':
         print(f'withdrew {withdraw(a.session, a.id)}')
+    elif a.cmd == 'withdraw-person':
+        print(f'withdrew {withdraw_person(a.persons)}')
     elif a.cmd == 'take':
         turn = take(a.holder, a.session, a.sid)
         if not turn:
