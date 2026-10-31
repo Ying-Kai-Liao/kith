@@ -48,3 +48,36 @@ app-only	PROPERTY	NeverWakeHold	fail
 app-only	PROPERTY	NeverHeldServed	fail
 door	INVARIANT	NeverDoorRuns	fail
 door	INVARIANT	NeverDoorKilled	fail
+# --- round 4: a revoke parks devices, memberships and invites (undo exact); Stop and revoke end delegations and wakes; a handle revoke reaches a paired Mac
+items	INVARIANT	TypeOK	pass
+items	INVARIANT	ItemsCut	pass
+items	INVARIANT	ItemsExact	pass
+broken-delete-items	INVARIANT	ItemsExact	fail
+items	INVARIANT	NeverItemsBack	fail
+asks	INVARIANT	TypeOK	pass
+asks	PROPERTY	StoppedNeverWakes	pass
+asks	PROPERTY	AsksEnded	pass
+asks	PROPERTY	WakesWithdrawn	pass
+broken-answer-after-end	PROPERTY	StoppedNeverWakes	fail
+broken-no-ask-sweep	PROPERTY	AsksEnded	fail
+broken-no-wake-withdraw	PROPERTY	WakesWithdrawn	fail
+asks	INVARIANT	NeverAnswerWake	fail
+handle	INVARIANT	TypeOK	pass
+handle	PROPERTY	HandleConverges	pass
+handle	PROPERTY	HandleStampsGrow	pass
+handle	PROPERTY	HandleNoCloud	pass
+broken-handle-no-stamp	PROPERTY	HandleStampsGrow	fail
+broken-handle-no-catchup	PROPERTY	HandleConverges	fail
+handle	INVARIANT	NeverHandleOnPeer	fail
+# --- round 5 (review of the sweep): a stamp is lifted above the kept one, a peer's future stamp is refused, a stamp is kept only once applied, a removal forgets what a revoke parked
+handle-skew	INVARIANT	TypeOK	pass
+handle-skew	PROPERTY	HandleConverges	pass
+handle-skew	PROPERTY	HandleStampsMove	pass
+handle-skew	INVARIANT	HandleBounded	pass
+broken-handle-no-bump	PROPERTY	HandleStampsMove	fail
+broken-handle-no-bump	PROPERTY	HandleConverges	fail
+broken-handle-future	INVARIANT	HandleBounded	fail
+broken-handle-store-first	PROPERTY	HandleConverges	fail
+removal	INVARIANT	TypeOK	pass
+removal	INVARIANT	NoOrphan	pass
+broken-removal-orphans	INVARIANT	NoOrphan	fail

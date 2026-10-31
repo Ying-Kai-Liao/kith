@@ -827,9 +827,16 @@ async fn a_bot_ask_waits_for_the_cloud_and_a_revoke_from_another_mac_puts_the_bo
     let e = call(&r, &j.caller, "botThread", thread.clone()).await.unwrap_err();
     assert_eq!(code(&e), Some("syncing"), "and no answer either: {e:#}");
 
+    let kept = r.hub.store.memberships().unwrap();
+    // The cloud lists the memberships a revoke has not cut: none while Sam is revoked, hers again after the undo.
     let pull = |revoked: Value| {
+        let listed: Vec<Value> = kept
+            .iter()
+            .filter(|_| revoked == json!([]))
+            .map(|m| json!({"membershipId": m.membership_id, "userId": m.user_id, "inviteId": m.invite_id}))
+            .collect();
         r.set_cloud_state(
-            json!({"owner": {"userId": "user_owner"}, "memberships": [], "grants": [], "requests": [], "revoked": revoked}),
+            json!({"owner": {"userId": "user_owner"}, "memberships": listed, "grants": [], "requests": [], "revoked": revoked}),
         );
         async {
             let mark = sync_lease::mark(&r.hub);

@@ -437,8 +437,12 @@ pub async fn pull(hub: &Hub, base: &str) -> Result<()> {
     let owner_uid = owner.as_ref().map(|o| o.user_id.clone());
     // Before the memberships: a membership the revoke cut then ends on a person already revoked (R6). A failure fails
     // the pull, so this host stays out of sync instead of serving on access it couldn't apply.
-    for person in super::members::apply_revoked(bin.as_deref(), state.revoked.as_deref()).await? {
+    let changed = super::members::apply_revoked(bin.as_deref(), state.revoked.as_deref()).await?;
+    for person in changed.cut {
         crate::api::people::cut_off(hub, &person).await;
+    }
+    for person in changed.restored {
+        crate::api::people::restored(hub, &person);
     }
     // Before the grants: a member's device is kept only while its account is bound to its person.
     super::members::sync(hub, state.memberships.as_deref(), owner_uid.as_deref()).await;
@@ -525,6 +529,18 @@ pub fn apply_grants(hub: &Hub, grants: &[HostGrant], owner_uid: Option<&str>) ->
             continue;
         }
         let listed = grants.iter().position(|g| Some(&g.grant_id) == d.grant_id.as_ref() && g.device_key == d.key);
+        // The owner's undo of a revoke grants the person's device again under a new id; the row this Mac kept for the
+        // undo is that device (same key, same account), so it follows the new grant instead of needing a new approval.
+        let regranted = || {
+            let mut same = grants.iter().enumerate().filter(|(_, g)| g.device_key == d.key);
+            let (i, g) = same.next()?;
+            (same.next().is_none() && !known[i] && grant_matches(hub, &d, g.user_id.as_deref(), owner_uid)).then_some(i)
+        };
+        let listed = listed.or_else(|| {
+            let i = regranted()?;
+            hub.store.set_grant_id(&d.key, &grants[i].grant_id).ok()?;
+            Some(i)
+        });
         if let Some(i) = listed {
             known[i] = true;
             if grant_matches(hub, &d, grants[i].user_id.as_deref(), owner_uid) {

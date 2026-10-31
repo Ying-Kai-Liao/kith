@@ -71,6 +71,49 @@ A person sam --revoke >/dev/null
 check "a link code made before the revoke is refused" "! A link discord 77 $CODE"
 check "and binds nothing" "[ \"\$(J \"'discord' in d['people']['sam'].get('handles', {})\")\" = False ]"
 A person sam --unrevoke >/dev/null
+check "undo: the link code made before the revoke works again (revoke keeps it)" "A link discord 77 $CODE"
+check "and binds them" "[ \"\$(J \"d['people']['sam']['handles']['discord']\")\" = 77 ]"
+
+# a revoke with nothing else running ends what the kernel holds for them (R5): their delegations, the wakes they are owed
+# (and their waiters), the runs their writer claims name; the owner's stay
+export KITH_STATE=$T/state KITH_WAKE_NO_KICK=1
+mkdir -p "$KITH_STATE/live/ask" "$KITH_STATE/live/terminal"
+python3 - "$KITH_STATE/live/ask" <<'PY'
+import json, sys, time
+box = sys.argv[1]
+def reg(mid, person, session):
+    json.dump({'asked': 'house', 'agent': 'garden', 'person': person, 'via': 'ask', 'reply_to': {'session': session, 'ask': None},
+               'chain': mid, 'hop': 0, 'cross_hops': 0, 'crossed': False, 'cost': 0.0, 'cost_base': 0, 'state': 'open',
+               'at': time.time()}, open(f'{box}/{mid}.reg', 'w'))
+reg('ask-sam', 'sam', 's-sam')
+reg('ask-owner', None, 's-owner')
+# an answer nobody has read yet in sam's mailbox
+open(f'{box}/ask-sam.jsonl', 'w').write(json.dumps({'text': 'done', 'kind': 'answer'}) + '\n')
+PY
+python3 "$KERNEL/bin/kith-wake" enqueue s-sam --id c1 --agent house --person sam --door host -- hi >/dev/null
+python3 "$KERNEL/bin/kith-wake" enqueue s-owner --id c2 --agent house --door host -- hi >/dev/null
+sleep 60 & HOLDER=$!; disown $HOLDER
+python3 "$KERNEL/bin/kith-sessions" proc $HOLDER sam house
+sleep 60 & OWNER_RUN=$!; disown $OWNER_RUN
+check "before: sam's claim holder runs" "kill -0 $HOLDER"
+A person sam --revoke >/dev/null
+R() { python3 -c "import json; print(json.load(open('$KITH_STATE/live/ask/$1.reg'))$2)"; }
+W2() { python3 "$KERNEL/bin/kith-wake" status "$1"; }
+check "revoke: sam's delegation is settled stopped and ended" "[ \"\$(R ask-sam \"['state']\")\" = stopped ] && [ \"\$(R ask-sam \"['ended_at'] > 0\")\" = True ]"
+check "revoke: the owner's delegation is untouched" "[ \"\$(R ask-owner \"['state']\")\" = open ]"
+check "revoke: a wake sam is owed is withdrawn" "[ \"\$(W2 c1)\" = withdrawn ]"
+check "revoke: the owner's wake stays queued" "[ \"\$(W2 c2)\" = queued ]"
+check "revoke: a late answer to sam's delegation is dropped and wakes no one" \
+  "[ \"\$(python3 '$KERNEL/bin/kith-ask' --answer ask-sam -- late)\" = stopped ] && [ \"\$(W2 ask:ask-sam/1)\" = unknown ]"
+sleep 1
+check "revoke: the run sam's claim named is ended" "! kill -0 $HOLDER"
+check "revoke: the owner's process is not" "kill -0 $OWNER_RUN"
+kill $OWNER_RUN 2>/dev/null
+check "revoking again is fine and sweeps nothing more" "A person sam --revoke && [ \"\$(R ask-owner \"['state']\")\" = open ]"
+A person sam --unrevoke >/dev/null
+check "undo: an ended delegation stays ended" "[ \"\$(R ask-sam \"['state']\")\" = stopped ]"
+check "undo: access is back" "A may sam house"
+unset KITH_STATE KITH_WAKE_NO_KICK
 
 # the channels' hold (R8): a linked Mac serves non-owners only while kith serve's lease on the cloud sync is live
 A handle kai telegram 1 >/dev/null

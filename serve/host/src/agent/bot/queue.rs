@@ -196,7 +196,7 @@ impl Actor {
         }
         // A card's wake among them is not delivered later: the wake queue is told it is dropped (R8). Also when the
         // router's Stop ended this place, which no `stop_place` saw.
-        crate::cards::resume::stopped_lane(&self.hub, &self.home);
+        crate::cards::resume::stopped_lane(&self.hub, &self.cfg.id, &self.home);
         crate::cards::resume::not_started(&self.hub, &dropped, false);
         self.cancel_turn().await;
     }

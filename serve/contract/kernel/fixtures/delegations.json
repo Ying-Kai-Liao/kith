@@ -26,7 +26,9 @@
         "started_ms": 1767225600000,
         "answered_ms": 1767225660000,
         "capped_ms": 1767225660000,
-        "cap_card_ms": null
+        "cap_card_ms": null,
+        "brief": null,
+        "session": null
       },
       {
         "id": "ask-old-1",
@@ -51,7 +53,9 @@
         "started_ms": 1767225000000,
         "answered_ms": null,
         "capped_ms": null,
-        "cap_card_ms": null
+        "cap_card_ms": null,
+        "brief": null,
+        "session": null
       }
     ]
   }
