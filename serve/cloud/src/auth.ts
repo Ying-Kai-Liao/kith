@@ -2,7 +2,6 @@
 
 import { verifyToken } from "@clerk/backend";
 import type { Env } from "./index";
-import { LEGACY_LABEL, LEGACY_SIG_HEADER } from "./legacy-compat";
 
 // ---- encoding ----
 
@@ -56,9 +55,6 @@ export async function verifyEd25519(pub: Uint8Array, sig: Uint8Array, msg: Uint8
 
 // ---- Kith-Sig (§5) ----
 
-/** Label families, newest first; the old one is for peers that haven't updated yet (legacy-compat.ts). */
-export const LABEL_FAMILIES = ["kith", LEGACY_LABEL] as const;
-export type LabelFamily = (typeof LABEL_FAMILIES)[number];
 
 export const SIG_WINDOW_MS = 300_000;
 export const NONCE_TTL_MS = 600_000;
@@ -69,7 +65,7 @@ export interface SignedRequest {
   nonce: string;
 }
 
-/** The exact bytes a Kith-Sig signs (with an old `family`, the old header's input). */
+/** The exact bytes a Kith-Sig signs. */
 export async function sigCanonical(
   method: string,
   authority: string,
@@ -77,9 +73,8 @@ export async function sigCanonical(
   ts: number,
   nonce: string,
   body: Uint8Array,
-  family: LabelFamily = "kith",
 ): Promise<string> {
-  return [`${family}-sig-v1`, method.toUpperCase(), authority.toLowerCase(), pathAndQuery, String(ts), nonce, b64url(await sha256(body))].join("\n");
+  return [`kith-sig-v1`, method.toUpperCase(), authority.toLowerCase(), pathAndQuery, String(ts), nonce, b64url(await sha256(body))].join("\n");
 }
 
 /**
@@ -87,7 +82,7 @@ export async function sigCanonical(
  * D1 `sig_nonces` for HTTP, the DO's `nonces` table for relay sockets. `null` = reject.
  */
 export async function verifySig(req: Request, body: Uint8Array, now = Date.now(), headerValue?: string): Promise<SignedRequest | null> {
-  const header = headerValue ?? req.headers.get("Kith-Sig") ?? req.headers.get(LEGACY_SIG_HEADER);
+  const header = headerValue ?? req.headers.get("Kith-Sig");
   if (!header) return null;
   const f = new Map<string, string>();
   for (const part of header.split(",")) {
@@ -103,12 +98,8 @@ export async function verifySig(req: Request, body: Uint8Array, now = Date.now()
   const ts = Number(tsText);
   if (Math.abs(now - ts) > SIG_WINDOW_MS) return null;
   const url = new URL(req.url);
-  // The signed prefix says which family signed; either header name may carry either.
-  for (const family of LABEL_FAMILIES) {
-    const canonical = await sigCanonical(req.method, url.host, url.pathname + url.search, ts, nonce, body, family);
-    if (await verifyEd25519(pub, sig, utf8(canonical))) return { kid: f.get("kid")!, ts, nonce };
-  }
-  return null;
+  const canonical = await sigCanonical(req.method, url.host, url.pathname + url.search, ts, nonce, body);
+  return (await verifyEd25519(pub, sig, utf8(canonical))) ? { kid: f.get("kid")!, ts, nonce } : null;
 }
 
 // ---- Clerk (§8.3) ----

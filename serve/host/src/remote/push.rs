@@ -143,8 +143,7 @@ fn faces(hub: &Hub, bot: &BotConfig, from: Option<&str>) -> Vec<Value> {
 fn seal_for(hub: &Hub, t: &PushTicket, secret: &str) -> Option<String> {
     let key = t.push_key.as_deref().and_then(|k| crypto::unb64_n::<32>(k).ok())?;
     let eph = StaticSecret::from(crypto::random::<32>());
-    let labels = crypto::Labels::from_name(hub.store.kv_get(&format!("push_labels.{}", t.device_key)).as_deref());
-    match crypto::seal_push(labels, &hub.identity.cid_raw(), &key, secret.as_bytes(), &eph) {
+    match crypto::seal_push(crypto::Labels::Kith, &hub.identity.cid_raw(), &key, secret.as_bytes(), &eph) {
         Ok(sealed) => Some(sealed),
         Err(error) => {
             tracing::warn!(error = format!("{error:#}"), "couldn't seal a notification");

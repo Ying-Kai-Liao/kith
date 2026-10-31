@@ -6,7 +6,6 @@ import * as api from "./api";
 import { webOrigins } from "./auth";
 import { ApiError, type Ctx } from "./api";
 import { check, ROUTES, type Responses, type RouteName } from "./contract.gen";
-import * as legacy from "./legacy-compat";
 import * as pages from "./routes/pages";
 import * as download from "./routes/download";
 import * as landing from "./routes/landing";
@@ -56,8 +55,6 @@ const MAX_REQUEST = 128 * 1024;
 
 const handlers: Handlers = {
   health: api.health,
-  oauthLegacyCallback: legacy.oauthLegacyCallback,
-  oauthLegacyDevCallback: legacy.oauthLegacyDevCallback,
   oauthKithCallback: api.oauthKithCallback,
   oauthKithDevCallback: api.oauthKithDevCallback,
   me: api.me,
