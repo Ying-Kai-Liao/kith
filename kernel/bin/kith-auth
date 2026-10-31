@@ -117,7 +117,8 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
   kith-auth door <agent> <id> <door@digest> [--json]
                                           read-only: may the person's runs of the agent start this door now (ok, or
                                           owner, revoked, not-allowed, held, stale, no-job, not-ticked, widened,
-                                          declined); a door's start asks it under the auth lock (kith_door)
+                                          declined, owner-lacks: a bot's tick has it, its owner doesn't); a door's
+                                          start asks it under the auth lock (kith_door)
   kith-auth job <agent> <id> <job> [--shown JSON | --decline HASH | --rm]
                                           tick a job for a person's own row (never `*` or the owner): their runs of the
                                           agent get its pieces as they are now, or as --shown listed them, and never more
@@ -1245,12 +1246,25 @@ def resolve_bot(auth, agent, bot, via, out, once=False):
                deny=list(dict.fromkeys(p.get('deny', []) + row.get('deny', []) + pr.get('deny', []))),
                model=row.get('model') or pr.get('model', ''), env=row.get('env', {}), helpers=helpers,
                budget=budget, budget_agent=budget_agent, was=list(dict.fromkeys(was)))
-    # never more than the owner holds: Kai's own bots are capped by nothing, an invitee's by that invitee's access
-    j = with_jobs(auth, pkg, bot, access_of(row))
-    mine = j['access']
-    out['access'] = mine if owner_parent else {k: [v for v in mine[k] if held(pr.get('access', {}), k, v)] for k in mine}
-    out['doors'] = j['doors'] if owner_parent else [d for d in j['doors'] if d in pr.get('doors', [])]
-    out['jobs'] = j['jobs'] if owner_parent else [n for n in j['jobs'] if n in pr.get('jobs', [])]
+    out.update(owner_cut(auth, agent, bot, with_jobs(auth, pkg, bot, access_of(row)), via, pr))
+    return out
+
+
+def owner_cut(auth, agent, bot, grants, via=None, pr=None):
+    """A bot's grants (any of access, doors, jobs) never more than its owner holds (I6): each cut to what the owner's
+    run of agent (resolve, through via) has. Kai's own bots are capped by nothing, and anyone not a bot is returned as
+    is. resolve_bot and door_state both cut here, so a door a bot may start is one its run would list. pr: the owner's
+    resolve, when the caller has it."""
+    parent = parent_of(auth, bot)
+    if is_owner(auth, parent):
+        return grants
+    pr = pr if pr is not None else resolve(auth, agent, parent, via)
+    out = dict(grants)
+    if 'access' in out:
+        out['access'] = {k: [v for v in vs if held(pr.get('access', {}), k, v)] for k, vs in out['access'].items()}
+    for k in ('doors', 'jobs'):
+        if k in out:
+            out[k] = [x for x in out[k] if x in pr.get(k, [])]
     return out
 
 
@@ -1558,8 +1572,13 @@ def door_state(auth, agent, person, piece):
                 'why': f'{agent} was updated since this chat started; start a new chat to use {name}' if stale
                 else f'no job of {agent} includes the door {name}'}
     out.update(job=job['name'], label=job['label'])
-    if piece in job_grants(auth, agent, person)['doors']:
+    mine = job_grants(auth, agent, person)
+    if piece in owner_cut(auth, agent, person, mine)['doors']:
         return {**out, 'ok': True, 'state': 'ok', 'why': f"part of {job['label']}"}
+    if piece in mine['doors']:
+        # a bot's own tick has it, its owner (an invitee) doesn't: the bot gets no more than they do
+        return {**out, 'state': 'owner-lacks',
+                'why': f"{job['label']} was not given to {parent_of(auth, person)}, whose bot {person} is"}
     view = job_view(auth, agent, person, job)
     if not view['ticked']:
         return {**out, 'state': 'not-ticked', 'why': f"{job['label']} was not given to {person}"}
