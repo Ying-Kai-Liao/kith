@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# kith-sched-origin-check — a scheduled run's origin: kith-sched asks the host (runEnv, owner token) for the call env
+# of the agent's app chat with the job's person only, and keeps the run outbox beside it. A guest with no app chat
+# keeps the outbox (never the owner's Telegram) and the tick log says the delivery is dropped; the owner with no app
+# chat gets no outbox (Telegram, as before); host down: no key, the outbox as before. A key in the caller's own
+# environment is never passed on. A fake host on loopback and a stub bin/kith; throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-sched-origin-check
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sched-origin.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap '[ -n "${srv:-}" ] && { kill "$srv"; wait "$srv"; } 2>/dev/null; rm -rf "$T"' EXIT
+export KITH_AUTH=$T/auth.json HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_SERVE_DIR=$T/serve
+unset KITH_PERSON HQ_PERSON KITH_AGENT HQ_AGENT HQ_HOME HQ_STATE KITH_SCHED_PERMISSION_MODE KITH_RUN_OUTBOX HQ_RUN_OUTBOX
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_SERVE_DIR" "$T/k/bin" "$KITH_HOME/agents/house/role"
+printf -- '---\nname: house\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/house/role/agent.md"
+ln -s "$KERNEL/lib" "$T/k/lib"
+for b in kith-sched kith-ask kith-remote kith-auth; do cp "$KERNEL/bin/$b" "$T/k/bin/$b"; done
+cat > "$T/k/bin/kith" <<'STUB'
+#!/bin/sh
+echo "${KITH_RUN_OUTBOX:-}|${KITH_CALL_CHAT:-}|${KITH_CALL_KEY:-}" > "$KITH_STATE/env-$KITH_SCHED_JOB"
+STUB
+chmod +x "$T/k/bin/kith"
+
+echo tok-1 > "$KITH_SERVE_DIR/token"
+cat > "$T/host.py" <<'PY'
+import http.server, json, os, sys
+state, seen = sys.argv[2], sys.argv[3]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+        with open(seen, 'a') as f:
+            f.write(json.dumps({'path': self.path, 'auth': self.headers['Authorization'], 'body': body}) + '\n')
+        who = body.get('person')
+        owner_chat = not os.path.exists(state + '/no-owner-chat')
+        chats = {None: 'chat-owner' if owner_chat else None, 'sam': 'chat-sam'}
+        chat = chats.get(who)
+        out = {'chat': chat, 'env': {'KITH_CALL_CHAT': chat, 'KITH_CALL_KEY': 'key-for-' + str(who)} if chat else {}}
+        self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+        self.wfile.write(json.dumps(out).encode())
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(('127.0.0.1', 0), H)
+open(sys.argv[1], 'w').write(str(s.server_address[1]))
+s.serve_forever()
+PY
+python3 "$T/host.py" "$T/port" "$T" "$T/seen" & srv=$!
+for _ in $(seq 50); do [ -s "$T/port" ] && break; sleep 0.1; done
+export KITH_SERVE_PORT=$(cat "$T/port")
+
+S() { python3 "$T/k/bin/kith-sched" "$@"; }
+A() { python3 "$T/k/bin/kith-auth" "$@"; }
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+env_of() { for _ in 1 2 3 4 5 6 7 8 9 10; do [ -s "$KITH_STATE/env-$1" ] && break; sleep 0.3; done; cat "$KITH_STATE/env-$1" 2>/dev/null; rm -f "$KITH_STATE/env-$1"; }
+A person kai owner >/dev/null; A person sam name=Sam >/dev/null; A person ann name=Ann >/dev/null
+A member house sam >/dev/null; A member house ann >/dev/null
+S add house "0 8 * * *" "owner's" --id mine >/dev/null
+KITH_PERSON=sam S add house "0 8 * * *" "sam's" --id sams >/dev/null
+KITH_PERSON=ann S add house "0 8 * * *" "ann's" --id anns >/dev/null
+
+# A key in the environment of whatever started kith-sched is not the job's.
+KITH_CALL_CHAT=stolen KITH_CALL_KEY=stolen S run house mine > "$T/out" 2>&1
+got=$(env_of mine)
+check "the owner's job: the owner's chat key and an outbox" "[ \"\${got#*|}\" = 'chat-owner|key-for-None' ] && [ -n \"\${got%%|*}\" ]"
+check "asked as the owner with the host token, for this agent and no person" "tail -1 $T/seen | python3 -c 'import json,sys; s=json.load(sys.stdin); assert s[\"path\"]==\"/api/runEnv\" and s[\"auth\"]==\"Bearer tok-1\" and s[\"body\"]==dict(agent=\"house\", person=None, outbox=False), s'"
+
+S run house sams >/dev/null 2>&1; got=$(env_of sams)
+check "a guest's job: that guest's chat and key, not the owner's" "[ \"\${got#*|}\" = 'chat-sam|key-for-sam' ] && [ -n \"\${got%%|*}\" ]"
+check "asked for the job's person" "tail -1 $T/seen | grep -q '\"person\": \"sam\"'"
+
+S run house anns > "$T/out" 2>&1; got=$(env_of anns)
+check "a guest with no app chat: no key, but the outbox stays (never the owner's Telegram)" "[ \"\${got#*|}\" = '|' ] && [ -n \"\${got%%|*}\" ]"
+check "and the tick log says what is dropped" "grep -q 'ann has no app chat with house' $T/out"
+
+touch "$T/no-owner-chat"
+S run house mine > "$T/out" 2>&1; got=$(env_of mine)
+check "the owner with no app chat: no key and no outbox, so Telegram as before" "[ \"\$got\" = '||' ]"
+rm "$T/no-owner-chat"
+
+kill $srv; wait $srv 2>/dev/null; srv=
+S run house mine >/dev/null 2>&1; got=$(env_of mine)
+check "host down: no key, the outbox as before" "[ \"\${got#*|}\" = '|' ] && [ -n \"\${got%%|*}\" ]"
+exit $fail

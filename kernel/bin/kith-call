@@ -7,11 +7,13 @@
 # Prints one status word and exits with its code:
 #   ringing 0   accepted 0 (only with --wait)   declined 3   missed 4   busy 5   rate-limited 6 (+ when to retry)
 #   not-allowed 7 (this agent has no Kith chat with the person it runs for)   host unreachable 1   usage 2
-# One call per agent per 10 minutes and 6 a day. There is no push: an app that isn't open misses the call, and a
+# One call per chat per 10 minutes and 6 a day, whichever agent in a `kith ask` chain rings: the call screen says
+# "coder (for architect)" (KITH_AGENT is sent as `from`, a label the host never counts or trusts). There is no push: an app that isn't open misses the call, and a
 # declined or missed call leaves "<agent> tried to call: <reason>" in the chat. The host puts KITH_CALL_CHAT and
-# KITH_CALL_KEY in the environment of runs it starts (app chats, its routines, Telegram/Discord/Slack): the key proves
-# which person the run serves, so a call reaches only them, in the agent's main app chat with that person. Runs
-# without them (a terminal, a launchd schedule outside the host) get not-allowed. In a Kith app chat the same thing is
+# KITH_CALL_KEY in the environment of runs it starts (app chats, its routines, Telegram/Discord/Slack), and kith-sched
+# and an owner's terminal run ask it for them (lib/kith_runenv.py): the key proves which person the run serves, so a
+# call reaches only them, in the agent's main app chat with that person. A run without them (the host was down when it
+# started, or the person has no app chat with the agent) gets not-allowed. In a Kith app chat the same thing is
 # the `call_person` tool of the kith-files server.
 set -euo pipefail
 . "$(dirname "$0")/../lib/kith-env.sh"   # old HQ_X callers and secrets/env: KITH_X and HQ_X agree
@@ -38,7 +40,8 @@ if not (data and port):
         d, p = str(Path.home() / '.kith' / 'serve'), '19224'
     data, port = data or d, port or p
 
-body = {'chat': os.environ['KITH_CALL_CHAT'], 'key': os.environ['KITH_CALL_KEY'], 'reason': reason, 'wait': wait}
+body = {'chat': os.environ['KITH_CALL_CHAT'], 'key': os.environ['KITH_CALL_KEY'], 'reason': reason, 'wait': wait,
+        'from': os.environ.get('KITH_AGENT', '')}
 try:
     token = (Path(data) / 'token').read_text().strip()
     req = urllib.request.Request(f'http://127.0.0.1:{port}/api/callPerson', json.dumps(body).encode(),

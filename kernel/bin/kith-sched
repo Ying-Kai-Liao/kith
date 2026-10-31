@@ -37,6 +37,7 @@ from pathlib import Path
 KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_launchd  # noqa: E402
+import kith_runenv  # noqa: E402
 from kith_paths import paths, launcher, job_installed, retire_old_job  # noqa: E402  the one place that knows where kith's folders are
 STATE = paths()['KITH_STATE']
 MACHINE = paths()['KITH_MACHINE'] / 'sched'  # last tick, last run per job
@@ -262,14 +263,27 @@ def start(agent, job, now, why):
     if os.environ.get('KITH_SCHED_PERMISSION_MODE'):   # unset: the agent's mode, else kith's default (bin/kith)
         env['KITH_PERMISSION_MODE'] = os.environ['KITH_SCHED_PERMISSION_MODE']
     for k in ('KITH_AGENT', 'KITH_MODEL', 'KITH_EFFORT', 'KITH_HARNESS', 'KITH_DISCORD_WEBHOOK_URL', 'KITH_DISCORD_THREAD_ID',
-              'KITH_BRIDGE_OUTBOX', 'KITH_RUN_OUTBOX'):   # and the HQ_ twins that sync_env made
+              'KITH_BRIDGE_OUTBOX', 'KITH_RUN_OUTBOX', 'KITH_CALL_CHAT', 'KITH_CALL_KEY'):   # and the HQ_ twins that sync_env made
         env.pop('HQ_' + k[5:], None)
         env.pop(k, None)
     if job.get('person'):   # none: whoever started this (launchd's tick: the owner; a run by hand: that run's person)
         env['KITH_PERSON'] = env['HQ_PERSON'] = job['person']
-    box = run_outbox(agent, job, env.get('KITH_PERSON') or None)
-    if box:
-        env['KITH_RUN_OUTBOX'] = env['HQ_RUN_OUTBOX'] = str(box)
+    person = env.get('KITH_PERSON') or None
+    # The run's origin: the host makes the call key for this agent and this job's person only. Host down: no key
+    # (kith-call says unreachable) and the outbox as before; the host drains it when it is back.
+    origin = kith_runenv.fetch(agent, person)
+    has_chat = bool(origin and origin.get('chat'))
+    if has_chat:
+        env.update(origin['env'])
+    if origin and not has_chat and person is None:
+        pass   # the owner has no app chat with this agent: no outbox, kith-send goes to Telegram as it always did
+    else:
+        if origin and not has_chat:   # a guest: never the owner's Telegram, whatever the run does
+            print('%s %s/%s: %s has no app chat with %s, so what this run sends is dropped'
+                  % (now.isoformat(timespec='minutes'), agent, job['id'], person, agent))
+        box = run_outbox(agent, job, person)
+        if box:
+            env['KITH_RUN_OUTBOX'] = env['HQ_RUN_OUTBOX'] = str(box)
     if job.get('model'): env['KITH_MODEL'] = job['model']
     if job.get('effort'): env['KITH_EFFORT'] = job['effort']
     if job.get('harness'): env['KITH_HARNESS'] = job['harness']

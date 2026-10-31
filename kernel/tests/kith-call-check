@@ -30,7 +30,7 @@ python3 "$tmp/host.py" "$tmp/port" "$tmp/seen.json" & srv=$!
 for _ in $(seq 50); do [[ -s $tmp/port ]] && break; sleep 0.1; done
 [[ -s $tmp/port ]] || fail "the fake host did not start"
 
-export KITH_SERVE_DIR=$tmp KITH_SERVE_PORT=$(cat "$tmp/port") KITH_CALL_CHAT=chat1 KITH_CALL_KEY=k1
+export KITH_SERVE_DIR=$tmp KITH_SERVE_PORT=$(cat "$tmp/port") KITH_CALL_CHAT=chat1 KITH_CALL_KEY=k1 KITH_AGENT=coder
 
 out=$("$call" "a call about dinner") || fail "ringing should exit 0: $out"
 [[ $out == ringing ]] || fail "status: $out"
@@ -38,7 +38,7 @@ python3 - "$tmp/seen.json" <<'PY' || fail "request"
 import json, sys
 s = json.load(open(sys.argv[1]))
 assert s['path'] == '/api/callPerson' and s['auth'] == 'Bearer secret-token', s
-assert s['body'] == {'chat': 'chat1', 'key': 'k1', 'reason': 'a call about dinner', 'wait': False}, s
+assert s['body'] == {'chat': 'chat1', 'key': 'k1', 'reason': 'a call about dinner', 'wait': False, 'from': 'coder'}, s
 PY
 
 "$call" --wait "a" >/dev/null

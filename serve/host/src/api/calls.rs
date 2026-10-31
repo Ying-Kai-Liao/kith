@@ -18,7 +18,16 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             if !crate::calls::key_ok(hub, chat, b["key"].as_str()) {
                 return Ok(ControlFlow::Break(json!({"status": "not-allowed"})));
             }
-            crate::calls::ring_and_wait(hub, chat, reason, b["wait"] == true).await?
+            crate::calls::ring_and_wait(hub, chat, reason, b["from"].as_str(), b["wait"] == true).await?
+        }
+        // `kith-sched` and `kith` (a terminal run): the origin of a run they start, for the agent and the person it is
+        // for. Only the owner's own processes may ask: the key it hands out rings that person.
+        "runEnv" => {
+            if !matches!(principal(&hub.store, caller), Principal::Owner) {
+                bail!("this device isn't allowed on this computer");
+            }
+            let person = b["person"].as_str().filter(|p| !p.is_empty());
+            crate::calls::run_origin(hub, str_arg(&b, "agent")?, person, b["outbox"] == true)
         }
         "callAccept" | "callDecline" | "callGreet" => {
             let who = match principal(&hub.store, caller) {

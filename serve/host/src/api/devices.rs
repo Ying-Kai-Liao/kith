@@ -52,6 +52,7 @@ pub(super) const LOCAL_ONLY: &[&str] = &[
     "computerTools",
     "chatCall",
     "callPerson",
+    "runEnv",
     "teamCall",
     "memoryCall",
     "routineCall",

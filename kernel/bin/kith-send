@@ -13,9 +13,10 @@
 # KITH_TELEGRAM_BOT_TOKEN / KITH_TELEGRAM_CHAT_ID from ~/.kith/secrets/env (or the file KITH_TELEGRAM_ENV_FILE names
 # there). Never prints a token.
 #
-# A run that has an outbox of its own (KITH_RUN_OUTBOX: an app chat's run, a kith-sched run) also leaves the message
-# there, and kith serve posts it into the person's chat with the agent; it still goes to Telegram when a bot is set up.
-# `--to dm` is Telegram only. Started from a Kith app chat (KITH_VIA=serve) with no outbox it still goes to Telegram
+# A run that has an outbox of its own (KITH_RUN_OUTBOX: an app chat's run, a kith-sched run, an owner's terminal run)
+# leaves the message there and stops: kith serve posts it into the person's chat with the agent, and that person is the
+# one the run's origin names (a run for a guest never reaches the owner's Telegram). Telegram is for a run with no
+# origin at all, or `--to dm`, which is Telegram only. Started from a Kith app chat (KITH_VIA=serve) with no outbox it still goes to Telegram
 # but says so: the chat's own way to give the user a file or image is the send_file tool (mcp__kith-files__send_file).
 set -euo pipefail
 . "$(dirname "$0")/../lib/kith-env.sh"   # old HQ_X callers and secrets/env: KITH_X and HQ_X agree
@@ -88,7 +89,6 @@ PY
 fi
 
 # The run's own outbox: the files are copied in, since the host takes only what is inside it.
-boxed=0
 if [[ -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX ]]; then
   [[ -f $1 ]] && kind=files || kind=text
   python3 - "$KITH_RUN_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
@@ -109,13 +109,13 @@ with open(name + '.tmp', 'w') as f:
     json.dump(item, f, ensure_ascii=False)
 os.rename(name + '.tmp', name)   # whole or not at all: the host reads *.json only
 PY
-  boxed=1
   echo "left for the Kith app as $as"
+  exit 0
 fi
 
 # KITH_VIA=serve covers the whole process (routines and bot-to-bot requests started from a chat too), so this only
 # hints and still goes on to Telegram as it always did.
-if [[ $boxed == 0 && ${KITH_VIA:-} == serve && $to != dm && -z ${KITH_TELEGRAM_CHAT_ID:-} ]]; then
+if [[ ${KITH_VIA:-} == serve && $to != dm && -z ${KITH_TELEGRAM_CHAT_ID:-} ]]; then
   echo "kith-send: hint: in a Kith app chat, share a file or image with your send_file tool (mcp__kith-files__send_file: path, name?), not kith-send; this goes to Telegram." >&2
 fi
 
@@ -128,13 +128,10 @@ if [[ -z ${KITH_TELEGRAM_BOT_TOKEN:-} && -n $tg_file && -f $tg_file ]]; then
   KITH_TELEGRAM_CHAT_ID=${KITH_TELEGRAM_CHAT_ID:-$(sed -n 's/^TELEGRAM_HOME_CHANNEL=//p' "$tg_file" | tr -d '"'"'"'')}
 fi
 if [[ -z ${KITH_TELEGRAM_BOT_TOKEN:-} || -z ${KITH_TELEGRAM_CHAT_ID:-} ]]; then
-  [[ $boxed == 1 ]] && exit 0
   echo "kith-send: no Telegram bot configured" >&2; exit 1
 fi
 api="https://api.telegram.org/bot$KITH_TELEGRAM_BOT_TOKEN"
 
-# Once it is in the app's outbox, a Telegram failure is reported but does not fail the send (a retry would post twice).
-(( boxed )) && set +eo pipefail
 check() { python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else print("kith-send:", d.get("description"), file=sys.stderr) or 1)'; }
 
 if [[ ! -f $1 ]]; then
