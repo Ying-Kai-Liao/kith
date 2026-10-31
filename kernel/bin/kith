@@ -1008,6 +1008,17 @@ if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi
 # by the host, a schedule or an ask, which set KITH_VIA). That covers `kith AGENT`, -r, -r ID and -c.
 terminal=0
 [[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && -t 0 && -t 1 ]] && terminal=1
+# Its origin is the agent's own chat with the owner in the app (kith-send leaves messages there, kith-call rings it); the
+# host makes both. No host or no such chat: nothing is set, and kith-send goes to Telegram as before.
+if [[ $terminal -eq 1 && -z ${KITH_RUN_OUTBOX:-} && -z ${KITH_BRIDGE_OUTBOX:-} && -z ${KITH_CALL_KEY:-} ]]; then
+  origin_env=$(python3 "$KITH/lib/kith_runenv.py" "$agent" --outbox 2>/dev/null | python3 -c '
+import json, sys
+for k, v in json.load(sys.stdin).get("env", {}).items():
+    if k in ("KITH_CALL_CHAT", "KITH_CALL_KEY", "KITH_RUN_OUTBOX"): print(k + "=" + v)' 2>/dev/null) || origin_env=""
+  while IFS== read -r k v; do
+    [[ -n $k ]] && export "$k=$v" && { [[ $k == KITH_RUN_OUTBOX ]] && export HQ_RUN_OUTBOX=$v; }
+  done <<< "$origin_env"
+fi
 # Every run with someone else's profile is findable by the revoke sweep (kith-sessions proc): its pid is the one that execs
 # claude below, so the claim lives as long as claude (or, for an interactive run, the launcher claude runs under).
 [[ $p_owner == 1 || $launch -eq 1 ]] || python3 "$KITH/bin/kith-sessions" proc "$$" "$p_id" "$agent" 2>/dev/null || true

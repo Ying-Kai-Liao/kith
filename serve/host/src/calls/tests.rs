@@ -42,7 +42,7 @@ async fn calls_seen(r: &Rig, caller: &Caller) -> Vec<Value> {
 }
 
 fn ring_for(r: &Rig, bot: &str, reason: &str) -> Value {
-    ring(&r.hub, bot, reason).unwrap()
+    ring(&r.hub, bot, reason, None).unwrap()
 }
 
 fn notices(r: &Rig, bot: &str) -> Vec<Value> {
@@ -99,7 +99,7 @@ async fn declining_and_ringing_out_leave_a_line_in_the_chat() {
     // Nobody answers: it rings out. A different agent, so the rate limit isn't what is tested.
     r.hub.calls.set_ring_ms(40);
     let money = r.owner_bot("money");
-    let out = ring_and_wait(&r.hub, &money, "late", true).await.unwrap();
+    let out = ring_and_wait(&r.hub, &money, "late", None, true).await.unwrap();
     assert_eq!(out["status"], "missed");
     assert_eq!(notices(&r, &money)[0]["text"], "money tried to call: late");
     assert_eq!(notices(&r, &money)[0]["callState"], "missed");
@@ -126,7 +126,7 @@ async fn a_person_is_on_one_call_and_an_agent_rings_rarely() {
     // Ten minutes on it may ring again; the sixth in a day is the last.
     let now = now_ms();
     let hours = |h: i64| now - h * 60 * 60 * 1000;
-    r.hub.calls.inner.locked().rung.insert(rate_key("house", None), (1..=5).rev().map(hours).collect());
+    r.hub.calls.inner.locked().rung.insert(rate_key(&house, None), (1..=5).rev().map(hours).collect());
     let sixth = ring_for(&r, &house, "sixth");
     assert_eq!(sixth["status"], "ringing");
     decline_now(&r, sixth["id"].as_str().unwrap());
@@ -135,12 +135,12 @@ async fn a_person_is_on_one_call_and_an_agent_rings_rarely() {
         .inner
         .locked()
         .rung
-        .get_mut(&rate_key("house", None))
+        .get_mut(&rate_key(&house, None))
         .unwrap()
         .iter_mut()
         .for_each(|t| *t -= 11 * 60 * 1000);
     assert_eq!(ring_for(&r, &house, "seventh")["status"], "rate-limited", "six in the last day");
-    assert_eq!(ring(&r.hub, "unknown", "x").unwrap(), json!({"status": "not-allowed"}));
+    assert_eq!(ring(&r.hub, "unknown", "x", None).unwrap(), json!({"status": "not-allowed"}));
 }
 
 fn decline_now(r: &Rig, id: &str) {
@@ -273,6 +273,50 @@ async fn a_forged_or_mismatched_key_rings_nobody() {
     assert_eq!(r.hub.calls.ringing(&r.hub), Vec::<Value>::new());
     let empty = rpc(&r, &Caller::Local, "callPerson", json!({"chat": mine, "key": owner_key, "reason": "  "})).await;
     assert!(empty.is_err());
+}
+
+#[tokio::test]
+async fn a_run_naming_another_agent_is_shown_but_not_counted_separately() {
+    let r = Rig::new().await;
+    let mine = r.owner_bot("house");
+    let (key_chat, key) = env_of(&env_for(&r.hub, &mine));
+    let body = |from: &str| json!({"chat": key_chat, "key": key, "reason": "bug", "from": from});
+    let first = rpc(&r, &Caller::Local, "callPerson", body("coder")).await.unwrap();
+    assert_eq!(first["status"], "ringing");
+    let name = r.hub.calls.ringing(&r.hub)[0]["call"]["name"].as_str().unwrap().to_owned();
+    assert!(name.starts_with("coder (for "), "{name}");
+    decline_now(&r, first["id"].as_str().unwrap());
+    // A different `from` buys no extra call: the chat rang a minute ago.
+    for from in ["architect", "x", "house"] {
+        let out = rpc(&r, &Caller::Local, "callPerson", body(from)).await.unwrap();
+        assert_eq!(out["status"], "rate-limited", "{from}");
+    }
+}
+
+#[tokio::test]
+async fn run_env_is_the_owners_and_mints_only_for_the_person_asked() {
+    let r = Rig::new().await;
+    let mine = r.owner_bot("house");
+    let (phone, theirs) = sam(&r).await;
+    let ask = |person: Value| json!({"agent": "house", "person": person});
+
+    // The owner's own process: the owner's chat for no person, Sam's for Sam, nothing for a stranger.
+    let own = rpc(&r, &Caller::Local, "runEnv", ask(Value::Null)).await.unwrap();
+    assert_eq!(own["chat"], mine);
+    assert_eq!(own["env"]["KITH_CALL_CHAT"], mine);
+    assert_eq!(own["env"]["KITH_CALL_KEY"], key(&r.hub.token, &mine, None));
+    assert!(own["env"].get("KITH_RUN_OUTBOX").is_none(), "no outbox unless asked");
+    let sams = rpc(&r, &Caller::Local, "runEnv", ask(json!("sam"))).await.unwrap();
+    assert_eq!(sams["env"]["KITH_CALL_CHAT"], theirs);
+    assert_eq!(sams["env"]["KITH_CALL_KEY"], key(&r.hub.token, &theirs, Some("sam")));
+    let none = rpc(&r, &Caller::Local, "runEnv", ask(json!("kim"))).await.unwrap();
+    assert_eq!(none, json!({"chat": null, "env": {}}));
+    let other = rpc(&r, &Caller::Local, "runEnv", json!({"agent": "money", "person": "sam"})).await.unwrap();
+    assert!(other["chat"].is_null(), "an agent the person has no chat with");
+
+    // Not a device, not an invitee's, not a bot guest's.
+    assert!(rpc(&r, &phone, "runEnv", ask(json!("sam"))).await.is_err());
+    assert!(rpc(&r, &r.device("owner-phone", None), "runEnv", ask(Value::Null)).await.is_err());
 }
 
 #[tokio::test]

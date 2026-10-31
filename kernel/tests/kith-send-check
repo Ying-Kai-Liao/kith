@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # kith-send-check — started from a Kith app chat (KITH_VIA=serve) kith-send hints at send_file but does not refuse
 # (routines and bot-to-bot requests share that env); a channel's outbox still works. A run with an outbox of its own
-# (KITH_RUN_OUTBOX) leaves each message there for the app, and on Telegram too when a bot is set up; `--to dm` is
-# Telegram only. No network (curl is a stub), no secrets: a throwaway HOME and KITH_STATE.
+# (KITH_RUN_OUTBOX) leaves each message there for the app and stops, Telegram bot or not; `--to dm` is Telegram only,
+# and so is a run with no origin at all. No network (curl is a stub), no secrets: a throwaway HOME and KITH_STATE.
 #
 #   kernel/tests/kith-send-check
 set -euo pipefail
@@ -41,18 +41,18 @@ stored=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["files"][0][
 [[ $stored =~ ^[0-9]+-0$ ]] || fail "a stored name the host would refuse: $stored"
 ls "$run"/*.tmp >/dev/null 2>&1 && fail "a half-written item was left"
 
-# With a Telegram bot as well, it goes to both; a Telegram failure doesn't fail a send the app already has.
+# With a Telegram bot set up it still stops at the outbox: the run's origin names the person, Telegram is the owner's.
 mkdir "$tmp/bin"
 printf '#!/bin/sh\necho "$*" >> "%s/curl.log"\necho "${CURL_SAYS:-{\\"ok\\": true}}"\n' "$tmp" > "$tmp/bin/curl"; chmod +x "$tmp/bin/curl"
 export PATH="$tmp/bin:$PATH" KITH_TELEGRAM_BOT_TOKEN=t0k KITH_TELEGRAM_CHAT_ID=42
-KITH_RUN_OUTBOX=$run "$send" "both" >/dev/null || fail "outbox and Telegram failed"
-[[ $(item 2) == *'"text": "both"'* ]] || fail "not in the outbox with Telegram set up"
-grep -q 'text=both' "$tmp/curl.log" || fail "not sent to Telegram"
-CURL_SAYS='{"ok": false, "description": "down"}' KITH_RUN_OUTBOX=$run "$send" "tg down" >/dev/null 2>&1 \
-  || fail "a Telegram failure failed a send the outbox had"
-[[ $(item 3) == *'"text": "tg down"'* ]] || fail "not in the outbox when Telegram is down"
+KITH_RUN_OUTBOX=$run "$send" "boxed only" >/dev/null || fail "outbox send failed"
+[[ $(item 2) == *'"text": "boxed only"'* ]] || fail "not in the outbox with Telegram set up"
+[[ ! -e $tmp/curl.log ]] || fail "a boxed message also went to Telegram: $(cat "$tmp/curl.log")"
 
 KITH_RUN_OUTBOX=$run "$send" --to dm "only telegram" >/dev/null || fail "--to dm failed"
 grep -q 'text=only telegram' "$tmp/curl.log" || fail "--to dm didn't reach Telegram"
-[[ $(ls "$run"/*.json | wc -l) -eq 4 ]] || fail "--to dm left an item for the app"
-echo "ok: a run's outbox gets each message (files copied in), Telegram too; --to dm is Telegram only"
+[[ $(ls "$run"/*.json | wc -l) -eq 3 ]] || fail "--to dm left an item for the app"
+
+"$send" "no origin" >/dev/null || fail "a run with no origin failed"
+grep -q 'text=no origin' "$tmp/curl.log" || fail "a run with no origin didn't reach Telegram"
+echo "ok: a run's outbox gets each message (files copied in) and stops there; --to dm and no origin are Telegram"
