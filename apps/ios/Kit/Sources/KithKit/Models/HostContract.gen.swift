@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8"
+    public static let sha256 = "48d644505434cb1fdeb551847b3cd755b42be8394aa600d31e9b4d69400e0a55"
 }
 
 extension HostContract {
@@ -1064,13 +1064,47 @@ extension HostContract {
         public var epoch: Int64?
         public var entries: [BotEntry]
         public var cursor: Int64
+        public var secrets: [BotRoomSecret]?
 
-        public init(room: String, conversation: String? = nil, epoch: Int64? = nil, entries: [BotEntry], cursor: Int64) {
+        public init(room: String, conversation: String? = nil, epoch: Int64? = nil, entries: [BotEntry], cursor: Int64, secrets: [BotRoomSecret]? = nil) {
             self.room = room
             self.conversation = conversation
             self.epoch = epoch
             self.entries = entries
             self.cursor = cursor
+            self.secrets = secrets
+        }
+    }
+
+    /// A secret the owner handed this bot in this room, waiting to be fetched with botSecretFetch: who from, the sender's own label for it and when it lapses. Never the value.
+    public struct BotRoomSecret: Codable, Hashable, Sendable {
+        public var id: String
+        public var from: String
+        public var label: String?
+        public var expiresAt: Int64
+
+        public init(id: String, from: String, label: String? = nil, expiresAt: Int64) {
+            self.id = id
+            self.from = from
+            self.label = label
+            self.expiresAt = expiresAt
+        }
+    }
+
+    /// A secret handed to this bot, once: the value is in this answer and nowhere else, and a second fetch is notFound.
+    public struct BotSecret: Codable, Hashable, Sendable {
+        public var id: String
+        public var room: String
+        public var from: String
+        public var label: String?
+        public var value: String
+
+        public init(id: String, room: String, from: String, label: String? = nil, value: String) {
+            self.id = id
+            self.room = room
+            self.from = from
+            self.label = label
+            self.value = value
         }
     }
 
@@ -1659,6 +1693,15 @@ extension HostContract {
         }
     }
 
+    /// What `botSecretFetch` takes.
+    public struct BotSecretFetchParams: Codable, Hashable, Sendable {
+        public var id: String
+
+        public init(id: String) {
+            self.id = id
+        }
+    }
+
     /// What `botThread` takes.
     public struct BotThreadParams: Codable, Hashable, Sendable {
         public var conversation: String
@@ -1746,6 +1789,7 @@ extension HostContract {
         case botAsk
         case botPost
         case botRoomRead
+        case botSecretFetch
         case botThread
         case botConversations
         case botStop
@@ -1763,7 +1807,7 @@ extension HostContract {
     public static let unprovenMethods: [Method] = [.proveInvite]
 
     /// What a bot guest (the pending ones too: see botPending) may call.
-    public static let botMethods: [Method] = [.hello, .botStatus, .proveBotInvite, .botAsk, .botPost, .botRoomRead, .botThread, .botConversations, .botStop, .botLeave]
+    public static let botMethods: [Method] = [.hello, .botStatus, .proveBotInvite, .botAsk, .botPost, .botRoomRead, .botSecretFetch, .botThread, .botConversations, .botStop, .botLeave]
 
     /// What a bot guest that is still joining or waiting for its owner's allow may call.
     public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
@@ -1821,6 +1865,8 @@ extension HostContract {
         case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
         case "BotPosted": _ = try d.decode(BotPosted.self, from: data)
         case "BotRoom": _ = try d.decode(BotRoom.self, from: data)
+        case "BotRoomSecret": _ = try d.decode(BotRoomSecret.self, from: data)
+        case "BotSecret": _ = try d.decode(BotSecret.self, from: data)
         case "BotSender": _ = try d.decode(BotSender.self, from: data)
         case "BotEntry": _ = try d.decode(BotEntry.self, from: data)
         case "BotThread": _ = try d.decode(BotThread.self, from: data)
@@ -1868,6 +1914,7 @@ extension HostContract {
         case "BotAskParams": _ = try d.decode(BotAskParams.self, from: data)
         case "BotPostParams": _ = try d.decode(BotPostParams.self, from: data)
         case "BotRoomReadParams": _ = try d.decode(BotRoomReadParams.self, from: data)
+        case "BotSecretFetchParams": _ = try d.decode(BotSecretFetchParams.self, from: data)
         case "BotThreadParams": _ = try d.decode(BotThreadParams.self, from: data)
         case "BotConversationsParams": _ = try d.decode(BotConversationsParams.self, from: data)
         case "BotStopParams": _ = try d.decode(BotStopParams.self, from: data)
