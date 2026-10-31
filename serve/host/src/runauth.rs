@@ -368,6 +368,19 @@ pub fn ask_identity(agent: &str, session: &str, reply: Option<AskReply>) -> RunI
     }
 }
 
+/// An owner token (cards only) for a run of `agent` under `session`, with the environment to give it. `None` when the
+/// socket isn't listening.
+pub fn owner_ask_grant(
+    agent: &str,
+    session: &str,
+    reply: Option<AskReply>,
+) -> Option<(RunGrant, [(String, String); 2])> {
+    let socket = SOCKET.get()?;
+    let grant = RunGrant::issue(table(), ask_identity(agent, session, reply)).ok()?;
+    let vars = grant.env(socket);
+    Some((grant, vars))
+}
+
 /// For a run started from an environment list (channel runs): when it names a person, issues a grant and adds the
 /// token and socket to the list. The owner's list (no `KITH_PERSON`) gets an owner token (cards only) under its own
 /// names. `session` is the conversation the run continues (the work key of a channel thread): a card and a once
@@ -382,10 +395,7 @@ pub fn grant_for_env(
     let (grant, vars) = if let Some(person) = get("KITH_PERSON").filter(|p| !p.is_empty()) {
         grant_for(&person, agent, get("KITH_ROOM").as_deref(), session, get("KITH_PROJECT").as_deref())?
     } else {
-        let socket = SOCKET.get()?;
-        let grant = RunGrant::issue(table(), ask_identity(agent, session, reply)).ok()?;
-        let vars = grant.env(socket);
-        (grant, vars)
+        owner_ask_grant(agent, session, reply)?
     };
     env.extend(vars.into_iter().map(|(k, v)| (k.into(), v.into())));
     Some(grant)

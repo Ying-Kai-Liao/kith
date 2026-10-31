@@ -1475,3 +1475,11 @@ async fn a_refused_start_of_a_card_and_messages_together_puts_each_back_where_it
     queue_says_eventually(&r, &card, "queued").await;
     queue_says_of(&r, &format!("msg:{}", e["id"].as_str().unwrap()), "queued").await;
 }
+
+/// An owner app-chat run's card has no session or channel thread behind it: nothing to wake, the answer is recorded.
+#[test]
+fn an_owner_app_chat_runs_card_has_no_door() {
+    let mut c = blank();
+    c.session = "run:o:acp:chat1:thr1".into();
+    assert_eq!(door_of(&c), None);
+}
