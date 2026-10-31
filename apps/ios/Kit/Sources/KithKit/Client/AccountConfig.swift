@@ -32,6 +32,12 @@ public enum AccountConfig {
         return !host.isEmpty
     }
 
+    /// Apple sign-in needs the Sign in with Apple capability (Main builds) and the production Clerk instance; the dev
+    /// instance has no Apple credentials of its own.
+    public static func appleSignInAvailable(environment: AppEnvironment, clerkPublishableKey: String?) -> Bool {
+        environment == .main && clerkPublishableKey?.hasPrefix("pk_live_") == true
+    }
+
     /// The OAuth return scheme when the bundle has no identifier (it always does in a real app).
     public static func fallbackScheme(environment: String?) -> String {
         environment == "dev" ? "kith-dev" : "kith"

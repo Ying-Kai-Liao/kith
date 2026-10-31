@@ -81,7 +81,7 @@ Sign-in with Google, Apple and GitHub, claiming a Mac to an account, and the acc
 Cloudflare login; the rest are one-line commands. Nothing secret goes in the repo.
 
 1. **[Kai]** Clerk dashboard (https://dashboard.clerk.com) > Create application > name it `Kith` > turn on Google, Apple and GitHub > Create.
-   (Apple needs your Apple Developer Services ID, team id and key: Clerk's SSO connections page walks through it.
+   (Apple needs your Apple Developer Services ID, team id and key, and works on the production instance only: Clerk's SSO connections page walks through it.
    Google and GitHub work with Clerk's development credentials until you want your own.)
 2. **[Kai]** Clerk > API keys: copy the **Publishable key** (`pk_...`) and the **Frontend API URL** (the issuer, `https://<name>.clerk.accounts.dev`, or your own domain). Copy the **Secret key** (`sk_...`) too, for step 6.
 3. Put the issuer in `wrangler.toml`: `[env.kith]` > `vars` > `CLERK_ISSUER` (replace `https://clerk.invalid`).
@@ -114,8 +114,8 @@ and never reaches the cloud). A landing page comes later.
 
 The dev worker takes sign-ins from the Kith Clerk development instance (application `Kith`, instance
 `ins_3L8cSNxglgpzXdJY3Ob2IczJZ09`, Frontend API `https://adjusted-starfish-4735.clerk.accounts.dev`). Google and
-GitHub work there. Apple does not: the instance uses Clerk's shared development credentials, and a free Personal
-Team cannot sign Sign in with Apple anyway. `CLERK_AUTHORIZED_PARTIES` stays unset on kith-dev, because native
+GitHub work there. Apple does not: the instance uses Clerk's shared development credentials, and Dev and free Personal
+Team builds cannot sign Sign in with Apple anyway. Apple works on the production instance with Main builds. `CLERK_AUTHORIZED_PARTIES` stays unset on kith-dev, because native
 iOS and desktop session tokens may carry no `azp` or a non-web one.
 
 Missing secrets degrade cleanly. Without `CLERK_SECRET_KEY`, token verification has no key and every account route

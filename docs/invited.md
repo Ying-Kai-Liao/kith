@@ -23,7 +23,7 @@ until you've used it.
 ## Joining on the web
 
 1. Open the link and confirm **Join a computer on Kith?**
-2. Sign in with Google or GitHub. Sign in with Apple doesn't work on the development instance.
+2. Sign in with Google or GitHub. Sign in with Apple works on production (Main) builds only, not on the development instance.
 3. Kith joins you to the owner's computer, sets up this browser as one of your devices, and connects. The steps show
    as they happen. The owner doesn't have to approve the browser: the invite already did that.
 4. You see the owner's computer, the chats you have there, and **New chat**.

@@ -5,12 +5,10 @@ import SwiftUI
 /// Equal access to every account provider at every sign-in entry point.
 struct SignInButtons: View {
     @Environment(AccountSession.self) private var account
-    /// Apple sign-in hidden until it works.
-    private let showsAppleSignIn = false
 
     var body: some View {
         VStack(spacing: 10) {
-            if showsAppleSignIn {
+            if account.showsAppleSignIn {
             Button { Task { await account.signIn(provider: .apple) } } label: {
                 ZStack {
                     HStack(spacing: 10) {
