@@ -1206,21 +1206,70 @@ pub fn stopped(hub: &Hub, keys: &[String], matches: impl Fn(&Door) -> bool) {
     });
 }
 
+/// The Claude sessions of the lanes whose key (`chat` or `chat/root`) `at` accepts, and the main session of `main_of`
+/// when that bot is stopped in its own main chat. The `kith ask` jobs these sessions started are the stopped lane's.
+fn lane_sessions(hub: &Hub, at: impl Fn(&str) -> bool, main_of: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = hub
+        .store
+        .kv_prefix("lane.session.")
+        .into_iter()
+        .filter(|k| k.split_once('@').is_some_and(|(_, lane)| at(lane)))
+        .filter_map(|k| hub.store.kv_get(&k))
+        .collect();
+    out.extend(main_of.and_then(|bot| hub.store.bot(bot).ok().flatten()).and_then(|b| b.session_id));
+    out.retain(|s| !s.is_empty());
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Every session a bot has: its main one and those of its lanes.
+fn bot_sessions(hub: &Hub, bot_id: &str) -> Vec<String> {
+    let prefix = format!("lane.session.{bot_id}@");
+    let mut out: Vec<String> = hub
+        .store
+        .kv_prefix(&prefix)
+        .into_iter()
+        .filter_map(|k| hub.store.kv_get(&k))
+        .chain(hub.store.bot(bot_id).ok().flatten().and_then(|b| b.session_id))
+        .filter(|s| !s.is_empty())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Stop ends the delegations its places started (R5, R8): their runs stop, their records settle, and no answer from them
+/// wakes the stopped place afterwards.
+fn end_delegations(sessions: Vec<String>) {
+    if !sessions.is_empty() {
+        crate::delegation::end_soon(sessions, Vec::new());
+    }
+}
+
 /// Stop in one place of a bot (its chat or one thread).
 pub fn stopped_lane(hub: &Hub, lane: &Lane) {
     cancel_waiting(hub, |l| l == lane);
+    let key = lane.key();
+    end_delegations(lane_sessions(hub, |at| at == key, lane.thread.is_none().then_some(lane.chat.as_str())));
     stopped(hub, &[session_key(lane)], |d| matches!(d, Door::Bot { lane: l, .. } if l == lane));
 }
 
 /// Stop everywhere in a chat (a group stops as a whole).
 pub fn stopped_chat(hub: &Hub, chat: &str) {
     cancel_waiting(hub, |l| l.chat == chat);
+    end_delegations(lane_sessions(
+        hub,
+        |at| at == chat || at.strip_prefix(chat).is_some_and(|r| r.starts_with('/')),
+        Some(chat),
+    ));
     stopped(hub, &[], |d| matches!(d, Door::Bot { lane, .. } if lane.chat == chat));
 }
 
 /// Stop everywhere a bot talks.
 pub fn stopped_bot(hub: &Hub, bot_id: &str) {
     cancel_waiting(hub, |l| l.chat == bot_id);
+    end_delegations(bot_sessions(hub, bot_id));
     stopped(hub, &[], |d| matches!(d, Door::Bot { bot, .. } if bot == bot_id));
 }
 

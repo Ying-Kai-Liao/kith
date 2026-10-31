@@ -1608,7 +1608,9 @@ def cmd_people(args):
                                   'bot_of': parent_of(auth, pid) or '', 'provider': auth['people'][pid].get('provider', ''),
                                   'root': root_of(auth, pid), 'revoked': cut_off(auth, pid),
                                   'revoked_at': (auth['people'][pid].get('revoked') or {}).get('at'),
-                                  'kith': auth['people'][pid].get('handles', {}).get('kith', '')} for pid in ordered(auth)]))
+                                  'kith': auth['people'][pid].get('handles', {}).get('kith', ''),
+                                  'handles': {k: v for k, v in auth['people'][pid].get('handles', {}).items() if k != 'kith'}}
+                                 for pid in ordered(auth)]))
     full = bool(args)
     for pid in args or ordered(auth):
         need_person(auth, pid)

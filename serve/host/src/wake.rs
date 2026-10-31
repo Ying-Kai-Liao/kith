@@ -188,6 +188,16 @@ pub fn withdraw(state: &Path, session: &str, id: Option<&str>) {
     log_failure("withdraw", run(state, &args));
 }
 
+/// Revoke or removal: everything the sessions of `persons` are owed is withdrawn as Stop does it, and their waiters go.
+pub fn withdraw_person(state: &Path, persons: &[String]) {
+    if persons.is_empty() {
+        return;
+    }
+    let mut args = vec!["withdraw-person"];
+    args.extend(persons.iter().map(String::as_str));
+    log_failure("withdraw", run(state, &args));
+}
+
 fn log_failure(what: &str, out: anyhow::Result<std::process::Output>) {
     match out {
         Ok(o) if o.status.success() => {}

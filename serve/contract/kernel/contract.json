@@ -96,7 +96,7 @@
       }
     },
     "Delegation": {
-      "doc": "The record of one `kith ask` id (foreground, --bg or agent@machine), in kernel/bin/kith-ask's ~/.kith/live/ask/ID.reg. `agent` is the agent asked, `chain` the id of the root ask of its chain, `hop` its depth (0 at the root) and `cross_hops` how many asks of the chain crossed to another Mac. Money is in micro-dollars (US$1 = 1000000) at API prices; `cost_micro_usd` is null for an ask from before costs were kept. `cap_micro_usd` is the chain cap in force now (null: none). `capped_ms` is when this ask's run took its chain to that cap, and `cap_card_ms` when the host raised the Needs-you card for it (once per chain and cap). Times are ms. A record from before delegation records reads as a root ask: chain = its id, hop 0.",
+      "doc": "The record of one `kith ask` id (foreground, --bg or agent@machine), in kernel/bin/kith-ask's ~/.kith/live/ask/ID.reg. `agent` is the agent asked, `chain` the id of the root ask of its chain, `hop` its depth (0 at the root) and `cross_hops` how many asks of the chain crossed to another Mac. Money is in micro-dollars (US$1 = 1000000) at API prices; `cost_micro_usd` is null for an ask from before costs were kept. `cap_micro_usd` is the chain cap in force now (null: none). `capped_ms` is when this ask's run took its chain to that cap, and `cap_card_ms` when the host raised the Needs-you card for it (once per chain and cap). Times are ms. A record from before delegation records reads as a root ask: chain = its id, hop 0. `brief` is the ask's text (at most 2000 characters) and `session` the asked agent's session once a --bg run claimed one; both are for the owner's peek, null on an older record, and never part of a member's or bot's RPC.",
       "fields": {
         "id": "string",
         "agent": "string",
@@ -113,7 +113,9 @@
         "started_ms": "int",
         "answered_ms": "int?",
         "capped_ms": "int?",
-        "cap_card_ms": "int?"
+        "cap_card_ms": "int?",
+        "brief": "string?",
+        "session": "string?"
       }
     },
     "Caller": {

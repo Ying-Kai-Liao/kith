@@ -17,6 +17,7 @@ mod peers;
 mod people;
 mod room_bots;
 mod schema;
+mod suspended;
 mod threads;
 
 pub use botguests::{BotConversation, BotGuest, BotInvite, BotState};
@@ -31,6 +32,9 @@ pub use model::{BotConfig, BotKind, BotRow, Entry, EntryKind, Lane, ReadScope, i
 pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
 pub use room_bots::RoomPoint;
+#[cfg(test)]
+pub use suspended::Moved;
+pub use suspended::HandleRevoke;
 
 use crate::LockExt;
 use anyhow::Result;

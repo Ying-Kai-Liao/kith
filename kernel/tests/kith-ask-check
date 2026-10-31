@@ -391,4 +391,12 @@ pw=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-race KITH_AGENT=architect "$ASK" ech
 expect "an answer after the end is refused" "$("$ASK" --answer "$pw" --as echo -- late)" stopped
 expect "nothing is owed to the lane" "$(queued | tr ' ' '\n' | grep -c '^sess-race:')" 0
 
+# The owner's peek: the record carries what was asked and the --bg run's session (host only; null before this)
+bk=$(cd "$T/w" && STUB_SID=sbrief "$ASK" --bg echo "peek at this one" | idof)
+ended "$bk"
+expect "the record keeps the ask's text" "$(rec "$bk" brief)" "peek at this one"
+expect "and the --bg run's session" "$(rec "$bk" session)" "sbrief"
+expect "a foreground ask keeps its text, with no session" "$(cd "$T" && "$ASK" echo "plain ask" >/dev/null 2>&1; rec "$(lastid)" brief session | tr '\n' ' ')" "plain ask None "
+expect "an old registration has neither" "$(rec ask-old-2 brief session | tr '\n' ' ')" "None None "
+
 [ "$fails" = 0 ] && echo "all kith-ask checks passed" || { echo "$fails check(s) failed"; exit 1; }

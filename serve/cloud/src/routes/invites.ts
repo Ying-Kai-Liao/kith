@@ -128,7 +128,20 @@ export async function hostRevokePerson(c: Ctx): Promise<Responses["hostRevokePer
 /** Undo of a person revoke: the row goes and every Mac of the owner is told; each clears the state in kith-auth. */
 export async function hostUnrevokePerson(c: Ctx): Promise<Responses["hostUnrevokePerson"]> {
   const { owner, userId } = await revokeTarget(c);
+  const revoked = await c.env.DB.prepare("SELECT revoked_at FROM revocations WHERE owner_user_id = ? AND user_id = ?")
+    .bind(owner, userId)
+    .first<{ revoked_at: number }>();
   await c.env.DB.batch([
+    // The memberships this revoke cut (stamped with its own time) are active again, so the Macs that kept them for the undo
+    // find them listed. A membership ended before, or by the owner on its own, keeps its end. Devices need a new approval.
+    ...(revoked
+      ? [
+          c.env.DB.prepare(
+            `UPDATE memberships SET revoked_at = NULL WHERE user_id = ? AND revoked_at = ?
+             AND computer_id IN (SELECT id FROM computers WHERE owner_user_id = ?)`,
+          ).bind(userId, revoked.revoked_at, owner),
+        ]
+      : []),
     c.env.DB.prepare("DELETE FROM revocations WHERE owner_user_id = ? AND user_id = ?").bind(owner, userId),
     audit(c.env, `owner:${owner}`, "person.unrevoke", userId, "ok", c.now),
   ]);

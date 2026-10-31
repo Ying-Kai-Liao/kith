@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 14;
+const SCHEMA: i64 = 15;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -28,6 +28,9 @@ const SCHEMA: i64 = 14;
 /// the host wakes it through (`wake_profile`, NULL: no wake).
 /// 13: Mac link (designs/2026-10-29-mac-link): the owner's computers let in here (`peers_in`) and the ones this
 /// computer may ask (`peers_out`), each pinned to the keys of its code exchange.
+/// 15: a revoked person's devices, memberships and open invites are kept (`suspended_*`) instead of deleted, so undo
+/// gives them back; and the revokes of people known only by a chat handle (`handle_revokes`), for the owner's other
+/// computers (Mac link).
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
         c.query_row("SELECT CAST(v AS INTEGER) FROM kv WHERE k = 'schema'", [], |r| r.get(0)).optional()?.unwrap_or(0);
@@ -65,7 +68,30 @@ fn migrate(c: &Connection) -> Result<()> {
         migrate_12(c)?;
     }
     migrate_13(c)?;
-    migrate_14(c)
+    migrate_14(c)?;
+    migrate_15(c)
+}
+
+fn migrate_15(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         CREATE TABLE IF NOT EXISTS suspended_devices(
+            key TEXT PRIMARY KEY, name TEXT NOT NULL, platform TEXT NOT NULL, source TEXT NOT NULL, grant_id TEXT,
+            scopes TEXT NOT NULL, lease_until INTEGER, created_at INTEGER NOT NULL, last_seen_at INTEGER,
+            person_id TEXT NOT NULL, proven INTEGER NOT NULL DEFAULT 0);
+         CREATE TABLE IF NOT EXISTS suspended_memberships(
+            membership_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, person_id TEXT NOT NULL,
+            invite_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+         CREATE TABLE IF NOT EXISTS suspended_invites(
+            invite_id TEXT PRIMARY KEY, person_id TEXT NOT NULL, token_hash TEXT NOT NULL,
+            agents TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+            used_at INTEGER, revoked_at INTEGER);
+         CREATE TABLE IF NOT EXISTS handle_revokes(
+            handle TEXT PRIMARY KEY, revoked INTEGER NOT NULL, at INTEGER NOT NULL);
+         INSERT INTO kv(k, v) VALUES('schema', '15') ON CONFLICT(k) DO UPDATE SET v = '15';
+         COMMIT;",
+    )?;
+    Ok(())
 }
 
 fn migrate_14(c: &Connection) -> Result<()> {
@@ -349,7 +375,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("15"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -370,7 +396,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("15"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -393,7 +419,7 @@ mod tests {
                 .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("15"));
         assert!(s.peers_in().unwrap().is_empty() && s.peers_out().unwrap().is_empty());
     }
 
@@ -413,7 +439,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("15"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         drop(s);
         let s = Store::open(&db).unwrap();

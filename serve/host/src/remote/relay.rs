@@ -266,7 +266,11 @@ async fn session(hub: &Arc<Hub>, base: &str) -> Result<Option<u16>> {
 async fn pull_state(hub: Arc<Hub>, base: String) {
     let mark = sync_lease::mark(&hub);
     match cloud::pull(&hub, &base).await {
-        Ok(()) => sync_lease::pulled(&hub, mark),
+        Ok(()) => {
+            sync_lease::pulled(&hub, mark);
+            // A paired Mac that was off catches up on the handle revokes it missed (Mac link), once this one is online.
+            tokio::spawn(super::handle_revokes::sync_peers(hub.clone()));
+        }
         Err(e) => {
             tracing::warn!(error = format!("{e:#}"), "couldn't get the cloud state");
             cloud::update_status(&hub, |s| s.last_error = Some(format!("{e:#}")));

@@ -85,6 +85,7 @@ BOX = paths()['KITH_MACHINE'] / 'live' / 'ask'
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 ID = re.compile(r'[A-Za-z0-9._-]{1,64}')
 KEEP_DAYS = 31   # a delegation record outlives the longest card (cards.expiry_hours, at most 720 h) and its chain's cost
+BRIEF_MAX = 2000     # characters of an ask's text a delegation record keeps
 MAX_LOCAL_HOPS = 8   # asks deep in a chain on one Mac (as the host's bot requests: serve/host/src/chat/team/requests.rs)
 MAX_CROSS_HOPS = 2   # asks in a chain that cross to another Mac
 REFUSED = 4          # exit code of an ask a cap refused: not the agent failing, and not "still waiting" (3)
@@ -226,7 +227,7 @@ def lineage(crossing):
     return dict(chain=None, hop=0, cross_hops=1 if crossing else 0, ask=None, cost_base=0, crossed=bool(crossing))
 
 
-def open_record(mid, asked, crossing=False):
+def open_record(mid, asked, crossing=False, brief=None):
     """The delegation record of ask mid, made as the ask begins and under the box lock (M8): who asked, the address of the
     answer (reply_to: the caller's session and ask, and nowhere else), its chain and hop. Refuses (exit 4) an ask that
     would take its chain over the hop caps or past its cost cap. The caller's wait registration is this same file."""
@@ -250,6 +251,8 @@ def open_record(mid, asked, crossing=False):
                'reply_to': {'session': os.environ.get('CLAUDE_CODE_SESSION_ID') or None, 'ask': place['ask']},
                'chain': chain, 'hop': place['hop'], 'cross_hops': place['cross_hops'], 'crossed': place['crossed'],
                'cost': 0.0, 'cost_base': place['cost_base'], 'state': 'open', 'at': time.time(), 'pid': os.getpid(), 'pid_at': time.time()}
+        if brief:
+            reg['brief'] = brief[:BRIEF_MAX]   # what was asked, for the owner's peek (host only; never in a member's reply)
         write_reg(mid, reg)
         return reg
 
@@ -317,7 +320,16 @@ def view(mid, reg, costs, cap):
             'state': reg['state'], 'cost_micro_usd': micro(reg['cost']),
             'chain_cost_micro_usd': micro(costs.get(reg['chain'], 0)), 'cap_micro_usd': micro(cap),
             'started_ms': ms(reg.get('at')) or 0, 'answered_ms': ms(reg.get('answered_at')),
-            'capped_ms': ms(reg.get('capped_at')), 'cap_card_ms': ms(reg.get('cap_card_at'))}
+            'capped_ms': ms(reg.get('capped_at')), 'cap_card_ms': ms(reg.get('cap_card_at')),
+            'brief': reg.get('brief') or None, 'session': job_sid(mid)}
+
+
+def job_sid(mid):
+    """The asked agent's session of --bg run mid, once it claimed one (ask-bg/ID.sid); None for any other ask."""
+    try:
+        return (BG / (mid + '.sid')).read_text().strip() or None
+    except OSError:
+        return None
 
 
 def delegations():
@@ -699,7 +711,7 @@ def wait_bg(mid, timeout):
 def background(argv):
     """Run this same call detached; print its id at once. The wrapper writes the exit code last, atomically."""
     mid = new_id('bg')
-    open_record(mid, argv[0], crossing='@' in argv[0])   # a refused ask says so now, not in a log
+    open_record(mid, argv[0], crossing='@' in argv[0], brief=argv[-1] if len(argv) > 1 else None)   # a refused ask says so now, not in a log
     BG.mkdir(parents=True, exist_ok=True)
     (BG / (mid + '.cmd')).write_text(' '.join(argv) + '\n')
     base = str(BG / mid)
@@ -956,7 +968,7 @@ def main(argv):
         note_job(bg_id, agent, key)
         env['KITH_LAUNCH_SID_FILE'] = str(BG / (bg_id + '.sid'))
     if read_reg(mid) is None:   # a --bg call made it when it began
-        open_record(mid, agent)
+        open_record(mid, agent, brief=task)
     elif bg_id:
         claim_pid(mid)
     # A run kith-remote started for another Mac's ask got its chain in KITH_ASK_*: the record holds it now, and the run's

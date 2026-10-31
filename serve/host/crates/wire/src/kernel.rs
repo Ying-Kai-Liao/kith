@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "813ceb49da99619261b4477872543653a21066c34b36b859eae1e6f67ef69977";
+pub const CONTRACT_SHA256: &str = "4233332e6534aa8c92ea8d7621fd691f70ea94e6d6cb7363df97f05709e1a543";
 
 /// The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -205,7 +205,7 @@ pub struct Delegations {
     pub delegations: Vec<Delegation>,
 }
 
-/// The record of one `kith ask` id (foreground, --bg or agent@machine), in kernel/bin/kith-ask's ~/.kith/live/ask/ID.reg. `agent` is the agent asked, `chain` the id of the root ask of its chain, `hop` its depth (0 at the root) and `cross_hops` how many asks of the chain crossed to another Mac. Money is in micro-dollars (US$1 = 1000000) at API prices; `cost_micro_usd` is null for an ask from before costs were kept. `cap_micro_usd` is the chain cap in force now (null: none). `capped_ms` is when this ask's run took its chain to that cap, and `cap_card_ms` when the host raised the Needs-you card for it (once per chain and cap). Times are ms. A record from before delegation records reads as a root ask: chain = its id, hop 0.
+/// The record of one `kith ask` id (foreground, --bg or agent@machine), in kernel/bin/kith-ask's ~/.kith/live/ask/ID.reg. `agent` is the agent asked, `chain` the id of the root ask of its chain, `hop` its depth (0 at the root) and `cross_hops` how many asks of the chain crossed to another Mac. Money is in micro-dollars (US$1 = 1000000) at API prices; `cost_micro_usd` is null for an ask from before costs were kept. `cap_micro_usd` is the chain cap in force now (null: none). `capped_ms` is when this ask's run took its chain to that cap, and `cap_card_ms` when the host raised the Needs-you card for it (once per chain and cap). Times are ms. A record from before delegation records reads as a root ask: chain = its id, hop 0. `brief` is the ask's text (at most 2000 characters) and `session` the asked agent's session once a --bg run claimed one; both are for the owner's peek, null on an older record, and never part of a member's or bot's RPC.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Delegation {
     pub id: String,
@@ -230,6 +230,10 @@ pub struct Delegation {
     pub capped_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cap_card_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
 }
 
 /// Who asked: the agent (null for a terminal), the person whose run it is (null for the owner) and where it came from (`terminal`, `serve`, ...).
@@ -296,7 +300,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "Launch", fields: &[("version", "int"), ("agent", "string"), ("agent_version", "string"), ("harness", "Harness?"), ("cwd", "string"), ("env", "{string}"), ("system_prompt", "string"), ("settings", "json?"), ("mcp_servers", "json"), ("add_dirs", "[string]"), ("allowed_tools", "[string]"), ("disable_slash_commands", "bool"), ("model", "string?"), ("effort", "string?"), ("project", "string?"), ("call_model", "string?"), ("permission_mode", "PermissionMode?"), ("cost_tag", "CostTag"), ("claude_args", "[string]?"), ("backup", "string?"), ("provider", "Harness?"), ("account", "string?"), ("account_id", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "CostTag", fields: &[("agent", "string"), ("version", "string"), ("model", "string?"), ("effort", "string?"), ("via", "string"), ("project", "string?"), ("person", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "Delegations", fields: &[("delegations", "[Delegation]")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Delegation", fields: &[("id", "string"), ("agent", "string"), ("chain", "string"), ("hop", "int"), ("cross_hops", "int"), ("crossed", "bool"), ("caller", "Caller"), ("reply_to", "ReplyTo"), ("state", "DelegationState"), ("cost_micro_usd", "int?"), ("chain_cost_micro_usd", "int?"), ("cap_micro_usd", "int?"), ("started_ms", "int"), ("answered_ms", "int?"), ("capped_ms", "int?"), ("cap_card_ms", "int?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Delegation", fields: &[("id", "string"), ("agent", "string"), ("chain", "string"), ("hop", "int"), ("cross_hops", "int"), ("crossed", "bool"), ("caller", "Caller"), ("reply_to", "ReplyTo"), ("state", "DelegationState"), ("cost_micro_usd", "int?"), ("chain_cost_micro_usd", "int?"), ("cap_micro_usd", "int?"), ("started_ms", "int"), ("answered_ms", "int?"), ("capped_ms", "int?"), ("cap_card_ms", "int?"), ("brief", "string?"), ("session", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "Caller", fields: &[("agent", "string?"), ("person", "string?"), ("via", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "ReplyTo", fields: &[("session", "string?"), ("ask", "string?")], may_omit: &[] },
     ],

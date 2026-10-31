@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8"
+    public static let sha256 = "4a62f53c9dea433c336a9a181b012ffbd7fcbda01f46932664998b669059b48d"
 }
 
 extension HostContract {
@@ -992,6 +992,28 @@ extension HostContract {
         }
     }
 
+    /// One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.
+    public struct HandleRevoke: Codable, Hashable, Sendable {
+        public var handle: String
+        public var revoked: Bool
+        public var at: Int64
+
+        public init(handle: String, revoked: Bool, at: Int64) {
+            self.handle = handle
+            self.revoked = revoked
+            self.at = at
+        }
+    }
+
+    /// Every handle revoke or undo the sender knows; the answer is the receiver's own list, so both ends hold the latest of each.
+    public struct HandleRevokes: Codable, Hashable, Sendable {
+        public var handles: [HandleRevoke]
+
+        public init(handles: [HandleRevoke]) {
+            self.handles = handles
+        }
+    }
+
     /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
     public struct BotProof: Codable, Hashable, Sendable {
         public var state: BotGuestState
@@ -1702,6 +1724,15 @@ extension HostContract {
         }
     }
 
+    /// What `peerRevokes` takes.
+    public struct PeerRevokesParams: Codable, Hashable, Sendable {
+        public var handles: [HandleRevoke]
+
+        public init(handles: [HandleRevoke]) {
+            self.handles = handles
+        }
+    }
+
     /// Each method's name, as called.
     public enum Method: String, CaseIterable, Sendable {
         case hello
@@ -1751,6 +1782,7 @@ extension HostContract {
         case botStop
         case botLeave
         case peerAgents
+        case peerRevokes
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
@@ -1769,7 +1801,7 @@ extension HostContract {
     public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
 
     /// What another computer of the owner's, paired here (Mac link) may call.
-    public static let peerMethods: [Method] = [.peerAgents]
+    public static let peerMethods: [Method] = [.peerAgents, .peerRevokes]
 
     /// Decodes `data` as the contract type `name`; false when the contract has no such type. For the fixtures' tests.
     public static func decode(_ name: String, _ data: Data) throws -> Bool {
@@ -1817,6 +1849,8 @@ extension HostContract {
         case "BotSelf": _ = try d.decode(BotSelf.self, from: data)
         case "PeerAgent": _ = try d.decode(PeerAgent.self, from: data)
         case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
+        case "HandleRevoke": _ = try d.decode(HandleRevoke.self, from: data)
+        case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
         case "BotProof": _ = try d.decode(BotProof.self, from: data)
         case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
         case "BotPosted": _ = try d.decode(BotPosted.self, from: data)
@@ -1873,6 +1907,7 @@ extension HostContract {
         case "BotStopParams": _ = try d.decode(BotStopParams.self, from: data)
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
+        case "PeerRevokesParams": _ = try d.decode(PeerRevokesParams.self, from: data)
         default: return false
         }
         return true

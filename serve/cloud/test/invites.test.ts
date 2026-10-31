@@ -421,6 +421,21 @@ describe("revoking a person on every computer of the owner (R6, R7)", () => {
     expect((await accept(friend, fresh.inviteId, fresh.token)).status).toBe(200);
   });
 
+  it("gives back the memberships the revoke cut when it is undone, and only those", async () => {
+    const { a, b, friend } = await twoMacs();
+    await revoke(a, friend.userId);
+    for (const h of [a, b]) expect((await state(h)).memberships).toEqual([]);
+    expect((await unrevoke(b, friend.userId)).body).toEqual({ ok: true });
+    for (const h of [a, b]) expect((await state(h)).memberships.map((m: Json) => m.userId)).toEqual([friend.userId]);
+    // Undoing again, or after the owner ended a membership by hand, brings nothing back.
+    expect((await unrevoke(a, friend.userId)).status).toBe(200);
+    const m = (await state(a)).memberships[0];
+    expect((await call("POST", `/v1/host/memberships/${m.membershipId}/revoke`, { key: a.sign, body: {} })).status).toBe(200);
+    await revoke(a, friend.userId);
+    await unrevoke(a, friend.userId);
+    expect((await state(a)).memberships).toEqual([]);
+  });
+
   it("is per owner: another owner's computers and lists are untouched", async () => {
     const { a, friend } = await twoMacs();
     const other = await setup();

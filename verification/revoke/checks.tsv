@@ -48,3 +48,24 @@ app-only	PROPERTY	NeverWakeHold	fail
 app-only	PROPERTY	NeverHeldServed	fail
 door	INVARIANT	NeverDoorRuns	fail
 door	INVARIANT	NeverDoorKilled	fail
+# --- round 4: a revoke parks devices, memberships and invites (undo exact); Stop and revoke end delegations and wakes; a handle revoke reaches a paired Mac
+items	INVARIANT	TypeOK	pass
+items	INVARIANT	ItemsCut	pass
+items	INVARIANT	ItemsExact	pass
+broken-delete-items	INVARIANT	ItemsExact	fail
+items	INVARIANT	NeverItemsBack	fail
+asks	INVARIANT	TypeOK	pass
+asks	PROPERTY	StoppedNeverWakes	pass
+asks	PROPERTY	AsksEnded	pass
+asks	PROPERTY	WakesWithdrawn	pass
+broken-answer-after-end	PROPERTY	StoppedNeverWakes	fail
+broken-no-ask-sweep	PROPERTY	AsksEnded	fail
+broken-no-wake-withdraw	PROPERTY	WakesWithdrawn	fail
+asks	INVARIANT	NeverAnswerWake	fail
+handle	INVARIANT	TypeOK	pass
+handle	PROPERTY	HandleConverges	pass
+handle	PROPERTY	HandleStampsGrow	pass
+handle	PROPERTY	HandleNoCloud	pass
+broken-handle-no-stamp	PROPERTY	HandleStampsGrow	fail
+broken-handle-no-catchup	PROPERTY	HandleConverges	fail
+handle	INVARIANT	NeverHandleOnPeer	fail

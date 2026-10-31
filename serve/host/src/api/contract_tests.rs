@@ -236,6 +236,7 @@ async fn the_peer_methods_answer_as_the_contract_and_its_fixtures_say() {
     let studio = Caller::Device { key: peer.device_key, scopes: vec![Scope::Control] };
     let mut answers = BTreeMap::new();
     answers.insert("peerAgents", ("peerAgents", call(&r, &studio, "peerAgents", json!({})).await));
+    answers.insert("peerRevokes", ("peerRevokes", call(&r, &studio, "peerRevokes", json!({"handles": []})).await));
     let methods: std::collections::BTreeSet<_> = answers.values().map(|(m, _)| *m).collect();
     assert_eq!(methods, rpc::PEER_METHODS.iter().copied().collect(), "a fixture for every peer method");
     answers_are_their_fixtures("peer", &answers);

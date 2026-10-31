@@ -393,6 +393,14 @@
       "doc": "The agents a paired computer may ask here.",
       "fields": { "agents": "[PeerAgent]" }
     },
+    "HandleRevoke": {
+      "doc": "One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.",
+      "fields": { "handle": "string", "revoked": "bool", "at": "int" }
+    },
+    "HandleRevokes": {
+      "doc": "Every handle revoke or undo the sender knows; the answer is the receiver's own list, so both ends hold the latest of each.",
+      "fields": { "handles": "[HandleRevoke]" }
+    },
     "BotProof": {
       "doc": "Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.",
       "fields": { "state": "BotGuestState", "botId": "string?", "owner": "string?", "agents": "[string]?" },
@@ -808,6 +816,12 @@
       "who": ["peer"],
       "params": {},
       "result": "PeerAgents"
+    },
+    "peerRevokes": {
+      "doc": "Mac link: the handle-only revokes and undos the caller knows. Each newer than this computer's own is applied here (the person is revoked or restored); the answer is this computer's list, so a computer that was off catches up.",
+      "who": ["peer"],
+      "params": { "handles": "[HandleRevoke]" },
+      "result": "HandleRevokes"
     }
   }
 }

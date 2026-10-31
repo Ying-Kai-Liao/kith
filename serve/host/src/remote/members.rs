@@ -108,6 +108,11 @@ pub async fn end_access(hub: &Hub, bin: Option<&Path>, person: &str) -> Result<(
         {
             return Ok(());
         }
+        // A removal (not a revoke) is final: what a revoke would have kept goes, and so does everything of theirs that is
+        // still running or owed (R5).
+        hub.store.forget_suspended(person)?;
+        crate::api::people::sweep_asks(hub, &[person.to_owned()]).await;
+        crate::api::botguests::sweep_claims(hub, vec![person.to_owned()], false).await;
         // Their bot guests lose their owner with the last membership.
         crate::api::botguests::revoke_owned_by(hub, person, "person").await;
         if let Some(bin) = bin
@@ -136,6 +141,9 @@ pub struct AuthPerson {
     /// Their Kith account, the one name a person has on every Mac of the owner; empty for one known only here.
     #[serde(default)]
     pub kith: String,
+    /// Their chat handles (`telegram` -> id) other than a Kith account.
+    #[serde(default)]
+    pub handles: std::collections::BTreeMap<String, String>,
     /// When they themselves were revoked (not merely the owner of a revoked bot's).
     #[serde(default)]
     pub revoked_at: Option<i64>,
@@ -158,9 +166,9 @@ pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
 /// and bots for the undo). Returns the people newly revoked here, whose running turns the caller stops. None (a cloud
 /// that predates revoking) changes nothing. An error fails the pull: this host stays out of sync rather than serve on
 /// access it could not apply (I2).
-pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Result<Vec<String>> {
-    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(vec![]) };
-    let mut cut = vec![];
+pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Result<Revoked> {
+    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(Revoked::default()) };
+    let mut out = Revoked::default();
     for p in auth_people(bin).await?.into_iter().filter(|p| !p.kith.is_empty() && !p.owner && p.bot_of.is_empty()) {
         let revoked = listed.contains(&p.kith);
         if revoked == p.revoked_at.is_some() {
@@ -171,11 +179,18 @@ pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Res
             .await
             .with_context(|| format!("kith-auth person {} {flag}", p.id))?;
         tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
-        if revoked {
-            cut.push(p.id);
-        }
+        if revoked { out.cut.push(p.id) } else { out.restored.push(p.id) }
     }
-    Ok(cut)
+    Ok(out)
+}
+
+/// The people [`apply_revoked`] changed here.
+#[derive(Default)]
+pub struct Revoked {
+    /// Newly revoked: the caller cuts them off.
+    pub cut: Vec<String>,
+    /// Undone on another Mac: the caller gives back what the revoke kept.
+    pub restored: Vec<String>,
 }
 
 /// Whether `person` is revoked here (their own state). False when kith-auth can't say: the caller then does what it

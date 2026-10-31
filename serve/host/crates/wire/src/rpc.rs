@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8";
+pub const CONTRACT_SHA256: &str = "4a62f53c9dea433c336a9a181b012ffbd7fcbda01f46932664998b669059b48d";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -1024,6 +1024,22 @@ pub struct PeerAgents {
     pub agents: Vec<PeerAgent>,
 }
 
+/// One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HandleRevoke {
+    pub handle: String,
+    pub revoked: bool,
+    pub at: i64,
+}
+
+/// Every handle revoke or undo the sender knows; the answer is the receiver's own list, so both ends hold the latest of each.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct HandleRevokes {
+    pub handles: Vec<HandleRevoke>,
+}
+
 /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -1575,6 +1591,13 @@ pub struct BotLeaveParams {}
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct PeerAgentsParams {}
 
+/// What `peerRevokes` takes.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PeerRevokesParams {
+    pub handles: Vec<HandleRevoke>,
+}
+
 /// Each method's name, as called.
 pub mod method {
     /// The connection handshake; answered to a member or a bot without paths, addresses, backends or screen state, with the agents they hold.
@@ -1671,6 +1694,8 @@ pub mod method {
     pub const BOT_LEAVE: &str = "botLeave";
     /// The agents another computer of the owner's may ask here (Mac link): the owner's own, by name.
     pub const PEER_AGENTS: &str = "peerAgents";
+    /// Mac link: the handle-only revokes and undos the caller knows. Each newer than this computer's own is applied here (the person is revoked or restored); the answer is this computer's list, so a computer that was off catches up.
+    pub const PEER_REVOKES: &str = "peerRevokes";
 }
 
 /// What the owner alone (a method no one else may call; the owner may call every method) may call.
@@ -1689,7 +1714,7 @@ pub const BOT_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PR
 pub const BOT_PENDING_METHODS: &[&str] = &[method::HELLO, method::BOT_STATUS, method::PROVE_BOT_INVITE];
 
 /// What another computer of the owner's, paired here (Mac link) may call.
-pub const PEER_METHODS: &[&str] = &[method::PEER_AGENTS];
+pub const PEER_METHODS: &[&str] = &[method::PEER_AGENTS, method::PEER_REVOKES];
 
 /// The contract as data, for `crate::check` (the producer's strict check and the consumer's).
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
@@ -1755,6 +1780,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotSelf", fields: &[("botId", "string"), ("name", "string"), ("state", "BotGuestState"), ("owner", "BotOwner"), ("agents", "[GrantedAgent]"), ("limits", "BotLimits"), ("version", "string"), ("minClient", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerAgent", fields: &[("agent", "string"), ("name", "string?")], may_omit: &["name"] },
         crate::check::TypeSchema { name: "PeerAgents", fields: &[("agents", "[PeerAgent]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "HandleRevoke", fields: &[("handle", "string"), ("revoked", "bool"), ("at", "int")], may_omit: &[] },
+        crate::check::TypeSchema { name: "HandleRevokes", fields: &[("handles", "[HandleRevoke]")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotProof", fields: &[("state", "BotGuestState"), ("botId", "string?"), ("owner", "string?"), ("agents", "[string]?")], may_omit: &["botId", "owner", "agents"] },
         crate::check::TypeSchema { name: "BotAsked", fields: &[("conversation", "string"), ("entryId", "string"), ("turn", "int"), ("seq", "int"), ("state", "ConversationState"), ("queued", "int"), ("duplicate", "bool?"), ("room", "string?")], may_omit: &["duplicate", "room"] },
         crate::check::TypeSchema { name: "BotPosted", fields: &[("entryId", "string"), ("seq", "int"), ("turn", "int"), ("room", "string"), ("conversation", "string"), ("replied", "bool"), ("late", "bool"), ("lateWhy", "string?"), ("unprompted", "bool?"), ("duplicate", "bool?")], may_omit: &["duplicate"] },
@@ -1811,6 +1838,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "BotStopParams", fields: &[("conversation", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotLeaveParams", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "PeerAgentsParams", fields: &[], may_omit: &[] },
+        crate::check::TypeSchema { name: "PeerRevokesParams", fields: &[("handles", "[HandleRevoke]")], may_omit: &[] },
     ],
     methods: &[
         crate::check::MethodSchema { name: "hello", who: &["member", "bot", "botPending"], params: "HelloParams", result: "Hello" },
@@ -1860,6 +1888,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::MethodSchema { name: "botStop", who: &["bot"], params: "BotStopParams", result: "Empty" },
         crate::check::MethodSchema { name: "botLeave", who: &["bot"], params: "BotLeaveParams", result: "Empty" },
         crate::check::MethodSchema { name: "peerAgents", who: &["peer"], params: "PeerAgentsParams", result: "PeerAgents" },
+        crate::check::MethodSchema { name: "peerRevokes", who: &["peer"], params: "PeerRevokesParams", result: "HandleRevokes" },
     ],
 };
 
@@ -1908,6 +1937,8 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotSelf" => serde_json::from_value::<BotSelf>(value).map(drop),
         "PeerAgent" => serde_json::from_value::<PeerAgent>(value).map(drop),
         "PeerAgents" => serde_json::from_value::<PeerAgents>(value).map(drop),
+        "HandleRevoke" => serde_json::from_value::<HandleRevoke>(value).map(drop),
+        "HandleRevokes" => serde_json::from_value::<HandleRevokes>(value).map(drop),
         "BotProof" => serde_json::from_value::<BotProof>(value).map(drop),
         "BotAsked" => serde_json::from_value::<BotAsked>(value).map(drop),
         "BotPosted" => serde_json::from_value::<BotPosted>(value).map(drop),
@@ -1964,6 +1995,7 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "BotStopParams" => serde_json::from_value::<BotStopParams>(value).map(drop),
         "BotLeaveParams" => serde_json::from_value::<BotLeaveParams>(value).map(drop),
         "PeerAgentsParams" => serde_json::from_value::<PeerAgentsParams>(value).map(drop),
+        "PeerRevokesParams" => serde_json::from_value::<PeerRevokesParams>(value).map(drop),
         _ => return None,
     })
 }

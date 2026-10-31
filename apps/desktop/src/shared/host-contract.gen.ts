@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8'
+export const CONTRACT_SHA256 = '4a62f53c9dea433c336a9a181b012ffbd7fcbda01f46932664998b669059b48d'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -481,6 +481,18 @@ export interface PeerAgents {
   agents: PeerAgent[]
 }
 
+/** One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer. */
+export interface HandleRevoke {
+  handle: string
+  revoked: boolean
+  at: number
+}
+
+/** Every handle revoke or undo the sender knows; the answer is the receiver's own list, so both ends hold the latest of each. */
+export interface HandleRevokes {
+  handles: HandleRevoke[]
+}
+
 /** Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only. */
 export interface BotProof {
   state: BotGuestState
@@ -861,6 +873,11 @@ export type BotLeaveParams = Record<string, never>
 /** What `peerAgents` takes. */
 export type PeerAgentsParams = Record<string, never>
 
+/** What `peerRevokes` takes. */
+export interface PeerRevokesParams {
+  handles: HandleRevoke[]
+}
+
 export interface Types {
   Empty: Empty
   StoreHealth: StoreHealth
@@ -904,6 +921,8 @@ export interface Types {
   BotSelf: BotSelf
   PeerAgent: PeerAgent
   PeerAgents: PeerAgents
+  HandleRevoke: HandleRevoke
+  HandleRevokes: HandleRevokes
   BotProof: BotProof
   BotAsked: BotAsked
   BotPosted: BotPosted
@@ -960,6 +979,7 @@ export interface Types {
   BotStopParams: BotStopParams
   BotLeaveParams: BotLeaveParams
   PeerAgentsParams: PeerAgentsParams
+  PeerRevokesParams: PeerRevokesParams
 }
 export type TypeName = keyof Types
 
@@ -1031,6 +1051,7 @@ export const METHODS = {
   botStop: { who: ['bot'], params: 'BotStopParams', result: 'Empty' },
   botLeave: { who: ['bot'], params: 'BotLeaveParams', result: 'Empty' },
   peerAgents: { who: ['peer'], params: 'PeerAgentsParams', result: 'PeerAgents' },
+  peerRevokes: { who: ['peer'], params: 'PeerRevokesParams', result: 'HandleRevokes' },
 } as const
 export type MethodName = keyof typeof METHODS
 
@@ -1083,6 +1104,7 @@ export interface Params {
   botStop: BotStopParams
   botLeave: BotLeaveParams
   peerAgents: PeerAgentsParams
+  peerRevokes: PeerRevokesParams
 }
 
 /** What each method answers with. */
@@ -1134,6 +1156,7 @@ export interface Results {
   botStop: Empty
   botLeave: Empty
   peerAgents: PeerAgents
+  peerRevokes: HandleRevokes
 }
 
 /** What the owner alone (a method no one else may call; the owner may call every method) may call. */
@@ -1152,7 +1175,7 @@ export const BOT_METHODS = ['hello', 'botStatus', 'proveBotInvite', 'botAsk', 'b
 export const BOT_PENDING_METHODS = ['hello', 'botStatus', 'proveBotInvite'] as const satisfies readonly MethodName[]
 
 /** What another computer of the owner's, paired here (Mac link) may call. */
-export const PEER_METHODS = ['peerAgents'] as const satisfies readonly MethodName[]
+export const PEER_METHODS = ['peerAgents', 'peerRevokes'] as const satisfies readonly MethodName[]
 
 // ---- checking and receiving ----
 
@@ -1230,6 +1253,8 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotSelf: { fields: { botId: 'string', name: 'string', state: 'BotGuestState', owner: 'BotOwner', agents: '[GrantedAgent]', limits: 'BotLimits', version: 'string', minClient: 'string' } },
     PeerAgent: { fields: { agent: 'string', name: 'string?' }, mayOmit: ['name'] },
     PeerAgents: { fields: { agents: '[PeerAgent]' } },
+    HandleRevoke: { fields: { handle: 'string', revoked: 'bool', at: 'int' } },
+    HandleRevokes: { fields: { handles: '[HandleRevoke]' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
     BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?', room: 'string?' }, mayOmit: ['duplicate', 'room'] },
     BotPosted: { fields: { entryId: 'string', seq: 'int', turn: 'int', room: 'string', conversation: 'string', replied: 'bool', late: 'bool', lateWhy: 'string?', unprompted: 'bool?', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
@@ -1286,6 +1311,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotStopParams: { fields: { conversation: 'string' } },
     BotLeaveParams: { fields: {} },
     PeerAgentsParams: { fields: {} },
+    PeerRevokesParams: { fields: { handles: '[HandleRevoke]' } },
   },
 }
 
