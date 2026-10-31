@@ -389,6 +389,9 @@ fn write_token_file(token: &str) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Two crypto backends reach rustls (reqwest pulls aws-lc-rs, the guest crate and ureq pull ring), so rustls can't
+    // pick one by itself and every TLS client without an explicit provider panics (the Discord gateway did, 0.1.1).
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     let args: Vec<_> = std::env::args_os().collect();
     let cli = match kernel::route(&args) {
         kernel::Route::Host(a) => Cli::parse_from(a),
