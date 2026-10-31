@@ -416,7 +416,7 @@ async fn a_ringing_call_is_pushed_to_its_persons_devices_only_and_not_while_the_
     let open = ring_for(&r, &mine, "app open");
     r.hub.phone_clients.fetch_sub(1, Ordering::Relaxed);
     let open_id = open["id"].as_str().unwrap().to_owned();
-    assert!(rung_for(&open_id).is_empty());
+    assert_eq!(rung_for(&open_id), Vec::<(String, bool)>::new());
     decline_now(&r, &open_id);
 
     r.hub.calls.inner.locked().rung.clear();
