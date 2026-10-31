@@ -55,6 +55,11 @@ public extension HostClient {
         let _: Empty = try await call("revokePerson", ["personId": personId], timeout: 60)
     }
 
+    /// Undoes `revokePerson`. The host says why when it can't (the person was removed meanwhile).
+    func unrevokePerson(_ personId: String) async throws {
+        let _: Empty = try await call("unrevokePerson", ["personId": personId], timeout: 60)
+    }
+
     func audit(since: Date? = nil, personId: String? = nil) async throws -> [AuditRow] {
         struct Body: Encodable { var since: Int64?; var personId: String? }
         struct Res: Decodable { var audit: [AuditRow] }
