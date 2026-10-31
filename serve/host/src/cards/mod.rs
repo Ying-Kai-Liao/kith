@@ -162,7 +162,7 @@ fn lane_of(agent: &str) -> crate::store::BotConfig {
 /// Where a -p run's card appears: the person's own chat with the agent, else (the owner's run, or a person with no chat
 /// yet) the owner's chat with it, else the agent's card lane. Cards are Permission entries, so the apps already show
 /// them in a chat, and the lane's in Needs-you.
-fn chat_for(hub: &Hub, person: &str, agent: &str) -> crate::store::BotConfig {
+pub(crate) fn chat_for(hub: &Hub, person: &str, agent: &str) -> crate::store::BotConfig {
     let rows: Vec<_> =
         hub.store.bots().unwrap_or_default().into_iter().filter(|r| !r.deleted).map(|r| r.config).collect();
     let of_agent = |c: &&crate::store::BotConfig| c.hq_agent.as_deref() == Some(agent);
