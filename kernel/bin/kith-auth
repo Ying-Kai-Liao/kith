@@ -1801,7 +1801,9 @@ def cmd_people(args):
                                   'bot_of': parent_of(auth, pid) or '', 'provider': auth['people'][pid].get('provider', ''),
                                   'root': root_of(auth, pid), 'revoked': cut_off(auth, pid),
                                   'revoked_at': (auth['people'][pid].get('revoked') or {}).get('at'),
-                                  'kith': auth['people'][pid].get('handles', {}).get('kith', '')} for pid in ordered(auth)]))
+                                  'kith': auth['people'][pid].get('handles', {}).get('kith', ''),
+                                  'handles': {k: v for k, v in auth['people'][pid].get('handles', {}).items() if k != 'kith'}}
+                                 for pid in ordered(auth)]))
     full = bool(args)
     for pid in args or ordered(auth):
         need_person(auth, pid)
@@ -1910,6 +1912,7 @@ def cmd_person(args):
             auth['people'].pop(x, None)
         forget(auth, gone)
         save_auth(auth)
+        sweep_kernel(gone)   # their delegations, wakes and runs end with them (R5)
         for x in gone:   # Claude Code's temp folder of their runs goes now; their memory and files stay (below)
             guest_tmp_remove(x)
         kept = sorted({label for label, _ in person_folders(pid)})
@@ -1962,6 +1965,21 @@ def remove_unused(auth, pid):
     print(f'{pid} removed (unused: the id is free again)')
 
 
+def sweep_kernel(persons):
+    """What a revoke or a removal ends on its own, with no kith serve to do it (R5): the delegations these people started and
+    the wakes and waiters they are owed (kith ask --end), and the runs their writer claims name (kith-sessions sweep). Run
+    as the owner: the env an agent's run would carry is dropped, as kith serve's own calls drop it. A failure is said, never
+    fatal: the access is already gone."""
+    env = {k: v for k, v in os.environ.items() if k not in ('KITH_AGENT', 'KITH_ASK_ID', 'CLAUDE_CODE_SESSION_ID', 'KITH_PERSON')}
+    here = Path(__file__).resolve().parent
+    people = [x for x in persons if x]
+    for argv in ([str(here / 'kith-ask'), '--end'] + [a for x in people for a in ('--person', x)],
+                 [str(here / 'kith-sessions'), 'sweep', *people]):
+        r = subprocess.run([sys.executable, *argv], env=env, capture_output=True, text=True)
+        if r.returncode:
+            print(f'kith-auth: {Path(argv[0]).name} did not finish: {(r.stderr or r.stdout).strip()[:200]}', file=sys.stderr)
+
+
 def revoke_person(pid, revoke, local):
     """Revoke: the person stays in kith (rows, handles, bots, memory) and reaches nothing; undo clears the one fact.
     On a Mac linked to the Kith cloud the revoke must reach every Mac of the owner, so it goes through kith serve,
@@ -1990,13 +2008,14 @@ def revoke_person(pid, revoke, local):
     if revoke:
         if not p.get('revoked'):
             p['revoked'] = {'at': int(time.time())}
-        # an open /link code would bind a new account to them: cut, as the cloud invites are
-        auth['invites'] = {c: i for c, i in auth['invites'].items() if canonical(auth, i.get('person', '')) != pid}
+        # An open /link code stays: link refuses a revoked person's code (cut_off), and undo gives it back while it lasts.
+        pass
     else:
         p.pop('revoked', None)
     save_auth(auth)
     bots = bots_of(auth, pid)
     if revoke and not local:   # kith serve's own --local call removes them itself, once it has stopped their runs
+        sweep_kernel([pid] + bots)
         for x in [pid] + bots:
             guest_tmp_remove(x)
     print(f'{pid}: access removed; their rows, accounts' + (f' and bots ({", ".join(bots)}, dormant)' if bots else '')

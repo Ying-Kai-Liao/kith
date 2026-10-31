@@ -178,7 +178,7 @@ async fn run_dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, mut b: Valu
         bot @ (Principal::Bot { .. } | Principal::BotPending(_)) => {
             return botguests::bot_call(hub, caller, bot, method, b, permitted).await;
         }
-        Principal::Peer(computer) => return peers::peer_call(hub, caller, &computer, method, &b, permitted),
+        Principal::Peer(computer) => return peers::peer_call(hub, caller, &computer, method, &b, permitted).await,
     }
     let observed = crate::analytics::observe_call(hub, caller, method, &b);
     let result = route(hub, caller, method, b).await;

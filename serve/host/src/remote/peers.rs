@@ -437,6 +437,12 @@ pub async fn status(hub: &Arc<Hub>, cid: &str) -> Result<Value> {
 /// The first call over the channel to B, pinned to the sign key the code was computed with. A stays pending until
 /// it succeeds.
 async fn first_call(hub: &Arc<Hub>, p: &PeerOut) -> Result<Value, String> {
+    Ok(call_peer(hub, p, kith_wire::rpc::method::PEER_AGENTS, json!({})).await?["agents"].take())
+}
+
+/// One call to a paired computer over the channel pinned at pairing: the one way this computer sends B something (Mac
+/// link). An error is a message to show; B being off is one.
+pub async fn call_peer(hub: &Arc<Hub>, p: &PeerOut, method: &str, params: Value) -> Result<Value, String> {
     let base = cloud::base(hub).map_err(|e| e.to_string())?;
     vault::unlock(hub.clone()).await.map_err(|e| e.to_string())?;
     let seed = vault::read(&hub.store, &key_slot(&p.computer_id)).map_err(|e| e.to_string())?;
@@ -447,9 +453,9 @@ async fn first_call(hub: &Arc<Hub>, p: &PeerOut) -> Result<Value, String> {
     let fail = |f: kith_guest::relay::Fail| f.into_cli().message;
     let mut channel =
         kith_guest::relay::connect(&target, &SigningKey::from_bytes(&seed), FIRST_CALL).await.map_err(fail)?;
-    let agents = channel.call(kith_wire::rpc::method::PEER_AGENTS, json!({}), FIRST_CALL).await;
+    let answer = channel.call(method, params, FIRST_CALL).await;
     channel.close().await;
-    Ok(agents.map_err(fail)?["agents"].take())
+    answer.map_err(fail)
 }
 
 /// Ends a pairing this computer started that can't finish: the request goes, and the row with it.
