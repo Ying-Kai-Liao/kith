@@ -806,9 +806,9 @@ if os.environ["P_OWNER"] == "1":
         listed.extend(n for n in notes if n not in listed)
     # Auto mode has no prompt, so a call its classifier blocks is only a refusal. In a run the host can ask about, a
     # PermissionDenied hook turns that into a card (Allow once, Always allow, Deny) and, on a yes, a PreToolUse hook lets the
-    # retry of that one call through. Not at the owner terminal: Claude Code shows its notice there. Needs the ask
-    # token, which only a run it started (or kith-permit issue) has; without one both hooks print nothing.
-    if run_mode == "auto" and os.environ["OWNER_TERMINAL"] != "1":
+    # retry of that one call through. Also at the owner terminal (the apps are the main surface; the notice Claude Code shows
+    # stays). Needs the ask token, which only a run it started (or kith-permit issue) has; without one both hooks print nothing.
+    if run_mode == "auto":
         import shlex, uuid
         permit = shlex.quote(os.environ["KITH_ROOT"] + "/bin/kith-permit")
         once_dir = shlex.quote("%s/run/once/%s" % (os.environ["KITH_MACHINE"], uuid.uuid4().hex))
@@ -1203,6 +1203,14 @@ if [[ $# -gt 0 ]]; then
   exec claude "${args[@]}" -p "$*"
 fi
 [[ -t 0 && -t 1 ]] || { echo "kith: no terminal for an interactive session; give a task (kith $agent \"...\") or run it in a terminal" >&2; exit 1; }
+# An interactive owner run gets an ask token too, for the PermissionDenied hook alone (its card in the apps): no prompt tool
+# is added, so ordinary permission prompts stay in the terminal. Only when the settings carry that hook (auto mode). The
+# pid is this shell's: kith-sessions run keeps it and claude is its child, so the hook still descends from it. No host:
+# the run starts as before and the hook prints nothing.
+if [[ $harness == claude && $p_owner == 1 && $nested -eq 0 && -z ${KITH_RUN_TOKEN:-} && -z ${KITH_ASK_TOKEN:-} ]] \
+   && grep -q 'kith-permit.* denied --dir' "$runs/$$.settings.json" 2>/dev/null; then
+  if ask_env=$("$KITH/bin/kith-permit" issue "$agent" "${csid:-continue:$PWD}" "$$"); then eval "$ask_env"; fi
+fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
 if [[ -n $csid && $csid != "${r_sid:-}" ]]; then

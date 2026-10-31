@@ -137,7 +137,7 @@ rest, so for them an unset mode stays as before. A run for anyone but the owner 
 
 **Auto mode and "Always allow"** (`bin/kith-allow`, `lib/kith_allowed.py`, `bin/kith-permit denied|once`, `serve/host/src/cards/autoallow.rs`).
 In auto mode Claude Code's classifier stands in for the prompt, so a call it blocks is only a refusal. For an owner run in
-auto mode that is not at the owner's own terminal, the settings fill adds a `PermissionDenied` hook: `kith-permit denied`
+auto mode (at the owner's own terminal too: the apps are the main surface, and an interactive run gets an ask token for this hook alone, with no prompt tool, so ordinary prompts stay in the terminal), the settings fill adds a `PermissionDenied` hook: `kith-permit denied`
 sends the host a `requestPermission` with `autoMode: {reason}` (an owner token only) and the owner's card says Allow once,
 Always allow or Deny. A yes writes a one-shot for that exact call in the run's own folder (`<machine>/run/once/<id>`) and answers
 `retry: true`; a `PreToolUse` hook (`kith-permit once`) lets that retry through, once (a PreToolUse allow beats the classifier,

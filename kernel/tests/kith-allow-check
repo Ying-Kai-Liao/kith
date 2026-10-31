@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # kith-allow-check — "Always allow" for a call the auto-mode classifier blocked: `kith allow` (the one reader/writer of an
 # agent's allowed.json and the rule of what may be remembered), the settings fill that loads it and adds the hooks
-# (owner runs in auto mode only), and kith-permit `denied` / `once` against a fake host socket.
+# (owner runs in auto mode only, also at the owner's terminal), and kith-permit `denied` / `once` against a fake host socket.
 #
 #   kernel/tests/kith-allow-check     a few seconds; exits 1 when a check fails
 set -uo pipefail
@@ -218,4 +218,56 @@ is "a host that is down leaves the denial" "$(hook PermissionDenied '[x]' 'ls' |
 rm -rf "$T/once"; mkdir -p "$T/once/old"; touch -t 200001010000 "$T/once/old"
 hook PermissionDenied '[x]' 'ls' | "$PERMIT" denied --dir "$ONCE" >/dev/null
 is "a day-old run folder is cleaned up" "$([[ -d $T/once/old ]] && echo kept || echo gone)" "gone"
+# --- an interactive owner run at the terminal gets the token too (the card shows in the apps) --------------------------
+mkdir -p "$T/serve"; echo servetok > "$T/serve/token"
+cat > "$T/fakehost.py" <<'PY'
+import http.server, json, sys
+log = sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers['Content-Length']))
+        open(log, 'a').write(self.path + ' ' + body.decode() + '\n')
+        out = json.dumps({'env': {'KITH_ASK_TOKEN': 'term-tok', 'KITH_ASK_SOCKET': '/tmp/x.sock'}}).encode()
+        self.send_response(200); self.send_header('Content-Length', str(len(out))); self.end_headers(); self.wfile.write(out)
+    def log_message(self, *a): pass
+http.server.HTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+PY
+PORT=$((20000 + $$ % 20000))
+python3 "$T/fakehost.py" "$PORT" "$T/issued" & PIDS+=($!)
+for _ in $(seq 50); do python3 -c "import socket; socket.create_connection(('127.0.0.1', $PORT), 1)" 2>/dev/null && break; sleep 0.1; done
+cat > "$T/bin/claude" <<'STUB'
+#!/usr/bin/env bash
+[[ $1 == --version ]] && { echo "2.1.309 (Claude Code)"; exit 0; }
+[[ $1 == plugin ]] && { echo "[]"; exit 0; }
+printf 'TOKEN=%s\nARGS=%s\n' "${KITH_ASK_TOKEN:-}" "$*" > "$STUB_OUT"
+STUB
+cat > "$T/inpty.py" <<'PY'
+import os, pty, sys
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[1], sys.argv[1:])
+while True:
+    try:
+        d = os.read(fd, 65536)
+        if not d: break
+        os.write(1, d)
+    except OSError: break
+sys.exit(os.waitpid(pid, 0)[1] >> 8)
+PY
+export STUB_OUT=$T/stub.out
+term() {   # term [env...]: kith echo with a pty on both ends, as at a terminal
+  rm -f "$STUB_OUT"; : > "$T/issued"
+  (cd "$T" && env -u KITH_ASK_TOKEN -u KITH_ASK_SOCKET KITH_SERVE_DIR="$T/serve" KITH_SERVE_PORT=$PORT "$@" python3 "$T/inpty.py" "$KITH" echo) >"$T/term.out" 2>&1 < /dev/null
+}
+term KITH_PERMISSION_MODE=auto
+has "terminal, auto mode: claude has an ask token" "$(cat "$STUB_OUT")" "TOKEN=term-tok"
+has "...issued for the agent and this shell's pid" "$(cat "$T/issued")" '/api/issueAskToken {"agent": "echo"'
+hasnt "...with no permission prompt tool: prompts stay in the terminal" "$(cat "$STUB_OUT")" "permission-prompt-tool"
+hasnt "...and no kithpermit server" "$(cat "$STUB_OUT")" "kithpermit"
+term KITH_PERMISSION_MODE=default
+is "terminal, another mode: no token asked for" "$(grep -c issueAskToken "$T/issued")" "0"
+term KITH_PERMISSION_MODE=auto KITH_AGENT=parent
+is "nested (started by another run): no token" "$(grep -c issueAskToken "$T/issued")" "0"
+term KITH_PERMISSION_MODE=auto KITH_SERVE_PORT=1
+has "no host: the run still starts" "$(cat "$STUB_OUT")" "TOKEN="
 exit $((fails > 0))
