@@ -271,3 +271,95 @@
   color: var(--kith-ink);
   font-size: 13px;
 }
+
+/* The Plan card (DESIGN.md "Plan"): a 4 pt bar in the agent pair, then steps that change in place. */
+.rc-mono {
+  font-family: var(--font-code);
+}
+.rc-bar {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--kith-line);
+  overflow: hidden;
+}
+.rc-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--pair-a), var(--pair-b));
+  transition: width 0.25s ease-out;
+}
+.rc-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rc-step {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font: 400 13px / 1.4 var(--font-ui);
+}
+.rc-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 18px;
+}
+.rc-mark i {
+  box-sizing: border-box;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--kith-line);
+  border-radius: 50%;
+}
+.rc-step.done {
+  color: var(--kith-muted);
+}
+.rc-step.now {
+  font-weight: 600;
+}
+.rc-step.now .rc-mark i {
+  border-color: var(--kith-muted);
+  border-top-color: var(--kith-ink);
+  animation: rc-spin 0.9s linear infinite;
+}
+.rc-step.next {
+  font-weight: 300;
+}
+.rc-step.stopped {
+  color: var(--kith-muted);
+}
+.rc-step.stopped .rc-mark i {
+  border-style: dashed;
+  border-color: var(--kith-muted);
+}
+.rc-step-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+@keyframes rc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rc-step.now .rc-mark i {
+    animation: none;
+  }
+  .rc-bar i {
+    transition: none;
+  }
+}

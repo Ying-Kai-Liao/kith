@@ -36,7 +36,7 @@ import { botGuestSender } from '@shared/bot-guest-chat'
 import { queuedLine } from '@shared/thread-writer'
 import { quoteOf, quotesOf } from './reply-quote'
 import { richCardOf, type RichCard } from '@shared/rich-card'
-import { NewsCard, ScheduleCard } from './RichCards'
+import { NewsCard, PlanCard, ScheduleCard } from './RichCards'
 import { lateOf } from '@shared/conversation'
 import { BotTag, LateTag } from './Tags'
 import { topicMenuItems } from './TopicPrompt'
@@ -121,6 +121,8 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
       if (entry.data.handoff) return <div className="chat-row notice"><HandoffNotice entry={entry} card={entry.data.handoff} /></div>
       // A routine's "Created routine" notice is its Schedule card.
       if (richCardOf(entry.data)?.type === 'schedule') return <div className="chat-row group-start"><div className="agent-inset"><ScheduleCard entry={entry} card={richCardOf(entry.data)!} /></div></div>
+      // A run's plan is one card that changes in place; an app without it shows the notice's text twin.
+      if (richCardOf(entry.data)?.type === 'plan') return <div className="chat-row group-start"><div className="agent-inset"><PlanCard entry={entry} card={richCardOf(entry.data)!} /></div></div>
       // Any notice that roots a thread (a bot guest's conversation) opens it like a message does.
       return <div className="chat-row notice"><NoticeRow entry={entry} /></div>
   }
