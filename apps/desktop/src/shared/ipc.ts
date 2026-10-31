@@ -8,6 +8,7 @@ import type { IslandRect, IslandScreen, IslandSummary } from './island'
 import type { ErrorReport } from './error-report'
 import type { InviteLink } from './invite'
 import type { SharedItem } from './share-link'
+import type { LinkPreview } from './link-preview'
 import type { AccessProgress, AccessTicket, CloudResult, RelayCallError, RelayComputer, RelayState } from './relay'
 
 // The bridge between the main process (host lifecycle, loopback HTTP, tray, windows)
@@ -284,6 +285,8 @@ export interface KithBridge {
     /** Error tracking: an uncaught error in this window (shared/error-report.ts). */
     reportError(report: ErrorReport): void
     openExternal(url: string): void
+    /** A News row's preview picture and icon as data: URLs, fetched and cached by the main process. */
+    linkPreview(url: string): Promise<LinkPreview>
     /** A long-form memory note in the user's editor; only paths inside a memory folder open. */
     openMemoryFile(path: string): void
     copy(text: string): void
