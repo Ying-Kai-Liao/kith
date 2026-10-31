@@ -42,7 +42,7 @@ if [[ -n $to ]]; then
       id=${to#ask:}
       [[ $id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "kith-send: bad target $to" >&2; exit 2; }
       [[ -f $1 ]] && kind=files || kind=text
-      python3 - "$KITH_MACHINE/live/ask/$id.jsonl" "$agent" "$kind" "$caption" "$@" <<'PY'
+      python3 -I - "$KITH_MACHINE/live/ask/$id.jsonl" "$agent" "$kind" "$caption" "$@" <<'PY'
 import json, os, sys, time
 dest, who, kind, caption, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
 item = {'as': who, 'files': [os.path.abspath(f) for f in rest], 'caption': caption} if kind == 'files' \
@@ -73,7 +73,7 @@ fi
 
 if [[ -n ${KITH_BRIDGE_OUTBOX:-} && -d $KITH_BRIDGE_OUTBOX && ! ( -n ${KITH_TELEGRAM_BOT_TOKEN:-} && -n ${KITH_TELEGRAM_CHAT_ID:-} ) ]]; then
   [[ -f $1 ]] && kind=files || kind=text
-  python3 - "$KITH_BRIDGE_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
+  python3 -I - "$KITH_BRIDGE_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
 import json, os, sys, time
 box, who, kind, caption, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
 item = {'as': who, 'files': [os.path.abspath(f) for f in rest], 'caption': caption} if kind == 'files' \
@@ -91,7 +91,7 @@ fi
 boxed=0
 if [[ -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX ]]; then
   [[ -f $1 ]] && kind=files || kind=text
-  python3 - "$KITH_RUN_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
+  python3 -I - "$KITH_RUN_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
 import json, os, shutil, sys, time
 box, who, kind, caption, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
 n = time.time_ns()

@@ -182,7 +182,7 @@ cmd_relay() {
     *) echo "kith serve relay: the URL must start with https:// (or http://127.0.0.1 / http://localhost)" >&2; exit 2 ;;
   esac
   mkdir -p "$DATA"
-  python3 - "$CONFIG" "$1" <<'PY'
+  python3 -I - "$CONFIG" "$1" <<'PY'
 import json, os, sys, tempfile
 path, url = sys.argv[1:3]
 try: cfg = json.load(open(path))

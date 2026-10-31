@@ -59,7 +59,7 @@ state: []          # where its data lives; read from the source every time
 access: read       # what it may change without asking
 EOF
 
-python3 - "$home/settings.json" <<'EOF'
+python3 -I - "$home/settings.json" <<'EOF'
 import json, re, subprocess, sys
 try:
     listing = subprocess.run(['claude', 'plugin', 'list'], capture_output=True, text=True, timeout=30).stdout

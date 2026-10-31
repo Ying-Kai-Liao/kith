@@ -188,6 +188,12 @@ printf 'open("%s", "w").write("ran")\n' "$T/planted.ran" > "$GF/json.py"
 (cd "$GF" && KITH_PERSON=guest "$KITH" echo --launch-json >/dev/null 2>&1)
 (cd "$GF" && KITH_PERSON=guest "$KITH" echo "hi" >/dev/null 2>&1)
 expect "guest: a json.py in their files folder doesn't run as the owner" "$([ -e "$T/planted.ran" ] && echo ran || echo "not run")" "not run"
+# kith-send feeds its Python on stdin (python3 - <<PY), which puts the working directory first too
+mkdir -p "$T/outbox"
+(cd "$GF" && KITH_RUN_OUTBOX=$T/outbox "$KERNEL/bin/kith-send" "hi" >/dev/null 2>&1)
+(cd "$GF" && "$KERNEL/bin/kith-send" --to ask:sandbox-check "hi" >/dev/null 2>&1)
+expect "guest: kith-send from their files folder doesn't run their json.py" "$([ -e "$T/planted.ran" ] && echo ran || echo "not run")" "not run"
+expect "guest: kith-send from their files folder still delivers" "$(ls "$T/outbox" | /usr/bin/grep -c '\.json$')" 1
 rm -f "$GF/json.py"
 CWDJ=$(cd "$KITH_HOME/agents/echo" && "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["cwd"])')
 expect "owner keeps its working directory" "$CWDJ" "$KITH_HOME/agents/echo"
