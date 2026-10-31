@@ -667,3 +667,19 @@ async fn a_turn_that_ends_with_a_question_open_parks_it() {
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Parked);
     assert_eq!(r.hub.store.entry(&entry.id).unwrap().data["status"], "pending", "still answerable");
 }
+
+/// An owner run of the Kith app's 1:1 chat (its ask token is keyed to the chat's `acp:<chat>:<thread>`): the card is in
+/// the owner's chat with the agent, not the `cards:` lane, and the answer reaches the run.
+#[tokio::test]
+async fn an_owner_app_chat_run_raises_a_card_in_the_owners_chat() {
+    let r = Rig::new().await;
+    let chat = r.owner_bot("house");
+    window(&r.hub, 20);
+    let call = ask(&r.hub, ask_identity("house", "acp:chat1:thr1", None), "Bash", ls());
+    let card = shown(&r.hub).await;
+    assert_eq!(card.session, "run:o:acp:chat1:thr1");
+    let entry = r.hub.store.entry(card.entry_id.as_ref().unwrap()).unwrap();
+    assert_eq!(entry.bot_id, chat, "the owner's chat with the agent, not the card lane");
+    answer(&r.hub, &entry.id, Some("allow"), None).unwrap();
+    assert!(call.await.unwrap().allow);
+}
