@@ -3,10 +3,10 @@
 
   kith allow AGENT [--json]            list what is remembered: id, rule, kind, why it was blocked, when it was added
   kith allow AGENT --rm ID             forget one (the next run of the agent no longer has it)
-  kith allow AGENT --derive            stdin {"tool", "input"}: what "Always allow" would remember for that call, or why it
+  kith allow AGENT --derive            stdin {"tool", "input", "reason"}: what "Always allow" would remember for that call, or why it
                                        can't ({"ok": true, "kind", "rule"} / {"ok": false, "why"})
-  kith allow AGENT --add-json          stdin {"tool", "input", "reason"}: remember that call, derived here (never a rule the
-                                       caller wrote). Prints {"ok", "id", "rule", "kind", "added"}; the same rule twice is one entry
+  kith allow AGENT --add-json          stdin {"tool", "input", "reason", "rule", "kind"}: remember that call, derived here (never a rule the
+                                       caller wrote; with "rule" and "kind" it writes only if they are what it derives). Prints {"ok", "id", "rule", "kind", "added"}; the same rule twice is one entry
 
 In auto mode a classifier blocks some calls of your own agent runs. The Kith app asks you on a card; "Always allow" lands here.
 The entries live in the agent's own folder (<agents>/AGENT/allowed.json, next to jobs.json) and are read by the settings of
@@ -55,13 +55,16 @@ def main(argv):
             return 0
         if rest == ['--derive']:
             doc = stdin_json()
-            print(json.dumps(ka.derive(agent, doc['tool'], doc.get('input'))))
+            print(json.dumps(ka.derive(agent, doc['tool'], doc.get('input'), doc.get('reason') or '')))
             return 0
         if rest == ['--add-json']:
             doc = stdin_json()
-            d = ka.derive(agent, doc['tool'], doc.get('input'))
+            d = ka.derive(agent, doc['tool'], doc.get('input'), doc.get('reason') or '')
             if not d['ok']:
                 print(json.dumps(d))
+                return 1
+            if 'rule' in doc and (doc['rule'], doc.get('kind')) != (d['rule'], d['kind']):
+                print(json.dumps({'ok': False, 'why': 'it is no longer what was offered'}))
                 return 1
             e, new = ka.add(agent, d['kind'], d['rule'], doc.get('reason') or '')
             print(json.dumps({'ok': True, 'id': e['id'], 'rule': e['rule'], 'kind': e['kind'], 'added': new}))

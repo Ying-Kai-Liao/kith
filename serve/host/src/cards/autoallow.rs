@@ -50,8 +50,8 @@ async fn run(agent: &str, flag: &str, body: &Value) -> Option<std::process::Outp
 }
 
 /// `kith allow <agent> --derive`: None when the kernel refuses to remember the call (or can't be reached).
-pub async fn derive(agent: &str, tool: &str, input: &Value) -> Option<Derived> {
-    let out = run(agent, "--derive", &json!({"tool": tool, "input": input})).await?;
+pub async fn derive(agent: &str, tool: &str, input: &Value, reason: &str) -> Option<Derived> {
+    let out = run(agent, "--derive", &json!({"tool": tool, "input": input, "reason": reason})).await?;
     let v: Value = serde_json::from_slice(&out.stdout).ok()?;
     if v["ok"] != true {
         return None;
@@ -66,7 +66,7 @@ pub async fn extras(agent: &str, tool: &str, input: &Value, reason: &str) -> edg
     let mut text = format!("Auto mode blocked this: {reason}");
     let mut options = Vec::new();
     let mut kept = json!({"kind": "auto", "reason": reason});
-    if let Some(d) = derive(agent, tool, input).await {
+    if let Some(d) = derive(agent, tool, input, &reason).await {
         let shown = if d.kind == "rule" { d.rule.clone() } else { format!("this exact action, for {agent}") };
         text = format!("{text}\nAlways allow remembers {shown}.");
         options.push(json!({"optionId": ALWAYS, "name": "Always allow", "kind": "allow_always"}));
@@ -81,7 +81,8 @@ pub async fn extras(agent: &str, tool: &str, input: &Value, reason: &str) -> edg
 pub async fn save(card: &Card, kept: &Value) -> Result<String, String> {
     let offered = kept["rule"].as_str().ok_or("this card offered nothing to remember")?;
     let input: Value = serde_json::from_str(&card.input).unwrap_or(Value::Null);
-    let body = json!({"tool": card.tool, "input": input, "reason": kept["reason"]});
+    let body =
+        json!({"tool": card.tool, "input": input, "reason": kept["reason"], "rule": offered, "kind": kept["ruleKind"]});
     let out = run(&card.agent, "--add-json", &body).await.ok_or("kith allow can't be reached")?;
     let v: Value = serde_json::from_slice(&out.stdout).unwrap_or(Value::Null);
     if !out.status.success() {

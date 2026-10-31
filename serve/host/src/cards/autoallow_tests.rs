@@ -10,8 +10,18 @@ use crate::api::rig::Rig;
 const REASON: &str = "[Data Exfiltration]";
 
 fn ask_auto(hub: &Arc<Hub>, who: RunIdentity, tool: &'static str, input: Value) -> tokio::task::JoinHandle<Decision> {
+    ask_auto_for(hub, who, tool, input, REASON)
+}
+
+fn ask_auto_for(
+    hub: &Arc<Hub>,
+    who: RunIdentity,
+    tool: &'static str,
+    input: Value,
+    reason: &'static str,
+) -> tokio::task::JoinHandle<Decision> {
     let hub = hub.clone();
-    tokio::spawn(async move { request_auto_denied(&hub, &who, tool, &input, REASON).await })
+    tokio::spawn(async move { request_auto_denied(&hub, &who, tool, &input, reason).await })
 }
 
 fn data(r: &Rig, card: &Card) -> Value {
@@ -159,7 +169,13 @@ async fn what_cannot_be_remembered_gets_no_always_option() {
 async fn a_rule_a_permission_rule_cannot_hold_is_kept_as_a_sentence_naming_the_agent() {
     let r = Rig::new().await;
     window(&r.hub, 20);
-    let call = ask_auto(&r.hub, owner_run("auto-g"), "Bash", json!({"command": "git push origin main"}));
+    let call = ask_auto_for(
+        &r.hub,
+        owner_run("auto-g"),
+        "Bash",
+        json!({"command": "git push origin main"}),
+        "[Irreversible Local Destruction]",
+    );
     let card = shown(&r.hub).await;
     let d = data(&r, &card);
     assert_eq!(ids(&d), ["allow", autoallow::ALWAYS, "deny"]);
@@ -198,4 +214,35 @@ async fn an_auto_card_never_joins_or_uses_an_ordinary_approval_of_the_same_call(
         answer(&r.hub, c.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     }
     assert!(!ordinary.await.unwrap().allow && !auto.await.unwrap().allow);
+}
+
+#[tokio::test]
+async fn a_sentence_is_not_offered_when_the_block_is_a_hard_deny() {
+    let r = Rig::new().await;
+    window(&r.hub, 20);
+    // A hard_deny block (Data Exfiltration) is not lifted by a sentence; an exact rule still resolves before the classifier.
+    let call = ask_auto(&r.hub, owner_run("auto-i"), "Bash", json!({"command": "git push origin main"}));
+    let card = shown(&r.hub).await;
+    assert_eq!(ids(&data(&r, &card)), ["allow", "deny"]);
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
+    assert!(!call.await.unwrap().allow);
+    let call = ask_auto(&r.hub, owner_run("auto-j"), "Bash", ls());
+    let card = shown(&r.hub).await;
+    assert_eq!(ids(&data(&r, &card)), ["allow", autoallow::ALWAYS, "deny"]);
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
+    assert!(!call.await.unwrap().allow);
+}
+
+#[tokio::test]
+async fn a_save_that_is_not_what_the_card_offered_writes_nothing() {
+    let r = Rig::new().await;
+    window(&r.hub, 20);
+    let call = ask_auto(&r.hub, owner_run("auto-k"), "Bash", ls());
+    let card = shown(&r.hub).await;
+    let kept = json!({"kind": "auto", "reason": REASON, "rule": "Bash(ls /etc)", "ruleKind": "rule"});
+    let why = autoallow::save(&card, &kept).await.unwrap_err();
+    assert!(why.contains("no longer what was offered"), "{why}");
+    assert_eq!(saved(&r).len(), 0, "the file stays as it was");
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
+    assert!(!call.await.unwrap().allow);
 }

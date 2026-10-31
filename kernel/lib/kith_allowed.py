@@ -55,6 +55,14 @@ PROTECTED_WORDS = re.compile(r'(?:^|[\s/"\'=])\.(?:git|claude|vscode|idea)(?:/|\
                              r'profile|gitconfig|gitmodules|mcp\.json|envrc|claude\.json)\b|CLAUDE(?:\.local)?\.md|LaunchAgents')
 COMPOUND = re.compile(r'[;&|`<>\n\\*?{}\[\]]|\$\(|\$\{|\$[A-Za-z_]')
 URL = re.compile(r'https?://', re.I)
+# Package managers whose run/exec forms Claude Code drops from allow rules in auto mode (permission-modes: "Package-manager run
+# commands"), so a saved rule would never take effect; `npm test` and the like stay rules.
+PKG_RUN = {'npm', 'pnpm', 'yarn', 'bun', 'uv', 'poetry', 'pipx', 'pdm', 'hatch'}
+PKG_RUN_VERBS = {'run', 'run-script', 'exec', 'x', 'dlx', 'create', 'init'}
+PKG_ALWAYS = {'npx', 'pnpx', 'bunx', 'uvx'}
+# `claude auto-mode defaults` hard_deny labels. A sentence in autoMode.allow only overrides soft_deny, so a block under one of
+# these is never lifted by a remembered sentence (an exact permission rule still resolves before the classifier).
+HARD_DENY = ('Data Exfiltration',)
 
 
 def home_of(agent):
@@ -194,12 +202,20 @@ def prose(agent, tool, tool_input):
             'it covers nothing else, not a similar command, another path or another agent.' % (agent, tool, action))
 
 
-def derive(agent, tool, tool_input):
+def derive(agent, tool, tool_input, reason=''):
     """What "Always allow" would save for this call: {"ok": True, "kind", "rule"} or {"ok": False, "why"}.
 
     Narrow by construction: an exact command, one file, one host, one named MCP tool; a prose entry (naming the agent and the
     exact input) for what a permission rule cannot hold. Refused: a critical-path delete, a bare or code-running shell, a
-    command or input that names a secret, kith's own secret and allow-list paths, a rule that would be a wildcard."""
+    command or input that names a secret, kith's own secret and allow-list paths, a rule that would be a wildcard. A sentence
+    is not offered when `reason` (the classifier's) names a hard_deny rule: it would never take effect."""
+    d = _derive(agent, tool, tool_input)
+    if d['ok'] and d['kind'] == 'prose' and any(h in (reason or '') for h in HARD_DENY):
+        return {'ok': False, 'why': 'the classifier blocks this under a rule a remembered sentence cannot lift'}
+    return d
+
+
+def _derive(agent, tool, tool_input):
     no = lambda why: {'ok': False, 'why': why}  # noqa: E731
     if not AGENT.match(agent or '') or not isinstance(tool, str) or not tool or len(tool) > 200:
         return no('not a call to remember')
@@ -230,7 +246,7 @@ def derive(agent, tool, tool_input):
         if not re.fullmatch(r'mcp__[A-Za-z0-9_.-]+__[A-Za-z0-9_.-]+', tool):
             return no('not a plain tool name')
         return {'ok': True, 'kind': 'rule', 'rule': tool}
-    # Anything else (a web search, a subagent...): a rule would be dropped or too wide.
+    # Anything else (a web search, a subagent, Monitor...): a rule would be dropped or too wide.
     return {'ok': True, 'kind': 'prose', 'rule': prose(agent, tool, tool_input)}
 
 
@@ -248,8 +264,10 @@ def _derive_bash(agent, tool_input):
         return no('a delete that reaches beyond one plain file is asked each time')
     if first in NEVER_FIRST:
         return no('a command that runs another command is asked each time')
-    if first in RUNNERS and (len(words) == 1 or any(w in ('-c', '-e', '-i', '--eval', 'exec', 'run', '-m') for w in words[1:])):
+    if first in RUNNERS and first not in PKG_ALWAYS and (len(words) == 1 or any(w in ('-c', '-e', '-i', '--eval', 'exec', 'run', '-m') for w in words[1:])):
         return no('a shell or interpreter given code to run is asked each time')
+    if first in PKG_ALWAYS or (first in PKG_RUN and any(w in PKG_RUN_VERBS for w in words[1:2])):
+        return {'ok': True, 'kind': 'prose', 'rule': prose(agent, 'Bash', {'command': command})}
     if first in NETWORK or URL.search(command) or PROTECTED_WORDS.search(command) or first == 'git' and \
             len(words) > 1 and words[1] in ('push', 'fetch', 'pull', 'clone', 'remote', 'config'):
         # A permission rule would not remember it: Claude Code sends these to the classifier whatever allows them.

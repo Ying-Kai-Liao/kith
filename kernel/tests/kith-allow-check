@@ -69,6 +69,20 @@ r=$(printf '{"tool":"mcp__kithpermit__approve","input":{}}' | "$ALLOW" echo --de
 is "kith's own approval tools are never remembered" "$(js "d['ok']" <<< "$r")" "False"
 r=$(printf '{"tool":"WebSearch","input":{"query":"kith"}}' | "$ALLOW" echo --derive)
 is "what a rule cannot hold is a sentence" "$(js "d['kind']" <<< "$r")" "prose"
+for c in 'npm run build' 'pnpm exec tsc' 'npx prettier --check .' 'uv run pytest'; do
+  r=$(printf '%s' "$(bash_in "$c")" | "$ALLOW" echo --derive)
+  is "auto mode drops allow rules for package-manager runs, so a sentence: $c" "$(js "d['kind']" <<< "$r")" "prose"
+done
+r=$(printf '%s' "$(bash_in 'npm test')" | "$ALLOW" echo --derive)
+is "a narrow npm command stays a rule" "$(js "d['kind']" <<< "$r")" "rule"
+r=$(printf '{"tool":"Bash","input":{"command":"git push origin main"},"reason":"[Data Exfiltration]"}' | "$ALLOW" echo --derive)
+is "a sentence is not offered under a hard_deny block" "$(js "d['ok']" <<< "$r")" "False"
+r=$(printf '{"tool":"Bash","input":{"command":"git status"},"reason":"[Data Exfiltration]"}' | "$ALLOW" echo --derive)
+is "...but an exact rule is" "$(js "d['kind']" <<< "$r")" "rule"
+printf '{"tool":"Bash","input":{"command":"git status"},"rule":"Bash(git status --short)","kind":"rule"}' | "$ALLOW" echo --add-json >/dev/null 2>&1
+is "a save that is not what was offered writes nothing" "$([[ -e $FILE ]] && echo written || echo none)" "none"
+printf '{"tool":"Bash","input":{"command":"git push origin main"},"reason":"[Data Exfiltration]","rule":"x","kind":"prose"}' | "$ALLOW" echo --add-json >/dev/null 2>&1
+is "...nor under a hard_deny block" "$([[ -e $FILE ]] && echo written || echo none)" "none"
 
 # --- kith allow: the list ------------------------------------------------------------------------------------------------
 is "nothing remembered at first" "$("$ALLOW" echo)" "nothing remembered for echo"
@@ -77,7 +91,7 @@ is "add saves one rule" "$(js "d['added']" <<< "$add")" "True"
 id=$(js "d['id']" <<< "$add")
 add2=$(printf '{"tool":"Bash","input":{"command":"git status","description":"again"},"reason":"x"}' | "$ALLOW" echo --add-json)
 is "the same rule twice is one entry" "$(js "d['added']" <<< "$add2")" "False"
-printf '{"tool":"Bash","input":{"command":"git push origin main"},"reason":"[Data Exfiltration]"}' | "$ALLOW" echo --add-json >/dev/null
+printf '{"tool":"Bash","input":{"command":"git push origin main"},"reason":"[Irreversible Local Destruction]"}' | "$ALLOW" echo --add-json >/dev/null
 printf '{"tool":"Bash","input":{"command":"rm -rf /"},"reason":"x"}' | "$ALLOW" echo --add-json >/dev/null
 is "a refused call adds nothing" "$("$ALLOW" echo --json | js "len(d['allowed'])")" "2"
 has "the list shows the rule, kind and reason" "$("$ALLOW" echo)" "Bash(git status)"
