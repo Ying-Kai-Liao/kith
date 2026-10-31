@@ -410,6 +410,7 @@ function ChatSplitView() {
           }}
           searchRef={searchRef}
           newItems={newItems}
+          onNewRoom={() => compose(true)}
           canCreate={onlineStores.length > 0}
           accountOpen={false}
           onAccount={() => void openProfileMenu(app, { onExtensions: openMarketplace })}

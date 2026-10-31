@@ -3,6 +3,7 @@ import { boardWaiting, buildBoard, type BoardTarget } from '@shared/board'
 import { resultList, searchCrew, type CrewHit, type CrewSearchSource } from '@shared/crew-search'
 import { goesTo, type GoesToAgent } from '@shared/goes-to'
 import { isGroup } from '@shared/models'
+import { hasLabel, labelsInUse } from '@shared/room-labels'
 import { isTask, taskLastAt, taskTitle } from '@shared/tasks'
 import { IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
@@ -29,7 +30,7 @@ import './crew-sidebar.css'
 const isMac = window.kith.platform === 'darwin'
 
 /** The sidebar of the main window: Crew or Board, the search dock, and the narrow rail. */
-export function CrewSidebar({ compact, roster, items, listRef, onListKey, onContext, searchRef, newItems, canCreate, accountOpen, onAccount, onExtensions, filter, emptyNote }: {
+export function CrewSidebar({ compact, roster, items, listRef, onListKey, onContext, searchRef, newItems, onNewRoom, canCreate, accountOpen, onAccount, onExtensions, filter, emptyNote }: {
   compact: boolean
   roster: ReturnType<typeof useComputerRoster>
   /** Every room shown, for search. */
@@ -40,6 +41,8 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
   /** ⌘F focuses this. */
   searchRef: RefObject<HTMLInputElement | null>
   newItems: () => MenuItem[]
+  /** The room list's New room: the group-creation page. */
+  onNewRoom: () => void
   canCreate: boolean
   accountOpen: boolean
   onAccount: () => void
@@ -53,6 +56,8 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const [newMenu, setNewMenu] = useState(false)
+  // The room list's label filter: one label at a time, applied in place to the Crew rows.
+  const [label, setLabel] = useState<string | null>(null)
   const newButton = useRef<HTMLDivElement>(null)
   const dictation = useDictation(query, setQuery)
   const searching = query.trim().length > 0
@@ -183,6 +188,13 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
     sending.current = false
   }
 
+  const labels = labelsInUse(items.map((i) => i.bot))
+  // A label nobody uses any more (its last room was relabelled or deleted) no longer filters.
+  const activeLabel = label && labels.includes(label) ? label : null
+  const shownRoster = activeLabel
+    ? { ...roster, sections: roster.sections.map((s) => ({ ...s, items: s.items.filter((i) => hasLabel(i.bot, activeLabel)) })) }
+    : roster
+
   const profile = <SidebarProfile accountOpen={accountOpen} onAccount={onAccount} />
   const newMenuNode = <AnchoredMenu open={newMenu} onClose={() => setNewMenu(false)} anchor={newButton} items={newItems} />
 
@@ -217,7 +229,19 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
   ) : (
     <>
       {filter ? <div className="cs-filter no-drag">{filter}</div> : null}
-      <BotRoster roster={roster} compact={false} onContext={onContext} />
+      <div className="cs-labels no-drag" role="group" aria-label="Room labels">
+        {labels.map((l) => (
+          <button key={l} className={`cs-label press ${l === activeLabel ? 'on' : ''}`} aria-pressed={l === activeLabel} onClick={() => setLabel(l === activeLabel ? null : l)}>
+            {l}
+          </button>
+        ))}
+        {canCreate ? (
+          <button className="cs-label cs-new-room press" onClick={onNewRoom}>
+            <Icon name="plus" size={11} weight="medium" /> New room
+          </button>
+        ) : null}
+      </div>
+      <BotRoster roster={shownRoster} compact={false} onContext={onContext} />
       {emptyNote}
     </>
   )
