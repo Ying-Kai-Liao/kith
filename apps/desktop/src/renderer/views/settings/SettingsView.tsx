@@ -22,7 +22,7 @@ import { MyBotsPage } from './BotGuestsView'
 import { PeopleView } from './PeopleView'
 import { ProfileImagePicker } from './ProfileImagePicker'
 import { KeysView } from './KeysView'
-import { LinkChatRow, ScheduleMessagesRow } from './LinkChatRow'
+import { LinkChatRow, ReplyCardsRow, ScheduleMessagesRow } from './LinkChatRow'
 import { errorText, isMac, thisMac } from './parts'
 import { BackupChains } from './BackupChain'
 import { UsageLimits } from './UsageLimits'
@@ -153,9 +153,6 @@ function PageContent({ page }: { page: SettingsPage }) {
   }
 }
 
-/** Apple sign-in hidden until it works; the button and its sign-in call stay. */
-const showAppleSignIn = false
-
 /** Who is signed in and how to sign in or out; then this account's computers. */
 function AccountSettings() {
   const account = useAccount()
@@ -191,7 +188,7 @@ function AccountSettings() {
           </>
         ) : (
           <>
-            {showAppleSignIn ? <Button kind="secondary" onClick={() => void account.signIn('apple')} disabled={account.isBusy}>Apple</Button> : null}
+            {account.appleSignIn ? <Button kind="secondary" onClick={() => void account.signIn('apple')} disabled={account.isBusy}>Apple</Button> : null}
             <Button kind="secondary" onClick={() => void account.signIn('google')} disabled={account.isBusy}>Google</Button>
             <Button kind="secondary" onClick={() => void account.signIn('github')} disabled={account.isBusy}>GitHub</Button>
           </>
@@ -229,6 +226,7 @@ function CrewSettings() {
         </ValueRow>
         <LinkChatRow />
         <ScheduleMessagesRow />
+        <ReplyCardsRow />
         <button className="settings-row settings-nav-row" onClick={() => setBackups(true)}>
           <VStack grow className="settings-stack">
             <span>Backups</span>

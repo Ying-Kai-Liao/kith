@@ -54,6 +54,8 @@ struct Script {
     impostor: bool,
     /// Refuse the relay upgrade with 403, as the cloud does once a bot's device is removed.
     refuse_upgrade: bool,
+    /// A room secret waiting for this bot (id, value): `botSecretFetch` hands it over once, then it is notFound.
+    secret: Option<(&'static str, String)>,
     // ---- what happened ----
     accepts: Vec<Value>,
     calls: Vec<(String, Value)>,
@@ -82,6 +84,7 @@ impl Server {
             drop_after_first_event: false,
             impostor: false,
             refuse_upgrade: false,
+            secret: None,
             accepts: vec![],
             calls: vec![],
             connections: 0,
@@ -238,6 +241,22 @@ fn answer_unchecked(fake: &Fake, method: &str, body: &Value) -> Result<Value, (u
         "botConversations" => Ok(
             json!({"conversations": [{"conversation": "cv_1", "agent": "house", "ref": null, "originLabel": "from Grok · Sam's Rex", "lastAt": 1_700_000_000_000_i64, "state": "idle"}]}),
         ),
+        "botRoomRead" => {
+            let secrets: Vec<Value> = s
+                .secret
+                .iter()
+                .map(|(id, _)| json!({"id": id, "from": "Kai", "label": "deploy key", "expiresAt": 4_102_444_800_000_i64}))
+                .collect();
+            Ok(
+                json!({"room": "rm_1", "conversation": null, "epoch": null, "entries": [], "cursor": 7, "secrets": secrets}),
+            )
+        }
+        "botSecretFetch" => match s.secret.take_if(|(id, _)| body["id"] == *id) {
+            Some((id, value)) => {
+                Ok(json!({"id": id, "room": "rm_1", "from": "Kai", "label": "deploy key", "value": value}))
+            }
+            None => Err((404, "notFound", "No such secret.")),
+        },
         "botLeave" | "botStop" => Ok(json!({})),
         _ => Err((404, "", "no such method")),
     }
@@ -669,4 +688,85 @@ async fn leave_removes_the_key_and_threads_and_agents_list() {
     assert_eq!(code, 0, "{err}");
     assert!(!home.path().join("device.key").exists() && !home.path().join("guest.json").exists());
     assert_eq!(kith(&server, home.path(), &["ask", "house", "hi"]).await.0, 3);
+}
+
+#[tokio::test]
+async fn room_secret_goes_to_a_new_0600_file_and_only_the_path_is_printed() {
+    let marker = format!("mk-{}", hex(&random::<8>()));
+    let server = Server::start(|s| s.secret = Some(("rs_1", marker.clone()))).await;
+    let home = tempfile::tempdir().unwrap();
+    assert_eq!(kith(&server, home.path(), &["join", &server.link(), "--wait", "5"]).await.0, 0);
+
+    // It is listed, without its value.
+    let (code, out, err) = kith(&server, home.path(), &["room", "read", "rm_1"]).await;
+    assert_eq!(code, 0, "{err}");
+    assert!(out.contains("secret rs_1 from Kai \"deploy key\""), "{out}");
+    assert!(!out.contains(&marker) && !err.contains(&marker));
+
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("key");
+    let path = file.to_str().unwrap();
+    let (code, out, err) = kith(&server, home.path(), &["room", "secret", "rs_1", "--to-file", path]).await;
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, format!("{path}\n"));
+    assert!(!err.contains(&marker));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), marker);
+    assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
+
+    // Once: the second fetch is the host's not-found, and it leaves no file behind.
+    let again = dir.path().join("again");
+    let (code, out, err) =
+        kith(&server, home.path(), &["room", "secret", "rs_1", "--to-file", again.to_str().unwrap()]).await;
+    assert_eq!(code, 2);
+    assert!(err.contains("No such secret."), "{err}");
+    assert!(!out.contains(&marker) && !err.contains(&marker));
+    assert!(!again.exists());
+}
+
+#[tokio::test]
+async fn room_secret_refuses_an_existing_path_without_taking_the_secret() {
+    let marker = format!("mk-{}", hex(&random::<8>()));
+    let server = Server::start(|s| s.secret = Some(("rs_1", marker.clone()))).await;
+    let home = tempfile::tempdir().unwrap();
+    assert_eq!(kith(&server, home.path(), &["join", &server.link(), "--wait", "5"]).await.0, 0);
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("key");
+    std::fs::write(&file, "mine").unwrap();
+    let (code, out, err) =
+        kith(&server, home.path(), &["room", "secret", "rs_1", "--to-file", file.to_str().unwrap()]).await;
+    assert_eq!(code, 2, "{err}");
+    assert!(err.contains("already exists"), "{err}");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "mine");
+    assert!(!out.contains(&marker) && !err.contains(&marker));
+    // The host was never asked, so the secret is still there for a path that works.
+    assert!(server.with(|s| s.calls.iter().all(|(m, _)| m != "botSecretFetch")));
+    let ok = dir.path().join("ok");
+    assert_eq!(kith(&server, home.path(), &["room", "secret", "rs_1", "--to-file", ok.to_str().unwrap()]).await.0, 0);
+    assert_eq!(std::fs::read_to_string(&ok).unwrap(), marker);
+}
+
+#[tokio::test]
+async fn room_secret_stdout_prints_the_value_and_json_names_the_path_not_the_value() {
+    let marker = format!("mk-{}", hex(&random::<8>()));
+    let server = Server::start(|s| s.secret = Some(("rs_1", marker.clone()))).await;
+    let home = tempfile::tempdir().unwrap();
+    assert_eq!(kith(&server, home.path(), &["join", &server.link(), "--wait", "5"]).await.0, 0);
+    let (code, out, err) = kith(&server, home.path(), &["room", "secret", "rs_1", "--stdout"]).await;
+    assert_eq!(code, 0, "{err}");
+    assert_eq!(out, format!("{marker}\n"));
+    assert_eq!(
+        kith(&server, home.path(), &["room", "secret", "rs_1", "--stdout"]).await.0,
+        2,
+        "a second fetch is notFound"
+    );
+
+    server.with(|s| s.secret = Some(("rs_2", marker.clone())));
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("k");
+    let (code, out, _) =
+        kith(&server, home.path(), &["--json", "room", "secret", "rs_2", "--to-file", file.to_str().unwrap()]).await;
+    assert_eq!(code, 0);
+    let event: Value = serde_json::from_str(out.lines().last().unwrap()).unwrap();
+    assert_eq!(event["file"], file.to_str().unwrap());
+    assert!(event.get("value").is_none() && !out.contains(&marker), "{out}");
 }

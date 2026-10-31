@@ -7,6 +7,10 @@ const PROVIDER_NAMES: Record<SignInProvider, string> = { apple: 'Apple', google:
 export const providerName = (provider: SignInProvider) => PROVIDER_NAMES[provider]
 export const providerStrategy = (provider: SignInProvider) => `oauth_${provider}`
 
+/** Apple needs the production Clerk instance and a build that can hold Apple credentials (not the dev build). */
+export const appleSignInAvailable = (environment: 'main' | 'dev', clerkPublishableKey: string | null) =>
+  environment === 'main' && !!clerkPublishableKey?.startsWith('pk_live_')
+
 export interface AccountConfig {
   clerkPublishableKey: string | null
   cloudURL: string | null

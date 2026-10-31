@@ -203,6 +203,8 @@ jobs:
         run: kernel/tests/kith-cost-bots-check
       - name: Call check
         run: kernel/tests/kith-call-check
+      - name: Chain check
+        run: kernel/tests/kith-chain-check
       - name: Ask check
         run: kernel/tests/kith-ask-check
       - name: Wake check

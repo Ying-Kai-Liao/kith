@@ -37,7 +37,8 @@ alone. To turn them on, set two variables in the environment of the build (or of
 
 - `KITH_CLERK_PUBLISHABLE_KEY`: the Kith Clerk app's publishable key (`pk_test_…` / `pk_live_…`), with
   Google, Apple and GitHub enabled and `kith://callback` and `kith-dev://callback` (plus the iOS
-  bundle ids' `://callback`) in its native redirect allowlist.
+  bundle ids' `://callback`) in its native redirect allowlist. The Apple button shows only on Main builds
+  with a `pk_live_…` key; the development instance can't do Apple.
 - `KITH_CLOUD_URL`: the Kith cloud's `https://` address (`https://api.kithbot.app` for Main builds).
 
 The desktop build writes them into `resources/account-config.json` (`tools/account-config.mjs`, run by
@@ -50,7 +51,7 @@ in the pairing link; the apps need no relay setting.
 
 The committed `DEVELOPMENT_TEAM` is not yours. Pass your team on the command line (or set it
 in Xcode, Signing & Capabilities) and switch the iOS app to the entitlements a free team can
-sign (no Push, Sign in with Apple or communication notifications; app groups and the
+sign (no Push, Sign in with Apple or communication notifications, so Apple sign-in stays hidden; app groups and the
 keychain group are kept):
 
 ```sh

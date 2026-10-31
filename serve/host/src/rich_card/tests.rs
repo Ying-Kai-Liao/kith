@@ -168,3 +168,71 @@ fn text_that_isnt_a_brief_stays_plain() {
         assert!(news::card(text, "echo", "j", None).is_none(), "{text}");
     }
 }
+
+fn steps(statuses: &[&str]) -> Value {
+    Value::Array(
+        statuses
+            .iter()
+            .enumerate()
+            .map(|(i, s)| json!({"content": format!("Step {}", i + 1), "status": s, "priority": "medium"}))
+            .collect(),
+    )
+}
+
+fn states(card: &Value) -> Vec<String> {
+    card["richCard"]["snapshot"]["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["state"].as_str().unwrap().into())
+        .collect()
+}
+
+#[test]
+fn a_plan_card_counts_done_steps_and_reads_as_numbered_marks() {
+    let card =
+        plan::card(&steps(&["completed", "completed", "in_progress", "pending", "pending"]), "e1", false).unwrap();
+    assert_eq!(card["text"], "Plan · 2 of 5\n1. ✓ Step 1\n2. ✓ Step 2\n3. → Step 3\n4. ○ Step 4\n5. ○ Step 5");
+    let rich = &card["richCard"];
+    assert_eq!((rich["type"].as_str(), rich["v"].as_i64()), (Some("plan"), Some(1)));
+    assert_eq!(rich["ref"], json!({"entry": "e1"}));
+    let snap = &rich["snapshot"];
+    assert_eq!(
+        (snap["done"].as_i64(), snap["total"].as_i64(), snap["ended"].as_bool()),
+        (Some(2), Some(5), Some(false))
+    );
+    assert_eq!(states(&card), ["done", "done", "now", "next", "next"]);
+}
+
+#[test]
+fn a_rewritten_plan_gives_a_new_state_for_the_same_card() {
+    // The actor rewrites one entry with each update: steps added, removed or finished all come out of the same call.
+    let first = plan::card(&steps(&["in_progress", "pending"]), "e1", false).unwrap();
+    let later = plan::card(&steps(&["completed", "completed", "in_progress"]), "e1", false).unwrap();
+    assert_eq!(first["richCard"]["ref"], later["richCard"]["ref"]);
+    assert_eq!(later["richCard"]["snapshot"]["total"], 3);
+    assert_eq!(later["text"].as_str().unwrap().lines().next(), Some("Plan · 2 of 3"));
+}
+
+#[test]
+fn a_plan_with_no_steps_has_no_card_and_a_finished_one_is_all_done() {
+    assert!(plan::card(&json!([]), "e1", false).is_none());
+    assert!(plan::card(&Value::Null, "e1", false).is_none());
+    let done = plan::card(&steps(&["completed", "completed"]), "e1", true).unwrap();
+    assert_eq!(done["text"].as_str().unwrap().lines().next(), Some("Plan · 2 of 2"));
+}
+
+#[test]
+fn a_turn_that_ended_mid_plan_leaves_nothing_spinning() {
+    let card = plan::card(&steps(&["completed", "in_progress", "pending"]), "e1", true).unwrap();
+    assert_eq!(states(&card), ["done", "stopped", "next"]);
+    assert_eq!(card["richCard"]["snapshot"]["ended"], true);
+}
+
+#[test]
+fn a_very_long_plan_is_cut_but_still_counted() {
+    let card = plan::card(&steps(&vec!["pending"; 45]), "e1", false).unwrap();
+    assert_eq!(card["richCard"]["snapshot"]["total"], 45);
+    assert_eq!(states(&card).len(), 40);
+    assert!(card["text"].as_str().unwrap().ends_with("… and 5 more"));
+}

@@ -6,7 +6,10 @@ import SwiftUI
 
 extension RichCard {
     /// A Schedule or News card this app draws in place of the entry's text twin.
-    var drawsInChat: Bool { (type == "schedule" || type == "news") && isDrawable() }
+    var drawsInChat: Bool {
+        // A Result card lacking a title or a fact is the plain reply.
+        (type == "schedule" || type == "news" || type == "plan" || (type == "result" && ResultCardModel(card: self) != nil)) && isDrawable()
+    }
 }
 
 /// A card folded to one line: a changed or removed job, or a card after its day (tap opens it in place).
@@ -49,13 +52,14 @@ private struct FoldedRichCard: View {
 /// The card's grey panel and its clock header.
 private struct ReportCard<Trailing: View, Content: View>: View {
     let title: String
+    var icon = "clock"
     @ViewBuilder var trailing: Trailing
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(Palette.ink)
+                Image(systemName: icon).font(.system(size: 12)).foregroundStyle(Palette.ink)
                 Text(title).kithText(.secondary).fontWeight(.semibold).foregroundStyle(Palette.ink).lineLimit(1)
                 Spacer(minLength: 8)
                 trailing
@@ -414,6 +418,43 @@ struct NewsCard: View {
     }
 }
 
+// MARK: Result
+
+/// The Result card: a reply Jev sorted as a result, its own lines as title and mono facts, a button for each link the
+/// reply held. The reply stays; "Show as text" folds the card back to it in place (DESIGN.md "Reply cards").
+struct ResultCard: View {
+    let model: ResultCardModel
+    let showText: () -> Void
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        ReportCard(title: model.title, icon: "doc.text") {
+            EmptyView()
+        } content: {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.facts.joined(separator: " · "))
+                    .font(KithText.code.font)
+                    .foregroundStyle(Palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    ForEach(Array(model.links.enumerated()), id: \.element.id) { index, link in
+                        let button = Button { openURL(link.url) } label: {
+                            Text(link.label).kithText(.secondary).fontWeight(.medium).padding(.horizontal, 14).frame(minHeight: 32)
+                        }
+                        if index == 0 { button.buttonStyle(.ink) } else { button.buttonStyle(.line) }
+                    }
+                    Spacer(minLength: 0)
+                    Button(action: showText) {
+                        Text("Show as text").kithText(.secondary).foregroundStyle(Palette.muted).frame(minHeight: 32)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .accessibilityLabel(model.title)
+    }
+}
+
 /// The brief's own words around the card, in the agent's bubble.
 private struct CardBubble: View {
     let text: String
@@ -426,5 +467,60 @@ private struct CardBubble: View {
             .background(Palette.bubbleAgent, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
             .padding(.trailing, 40)
             .textSelection(.enabled)
+    }
+}
+
+// MARK: Plan
+
+/// The Plan card: a count in mono, a 4 pt bar in the agent's pair, and steps that change in place (done = check, muted;
+/// now = spinner, semibold; next = ring, light). A turn that ended mid-plan leaves its step as a dashed ring.
+struct PlanCard: View {
+    let entry: Entry
+    let card: RichCard
+    @Environment(BotStore.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let view = PlanCardModel(card: card)
+        let tint = AgentTint.resolve((entry.data.author.flatMap { model.bots[$0] } ?? model.bots[entry.botId])?.avatarColor)
+        ReportCard(title: view.title, icon: "checklist") {
+            Text(view.count).font(.caption.monospaced()).foregroundStyle(Palette.muted).lineLimit(1)
+        } content: {
+            GeometryReader { geo in
+                Capsule().fill(Palette.line)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(LinearGradient(colors: [tint.a, tint.b], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * view.fraction)
+                    }
+            }
+            .frame(height: 4)
+            .animation(Motion.reduced(Motion.layout, reduceMotion), value: view.fraction)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(view.steps) { step in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        mark(step.state, ended: view.ended).frame(width: 14)
+                        Text(step.text).kithText(.secondary)
+                            .fontWeight(step.state == .now ? .semibold : step.state == .next ? .light : .regular)
+                            .foregroundStyle(step.state == .done || step.state == .stopped ? Palette.muted : Palette.ink)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue(step.state.rawValue)
+                }
+            }
+        }
+        .accessibilityLabel("\(view.title), \(view.count)")
+    }
+
+    @ViewBuilder private func mark(_ state: PlanCardModel.State, ended: Bool) -> some View {
+        switch state {
+        case .done:
+            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.muted)
+        case .now where !ended:
+            ProgressView().controlSize(.mini)
+        case .stopped, .now:
+            Circle().strokeBorder(Palette.muted, style: StrokeStyle(lineWidth: 1.5, dash: [2, 2])).frame(width: 11, height: 11)
+        case .next:
+            Circle().strokeBorder(Palette.line, lineWidth: 1.5).frame(width: 11, height: 11)
+        }
     }
 }

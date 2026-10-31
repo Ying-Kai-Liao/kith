@@ -62,6 +62,8 @@ test('the people list is read defensively', () => {
   assert.equal(people[0]!.devices[0]!.lastSeenAt, 5)
   assert.equal(people.length, 2)
   assert.deepEqual(parsePeople(null), [])
+  const revoked = parsePeople({ people: [{ personId: 'a', revoked: true }, { personId: 'b' }, { personId: 'c', revoked: 'yes' }] })
+  assert.deepEqual(revoked.map((p) => p.revoked), [true, false, false])
   assert.ok(isOpenInvite({ inviteId: 'i', personId: 'p', agents: {}, createdAt: 0, expiresAt: 10, usedAt: null, revokedAt: null }, 5))
   assert.ok(!isOpenInvite({ inviteId: 'i', personId: 'p', agents: {}, createdAt: 0, expiresAt: 10, usedAt: 1, revokedAt: null }, 5))
 })

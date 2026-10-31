@@ -21,6 +21,8 @@ struct ChatRow: View {
     var onMakeTopic: ((Entry) -> Void)?
     @Environment(BotStore.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// A Result card folded back to the reply ("Show as text"), for this row.
+    @State private var resultAsText = false
     /// A tapped agent reply shows its time and context line under it. The chat holds which one is open
     /// (one at a time, closed by scrolling), so the row only gets whether it is this one.
     var showsContext = false
@@ -52,11 +54,23 @@ struct ChatRow: View {
         case "agent":
             VStack(alignment: .leading, spacing: 4) {
                 if groupStart || entry.data.isLate { AuthorLabel(botId: entry.data.author ?? chat?.id, late: entry.data.isLate) }
-                if let card = entry.data.richCard, card.drawsInChat {
-                    if card.type == "news" { NewsCard(entry: entry, card: card) } else { ScheduleCard(entry: entry, card: card) }
+                if let card = entry.data.richCard, card.drawsInChat, !(card.type == "result" && resultAsText) {
+                    if card.type == "news" {
+                        NewsCard(entry: entry, card: card)
+                    } else if card.type == "result", let model = ResultCardModel(card: card) {
+                        ResultCard(model: model) { withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { resultAsText = true } }
+                    } else {
+                        ScheduleCard(entry: entry, card: card)
+                    }
                 } else {
                     AgentBubble(entry: entry, openTrace: openTrace, reply: reply, makeTopic: topicAction, late: entry.data.isLate, lateQuote: lateQuote) {
                         withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { toggleContext() }
+                    }
+                    if resultAsText, entry.data.richCard?.type == "result" {
+                        Button { withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { resultAsText = false } } label: {
+                            Text("Shown as text · Show as card").font(.caption).foregroundStyle(Palette.muted)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 Group {
@@ -89,6 +103,9 @@ struct ChatRow: View {
                 ConnectionRequestCard(entry: entry, request: request).padding(.top, 12)
             } else if let card = entry.data.handoff {
                 HandoffCardRow(entry: entry, card: card).padding(.top, 10)
+            } else if let card = entry.data.richCard, card.type == "plan", card.drawsInChat {
+                // A run's plan is one card that changes in place; an older app shows the notice's text twin.
+                PlanCard(entry: entry, card: card).padding(.top, 10)
             } else if let card = entry.data.richCard, card.type == "schedule", card.drawsInChat {
                 // A routine's card arrives as a notice from the host, not as the bot's message.
                 ScheduleCard(entry: entry, card: card).padding(.top, 10)

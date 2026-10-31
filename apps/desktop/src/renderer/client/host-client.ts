@@ -431,6 +431,10 @@ export class HostClient {
     return this.call('revokePerson', { personId }, 60_000)
   }
 
+  unrevokePerson(personId: string) {
+    return this.call('unrevokePerson', { personId }, 60_000)
+  }
+
   async audit(since = 0, personId: string | null = null): Promise<AuditRow[]> {
     return parseAudit(await this.call('audit', { since, ...(personId ? { personId } : {}) }))
   }

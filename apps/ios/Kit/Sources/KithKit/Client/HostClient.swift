@@ -454,6 +454,19 @@ public extension HostClient {
         return res.on
     }
 
+    /// Whether the host lets Jev sort a finished reply into a Result card (the owner's switch, off by default); `enabled`
+    /// sets it first. An older host answers with `HostError.http(404, …)`.
+    func replyCards(enabled: Bool? = nil) async throws -> Bool {
+        struct Body: Encodable { var enabled: Bool }
+        struct Answer: Decodable { var enabled: Bool }
+        if let enabled {
+            let answer: Answer = try await call("setJevCards", Body(enabled: enabled))
+            return answer.enabled
+        }
+        let answer: Answer = try await call("jevCardsStatus")
+        return answer.enabled
+    }
+
     // MARK: kith bot details (serve/docs/bot-info.md)
 
     func kithInfo(botId: String, refresh: Bool = false) async throws -> KithInfoResponse {

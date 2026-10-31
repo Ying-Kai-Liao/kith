@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 import { join } from 'node:path'
 import { fromRenderer } from './ipc-guard'
 import { app, ipcMain, safeStorage, type BrowserWindow } from 'electron'
-import { providerName, providerStrategy, resolveAccountConfig, type AccountConfig, type SignInProvider } from '../shared/account-config'
+import { appleSignInAvailable, providerName, providerStrategy, resolveAccountConfig, type AccountConfig, type SignInProvider } from '../shared/account-config'
 import type { AccountState } from '../shared/ipc'
 import { linkedPhotos, profileImageProblem, type ProfileImageSource } from '../shared/profile-image'
 import { authenticate } from './auth'
@@ -86,6 +86,7 @@ export class AccountService extends EventEmitter {
     error: null,
     user: null,
     cloudURL: this.config.cloudURL,
+    appleSignIn: appleSignInAvailable(identity.environment, this.config.clerkPublishableKey),
   }
 
   private get storePath() {

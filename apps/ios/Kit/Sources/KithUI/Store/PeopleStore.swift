@@ -10,6 +10,7 @@ public protocol PeopleHost: Sendable {
     func revokeInvite(_ inviteId: String) async throws
     func setPersonAccess(personId: String, agents: [String: InviteRole]?, projects: [String]?) async throws
     func revokePerson(_ personId: String) async throws
+    func unrevokePerson(_ personId: String) async throws
     func audit(since: Date?, personId: String?) async throws -> [AuditRow]
     func projectList() async throws -> [HQProject]
 }
@@ -32,6 +33,8 @@ public final class PeopleStore {
     /// A write is in flight: Create and the edit buttons wait, so a double tap makes one invite.
     public private(set) var busy = false
     public var error: String?
+    /// Who the owner just removed, so the page can offer Undo until they do something else.
+    public private(set) var removed: HostPerson?
 
     private let host: @MainActor () -> (any PeopleHost)?
 
@@ -118,8 +121,18 @@ public final class PeopleStore {
 
     /// Ends their access. Their chats and memory stay on the computer.
     public func remove(_ personId: String) async -> Bool {
-        await write { try await $0.revokePerson(personId) }
+        let gone = person(personId)
+        let done = await write { try await $0.revokePerson(personId) }
+        if done { removed = gone }
+        return done
     }
+
+    /// Undo of a remove, from the banner or from the revoked person's row. The host's reason lands in `error`.
+    public func restore(_ personId: String) async {
+        if await write({ try await $0.unrevokePerson(personId) }), removed?.personId == personId { removed = nil }
+    }
+
+    public func dismissRemoved() { removed = nil }
 
     @discardableResult
     private func write(_ call: (any PeopleHost) async throws -> Void) async -> Bool {

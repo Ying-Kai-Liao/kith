@@ -11,6 +11,8 @@ import Observation
 @Observable
 final class AccountSession {
     private let clerk: Clerk?
+    /// Main builds on the production Clerk instance only; Dev and Personal Team builds can't sign in with Apple.
+    let showsAppleSignIn: Bool
     private(set) var isBusy = false
     var errorMessage: String?
 
@@ -73,6 +75,7 @@ final class AccountSession {
             .flatMap { try? PropertyListDecoder().decode(Configuration.self, from: $0) }
         let resolved = AccountConfig.resolve(env: env, cloudURL: config?.cloudURL, clerkPublishableKey: config?.clerkPublishableKey)
         cloudURL = resolved.cloudURL
+        showsAppleSignIn = AccountConfig.appleSignInAvailable(environment: .current, clerkPublishableKey: resolved.clerkPublishableKey)
         guard let key = resolved.clerkPublishableKey else {
             // Empty or malformed: sign-in is unavailable. Clerk would assert on a key it can't decode.
             if let raw = config?.clerkPublishableKey ?? env["KITH_CLERK_PUBLISHABLE_KEY"], !raw.isEmpty {

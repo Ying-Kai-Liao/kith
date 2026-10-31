@@ -160,8 +160,14 @@ async fn bot_answers(r: &Rig) -> BTreeMap<&'static str, (&'static str, Value)> {
     let room_cfg = json!({"id": "", "kind": "group", "name": "Crew", "members": [house, bot_id]});
     let room = r.hub.create_bot(serde_json::from_value(room_cfg).unwrap()).unwrap()["id"].as_str().unwrap().to_owned();
     r.hub.add_entry(&Lane::main(&room), EntryKind::User, 1, &json!({"text": "hello crew", "status": "sent"})).unwrap();
+    // The owner hands the bot a secret (the Keychain is a stand-in): the read lists it, the fetch answers it once.
+    crate::cards::room_secret_tests::keychain(r);
+    let given = json!({"room": room, "to": bot_id, "value": "stand-in-secret", "label": "api key"});
+    let sent = call(r, &Caller::Local, "sendSecret", given).await;
     let read = call(r, &rex, "botRoomRead", json!({"room": room})).await;
     got.insert("botRoomRead", ("botRoomRead", read));
+    let fetched = call(r, &rex, "botSecretFetch", json!({"id": sent["id"]})).await;
+    got.insert("botSecretFetch", ("botSecretFetch", fetched));
     // An open conversation (no loop started): the bot speaks up in it, one turn off its budget.
     let open = r.hub.store.open_conversation(&Lane::main(&room), 5, "owner").unwrap();
     let post = json!({"room": room, "conversation": open.id, "epoch": open.epoch, "text": "hi from outside", "clientNonce": "p1"});

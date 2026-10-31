@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 15;
+const SCHEMA: i64 = 16;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -28,7 +28,10 @@ const SCHEMA: i64 = 15;
 /// the host wakes it through (`wake_profile`, NULL: no wake).
 /// 13: Mac link (designs/2026-10-29-mac-link): the owner's computers let in here (`peers_in`) and the ones this
 /// computer may ask (`peers_out`), each pinned to the keys of its code exchange.
-/// 15: a revoked person's devices, memberships and open invites are kept (`suspended_*`) instead of deleted, so undo
+/// 14: where an outside bot's view of a room starts (`room_bots`) and why a conversation ended or opened.
+/// 15: room secrets (designs/2026-10-31-room-secrets): who handed whom a one-time secret in a room, and where it stands.
+/// The value is never in this table (it is a Keychain item of kith-auth's).
+/// 16: a revoked person's devices, memberships and open invites are kept (`suspended_*`) instead of deleted, so undo
 /// gives them back; and the revokes of people known only by a chat handle (`handle_revokes`), for the owner's other
 /// computers (Mac link).
 fn migrate(c: &Connection) -> Result<()> {
@@ -69,10 +72,31 @@ fn migrate(c: &Connection) -> Result<()> {
     }
     migrate_13(c)?;
     migrate_14(c)?;
-    migrate_15(c)
+    migrate_15(c)?;
+    migrate_16(c)
 }
 
 fn migrate_15(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         CREATE TABLE IF NOT EXISTS room_secrets(
+            id TEXT PRIMARY KEY,
+            room TEXT NOT NULL,
+            sender_kind TEXT NOT NULL CHECK(sender_kind IN ('owner','agent')), sender TEXT NOT NULL,
+            recipient_kind TEXT NOT NULL CHECK(recipient_kind IN ('agent','bot')), recipient TEXT NOT NULL,
+            agent TEXT,
+            label TEXT,
+            notice_seq INTEGER,
+            created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+            state TEXT NOT NULL CHECK(state IN ('pending','taking','taken','expired','dropped')), done_at INTEGER);
+         CREATE INDEX IF NOT EXISTS room_secrets_by_recipient ON room_secrets(recipient, state);
+         INSERT INTO kv(k, v) VALUES('schema', '15') ON CONFLICT(k) DO UPDATE SET v = '15';
+         COMMIT;",
+    )?;
+    Ok(())
+}
+
+fn migrate_16(c: &Connection) -> Result<()> {
     c.execute_batch(
         "BEGIN;
          CREATE TABLE IF NOT EXISTS suspended_devices(
@@ -88,7 +112,7 @@ fn migrate_15(c: &Connection) -> Result<()> {
             used_at INTEGER, revoked_at INTEGER);
          CREATE TABLE IF NOT EXISTS handle_revokes(
             handle TEXT PRIMARY KEY, revoked INTEGER NOT NULL, at INTEGER NOT NULL);
-         INSERT INTO kv(k, v) VALUES('schema', '15') ON CONFLICT(k) DO UPDATE SET v = '15';
+         INSERT INTO kv(k, v) VALUES('schema', '16') ON CONFLICT(k) DO UPDATE SET v = '16';
          COMMIT;",
     )?;
     Ok(())
@@ -375,7 +399,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("15"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("16"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -396,7 +420,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("15"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("16"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -419,7 +443,7 @@ mod tests {
                 .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("15"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("16"));
         assert!(s.peers_in().unwrap().is_empty() && s.peers_out().unwrap().is_empty());
     }
 
@@ -439,7 +463,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("15"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("16"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         drop(s);
         let s = Store::open(&db).unwrap();

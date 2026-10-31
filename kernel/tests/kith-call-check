@@ -46,6 +46,18 @@ python3 - "$tmp/seen.json" <<'PY' || fail "wait not sent"
 import json, sys
 assert json.load(open(sys.argv[1]))['body']['wait'] is True
 PY
+"$call" --result $'bug X\nPR: https://github.com/o/r/pull/1' --wait "a" >/dev/null
+python3 - "$tmp/seen.json" <<'PY' || fail "result not sent"
+import json, sys
+b = json.load(open(sys.argv[1]))['body']
+assert b['result'] == 'bug X\nPR: https://github.com/o/r/pull/1' and b['wait'] is True and b['reason'] == 'a', b
+PY
+"$call" "a" >/dev/null
+python3 - "$tmp/seen.json" <<'PY' || fail "a call without --result must not send one"
+import json, sys
+assert 'result' not in json.load(open(sys.argv[1]))['body']
+PY
+code=0; "$call" --result >/dev/null 2>&1 || code=$?; [[ $code == 2 ]] || fail "--result with nothing after it is a usage error, got $code"
 code=0; env -u KITH_CALL_KEY -u HQ_CALL_KEY "$call" "a" >/dev/null 2>&1 || code=$?
 [[ $code == 7 ]] || fail "a run without the key should be not-allowed (7), got $code"
 

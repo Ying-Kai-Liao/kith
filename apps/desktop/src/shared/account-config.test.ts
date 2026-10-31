@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { providerName, providerStrategy, resolveAccountConfig } from './account-config.ts'
+import { appleSignInAvailable, providerName, providerStrategy, resolveAccountConfig } from './account-config.ts'
 
 const file = { clerkPublishableKey: 'pk_test_file', cloudURL: 'https://file.example/' }
 
@@ -24,4 +24,12 @@ test('GitHub maps to the oauth_github strategy', () => {
   assert.equal(providerStrategy('github'), 'oauth_github')
   assert.equal(providerStrategy('google'), 'oauth_google')
   assert.equal(providerName('github'), 'GitHub')
+})
+
+test('Apple maps to oauth_apple and shows only on a main build with a production key', () => {
+  assert.equal(providerStrategy('apple'), 'oauth_apple')
+  assert.equal(appleSignInAvailable('main', 'pk_live_x'), true)
+  assert.equal(appleSignInAvailable('dev', 'pk_live_x'), false)
+  assert.equal(appleSignInAvailable('main', 'pk_test_x'), false)
+  assert.equal(appleSignInAvailable('main', null), false)
 })

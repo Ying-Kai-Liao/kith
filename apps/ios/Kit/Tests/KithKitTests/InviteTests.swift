@@ -119,6 +119,10 @@ private func link(_ query: String, scheme: String = "kith") -> URL { URL(string:
     #expect(sam.lastSeen == Date(timeIntervalSince1970: 1_700_000_000))
     // No name: the id stands in.
     #expect(people[1].name == "lee" && people[1].lastSeen == nil)
+    // `revoked` is read when the host says it and is false otherwise.
+    #expect(!sam.revoked && !people[1].revoked)
+    let gone = try JSONDecoder().decode(HostPerson.self, from: Data(#"{"personId":"kay","revoked":true}"#.utf8))
+    #expect(gone.revoked)
 }
 
 @Test func invitesCreatedInviteAndAuditDecode() throws {
@@ -203,9 +207,11 @@ private func link(_ query: String, scheme: String = "kith") -> URL { URL(string:
     try? await client.setPersonAccess(personId: "sam", agents: ["house": .member], projects: ["site"])
     try? await client.proveInvite(inviteId: "inv_1", token: fakeToken)
     _ = try? await client.startChat(agent: "house")
+    try? await client.unrevokePerson("sam")
     let calls = await transport.calls
-    #expect(calls.map(\.method) == ["createInvite", "createInvite", "setPersonAccess", "proveInvite", "startChat"])
+    #expect(calls.map(\.method) == ["createInvite", "createInvite", "setPersonAccess", "proveInvite", "startChat", "unrevokePerson"])
     func json(_ i: Int) throws -> [String: Any] { try #require(JSONSerialization.jsonObject(with: calls[i].body) as? [String: Any]) }
+    #expect(try json(5)["personId"] as? String == "sam")
     #expect(try json(0)["name"] as? String == "Sam")
     #expect(try json(0)["personId"] == nil)
     #expect(try json(0)["agents"] as? [String: String] == ["house": "guest"])

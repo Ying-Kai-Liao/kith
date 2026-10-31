@@ -377,6 +377,7 @@ private struct DemoPeopleHost: PeopleHost {
     func revokeInvite(_ inviteId: String) async throws {}
     func setPersonAccess(personId: String, agents: [String: InviteRole]?, projects: [String]?) async throws {}
     func revokePerson(_ personId: String) async throws {}
+    func unrevokePerson(_ personId: String) async throws {}
     func audit(since: Date?, personId: String?) async throws -> [AuditRow] { [] }
     func projectList() async throws -> [HQProject] { [] }
 }

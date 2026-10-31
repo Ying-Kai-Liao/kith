@@ -520,6 +520,7 @@ pub const BOT_METHODS: &[&str] = &[
     "botLeave",         // the bot retires itself
     "botPost",          // post into a room it is a member of (7.12)
     "botRoomRead",      // read a room it is a member of (7.12)
+    "botSecretFetch",   // take the secret the owner handed it in a room, once (7.12)
     // later packages:
     "botLinkRequest",   // Grok-account linking (2.7)
 ];
@@ -843,7 +844,21 @@ member list): there is no new way to add a member, it is the owner's own group e
   kept, wakes nobody and costs nothing (C3). A post never opens or tops up a budget (C1). It is stored as a `user` entry
   with `data.sender.botId`, so it is never taken for a person's message. A room the bot is not a member of is a 404.
 - **`botRoomRead {room, since?, limit?}`** reads the room after a cursor (a `rev`); the first read is the newest few.
-  Entries are shaped as for any bot plus `room`, `epoch` and `author`. `kith room read` prints them and the new cursor.
+  Entries are shaped as for any bot plus `room`, `epoch` and `author`. `kith room read` prints them and the new cursor, then one line per pending secret (id, who from, the sender's label, when
+  it lapses; never the value).
+- **`botSecretFetch {id}`** (room secrets) takes a secret the owner handed this bot
+  in a room, once. The value is in the answer `{id, room, from, label?, value}` and nowhere else: the owner's `sendSecret`
+  puts it in a one-time Keychain item of kith-auth's (`kith/once/<id>`), never in the host database, an entry, an event or a
+  log. It is on the bot list because a bot has no run on this computer that could use `kith-auth exec --secret`; nothing
+  else a bot may call carries a secret. Everything that is not the bot's to have is the same 404 ("No such secret."), so ids
+  can't be probed: no such id, another bot's, already taken, lapsed (10 minutes by default, 1 to 60), sent before the bot
+  joined the room (or while it had no join point), or the bot is no member any more. While this computer is catching up
+  with the cloud it is a 503 (as for `botRoomRead`). The host claims the row (`pending` -> `taking`), has kith-auth take
+  the item (deleted before it is printed), checks again that the bot is still active and a member, and answers only if the
+  row then moves `taking` -> `taken`; a removal, a revoke or the clock in between wins and nothing is answered. The bot hears
+  of it by a `roomSecret` event `{room, id, from, label, expiresAt}` (to it and the owner alone) and in `botRoomRead`'s
+  `secrets` list (this bot's pending ones, no value); neither wakes it. The room shows only a quiet line ("Kai sent Grok a
+  secret"), which no bot ever receives. Once the bot has it, it is the bot's: a prompt-injected bot can leak it (8.1).
 - **Events.** The bot's event stream also carries the `entry` events of the rooms it is a member of right now. Membership
   and the bot's state are checked on every event: taking it out of the group, `botLeave` or a revoke ends them at once.
 - **`botAsk` with `room`** (C5): the question becomes one turn of the agent it @-mentions in that room, no conversation
@@ -1024,11 +1039,17 @@ kith agents [--json]
 kith status [--json]
 kith room read <room> [--since CURSOR] [--json]        (7.12)
 kith room post <room> --conversation C --epoch E [--turn-key K] [--nonce N] [--json] <TEXT | ->
+kith room secret <id> (--to-file PATH | --stdout) [--json]    (room secrets)
 kith link-account --speaker S [--json]          (package 7)
 kith leave
 kith --version | --help
 ```
 
+- `room secret <id>` calls `botSecretFetch`, once. `--to-file PATH` creates PATH new (mode 0600; an existing path or a
+  symlink is refused, before the host is asked, so the secret is not used up) and prints only the path: use the file, do not
+  paste it into a chat. `--stdout` prints the value itself, for a pipe; with `--json` only `--stdout` carries `value`. A
+  second fetch, or a lapsed, withdrawn or someone else's id, is the host's "No such secret." (exit 2). The owner sends one
+  with `kith group secret <room> --to <member|bot>` (value on stdin, never an argument).
 - `TEXT` is the question; `-` or no argument with piped stdin reads it from stdin (UTF-8, up to 16000 chars; longer -> exit 2).
 - `join --wait` default 90; `--wait 0` returns after the accept without waiting for admission. `--name` defaults to the
   hostname; the host shows its own name for the bot anyway.

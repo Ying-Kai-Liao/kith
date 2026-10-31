@@ -15,6 +15,7 @@ pub mod access;
 pub mod edge;
 pub mod resource;
 pub mod resume;
+pub mod room_secret;
 pub mod secret;
 
 use crate::hub::Hub;
@@ -715,6 +716,7 @@ pub fn start(hub: &Arc<Hub>) {
             tick.tick().await;
             let Some(hub) = weak.upgrade() else { return };
             sweep(&hub);
+            room_secret::sweep(&hub).await;
             crate::access::rederive(&hub).await;
             // An owner token handed out over the API ends with its process or its time.
             let gone = tokio::task::spawn_blocking(|| crate::runauth::table().reap(crate::runauth::pid_alive))
@@ -771,3 +773,5 @@ mod tests;
 
 #[cfg(test)]
 mod resume_tests;
+#[cfg(test)]
+pub(crate) mod room_secret_tests;
