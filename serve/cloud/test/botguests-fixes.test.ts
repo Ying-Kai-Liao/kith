@@ -34,17 +34,34 @@ const accept = (bot: ref.SignKey, inviteId: string, token: string, body: Record<
 const revokeDevice = (host: TestHost, id: string) => call("POST", `/v1/host/bot-devices/${id}/revoke`, { key: host.sign, body: {} });
 const count = async (sql: string, ...binds: unknown[]) => (await env.DB.prepare(sql).bind(...binds).first<{ n: number }>())!.n;
 
+// The limiter's windows are fixed and aligned to the wall clock (miniflare's RateLimiterObject: epoch = floor(now / period)).
+// A burst that crosses a minute boundary gets 10 requests in one window and the 11th in a fresh one, which answers 401,
+// so the burst has to fall inside one window: start it early in a window, and if it still crosses the edge, run it once more.
+const WINDOW_MS = 60_000;
+const EARLY_IN_WINDOW_MS = 5_000;
+const windowOf = () => Math.floor(Date.now() / WINDOW_MS);
+const msToNextWindow = () => WINDOW_MS - (Date.now() % WINDOW_MS);
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function floodFrom(ip: string, inviteId: string, proof: string): Promise<number[] | null> {
+  if (msToNextWindow() < EARLY_IN_WINDOW_MS) await pause(msToNextWindow() + 50);
+  const headers = { "CF-Connecting-IP": ip };
+  const window = windowOf();
+  const statuses = [];
+  for (let i = 0; i < 11; i++) {
+    statuses.push((await call("POST", `/v1/bot-invites/${inviteId}/accept`, { headers, body: { token: proof, name: "Rex" } })).status);
+  }
+  return windowOf() === window ? statuses : null;
+}
+
 describe("bot join limiter", () => {
   it("counts a request before its signature is checked, so unsigned floods are limited too", async () => {
     const { inviteId, proof } = { inviteId: "binv_flood", proof: secrets().proof };
-    const headers = { "CF-Connecting-IP": "192.0.2.201" };
-    const statuses = [];
-    for (let i = 0; i < 11; i++) {
-      statuses.push((await call("POST", `/v1/bot-invites/${inviteId}/accept`, { headers, body: { token: proof, name: "Rex" } })).status);
-    }
-    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(401));
-    expect(statuses[10]).toBe(429);
-  });
+    const statuses =(await floodFrom("192.0.2.201", inviteId, proof)) ?? (await floodFrom("192.0.2.203", inviteId, proof));
+    expect(statuses, "the burst crossed a window edge twice").not.toBeNull();
+    expect(statuses!.slice(0, 10)).toEqual(Array(10).fill(401));
+    expect(statuses![10]).toBe(429);
+  }, 30_000);
 });
 
 describe("unknown invite and wrong token", () => {
