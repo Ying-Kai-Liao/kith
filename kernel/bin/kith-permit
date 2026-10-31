@@ -4,6 +4,10 @@
   kith-permit                          stdio MCP server with one tool, approve(tool_name, input, tool_use_id)
   kith-permit issue AGENT SESSION PID  ask the host for an owner ask token bound to PID; prints export lines for sh. A host
                                        that isn't up gets its launchd job restarted and is asked once more
+  kith-permit denied --dir DIR         PermissionDenied hook of an owner run in auto mode (bin/kith adds it): a call the classifier
+                                       blocked becomes a card (below); on a yes it records a one-shot in DIR and tells the model
+                                       it may retry. Prints nothing otherwise
+  kith-permit once --dir DIR           PreToolUse hook of the same runs: allows the call that matches a one-shot in DIR, once
   kith-permit apply SETTINGS_FILE      a guest run's launch, after its session claim (or a --launch-json run's, whose settings
                                        go to the host): ask the host for the access this session was given (a yes on an
                                        escape card, an "always") and add it to the settings file
@@ -34,6 +38,15 @@ one not ticked, or ticked at another version of the door, is asked of the owner 
 input {door, path}) whose only yes turns the job on; the start checks the tick again under the kith-auth lock. A door not
 prepared on this Mac asks the owner a second card (mcp__kithpermit__prepare_door) before it downloads anything.
 
+Auto mode (Claude Code's classifier stands in for the prompt) has no prompt, so a block would only be a refusal. For an owner
+run in auto mode, bin/kith adds two hooks: `denied` (PermissionDenied) sends the host the same requestPermission line with
+"autoMode": {"reason": the classifier's} and waits the live window; the owner's card says Allow once, Always allow or Deny
+(serve/host/src/cards/autoallow.rs; Always allow is saved through `kith allow`, lib/kith_allowed.py). On a yes `denied` writes a
+one-shot for that exact call into the run's own folder and answers retry: true, and `once` (PreToolUse) lets the retried call
+through, once: a PreToolUse allow beats the classifier (tried with claude 2.1.316, also against a hard_deny rule). A denial
+with no verdict ("Auto mode could not evaluate ...", "Classifier unavailable") gets no card, since retry is ignored for it.
+No token, no host, no answer: nothing is printed and the denial stands. Only the owner's ask token is used, never a guest's.
+
 When Claude Code reaches a permission prompt in a run nobody is watching (an "ask" rule, a tool the mode doesn't allow),
 it calls approve instead of refusing. The tool sends the host one line over the run socket,
   {"token", "method": "requestPermission", "tool", "input"}
@@ -47,7 +60,7 @@ Which token: a guest run has KITH_RUN_TOKEN and KITH_RUN_SOCKET (the host gave t
 and KITH_ASK_SOCKET (the host gave them, or `issue` got them for a run kith started itself). Secrets and logins are
 never carded: the host denies them at once. What the agent is told: kernel/skills/kith-guests/SKILL.md.
 """
-import json, os, re, socket, subprocess, sys
+import hashlib, json, os, re, shutil, socket, subprocess, sys, time
 
 SERVER, TOOL = 'kithpermit', 'approve'
 # The host waits its live window (default 90 s, at most 600) before it answers; a little longer than that.
@@ -341,6 +354,85 @@ def call_host(method, body, env=os.environ, timeout=30):
     return reply if isinstance(reply, dict) else None
 
 
+# ---- auto mode: a card for a call the classifier blocked, and the one-shot that lets its retry through
+
+ONCE_KEEP_S = 24 * 3600
+# What the classifier said when it gave no verdict: Claude Code ignores retry for these, so a card would be a yes that does nothing.
+NO_VERDICT = ('Auto mode could not evaluate', 'Classifier unavailable')
+
+
+def once_key(tool, tool_input):
+    """The one-shot's name: a hash of the tool and its input, so only the same call matches. A Bash call's description is the
+    model's own wording of it and changes between tries; it is not part of what was approved."""
+    ti = dict(tool_input) if isinstance(tool_input, dict) else {}
+    if tool == 'Bash':
+        ti.pop('description', None)
+    return hashlib.sha256(json.dumps([tool, ti], sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def hook_input(raw):
+    try:
+        d = json.loads(raw)
+    except ValueError:
+        return None
+    ok = isinstance(d, dict) and isinstance(d.get('tool_name'), str) and d['tool_name'] and isinstance(d.get('tool_input'), dict)
+    return d if ok else None
+
+
+def keep_once(once_dir, key, now=None):
+    """Records the one-shot in the run's own folder (made 0700). Files older than a day, and the folders of other runs that
+    are, are cleaned up on the way."""
+    now = now or time.time()
+    os.makedirs(once_dir, mode=0o700, exist_ok=True)
+    os.chmod(once_dir, 0o700)
+    parent = os.path.dirname(once_dir.rstrip('/'))
+    try:
+        for name in os.listdir(parent):
+            sib = os.path.join(parent, name)
+            if os.path.realpath(sib) != os.path.realpath(once_dir) and now - os.stat(sib).st_mtime > ONCE_KEEP_S:
+                shutil.rmtree(sib, ignore_errors=True)
+        for name in os.listdir(once_dir):
+            if now - os.stat(os.path.join(once_dir, name)).st_mtime > ONCE_KEEP_S:
+                os.unlink(os.path.join(once_dir, name))
+    except OSError:
+        pass
+    with open(os.path.join(once_dir, key), 'w') as f:
+        f.write('%d\n' % now)
+
+
+def denied(raw, once_dir, env=os.environ):
+    """The PermissionDenied hook's output (a JSON line, or '' for no opinion). Owner runs only: the ask token, never a guest's."""
+    d = hook_input(raw)
+    reason = d.get('reason') if d else None
+    if not d or d.get('hook_event_name') != 'PermissionDenied' or not isinstance(reason, str) or not reason.strip() \
+            or reason.startswith(NO_VERDICT):
+        return ''
+    if not (env.get('KITH_ASK_TOKEN') and env.get('KITH_ASK_SOCKET')) or env.get('KITH_RUN_TOKEN'):
+        return ''
+    reply = call_host('requestPermission', {'tool': d['tool_name'], 'input': d['tool_input'], 'autoMode': {'reason': reason}},
+                      {k: env[k] for k in ('KITH_ASK_TOKEN', 'KITH_ASK_SOCKET')}, timeout=WAIT_S)
+    if not (reply and reply.get('ok') is True and reply.get('behavior') == 'allow'):
+        return ''
+    try:
+        keep_once(once_dir, once_key(d['tool_name'], d['tool_input']))
+    except OSError:
+        return ''     # nowhere to record it: the retry would be refused again, so don't invite it
+    return json.dumps({'hookSpecificOutput': {'hookEventName': 'PermissionDenied', 'retry': True}})
+
+
+def once(raw, once_dir):
+    """The PreToolUse hook's output: allow (and use up the one-shot) when this exact call was approved, else ''."""
+    d = hook_input(raw)
+    if not d or d.get('hook_event_name') != 'PreToolUse':
+        return ''
+    try:
+        os.unlink(os.path.join(once_dir, once_key(d['tool_name'], d['tool_input'])))
+    except OSError:
+        return ''
+    return json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'allow',
+                                              'permissionDecisionReason': 'kith: you allowed this once'}})
+
+
 def request_access(a, env=os.environ):
     """The text the agent is told for one request_access call."""
     path, domain = a.get('path'), a.get('domain')
@@ -542,6 +634,11 @@ def issue(agent, session, pid):
 if __name__ == '__main__':
     if len(sys.argv) == 5 and sys.argv[1] == 'issue':
         sys.exit(issue(*sys.argv[2:]))
+    if len(sys.argv) == 4 and sys.argv[1] in ('denied', 'once') and sys.argv[2] == '--dir':
+        out = (denied if sys.argv[1] == 'denied' else once)(sys.stdin.read(), sys.argv[3])
+        if out:
+            print(out)
+        sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[1] == 'apply':
         sys.exit(apply(sys.argv[2]))
     sys.exit(serve())

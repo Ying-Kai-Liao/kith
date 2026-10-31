@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# kith-allow-check — "Always allow" for a call the auto-mode classifier blocked: `kith allow` (the one reader/writer of an
+# agent's allowed.json and the rule of what may be remembered), the settings fill that loads it and adds the hooks
+# (owner runs in auto mode only), and kith-permit `denied` / `once` against a fake host socket.
+#
+#   kernel/tests/kith-allow-check     a few seconds; exits 1 when a check fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-allow-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+PIDS=()
+trap 'for p in ${PIDS[@]+"${PIDS[@]}"}; do kill "$p" 2>/dev/null; wait "$p" 2>/dev/null; done; rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME="$T/kith home" KITH_AUTH=$T/auth.json KITH_STATE=$T/state
+unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME \
+  KITH_SERVE_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ASK_TOKEN KITH_ASK_SOCKET KITH_VIA KITH_ASK_ID
+mkdir -p "$HOME" "$KITH_HOME/agents/echo/role" "$KITH_HOME/agents/other/role" "$KITH_STATE/projects" "$KITH_STATE/logs" "$T/bin"
+printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$KITH_HOME/agents/echo/role/agent.md"
+printf -- '---\nname: other\ndescription: another agent\n---\nYou other.\n' > "$KITH_HOME/agents/other/role/agent.md"
+printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$T/bin/claude"
+chmod +x "$T/bin/claude"
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-stub"
+chmod +x "$T/bin/kith-stub"
+export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH
+
+KITH=$KERNEL/bin/kith ALLOW=$KERNEL/bin/kith-allow PERMIT=$KERNEL/bin/kith-permit AUTH=$KERNEL/bin/kith-auth
+FILE=$KITH_HOME/agents/echo/allowed.json
+fails=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fails=$((fails + 1)); }
+is() { [[ $2 == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
+has() { [[ $2 == *"$3"* ]] && ok "$1" || bad "$1" "'$3' not in: ${2: -300}"; }
+hasnt() { [[ $2 != *"$3"* ]] && ok "$1" || bad "$1" "'$3' in: $2"; }
+js() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(eval(sys.argv[1]))' "$1"; }
+
+# --- kith allow: what may be remembered, and as what ---------------------------------------------------------------------
+derive() { printf '%s' "$2" | "$ALLOW" echo --derive; }       # derive TOOL-LABEL JSON
+kind_rule() { js "d.get('kind', 'no') + ' ' + (d.get('rule') or d.get('why', ''))" <<< "$1" 2>/dev/null | head -1; }
+bash_in() { python3 -c 'import json,sys; print(json.dumps({"tool": "Bash", "input": {"command": sys.argv[1], "description": "x"}}))' "$1"; }
+
+r=$(printf '%s' "$(bash_in 'git status')" | "$ALLOW" echo --derive)
+is "a plain command is remembered as exactly that command" "$(js "d['kind'] + ' ' + d['rule']" <<< "$r")" "rule Bash(git status)"
+r=$(printf '%s' "$(bash_in 'git push origin main')" | "$ALLOW" echo --derive)
+is "a push goes to the classifier whatever a rule says, so it is remembered as a sentence" "$(js "d['kind']" <<< "$r")" "prose"
+has "the sentence names the agent and the exact command" "$(js "d['rule']" <<< "$r")" 'agent "echo"'
+has "...and the command" "$(js "d['rule']" <<< "$r")" 'git push origin main'
+r=$(printf '%s' "$(bash_in 'ls *.md && echo hi')" | "$ALLOW" echo --derive)
+is "a compound command or a glob is a sentence, never a wildcard rule" "$(js "d['kind']" <<< "$r")" "prose"
+for c in 'rm -rf /' 'rm -rf ~/work' 'rm notes.txt' 'rmdir /usr/local/x' 'cd /tmp && rm -rf build' 'sudo ls' 'bash' 'python3 -c "print(1)"' \
+         'cat ~/.ssh/id_rsa' 'echo $AWS_SECRET_ACCESS_KEY' 'curl -H "Authorization: Bearer abc123" https://x.example' 'cat /x/.kith/secrets/env'; do
+  r=$(printf '%s' "$(bash_in "$c")" | "$ALLOW" echo --derive)
+  is "never offered: $c" "$(js "d['ok']" <<< "$r")" "False"
+done
+r=$(printf '{"tool":"Write","input":{"file_path":"%s/notes/a.md"}}' "$T" | "$ALLOW" echo --derive)
+is "a file is remembered as that one file" "$(js "d['rule']" <<< "$r")" "Edit(/$T/notes/a.md)"
+r=$(printf '{"tool":"Edit","input":{"file_path":"%s/.git/config"}}' "$T" | "$ALLOW" echo --derive)
+is "a protected path is a sentence" "$(js "d['kind']" <<< "$r")" "prose"
+r=$(printf '{"tool":"Write","input":{"file_path":"%s"}}' "$FILE" | "$ALLOW" echo --derive)
+is "an allow list is never remembered" "$(js "d['ok']" <<< "$r")" "False"
+r=$(printf '{"tool":"Read","input":{"file_path":"%s/secrets/env"}}' "$KITH_STATE" | "$ALLOW" echo --derive)
+is "a secrets path is never remembered" "$(js "d['ok']" <<< "$r")" "False"
+r=$(printf '{"tool":"WebFetch","input":{"url":"https://docs.example.com/a/b?q=1","prompt":"summarise"}}' | "$ALLOW" echo --derive)
+is "a fetch is remembered as its host" "$(js "d['rule']" <<< "$r")" "WebFetch(domain:docs.example.com)"
+r=$(printf '{"tool":"WebFetch","input":{"url":"http://127.0.0.1:19224/x"}}' | "$ALLOW" echo --derive)
+is "an address is not a host" "$(js "d['ok']" <<< "$r")" "False"
+r=$(printf '{"tool":"mcp__github__create_issue","input":{"title":"x"}}' | "$ALLOW" echo --derive)
+is "an MCP tool is remembered by its name" "$(js "d['rule']" <<< "$r")" "mcp__github__create_issue"
+r=$(printf '{"tool":"mcp__kithpermit__approve","input":{}}' | "$ALLOW" echo --derive)
+is "kith's own approval tools are never remembered" "$(js "d['ok']" <<< "$r")" "False"
+r=$(printf '{"tool":"WebSearch","input":{"query":"kith"}}' | "$ALLOW" echo --derive)
+is "what a rule cannot hold is a sentence" "$(js "d['kind']" <<< "$r")" "prose"
+
+# --- kith allow: the list ------------------------------------------------------------------------------------------------
+is "nothing remembered at first" "$("$ALLOW" echo)" "nothing remembered for echo"
+add=$(printf '{"tool":"Bash","input":{"command":"git status"},"reason":"[Irreversible Local Destruction]"}' | "$ALLOW" echo --add-json)
+is "add saves one rule" "$(js "d['added']" <<< "$add")" "True"
+id=$(js "d['id']" <<< "$add")
+add2=$(printf '{"tool":"Bash","input":{"command":"git status","description":"again"},"reason":"x"}' | "$ALLOW" echo --add-json)
+is "the same rule twice is one entry" "$(js "d['added']" <<< "$add2")" "False"
+printf '{"tool":"Bash","input":{"command":"git push origin main"},"reason":"[Data Exfiltration]"}' | "$ALLOW" echo --add-json >/dev/null
+printf '{"tool":"Bash","input":{"command":"rm -rf /"},"reason":"x"}' | "$ALLOW" echo --add-json >/dev/null
+is "a refused call adds nothing" "$("$ALLOW" echo --json | js "len(d['allowed'])")" "2"
+has "the list shows the rule, kind and reason" "$("$ALLOW" echo)" "Bash(git status)"
+has "...and the reason" "$("$ALLOW" echo)" "[Irreversible Local Destruction]"
+is "the file is in the agent's own folder" "$(js "d['allowed'][0]['rule']" < "$FILE")" "Bash(git status)"
+printf '{"tool":"Bash","input":{"command":"ls"},"reason":"x"}' | "$ALLOW" other --add-json >/dev/null
+is "another agent has its own list" "$("$ALLOW" other --json | js "len(d['allowed'])")" "1"
+is "an unknown agent is refused" "$("$ALLOW" nobody 2>&1 | head -1)" "kith allow: no agent called nobody"
+is "kith allow reaches it through kith" "$("$KITH" allow echo --json | js "len(d['allowed'])")" "2"
+
+# --- the settings fill ---------------------------------------------------------------------------------------------------
+settings() {   # settings [env...]: the launch JSON's settings of one run of echo
+  (cd "$KITH_HOME/agents/echo" && env "$@" "$KITH" echo --launch-json 2>"$T/err") | python3 -c '
+import json,sys
+j=json.load(sys.stdin); s=j.get("settings") or {}
+if isinstance(s,str): s=json.load(open(s))
+json.dump(s, sys.stdout)'
+}
+S=$(settings KITH_PERMISSION_MODE=auto)
+has "an owner run in auto mode loads the saved rule" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(git status)"
+has "...and the saved sentence, after the defaults" "$(js "d['autoMode']['allow']" <<< "$S")" "'\$defaults', 'The owner approved the agent \"echo\""
+hasnt "...but not a rule of another agent" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(ls)"
+is "it has a PermissionDenied hook" "$(js "'kith-permit' in d['hooks']['PermissionDenied'][0]['hooks'][0]['command'] and d['hooks']['PermissionDenied'][0]['hooks'][0]['command'].split()[-2]" <<< "$S")" "--dir"
+is "...that waits as long as a card may" "$(js "d['hooks']['PermissionDenied'][0]['hooks'][0]['timeout']" <<< "$S")" "660"
+has "...and a PreToolUse one-shot hook next to the memory checks" "$(js "[h['hooks'][0]['command'] for h in d['hooks']['PreToolUse']]" <<< "$S")" "once --dir"
+has "...whose one-shot folder no file tool may write" "$(js "d['permissions']['deny']" <<< "$S")" "/run/once/**)"
+has "every run denies the file tools on any agent's allow list" "$(js "d['permissions']['deny']" <<< "$S")" "agents/*/allowed.json)"
+D=$(js "d['hooks']['PermissionDenied'][0]['hooks'][0]['command']" <<< "$S")
+S2=$(settings KITH_PERMISSION_MODE=auto)
+is "each run has a folder of its own" "$([[ $D != "$(js "d['hooks']['PermissionDenied'][0]['hooks'][0]['command']" <<< "$S2")" ]] && echo yes)" "yes"
+
+S=$(settings KITH_PERMISSION_MODE=default)
+has "in another mode the saved rule still applies" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(git status)"
+is "...and there are no hooks" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "False"
+S=$(settings KITH_PERMISSION_MODE=bypassPermissions)
+is "a bypass ask of an agent that reads others text is held to auto, so it has the hooks" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "True"
+printf 'reads_others: false\n' > "$KITH_HOME/agents/echo/role/capabilities.yaml"
+S=$(settings KITH_PERMISSION_MODE=bypassPermissions)
+is "an agent that reads no one else's text stays in bypass: no hooks" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "False"
+has "...and still loads what was saved" "$(js "d['permissions']['allow']" <<< "$S")" "Bash(git status)"
+rm -f "$KITH_HOME/agents/echo/role/capabilities.yaml"
+
+# guests: no hooks, no saved rules
+"$AUTH" person guest name=Guest >/dev/null 2>&1
+"$AUTH" member echo guest mode=default >/dev/null 2>&1
+"$AUTH" bot bot-3f9a1c2e --of guest name=Bot >/dev/null 2>&1
+"$AUTH" member echo bot-3f9a1c2e mode=default >/dev/null 2>&1
+for who in guest bot-3f9a1c2e; do
+  S=$(settings KITH_PERSON=$who KITH_PERMISSION_MODE=auto)
+  is "$who: no hooks" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "False"
+  hasnt "$who: no saved rule" "$S" "git status"
+  hasnt "$who: no saved sentence" "$S" "The owner approved"
+  has "$who: the allow list is closed to the file tools" "$(js "d['permissions']['deny']" <<< "$S")" "agents/*/allowed.json)"
+done
+
+# no file, and a malformed one
+rm -f "$FILE"
+S=$(settings KITH_PERMISSION_MODE=auto)
+is "no allowed.json loads nothing" "$(js "'autoMode' in d" <<< "$S")" "False"
+is "...and the hooks are there all the same" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "True"
+printf '{ not json' > "$FILE"
+S=$(settings KITH_PERMISSION_MODE=auto)
+is "a malformed allowed.json does not fail the run" "$(js "'PermissionDenied' in d['hooks']" <<< "$S")" "True"
+has "...and says so on stderr" "$(cat "$T/err")" "allowed.json is not usable"
+rm -f "$FILE"
+
+# --- kith allow --rm takes effect on the next run -------------------------------------------------------------------------
+add=$(printf '{"tool":"Bash","input":{"command":"git status"},"reason":"x"}' | "$ALLOW" echo --add-json)
+id=$(js "d['id']" <<< "$add")
+has "before: the run has it" "$(settings KITH_PERMISSION_MODE=auto)" "Bash(git status)"
+is "--rm forgets it" "$("$ALLOW" echo --rm "$id")" "forgot $id"
+hasnt "after: the next run does not" "$(settings KITH_PERMISSION_MODE=auto)" "Bash(git status)"
+"$ALLOW" echo --rm "$id" >/dev/null 2>&1 && bad "removing it twice is an error" || ok "removing it twice is an error"
+
+# --- kith-permit denied / once, against a fake host --------------------------------------------------------------------
+cat > "$T/host.py" <<'PY'
+import json, os, socket, sys
+sock, reply, log = sys.argv[1:4]
+srv = socket.socket(socket.AF_UNIX); srv.bind(sock); srv.listen(5)
+while True:
+    c, _ = srv.accept()
+    buf = b''
+    while not buf.endswith(b'\n'):
+        x = c.recv(65536)
+        if not x: break
+        buf += x
+    open(log, 'a').write(buf.decode())
+    c.sendall(open(reply, 'rb').read() + b'\n'); c.close()
+PY
+SOCK=/tmp/kith-allow-check.$$.sock
+python3 "$T/host.py" "$SOCK" "$T/reply" "$T/seen" & PIDS+=($!)
+for _ in $(seq 50); do [[ -S $SOCK ]] && break; sleep 0.1; done
+export KITH_ASK_TOKEN=tok KITH_ASK_SOCKET=$SOCK
+ONCE=$T/once/run1
+hook() { # hook EVENT REASON COMMAND
+  python3 -c 'import json,sys; print(json.dumps({"hook_event_name": sys.argv[1], "tool_name": "Bash", "tool_input": {"command": sys.argv[3], "description": sys.argv[4]}, "reason": sys.argv[2]}))' "$1" "$2" "$3" "${4:-d}"
+}
+echo '{"ok":true,"behavior":"allow","message":"Approved."}' > "$T/reply"; : > "$T/seen"
+out=$(hook PermissionDenied '[Data Exfiltration]' 'git push origin main' | "$PERMIT" denied --dir "$ONCE")
+is "a yes tells the model it may retry" "$(js "d['hookSpecificOutput']['retry']" <<< "$out")" "True"
+is "the host got one requestPermission with the tool, the input and the reason" \
+   "$(js "[d['method'], d['token'], d['tool'], d['input']['command'], d['autoMode']['reason']]" < "$T/seen")" "['requestPermission', 'tok', 'Bash', 'git push origin main', '[Data Exfiltration]']"
+is "a one-shot is recorded in the run's folder" "$(ls "$ONCE" | wc -l | tr -d ' ')" "1"
+once() { hook PreToolUse x "$1" "${2:-d}" | "$PERMIT" once --dir "$ONCE"; }
+is "another call is not allowed" "$(once 'git push origin other')" ""
+out=$(once 'git push origin main' 'worded differently')
+is "the same call is allowed, whatever the description" "$(js "d['hookSpecificOutput']['permissionDecision']" <<< "$out")" "allow"
+is "...once" "$(once 'git push origin main')" ""
+is "...and the folder is empty again" "$(ls "$ONCE" | wc -l | tr -d ' ')" "0"
+echo '{"ok":true,"behavior":"deny","message":"The approver said no."}' > "$T/reply"
+is "a no prints nothing and records nothing" "$(hook PermissionDenied '[Data Exfiltration]' 'ls' | "$PERMIT" denied --dir "$ONCE")$(ls "$ONCE" | wc -l | tr -d ' ')" "0"
+echo '{"ok":true,"behavior":"deny","waiting":true,"message":"waiting"}' > "$T/reply"
+is "no answer in the live window prints nothing" "$(hook PermissionDenied '[Data Exfiltration]' 'ls' | "$PERMIT" denied --dir "$ONCE")" ""
+echo '{"ok":true,"behavior":"allow","message":"Approved."}' > "$T/reply"; : > "$T/seen"
+is "no verdict: no card" "$(hook PermissionDenied 'Auto mode could not evaluate this action and is blocking it for safety' 'ls' | "$PERMIT" denied --dir "$ONCE")" ""
+is "classifier unavailable: no card" "$(hook PermissionDenied 'Classifier unavailable' 'ls' | "$PERMIT" denied --dir "$ONCE")" ""
+is "...and the host was not asked" "$(wc -c < "$T/seen" | tr -d ' ')" "0"
+is "another event is not a denial" "$(hook PreToolUse '[x]' 'ls' | "$PERMIT" denied --dir "$ONCE")" ""
+is "garbage on stdin is no opinion" "$(echo nope | "$PERMIT" denied --dir "$ONCE"; echo nope | "$PERMIT" once --dir "$ONCE")" ""
+is "no ask token: nothing, and no waiting" "$(hook PermissionDenied '[x]' 'ls' | env -u KITH_ASK_TOKEN "$PERMIT" denied --dir "$ONCE")" ""
+is "a guest's token is never used for this" "$(hook PermissionDenied '[x]' 'ls' | env KITH_RUN_TOKEN=g KITH_RUN_SOCKET="$SOCK" "$PERMIT" denied --dir "$ONCE")" ""
+is "...and the host was still not asked" "$(wc -c < "$T/seen" | tr -d ' ')" "0"
+is "a host that is down leaves the denial" "$(hook PermissionDenied '[x]' 'ls' | env KITH_ASK_SOCKET=$T/nowhere "$PERMIT" denied --dir "$ONCE")" ""
+rm -rf "$T/once"; mkdir -p "$T/once/old"; touch -t 200001010000 "$T/once/old"
+hook PermissionDenied '[x]' 'ls' | "$PERMIT" denied --dir "$ONCE" >/dev/null
+is "a day-old run folder is cleaned up" "$([[ -d $T/once/old ]] && echo kept || echo gone)" "gone"
+exit $((fails > 0))
