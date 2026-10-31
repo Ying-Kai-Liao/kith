@@ -131,6 +131,32 @@ is "owner: the package's autoMode.allow, after the defaults" "$(js "d['autoMode'
   "['\$defaults', 'Writing under the files folder is routine']"
 is "owner: soft_deny keeps the defaults first" "$(js "d['autoMode']['soft_deny'][0]" <<< "$S")" "\$defaults"
 is "owner: one soft_deny sentence per class" "$(js "len(d['autoMode']['soft_deny'])" <<< "$S")" "6"
+# What the emitted Bash ask rules match, read as Claude Code reads them: `*` spans any characters, spaces and slashes
+# included; `X:*` is X alone or X and more words. A delete inside the run's roots must match none of them.
+asked() {   # asked <command>: the first ask rule that matches it, or "-"
+  python3 -c '
+import json, re, sys
+cmd = sys.argv[1]
+for r in json.loads(sys.argv[2])["permissions"]["ask"]:
+    m = re.fullmatch(r"Bash\((.*)\)", r, re.S)
+    if not m:
+        continue
+    p = m.group(1)
+    rx = re.escape(p[:-2]) + r"(?: .*)?" if p.endswith(":*") else ".*".join(map(re.escape, p.split("*")))
+    if re.fullmatch(rx, cmd, re.S):
+        print(r); break
+else:
+    print("-")' "$1" "$S"
+}
+is "owner: no rm ask rule ends in /*" "$(js "[r for r in d['permissions']['ask'] if r.startswith('Bash(rm ') and r.endswith('/*)')]" <<< "$S")" "[]"
+is "owner: a delete in the files folder asks nothing" "$(asked "rm -rf \"$KITH_HOME/agents/echo/files/work/build\"")" "-"
+is "owner: a delete in a scratchpad asks nothing" "$(asked "rm -f /private/tmp/claude-1/scratchpad/x")" "-"
+is "owner: a delete under home asks nothing" "$(asked "rm -rf ~/Workspace/x/build")" "-"
+is "owner: rm -rf / asks" "$(asked "rm -rf /")" "Bash(rm -* /)"
+is "owner: rm -rf ~ asks" "$(asked "rm -rf ~")" "Bash(rm -* ~)"
+is "owner: rm -rf \$HOME/ asks" "$(asked 'rm -rf $HOME/')" 'Bash(rm -* $HOME/)'
+is "owner: bash -lc asks" "$(asked "bash -lc 'echo x'")" "Bash(bash -lc *)"
+is "owner: bash -e on a script with a later word ending in c asks nothing" "$(asked "bash -e tools/run.sh --sync now --sync-c")" "-"
 "$KERNEL/bin/kith-auth" person guest name=Guest >/dev/null 2>&1
 "$KERNEL/bin/kith-auth" member echo guest mode=default >/dev/null 2>&1
 S=$(settings KITH_PERSON=guest KITH_PERMISSION_MODE=auto)

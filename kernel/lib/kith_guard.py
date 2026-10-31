@@ -686,12 +686,13 @@ def must_ask_rules(places):
     ask_files += ["Edit(/%s/**)" % t for t in trees if t not in places.package] + ["Edit(/%s)" % f for f in files]
     ask_bash += _bash_rules(TRUST_CMDS, places.kernel)
     # destroy: the disk tools and git's discards; a plain rm is judged by the classifier (soft_deny), and by
-    # must_ask where a call is remembered.
+    # must_ask where a call is remembered. Only the exact critical paths get a rule: a rule's * spans slashes, so
+    # `rm -* /*` would also ask for a delete inside the run's own roots.
     ask_bash += _bash_rules(DESTROY_CMDS)
     ask_bash += ["Bash(dd *of=*)"]
     for h in ["~", "$HOME"] + both(places.home):
-        ask_bash += ["Bash(rm -* %s)" % h, "Bash(rm -* %s/)" % h, "Bash(rm -* %s/*)" % h]
-    ask_bash += ["Bash(rm -* /)", "Bash(rm -* /*)"]
+        ask_bash += ["Bash(rm -* %s)" % h, "Bash(rm -* %s/)" % h]
+    ask_bash += ["Bash(rm -* /)"]
     # outward
     for g in ("git", "git -C *"):
         for shape in ("--force*", "-f", "-f *", "* -f", "* -f *", "* --force*", "* +*", "--tags*", "* --tags*",
@@ -718,7 +719,8 @@ def must_ask_rules(places):
         for n in names:
             ask_bash += ["Bash(%s)" % n, "Bash(%s -)" % n, "Bash(%s - *)" % n]
             ask_bash += ["Bash(%s %s *)" % (n, f) for f in flags] + ["Bash(%s %s)" % (n, f) for f in flags]
-            if b in SHELLS:
-                ask_bash.append("Bash(%s -*c *)" % n)
+            if b in SHELLS:   # the usual combined spellings; `-*c *` would run on to any later word ending in c
+                ask_bash += ["Bash(%s %s *)" % (n, f) for f in ("-lc", "-ec", "-xc", "-ic", "-euc", "-exc", "-lic",
+                                                                 "-cl", "-ce")]
     return {"deny": list(dict.fromkeys(deny)), "ask_files": list(dict.fromkeys(ask_files)),
             "ask_bash": list(dict.fromkeys(ask_bash)), "soft_deny": [SOFT_DENY[c] for c in CLASSES]}
