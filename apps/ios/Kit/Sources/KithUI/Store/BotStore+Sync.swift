@@ -117,6 +117,12 @@ extension BotStore {
             hostId = id
             // The host repeats the calls still ringing right after a hello.
             incomingCalls = []
+            catchUpTask?.cancel()
+            catchUpTask = Task { [weak self] in
+                try? await Task.sleep(for: Self.catchUpWait)
+                guard !Task.isCancelled, let self else { return }
+                self.onCallCatchUp?(Set(self.incomingCalls.map(\.id)))
+            }
             setUsage(newUsage)
             screen = newScreen
             let hostRewound = hostRev < rev
@@ -183,6 +189,7 @@ extension BotStore {
         case let .screen(s):
             screen = s
         case let .call(event):
+            onCallEvent?(event)
             if event.ringing && CallPresence.active > 0 {
                 declineCall(event.call)
             } else {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// An agent calling the person, from the host's `call` event while it rings. It is on screen until any event settles
-/// it (answered on a device, declined, missed) or its ring runs out here. No push: only an open, connected app hears it.
+/// it (answered on a device, declined, missed) or its ring runs out here. A closed app hears it from a VoIP push instead (`CallPush`).
 public struct IncomingCall: Identifiable, Equatable, Sendable {
     public var id: String
     public var botId: String
@@ -26,6 +26,14 @@ public struct IncomingCall: Identifiable, Equatable, Sendable {
 public struct IncomingCallEvent: Equatable, Sendable {
     public var call: IncomingCall
     public var ringing: Bool
+    /// The host's word for the call: "ringing", "accepted", "declined" or "missed".
+    public var state: String
+
+    public init(call: IncomingCall, ringing: Bool, state: String? = nil) {
+        self.call = call
+        self.ringing = ringing
+        self.state = state ?? (ringing ? "ringing" : "")
+    }
 
     /// The event's payload; nil for one this app can't read.
     public static func decode(_ data: Data, now: Date = .now) -> IncomingCallEvent? {
@@ -47,7 +55,7 @@ public struct IncomingCallEvent: Equatable, Sendable {
         return IncomingCallEvent(
             call: IncomingCall(id: c.id, botId: c.botId, threadId: c.threadId, name: c.name ?? "", reason: c.reason ?? "",
                                deadline: now.addingTimeInterval(remaining)),
-            ringing: c.state == "ringing")
+            ringing: c.state == "ringing", state: c.state ?? "")
     }
 }
 

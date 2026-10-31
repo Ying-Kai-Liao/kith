@@ -16,6 +16,10 @@ extension BotStore {
         onConnected = nil
         onBotUpdated = nil
         onUsageChanged = nil
+        onCallEvent = nil
+        onCallCatchUp = nil
+        catchUpTask?.cancel()
+        callHolds = []
         onSent = nil
         onRosterChanged = nil
         onComputerChanged = nil
@@ -30,7 +34,7 @@ extension BotStore {
         if active {
             // Returning to the foreground must not interrupt a live call's sends.
             if voiceCalls.isEmpty || streamTask == nil { restartStream() }
-        } else if voiceCalls.isEmpty {
+        } else if voiceCalls.isEmpty && callHolds.isEmpty {
             // Disconnect so the host knows we're gone and sends pushes instead.
             stopTransport()
             saveCache()
@@ -38,7 +42,7 @@ extension BotStore {
     }
 
     public func restartStream() {
-        guard isActive || !voiceCalls.isEmpty, !retired else { return }
+        guard isActive || !voiceCalls.isEmpty || !callHolds.isEmpty, !retired else { return }
         stopTransport()
         if connection != .online { setConnection(.connecting) }
         streamTask = Task { [weak self] in await self?.runStream() }
@@ -57,7 +61,7 @@ extension BotStore {
 
     func endVoiceCall(_ id: UUID) {
         guard voiceCalls.removeValue(forKey: id) != nil else { return }
-        if !isActive && voiceCalls.isEmpty {
+        if !isActive && voiceCalls.isEmpty && callHolds.isEmpty {
             stopTransport()
             saveCache()
         }

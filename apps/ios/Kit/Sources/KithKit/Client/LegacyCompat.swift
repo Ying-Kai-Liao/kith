@@ -36,7 +36,7 @@ public enum LegacyCompat {
 
     /// The APNs push relay under its old name, used when the build names none (`KITH_PUSH_RELAY_HOST`).
     /// Delete once the builds point at kith-relay (decision q25).
-    public static let relayURL = "https://codync-relay.kevin2005ha.workers.dev"
+    public static let relayURL = "https://kith-relay.lykevin890919.workers.dev"
 
     // MARK: Stored data
 

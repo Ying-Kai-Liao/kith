@@ -38,6 +38,8 @@ final class PushRegistrar {
     static let shared = PushRegistrar()
 
     private var deviceToken: Data?
+    /// PushKit's token for ringing calls; nil until iOS hands it out.
+    private var voipToken: Data?
     private var stores: [ComputerID: WeakStore] = [:]
     private var registrations: [ComputerID: Task<Void, Never>] = [:]
 
@@ -104,6 +106,11 @@ final class PushRegistrar {
         resync()
     }
 
+    func didRegister(voipToken token: Data?) {
+        voipToken = token
+        resync()
+    }
+
     /// The in-app switch; off asks every computer to stop alerting this phone.
     static var enabled: Bool { UserDefaults.standard.object(forKey: "notificationsEnabled") as? Bool ?? true }
 
@@ -134,13 +141,16 @@ final class PushRegistrar {
         }
         registrations[id]?.cancel()
         let storage = store.storage
+        let voipToken = voipToken
         registrations[id] = Task { [weak store] in
             do {
                 let identity = try DeviceIdentity.load(context: storage)
                 let ticket = try await relayTicket(token: token, kind: "alert", computerId: id)
+                // A relay that predates voip tickets refuses one: alerts must still register.
+                let voipTicket: String? = if let voipToken { try? await relayTicket(token: voipToken, kind: "voip", computerId: id) } else { nil }
                 try Task.checkCancellation()
                 guard let client = store?.client else { return }
-                try await client.registerDevice(ticket: ticket, relay: SharedStore.relayURL, name: UIDevice.current.name,
+                try await client.registerDevice(ticket: ticket, voipTicket: voipTicket, relay: SharedStore.relayURL, name: UIDevice.current.name,
                                                 pushKey: identity.pushKey, ctx: storage.id,
                                                 labels: store?.computer.labelFamily ?? .legacy)
                 log.info("device registered with a computer")

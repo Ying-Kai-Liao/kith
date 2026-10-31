@@ -408,12 +408,13 @@ public extension HostClient {
     /// Push tickets are bound to this device's key; `pushKey` lets the host seal notification text (§6.7).
     /// `labels` says which crypto labels the pairing uses, so the host seals pushes under the same ones;
     /// a host that predates the rename ignores it, and omitting it means the old labels.
-    func registerDevice(ticket: String, relay: String, name: String, pushKey: String?, ctx: String,
+    /// `voipTicket` is the PushKit one for ringing calls; send it every time we have it (a host keeps the old one when it is missing).
+    func registerDevice(ticket: String, voipTicket: String? = nil, relay: String, name: String, pushKey: String?, ctx: String,
                         labels: LabelFamily = .legacy) async throws {
         struct Body: Encodable {
-            var ticket: String; var relay: String; var name: String; var pushKey: String?; var ctx: String; var labels: String?
+            var ticket: String; var voipTicket: String?; var relay: String; var name: String; var pushKey: String?; var ctx: String; var labels: String?
         }
-        let _: Empty = try await call("registerDevice", Body(ticket: ticket, relay: relay, name: name, pushKey: pushKey, ctx: ctx,
+        let _: Empty = try await call("registerDevice", Body(ticket: ticket, voipTicket: voipTicket, relay: relay, name: name, pushKey: pushKey, ctx: ctx,
                                                              labels: labels == .kith ? labels.rawValue : nil))
     }
 
