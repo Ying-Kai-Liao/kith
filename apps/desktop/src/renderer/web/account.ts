@@ -46,7 +46,7 @@ export class WebAccount {
   private readonly listeners = new Set<(s: AccountState) => void>()
 
   constructor(private readonly d: AccountDeps) {
-    this.state = { ready: false, configured: true, busy: false, error: null, user: null, cloudURL: d.cloudURL }
+    this.state = { ready: false, configured: true, busy: false, error: null, user: null, cloudURL: d.cloudURL, appleSignIn: false }
   }
 
   /** Loads Clerk, finishes a sign-in that just came back from the provider, and follows the session from then on. */

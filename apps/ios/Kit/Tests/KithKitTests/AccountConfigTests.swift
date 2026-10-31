@@ -70,3 +70,10 @@ private let testKey = "pk_test_" + Data("file.example.com$".utf8).base64EncodedS
     #expect(code.code == "123456")
     #expect(code.expiry == Date(timeIntervalSince1970: 1_760_000_000))
 }
+
+@Test func appleSignInNeedsAMainBuildAndAProductionKey() {
+    #expect(AccountConfig.appleSignInAvailable(environment: .main, clerkPublishableKey: "pk_live_x"))
+    #expect(!AccountConfig.appleSignInAvailable(environment: .dev, clerkPublishableKey: "pk_live_x"))
+    #expect(!AccountConfig.appleSignInAvailable(environment: .main, clerkPublishableKey: "pk_test_x"))
+    #expect(!AccountConfig.appleSignInAvailable(environment: .main, clerkPublishableKey: nil))
+}

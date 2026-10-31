@@ -16,7 +16,7 @@ const snapshot: HostSnapshot = {
   dev: false,
   logPath: '',
 }
-const account: AccountState = { ready: true, configured: false, busy: false, error: null, user: null, cloudURL: null }
+const account: AccountState = { ready: true, configured: false, busy: false, error: null, user: null, cloudURL: null, appleSignIn: false }
 const updates: UpdateState = {
   supported: false, checking: false, availableVersion: null, downloadPercent: null, staged: false, installing: false,
   autoCheck: false, autoDownload: false, lastCheck: null, error: null, waitingForApp: null,

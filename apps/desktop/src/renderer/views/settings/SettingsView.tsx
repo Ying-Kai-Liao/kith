@@ -153,9 +153,6 @@ function PageContent({ page }: { page: SettingsPage }) {
   }
 }
 
-/** Apple sign-in hidden until it works; the button and its sign-in call stay. */
-const showAppleSignIn = false
-
 /** Who is signed in and how to sign in or out; then this account's computers. */
 function AccountSettings() {
   const account = useAccount()
@@ -191,7 +188,7 @@ function AccountSettings() {
           </>
         ) : (
           <>
-            {showAppleSignIn ? <Button kind="secondary" onClick={() => void account.signIn('apple')} disabled={account.isBusy}>Apple</Button> : null}
+            {account.appleSignIn ? <Button kind="secondary" onClick={() => void account.signIn('apple')} disabled={account.isBusy}>Apple</Button> : null}
             <Button kind="secondary" onClick={() => void account.signIn('google')} disabled={account.isBusy}>Google</Button>
             <Button kind="secondary" onClick={() => void account.signIn('github')} disabled={account.isBusy}>GitHub</Button>
           </>
