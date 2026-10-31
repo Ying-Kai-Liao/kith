@@ -10,6 +10,7 @@ mod cards;
 mod channels;
 mod chat;
 mod compat;
+mod delegation;
 mod doors;
 mod environment;
 mod hqmem;

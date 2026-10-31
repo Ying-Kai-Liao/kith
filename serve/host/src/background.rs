@@ -21,6 +21,7 @@ pub fn start(hub: &Arc<Hub>) {
     tokio::spawn(screen::serve_helpers(hub.screen.clone()));
     tokio::spawn(relay::run(hub.clone()));
     tokio::spawn(crate::doors::sweep_loop());
+    tokio::spawn(crate::delegation::sweep_loop(hub.clone()));
     channels::start(hub);
     #[cfg(target_os = "linux")]
     tokio::spawn(screen::supervise_linux_helper(hub.screen.clone()));

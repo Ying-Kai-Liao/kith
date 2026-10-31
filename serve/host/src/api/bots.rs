@@ -408,6 +408,11 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                     crate::cards::secret::respond(hub, entry_id, option_id.as_deref()).await?,
                 ));
             }
+            // A delegation chain's cap card (delegation.rs) has no process or messages either: raise the cap, or leave it.
+            if e.data["delegation"].is_object() {
+                let by = b["asPerson"].as_str().unwrap_or("owner");
+                return Ok(ControlFlow::Break(crate::delegation::respond(hub, &e, option_id.as_deref(), by).await?));
+            }
             // A limit card holds messages, not a process: its answer runs them, raises the limit, or keeps them.
             if e.data["limit"].is_object() {
                 let by = b["asPerson"].as_str().unwrap_or("owner");
