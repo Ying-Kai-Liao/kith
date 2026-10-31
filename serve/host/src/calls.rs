@@ -4,7 +4,9 @@
 //! doesn't reset the daily limit. It reaches apps as a `call` event on the ordinary event stream, so the relay
 //! carries it too, and `event_for` routes it by the chat's owner: the owner's devices for an owner chat, only that
 //! person's devices for an invitee's. Accepting starts an ordinary Kith voice call in the app; declining or letting
-//! it ring out leaves a line in the chat. There is no push: an app that isn't open misses the call.
+//! it ring out leaves a line in the chat. An app that isn't open is pushed to (`push::ring`) when no phone is
+//! connected: a `VoIP` push for a phone with a `PushKit` ticket, else a time-sensitive alert. Nothing is pushed when the
+//! call settles; the phone ends its own ring.
 
 use crate::LockExt;
 use crate::agent::bot::Cmd;
@@ -313,6 +315,7 @@ fn ring_with(hub: &Arc<Hub>, bot_id: &str, reason: &str, from: Option<&str>, res
         call
     };
     emit(hub, &call);
+    crate::remote::push::ring(hub, &call, call.created + hub.calls.ring_ms());
     let (hub, id) = (hub.clone(), call.id.clone());
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(u64::try_from(hub.calls.ring_ms()).unwrap_or(0))).await;

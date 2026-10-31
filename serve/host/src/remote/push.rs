@@ -3,12 +3,14 @@
 //!
 //! Alerts cover completion, input requests, and failures;
 //! none are sent while the phone app is connected (it's in the foreground).
+//! A ringing agent call (`ring`) goes out the same way, as a `VoIP` push when the phone has a `PushKit` ticket.
 
 use crate::LockExt;
+use crate::calls::Call;
 use crate::hub::{BotStatus, Hub, Runtime};
 use crate::remote::identity::Identity;
 use crate::remote::{cloud, crypto};
-use crate::store::BotConfig;
+use crate::store::{BotConfig, PushTicket};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -137,6 +139,20 @@ fn faces(hub: &Hub, bot: &BotConfig, from: Option<&str>) -> Vec<Value> {
         .collect()
 }
 
+/// `secret` sealed to the device `t` belongs to (§6.7); nothing when it has no push key or sealing fails.
+fn seal_for(hub: &Hub, t: &PushTicket, secret: &str) -> Option<String> {
+    let key = t.push_key.as_deref().and_then(|k| crypto::unb64_n::<32>(k).ok())?;
+    let eph = StaticSecret::from(crypto::random::<32>());
+    let labels = crypto::Labels::from_name(hub.store.kv_get(&format!("push_labels.{}", t.device_key)).as_deref());
+    match crypto::seal_push(labels, &hub.identity.cid_raw(), &key, secret.as_bytes(), &eph) {
+        Ok(sealed) => Some(sealed),
+        Err(error) => {
+            tracing::warn!(error = format!("{error:#}"), "couldn't seal a notification");
+            None
+        }
+    }
+}
+
 /// The title and body of every alert asked for, for tests that check what a push would say.
 #[cfg(test)]
 pub static SENT: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -180,14 +196,8 @@ pub fn notify(hub: &Hub, bot: &BotConfig, from: Option<&str>, title: &str, body:
             continue;
         }
         let mut data = json!({"botId": bot.id, "computerId": computer_id, "ctx": t.ctx});
-        if let Some(key) = t.push_key.as_deref().and_then(|k| crypto::unb64_n::<32>(k).ok()) {
-            let eph = StaticSecret::from(crypto::random::<32>());
-            let labels =
-                crypto::Labels::from_name(hub.store.kv_get(&format!("push_labels.{}", t.device_key)).as_deref());
-            match crypto::seal_push(labels, &hub.identity.cid_raw(), &key, secret.as_bytes(), &eph) {
-                Ok(sealed) => data["sealed"] = sealed.into(),
-                Err(error) => tracing::warn!(error = format!("{error:#}"), "couldn't seal a notification"),
-            }
+        if let Some(sealed) = seal_for(hub, &t, &secret) {
+            data["sealed"] = sealed.into();
         }
         notifications.push(json!({
             "ticket": t.ticket,
@@ -198,6 +208,77 @@ pub fn notify(hub: &Hub, bot: &BotConfig, from: Option<&str>, title: &str, body:
             "data": data,
         }));
     }
+    if !notifications.is_empty() {
+        post(hub, format!("{relay}/push-batch"), json!({"notifications": notifications}));
+    }
+}
+
+/// Who a call push was asked for, for tests: (call id, device key, whether it went as a `VoIP` push).
+#[cfg(test)]
+pub static RINGS: Mutex<Vec<(String, String, bool)>> = Mutex::new(Vec::new());
+
+/// A call starts ringing: push it to the call's person's devices, for an app that isn't open. A device with a
+/// `PushKit` ticket gets a `VoIP` push (the phone shows its call screen at once); the others a time-sensitive alert.
+/// Not while the phone app is connected (it shows the call itself), and it ignores the chat's mute: a call is not
+/// a notification the person turned off. Nothing is sent when the call settles: the phone ends its own ring.
+/// `deadline` is when the ring ends, in ms since the epoch.
+pub fn ring(hub: &Hub, call: &Call, deadline: i64) {
+    purge_dead_tickets(hub);
+    if hub.phone_connected() {
+        return;
+    }
+    let Some(bot) = hub.store.bot(&call.bot_id).ok().flatten().filter(|r| !r.deleted).map(|r| r.config) else {
+        return;
+    };
+    if bot.hidden {
+        return;
+    }
+    // The caller's own name: the agent that rang for this chat, else the chat's agent.
+    let name = call.from.as_deref().unwrap_or(&bot.name);
+    let mut secret = json!({"name": name, "reason": crate::agent::acp::truncate(&call.reason, 200)});
+    if let Some(from) = call.from.as_deref().filter(|f| *f != bot.id) {
+        secret["from"] = from.into();
+    }
+    secret["faces"] = faces(hub, &bot, call.from.as_deref()).into();
+    let alert_secret = json!({"title": format!("{name} is calling"), "subtitle": "Incoming call",
+        "body": secret["reason"], "faces": secret["faces"]})
+    .to_string();
+    let secret = secret.to_string();
+    let computer_id = hub.identity.computer_id();
+    let mut notifications = Vec::new();
+    for t in hub.store.push_tickets() {
+        // A person's call rings only that person's devices: an invitee's never reaches the owner's.
+        let device_person = hub.store.device(&t.device_key).and_then(|d| d.person_id);
+        if device_person != call.person {
+            continue;
+        }
+        #[cfg(test)]
+        RINGS.locked().push((call.id.clone(), t.device_key.clone(), t.voip_ticket.is_some()));
+        let mut data = json!({"botId": bot.id, "computerId": computer_id, "ctx": t.ctx, "callId": call.id});
+        if let Some(voip) = &t.voip_ticket {
+            data = json!({"kind": "call", "callId": call.id, "botId": bot.id, "computerId": computer_id,
+                "ctx": t.ctx, "deadline": deadline});
+            if let Some(sealed) = seal_for(hub, &t, &secret) {
+                data["sealed"] = sealed.into();
+            }
+            notifications.push(json!({"ticket": voip, "voip": {"data": data}}));
+            continue;
+        }
+        if let Some(sealed) = seal_for(hub, &t, &alert_secret) {
+            data["sealed"] = sealed.into();
+        }
+        notifications.push(json!({
+            "ticket": t.ticket,
+            "alert": {"title": "Kith", "body": "Incoming call. Open Kith to answer."},
+            "mutableContent": true,
+            "interruptionLevel": "time-sensitive",
+            "sound": "default",
+            "threadId": format!("{computer_id}:{}", bot.id),
+            "category": "call",
+            "data": data,
+        }));
+    }
+    let Some(relay) = relay_url(hub) else { return };
     if !notifications.is_empty() {
         post(hub, format!("{relay}/push-batch"), json!({"notifications": notifications}));
     }
