@@ -7,6 +7,7 @@ import { Dialog, ModalHeader, SheetPage, useDismiss } from '../../components/Ove
 import { VStack } from '../../components/Stack'
 import { Text } from '../../components/Text'
 import { useStore } from '../../store/context'
+import { parseLabels } from '@shared/room-labels'
 import { errorText } from './drafts'
 import { AutoTextArea } from './parts'
 import './bots.css'
@@ -23,6 +24,7 @@ export function GroupEditorView({ group, members: initialMembers = [] }: { group
   const [name, setName] = useState(group?.name ?? '')
   const [about, setAbout] = useState(group?.description ?? '')
   const [members, setMembers] = useState<string[]>(group?.members ?? initialMembers)
+  const [labels, setLabels] = useState((group?.labels ?? []).join(', '))
   const [query, setQuery] = useState('')
   // A new group starts in the picker; an existing one shows its members first.
   const [adding, setAdding] = useState(group === null && initialMembers.length === 0)
@@ -52,8 +54,8 @@ export function GroupEditorView({ group, members: initialMembers = [] }: { group
     const finalName = typed || defaultName
     const description = about.trim()
     const done = groupId
-      ? store.updateGroup({ id: groupId, kind: 'group', name: finalName, description, members, pinned: store.bots.get(groupId)?.pinned })
-      : store.createGroup(finalName, description, members)
+      ? store.updateGroup({ id: groupId, kind: 'group', name: finalName, description, members, labels: parseLabels(labels), pinned: store.bots.get(groupId)?.pinned })
+      : store.createGroup(finalName, description, members, parseLabels(labels))
     void Promise.resolve(done)
       .then(() => dismiss())
       .catch((e: unknown) => setError(errorText(e)))
@@ -70,6 +72,11 @@ export function GroupEditorView({ group, members: initialMembers = [] }: { group
             <input className="group-name" value={name} placeholder={defaultName} aria-label="Name" onChange={(e) => setName(e.target.value)} />
             <AutoTextArea className="group-about" value={about} placeholder="What this group works on" minRows={1} maxRows={4} onChange={setAbout} />
           </div>
+          <VStack>
+            <div className="group-section-title">Labels</div>
+            <input className="field-box" value={labels} placeholder="launch, q4 plan" aria-label="Labels" onChange={(e) => setLabels(e.target.value)} />
+            <Text as="div" size="caption" tone="tertiary" className="group-note">Up to 5, separated by commas. They filter the room list.</Text>
+          </VStack>
           <VStack>
             <div className="group-section-title">Members</div>
             {picked.map((bot) => (
