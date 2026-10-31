@@ -35,24 +35,22 @@ EDIT_TOOLS = ('Edit', 'Write', 'MultiEdit', 'NotebookEdit')
 # Names of the run's own approval tools and of kith's secret handling are never remembered.
 NEVER_TOOLS = ('mcp__kithpermit__',)
 
-# Text that points at a credential or a login. The host already refuses a card for kith's own secret paths; this also
-# keeps a remembered rule from carrying one into settings.
-SECRET_WORDS = re.compile(
-    r'(?i)\.ssh\b|\.aws\b|\.gnupg\b|\.netrc|\.npmrc|\.pypirc|\.docker/config|\bid_(?:rsa|dsa|ed25519|ecdsa)\b|auth\.json'
-    r'|serve/token|\.kith/(?:secrets|serve|browsers|bridge|index)\b|/secrets/|\bkeychain|\bsecurity\s+(?:find|dump|add|delete)-'
-    r'|(?<![A-Za-z])(?:credentials?|passwords?|passwd|api[_-]?keys?|secrets?|tokens?|bearer|private[_-]?key)(?![a-z])|\.pem\b|\.env\b')
-
 # A shell that can run anything: a bare one, or one given code to run, is not a rule worth keeping.
 RUNNERS = {'sudo', 'su', 'doas', 'eval', 'exec', 'xargs', 'env', 'bash', 'sh', 'zsh', 'dash', 'fish', 'python', 'python3',
            'node', 'deno', 'bun', 'ruby', 'perl', 'php', 'osascript', 'npx', 'pnpx', 'bunx', 'uvx', 'ssh', 'nohup', 'time',
            'command', 'builtin', 'watch', 'timeout', 'nice', 'open', 'xcrun'}
 NEVER_FIRST = {'sudo', 'su', 'doas', 'eval', 'exec'}
-DESTROY = {'rm', 'rmdir', 'shred', 'unlink', 'srm', 'mkfs', 'dd', 'diskutil', 'trash', 'truncate'}
 NETWORK = {'curl', 'wget', 'nc', 'ncat', 'scp', 'rsync', 'sftp', 'ftp', 'telnet', 'ssh'}
-# Claude Code sends a write to these to the classifier even when an allow rule matches (permission-modes): a rule would
-# not remember it.
-PROTECTED_WORDS = re.compile(r'(?:^|[\s/"\'=])\.(?:git|claude|vscode|idea)(?:/|\b)|\.(?:bashrc|bash_profile|zshrc|zshenv|zprofile|'
-                             r'profile|gitconfig|gitmodules|mcp\.json|envrc|claude\.json)\b|CLAUDE(?:\.local)?\.md|LaunchAgents')
+# Claude Code sends a write under these to the classifier even when an allow rule matches (permission-modes "protected
+# paths"), so a rule would not remember it; the call is still rememberable as a sentence.
+CC_PROTECTED = re.compile(r'(?:^|[\s/"\'=])\.(?:git|claude|vscode|idea)(?:/|\b)|\.(?:gitmodules|mcp\.json|envrc)\b'
+                          r'|CLAUDE(?:\.local)?\.md')
+# Why a must-ask class is never remembered (kith_guard.must_ask).
+WHY = {'secret': 'it names a secret or a login',
+       'trust': 'it changes what later runs may do (an allow list, settings, a package, a protected path)',
+       'destroy': 'a delete or overwrite outside the run\'s own folders is asked each time',
+       'outward': 'something public or past the owner (a push to main, a merge, a publish, a post) is asked each time',
+       'code': 'code with no name (inline code, a package runner, a pipe into a shell) is asked each time'}
 COMPOUND = re.compile(r'[;&|`<>\n\\*?{}\[\]]|\$\(|\$\{|\$[A-Za-z_]')
 URL = re.compile(r'https?://', re.I)
 # Package managers whose run/exec forms Claude Code drops from allow rules in auto mode (permission-modes: "Package-manager run
@@ -161,39 +159,11 @@ def for_settings(f):
 
 # ---- what may be remembered, and as what
 
-def _roots():
-    p = paths()
-    return [str(p[k]) for k in ('KITH_STATE', 'KITH_STATE_REAL', 'KITH_MACHINE')]
-
-
-def _names_secret(text):
-    if SECRET_WORDS.search(text):
-        return True
-    secrets = os.environ.get('KITH_SECRETS')
-    if secrets and len(secrets) > 1 and secrets in text:
-        return True
-    for r in _roots():
-        for d in kith_guard.SECRET_DIRS:
-            if '%s/%s' % (r, d) in text:
-                return True
-    try:
-        from kith_trajectory import redact
-        return redact(text) != text
-    except Exception:  # noqa: BLE001 - a missing redactor must not make a secret rememberable
-        return False
-
-
 def _first_words(command):
     try:
         return shlex.split(command)
     except ValueError:
         return None
-
-
-def _destroys(words):
-    """Any word that deletes or overwrites by itself (rm and rmdir with any target too: a recursive or critical-path delete
-    cannot be told from a plain one by its spelling, so none is remembered)."""
-    return any(os.path.basename(w) in DESTROY for w in words)
 
 
 def prose(agent, tool, tool_input):
@@ -206,8 +176,9 @@ def derive(agent, tool, tool_input, reason=''):
     """What "Always allow" would save for this call: {"ok": True, "kind", "rule"} or {"ok": False, "why"}.
 
     Narrow by construction: an exact command, one file, one host, one named MCP tool; a prose entry (naming the agent and the
-    exact input) for what a permission rule cannot hold. Refused: a critical-path delete, a bare or code-running shell, a
-    command or input that names a secret, kith's own secret and allow-list paths, a rule that would be a wildcard. A sentence
+    exact input) for what a permission rule cannot hold. Refused: anything in a must-ask class (kith_guard.must_ask: a
+    secret, a trust file, a delete, something outward, code with no name), any delete (a remembered rule has no roots to
+    keep it inside), a bare or code-running shell, a folder, a rule that would be a wildcard. A sentence
     is not offered when `reason` (the classifier's) names a hard_deny rule: it would never take effect."""
     d = _derive(agent, tool, tool_input)
     if d['ok'] and d['kind'] == 'prose' and any(h in (reason or '') for h in HARD_DENY):
@@ -226,8 +197,9 @@ def _derive(agent, tool, tool_input):
     text = json.dumps(tool_input, ensure_ascii=False)
     if len(text) > MAX_RULE - 400:
         return no('it is too long to remember exactly')
-    if _names_secret(text):
-        return no('it names a secret or a login')
+    c = kith_guard.must_ask(tool, tool_input, places=kith_guard.Places(package=home_of(agent) / 'role'))
+    if c:
+        return no(WHY[c])
     if tool == 'Bash':
         return _derive_bash(agent, tool_input)
     if tool in EDIT_TOOLS:
@@ -260,15 +232,15 @@ def _derive_bash(agent, tool_input):
     if words is None or not words:
         return no('not a command that can be remembered exactly')
     first = os.path.basename(words[0])
-    if _destroys(words) or re.search(r'(?:^|[\s;&|(`])(?:rm|rmdir)\s', command):
-        return no('a delete that reaches beyond one plain file is asked each time')
+    if re.search(r'(?:^|[\s;&|(`/])(?:rm|rmdir|unlink|trash|truncate)\s', command):
+        return no(WHY['destroy'])
     if first in NEVER_FIRST:
         return no('a command that runs another command is asked each time')
     if first in RUNNERS and first not in PKG_ALWAYS and (len(words) == 1 or any(w in ('-c', '-e', '-i', '--eval', 'exec', 'run', '-m') for w in words[1:])):
         return no('a shell or interpreter given code to run is asked each time')
     if first in PKG_ALWAYS or (first in PKG_RUN and any(w in PKG_RUN_VERBS for w in words[1:2])):
         return {'ok': True, 'kind': 'prose', 'rule': prose(agent, 'Bash', {'command': command})}
-    if first in NETWORK or URL.search(command) or PROTECTED_WORDS.search(command) or first == 'git' and \
+    if first in NETWORK or URL.search(command) or CC_PROTECTED.search(command) or first == 'git' and \
             len(words) > 1 and words[1] in ('push', 'fetch', 'pull', 'clone', 'remote', 'config'):
         # A permission rule would not remember it: Claude Code sends these to the classifier whatever allows them.
         return {'ok': True, 'kind': 'prose', 'rule': prose(agent, 'Bash', {'command': command})}
@@ -284,13 +256,8 @@ def _derive_edit(agent, tool, tool_input):
     if not isinstance(raw, str) or not raw.startswith('/') or '\0' in raw or '*' in raw or '?' in raw or '[' in raw:
         return no('not one absolute file')
     real = os.path.realpath(raw)
-    p = paths()
-    secrets = kith_guard.whole_secret_paths([str(p['KITH_STATE']), str(p['KITH_MACHINE'])], str(p['KITH_SECRETS']),
-                                            str(p['KITH_MACHINE']))
-    if any(kith_guard.covers(s, x) for s in secrets for x in (raw, real)):
-        return no("kith's secrets are never remembered")
-    if os.path.basename(real) == 'allowed.json' or os.path.basename(real).startswith('allowed.json.'):
-        return no("an agent's allow list is not written by the agent")
+    if os.path.isdir(real) or raw.endswith('/'):
+        return no('not one absolute file')
     home = str(Path.home())
     if any(kith_guard.is_rule_w(home, x) for x in (raw, real)):
         return {'ok': True, 'kind': 'prose', 'rule': prose(agent, tool, {'file_path': real})}
