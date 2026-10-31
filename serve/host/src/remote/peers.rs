@@ -167,7 +167,9 @@ async fn decision(hub: &Hub, base: &str, id: &str, approve: bool) -> Result<Deci
     cloud::send(hub, base, &path::host_peer_decision(id), &body).await
 }
 
-/// `peerRequests`: the computers asking to pair with this one, each with its code once it has one.
+/// `peerRequests`: the computers asking to pair with this one, and whether each has shown its code yet. The code itself
+/// never leaves this host: the yes is the code the asking computer shows, typed here, and a code read from here would
+/// let anything holding the Local token type it back without looking at the other computer.
 pub fn requests_json(hub: &Hub) -> Vec<Value> {
     hub.cloud
         .pairings
@@ -175,7 +177,7 @@ pub fn requests_json(hub: &Hub) -> Vec<Value> {
         .locked()
         .iter()
         .map(|r| {
-            json!({"requestId": r.id, "computerId": r.computer_id, "name": r.name, "code": r.code, "expiresAt": r.expires_at})
+            json!({"requestId": r.id, "computerId": r.computer_id, "name": r.name, "codeShown": r.code.is_some(), "expiresAt": r.expires_at})
         })
         .collect()
 }
@@ -588,7 +590,9 @@ mod tests {
         let r = Rig::new().await;
         let a = Asker::new();
         let (code, nh) = offered(&r, "preq_1", &a).await;
-        assert_eq!(requests_json(&r.hub)[0]["code"], code.as_str());
+        let listed = &requests_json(&r.hub)[0];
+        assert_eq!(listed["codeShown"], true);
+        assert!(!listed.to_string().contains(code.as_str()), "the code never leaves this host: {listed}");
         assert!(r.hub.store.peer_in("cmp_a").is_none(), "a matching reveal alone lets nobody in");
         for typed in [None, Some("000000"), Some("")].into_iter().filter(|t| *t != Some(code.as_str())) {
             let e = decide(&r.hub, "preq_1", true, typed).await.unwrap_err();
