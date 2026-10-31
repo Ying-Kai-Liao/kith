@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""kith-chain — the health-check chain: one bug, one PR, one call (designs/2026-10-25-all-together.md, C1-C6).
+
+  kith-chain run SERVICE --check "COMMAND"      run the check (a shell command, 10 minutes at most). Healthy: prints ok,
+                                                exit 0. Failing: opens a chain on the bug's signature and prints the
+                                                signature and the redacted findings, exit 10. The signature holds (the
+                                                same bug is already being handled, or was within 7 days or until its PR
+                                                merged): prints held and why, exit 0, and the run ends there
+  kith-chain ask SIG AGENT -- TEXT              `kith ask --bg AGENT` with TEXT cut to findings (no logs, env or keys),
+                                                for the chain SIG; prints the ask id. A refusal by the hop or cost caps
+                                                ends the chain failed, with one note to the person (exit 4)
+  kith-chain done SIG -- ANSWER                 the coder's answer is back: a PR link in it is kept in the ledger and the
+                                                person is called once with the bug and the link (a call that doesn't
+                                                ring leaves them the result in the chat as a note). No link: the chain
+                                                ends failed with a note, no call
+  kith-chain close SIG --why TEXT               ends the chain without a PR (devops says it is not a bug). Holds 7 days
+  kith-chain fail SIG --why TEXT                ends the chain failed: one note to the person saying which bug and why
+  kith-chain seen SIG                           exit 0 when SIG holds (prints its state), 1 when it doesn't
+  kith-chain sig SERVICE                        the signature of the error text on stdin
+  kith-chain task SERVICE --check "COMMAND"     the task text for a kith-sched job on the origin agent:
+                                                  kith-sched add AGENT "*/30 * * * *" "$(kith-chain task S --check CMD)" --id health-S
+
+The run that finds the bug is the origin: it asks, parks, and when the answer wakes it, calls (C1, C2). The ledger lives in
+<machine>/chain/ledger.json (lib/kith_chain.py). Notes go through kith-send, which a scheduled run leaves in the origin's
+chat; the call's missed/declined entry carries the result the same way (kith-call --result).
+"""
+import os, re, subprocess, sys, time
+from pathlib import Path
+
+KITH = Path(__file__).resolve().parent.parent
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+import kith_chain  # noqa: E402
+from kith_paths import paths  # noqa: E402
+
+LEDGER = kith_chain.Ledger(paths()['KITH_MACHINE'] / 'chain')
+AGENT = os.environ.get('KITH_AGENT', 'kith')
+
+
+def redactor():
+    try:
+        import kith_redact
+        return kith_redact.redactor()
+    except Exception:  # noqa: BLE001 — better the plain text than no findings at all
+        return lambda t: t
+
+
+def die(msg, code=2):
+    print('kith-chain: ' + msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def need(e, sig):
+    if e is None:
+        die('no chain %s in the ledger' % sig)
+    return e
+
+
+def note(text):
+    """One line to the person (kith-send; a scheduled run's outbox is their chat). A send that fails is said."""
+    r = subprocess.run([str(KITH / 'bin/kith-send'), '--as', AGENT, text], capture_output=True, text=True)
+    if r.returncode:
+        print('kith-chain: the note did not go (%s)' % (r.stderr.strip() or r.returncode), file=sys.stderr)
+    return r.returncode == 0
+
+
+def summary_of(entry):
+    return '%s (%s)' % (entry['summary'] or entry['service'], entry['service'])
+
+
+def end(sig, why):
+    """Ends the chain failed and tells the person once, however often this is asked."""
+    with LEDGER.locked() as e:
+        ent = need(e.get(sig), sig)
+        if ent['noted']:
+            return
+        ent.update(state='failed', why=why)
+        snap = dict(ent)
+    text = 'Health check: %s: %s.%s' % (summary_of(snap), why, ' PR: ' + snap['pr'] if snap.get('pr') else '')
+    if note(text):
+        kith_chain.update(LEDGER, sig, noted=True)
+
+
+def cmd_run(a):
+    if len(a) != 3 or a[1] != '--check':
+        die('usage: kith-chain run SERVICE --check "COMMAND"')
+    service, check = a[0], a[2]
+    try:
+        r = subprocess.run(check, shell=True, capture_output=True, text=True, timeout=600)
+    except subprocess.TimeoutExpired:
+        r = subprocess.CompletedProcess(check, 124, '', 'error: the check timed out after 10 minutes')
+    if r.returncode == 0:
+        print('ok')
+        return 0
+    text = (r.stderr + '\n' + r.stdout).strip() or 'error: the check exited %d with no output' % r.returncode
+    sig = kith_chain.signature(service, text)
+    body = kith_chain.findings(text, redactor())
+    opened, ent = kith_chain.open_chain(LEDGER, sig, service, body.splitlines()[0] if body else service, AGENT)
+    if not opened:
+        when = time.strftime('%Y-%m-%d', time.localtime(ent['opened']))
+        print('held: %s is %s since %s%s' % (sig, ent['state'], when, ' (PR ' + ent['pr'] + ')' if ent.get('pr') else ''))
+        print('kith-chain: %s fired again while its chain is %s: no second ask, PR or call' % (sig, ent['state']),
+              file=sys.stderr)
+        return 0
+    print('signature: %s\nfindings:\n%s' % (sig, body))
+    return 10
+
+
+def cmd_ask(a):
+    if len(a) < 4 or a[2] != '--':
+        die('usage: kith-chain ask SIG AGENT -- TEXT')
+    sig, agent, text = a[0], a[1], ' '.join(a[3:])
+    need(LEDGER.get(sig), sig)
+    brief = kith_chain.findings(text, redactor())
+    r = subprocess.run([str(KITH / 'bin/kith-ask'), '--bg', agent, brief], capture_output=True, text=True)
+    if r.returncode == 0:
+        m = re.match(r'started \S+ in the background as (\S+)', r.stdout)
+        print(m.group(1) if m else r.stdout.strip())
+        return 0
+    reason = (r.stderr.strip().splitlines() or ['the ask was refused'])[-1][:200]
+    if r.returncode == 4:   # the hop or cost cap (C5): nobody is watching, so it ends here, with a note
+        end(sig, 'stopped, the ask to %s was refused: %s' % (agent, reason))
+        return 4
+    end(sig, 'stopped, could not ask %s: %s' % (agent, reason))
+    return 1
+
+
+def cmd_done(a):
+    if len(a) < 2 or a[1] != '--':
+        die('usage: kith-chain done SIG -- ANSWER')
+    sig, answer = a[0], ' '.join(a[2:])
+    ent = need(LEDGER.get(sig), sig)
+    if ent['noted'] or ent['state'] in ('failed', 'merged'):
+        print('already ended (%s)' % ent['state'])
+        return 0
+    m = kith_chain.PR_URL.search(answer)
+    if not m:
+        end(sig, 'stopped, the fix came back with no PR link')
+        return 0
+    url = m.group(0)
+    ent = kith_chain.update(LEDGER, sig, state='pr', pr=url)   # recorded first: C3 holds even if the call dies
+    result = '%s. PR: %s' % (summary_of(ent), url)
+    reason = ('Health check: %s has a fix ready for review' % ent['service'])[:150]
+    r = subprocess.run([str(KITH / 'bin/kith-call'), '--result', result, reason], capture_output=True, text=True)
+    status = r.stdout.strip().split(' ')[0]
+    if status in ('ringing', 'accepted', 'declined', 'missed'):
+        # The host leaves the result in the chat itself when the call is declined or missed (C6).
+        kith_chain.update(LEDGER, sig, noted=True, why='called: ' + status)
+        print(status)
+        return 0
+    # No call went (rate-limited, busy, no key, host down): the result is the note.
+    if note('Health check: %s. PR: %s (I could not call: %s)' % (summary_of(ent), url, status or 'no answer')):
+        kith_chain.update(LEDGER, sig, noted=True, why='noted: ' + (status or 'call failed'))
+    print('noted (%s)' % (status or 'call failed'))
+    return 0
+
+
+def cmd_close(a):
+    if len(a) < 3 or a[1] != '--why':
+        die('usage: kith-chain close SIG --why TEXT')
+    need(LEDGER.get(a[0]), a[0])
+    kith_chain.update(LEDGER, a[0], state='closed', why=' '.join(a[2:]))
+    return 0
+
+
+def cmd_fail(a):
+    if len(a) < 3 or a[1] != '--why':
+        die('usage: kith-chain fail SIG --why TEXT')
+    end(a[0], 'stopped, ' + ' '.join(a[2:]))
+    return 0
+
+
+def cmd_seen(a):
+    e = LEDGER.get(a[0]) if a else None
+    if e and kith_chain.holds(e, kith_chain.now()):
+        print(e['state'])
+        return 0
+    return 1
+
+
+def cmd_sig(a):
+    print(kith_chain.signature(a[0], sys.stdin.read()))
+    return 0
+
+
+def cmd_task(a):
+    if len(a) != 3 or a[1] != '--check':
+        die('usage: kith-chain task SERVICE --check "COMMAND"')
+    s, c = a[0], a[2]
+    k = KITH / 'bin' / 'kith-chain'
+    print(f"""Health check of {s}. Run `{k} run {s} --check {c!r}`.
+- Exit 0 (ok or held): nothing to do, end the run and send nothing.
+- Exit 10: a new bug; the output has its signature SIG and the findings. Ask devops for the cause with
+  `{k} ask SIG devops -- "<the findings, and what to look at in the logs>"`. Findings only: never paste logs, env or keys
+  into the ask, devops reads its own. Note "devops: <finding> (asked <date>)" in your memory, then end your turn: the answer wakes you.
+- When woken with devops's answer: if it is not a bug, `{k} close SIG --why "<one line>"` and end. Otherwise ask coder
+  for the fix with `{k} ask SIG coder -- "<cause and proposed fix, findings only, what the PR should do>"` and end your turn.
+- When woken with coder's answer, `{k} done SIG -- "<its answer>"` calls the person once and leaves the result in the chat.
+  Do not call yourself and do not ask again. If any step is refused or fails, `{k} fail SIG --why "<one line>"`.""")
+    return 0
+
+
+CMDS = {'run': cmd_run, 'ask': cmd_ask, 'done': cmd_done, 'close': cmd_close, 'fail': cmd_fail, 'seen': cmd_seen,
+        'sig': cmd_sig, 'task': cmd_task}
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2 or sys.argv[1] not in CMDS:
+        print('usage: kith-chain run|ask|done|close|fail|seen|sig|task (see the top of this file)', file=sys.stderr)
+        sys.exit(2)
+    sys.exit(CMDS[sys.argv[1]](sys.argv[2:]))

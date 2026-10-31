@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# kith-chain-check — the health-check chain's ledger and flow (C1-C6): a failing check opens one chain per bug signature
+# (also when two runs fire at once), a signature holds until its PR merges or 7 days pass, the brief to the next agent
+# carries findings only, the end of the chain calls once with the result or leaves it as a note, and a refused ask ends
+# it failed with one note. Stub kith-ask, kith-call, kith-send and gh; throwaway dirs, never ~/.kith.
+#
+#   kernel/tests/kith-chain-check
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-chain.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_AGENT=house LOG=$T/log
+unset KITH_CHAIN_NOW HQ_HOME HQ_STATE
+mkdir -p "$HOME" "$KITH_STATE" "$T/k/bin" "$LOG"
+ln -s "$KERNEL/lib" "$T/k/lib"
+cp "$KERNEL/bin/kith-chain" "$T/k/bin/kith-chain"
+cat > "$T/k/bin/kith-ask" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$LOG/ask"
+if [ -n "${STUB_ASK_RC:-}" ]; then echo "kith ask: delegation cost cap: chain x has spent US\$5.01; ask the user before starting another chain" >&2; exit "$STUB_ASK_RC"; fi
+echo "started $2 in the background as ask-$$; its answer: kith ask --wait ask-$$"
+STUB
+cat > "$T/k/bin/kith-call" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$LOG/call"
+echo "${STUB_CALL:-ringing}"
+STUB
+cat > "$T/k/bin/kith-send" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >> "$LOG/send"
+STUB
+cat > "$T/gh" <<'STUB'
+#!/bin/sh
+cat "$LOG/ghstate" 2>/dev/null || echo OPEN
+STUB
+chmod +x "$T"/k/bin/* "$T/gh"
+export KITH_CHAIN_GH=$T/gh
+C() { python3 "$T/k/bin/kith-chain" "$@"; }
+
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+lines() { [ -f "$LOG/$1" ] && wc -l < "$LOG/$1" | tr -d ' ' || echo 0; }
+reset() { rm -f "$LOG"/*; }
+
+# The same bug, run to run: a time, a pid and a port change; the error does not.
+bug() { echo "$(date +%s%N) boot ok" ; echo "2026-10-3$1T10:0$1:00Z error: connection refused to 10.0.0.$1:543$1 (pid 1$1$1)" >&2; echo "API_TOKEN=sk-live-abcdef123456"; exit 1; }
+export -f bug
+CHECK='bug 1'
+
+check "a healthy check prints ok and opens nothing" "[ \"\$(C run web --check true)\" = ok ]"
+out=$(C run web --check "$CHECK"); rc=$?
+sig=$(echo "$out" | sed -n 's/^signature: //p')
+check "a failing check opens a chain: exit 10 and a signature" "[ $rc = 10 ] && [ -n '$sig' ]"
+check "the findings carry no NAME=value line" "! echo '$out' | grep -q 'API_TOKEN'"
+out2=$(C run web --check 'bug 2' 2>"$T/err"); rc2=$?
+check "the same bug again (other time, pid, port): held, exit 0, no second chain" "[ $rc2 = 0 ] && echo '$out2' | grep -q '^held: $sig is open' && grep -q 'no second ask' $T/err"
+check "seen says it holds" "[ \"\$(C seen $sig)\" = open ]"
+check "another bug gets its own chain" "[ \$(C run web --check 'echo error: disk full >&2; exit 1' | grep -c '^signature: web:') = 1 ]"
+
+# Two runs firing at once open one chain.
+pids=""; for i in 1 2 3 4 5 6; do ( C run web2 --check 'bug 3' >/dev/null 2>&1; echo $? > "$T/rc$i" ) & pids="$pids $!"; done
+wait $pids
+opened=$(cat "$T"/rc? | grep -c '^10$')
+check "six concurrent runs: exactly one opened the chain" "[ $opened = 1 ]"
+
+# Seven days.
+export KITH_CHAIN_NOW=$(( $(date +%s) + 6*86400 ))
+C run web2 --check 'bug 4' >/dev/null 2>&1; rc=$?
+check "after 6 days it still holds" "[ $rc = 0 ]"
+export KITH_CHAIN_NOW=$(( $(date +%s) + 8*86400 ))
+C run web2 --check 'bug 4' >/dev/null 2>&1; rc=$?
+check "after 7 days a new chain may open" "[ $rc = 10 ]"
+unset KITH_CHAIN_NOW
+
+# C4: the brief to the next agent carries findings, never env or keys.
+reset
+C ask "$sig" coder -- "cause: refused. $(printf 'API_TOKEN=sk-live-abcdef123456\nDATABASE_URL=postgres://u:pw@h/db\nBearer abcdefghijklmnopqrstuvwxyz0123\nfinding: port closed')" > "$T/id"; rc=$?
+check "ask prints the ask id" "[ $rc = 0 ] && grep -q '^ask-' $T/id"
+check "the brief reached kith-ask as --bg coder" "grep -q '^--bg coder ' $LOG/ask"
+check "the brief has no env line, key or bearer" "! grep -Eq 'sk-live|DATABASE_URL|postgres://|abcdefghijklmnopqrstuvwxyz0123' $LOG/ask"
+check "the finding itself is kept" "grep -q 'finding: port closed' $LOG/ask"
+
+# The end of the chain: a PR link calls once, with the result.
+reset
+C done "$sig" -- "Opened https://github.com/o/r/pull/12 for it." >/dev/null; rc=$?
+check "done with a PR: one call, its result carries the bug and the link" "[ $rc = 0 ] && [ \$(lines call) = 1 ] && grep -q -- '--result .*pull/12' $LOG/call && [ \$(lines send) = 0 ]"
+C done "$sig" -- "Opened https://github.com/o/r/pull/12 for it." >/dev/null
+check "done again: no second call" "[ \$(lines call) = 1 ]"
+check "the ledger holds the PR" "grep -q 'pull/12' $KITH_STATE/chain/ledger.json"
+out=$(C run web --check "$CHECK" 2>/dev/null)
+check "with the PR open the bug is held" "echo '$out' | grep -q 'held: $sig is pr.*pull/12'"
+echo MERGED > "$LOG/ghstate"
+C run web --check "$CHECK" >/dev/null 2>&1; rc=$?
+check "once the PR is merged the same bug may open a new chain" "[ $rc = 10 ]"
+rm -f "$LOG/ghstate"
+
+# C6: a call that does not ring leaves the result as a note.
+reset; sig2=$(echo "error: other bug" | C sig db); C run db --check 'echo "error: other bug" >&2; exit 1' >/dev/null 2>&1
+STUB_CALL="rate-limited (try again in 540 s)" C done "$sig2" -- "PR https://github.com/o/r/pull/13" >/dev/null
+check "rate-limited call: the result goes as a note with the PR link" "[ \$(lines send) = 1 ] && grep -q 'pull/13' $LOG/send && grep -q 'rate-limited' $LOG/send"
+
+# The coder's answer has no PR: a note, no call.
+reset; C run cache --check 'echo "error: cold" >&2; exit 1' >/dev/null 2>&1; sig3=$(echo "error: cold" | C sig cache)
+C done "$sig3" -- "I could not reproduce it." >/dev/null
+check "no PR link: one note, no call" "[ \$(lines send) = 1 ] && [ \$(lines call) = 0 ] && grep -q 'no PR link' $LOG/send"
+
+# C5: the caps refuse the next hop: failed, one note naming the bug and why.
+reset; C run q --check 'echo "error: capped bug" >&2; exit 1' >/dev/null 2>&1; sig4=$(echo "error: capped bug" | C sig q)
+STUB_ASK_RC=4 C ask "$sig4" devops -- "why" >/dev/null 2>&1; rc=$?
+check "a cap refusal exits 4" "[ $rc = 4 ]"
+check "one note, saying which bug and why it stopped" "[ \$(lines send) = 1 ] && grep -q 'capped bug' $LOG/send && grep -q 'cost cap' $LOG/send"
+check "the ledger marks it failed" "grep -q '\"state\": \"failed\"' $KITH_STATE/chain/ledger.json"
+C fail "$sig4" --why "again" >/dev/null
+check "failing it again sends no second note" "[ \$(lines send) = 1 ]"
+check "a failed bug is held too (no second chain)" "C run q --check 'echo \"error: capped bug\" >&2; exit 1' 2>/dev/null | grep -q '^held'"
+
+# Not a bug: closed, held, no coder ask.
+reset; C run n --check 'echo "error: noise" >&2; exit 1' >/dev/null 2>&1; sig5=$(echo "error: noise" | C sig n)
+C close "$sig5" --why "devops: expected during deploys" >/dev/null
+check "closed: held and nothing was sent or asked" "[ \"\$(C seen $sig5)\" = closed ] && [ \$(lines ask) = 0 ] && [ \$(lines send) = 0 ]"
+exit $fail
