@@ -1,8 +1,7 @@
 import Foundation
 
 /// A scanned QR / pairing link (§4.1). Short-lived: only the resulting `Computer` is kept.
-/// `kith://pair?v=3&name=…&id=<computerId>&sk=…&bk=…&code=…&urls=a,b&cloud=…` (a host that predates the
-/// Kith rename still shows an old-scheme link, which `LegacyCompat` maps here and pairs with the old crypto labels).
+/// `kith://pair?v=3&name=…&id=<computerId>&sk=…&bk=…&code=…&urls=a,b&cloud=…`.
 public struct Pairing: Hashable, Sendable {
     public var computer: Computer
     public var code: String

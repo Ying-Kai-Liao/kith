@@ -9,7 +9,7 @@ public enum SharedStore {
     public static let relayURL = relayURL(host: Bundle.main.object(forInfoDictionaryKey: "KithPushRelayHost") as? String)
 
     /// Used when the build names no relay host.
-    static let defaultRelayURL = "https://codync-relay.kevin2005ha.workers.dev"
+    static let defaultRelayURL = "https://kith-relay.lykevin890919.workers.dev"
 
     static func relayURL(host: String?) -> String {
         guard let host = host?.trimmingCharacters(in: .whitespaces), !host.isEmpty, !host.hasPrefix("$(") else { return defaultRelayURL }

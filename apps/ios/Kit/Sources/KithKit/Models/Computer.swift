@@ -21,8 +21,7 @@ public struct Computer: Codable, Hashable, Sendable, Identifiable {
     public var color: String?
     /// How this device reaches the computer, picked per computer; nil = `.automatic`.
     public var route: ConnectionRoute?
-    /// The crypto labels this pairing runs under. nil = a pairing stored before the Kith rename, which keeps
-    /// the old labels (`LegacyCompat.labelPrefix`) until the computer is paired again.
+    /// The crypto labels this pairing runs under. nil = the Kith labels.
     public var labels: LabelFamily?
 
     public init(id: ComputerID, name: String, signKey: String, boxKey: String? = nil, urls: [String] = [],
