@@ -53,6 +53,8 @@ const CLAIM_MS: i64 = 5 * 60 * 1000;
 /// A saved card keeps its owed resume alive at least this long.
 const RESUME_KEEP_MS: i64 = 60 * 60 * 1000;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(20);
+/// The holders lookup is advice, not a gate: past this the card is shown as before.
+const HOLDERS_TIMEOUT: Duration = Duration::from_secs(3);
 
 // ---- where an ask came from
 
@@ -194,7 +196,8 @@ struct Holder {
 /// `kith-auth holders`: the agents with a grant of this service. None when kith-auth can't say (then the card is
 /// shown as before: a failed lookup must never leave the agent without a way to get its key).
 async fn holders_of(service: &str) -> Option<Vec<String>> {
-    let ran = kith_auth(&["holders", service, "--json"], None).await?;
+    // Short bound: the lookup sits in front of the card, and a slow one must read as "no holder", not as a stall.
+    let ran = tokio::time::timeout(HOLDERS_TIMEOUT, kith_auth(&["holders", service, "--json"], None)).await.ok()??;
     ran.ok.then_some(())?;
     let rows: Vec<Holder> = serde_json::from_slice(&ran.stdout).ok()?;
     Some(rows.into_iter().map(|h| h.agent).collect())

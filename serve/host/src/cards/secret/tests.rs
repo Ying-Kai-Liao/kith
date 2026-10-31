@@ -522,8 +522,8 @@ async fn the_deadline_passing_during_the_write_does_not_lose_the_saved_key() {
     f.state(NONE);
     f.ask("github").await;
     let (card, _) = f.open();
-    f.set_deadline(&card, now_ms() + 150);
-    f.delay("0.7");
+    f.set_deadline(&card, now_ms() + 400);
+    f.delay("1.2");
     let m = marker();
     f.provide(&card, Some("work"), &[("GITHUB_TOKEN", &m)]).await.unwrap();
     // The sweep runs after the deadline: the key is in, so the card stays saved, not expired.
