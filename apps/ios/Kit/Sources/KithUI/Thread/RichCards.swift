@@ -420,14 +420,90 @@ struct NewsCard: View {
 
 // MARK: Result
 
-/// The Result card: a reply Jev sorted as a result, its own lines as title and mono facts, a button for each link the
-/// reply held. The reply stays; "Show as text" folds the card back to it in place (DESIGN.md "Reply cards").
+/// The Result card: a reply Jev sorted as a result. v2 is the Info card (DESIGN.md "Reply cards"): the reply's heading,
+/// one sub line, Key: value rows and a link row if the reply had a link. v1 keeps its mono facts and buttons for old
+/// entries. The reply stays; "Show as text" folds the card back to it in place.
 struct ResultCard: View {
     let model: ResultCardModel
     let showText: () -> Void
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        if model.rows.isEmpty { facts } else { info }
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // 1 pt under the title, 7 pt above the group (the card's 8 less the 1 the sub line pulls back).
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.title).kithText(.secondary).fontWeight(.semibold).foregroundStyle(Palette.ink)
+                if !model.sub.isEmpty {
+                    Text(model.sub).font(.footnote).foregroundStyle(Palette.ink2)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.bottom, model.sub.isEmpty ? 0 : -1)
+            // The label column sizes to the longest label; dividers run edge to edge past the 10 pt side padding.
+            Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 0) {
+                ForEach(Array(model.rows.enumerated()), id: \.offset) { index, row in
+                    if index > 0 { Palette.line.frame(height: 1).padding(.horizontal, -10) }
+                    GridRow {
+                        if row.label.isEmpty {
+                            Text(row.value).kithText(.secondary).foregroundStyle(Palette.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .gridCellColumns(2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Text(row.label).font(.footnote).foregroundStyle(Palette.muted)
+                            Text(row.value).kithText(.secondary).foregroundStyle(Palette.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding(.vertical, 10)
+                    .accessibilityElement(children: .combine)
+                }
+                ForEach(model.links) { link in
+                    Palette.line.frame(height: 1).padding(.horizontal, -10)
+                    GridRow {
+                        Button { openURL(link.url) } label: {
+                            HStack(spacing: 8) {
+                                Text(link.label).font(.footnote).foregroundStyle(Palette.ink2).lineLimit(1)
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.right").font(.system(size: 11)).foregroundStyle(Palette.faint)
+                            }
+                            .padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .gridCellColumns(2)
+                        .accessibilityHint(link.url.host() ?? link.label)
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Palette.background, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            Button(action: showText) {
+                HStack(spacing: 4) {
+                    Image(systemName: "text.alignleft").font(.system(size: 11))
+                    Text("Show as text").font(.caption).fontWeight(.medium)
+                }
+                .foregroundStyle(Palette.muted)
+                // The tap area stays finger-sized without the 8 pt gap under the group growing.
+                .contentShape(Rectangle().inset(by: -8))
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(model.title)
+    }
+
+    private var facts: some View {
         ReportCard(title: model.title, icon: "doc.text") {
             EmptyView()
         } content: {

@@ -182,12 +182,39 @@ export function NewsCard({ entry, card }: { entry: Entry; card: RichCard }) {
 }
 
 /**
- * The Result card: a reply Jev sorted as a result, its own lines as title and mono facts, a button for each link the
- * reply held. The reply stays; "Show as text" folds the card back to it in place (DESIGN.md "Reply cards").
+ * The Result card: a reply Jev sorted as a result. v2 is the Info card (DESIGN.md "Reply cards"): the reply's heading,
+ * one sub line, Key: value rows and a link row if the reply had a link. v1 keeps its mono facts and buttons for old
+ * entries. The reply stays; "Show as text" folds the card back to it in place.
  */
 export function ResultCard({ card, showText }: { card: RichCard; showText: () => void }) {
   const view = resultView(card)
   if (!view) return null
+  if (view.rows.length) {
+    return (
+      <section className="rc-card info" aria-label={view.title}>
+        <div className="rc-head"><span className="rc-name wrap">{view.title}</span></div>
+        {view.sub ? <div className="rc-sub">{view.sub}</div> : null}
+        <div className="rc-info">
+          {view.rows.map((r, i) => (
+            <div key={i} className="rc-info-row">
+              {r.label ? <span className="rc-info-label">{r.label}</span> : null}
+              <span className={r.label ? 'rc-info-value' : 'rc-info-value alone'}>{r.value}</span>
+            </div>
+          ))}
+          {view.links.map((l) => (
+            <button key={l.url} className="rc-info-row rc-info-link" title={l.url} onClick={() => window.kith.app.openExternal(l.url)}>
+              <span className="rc-info-value">{l.label}</span>
+              <Icon name="arrow.up.right" size={11} color="var(--rc-faint)" />
+            </button>
+          ))}
+        </div>
+        <button className="rc-as-text-link" onClick={showText}>
+          <Icon name="text.alignleft" size={11} color="var(--kith-muted)" />
+          Show as text
+        </button>
+      </section>
+    )
+  }
   return (
     <section className="rc-card" aria-label={view.title}>
       <div className="rc-head">
