@@ -515,6 +515,7 @@ impl Actor {
         }
         if self.conn.is_none() {
             self.conn_started_as = Some(started_as);
+            self.conn_dirs.clone_from(&launch.add_dirs);
             self.conn_serving.clone_from(&self.serving);
             self.conn_account.clone_from(&launch.account_id);
             self.conn_room = self.run_room();

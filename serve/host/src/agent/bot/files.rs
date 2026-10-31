@@ -73,12 +73,16 @@ impl Actor {
         let root = files::root(&self.cfg.id);
         // Relative paths are the agent's own: it works in the launch's folder (a project-pinned place), not the bot's.
         let cwd = PathBuf::from(self.conn_started_as.as_ref().map_or(self.cfg.cwd.as_str(), |s| s.1.as_str()));
+        let folders: Vec<PathBuf> =
+            std::iter::once(cwd.clone()).chain(self.conn_dirs.iter().map(PathBuf::from)).collect();
         let tx = self.files.tx.clone();
         tokio::spawn(async move {
             let flag = cancelled.clone();
-            let result =
-                tokio::task::spawn_blocking(move || files::snapshot_all(&root, &cwd, &sources, name.as_deref(), &flag))
-                    .await;
+            let result = tokio::task::spawn_blocking(move || {
+                let reach = files::Reach::new(folders, crate::cards::resource::roots());
+                files::snapshot_all(&root, &cwd, &sources, name.as_deref(), &reach, &flag)
+            })
+            .await;
             let result = result.map_err(anyhow::Error::from).and_then(std::convert::identity);
             let _ = tx.send(Completed { epoch, cancelled, reply, result });
         });
