@@ -5,7 +5,8 @@
                           the tick (kith-wake drain starts it): for each listed session with no live writer, the 54-minute
                           decision of its idle period, once (rule 5): compact, sleep or end. Compact runs
                           `claude -p --resume SID "/compact"` only while holding the session's writer claim and after
-                          checking again under it (rule 11); end is written only under the claim too (rule 12). Prints one
+                          checking again under it (rule 11); the claim names claude's own pid (claim-then-exec), so it
+                          lasts while claude writes even if the sweep dies. End is written only under the claim too (rule 12). Prints one
                           line per session it acted on. --at-sleep: ask now (a 5-minute cache has no timer; the wrapper
                           calls it as a session goes to sleep).
   kith-lifecycle status SID   what is known: how it ended (idle, quit, ... or crash), the decision, outstanding work
@@ -18,7 +19,7 @@ never sees them; a session the host keeps a conversation for (resolveThread know
 compactor (memory/compaction.rs while_idle) keeps those. A failed /compact is tried once per idle period. One sweep at a time
 (flock sessions/lifecycle.lock).
 """
-import argparse, fcntl, importlib.machinery, importlib.util, json, os, shutil, subprocess, sys, time
+import argparse, fcntl, importlib.machinery, importlib.util, json, os, shutil, signal, sys, time
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent
@@ -76,10 +77,10 @@ def host_owns(ks, sid):
     return bool(r and not r.get('error') and r.get('sessionId'))
 
 
-def writer_free(ks, e):
-    """Nobody else writes the session: no live claim but our own, no live claude process."""
-    sid = e['sessionId']
-    mine = lambda c: c and c.get('pid') == os.getpid()
+def writer_free(ks, e, me=None):
+    """Nobody else writes the session: no live claim but our own (`me`: the pid we claimed it for), no live claude process."""
+    sid, me = e['sessionId'], me or os.getpid()
+    mine = lambda c: c and c.get('pid') == me
     claims = [c for c in (ks.read_claim(ks.claim_path(sid)), ks.read_claim(ks.claim_path(sid, True))) if not mine(c)]
     return not (any(ks.claim_live(c) for c in claims) or ks.live_pid(e))
 
@@ -97,13 +98,13 @@ def settled(sid, since, decision=None):
     return bool(d and d.get('idleSince') == since and (d.get('compacted') or d.get('failed') or d.get('decision') == 'end' and d.get('ended')))
 
 
-def still(ks, e, want, since, at=None):
+def still(ks, e, want, since, at=None, me=None):
     """The checks under the claim (rules 11, 12): nothing changed since the decision was made."""
     sid, t = e['sessionId'], e['transcriptPath']
     d = lc.read_decision(sid)
     if not d or d.get('decision') != want or d.get('idleSince') != since or d.get('compacted'):
         return False   # cleared by a resume, or already done this period
-    if lc.last_turn_at(t) != since or not writer_free(ks, e):
+    if lc.last_turn_at(t) != since or not writer_free(ks, e, me):
         return False
     if lc.compacted_since(t, since) and want == 'compact':
         return False   # Claude compacted it itself since (rule 6, belt and braces)
@@ -118,31 +119,89 @@ def failed(sid, why):
     return f'failed: {why}'
 
 
+def parked(argv, cwd, env):
+    """Fork the process that will be claude, parked before its exec: it execs argv (in cwd, with env, stdio on /dev/null)
+    when b'1' is written to `go`, and exits without running anything when `go` closes unwritten (also when this process
+    dies). Its pid is claude's pid, so the writer claim can name it before it starts (claim-then-exec, as a one-shot does
+    in kernel/bin/kith). Returns (pid, go, err): an exec that fails writes why to `err`; one that succeeds closes it."""
+    go_r, go_w = os.pipe()
+    err_r, err_w = os.pipe()   # not inheritable (PEP 446): the exec closes them
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.close(go_w)
+            os.close(err_r)
+            if os.read(go_r, 1) == b'1':
+                os.chdir(cwd)
+                null = os.open(os.devnull, os.O_RDWR)
+                for fd in (0, 1, 2):
+                    os.dup2(null, fd)
+                os.execvpe(argv[0], argv, env)
+        except BaseException as x:  # noqa: BLE001 — reported to the parent, never raised in a forked copy of the sweep
+            try:
+                os.write(err_w, str(x).encode())
+            except BaseException:  # noqa: BLE001
+                pass
+        finally:
+            os._exit(127)
+    os.close(go_r)
+    os.close(err_w)
+    return pid, go_w, err_r
+
+
+def reap(pid, timeout=None):
+    """Wait for pid; its exit code (negative: the signal), or None when it ran past timeout (it is then killed and reaped)."""
+    end = time.monotonic() + timeout if timeout else None
+    while True:
+        got, status = os.waitpid(pid, os.WNOHANG if end else 0)
+        if got:
+            return os.waitstatus_to_exitcode(status)
+        if time.monotonic() >= end:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            return None
+        time.sleep(0.2)
+
+
 def compact(ks, e, since, at):
+    """The claim names claude's own pid, not this sweep's (I11): a sweep that dies while claude writes leaves the claim held
+    by the live writer, so nobody else gets in until claude has exited."""
     sid, t = e['sessionId'], e['transcriptPath']
-    if ks.take_claim(sid, os.getpid(), 'oneshot', lifecycle_owner=True):
-        return 'held'
+    claude = os.environ.get('KITH_CLAUDE') or shutil.which('claude') or 'claude'
+    env = {k: v for k, v in os.environ.items() if k not in ('KITH_PERSON', 'KITH_VIA', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT')}
+    env['CLAUDE_CONFIG_DIR'] = str(Path(t).parents[2])   # the login the session was made under
+    pid, go, err = parked([claude, '-p', '--resume', sid, '/compact'], e.get('cwd') or '/', env)
+    reaped = False
     try:
-        if not still(ks, e, 'compact', since, at):
+        if ks.take_claim(sid, pid, 'oneshot', lifecycle_owner=True):
+            return 'held'
+        if not still(ks, e, 'compact', since, at, pid):
             return 'skipped'
         if not (e.get('cwd') and os.path.isdir(e['cwd'])):
             return failed(sid, 'the session\'s folder is gone')   # --resume would look in the wrong project
-        claude = os.environ.get('KITH_CLAUDE') or shutil.which('claude') or 'claude'
-        env = {k: v for k, v in os.environ.items() if k not in ('KITH_PERSON', 'KITH_VIA', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT')}
-        env['CLAUDE_CONFIG_DIR'] = str(Path(t).parents[2])   # the login the session was made under
-        try:
-            r = subprocess.run([claude, '-p', '--resume', sid, '/compact'], cwd=e['cwd'], env=env, stdin=subprocess.DEVNULL,
-                               capture_output=True, text=True, timeout=COMPACT_TIMEOUT)
-        except subprocess.TimeoutExpired:
+        os.write(go, b'1')
+        why = b''
+        while True:
+            chunk = os.read(err, 4096)
+            if not chunk:
+                break
+            why += chunk
+        if why:   # claude not on PATH, say
+            return failed(sid, why.decode(errors='replace'))
+        rc = reap(pid, COMPACT_TIMEOUT)
+        reaped = True
+        if rc is None:
             return failed(sid, 'timed out')
-        except OSError as x:   # claude not on PATH
-            return failed(sid, str(x))
-        if r.returncode == 0:
+        if rc == 0:
             lc.write_decision(sid, {**(lc.read_decision(sid) or {}), 'compacted': True, 'compactedAt': time.time()})
             return 'compacted'
-        return failed(sid, f'exit {r.returncode}')
+        return failed(sid, f'exit {rc}')
     finally:
-        ks.release_claims(os.getpid())
+        os.close(go)   # a child still parked exits without running claude
+        os.close(err)
+        if not reaped:
+            reap(pid)
+        ks.release_claims(pid)
 
 
 def end(ks, e, since, at):
