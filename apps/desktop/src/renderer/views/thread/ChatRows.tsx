@@ -24,6 +24,7 @@ import { isSecretCard } from '@shared/secret-card'
 import { confirmMessage, confirmTitle, heldIcon, heldRowOf, stoppedDivider } from '@shared/held-run'
 import { ConnectionRequestCard } from '../marketplace/ConnectionRequestCard'
 import { HandoffNotice } from './HandoffNotice'
+import { HandoffSheet } from './HandoffSheet'
 import { AnsweredBy } from './AnsweredBy'
 import { contextLine } from './context-hint'
 import { groupReactions } from './reaction-groups'
@@ -32,6 +33,7 @@ import { foldOf } from './fold-card'
 import { callLineSuffix } from './call-line'
 import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
 import { toolRowOf, VISIBLE_STEPS } from '@shared/thread-feed'
+import { askIdOf } from '@shared/handoff-peek'
 import { botGuestSender } from '@shared/bot-guest-chat'
 import { queuedLine } from '@shared/thread-writer'
 import { quoteOf, quotesOf } from './reply-quote'
@@ -527,9 +529,14 @@ function MessageActions({ visible, className, reactions, reply, trace, copy }: {
 /** A tool call as one row in the chat: "Edited kith-sessions.py  +6 -2"; it opens the command and output. */
 export function ToolRowItem({ entry }: { entry: Entry }) {
   const m = toolRowOf(entry)
+  const store = useStore()
+  const [peeking, setPeeking] = useState(false)
+  // Only the owner sees a handoff's peek; a row without an ask id (a plain ask, one from before the records) is an ordinary row.
+  const ask = store.isOwner ? askIdOf(m.command, m.output) : null
   return (
     <div className="chat-tool">
-      <ToolRow verb={m.verb} object={m.object} result={m.result} state={m.state} detail={m.command || m.output ? { command: m.command, output: m.output } : undefined} />
+      <ToolRow verb={m.verb} object={m.object} result={m.result} state={m.state} detail={m.command || m.output ? { command: m.command, output: m.output } : undefined} onPeek={ask ? () => setPeeking(true) : undefined} />
+      {ask ? <HandoffSheet store={store} id={peeking ? ask : null} onClose={() => setPeeking(false)} /> : null}
     </div>
   )
 }
