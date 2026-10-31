@@ -47,7 +47,7 @@ settings:
     KITH_LEGACY_URL_SCHEME: codync
     # The APNs push relay's host (serve/relay). kith-relay is ready to take over once it has a public URL and
     # the APNs key (paid Apple program): set its host here; phones re-register with it on their next launch.
-    KITH_PUSH_RELAY_HOST: codync-relay.kevin2005ha.workers.dev
+    KITH_PUSH_RELAY_HOST: kith-relay.lykevin890919.workers.dev
     KITH_SCREEN_NAME: KithScreen
     KITH_SCREEN_BUNDLE_ID: com.yingkailiao.kith.screen
     KITH_DATA_FOLDER: .kith/serve-main

@@ -54,6 +54,19 @@ struct RootView: View {
                     .id(target.id)
             }
         }
+        .onChange(of: app.answeredCall, initial: true) { _, call in
+            if let call, let store = accounts.store(for: call.computerId) {
+                answered = AnsweredCall(store: store, botId: call.botId, callId: call.callId, fromSystem: true, computerId: call.computerId)
+            } else if call == nil, answered?.fromSystem == true {
+                answered = nil
+            }
+        }
+        .onChange(of: answered?.key) { old, new in
+            // However the voice call ended, the system call ends with it.
+            if new == nil, let old, let slash = old.firstIndex(of: "/") {
+                app.answeredCallEnded(computerId: String(old[..<slash]), callId: String(old[old.index(after: slash)...]))
+            }
+        }
         .kithOverlay(isPresented: Binding(get: { ringing != nil || answered != nil }, set: { if !$0 { answered = nil } })) { close in
             if let answered {
                 // The agent speaks first once the call is live.
@@ -62,7 +75,7 @@ struct RootView: View {
                 IncomingCallView(call: call, bot: store.bots[call.botId]) {
                     Task {
                         if await store.acceptCall(call) {
-                            answered = AnsweredCall(store: store, botId: call.botId, callId: call.id)
+                            answered = AnsweredCall(store: store, botId: call.botId, callId: call.id, computerId: store.computer.id)
                             store.dismissCall(call.id)
                         }
                     }
@@ -144,6 +157,10 @@ struct RootView: View {
         let store: BotStore
         let botId: String
         let callId: String
+        /// Answered in the system call UI, which can also hang it up.
+        var fromSystem = false
+        var key: String { CallPush.key(computerId: computerId, callId: callId) }
+        let computerId: ComputerID
     }
 
     /// "In 10 min": a local notification that rings this agent's call again. One pending per agent.
@@ -163,7 +180,11 @@ struct RootView: View {
     /// The first agent ringing on any computer.
     private var ringing: (BotStore, IncomingCall)? {
         for computer in accounts.computers {
-            if let store = accounts.store(for: computer.id), let call = store.incomingCalls.first { return (store, call) }
+            // A call the system call UI is already ringing is not shown twice.
+            if let store = accounts.store(for: computer.id),
+               let call = store.incomingCalls.first(where: { !CallCoordinator.shared.owned.owns(computerId: computer.id, callId: $0.id) }) {
+                return (store, call)
+            }
         }
         return nil
     }

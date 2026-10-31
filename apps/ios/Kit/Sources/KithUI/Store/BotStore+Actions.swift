@@ -82,6 +82,33 @@ extension BotStore {
         return false
     }
 
+    /// Accepts a call the system call UI answered, possibly before this app has a link: connects first.
+    /// The link is held until `releaseCall`, so a backgrounded app keeps it for the voice call that follows.
+    public func answerCall(_ id: String) async -> Bool {
+        holdCall(id)
+        if (try? await withLink { try await $0.callAccept(id) }) != nil { return true }
+        releaseCall(id)
+        return false
+    }
+
+    /// Keeps the link up for a call the system call UI is ringing, so its event reaches a backgrounded app.
+    public func holdCall(_ id: String) {
+        guard !retired else { return }
+        callHolds.insert(id)
+        if streamTask == nil { restartStream() }
+    }
+
+    public func releaseCall(_ id: String) {
+        guard callHolds.remove(id) != nil, !isActive, voiceCalls.isEmpty, callHolds.isEmpty, !retired else { return }
+        setActive(false)
+    }
+
+    /// Declines a call by id, for a ring the system call UI showed before this app saw the event.
+    public func declineCall(id: String) {
+        incomingCalls.removeAll { $0.id == id }
+        perform { try await $0.callDecline(id) }
+    }
+
     public func dismissCall(_ id: String) { incomingCalls.removeAll { $0.id == id } }
 
     public func declineCall(_ call: IncomingCall) {

@@ -131,6 +131,18 @@ public final class BotStore {
     public var onConnected: (@MainActor (BotStore) -> Void)?
     public var onBotUpdated: (@MainActor (Bot) -> Void)?
     public var onUsageChanged: (@MainActor (ComputerID, Usage) -> Void)?
+    /// Every `call` event, so the system call UI can follow a call the host settles.
+    public var onCallEvent: (@MainActor (IncomingCallEvent) -> Void)?
+    /// A moment after each hello, with the ids of the calls the host repeated as ringing: the host sends nothing
+    /// for a call that settled while the app was away, so the system call UI ends what is not in this set.
+    public var onCallCatchUp: (@MainActor (Set<String>) -> Void)?
+    /// Waits out the host's catch-up after a hello; a reconnect's hello starts it over.
+    var catchUpTask: Task<Void, Never>?
+    /// How long after a hello the host's repeated ringing calls are taken as complete. The catch-up follows the hello
+    /// at once, and a quiet host sends no other event to mark its end, so a timer it is.
+    static let catchUpWait: Duration = .seconds(3)
+    /// Calls the system call UI is answering: the link stays up for them while the app is in the background.
+    var callHolds: Set<String> = []
     /// A message to the bot from this phone moved along (the Live Activity follows it).
     public var onSent: (@MainActor (Bot, SendProgress) -> Void)?
     /// A bot appeared, changed or went away.

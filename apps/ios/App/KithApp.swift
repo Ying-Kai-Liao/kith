@@ -241,6 +241,18 @@ final class AppStore {
     var guestPrompt: BotReference?
     /// A snoozed call's notification was tapped: the agent whose call to open.
     var callBack: BotReference?
+    /// A call answered from the system call UI: the voice call to show. Cleared when it is hung up there.
+    private(set) var answeredCall: AnsweredCallRef?
+
+    func openAnsweredCall(_ call: AnsweredCallRef) { answeredCall = call }
+
+    func closeAnsweredCall(_ call: AnsweredCallRef) { if answeredCall == call { answeredCall = nil } }
+
+    /// The voice call is over (here or in the system UI): forget it and end the system call.
+    func answeredCallEnded(computerId: ComputerID, callId: String) {
+        if answeredCall?.computerId == computerId, answeredCall?.callId == callId { answeredCall = nil }
+        CallCoordinator.shared.voiceCallEnded(computerId: computerId, callId: callId)
+    }
     /// An invite link being joined, shown as a sheet.
     private(set) var inviteJoin: InviteJoinModel?
 
@@ -441,6 +453,8 @@ final class AppStore {
             PushRegistrar.shared.syncDevice(with: store)
             store.onUsageChanged = { _, _ in WidgetCenter.shared.reloadTimelines(ofKind: "KithUsage") }
         }
+        accounts.onCallEvent = { computerId, event in CallCoordinator.shared.handle(event, computerId: computerId) }
+        accounts.onCallCatchUp = { computerId, ringing in CallCoordinator.shared.endStale(computerId: computerId, ringing: ringing) }
         accounts.onBotUpdated = { ref, bot in LiveActivities.shared.update(ref, bot: bot) }
         accounts.onRosterChanged = { roster in
             BotsWidgetFeed.update(roster, storage: storage)
@@ -489,12 +503,23 @@ final class AppStore {
     }
 }
 
+/// A call answered in the system call UI, for the in-app voice call that follows.
+struct AnsweredCallRef: Equatable {
+    let computerId: ComputerID
+    let botId: String
+    let callId: String
+}
+
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
         let open = UNNotificationAction(identifier: "openConversation", title: "Open conversation", options: [.foreground])
         let review = UNNotificationAction(identifier: "reviewRequest", title: "Review request", options: [.foreground])
+        // Early, so a killed app is woken by a VoIP push.
+        CallCoordinator.shared.start()
         UNUserNotificationCenter.current().setNotificationCategories([
+            // A call's alert fallback (a phone with no VoIP ticket): a tap opens the ringing call, or else the chat.
+            UNNotificationCategory(identifier: "call", actions: [open], intentIdentifiers: []),
             UNNotificationCategory(identifier: "done", actions: [open], intentIdentifiers: []),
             UNNotificationCategory(identifier: "needsInput", actions: [review], intentIdentifiers: []),
             UNNotificationCategory(identifier: "failed", actions: [open], intentIdentifiers: []),

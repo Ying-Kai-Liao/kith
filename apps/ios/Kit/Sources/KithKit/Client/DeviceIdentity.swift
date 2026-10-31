@@ -64,6 +64,20 @@ public struct DeviceIdentity: Sendable {
     /// For the Notification Service Extension: opens §6.7's `sealed` with the push key of
     /// `contextID`. Never creates keys; nil when anything doesn't check out.
     public static func openPush(sealed: String, computerId: ComputerID, contextID: String) -> PushAlert? {
+        guard let plain = openSealed(sealed: sealed, computerId: computerId, contextID: contextID) else { return nil }
+        let alert = try? JSONDecoder().decode(PushAlert.self, from: plain)
+        if alert == nil {
+            Logger(subsystem: "com.yingkailiao.kith.ios", category: "PushDecrypt").error("Notification content decoding failed")
+        }
+        return alert
+    }
+
+    /// The secret of a VoIP call push, opened the same way; nil when anything doesn't check out.
+    public static func openCall(sealed: String, computerId: ComputerID, contextID: String) -> CallPush.Secret? {
+        openSealed(sealed: sealed, computerId: computerId, contextID: contextID).flatMap(CallPush.Secret.decode)
+    }
+
+    private static func openSealed(sealed: String, computerId: ComputerID, contextID: String) -> Data? {
         let log = Logger(subsystem: "com.yingkailiao.kith.ios", category: "PushDecrypt")
         // The extension can run before the app has after an update, and shares the keychain group.
         LegacyCompat.migrateKeys(account: contextID, in: Keychain.shared)
@@ -73,9 +87,9 @@ public struct DeviceIdentity: Sendable {
                 return nil
             }
             let key = try Curve25519.KeyAgreement.PrivateKey(rawRepresentation: raw)
-            let alert = openPush(sealed: sealed, computerId: computerId, key: key)
-            if alert == nil { log.error("Notification authentication or content decoding failed") }
-            return alert
+            let plain = try? RelayCrypto.openPush(sealed: sealed, computerId: computerId, pushPrivate: key)
+            if plain == nil { log.error("Notification authentication failed") }
+            return plain
         } catch {
             log.error("Notification key unavailable: \(error.localizedDescription)")
             return nil
