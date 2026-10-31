@@ -299,7 +299,18 @@ if command -v sandbox-exec >/dev/null && [ "$(uname)" = Darwin ]; then
   check "sandboxed: kith-auth acts for no one, not the owner" "SB env KITH_AGENT=echo \"$KR/bin/kith-auth\" resolve echo | grep -q '\"owner\": false' && SB env KITH_PERSON=kai \"$KR/bin/kith-auth\" resolve echo | grep -q '\"owner\": false'"
   check "outside: kith-auth still acts for the owner" "\"$KR/bin/kith-auth\" resolve echo | grep -q '\"owner\": true'"
   check "sandboxed, KITH_PERSON dropped: no owner run starts" "! SB \"$KR/bin/kith\" echo --launch-json >/dev/null 2>$T/e && grep -q \"inside a guest's run\" $T/e"
+  # a room secret (kith-auth once, `exec --secret`) is for the owner's own runs: inside a guest's sandbox nobody is the owner,
+  # so it is refused with its fixed text before anything is read, whatever the shell says KITH_PERSON is.
+  OS=rs_0123456789abcdef
+  check "sandboxed, KITH_PERSON dropped: exec --secret is refused" "! SB env KITH_AGENT=echo \"$KR/bin/kith-auth\" exec --secret $OS -- true >$T/o 2>$T/e && grep -q 'not available to this run' $T/e"
+  check "sandboxed, KITH_PERSON names the owner: exec --secret is refused" "! SB env KITH_AGENT=echo KITH_PERSON=kai \"$KR/bin/kith-auth\" exec --secret $OS -- true >$T/o 2>$T/e && grep -q 'not available to this run' $T/e"
+  check "sandboxed: once list and once take are refused too" "! SB \"$KR/bin/kith-auth\" once list --json >$T/o 2>$T/e && grep -q 'not available' $T/e && ! SB \"$KR/bin/kith-auth\" once take $OS --bot b >$T/o 2>$T/e && grep -q 'not available' $T/e"
 fi
+# outside the sandbox the same call is refused for an invited person (KITH_PERSON) and, for the owner, only for want of the secret
+OS=rs_0123456789abcdef
+check "KITH_PERSON=sam: exec --secret is refused as not available" "! env KITH_AGENT=echo KITH_PERSON=sam \"$KERNEL/bin/kith-auth\" exec --secret $OS -- true >$T/o 2>$T/e && grep -q 'not available to this run' $T/e"
+check "KITH_PERSON=sam: once list, put, take and drop are refused" "for c in 'list --json' \"take $OS --bot b\" \"drop $OS\"; do ! env KITH_PERSON=sam \"$KERNEL/bin/kith-auth\" once \$c >$T/o 2>$T/e || exit 1; grep -q 'not available to this run' $T/e || exit 1; done"
+check "the owner's own run reaches the secret check, and finds none" "! env KITH_AGENT=echo \"$KERNEL/bin/kith-auth\" exec --secret $OS -- true >$T/o 2>$T/e && grep -q 'no such secret' $T/e"
 
 echo
 if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi

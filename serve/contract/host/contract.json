@@ -435,8 +435,17 @@
         "conversation": "string?",
         "epoch": "int?",
         "entries": "[BotEntry]",
-        "cursor": "int"
+        "cursor": "int",
+        "secrets": "[BotRoomSecret]?"
       }
+    },
+    "BotRoomSecret": {
+      "doc": "A secret the owner handed this bot in this room, waiting to be fetched with botSecretFetch: who from, the sender's own label for it and when it lapses. Never the value.",
+      "fields": { "id": "string", "from": "string", "label": "string?", "expiresAt": "int" }
+    },
+    "BotSecret": {
+      "doc": "A secret handed to this bot, once: the value is in this answer and nowhere else, and a second fetch is notFound.",
+      "fields": { "id": "string", "room": "string", "from": "string", "label": "string?", "value": "string" }
     },
     "BotSender": {
       "doc": "Who sent an ask: the bot, and the person it spoke for when it said.",
@@ -778,6 +787,12 @@
       "who": ["bot"],
       "params": { "room": "string", "since": "int?", "limit": "int?" },
       "result": "BotRoom"
+    },
+    "botSecretFetch": {
+      "doc": "Takes the secret the owner handed this bot in a room, once (a bot has no run here to use kith-auth exec --secret, so this is its only way to get one). notFound for everything that is not its own: no such id, another bot's, already taken, lapsed, sent before it joined, or it is no member any more. syncing while this computer catches up with the cloud.",
+      "who": ["bot"],
+      "params": { "id": "string" },
+      "result": "BotSecret"
     },
     "botThread": {
       "doc": "What a bot may read of its own conversation, after afterSeq.",
