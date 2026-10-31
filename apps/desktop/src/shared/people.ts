@@ -22,6 +22,8 @@ export interface Person {
   devices: PersonDevice[]
   /** Bots this person invites start without waiting for the owner. */
   autoBots: boolean
+  /** The owner revoked them; Restore access undoes it. False from a host that doesn't say. */
+  revoked: boolean
 }
 
 export interface PendingInvite {
@@ -72,6 +74,7 @@ export function parsePeople(raw: unknown): Person[] {
       joined: r.joined === true,
       openInvites: num(r.openInvites) ?? 0,
       autoBots: r.autoBots === true,
+      revoked: r.revoked === true,
       devices: list(r.devices).map((d) => {
         const x = rec(d)
         return { key: str(x.key), name: str(x.name) || null, platform: str(x.platform) || null, lastSeenAt: num(x.lastSeenAt), connected: x.connected === true }

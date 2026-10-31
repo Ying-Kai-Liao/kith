@@ -98,9 +98,17 @@ struct PeopleView: View {
             CardSection("People", footer: people.people.isEmpty
                         ? "Nobody yet. They sign in to Kith with their own account, so you can see who did what."
                         : "Members and guests can only use the agents you pick. Tap a person to change that.") {
+                if let gone = people.removed {
+                    RemovedRow(name: gone.name, busy: people.busy,
+                               undo: { Task { await people.restore(gone.personId) } }, dismiss: { people.dismissRemoved() })
+                }
                 ForEach(people.people) { person in
-                    Button { editing = person } label: { PersonRow(person: person) }
-                        .buttonStyle(.plain)
+                    if person.revoked {
+                        PersonRow(person: person, restore: { Task { await people.restore(person.personId) } }, busy: people.busy)
+                    } else {
+                        Button { editing = person } label: { PersonRow(person: person) }
+                            .buttonStyle(.plain)
+                    }
                     // That person's bots, as rows under them.
                     ForEach(botGuestRows(of: person, in: guests)) { guest in
                         BotGuestRow(bot: guest, viewer: .owner, store: store, indent: 20,
@@ -170,18 +178,56 @@ struct PeopleView: View {
     guests.bots(of: person.personId).filter { !$0.state.isEnded }
 }
 
-private struct PersonRow: View {
-    let person: HostPerson
+/// "Sam was removed. Undo", until the owner does something else.
+private struct RemovedRow: View {
+    let name: String
+    let busy: Bool
+    let undo: () -> Void
+    let dismiss: () -> Void
 
     var body: some View {
-        LinkRow {
+        HStack(spacing: 12) {
+            Text("\(name) was removed.").font(.subheadline).foregroundStyle(Palette.secondary)
+            Spacer()
+            Button("Undo", action: undo)
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.accent)
+                .disabled(busy)
+            Button(action: dismiss) { Image(systemName: "xmark").foregroundStyle(Palette.tertiary) }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+        }
+    }
+}
+
+private struct PersonRow: View {
+    let person: HostPerson
+    /// Set on a revoked person's row: its Restore access button.
+    var restore: (() -> Void)?
+    var busy = false
+
+    var body: some View {
+        if let restore {
             HStack(spacing: 12) {
-                SkyPatch(id: person.personId, size: 30)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(person.name).font(.body.weight(.semibold))
-                    Text(roomsLine).font(.subheadline).foregroundStyle(Palette.secondary).lineLimit(1)
-                    Text(deviceLine).font(.caption).foregroundStyle(Palette.tertiary).lineLimit(1)
-                }
+                content
+                Spacer()
+                Button("Restore access", action: restore)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Palette.accent)
+                    .disabled(busy)
+            }
+        } else {
+            LinkRow { content }
+        }
+    }
+
+    private var content: some View {
+        HStack(spacing: 12) {
+            SkyPatch(id: person.personId, size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(person.name).font(.body.weight(.semibold))
+                Text(roomsLine).font(.subheadline).foregroundStyle(Palette.secondary).lineLimit(1)
+                Text(deviceLine).font(.caption).foregroundStyle(Palette.tertiary).lineLimit(1)
             }
         }
     }
@@ -193,6 +239,7 @@ private struct PersonRow: View {
     }
 
     private var deviceLine: String {
+        if person.revoked { return "Access revoked" }
         guard person.joined else { return person.openInvites > 0 ? "Hasn't joined yet" : "Not joined" }
         let count = person.devices.count
         let devices = count == 1 ? "1 device" : "\(count) devices"

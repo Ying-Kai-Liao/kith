@@ -65,6 +65,7 @@ private struct FakeHost: PeopleHost {
         await calls.access(personId, agents, projects)
     }
     func revokePerson(_ personId: String) async throws { await calls.revoke(personId) }
+    func unrevokePerson(_ personId: String) async throws {}
     func audit(since: Date?, personId: String?) async throws -> [AuditRow] { [] }
     func projectList() async throws -> [HQProject] { [] }
 }

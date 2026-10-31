@@ -37,10 +37,12 @@ public struct HostPerson: Codable, Hashable, Sendable, Identifiable {
     public var devices: [HostPersonDevice]
     /// Their bots join without waiting for the owner (`setAutoAllowBots`). False from an older host.
     public var autoBots: Bool
+    /// The owner revoked them; Restore access undoes it. False from a host that doesn't say.
+    public var revoked: Bool
     public var id: String { personId }
 
     public init(personId: String, name: String, agents: [String: InviteRole] = [:], projects: [String] = [],
-                joined: Bool = false, openInvites: Int = 0, devices: [HostPersonDevice] = [], autoBots: Bool = false) {
+                joined: Bool = false, openInvites: Int = 0, devices: [HostPersonDevice] = [], autoBots: Bool = false, revoked: Bool = false) {
         self.personId = personId
         self.name = name
         self.agents = agents
@@ -49,9 +51,10 @@ public struct HostPerson: Codable, Hashable, Sendable, Identifiable {
         self.openInvites = openInvites
         self.devices = devices
         self.autoBots = autoBots
+        self.revoked = revoked
     }
 
-    private enum CodingKeys: String, CodingKey { case personId, name, agents, projects, joined, openInvites, devices, autoBots }
+    private enum CodingKeys: String, CodingKey { case personId, name, agents, projects, joined, openInvites, devices, autoBots, revoked }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -64,6 +67,7 @@ public struct HostPerson: Codable, Hashable, Sendable, Identifiable {
         openInvites = try c.decodeIfPresent(Int.self, forKey: .openInvites) ?? 0
         devices = try c.decodeIfPresent([HostPersonDevice].self, forKey: .devices) ?? []
         autoBots = try c.decodeIfPresent(Bool.self, forKey: .autoBots) ?? false
+        revoked = try c.decodeIfPresent(Bool.self, forKey: .revoked) ?? false
     }
 
     /// The most recent time any of their devices was seen.
