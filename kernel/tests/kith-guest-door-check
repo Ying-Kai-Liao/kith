@@ -161,6 +161,26 @@ import sys; p = sys.argv[1]; t = open(p).read()
 open(p, 'w').write(t.replace('args: [render, --quality, draft]', 'args: [render]'))
 PY
 expect "back as ticked" "$(field "$(door bill "$DOOR")" ok)" "true"
+# a bot never starts a door its owner can't (I6): its own tick is cut to what the owner (an invitee) holds, as resolve
+# cuts its doors; Kai's own bots are capped by nothing
+"$AUTH" bot bill-bot --of bill >/dev/null 2>&1
+"$AUTH" member video bill-bot mode=default >/dev/null 2>&1
+"$AUTH" job video bill-bot make-videos >/dev/null
+expect "a bot's tick, its owner ticked: the door may start" "$(field "$(door bill-bot "$DOOR")" ok)" "true"
+"$AUTH" job video bill make-videos --rm >/dev/null
+V=$(door bill-bot "$DOOR")
+expect "its owner no longer holds the door: refused" "$(field "$V" ok)" "false"
+expect "as owner-lacks" "$(field "$V" state)" "owner-lacks"
+has "naming the owner" "$(field "$V" why)" "not given to bill, whose bot bill-bot is"
+expect "exit 1 without --json" "$("$AUTH" door video bill-bot "$DOOR" >/dev/null 2>&1; echo $?)" "1"
+expect "resolve lists no door for the bot either" \
+  "$(field "$("$AUTH" resolve video --person bill-bot)" doors)" "[]"
+"$AUTH" job video bill make-videos >/dev/null
+expect "the owner ticked again: the bot's door may start" "$(field "$(door bill-bot "$DOOR")" ok)" "true"
+"$AUTH" bot kai-bot --of kai >/dev/null 2>&1
+"$AUTH" member video kai-bot mode=default >/dev/null 2>&1
+"$AUTH" job video kai-bot make-videos >/dev/null
+expect "Kai's own bot is not cut" "$(field "$(door kai-bot "$DOOR")" ok)" "true"
 # held: a linked Mac whose cloud lease ran out waits (D2), as the channels do
 SERVE=$T/serve
 mkdir -p "$SERVE"
