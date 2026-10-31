@@ -516,8 +516,8 @@ export class BotStore extends BotSync {
   }
 
   /** Creates a group chat (or opens the one these bots already share) and selects it. */
-  async createGroup(name: string, description: string, members: string[]) {
-    const draft: GroupDraft = { kind: 'group', name, description, members }
+  async createGroup(name: string, description: string, members: string[], labels: string[] = []) {
+    const draft: GroupDraft = { kind: 'group', name, description, members, ...(labels.length ? { labels } : {}) }
     const res = await (await this.ready()).call<{ bot: Bot }>('createBot', draft)
     this.bots.set(res.bot.id, res.bot)
     this.selection = res.bot.id

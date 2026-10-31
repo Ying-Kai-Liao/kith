@@ -364,6 +364,9 @@ textarea.field-box {
   color: var(--text);
   resize: none;
 }
+.compose-labels {
+  margin: 0 12px 8px;
+}
 .group-name {
   font-size: var(--text-title);
   font-weight: 600;

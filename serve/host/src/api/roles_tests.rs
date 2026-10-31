@@ -753,6 +753,35 @@ async fn showing_the_summary_as_the_row_is_an_owner_setting_off_by_default() {
     assert!(denied(&e), "{e:#}");
 }
 
+async fn set_labels(r: &Rig, room: &str, labels: Value) -> anyhow::Result<Value> {
+    call(r, &Caller::Local, "updateBot", json!({"id": room, "labels": labels})).await
+}
+
+#[tokio::test]
+async fn a_rooms_labels_are_the_owners_normalized_and_capped() {
+    let r = Rig::new().await;
+    let (a, b) = (r.owner_bot("house"), r.owner_bot("money"));
+    let made = call(&r, &Caller::Local, "createBot", json!({"kind": "group", "name": "Crew", "members": [a, b]}))
+        .await
+        .unwrap();
+    let room = made["bot"]["id"].as_str().unwrap().to_owned();
+    assert!(made["bot"].get("labels").is_none(), "a room from before has none, and the key is left out");
+    let got = set_labels(&r, &room, json!([" Launch ", "launch", "", "Q4  Plan"])).await.unwrap();
+    assert_eq!(got["bot"]["labels"], json!(["launch", "q4 plan"]), "trimmed, lowercased, deduplicated");
+    let again = call(&r, &Caller::Local, "updateBot", json!({"id": room, "name": "Crew 2"})).await.unwrap();
+    assert_eq!(again["bot"]["labels"], json!(["launch", "q4 plan"]), "an edit that doesn't name them keeps them");
+    assert!(set_labels(&r, &room, json!(["a", "b", "c", "d", "e", "f"])).await.is_err(), "at most five");
+    assert!(set_labels(&r, &room, json!(["x".repeat(25)])).await.is_err(), "at most 24 characters");
+    assert_eq!(set_labels(&r, &room, json!(null)).await.unwrap()["bot"].get("labels"), None, "null clears");
+    // An agent's own chat is not a room.
+    let e = call(&r, &Caller::Local, "updateBot", json!({"id": a, "labels": ["x"]})).await.unwrap_err();
+    assert!(format!("{e:#}").contains("only a room"), "{e:#}");
+    // Only the owner sets them.
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    let e = call(&r, &sam, "updateBot", json!({"id": room, "labels": ["x"]})).await.unwrap_err();
+    assert!(denied(&e), "{e:#}");
+}
+
 #[tokio::test]
 async fn a_citation_opens_for_its_audience_and_is_not_shared_for_anyone_else() {
     let r = Rig::new().await;
