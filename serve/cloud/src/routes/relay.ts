@@ -3,7 +3,6 @@
 
 import { COMPUTER_ID, computerIdFor, fromB64url, verifyClerkToken, verifySig, type SignedRequest } from "../auth";
 import { isErrorCode, type ErrorCode } from "../contract.gen";
-import { LEGACY_SIG_HEADER } from "../legacy-compat";
 import { HOOK_ID, HOOK_MAX_BODY } from "../hooks";
 import { ApiError, webSessionLive, type Ctx } from "./common";
 
@@ -59,7 +58,7 @@ export async function relayHost(c: Ctx): Promise<Response> {
 
 /** The browser form of the upgrade (design 4.6): no Kith-Sig header, the credentials ride in `Sec-WebSocket-Protocol`. */
 function subprotocols(c: Ctx): { sig: string; jwt: string | null } | null {
-  if (c.req.headers.has("Kith-Sig") || c.req.headers.has(LEGACY_SIG_HEADER)) return null;
+  if (c.req.headers.has("Kith-Sig")) return null;
   const offered = (c.req.headers.get("Sec-WebSocket-Protocol") ?? "").split(",").map((p) => p.trim());
   if (!offered.includes("kith.v1")) return null;
   const sig = offered.find((p) => p.startsWith("kith-sig."))?.slice("kith-sig.".length);

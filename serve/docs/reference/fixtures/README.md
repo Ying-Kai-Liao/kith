@@ -1,6 +1,6 @@
 # Shared cryptographic fixtures
 
-[remote-relay-vectors.json](remote-relay-vectors.json) carries the vectors for the `kith/*` labels, `kith-sig-v1` and `Kith-Sig`, what every pairing made today uses. A second file for pairings made before the rename is described in [legacy-compat.md](legacy-compat.md).
+[remote-relay-vectors.json](remote-relay-vectors.json) carries the vectors for the `kith/*` labels, `kith-sig-v1` and `Kith-Sig`, what every pairing made today uses.
 
 The file contains deterministic protocol-v1 vectors for host/device keys, handshake, frame encryption, chunking, SAS, pairing offers, mailbox, request signatures, claims, signed ACL and sealed push.
 
@@ -9,7 +9,7 @@ The private values are fixed **test seeds**, not live credentials. Changing thes
 [remote-relay-vectors.py](remote-relay-vectors.py) prints the JSON to stdout and requires Python 3 plus `cryptography`. To compare without overwriting the checked-in fixture, from the repository root:
 
 ```sh
-python3 docs/reference/fixtures/remote-relay-vectors.py kith > /tmp/kith-relay-vectors.json
+python3 docs/reference/fixtures/remote-relay-vectors.py > /tmp/kith-relay-vectors.json
 cmp docs/reference/fixtures/remote-relay-vectors.json /tmp/kith-relay-vectors.json
 ```
 
