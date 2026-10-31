@@ -8,7 +8,7 @@ extension RichCard {
     /// A Schedule or News card this app draws in place of the entry's text twin.
     var drawsInChat: Bool {
         // A Result card lacking a title or a fact is the plain reply.
-        (type == "schedule" || type == "news" || (type == "result" && ResultCardModel(card: self) != nil)) && isDrawable()
+        (type == "schedule" || type == "news" || type == "plan" || (type == "result" && ResultCardModel(card: self) != nil)) && isDrawable()
     }
 }
 
@@ -467,5 +467,60 @@ private struct CardBubble: View {
             .background(Palette.bubbleAgent, in: RoundedRectangle(cornerRadius: KithRadius.card + 4, style: .continuous))
             .padding(.trailing, 40)
             .textSelection(.enabled)
+    }
+}
+
+// MARK: Plan
+
+/// The Plan card: a count in mono, a 4 pt bar in the agent's pair, and steps that change in place (done = check, muted;
+/// now = spinner, semibold; next = ring, light). A turn that ended mid-plan leaves its step as a dashed ring.
+struct PlanCard: View {
+    let entry: Entry
+    let card: RichCard
+    @Environment(BotStore.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let view = PlanCardModel(card: card)
+        let tint = AgentTint.resolve((entry.data.author.flatMap { model.bots[$0] } ?? model.bots[entry.botId])?.avatarColor)
+        ReportCard(title: view.title, icon: "checklist") {
+            Text(view.count).font(.caption.monospaced()).foregroundStyle(Palette.muted).lineLimit(1)
+        } content: {
+            GeometryReader { geo in
+                Capsule().fill(Palette.line)
+                    .overlay(alignment: .leading) {
+                        Capsule().fill(LinearGradient(colors: [tint.a, tint.b], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: geo.size.width * view.fraction)
+                    }
+            }
+            .frame(height: 4)
+            .animation(Motion.reduced(Motion.layout, reduceMotion), value: view.fraction)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(view.steps) { step in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        mark(step.state, ended: view.ended).frame(width: 14)
+                        Text(step.text).kithText(.secondary)
+                            .fontWeight(step.state == .now ? .semibold : step.state == .next ? .light : .regular)
+                            .foregroundStyle(step.state == .done || step.state == .stopped ? Palette.muted : Palette.ink)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityValue(step.state.rawValue)
+                }
+            }
+        }
+        .accessibilityLabel("\(view.title), \(view.count)")
+    }
+
+    @ViewBuilder private func mark(_ state: PlanCardModel.State, ended: Bool) -> some View {
+        switch state {
+        case .done:
+            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Palette.muted)
+        case .now where !ended:
+            ProgressView().controlSize(.mini)
+        case .stopped, .now:
+            Circle().strokeBorder(Palette.muted, style: StrokeStyle(lineWidth: 1.5, dash: [2, 2])).frame(width: 11, height: 11)
+        case .next:
+            Circle().strokeBorder(Palette.line, lineWidth: 1.5).frame(width: 11, height: 11)
+        }
     }
 }

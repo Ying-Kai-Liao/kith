@@ -170,8 +170,34 @@ impl Actor {
                         }
                     }
                 }
+                self.draw_plan_card(&u["entries"], false);
             }
             _ => {}
+        }
+    }
+
+    /// The turn's Plan card: one notice, posted at the first plan update and rewritten (same entry, new rev) on each
+    /// after, so an app shows the latest state and a reconnect gets no duplicates. Channels hear nothing of it: they
+    /// carry the agent's replies, so a step change never becomes a message.
+    fn draw_plan_card(&mut self, steps: &Value, ended: bool) {
+        let Some(plan) = self.plan_entry.clone() else { return };
+        let Some(mut data) = crate::rich_card::plan::card(steps, &plan, ended) else { return };
+        if let Some(id) = &self.plan_card {
+            data["author"] = self.cfg.id.clone().into();
+            self.hub.set_entry(id, &data);
+        } else {
+            let turn = self.turn.unwrap_or(0);
+            if let Some(e) = self.add(EntryKind::Notice, turn, data) {
+                self.plan_card = Some(e.id);
+            }
+        }
+    }
+
+    /// The turn is over (done, stopped, failed or failing over): the card keeps its last state with nothing spinning.
+    pub(super) fn end_plan_card(&mut self) {
+        let Some(plan) = self.plan_entry.as_ref().and_then(|id| self.hub.store.entry(id)) else { return };
+        if self.plan_card.is_some() {
+            self.draw_plan_card(&plan.data["entries"], true);
         }
     }
 

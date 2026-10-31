@@ -264,6 +264,7 @@ impl Actor {
         self.seg = Seg::None;
         self.tools.clear();
         self.plan_entry = None;
+        self.plan_card = None;
         self.last_text = None;
         self.last_agent = None;
         self.sent.clear();
@@ -473,6 +474,7 @@ impl Actor {
         self.files.cancel();
         self.flush(true);
         self.seg = Seg::None;
+        self.end_plan_card();
         // Unanswered permission cards can't be answered after the turn.
         let ids: Vec<String> = self.perms.drain().map(|(k, _)| k).collect();
         // Cards nobody answered: an owner's gave up the turn's slot, which comes back with the dropped guard.
