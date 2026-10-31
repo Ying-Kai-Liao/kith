@@ -617,8 +617,9 @@ def issue(agent, session, pid):
         body.update(replyTo=mid, askedBy=asked_by(mid))
     r = host_call('issueAskToken', body)
     if r is None and not host_up():
-        # The host is down: its job is restarted once (rule 5) and asked again, else nothing can show a card.
-        if not restart_host():
+        # The host is down: its job is restarted once (rule 5) and asked again, else nothing can show a card. A terminal
+        # start (KITH_PERMIT_NO_RESTART) never waits for that: the run starts, the hook prints nothing.
+        if os.environ.get('KITH_PERMIT_NO_RESTART') or not restart_host():
             print("kith: no approval cards for this run: the Kith host isn't running; asks are refused", file=sys.stderr)
             return 1
         r = host_call('issueAskToken', body)

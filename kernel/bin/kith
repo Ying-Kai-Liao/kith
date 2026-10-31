@@ -1209,7 +1209,7 @@ fi
 # the run starts as before and the hook prints nothing.
 if [[ $harness == claude && $p_owner == 1 && $nested -eq 0 && -z ${KITH_RUN_TOKEN:-} && -z ${KITH_ASK_TOKEN:-} ]] \
    && grep -q 'kith-permit.* denied --dir' "$runs/$$.settings.json" 2>/dev/null; then
-  if ask_env=$("$KITH/bin/kith-permit" issue "$agent" "${csid:-continue:$PWD}" "$$"); then eval "$ask_env"; fi
+  if ask_env=$(KITH_PERMIT_NO_RESTART=1 "$KITH/bin/kith-permit" issue "$agent" "${csid:-continue:$PWD}" "$$"); then eval "$ask_env"; fi
 fi
 # The terminal's claim (kind terminal), for this shell's pid, which `kith-sessions run` keeps: it gives the claim back when
 # claude has exited. -r/-c/--resume took it in resolve already. A held session is refused at once.
