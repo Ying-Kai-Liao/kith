@@ -501,6 +501,9 @@ pub enum AccessCall {
 pub struct Ask {
     pub tool: String,
     pub input: Value,
+    /// Set by kith-permit's `denied` hook: the auto-mode classifier's reason for blocking this call in the owner's run.
+    /// Only an owner token may send it (`authorize`).
+    pub auto_denied: Option<String>,
 }
 
 /// Checks a request line without running anything. Every token failure reads the same to the caller, so a probe
@@ -549,11 +552,20 @@ pub fn authorize(table: &TokenTable, line: &[u8], peer: PeerInfo) -> Result<Auth
             if tool.len() > MAX_ARG_LEN || !(input.is_object() || input.is_null()) {
                 return Err(Response::refused("bad request"));
             }
+            // A card for a call the auto-mode classifier blocked is the owner's own run's: a guest's token never opens one.
+            let auto_denied = match &req["autoMode"] {
+                Value::Null => None,
+                _ if identity.scope != TokenScope::OwnerAsk => return Err(Response::refused("not authorized")),
+                mode => match mode["reason"].as_str().filter(|r| r.len() <= MAX_ARG_LEN) {
+                    Some(reason) => Some(reason.to_owned()),
+                    None => return Err(Response::refused("bad request")),
+                },
+            };
             Ok(Authorized {
                 identity,
                 run: Run::None,
                 args: Vec::new(),
-                ask: Some(Ask { tool: tool.to_owned(), input: input.clone() }),
+                ask: Some(Ask { tool: tool.to_owned(), input: input.clone(), auto_denied }),
                 access: None,
             })
         }
@@ -704,7 +716,12 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
     match authorize(table, line, peer) {
         Ok(Authorized { identity, ask: Some(ask), .. }) => match hub() {
             Some(hub) => {
-                let d = crate::cards::request_permission(&hub, &identity, &ask.tool, &ask.input).await;
+                let d = match &ask.auto_denied {
+                    Some(reason) => {
+                        crate::cards::request_auto_denied(&hub, &identity, &ask.tool, &ask.input, reason).await
+                    }
+                    None => crate::cards::request_permission(&hub, &identity, &ask.tool, &ask.input).await,
+                };
                 Response::Decision { allow: d.allow, message: d.message, waiting: d.waiting }
             }
             None => Response::Decision {
@@ -1188,7 +1205,7 @@ mod tests {
         let line = json!({"token": token, "method": "requestPermission", "tool": "Bash", "input": {"command": "ls"}});
         let job = authorize(&t, line.to_string().as_bytes(), peer(5)).unwrap();
         assert_eq!(job.identity, owner);
-        assert_eq!(job.ask, Some(Ask { tool: "Bash".into(), input: json!({"command": "ls"}) }));
+        assert_eq!(job.ask, Some(Ask { tool: "Bash".into(), input: json!({"command": "ls"}), auto_denied: None }));
         assert!(authorize(&t, &req(&token, "requestPermission", &json!([])), peer(5)).is_err(), "no tool, no ask");
         // Recall is a guest's: an owner token is refused it, whatever it asks for (the audience is not widened).
         assert_eq!(
@@ -1203,6 +1220,34 @@ mod tests {
         let g = RunGrant::issue(&t, owner).unwrap();
         let env = g.env(Path::new("/s"));
         assert_eq!((env[0].0.as_str(), env[1].0.as_str()), (ASK_TOKEN_ENV, ASK_SOCKET_ENV));
+    }
+
+    #[test]
+    fn only_an_owner_token_can_ask_about_a_call_auto_mode_blocked() {
+        let t = open_table();
+        let owner = ask_identity("echo", "s1", None);
+        let token = t.insert_ask(owner, 5, Duration::from_secs(60)).unwrap();
+        let line = |extra: Value| {
+            let mut v =
+                json!({"token": token, "method": "requestPermission", "tool": "Bash", "input": {"command": "ls"}});
+            v["autoMode"] = extra;
+            v.to_string()
+        };
+        let job = authorize(&t, line(json!({"reason": "[Data Exfiltration]"})).as_bytes(), peer(5)).unwrap();
+        assert_eq!(job.ask.unwrap().auto_denied.as_deref(), Some("[Data Exfiltration]"));
+        for bad in [json!({}), json!({"reason": 1}), json!("x"), json!({"reason": "x".repeat(MAX_ARG_LEN + 1)})] {
+            assert_eq!(authorize(&t, line(bad).as_bytes(), peer(5)), Err(Response::refused("bad request")));
+        }
+        // A guest's token (an invited person's or a bot guest's) never opens one, and gets the same refusal as any other
+        // token failure.
+        let g = RunGrant::issue(&t, id("sam")).unwrap();
+        g.bind_pid(6);
+        let guest = json!({"token": g.token, "method": "requestPermission", "tool": "Bash", "input": {"command": "ls"},
+                           "autoMode": {"reason": "[Data Exfiltration]"}});
+        assert_eq!(authorize(&t, guest.to_string().as_bytes(), peer(6)), Err(Response::refused("not authorized")));
+        let plain =
+            json!({"token": g.token, "method": "requestPermission", "tool": "Bash", "input": {"command": "ls"}});
+        assert!(authorize(&t, plain.to_string().as_bytes(), peer(6)).is_ok(), "an ordinary ask of a guest still works");
     }
 
     #[test]
