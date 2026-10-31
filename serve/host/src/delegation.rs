@@ -79,7 +79,7 @@ pub fn card(bot: &str, agent: &str, label: &str, chain: &str, spent: f64, cap: f
         "command": Value::Null,
         "detail": format!(
             "The chain of asks that started with {label} has spent {} at API prices. It starts no new ask until you raise \
-             the cap; asks already running finish.", money(spent)),
+             the cap; asks already running finish. The cap is one setting for every chain on this Mac.", money(spent)),
         "diffs": [],
         "cwd": Value::Null,
         "options": [
@@ -150,7 +150,12 @@ pub async fn respond(hub: &Hub, entry: &Entry, option: Option<&str>, by: &str) -
         "raise" => {
             let to = entry.data["delegation"]["raiseTo"].as_f64().filter(|t| *t > 0.0);
             let to = to.ok_or_else(|| anyhow!("the card has no amount to raise to"))?;
-            hq::run(&kernel().await?, &["ask", "--cap", &to.to_string()], None, READ).await?;
+            let bin = kernel().await?;
+            // Never lower it: the cap is the Mac's, and another chain's card may have raised it since. "none" stays none.
+            let now = hq::run(&bin, &["ask", "--cap"], None, READ).await?;
+            if let Ok(current) = now.trim().parse::<f64>() {
+                hq::run(&bin, &["ask", "--cap", &current.max(to).to_string()], None, READ).await?;
+            }
         }
         "leave" => {}
         _ => bail!("That isn't one of the choices on this card."),

@@ -117,7 +117,11 @@ fn a_newer_kernels_words_read_as_their_enum_declares() {
     );
     assert_eq!((launch.harness, launch.provider), (Some(Harness::Unknown), Some(Harness::Unknown)));
     let delegations: Delegations = fixture("unknown", "delegations-new-state.json");
-    assert_eq!(delegations.delegations[0].state, DelegationState::Unknown, "a state this version doesn't know is left alone");
+    assert_eq!(
+        delegations.delegations[0].state,
+        DelegationState::Unknown,
+        "a state this version doesn't know is left alone"
+    );
 }
 
 #[test]
@@ -130,7 +134,10 @@ fn an_older_kernels_output_leaves_out_what_it_didnt_have() {
     assert_eq!((projects.projects[0].home.as_deref(), projects.projects[0].parent.as_deref()), (None, None));
     let delegations: Delegations = fixture("compat", "delegations-optional-left-out.json");
     let d = &delegations.delegations[0];
-    assert_eq!((d.cost_micro_usd, d.cap_micro_usd, d.reply_to.session.as_deref(), d.caller.agent.as_deref()), (None, None, None, None));
+    assert_eq!(
+        (d.cost_micro_usd, d.cap_micro_usd, d.reply_to.session.as_deref(), d.caller.agent.as_deref()),
+        (None, None, None, None)
+    );
 }
 
 #[test]

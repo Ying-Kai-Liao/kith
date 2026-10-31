@@ -240,6 +240,7 @@ expect "with the answer" "$(queued | tr ' ' '\n' | grep -c '^sess-old:oldanswer$
 cat > "$T/k/bin/kith-remote" <<'RSTUB'
 #!/bin/sh
 printf '%s' "$KITH_ASK_RECORD" > "$KITH_STATE/stub-record"
+[ -n "${STUB_REMOTE_FAIL:-}" ] && exit 1
 exit 0
 RSTUB
 chmod +x "$T/k/bin/kith-remote"
@@ -251,9 +252,16 @@ rm "$KITH_STATE/stub-record"
 out=$(cd "$T" && KITH_ASK_ID=$cx2 "$ASK" echo@mini "too far" 2>&1); code=$?
 expect "a third crossing is refused (exit 4)" "$code" 4
 expect "with the reason, and nothing sent" "$(printf '%s' "$out" | grep -c 'delegation hop limit.*crossed to another Mac 2 times'): $([ -e "$KITH_STATE/stub-record" ] && echo sent)" "1: "
+(cd "$T" && STUB_REMOTE_FAIL=1 "$ASK" echo@mini "refused over there" >/dev/null 2>&1); cf1=$(cat "$KITH_STATE/stub-record")
+expect "a cross-Mac ask that failed early is stopped, not open forever" "$(rec "$cf1" state)" stopped
 bgc=$(cd "$T" && "$ASK" --bg echo@mini "far, in the background" | idof)
 ended "$bgc"
 expect "a --bg ask across Macs has its record under its bg id" "$(rec "$bgc" crossed chain | tr '\n' ' ')" "True $bgc "
+# what another Mac hands over is checked: NaN, negatives and nonsense are refused (exit 4)
+for bad in "KITH_ASK_COST=nan" "KITH_ASK_COST=-5" "KITH_ASK_HOP=-3" "KITH_ASK_CROSS=-1" "KITH_ASK_HOP=x"; do
+  (cd "$T" && env KITH_ASK_CHAIN=chain-bad "$bad" "$ASK" echo "crafted" >/dev/null 2>&1); code=$?
+  expect "a handed-over chain with $bad is refused" "$code" 4
+done
 # the Mac an ask arrives on gets the chain in KITH_ASK_*
 (cd "$T" && KITH_ASK_CHAIN=chain-far KITH_ASK_HOP=1 KITH_ASK_CROSS=1 KITH_ASK_FROM=ask-far-1 KITH_ASK_COST=1.5 "$ASK" echo "arrived" >/dev/null 2>&1); a1=$(lastid)
 expect "it carries the chain, hop and where it came from" "$(rec "$a1" chain hop crossed reply_to.ask | tr '\n' ' ')" "chain-far 1 True ask-far-1 "
@@ -276,6 +284,13 @@ rm -f "$BOX/$pk.read"   # a restart that lost the count: the answer is handed ov
 "$ASK" --sweep >/dev/null
 expect "after a restart the answer is still one wake" "$(queued | tr ' ' '\n' | grep -c '^sess-k:')" 1
 expect "the record is answered" "$(rec "$pk" state)" answered
+# a second answer, even with other words, is for --wait only: the caller was woken once
+pq=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-q KITH_AGENT=architect "$ASK" echo park 2>/dev/null | waitid)
+expect "the first answer wakes" "$("$ASK" --answer "$pq" --as echo -- first)" woke
+expect "a different second answer does not wake again" "$("$ASK" --answer "$pq" --as echo -- second)" kept
+"$ASK" --sweep >/dev/null
+expect "the caller has one wake, with the first only" "$(queued | grep -o 'sess-q:[a-z|]*')" "sess-q:first"
+expect "--wait still has the second" "$("$ASK" --wait "$pq" --timeout 0 2>/dev/null)" "second"
 # --wait: the notes, then the answer
 pw=$(cd "$T" && "$ASK" echo park 2>/dev/null | waitid)
 "$ASK" --answer "$pw" --as echo --progress -- "reading" >/dev/null
@@ -306,6 +321,23 @@ expect "a new chain is not affected" "$(cd "$T" && "$ASK" echo "fresh" 2>/dev/nu
 expect "the host's card is noted on the record" "$([ "$(rec "$cq3" cap_card_ms)" != None ] && echo yes)" yes
 "$ASK" --cap 5 >/dev/null
 expect "raising the cap lets the chain go on" "$(cd "$T" && KITH_ASK_ID=$cq3 "$ASK" echo "cap five" 2>/dev/null | head -1)" "answer to: cap five"
+# a second cap reached is a second card
+"$ASK" --cap 0.045 >/dev/null
+(cd "$T" && KITH_ASK_ID=$(lastid) "$ASK" echo "tip again" >/dev/null 2>&1); ct=$(lastid)
+expect "a new cap reached is marked again, with no card yet" "$(rec "$ct" state capped_ms cap_card_ms | sed 's/[0-9]\{6,\}/T/' | tr '\n' ' ')" "capped T None "
+# an agent run doesn't change the caps
+before=$("$ASK" --cap)
+KITH_AGENT=echo "$ASK" --cap 99 >/dev/null 2>&1; code=$?
+expect "an agent's run can't set the cap" "$code: $("$ASK" --cap)" "1: $before"
+CLAUDE_CODE_SESSION_ID=x "$ASK" --cap none >/dev/null 2>&1
+KITH_ASK_ID=$ct "$ASK" --cap none >/dev/null 2>&1
+expect "nor from a session or an ask" "$("$ASK" --cap)" "$before"
+KITH_AGENT=echo "$ASK" --cap-told "$cr" >/dev/null 2>&1; code=$?
+expect "nor mark a card raised" "$code" 1
+expect "but may read the cap" "$(KITH_AGENT=echo "$ASK" --cap)" "$before"
+rm -f "$KITH_STATE/stub-args"
+"$ASK" --cap-told >/dev/null 2>&1; code=$?
+expect "--cap-told with no id is a usage error, not an agent" "$code: $([ -e "$KITH_STATE/stub-args" ] && echo ran)" "1: "
 expect "none turns the cap off" "$("$ASK" --cap none)" none
 "$ASK" --cap default >/dev/null
 expect "default brings it back" "$("$ASK" --cap)" 5

@@ -197,8 +197,8 @@ def call(agent, host, opts, task, cont, name, as_json, no_code):
             ask.settle(rid, 0, 'stopped')
         sys.stderr.write((p.stderr or p.stdout or 'kith ask: no answer from %s\n' % host)[-3000:])
         return 1
-    if rid:   # the other Mac's cost is the chain's cost here too
-        ask.settle(rid, res.get('cost_usd') or 0, 'stopped' if res.get('error') else 'answered')
+    if rid:   # the other Mac's cost is the chain's cost here too; a run waiting on a card has no answer yet
+        ask.settle(rid, res.get('cost_usd') or 0, None if res.get('waiting') else 'stopped' if res.get('error') else 'answered')
 
     branch, notes = res.get('branch'), []
     if branch and res.get('commits') and top:
@@ -288,8 +288,14 @@ def serve_run(req):
     for k, v in (req.get('opts') or {}).items():
         argv += [k, v]
     env = dict(os.environ)
-    for k, v in (req.get('delegation') or {}).items():   # kith-ask's lineage() reads these
-        env['KITH_ASK_' + k.upper()] = str(v)
+    # kith-ask's lineage() reads these; only these keys, each checked, whatever the blob says
+    d = req.get('delegation') if isinstance(req.get('delegation'), dict) else {}
+    checks = {'chain': lambda v: isinstance(v, str) and ask.ID.fullmatch(v), 'from': lambda v: isinstance(v, str) and ask.ID.fullmatch(v),
+              'hop': lambda v: type(v) is int and 0 <= v <= 64, 'cross': lambda v: type(v) is int and 0 <= v <= 64,
+              'cost': lambda v: type(v) in (int, float) and 0 <= v < 1e9}
+    for k, ok in checks.items():
+        if k in d and ok(d[k]):
+            env['KITH_ASK_' + k.upper()] = str(d[k])
     if os.environ.get('KITH_REMOTE_PERMISSION_MODE'):   # unset: the agent's mode, else kith's default (bin/kith)
         env['KITH_ASK_PERMISSION_MODE'] = os.environ['KITH_REMOTE_PERMISSION_MODE']
     # Over ssh, macOS keeps the login keychain (where Claude Code keeps its login) out of reach: use the long-lived
