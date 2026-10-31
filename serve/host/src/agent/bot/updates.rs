@@ -67,6 +67,18 @@ impl Actor {
         if matches!(u["sessionUpdate"].as_str(), Some("tool_call" | "tool_call_update")) && u["status"] == "completed" {
             self.attempt_effects = true;
         }
+        // Reply cards watch for secrets only when the owner turned them on; the lookup costs a kernel call otherwise.
+        if !self.secrets_turn
+            && matches!(u["sessionUpdate"].as_str(), Some("tool_call" | "tool_call_update"))
+            && !u["rawInput"].is_null()
+            && crate::rich_card::jev::enabled(&self.hub.store)
+        {
+            let name = crate::cards::edge::acp_tool(u, u["title"].as_str().unwrap_or_default());
+            self.secrets_turn = matches!(
+                crate::cards::resource::classify(name, &u["rawInput"], &crate::cards::resource::roots()),
+                crate::cards::resource::Classified::Never
+            );
+        }
         match u["sessionUpdate"].as_str().unwrap_or_default() {
             "agent_message_chunk" => {
                 let t = acp::content_text(&u["content"]);
@@ -255,6 +267,7 @@ impl Actor {
         // The same question again joins the card that is open for it (A6), and a yes already given for it is used.
         let Some((resource, shown)) = Self::card_resource(tool, &title) else {
             // A secret or a login (A5): no card, the agent is told no.
+            self.secrets_turn = true;
             let no = params["options"].as_array().and_then(|all| all.iter().find(|o| o["kind"] == "reject_once"));
             let outcome = match no {
                 Some(o) => json!({"outcome": {"outcome": "selected", "optionId": o["optionId"]}}),

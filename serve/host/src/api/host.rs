@@ -31,6 +31,12 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         }
         "routerStatus" => crate::chat::router::status(&hub.store)?,
         "setRouterKey" => crate::chat::router::set_key(hub, b["key"].as_str().unwrap_or_default()).await?,
+        // Jev sorting a finished reply into a Result card: the owner's switch, off until turned on.
+        "jevCardsStatus" => crate::rich_card::jev::status(&hub.store),
+        "setJevCards" => crate::rich_card::jev::set_enabled(
+            &hub.store,
+            b["enabled"].as_bool().context("enabled must be a boolean")?,
+        )?,
         "voiceStatus" => crate::voice::status(&hub.store)?,
         "setVoiceKey" => {
             let provider = crate::voice::Provider::parse(str_arg(&b, "provider")?)?;

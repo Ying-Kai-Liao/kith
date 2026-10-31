@@ -36,7 +36,8 @@ import { botGuestSender } from '@shared/bot-guest-chat'
 import { queuedLine } from '@shared/thread-writer'
 import { quoteOf, quotesOf } from './reply-quote'
 import { richCardOf, type RichCard } from '@shared/rich-card'
-import { NewsCard, ScheduleCard } from './RichCards'
+import { resultView } from '@shared/result-card'
+import { NewsCard, ResultCard, ScheduleCard } from './RichCards'
 import { lateOf } from '@shared/conversation'
 import { BotTag, LateTag } from './Tags'
 import { topicMenuItems } from './TopicPrompt'
@@ -126,8 +127,23 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
   }
 })
 
+/** A reply Jev sorted as a result: its card, which folds back to the reply in place ("Shown as text · Show as card"). */
+function ResultReply({ entry, card, openTrace, reply }: { entry: Entry; card: RichCard; openTrace: () => void; reply?: () => void }) {
+  const [asText, setAsText] = useState(false)
+  if (asText || !resultView(card)) {
+    return (
+      <>
+        <AgentBubble entry={entry} openTrace={openTrace} reply={reply} />
+        {resultView(card) ? <button className="rc-button rc-as-text" onClick={() => setAsText(false)}>Shown as text · Show as card</button> : null}
+      </>
+    )
+  }
+  return <div className="agent-inset"><ResultCard card={card} showText={() => setAsText(true)} /></div>
+}
+
 /** An agent message drawn as its card. A brief's lead and tail stay the agent's words, as bubbles around it. */
 function AgentCard({ entry, card, openTrace, reply }: { entry: Entry; card: RichCard; openTrace: () => void; reply?: () => void }) {
+  if (card.type === 'result') return <ResultReply entry={entry} card={card} openTrace={openTrace} reply={reply} />
   if (card.type === 'schedule') return <div className="agent-inset"><ScheduleCard entry={entry} card={card} /></div>
   const words = (key: 'lead' | 'tail') => (typeof card.snapshot?.[key] === 'string' ? (card.snapshot[key] as string).trim() : '')
   const bubble = (text: string) => (text ? <AgentBubble entry={{ ...entry, data: { ...entry.data, text } }} openTrace={openTrace} reply={reply} /> : null)

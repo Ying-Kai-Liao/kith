@@ -6,7 +6,10 @@ import SwiftUI
 
 extension RichCard {
     /// A Schedule or News card this app draws in place of the entry's text twin.
-    var drawsInChat: Bool { (type == "schedule" || type == "news") && isDrawable() }
+    var drawsInChat: Bool {
+        // A Result card lacking a title or a fact is the plain reply.
+        (type == "schedule" || type == "news" || (type == "result" && ResultCardModel(card: self) != nil)) && isDrawable()
+    }
 }
 
 /// A card folded to one line: a changed or removed job, or a card after its day (tap opens it in place).
@@ -49,13 +52,14 @@ private struct FoldedRichCard: View {
 /// The card's grey panel and its clock header.
 private struct ReportCard<Trailing: View, Content: View>: View {
     let title: String
+    var icon = "clock"
     @ViewBuilder var trailing: Trailing
     @ViewBuilder var content: Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "clock").font(.system(size: 12)).foregroundStyle(Palette.ink)
+                Image(systemName: icon).font(.system(size: 12)).foregroundStyle(Palette.ink)
                 Text(title).kithText(.secondary).fontWeight(.semibold).foregroundStyle(Palette.ink).lineLimit(1)
                 Spacer(minLength: 8)
                 trailing
@@ -411,6 +415,43 @@ struct NewsCard: View {
                 if !view.tail.isEmpty { CardBubble(text: view.tail) }
             }
         }
+    }
+}
+
+// MARK: Result
+
+/// The Result card: a reply Jev sorted as a result, its own lines as title and mono facts, a button for each link the
+/// reply held. The reply stays; "Show as text" folds the card back to it in place (DESIGN.md "Reply cards").
+struct ResultCard: View {
+    let model: ResultCardModel
+    let showText: () -> Void
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        ReportCard(title: model.title, icon: "doc.text") {
+            EmptyView()
+        } content: {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.facts.joined(separator: " · "))
+                    .font(KithText.code.font)
+                    .foregroundStyle(Palette.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    ForEach(Array(model.links.enumerated()), id: \.element.id) { index, link in
+                        let button = Button { openURL(link.url) } label: {
+                            Text(link.label).kithText(.secondary).fontWeight(.medium).padding(.horizontal, 14).frame(minHeight: 32)
+                        }
+                        if index == 0 { button.buttonStyle(.ink) } else { button.buttonStyle(.line) }
+                    }
+                    Spacer(minLength: 0)
+                    Button(action: showText) {
+                        Text("Show as text").kithText(.secondary).foregroundStyle(Palette.muted).frame(minHeight: 32)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .accessibilityLabel(model.title)
     }
 }
 

@@ -271,3 +271,25 @@
   color: var(--kith-ink);
   font-size: 13px;
 }
+
+/* The Result card (DESIGN.md "Reply cards"): an icon tile, the title, mono facts, up to two link buttons. */
+.rc-tile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: var(--kith-ground);
+}
+.rc-facts {
+  font-family: var(--font-code);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.rc-as-text {
+  margin-left: auto;
+  background: transparent;
+  color: var(--kith-muted);
+}

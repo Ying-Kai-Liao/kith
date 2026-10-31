@@ -257,6 +257,7 @@ impl Actor {
         self.turn_memory_revision.clear();
         self.announce = None;
         self.stop_requested = false;
+        self.secrets_turn = false;
         self.cancel_deadline = None;
         self.hub.team.start_turn(&self.rt, self.active_request.as_ref());
         self.exit_tail = None;
@@ -499,6 +500,7 @@ impl Actor {
             }
         }
         let mut final_text = None;
+        let mut reply_entry = None;
         let routine = self.active_routine.is_some();
         let grouped = self.active_group.is_some() || routine;
         let delegated = self.active_request.as_ref().is_some_and(crate::chat::team::BotRequest::expects_reply);
@@ -535,6 +537,7 @@ impl Actor {
                 if !delegated {
                     e.data["final"] = true.into();
                     self.hub.set_entry(&id, &e.data);
+                    reply_entry = Some(id);
                 }
                 final_text = text;
             }
@@ -570,6 +573,9 @@ impl Actor {
             (_, "max_turn_requests") => self.notice("The agent hit its step limit for this turn.", NoticeStyle::Info),
             (_, "refusal") => self.notice("The agent declined to continue.", NoticeStyle::Info),
             _ => {}
+        }
+        if let (Some(id), Some(text), "end_turn", false) = (reply_entry, &final_text, stop_reason.as_str(), stopped) {
+            self.start_reply_card(id, text);
         }
         let failure = done.as_ref().err().filter(|_| !self.stop_requested);
         let failed = failure.is_some();
@@ -653,6 +659,27 @@ impl Actor {
 }
 
 impl Actor {
+    /// Hands the final reply to Jev, in the background, when the owner turned reply cards on and this run may have
+    /// them (see `rich_card::jev`). The reply is already shown; the card is attached when and if Jev answers.
+    fn start_reply_card(&self, entry_id: String, text: &str) {
+        let run = crate::rich_card::jev::Run {
+            owner: self.cfg.person.is_none() && self.active_request.is_none() && self.active_routine.is_none(),
+            owner_only_room: if self.cfg.is_group() || self.active_group.is_some() {
+                self.run_members() == crate::agent::hq::Members::OwnerOnly
+            } else {
+                true
+            },
+            touched_secrets: self.secrets_turn
+                || self.hub.runtime(&self.rt).started_at.is_none_or(|from| {
+                    crate::rich_card::jev::raised_secret_card(&self.hub.store, &self.lane.chat, from)
+                }),
+        };
+        if crate::rich_card::jev::refusal(&self.hub.store, run).is_some() {
+            return;
+        }
+        tokio::spawn(crate::rich_card::jev::attach(self.hub.clone(), entry_id, text.to_owned(), None));
+    }
+
     /// `turn_finished`, while the turn's start time is still in the runtime.
     pub(super) fn report_turn(&self, stopped: bool, failure: Option<&anyhow::Error>, stop_reason: &str) {
         let outcome = if stopped {

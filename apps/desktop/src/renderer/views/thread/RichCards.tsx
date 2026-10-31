@@ -4,6 +4,7 @@ import type { RichCard } from '@shared/rich-card'
 import { ownerNameFrom } from '@shared/mac-role'
 import { scheduleFoot, scheduleView, type ScheduleFold, type ScheduleOp, type ScheduleView } from '@shared/schedule-card'
 import { newsView, type NewsRow } from '@shared/news-card'
+import { resultView } from '@shared/result-card'
 import { BotAvatar } from '../../components/Avatar'
 import { Icon } from '../../components/Icon'
 import { useStore } from '../../store/context'
@@ -172,6 +173,30 @@ export function NewsCard({ entry, card }: { entry: Entry; card: RichCard }) {
             <Icon name="chevron.down" size={9} color="var(--kith-muted)" />
           </button>
         ) : null}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The Result card: a reply Jev sorted as a result, its own lines as title and mono facts, a button for each link the
+ * reply held. The reply stays; "Show as text" folds the card back to it in place (DESIGN.md "Reply cards").
+ */
+export function ResultCard({ card, showText }: { card: RichCard; showText: () => void }) {
+  const view = resultView(card)
+  if (!view) return null
+  return (
+    <section className="rc-card" aria-label={view.title}>
+      <div className="rc-head">
+        <span className="rc-tile" aria-hidden><Icon name="doc.text" size={13} color="var(--kith-ink)" /></span>
+        <span className="rc-name">{view.title}</span>
+      </div>
+      <div className="rc-facts">{view.facts.join(' · ')}</div>
+      <div className="rc-buttons">
+        {view.links.map((l, i) => (
+          <button key={l.url} className={i === 0 ? 'rc-button ink' : 'rc-button'} title={l.url} onClick={() => window.kith.app.openExternal(l.url)}>{l.label}</button>
+        ))}
+        <button className="rc-button rc-as-text" onClick={showText}>Show as text</button>
       </div>
     </section>
   )
