@@ -7,7 +7,7 @@ rust-version = "1.88"
 default-run = "kith"
 description = "Runs your coding-agent bots and serves the Kith apps"
 license = "Apache-2.0"
-repository = "https://github.com/leepokai/Kith"
+repository = "https://github.com/Ying-Kai-Liao/kith"
 
 # One program, two names: `kith` is the command (kith serve ..., or the kernel's commands); `kith-serve` is the
 # host alone, the name the launchd job and the apps already use. Same source, so both stay in step.

@@ -18,7 +18,7 @@ transaction, so a memory change commits together with whatever the caller record
 ## Status
 
 0.x, developed inside Kith and mirrored here read-only. The API changes with Kith. Report issues here;
-send pull requests to [Kith's `dev` branch](https://github.com/leepokai/Kith) (`host/crates/memory`).
+send pull requests to [Kith](https://github.com/Ying-Kai-Liao/kith) (`host/crates/memory`).
 
 ## Use
 
