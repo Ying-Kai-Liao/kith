@@ -69,6 +69,8 @@ export const prefs = {
   usageIconStyle: pref<'character' | 'original'>('usageIconStyle', 'character'),
   onboardingDone: pref('macAccountOnboardingCompleted', false),
   computerAccessSetup: pref<'ready' | 'later' | null>('computerAccessSetup', null),
+  /** Settings > Privacy: News rows show the page's own picture (the app fetches it). */
+  linkPictures: pref('linkPictures', true),
   starAsk: pref<StarAsk>('githubStarAsk', { kind: 'never' }),
 }
 
