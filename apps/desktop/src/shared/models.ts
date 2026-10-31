@@ -18,6 +18,8 @@ export interface Bot {
   /** `agent`, or `group`: several bots and the user in one chat. */
   kind: string
   members: string[]
+  /** A room's purpose labels (filters in the list); absent for an agent and for a room that has none. */
+  labels?: string[]
   name: string
   description: string
   avatarColor: string
@@ -640,5 +642,6 @@ export interface GroupDraft {
   name: string
   description: string
   members: string[]
+  labels?: string[]
   pinned?: boolean
 }

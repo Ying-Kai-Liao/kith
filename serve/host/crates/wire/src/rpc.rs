@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "7e41791695d85fd6b350927be5e3b1091ae9118f4e16bd74cee3c3b37eed59bd";
+pub const CONTRACT_SHA256: &str = "dcc5b25fce70bc9615f4b9e5437113f17e5dd3a6b5476c677bcd71f587804878";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -604,6 +604,8 @@ pub struct Bot {
     pub id: String,
     pub kind: BotKind,
     pub members: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub labels: Option<Vec<String>>,
     pub name: String,
     pub description: String,
     pub avatar_color: String,
@@ -1780,7 +1782,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "KithInfo", fields: &[("info", "KithCard?"), ("fetchedAt", "int"), ("error", "string?")], may_omit: &["error"] },
         crate::check::TypeSchema { name: "WorkingLane", fields: &[("chat", "string"), ("thread", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "BotGuestRef", fields: &[("botId", "string"), ("name", "string"), ("provider", "BotProvider"), ("ownerPerson", "string?"), ("ownerName", "string?")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Bot", fields: &[("id", "string"), ("kind", "BotKind"), ("members", "[string]"), ("name", "string"), ("description", "string"), ("avatarColor", "string"), ("avatarShape", "string"), ("avatarSource", "string"), ("backend", "string"), ("command", "string?"), ("cwd", "string?"), ("permission", "Permission"), ("model", "string?"), ("modelOptions", "{string}"), ("fastMode", "bool"), ("pinned", "bool"), ("position", "int"), ("hidden", "bool"), ("notify", "bool?"), ("connectors", "[string]"), ("skills", "[string]"), ("computer", "bool"), ("sharedMemory", "bool?"), ("harnessMemory", "bool?"), ("rowShowsSummary", "bool"), ("autoName", "bool"), ("tasks", "bool?"), ("hqAgent", "string?"), ("project", "string?"), ("person", "string?"), ("createdAt", "int"), ("managedWorkspace", "bool"), ("folder", "json?"), ("memoryRev", "int?"), ("workingLanes", "[WorkingLane]"), ("rev", "int"), ("deleted", "bool"), ("status", "BotStatus"), ("activity", "string"), ("startedAt", "int?"), ("workingChat", "string?"), ("workingThread", "string?"), ("fastModeSupport", "string"), ("fastModeIssue", "string?"), ("unread", "int"), ("lastMessage", "string?"), ("lastAt", "int"), ("botGuest", "BotGuestRef?")], may_omit: &["command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "project", "person", "botGuest"] },
+        crate::check::TypeSchema { name: "Bot", fields: &[("id", "string"), ("kind", "BotKind"), ("members", "[string]"), ("labels", "[string]?"), ("name", "string"), ("description", "string"), ("avatarColor", "string"), ("avatarShape", "string"), ("avatarSource", "string"), ("backend", "string"), ("command", "string?"), ("cwd", "string?"), ("permission", "Permission"), ("model", "string?"), ("modelOptions", "{string}"), ("fastMode", "bool"), ("pinned", "bool"), ("position", "int"), ("hidden", "bool"), ("notify", "bool?"), ("connectors", "[string]"), ("skills", "[string]"), ("computer", "bool"), ("sharedMemory", "bool?"), ("harnessMemory", "bool?"), ("rowShowsSummary", "bool"), ("autoName", "bool"), ("tasks", "bool?"), ("hqAgent", "string?"), ("project", "string?"), ("person", "string?"), ("createdAt", "int"), ("managedWorkspace", "bool"), ("folder", "json?"), ("memoryRev", "int?"), ("workingLanes", "[WorkingLane]"), ("rev", "int"), ("deleted", "bool"), ("status", "BotStatus"), ("activity", "string"), ("startedAt", "int?"), ("workingChat", "string?"), ("workingThread", "string?"), ("fastModeSupport", "string"), ("fastModeIssue", "string?"), ("unread", "int"), ("lastMessage", "string?"), ("lastAt", "int"), ("botGuest", "BotGuestRef?")], may_omit: &["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "project", "person", "botGuest"] },
         crate::check::TypeSchema { name: "BotAnswer", fields: &[("bot", "Bot")], may_omit: &[] },
         crate::check::TypeSchema { name: "Entry", fields: &[("id", "string"), ("seq", "int"), ("botId", "string"), ("threadId", "string?"), ("rev", "int"), ("kind", "EntryKind"), ("turn", "int"), ("data", "json"), ("createdAt", "int"), ("updatedAt", "int")], may_omit: &[] },
         crate::check::TypeSchema { name: "Entries", fields: &[("entries", "[Entry]"), ("folder", "json?"), ("conversation", "RoomConversation?")], may_omit: &["folder", "conversation"] },

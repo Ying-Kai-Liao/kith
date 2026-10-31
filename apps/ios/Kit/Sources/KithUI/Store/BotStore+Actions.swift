@@ -407,8 +407,8 @@ extension BotStore {
     }
 
     /// Creates a group chat (or opens the one these bots already share) and selects it.
-    public func createGroup(name: String, description: String = "", members: [String]) async throws -> Bot {
-        let group = try await ready().createGroup(GroupDraft(name: name, description: description, members: members))
+    public func createGroup(name: String, description: String = "", members: [String], labels: [String] = []) async throws -> Bot {
+        let group = try await ready().createGroup(GroupDraft(name: name, description: description, members: members, labels: labels.isEmpty ? nil : labels))
         bots[group.id] = group
         selection = group.id
         return group

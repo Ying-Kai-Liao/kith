@@ -58,6 +58,8 @@ struct BotListView: View {
     @State private var picking: AgentPick?
     /// The agent the person tapped in the "Goes to" pill; it holds until the box is cleared.
     @State private var goesPick: String?
+    /// The room list's label filter: one label at a time, applied in place to the crew.
+    @State private var labelFilter: String?
     @State private var calling: CallTarget?
     @State private var dictation = HomeDictation()
 
@@ -149,9 +151,17 @@ struct BotListView: View {
 
     /// The rooms as shown: the crew's order, or the dock's ranking while something is typed.
     private func displayed(_ all: [Room], found hits: [CrewSearchHit]? = nil) -> [Room] {
-        guard searching else { return ordered(all) }
+        guard searching else {
+            let label = activeLabel(all)
+            return ordered(all).filter { RoomLabels.matches($0.item.bot, label: label) }
+        }
         let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return (hits ?? found(all)).compactMap { byId[$0.id] }
+    }
+
+    /// The chosen label, unless no room carries it any more (it was removed or the room deleted).
+    private func activeLabel(_ all: [Room]) -> String? {
+        labelFilter.flatMap { RoomLabels.inUse(all.map(\.item.bot)).contains($0) ? $0 : nil }
     }
 
     /// Where opening a result lands: the message the match was in, by room.
@@ -273,6 +283,7 @@ struct BotListView: View {
                 if !searching {
                     ForEach(shownStores, id: \.computer.id) { updateCard($0) }
                     machineChips
+                    labelChips(all)
                     // A computer waiting for an update has its card instead; its bots aren't known yet.
                     if all.isEmpty && shownStores.allSatisfy({ $0.mismatch == nil }) {
                         EmptyRoster(canCreate: allStores.contains { $0.mismatch == nil }, hasComputer: !accounts.computers.isEmpty,
@@ -567,6 +578,40 @@ struct BotListView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("\(store.hostName), \(store.connectionLabel). Opens Computers")
                     }
+                }
+                .padding(.horizontal, KithSpacing.gutter)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    /// The labels rooms use as filter chips, and New room (the group-creation page).
+    @ViewBuilder private func labelChips(_ all: [Room]) -> some View {
+        let labels = RoomLabels.inUse(all.map(\.item.bot))
+        let active = activeLabel(all)
+        if !labels.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(labels, id: \.self) { label in
+                        Button { labelFilter = label == active ? nil : label } label: {
+                            Text(label).kithText(.secondary)
+                                .foregroundStyle(label == active ? Palette.background : Palette.ink)
+                                .lineLimit(1)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(label == active ? Palette.ink : Color.clear, in: Capsule())
+                                .kithGlass(in: Capsule(), interactive: true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Label \(label)")
+                        .accessibilityAddTraits(label == active ? .isSelected : [])
+                    }
+                    Button(action: newGroup) {
+                        Label("New room", systemImage: "plus").kithText(.secondary).foregroundStyle(Palette.ink)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .kithGlass(in: Capsule(), interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onlineStores.isEmpty)
                 }
                 .padding(.horizontal, KithSpacing.gutter)
             }

@@ -72,6 +72,10 @@ pub enum BotKind {
     Group,
 }
 
+/// How many labels a room carries and how long each is.
+pub const MAX_LABELS: usize = 5;
+pub const MAX_LABEL_CHARS: usize = 24;
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 #[expect(clippy::struct_excessive_bools, reason = "independent user settings stored as plain JSON flags")]
@@ -82,6 +86,10 @@ pub struct BotConfig {
     /// A group's bots, in the order they were added.
     #[serde(default)]
     pub members: Vec<String>,
+    /// A group's purpose labels (filters in the room list, not folders): lowercase, trimmed, at most
+    /// [`MAX_LABELS`] of [`MAX_LABEL_CHARS`] characters. Stored in the bot's JSON, so rows from before have none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "null_as_empty")]
+    pub labels: Vec<String>,
     pub name: String,
     #[serde(default)]
     pub description: String,
@@ -186,6 +194,29 @@ impl BotConfig {
         }
     }
 
+    /// Normalizes `labels` (lowercase, trimmed, no blanks or repeats) and refuses what a room list couldn't show.
+    pub fn clean_labels(&mut self) -> anyhow::Result<()> {
+        let mut clean: Vec<String> = Vec::new();
+        for l in &self.labels {
+            let l = l.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
+            if l.is_empty() || clean.contains(&l) {
+                continue;
+            }
+            if l.chars().count() > MAX_LABEL_CHARS {
+                anyhow::bail!("a label is at most {MAX_LABEL_CHARS} characters");
+            }
+            clean.push(l);
+        }
+        if clean.len() > MAX_LABELS {
+            anyhow::bail!("a room has at most {MAX_LABELS} labels");
+        }
+        if !clean.is_empty() && !self.is_group() {
+            anyhow::bail!("only a room has labels");
+        }
+        self.labels = clean;
+        Ok(())
+    }
+
     /// An empty default project is none.
     pub fn clean_project(&mut self) {
         self.project = self.project.take().map(|p| p.trim().to_owned()).filter(|p| !p.is_empty());
@@ -204,6 +235,10 @@ impl BotConfig {
     pub fn uses_tasks(&self) -> bool {
         !self.is_group() && self.tasks != Some(false)
     }
+}
+
+fn null_as_empty<'de, D: serde::Deserializer<'de>>(value: D) -> Result<Vec<String>, D::Error> {
+    Ok(Option::<Vec<String>>::deserialize(value)?.unwrap_or_default())
 }
 
 fn null_as_false<'de, D: serde::Deserializer<'de>>(value: D) -> Result<bool, D::Error> {
