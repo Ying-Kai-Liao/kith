@@ -129,6 +129,8 @@ export interface AccountState {
   /** `photos`: the linked sign-in accounts' own photos, for the profile image picker. */
   user: { userId: string; email: string | null; avatarURL: string | null; photos: LinkedPhoto[] } | null
   cloudURL: string | null
+  /** Show Apple sign-in: a main build on the production Clerk instance. */
+  appleSignIn: boolean
 }
 
 export type SpeechEvent =

@@ -22,6 +22,7 @@ export class AccountSession extends Observable {
   errorMessage: string | null = null
   user: AccountInfo | null = null
   cloudURL: string | null = null
+  appleSignIn = false
 
   get isSignedIn() {
     return this.user !== null
@@ -40,6 +41,7 @@ export class AccountSession extends Observable {
     this.errorMessage = s.error
     this.user = s.user
     this.cloudURL = s.cloudURL
+    this.appleSignIn = s.appleSignIn
     this.changed()
   }
 

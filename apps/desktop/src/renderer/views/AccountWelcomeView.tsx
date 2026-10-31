@@ -10,9 +10,6 @@ import { useAccount } from '../store/account'
 import googleLogo from '../assets/google.svg'
 import './account-welcome.css'
 
-// Apple sign-in hidden until it works.
-const showAppleSignIn = false
-
 const deviceName = window.kith.platform === 'darwin' ? 'Mac' : 'computer'
 
 /** First-run account choice. A restored session skips this screen as soon as it is back. */
@@ -66,7 +63,7 @@ export function AccountWelcomeView({ onContinue }: { onContinue: () => void }) {
           <Button onClick={onContinue} className="welcome-button welcome-primary">
             Continue on this {deviceName}
           </Button>
-          {showAppleSignIn ? (
+          {account.appleSignIn ? (
             <Button kind="secondary" onClick={() => void account.signIn('apple')} disabled={!account.isConfigured || account.isBusy} className="welcome-button">
               {account.isBusy ? (
                 <Spinner size={18} />
