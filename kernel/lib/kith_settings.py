@@ -47,6 +47,9 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
   delegation        delegation.chain_cost_cap_usd: what one chain of `kith ask`s (an agent asks another, which asks a
                     third, ...) may cost in dollars at API prices before it starts no new ask and the owner gets a Needs-you
                     card. Default 5; "none" turns the cap off. Asks already running finish (kith ask --cap shows or sets it)
+  reads_others      capabilities.yaml `reads_others: false` marks an agent that works on the owner's own files only; its owner
+                    runs may use bypassPermissions. Without it (or true) the agent reads other people's text and its
+                    owner runs are held to auto (kith_settings.py cap MODE CAPS_FILE prints the mode that applies)
 
   kith_settings.py backups [AGENT]   the chain that applies, one id per line
   kith_settings.py account [AGENT]   the main account set for the agent (else the global one), '' when none is
@@ -100,6 +103,23 @@ def strip_broad_bash(rules, trusted):
 def current(mode):
     """The mode a run starts in for a mode from any source: a retired one as the mode that replaced it."""
     return RETIRED.get(mode, mode) if isinstance(mode, str) else mode
+
+
+def reads_others(caps_file):
+    """Does the agent read text other people wrote (pages, papers, posts, logs)? True unless its capabilities.yaml says
+    `reads_others: false`, so an agent nobody marked (a private role, a new one) takes the conservative side."""
+    try:
+        text = open(caps_file).read()
+    except OSError:
+        return True
+    return not re.search(r'^reads_others: *false\b', text, re.M)
+
+
+def cap_mode(mode, caps_file):
+    """The mode an owner's run of the agent may start in: bypass only for an agent that works on the owner's own files
+    (`reads_others: false`); a reader agent is held to auto, where the checker can stop an instruction planted in what it
+    reads. Applies whoever asked for bypass (caller, this Mac, the role)."""
+    return 'auto' if mode == 'bypassPermissions' and reads_others(caps_file) else mode
 
 
 def retired():
@@ -432,6 +452,12 @@ if __name__ == '__main__':
     if len(sys.argv) == 2 and sys.argv[1] == 'delegation.chain_cost_cap_usd':
         cap = chain_cost_cap()
         print('none' if cap is None else cap)
+        sys.exit(0)
+    if len(sys.argv) == 4 and sys.argv[1] == 'cap':   # cap MODE CAPS_FILE
+        print(cap_mode(sys.argv[2], sys.argv[3]))
+        sys.exit(0)
+    if len(sys.argv) == 3 and sys.argv[1] == 'reads-others':
+        print(1 if reads_others(sys.argv[2]) else 0)
         sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[1] == 'limit':
         amount, at = limit(sys.argv[2])

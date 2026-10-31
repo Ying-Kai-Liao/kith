@@ -215,6 +215,8 @@ jobs:
         run: kernel/tests/kith-sched-jobs-check
       - name: Send check
         run: kernel/tests/kith-send-check
+      - name: Schedule origin check
+        run: kernel/tests/kith-sched-origin-check
       - name: Terminal flags check
         run: kernel/tests/kith-terminal-flags-check
       - uses: oven-sh/setup-bun@v2
