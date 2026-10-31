@@ -10,9 +10,14 @@
 // the computer id from that key. Tickets minted before this (no computer, no expiry) and unsigned pushes
 // from hosts that predate it keep working until LEGACY_TICKETS_UNTIL, so phones and hosts can update.
 //
-//   POST /register { token, env: "sandbox" | "production", kind: "alert" | "liveactivity", computerId } -> { ticket }
+//   POST /register { token, env: "sandbox" | "production", kind: "alert" | "liveactivity" | "voip", computerId } -> { ticket }
+//                  (voip: APNs only, the PushKit token; pushed to topic `<bundle>.voip`)
 //   POST /push     { ticket, alert?: { title, body }, threadId?, category?, data?, mutableContent?,
-//                    liveActivity?: { event: "update" | "end", contentState } }   (Kith-Sig header)
+//                    interruptionLevel?: "active" | "time-sensitive", sound?: "default",
+//                    voip?: { data }, liveActivity?: { event: "update" | "end", contentState } }   (Kith-Sig header)
+//
+// A voip ticket is pushed with `voip` only (priority 10, expires in 60 s, `data` is the payload); an alert
+// ticket with `voip` is a 400.
 //
 // `mutableContent: true` sets `mutable-content: 1` so the Notification Service Extension can replace the
 // generic alert with the host's end-to-end encrypted title/body (`data.sealed`).
@@ -34,7 +39,7 @@ export interface Env {
 }
 
 type ApnsEnv = "sandbox" | "production";
-type Kind = "alert" | "liveactivity";
+type Kind = "alert" | "liveactivity" | "voip";
 /** `h`: the computer allowed to push with it; `x`: expiry, Unix seconds. A ticket without `x` is a legacy ticket. */
 interface ApnsTicket { p?: "apns"; t: string; e: ApnsEnv; k: Kind; b?: string; h?: string; x?: number }
 interface FcmTicket { p: "fcm"; t: string; k: Kind; c: string; h: string; b?: string; r?: string; x?: number }
@@ -43,7 +48,7 @@ type TicketPayload = ApnsTicket | FcmTicket;
 const BUNDLE_ID = "com.yingkailiao.kith.ios";
 const COMPUTER_ID = /^[A-Za-z0-9_-]{22}$/;
 /** Phones mint a fresh alert ticket every time they connect to the computer; activities live hours, not days. */
-export const TICKET_TTL: Record<Kind, number> = { alert: 90 * 86400, liveactivity: 7 * 86400 };
+export const TICKET_TTL: Record<Kind, number> = { alert: 90 * 86400, liveactivity: 7 * 86400, voip: 90 * 86400 };
 
 const legacyOpen = (env: Env, now: number) => now < (Date.parse(env.LEGACY_TICKETS_UNTIL ?? "") || 0);
 
@@ -97,6 +102,7 @@ const clients = new Map<string, ApnsClient>();
 export function apnsTopic(bundleId: string | undefined, kind: Kind): string {
   const bundle = bundleId ?? BUNDLE_ID;
   if (bundle !== BUNDLE_ID && bundle !== `${BUNDLE_ID}.dev`) throw new Error("invalid bundle identifier");
+  if (kind === "voip") return `${bundle}.voip`;
   return kind === "liveactivity" ? `${bundle}.push-type.liveactivity` : bundle;
 }
 
@@ -139,14 +145,14 @@ async function register(req: Request, env: Env, now = Date.now()): Promise<Respo
   if (body?.provider !== undefined && body.provider !== "apns") return json({ error: "invalid provider" }, 400);
   if (typeof body?.token !== "string" || !/^(?:[0-9a-fA-F]{2}){16,100}$/.test(body.token)) return json({ error: "invalid token" }, 400);
   if (body.env !== "production" && body.env !== "sandbox") return json({ error: "invalid environment" }, 400);
-  if (body.kind !== "alert" && body.kind !== "liveactivity") return json({ error: "invalid kind" }, 400);
+  if (body.kind !== "alert" && body.kind !== "liveactivity" && body.kind !== "voip") return json({ error: "invalid kind" }, 400);
   if (body.bundleId !== undefined && body.bundleId !== BUNDLE_ID && body.bundleId !== `${BUNDLE_ID}.dev`) return json({ error: "invalid bundle identifier" }, 400);
   // Apps before computer-bound tickets don't send `computerId`; they get a legacy ticket while that's allowed.
   if (body.computerId === undefined ? !legacyOpen(env, now) : typeof body.computerId !== "string" || !COMPUTER_ID.test(body.computerId)) {
     return json({ error: "invalid computerId" }, 400);
   }
   const e: ApnsEnv = body.env;
-  const k: Kind = body.kind === "liveactivity" ? "liveactivity" : "alert";
+  const k: Kind = body.kind;
   return json({ ticket: await sealTicket(env, { t: body.token, e, k, ...(body.bundleId ? { b: body.bundleId } : {}),
     ...(body.computerId ? { h: body.computerId, x: expires(k) } : {}) }) });
 }
@@ -158,6 +164,11 @@ export interface PushBody {
   category?: string;
   data?: Record<string, unknown>;
   mutableContent?: boolean;
+  /** "time-sensitive" lets a call alert break through Focus. */
+  interruptionLevel?: "active" | "time-sensitive";
+  sound?: "default";
+  /** A VoIP push: `data` is the whole payload, with no `aps.alert`. */
+  voip?: { data?: Record<string, unknown> };
   liveActivity?: { event?: "update" | "end"; timestamp?: number; staleDate?: number; contentState?: Record<string, unknown> };
 }
 
@@ -165,11 +176,12 @@ export interface PushBody {
 export function alertAps(body: PushBody & { alert: NonNullable<PushBody["alert"]> }): Record<string, unknown> {
   const aps: Record<string, unknown> = {
     alert: { title: (body.alert.title ?? "Kith").slice(0, 120), body: (body.alert.body ?? "").slice(0, 400) },
-    sound: "default",
+    sound: body.sound ?? "default",
     "thread-id": body.threadId,
     category: body.category,
   };
   if (body.mutableContent === true) aps["mutable-content"] = 1;
+  if (body.interruptionLevel !== undefined) aps["interruption-level"] = body.interruptionLevel;
   return aps;
 }
 
@@ -303,7 +315,22 @@ export async function pushOne(body: PushBody | null, who: Pusher, env: Env, now 
       await sender.push(t.t, data, urgent);
       return json({ ok: true });
     }
-    if (t.k === "alert") {
+    if (t.k === "voip") {
+      const data = body.voip?.data;
+      if (body.alert !== undefined || !data || typeof data !== "object" || Array.isArray(data) || "aps" in data) {
+        return json({ error: "invalid voip" }, 400);
+      }
+      // A ring that is 60 s late is a call that already ended.
+      const notification = new Notification(t.t, {
+        type: PushType.voip, priority: Priority.immediate, data, expiration: Math.floor(Date.now() / 1000) + 60,
+      });
+      if (new TextEncoder().encode(JSON.stringify(notification.buildApnsOptions())).length > 4096) {
+        return json({ error: "payload too large" }, 413);
+      }
+      await client(env, t.e, "voip", t.b).send(notification);
+    } else if (t.k === "alert") {
+      if (body.voip !== undefined || body.interruptionLevel !== undefined && body.interruptionLevel !== "active" && body.interruptionLevel !== "time-sensitive" ||
+          body.sound !== undefined && body.sound !== "default") return json({ error: "invalid alert" }, 400);
       if (!body.alert || typeof body.alert !== "object" ||
           (body.alert.title !== undefined && typeof body.alert.title !== "string") ||
           (body.alert.body !== undefined && typeof body.alert.body !== "string") ||
