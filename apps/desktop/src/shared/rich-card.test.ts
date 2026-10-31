@@ -31,7 +31,7 @@ test('the permission card is not a rich card', () => {
 })
 
 test('this app draws Schedule and News cards of version 1', () => {
-  assert.deepEqual(KNOWN_CARDS, { schedule: 1, news: 1 })
+  assert.deepEqual(KNOWN_CARDS, { schedule: 1, news: 1, result: 1 })
   assert.deepEqual(richCardOf(data({ type: 'schedule', v: 1 })), { type: 'schedule', v: 1 })
   assert.deepEqual(richCardOf(data({ type: 'news', v: 1 })), { type: 'news', v: 1 })
   assert.equal(richCardOf(data({ type: 'news', v: 2 })), null)

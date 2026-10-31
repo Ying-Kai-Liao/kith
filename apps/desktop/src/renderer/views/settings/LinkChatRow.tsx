@@ -69,6 +69,47 @@ export function LinkChatRow() {
   )
 }
 
+/** The owner's switch for reply cards: Jev sorts a finished reply that reads like a result into a card (off until turned on). */
+export function ReplyCardsRow() {
+  const app = useApp()
+  const local = useModel(app.local)
+  const online = local?.connection.kind === 'online'
+  const [on, setOn] = useState<boolean | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!local || !online) return
+    let live = true
+    // A host that doesn't know the method, or won't answer this person, leaves the row hidden.
+    local.replyCards().then((v) => live && setOn(v), () => undefined)
+    return () => {
+      live = false
+    }
+  }, [local, online])
+  if (!local || !online || on === null) return null
+
+  const set = (next: boolean) => {
+    setOn(next)
+    setError(null)
+    local.replyCards(next).then(setOn, (e: unknown) => {
+      setOn(!next)
+      setError(errorText(e))
+    })
+  }
+  return (
+    <VStack gap={8}>
+      <div className="settings-row">
+        <Icon name="doc.text" size={26} color="var(--secondary)" />
+        <VStack grow className="settings-stack">
+          <Text truncate>Result cards for replies</Text>
+          <Text size="caption" tone="secondary">Lets Jev turn a reply that reads like a result into a card, using the reply's own words. The reply stays one tap away.</Text>
+        </VStack>
+        <Switch on={on} onChange={set} label="Result cards for replies" />
+      </div>
+      {error ? <Text size="footnote" tone="attention">{error}</Text> : null}
+    </VStack>
+  )
+}
+
 /** Whether a Schedule card's words also go to your Telegram or Discord chat with the agent. The card stays in the app either way. */
 export function ScheduleMessagesRow() {
   const app = useApp()

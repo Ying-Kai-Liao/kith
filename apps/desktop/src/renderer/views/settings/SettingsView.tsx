@@ -22,7 +22,7 @@ import { MyBotsPage } from './BotGuestsView'
 import { PeopleView } from './PeopleView'
 import { ProfileImagePicker } from './ProfileImagePicker'
 import { KeysView } from './KeysView'
-import { LinkChatRow, ScheduleMessagesRow } from './LinkChatRow'
+import { LinkChatRow, ReplyCardsRow, ScheduleMessagesRow } from './LinkChatRow'
 import { errorText, isMac, thisMac } from './parts'
 import { BackupChains } from './BackupChain'
 import { UsageLimits } from './UsageLimits'
@@ -229,6 +229,7 @@ function CrewSettings() {
         </ValueRow>
         <LinkChatRow />
         <ScheduleMessagesRow />
+        <ReplyCardsRow />
         <button className="settings-row settings-nav-row" onClick={() => setBackups(true)}>
           <VStack grow className="settings-stack">
             <span>Backups</span>

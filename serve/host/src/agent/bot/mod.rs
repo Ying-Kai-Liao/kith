@@ -221,6 +221,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         cmd_rx: None,
         deferred: VecDeque::new(),
         stop_requested: false,
+        secrets_turn: false,
         cancel_deadline: None,
         exit_tail: None,
         conn_started_as: None,
@@ -444,6 +445,8 @@ struct Actor {
     /// Commands that arrived during a start phase, handled in order once it ends.
     deferred: VecDeque<Cmd>,
     stop_requested: bool,
+    /// A tool call of this turn named something on the secrets deny list; watched only while reply cards are on.
+    secrets_turn: bool,
     /// A cancelled turn still running past this stops its agent process.
     cancel_deadline: Option<Instant>,
     /// Last stderr lines of an agent process that just exited.
