@@ -235,8 +235,6 @@
   },
   "routes": {
     "health": { "method": "GET", "path": "v1/health", "auth": "none", "response": "Health" },
-    "oauthLegacyCallback": { "method": "GET", "path": "v1/oauth/callback", "auth": "none", "kind": "redirect" },
-    "oauthLegacyDevCallback": { "method": "GET", "path": "v1/oauth/callback/dev", "auth": "none", "kind": "redirect" },
     "oauthKithCallback": { "method": "GET", "path": "v1/oauth/callback/kith", "auth": "none", "kind": "redirect" },
     "oauthKithDevCallback": { "method": "GET", "path": "v1/oauth/callback/kith-dev", "auth": "none", "kind": "redirect" },
     "me": { "method": "GET", "path": "v1/me", "auth": "user", "response": "Me" },

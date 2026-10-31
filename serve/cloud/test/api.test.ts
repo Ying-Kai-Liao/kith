@@ -35,15 +35,15 @@ async function newUser(name = "a") {
 type User = Awaited<ReturnType<typeof newUser>>;
 
 /** Claims `host` into `user`'s account the way the Mac app does (§4.2 A). */
-async function claim(user: User, host: TestHost, family?: ref.Family) {
+async function claim(user: User, host: TestHost) {
   const c = await call("POST", "/v1/claims", { token: user.token });
   expect(c.status).toBe(200);
-  return call("POST", `/v1/claims/${c.body.claimId}/complete`, { token: user.token, body: claimBody(c.body, user.userId, host, family) });
+  return call("POST", `/v1/claims/${c.body.claimId}/complete`, { token: user.token, body: claimBody(c.body, user.userId, host) });
 }
 
-function claimBody(c: Json, userId: string, host: TestHost, family?: ref.Family) {
+function claimBody(c: Json, userId: string, host: TestHost) {
   const boxKey = ref.b64url(host.box.pub);
-  const canonical = ref.claimCanonical(c.claimId, c.nonce, userId, host.cid, boxKey, family);
+  const canonical = ref.claimCanonical(c.claimId, c.nonce, userId, host.cid, boxKey);
   return {
     computerId: host.cid,
     signKey: ref.b64url(host.sign.pub),

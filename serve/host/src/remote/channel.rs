@@ -296,14 +296,11 @@ async fn handshake(
         return None;
     };
     let cid = hub.identity.cid_raw();
-    // Devices paired before the rename sign under the old labels (`legacy_compat`); the signature says which family this is.
-    let Some(labels) = crypto::Labels::ALL
-        .into_iter()
-        .find(|l| crypto::verify(&dk_raw, &crypto::hs1_input(*l, &cid, &dk_raw, &ek_d, &n), &sig).is_ok())
-    else {
+    let labels = crypto::Labels::Kith;
+    if crypto::verify(&dk_raw, &crypto::hs1_input(labels, &cid, &dk_raw, &ek_d, &n), &sig).is_err() {
         send_reject(out, RejectCode::BadSignature).await;
         return None;
-    };
+    }
     let ek_h = StaticSecret::from(crypto::random::<32>());
     let ek_h_pub = crypto::x25519_pub(&ek_h);
     let Ok(shared) = crypto::x25519(&ek_h, &ek_d) else {
@@ -807,38 +804,6 @@ mod tests {
         assert_eq!(hello["ok"]["computerId"], hub.identity.computer_id());
         let refused = connected.call(2, "setScreenEnabled", json!({"enabled": true})).await;
         assert_eq!(refused["err"]["status"], 403);
-    }
-
-    #[tokio::test]
-    async fn a_device_paired_before_the_rename_still_connects() {
-        let hub = temp_hub();
-        let key = paired_phone(&hub).await;
-        let mut legacy = Phone::direct(&hub, key);
-        legacy.labels = crypto::Labels::Legacy;
-        assert!(matches!(legacy.hello(&hub, false).await, Out::Msg(v) if v["t"] == "welcome"));
-        let hello = legacy.call(1, "hello", json!({})).await;
-        assert_eq!(hello["ok"]["computerId"], hub.identity.computer_id(), "frames use the legacy labels both ways");
-    }
-
-    #[tokio::test]
-    async fn registering_a_device_records_the_labels_its_pushes_are_sealed_under() {
-        let hub = temp_hub();
-        let key = paired_phone(&hub).await;
-        let slot = format!("push_labels.{}", crypto::b64(key.verifying_key().as_bytes()));
-        let mut phone = Phone::direct(&hub, key);
-        assert!(matches!(phone.hello(&hub, false).await, Out::Msg(v) if v["t"] == "welcome"));
-        let body = |labels: Option<&str>| {
-            let mut b = json!({"ticket": "t1", "relay": "https://relay.example", "name": "iPhone"});
-            if let Some(l) = labels {
-                b["labels"] = l.into();
-            }
-            b
-        };
-        assert!(phone.call(1, "registerDevice", body(Some("kith"))).await["ok"].is_object());
-        assert_eq!(hub.store.kv_get(&slot).as_deref(), Some("kith"));
-        // A device that doesn't say (an app from before the rename) is back on the old labels.
-        assert!(phone.call(2, "registerDevice", body(None)).await["ok"].is_object());
-        assert_eq!(hub.store.kv_get(&slot), None);
     }
 
     #[tokio::test]

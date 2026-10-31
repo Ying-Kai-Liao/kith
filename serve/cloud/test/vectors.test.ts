@@ -1,23 +1,15 @@
-// docs/reference/fixtures/remote-relay-vectors.json (kith labels) and legacy-compat-vectors.json (pairings made
-// before the rename), field by field: the TS reference implementation and the Worker's own code.
+// docs/reference/fixtures/remote-relay-vectors.json, field by field: the TS reference implementation and the Worker's own code.
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import LEGACY from "../../docs/reference/fixtures/legacy-compat-vectors.json";
+import { describe, expect, it } from "vitest";
 import KITH from "../../docs/reference/fixtures/remote-relay-vectors.json";
 import { claimCanonical as workerClaimCanonical } from "../src/api";
-import { LEGACY_LABEL, LEGACY_SIG_HEADER } from "../src/legacy-compat";
 import { computerIdFor, fromB64url, sigCanonical, verifyEd25519, verifySig } from "../src/auth";
 import { parseAcl } from "../src/relay";
 import * as ref from "./ref";
 
-for (const [family, V] of [
-  [LEGACY_LABEL, LEGACY],
-  ["kith", KITH],
-] as const) {
+for (const [family, V] of [["kith", KITH]] as const) {
   describe(`${family} labels`, () => {
-    beforeAll(() => ref.useFamily(family));
-    afterAll(() => ref.useFamily("kith"));
-    const HEADER = family === "kith" ? "Kith-Sig" : LEGACY_SIG_HEADER;
+    const HEADER = "Kith-Sig";
     const u = ref.unb64url;
     const hostSign = ref.signKey(u(V.keys.hostSignSeed));
     const hostBox = ref.boxKey(u(V.keys.hostBoxPriv));
@@ -153,7 +145,7 @@ for (const [family, V] of [
         const c = V.claim;
         const canonical = ref.claimCanonical(c.claimId, c.nonce, c.userId, c.computerId, c.boxKey);
         expect(canonical).toBe(c.canonical);
-        expect(workerClaimCanonical(c.claimId, c.nonce, c.userId, c.computerId, c.boxKey, family)).toBe(c.canonical);
+        expect(workerClaimCanonical(c.claimId, c.nonce, c.userId, c.computerId, c.boxKey)).toBe(c.canonical);
         expect(ref.b64url(ref.sign(hostSign, ref.enc.encode(canonical)))).toBe(c.sig);
         expect(await verifyEd25519(hostSign.pub, u(c.sig), ref.enc.encode(canonical))).toBe(true);
       });
@@ -178,7 +170,7 @@ for (const [family, V] of [
       it("builds the canonical string and header", async () => {
         expect(ref.b64url(await import("@noble/hashes/sha2.js").then((m) => m.sha256(new Uint8Array())))).toBe(r.bodySha256);
         expect(ref.sigCanonical(r.method, r.authority, r.pathAndQuery, r.ts, r.nonce, new Uint8Array())).toBe(r.canonical);
-        expect(await sigCanonical(r.method, r.authority, r.pathAndQuery, r.ts, r.nonce, new Uint8Array(), family)).toBe(r.canonical);
+        expect(await sigCanonical(r.method, r.authority, r.pathAndQuery, r.ts, r.nonce, new Uint8Array())).toBe(r.canonical);
         const header = ref.signRequest(device, { method: r.method, authority: r.authority, pathAndQuery: r.pathAndQuery, ts: r.ts, nonce: r.nonce });
         expect(`${HEADER}: ${header}`).toBe(r.header);
       });
@@ -193,13 +185,6 @@ for (const [family, V] of [
         expect(await verifySig(req({ [HEADER]: value }), new Uint8Array(), r.ts + 300_000)).not.toBeNull();
         expect(await verifySig(req({ [HEADER]: value }), new Uint8Array(), r.ts + 300_001)).toBeNull();
         expect(await verifySig(req({ [HEADER]: value }), new Uint8Array(), r.ts - 300_001)).toBeNull();
-      });
-
-      it("accepts either header name, since the signed prefix says which family signed", async () => {
-        const value = r.header.slice(`${HEADER}: `.length);
-        for (const name of ["Kith-Sig", LEGACY_SIG_HEADER]) {
-          expect(await verifySig(req({ [name]: value }), new Uint8Array(), r.ts)).not.toBeNull();
-        }
       });
 
       it("binds the authority, path and body", async () => {

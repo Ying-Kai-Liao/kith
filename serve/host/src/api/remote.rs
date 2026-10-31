@@ -28,18 +28,10 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             if let Some(voip) = b["voipTicket"].as_str().filter(|v| !v.is_empty()) {
                 hub.store.set_voip_ticket(caller.device_key(), voip)?;
             }
-            // The label family the device seals pushes under; a device that doesn't say is a pre-Kith pairing.
-            let labels_key = format!("push_labels.{}", caller.device_key());
-            if b["labels"].as_str() == Some("kith") {
-                hub.store.kv_set(&labels_key, "kith")?;
-            } else {
-                hub.store.kv_delete(&labels_key)?;
-            }
             json!({})
         }
         "unregisterDevice" => {
             hub.store.remove_push_tickets(caller.device_key())?;
-            hub.store.kv_delete(&format!("push_labels.{}", caller.device_key()))?;
             json!({})
         }
         "registerActivity" => {

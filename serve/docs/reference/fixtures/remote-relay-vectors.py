@@ -1,5 +1,4 @@
-# Generates docs/reference/fixtures/remote-relay-vectors.json (kith/* labels, kith-sig-v1, Kith-Sig). The argument
-# is the label family; the pre-rename family's vectors (legacy-compat-vectors.json) are made by passing its name.
+# Generates docs/reference/fixtures/remote-relay-vectors.json (kith/* labels, kith-sig-v1, Kith-Sig); no arguments.
 import base64, hashlib, json, struct, sys
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
@@ -8,7 +7,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF, HKDFExpand
 from cryptography.hazmat.primitives import hashes, hmac
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
 
-NAME = sys.argv[1] if len(sys.argv) > 1 else "kith"
+NAME = "kith"
 NB = NAME.encode()
 b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
 raw = lambda k: k.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw)
