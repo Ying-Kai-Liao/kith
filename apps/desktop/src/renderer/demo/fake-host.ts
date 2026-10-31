@@ -39,6 +39,10 @@ export class FakeHost {
     { profile: 'github/personal', service: 'github', account: 'personal', owner: 'kai', vars: ['GITHUB_TOKEN'], agents: ['pacer'], last_used: new Date(Date.now() - 3 * 86_400_000).toISOString() },
     { profile: 'notion/library', service: 'notion', account: 'library', owner: 'kai', vars: ['NOTION_TOKEN'], agents: [], last_used: null },
   ]
+  /** What "Always allow" remembered, as `allowedRules` lists it (all agents share it in the demo). */
+  private allowed: { id: string; rule: string; kind: 'rule' | 'prose'; reason: string; added: string }[] = [
+    { id: 'a1b2c3d4', rule: 'Bash(ls /tmp)', kind: 'rule', reason: '[Data Exfiltration]', added: new Date(Date.now() - 2 * 3_600_000).toISOString() },
+  ]
   /** Bots from outside, one in each state (host methods `bots`, `decideBot`, ...). */
   private botGuests: Record<string, unknown>[] = ['invited', 'joining', 'pending', 'active', 'denied', 'revoked'].map((state, i) => ({
     botId: `bg_${state}`, name: ['Rex', 'Pip', 'Ada', 'Max', 'Zed', 'Old'][i], provider: i % 2 ? 'other' : 'grok', state,
@@ -345,6 +349,13 @@ export class FakeHost {
         return this.provideSecret(str('entryId'), str('account'), (b.values ?? {}) as Record<string, unknown>)
       case 'listKeys':
         return { keys: this.keys }
+      case 'allowedRules':
+        return { allowed: this.allowed }
+      case 'removeAllowedRule': {
+        if (!this.allowed.some((r) => r.id === str('id'))) throw fail('Not found: it may already be removed')
+        this.allowed = this.allowed.filter((r) => r.id !== str('id'))
+        return { ok: true }
+      }
       case 'accessLedger':
         return { grants: this.grants.filter((g) => !b.agent || g.agent === b.agent) }
       case 'removeGrant':

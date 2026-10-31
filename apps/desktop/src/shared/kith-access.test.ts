@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { accessHidden, accountText, agentKeys, groupGrants, keyDetail, keyName, personTitle } from './kith-access.ts'
+import { accessHidden, accountText, agentKeys, groupGrants, keyDetail, keyName, parseAllowed, personTitle, ruleDetail, ruleText } from './kith-access.ts'
 import type { AccessGrant } from './kith-info.ts'
 import type { KeyRow } from './secret-card.ts'
 
@@ -37,4 +37,19 @@ test('a 403 or 404 hides the section', () => {
   assert.equal(accessHidden(new Error('unknown method listKeys')), true)
   assert.equal(accessHidden({ status: 500 }), false)
   assert.equal(accessHidden(null), false)
+})
+
+test('allowed rules: rows, a damaged file, short sentences and the detail line', () => {
+  const raw = { allowed: [{ id: 'a1b2', rule: 'Bash(ls /tmp)', kind: 'rule', reason: '[Data Exfiltration]', added: '2026-10-29T10:00:00Z' }, { rule: 'no id' }, { id: 'x', rule: '' }, { id: 'p', rule: 'p'.repeat(200), kind: 'prose', reason: 5, added: 'nonsense' }], error: 'allowed.json is not usable' }
+  const { rules, error } = parseAllowed(raw)
+  assert.deepEqual(rules.map((r) => [r.id, r.kind]), [['a1b2', 'rule'], ['p', 'prose']])
+  assert.equal(error, 'allowed.json is not usable')
+  assert.deepEqual(parseAllowed(null), { rules: [], error: null })
+  assert.deepEqual(parseAllowed({ allowed: [] }), { rules: [], error: null })
+  assert.equal(ruleText(rules[0]!), 'Bash(ls /tmp)')
+  assert.equal(ruleText(rules[1]!).length, 90)
+  assert.ok(ruleText(rules[1]!).endsWith('…'))
+  const now = Date.parse('2026-10-29T12:00:00Z')
+  assert.equal(ruleDetail(rules[0]!, now), 'Blocked: [Data Exfiltration] · 2 h ago')
+  assert.equal(ruleDetail(rules[1]!, now), '')
 })

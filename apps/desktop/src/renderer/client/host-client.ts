@@ -6,6 +6,7 @@ import type { RelayCallError } from '@shared/relay'
 import { parseBackups, type Backups } from '@shared/backups'
 import { parseBotGuest, parseBotGuests, parseBotRequest, parseCreatedBotInvite, type BotGuest, type BotProvider, type CreatedBotInvite } from '@shared/bot-guests'
 import { parseKeys, type KeyRow } from '@shared/secret-card'
+import { parseAllowed, type AllowedList } from '@shared/kith-access'
 import type { StopHolderResult } from '@shared/held-run'
 import {
   parseDiff, parseHistory, parseMemoryList, parseRead, parseSave, parseTidyUps, parseUndo,
@@ -494,6 +495,15 @@ export class HostClient {
 
   revokeKey(agent: string, service: string, profile: string) {
     return this.call<{ ok: boolean }>('revokeKey', { agent, service, profile })
+  }
+
+  // What "Always allow" remembered for an agent in auto mode (serve/host/src/cards/autoallow.rs). Owner only. A removed rule is gone at the agent's next run.
+  async allowedRules(agent: string): Promise<AllowedList> {
+    return parseAllowed(await this.call('allowedRules', { agent }))
+  }
+
+  removeAllowedRule(agent: string, id: string) {
+    return this.call<{ ok: boolean }>('removeAllowedRule', { agent, id })
   }
 
   // Bots from outside (serve/host/src/api/botguests.rs). A host before them answers "unknown method".
