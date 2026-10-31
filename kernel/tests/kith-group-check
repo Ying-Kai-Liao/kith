@@ -52,8 +52,6 @@ class H(http.server.BaseHTTPRequestHandler):
             return
         n = int(self.headers.get('Content-Length', 0)); body = json.loads(self.rfile.read(n) or b'{}')
         m = self.path.rsplit('/', 1)[1]
-        with open(T + '/rec.jsonl', 'a') as f:
-            f.write(json.dumps({'m': m, 'body': body}) + '\n')
         st, out = 200, {}
         if m == 'bots':
             out = {'bots': GUESTS}
@@ -65,6 +63,17 @@ class H(http.server.BaseHTTPRequestHandler):
         elif m == 'setBotLimits':
             out = {'bot': {'limits': {'turnTimeoutS': min(max(body.get('turnTimeoutS', 300), 30), 3600),
                                       'wakeProfile': body.get('wakeProfile') or None}}}
+        elif m == 'sendSecret':
+            open(T + '/val.txt', 'w').write(body.pop('value'))  # the stub keeps it apart; rec.jsonl below never sees it
+            out = {'id': 'rs_stub', 'expiresAt': 4102444800000}
+        elif m == 'withdrawSecret':
+            out = {'withdrawn': body['id'] == 'rs_stub'}
+        elif m == 'roomSecrets':
+            out = {'secrets': [{'id': 'rs_a', 'recipient': 'bg_twin1', 'label': 'deploy', 'state': 'pending', 'expiresAt': 4102444800000},
+                               {'id': 'rs_b', 'recipient': 'house', 'label': None, 'state': 'taken', 'expiresAt': 4102444800000},
+                               {'id': 'rs_c', 'recipient': 'house', 'label': None, 'state': 'pending', 'expiresAt': 1000}]}
+        with open(T + '/rec.jsonl', 'a') as f:
+            f.write(json.dumps({'m': m, 'body': body}) + '\n')
         b = json.dumps(out).encode()
         self.send_response(st); self.send_header('Content-Length', str(len(b))); self.end_headers(); self.wfile.write(b)
     def log_message(self, *a): pass
@@ -79,9 +88,9 @@ export KITH_SERVE_PORT=$(cat "$T/port")
 G() { python3 "$KERNEL/bin/kith-group" "$@"; }
 rec() { : > "$T/rec.jsonl"; }
 lastbody() { grep "\"m\": \"$1\"" "$T/rec.jsonl" | tail -n1 | python3 -c "import json,sys; d=json.load(sys.stdin)['body']; print($2)"; }
-nowrite() { ! grep -q '"m": "\(updateBot\|setBotLimits\)"' "$T/rec.jsonl"; }
+nowrite() { ! grep -q '"m": "\(updateBot\|setBotLimits\|sendSecret\|withdrawSecret\)"' "$T/rec.jsonl"; }
 fail=0
-check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1 [RC=${RC:-} OUT=${OUT:-}]"; fail=1; fi; }
 
 rec; OUT=$(G group add-bot Team Grok 2>&1); RC=$?
 check "add-bot by names prints the line, exit 0"          "[[ \$RC == 0 && \$OUT == 'Grok will see this room from now on' ]]"
@@ -137,6 +146,63 @@ OUT=$(G bot set Grok --turn-timeout x 2>&1); RC=$?
 check "a non-number timeout: exit 2"                     "[[ \$RC == 2 && \$OUT != *Traceback* ]]"
 OUT=$(G bot set Grok --wake-profile k --json 2>&1)
 check "bot set --json"                                   "python3 -c 'import json,sys; assert json.loads(sys.argv[1])[\"bot\"][\"limits\"][\"wakeProfile\"]==\"k\"' \"\$OUT\""
+
+
+# Room secrets. The value is a run-time marker; it must reach the host's body and nothing else.
+MARK="mk-$$-$RANDOM$RANDOM"
+rec; OUT=$(printf '%s\n' "$MARK" | G group secret Team --to Twin --label deploy --ttl 5 2>&1); RC=$?; ENVD=$(env)
+check "secret: value from stdin reaches the host once, sent to the member by id" "[[ \$RC == 0 && \$(cat $T/val.txt) == \$MARK && \$(lastbody sendSecret 'd[\"room\"], d[\"to\"], d[\"label\"], d[\"ttlS\"]') == 'grp1 bg_twin1 deploy 300' ]]"
+check "secret: prints the id and when it lapses, never the value" "[[ \$OUT == 'secret rs_stub sent to Twin; it lapses at '* && \$OUT != *\$MARK* ]]"
+check "secret: the value is in no log the stub kept"  "! grep -q \"\$MARK\" $T/rec.jsonl"
+check "secret: not in this shell's env dump"           "[[ \$ENVD != *\$MARK* ]]"
+rec; OUT=$(G group secret Team --to Twin --value "$MARK" 2>&1); RC=$?
+check "secret: a value argument is refused (exit 2), nothing sent, value not echoed" "[[ \$RC == 2 && \$OUT != *\$MARK* ]] && nowrite"
+rec; OUT=$(printf '%s' "$MARK" | G group secret Team --to bg_grok 2>&1); RC=$?
+check "secret: a bot that is not in the room is not a member (exit 2)" "[[ \$RC == 2 && \$OUT == *'no member'* && \$OUT != *\$MARK* ]] && nowrite"
+rec; OUT=$(printf '' | G group secret Team --to bg_twin1 2>&1); RC=$?
+check "secret: an empty stdin is refused (exit 2)"     "[[ \$RC == 2 && \$OUT == *empty* ]] && nowrite"
+rec; OUT=$(printf '%s' "$MARK" | G group secret Team --to bg_twin1 --ttl 61 2>&1); RC=$?
+check "secret: --ttl outside 1..60 is refused (exit 2)" "[[ \$RC == 2 && \$OUT != *\$MARK* ]] && nowrite"
+rec; OUT=$(printf '%s' "$MARK" | G group secret Team 2>&1); RC=$?
+check "secret: no --to is refused (exit 2)"            "[[ \$RC == 2 ]] && nowrite"
+cat > "$T/tty_secret.py" <<'PY'
+import os, pty, sys, select
+marker, kernel = sys.argv[1], sys.argv[2]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execv(sys.executable, [sys.executable, kernel + '/bin/kith-group', 'group', 'secret', 'Team', '--to', 'bg_twin1'])
+seen = b''
+sent = False
+while True:
+    r, _, _ = select.select([fd], [], [], 8)
+    if not r:
+        break
+    try:
+        d = os.read(fd, 4096)
+    except OSError:
+        break
+    if not d:
+        break
+    seen += d
+    if not sent and b'hidden' in seen:
+        os.write(fd, marker.encode() + b'\r'); sent = True
+_, st = os.waitpid(pid, 0)
+ok = os.WEXITSTATUS(st) == 0 and sent and marker.encode() not in seen
+if not ok:
+    print('exit', os.WEXITSTATUS(st), 'sent', sent, 'echoed', marker.encode() in seen, seen.replace(marker.encode(), b'<M>')[-300:])
+sys.exit(0 if ok else 1)
+PY
+OUT=$(python3 "$T/tty_secret.py" "$MARK" "$KERNEL" 2>&1); RC=$?
+check "secret: a terminal gets a no-echo prompt and the value is not echoed" "[[ \$RC == 0 && \$(cat $T/val.txt) == \$MARK ]]"
+rec; OUT=$(G group secrets Team 2>&1); RC=$?
+check "secrets: lists only open ones (id, to, label, lapses), exit 0" "[[ \$RC == 0 && \$OUT == 'rs_a  to bg_twin1  deploy  lapses '* && \$OUT != *rs_b* && \$OUT != *rs_c* ]]"
+OUT=$(G group secrets Team --json 2>&1)
+check "secrets --json carries no value field"          "python3 -c 'import json,sys; d=json.loads(sys.argv[1]); assert [s[\"id\"] for s in d[\"secrets\"]]==[\"rs_a\"] and all(\"value\" not in s for s in d[\"secrets\"])' \"\$OUT\""
+rec; OUT=$(G group secret Team --withdraw rs_stub 2>&1); RC=$?
+check "withdraw: sends the id, exit 0"                 "[[ \$RC == 0 && \$OUT == 'rs_stub withdrawn' && \$(lastbody withdrawSecret 'd[\"id\"]') == rs_stub ]]"
+OUT=$(G group secret Team --withdraw rs_none 2>&1); RC=$?
+check "withdraw: already used or gone, exit 1"         "[[ \$RC == 1 && \$OUT == *'already used'* ]]"
+check "the marker is in no file the run left (stub log)" "! grep -rq \"\$MARK\" $T --exclude=val.txt --exclude=tty_secret.py"
 
 : > "$T/empty"
 OUT=$(G group add-bot Team Grok 2>&1); RC=$?
