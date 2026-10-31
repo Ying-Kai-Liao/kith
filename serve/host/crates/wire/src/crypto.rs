@@ -16,29 +16,18 @@ use hkdf::Hkdf;
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
-/// Which family of domain-separation labels a pairing uses. Pairings made before the Kith
-/// rename keep their old labels until re-paired (`legacy_compat`), so every construction takes
-/// the labels it runs under: the host learns them from whichever the device's signature verifies under.
+/// The family of domain-separation labels every construction runs under. One variant today; the type stays so a
+/// future label rename is a compile-checked change at each construction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Labels {
-    Legacy,
     Kith,
 }
 
 impl Labels {
-    /// Newest first: the order a verifier tries them in.
-    pub const ALL: [Labels; 2] = [Labels::Kith, Labels::Legacy];
-
     pub fn name(self) -> &'static str {
         match self {
-            Labels::Legacy => crate::legacy_compat::LABEL,
             Labels::Kith => "kith",
         }
-    }
-
-    /// A stored or announced label name; anything unknown reads as the legacy labels.
-    pub fn from_name(name: Option<&str>) -> Labels {
-        if name == Some("kith") { Labels::Kith } else { Labels::Legacy }
     }
 
     /// `<family>/<rest>`, e.g. `kith/hs1/v1`.
@@ -46,10 +35,9 @@ impl Labels {
         format!("{}/{rest}", self.name()).into_bytes()
     }
 
-    /// The `-Sig` header name: `Kith-Sig`, or the old one for a pre-rename pairing.
+    /// The `-Sig` header name.
     pub fn sig_header(self) -> &'static str {
         match self {
-            Labels::Legacy => crate::legacy_compat::SIG_HEADER,
             Labels::Kith => "Kith-Sig",
         }
     }
@@ -298,10 +286,9 @@ pub fn open_mailbox(
     let (sig, ct) = rest.split_at(64);
     let epk: [u8; 32] = epk.try_into()?;
     let sig: [u8; 64] = sig.try_into()?;
-    let l = Labels::ALL
-        .into_iter()
-        .find(|l| verify(dk, &[l.label("mbox/v1").as_slice(), cid_raw, &epk, ct].concat(), &sig).is_ok())
-        .ok_or_else(|| anyhow!("bad signature"))?;
+    let l = Labels::Kith;
+    verify(dk, &[l.label("mbox/v1").as_slice(), cid_raw, &epk, ct].concat(), &sig)
+        .map_err(|_| anyhow!("bad signature"))?;
     let key = mailbox_key(l, &x25519(box_secret, &epk)?, cid_raw, dk, &epk);
     aead(&key)
         .decrypt(&[0u8; 12].into(), Payload { msg: ct, aad: &[dk.as_slice(), client_nonce.as_bytes()].concat() })
@@ -396,7 +383,6 @@ mod tests {
 
     fn vectors(l: Labels) -> Value {
         let json = match l {
-            Labels::Legacy => include_str!("../../../../docs/reference/fixtures/legacy-compat-vectors.json"),
             Labels::Kith => include_str!("../../../../docs/reference/fixtures/remote-relay-vectors.json"),
         };
         serde_json::from_str(json).unwrap()
@@ -609,37 +595,27 @@ mod tests {
 
     #[test]
     fn handshake_vectors() {
-        for l in Labels::ALL {
-            handshake_vectors_for(l);
-        }
+        handshake_vectors_for(Labels::Kith);
     }
 
     #[test]
     fn frame_vectors() {
-        for l in Labels::ALL {
-            frame_vectors_for(l);
-        }
+        frame_vectors_for(Labels::Kith);
     }
 
     #[test]
     fn mailbox_vector_opens() {
-        for l in Labels::ALL {
-            mailbox_vector_opens_for(l);
-        }
+        mailbox_vector_opens_for(Labels::Kith);
     }
 
     #[test]
     fn push_vector_seals() {
-        for l in Labels::ALL {
-            push_vector_seals_for(l);
-        }
+        push_vector_seals_for(Labels::Kith);
     }
 
     #[allow(clippy::many_single_char_names)] // vector sections, named as in the JSON
     #[test]
     fn sas_offer_claim_and_request_sig_vectors() {
-        for l in Labels::ALL {
-            sas_offer_claim_and_request_sig_vectors_for(l);
-        }
+        sas_offer_claim_and_request_sig_vectors_for(Labels::Kith);
     }
 }

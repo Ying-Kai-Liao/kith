@@ -72,22 +72,12 @@ export function boxKey(priv: Uint8Array = random(32)): BoxKey {
   return { priv, pub: x25519.getPublicKey(priv) };
 }
 
-// ---- label family ----
-
-/** Which labels the reference side speaks. New pairings use "kith"; the legacy-compat tests pin the old family. */
-export type Family = string;
-export let family: Family = "kith";
-export const useFamily = (f: Family) => {
-  family = f;
-};
-const label = (rest: string) => `${family}/${rest}`;
-/** The signature header name for the current family. */
-export const sigHeader = () => `${family[0]!.toUpperCase()}${family.slice(1)}-Sig`;
+const label = (rest: string) => `kith/${rest}`;
 
 // ---- Kith-Sig (§5) ----
 
 export function sigCanonical(method: string, authority: string, pathAndQuery: string, ts: number, nonce: string, body: Uint8Array) {
-  return [`${family}-sig-v1`, method.toUpperCase(), authority.toLowerCase(), pathAndQuery, String(ts), nonce, b64url(sha256(body))].join("\n");
+  return [`kith-sig-v1`, method.toUpperCase(), authority.toLowerCase(), pathAndQuery, String(ts), nonce, b64url(sha256(body))].join("\n");
 }
 
 /** The `Kith-Sig` header value. */
@@ -259,8 +249,8 @@ export function sasCode(hostSignPub: Uint8Array, dk: Uint8Array, nD: Uint8Array,
 
 export const offerId = (code: Uint8Array) => b64url(sha256(concat(enc.encode(label("offer/v1")), code)).subarray(0, 16));
 
-export const claimCanonical = (claimId: string, nonce: string, userId: string, computerId: string, boxKey: string, f: Family = family) =>
-  [`${f}/claim/v1`, claimId, nonce, userId, computerId, boxKey].join("\n");
+export const claimCanonical = (claimId: string, nonce: string, userId: string, computerId: string, boxKey: string) =>
+  [`kith/claim/v1`, claimId, nonce, userId, computerId, boxKey].join("\n");
 
 export interface AclBody {
   v: 1;

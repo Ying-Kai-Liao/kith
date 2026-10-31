@@ -1,8 +1,7 @@
 // Clerk-authenticated account routes: devices, claims, computers, access requests and grants.
 
 import type { Env } from "../index";
-import { LEGACY_SIG_HEADER } from "../legacy-compat";
-import { computerIdFor, fromB64url, LABEL_FAMILIES, randomId, utf8, verifyEd25519, webOrigins, type LabelFamily } from "../auth";
+import { computerIdFor, fromB64url, randomId, utf8, verifyEd25519, webOrigins } from "../auth";
 import {
   ApiError,
   audit,
@@ -38,8 +37,7 @@ export const claimCanonical = (
   userId: string,
   computerId: string,
   boxKey: string,
-  family: LabelFamily = "kith",
-) => [`${family}/claim/v1`, claimId, nonce, userId, computerId, boxKey].join("\n");
+) => [`kith/claim/v1`, claimId, nonce, userId, computerId, boxKey].join("\n");
 
 export async function me(c: Ctx): Promise<Responses["me"]> {
   const u = await user(c);
@@ -213,16 +211,10 @@ export async function completeClaim(c: Ctx, [claimId]: string[]): Promise<Respon
     .bind(claimId, u.userId)
     .first<{ nonce: string }>();
   if (!claim) throw new ApiError("notFound");
-  // A host that hasn't updated yet signs the claim under the old labels (legacy-compat.ts).
   const signer = fromB64url(signKey, 32)!;
-  let signedClaim = false;
-  for (const family of LABEL_FAMILIES) {
-    if (await verifyEd25519(signer, sig, utf8(claimCanonical(claimId, claim.nonce, u.userId, computerId, boxKey, family)))) {
-      signedClaim = true;
-      break;
-    }
+  if (!(await verifyEd25519(signer, sig, utf8(claimCanonical(claimId, claim.nonce, u.userId, computerId, boxKey))))) {
+    throw new ApiError("badSignature");
   }
-  if (!signedClaim) throw new ApiError("badSignature");
   const existing = await c.env.DB.prepare("SELECT status FROM computers WHERE id = ?").bind(computerId).first<{ status: string }>();
   if (existing && existing.status !== "active") throw new ApiError("forbidden");
 
@@ -257,7 +249,7 @@ export async function completeClaim(c: Ctx, [claimId]: string[]): Promise<Respon
 export async function listComputers(c: Ctx): Promise<Responses["listComputers"]> {
   const u = await user(c);
   let deviceId: string | null = null;
-  if (c.req.headers.has("Kith-Sig") || c.req.headers.has(LEGACY_SIG_HEADER)) {
+  if (c.req.headers.has("Kith-Sig")) {
     const s = await signed(c);
     const d = await c.env.DB.prepare(
       "UPDATE devices SET last_used_at = ? WHERE owner_user_id = ? AND sign_pub = ? AND revoked_at IS NULL RETURNING id",

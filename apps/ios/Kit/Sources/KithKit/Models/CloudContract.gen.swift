@@ -5,7 +5,7 @@ import Foundation
 
 /// The cloud contract these types were made from.
 public enum CloudContract {
-    public static let sha256 = "0c5a1e624112809e89829ddfc89c784ff5e09aa201a157f1aa7cf54b05814888"
+    public static let sha256 = "0fa1c666e2858bc639027cbedcfe942f9e7f3e78450f3506d53ce4bc48d30d2f"
 }
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
@@ -707,8 +707,6 @@ public struct BotInviteAccepted: Codable, Hashable, Sendable {
 /// Each route's path, without a leading slash; a route with a query has it (relay sockets: `?v=1`).
 public enum CloudPath {
     public static let health = "v1/health"
-    public static let oauthLegacyCallback = "v1/oauth/callback"
-    public static let oauthLegacyDevCallback = "v1/oauth/callback/dev"
     public static let oauthKithCallback = "v1/oauth/callback/kith"
     public static let oauthKithDevCallback = "v1/oauth/callback/kith-dev"
     public static let me = "v1/me"
