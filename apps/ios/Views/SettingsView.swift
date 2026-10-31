@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var notificationsAllowed: Bool?
     @AppStorage("notificationsEnabled") private var notificationsEnabled = true
     @AppStorage(Analytics.enabledKey) private var analyticsEnabled = true
+    @AppStorage(LinkPreview.enabledKey) private var showLinkPictures = true
     @AppStorage(TextSizePreference.key) private var textSize = TextSizePreference.system.rawValue
     @AppStorage(AppearancePreference.key) private var appearance = AppearancePreference.system.rawValue
     @State private var pairing = false
@@ -101,6 +102,15 @@ struct SettingsView: View {
                     Toggle(isOn: Binding(get: { analyticsEnabled }, set: { Analytics.shared.setEnabled($0) })) { EmptyView() }
                         .toggleStyle(.kithGreen)
                         .accessibilityLabel("Share usage analytics")
+                }
+            }
+
+            CardSection(footer: "Kith loads a picture from each news link. The site sees your IP address, just as when you open the link.") {
+                HStack {
+                    Text("Show link pictures").lineLimit(1)
+                    Toggle(isOn: $showLinkPictures) { EmptyView() }
+                        .toggleStyle(.kithGreen)
+                        .accessibilityLabel("Show link pictures")
                 }
             }
 

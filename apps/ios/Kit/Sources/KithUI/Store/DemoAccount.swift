@@ -344,6 +344,25 @@ extension AccountStore {
                 ]),
             ].compactMap { $0 }
         }
+        if DemoScreens.name == "news" {
+            // The News card with real links, for the link-pictures shots (the simulator fetches their pictures).
+            func row(_ title: String, _ line: String, _ source: String, _ domain: String, _ url: String) -> [String: Any] {
+                ["title": title, "line": line, "source": source, "domain": domain, "url": url]
+            }
+            let rows = [
+                row("Cold front brings snow to the Alps", "Up to 30 cm by Saturday, then clearing.", "BOM", "bom.gov.au", "https://www.bom.gov.au/"),
+                row("Reserve Bank holds the cash rate", "Third meeting in a row without a move.", "ABC News", "abc.net.au", "https://www.abc.net.au/news"),
+                row("What the new Swift concurrency checks catch", "A look at the Swift 6 migration.", "Swift.org", "swift.org", "https://www.swift.org/blog/"),
+                row("Sydney ferry timetable changes from Monday", "Three routes move to a 20 minute gap.", "", "transportnsw.info", "https://transportnsw.info/"),
+                row("A page with no picture", "Nothing to show here.", "Local", "example.com", "https://example.com/"),
+            ]
+            let card: [String: Any] = ["type": "news", "v": 1, "ref": ["agent": id, "job": "morning-brief"], "snapshot": [
+                "name": "Morning brief", "every": "Every day at 7:00", "lead": "Five worth your time today.",
+                "tail": "Want the long read summarised?", "rows": rows,
+            ]]
+            list = [entry("agent", ago: 1, data: ["text": "Morning brief: five items.", "final": true, "richCard": card])].compactMap { $0 }
+            threads = [:]
+        }
         store.entries[id] = list
         store.threadFolders.merge(threads) { $1 }
     }
