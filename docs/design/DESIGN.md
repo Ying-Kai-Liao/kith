@@ -262,7 +262,10 @@ a design decision). At most one card per reply. Boards: `docs/design/mocks/repli
 - **Plan** (report): title, "3 of 5" in mono, a 4 pt progress bar in the agent pair, steps updating in place (done =
   check, muted; now = spinner, semibold; next = ring, light). Replaces "done X" messages.
 - **Result** (report): what came out with its actions: icon tile, title, mono facts (#172 · 3 files · +84 / −12), a
-  green word for checks, one or two buttons (Open, Diff).
+  green word for checks, one or two buttons (Open, Diff). Payload v2 draws the Info card (morecards.jpg panel 2): the
+  reply's heading, one sub line (muted), then a white group of read-only Key: value rows (label muted left, value
+  right, hairlines, no chevrons, at most five), a link row only if the reply had a link, "Show as text" bottom-left.
+  v1 (the mono facts above) still draws for old entries.
 - **Options** (asks): two or three choices, a picture each (96 pt), name + one line; "Tap one, or say what to change".
 - **Numbers** (report): one mono figure (26), one line of context, at most five ink bars with tabular figures, one row
   to go further. Never a dashboard.

@@ -420,14 +420,77 @@ struct NewsCard: View {
 
 // MARK: Result
 
-/// The Result card: a reply Jev sorted as a result, its own lines as title and mono facts, a button for each link the
-/// reply held. The reply stays; "Show as text" folds the card back to it in place (DESIGN.md "Reply cards").
+/// The Result card: a reply Jev sorted as a result. v2 is the Info card (DESIGN.md "Reply cards"): the reply's heading,
+/// one sub line, Key: value rows and a link row if the reply had a link. v1 keeps its mono facts and buttons for old
+/// entries. The reply stays; "Show as text" folds the card back to it in place.
 struct ResultCard: View {
     let model: ResultCardModel
     let showText: () -> Void
     @Environment(\.openURL) private var openURL
 
     var body: some View {
+        if model.rows.isEmpty { facts } else { info }
+    }
+
+    private var info: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(model.title).kithText(.secondary).fontWeight(.semibold).foregroundStyle(Palette.ink)
+                if !model.sub.isEmpty {
+                    Text(model.sub).font(.footnote).foregroundStyle(Palette.muted)
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            WhiteGroup {
+                ForEach(Array(model.rows.enumerated()), id: \.offset) { _, row in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        if !row.label.isEmpty {
+                            Text(row.label).font(.footnote).foregroundStyle(Palette.muted)
+                                .frame(width: 92, alignment: .leading)
+                        }
+                        Text(row.value).kithText(.secondary).foregroundStyle(Palette.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .accessibilityElement(children: .combine)
+                }
+                ForEach(model.links) { link in
+                    Button { openURL(link.url) } label: {
+                        HStack(spacing: 8) {
+                            Text(link.label).kithText(.secondary).foregroundStyle(Palette.ink).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Image(systemName: "arrow.up.right").font(.system(size: 9)).foregroundStyle(Palette.muted)
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityHint(link.url.host() ?? link.label)
+                }
+            }
+            Button(action: showText) {
+                HStack(spacing: 4) {
+                    Image(systemName: "doc.text").font(.system(size: 10))
+                    Text("Show as text").font(.caption)
+                }
+                .foregroundStyle(Palette.muted)
+                .frame(minHeight: 28)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 11)
+        .background(Palette.panel, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(model.title)
+    }
+
+    private var facts: some View {
         ReportCard(title: model.title, icon: "doc.text") {
             EmptyView()
         } content: {
