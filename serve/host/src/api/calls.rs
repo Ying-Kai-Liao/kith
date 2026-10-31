@@ -18,7 +18,15 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
             if !crate::calls::key_ok(hub, chat, b["key"].as_str()) {
                 return Ok(ControlFlow::Break(json!({"status": "not-allowed"})));
             }
-            crate::calls::ring_and_wait(hub, chat, reason, b["from"].as_str(), b["wait"] == true).await?
+            crate::calls::ring_and_wait_with(
+                hub,
+                chat,
+                reason,
+                b["from"].as_str(),
+                b["result"].as_str(),
+                b["wait"] == true,
+            )
+            .await?
         }
         // `kith-sched` and `kith` (a terminal run): the origin of a run they start, for the agent and the person it is
         // for. Only the owner's own processes may ask: the key it hands out rings that person.

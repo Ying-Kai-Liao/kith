@@ -358,3 +358,34 @@ async fn a_voice_call_line_is_written_at_the_start_and_filled_in_at_the_end() {
     assert!(stamp.is_err());
     assert!(r.hub.store.entry(&plain.id).unwrap().data["callSeconds"].is_null());
 }
+
+#[tokio::test]
+async fn a_call_that_carried_a_result_leaves_it_in_the_chat_when_declined_or_missed() {
+    let r = Rig::new().await;
+    // Declined: the line carries the bug and its PR link beside the reason.
+    let bot = r.owner_bot("house");
+    let result = Some("peace-guardian is down.\n\n PR: https://github.com/o/r/pull/9 ");
+    let out = ring_and_wait_with(&r.hub, &bot, "fix ready", None, result, false).await.unwrap();
+    rpc(&r, &Caller::Local, "callDecline", json!({"id": out["id"]})).await.unwrap();
+    let line = &notices(&r, &bot)[0];
+    assert_eq!(
+        line["text"],
+        "house tried to call: fix ready\npeace-guardian is down.\nPR: https://github.com/o/r/pull/9"
+    );
+    assert_eq!(line["callResult"], "peace-guardian is down.\nPR: https://github.com/o/r/pull/9");
+    assert_eq!(line["missedCall"], true);
+
+    // Missed: the same. Another agent, so the rate limit isn't what is tested.
+    r.hub.calls.set_ring_ms(40);
+    let money = r.owner_bot("money");
+    let out = ring_and_wait_with(&r.hub, &money, "fix ready", None, Some("bug X, PR Y"), true).await.unwrap();
+    assert_eq!(out["status"], "missed");
+    assert_eq!(notices(&r, &money)[0]["text"], "money tried to call: fix ready\nbug X, PR Y");
+
+    // An empty result: the line is as before.
+    let calm = r.owner_bot("calm");
+    let out = ring_and_wait_with(&r.hub, &calm, "hi", None, Some("  "), true).await.unwrap();
+    assert_eq!(out["status"], "missed");
+    assert_eq!(notices(&r, &calm)[0]["text"], "calm tried to call: hi");
+    assert!(notices(&r, &calm)[0].get("callResult").is_none());
+}
