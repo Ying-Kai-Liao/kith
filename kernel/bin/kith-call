@@ -27,7 +27,7 @@ done
 [[ $# -gt 0 && -n "$*" ]] || { echo 'usage: kith-call [--wait] [--result TEXT] "short reason"' >&2; exit 2; }
 [[ -n ${KITH_CALL_CHAT:-} && -n ${KITH_CALL_KEY:-} ]] || { echo "not-allowed"; echo "kith-call: only runs the Kith host started can call (no KITH_CALL_KEY here)" >&2; exit 7; }
 
-exec python3 - "$(dirname "$0")" "$wait" "$*" "$result" <<'PY'
+exec python3 -I - "$(dirname "$0")" "$wait" "$*" "$result" <<'PY'
 import json, os, subprocess, sys, urllib.error, urllib.request
 from pathlib import Path
 
