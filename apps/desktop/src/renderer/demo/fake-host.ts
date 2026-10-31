@@ -24,8 +24,8 @@ export class FakeHost {
   private analytics = true
   /** The people the owner invited and their open invites (host methods `people`, `invites`). */
   private people: Record<string, unknown>[] = [
-    { personId: 'mia', name: 'Mia', agents: { pacer: 'member', relay: 'guest' }, projects: [], joined: true, openInvites: 0, devices: [], autoBots: false },
-    { personId: 'leo', name: 'Leo', agents: { pacer: 'guest' }, projects: [], joined: false, openInvites: 0, devices: [], autoBots: false },
+    { personId: 'mia', name: 'Mia', agents: { pacer: 'member', relay: 'guest' }, projects: [], joined: true, openInvites: 0, devices: [], autoBots: false, revoked: false },
+    { personId: 'leo', name: 'Leo', agents: { pacer: 'guest' }, projects: [], joined: false, openInvites: 0, devices: [], autoBots: false, revoked: false },
   ]
   private invites: Record<string, unknown>[] = []
   /** The grants ledger as `accessLedger` returns it (fake people, folders and sites). */
@@ -463,7 +463,7 @@ export class FakeHost {
         const agents = (b.agents ?? {}) as Record<string, string>
         const existing = this.people.find((p) => p.personId === b.personId)
         const personId = existing ? String(existing.personId) : str('name').toLowerCase().replace(/\W+/g, '-')
-        if (!existing) this.people.push({ personId, name: str('name'), agents: {}, projects: [], joined: false, openInvites: 0, devices: [], autoBots: false })
+        if (!existing) this.people.push({ personId, name: str('name'), agents: {}, projects: [], joined: false, openInvites: 0, devices: [], autoBots: false, revoked: false })
         // Like the host, the invite grants the membership when it is made.
         const holder = this.people.find((p) => p.personId === personId)
         if (holder) holder.agents = { ...(holder.agents as object), ...agents }

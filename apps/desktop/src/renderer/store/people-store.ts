@@ -18,6 +18,8 @@ export class PeopleModel extends Observable {
   /** A host warning from the last change that still went through. */
   notice: string | null = null
   busy = false
+  /** Who the owner just removed, so the page can offer Undo until they do something else. */
+  removed: { personId: string; name: string } | null = null
 
   constructor(private store: BotStore) {
     super()
@@ -83,7 +85,22 @@ export class PeopleModel extends Observable {
   }
 
   async removePerson(personId: string) {
-    if ((await this.run((c) => c.revokePerson(personId))) !== null) await this.load()
+    const name = this.people.find((p) => p.personId === personId)?.name ?? personId
+    if ((await this.run((c) => c.revokePerson(personId))) === null) return
+    this.removed = { personId, name }
+    await this.load()
+  }
+
+  /** Undo of a revoke, from the banner or from the revoked person's row. The host's reason lands in `error`. */
+  async restorePerson(personId: string) {
+    if ((await this.run((c) => c.unrevokePerson(personId))) === null) return
+    if (this.removed?.personId === personId) this.removed = null
+    await this.load()
+  }
+
+  dismissRemoved() {
+    this.removed = null
+    this.changed()
   }
 
   async loadAudit(personId: string | null = null) {
