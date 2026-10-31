@@ -39,6 +39,14 @@ test('a 403 or 404 hides the section', () => {
   assert.equal(accessHidden(null), false)
 })
 
+test('a sentence rule shows the action, not the boilerplate', () => {
+  const sentence = (input: string) => `The owner approved the agent "x" doing exactly this one thing with Bash: ${input}. It is allowed, with that input only; it covers nothing else.`
+  assert.equal(ruleText({ kind: 'prose', rule: sentence('{"command": "ls -la /tmp"}') }), 'Bash: ls -la /tmp')
+  assert.equal(ruleText({ kind: 'prose', rule: sentence('{"a": 1}') }), 'Bash: {"a": 1}')
+  const long = ruleText({ kind: 'prose', rule: sentence(`{"command": "${'z'.repeat(200)}"}`) })
+  assert.ok(long.startsWith('Bash: zzz') && long.length === 90)
+})
+
 test('allowed rules: rows, a damaged file, short sentences and the detail line', () => {
   const raw = { allowed: [{ id: 'a1b2', rule: 'Bash(ls /tmp)', kind: 'rule', reason: '[Data Exfiltration]', added: '2026-10-29T10:00:00Z' }, { rule: 'no id' }, { id: 'x', rule: '' }, { id: 'p', rule: 'p'.repeat(200), kind: 'prose', reason: 5, added: 'nonsense' }], error: 'allowed.json is not usable' }
   const { rules, error } = parseAllowed(raw)

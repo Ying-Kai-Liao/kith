@@ -77,10 +77,26 @@ export function parseAllowed(raw: unknown): AllowedList {
   return { rules, error: typeof o.error === 'string' && o.error ? o.error : null }
 }
 
-/** A permission rule as it is; a sentence for the classifier cut to one short line. */
+const PROSE = /with (\S+): ([\s\S]*)\. It is allowed/
+
+/** The action a sentence rule allows, as "Bash: ls /tmp": the tool and the main field of its input. */
+function proseAction(rule: string): string | null {
+  const m = PROSE.exec(rule)
+  if (!m) return null
+  let shown = m[2]!
+  try {
+    const input = JSON.parse(shown) as Record<string, unknown>
+    const main = ['command', 'file_path', 'path', 'url', 'pattern'].map((k) => input[k]).find((v) => typeof v === 'string')
+    shown = typeof main === 'string' ? main : shown
+  } catch { /* not JSON: show it as it is */ }
+  return `${m[1]}: ${shown}`
+}
+
+/** A permission rule as it is; a sentence shown as the action it allows, cut to one short line. */
 export function ruleText(r: Pick<AllowedRule, 'rule' | 'kind'>, max = 90): string {
-  if (r.kind === 'rule' || r.rule.length <= max) return r.rule
-  return `${r.rule.slice(0, max - 1).trimEnd()}…`
+  if (r.kind === 'rule') return r.rule
+  const text = proseAction(r.rule) ?? r.rule
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`
 }
 
 /** "Blocked: [Data Exfiltration] · 2 h ago": why it was blocked, and when it was remembered. */

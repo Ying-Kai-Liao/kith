@@ -53,6 +53,16 @@ import Testing
     #expect(try JSONDecoder().decode(AllowedList.self, from: Data(#"{"allowed":[]}"#.utf8)) == AllowedList())
 }
 
+@Test func aSentenceRuleShowsTheActionNotTheBoilerplate() {
+    func prose(_ input: String) -> AllowedRule {
+        AllowedRule(id: "p", rule: "The owner approved the agent \"x\" doing exactly this one thing with Bash: \(input). It is allowed, with that input only; it covers nothing else.", kind: "prose")
+    }
+    #expect(prose(#"{"command": "ls -la /tmp"}"#).text() == "Bash: ls -la /tmp")
+    #expect(prose(#"{"a": 1}"#).text() == #"Bash: {"a": 1}"#)
+    let long = prose("{\"command\": \"\(String(repeating: "z", count: 200))\"}").text()
+    #expect(long.hasPrefix("Bash: zzz") && long.count == 90)
+}
+
 @Test func aRuleAlreadyRemovedIsNotAnError() {
     #expect(AccessTab.isNotFound(HostError.http(400, "Not found: it may already be removed")))
     #expect(!AccessTab.isNotFound(HostError.http(500, "boom")))

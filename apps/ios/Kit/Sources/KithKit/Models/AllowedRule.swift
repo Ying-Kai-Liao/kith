@@ -18,10 +18,26 @@ public struct AllowedRule: Codable, Hashable, Sendable, Identifiable {
         self.added = added
     }
 
-    /// A permission rule as it is; a sentence cut to one short line.
+    /// The action a sentence rule allows, as "Bash: ls /tmp": the tool and the main field of its input.
+    static func proseAction(_ rule: String) -> String? {
+        guard let from = rule.range(of: " with "),
+              let to = rule.range(of: ". It is allowed", range: from.upperBound..<rule.endIndex),
+              let colon = rule.range(of: ": ", range: from.upperBound..<to.lowerBound) else { return nil }
+        let tool = rule[from.upperBound..<colon.lowerBound]
+        var shown = String(rule[colon.upperBound..<to.lowerBound])
+        if let object = try? JSONSerialization.jsonObject(with: Data(shown.utf8)) as? [String: Any],
+           let main = ["command", "file_path", "path", "url", "pattern"].lazy.compactMap({ object[$0] as? String }).first {
+            shown = main
+        }
+        return "\(tool): \(shown)"
+    }
+
+    /// A permission rule as it is; a sentence shown as the action it allows, cut to one short line.
     public func text(max: Int = 90) -> String {
-        guard kind == "prose", rule.count > max else { return rule }
-        return rule.prefix(max - 1).trimmingCharacters(in: .whitespaces) + "…"
+        guard kind == "prose" else { return rule }
+        let shown = Self.proseAction(rule) ?? rule
+        guard shown.count > max else { return shown }
+        return shown.prefix(max - 1).trimmingCharacters(in: .whitespaces) + "…"
     }
 
     public var addedDate: Date? {
