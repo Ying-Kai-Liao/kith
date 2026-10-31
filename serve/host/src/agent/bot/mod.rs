@@ -211,6 +211,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         seg: Seg::None,
         tools: HashMap::new(),
         plan_entry: None,
+        plan_card: None,
         last_text: None,
         last_agent: None,
         context_show: crate::channels::settings::Settings::load().context_show,
@@ -427,6 +428,8 @@ struct Actor {
     seg: Seg,
     tools: HashMap<String, String>,
     plan_entry: Option<String>,
+    /// The Plan card (a notice) drawn from `plan_entry`, rewritten with each plan update.
+    plan_card: Option<String>,
     last_text: Option<String>,
     /// The turn's last `agent` entry (streamed text, a sent message or a file card): carries the context hint.
     last_agent: Option<String>,

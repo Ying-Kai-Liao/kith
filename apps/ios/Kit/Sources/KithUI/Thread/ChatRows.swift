@@ -89,6 +89,9 @@ struct ChatRow: View {
                 ConnectionRequestCard(entry: entry, request: request).padding(.top, 12)
             } else if let card = entry.data.handoff {
                 HandoffCardRow(entry: entry, card: card).padding(.top, 10)
+            } else if let card = entry.data.richCard, card.type == "plan", card.drawsInChat {
+                // A run's plan is one card that changes in place; an older app shows the notice's text twin.
+                PlanCard(entry: entry, card: card).padding(.top, 10)
             } else if let card = entry.data.richCard, card.type == "schedule", card.drawsInChat {
                 // A routine's card arrives as a notice from the host, not as the bot's message.
                 ScheduleCard(entry: entry, card: card).padding(.top, 10)
