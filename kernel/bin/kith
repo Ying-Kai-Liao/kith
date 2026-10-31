@@ -577,6 +577,10 @@ fi
 # The agent's defaultMode is its author's suggestion: this Mac's choice for the agent (kith install asks; agents in
 # ~/.kith/settings.json) wins over it, and the caller's over both.
 [[ -z $perm_mode ]] && perm_mode=$(python3 "$KITH/lib/kith_settings.py" permission_mode "$agent")
+# An owner's run of an agent that reads other people's text never starts in bypass (capabilities.yaml reads_others: false
+# lifts that for agents on the owner's own files); the cap wins over the caller and this Mac, the conservative side.
+reads_others=$(python3 "$KITH/lib/kith_settings.py" reads-others "$pkg/capabilities.yaml")
+[[ $p_owner == 1 && $perm_mode == bypassPermissions && $reads_others == 1 ]] && perm_mode=auto
 # For anyone but the owner the membership sets the permission mode, whatever the caller asked for, and deny rules
 # only Claude Code can enforce keep the run on Claude Code.
 if [[ $p_owner == 0 ]]; then
@@ -640,6 +644,9 @@ state_projects="$KITH_STATE/projects"$'\n'"$KITH_STATE_REAL/projects"
 learned="$src_pkg/skills/learned"$'\n'"$(cd "$src_pkg" && pwd -P)/skills/learned"
 [[ $p_owner == 0 ]] && learned=""
 if [[ $harness == claude ]]; then
+# The owner at their own terminal (same test as `terminal` below, which the settings fill needs earlier): their plugins stay on.
+owner_terminal=0
+[[ $launch -eq 0 && $print -eq 0 && $# -eq 0 && $p_owner == 1 && $nested -eq 0 && ${KITH_VIA:-terminal} == terminal && -t 0 && -t 1 ]] && owner_terminal=1
 plugins=$(claude plugin list --json 2>/dev/null || echo '[]')
 # Memory checks: before a Write/Edit/MultiEdit of a memory file the host's `kith memory hook pre` runs kith-mem's
 # checks and blocks a refused write with the reason; after it, `post` records the version. Files that aren't memory
@@ -670,7 +677,7 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
   [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
-fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
+fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
 $learned
 $state_projects" python3 -c '
 import json, os, re, sys
@@ -775,6 +782,8 @@ if not os.environ["PERM_MODE"]:
     s["permissions"].setdefault("defaultMode", get("permission_mode"))
 if "defaultMode" in s["permissions"]:   # the agent author may still suggest a retired one
     s["permissions"]["defaultMode"] = current(s["permissions"]["defaultMode"])
+    if os.environ["CAP_BYPASS"] == "1" and s["permissions"]["defaultMode"] == "bypassPermissions":
+        s["permissions"]["defaultMode"] = "auto"   # a reader agent: held to auto, whoever suggested bypass
 try:
     installed = [p["id"] for p in json.loads(os.environ["PLUGINS"])]
 except (ValueError, KeyError, TypeError):
@@ -782,7 +791,11 @@ except (ValueError, KeyError, TypeError):
 every = get("plugins")
 on = s.setdefault("enabledPlugins", {})
 for p in installed:
-    on.setdefault(p, p in ("kith@kith", "hq@hq") or p in every)
+    # At the owner terminal the plugins they installed stay as their own settings have them; the lean list is
+    # for runs between agents, host launches and other people.
+    want = p in ("kith@kith", "hq@hq") or p in every
+    if want or os.environ["OWNER_TERMINAL"] != "1":
+        on.setdefault(p, want)
 if os.environ["API_HELPER"]:   # claude-api backup: Claude Code asks kith-auth for the key itself; it is never in our output
     s["apiKeyHelper"] = os.environ["API_HELPER"]
 json.dump(s, sys.stdout, indent=1)' > "$runs/$$.settings.json"
@@ -943,6 +956,16 @@ done < <(printf '%s\n' "$KITH" "$kith_real" "$KITH_HOME/kernel" | awk '!seen[$0]
 "$KITH/bin/kith-auth" mcp-config "$agent" > "$runs/$$.mcp.json" \
   || { echo "kith: $agent: no shared services this run (kith-auth failed)" >&2; echo '{"mcpServers": {}}' > "$runs/$$.mcp.json"; }
 
+# Skills load lazily (their descriptions only) for the owner's runs between agents; --disable-slash-commands stays for
+# a guest (unless the role says global_skills: true), for an owner's room shared with other people, and for a role that
+# says global_skills: false.
+slash_off() {
+  local caps="$pkg/capabilities.yaml"
+  if [[ $p_owner == 0 ]]; then grep -q '^global_skills: *true' "$caps" 2>/dev/null && echo false || echo true
+  elif [[ -n ${KITH_ROOM_MEMBERS:-} ]] || grep -q '^global_skills: *false' "$caps" 2>/dev/null; then echo true
+  else echo false; fi
+}
+
 kith_env_sync   # the exports above reach role repos under their old HQ_ names too
 # The agent's MCP servers for a launch-json run: the granted shared services plus its own mcp.json, as one {"mcpServers": {...}}.
 # Anyone but the owner gets kith-permit and nothing else: no shared services (their logins), no server of the agent's own.
@@ -972,7 +995,7 @@ emit_launch() {
   add_dirs=$(for ((i = 1; i < ${#dirs[@]}; i += 2)); do printf '%s\n' "${dirs[i]}"; done)
   allowed_tools=$(printf '%s\n' "${allowed[@]}")
   [[ $harness == claude ]] && settings=$(cat "$runs/$$.settings.json")
-  grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null && no_slash=false || no_slash=true
+  no_slash=$(slash_off)
   [[ $harness == claude ]] || allowed_tools=""
   # A guest's workspace (above): Claude Code reads its temp dir from the process environment, not the settings, so the host
   # has to start it with these.
@@ -1015,7 +1038,7 @@ terminal=0
 if [[ $harness != claude ]]; then
   printf '%s\n' "$prompt" > "$runs/$$.prompt.md"
   run_dirs=$(for ((i = 1; i < ${#dirs[@]}; i += 2)); do printf '%s\n' "${dirs[i]}"; done)
-  { [[ $terminal -eq 1 ]] || grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null; } && gs=1 || gs=0
+  [[ $terminal -eq 1 || $(slash_off) == false ]] && gs=1 || gs=0
   run_mcp="$runs/$$.mcp.json"; [[ -f $pkg/mcp.json ]] && run_mcp+=$'\n'"$pkg/mcp.json"
   export KITH_RUN_PROMPT="$runs/$$.prompt.md" KITH_RUN_DIRS="$PWD"$'\n'"$run_dirs" KITH_RUN_MCP=$run_mcp KITH_RUN_GLOBAL_SKILLS=$gs
   hargs=(--)
@@ -1048,7 +1071,7 @@ args=(--append-system-prompt "$prompt" "${dirs[@]}" --settings "$settings_arg" -
 [[ $terminal -eq 1 ]] || args+=(--strict-mcp-config)
 args+=(--mcp-config "$mcp_arg")
 [[ $launch -eq 0 && $p_owner == 1 && -f $pkg/mcp.json ]] && args+=(--mcp-config "$pkg/mcp.json")
-[[ $terminal -eq 1 ]] || grep -q '^global_skills: *true' "$pkg/capabilities.yaml" 2>/dev/null || args+=(--disable-slash-commands)
+[[ $terminal -eq 1 || $(slash_off) == false ]] || args+=(--disable-slash-commands)
 [[ -n $KITH_MODEL ]] && args+=(--model "$KITH_MODEL")
 [[ -n $KITH_EFFORT ]] && args+=(--effort "$KITH_EFFORT")
 [[ $out_format == json ]] && args+=(--output-format json)
