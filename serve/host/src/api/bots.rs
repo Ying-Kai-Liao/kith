@@ -51,7 +51,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
             if name == "call_person" {
                 let reason = b["arguments"]["reason"].as_str().unwrap_or_default();
-                crate::calls::ring_and_wait(hub, bot, reason, false).await?
+                crate::calls::ring_and_wait(hub, bot, reason, None, false).await?
             } else if name == crate::cards::secret::TOOL {
                 crate::cards::secret::chat_request(hub, bot, actor_arg(&b, bot), &b["arguments"]).await?
             } else if crate::chat::profile::TOOLS.contains(&name) {
@@ -407,6 +407,11 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 return Ok(ControlFlow::Break(
                     crate::cards::secret::respond(hub, entry_id, option_id.as_deref()).await?,
                 ));
+            }
+            // A delegation chain's cap card (delegation.rs) has no process or messages either: raise the cap, or leave it.
+            if e.data["delegation"].is_object() {
+                let by = b["asPerson"].as_str().unwrap_or("owner");
+                return Ok(ControlFlow::Break(crate::delegation::respond(hub, &e, option_id.as_deref(), by).await?));
             }
             // A limit card holds messages, not a process: its answer runs them, raises the limit, or keeps them.
             if e.data["limit"].is_object() {

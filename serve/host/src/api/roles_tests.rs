@@ -105,6 +105,7 @@ pub(super) fn router_methods() -> BTreeSet<String> {
         include_str!("botguests.rs"),
         include_str!("peers.rs"),
         include_str!("threads.rs"),
+        include_str!("delegations.rs"),
     ];
     let mut out = BTreeSet::new();
     for src in sources {
@@ -557,8 +558,9 @@ async fn changing_and_revoking_a_persons_access() {
     assert_eq!(call(&r, &Caller::Local, "revokeInvite", json!({"inviteId": id})).await.unwrap()["revoked"], false);
     assert!(r.posts().iter().any(|(p, _)| p == &format!("/v1/host/invites/{id}/revoke")));
 
-    // Revoking the person: devices and the cloud membership go and kith-auth refuses them; the person, their rows,
-    // their memory and their account handle stay (the bridge tells them, and an undo finds them).
+    // Revoking the person: their devices and membership stop granting anything (kept for the undo, the cloud cuts the
+    // membership itself) and kith-auth refuses them; the person, their rows, their memory and their account handle
+    // stay (the bridge tells them, and an undo finds them).
     let other = r.device("sam-tablet", Some("sam"));
     call(&r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
     call(&r, &Caller::Local, "revokePerson", json!({"personId": "sam"})).await.unwrap();
@@ -567,10 +569,11 @@ async fn changing_and_revoking_a_persons_access() {
     assert_eq!(r.who("user_sam")["person"], "sam");
     assert_eq!(r.who("user_sam")["revoked"], true);
     assert_eq!(r.hub.store.memberships().unwrap(), []);
-    assert!(r.posts().iter().any(|(p, _)| p == &format!("/v1/host/memberships/{membership}/revoke")));
+    assert_eq!(r.hub.store.suspended_of("sam").unwrap().memberships, 1, "kept for the undo");
+    assert!(r.posts().iter().all(|(p, _)| p != &format!("/v1/host/memberships/{membership}/revoke")));
     assert!(call(&r, &sam, "hello", json!({})).await.is_err() && call(&r, &other, "hello", json!({})).await.is_err());
     assert!(call(&r, &Caller::Local, "revokePerson", json!({"personId": "nobody"})).await.is_err());
-    // The invite that was open is closed with them.
+    // An invite that was open cannot be accepted meanwhile.
     assert!(r.hub.store.invites().unwrap().iter().all(|i| !i.open(now_ms())));
     let _ = Arc::strong_count(&r.hub);
 }
@@ -750,6 +753,35 @@ async fn showing_the_summary_as_the_row_is_an_owner_setting_off_by_default() {
     }
     let (sam, _) = joined(&r, json!({"house": "member"})).await;
     let e = call(&r, &sam, "updateBot", json!({"id": bot, "rowShowsSummary": true})).await.unwrap_err();
+    assert!(denied(&e), "{e:#}");
+}
+
+async fn set_labels(r: &Rig, room: &str, labels: Value) -> anyhow::Result<Value> {
+    call(r, &Caller::Local, "updateBot", json!({"id": room, "labels": labels})).await
+}
+
+#[tokio::test]
+async fn a_rooms_labels_are_the_owners_normalized_and_capped() {
+    let r = Rig::new().await;
+    let (a, b) = (r.owner_bot("house"), r.owner_bot("money"));
+    let made = call(&r, &Caller::Local, "createBot", json!({"kind": "group", "name": "Crew", "members": [a, b]}))
+        .await
+        .unwrap();
+    let room = made["bot"]["id"].as_str().unwrap().to_owned();
+    assert!(made["bot"].get("labels").is_none(), "a room from before has none, and the key is left out");
+    let got = set_labels(&r, &room, json!([" Launch ", "launch", "", "Q4  Plan"])).await.unwrap();
+    assert_eq!(got["bot"]["labels"], json!(["launch", "q4 plan"]), "trimmed, lowercased, deduplicated");
+    let again = call(&r, &Caller::Local, "updateBot", json!({"id": room, "name": "Crew 2"})).await.unwrap();
+    assert_eq!(again["bot"]["labels"], json!(["launch", "q4 plan"]), "an edit that doesn't name them keeps them");
+    assert!(set_labels(&r, &room, json!(["a", "b", "c", "d", "e", "f"])).await.is_err(), "at most five");
+    assert!(set_labels(&r, &room, json!(["x".repeat(25)])).await.is_err(), "at most 24 characters");
+    assert_eq!(set_labels(&r, &room, json!(null)).await.unwrap()["bot"].get("labels"), None, "null clears");
+    // An agent's own chat is not a room.
+    let e = call(&r, &Caller::Local, "updateBot", json!({"id": a, "labels": ["x"]})).await.unwrap_err();
+    assert!(format!("{e:#}").contains("only a room"), "{e:#}");
+    // Only the owner sets them.
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    let e = call(&r, &sam, "updateBot", json!({"id": room, "labels": ["x"]})).await.unwrap_err();
     assert!(denied(&e), "{e:#}");
 }
 

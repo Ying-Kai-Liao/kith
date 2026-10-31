@@ -13,6 +13,7 @@ mod calls;
 mod cards;
 #[cfg(test)]
 mod contract_tests;
+mod delegations;
 pub mod devices;
 #[cfg(test)]
 mod error_tests;
@@ -43,6 +44,8 @@ mod roles_props;
 mod roles_tests;
 #[cfg(test)]
 mod room_points_props;
+#[cfg(test)]
+mod room_secrets_props;
 mod threads;
 
 pub use events::{events_stream, term_events};
@@ -176,7 +179,7 @@ async fn run_dispatch(hub: &Arc<Hub>, caller: &Caller, method: &str, mut b: Valu
         bot @ (Principal::Bot { .. } | Principal::BotPending(_)) => {
             return botguests::bot_call(hub, caller, bot, method, b, permitted).await;
         }
-        Principal::Peer(computer) => return peers::peer_call(hub, caller, &computer, method, &b, permitted),
+        Principal::Peer(computer) => return peers::peer_call(hub, caller, &computer, method, &b, permitted).await,
     }
     let observed = crate::analytics::observe_call(hub, caller, method, &b);
     let result = route(hub, caller, method, b).await;
@@ -239,6 +242,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match bots::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match delegations::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

@@ -4,6 +4,7 @@ import { BotAvatar, GroupAvatar } from '../../components/Avatar'
 import { Hairline, IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { SheetPage } from '../../components/Overlay'
+import { parseLabels } from '@shared/room-labels'
 import { HStack, Spacer } from '../../components/Stack'
 import { Text } from '../../components/Text'
 import { useStore } from '../../store/context'
@@ -25,6 +26,8 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
   const [draft, setDraft] = useState('')
   const [recipients, setRecipients] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
+  // A new group chat's purpose labels, typed as "launch, q4 plan".
+  const [labels, setLabels] = useState('')
   // The folder for the first message; the bot's own default shows until one is picked.
   const [startFolder, setStartFolder] = useState<StartingPick | null>(null)
   const toField = useRef<HTMLInputElement>(null)
@@ -85,7 +88,7 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
       return
     }
     store
-      .createGroup(picked.map((b) => b.name).join(', '), '', recipients)
+      .createGroup(picked.map((b) => b.name).join(', '), '', recipients, parseLabels(labels))
       .then((g) => open(g.id))
       .catch((e: unknown) => store.setError(errorText(e)))
   }
@@ -200,6 +203,9 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
         <div className="place-chip-row compose-folder">
           <StartingFolderChip key={picked[0]!.id} inherited={picked[0]!.folder} value={startFolder} onChange={setStartFolder} />
         </div>
+      ) : null}
+      {group ? (
+        <input className="field-box compose-labels" value={labels} placeholder="Labels (optional): launch, q4 plan" aria-label="Labels" onChange={(e) => setLabels(e.target.value)} />
       ) : null}
       <div className="compose-box">
         <AutoTextArea

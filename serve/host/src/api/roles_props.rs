@@ -481,6 +481,7 @@ pub(super) fn router_methods() -> Vec<String> {
         include_str!("botguests.rs"),
         include_str!("peers.rs"),
         include_str!("threads.rs"),
+        include_str!("delegations.rs"),
     ];
     let mut out = std::collections::BTreeSet::new();
     for src in sources {
@@ -1349,7 +1350,8 @@ fn the_store_health_reaches_a_member_without_its_error_text_and_only_the_owner_h
 #[test]
 fn the_key_methods_are_on_no_guest_list() {
     let routed = router_methods();
-    for m in ["provideSecret", "listKeys", "revokeKey"] {
+    // `sendSecret`, `withdrawSecret` and `roomSecrets` (room secrets, cards/room_secret.rs) are the owner's alone as well.
+    for m in ["provideSecret", "listKeys", "revokeKey", "sendSecret", "withdrawSecret", "roomSecrets"] {
         assert!(routed.iter().any(|r| r == m), "{m} is not found by the router walk");
         assert!(!MEMBER_METHODS.contains(&m), "{m} on MEMBER_METHODS");
         assert!(!roles::BOT_METHODS.contains(&m), "{m} on BOT_METHODS");

@@ -290,6 +290,8 @@ private final class FakePeopleHost: PeopleHost, @unchecked Sendable {
     var createDelay: Duration = .zero
     var revoked: [String] = []
     var removed: [String] = []
+    var restored: [String] = []
+    var restoreFailure: Error?
 
     func people() async throws -> [HostPerson] { try peopleResult.get() }
     func invites() async throws -> [HostInvite] {
@@ -305,6 +307,10 @@ private final class FakePeopleHost: PeopleHost, @unchecked Sendable {
     func revokeInvite(_ inviteId: String) async throws { revoked.append(inviteId) }
     func setPersonAccess(personId: String, agents: [String: InviteRole]?, projects: [String]?) async throws {}
     func revokePerson(_ personId: String) async throws { removed.append(personId) }
+    func unrevokePerson(_ personId: String) async throws {
+        if let failure = restoreFailure { throw failure }
+        restored.append(personId)
+    }
     func audit(since: Date?, personId: String?) async throws -> [AuditRow] { [] }
     func projectList() async throws -> [HQProject] { [] }
 }
@@ -351,6 +357,7 @@ private final class FakePeopleHost: PeopleHost, @unchecked Sendable {
         func revokeInvite(_ inviteId: String) async throws {}
         func setPersonAccess(personId: String, agents: [String: InviteRole]?, projects: [String]?) async throws {}
         func revokePerson(_ personId: String) async throws {}
+        func unrevokePerson(_ personId: String) async throws {}
         func audit(since: Date?, personId: String?) async throws -> [AuditRow] { [] }
         func projectList() async throws -> [HQProject] { [] }
     }
@@ -366,4 +373,20 @@ private final class FakePeopleHost: PeopleHost, @unchecked Sendable {
     await store.revokeInvite("inv_open")
     #expect(await store.remove("sam"))
     #expect(host.revoked == ["inv_open"] && host.removed == ["sam"])
+}
+
+@MainActor @Test func undoingARemoveRestoresThePersonAndAFailureShowsTheHostsReason() async {
+    struct Refused: LocalizedError { var errorDescription: String? { "Sam was already deleted." } }
+    let host = FakePeopleHost()
+    let store = PeopleStore { host }
+    #expect(store.removed == nil)
+    await store.load()
+    #expect(await store.remove("sam"))
+    #expect(store.removed?.name == "Sam")
+    host.restoreFailure = Refused()
+    await store.restore("sam")
+    #expect(host.restored.isEmpty && store.error == "Sam was already deleted." && store.removed?.personId == "sam")
+    host.restoreFailure = nil
+    await store.restore("sam")
+    #expect(host.restored == ["sam"] && store.removed == nil && store.error == nil)
 }

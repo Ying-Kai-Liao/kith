@@ -188,6 +188,11 @@ impl Core {
         self.with(|i| i.st.threads.contains_key(key))
     }
 
+    /// The Claude sessions behind a work key (`<thread>#<agent>`), for ending what they delegated.
+    pub fn thread_sessions(&self, wk: &str) -> Vec<String> {
+        self.with(|i| i.st.sessions_of(wk))
+    }
+
     /// A room's default agent: None when the room has none set (an agent's own channel then defaults to it).
     pub fn room_default(&self, room: &str) -> Option<String> {
         self.with(|i| i.st.rooms.get(room)?.get("default")?.as_str().map(str::to_owned))

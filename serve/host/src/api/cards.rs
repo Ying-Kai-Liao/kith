@@ -99,6 +99,26 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, mut b: Value) -> Result<C
             )
             .await?
         }
+        // Room secrets: the owner hands one member of a room a secret, once (cards/room_secret.rs). Owner only, on neither
+        // the member nor the bot list. `sendSecret` carries the value: moved out of the body at once into a Zeroizing
+        // buffer, and nothing here logs, audits or answers it.
+        "sendSecret" => {
+            let value = match std::mem::take(&mut b["value"]) {
+                Value::String(s) => zeroize::Zeroizing::new(s),
+                _ => bail!("`value` is required"),
+            };
+            crate::cards::room_secret::send(
+                hub,
+                str_arg(&b, "room")?,
+                str_arg(&b, "to")?,
+                value,
+                b["label"].as_str(),
+                b["ttlS"].as_i64(),
+            )
+            .await?
+        }
+        "withdrawSecret" => crate::cards::room_secret::withdraw(hub, str_arg(&b, "id")?).await,
+        "roomSecrets" => crate::cards::room_secret::list(hub, str_arg(&b, "room")?),
         "listKeys" => crate::cards::secret::list_keys().await?,
         "revokeKey" => {
             crate::cards::secret::revoke_key(str_arg(&b, "agent")?, str_arg(&b, "service")?, str_arg(&b, "profile")?)

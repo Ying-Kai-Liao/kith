@@ -145,16 +145,10 @@ impl Jev {
         }
     }
 
-    async fn scores(&self, task: &str, recent: &[String], latest: &str, partial: bool) -> Result<Scores> {
-        let asked = QUESTIONS.iter().chain(partial.then_some(&PARTIAL));
-        let questions: serde_json::Map<String, Value> =
-            asked.map(|(k, q)| ((*k).to_owned(), json!({"type": "noul", "instructions": q}))).collect();
-        let recent: Vec<Value> = recent.iter().map(|t| json!({"role": "user", "text": tail(t, 1000)})).collect();
-        let body = json!({
-            "model": self.model,
-            "state": {"task": tail(task, 4000), "recent": recent, "latest": tail(latest, 2000)},
-            "questions": questions,
-        });
+    /// One System One call, `state` and `questions` in, the response's JSON out. Fails on anything but a 2xx within
+    /// [`TIMEOUT`]. Other users of Jev (the reply cards) read the answers themselves.
+    pub async fn ask(&self, state: Value, questions: serde_json::Map<String, Value>) -> Result<Value> {
+        let body = json!({"model": self.model, "state": state, "questions": questions});
         let res = reqwest::Client::new()
             .post(&self.url)
             .bearer_auth(&self.key)
@@ -164,7 +158,17 @@ impl Jev {
             .send()
             .await?
             .error_for_status()?;
-        let v: Value = res.json().await?;
+        Ok(res.json().await?)
+    }
+
+    async fn scores(&self, task: &str, recent: &[String], latest: &str, partial: bool) -> Result<Scores> {
+        let asked = QUESTIONS.iter().chain(partial.then_some(&PARTIAL));
+        let questions: serde_json::Map<String, Value> =
+            asked.map(|(k, q)| ((*k).to_owned(), json!({"type": "noul", "instructions": q}))).collect();
+        let recent: Vec<Value> = recent.iter().map(|t| json!({"role": "user", "text": tail(t, 1000)})).collect();
+        let v = self
+            .ask(json!({"task": tail(task, 4000), "recent": recent, "latest": tail(latest, 2000)}), questions)
+            .await?;
         let score = |k: &str| -> Result<f64> {
             let s = v["answers"][k]["noul"].as_f64().with_context(|| format!("no `{k}` score"))?;
             Ok(s.clamp(0.0, 1.0))

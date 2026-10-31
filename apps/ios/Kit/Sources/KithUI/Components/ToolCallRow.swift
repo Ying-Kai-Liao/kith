@@ -16,13 +16,16 @@ public struct ToolCallRowModel: Equatable, Sendable {
     /// What the sheet shows; a row with neither is not tappable.
     public var command: String?
     public var output: String?
+    /// A `kith ask` row's id: the row opens the handoff's peek sheet (owner only) in place of the command and output.
+    public var askId: String?
 
-    public init(verb: String, object: String, result: Result? = nil, command: String? = nil, output: String? = nil) {
+    public init(verb: String, object: String, result: Result? = nil, command: String? = nil, output: String? = nil, askId: String? = nil) {
         self.verb = verb
         self.object = object
         self.result = result
         self.command = command
         self.output = output
+        self.askId = askId
     }
 
     var hasDetail: Bool { command != nil || output != nil }
@@ -32,11 +35,20 @@ public struct ToolCallRowModel: Equatable, Sendable {
 public struct ToolCallRow: View {
     let model: ToolCallRowModel
     @State private var showSheet = false
+    @State private var showPeek = false
+    /// Absent in previews and the gallery; only the owner's store opens a handoff.
+    @Environment(BotStore.self) private var store: BotStore?
 
     public init(_ model: ToolCallRowModel) { self.model = model }
 
     public var body: some View {
-        if model.hasDetail {
+        if let id = model.askId, let store, store.isOwner {
+            Button { showPeek = true } label: { row }
+                .buttonStyle(.plain)
+                .kithSheet(isPresented: $showPeek) { HandoffSheet(store: store, id: id).presentationDetents([.medium, .large]) }
+                .accessibilityAddTraits(.isButton)
+                .accessibilityHint(Text("Opens the handoff"))
+        } else if model.hasDetail {
             Button { showSheet = true } label: { row }
                 .buttonStyle(.plain)
                 .sheet(isPresented: $showSheet) {

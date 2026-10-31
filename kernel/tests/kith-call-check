@@ -30,7 +30,7 @@ python3 "$tmp/host.py" "$tmp/port" "$tmp/seen.json" & srv=$!
 for _ in $(seq 50); do [[ -s $tmp/port ]] && break; sleep 0.1; done
 [[ -s $tmp/port ]] || fail "the fake host did not start"
 
-export KITH_SERVE_DIR=$tmp KITH_SERVE_PORT=$(cat "$tmp/port") KITH_CALL_CHAT=chat1 KITH_CALL_KEY=k1
+export KITH_SERVE_DIR=$tmp KITH_SERVE_PORT=$(cat "$tmp/port") KITH_CALL_CHAT=chat1 KITH_CALL_KEY=k1 KITH_AGENT=coder
 
 out=$("$call" "a call about dinner") || fail "ringing should exit 0: $out"
 [[ $out == ringing ]] || fail "status: $out"
@@ -38,7 +38,7 @@ python3 - "$tmp/seen.json" <<'PY' || fail "request"
 import json, sys
 s = json.load(open(sys.argv[1]))
 assert s['path'] == '/api/callPerson' and s['auth'] == 'Bearer secret-token', s
-assert s['body'] == {'chat': 'chat1', 'key': 'k1', 'reason': 'a call about dinner', 'wait': False}, s
+assert s['body'] == {'chat': 'chat1', 'key': 'k1', 'reason': 'a call about dinner', 'wait': False, 'from': 'coder'}, s
 PY
 
 "$call" --wait "a" >/dev/null
@@ -46,6 +46,18 @@ python3 - "$tmp/seen.json" <<'PY' || fail "wait not sent"
 import json, sys
 assert json.load(open(sys.argv[1]))['body']['wait'] is True
 PY
+"$call" --result $'bug X\nPR: https://github.com/o/r/pull/1' --wait "a" >/dev/null
+python3 - "$tmp/seen.json" <<'PY' || fail "result not sent"
+import json, sys
+b = json.load(open(sys.argv[1]))['body']
+assert b['result'] == 'bug X\nPR: https://github.com/o/r/pull/1' and b['wait'] is True and b['reason'] == 'a', b
+PY
+"$call" "a" >/dev/null
+python3 - "$tmp/seen.json" <<'PY' || fail "a call without --result must not send one"
+import json, sys
+assert 'result' not in json.load(open(sys.argv[1]))['body']
+PY
+code=0; "$call" --result >/dev/null 2>&1 || code=$?; [[ $code == 2 ]] || fail "--result with nothing after it is a usage error, got $code"
 code=0; env -u KITH_CALL_KEY -u HQ_CALL_KEY "$call" "a" >/dev/null 2>&1 || code=$?
 [[ $code == 7 ]] || fail "a run without the key should be not-allowed (7), got $code"
 

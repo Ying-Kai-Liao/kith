@@ -110,7 +110,9 @@ pub fn door_of(card: &Card) -> Option<Door> {
         let len: usize = len.parse().ok()?;
         tail.get(len + 1..).filter(|_| tail.get(..len) == Some(card.person.as_str()))?
     };
-    if inner.is_empty() {
+    // An owner run of the app's chat (`run:o:acp:<chat>:<thread>`, its ask token): no Claude session or channel thread
+    // to wake. The answer is recorded and the agent asks again on its next pass.
+    if inner.is_empty() || inner.starts_with("acp:") {
         return None;
     }
     Some(if inner.contains('#') { Door::Channel(inner.to_owned()) } else { Door::Run { session: inner.to_owned() } })
@@ -1190,7 +1192,7 @@ fn cancel_waiting(hub: &Hub, matches: impl Fn(&Lane) -> bool) {
 /// nor another yes in the session brings the stopped turn back. `keys` are the queue sessions the caller knows it
 /// stops; the cards of `matches` add theirs. A turn the queue already gave to a door is settled by that door's own
 /// Stop ([`not_started`], [`channel_failed`]).
-pub fn stopped(hub: &Hub, keys: &[String], matches: impl Fn(&Door) -> bool) {
+pub fn stopped(hub: &Hub, keys: &[String], ending: Vec<String>, matches: impl Fn(&Door) -> bool) {
     let mut keys: BTreeSet<String> = keys.iter().cloned().collect();
     for card in hub.store.cards_unapplied() {
         let Some(door) = door_of(&card).filter(&matches) else { continue };
@@ -1199,34 +1201,94 @@ pub fn stopped(hub: &Hub, keys: &[String], matches: impl Fn(&Door) -> bool) {
         end_for_stop(hub, &card);
     }
     let state = state_of(hub);
-    wake::spawn(move || {
-        for k in &keys {
-            wake::withdraw(&state, k, None);
+    let withdraw = {
+        let (state, keys) = (state.clone(), keys.clone());
+        move || {
+            for k in &keys {
+                wake::withdraw(&state, k, None);
+            }
         }
-    });
+    };
+    wake::spawn(withdraw.clone());
+    // The delegations those places started end too (R5, R8): their runs stop and their records settle. An answer landing
+    // between the two steps could still enqueue a wake, so the queue is withdrawn once more after they have ended.
+    if !ending.is_empty()
+        && let Ok(rt) = tokio::runtime::Handle::try_current()
+    {
+        drop(rt.spawn(async move {
+            crate::delegation::end(&ending, &[]).await;
+            drop(tokio::task::spawn_blocking(withdraw).await);
+        }));
+    }
+}
+
+/// The Claude sessions of the lanes whose key (`chat` or `chat/root`) `at` accepts (of one `bot`, or of every bot in the
+/// place), and the main session of `main_of` when that bot is stopped in its own main chat. The `kith ask` jobs these sessions started are the stopped lane's.
+fn lane_sessions(hub: &Hub, bot: Option<&str>, at: impl Fn(&str) -> bool, main_of: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = hub
+        .store
+        .kv_prefix(&bot.map_or_else(|| "lane.session.".to_owned(), |b| format!("lane.session.{b}@")))
+        .into_iter()
+        .filter(|k| k.split_once('@').is_some_and(|(_, lane)| at(lane)))
+        .filter_map(|k| hub.store.kv_get(&k))
+        .collect();
+    out.extend(main_of.and_then(|bot| hub.store.bot(bot).ok().flatten()).and_then(|b| b.session_id));
+    out.retain(|s| !s.is_empty());
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Every session a bot has: its main one and those of its lanes.
+fn bot_sessions(hub: &Hub, bot_id: &str) -> Vec<String> {
+    let prefix = format!("lane.session.{bot_id}@");
+    let mut out: Vec<String> = hub
+        .store
+        .kv_prefix(&prefix)
+        .into_iter()
+        .filter_map(|k| hub.store.kv_get(&k))
+        .chain(hub.store.bot(bot_id).ok().flatten().and_then(|b| b.session_id))
+        .filter(|s| !s.is_empty())
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Stop in one place of a bot (its chat or one thread).
-pub fn stopped_lane(hub: &Hub, lane: &Lane) {
+pub fn stopped_lane(hub: &Hub, bot: &str, lane: &Lane) {
     cancel_waiting(hub, |l| l == lane);
-    stopped(hub, &[session_key(lane)], |d| matches!(d, Door::Bot { lane: l, .. } if l == lane));
+    let key = lane.key();
+    let ending = lane_sessions(hub, Some(bot), |at| at == key, lane.thread.is_none().then_some(bot));
+    stopped(hub, &[session_key(lane)], ending, |d| matches!(d, Door::Bot { lane: l, .. } if l == lane));
 }
 
 /// Stop everywhere in a chat (a group stops as a whole).
 pub fn stopped_chat(hub: &Hub, chat: &str) {
     cancel_waiting(hub, |l| l.chat == chat);
-    stopped(hub, &[], |d| matches!(d, Door::Bot { lane, .. } if lane.chat == chat));
+    let ending = lane_sessions(
+        hub,
+        None,
+        |at| at == chat || at.strip_prefix(chat).is_some_and(|r| r.starts_with('/')),
+        Some(chat),
+    );
+    stopped(hub, &[], ending, |d| matches!(d, Door::Bot { lane, .. } if lane.chat == chat));
 }
 
 /// Stop everywhere a bot talks.
 pub fn stopped_bot(hub: &Hub, bot_id: &str) {
     cancel_waiting(hub, |l| l.chat == bot_id);
-    stopped(hub, &[], |d| matches!(d, Door::Bot { bot, .. } if bot == bot_id));
+    stopped(hub, &[], bot_sessions(hub, bot_id), |d| matches!(d, Door::Bot { bot, .. } if bot == bot_id));
 }
 
 /// Stop in a channel thread (its work key).
 pub fn stopped_thread(hub: &Hub, wk: &str) {
-    stopped(hub, &[wk.to_owned()], |d| matches!(d, Door::Channel(w) if w == wk));
+    stopped_thread_of(hub, wk, crate::channels::thread_sessions(wk));
+}
+
+/// [`stopped_thread`] with the thread's Claude sessions given: their delegations end with it (R8), as a lane's do.
+pub fn stopped_thread_of(hub: &Hub, wk: &str, sessions: Vec<String>) {
+    stopped(hub, &[wk.to_owned()], sessions, |d| matches!(d, Door::Channel(w) if w == wk));
 }
 
 #[cfg(not(test))]

@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8"
+    public static let sha256 = "dcc5b25fce70bc9615f4b9e5437113f17e5dd3a6b5476c677bcd71f587804878"
 }
 
 extension HostContract {
@@ -432,6 +432,7 @@ extension HostContract {
         public var id: String
         public var kind: BotKind
         public var members: [String]
+        public var labels: [String]?
         public var name: String
         public var description: String
         public var avatarColor: String
@@ -478,10 +479,11 @@ extension HostContract {
         public var lastAt: Int64
         public var botGuest: BotGuestRef?
 
-        public init(id: String, kind: BotKind, members: [String], name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
+        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
             self.id = id
             self.kind = kind
             self.members = members
+            self.labels = labels
             self.name = name
             self.description = description
             self.avatarColor = avatarColor
@@ -992,6 +994,28 @@ extension HostContract {
         }
     }
 
+    /// One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer.
+    public struct HandleRevoke: Codable, Hashable, Sendable {
+        public var handle: String
+        public var revoked: Bool
+        public var at: Int64
+
+        public init(handle: String, revoked: Bool, at: Int64) {
+            self.handle = handle
+            self.revoked = revoked
+            self.at = at
+        }
+    }
+
+    /// Every handle revoke or undo the sender knows; the answer is the receiver's own list, so both ends hold the latest of each.
+    public struct HandleRevokes: Codable, Hashable, Sendable {
+        public var handles: [HandleRevoke]
+
+        public init(handles: [HandleRevoke]) {
+            self.handles = handles
+        }
+    }
+
     /// Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only.
     public struct BotProof: Codable, Hashable, Sendable {
         public var state: BotGuestState
@@ -1064,13 +1088,47 @@ extension HostContract {
         public var epoch: Int64?
         public var entries: [BotEntry]
         public var cursor: Int64
+        public var secrets: [BotRoomSecret]?
 
-        public init(room: String, conversation: String? = nil, epoch: Int64? = nil, entries: [BotEntry], cursor: Int64) {
+        public init(room: String, conversation: String? = nil, epoch: Int64? = nil, entries: [BotEntry], cursor: Int64, secrets: [BotRoomSecret]? = nil) {
             self.room = room
             self.conversation = conversation
             self.epoch = epoch
             self.entries = entries
             self.cursor = cursor
+            self.secrets = secrets
+        }
+    }
+
+    /// A secret the owner handed this bot in this room, waiting to be fetched with botSecretFetch: who from, the sender's own label for it and when it lapses. Never the value.
+    public struct BotRoomSecret: Codable, Hashable, Sendable {
+        public var id: String
+        public var from: String
+        public var label: String?
+        public var expiresAt: Int64
+
+        public init(id: String, from: String, label: String? = nil, expiresAt: Int64) {
+            self.id = id
+            self.from = from
+            self.label = label
+            self.expiresAt = expiresAt
+        }
+    }
+
+    /// A secret handed to this bot, once: the value is in this answer and nowhere else, and a second fetch is notFound.
+    public struct BotSecret: Codable, Hashable, Sendable {
+        public var id: String
+        public var room: String
+        public var from: String
+        public var label: String?
+        public var value: String
+
+        public init(id: String, room: String, from: String, label: String? = nil, value: String) {
+            self.id = id
+            self.room = room
+            self.from = from
+            self.label = label
+            self.value = value
         }
     }
 
@@ -1659,6 +1717,15 @@ extension HostContract {
         }
     }
 
+    /// What `botSecretFetch` takes.
+    public struct BotSecretFetchParams: Codable, Hashable, Sendable {
+        public var id: String
+
+        public init(id: String) {
+            self.id = id
+        }
+    }
+
     /// What `botThread` takes.
     public struct BotThreadParams: Codable, Hashable, Sendable {
         public var conversation: String
@@ -1699,6 +1766,15 @@ extension HostContract {
     /// What `peerAgents` takes.
     public struct PeerAgentsParams: Codable, Hashable, Sendable {
         public init() {
+        }
+    }
+
+    /// What `peerRevokes` takes.
+    public struct PeerRevokesParams: Codable, Hashable, Sendable {
+        public var handles: [HandleRevoke]
+
+        public init(handles: [HandleRevoke]) {
+            self.handles = handles
         }
     }
 
@@ -1746,11 +1822,13 @@ extension HostContract {
         case botAsk
         case botPost
         case botRoomRead
+        case botSecretFetch
         case botThread
         case botConversations
         case botStop
         case botLeave
         case peerAgents
+        case peerRevokes
     }
 
     /// What the owner alone (a method no one else may call; the owner may call every method) may call.
@@ -1763,13 +1841,13 @@ extension HostContract {
     public static let unprovenMethods: [Method] = [.proveInvite]
 
     /// What a bot guest (the pending ones too: see botPending) may call.
-    public static let botMethods: [Method] = [.hello, .botStatus, .proveBotInvite, .botAsk, .botPost, .botRoomRead, .botThread, .botConversations, .botStop, .botLeave]
+    public static let botMethods: [Method] = [.hello, .botStatus, .proveBotInvite, .botAsk, .botPost, .botRoomRead, .botSecretFetch, .botThread, .botConversations, .botStop, .botLeave]
 
     /// What a bot guest that is still joining or waiting for its owner's allow may call.
     public static let botPendingMethods: [Method] = [.hello, .botStatus, .proveBotInvite]
 
     /// What another computer of the owner's, paired here (Mac link) may call.
-    public static let peerMethods: [Method] = [.peerAgents]
+    public static let peerMethods: [Method] = [.peerAgents, .peerRevokes]
 
     /// Decodes `data` as the contract type `name`; false when the contract has no such type. For the fixtures' tests.
     public static func decode(_ name: String, _ data: Data) throws -> Bool {
@@ -1817,10 +1895,14 @@ extension HostContract {
         case "BotSelf": _ = try d.decode(BotSelf.self, from: data)
         case "PeerAgent": _ = try d.decode(PeerAgent.self, from: data)
         case "PeerAgents": _ = try d.decode(PeerAgents.self, from: data)
+        case "HandleRevoke": _ = try d.decode(HandleRevoke.self, from: data)
+        case "HandleRevokes": _ = try d.decode(HandleRevokes.self, from: data)
         case "BotProof": _ = try d.decode(BotProof.self, from: data)
         case "BotAsked": _ = try d.decode(BotAsked.self, from: data)
         case "BotPosted": _ = try d.decode(BotPosted.self, from: data)
         case "BotRoom": _ = try d.decode(BotRoom.self, from: data)
+        case "BotRoomSecret": _ = try d.decode(BotRoomSecret.self, from: data)
+        case "BotSecret": _ = try d.decode(BotSecret.self, from: data)
         case "BotSender": _ = try d.decode(BotSender.self, from: data)
         case "BotEntry": _ = try d.decode(BotEntry.self, from: data)
         case "BotThread": _ = try d.decode(BotThread.self, from: data)
@@ -1868,11 +1950,13 @@ extension HostContract {
         case "BotAskParams": _ = try d.decode(BotAskParams.self, from: data)
         case "BotPostParams": _ = try d.decode(BotPostParams.self, from: data)
         case "BotRoomReadParams": _ = try d.decode(BotRoomReadParams.self, from: data)
+        case "BotSecretFetchParams": _ = try d.decode(BotSecretFetchParams.self, from: data)
         case "BotThreadParams": _ = try d.decode(BotThreadParams.self, from: data)
         case "BotConversationsParams": _ = try d.decode(BotConversationsParams.self, from: data)
         case "BotStopParams": _ = try d.decode(BotStopParams.self, from: data)
         case "BotLeaveParams": _ = try d.decode(BotLeaveParams.self, from: data)
         case "PeerAgentsParams": _ = try d.decode(PeerAgentsParams.self, from: data)
+        case "PeerRevokesParams": _ = try d.decode(PeerRevokesParams.self, from: data)
         default: return false
         }
         return true

@@ -1,14 +1,16 @@
-//! `kith room read` and `kith room post`: what a bot that was woken for its turn in a room runs. Both are one-shot (a
-//! woken Grok can't keep a process running, so there is no listen mode): read what the room said since a cursor, post
-//! one reply.
+//! `kith room read`, `kith room post` and `kith room secret`: what a bot that was woken for its turn in a room runs. All
+//! are one-shot (a woken Grok can't keep a process running, so there is no listen mode): read what the room said since a
+//! cursor, post one reply, take a secret the owner handed it.
 
 use std::fmt::Write as _;
 use std::io::Read;
 
-use kith_wire::rpc::{BotEntryKind, BotPostParams, BotPosted, BotRoom, BotRoomReadParams, method};
+use kith_wire::rpc::{
+    BotEntryKind, BotPostParams, BotPosted, BotRoom, BotRoomReadParams, BotSecret, BotSecretFetchParams, method,
+};
 use serde_json::json;
 
-use crate::cli::{RoomCommand, RoomPostArgs, RoomReadArgs};
+use crate::cli::{RoomCommand, RoomPostArgs, RoomReadArgs, RoomSecretArgs};
 use crate::config::Store;
 use crate::exit::CliError;
 use crate::output::Out;
@@ -91,6 +93,7 @@ pub async fn run(
     let result = match cmd {
         RoomCommand::Read(args) => read(&mut client, &args, out).await,
         RoomCommand::Post(args) => post(&mut client, &args, out).await,
+        RoomCommand::Secret(args) => secret(&mut client, &args, out).await,
     };
     client.close().await;
     result
@@ -105,7 +108,7 @@ async fn read(client: &mut Client<'_>, args: &RoomReadArgs, out: &Out) -> Result
     });
     let room: BotRoom = answer(client.call(method::BOT_ROOM_READ, body).await?)?;
     out.event(&json!({"type": "room", "room": room.room, "conversation": room.conversation, "epoch": room.epoch,
-                      "entries": room.entries, "cursor": room.cursor}));
+                      "entries": room.entries, "cursor": room.cursor, "secrets": room.secrets}));
     if !out.json {
         out.stdout(&format!("room {}\n", room.room));
         if let (Some(c), Some(e)) = (&room.conversation, room.epoch) {
@@ -126,9 +129,83 @@ async fn read(client: &mut Client<'_>, args: &RoomReadArgs, out: &Out) -> Result
             };
             out.stdout(&format!("{who}{lane}: {}\n", e.text));
         }
+        // Waiting for this bot to take: id, who from, the sender's label, when it lapses. Never the value.
+        for s in room.secrets.iter().flatten() {
+            let label = s.label.as_deref().map_or(String::new(), |l| format!(" \"{l}\""));
+            out.stdout(&format!(
+                "secret {} from {}{label}, lapses in {}: kith room secret {} --to-file PATH\n",
+                s.id,
+                s.from,
+                lapses_in(s.expires_at),
+                s.id
+            ));
+        }
         out.stdout(&format!("cursor {}\n", room.cursor));
     }
     Ok(())
+}
+
+/// "9 min" or "40 s", from an epoch-ms time; "0 s" once past.
+fn lapses_in(expires_at_ms: i64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    let secs = ((expires_at_ms - now) / 1000).max(0);
+    if secs >= 60 { format!("{} min", secs / 60) } else { format!("{secs} s") }
+}
+
+/// Opens the file the value will go to before asking the host: the host hands the value over once, so a path that
+/// can't be written must be found out first. New file only, mode 0600; a symlink or an existing file is refused.
+fn open_new(path: &std::path::Path) -> Result<std::fs::File, CliError> {
+    use std::os::unix::fs::OpenOptionsExt;
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).map_err(|e| match e.kind() {
+        std::io::ErrorKind::AlreadyExists => CliError::usage(format!(
+            "{} already exists: pick a path that doesn't, so no existing file is overwritten. The secret was not taken.",
+            path.display()
+        )),
+        _ => CliError::usage(format!("Can't write {}: {e}. The secret was not taken.", path.display())),
+    })
+}
+
+async fn secret(client: &mut Client<'_>, args: &RoomSecretArgs, out: &Out) -> Result<(), CliError> {
+    use std::io::Write;
+    let file = args.to_file.as_deref().map(|p| open_new(p).map(|f| (p, f))).transpose()?;
+    let got = match fetch(client, &args.id).await {
+        Ok(got) => got,
+        Err(e) => {
+            if let Some((path, _)) = &file {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(e);
+        }
+    };
+    let mut event = json!({"type": "secret", "id": got.id, "room": got.room, "from": got.from, "label": got.label});
+    if let Some((path, mut f)) = file {
+        if let Err(e) = f.write_all(got.value.as_bytes()).and_then(|()| f.flush()) {
+            let _ = std::fs::remove_file(path);
+            return Err(CliError::unexpected(format!(
+                "Can't write {}: {e}. The secret is gone: ask for a new one.",
+                path.display()
+            )));
+        }
+        event["file"] = json!(path);
+        out.event(&event);
+        if !out.json {
+            out.stdout(&format!("{}\n", path.display()));
+        }
+    } else {
+        event["value"] = json!(got.value);
+        out.event(&event);
+        if !out.json {
+            out.stdout(&format!("{}\n", got.value));
+        }
+    }
+    Ok(())
+}
+
+async fn fetch(client: &mut Client<'_>, id: &str) -> Result<BotSecret, CliError> {
+    client.ensure_usable().await?;
+    answer(client.call(method::BOT_SECRET_FETCH, params(&BotSecretFetchParams { id: id.to_string() })).await?)
 }
 
 async fn post(client: &mut Client<'_>, args: &RoomPostArgs, out: &Out) -> Result<(), CliError> {
@@ -196,5 +273,29 @@ mod tests {
         assert_eq!(post_text("-", || Ok("from stdin\n".into())).unwrap(), "from stdin");
         assert!(post_text("  ", none).is_err());
         assert!(post_text(&"x".repeat(MAX_CHARS + 1), none).is_err());
+    }
+
+    #[test]
+    fn open_new_is_private_and_never_replaces() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("k");
+        drop(open_new(&path).unwrap());
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(open_new(&path).is_err());
+        let link = dir.path().join("l");
+        std::os::unix::fs::symlink(dir.path().join("target"), &link).unwrap();
+        assert!(open_new(&link).is_err());
+        assert!(!dir.path().join("target").exists());
+    }
+
+    #[test]
+    fn lapses_in_reads_minutes_then_seconds() {
+        let now =
+            i64::try_from(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis())
+                .unwrap();
+        assert_eq!(lapses_in(now - 5000), "0 s");
+        assert!(lapses_in(now + 300_000).ends_with("min"));
+        assert!(lapses_in(now + 30_000).ends_with(" s"));
     }
 }

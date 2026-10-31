@@ -37,7 +37,7 @@ Auto-update reads the feed from GitHub directly.
 
 The Mac app is signed with a Developer ID Application certificate (team `T6DWQUSF55`) and notarized with an App Store
 Connect API key (create it under Users and Access, Integrations; the **Developer** role is enough for notarytool).
-On a tag the job fails if any of these is missing; a manual run builds unsigned instead.
+On a tag with any of these missing, the release goes out without the Mac app (a warning, never an unsigned app); a manual run builds unsigned instead.
 
 ```sh
 base64 -i DeveloperID.p12 | gh secret set MAC_CERT_P12_BASE64 -R Ying-Kai-Liao/kith

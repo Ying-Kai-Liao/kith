@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type WheelEvent, type ReactNode, type RefObject } from 'react'
 import { boardWaiting, buildBoard, type BoardTarget } from '@shared/board'
 import { resultList, searchCrew, type CrewHit, type CrewSearchSource } from '@shared/crew-search'
+import { goesTo, type GoesToAgent } from '@shared/goes-to'
 import { isGroup } from '@shared/models'
+import { hasLabel, labelsInUse } from '@shared/room-labels'
 import { isTask, taskLastAt, taskTitle } from '@shared/tasks'
 import { IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
@@ -21,13 +23,14 @@ import { UpdateBadge } from '../UpdateButton'
 import { swipeTracker } from '../../lib/sidebar-swipe'
 import { BoardList } from './BoardList'
 import { SearchResults } from './SearchResults'
+import { GoesToPill } from './GoesToPill'
 import '../sidebar-footer.css'
 import './crew-sidebar.css'
 
 const isMac = window.kith.platform === 'darwin'
 
 /** The sidebar of the main window: Crew or Board, the search dock, and the narrow rail. */
-export function CrewSidebar({ compact, roster, items, listRef, onListKey, onContext, searchRef, newItems, canCreate, accountOpen, onAccount, onExtensions, filter, emptyNote }: {
+export function CrewSidebar({ compact, roster, items, listRef, onListKey, onContext, searchRef, newItems, onNewRoom, canCreate, accountOpen, onAccount, onExtensions, filter, emptyNote }: {
   compact: boolean
   roster: ReturnType<typeof useComputerRoster>
   /** Every room shown, for search. */
@@ -38,6 +41,8 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
   /** ⌘F focuses this. */
   searchRef: RefObject<HTMLInputElement | null>
   newItems: () => MenuItem[]
+  /** The room list's New room: the group-creation page. */
+  onNewRoom: () => void
   canCreate: boolean
   accountOpen: boolean
   onAccount: () => void
@@ -51,6 +56,8 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const [newMenu, setNewMenu] = useState(false)
+  // The room list's label filter: one label at a time, applied in place to the Crew rows.
+  const [label, setLabel] = useState<string | null>(null)
   const newButton = useRef<HTMLDivElement>(null)
   const dictation = useDictation(query, setQuery)
   const searching = query.trim().length > 0
@@ -129,7 +136,9 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
       setActive((i) => (hits.length ? (i + step + hits.length) % hits.length : 0))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      openHit(hits[active] ?? hits[0])
+      // Matches open as before; with none (or a typed @name) the words go to the pill's agent as a new session.
+      if (hits.length && route.how !== 'mention') openHit(hits[active] ?? hits[0])
+      else sendNew()
     } else if (e.key === 'Escape') {
       dictation.stop()
       setQuery('')
@@ -138,6 +147,7 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
   const change = (text: string) => {
     setQuery(text)
     setActive(0)
+    if (!text.trim()) setPick(null)
   }
 
   // The dock has no send of its own: attached files go to the top match while searching, else the chat open now,
@@ -154,6 +164,36 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
     openRef(target.ref)
     setQuery('')
   }
+
+  // "Goes to": the owner's own agents only (no groups, no outside bots). The user's tap in the pill holds until the
+  // box is cleared.
+  const [pick, setPick] = useState<string | null>(null)
+  const sending = useRef(false)
+  const selectedKey = app.selection ? refKey(app.selection) : null
+  const agents: GoesToAgent[] = items
+    .filter((i) => !isGroup(i.bot) && !i.bot.botGuest)
+    .map((i) => ({ key: refKey(i.ref), name: i.bot.name, lastAt: i.bot.lastAt, selected: refKey(i.ref) === selectedKey }))
+  const route = goesTo(agents, query, pick)
+  // A message needs words; an unknown @name is not sent anywhere (it would otherwise go to the wrong agent).
+  const canSend = !!route.target && !!route.text
+  const sendNew = () => {
+    const to = route.target && byKey.get(route.target.key)
+    if (!to || !route.text || sending.current) return
+    sending.current = true
+    dictation.stop()
+    to.store.send(route.text, to.bot.id, null, [], undefined, [], true)
+    openRef(to.ref)
+    setQuery('')
+    setPick(null)
+    sending.current = false
+  }
+
+  const labels = labelsInUse(items.map((i) => i.bot))
+  // A label nobody uses any more (its last room was relabelled or deleted) no longer filters.
+  const activeLabel = label && labels.includes(label) ? label : null
+  const shownRoster = activeLabel
+    ? { ...roster, sections: roster.sections.map((s) => ({ ...s, items: s.items.filter((i) => hasLabel(i.bot, activeLabel)) })) }
+    : roster
 
   const profile = <SidebarProfile accountOpen={accountOpen} onAccount={onAccount} />
   const newMenuNode = <AnchoredMenu open={newMenu} onClose={() => setNewMenu(false)} anchor={newButton} items={newItems} />
@@ -189,7 +229,19 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
   ) : (
     <>
       {filter ? <div className="cs-filter no-drag">{filter}</div> : null}
-      <BotRoster roster={roster} compact={false} onContext={onContext} />
+      <div className="cs-labels no-drag" role="group" aria-label="Room labels">
+        {labels.map((l) => (
+          <button key={l} className={`cs-label press ${l === activeLabel ? 'on' : ''}`} aria-pressed={l === activeLabel} onClick={() => setLabel(l === activeLabel ? null : l)}>
+            {l}
+          </button>
+        ))}
+        {canCreate ? (
+          <button className="cs-label cs-new-room press" onClick={onNewRoom}>
+            <Icon name="plus" size={11} weight="medium" /> New room
+          </button>
+        ) : null}
+      </div>
+      <BotRoster roster={shownRoster} compact={false} onContext={onContext} />
       {emptyNote}
     </>
   )
@@ -212,6 +264,7 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
         {body}
       </div>
       <div className="cs-dock">
+        {searching ? <GoesToPill route={route} onPick={setPick} /> : null}
         <div className={`cs-box kith-glass ${searching ? 'typing' : ''}`}>
           <button className="cs-box-plus" aria-label="Attach files or images" title="Attach files or images" disabled={!attachTarget} onClick={() => void attach()}>
             <Icon name="plus" size={15} weight="medium" />
@@ -234,7 +287,7 @@ export function CrewSidebar({ compact, roster, items, listRef, onListKey, onCont
             </button>
           ) : null}
           {searching ? (
-            <button className="cs-box-send" aria-label="Open the top match" disabled={!hits.length} onClick={() => openHit(hits[active] ?? hits[0])}>
+            <button className="cs-box-send" aria-label={route.target ? `Send to ${route.target.name} as a new session` : 'Send'} title="Send as a new session (Return opens the top match)" disabled={!canSend} onClick={sendNew}>
               <Icon name="arrow.up" size={13} weight="bold" />
             </button>
           ) : !dictation.listening && window.kith.speech.available ? (

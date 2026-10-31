@@ -43,7 +43,7 @@ pub enum Command {
     Threads,
     /// Stop the running turn of a conversation.
     Stop(StopArgs),
-    /// Read or post in a room this bot is a member of (what a woken bot runs on its turn).
+    /// Read or post in a room this bot is a member of, or take a secret the owner handed it (what a woken bot runs).
     #[command(subcommand)]
     Room(RoomCommand),
     /// List the agents this bot may ask.
@@ -137,6 +137,21 @@ pub enum RoomCommand {
     Read(RoomReadArgs),
     /// Post one message into a room (a reply to your turn, or speaking up).
     Post(RoomPostArgs),
+    /// Take a secret the owner handed you in a room: once, then it is gone. Say where it goes.
+    Secret(RoomSecretArgs),
+}
+
+#[derive(Args, Debug)]
+#[command(group(clap::ArgGroup::new("dest").required(true).args(["to_file", "stdout"])))]
+pub struct RoomSecretArgs {
+    /// The secret's id (`rs_...`, from `kith room read`).
+    pub id: String,
+    /// Write the value to a NEW file (mode 0600) and print only its path. Refuses a path that exists.
+    #[arg(long, value_name = "PATH")]
+    pub to_file: Option<PathBuf>,
+    /// Print the value itself (it ends up wherever your output goes, a chat log included).
+    #[arg(long)]
+    pub stdout: bool,
 }
 
 #[derive(Args, Debug)]
@@ -203,6 +218,10 @@ mod tests {
         parse(&["read", "cv_1", "--after", "4", "--wait"]).unwrap();
         parse(&["stop", "cv_1"]).unwrap();
         parse(&["room", "read", "rm_1", "--since", "12", "--json"]).unwrap();
+        parse(&["room", "secret", "rs_1", "--to-file", "/tmp/x"]).unwrap();
+        parse(&["room", "secret", "rs_1", "--stdout"]).unwrap();
+        assert!(parse(&["room", "secret", "rs_1"]).is_err());
+        assert!(parse(&["room", "secret", "rs_1", "--stdout", "--to-file", "/tmp/x"]).is_err());
         parse(&["room", "post", "rm_1", "--conversation", "c", "--epoch", "2", "--turn-key", "k", "hi"]).unwrap();
     }
 

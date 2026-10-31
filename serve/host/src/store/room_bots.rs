@@ -141,7 +141,7 @@ mod tests {
             .execute_batch("DROP TABLE room_bots; UPDATE kv SET v = '13' WHERE k = 'schema';")
             .unwrap();
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("14"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("16"));
         assert_eq!(s.room_bot_point(&room, "bg1"), Some(RoomPoint { seq: last.seq, rev: s.current_rev() }));
         assert!(s.room_bot_point(&room, "a").is_none(), "an agent has no point");
     }

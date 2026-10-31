@@ -170,7 +170,7 @@ const bridge: KithBridge = {
     },
   },
   account: {
-    state: async (): Promise<AccountState> => (await ready, support ? { ready: true, configured: false, busy: false, error: null, user: null, cloudURL: null } : account.state),
+    state: async (): Promise<AccountState> => (await ready, support ? { ready: true, configured: false, busy: false, error: null, user: null, cloudURL: null, appleSignIn: false } : account.state),
     onChange: (cb) => account.onChange(cb),
     signIn: (provider) => account.signIn(provider),
     signOut,

@@ -20,7 +20,7 @@ use std::time::Duration;
 
 /// How long a call rings before it counts as missed.
 pub const RING_MS: i64 = 45_000;
-/// One call per agent per this long, and at most `PER_DAY` in any 24 hours.
+/// One call per chat per this long, and at most `PER_DAY` in any 24 hours.
 const MIN_GAP_MS: i64 = 10 * 60 * 1000;
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 const PER_DAY: usize = 6;
@@ -30,6 +30,8 @@ const ACTIVE_MS: i64 = 30 * 60 * 1000;
 const GREET_MS: i64 = 60_000;
 /// Longest reason kept, in characters.
 const MAX_REASON: usize = 200;
+/// Longest result kept, in characters.
+const MAX_RESULT: usize = 600;
 /// How long `wait` holds a `callPerson` request open.
 const WAIT: Duration = Duration::from_secs(50);
 
@@ -60,7 +62,12 @@ pub struct Call {
     pub bot_id: String,
     /// Whose call it is: `None` is the owner, else the invited person.
     pub person: Option<String>,
+    /// The agent that rang when it isn't the chat's own (`coder` working for `architect`): shown, never counted.
+    pub from: Option<String>,
     pub reason: String,
+    /// What the call is about (`kith-call --result`: a bug and its PR link), kept for the chat line a declined or
+    /// missed call leaves, so the result isn't lost with the call.
+    pub result: Option<String>,
     pub created: i64,
     pub state: State,
     settled: i64,
@@ -78,7 +85,7 @@ impl Call {
 #[derive(Default)]
 struct Inner {
     calls: HashMap<String, Call>,
-    /// Agent -> when its calls rang in the last day, oldest first.
+    /// Chat and person -> when its calls rang in the last day, oldest first.
     rung: HashMap<String, Vec<i64>>,
 }
 
@@ -147,7 +154,7 @@ impl Calls {
 
 /// The event for a call. `person` stays on the host: events are routed by the chat's owner.
 fn wire(hub: &Hub, call: &Call) -> Value {
-    let name = hub.store.bot(&call.bot_id).ok().flatten().map(|r| r.config.name).unwrap_or_default();
+    let name = shown(hub, call);
     json!({
         "type": "call",
         "rev": hub.store.current_rev(),
@@ -159,6 +166,21 @@ fn wire(hub: &Hub, call: &Call) -> Value {
     })
 }
 
+/// Who the screen says is calling: the chat's agent, or `coder (for architect)` when another agent rang in its name.
+fn shown(hub: &Hub, call: &Call) -> String {
+    let name = hub.store.bot(&call.bot_id).ok().flatten().map(|r| r.config.name).unwrap_or_default();
+    match &call.from {
+        Some(from) => format!("{from} (for {name})"),
+        None => name,
+    }
+}
+
+/// The `from` a run named for itself: one short word, or nothing. It is a label only; it decides no one's access.
+fn clean_from(from: Option<&str>) -> Option<String> {
+    let from: String = from?.chars().filter(|c| c.is_ascii_alphanumeric() || "._-".contains(*c)).take(40).collect();
+    (!from.is_empty()).then_some(from)
+}
+
 fn emit(hub: &Hub, call: &Call) {
     let _ = hub.events.send(wire(hub, call));
 }
@@ -168,9 +190,15 @@ fn clean(reason: &str) -> String {
     reason.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_REASON).collect()
 }
 
-/// What the rate limit counts: one agent's calls to one person.
-fn rate_key(agent: &str, person: Option<&str>) -> String {
-    format!("{agent}\u{1f}{}", person.unwrap_or_default())
+/// A result: its lines kept (a bug and a link read better apart), cut to length.
+fn clean_result(result: &str) -> String {
+    let lines: Vec<&str> = result.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    lines.join("\n").chars().take(MAX_RESULT).collect()
+}
+
+/// What the rate limit counts: the calls of one chat to its person. Never the `from` a run names, which it picks.
+fn rate_key(chat: &str, person: Option<&str>) -> String {
+    format!("{chat}\u{1f}{}", person.unwrap_or_default())
 }
 
 /// The proof a run has of serving `person` (`None` is the owner) in chat `bot`: the host puts it in that run's
@@ -200,6 +228,24 @@ pub fn run_env(hub: &Hub, agent: &str, person: Option<&str>) -> Vec<(String, Str
     chat_of(hub, agent, person).map(|c| env_for(hub, &c)).unwrap_or_default()
 }
 
+/// What a run starting for `agent` and `person` (`None` is the owner) is given as its origin: the call env of their
+/// main app chat and, with `outbox`, that chat's run outbox (`KITH_RUN_OUTBOX`). Both name the same chat and person,
+/// made here, so nothing the run later sets in its environment can move it. Nothing when the person has no app chat
+/// with the agent (`chat` is null): the caller then knows there is no origin to stamp.
+pub fn run_origin(hub: &Hub, agent: &str, person: Option<&str>, outbox: bool) -> Value {
+    let Some(chat) = chat_of(hub, agent, person) else { return json!({"chat": null, "env": {}}) };
+    let mut env: serde_json::Map<String, Value> = env_for(hub, &chat).into_iter().map(|(k, v)| (k, v.into())).collect();
+    if outbox {
+        match crate::run_outbox::for_chat(agent, person) {
+            Ok(dir) => {
+                env.insert("KITH_RUN_OUTBOX".into(), dir.to_string_lossy().into_owned().into());
+            }
+            Err(error) => tracing::warn!(agent, error = format!("{error:#}"), "no outbox for a run's origin"),
+        }
+    }
+    json!({"chat": chat, "env": env})
+}
+
 /// The agent's main chat with `person` (`None` is the owner): never a group.
 pub fn chat_of(hub: &Hub, agent: &str, person: Option<&str>) -> Option<String> {
     hub.store.bots().ok().and_then(|rows| {
@@ -215,8 +261,15 @@ pub fn chat_of(hub: &Hub, agent: &str, person: Option<&str>) -> Option<String> {
 }
 
 /// An agent rings its person. `bot_id` is the chat the agent works in, which also says who is called. The answer's
-/// `status` is `ringing`, `busy`, `rate-limited` or `not-allowed`.
-pub fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str) -> Result<Value> {
+/// `status` is `ringing`, `busy`, `rate-limited` or `not-allowed`. `from` is the agent a run says it is (`kith-call`
+/// sends `KITH_AGENT`): a label for the call screen only.
+#[cfg(test)]
+fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str, from: Option<&str>) -> Result<Value> {
+    ring_with(hub, bot_id, reason, from, None)
+}
+
+fn ring_with(hub: &Arc<Hub>, bot_id: &str, reason: &str, from: Option<&str>, result: Option<&str>) -> Result<Value> {
+    let result = result.map(clean_result).filter(|r| !r.is_empty());
     let reason = clean(reason);
     if reason.is_empty() {
         bail!("reason is required: say in a few words why you're calling");
@@ -225,7 +278,7 @@ pub fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str) -> Result<Value> {
         return Ok(json!({"status": "not-allowed"}));
     };
     let person = row.config.person.clone();
-    let agent = row.config.hq_agent.clone().unwrap_or_else(|| bot_id.to_owned());
+    let from = clean_from(from).filter(|f| row.config.hq_agent.as_deref() != Some(f));
     let now = now_ms();
     let call = {
         let mut g = hub.calls.inner.locked();
@@ -234,7 +287,7 @@ pub fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str) -> Result<Value> {
         if g.calls.values().any(|c| c.person == person && c.live(now)) {
             return Ok(json!({"status": "busy"}));
         }
-        let rung = g.rung.entry(rate_key(&agent, person.as_deref())).or_default();
+        let rung = g.rung.entry(rate_key(bot_id, person.as_deref())).or_default();
         rung.retain(|t| now - t < DAY_MS);
         let gap = rung.last().map(|t| MIN_GAP_MS - (now - t)).filter(|w| *w > 0);
         if gap.is_some() || rung.len() >= PER_DAY {
@@ -246,7 +299,9 @@ pub fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str) -> Result<Value> {
             id: uuid::Uuid::new_v4().to_string(),
             bot_id: bot_id.to_owned(),
             person,
+            from,
             reason,
+            result,
             created: now,
             state: State::Ringing,
             settled: now,
@@ -285,12 +340,18 @@ fn settle(hub: &Arc<Hub>, id: &str, to: State, who: Who) -> Result<Call> {
     };
     emit(hub, &call);
     if matches!(to, State::Declined | State::Missed) {
-        let name = hub.store.bot(&call.bot_id).ok().flatten().map(|r| r.config.name).unwrap_or_default();
+        let name = shown(hub, &call);
         // `missedCall` marks it for later styling; apps draw it as the notice it is.
-        let data = json!({
-            "text": format!("{name} tried to call: {}", call.reason),
-            "missedCall": true, "callState": to.as_str(), "callReason": call.reason,
-        });
+        // A call that carried a result (the health-check chain's bug and PR link) shows it in the same line, so a
+        // call nobody answered still leaves the result where the person will read it.
+        let text = match &call.result {
+            Some(result) => format!("{name} tried to call: {}\n{result}", call.reason),
+            None => format!("{name} tried to call: {}", call.reason),
+        };
+        let mut data = json!({"text": text, "missedCall": true, "callState": to.as_str(), "callReason": call.reason});
+        if let Some(result) = &call.result {
+            data["callResult"] = json!(result);
+        }
         // Always the main chat: the voice call talks there, so the call's lines and the greeting go with it.
         let lane = Lane::main(&call.bot_id);
         hub.add_entry(&lane, EntryKind::Notice, hub.store.max_turn(&call.bot_id), &data);
@@ -334,8 +395,26 @@ pub fn greet(hub: &Arc<Hub>, who: Option<&str>, id: &str) -> Result<Value> {
 
 /// `callPerson` and the `call_person` tool, after the caller has said which chat it is. With `wait` the answer holds
 /// until the person answered or the ring ended: `status` then is `accepted`, `declined` or `missed`.
-pub async fn ring_and_wait(hub: &Arc<Hub>, bot_id: &str, reason: &str, wait: bool) -> Result<Value> {
-    let mut out = ring(hub, bot_id, reason)?;
+pub async fn ring_and_wait(
+    hub: &Arc<Hub>,
+    bot_id: &str,
+    reason: &str,
+    from: Option<&str>,
+    wait: bool,
+) -> Result<Value> {
+    ring_and_wait_with(hub, bot_id, reason, from, None, wait).await
+}
+
+/// `ring_and_wait` with the result the call is about, kept for the line a declined or missed call leaves.
+pub async fn ring_and_wait_with(
+    hub: &Arc<Hub>,
+    bot_id: &str,
+    reason: &str,
+    from: Option<&str>,
+    result: Option<&str>,
+    wait: bool,
+) -> Result<Value> {
+    let mut out = ring_with(hub, bot_id, reason, from, result)?;
     let Some(id) = out["id"].as_str().filter(|_| wait).map(str::to_owned) else { return Ok(out) };
     let deadline = tokio::time::Instant::now() + WAIT;
     while tokio::time::Instant::now() < deadline {

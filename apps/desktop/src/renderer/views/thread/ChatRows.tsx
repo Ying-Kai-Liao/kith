@@ -24,6 +24,7 @@ import { isSecretCard } from '@shared/secret-card'
 import { confirmMessage, confirmTitle, heldIcon, heldRowOf, stoppedDivider } from '@shared/held-run'
 import { ConnectionRequestCard } from '../marketplace/ConnectionRequestCard'
 import { HandoffNotice } from './HandoffNotice'
+import { HandoffSheet } from './HandoffSheet'
 import { AnsweredBy } from './AnsweredBy'
 import { contextLine } from './context-hint'
 import { groupReactions } from './reaction-groups'
@@ -32,11 +33,13 @@ import { foldOf } from './fold-card'
 import { callLineSuffix } from './call-line'
 import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
 import { toolRowOf, VISIBLE_STEPS } from '@shared/thread-feed'
+import { askIdOf } from '@shared/handoff-peek'
 import { botGuestSender } from '@shared/bot-guest-chat'
 import { queuedLine } from '@shared/thread-writer'
 import { quoteOf, quotesOf } from './reply-quote'
 import { richCardOf, type RichCard } from '@shared/rich-card'
-import { NewsCard, ScheduleCard } from './RichCards'
+import { resultView } from '@shared/result-card'
+import { NewsCard, PlanCard, ResultCard, ScheduleCard } from './RichCards'
 import { lateOf } from '@shared/conversation'
 import { BotTag, LateTag } from './Tags'
 import { topicMenuItems } from './TopicPrompt'
@@ -121,13 +124,30 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
       if (entry.data.handoff) return <div className="chat-row notice"><HandoffNotice entry={entry} card={entry.data.handoff} /></div>
       // A routine's "Created routine" notice is its Schedule card.
       if (richCardOf(entry.data)?.type === 'schedule') return <div className="chat-row group-start"><div className="agent-inset"><ScheduleCard entry={entry} card={richCardOf(entry.data)!} /></div></div>
+      // A run's plan is one card that changes in place; an app without it shows the notice's text twin.
+      if (richCardOf(entry.data)?.type === 'plan') return <div className="chat-row group-start"><div className="agent-inset"><PlanCard entry={entry} card={richCardOf(entry.data)!} /></div></div>
       // Any notice that roots a thread (a bot guest's conversation) opens it like a message does.
       return <div className="chat-row notice"><NoticeRow entry={entry} /></div>
   }
 })
 
+/** A reply Jev sorted as a result: its card, which folds back to the reply in place ("Shown as text · Show as card"). */
+function ResultReply({ entry, card, openTrace, reply }: { entry: Entry; card: RichCard; openTrace: () => void; reply?: () => void }) {
+  const [asText, setAsText] = useState(false)
+  if (asText || !resultView(card)) {
+    return (
+      <>
+        <AgentBubble entry={entry} openTrace={openTrace} reply={reply} />
+        {resultView(card) ? <button className="rc-button rc-as-text" onClick={() => setAsText(false)}>Shown as text · Show as card</button> : null}
+      </>
+    )
+  }
+  return <div className="agent-inset"><ResultCard card={card} showText={() => setAsText(true)} /></div>
+}
+
 /** An agent message drawn as its card. A brief's lead and tail stay the agent's words, as bubbles around it. */
 function AgentCard({ entry, card, openTrace, reply }: { entry: Entry; card: RichCard; openTrace: () => void; reply?: () => void }) {
+  if (card.type === 'result') return <ResultReply entry={entry} card={card} openTrace={openTrace} reply={reply} />
   if (card.type === 'schedule') return <div className="agent-inset"><ScheduleCard entry={entry} card={card} /></div>
   const words = (key: 'lead' | 'tail') => (typeof card.snapshot?.[key] === 'string' ? (card.snapshot[key] as string).trim() : '')
   const bubble = (text: string) => (text ? <AgentBubble entry={{ ...entry, data: { ...entry.data, text } }} openTrace={openTrace} reply={reply} /> : null)
@@ -509,9 +529,14 @@ function MessageActions({ visible, className, reactions, reply, trace, copy }: {
 /** A tool call as one row in the chat: "Edited kith-sessions.py  +6 -2"; it opens the command and output. */
 export function ToolRowItem({ entry }: { entry: Entry }) {
   const m = toolRowOf(entry)
+  const store = useStore()
+  const [peeking, setPeeking] = useState(false)
+  // Only the owner sees a handoff's peek; a row without an ask id (a plain ask, one from before the records) is an ordinary row.
+  const ask = store.isOwner ? askIdOf(m.command, m.output) : null
   return (
     <div className="chat-tool">
-      <ToolRow verb={m.verb} object={m.object} result={m.result} state={m.state} detail={m.command || m.output ? { command: m.command, output: m.output } : undefined} />
+      <ToolRow verb={m.verb} object={m.object} result={m.result} state={m.state} detail={m.command || m.output ? { command: m.command, output: m.output } : undefined} onPeek={ask ? () => setPeeking(true) : undefined} />
+      {ask ? <HandoffSheet store={store} id={peeking ? ask : null} onClose={() => setPeeking(false)} /> : null}
     </div>
   )
 }

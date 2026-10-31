@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '4eb5a574dedfc23e78859c3e36706b53c81b2d25b63263726dee1c76c71467b8'
+export const CONTRACT_SHA256 = 'dcc5b25fce70bc9615f4b9e5437113f17e5dd3a6b5476c677bcd71f587804878'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -189,6 +189,7 @@ export interface Bot {
   id: string
   kind: BotKind
   members: string[]
+  labels?: string[] | null
   name: string
   description: string
   avatarColor: string
@@ -481,6 +482,18 @@ export interface PeerAgents {
   agents: PeerAgent[]
 }
 
+/** One person known only by a chat handle (`telegram:123`), revoked or restored, and when (ms). The latest change of a handle wins on every computer. */
+export interface HandleRevoke {
+  handle: string
+  revoked: boolean
+  at: number
+}
+
+/** Every handle revoke or undo the sender knows; the answer is the receiver's own list, so both ends hold the latest of each. */
+export interface HandleRevokes {
+  handles: HandleRevoke[]
+}
+
 /** Where the bot stands once its key showed the invite token. A repeat (the key was already proven) answers the state only. */
 export interface BotProof {
   state: BotGuestState
@@ -522,6 +535,24 @@ export interface BotRoom {
   epoch?: number | null
   entries: BotEntry[]
   cursor: number
+  secrets?: BotRoomSecret[] | null
+}
+
+/** A secret the owner handed this bot in this room, waiting to be fetched with botSecretFetch: who from, the sender's own label for it and when it lapses. Never the value. */
+export interface BotRoomSecret {
+  id: string
+  from: string
+  label?: string | null
+  expiresAt: number
+}
+
+/** A secret handed to this bot, once: the value is in this answer and nowhere else, and a second fetch is notFound. */
+export interface BotSecret {
+  id: string
+  room: string
+  from: string
+  label?: string | null
+  value: string
 }
 
 /** Who sent an ask: the bot, and the person it spoke for when it said. */
@@ -838,6 +869,11 @@ export interface BotRoomReadParams {
   limit?: number | null
 }
 
+/** What `botSecretFetch` takes. */
+export interface BotSecretFetchParams {
+  id: string
+}
+
 /** What `botThread` takes. */
 export interface BotThreadParams {
   conversation: string
@@ -860,6 +896,11 @@ export type BotLeaveParams = Record<string, never>
 
 /** What `peerAgents` takes. */
 export type PeerAgentsParams = Record<string, never>
+
+/** What `peerRevokes` takes. */
+export interface PeerRevokesParams {
+  handles: HandleRevoke[]
+}
 
 export interface Types {
   Empty: Empty
@@ -904,10 +945,14 @@ export interface Types {
   BotSelf: BotSelf
   PeerAgent: PeerAgent
   PeerAgents: PeerAgents
+  HandleRevoke: HandleRevoke
+  HandleRevokes: HandleRevokes
   BotProof: BotProof
   BotAsked: BotAsked
   BotPosted: BotPosted
   BotRoom: BotRoom
+  BotRoomSecret: BotRoomSecret
+  BotSecret: BotSecret
   BotSender: BotSender
   BotEntry: BotEntry
   BotThread: BotThread
@@ -955,11 +1000,13 @@ export interface Types {
   BotAskParams: BotAskParams
   BotPostParams: BotPostParams
   BotRoomReadParams: BotRoomReadParams
+  BotSecretFetchParams: BotSecretFetchParams
   BotThreadParams: BotThreadParams
   BotConversationsParams: BotConversationsParams
   BotStopParams: BotStopParams
   BotLeaveParams: BotLeaveParams
   PeerAgentsParams: PeerAgentsParams
+  PeerRevokesParams: PeerRevokesParams
 }
 export type TypeName = keyof Types
 
@@ -1026,11 +1073,13 @@ export const METHODS = {
   botAsk: { who: ['bot'], params: 'BotAskParams', result: 'BotAsked' },
   botPost: { who: ['bot'], params: 'BotPostParams', result: 'BotPosted' },
   botRoomRead: { who: ['bot'], params: 'BotRoomReadParams', result: 'BotRoom' },
+  botSecretFetch: { who: ['bot'], params: 'BotSecretFetchParams', result: 'BotSecret' },
   botThread: { who: ['bot'], params: 'BotThreadParams', result: 'BotThread' },
   botConversations: { who: ['bot'], params: 'BotConversationsParams', result: 'BotConversations' },
   botStop: { who: ['bot'], params: 'BotStopParams', result: 'Empty' },
   botLeave: { who: ['bot'], params: 'BotLeaveParams', result: 'Empty' },
   peerAgents: { who: ['peer'], params: 'PeerAgentsParams', result: 'PeerAgents' },
+  peerRevokes: { who: ['peer'], params: 'PeerRevokesParams', result: 'HandleRevokes' },
 } as const
 export type MethodName = keyof typeof METHODS
 
@@ -1078,11 +1127,13 @@ export interface Params {
   botAsk: BotAskParams
   botPost: BotPostParams
   botRoomRead: BotRoomReadParams
+  botSecretFetch: BotSecretFetchParams
   botThread: BotThreadParams
   botConversations: BotConversationsParams
   botStop: BotStopParams
   botLeave: BotLeaveParams
   peerAgents: PeerAgentsParams
+  peerRevokes: PeerRevokesParams
 }
 
 /** What each method answers with. */
@@ -1129,11 +1180,13 @@ export interface Results {
   botAsk: BotAsked
   botPost: BotPosted
   botRoomRead: BotRoom
+  botSecretFetch: BotSecret
   botThread: BotThread
   botConversations: BotConversations
   botStop: Empty
   botLeave: Empty
   peerAgents: PeerAgents
+  peerRevokes: HandleRevokes
 }
 
 /** What the owner alone (a method no one else may call; the owner may call every method) may call. */
@@ -1146,13 +1199,13 @@ export const MEMBER_METHODS = ['hello', 'kithInfo', 'startChat', 'send', 'thread
 export const UNPROVEN_METHODS = ['proveInvite'] as const satisfies readonly MethodName[]
 
 /** What a bot guest (the pending ones too: see botPending) may call. */
-export const BOT_METHODS = ['hello', 'botStatus', 'proveBotInvite', 'botAsk', 'botPost', 'botRoomRead', 'botThread', 'botConversations', 'botStop', 'botLeave'] as const satisfies readonly MethodName[]
+export const BOT_METHODS = ['hello', 'botStatus', 'proveBotInvite', 'botAsk', 'botPost', 'botRoomRead', 'botSecretFetch', 'botThread', 'botConversations', 'botStop', 'botLeave'] as const satisfies readonly MethodName[]
 
 /** What a bot guest that is still joining or waiting for its owner's allow may call. */
 export const BOT_PENDING_METHODS = ['hello', 'botStatus', 'proveBotInvite'] as const satisfies readonly MethodName[]
 
 /** What another computer of the owner's, paired here (Mac link) may call. */
-export const PEER_METHODS = ['peerAgents'] as const satisfies readonly MethodName[]
+export const PEER_METHODS = ['peerAgents', 'peerRevokes'] as const satisfies readonly MethodName[]
 
 // ---- checking and receiving ----
 
@@ -1196,7 +1249,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     KithInfo: { fields: { info: 'KithCard?', fetchedAt: 'int', error: 'string?' }, mayOmit: ['error'] },
     WorkingLane: { fields: { chat: 'string', thread: 'string?' } },
     BotGuestRef: { fields: { botId: 'string', name: 'string', provider: 'BotProvider', ownerPerson: 'string?', ownerName: 'string?' } },
-    Bot: { fields: { id: 'string', kind: 'BotKind', members: '[string]', name: 'string', description: 'string', avatarColor: 'string', avatarShape: 'string', avatarSource: 'string', backend: 'string', command: 'string?', cwd: 'string?', permission: 'Permission', model: 'string?', modelOptions: '{string}', fastMode: 'bool', pinned: 'bool', position: 'int', hidden: 'bool', notify: 'bool?', connectors: '[string]', skills: '[string]', computer: 'bool', sharedMemory: 'bool?', harnessMemory: 'bool?', rowShowsSummary: 'bool', autoName: 'bool', tasks: 'bool?', hqAgent: 'string?', project: 'string?', person: 'string?', createdAt: 'int', managedWorkspace: 'bool', folder: 'json?', memoryRev: 'int?', workingLanes: '[WorkingLane]', rev: 'int', deleted: 'bool', status: 'BotStatus', activity: 'string', startedAt: 'int?', workingChat: 'string?', workingThread: 'string?', fastModeSupport: 'string', fastModeIssue: 'string?', unread: 'int', lastMessage: 'string?', lastAt: 'int', botGuest: 'BotGuestRef?' }, mayOmit: ['command', 'cwd', 'folder', 'sharedMemory', 'memoryRev', 'tasks', 'hqAgent', 'project', 'person', 'botGuest'] },
+    Bot: { fields: { id: 'string', kind: 'BotKind', members: '[string]', labels: '[string]?', name: 'string', description: 'string', avatarColor: 'string', avatarShape: 'string', avatarSource: 'string', backend: 'string', command: 'string?', cwd: 'string?', permission: 'Permission', model: 'string?', modelOptions: '{string}', fastMode: 'bool', pinned: 'bool', position: 'int', hidden: 'bool', notify: 'bool?', connectors: '[string]', skills: '[string]', computer: 'bool', sharedMemory: 'bool?', harnessMemory: 'bool?', rowShowsSummary: 'bool', autoName: 'bool', tasks: 'bool?', hqAgent: 'string?', project: 'string?', person: 'string?', createdAt: 'int', managedWorkspace: 'bool', folder: 'json?', memoryRev: 'int?', workingLanes: '[WorkingLane]', rev: 'int', deleted: 'bool', status: 'BotStatus', activity: 'string', startedAt: 'int?', workingChat: 'string?', workingThread: 'string?', fastModeSupport: 'string', fastModeIssue: 'string?', unread: 'int', lastMessage: 'string?', lastAt: 'int', botGuest: 'BotGuestRef?' }, mayOmit: ['labels', 'command', 'cwd', 'folder', 'sharedMemory', 'memoryRev', 'tasks', 'hqAgent', 'project', 'person', 'botGuest'] },
     BotAnswer: { fields: { bot: 'Bot' } },
     Entry: { fields: { id: 'string', seq: 'int', botId: 'string', threadId: 'string?', rev: 'int', kind: 'EntryKind', turn: 'int', data: 'json', createdAt: 'int', updatedAt: 'int' } },
     Entries: { fields: { entries: '[Entry]', folder: 'json?', conversation: 'RoomConversation?' }, mayOmit: ['folder', 'conversation'] },
@@ -1230,10 +1283,14 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotSelf: { fields: { botId: 'string', name: 'string', state: 'BotGuestState', owner: 'BotOwner', agents: '[GrantedAgent]', limits: 'BotLimits', version: 'string', minClient: 'string' } },
     PeerAgent: { fields: { agent: 'string', name: 'string?' }, mayOmit: ['name'] },
     PeerAgents: { fields: { agents: '[PeerAgent]' } },
+    HandleRevoke: { fields: { handle: 'string', revoked: 'bool', at: 'int' } },
+    HandleRevokes: { fields: { handles: '[HandleRevoke]' } },
     BotProof: { fields: { state: 'BotGuestState', botId: 'string?', owner: 'string?', agents: '[string]?' }, mayOmit: ['botId', 'owner', 'agents'] },
     BotAsked: { fields: { conversation: 'string', entryId: 'string', turn: 'int', seq: 'int', state: 'ConversationState', queued: 'int', duplicate: 'bool?', room: 'string?' }, mayOmit: ['duplicate', 'room'] },
     BotPosted: { fields: { entryId: 'string', seq: 'int', turn: 'int', room: 'string', conversation: 'string', replied: 'bool', late: 'bool', lateWhy: 'string?', unprompted: 'bool?', duplicate: 'bool?' }, mayOmit: ['duplicate'] },
-    BotRoom: { fields: { room: 'string', conversation: 'string?', epoch: 'int?', entries: '[BotEntry]', cursor: 'int' } },
+    BotRoom: { fields: { room: 'string', conversation: 'string?', epoch: 'int?', entries: '[BotEntry]', cursor: 'int', secrets: '[BotRoomSecret]?' } },
+    BotRoomSecret: { fields: { id: 'string', from: 'string', label: 'string?', expiresAt: 'int' } },
+    BotSecret: { fields: { id: 'string', room: 'string', from: 'string', label: 'string?', value: 'string' } },
     BotSender: { fields: { botId: 'string', name: 'string', speaker: 'string?' } },
     BotEntry: { fields: { id: 'string', seq: 'int', turn: 'int', at: 'int', conversation: 'string', kind: 'BotEntryKind', text: 'string', sender: 'BotSender?', final: 'bool?', error: 'bool?', room: 'string?', epoch: 'int?', author: 'string?' }, mayOmit: ['sender', 'final', 'error', 'room', 'epoch', 'author'] },
     BotThread: { fields: { conversation: 'string', entries: '[BotEntry]', done: 'bool', turn: 'int?', state: 'ConversationState' } },
@@ -1281,11 +1338,13 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     BotAskParams: { fields: { agent: 'string?', text: 'string', conversation: 'string?', ref: 'string?', room: 'string?', speaker: 'string?', clientNonce: 'string', noQueue: 'bool?' } },
     BotPostParams: { fields: { room: 'string', conversation: 'string', epoch: 'int', turnKey: 'string?', text: 'string', clientNonce: 'string' } },
     BotRoomReadParams: { fields: { room: 'string', since: 'int?', limit: 'int?' } },
+    BotSecretFetchParams: { fields: { id: 'string' } },
     BotThreadParams: { fields: { conversation: 'string', afterSeq: 'int?', limit: 'int?' } },
     BotConversationsParams: { fields: { limit: 'int?' } },
     BotStopParams: { fields: { conversation: 'string' } },
     BotLeaveParams: { fields: {} },
     PeerAgentsParams: { fields: {} },
+    PeerRevokesParams: { fields: { handles: '[HandleRevoke]' } },
   },
 }
 

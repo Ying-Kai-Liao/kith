@@ -1,6 +1,6 @@
 {
   "contract": "kernel",
-  "doc": "What the kernel prints for the host to read: `kith ls --json`, `kith project ls --json` (kernel/bin/kith-project) and `kith <agent> --launch-json` (kernel/bin/kith). Field names are the kernel's own snake_case. A model or effort is the harness's own word, which the host passes on as it came. Additive only: see serve/contract/README.md.",
+  "doc": "What the kernel prints for the host to read: `kith ls --json`, `kith project ls --json` (kernel/bin/kith-project), `kith <agent> --launch-json` (kernel/bin/kith) and `kith ask delegations --json` (kernel/bin/kith-ask). Field names are the kernel's own snake_case. A model or effort is the harness's own word, which the host passes on as it came. Additive only: see serve/contract/README.md.",
   "fieldCase": "snake",
   "enums": {
     "Harness": {
@@ -12,6 +12,11 @@
       "doc": "The Claude Code permission mode a run starts in (kernel/lib/kith_settings.py CHOICES); a Codex run gets the host's translation. One this version doesn't know starts the run in default, which asks before every change.",
       "values": ["default", "acceptEdits", "plan", "auto", "bypassPermissions"],
       "unknown": "default"
+    },
+    "DelegationState": {
+      "doc": "Where a delegation (one `kith ask` id) stands: `open` (running, or parked on a card), `answered`, `capped` (answered, and its run took the chain to its cost cap) or `stopped` (the run gave no answer). One this version doesn't know is its own state: the host leaves it alone.",
+      "values": ["open", "answered", "capped", "stopped"],
+      "unknown": "unknown"
     }
   },
   "types": {
@@ -83,6 +88,50 @@
         "project": "string?",
         "person": "string?"
       }
+    },
+    "Delegations": {
+      "doc": "`kith ask delegations --json`: every delegation record on this Mac, newest first.",
+      "fields": {
+        "delegations": "[Delegation]"
+      }
+    },
+    "Delegation": {
+      "doc": "The record of one `kith ask` id (foreground, --bg or agent@machine), in kernel/bin/kith-ask's ~/.kith/live/ask/ID.reg. `agent` is the agent asked, `chain` the id of the root ask of its chain, `hop` its depth (0 at the root) and `cross_hops` how many asks of the chain crossed to another Mac. Money is in micro-dollars (US$1 = 1000000) at API prices; `cost_micro_usd` is null for an ask from before costs were kept. `cap_micro_usd` is the chain cap in force now (null: none). `capped_ms` is when this ask's run took its chain to that cap, and `cap_card_ms` when the host raised the Needs-you card for it (once per chain and cap). Times are ms. A record from before delegation records reads as a root ask: chain = its id, hop 0. `brief` is the ask's text (at most 2000 characters) and `session` the asked agent's session once a --bg run claimed one; both are for the owner's peek, null on an older record, and never part of a member's or bot's RPC.",
+      "fields": {
+        "id": "string",
+        "agent": "string",
+        "chain": "string",
+        "hop": "int",
+        "cross_hops": "int",
+        "crossed": "bool",
+        "caller": "Caller",
+        "reply_to": "ReplyTo",
+        "state": "DelegationState",
+        "cost_micro_usd": "int?",
+        "chain_cost_micro_usd": "int?",
+        "cap_micro_usd": "int?",
+        "started_ms": "int",
+        "answered_ms": "int?",
+        "capped_ms": "int?",
+        "cap_card_ms": "int?",
+        "brief": "string?",
+        "session": "string?"
+      }
+    },
+    "Caller": {
+      "doc": "Who asked: the agent (null for a terminal), the person whose run it is (null for the owner) and where it came from (`terminal`, `serve`, ...).",
+      "fields": {
+        "agent": "string?",
+        "person": "string?",
+        "via": "string?"
+      }
+    },
+    "ReplyTo": {
+      "doc": "Where the answer goes: the caller's session (a wake once nobody waits for it) and the ask whose run asked. This is the only place the address lives; cards never carry it.",
+      "fields": {
+        "session": "string?",
+        "ask": "string?"
+      }
     }
   },
   "commands": {
@@ -99,8 +148,16 @@
     "launch": {
       "doc": "How to start `agent` (run in the folder the run works in; `KITH_PERSON` makes it an invited person's run). `backup` launches a backup chain entry instead of the agent's own login; `project` loads that project's context.",
       "args": ["{agent}", "--launch-json"],
-      "options": { "backup": "--backup", "project": "-p" },
+      "options": {
+        "backup": "--backup",
+        "project": "-p"
+      },
       "result": "Launch"
+    },
+    "delegations": {
+      "doc": "The delegation records on this Mac.",
+      "args": ["ask", "delegations", "--json"],
+      "result": "Delegations"
     }
   }
 }

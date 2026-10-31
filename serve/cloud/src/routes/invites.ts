@@ -128,7 +128,32 @@ export async function hostRevokePerson(c: Ctx): Promise<Responses["hostRevokePer
 /** Undo of a person revoke: the row goes and every Mac of the owner is told; each clears the state in kith-auth. */
 export async function hostUnrevokePerson(c: Ctx): Promise<Responses["hostUnrevokePerson"]> {
   const { owner, userId } = await revokeTarget(c);
+  const revoked = await c.env.DB.prepare("SELECT revoked_at FROM revocations WHERE owner_user_id = ? AND user_id = ?")
+    .bind(owner, userId)
+    .first<{ revoked_at: number }>();
   await c.env.DB.batch([
+    // The memberships this revoke cut (stamped with its own time) are active again, so the Macs that kept them for the undo
+    // find them listed. A membership ended before, or by the owner on its own, keeps its end.
+    ...(revoked
+      ? [
+          c.env.DB.prepare(
+            `UPDATE memberships SET revoked_at = NULL WHERE user_id = ? AND revoked_at = ?
+             AND computer_id IN (SELECT id FROM computers WHERE owner_user_id = ?)`,
+          ).bind(userId, revoked.revoked_at, owner),
+          // Their devices' grants the same revoke cut are granted again, under new ids: the relay lifts its block on a
+          // device only when the ACL lists it under another grant than the revoked one (§7.3).
+          c.env.DB.prepare(
+            `INSERT INTO grants(id, computer_id, device_id, scopes, status, created_at)
+             SELECT 'grt_' || lower(hex(randomblob(16))), g.computer_id, g.device_id, g.scopes, 'active', ?1
+             FROM grants g JOIN devices d ON d.id = g.device_id
+             WHERE g.status = 'revoked' AND g.revoked_reason = 'membershipRevoked' AND g.revoked_at = ?2
+               AND d.owner_user_id = ?3 AND d.revoked_at IS NULL
+               AND g.computer_id IN (SELECT id FROM computers WHERE owner_user_id = ?4)
+               AND NOT EXISTS(SELECT 1 FROM grants a WHERE a.computer_id = g.computer_id AND a.device_id = g.device_id AND a.status = 'active')
+             GROUP BY g.computer_id, g.device_id`,
+          ).bind(c.now, revoked.revoked_at, userId, owner),
+        ]
+      : []),
     c.env.DB.prepare("DELETE FROM revocations WHERE owner_user_id = ? AND user_id = ?").bind(owner, userId),
     audit(c.env, `owner:${owner}`, "person.unrevoke", userId, "ok", c.now),
   ]);

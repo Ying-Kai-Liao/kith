@@ -44,11 +44,20 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
                     limit is raised or the month turns). An owner's run is never refused unless "hold" is chosen here.
                     A guest's runs keep their own budget (kith-auth member AGENT PERSON budget=) and stop at it
 
+  delegation        delegation.chain_cost_cap_usd: what one chain of `kith ask`s (an agent asks another, which asks a
+                    third, ...) may cost in dollars at API prices before it starts no new ask and the owner gets a Needs-you
+                    card. Default 5; "none" turns the cap off. Asks already running finish (kith ask --cap shows or sets it)
+  reads_others      capabilities.yaml `reads_others: false` marks an agent that works on the owner's own files only; its owner
+                    runs may use bypassPermissions. Without it (or true) the agent reads other people's text and its
+                    owner runs are held to auto (kith_settings.py cap MODE CAPS_FILE prints the mode that applies)
+
   kith_settings.py backups [AGENT]   the chain that applies, one id per line
   kith_settings.py account [AGENT]   the main account set for the agent (else the global one), '' when none is
   kith_settings.py limit AGENT       the agent's limit as JSON: {"limit": N or null, "at": "ask"|"tell"|"hold"}
   kith_settings.py set limit AGENT N|none          set or forget the agent's monthly limit (kith AGENT set limit)
   kith_settings.py set at_limit AGENT MODE         ask, tell or hold ('' forgets: ask) (kith AGENT set at-limit)
+  kith_settings.py delegation.chain_cost_cap_usd   the chain cap that applies: a number, or none
+  kith_settings.py set delegation.chain_cost_cap_usd N|none|default   set it (kith ask --cap N)
 """
 import contextlib, fcntl, json, os, re, sys, tempfile
 
@@ -61,6 +70,7 @@ CHOICES = {'permission_mode': ('default', 'acceptEdits', 'plan', 'auto', 'bypass
            'at_limit': ('ask', 'tell', 'hold')}
 # Modes kith no longer offers, and what a stored one reads as: 'manual' was kith's own word for Claude Code's 'default';
 # 'dontAsk' (refuse whatever no allow rule names) is gone, and its runs start in auto.
+CHAIN_CAP_USD = 5   # the default cost cap of a delegation chain
 RETIRED = {'manual': 'default', 'dontAsk': 'auto'}
 
 
@@ -93,6 +103,23 @@ def strip_broad_bash(rules, trusted):
 def current(mode):
     """The mode a run starts in for a mode from any source: a retired one as the mode that replaced it."""
     return RETIRED.get(mode, mode) if isinstance(mode, str) else mode
+
+
+def reads_others(caps_file):
+    """Does the agent read text other people wrote (pages, papers, posts, logs)? True unless its capabilities.yaml says
+    `reads_others: false`, so an agent nobody marked (a private role, a new one) takes the conservative side."""
+    try:
+        text = open(caps_file).read()
+    except OSError:
+        return True
+    return not re.search(r'^reads_others: *false\b', text, re.M)
+
+
+def cap_mode(mode, caps_file):
+    """The mode an owner's run of the agent may start in: bypass only for an agent that works on the owner's own files
+    (`reads_others: false`); a reader agent is held to auto, where the checker can stop an instruction planted in what it
+    reads. Applies whoever asked for bypass (caller, this Mac, the role)."""
+    return 'auto' if mode == 'bypassPermissions' and reads_others(caps_file) else mode
 
 
 def retired():
@@ -139,7 +166,51 @@ def read():
                 return {}, f'{FILE}: {where}{k} {v!r} is not one of {", ".join(CHOICES[k])}'
         if 'limit' in d and not valid_limit(d['limit']):
             return {}, f'{FILE}: {where}limit {d["limit"]!r} is not a number of dollars above 0'
+    delegation = s.get('delegation', {})
+    if not isinstance(delegation, dict) or not valid_chain_cap(delegation.get('chain_cost_cap_usd', CHAIN_CAP_USD)):
+        return {}, f'{FILE}: delegation.chain_cost_cap_usd is not a number of dollars above 0 (or "none")'
     return s, None
+
+
+def valid_chain_cap(v):
+    """A chain's cost cap: dollars above 0, or "none" for no cap."""
+    return v == 'none' or valid_limit(v)
+
+
+def chain_cost_cap():
+    """The dollars one delegation chain of kith asks may cost before it starts no new ask, None for no cap. A settings file
+    that can't be read leaves the default, so a broken file never lifts the cap."""
+    v = read()[0].get('delegation', {}).get('chain_cost_cap_usd', CHAIN_CAP_USD)
+    return None if v == 'none' else v
+
+
+def set_chain_cost_cap(value):
+    """Record the chain cap: a number of dollars, 'none' for no cap, 'default' (or '') to forget the choice."""
+    v = (value or '').strip().lstrip('$')
+    if v.lower() in ('', 'default'):
+        amount = None
+    elif v.lower() in ('none', 'off'):
+        amount = 'none'
+    else:
+        try:
+            amount = float(v)
+        except ValueError:
+            raise ValueError(f'cap {value!r} is not a number of dollars (or none)') from None
+        if not valid_limit(amount):
+            raise ValueError(f'cap {value!r} is not a number of dollars above 0')
+        amount = int(amount) if amount == int(amount) else round(amount, 4)
+    with locked():
+        s, why = read()
+        if why:
+            raise ValueError(why)
+        d = s.setdefault('delegation', {})
+        if amount is None:
+            d.pop('chain_cost_cap_usd', None)
+        else:
+            d['chain_cost_cap_usd'] = amount
+        if not d:
+            s.pop('delegation')
+        write(s)
 
 
 def valid_limit(v):
@@ -369,6 +440,24 @@ if __name__ == '__main__':
             set_limit(sys.argv[3], sys.argv[4])
         except ValueError as e:
             sys.exit(f'kith: {e}')
+        sys.exit(0)
+    if len(sys.argv) == 4 and sys.argv[1:3] == ['set', 'delegation.chain_cost_cap_usd']:
+        if any(os.environ.get(k) for k in ('KITH_ASK_ID', 'KITH_AGENT', 'CLAUDE_CODE_SESSION_ID')):
+            sys.exit('kith: the delegation cap is the owner\'s to change, not an agent\'s run')
+        try:
+            set_chain_cost_cap(sys.argv[3])
+        except ValueError as e:
+            sys.exit(f'kith: {e}')
+        sys.exit(0)
+    if len(sys.argv) == 2 and sys.argv[1] == 'delegation.chain_cost_cap_usd':
+        cap = chain_cost_cap()
+        print('none' if cap is None else cap)
+        sys.exit(0)
+    if len(sys.argv) == 4 and sys.argv[1] == 'cap':   # cap MODE CAPS_FILE
+        print(cap_mode(sys.argv[2], sys.argv[3]))
+        sys.exit(0)
+    if len(sys.argv) == 3 and sys.argv[1] == 'reads-others':
+        print(1 if reads_others(sys.argv[2]) else 0)
         sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[1] == 'limit':
         amount, at = limit(sys.argv[2])

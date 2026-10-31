@@ -4,7 +4,11 @@ import type { RichCard } from '@shared/rich-card'
 import { ownerNameFrom } from '@shared/mac-role'
 import { scheduleFoot, scheduleView, type ScheduleFold, type ScheduleOp, type ScheduleView } from '@shared/schedule-card'
 import { newsView, type NewsRow } from '@shared/news-card'
+import { resultView } from '@shared/result-card'
+import { planView } from '@shared/plan-card'
 import { BotAvatar } from '../../components/Avatar'
+import { pairOf } from '../../components/kith'
+import { pairStyle } from '../../components/kith/pair'
 import { Icon } from '../../components/Icon'
 import { useStore } from '../../store/context'
 import { useLiveSchedule } from './rich-card-live'
@@ -173,6 +177,60 @@ export function NewsCard({ entry, card }: { entry: Entry; card: RichCard }) {
           </button>
         ) : null}
       </div>
+    </section>
+  )
+}
+
+/**
+ * The Result card: a reply Jev sorted as a result, its own lines as title and mono facts, a button for each link the
+ * reply held. The reply stays; "Show as text" folds the card back to it in place (DESIGN.md "Reply cards").
+ */
+export function ResultCard({ card, showText }: { card: RichCard; showText: () => void }) {
+  const view = resultView(card)
+  if (!view) return null
+  return (
+    <section className="rc-card" aria-label={view.title}>
+      <div className="rc-head">
+        <span className="rc-tile" aria-hidden><Icon name="doc.text" size={13} color="var(--kith-ink)" /></span>
+        <span className="rc-name">{view.title}</span>
+      </div>
+      <div className="rc-facts">{view.facts.join(' · ')}</div>
+      <div className="rc-buttons">
+        {view.links.map((l, i) => (
+          <button key={l.url} className={i === 0 ? 'rc-button ink' : 'rc-button'} title={l.url} onClick={() => window.kith.app.openExternal(l.url)}>{l.label}</button>
+        ))}
+        <button className="rc-button rc-as-text" onClick={showText}>Show as text</button>
+      </div>
+    </section>
+  )
+}
+
+/** The Plan card: steps updating in place under a count and a bar in the agent's colour pair (DESIGN.md "Plan"). */
+export function PlanCard({ entry, card }: { entry: Entry; card: RichCard }) {
+  const store = useStore()
+  const view = planView(card)
+  const pair = pairOf(store.bots.get(entry.data.author ?? entry.botId)?.avatarColor)
+  return (
+    <section className="rc-card" aria-label={`${view.title}, ${view.count}`}>
+      <div className="rc-head">
+        <Icon name="checklist" size={12} color="var(--kith-ink)" />
+        <span className="rc-name">{view.title}</span>
+        <span className="rc-trailing rc-mono">{view.count}</span>
+      </div>
+      <div className="rc-bar" style={pairStyle(pair)} role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(view.fraction * 100)}>
+        <i style={{ width: `${view.fraction * 100}%` }} />
+      </div>
+      <ol className="rc-plan">
+        {view.steps.map((step, i) => (
+          <li key={i} className={`rc-step ${step.state}`}>
+            <span className="rc-mark" aria-hidden>
+              {step.state === 'done' ? <Icon name="checkmark" size={10} color="var(--kith-muted)" /> : <i />}
+            </span>
+            <span className="rc-step-text">{step.text}</span>
+            <span className="rc-sr">{step.state === 'stopped' ? 'stopped' : step.state}</span>
+          </li>
+        ))}
+      </ol>
     </section>
   )
 }

@@ -7,6 +7,10 @@
                                           several profiles as p1,p2 (kith serve: one bot each, telegram/hq,telegram/x)
   kith-auth granted [--for AGENT] <service> the profiles granted, one per line
   kith-auth revoke <agent> <service> [--profile P]   with --profile, only that profile's grant goes
+  kith-auth holders <service> [--json]      the agents of this Mac granted a profile of that service, one per line (--json:
+                                          [{agent, profiles}]); read live from the grants, so a revoke drops an agent and an
+                                          undo brings it back. The owner's runs see every holder; a guest's only the
+                                          holders it may use itself (kith ask would refuse the rest)
   kith-auth set <profile> <VAR>             store a secret in the macOS Keychain (prompts; never echoed) and point
                                           the profile at it
   kith-auth set <profile> --stdin-json [--grant AGENT]   the host's route (a Key card): stdin is one JSON object
@@ -30,6 +34,17 @@
                                           isn't granted for this run's person gets ask (owner's session) or deny (anyone
                                           else's); other tools pass
   kith-auth exec [--for AGENT] <service> -- CMD...   run CMD with that service's secrets in its environment only
+  kith-auth exec [--for AGENT] --secret <id> [--as VAR] -- CMD...   run CMD with a secret a room member was handed once
+                                          (rs_<hex>, from `once put`) in VAR (default KITH_SECRET), in its environment only;
+                                          the owner's runs only, for the agent it was handed to, once: it is deleted first
+  kith-auth once put <id> (--agent A | --bot B) --expires MS   a one-time secret (stdin: the value, <= 1536 bytes, no NUL)
+                                          for one holder, in the Keychain item kith/once/<id>; auth.json keeps who, when it
+                                          was made and when it lapses (MS since the epoch, at most an hour ahead), never the value
+  kith-auth once copy <id> --from <profile> --var VAR (--agent A | --bot B) --expires MS   the same from a stored key,
+                                          which never leaves kith-auth
+  kith-auth once take <id> --bot B          prints the value once and deletes it first (the host's pipe: a bot's fetch)
+  kith-auth once drop <id>                  deletes the item and its entry; nothing is wrong if it is already gone
+  kith-auth once list --json                [{id, agent|bot, created, expires}]; never values (the host's sweep)
   kith-auth get  [--for AGENT] [--profile P] <service> <VAR>   print one secret, for an agent's own tool to call;
                                           --profile picks one of several granted profiles
   kith-auth env  <agent> <service> [VAR=value | VAR=]  this agent's own settings for a service (not secrets), e.g.
@@ -223,7 +238,7 @@ def load_auth(write=False):
         data = {}
     except ValueError as e:
         die(f'{AUTH}: invalid JSON ({e})')
-    for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites', 'retired'):
+    for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites', 'retired', 'once'):
         data.setdefault(table, {})
     return data
 
@@ -737,6 +752,8 @@ def cmd_helper_mcp(agent, decision):
 
 def cmd_exec(args):
     agent, args = take_for(args)
+    if args[:1] == ['--secret']:
+        return cmd_exec_secret(agent, args)
     if len(args) < 3 or args[1] != '--':
         die('exec [--for AGENT] <service> -- CMD...', 2)
     svc, cmd = args[0], args[2:]
@@ -870,6 +887,186 @@ def cmd_set_stdin(profile, grant_agent):
     print(json.dumps({'profile': profile, 'service': svc, 'vars': names, 'granted': grant_agent}))
 
 
+ONCE_ID_RE = re.compile(r'^rs_[0-9a-f]{16}$')
+ONCE_MAX_MS = 60 * 60 * 1000   # a one-time secret lives at most an hour (the host asks for ten minutes)
+
+
+def once_item(oid):
+    return f'kith/once/{oid}'
+
+
+def keychain_delete(kc, var):
+    """Removes the Keychain item and reads it back: True only when it is gone. Nothing security prints is shown."""
+    try:
+        subprocess.run([SECURITY, 'delete-generic-password', '-s', kc, '-a', var], capture_output=True, timeout=30)
+        got = subprocess.run([SECURITY, 'find-generic-password', '-s', kc, '-a', var, '-w'],
+                             capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return got.returncode != 0
+
+
+def once_owner_only(auth):
+    """Once secrets are the owner's runs' business: a guest's run, inside its sandbox or under KITH_PERSON, gets nothing."""
+    person = acting(auth)
+    if person == '-' or not is_owner(auth, person):
+        die('refused: not available to this run', 2)
+
+
+def once_holder(opts):
+    """('agent'|'bot', name) from --agent / --bot, or exit with a fixed message."""
+    given = [(k[2:], opts[k]) for k in ('--agent', '--bot') if k in opts]
+    if len(given) != 1 or not AGENT_RE.match(given[0][1]):
+        die('refused: name one holder, --agent A or --bot B; nothing stored', 2)
+    return given[0]
+
+
+def once_expires(opts):
+    try:
+        expires = int(opts.get('--expires', ''))
+    except ValueError:
+        die('refused: --expires is a time in ms since the epoch; nothing stored', 2)
+    now = int(time.time() * 1000)
+    if expires <= now or expires > now + ONCE_MAX_MS:
+        die('refused: the time must be ahead, and at most an hour; nothing stored', 2)
+    return expires
+
+
+def once_store(oid, value, holder, expires):
+    """Keychain item first, then the entry (names and times only). A failure leaves nothing behind."""
+    if bad_value(value):
+        die(f'refused: a secret is text with no NUL, at most {MAX_VALUE} bytes; nothing stored', 2)
+    kc = once_item(oid)
+    if not keychain_put(kc, 'VALUE', value):
+        keychain_delete(kc, 'VALUE')
+        die('the Keychain did not take the secret; nothing stored')
+    try:
+        auth = load_auth(write=True)
+        auth.setdefault('once', {})[oid] = {holder[0]: holder[1], 'created': int(time.time() * 1000), 'expires': expires}
+        save_auth(auth)
+    except BaseException:
+        keychain_delete(kc, 'VALUE')
+        raise
+
+
+def once_remove(auth, oid):
+    """Deletes the Keychain item and the entry. False when the item could not be deleted (the entry stays, so a sweep
+    tries again)."""
+    if not keychain_delete(once_item(oid), 'VALUE'):
+        return False
+    auth.get('once', {}).pop(oid, None)
+    return True
+
+
+def once_take(auth, oid, kind, who):
+    """The value of one-time secret `oid` held by `who`, deleted before it is returned; exits with a fixed message
+    when it is not there, not theirs, lapsed or could not be deleted. `auth` was loaded under the lock, so two takers
+    never both win."""
+    entry = auth.get('once', {}).get(oid)
+    if not isinstance(entry, dict) or entry.get(kind) != who:
+        die('refused: no such secret', 2)
+    if entry.get('expires', 0) <= int(time.time() * 1000):
+        if once_remove(auth, oid):
+            save_auth(auth)
+        die('refused: no such secret', 2)
+    value = resolve_ref(f'keychain:{once_item(oid)}#VALUE')
+    if not value:
+        auth['once'].pop(oid, None)
+        save_auth(auth)
+        die('refused: no such secret', 2)
+    if not once_remove(auth, oid):
+        die('refused: the secret could not be taken', 2)
+    save_auth(auth)
+    return value
+
+
+def cmd_once(args):
+    """once put|copy|take|drop|list. Every refusal is a fixed message: never a value, a name from the input or
+    security's output."""
+    if not args:
+        die('once put|copy|take|drop|list', 2)
+    sub, rest = args[0], args[1:]
+    auth = load_auth()
+    once_owner_only(auth)
+    if sub == 'list':
+        if rest != ['--json']:
+            die('once list --json', 2)
+        rows = [{'id': i, 'created': e.get('created', 0), 'expires': e.get('expires', 0),
+                 **{k: e[k] for k in ('agent', 'bot') if k in e}}
+                for i, e in sorted(auth.get('once', {}).items()) if isinstance(e, dict)]
+        print(json.dumps(rows))
+        return
+    if not rest or not ONCE_ID_RE.match(rest[0]):
+        die('refused: not a secret id', 2)
+    oid, opts_in = rest[0], rest[1:]
+    if sub == 'put':
+        opts, extra = take_opts(opts_in, ('--agent', '--bot', '--expires'))
+        if extra:
+            die('once put <id> (--agent A | --bot B) --expires MS', 2)
+        holder, expires = once_holder(opts), once_expires(opts)
+        raw = sys.stdin.buffer.read(MAX_VALUE + 2)
+        try:
+            value = raw.decode()
+        except UnicodeDecodeError:
+            value = None
+        raw = None
+        once_store(oid, value, holder, expires)
+    elif sub == 'copy':
+        opts, extra = take_opts(opts_in, ('--from', '--var', '--agent', '--bot', '--expires'))
+        profile, var = opts.get('--from', ''), opts.get('--var', '')
+        if extra or not VAR_RE.match(var):
+            die('once copy <id> --from <profile> --var VAR (--agent A | --bot B) --expires MS', 2)
+        split_profile(profile)
+        holder, expires = once_holder(opts), once_expires(opts)
+        ref = auth['profiles'].get(profile, {}).get(var)
+        value = resolve_ref(ref) if ref else None
+        if not value:
+            die('refused: no such key; nothing stored', 2)
+        once_store(oid, value, holder, expires)
+        value = None
+    elif sub == 'take':
+        opts, extra = take_opts(opts_in, ('--bot',))
+        if extra or not AGENT_RE.match(opts.get('--bot', '')):
+            die('once take <id> --bot B', 2)
+        auth = load_auth(write=True)
+        value = once_take(auth, oid, 'bot', opts['--bot'])
+        sys.stdout.write(value)
+        sys.stdout.flush()
+    elif sub == 'drop':
+        if opts_in:
+            die('once drop <id>', 2)
+        auth = load_auth(write=True)
+        if not once_remove(auth, oid):
+            die('the secret could not be removed')
+        save_auth(auth)
+    else:
+        die('once put|copy|take|drop|list', 2)
+
+
+def cmd_exec_secret(agent, args):
+    """exec [--for AGENT] --secret <id> [--as VAR] -- CMD...: the secret handed to this agent once, in CMD's environment
+    only. Only the owner's runs (a guest's sandbox and KITH_PERSON never), only for the agent it was handed to."""
+    opts, rest = {}, args
+    while rest and rest[0] in ('--secret', '--as'):
+        if len(rest) < 2:
+            die('exec [--for AGENT] --secret <id> [--as VAR] -- CMD...', 2)
+        opts[rest[0]], rest = rest[1], rest[2:]
+    if '--secret' not in opts or len(rest) < 2 or rest[0] != '--':
+        die('exec [--for AGENT] --secret <id> [--as VAR] -- CMD...', 2)
+    oid, var, cmd = opts['--secret'], opts.get('--as', 'KITH_SECRET'), rest[1:]
+    if not ONCE_ID_RE.match(oid) or not VAR_RE.match(var):
+        die('refused: not a secret id or a variable name', 2)
+    auth = load_auth(write=True)
+    once_owner_only(auth)
+    if not agent:
+        die('refused: no such secret', 2)
+    value = once_take(auth, oid, 'agent', agent)
+    env = {**os.environ, var: value}
+    value = None
+    audit(agent, 'once', oid, 'exec')
+    os.execvpe(cmd[0], cmd, env)
+
+
 def profile_vars(refs):
     """The names a profile stores a secret for: entries pointing at a keychain, env-file or env source."""
     return [k for k, v in refs.items() if isinstance(v, str) and v.split(':', 1)[0] in ('keychain', 'env-file', 'env')
@@ -879,6 +1076,31 @@ def profile_vars(refs):
 def agents_granted(auth, profile):
     return sorted(a for a, g in auth['grants'].items() if isinstance(g, dict)
                   and any(profile in grant_list(p) for p in g.values()))
+
+
+def holders(auth, svc, person=None):
+    """[{agent, profiles}]: the real agents on this Mac with a grant of their own (not an `agent@person` row, which is a
+    guest's) for a profile of svc, sorted by name. A person other than the owner is shown only the agents they may use."""
+    person = acting(auth) if person is None else person
+    known = set(agents())
+    out = []
+    for agent in sorted(a for a in auth['grants'] if a in known):
+        g = auth['grants'][agent]
+        have = grant_list(g.get(svc)) if isinstance(g, dict) else []
+        if have and (is_owner(auth, person) or may(auth, person, agent)[0]):
+            out.append({'agent': agent, 'profiles': have})
+    return out
+
+
+def cmd_holders(args):
+    rest = [a for a in args if a != '--json']
+    if len(rest) != 1 or len(args) - len(rest) > 1 or not SERVICE_RE.match(rest[0]):
+        die('holders <service> [--json]', 2)
+    rows = holders(load_auth(), rest[0])
+    if '--json' in args:
+        print(json.dumps(rows))
+    else:
+        print('\n'.join(r['agent'] for r in rows))
 
 
 def cmd_account_state(args):
@@ -1608,7 +1830,9 @@ def cmd_people(args):
                                   'bot_of': parent_of(auth, pid) or '', 'provider': auth['people'][pid].get('provider', ''),
                                   'root': root_of(auth, pid), 'revoked': cut_off(auth, pid),
                                   'revoked_at': (auth['people'][pid].get('revoked') or {}).get('at'),
-                                  'kith': auth['people'][pid].get('handles', {}).get('kith', '')} for pid in ordered(auth)]))
+                                  'kith': auth['people'][pid].get('handles', {}).get('kith', ''),
+                                  'handles': {k: v for k, v in auth['people'][pid].get('handles', {}).items() if k != 'kith'}}
+                                 for pid in ordered(auth)]))
     full = bool(args)
     for pid in args or ordered(auth):
         need_person(auth, pid)
@@ -1717,6 +1941,7 @@ def cmd_person(args):
             auth['people'].pop(x, None)
         forget(auth, gone)
         save_auth(auth)
+        sweep_kernel(gone)   # their delegations, wakes and runs end with them (R5)
         for x in gone:   # Claude Code's temp folder of their runs goes now; their memory and files stay (below)
             guest_tmp_remove(x)
         kept = sorted({label for label, _ in person_folders(pid)})
@@ -1769,6 +1994,21 @@ def remove_unused(auth, pid):
     print(f'{pid} removed (unused: the id is free again)')
 
 
+def sweep_kernel(persons):
+    """What a revoke or a removal ends on its own, with no kith serve to do it (R5): the delegations these people started and
+    the wakes and waiters they are owed (kith ask --end), and the runs their writer claims name (kith-sessions sweep). Run
+    as the owner: the env an agent's run would carry is dropped, as kith serve's own calls drop it. A failure is said, never
+    fatal: the access is already gone."""
+    env = {k: v for k, v in os.environ.items() if k not in ('KITH_AGENT', 'KITH_ASK_ID', 'CLAUDE_CODE_SESSION_ID', 'KITH_PERSON')}
+    here = Path(__file__).resolve().parent
+    people = [x for x in persons if x]
+    for argv in ([str(here / 'kith-ask'), '--end'] + [a for x in people for a in ('--person', x)],
+                 [str(here / 'kith-sessions'), 'sweep', *people]):
+        r = subprocess.run([sys.executable, *argv], env=env, capture_output=True, text=True)
+        if r.returncode:
+            print(f'kith-auth: {Path(argv[0]).name} did not finish: {(r.stderr or r.stdout).strip()[:200]}', file=sys.stderr)
+
+
 def revoke_person(pid, revoke, local):
     """Revoke: the person stays in kith (rows, handles, bots, memory) and reaches nothing; undo clears the one fact.
     On a Mac linked to the Kith cloud the revoke must reach every Mac of the owner, so it goes through kith serve,
@@ -1797,13 +2037,14 @@ def revoke_person(pid, revoke, local):
     if revoke:
         if not p.get('revoked'):
             p['revoked'] = {'at': int(time.time())}
-        # an open /link code would bind a new account to them: cut, as the cloud invites are
-        auth['invites'] = {c: i for c, i in auth['invites'].items() if canonical(auth, i.get('person', '')) != pid}
+        # An open /link code stays: link refuses a revoked person's code (cut_off), and undo gives it back while it lasts.
+        pass
     else:
         p.pop('revoked', None)
     save_auth(auth)
     bots = bots_of(auth, pid)
     if revoke and not local:   # kith serve's own --local call removes them itself, once it has stopped their runs
+        sweep_kernel([pid] + bots)
         for x in [pid] + bots:
             guest_tmp_remove(x)
     print(f'{pid}: access removed; their rows, accounts' + (f' and bots ({", ".join(bots)}, dormant)' if bots else '')
@@ -2233,6 +2474,8 @@ def main(argv):
         cmd_set_stdin(rest[0], rest[3] if len(rest) == 4 else None)
     elif cmd == 'account-state':
         cmd_account_state(rest)
+    elif cmd == 'holders':
+        cmd_holders(rest)
     elif cmd == 'keys':
         cmd_keys(rest)
     elif cmd == 'env' and len(rest) >= 2:
@@ -2349,6 +2592,8 @@ def main(argv):
         cmd_mcp_names(rest[0])
     elif cmd == 'helper-mcp' and len(rest) == 2 and rest[1] in ('ask', 'deny'):
         cmd_helper_mcp(*rest)
+    elif cmd == 'once':
+        cmd_once(rest)
     elif cmd == 'exec':
         cmd_exec(rest)
     elif cmd == 'get':

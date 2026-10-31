@@ -203,6 +203,8 @@ jobs:
         run: kernel/tests/kith-cost-bots-check
       - name: Call check
         run: kernel/tests/kith-call-check
+      - name: Chain check
+        run: kernel/tests/kith-chain-check
       - name: Ask check
         run: kernel/tests/kith-ask-check
       - name: Wake check
@@ -215,6 +217,8 @@ jobs:
         run: kernel/tests/kith-sched-jobs-check
       - name: Send check
         run: kernel/tests/kith-send-check
+      - name: Schedule origin check
+        run: kernel/tests/kith-sched-origin-check
       - name: Terminal flags check
         run: kernel/tests/kith-terminal-flags-check
       - uses: oven-sh/setup-bun@v2
@@ -264,7 +268,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.revoke == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4

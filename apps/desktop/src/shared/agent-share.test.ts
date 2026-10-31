@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { agentsWithout, invitesOnly, inviteAgents, openInvitesFor, sharedWith } from './agent-share.ts'
 import type { PendingInvite, Person } from './people.ts'
 
-const person = (personId: string, agents: Person['agents']): Person => ({ personId, name: personId, agents, projects: ['p'], joined: true, openInvites: 0, devices: [], autoBots: false })
+const person = (personId: string, agents: Person['agents']): Person => ({ personId, name: personId, agents, projects: ['p'], joined: true, openInvites: 0, devices: [], autoBots: false, revoked: false })
 const invite = (inviteId: string, agents: PendingInvite['agents'], over: Partial<PendingInvite> = {}): PendingInvite =>
   ({ inviteId, personId: 'a', agents, createdAt: 0, expiresAt: 2000, usedAt: null, revokedAt: null, ...over })
 

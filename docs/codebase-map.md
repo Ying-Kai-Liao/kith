@@ -16,7 +16,7 @@ kith/agents/                        the agents folder, $KITH_AGENTS: your privat
   <name>/                           one agent
     role/                             what it is: its own git repo (<you>/kith-agent-<name>), ignored by hq-agents
       agent.md                          frontmatter (description, model, effort) + instructions
-      capabilities.yaml                 tools, needs: [services], global_skills
+      capabilities.yaml                 tools, needs: [services], global_skills (false = no skills for owner runs), reads_others (false = bypass allowed)
       settings.json                     Claude Code settings merged over yours for its runs
       skills/  skills.json  tools/      own skills; third-party skills by link; its CLIs
     memory/                           MEMORY.md, projects/<id>.md, sessions/<project>.md

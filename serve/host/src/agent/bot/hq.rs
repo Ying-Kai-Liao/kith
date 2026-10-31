@@ -59,6 +59,12 @@ fn process_env(saved: Vec<(String, String)>, launch: &hq::Launch, backup: bool) 
     env
 }
 
+/// Whether a process for `person` in `room` is the owner's own 1:1 with `agent`: the only run of the app that gets an
+/// ask token.
+fn owner_may_ask(person: Option<&str>, agent: &str, room: &str) -> bool {
+    person.is_none() && room == hq::room_of(agent, None, None)
+}
+
 /// The project set of a turn and what changed with it.
 #[derive(Default)]
 pub(super) struct ProjectTurn {
@@ -521,6 +527,11 @@ impl Actor {
                 let project = launch.env.get("KITH_PROJECT").map(String::as_str);
                 crate::runauth::grant_for(p, &agent, room, &conversation, project)
             });
+            // The owner's own 1:1 with the agent can raise approval cards (`card.py`): a cards-only token, under
+            // its own env names. Not a group room, not a guest's, and not a Codex process, which has no use for it.
+            if grant.is_none() && owner_may_ask(person.as_deref(), &agent, &self.run_room()) && !launch.is_codex() {
+                grant = crate::runauth::owner_ask_grant(&agent, &conversation, None);
+            }
             if let Some((_, vars)) = &grant {
                 env.extend(vars.iter().cloned());
             }
@@ -800,5 +811,18 @@ mod tests {
         assert_eq!(room_members(&store, "nope", None), Unknown, "group not found is a failed read");
         assert_eq!(room_members(&store, "dead-group", None), Unknown, "a group deleted mid-run");
         assert_eq!(room_members(&store, "solo", Some("sam")), Unknown, "a person's own run is never owner only");
+    }
+}
+
+#[cfg(test)]
+mod owner_ask_tests {
+    use super::owner_may_ask;
+
+    #[test]
+    fn only_the_owners_own_one_to_one_gets_an_ask_token() {
+        assert!(owner_may_ask(None, "house", "1:1:house:owner"));
+        assert!(!owner_may_ask(None, "house", "group:abc"), "a group room");
+        assert!(!owner_may_ask(Some("sam"), "house", "1:1:house:sam"), "a guest or bot guest");
+        assert!(!owner_may_ask(Some("sam"), "house", "1:1:house:owner"));
     }
 }

@@ -1,0 +1,62 @@
+{
+  "command": "delegations",
+  "type": "Delegations",
+  "body": {
+    "delegations": [
+      {
+        "id": "ask-20260101000000-aaaaaa",
+        "agent": "echo",
+        "chain": "ask-20260101000000-aaaaaa",
+        "hop": 0,
+        "cross_hops": 0,
+        "crossed": false,
+        "caller": {
+          "agent": "architect",
+          "person": null,
+          "via": "terminal"
+        },
+        "reply_to": {
+          "session": "sess-1",
+          "ask": null
+        },
+        "state": "capped",
+        "cost_micro_usd": 5250000,
+        "chain_cost_micro_usd": 5250000,
+        "cap_micro_usd": 5000000,
+        "started_ms": 1767225600000,
+        "answered_ms": 1767225660000,
+        "capped_ms": 1767225660000,
+        "cap_card_ms": null,
+        "brief": null,
+        "session": null
+      },
+      {
+        "id": "ask-old-1",
+        "agent": "relay",
+        "chain": "ask-old-1",
+        "hop": 0,
+        "cross_hops": 0,
+        "crossed": false,
+        "caller": {
+          "agent": "architect",
+          "person": null,
+          "via": "terminal"
+        },
+        "reply_to": {
+          "session": "sess-0",
+          "ask": null
+        },
+        "state": "open",
+        "cost_micro_usd": null,
+        "chain_cost_micro_usd": 0,
+        "cap_micro_usd": 5000000,
+        "started_ms": 1767225000000,
+        "answered_ms": null,
+        "capped_ms": null,
+        "cap_card_ms": null,
+        "brief": null,
+        "session": null
+      }
+    ]
+  }
+}

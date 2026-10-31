@@ -20,6 +20,7 @@ import { partialUpdate } from '@shared/optimistic'
 import { expireCalls, type IncomingCall } from '@shared/incoming-call'
 import { failureOf, OWN_TURN, type HeldPhase } from '@shared/held-run'
 import { DEFAULT_TURNS } from '@shared/conversation'
+import { parsePeek, parsePeeks, type Peek } from '@shared/handoff-peek'
 import { FileDownloads } from './file-downloads'
 import { BotSync, sleep } from './bot-sync'
 
@@ -162,6 +163,25 @@ export class BotStore extends BotSync {
     this.perform((c) => c.callHost('stop', thread ? { botId, threadId: thread } : { botId }), true)
   }
 
+  /** The owner's peek at one handoff; null when the host has no record of it (an ask from before the records). */
+  async peekHandoff(id: string): Promise<Peek | null> {
+    try {
+      return parsePeek((await this.withLink((c) => c.call<{ peek?: unknown }>('delegationPeek', { id }))).peek)
+    } catch {
+      return null
+    }
+  }
+
+  /** The handoffs still going or waiting on the owner; empty for a host that doesn't have the peek yet or for a member. */
+  async openHandoffs(): Promise<Peek[]> {
+    if (!this.isOwner) return []
+    try {
+      return parsePeeks(await this.withLink((c) => c.call('delegationsPeek', {})))
+    } catch {
+      return []
+    }
+  }
+
   /** "Give them 10 more": an ordinary message with turns, from the person (only a person tops a run up). */
   keepGoing(botId: string, turns = DEFAULT_TURNS) {
     this.send('Keep going', botId, null, [], undefined, [], false, null, null, turns)
@@ -284,6 +304,13 @@ export class BotStore extends BotSync {
   /** Whether this person's Schedule cards are also said in their Telegram or Discord chat (on by default); `on` sets it first. */
   scheduleMessages(on?: boolean) {
     return this.withLink((c) => c.callHost('scheduleMessages', on === undefined ? {} : { on })).then((r) => r.on)
+  }
+
+  /** Whether the host lets Jev sort a finished reply into a Result card (the owner's switch, off by default); `on` sets it first. */
+  replyCards(on?: boolean) {
+    const call = async (c: HostClient) =>
+      (on === undefined ? await c.call<{ enabled: boolean }>('jevCardsStatus', {}) : await c.call<{ enabled: boolean }>('setJevCards', { enabled: on })).enabled
+    return this.ready().then(call)
   }
 
   /** Fire-and-forget; the host holds it until this computer answers and drops it on a no. */
@@ -509,8 +536,8 @@ export class BotStore extends BotSync {
   }
 
   /** Creates a group chat (or opens the one these bots already share) and selects it. */
-  async createGroup(name: string, description: string, members: string[]) {
-    const draft: GroupDraft = { kind: 'group', name, description, members }
+  async createGroup(name: string, description: string, members: string[], labels: string[] = []) {
+    const draft: GroupDraft = { kind: 'group', name, description, members, ...(labels.length ? { labels } : {}) }
     const res = await (await this.ready()).call<{ bot: Bot }>('createBot', draft)
     this.bots.set(res.bot.id, res.bot)
     this.selection = res.bot.id

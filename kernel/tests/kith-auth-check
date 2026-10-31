@@ -218,4 +218,23 @@ for i in $(seq 1 15); do
   [ "$(BY "d$i")" = '[]' ] || bad=$((bad + 1))
 done
 check "15 parallel approve-vs-demote races: no guest keeps their own yes ($bad bad)" "[ $bad = 0 ]"
+# --- holders: who on this Mac holds a service (the host's "ask the agent that holds it")
+A grant house notion notion/kai >/dev/null 2>&1
+A grant garden slack slack/kai >/dev/null 2>&1
+check "holders: the agents granted a profile of the service, as lines and as json" "[ \"\$(A holders notion)\" = house ] && [ \"\$(A holders notion --json)\" = '[{\"agent\": \"house\", \"profiles\": [\"notion/kai\"]}]' ]"
+check "holders: a service nobody holds is empty, a bad name is refused" "[ \"\$(A holders nothing --json)\" = '[]' ] && ! A holders 'No/Way'"
+A person hal >/dev/null 2>&1
+A member house hal >/dev/null 2>&1
+A person carl >/dev/null 2>&1
+A grant house@hal slack slack/hal >/dev/null 2>&1
+check "holders: a person's own agent@person grant makes no holder" "[ \"\$(A holders slack)\" = garden ]"
+A grant ghost notion notion/kai >/dev/null 2>&1
+check "holders: a name that is not an agent here is no holder" "[ \"\$(A holders notion)\" = house ]"
+check "holders: a guest sees only the holders it may use" "[ \"\$(KITH_PERSON=hal A holders notion)\" = house ] && [ \"\$(KITH_PERSON=carl A holders slack)\" = '' ]"
+A revoke house notion >/dev/null 2>&1
+check "holders: a revoked grant is no longer a holder" "[ \"\$(A holders notion)\" = '' ]"
+A grant house notion notion/kai >/dev/null 2>&1
+check "holders: granted again, it is a holder again" "[ \"\$(A holders notion)\" = house ]"
+A person hal --revoke >/dev/null 2>&1
+check "holders: a revoked guest sees none, and undo brings back what it saw" "[ \"\$(KITH_PERSON=hal A holders notion)\" = '' ] && A person hal --unrevoke >/dev/null 2>&1 && [ \"\$(KITH_PERSON=hal A holders notion)\" = house ]"
 exit $fail

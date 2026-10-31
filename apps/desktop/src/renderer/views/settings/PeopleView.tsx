@@ -44,12 +44,19 @@ export function PeopleView() {
         title="People"
         footer={people.error ?? 'Invite someone to use some of your agents. Their chats and memory stay separate from yours.'}
       >
+        {people.removed ? (
+          <div className="settings-row">
+            <Text grow>{people.removed.name} was removed.</Text>
+            <Button kind="secondary" onClick={() => void people.restorePerson(people.removed!.personId)} disabled={people.busy}>Undo</Button>
+            <IconButton title="Dismiss" icon="xmark" onClick={() => people.dismissRemoved()} />
+          </div>
+        ) : null}
         {people.people.length === 0 ? (
           <div className="settings-row"><Text tone="secondary">No one yet.</Text></div>
         ) : (
           people.people.map((person) => (
             <div key={person.personId}>
-              <PersonRow person={person} onEdit={() => setEditing(person)} onInvite={() => setInviting({ personId: person.personId })} onRemove={() => setRemoving(person)} />
+              <PersonRow person={person} busy={people.busy} onRestore={() => void people.restorePerson(person.personId)} onEdit={() => setEditing(person)} onInvite={() => setInviting({ personId: person.personId })} onRemove={() => setRemoving(person)} />
               {botsShown && guests ? <BotList store={local} bots={botsOf(guests.bots, person.personId)} view="owner" indent /> : null}
             </div>
           ))
@@ -95,7 +102,7 @@ export function PeopleView() {
   )
 }
 
-function PersonRow({ person, onEdit, onInvite, onRemove }: { person: Person; onEdit: () => void; onInvite: () => void; onRemove: () => void }) {
+function PersonRow({ person, busy, onRestore, onEdit, onInvite, onRemove }: { person: Person; busy: boolean; onRestore: () => void; onEdit: () => void; onInvite: () => void; onRemove: () => void }) {
   const agents = Object.entries(person.agents)
   const seen = Math.max(0, ...person.devices.map((d) => d.lastSeenAt ?? 0))
   return (
@@ -108,12 +115,18 @@ function PersonRow({ person, onEdit, onInvite, onRemove }: { person: Person; onE
             {agents.length ? agents.map(([a, r]) => `${a} (${r})`).join(', ') : 'No agents'}
           </Text>
           <Text size="caption" tone="secondary">
-            {!person.joined ? (person.openInvites ? 'Invite sent' : 'Hasn\'t joined') : seen ? `Last seen ${relativeDay(new Date(seen))}` : 'Joined'}
+            {person.revoked ? 'Access revoked' : !person.joined ? (person.openInvites ? 'Invite sent' : 'Hasn\'t joined') : seen ? `Last seen ${relativeDay(new Date(seen))}` : 'Joined'}
           </Text>
         </VStack>
-        <IconButton title="New invite" icon="link" onClick={onInvite} />
-        <IconButton title="Edit access" icon="slider.horizontal.3" onClick={onEdit} />
-        <IconButton title="Remove" icon="minus.circle" onClick={onRemove} />
+        {person.revoked ? (
+          <Button kind="secondary" onClick={onRestore} disabled={busy}>Restore access</Button>
+        ) : (
+          <>
+            <IconButton title="New invite" icon="link" onClick={onInvite} />
+            <IconButton title="Edit access" icon="slider.horizontal.3" onClick={onEdit} />
+            <IconButton title="Remove" icon="minus.circle" onClick={onRemove} />
+          </>
+        )}
       </div>
       {person.devices.map((d) => (
         <HStack key={d.key} gap={8} className="settings-person-device">

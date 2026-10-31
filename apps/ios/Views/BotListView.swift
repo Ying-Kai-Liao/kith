@@ -56,6 +56,10 @@ struct BotListView: View {
     @State private var pickingFiles = false
     @State private var pickingCamera = false
     @State private var picking: AgentPick?
+    /// The agent the person tapped in the "Goes to" pill; it holds until the box is cleared.
+    @State private var goesPick: String?
+    /// The room list's label filter: one label at a time, applied in place to the crew.
+    @State private var labelFilter: String?
     @State private var calling: CallTarget?
     @State private var dictation = HomeDictation()
 
@@ -147,9 +151,17 @@ struct BotListView: View {
 
     /// The rooms as shown: the crew's order, or the dock's ranking while something is typed.
     private func displayed(_ all: [Room], found hits: [CrewSearchHit]? = nil) -> [Room] {
-        guard searching else { return ordered(all) }
+        guard searching else {
+            let label = activeLabel(all)
+            return ordered(all).filter { RoomLabels.matches($0.item.bot, label: label) }
+        }
         let byId = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return (hits ?? found(all)).compactMap { byId[$0.id] }
+    }
+
+    /// The chosen label, unless no room carries it any more (it was removed or the room deleted).
+    private func activeLabel(_ all: [Room]) -> String? {
+        labelFilter.flatMap { RoomLabels.inUse(all.map(\.item.bot)).contains($0) ? $0 : nil }
     }
 
     /// Where opening a result lands: the message the match was in, by room.
@@ -209,7 +221,7 @@ struct BotListView: View {
                     .allowsHitTesting(tab == .crew)
                     .accessibilityHidden(tab != .crew)
                 BoardView(model: shownBoard, searching: searching, showsHosts: accounts.computers.count > 1,
-                          store: { accounts.store(for: $0) }, open: openBoard, showComputers: { app.showComputers = true })
+                          store: { accounts.store(for: $0) }, handoffStores: shownStores.filter(\.isOwner), open: openBoard, showComputers: { app.showComputers = true })
                     .offset(x: tab == .board ? 0 : pageWidth)
                     .opacity(tab == .board ? 1 : 0)
                     .allowsHitTesting(tab == .board)
@@ -237,7 +249,10 @@ struct BotListView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: computedOrder, initial: true) { _, _ in syncOrder() }
         .onChange(of: frozen) { _, _ in syncOrder() }
-        .onChange(of: query) { _, _ in grouped = false }
+        .onChange(of: query) { _, new in
+            grouped = false
+            if new.isEmpty { goesPick = nil }
+        }
         .onChange(of: sleepProbe) { _, _ in observeSleepers() }
         .modifier(HomeSheets(
             editing: $editing, editingGroup: $editingGroup, confirmDelete: $confirmDelete, newChat: $newChat,
@@ -268,6 +283,7 @@ struct BotListView: View {
                 if !searching {
                     ForEach(shownStores, id: \.computer.id) { updateCard($0) }
                     machineChips
+                    labelChips(all)
                     // A computer waiting for an update has its card instead; its bots aren't known yet.
                     if all.isEmpty && shownStores.allSatisfy({ $0.mismatch == nil }) {
                         EmptyRoster(canCreate: allStores.contains { $0.mismatch == nil }, hasComputer: !accounts.computers.isEmpty,
@@ -569,6 +585,40 @@ struct BotListView: View {
         }
     }
 
+    /// The labels rooms use as filter chips, and New room (the group-creation page).
+    @ViewBuilder private func labelChips(_ all: [Room]) -> some View {
+        let labels = RoomLabels.inUse(all.map(\.item.bot))
+        let active = activeLabel(all)
+        if !labels.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(labels, id: \.self) { label in
+                        Button { labelFilter = label == active ? nil : label } label: {
+                            Text(label).kithText(.secondary)
+                                .foregroundStyle(label == active ? Palette.background : Palette.ink)
+                                .lineLimit(1)
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(label == active ? Palette.ink : Color.clear, in: Capsule())
+                                .kithGlass(in: Capsule(), interactive: true)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Label \(label)")
+                        .accessibilityAddTraits(label == active ? .isSelected : [])
+                    }
+                    Button(action: newGroup) {
+                        Label("New room", systemImage: "plus").kithText(.secondary).foregroundStyle(Palette.ink)
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .kithGlass(in: Capsule(), interactive: true)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onlineStores.isEmpty)
+                }
+                .padding(.horizontal, KithSpacing.gutter)
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
     /// Cards outside this account's chats that wait for its answer (guests' and card lanes'), ahead of the rooms.
     @ViewBuilder private var needsYourOK: some View {
         let waiting = shownStores.flatMap { store in
@@ -635,12 +685,22 @@ struct BotListView: View {
                  onCamera: { if CameraPicker.isAvailable { pickingCamera = true } else { accounts.lastError = "This device has no camera." } },
                  onFiles: { pickingFiles = true },
                  sendStyle: leading ? .muted : .word, micListening: dictation.listening) {
+            if searching { GoesToPill(route: goesRoute) { goesPick = $0 } }
             if !files.isEmpty {
                 HomeAttachmentChips(files: files) { file in
                     withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { files.removeAll { $0.id == file.id } }
                 }
             }
         }
+    }
+
+    /// Where the typed words go: the owner's own agents only (no groups, no outside bots).
+    private var goesRoute: GoesTo {
+        let selected = accounts.selection
+        let agents = rooms.filter { !$0.item.bot.isGroup && $0.item.bot.botGuest == nil }.map {
+            GoesToAgent(key: $0.id, name: $0.item.bot.name, lastAt: $0.item.bot.lastAt, selected: $0.item.ref == selected)
+        }
+        return GoesTo.route(agents, query: query, override: goesPick)
     }
 
     /// Return at the end of the text submits it; the box is otherwise a plain field.
@@ -655,7 +715,9 @@ struct BotListView: View {
         dictation.stop()
         if leads(!matches.isEmpty), let top = matches.first {
             open(top.item.ref, focus: landing[top.id]?.id)
-        } else if searching || !files.isEmpty {
+        } else if searching {
+            sendNew()
+        } else if !files.isEmpty {
             picking = .send
         }
     }
@@ -665,7 +727,9 @@ struct BotListView: View {
         dictation.stop()
         if leads(board.top != nil), let top = board.top {
             openBoard(top)
-        } else if searching || !files.isEmpty {
+        } else if searching {
+            sendNew()
+        } else if !files.isEmpty {
             picking = .send
         }
     }
@@ -706,12 +770,20 @@ struct BotListView: View {
     private var displayedAgents: [Room] { displayed(rooms).filter { !$0.item.bot.isGroup } }
 
     /// A new session with the agent: what was typed and attached goes out as its first message, then its chat opens.
-    private func startSession(with room: Room) {
-        let text = trimmedQuery
+    private func startSession(with room: Room, text: String? = nil) {
+        let text = text ?? trimmedQuery
         room.store.send(text, to: room.item.bot.id, files: files, newTask: true)
         query = ""
         files = []
+        goesPick = nil
         accounts.selection = room.item.ref
+    }
+
+    /// Send with words typed: a new session with the agent the pill names. Twice in a row sends once (the box clears).
+    private func sendNew() {
+        let route = goesRoute
+        guard route.canSend, let target = route.target, let room = rooms.first(where: { $0.id == target.key }) else { return }
+        startSession(with: room, text: route.text)
     }
 
     private func append(_ new: [OutgoingFile]) {

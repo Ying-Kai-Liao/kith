@@ -3,29 +3,35 @@
 #
 #   kith-call "short reason"          rings and returns at once
 #   kith-call --wait "short reason"   holds up to 50 s for the person to answer
+#   kith-call --result "TEXT" "reason"  also hands the host what the call is about (a bug and its PR link): a declined or
+#                                     missed call leaves it in the chat beside the reason, so it is not lost
 #
 # Prints one status word and exits with its code:
 #   ringing 0   accepted 0 (only with --wait)   declined 3   missed 4   busy 5   rate-limited 6 (+ when to retry)
 #   not-allowed 7 (this agent has no Kith chat with the person it runs for)   host unreachable 1   usage 2
-# One call per agent per 10 minutes and 6 a day. There is no push: an app that isn't open misses the call, and a
+# One call per chat per 10 minutes and 6 a day, whichever agent in a `kith ask` chain rings: the call screen says
+# "coder (for architect)" (KITH_AGENT is sent as `from`, a label the host never counts or trusts). There is no push: an app that isn't open misses the call, and a
 # declined or missed call leaves "<agent> tried to call: <reason>" in the chat. The host puts KITH_CALL_CHAT and
-# KITH_CALL_KEY in the environment of runs it starts (app chats, its routines, Telegram/Discord/Slack): the key proves
-# which person the run serves, so a call reaches only them, in the agent's main app chat with that person. Runs
-# without them (a terminal, a launchd schedule outside the host) get not-allowed. In a Kith app chat the same thing is
+# KITH_CALL_KEY in the environment of runs it starts (app chats, its routines, Telegram/Discord/Slack), and kith-sched
+# and an owner's terminal run ask it for them (lib/kith_runenv.py): the key proves which person the run serves, so a
+# call reaches only them, in the agent's main app chat with that person. A run without them (the host was down when it
+# started, or the person has no app chat with the agent) gets not-allowed. In a Kith app chat the same thing is
 # the `call_person` tool of the kith-files server.
 set -euo pipefail
 . "$(dirname "$0")/../lib/kith-env.sh"   # old HQ_X callers and secrets/env: KITH_X and HQ_X agree
 
-wait=false
-[[ ${1:-} == --wait ]] && { wait=true; shift; }
-[[ $# -gt 0 && -n "$*" ]] || { echo 'usage: kith-call [--wait] "short reason"' >&2; exit 2; }
+wait=false result=""
+while [[ ${1:-} == --wait || ${1:-} == --result ]]; do
+  if [[ $1 == --wait ]]; then wait=true; shift; else [[ $# -ge 2 ]] || { echo 'usage: kith-call [--wait] [--result TEXT] "short reason"' >&2; exit 2; }; result=$2; shift 2; fi
+done
+[[ $# -gt 0 && -n "$*" ]] || { echo 'usage: kith-call [--wait] [--result TEXT] "short reason"' >&2; exit 2; }
 [[ -n ${KITH_CALL_CHAT:-} && -n ${KITH_CALL_KEY:-} ]] || { echo "not-allowed"; echo "kith-call: only runs the Kith host started can call (no KITH_CALL_KEY here)" >&2; exit 7; }
 
-exec python3 -I - "$(dirname "$0")" "$wait" "$*" <<'PY'
+exec python3 -I - "$(dirname "$0")" "$wait" "$*" "$result" <<'PY'
 import json, os, subprocess, sys, urllib.error, urllib.request
 from pathlib import Path
 
-here, wait, reason = Path(sys.argv[1]), sys.argv[2] == 'true', sys.argv[3]
+here, wait, reason, result = Path(sys.argv[1]), sys.argv[2] == 'true', sys.argv[3], sys.argv[4]
 CODES = {'ringing': 0, 'accepted': 0, 'declined': 3, 'missed': 4, 'busy': 5, 'rate-limited': 6, 'not-allowed': 7}
 
 # The host's own rule for where it lives (kith-serve endpoint); the env overrides win.
@@ -38,7 +44,10 @@ if not (data and port):
         d, p = str(Path.home() / '.kith' / 'serve'), '19224'
     data, port = data or d, port or p
 
-body = {'chat': os.environ['KITH_CALL_CHAT'], 'key': os.environ['KITH_CALL_KEY'], 'reason': reason, 'wait': wait}
+body = {'chat': os.environ['KITH_CALL_CHAT'], 'key': os.environ['KITH_CALL_KEY'], 'reason': reason, 'wait': wait,
+        'from': os.environ.get('KITH_AGENT', '')}
+if result:
+    body['result'] = result
 try:
     token = (Path(data) / 'token').read_text().strip()
     req = urllib.request.Request(f'http://127.0.0.1:{port}/api/callPerson', json.dumps(body).encode(),

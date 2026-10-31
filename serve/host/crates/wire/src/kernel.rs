@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "aa52c5a3c201936040d1d5fa4cc3b2a675396b33171fd06400e69991ace0d407";
+pub const CONTRACT_SHA256: &str = "4233332e6534aa8c92ea8d7621fd691f70ea94e6d6cb7363df97f05709e1a543";
 
 /// The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -76,6 +76,35 @@ impl PermissionMode {
             Self::Plan => "plan",
             Self::Auto => "auto",
             Self::BypassPermissions => "bypassPermissions",
+        }
+    }
+}
+
+/// Where a delegation (one `kith ask` id) stands: `open` (running, or parked on a card), `answered`, `capped` (answered, and its run took the chain to its cost cap) or `stopped` (the run gave no answer). One this version doesn't know is its own state: the host leaves it alone.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum DelegationState {
+    #[serde(rename = "open")]
+    Open,
+    #[serde(rename = "answered")]
+    Answered,
+    #[serde(rename = "capped")]
+    Capped,
+    #[serde(rename = "stopped")]
+    Stopped,
+    /// A value this version doesn't know.
+    #[default]
+    #[serde(rename = "unknown", other)]
+    Unknown,
+}
+
+impl DelegationState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::Answered => "answered",
+            Self::Capped => "capped",
+            Self::Stopped => "stopped",
+            Self::Unknown => "unknown",
         }
     }
 }
@@ -170,6 +199,63 @@ pub struct CostTag {
     pub person: Option<String>,
 }
 
+/// `kith ask delegations --json`: every delegation record on this Mac, newest first.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Delegations {
+    pub delegations: Vec<Delegation>,
+}
+
+/// The record of one `kith ask` id (foreground, --bg or agent@machine), in kernel/bin/kith-ask's ~/.kith/live/ask/ID.reg. `agent` is the agent asked, `chain` the id of the root ask of its chain, `hop` its depth (0 at the root) and `cross_hops` how many asks of the chain crossed to another Mac. Money is in micro-dollars (US$1 = 1000000) at API prices; `cost_micro_usd` is null for an ask from before costs were kept. `cap_micro_usd` is the chain cap in force now (null: none). `capped_ms` is when this ask's run took its chain to that cap, and `cap_card_ms` when the host raised the Needs-you card for it (once per chain and cap). Times are ms. A record from before delegation records reads as a root ask: chain = its id, hop 0. `brief` is the ask's text (at most 2000 characters) and `session` the asked agent's session once a --bg run claimed one; both are for the owner's peek, null on an older record, and never part of a member's or bot's RPC.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Delegation {
+    pub id: String,
+    pub agent: String,
+    pub chain: String,
+    pub hop: i64,
+    pub cross_hops: i64,
+    pub crossed: bool,
+    pub caller: Caller,
+    pub reply_to: ReplyTo,
+    pub state: DelegationState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_micro_usd: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain_cost_micro_usd: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap_micro_usd: Option<i64>,
+    pub started_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answered_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capped_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap_card_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brief: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+}
+
+/// Who asked: the agent (null for a terminal), the person whose run it is (null for the owner) and where it came from (`terminal`, `serve`, ...).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct Caller {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
+}
+
+/// Where the answer goes: the caller's session (a wake once nobody waits for it) and the ask whose run asked. This is the only place the address lives; cards never carry it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct ReplyTo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask: Option<String>,
+}
+
 /// Each command's arguments, as the kernel takes them.
 pub mod command {
     /// The agents on this Mac.
@@ -191,16 +277,21 @@ pub mod command {
         }
         args
     }
+    /// The delegation records on this Mac.
+    pub fn delegations() -> Vec<&'static str> {
+        vec!["ask", "delegations", "--json"]
+    }
 }
 
 /// Each command's name and the spec of what it prints (a type, or `[T]` for a list of one). For the fixtures' tests.
-pub const COMMANDS: &[(&str, &str)] = &[("ls", "[Agent]"), ("projectLs", "Projects"), ("launch", "Launch")];
+pub const COMMANDS: &[(&str, &str)] = &[("ls", "[Agent]"), ("projectLs", "Projects"), ("launch", "Launch"), ("delegations", "Delegations")];
 
 /// The contract as data, for `crate::check` (the producer's strict check and the consumer's).
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
     enums: &[
         crate::check::EnumSchema { name: "Harness", values: &["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode"], unknown: "unknown" },
         crate::check::EnumSchema { name: "PermissionMode", values: &["default", "acceptEdits", "plan", "auto", "bypassPermissions"], unknown: "default" },
+        crate::check::EnumSchema { name: "DelegationState", values: &["open", "answered", "capped", "stopped"], unknown: "unknown" },
     ],
     types: &[
         crate::check::TypeSchema { name: "Agent", fields: &[("name", "string"), ("description", "string"), ("home", "string"), ("model", "string?"), ("effort", "string?"), ("harness", "Harness?")], may_omit: &[] },
@@ -208,6 +299,10 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "Project", fields: &[("id", "string"), ("paths", "[string]"), ("home", "string?"), ("remotes", "[string]"), ("parent", "string?"), ("memory", "string"), ("exists", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "Launch", fields: &[("version", "int"), ("agent", "string"), ("agent_version", "string"), ("harness", "Harness?"), ("cwd", "string"), ("env", "{string}"), ("system_prompt", "string"), ("settings", "json?"), ("mcp_servers", "json"), ("add_dirs", "[string]"), ("allowed_tools", "[string]"), ("disable_slash_commands", "bool"), ("model", "string?"), ("effort", "string?"), ("project", "string?"), ("call_model", "string?"), ("permission_mode", "PermissionMode?"), ("cost_tag", "CostTag"), ("claude_args", "[string]?"), ("backup", "string?"), ("provider", "Harness?"), ("account", "string?"), ("account_id", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "CostTag", fields: &[("agent", "string"), ("version", "string"), ("model", "string?"), ("effort", "string?"), ("via", "string"), ("project", "string?"), ("person", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Delegations", fields: &[("delegations", "[Delegation]")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Delegation", fields: &[("id", "string"), ("agent", "string"), ("chain", "string"), ("hop", "int"), ("cross_hops", "int"), ("crossed", "bool"), ("caller", "Caller"), ("reply_to", "ReplyTo"), ("state", "DelegationState"), ("cost_micro_usd", "int?"), ("chain_cost_micro_usd", "int?"), ("cap_micro_usd", "int?"), ("started_ms", "int"), ("answered_ms", "int?"), ("capped_ms", "int?"), ("cap_card_ms", "int?"), ("brief", "string?"), ("session", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Caller", fields: &[("agent", "string?"), ("person", "string?"), ("via", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "ReplyTo", fields: &[("session", "string?"), ("ask", "string?")], may_omit: &[] },
     ],
     methods: &[],
 };
@@ -220,6 +315,10 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "Project" => serde_json::from_value::<Project>(value).map(drop),
         "Launch" => serde_json::from_value::<Launch>(value).map(drop),
         "CostTag" => serde_json::from_value::<CostTag>(value).map(drop),
+        "Delegations" => serde_json::from_value::<Delegations>(value).map(drop),
+        "Delegation" => serde_json::from_value::<Delegation>(value).map(drop),
+        "Caller" => serde_json::from_value::<Caller>(value).map(drop),
+        "ReplyTo" => serde_json::from_value::<ReplyTo>(value).map(drop),
         _ => return None,
     })
 }

@@ -12,7 +12,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 /// A call from a paired computer: only the peer methods, each audited under `peer:<computer id>`.
-pub(super) fn peer_call(
+pub(super) async fn peer_call(
     hub: &Arc<Hub>,
     caller: &Caller,
     computer_id: &str,
@@ -29,7 +29,7 @@ pub(super) fn peer_call(
     };
     let target = roles::target_of(b);
     let outcome = match verdict {
-        Ok(()) => peer_method(hub, method),
+        Ok(()) => peer_method(hub, method, b).await,
         Err(e) => Err(e),
     };
     hub.store.audit_add(
@@ -45,9 +45,15 @@ pub(super) fn peer_call(
     Ok(answer)
 }
 
-fn peer_method(hub: &Hub, method: &str) -> Result<Value> {
+async fn peer_method(hub: &Arc<Hub>, method: &str, b: &Value) -> Result<Value> {
     match method {
         "peerAgents" => Ok(json!({ "agents": owner_agents(hub) })),
+        "peerRevokes" => {
+            let sent: kith_wire::rpc::HandleRevokes = serde_json::from_value(b.clone())
+                .map_err(|_| UserError("`handles` is a list of {handle, revoked, at}".into()))?;
+            let mine = crate::remote::handle_revokes::exchange_in(hub, sent.handles).await?;
+            Ok(json!({ "handles": mine }))
+        }
         _ => Err(NotAllowed("This isn't available to a paired computer.".into()).into()),
     }
 }

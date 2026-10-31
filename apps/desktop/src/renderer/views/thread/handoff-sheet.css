@@ -1,0 +1,16 @@
+/* The peek sheet over a handoff (HandoffSheet): brief, live line, limits line, times, the box to the worker, Join and Stop. */
+.hs-body { display: flex; flex-direction: column; gap: 12px; padding: 4px var(--kith-gutter) var(--kith-gutter); min-width: 0; }
+.hs-brief { margin: 0; padding: 12px; border-radius: var(--kith-radius-row-tool); background: var(--kith-panel); color: var(--kith-ink); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font-size: var(--text-callout); line-height: 1.45; }
+.hs-label { color: var(--kith-muted); font-size: var(--text-caption); font-weight: 600; letter-spacing: 0.04em; }
+.hs-live { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.hs-live-text { min-width: 0; overflow-wrap: anywhere; font-size: var(--text-callout); }
+.hs-live-text.mono { font-family: var(--mono, ui-monospace, monospace); }
+.hs-limits { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; padding-top: 10px; border-top: 1px solid var(--kith-hairline, rgba(128, 128, 128, 0.2)); font-family: var(--mono, ui-monospace, monospace); font-size: var(--text-caption); color: var(--kith-muted); }
+.hs-limit { display: inline-flex; align-items: center; gap: 8px; }
+.hs-limit .progress-track { width: 72px; }
+/* The one closest to its limit is the one to watch: ink, not red (a limit is not a failure). */
+.hs-limit.watch { color: var(--kith-ink); font-weight: 600; }
+.hs-times { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: var(--text-caption); color: var(--kith-muted); }
+.hs-box { display: flex; gap: 8px; align-items: flex-end; }
+.hs-box > :first-child { flex: 1; min-width: 0; }
+.hs-actions { display: flex; gap: 8px; }

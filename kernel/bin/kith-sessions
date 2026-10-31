@@ -15,6 +15,8 @@
                                            launcher's shell, which then execs `run`, which gives it back); refused at once when held
   kith-sessions proc PID PERSON AGENT     every non-owner run: a session-less `proc-PID.claim` naming the person, so the revoke sweep
                                            finds the run (and the claude below it) after a host restart
+  kith-sessions sweep PERSON...            revoke or removal with no host running: ends the live holders of every claim naming one of
+                                           these people (and their bots), and what those started; the owner's claims name no one
   kith-sessions pick AGENT                 for `kith AGENT -r`: the agent's recent sessions (cost ledger runs with a transcript),
                                            numbered on stderr; reads a number on stdin and prints that session id
   kith-sessions latest AGENT DIR           for `kith AGENT -c`: the id of the agent's newest session begun in DIR
@@ -375,6 +377,56 @@ def proc_claim(pid, person, agent):
     tmp.write_text(json.dumps(mine))
     os.chmod(tmp, 0o600)
     os.replace(tmp, d / f'proc-{pid}.claim')
+
+
+def sweep_persons(persons, grace=2.0):
+    """The kernel's twin of the host's claim sweep (terminal/claim.rs sweep), for a revoke or removal made with no host
+    running: the live holders of claims that name one of `persons`, and their descendants, get SIGTERM, and SIGKILL after
+    `grace` seconds. A claim without a person is the owner's and is never touched; each holder is checked live first (pid and
+    start time), so a reused pid is left alone. Returns the pids it signalled."""
+    d = reg_dir()
+    holders = []
+    for f in (d.glob('*.claim') if d and d.is_dir() else ()):
+        c = read_claim(f)
+        if c and c.get('person') in persons and claim_live(c) and c.get('pid', 0) > 1:
+            holders.append(c['pid'])
+    if not holders:
+        return []
+    try:
+        table = subprocess.run(['ps', '-A', '-o', 'pid=,ppid='], capture_output=True, text=True).stdout.split('\n')
+    except OSError:
+        table = []
+    kids = {}
+    for row in table:
+        got = row.split()
+        if len(got) == 2 and all(x.isdigit() for x in got):
+            kids.setdefault(int(got[1]), []).append(int(got[0]))
+    victims, todo = [], list(holders)
+    while todo:
+        pid = todo.pop()
+        if pid not in victims and pid != os.getpid():
+            victims.append(pid)
+            todo += kids.get(pid, [])
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 0)):
+        for pid in victims:
+            try:
+                os.kill(pid, sig)
+            except OSError:
+                pass
+        end = time.time() + wait
+        while wait and time.time() < end and any(pid_alive(p) for p in victims):
+            time.sleep(0.1)
+    return victims
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True
+    return True
 
 
 def release_claims(pid):
@@ -762,6 +814,8 @@ if __name__ == '__main__':
         claim_terminal(a[1], int(a[2]), a[3] if len(a) > 3 else None, a[4] if len(a) > 4 else None)
     elif a[:1] == ['proc'] and len(a) == 4:
         proc_claim(int(a[1]), a[2], a[3])
+    elif a[:1] == ['sweep'] and len(a) > 1:
+        print('swept %d' % len(sweep_persons(set(a[1:]))))
     elif a[:1] == ['pick'] and len(a) == 2:
         pick(a[1])
     elif a[:1] == ['latest'] and len(a) == 3:

@@ -160,8 +160,14 @@ async fn bot_answers(r: &Rig) -> BTreeMap<&'static str, (&'static str, Value)> {
     let room_cfg = json!({"id": "", "kind": "group", "name": "Crew", "members": [house, bot_id]});
     let room = r.hub.create_bot(serde_json::from_value(room_cfg).unwrap()).unwrap()["id"].as_str().unwrap().to_owned();
     r.hub.add_entry(&Lane::main(&room), EntryKind::User, 1, &json!({"text": "hello crew", "status": "sent"})).unwrap();
+    // The owner hands the bot a secret (the Keychain is a stand-in): the read lists it, the fetch answers it once.
+    crate::cards::room_secret_tests::keychain(r);
+    let given = json!({"room": room, "to": bot_id, "value": "stand-in-secret", "label": "api key"});
+    let sent = call(r, &Caller::Local, "sendSecret", given).await;
     let read = call(r, &rex, "botRoomRead", json!({"room": room})).await;
     got.insert("botRoomRead", ("botRoomRead", read));
+    let fetched = call(r, &rex, "botSecretFetch", json!({"id": sent["id"]})).await;
+    got.insert("botSecretFetch", ("botSecretFetch", fetched));
     // An open conversation (no loop started): the bot speaks up in it, one turn off its budget.
     let open = r.hub.store.open_conversation(&Lane::main(&room), 5, "owner").unwrap();
     let post = json!({"room": room, "conversation": open.id, "epoch": open.epoch, "text": "hi from outside", "clientNonce": "p1"});
@@ -234,8 +240,11 @@ async fn the_peer_methods_answer_as_the_contract_and_its_fixtures_say() {
     };
     r.hub.store.put_peer_in(&peer).unwrap();
     let studio = Caller::Device { key: peer.device_key, scopes: vec![Scope::Control] };
+    let known = crate::store::HandleRevoke { handle: "telegram:7".into(), revoked: true, at: 1_761_000_000_000 };
+    r.hub.store.put_handle_revoke(&known).unwrap();
     let mut answers = BTreeMap::new();
     answers.insert("peerAgents", ("peerAgents", call(&r, &studio, "peerAgents", json!({})).await));
+    answers.insert("peerRevokes", ("peerRevokes", call(&r, &studio, "peerRevokes", json!({"handles": []})).await));
     let methods: std::collections::BTreeSet<_> = answers.values().map(|(m, _)| *m).collect();
     assert_eq!(methods, rpc::PEER_METHODS.iter().copied().collect(), "a fixture for every peer method");
     answers_are_their_fixtures("peer", &answers);

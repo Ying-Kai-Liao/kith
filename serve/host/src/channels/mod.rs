@@ -97,6 +97,11 @@ pub fn has_work_key(wk: &str) -> bool {
     wk.rsplit_once('#').is_some_and(|(key, _)| CORE.get().is_some_and(|core| core.has_thread(key)))
 }
 
+/// The Claude sessions of the thread behind `wk`; none without channels.
+pub fn thread_sessions(wk: &str) -> Vec<String> {
+    CORE.get().map_or_else(Vec::new, |core| core.thread_sessions(wk))
+}
+
 /// Starts the channels in the background: nothing happens without hq, or with `channels.enabled` off.
 pub fn start(hub: &Arc<Hub>) {
     tokio::spawn(run(hub.clone()));
