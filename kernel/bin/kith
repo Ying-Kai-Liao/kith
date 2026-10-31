@@ -1034,7 +1034,7 @@ terminal=0
 # Its origin is the agent's own chat with the owner in the app (kith-send leaves messages there, kith-call rings it); the
 # host makes both. No host or no such chat: nothing is set, and kith-send goes to Telegram as before.
 if [[ $terminal -eq 1 && -z ${KITH_RUN_OUTBOX:-} && -z ${KITH_BRIDGE_OUTBOX:-} && -z ${KITH_CALL_KEY:-} ]]; then
-  origin_env=$(python3 "$KITH/lib/kith_runenv.py" "$agent" --outbox 2>/dev/null | python3 -c '
+  origin_env=$(python3 "$KITH/lib/kith_runenv.py" "$agent" --outbox 2>/dev/null | python3 -I -c '
 import json, sys
 for k, v in json.load(sys.stdin).get("env", {}).items():
     if k in ("KITH_CALL_CHAT", "KITH_CALL_KEY", "KITH_RUN_OUTBOX"): print(k + "=" + v)' 2>/dev/null) || origin_env=""
