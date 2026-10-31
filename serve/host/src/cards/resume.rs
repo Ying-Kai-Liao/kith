@@ -1281,7 +1281,12 @@ pub fn stopped_bot(hub: &Hub, bot_id: &str) {
 
 /// Stop in a channel thread (its work key).
 pub fn stopped_thread(hub: &Hub, wk: &str) {
-    stopped(hub, &[wk.to_owned()], crate::channels::thread_sessions(wk), |d| matches!(d, Door::Channel(w) if w == wk));
+    stopped_thread_of(hub, wk, crate::channels::thread_sessions(wk));
+}
+
+/// [`stopped_thread`] with the thread's Claude sessions given: their delegations end with it (R8), as a lane's do.
+pub fn stopped_thread_of(hub: &Hub, wk: &str, sessions: Vec<String>) {
+    stopped(hub, &[wk.to_owned()], sessions, |d| matches!(d, Door::Channel(w) if w == wk));
 }
 
 #[cfg(not(test))]

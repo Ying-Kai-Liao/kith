@@ -363,3 +363,32 @@ async fn a_handle_revoke_waits_for_a_computer_that_is_off_and_arrives_when_it_is
     assert!(!due(&r.hub, "cmp_b"), "acknowledged now");
     assert!(due(&r.hub, "cmp_c"), "another computer that never heard is still owed");
 }
+
+#[tokio::test]
+async fn a_revoke_made_on_a_clock_behind_the_kept_stamp_is_still_newer_than_it() {
+    let r = Rig::new().await;
+    r.auth(&["person", "tom"]);
+    r.auth(&["member", "house", "tom"]);
+    r.auth(&["handle", "tom", "telegram", "42"]);
+    // This clock runs an hour behind the computer that stamped the last change.
+    let ahead = crate::store::now_ms() + 3_600_000;
+    let kept = crate::store::HandleRevoke { handle: "telegram:42".into(), revoked: false, at: ahead };
+    assert!(r.hub.store.put_handle_revoke(&kept).unwrap());
+    call(&r, "revokePerson", json!({"personId": "tom"})).await.unwrap();
+    let mine = r.hub.store.handle_revokes().unwrap();
+    assert!(mine[0].revoked && mine[0].at > ahead, "a stamp that is not newer is ignored and no computer would hear");
+}
+
+#[tokio::test]
+async fn a_stamp_from_far_in_the_future_is_refused() {
+    use crate::remote::handle_revokes::exchange_in;
+    let r = Rig::new().await;
+    r.auth(&["person", "tom"]);
+    r.auth(&["member", "house", "tom"]);
+    r.auth(&["handle", "tom", "telegram", "42"]);
+    let at = crate::store::now_ms() + 3_600_000;
+    let future = crate::store::HandleRevoke { handle: "telegram:42".into(), revoked: true, at };
+    let mine = exchange_in(&r.hub, vec![future]).await.unwrap();
+    assert!(r.allowed("tom", "house"), "not applied");
+    assert!(mine.is_empty(), "and not kept, or it would win over every real change after it");
+}

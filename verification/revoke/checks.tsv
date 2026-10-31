@@ -69,3 +69,15 @@ handle	PROPERTY	HandleNoCloud	pass
 broken-handle-no-stamp	PROPERTY	HandleStampsGrow	fail
 broken-handle-no-catchup	PROPERTY	HandleConverges	fail
 handle	INVARIANT	NeverHandleOnPeer	fail
+# --- round 5 (review of the sweep): a stamp is lifted above the kept one, a peer's future stamp is refused, a stamp is kept only once applied, a removal forgets what a revoke parked
+handle-skew	INVARIANT	TypeOK	pass
+handle-skew	PROPERTY	HandleConverges	pass
+handle-skew	PROPERTY	HandleStampsMove	pass
+handle-skew	INVARIANT	HandleBounded	pass
+broken-handle-no-bump	PROPERTY	HandleStampsMove	fail
+broken-handle-no-bump	PROPERTY	HandleConverges	fail
+broken-handle-future	INVARIANT	HandleBounded	fail
+broken-handle-store-first	PROPERTY	HandleConverges	fail
+removal	INVARIANT	TypeOK	pass
+removal	INVARIANT	NoOrphan	pass
+broken-removal-orphans	INVARIANT	NoOrphan	fail

@@ -529,6 +529,18 @@ pub fn apply_grants(hub: &Hub, grants: &[HostGrant], owner_uid: Option<&str>) ->
             continue;
         }
         let listed = grants.iter().position(|g| Some(&g.grant_id) == d.grant_id.as_ref() && g.device_key == d.key);
+        // The owner's undo of a revoke grants the person's device again under a new id; the row this Mac kept for the
+        // undo is that device (same key, same account), so it follows the new grant instead of needing a new approval.
+        let regranted = || {
+            let mut same = grants.iter().enumerate().filter(|(_, g)| g.device_key == d.key);
+            let (i, g) = same.next()?;
+            (same.next().is_none() && !known[i] && grant_matches(hub, &d, g.user_id.as_deref(), owner_uid)).then_some(i)
+        };
+        let listed = listed.or_else(|| {
+            let i = regranted()?;
+            hub.store.set_grant_id(&d.key, &grants[i].grant_id).ok()?;
+            Some(i)
+        });
         if let Some(i) = listed {
             known[i] = true;
             if grant_matches(hub, &d, grants[i].user_id.as_deref(), owner_uid) {

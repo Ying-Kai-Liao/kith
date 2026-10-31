@@ -1,0 +1,3 @@
+HandleSync = TRUE
+HandleSkew = TRUE
+HandleApplyFails = TRUE

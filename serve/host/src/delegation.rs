@@ -46,9 +46,15 @@ pub async fn list() -> Result<Vec<Delegation>> {
 /// stop, their records settle `stopped`, no answer wakes the caller afterwards, and the wakes and waiters the callers are
 /// owed go. Nothing to end is fine. An error is logged: the access or the run is already stopped.
 pub async fn end(sessions: &[String], persons: &[String]) {
+    #[cfg(test)]
+    ENDED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((sessions.to_vec(), persons.to_vec()));
     let Ok(bin) = kernel().await else { return };
     end_with(&bin, sessions, persons).await;
 }
+
+/// What the tests asked to end: there is no kernel to ask.
+#[cfg(test)]
+pub static ENDED: std::sync::Mutex<Vec<(Vec<String>, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
 
 async fn end_with(bin: &std::path::Path, sessions: &[String], persons: &[String]) {
     let (sessions, persons): (Vec<&String>, Vec<&String>) =

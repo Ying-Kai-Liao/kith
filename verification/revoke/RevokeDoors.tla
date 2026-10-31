@@ -66,7 +66,14 @@ CONSTANTS
     AnswerIgnoresEnd,   \* an answer to an ended (stopped) ask is still kept and wakes its caller
     HandleSync,         \* TRUE = a handle-only person Q, revoked on one Mac, and the second Mac starts off
     HandleNoStamp,      \* a peer's state overrides this one's whatever the stamps say
-    HandleNoCatchup     \* a handle revoke is sent only at the moment it is made, to peers then online
+    HandleNoCatchup,    \* a handle revoke is sent only at the moment it is made, to peers then online
+    HandleSkew,         \* m2's clock reads behind the stamps it has been sent (clocks disagree)
+    HandleNoBump,       \* a change is stamped with the clock alone, so it can be older than the stamp kept (and is dropped)
+    HandleFutureOk,     \* a peer's stamp from the far future is taken as it is
+    HandleStoreFirst,   \* a peer's stamp is kept before the change is applied, so a failed apply is never retried
+    HandleApplyFails,   \* applying a peer's change can fail (kith-auth refuses, or there is none)
+    Removal,            \* TRUE = the owner can remove P while P is revoked
+    RemoveKeeps         \* a removal leaves what the revoke parked (device keys, invite token hashes) behind
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -104,6 +111,7 @@ VARIABLES
     gdoor,         \* gdoor[m] \in GDoor: P's guest door on m
     items,         \* items[m]: P's devices, memberships and open invites that grant access on m
     parked,        \* parked[m]: the ones a revoke kept for the undo
+    gone,          \* gone[m]: P was removed on m (while revoked)
     ask,           \* ask[m] \in AskState: P's delegation on m
     wakeOwed,      \* wakeOwed[m]: the answer of P's ask is owed to P's session as a wake
     hrev,          \* hrev[m]: the handle-only person Q is revoked on m
@@ -114,8 +122,8 @@ VARIABLES
 AskState == {"none", "open", "answered", "stopped"}
 
 vars == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor,
-          items, parked, ask, wakeOwed, hrev, hat, clk, hops>>
-ext == <<items, parked, ask, wakeOwed, hrev, hat, clk, hops>>
+          items, parked, gone, ask, wakeOwed, hrev, hat, clk, hops>>
+ext == <<items, parked, gone, ask, wakeOwed, hrev, hat, clk, hops>>
 auth == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos>>
 
 (* ---- access ---- *)
@@ -153,14 +161,16 @@ Publish(m, val) ==
 \* twice changes nothing more. The undo (restore_person) gives back exactly what was parked.
 ItemsRevoke(m) ==
     IF ~ItemsOn \/ revoked[m]
-    THEN UNCHANGED <<items, parked>>
+    THEN UNCHANGED <<items, parked, gone>>
     ELSE /\ items' = [items EXCEPT ![m] = {}]
          /\ parked' = [parked EXCEPT ![m] = IF DeleteItems THEN {} ELSE items[m]]
+         /\ gone' = gone
 ItemsUndo(m) ==
     IF ~ItemsOn \/ ~revoked[m]
-    THEN UNCHANGED <<items, parked>>
+    THEN UNCHANGED <<items, parked, gone>>
     ELSE /\ items' = [items EXCEPT ![m] = items[m] \union parked[m]]
          /\ parked' = [parked EXCEPT ![m] = {}]
+         /\ gone' = gone
 ItemsStep(m, val) == IF val THEN ItemsRevoke(m) ELSE ItemsUndo(m)
 
 Init ==
@@ -178,6 +188,7 @@ Init ==
     /\ gdoor = [m \in Macs |-> "idle"]
     /\ items = [m \in Macs |-> Items0]
     /\ parked = [m \in Macs |-> {}]
+    /\ gone = [m \in Macs |-> FALSE]
     /\ ask = [m \in Macs |-> "none"]
     /\ wakeOwed = [m \in Macs |-> FALSE]
     /\ hrev = [m \in Macs |-> FALSE]
@@ -376,14 +387,14 @@ AskStart(m) ==
     /\ turn[m]["P"] \in Live
     /\ MayP(m)
     /\ ask' = [ask EXCEPT ![m] = "open"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, wakeOwed, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, wakeOwed, hrev, hat, clk, hops>>
 \* The asked agent answers; nobody waits, so the answer is a wake of P's session. An ended ask keeps nothing (R8).
 AskAnswer(m) ==
     /\ Asks
     /\ ask[m] = "open" \/ (AnswerIgnoresEnd /\ ask[m] = "stopped")
     /\ ask' = [ask EXCEPT ![m] = IF ask[m] = "open" THEN "answered" ELSE ask[m]]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = TRUE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, hrev, hat, clk, hops>>
 \* The owed wake starts P's turn: the host's Recheck reads may().
 WakeStart(m) ==
     /\ Asks
@@ -392,7 +403,7 @@ WakeStart(m) ==
     /\ MayP(m)
     /\ turn' = [turn EXCEPT ![m]["P"] = "running"]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<auth, door, gdoor, items, parked, ask, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, ask, hrev, hat, clk, hops>>
 \* A revoke on m (cut_off -> sweep_asks): P's open delegation ends (kith ask --end) ...
 AskSweep(m) ==
     /\ Asks
@@ -400,7 +411,7 @@ AskSweep(m) ==
     /\ revoked[m]
     /\ ask[m] = "open"
     /\ ask' = [ask EXCEPT ![m] = "stopped"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, wakeOwed, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, wakeOwed, hrev, hat, clk, hops>>
 \* ... and the wake owed to P's session is withdrawn (kith-wake withdraw-person).
 WakeWithdraw(m) ==
     /\ Asks
@@ -408,7 +419,7 @@ WakeWithdraw(m) ==
     /\ revoked[m]
     /\ wakeOwed[m]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, ask, hrev, hat, clk, hops>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, hrev, hat, clk, hops>>
 
 (* ---- a person known only by a chat handle (remote/handle_revokes.rs) ---- *)
 \* The owner revokes or undoes Q on m's terminal or app: stamped, kept. With no catch-up the change is sent only now.
@@ -418,11 +429,14 @@ HChange(m) ==
     /\ clk' = clk + 1
     /\ hops' = hops + 1
     /\ LET v == ~hrev[m]
-       IN /\ hrev' = [n \in Macs |-> IF n = m \/ (HandleNoCatchup /\ net[m] = "online" /\ net[n] = "online")
-                                      THEN v ELSE hrev[n]]
-          /\ hat' = [n \in Macs |-> IF n = m \/ (HandleNoCatchup /\ net[m] = "online" /\ net[n] = "online")
-                                     THEN clk + 1 ELSE hat[n]]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, ask, wakeOwed>>
+           \* A clock that runs behind reads low; the stamp is then lifted above the one kept (put_handle_revoke ignores
+           \* a stamp that is not newer), unless HandleNoBump.
+           st == IF HandleSkew /\ m = "m2" THEN (IF HandleNoBump THEN 0 ELSE hat[m] + 1) ELSE clk + 1
+           kept == st > hat[m]
+           toAll(n) == n = m \/ (HandleNoCatchup /\ net[m] = "online" /\ net[n] = "online")
+       IN /\ hrev' = [n \in Macs |-> IF toAll(n) THEN v ELSE hrev[n]]
+          /\ hat' = [n \in Macs |-> IF kept /\ toAll(n) THEN st ELSE hat[n]]
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed>>
 \* Two paired Macs, both online, exchange their lists (peerRevokes): the latest stamp wins on both.
 HExchange(a, b) ==
     /\ HandleSync
@@ -432,9 +446,40 @@ HExchange(a, b) ==
     /\ IF HandleNoStamp
        THEN /\ hrev' = [hrev EXCEPT ![b] = hrev[a]]
             /\ hat' = [hat EXCEPT ![b] = hat[a]]
-       ELSE /\ hrev' = [n \in Macs |-> IF hat[a] >= hat[b] THEN hrev[a] ELSE hrev[b]]
-            /\ hat' = [n \in Macs |-> IF hat[a] >= hat[b] THEN hat[a] ELSE hat[b]]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, ask, wakeOwed, clk, hops>>
+       ELSE \* the newer stamp wins; an equal one changes nothing (the receiver knows it already)
+            /\ hrev' = [n \in Macs |-> IF hat[a] > hat[b] THEN hrev[a] ELSE IF hat[b] > hat[a] THEN hrev[b] ELSE hrev[n]]
+            /\ hat' = [n \in Macs |-> IF hat[a] > hat[b] THEN hat[a] ELSE hat[b]]
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, clk, hops>>
+\* The same exchange where applying a's newer change on b fails: with the stamp kept first, b then believes it has it.
+HExchangeFails(a, b) ==
+    /\ HandleSync
+    /\ HandleApplyFails
+    /\ ~HandleNoCatchup
+    /\ a # b
+    /\ net[a] = "online" /\ net[b] = "online"
+    /\ hat[a] > hat[b]
+    /\ hat' = IF HandleStoreFirst THEN [hat EXCEPT ![b] = hat[a]] ELSE hat
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, hrev, clk, hops>>
+\* A peer sends a stamp from the far future; only a computer that does not bound stamps takes it.
+HForge(m) ==
+    /\ HandleSync
+    /\ HandleFutureOk
+    /\ net[m] = "online"
+    /\ hat[m] < 9
+    /\ hrev' = [hrev EXCEPT ![m] = TRUE]
+    /\ hat' = [hat EXCEPT ![m] = 9]
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, clk, hops>>
+
+(* ---- removing a revoked person ---- *)
+\* kith-auth `--rm` (or the owner dropping them) while P is revoked: what the revoke parked goes with them, on whichever
+\* path (members.rs forget_removed), or it is orphaned and an undo would hand it to nobody.
+Remove(m) ==
+    /\ Removal
+    /\ revoked[m]
+    /\ ~gone[m]
+    /\ gone' = [gone EXCEPT ![m] = TRUE]
+    /\ parked' = [parked EXCEPT ![m] = IF RemoveKeeps THEN parked[m] ELSE {}]
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, ask, wakeOwed, hrev, hat, clk, hops>>
 
 \* Host restart (round 1's Restart) is left out here: it only aborts live turns, which no property depends on.
 
@@ -461,7 +506,9 @@ Next ==
           \/ AskSweep(m)
           \/ WakeWithdraw(m)
           \/ HChange(m)
-    \/ \E a, b \in Macs : HExchange(a, b)
+          \/ HForge(m)
+          \/ Remove(m)
+    \/ \E a, b \in Macs : HExchange(a, b) \/ HExchangeFails(a, b)
     \/ \E m \in Macs, w \in Who :
           \/ Helper(m, w)
           \/ Deliver(m, w)
@@ -490,10 +537,11 @@ TypeOK ==
     /\ \A m \in Macs : ver[m] <= cloudVer
     /\ items \in [Macs -> SUBSET Items0]
     /\ parked \in [Macs -> SUBSET Items0]
+    /\ gone \in [Macs -> BOOLEAN]
     /\ ask \in [Macs -> AskState]
     /\ wakeOwed \in [Macs -> BOOLEAN]
     /\ hrev \in [Macs -> BOOLEAN]
-    /\ hat \in [Macs -> 0..2]
+    /\ hat \in [Macs -> 0..9]
     /\ clk \in 0..2
     /\ hops \in 0..2
 
@@ -547,6 +595,13 @@ WakesWithdrawn == \A m \in Macs : (revoked[m] /\ wakeOwed[m]) ~> (~wakeOwed[m] \
 HandleConverges == <>[](hrev["m1"] = hrev["m2"] /\ hat["m1"] = hat["m2"])
 \* HandleStampsGrow: a Mac never takes an older fact over a newer one.
 HandleStampsGrow == [][\A m \in Macs : hat'[m] >= hat[m]]_vars
+\* HandleStampsMove: a Mac's answer about Q changes only with a newer stamp kept beside it (a change whose stamp is
+\* ignored leaves the other Macs deaf to it).
+HandleStampsMove == [][\A m \in Macs : hrev'[m] # hrev[m] => hat'[m] > hat[m]]_vars
+\* HandleBounded: no stamp is ahead of every real change (a peer's far-future stamp would win over all after it).
+HandleBounded == \A m \in Macs : hat[m] <= clk
+\* NoOrphan: a removed P leaves nothing parked.
+NoOrphan == \A m \in Macs : gone[m] => parked[m] = {}
 \* HandleNoCloud: a handle revoke changes nothing in the cloud.
 HandleNoCloud == [][(hrev' # hrev) => (cloudRevoked' = cloudRevoked /\ cloudVer' = cloudVer)]_vars
 

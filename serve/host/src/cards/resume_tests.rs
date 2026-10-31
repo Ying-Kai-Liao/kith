@@ -508,6 +508,35 @@ async fn stop_wins_over_a_yes_already_given_also_across_a_restart() {
     assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
 }
 
+/// Whether `end` was asked for `session`, waiting for the task Stop spawned to get there.
+async fn ended(session: &str) -> bool {
+    for _ in 0..100 {
+        let asked = crate::delegation::ENDED.lock().unwrap().iter().any(|(s, _)| s.iter().any(|x| x == session));
+        if asked {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    false
+}
+
+#[tokio::test]
+async fn a_stop_in_a_channel_thread_ends_the_delegations_of_its_sessions() {
+    let r = Rig::new().await;
+    resume::stopped_thread_of(&r.hub, "t:1#house", vec!["thread-sess-1".into()]);
+    assert!(ended("thread-sess-1").await, "the thread's asks end with its Stop (R8)");
+}
+
+#[tokio::test]
+async fn a_stop_of_one_bot_ends_only_that_bots_delegations_in_a_shared_chat() {
+    let r = Rig::new().await;
+    r.hub.store.kv_set("lane.session.botx@room1", "sess-botx").unwrap();
+    r.hub.store.kv_set("lane.session.boty@room1", "sess-boty").unwrap();
+    resume::stopped_lane(&r.hub, "botx", &Lane::main("room1"));
+    assert!(ended("sess-botx").await);
+    assert!(!crate::delegation::ENDED.lock().unwrap().iter().any(|(s, _)| s.iter().any(|x| x == "sess-boty")));
+}
+
 #[tokio::test]
 async fn after_a_stop_another_yes_makes_only_its_own_turn() {
     let r = Rig::new().await;
