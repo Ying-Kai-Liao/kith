@@ -10,6 +10,7 @@ import { registerHostProxy } from './host-proxy'
 import { readClipboardFiles, readFiles } from './files'
 import { Tray } from './tray'
 import { applyAppearance, setAppearance } from './appearance'
+import { linkPreview } from './link-preview'
 import { applyDockVisibility, setShowInDock, showInDock } from './dock'
 import { AccountService } from './account'
 import { Updates } from './updates'
@@ -203,6 +204,7 @@ function registerIPC(tray: Tray) {
       void shell.openPath(path)
     }
   })
+  ipcMain.handle('app:linkPreview', fromRenderer((_e, url: unknown) => linkPreview(url)))
   ipcMain.on('app:openSettings', (_e, url: string) => {
     if (url.startsWith('x-apple.systempreferences:')) void shell.openExternal(url)
   })

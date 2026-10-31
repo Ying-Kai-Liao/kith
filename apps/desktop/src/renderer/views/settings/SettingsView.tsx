@@ -350,6 +350,7 @@ function NotificationSettings() {
 /** Product analytics on this computer's host (only the computer itself may change it), and computer access. */
 function PrivacySettings() {
   const app = useApp()
+  const [linkPictures, setLinkPictures] = usePref(prefs.linkPictures)
   const local = useModel(app.local)
   const role = useComputerRole()
   const running = local !== null && local.connection.kind === 'online'
@@ -358,11 +359,21 @@ function PrivacySettings() {
   const setShared = (on: boolean) => void local?.setAnalytics(on).catch((e: unknown) => app.setError(errorText(e)))
   return (
     <>
-      <CardSection title="Privacy" footer="Which features you use, never your messages, code or files. Helps us spot bugs sooner and make Kith better for you.">
+      <CardSection
+        title="Privacy"
+        footer={<>
+          <p>Which features you use, never your messages, code or files. Helps us spot bugs sooner and make Kith better for you.</p>
+          <p>Kith loads a picture from each news link. The site sees your IP address, just as when you open the link.</p>
+        </>}
+      >
         <HStack gap={4}>
           <span className={running ? undefined : 'settings-off'}>Share usage analytics</span>
           <IconButton title="About usage analytics" icon="info.circle" onClick={() => setAbout(true)} />
           <Switch on={local?.analytics === true} onChange={setShared} disabled={!running} label="Share usage analytics" className="settings-privacy-switch" />
+        </HStack>
+        <HStack gap={4}>
+          <span>Show link pictures</span>
+          <Switch on={linkPictures} onChange={setLinkPictures} label="Show link pictures" className="settings-privacy-switch" />
         </HStack>
       </CardSection>
       {role === 'owner' ? (
