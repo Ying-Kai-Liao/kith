@@ -57,11 +57,11 @@ async function floodFrom(ip: string, inviteId: string, proof: string): Promise<n
 describe("bot join limiter", () => {
   it("counts a request before its signature is checked, so unsigned floods are limited too", async () => {
     const { inviteId, proof } = { inviteId: "binv_flood", proof: secrets().proof };
-    const statuses =(await floodFrom("192.0.2.201", inviteId, proof)) ?? (await floodFrom("192.0.2.203", inviteId, proof));
+    const statuses = (await floodFrom("192.0.2.201", inviteId, proof)) ?? (await floodFrom("192.0.2.203", inviteId, proof));
     expect(statuses, "the burst crossed a window edge twice").not.toBeNull();
     expect(statuses!.slice(0, 10)).toEqual(Array(10).fill(401));
     expect(statuses![10]).toBe(429);
-  }, 30_000);
+  }, 150_000); // up to ~55 s waiting for an early window, then a possible second burst
 });
 
 describe("unknown invite and wrong token", () => {
