@@ -169,6 +169,17 @@ again=$(python3 "$W" take --holder $$ --session acp:c3:t1 2>/dev/null)
 [[ -z $again ]] && ok "a dead turn the session never saw waits its pause" || bad "no pause after a dead turn" "$again"
 is "and is still owed, not lost" "$(owed acp:c3:t1)/$(how card:10)" "1/"
 is "its dead turn was let go" "$(python3 "$W" ls --json | python3 -c 'import json,sys; print([(i["turn"], i["tries"]) for i in json.load(sys.stdin) if i["session"]=="acp:c3:t1"])')" "[(None, 1)]"
+# N4: the host's take names no session, yet a host-door turn on a Claude session keeps its id, so a restart finds the
+# turn's claude still running (left alone) or its note in the transcript (answered), never owed a second time.
+python3 "$W" enqueue s8 --id card:81 --agent designer --door host -- approved >/dev/null
+turn=$(python3 "$W" take --holder "$gone" --session s8)
+python3 -c 'import json,os,sys; json.dump({"pid": os.getppid()}, open(sys.argv[1], "w"))' "$KITH_STATE/live/terminal/s8.claim"
+python3 "$W" drain >/dev/null
+is "a dead host whose claude still runs keeps the turn" "$(python3 "$W" ls --json | python3 -c 'import json,sys; print([bool(i["turn"]) for i in json.load(sys.stdin) if i["session"]=="s8"])')" "[True]"
+rm "$KITH_STATE/live/terminal/s8.claim"
+printf '{"type":"user","message":{"content":"%s"}}\n' "[kith wake $(field "$turn" run)] approved" > "$TR/s8.jsonl"
+python3 "$W" drain >/dev/null
+is "a host-door turn on a Claude session is answered after a restart, not re-run" "$(how card:81)/$(owed s8)" "recovered/0"
 
 # --- waiters (WaiterResult): code, no model, one wake each -----------------------------------------------------------
 cat > "$T/gh" <<'STUB'
