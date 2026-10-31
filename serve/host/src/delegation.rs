@@ -218,20 +218,20 @@ mod tests {
     fn a_chain_whose_cap_was_raised_or_turned_off_gets_no_card() {
         let raised = rec("a", "a", true, false, 5_250_000, Some(10_000_000));
         let off = rec("b", "b", true, false, 5_250_000, None);
-        assert!(needing_a_card(&[raised, off]).is_empty());
+        assert_eq!(needing_a_card(&[raised, off]).len(), 0);
     }
 
     #[test]
     fn a_state_this_version_does_not_know_is_left_alone() {
         let mut d = rec("a", "a", true, false, 6_000_000, Some(5_000_000));
         d.state = DelegationState::Unknown;
-        assert!(needing_a_card(&[d]).is_empty());
+        assert_eq!(needing_a_card(&[d]).len(), 0);
     }
 
     #[test]
     fn a_chain_id_is_checked_before_it_reaches_a_command_line() {
         let all = [rec("a", "--cap", true, false, 6_000_000, Some(5_000_000))];
-        assert!(needing_a_card(&all).is_empty());
+        assert_eq!(needing_a_card(&all).len(), 0);
         assert!(plain("ask-20261031104140-1f08b7"));
         assert!(!plain("a b") && !plain("") && !plain("a;b"));
     }
