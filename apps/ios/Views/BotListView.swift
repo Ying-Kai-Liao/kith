@@ -56,6 +56,8 @@ struct BotListView: View {
     @State private var pickingFiles = false
     @State private var pickingCamera = false
     @State private var picking: AgentPick?
+    /// The agent the person tapped in the "Goes to" pill; it holds until the box is cleared.
+    @State private var goesPick: String?
     @State private var calling: CallTarget?
     @State private var dictation = HomeDictation()
 
@@ -237,7 +239,10 @@ struct BotListView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onChange(of: computedOrder, initial: true) { _, _ in syncOrder() }
         .onChange(of: frozen) { _, _ in syncOrder() }
-        .onChange(of: query) { _, _ in grouped = false }
+        .onChange(of: query) { _, new in
+            grouped = false
+            if new.isEmpty { goesPick = nil }
+        }
         .onChange(of: sleepProbe) { _, _ in observeSleepers() }
         .modifier(HomeSheets(
             editing: $editing, editingGroup: $editingGroup, confirmDelete: $confirmDelete, newChat: $newChat,
@@ -635,12 +640,22 @@ struct BotListView: View {
                  onCamera: { if CameraPicker.isAvailable { pickingCamera = true } else { accounts.lastError = "This device has no camera." } },
                  onFiles: { pickingFiles = true },
                  sendStyle: leading ? .muted : .word, micListening: dictation.listening) {
+            if searching { GoesToPill(route: goesRoute) { goesPick = $0 } }
             if !files.isEmpty {
                 HomeAttachmentChips(files: files) { file in
                     withAnimation(Motion.reduced(Motion.layout, reduceMotion)) { files.removeAll { $0.id == file.id } }
                 }
             }
         }
+    }
+
+    /// Where the typed words go: the owner's own agents only (no groups, no outside bots).
+    private var goesRoute: GoesTo {
+        let selected = accounts.selection
+        let agents = rooms.filter { !$0.item.bot.isGroup && $0.item.bot.botGuest == nil }.map {
+            GoesToAgent(key: $0.id, name: $0.item.bot.name, lastAt: $0.item.bot.lastAt, selected: $0.item.ref == selected)
+        }
+        return GoesTo.route(agents, query: query, override: goesPick)
     }
 
     /// Return at the end of the text submits it; the box is otherwise a plain field.
@@ -655,7 +670,9 @@ struct BotListView: View {
         dictation.stop()
         if leads(!matches.isEmpty), let top = matches.first {
             open(top.item.ref, focus: landing[top.id]?.id)
-        } else if searching || !files.isEmpty {
+        } else if searching {
+            sendNew()
+        } else if !files.isEmpty {
             picking = .send
         }
     }
@@ -665,7 +682,9 @@ struct BotListView: View {
         dictation.stop()
         if leads(board.top != nil), let top = board.top {
             openBoard(top)
-        } else if searching || !files.isEmpty {
+        } else if searching {
+            sendNew()
+        } else if !files.isEmpty {
             picking = .send
         }
     }
@@ -706,12 +725,20 @@ struct BotListView: View {
     private var displayedAgents: [Room] { displayed(rooms).filter { !$0.item.bot.isGroup } }
 
     /// A new session with the agent: what was typed and attached goes out as its first message, then its chat opens.
-    private func startSession(with room: Room) {
-        let text = trimmedQuery
+    private func startSession(with room: Room, text: String? = nil) {
+        let text = text ?? trimmedQuery
         room.store.send(text, to: room.item.bot.id, files: files, newTask: true)
         query = ""
         files = []
+        goesPick = nil
         accounts.selection = room.item.ref
+    }
+
+    /// Send with words typed: a new session with the agent the pill names. Twice in a row sends once (the box clears).
+    private func sendNew() {
+        let route = goesRoute
+        guard route.canSend, let target = route.target, let room = rooms.first(where: { $0.id == target.key }) else { return }
+        startSession(with: room, text: route.text)
     }
 
     private func append(_ new: [OutgoingFile]) {
