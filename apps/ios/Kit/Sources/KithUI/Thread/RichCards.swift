@@ -339,20 +339,41 @@ private struct ScheduleButtons: View {
 
 private struct NewsItem: View {
     let row: NewsCardModel.Row
+    /// The card is in the owner's own chat: only then does the app ask the web for pictures.
+    let owner: Bool
     @State private var quiet = false
+    @State private var images: LinkPreviewImages?
+    @AppStorage(LinkPreview.enabledKey) private var showPictures = true
     @Environment(\.openURL) private var openURL
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let square: CGFloat = 44
 
     var body: some View {
+        // Off, or not the owner's chat: nothing shows, even what an earlier fetch left in `images`.
+        let live = showPictures && owner
+        let picture = live ? images?.picture.flatMap { UIImage(data: $0) } : nil
+        let favicon = live ? images?.icon.flatMap { UIImage(data: $0) } : nil
+        let dim = quiet ? 0.5 : 1.0
         Button {
             OpenedLinks.urls.insert(row.url)
             quiet = true
             openURL(row.url)
         } label: {
-            HStack(alignment: .top, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.title).kithText(.secondary).fontWeight(.semibold).lineLimit(2)
                     if !row.line.isEmpty { Text(row.line).kithText(.secondary).lineLimit(1) }
                     HStack(spacing: 0) {
+                        if let favicon {
+                            Image(uiImage: favicon).resizable().scaledToFill()
+                                .frame(width: 14, height: 14)
+                                .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                                .opacity(dim)
+                                .padding(.trailing, 5)
+                                .accessibilityHidden(true)
+                        }
                         if let source = row.source { Text("\(source) · ") }
                         Text(row.domain).font(KithText.code.font)
                     }
@@ -362,7 +383,20 @@ private struct NewsItem: View {
                 }
                 .foregroundStyle(quiet ? Palette.muted : Palette.ink)
                 Spacer(minLength: 0)
-                Image(systemName: "arrow.up.right").font(.system(size: 9)).foregroundStyle(Palette.muted)
+                if let picture {
+                    // Top of the square on the title's first line; on this row it stands in for the arrow.
+                    Image(uiImage: picture).resizable().scaledToFill()
+                        .frame(width: Self.square, height: Self.square)
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(scheme == .dark ? Color.white.opacity(0.10) : Palette.ink.opacity(0.08), lineWidth: 0.5)
+                        }
+                        .opacity(dim)
+                        .accessibilityHidden(true)
+                } else {
+                    Image(systemName: "arrow.up.right").font(.system(size: 9)).foregroundStyle(Palette.muted)
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
@@ -371,6 +405,13 @@ private struct NewsItem: View {
         .buttonStyle(.plain)
         .accessibilityHint(row.url.host() ?? row.domain)
         .onAppear { quiet = OpenedLinks.urls.contains(row.url) }
+        .task(id: live) {
+            guard live else { return }
+            // The card already warmed every row; this picks the answer up, from cache once it has landed.
+            let found = await LinkPreviewStore.shared.images(for: row.url)
+            guard !Task.isCancelled, found?.picture != nil || found?.icon != nil else { return }
+            withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { images = found }
+        }
     }
 }
 
@@ -380,6 +421,8 @@ struct NewsCard: View {
     let card: RichCard
     @State private var expanded = false
     @State private var opened = false
+    @Environment(BotStore.self) private var model
+    @AppStorage(LinkPreview.enabledKey) private var showPictures = true
 
     var body: some View {
         let view = NewsCardModel(card: card, postedAt: entry.date, expanded: expanded, opened: opened)
@@ -394,7 +437,7 @@ struct NewsCard: View {
                     }
                 } content: {
                     WhiteGroup {
-                        ForEach(Array(view.shown.enumerated()), id: \.offset) { _, row in NewsItem(row: row) }
+                        ForEach(Array(view.shown.enumerated()), id: \.offset) { _, row in NewsItem(row: row, owner: model.isOwner) }
                         if view.more > 0 {
                             Button { expanded = true } label: {
                                 HStack(spacing: 4) {
@@ -413,6 +456,10 @@ struct NewsCard: View {
                 }
                 .accessibilityLabel(view.title)
                 if !view.tail.isEmpty { CardBubble(text: view.tail) }
+            }
+            // Every row's fetch starts now, the ones behind "Show N more" too; a folded card asks for nothing.
+            .task(id: showPictures && model.isOwner) {
+                if showPictures && model.isOwner { LinkPreviewStore.shared.warm(view.rows.map(\.url)) }
             }
         }
     }

@@ -167,7 +167,7 @@ private struct DebugHooks: ViewModifier {
                     app.showSettings = true
                     try? await Task.sleep(for: .seconds(1.5))
                     app.openWidgets = true
-                case "chat", "mermaid":
+                case "chat", "mermaid", "news":
                     if let computer = app.accounts.computers.first {
                         app.accounts.selection = BotReference(accountId: nil, computerId: computer.id, botId: DemoScreens.chatBotId)
                     }

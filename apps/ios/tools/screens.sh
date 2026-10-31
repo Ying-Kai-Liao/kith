@@ -41,6 +41,7 @@ modes=(
   "demo-crew-typing|-kithDemoScreens crew-typing"
   "demo-board|-kithDemoScreens board"
   "demo-chat|-kithDemoScreens chat"
+  "demo-news|-kithDemoScreens news"
   "demo-settings|-kithDemoScreens settings"
   "demo-computers|-kithDemoScreens computers"
   "demo-account|-kithDemoScreens account"
