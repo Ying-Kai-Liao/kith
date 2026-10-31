@@ -896,7 +896,7 @@ mod tests {
         let bot_id = hub.create_bot(cfg).unwrap()["id"].as_str().unwrap().to_owned();
         let nonce = "9A1B2C3D-4F89-11D3-9A0C-0305E82C3301";
         let inner = json!({"m": "send", "b": {"botId": bot_id, "text": "hi", "clientNonce": nonce}, "ts": now_ms()});
-        let blob = seal_mailbox(crypto::Labels::Legacy, &hub, &phone, nonce, inner.to_string().as_bytes());
+        let blob = seal_mailbox(crypto::Labels::Kith, &hub, &phone, nonce, inner.to_string().as_bytes());
         *fake.script.lock().unwrap() =
             vec![json!({"t": "mbox.item", "seq": 1, "from": dk, "nonce": nonce, "d": blob, "exp": now_ms() + 1000})];
 

@@ -10,6 +10,5 @@ pub mod cloud;
 pub mod crypto;
 #[rustfmt::skip]
 pub mod kernel;
-pub mod legacy_compat;
 #[rustfmt::skip]
 pub mod rpc;

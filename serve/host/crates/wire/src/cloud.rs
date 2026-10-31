@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "0c5a1e624112809e89829ddfc89c784ff5e09aa201a157f1aa7cf54b05814888";
+pub const CONTRACT_SHA256: &str = "0fa1c666e2858bc639027cbedcfe942f9e7f3e78450f3506d53ce4bc48d30d2f";
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -632,8 +632,6 @@ pub struct BotInviteAccepted {
 /// Each route's path and query, as signed.
 pub mod path {
     pub const HEALTH: &str = "/v1/health";
-    pub const OAUTH_LEGACY_CALLBACK: &str = "/v1/oauth/callback";
-    pub const OAUTH_LEGACY_DEV_CALLBACK: &str = "/v1/oauth/callback/dev";
     pub const OAUTH_KITH_CALLBACK: &str = "/v1/oauth/callback/kith";
     pub const OAUTH_KITH_DEV_CALLBACK: &str = "/v1/oauth/callback/kith-dev";
     pub const ME: &str = "/v1/me";

@@ -661,12 +661,12 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<HostAccessRequest>, owne
                 continue;
             }
             let Some(nd) = s.device_nonce.as_deref() else { continue };
-            // The commit is bound to the device's label family; whichever matches picks the SAS labels.
-            let family = crypto::unb64_n::<32>(nd).ok().and_then(|nd| {
-                crypto::Labels::ALL.into_iter().find(|l| crypto::sas_commit(*l, &dk, &nd) == r.commit).map(|l| (l, nd))
-            });
-            if let Some((l, nd)) = family {
-                r.code = Some(crypto::sas_code(l, &hub.identity.sign_pub(), &dk, &nd, &r.host_nonce));
+            let committed = crypto::unb64_n::<32>(nd)
+                .ok()
+                .filter(|nd| crypto::sas_commit(crypto::Labels::Kith, &dk, nd) == r.commit);
+            if let Some(nd) = committed {
+                r.code =
+                    Some(crypto::sas_code(crypto::Labels::Kith, &hub.identity.sign_pub(), &dk, &nd, &r.host_nonce));
             } else {
                 tracing::warn!(request_id = r.id, "device nonce doesn't match its commit; denying the request");
                 next.push(Next::Deny(r.id.clone()));

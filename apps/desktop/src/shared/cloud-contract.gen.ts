@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '0c5a1e624112809e89829ddfc89c784ff5e09aa201a157f1aa7cf54b05814888'
+export const CONTRACT_SHA256 = '0fa1c666e2858bc639027cbedcfe942f9e7f3e78450f3506d53ce4bc48d30d2f'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -438,8 +438,6 @@ type ReceivedValue<T> = true extends IsOpen<T>
 
 export const ROUTES = {
   health: { method: 'GET', path: 'v1/health', pattern: /^\/v1\/health$/, kind: 'json', response: 'Health' },
-  oauthLegacyCallback: { method: 'GET', path: 'v1/oauth/callback', pattern: /^\/v1\/oauth\/callback$/, kind: 'redirect' },
-  oauthLegacyDevCallback: { method: 'GET', path: 'v1/oauth/callback/dev', pattern: /^\/v1\/oauth\/callback\/dev$/, kind: 'redirect' },
   oauthKithCallback: { method: 'GET', path: 'v1/oauth/callback/kith', pattern: /^\/v1\/oauth\/callback\/kith$/, kind: 'redirect' },
   oauthKithDevCallback: { method: 'GET', path: 'v1/oauth/callback/kith-dev', pattern: /^\/v1\/oauth\/callback\/kith-dev$/, kind: 'redirect' },
   me: { method: 'GET', path: 'v1/me', pattern: /^\/v1\/me$/, kind: 'json', response: 'Me' },
@@ -567,8 +565,6 @@ export interface Requests {
 /** Each route's path, without a leading slash; a route with a query has it (relay sockets: `?v=1`). */
 export const paths = {
   health: () => `v1/health`,
-  oauthLegacyCallback: () => `v1/oauth/callback`,
-  oauthLegacyDevCallback: () => `v1/oauth/callback/dev`,
   oauthKithCallback: () => `v1/oauth/callback/kith`,
   oauthKithDevCallback: () => `v1/oauth/callback/kith-dev`,
   me: () => `v1/me`,

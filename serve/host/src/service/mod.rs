@@ -362,12 +362,10 @@ pub fn ensure_statusline(settings: &Path, host: Option<&Path>) -> Result<bool> {
     }
     let wrapper = current.as_deref().and_then(wrapper_parts);
     let new_command = match (host, wrapper) {
-        // A wrapper whose binary is gone (ours or a legacy one): back to the user's own line.
+        // A wrapper whose binary is gone: back to the user's own line.
         // With a stable host the repaired line is wrapped again in the same step.
         (None, Some((bin, original))) if !Path::new(bin).exists() => original.to_owned(),
         (Some(host), Some((bin, original))) if !Path::new(bin).exists() => wrap(host, original),
-        // Someone else's live wrapper is not ours to touch.
-        (_, Some((bin, _))) if legacy(bin) => return Ok(false),
         (None, _) => return Ok(false),
         (Some(host), Some((bin, original))) => {
             if Path::new(bin) == host {
@@ -420,16 +418,9 @@ fn wrapper_parts(cmd: &str) -> Option<(&str, &str)> {
 }
 
 /// The command our wrapper wraps (empty when it wraps nothing), or `None`
-/// when `cmd` isn't ours. A live legacy wrapper isn't ours either.
+/// when `cmd` isn't ours.
 fn unwrap_statusline(cmd: &str) -> Option<&str> {
-    wrapper_parts(cmd).filter(|(bin, _)| !legacy(bin) || !Path::new(bin).exists()).map(|(_, original)| original)
-}
-
-/// Legacy compat: the app this project was forked from wrapped status lines the
-/// same way (`'…/<its host>' statusline -- <original>`). Recognised only so that
-/// a leftover wrapper whose app was deleted gets unwrapped; a live one stays.
-fn legacy(bin: &str) -> bool {
-    Path::new(bin).file_name().is_some_and(|n| n.to_string_lossy().starts_with("codync"))
+    wrapper_parts(cmd).map(|(_, original)| original)
 }
 
 #[cfg(test)]
@@ -575,35 +566,17 @@ mod tests {
     #[test]
     fn statusline_unwraps_dangling_wrappers() {
         let host = fake_bin("kith");
-        for cmd in [
-            "'/gone/kith-serve' statusline -- sh ~/mine.sh",
-            "'/Applications/Gone.app/Contents/Resources/codync-host' statusline -- sh ~/mine.sh",
-        ] {
-            let f = temp_settings(&format!(r#"{{"statusLine":{{"type":"command","command":"{cmd}"}}}}"#));
-            assert!(ensure_statusline(&f, None).unwrap(), "{cmd}");
-            assert_eq!(command(&f), "sh ~/mine.sh", "repair only, no wrap");
-            let f = temp_settings(&format!(r#"{{"statusLine":{{"type":"command","command":"{cmd}"}}}}"#));
-            assert!(ensure_statusline(&f, Some(&host)).unwrap(), "{cmd}");
-            assert_eq!(command(&f), format!("'{}' statusline -- sh ~/mine.sh", host.display()));
-        }
+        let cmd = "'/gone/kith-serve' statusline -- sh ~/mine.sh";
+        let f = temp_settings(&format!(r#"{{"statusLine":{{"type":"command","command":"{cmd}"}}}}"#));
+        assert!(ensure_statusline(&f, None).unwrap(), "{cmd}");
+        assert_eq!(command(&f), "sh ~/mine.sh", "repair only, no wrap");
+        let f = temp_settings(&format!(r#"{{"statusLine":{{"type":"command","command":"{cmd}"}}}}"#));
+        assert!(ensure_statusline(&f, Some(&host)).unwrap(), "{cmd}");
+        assert_eq!(command(&f), format!("'{}' statusline -- sh ~/mine.sh", host.display()));
         // Dangling with nothing wrapped: the line is dropped, not left pointing nowhere.
         let f = temp_settings(r#"{"statusLine":{"type":"command","command":"'/gone/kith-serve' statusline"}}"#);
         assert!(ensure_statusline(&f, None).unwrap());
         assert!(read(&f).get("statusLine").is_none());
-    }
-
-    #[test]
-    fn statusline_leaves_live_legacy_wrappers_alone() {
-        let host = fake_bin("kith");
-        let theirs = fake_bin("codync-host");
-        let text = format!(
-            r#"{{"statusLine":{{"type":"command","command":"'{}' statusline -- sh ~/mine.sh"}}}}"#,
-            theirs.display()
-        );
-        let f = temp_settings(&text);
-        assert!(!ensure_statusline(&f, Some(&host)).unwrap());
-        restore_statusline(&f).unwrap();
-        assert_eq!(read(&f), serde_json::from_str::<Value>(&text).unwrap());
     }
 
     #[test]
