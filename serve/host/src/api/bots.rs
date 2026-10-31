@@ -51,7 +51,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let (bot, name) = (str_arg(&b, "botId")?, str_arg(&b, "name")?);
             if name == "call_person" {
                 let reason = b["arguments"]["reason"].as_str().unwrap_or_default();
-                crate::calls::ring_and_wait(hub, bot, reason, false).await?
+                crate::calls::ring_and_wait(hub, bot, reason, None, false).await?
             } else if name == crate::cards::secret::TOOL {
                 crate::cards::secret::chat_request(hub, bot, actor_arg(&b, bot), &b["arguments"]).await?
             } else if crate::chat::profile::TOOLS.contains(&name) {
