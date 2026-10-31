@@ -2,8 +2,7 @@ import CryptoKit
 import Foundation
 
 // The relay protocol's cryptography (docs/reference/remote-relay.md §5, §6), checked field by field
-// against docs/reference/fixtures/remote-relay-vectors.json (`kith/*` labels) and legacy-compat-vectors.json
-// (the pre-rename labels, see LegacyCompat). Labels are ASCII without a trailing NUL.
+// against docs/reference/fixtures/remote-relay-vectors.json (`kith/*` labels). Labels are ASCII without a trailing NUL.
 
 extension Data {
     /// Strict base64url without padding (RFC 4648 §5).
@@ -39,27 +38,23 @@ public enum RelayCryptoError: Error, Equatable {
     case malformed
 }
 
-/// Which family of domain-separation labels a pairing speaks. Pairings made before the Kith rename keep
-/// their old labels (`LegacyCompat.labelPrefix`) until they are paired again; new ones use `kith/*`. The
-/// host accepts either, so an updated app still talks to a host that hasn't updated yet.
+/// Which family of domain-separation labels a pairing speaks. Only `kith/*` exists; a stored value
+/// this build doesn't know reads as it.
 public enum LabelFamily: Codable, Sendable, CaseIterable, RawRepresentable {
-    case legacy
     case kith
 
     /// Newest first: the order a verifier tries them in.
-    static let newestFirst: [LabelFamily] = [.kith, .legacy]
+    static let newestFirst: [LabelFamily] = [.kith]
 
     public var rawValue: String {
         switch self {
         case .kith: "kith"
-        case .legacy: LegacyCompat.labelPrefix
         }
     }
 
     public init?(rawValue: String) {
         switch rawValue {
         case "kith": self = .kith
-        case LegacyCompat.labelPrefix: self = .legacy
         default: return nil
         }
     }
@@ -70,26 +65,11 @@ public enum LabelFamily: Codable, Sendable, CaseIterable, RawRepresentable {
     }
 
     public init(from decoder: any Decoder) throws {
-        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .legacy
+        self = Self(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .kith
     }
 
     /// `<family>/<rest>`, e.g. `kith/hs1/v1`.
     func label(_ rest: String) -> String { "\(rawValue)/\(rest)" }
-
-    /// The first legacy (2.x) host release that verifies `kith/*` labels. Older 2.x hosts only know the old
-    /// ones. Guessing too high is safe (a new host accepts the old ones as well); guessing too low would get
-    /// the request denied. Kith's own line starts again at 0.1.0 and every release of it knows `kith/*`.
-    static let firstKithHostVersion = [2, 20, 0]
-
-    /// The labels to use toward a host that reports `version` (an account computer that was never paired
-    /// by QR): a 2.x host that predates the rename gets the old ones, any other version the new ones.
-    public static func forHost(version: String?) -> LabelFamily {
-        guard let version else { return .legacy }
-        let parts = version.split(separator: ".").prefix(3).map { Int($0.prefix { $0.isNumber }) ?? 0 }
-        let padded = parts + Array(repeating: 0, count: max(0, 3 - parts.count))
-        let legacyLine = padded[0] == 2
-        return legacyLine && padded.lexicographicallyPrecedes(firstKithHostVersion) ? .legacy : .kith
-    }
 }
 
 public enum RelayCrypto {

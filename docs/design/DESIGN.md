@@ -113,7 +113,7 @@ Brand source: branding's `brand/` (BRAND.md, brand.tokens.json, living-bots/LAYE
 ## Overview
 Kith is your crew of agents, and the app is where you talk to them. It is **stock iOS 26 underneath** (lists, menus,
 sheets, swipe actions, SF Symbols, Liquid Glass) with a **thin Kith layer** on top: the living crew, a morning sky,
-a handful of own components, Nunito for agent names. It keeps what works in Codync and adds rather than reacts.
+a handful of own components, Nunito for agent names. It keeps what already works and adds rather than reacts.
 
 Four ideas carry it:
 1. **The bottom is for talking.** Only the chat box lives there; + inside it adds files and images.
@@ -207,7 +207,7 @@ the box (home and Board) calls the agent **directly**: the agent the box would r
 ### Room chat (agent chat and group rooms)
 A room is a purpose; its members (people and agents) belong to the room. The chat is flat: your bubble right, agent
 bubbles left with the bot (24) and Nunito name, tool rows and cards under the reply that made them. No thread chips,
-no per-message level (Codync's thread chip is gone as of v4; `docs/design/mocks/threads2.png` is superseded). Long-press a message:
+no per-message level (the thread chip is gone as of v4; `docs/design/mocks/threads2.png` is superseded). Long-press a message:
 Reply, **Make a topic from here** ("This and the replies after it"), Copy, Correct this, Compact now (agent replies).
 1:1 chats and group rooms work the same. Board: `docs/design/mocks/now.jpg` (1, 2, 4).
 ### Handoff card
@@ -404,7 +404,6 @@ SF Symbols in the app (phone.fill, square.and.pencil, plus, mic.fill, chevron.do
 - Cards an agent composes itself, or more than one card per reply.
 - A topic per message, or topics inside topics.
 - An always-on context ring or percent on lists, top bars or Board.
-- Framing Kith against Codync: keep what works.
 
 ## Open
 - Reply cards need backend. The host builds every card; agents send nothing new (no card block, no PROTOCOL rule).

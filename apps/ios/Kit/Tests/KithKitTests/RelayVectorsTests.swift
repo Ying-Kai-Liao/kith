@@ -3,22 +3,19 @@ import Foundation
 import Testing
 @testable import KithKit
 
-/// docs/reference/fixtures/remote-relay-vectors.json (`kith/*` labels) and
-/// legacy-compat-vectors.json (pairings made before the Kith rename): the single source of truth shared with the host and the cloud.
+/// docs/reference/fixtures/remote-relay-vectors.json (`kith/*` labels): the single source of truth shared with the host and the cloud.
 struct Vectors: Sendable {
     let family: LabelFamily
     let data: Data
     var json: [String: Any] { (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:] }
 
     static func load(_ family: LabelFamily) -> Vectors {
-        let file = family == .kith ? "remote-relay-vectors.json" : "legacy-compat-vectors.json"
+        let file = "remote-relay-vectors.json"
         return Vectors(family: family, data: (try? Data(contentsOf: URL(filePath: #filePath).deletingLastPathComponent()
             .appending(path: "../../../../../serve/docs/reference/fixtures/\(file)").standardized)) ?? Data())
     }
 
-    /// The pre-rename labels: what a stored pairing without a label version speaks.
-    static let shared = load(.legacy)
-    static let kith = load(.kith)
+    static let shared = load(.kith)
 
     subscript(_ section: String) -> [String: Any] { json[section] as? [String: Any] ?? [:] }
 

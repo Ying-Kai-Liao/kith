@@ -11,7 +11,7 @@ public enum AppEnvironment: String, Sendable {
 
     public var appGroup: String { self == .dev ? "group.com.yingkailiao.kith.dev" : "group.com.yingkailiao.kith" }
     public var urlScheme: String { self == .dev ? "kith-dev" : "kith" }
-    /// Whether `scheme` is this build's link scheme. Old links go through `LegacyCompat.canonical` first.
+    /// Whether `scheme` is this build's link scheme.
     public func accepts(scheme: String) -> Bool { scheme == urlScheme }
 
     public func link(_ destination: String) -> URL {

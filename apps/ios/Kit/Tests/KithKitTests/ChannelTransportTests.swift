@@ -62,7 +62,7 @@ struct HostSide {
     var sealer: RelayCrypto.FrameSealer?
     var opener: RelayCrypto.FrameOpener?
     /// The labels the device's hello verified under, like the host: either family is accepted.
-    var family: LabelFamily = .legacy
+    var family: LabelFamily = .kith
 
     init(_ socket: FakeSocket) { self.socket = socket }
 

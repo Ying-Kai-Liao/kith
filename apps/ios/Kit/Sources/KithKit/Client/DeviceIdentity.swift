@@ -25,7 +25,6 @@ public struct DeviceIdentity: Sendable {
 
     /// Loads this context's keys, creating whichever is missing.
     public static func load(context: SharedStore.Context) throws -> DeviceIdentity {
-        LegacyCompat.migrateKeys(account: context.id, in: Keychain.shared)
         let signing = try Keychain.read(service: deviceService, account: context.id)
             .map { try Curve25519.Signing.PrivateKey(rawRepresentation: $0) }
             ?? Keychain.create(service: deviceService, account: context.id) { Curve25519.Signing.PrivateKey() }
@@ -39,9 +38,6 @@ public struct DeviceIdentity: Sendable {
     public static func delete(context: SharedStore.Context) {
         Keychain.delete(service: deviceService, account: context.id)
         Keychain.delete(service: pushService, account: context.id)
-        // A signed-out account must not keep a pre-rename copy the migration would bring back.
-        Keychain.delete(service: LegacyCompat.oldDeviceService, account: context.id)
-        Keychain.delete(service: LegacyCompat.oldPushService, account: context.id)
     }
 
     var deviceKey: Data { signing.publicKey.rawRepresentation }
@@ -79,8 +75,6 @@ public struct DeviceIdentity: Sendable {
 
     private static func openSealed(sealed: String, computerId: ComputerID, contextID: String) -> Data? {
         let log = Logger(subsystem: "com.yingkailiao.kith.ios", category: "PushDecrypt")
-        // The extension can run before the app has after an update, and shares the keychain group.
-        LegacyCompat.migrateKeys(account: contextID, in: Keychain.shared)
         do {
             guard let raw = try Keychain.read(service: pushService, account: contextID) else {
                 log.error("Notification push key missing; re-register this device")
@@ -105,7 +99,7 @@ public struct DeviceIdentity: Sendable {
 
 /// Generic-password items holding 32-byte raw keys (§3.2): this device only, never synced,
 /// readable after first unlock (pushes arrive while locked).
-struct Keychain: KeyStore {
+struct Keychain {
     static let shared = Keychain()
     func read(service: String, account: String) throws -> Data? { try Self.read(service: service, account: account) }
     func write(service: String, account: String, data: Data) throws { try Self.write(service: service, account: account, data: data) }

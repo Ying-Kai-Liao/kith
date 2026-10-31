@@ -95,8 +95,7 @@ public struct CloudClient: Sendable {
         guard let hostKey = Data(base64URL: signKey), hostKey.count == 32, RelayCrypto.computerId(signKey: hostKey) == id else {
             throw CloudError(status: 0, code: "badSignKey", message: "This computer's key doesn't match its ID.")
         }
-        // A host that predates the Kith rename can only verify the commit under the old labels.
-        let family = LabelFamily.forHost(version: hostVersion)
+        let family = LabelFamily.kith
         let nD = Data.random(32)
         let commit = RelayCrypto.sasCommit(family, deviceKey: identity.deviceKey, deviceNonce: nD).base64URL
         let created: AccessRequestCreated = try await request("POST", CloudPath.createAccessRequest(id), body: CreateAccessRequest(commit: commit), signed: true)
