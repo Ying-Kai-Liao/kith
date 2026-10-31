@@ -38,7 +38,7 @@ public struct Pairing: Hashable, Sendable {
     }
 
     public static func parse(_ link: URL) throws(Problem) -> Pairing {
-        let (url, legacy) = LegacyCompat.canonical(link)
+        let url = link
         guard let scheme = url.scheme, AppEnvironment.current.accepts(scheme: scheme), url.host() == "pair",
               let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems else { throw .notPairingLink }
         let q = Dictionary(items.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { a, _ in a })
@@ -56,8 +56,7 @@ public struct Pairing: Hashable, Sendable {
         }
         guard !urls.isEmpty || cloud != nil else { throw .invalid }
         let name = q["name"].flatMap { $0.isEmpty ? nil : $0 } ?? "My computer"
-        let labels: LabelFamily = legacy ? .legacy : .kith
-        return Pairing(computer: Computer(id: id, name: name, signKey: sk, boxKey: bk, urls: urls, cloud: cloud, labels: labels), code: code)
+        return Pairing(computer: Computer(id: id, name: name, signKey: sk, boxKey: bk, urls: urls, cloud: cloud, labels: .kith), code: code)
     }
 
     init(computer: Computer, code: String) {

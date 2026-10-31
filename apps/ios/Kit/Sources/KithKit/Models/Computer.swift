@@ -38,7 +38,7 @@ public struct Computer: Codable, Hashable, Sendable, Identifiable {
         self.labels = labels
     }
 
-    public var labelFamily: LabelFamily { labels ?? .legacy }
+    public var labelFamily: LabelFamily { labels ?? .kith }
 
     /// `true` when `id` really is the computer ID of `signKey`.
     public var isConsistent: Bool {

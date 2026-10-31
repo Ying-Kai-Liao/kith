@@ -301,7 +301,7 @@ public final class AccountStore {
                 setPending(ticket.computerId, nil)
                 // Pin the key the SAS was computed with; the first hello brings its mailbox key and addresses.
                 let computer = Computer(id: ticket.computerId, name: target.name, signKey: ticket.signKey,
-                                        cloud: cloud.baseURL, device: target.device, labels: ticket.labels ?? .legacy)
+                                        cloud: cloud.baseURL, device: target.device, labels: ticket.labels ?? .kith)
                 save(computer)
                 open(computer)
                 Analytics.shared.capture(.computerPaired, ["via": "account", "computer": Analytics.computerTag(computer.id)])

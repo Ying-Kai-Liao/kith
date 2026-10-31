@@ -27,40 +27,27 @@ private func link(_ overrides: [String: String?] = [:], scheme: String = "kith")
     #expect(p.code == v.str("pairing", "code"))
     // A kith:// link starts a pairing on the kith/* labels.
     #expect(p.computer.labelFamily == .kith)
-    #expect(p.offerId == Vectors.kith.str("pairing", "offerId"))
+    #expect(p.offerId == Vectors.shared.str("pairing", "offerId"))
     #expect(Pairing(string: link()) == p)
     // Either route alone is enough.
     #expect(Pairing(string: link(["urls": nil])) != nil)
     #expect(Pairing(string: link(["cloud": nil])) != nil)
 }
 
-@Test func aPreRenameLinkStillPairsWithTheOldLabels() throws {
-    for scheme in [LegacyCompat.legacyScheme(for: .current)] {
-        let p = try Pairing.parse(link(scheme: scheme))
-        #expect(p.computer.labelFamily == .legacy)
-        #expect(p.offerId == v.str("pairing", "offerId"))
-    }
-    // The old and new offer ids differ, so the host registers both.
-    #expect(v.str("pairing", "offerId") != Vectors.kith.str("pairing", "offerId"))
-}
-
-@Test func aStoredComputerWithoutLabelsReadsAsLegacy() throws {
+@Test func aStoredComputerReadsAsKith() throws {
     let stored = Data(#"{"id":"x","name":"Mac","signKey":"k","urls":[]}"#.utf8)
-    #expect(try JSONDecoder().decode(Computer.self, from: stored).labelFamily == .legacy)
-    var kith = Computer(id: "x", name: "Mac", signKey: "k", labels: .kith)
-    #expect(try JSONDecoder().decode(Computer.self, from: JSONEncoder().encode(kith)).labelFamily == .kith)
-    kith.labels = nil
-    #expect(try JSONDecoder().decode(Computer.self, from: JSONEncoder().encode(kith)).labelFamily == .legacy)
+    #expect(try JSONDecoder().decode(Computer.self, from: stored).labelFamily == .kith)
+    // A label value this build doesn't know (an old pairing) reads as kith rather than dropping the computer.
+    let old = Data(#"{"id":"x","name":"Mac","signKey":"k","urls":[],"labels":"old"}"#.utf8)
+    #expect(try JSONDecoder().decode(Computer.self, from: old).labelFamily == .kith)
+    #expect(LabelFamily.kith.rawValue == "kith")
 }
 
-@Test func hostVersionPicksLabelsForAccountComputers() {
-    #expect(LabelFamily.forHost(version: nil) == .legacy)
-    #expect(LabelFamily.forHost(version: "2.19.1") == .legacy)
-    #expect(LabelFamily.forHost(version: "2.20.0") == .kith)
-    #expect(LabelFamily.forHost(version: "3.0") == .kith)
-    // Kith's own line restarts at 0.1.0: every release of it verifies `kith/*`.
-    #expect(LabelFamily.forHost(version: "0.1.0") == .kith)
-    #expect(LabelFamily.forHost(version: "1.4.2") == .kith)
+@Test func thePushRelayIsTheBuildsHostElseTheDefault() {
+    #expect(SharedStore.relayURL(host: "kith-relay.example.workers.dev") == "https://kith-relay.example.workers.dev")
+    #expect(SharedStore.relayURL(host: nil) == SharedStore.defaultRelayURL)
+    #expect(SharedStore.relayURL(host: " ") == SharedStore.defaultRelayURL)
+    #expect(SharedStore.relayURL(host: "$(KITH_PUSH_RELAY_HOST)") == SharedStore.defaultRelayURL)
 }
 
 @Test func rejectsBadPairingLinks() {
@@ -93,7 +80,7 @@ private func link(_ overrides: [String: String?] = [:], scheme: String = "kith")
     #expect(alice.reference(from: URL(string: "kith://bot/b1")!) == nil)
     #expect(alice.reference(from: URL(string: "kith://bot/b1?scope=\(alice.id)&computer=nope")!) == nil)
     // Links made before the rename keep working.
-    #expect(alice.reference(from: URL(string: "\(LegacyCompat.legacyScheme(for: .current))://bot/b1?scope=\(alice.id)&computer=\(ref.computerId)")!) == ref)
+    #expect(alice.reference(from: URL(string: "\(AppEnvironment.current.urlScheme)://bot/b1?scope=\(alice.id)&computer=\(ref.computerId)")!) == ref)
     let localRef = BotReference(accountId: nil, computerId: ref.computerId, botId: "b1")
     #expect(local.reference(from: local.botURL(localRef)) == localRef)
 }

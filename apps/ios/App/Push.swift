@@ -152,7 +152,7 @@ final class PushRegistrar {
                 guard let client = store?.client else { return }
                 try await client.registerDevice(ticket: ticket, voipTicket: voipTicket, relay: SharedStore.relayURL, name: UIDevice.current.name,
                                                 pushKey: identity.pushKey, ctx: storage.id,
-                                                labels: store?.computer.labelFamily ?? .legacy)
+                                                labels: store?.computer.labelFamily ?? .kith)
                 log.info("device registered with a computer")
             } catch is CancellationError {
                 return

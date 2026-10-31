@@ -410,7 +410,7 @@ public extension HostClient {
     /// a host that predates the rename ignores it, and omitting it means the old labels.
     /// `voipTicket` is the PushKit one for ringing calls; send it every time we have it (a host keeps the old one when it is missing).
     func registerDevice(ticket: String, voipTicket: String? = nil, relay: String, name: String, pushKey: String?, ctx: String,
-                        labels: LabelFamily = .legacy) async throws {
+                        labels: LabelFamily = .kith) async throws {
         struct Body: Encodable {
             var ticket: String; var voipTicket: String?; var relay: String; var name: String; var pushKey: String?; var ctx: String; var labels: String?
         }

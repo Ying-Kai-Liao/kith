@@ -493,7 +493,7 @@ struct QRScanner: UIViewControllerRepresentable {
 
         func dataScanner(_ scanner: DataScannerViewController, didAdd items: [RecognizedItem], allItems: [RecognizedItem]) {
             for case let .barcode(code) in items {
-                if let value = code.payloadStringValue, value.hasPrefix(AppEnvironment.current.urlScheme + "://") || LegacyCompat.isLegacyLink(value), !done {
+                if let value = code.payloadStringValue, value.hasPrefix(AppEnvironment.current.urlScheme + "://"), !done {
                     done = true
                     scanner.stopScanning()
                     onCode(value)
