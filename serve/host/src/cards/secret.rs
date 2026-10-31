@@ -53,6 +53,8 @@ const CLAIM_MS: i64 = 5 * 60 * 1000;
 /// A saved card keeps its owed resume alive at least this long.
 const RESUME_KEEP_MS: i64 = 60 * 60 * 1000;
 const TOOL_TIMEOUT: Duration = Duration::from_secs(20);
+/// The holders lookup is advice, not a gate: past this the card is shown as before.
+const HOLDERS_TIMEOUT: Duration = Duration::from_secs(3);
 
 // ---- where an ask came from
 
@@ -64,6 +66,8 @@ pub struct Origin {
     pub source: &'static str,
     pub bot_id: Option<String>,
     pub run_id: Option<String>,
+    /// The agent whose `kith ask` this run answers: never pointed back at, or the two would ask each other forever.
+    pub asked_by: Option<String>,
 }
 
 impl Origin {
@@ -75,6 +79,7 @@ impl Origin {
             source: "run",
             bot_id: None,
             run_id: Some(who.run_id.clone()),
+            asked_by: who.reply.as_ref().and_then(|r| r.asked_by.clone()),
         }
     }
 
@@ -86,6 +91,7 @@ impl Origin {
             source: "acp",
             bot_id: Some(bot.to_owned()),
             run_id: None,
+            asked_by: None,
         }
     }
 }
@@ -181,6 +187,34 @@ struct ProfileRow {
     agents: Vec<String>,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(default)]
+struct Holder {
+    agent: String,
+}
+
+/// `kith-auth holders`: the agents with a grant of this service. None when kith-auth can't say (then the card is
+/// shown as before: a failed lookup must never leave the agent without a way to get its key).
+async fn holders_of(service: &str) -> Option<Vec<String>> {
+    // Short bound: the lookup sits in front of the card, and a slow one must read as "no holder", not as a stall.
+    let ran = tokio::time::timeout(HOLDERS_TIMEOUT, kith_auth(&["holders", service, "--json"], None)).await.ok()??;
+    ran.ok.then_some(())?;
+    let rows: Vec<Holder> = serde_json::from_slice(&ran.stdout).ok()?;
+    Some(rows.into_iter().map(|h| h.agent).collect())
+}
+
+/// What an agent with no grant is told when another agent holds the service. Several holders are all named; the
+/// command is for the first (kith-auth sorts them by name).
+fn redirect(service: &str, holders: &[String]) -> String {
+    let first = &holders[0];
+    let who = if holders.len() == 1 {
+        format!("{first} holds {service}")
+    } else {
+        format!("{} hold {service}", holders.join(", "))
+    };
+    format!("{who}: kith ask {first} \"...\" (say what you need done with it). Don't ask for the key again.")
+}
+
 async fn account_state(agent: &str, service: &str) -> Option<State> {
     let ran = kith_auth(&["account-state", agent, service, "--json"], None).await?;
     ran.ok.then_some(())?;
@@ -242,6 +276,21 @@ pub async fn request(hub: &Arc<Hub>, o: &Origin, service: &str, purpose: &str) -
     };
     if !state.declared || state.secrets.is_empty() || !state.secrets.iter().all(|v| var_ok(v)) {
         return refused("That service doesn't take a key here. Don't ask for it again.");
+    }
+    // The holder rule: an agent with no grant is sent to the agent that holds the service. An agent that already has a
+    // grant, or a service nobody holds, still gets its card (a key the person types stays theirs). Only owner runs and
+    // owner chats get here, so a guest never learns who holds what. The asker, and the agent whose `kith ask` it
+    // answers, are not holders it can be sent to.
+    if state.granted.is_empty() {
+        let held: Vec<String> = holders_of(service)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|h| *h != o.agent && o.asked_by.as_deref() != Some(h.as_str()))
+            .collect();
+        if !held.is_empty() {
+            return json!({"ok": true, "carded": false, "message": redirect(service, &held)});
+        }
     }
     let plan = plan_for(&state);
     let purpose = clean_purpose(purpose);
