@@ -274,8 +274,17 @@ pub async fn request(hub: &Arc<Hub>, o: &Origin, service: &str, purpose: &str) -
     let Some(state) = account_state(&o.agent, service).await else {
         return refused("Keys aren't available right now.");
     };
-    if !state.declared || state.secrets.is_empty() || !state.secrets.iter().all(|v| var_ok(v)) {
-        return refused("That service doesn't take a key here. Don't ask for it again.");
+    if !state.declared {
+        // Declaring a service is a change to the agent's package (which variables it takes), not something a card can
+        // do: say what is missing and who adds it, so the agent tells the owner instead of giving up.
+        return refused(&format!(
+            "{agent} doesn't declare {service} yet, so there is no key to ask for. Tell the owner: builder declares it in \
+             {agent}'s role/services/{service}.json (the variables it takes under \"secrets\"), then ask again.",
+            agent = o.agent
+        ));
+    }
+    if state.secrets.is_empty() || !state.secrets.iter().all(|v| var_ok(v)) {
+        return refused(&format!("{service} takes no key. Don't ask for it again."));
     }
     // The holder rule: an agent with no grant is sent to the agent that holds the service. An agent that already has a
     // grant, or a service nobody holds, still gets its card (a key the person types stays theirs). Only owner runs and

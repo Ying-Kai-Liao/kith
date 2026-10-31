@@ -175,6 +175,14 @@ async fn a_service_the_agent_cannot_have_is_refused_without_a_card() {
     let got = f.ask("github").await;
     assert_eq!((got["ok"].as_bool(), got["carded"].as_bool()), (Some(false), Some(false)), "{got}");
     assert_eq!(f.r.hub.store.cards_open(None).len(), 0);
+    // Not a dead end: the agent is told what is missing and who adds it, so it can tell the owner.
+    assert_eq!(
+        got["message"],
+        "house doesn't declare github yet, so there is no key to ask for. Tell the owner: builder declares it in \
+         house's role/services/github.json (the variables it takes under \"secrets\"), then ask again."
+    );
+    f.state(r#"{"declared":true,"secrets":[],"granted":[],"missing":[],"profiles":[]}"#);
+    assert_eq!(f.ask("github").await["message"], "github takes no key. Don't ask for it again.");
     for bad in ["", "GitHub", "../x", "-x", "a/b", "x y"] {
         assert_eq!(f.ask(bad).await["ok"], false, "{bad:?}");
     }
