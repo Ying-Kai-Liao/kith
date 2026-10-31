@@ -84,7 +84,7 @@ fn money(x: f64) -> String {
 }
 
 /// A kernel id, safe to put on a command line.
-fn plain(id: &str) -> bool {
+pub(crate) fn plain(id: &str) -> bool {
     id.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
         && id.len() <= 64
         && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))

@@ -169,7 +169,8 @@ enum ThreadFeed {
         let command = d.command?.nilIfEmpty ?? (d.toolKind == "execute" ? d.title?.nilIfEmpty : nil)
         let patches = withPatches ? diffs.map(\.patch).joined(separator: "\n") : ""
         let output = [d.output?.nilIfEmpty, patches.nilIfEmpty].compactMap { $0 }.joined(separator: "\n\n").nilIfEmpty
-        return ToolCallRowModel(verb: verb, object: object, result: result, command: command, output: output)
+        return ToolCallRowModel(verb: verb, object: object, result: result, command: command, output: output,
+                                askId: HandoffPeek.askId(command: command, output: output))
     }
 
     // MARK: open thread

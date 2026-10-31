@@ -20,6 +20,7 @@ import { partialUpdate } from '@shared/optimistic'
 import { expireCalls, type IncomingCall } from '@shared/incoming-call'
 import { failureOf, OWN_TURN, type HeldPhase } from '@shared/held-run'
 import { DEFAULT_TURNS } from '@shared/conversation'
+import { parsePeek, parsePeeks, type Peek } from '@shared/handoff-peek'
 import { FileDownloads } from './file-downloads'
 import { BotSync, sleep } from './bot-sync'
 
@@ -160,6 +161,25 @@ export class BotStore extends BotSync {
   /** Stops the bot in its chat, or in the thread on `thread`; its other places keep working. */
   stop(botId: string, thread: string | null = null) {
     this.perform((c) => c.callHost('stop', thread ? { botId, threadId: thread } : { botId }), true)
+  }
+
+  /** The owner's peek at one handoff; null when the host has no record of it (an ask from before the records). */
+  async peekHandoff(id: string): Promise<Peek | null> {
+    try {
+      return parsePeek((await this.withLink((c) => c.call<{ peek?: unknown }>('delegationPeek', { id }))).peek)
+    } catch {
+      return null
+    }
+  }
+
+  /** The handoffs still going or waiting on the owner; empty for a host that doesn't have the peek yet or for a member. */
+  async openHandoffs(): Promise<Peek[]> {
+    if (!this.isOwner) return []
+    try {
+      return parsePeeks(await this.withLink((c) => c.call('delegationsPeek', {})))
+    } catch {
+      return []
+    }
   }
 
   /** "Give them 10 more": an ordinary message with turns, from the person (only a person tops a run up). */

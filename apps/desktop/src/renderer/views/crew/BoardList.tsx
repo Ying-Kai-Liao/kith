@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { stateLabel, type Peek } from '@shared/handoff-peek'
 import { avatarImage, DEFAULT_IMAGE } from '@shared/crew'
 import { needsYouRows, type BoardDecision, type BoardModel, type BoardTarget } from '@shared/board'
 import { isGroup, type Bot } from '@shared/models'
@@ -10,6 +11,7 @@ import { useModel } from '../../lib/observable'
 import { GuestPromptList } from '../GuestPromptList'
 import { pairOf } from '../../components/kith/pair.ts'
 import { LimitCard } from '../thread/LimitCard'
+import { HandoffSheet } from '../thread/HandoffSheet'
 
 /**
  * The Board in the sidebar: Needs you (a row per thread, with its count), Working, Done today and Where we left off.
@@ -44,6 +46,7 @@ export function BoardList({ board, selected, bots, stores, open }: {
           <BoardRow key={w.id} bot={w.bot} title={w.title} detail={w.detail} selected={isSelected(w.target)} onClick={() => open(w.target)} />
         ))}
       </Section>
+      {stores.map((s) => <OpenHandoffs key={s.computer.id} store={s} />)}
       <Section title="Done today" count={board.doneToday.length} show={board.doneToday.length > 0}>
         {board.doneToday.map((w) => (
           <BoardRow key={w.id} bot={w.bot} title={w.title} detail={w.detail} selected={isSelected(w.target)} onClick={() => open(w.target)} />
@@ -57,6 +60,40 @@ export function BoardList({ board, selected, bots, stores, open }: {
       {/* Projects wait for slice 4 (labels as filters); `board.projects` stays for the callers that use it. */}
       {empty ? <div className="cs-board-empty">Nothing is waiting on you.</div> : null}
     </div>
+  )
+}
+
+/** How often the Board reads the open handoffs again. */
+const HANDOFFS_MS = 10_000
+
+/** The owner's open handoffs on one computer (`delegationsPeek`), each opening its peek sheet. A member sees none. */
+function OpenHandoffs({ store }: { store: BotStore }) {
+  const [peeks, setPeeks] = useState<Peek[]>([])
+  const [open, setOpen] = useState<string | null>(null)
+  useEffect(() => {
+    if (!store.isOwner) return
+    let alive = true
+    const read = async () => {
+      const next = await store.openHandoffs()
+      if (alive) setPeeks(next)
+    }
+    void read()
+    const timer = setInterval(() => void read(), HANDOFFS_MS)
+    return () => {
+      alive = false
+      clearInterval(timer)
+    }
+  }, [store])
+  if (!store.isOwner) return null
+  return (
+    <>
+      <Section title="Handoffs" count={peeks.length} show={peeks.length > 0}>
+        {peeks.map((p) => (
+          <BoardRow key={p.id} icon="arrow.triangle.branch" title={`${p.from.agent ?? p.from.person ?? 'Someone'} → ${p.to}`} detail={`${stateLabel(p.state)} · ${p.brief?.split('\n')[0] ?? 'no brief'}`} ink={p.state === 'needsYou'} selected={false} onClick={() => setOpen(p.id)} />
+        ))}
+      </Section>
+      <HandoffSheet store={store} id={open} onClose={() => setOpen(null)} />
+    </>
   )
 }
 

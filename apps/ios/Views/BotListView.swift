@@ -221,7 +221,7 @@ struct BotListView: View {
                     .allowsHitTesting(tab == .crew)
                     .accessibilityHidden(tab != .crew)
                 BoardView(model: shownBoard, searching: searching, showsHosts: accounts.computers.count > 1,
-                          store: { accounts.store(for: $0) }, open: openBoard, showComputers: { app.showComputers = true })
+                          store: { accounts.store(for: $0) }, handoffStores: shownStores.filter(\.isOwner), open: openBoard, showComputers: { app.showComputers = true })
                     .offset(x: tab == .board ? 0 : pageWidth)
                     .opacity(tab == .board ? 1 : 0)
                     .allowsHitTesting(tab == .board)
