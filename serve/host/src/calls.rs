@@ -250,13 +250,9 @@ pub fn chat_of(hub: &Hub, agent: &str, person: Option<&str>) -> Option<String> {
 }
 
 /// An agent rings its person. `bot_id` is the chat the agent works in, which also says who is called. The answer's
-/// `status` is `ringing`, `busy`, `rate-limited` or `not-allowed`.
-pub fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str) -> Result<Value> {
-    ring_from(hub, bot_id, reason, None)
-}
-
-/// `ring`, for a run that says which agent it is (`kith-call` sends `KITH_AGENT`).
-fn ring_from(hub: &Arc<Hub>, bot_id: &str, reason: &str, from: Option<&str>) -> Result<Value> {
+/// `status` is `ringing`, `busy`, `rate-limited` or `not-allowed`. `from` is the agent a run says it is (`kith-call`
+/// sends `KITH_AGENT`): a label for the call screen only.
+fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str, from: Option<&str>) -> Result<Value> {
     let reason = clean(reason);
     if reason.is_empty() {
         bail!("reason is required: say in a few words why you're calling");
@@ -382,7 +378,7 @@ pub async fn ring_and_wait(
     from: Option<&str>,
     wait: bool,
 ) -> Result<Value> {
-    let mut out = ring_from(hub, bot_id, reason, from)?;
+    let mut out = ring(hub, bot_id, reason, from)?;
     let Some(id) = out["id"].as_str().filter(|_| wait).map(str::to_owned) else { return Ok(out) };
     let deadline = tokio::time::Instant::now() + WAIT;
     while tokio::time::Instant::now() < deadline {

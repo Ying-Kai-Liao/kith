@@ -42,7 +42,7 @@ async fn calls_seen(r: &Rig, caller: &Caller) -> Vec<Value> {
 }
 
 fn ring_for(r: &Rig, bot: &str, reason: &str) -> Value {
-    ring(&r.hub, bot, reason).unwrap()
+    ring(&r.hub, bot, reason, None).unwrap()
 }
 
 fn notices(r: &Rig, bot: &str) -> Vec<Value> {
@@ -99,7 +99,7 @@ async fn declining_and_ringing_out_leave_a_line_in_the_chat() {
     // Nobody answers: it rings out. A different agent, so the rate limit isn't what is tested.
     r.hub.calls.set_ring_ms(40);
     let money = r.owner_bot("money");
-    let out = ring_and_wait(&r.hub, &money, "late", true).await.unwrap();
+    let out = ring_and_wait(&r.hub, &money, "late", None, true).await.unwrap();
     assert_eq!(out["status"], "missed");
     assert_eq!(notices(&r, &money)[0]["text"], "money tried to call: late");
     assert_eq!(notices(&r, &money)[0]["callState"], "missed");
@@ -140,7 +140,7 @@ async fn a_person_is_on_one_call_and_an_agent_rings_rarely() {
         .iter_mut()
         .for_each(|t| *t -= 11 * 60 * 1000);
     assert_eq!(ring_for(&r, &house, "seventh")["status"], "rate-limited", "six in the last day");
-    assert_eq!(ring(&r.hub, "unknown", "x").unwrap(), json!({"status": "not-allowed"}));
+    assert_eq!(ring(&r.hub, "unknown", "x", None).unwrap(), json!({"status": "not-allowed"}));
 }
 
 fn decline_now(r: &Rig, id: &str) {
