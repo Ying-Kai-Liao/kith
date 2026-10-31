@@ -9,15 +9,20 @@ const entry = (id: string, kind: Entry['kind'], at: number, data: Entry['data'] 
 
 const ids = (entries: Entry[]) => buildChat(entries).filter((i) => i.kind !== 'separator').map((i) => i.id)
 
-test('task and thread replies interleave with the chat in time order', () => {
+test('a task\'s thread folds into one card at its first message; other threads interleave in time order', () => {
   const entries = [
     entry('task', 'user', 1, { text: 'fix it', task: true }),
     entry('chat', 'user', 3, { text: 'meanwhile' }),
     entry('r1', 'agent', 2, { text: 'on it', final: true }, 'task'),
+    entry('t1', 'tool', 2.5, { title: 'ls' }, 'task'),
     entry('r2', 'agent', 4, { text: 'done', final: true }, 'task'),
     entry('old', 'agent', 5, { text: 'in an old thread', final: true }, 'chat'),
   ]
-  assert.deepEqual(ids(entries), ['task', 'r1', 'chat', 'r2', 'old'])
+  assert.deepEqual(ids(entries), ['task-task', 'chat', 'old'])
+  const card = buildChat(entries).find((i) => i.kind === 'task')!
+  assert.ok(card.kind === 'task')
+  assert.deepEqual(card.thread.map((e) => e.id), ['r1', 't1', 'r2'])
+  assert.deepEqual(card.inner.map((i) => i.id), ['r1', 'steps-t1', 'r2'], 'inside the card the thread reads as chat rows')
 })
 
 test('an entry in the chat and in a thread fetch shows once, the newer revision', () => {

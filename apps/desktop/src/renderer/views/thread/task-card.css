@@ -1,0 +1,197 @@
+/* A task in the flat chat (TaskCard.tsx). No fill but Needs you; an open task has a spine down its left. */
+.task-card {
+  position: relative;
+  margin: 6px 0;
+  border-radius: 18px;
+}
+.task-card.open {
+  padding-left: 14px;
+}
+.task-card.open::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 34px;
+  bottom: 4px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--kith-line);
+}
+.task-card.open.live::before {
+  background: var(--kith-ink);
+}
+/* Waiting on you: the asking agent's pair, at low strength. */
+.task-card.needs-you {
+  padding: 4px 10px 10px;
+  background: linear-gradient(135deg, color-mix(in srgb, var(--pair-a) 14%, transparent), color-mix(in srgb, var(--pair-b) 14%, transparent));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--pair-b) 24%, transparent);
+}
+
+.task-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 4px 2px;
+  font-size: var(--text-footnote);
+  color: var(--secondary);
+  text-align: left;
+}
+.task-status,
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-weight: 600;
+}
+.task-chip {
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+  font-weight: 500;
+}
+.task-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--kith-ink);
+}
+.task-head > * + .task-origin::before,
+.task-head > * + .task-time::before {
+  content: '·';
+  margin-right: 6px;
+  color: var(--tertiary);
+}
+.task-head-end {
+  margin-left: auto;
+}
+.task-head .disclosure-chevron.open {
+  transform: rotate(180deg);
+}
+
+.task-rows {
+  display: flex;
+  flex-direction: column;
+}
+.task-fold {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 2px 0;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-footnote);
+  color: var(--secondary);
+}
+.task-fold:hover,
+.task-reply:hover {
+  background: var(--hover);
+}
+.task-needs {
+  margin-top: 6px;
+}
+.task-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.task-live > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+.task-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--background);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+  font-size: var(--text-footnote);
+  font-weight: 600;
+  color: var(--text);
+}
+.task-writer {
+  margin-top: 8px;
+}
+.task-reply {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 2px 0 0 36px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-caption);
+  color: var(--secondary);
+}
+
+/* The composer's target: which task the next message goes in. */
+.task-pills {
+  display: flex;
+  gap: 6px;
+  /* Lined up with the box: 620 centred, less its side padding. */
+  width: calc(100% - 28px);
+  max-width: calc(620px * var(--scale) - 28px);
+  margin: 0 auto;
+  padding-bottom: 6px;
+}
+.task-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 60%;
+  padding: 5px 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-footnote);
+  color: var(--text);
+  white-space: nowrap;
+}
+.task-pill > b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.task-pill:hover {
+  background: var(--hover);
+}
+.task-pill.on {
+  background: var(--kith-ink);
+  color: var(--background);
+}
+
+/* A working task whose card is off screen: one line above the pills. */
+.working-now {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 28px);
+  max-width: calc(620px * var(--scale) - 28px);
+  margin: 0 auto 6px;
+  padding: 7px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--background);
+  box-shadow: var(--shadow-m);
+  font-size: var(--text-footnote);
+  color: var(--secondary);
+  text-align: left;
+}
+.working-now > b {
+  color: var(--text);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40%;
+}
+.working-now-more {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: var(--hover);
+  color: var(--text);
+  font-weight: 600;
+}

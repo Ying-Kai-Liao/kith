@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isGroup, isWorkingIn, type Bot } from '@shared/models'
 import { defaultFolderOf } from '@shared/place-folders'
-import { currentTask } from '@shared/tasks'
+import { continuingTask, currentTask, isTask, sendInTask, taskTitle } from '@shared/tasks'
 import { BotAvatar } from '../../components/Avatar'
 import { Icon } from '../../components/Icon'
 import { usePresence } from '../../components/Overlay'
@@ -13,6 +13,8 @@ import { MAX_FILE_SIZE, type OutgoingFile } from '../../store/bot-store'
 import { StartingFolderChip, type StartingPick } from '../bots/PlaceFolderPicker'
 import { pluginsFor } from '../marketplace/plugins'
 import { quotesOf, withQuote } from './reply-quote'
+import { targetsOf } from './task-target'
+import './task-card.css'
 import { composerEnter } from './composer-keyboard'
 import { CommandMenu, useCommandMenu } from './CommandMenu'
 import { TurnsChip, TurnsPopover } from './ConversationLine'
@@ -59,25 +61,35 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
   const composing = useRef(false)
   /** Text pasted into this draft since the last send. */
   const pasted = useRef<string[]>([])
-  // The flat chat has no thread: a message goes on with the current task (the host routes it), and Stop and
-  // "working" are that task's. Only the New task button starts another.
+  // The chat's one box sends into a task: the one a card's Reply picked, else the newest while it goes on (as the host
+  // would route it). "New task" starts another; with no task going on, the message starts one anyway.
   const tasks = !!bot && bot.tasks
-  const place = tasks ? currentTask(store.chat(botId))?.id ?? null : null
-  const [newTask, setNewTask] = useState(false)
+  const targets = targetsOf(store)
+  useSyncExternalStore(targets.subscribe, targets.getVersion)
+  const target = tasks ? targets.get(botId) : null
+  const chat = store.chat(botId)
+  const picked = target && target !== 'new' ? chat.find((e) => e.id === target && isTask(e)) ?? null : null
+  const going = tasks ? picked ?? (bot ? continuingTask(bot, chat, Date.now()) : null) : null
+  const newTask = target === 'new'
+  const goesOn = newTask ? null : going
   const startsNew = tasks && newTask
+  const place = tasks ? goesOn?.id ?? currentTask(chat)?.id ?? null : null
+  const [taking, setTaking] = useState(false)
   // "Reply" on a message: its first line, quoted over the box and in front of what is sent.
   const quotes = quotesOf(store)
   useSyncExternalStore(quotes.subscribe, quotes.getVersion)
   const quote = quotes.get(botId)
   // The folder the next new task starts in; the chat's own shows until one is picked.
   const [taskFolder, setTaskFolder] = useState<StartingPick | null>(null)
+  // A task's Stop is on its card's live line.
   const working = !!bot && (isWorkingIn(bot, botId, place) || isWorkingIn(bot, botId, null)) && !startsNew && !liveLine
+  const stopHere = working && !tasks
   // In a group, how many turns this message gives the room; it starts at 10 for every message.
   const inGroup = !!bot && isGroup(bot)
   const [turns, setTurns] = useState(DEFAULT_TURNS)
   const [turnsOpen, setTurnsOpen] = useState(false)
   const empty = !draft.trim() && !files.length
-  const canSend = !empty && (store.connection.kind === 'online' || (store.canQueue && !files.length))
+  const canSend = !empty && !taking && (store.connection.kind === 'online' || (store.canQueue && !files.length))
   const canAttach = !!bot
 
   const placeholder = bot && isGroup(bot) ? 'Message everyone · @ to ask one bot' : startsNew ? `Tell ${bot?.name ?? ''}…` : working ? `Queue a message for ${bot?.name ?? ''}` : `Tell ${bot?.name ?? ''}…`
@@ -180,12 +192,24 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
     const command = files.length ? null : builtInCommand(bot, draft)
     if (command) return run(command)
     if (!canSend) return
-    store.send(withQuote(draft, quote), botId, null, files, undefined, pasted.current, startsNew, newTask ? (taskFolder?.start ?? null) : null, null, inGroup ? clampTurns(turns) : null)
+    const into = goesOn
+    const text = withQuote(draft, quote)
+    const send = () => store.send(text, botId, into?.id ?? null, files, undefined, pasted.current, startsNew, newTask ? (taskFolder?.start ?? null) : null, null, inGroup ? clampTurns(turns) : null)
+    // A task an idle terminal holds is taken over first; if that fails the text stays here, never sent as a new task.
+    setTaking(true)
+    void sendInTask(into?.data.thread, () => store.ready().then((c) => c.takeOverThread(botId, into!.id)), send).then((sent) => {
+      setTaking(false)
+      if (sent) return clear()
+      store.setError("Couldn't take over from the terminal, so nothing was sent. Your message is still in the box.")
+    })
+  }
+
+  const clear = () => {
     setTurns(DEFAULT_TURNS)
     setTurnsOpen(false)
     pasted.current = []
     quotes.set(botId, null)
-    setNewTask(false)
+    if (newTask) targets.set(botId, null)
     setTaskFolder(null)
     setDraft('')
     setFiles([])
@@ -193,7 +217,7 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
   }
 
   // While recording, the mic is its Stop and this is its Send.
-  const trailing: Trailing = dictation.listening ? 'send' : onInterrupt && !draft && !files.length ? 'interrupt' : working && !draft && !files.length ? 'stop' : onCall && !draft && !files.length ? 'call' : 'send'
+  const trailing: Trailing = dictation.listening ? 'send' : onInterrupt && !draft && !files.length ? 'interrupt' : stopHere && !draft && !files.length ? 'stop' : onCall && !draft && !files.length ? 'call' : 'send'
   const [symbol, label] = ({
     interrupt: ['stop.fill', 'Interrupt'],
     stop: ['stop.fill', 'Stop'],
@@ -212,6 +236,20 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
               <Text size="subheadline" tone="text">{m.name}</Text>
             </button>
           ))}
+        </div>
+      </ComposerReveal>
+      <ComposerReveal open={tasks && (!empty || !!target)}>
+        <div className="task-pills" role="radiogroup" aria-label="Where this message goes">
+          {going ? (
+            <button className={`press task-pill ${newTask ? '' : 'on'}`} role="radio" aria-checked={!newTask} onClick={() => { targets.set(botId, going.id); field.current?.focus() }}>
+              <span aria-hidden>↳</span>
+              Continues <b>{taskTitle(going)}</b>
+            </button>
+          ) : null}
+          <button className={`press task-pill ${newTask || !goesOn ? 'on' : ''}`} role="radio" aria-checked={newTask || !goesOn} onClick={() => { targets.set(botId, 'new'); field.current?.focus() }}>
+            <Icon name="plus" size={10} weight="semibold" />
+            New task
+          </button>
         </div>
       </ComposerReveal>
       <div
@@ -254,20 +292,6 @@ function DestinationComposer({ botId, onCall, onInterrupt, liveLine }: {
             {canAttach ? (
               <button className="press composer-add" aria-label="Add files" title="Add files" onClick={() => void window.kith.app.pickFiles().then(append)}>
                 <Icon name="plus" size={13} weight="medium" color="var(--text)" />
-              </button>
-            ) : null}
-            {tasks ? (
-              <button
-                className={`press composer-add ${startsNew ? 'on' : ''}`}
-                aria-label="New task"
-                title={startsNew ? 'Your next message starts a new task' : 'New task'}
-                aria-pressed={startsNew}
-                onClick={() => {
-                  setNewTask((on) => !on)
-                  field.current?.focus()
-                }}
-              >
-                <Icon name="square.and.pencil" size={12} weight="medium" color={startsNew ? 'var(--accent)' : 'var(--text)'} />
               </button>
             ) : null}
             <div className="composer-field">
