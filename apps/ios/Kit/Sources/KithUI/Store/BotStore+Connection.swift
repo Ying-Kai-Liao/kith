@@ -17,6 +17,8 @@ extension BotStore {
         onBotUpdated = nil
         onUsageChanged = nil
         onCallEvent = nil
+        onCallCatchUp = nil
+        catchUpTask?.cancel()
         callHolds = []
         onSent = nil
         onRosterChanged = nil

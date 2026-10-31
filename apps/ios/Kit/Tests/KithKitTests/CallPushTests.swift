@@ -90,6 +90,18 @@ struct CallPushTests {
         #expect(ledger.settle(key: push.key, event: event("accepted")) == nil, "our own accept comes back as an event")
     }
 
+    @Test func aHelloEndsOnlyRingingCallsTheHostDidNotRepeat() throws {
+        var ledger = CallLedger()
+        let push = try #require(CallPush.parse(payload(), now: now))
+        guard case let .new(uuid) = ledger.add(push, now: now) else { Issue.record("not added"); return }
+        #expect(ledger.staleAfterHello(computerId: "mac", ringing: ["c1"]).isEmpty, "still ringing on the host, also after a reconnect")
+        #expect(ledger.staleAfterHello(computerId: "other", ringing: []).isEmpty, "a hello from another computer")
+        #expect(ledger.staleAfterHello(computerId: "mac", ringing: []) == [uuid])
+        _ = ledger.beginAnswer(uuid)
+        #expect(ledger.staleAfterHello(computerId: "mac", ringing: []).isEmpty, "the voice call owns an answered call")
+        #expect(CallLedger().staleAfterHello(computerId: "mac", ringing: []).isEmpty, "nothing held")
+    }
+
     @Test func aRingNobodyAnsweredExpiresAtItsDeadline() throws {
         var ledger = CallLedger()
         let push = try #require(CallPush.parse(payload(), now: now))

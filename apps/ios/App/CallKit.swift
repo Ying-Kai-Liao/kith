@@ -154,6 +154,15 @@ final class CallCoordinator: NSObject {
         finish(uuid)
     }
 
+    /// The host's catch-up after a hello is in: a call still ringing here that it did not repeat settled while the
+    /// app was away, so it ends as unanswered.
+    func endStale(computerId: ComputerID, ringing: Set<String>) {
+        for uuid in ledger.staleAfterHello(computerId: computerId, ringing: ringing) {
+            provider.reportCall(with: uuid, endedAt: nil, reason: .unanswered)
+            finish(uuid)
+        }
+    }
+
     /// The Kith voice call for an answered call is over: the system call ends with it.
     func voiceCallEnded(computerId: ComputerID, callId: String) {
         guard let entry = ledger.entry(key: CallPush.key(computerId: computerId, callId: callId)), entry.phase != .ringing else { return }

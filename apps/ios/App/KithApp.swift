@@ -454,6 +454,7 @@ final class AppStore {
             store.onUsageChanged = { _, _ in WidgetCenter.shared.reloadTimelines(ofKind: "KithUsage") }
         }
         accounts.onCallEvent = { computerId, event in CallCoordinator.shared.handle(event, computerId: computerId) }
+        accounts.onCallCatchUp = { computerId, ringing in CallCoordinator.shared.endStale(computerId: computerId, ringing: ringing) }
         accounts.onBotUpdated = { ref, bot in LiveActivities.shared.update(ref, bot: bot) }
         accounts.onRosterChanged = { roster in
             BotsWidgetFeed.update(roster, storage: storage)

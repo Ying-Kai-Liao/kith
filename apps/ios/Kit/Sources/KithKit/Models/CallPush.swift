@@ -125,6 +125,14 @@ public struct CallLedger: Sendable {
         entries.values.filter { $0.phase == .ringing && $0.push.deadline <= now }.map(\.uuid)
     }
 
+    /// After a hello's catch-up: the ringing calls of `computerId` the host did not repeat as ringing have settled.
+    /// A call this phone answered (or is answering) is left to its voice call.
+    public func staleAfterHello(computerId: ComputerID, ringing: Set<String>) -> [UUID] {
+        entries.values.filter {
+            $0.phase == .ringing && $0.push.computerId == computerId && !ringing.contains($0.push.callId)
+        }.map(\.uuid)
+    }
+
     @discardableResult
     public mutating func remove(_ uuid: UUID) -> Entry? { entries.removeValue(forKey: uuid) }
 }

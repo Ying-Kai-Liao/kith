@@ -41,6 +41,8 @@ public final class AccountStore {
     public var onSent: (@MainActor (BotReference, Bot, SendProgress) -> Void)?
     /// A computer's `call` event (see `BotStore.onCallEvent`).
     public var onCallEvent: (@MainActor (ComputerID, IncomingCallEvent) -> Void)?
+    /// A computer's ringing calls after a hello (see `BotStore.onCallCatchUp`).
+    public var onCallCatchUp: (@MainActor (ComputerID, Set<String>) -> Void)?
     /// The combined roster changed: a bot came, changed or went, or a computer did.
     public var onRosterChanged: (@MainActor ([RosterItem]) -> Void)?
 
@@ -396,6 +398,7 @@ public final class AccountStore {
         onConnected = nil
         onSent = nil
         onCallEvent = nil
+        onCallCatchUp = nil
         onRosterChanged = nil
         selection = nil
     }
@@ -417,6 +420,10 @@ public final class AccountStore {
         store.onCallEvent = { [weak self] event in
             guard let self, !self.retired else { return }
             self.onCallEvent?(id, event)
+        }
+        store.onCallCatchUp = { [weak self] ringing in
+            guard let self, !self.retired else { return }
+            self.onCallCatchUp?(id, ringing)
         }
         store.onConnected = { [weak self] store in
             guard let self, !self.retired else { return }
