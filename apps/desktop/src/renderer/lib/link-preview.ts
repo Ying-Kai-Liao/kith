@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { LinkPreview } from '@shared/link-preview'
+import { fetchTargets, type LinkPreview } from '@shared/link-preview'
 import { prefs, usePref } from './prefs'
 
 // Pictures for News rows. The main process fetches and caches them; this only asks, once per URL per window.
@@ -28,7 +28,7 @@ export function useLinkPictures(isOwner: boolean): boolean {
 export function usePrefetch(urls: string[], enabled: boolean) {
   const key = urls.join('\n')
   useEffect(() => {
-    if (enabled) for (const u of key.split('\n')) if (u) void loadPreview(u)
+    for (const u of fetchTargets(key.split('\n'), enabled)) void loadPreview(u)
   }, [key, enabled])
 }
 

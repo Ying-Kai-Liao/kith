@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { isFetchableUrl, isPrivateHost, NO_PREVIEW, parseHead, PreviewCache } from './link-preview.ts'
+import { fetchTargets, isFetchableUrl, isPrivateHost, NO_PREVIEW, parseHead, PreviewCache } from './link-preview.ts'
 
 const base = 'https://news.example.com/a/b.html'
 
@@ -30,6 +30,11 @@ test('private hosts are refused', () => {
   assert.ok(!isFetchableUrl('http://localhost:3000/'))
   assert.ok(!isFetchableUrl('https://user:pw@example.com/'))
   assert.ok(isFetchableUrl('https://example.com/x'))
+})
+
+test('setting off: nothing is asked for', () => {
+  assert.deepEqual(fetchTargets(['https://a.com/', 'https://a.com/', 'https://b.com/'], false), [])
+  assert.deepEqual(fetchTargets(['https://a.com/', 'https://a.com/', ''], true), ['https://a.com/'])
 })
 
 test('cache: hit, negative hit, expiry, cap', () => {

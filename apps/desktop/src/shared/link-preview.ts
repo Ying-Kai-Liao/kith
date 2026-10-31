@@ -102,6 +102,11 @@ export function isFetchableUrl(url: string): boolean {
   }
 }
 
+/** The links worth asking the main process about: none at all when pictures are off, so no call is made. */
+export function fetchTargets(urls: string[], enabled: boolean): string[] {
+  return enabled ? [...new Set(urls.filter(Boolean))] : []
+}
+
 /** How long a result, a negative one included, is trusted. */
 export const CACHE_TTL_MS = 7 * 24 * 3600 * 1000
 export const CACHE_MAX_ENTRIES = 400
