@@ -466,6 +466,23 @@ pub fn event_for_bot(store: &Store, bot_id: &str, v: Value) -> Option<Value> {
             let room = v["room"].as_str()?;
             (v["botId"] == bot_id && crate::chat::group::is_room_member(store, room, bot_id)).then_some(v)
         }
+        // A room secret handed to this bot (cards/room_secret.rs): its recipient alone, while a member, and only for a
+        // row that is still its own to fetch. Names and times; never a value. Everyone else's event of this type is
+        // dropped here, and a person's is dropped by `route` (the owner alone hears it).
+        "roomSecret" => {
+            let (room, id) = (v["room"].as_str()?, v["id"].as_str()?);
+            let row = store.room_secret(id)?;
+            let mine = v["to"] == bot_id
+                && row.recipient_kind == "bot"
+                && row.recipient == bot_id
+                && row.room == room
+                && row.state == "pending"
+                && row.expires_at > crate::store::now_ms()
+                && row.notice_seq.is_some_and(|n| n > store.room_bot_floor(room, bot_id));
+            (mine && crate::chat::group::is_room_member(store, room, bot_id)).then(|| {
+                json!({"type": "roomSecret", "room": room, "id": id, "from": v["from"], "label": v["label"], "expiresAt": v["expiresAt"]})
+            })
+        }
         "entry" => {
             let e = &v["entry"];
             let chat = e["botId"].as_str()?;

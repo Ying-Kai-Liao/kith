@@ -608,6 +608,8 @@ pub fn members_changed(hub: &Hub, room: &str, before: &[String], after: &[String
         }
     }
     for id in before.iter().filter(|m| !after.contains(m)) {
+        // A secret handed to or by a member who is out of the room ends with it, no undo.
+        crate::cards::room_secret::end(hub, Some(room), Some(id.as_str()));
         // A bot revoked meanwhile said so when it went (`left_rooms`).
         let was_there = hub.store.drop_room_bot(room, id).unwrap_or(false);
         if let Some(guest) = hub.store.bot_guest(id).filter(|g| was_there && is_owners_active_bot(g)) {
@@ -618,6 +620,8 @@ pub fn members_changed(hub: &Hub, room: &str, before: &[String], after: &[String
 
 /// An outside bot ended or left: one `botLeft` line in each room it was a member of, and its points go.
 pub fn left_rooms(hub: &Hub, guest: &BotGuest, why: &str) {
+    // Its secrets, in every room: gone with it. A fetch already in flight finds its row ended and answers nothing.
+    crate::cards::room_secret::end(hub, None, Some(guest.bot_id.as_str()));
     for room in hub.store.rooms_of_bot(&guest.bot_id) {
         if hub.store.drop_room_bot(&room, &guest.bot_id).unwrap_or(false) {
             membership_notice(hub, &room, guest, "botLeft", Some(why));
@@ -802,6 +806,8 @@ fn member_prompt(hub: &Hub, group: &BotConfig, members: &[BotConfig], me: &BotCo
         lines.push(line(hub, group, &e, me));
     }
     out.push(header);
+    // A secret handed to this agent here: its id and how to use it, never the value.
+    out.extend(crate::cards::room_secret::prompt_lines(hub, &group.id, &me.id));
     if lines.is_empty() {
         out.push("No new messages in the room since your last turn.".into());
     } else {
