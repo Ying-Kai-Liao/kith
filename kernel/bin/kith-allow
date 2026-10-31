@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""kith-allow — what you said is OK for an agent in auto mode (kith allow).
+
+  kith allow AGENT [--json]            list what is remembered: id, rule, kind, why it was blocked, when it was added
+  kith allow AGENT --rm ID             forget one (the next run of the agent no longer has it)
+  kith allow AGENT --derive            stdin {"tool", "input", "reason"}: what "Always allow" would remember for that call, or why it
+                                       can't ({"ok": true, "kind", "rule"} / {"ok": false, "why"})
+  kith allow AGENT --add-json          stdin {"tool", "input", "reason", "rule", "kind"}: remember that call, derived here (never a rule the
+                                       caller wrote; with "rule" and "kind" it writes only if they are what it derives). Prints {"ok", "id", "rule", "kind", "added"}; the same rule twice is one entry
+
+In auto mode a classifier blocks some calls of your own agent runs. The Kith app asks you on a card; "Always allow" lands here.
+The entries live in the agent's own folder (<agents>/AGENT/allowed.json, next to jobs.json) and are read by the settings of
+your own runs of that agent (bin/kith): a permission rule for an exact command, one file or one host, or a sentence for the
+classifier when a rule can't hold it. Runs for other people never read them, and an agent's file tools may not write the file.
+Rules: lib/kith_allowed.py.
+"""
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+import kith_allowed as ka  # noqa: E402
+from kith_paths import paths  # noqa: E402
+
+
+def exists(agent):
+    pkgs = paths()['KITH_AGENTS']
+    return ka.AGENT.match(agent) is not None and any((pkgs / agent / x).is_file() for x in ('agent.md', 'role/agent.md'))
+
+
+def stdin_json():
+    try:
+        doc = json.load(sys.stdin)
+    except ValueError:
+        doc = None
+    if not isinstance(doc, dict) or not isinstance(doc.get('tool'), str):
+        sys.exit('kith allow: give {"tool", "input"} as JSON on stdin')
+    return doc
+
+
+def main(argv):
+    if not argv or argv[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return 0
+    agent, rest = argv[0], argv[1:]
+    if not exists(agent):
+        print('kith allow: no agent called %s' % agent, file=sys.stderr)
+        return 1
+    try:
+        if rest[:1] == ['--rm'] and len(rest) == 2:
+            if not ka.remove(agent, rest[1]):
+                print('kith allow: nothing with id %s for %s (kith allow %s lists them)' % (rest[1], agent, agent), file=sys.stderr)
+                return 1
+            print('forgot %s' % rest[1])
+            return 0
+        if rest == ['--derive']:
+            doc = stdin_json()
+            print(json.dumps(ka.derive(agent, doc['tool'], doc.get('input'), doc.get('reason') or '')))
+            return 0
+        if rest == ['--add-json']:
+            doc = stdin_json()
+            d = ka.derive(agent, doc['tool'], doc.get('input'), doc.get('reason') or '')
+            if not d['ok']:
+                print(json.dumps(d))
+                return 1
+            if 'rule' in doc and (doc['rule'], doc.get('kind')) != (d['rule'], d['kind']):
+                print(json.dumps({'ok': False, 'why': 'it is no longer what was offered'}))
+                return 1
+            e, new = ka.add(agent, d['kind'], d['rule'], doc.get('reason') or '')
+            print(json.dumps({'ok': True, 'id': e['id'], 'rule': e['rule'], 'kind': e['kind'], 'added': new}))
+            return 0
+        if rest in ([], ['--json']):
+            entries, bad = ka.read_file(ka.file_of(agent))
+            if bad:
+                print('kith allow: %s' % bad, file=sys.stderr)
+            if rest:
+                print(json.dumps({'allowed': entries}))
+            elif not entries:
+                print('nothing remembered for %s' % agent)
+            else:
+                for e in entries:
+                    print('%s  %-5s  %s   [%s]  %s' % (e['id'], e['kind'], e['rule'], e['reason'], e['added']))
+            return 0
+    except (ValueError, OSError) as e:
+        print('kith allow: %s' % e, file=sys.stderr)
+        return 1
+    print(__doc__.strip(), file=sys.stderr)
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
