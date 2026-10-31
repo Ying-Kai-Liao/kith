@@ -7,6 +7,10 @@
                                           several profiles as p1,p2 (kith serve: one bot each, telegram/hq,telegram/x)
   kith-auth granted [--for AGENT] <service> the profiles granted, one per line
   kith-auth revoke <agent> <service> [--profile P]   with --profile, only that profile's grant goes
+  kith-auth holders <service> [--json]      the agents of this Mac granted a profile of that service, one per line (--json:
+                                          [{agent, profiles}]); read live from the grants, so a revoke drops an agent and an
+                                          undo brings it back. The owner's runs see every holder; a guest's only the
+                                          holders it may use itself (kith ask would refuse the rest)
   kith-auth set <profile> <VAR>             store a secret in the macOS Keychain (prompts; never echoed) and point
                                           the profile at it
   kith-auth set <profile> --stdin-json [--grant AGENT]   the host's route (a Key card): stdin is one JSON object
@@ -1072,6 +1076,31 @@ def profile_vars(refs):
 def agents_granted(auth, profile):
     return sorted(a for a, g in auth['grants'].items() if isinstance(g, dict)
                   and any(profile in grant_list(p) for p in g.values()))
+
+
+def holders(auth, svc, person=None):
+    """[{agent, profiles}]: the real agents on this Mac with a grant of their own (not an `agent@person` row, which is a
+    guest's) for a profile of svc, sorted by name. A person other than the owner is shown only the agents they may use."""
+    person = acting(auth) if person is None else person
+    known = set(agents())
+    out = []
+    for agent in sorted(a for a in auth['grants'] if a in known):
+        g = auth['grants'][agent]
+        have = grant_list(g.get(svc)) if isinstance(g, dict) else []
+        if have and (is_owner(auth, person) or may(auth, person, agent)[0]):
+            out.append({'agent': agent, 'profiles': have})
+    return out
+
+
+def cmd_holders(args):
+    rest = [a for a in args if a != '--json']
+    if len(rest) != 1 or len(args) - len(rest) > 1 or not SERVICE_RE.match(rest[0]):
+        die('holders <service> [--json]', 2)
+    rows = holders(load_auth(), rest[0])
+    if '--json' in args:
+        print(json.dumps(rows))
+    else:
+        print('\n'.join(r['agent'] for r in rows))
 
 
 def cmd_account_state(args):
@@ -2445,6 +2474,8 @@ def main(argv):
         cmd_set_stdin(rest[0], rest[3] if len(rest) == 4 else None)
     elif cmd == 'account-state':
         cmd_account_state(rest)
+    elif cmd == 'holders':
+        cmd_holders(rest)
     elif cmd == 'keys':
         cmd_keys(rest)
     elif cmd == 'env' and len(rest) >= 2:

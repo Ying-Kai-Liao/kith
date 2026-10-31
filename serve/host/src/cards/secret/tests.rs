@@ -30,6 +30,11 @@ if cmd == "account-state":
     if not has("state.json"):
         sys.exit(1)
     cat("state.json")
+elif cmd == "holders":
+    if has("holders.json"):
+        cat("holders.json")
+    else:
+        print("[]")
 elif cmd == "keys":
     if has("keys.json"):
         cat("keys.json")
@@ -231,6 +236,64 @@ async fn existing_accounts_without_a_grant_make_an_access_card() {
     assert_eq!(ids, ["profile:github/work", "profile:github/home", "another", "deny"]);
     assert_eq!(data["accounts"][0], json!({"profile": "github/work", "account": "work", "agents": ["money"]}));
     assert_eq!(data["secret"]["vars"], json!(["GITHUB_TOKEN"]));
+}
+
+fn secret_cards(f: &Fake) -> usize {
+    f.r.hub.store.cards_open(None).into_iter().filter(|c| c.tool == TOOL).count()
+}
+
+#[tokio::test]
+async fn a_service_another_agent_holds_is_a_kith_ask_not_a_card() {
+    let f = Fake::new().await;
+    f.state(PROFILES);
+    std::fs::write(f.dir.join("holders.json"), r#"[{"agent":"money","profiles":["github/work"]}]"#).unwrap();
+    let reply = f.ask("github").await;
+    assert_eq!(reply["carded"], false);
+    let said = reply["message"].as_str().unwrap();
+    assert!(said.starts_with("money holds github: kith ask money \""), "{said}");
+    assert_eq!(secret_cards(&f), 0);
+    // Asking again is the same answer, still no card.
+    assert_eq!(f.ask("github").await["message"], reply["message"]);
+    assert_eq!(secret_cards(&f), 0);
+}
+
+#[tokio::test]
+async fn several_holders_are_all_named_and_the_asker_itself_is_not_one() {
+    let f = Fake::new().await;
+    f.state(PROFILES);
+    std::fs::write(f.dir.join("holders.json"), r#"[{"agent":"house"},{"agent":"money"},{"agent":"zed"}]"#).unwrap();
+    let said = f.ask("github").await["message"].as_str().unwrap().to_owned();
+    assert!(said.starts_with("money, zed hold github: kith ask money \""), "{said}");
+}
+
+#[tokio::test]
+async fn nobody_else_holding_it_still_makes_the_card() {
+    let f = Fake::new().await;
+    f.state(PROFILES);
+    // The asker (house) is the only holder: nobody else to ask.
+    std::fs::write(f.dir.join("holders.json"), r#"[{"agent":"house"}]"#).unwrap();
+    f.ask("github").await;
+    assert_eq!(f.open().1["card"], "account");
+}
+
+#[tokio::test]
+async fn an_agent_with_a_grant_keeps_its_key_card_whoever_else_holds_the_service() {
+    let f = Fake::new().await;
+    f.state(GRANTED);
+    std::fs::write(f.dir.join("holders.json"), r#"[{"agent":"money"}]"#).unwrap();
+    f.ask("github").await;
+    assert_eq!(f.open().1["card"], "key");
+}
+
+#[tokio::test]
+async fn the_agent_that_asked_this_run_is_not_sent_back_to() {
+    let f = Fake::new().await;
+    f.state(PROFILES);
+    std::fs::write(f.dir.join("holders.json"), r#"[{"agent":"money"}]"#).unwrap();
+    let mut origin = Origin::run(&owner_run(SESSION));
+    origin.asked_by = Some("money".into());
+    request(&f.r.hub, &origin, "github", "pull requests").await;
+    assert_eq!(f.open().1["card"], "account");
 }
 
 #[tokio::test]
