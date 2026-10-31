@@ -533,7 +533,7 @@ Not allowed, with the reason:
 
 | Method | Why not |
 |---|---|
-| `respondPermission` | a bot must never answer the prompts of its own run. They go to its owner and Kai (7.6). |
+| `respondPermission` | a bot must never answer the prompts of its own run. They go to Kai, and to the bot's owner for in-grants, no-code tools while that owner is a member of the agent (7.6). |
 | `startChat`, `send`, `thread`, `history` | too wide for a client that cannot be upgraded in lockstep (it takes `botId`, `folder`, `project`, attachments). `botAsk`/`botThread` are the narrow, versioned contract; the host maps them onto these internally. |
 | `newSession`, `unsend`, `markRead`, `react`, `editHandoff`, `keepConversation` | UI affordances for a person |
 | `upload`, `readUpload` | v1 is text only; files are a later package (open question 5) |
@@ -766,16 +766,18 @@ in the thread. The bot's client gets the channel close and prints `Your access t
 
 ### 7.6 Permission prompts
 
-A bot's chat rows are guests', so tool approvals raise `permission` entries exactly as for a guest member. Today
-`event_for` gives the Owner only the permission cards of invitee chats, and `guard` lets only the Owner answer a guest's.
-For bots:
+A bot's chat rows are guests', so tool approvals raise `permission` entries exactly as for a guest member. For bots:
 
-- Approvers = **the bot's owner and Kai**. Kai's own bots: Kai. An invitee owner's bot: Sam answers only when
-  `approves_own(sam, agent)` (Sam is a `member` of that agent, the existing rule); otherwise only Kai. Either may answer; the
-  first answer wins (the existing handler is idempotent).
-- Implementation: `roles::own_bot(hub, person, bot)` also accepts a chat row whose person is a bot owned by `person`, for
-  `respondPermission` only; `event_for` for Member `sam` passes `permission` entries of his bots' chats; `event_for` for
-  the Owner already passes permission cards of anyone else's chats.
+- Approvers = **the bot's owner and Kai**. Kai's own bots: Kai. An invitee owner's bot: Sam may answer only a card whose
+  tool is within the bot's grants (every path it names is inside the bot's grant roots) and runs no code
+  (`roles::runs_code`: shell tools and every `mcp__*` tool, F11; access arch rules 1-2), and only while Sam is a `member`
+  of that agent. Every other card (a shell or MCP tool, a path outside the bot's grants, an escape or key card) is Kai's
+  alone. Either may answer; the first answer wins (the existing handler is idempotent).
+- Implementation: `access::approver` (`serve/host/src/access.rs:58-80`) names who answers besides Kai when the card opens,
+  and every producer stores it on the card as `answerable_by` (none: Kai alone). `respondPermission`'s guard
+  (`serve/host/src/api/roles.rs:221-226`) checks that field with `access::may_answer`, which asks kith-auth again so a
+  revoke applies at once; what the card names is not judged again at answer time. `event_for` shows a card to the person
+  it names (`answerable_by`), and the apps' `canAnswer` is read from the same field.
 - The bot itself never sees the card (5.8: `waiting`) and has no method to answer it.
 
 ### 7.7 Limits and abuse controls (host)
@@ -951,7 +953,7 @@ A web page the bot reads can make *the bot* ask Kith things, and can try to stee
      preset and deny list are the real boundary; owners should give bots only low-risk agents (the app says so on the picker).
   2. No secrets: the bot person has no service profiles, no `env` unless the owner sets some, no browser logins (those belong
      to the owner person).
-  3. Tool approvals go to the owner and Kai, never the bot (7.6). An injected "run this" waits for a human who sees a card from
+  3. Tool approvals go to Kai and, within the limits of 7.6, the bot's owner, never the bot. An injected "run this" waits for a human who sees a card from
      "Sam's bot Rex".
   4. The text is marked untrusted: the first-message wrapper (5.8) and `data.pasted`, so memory never stores it as what the owner
      said.

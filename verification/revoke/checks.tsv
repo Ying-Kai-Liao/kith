@@ -39,6 +39,10 @@ door	PROPERTY	DoorD1	pass
 broken-door-no-hold	PROPERTY	DoorD2c	fail
 broken-door-split	PROPERTY	DoorD2	fail
 broken-no-door-sweep	PROPERTY	DoorD1	fail
+# --- a bot's door: never one its owner doesn't hold (I6, kith-auth owner_cut) ---
+bot-door	INVARIANT	TypeOK	pass
+bot-door	PROPERTY	BotDoorCut	pass
+broken-bot-door-no-cut	PROPERTY	BotDoorCut	fail
 # --- probes: things that should happen do (a probe "fails" = it is reachable) -
 code	INVARIANT	NeverBridgeServed	fail
 code	PROPERTY	NeverAppAfterUndo	fail
@@ -48,6 +52,8 @@ app-only	PROPERTY	NeverWakeHold	fail
 app-only	PROPERTY	NeverHeldServed	fail
 door	INVARIANT	NeverDoorRuns	fail
 door	INVARIANT	NeverDoorKilled	fail
+bot-door	INVARIANT	NeverBotDoorRuns	fail
+bot-door	INVARIANT	NeverBotDoorKilled	fail
 # --- round 4: a revoke parks devices, memberships and invites (undo exact); Stop and revoke end delegations and wakes; a handle revoke reaches a paired Mac
 items	INVARIANT	TypeOK	pass
 items	INVARIANT	ItemsCut	pass
