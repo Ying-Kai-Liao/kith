@@ -45,7 +45,7 @@ if [[ -n $to ]]; then
       id=${to#ask:}
       [[ $id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "kith-send: bad target $to" >&2; exit 2; }
       [[ -f $1 ]] && kind=files || kind=text
-      python3 - "$KITH_MACHINE/live/ask/$id.jsonl" "$agent" "$kind" "$caption" "$progress" "$@" <<'PY'
+      python3 -I - "$KITH_MACHINE/live/ask/$id.jsonl" "$agent" "$kind" "$caption" "$progress" "$@" <<'PY'
 import json, os, sys, time
 dest, who, kind, caption, progress, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6:]
 item = {'as': who, 'files': [os.path.abspath(f) for f in rest], 'caption': caption} if kind == 'files' \
@@ -64,7 +64,7 @@ fi
 
 if [[ -n ${KITH_DISCORD_WEBHOOK_URL:-} && -n ${KITH_DISCORD_THREAD_ID:-} ]]; then
   url="$KITH_DISCORD_WEBHOOK_URL?wait=true&thread_id=$KITH_DISCORD_THREAD_ID"
-  json() { python3 -c 'import json,sys; print(json.dumps({"username": sys.argv[1], "content": sys.argv[2][:2000]}))' "$as" "$1"; }
+  json() { python3 -I -c 'import json,sys; print(json.dumps({"username": sys.argv[1], "content": sys.argv[2][:2000]}))' "$as" "$1"; }
   if [[ ! -f $1 ]]; then
     curl -s --fail-with-body --max-time 30 -H 'Content-Type: application/json' -d "$(json "$*")" "$url" >/dev/null
     echo "sent message to thread as $as"; exit 0
@@ -77,7 +77,7 @@ fi
 
 if [[ -n ${KITH_BRIDGE_OUTBOX:-} && -d $KITH_BRIDGE_OUTBOX && ! ( -n ${KITH_TELEGRAM_BOT_TOKEN:-} && -n ${KITH_TELEGRAM_CHAT_ID:-} ) ]]; then
   [[ -f $1 ]] && kind=files || kind=text
-  python3 - "$KITH_BRIDGE_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
+  python3 -I - "$KITH_BRIDGE_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
 import json, os, sys, time
 box, who, kind, caption, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
 item = {'as': who, 'files': [os.path.abspath(f) for f in rest], 'caption': caption} if kind == 'files' \
@@ -94,7 +94,7 @@ fi
 # The run's own outbox: the files are copied in, since the host takes only what is inside it.
 if [[ -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX ]]; then
   [[ -f $1 ]] && kind=files || kind=text
-  python3 - "$KITH_RUN_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
+  python3 -I - "$KITH_RUN_OUTBOX" "$agent" "$kind" "$caption" "$@" <<'PY'
 import json, os, shutil, sys, time
 box, who, kind, caption, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
 n = time.time_ns()
@@ -135,7 +135,7 @@ if [[ -z ${KITH_TELEGRAM_BOT_TOKEN:-} || -z ${KITH_TELEGRAM_CHAT_ID:-} ]]; then
 fi
 api="https://api.telegram.org/bot$KITH_TELEGRAM_BOT_TOKEN"
 
-check() { python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else print("kith-send:", d.get("description"), file=sys.stderr) or 1)'; }
+check() { python3 -I -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("ok") else print("kith-send:", d.get("description"), file=sys.stderr) or 1)'; }
 
 if [[ ! -f $1 ]]; then
   curl -s --max-time 30 --data-urlencode "chat_id=$KITH_TELEGRAM_CHAT_ID" --data-urlencode "text=$*" "$api/sendMessage" | check
