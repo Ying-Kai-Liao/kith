@@ -46,6 +46,18 @@ private let page = URL(string: "https://news.example.com/a/story")!
     #expect(LinkPreview.isFetchable(URL(string: "http://bom.gov.au/x")!))
 }
 
+@Test func aNameResolvingToAPrivateAddressIsRefused() async {
+    #expect(LinkPreview.refuses(addresses: ["93.184.216.34", "192.168.1.20"]))
+    #expect(LinkPreview.refuses(addresses: ["fe80::1%en0"]))
+    #expect(LinkPreview.refuses(addresses: ["::ffff:127.0.0.1"]))
+    #expect(LinkPreview.refuses(addresses: []))
+    #expect(!LinkPreview.refuses(addresses: ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]))
+    let url = URL(string: "https://rebind.example.com/x")!
+    #expect(await LinkPreview.resolvesPublic(url) { _ in ["10.0.0.7"] } == false)
+    #expect(await LinkPreview.resolvesPublic(url) { _ in ["93.184.216.34"] } == true)
+    #expect(await LinkPreview.resolvesPublic(URL(string: "http://localhost/x")!) { _ in ["93.184.216.34"] } == false)
+}
+
 // MARK: Store
 
 private func png(_ side: Int) -> Data {

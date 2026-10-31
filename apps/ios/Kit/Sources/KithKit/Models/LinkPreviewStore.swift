@@ -177,7 +177,7 @@ public final class LinkPreviewSession: LinkPreviewLoading, Sendable {
     private final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
         func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                         newRequest request: URLRequest) async -> URLRequest? {
-            guard let url = request.url, LinkPreview.isFetchable(url) else { return nil }
+            guard let url = request.url, await LinkPreview.resolvesPublic(url) else { return nil }
             return request
         }
     }
@@ -197,7 +197,8 @@ public final class LinkPreviewSession: LinkPreviewLoading, Sendable {
     /// Streams the body and stops at `limit` bytes: for a page the head is all that's wanted (`cut`), an oversized
     /// image is dropped.
     private func read(_ url: URL, limit: Int, accept: String, cut: Bool) async -> (Data, String)? {
-        guard LinkPreview.isFetchable(url) else { return nil }
+        // Resolved here and on every redirect hop; a connection that re-resolves later is not pinned.
+        guard await LinkPreview.resolvesPublic(url) else { return nil }
         var request = URLRequest(url: url)
         request.setValue(accept, forHTTPHeaderField: "Accept")
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Kith", forHTTPHeaderField: "User-Agent")

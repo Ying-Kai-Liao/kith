@@ -88,6 +88,40 @@ public enum LinkPreview {
         return parts.count == 1 || host.hasSuffix(".localhost") || host.hasSuffix(".local")
     }
 
+    /// True when a name's resolved addresses must be refused: any of them private, or none at all. This closes the
+    /// gap `isPrivate(host:)` leaves for a public name that points at the LAN.
+    public static func refuses(addresses: [String]) -> Bool {
+        addresses.isEmpty || addresses.contains { isPrivate(host: $0) }
+    }
+
+    /// The numeric addresses `host` resolves to (getaddrinfo, off the calling actor).
+    public static func addresses(of host: String) async -> [String] {
+        await Task.detached {
+            var hints = addrinfo(ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM, ai_protocol: 0,
+                                 ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+            var list: UnsafeMutablePointer<addrinfo>?
+            guard getaddrinfo(host, nil, &hints, &list) == 0, let first = list else { return [] }
+            defer { freeaddrinfo(list) }
+            var out: [String] = []
+            var node: UnsafeMutablePointer<addrinfo>? = first
+            while let n = node {
+                var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+                if let addr = n.pointee.ai_addr,
+                   getnameinfo(addr, n.pointee.ai_addrlen, &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 {
+                    out.append(String(cString: buf))
+                }
+                node = n.pointee.ai_next
+            }
+            return out
+        }.value
+    }
+
+    /// The URL's host resolves only to public addresses.
+    static func resolvesPublic(_ url: URL, using resolve: @Sendable (String) async -> [String] = { await addresses(of: $0) }) async -> Bool {
+        guard isFetchable(url), let host = url.host(percentEncoded: false) else { return false }
+        return !refuses(addresses: await resolve(host))
+    }
+
     // MARK: Tag reading
 
     struct Tag { var name: String; var attributes: [String: String] }
