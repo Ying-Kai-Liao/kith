@@ -229,6 +229,7 @@ impl Hub {
         }
         cfg.clean_avatar_source();
         cfg.clean_project();
+        cfg.clean_labels()?;
         validate(&cfg)?;
         crate::agent::workspace::prepare(&mut cfg)?;
         {
@@ -301,6 +302,7 @@ impl Hub {
         }
         cfg.clean_avatar_source();
         cfg.clean_project();
+        cfg.clean_labels()?;
         validate(&cfg)?;
         crate::agent::workspace::prepare(&mut cfg)?;
         crate::agent::own_memory::settle(&mut cfg, &row.config, patch);

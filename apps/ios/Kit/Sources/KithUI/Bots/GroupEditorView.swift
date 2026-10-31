@@ -11,6 +11,7 @@ public struct GroupEditorView: View {
     @State private var name: String
     @State private var about: String
     @State private var members: [String]
+    @State private var labels: String
     @State private var query = ""
     /// A new group starts in the picker; an existing one shows its members first.
     @State private var adding: Bool
@@ -23,6 +24,7 @@ public struct GroupEditorView: View {
         _name = State(initialValue: group?.name ?? "")
         _about = State(initialValue: group?.description ?? "")
         _members = State(initialValue: group?.members ?? members)
+        _labels = State(initialValue: (group?.labels ?? []).joined(separator: ", "))
         _adding = State(initialValue: group == nil && members.isEmpty)
     }
 
@@ -64,6 +66,20 @@ public struct GroupEditorView: View {
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Labels")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(Palette.secondary)
+                            .padding(.bottom, 4)
+                        TextField("launch, q4 plan", text: $labels)
+                            .fieldBox(fill: Palette.surface)
+                            .textInputAutocapitalization(.never)
+                            .accessibilityLabel("Labels")
+                        Text("Up to 5, separated by commas. They filter the room list.")
+                            .font(.caption)
+                            .foregroundStyle(Palette.tertiary)
+                            .padding(.top, 6)
+                    }
                     VStack(alignment: .leading, spacing: 0) {
                         Text("Members")
                             .font(.subheadline.weight(.semibold))
@@ -160,12 +176,12 @@ public struct GroupEditorView: View {
         Task {
             do {
                 if let groupId {
-                    var draft = GroupDraft(name: finalName, description: about, members: members)
+                    var draft = GroupDraft(name: finalName, description: about, members: members, labels: RoomLabels.parse(labels))
                     draft.id = groupId
                     draft.pinned = model.bots[groupId]?.pinned
                     try await model.updateGroup(draft)
                 } else {
-                    _ = try await model.createGroup(name: finalName, description: about, members: members)
+                    _ = try await model.createGroup(name: finalName, description: about, members: members, labels: RoomLabels.parse(labels))
                 }
                 dismiss()
             } catch {

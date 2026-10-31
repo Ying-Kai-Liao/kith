@@ -416,3 +416,27 @@ html:not([data-platform='darwin']) .cs-profile {
 .cs-goes-pill:disabled {
   cursor: default;
 }
+
+/* The room list's label chips (filters, not folders) and New room. */
+.cs-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 14px 8px;
+}
+.cs-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--hairline, rgba(128, 128, 128, 0.25));
+  background: transparent;
+  color: var(--secondary);
+  font-size: var(--text-caption);
+}
+.cs-label.on {
+  background: var(--accent, #3478f6);
+  border-color: transparent;
+  color: #fff;
+}

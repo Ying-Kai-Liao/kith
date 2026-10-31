@@ -9,6 +9,8 @@ public struct Bot: Codable, Identifiable, Hashable, Sendable {
     public var kind: String
     /// A group's bots.
     public var members: [String]
+    /// A room's purpose labels (filters in the list, not folders); empty for an agent and for an older host.
+    public var labels: [String] = []
     public var name: String
     public var description: String
     /// `kith:<paletteId>` recolours the body; anything else (old ids like `blue` too) is the original.
@@ -470,12 +472,15 @@ public struct GroupDraft: Codable, Hashable, Sendable {
     /// What the group is for; its bots are told.
     public var description = ""
     public var members: [String]
+    /// Nil leaves a room's labels as they are; an empty list clears them.
+    public var labels: [String]?
     public var pinned: Bool?
 
-    public init(name: String, description: String = "", members: [String]) {
+    public init(name: String, description: String = "", members: [String], labels: [String]? = nil) {
         self.name = name
         self.description = description
         self.members = members
+        self.labels = labels
     }
 
     public init(_ group: Bot) {
@@ -483,6 +488,7 @@ public struct GroupDraft: Codable, Hashable, Sendable {
         name = group.name
         description = group.description
         members = group.members
+        labels = group.labels
         pinned = group.pinned
     }
 }
@@ -564,6 +570,7 @@ extension Bot {
         id = try c.decode(String.self, forKey: .id)
         kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "agent"
         members = try c.decodeIfPresent([String].self, forKey: .members) ?? []
+        labels = try c.decodeIfPresent([String].self, forKey: .labels) ?? []
         name = try c.decodeIfPresent(String.self, forKey: .name) ?? "Bot"
         description = try c.decodeIfPresent(String.self, forKey: .description) ?? ""
         avatarColor = try c.decodeIfPresent(String.self, forKey: .avatarColor) ?? ""
