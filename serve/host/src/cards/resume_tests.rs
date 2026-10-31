@@ -1096,6 +1096,16 @@ async fn send_to(r: &Rig, chat: &str, root: &str, text: &str, nonce: &str) -> Va
     out["entry"].clone()
 }
 
+/// Waits until the queue's background give-back of a held take has landed (no item has a turn).
+async fn given_back(r: &Rig) {
+    for _ in 0..200 {
+        if crate::wake::ls(&state(r)).iter().all(|i| i["turn"].is_null()) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 fn waiting_ids(r: &Rig) -> Vec<String> {
     let mut ids: Vec<String> = crate::wake::ls(&state(r))
         .iter()
@@ -1131,15 +1141,13 @@ async fn messages_to_a_held_thread_wait_and_go_out_as_one_turn_once_the_terminal
     // The terminal still holds it: the take is given back, held, and nothing reaches an actor.
     drive(&r.hub).await;
     assert!(messages_seen(&chat, &root).is_empty());
-    for _ in 0..200 {
-        if crate::wake::ls(&state(&r)).iter().all(|i| i["turn"].is_null()) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
+    given_back(&r).await;
     pause_over(&r);
     drive(&r.hub).await;
     assert!(messages_seen(&chat, &root).is_empty(), "still held");
+    // The give-back of this second try is written in the background: let it land before the pause is cleared again,
+    // or it would put the pause back after the terminal ended.
+    given_back(&r).await;
     // The terminal ends.
     claim::release(&state(&r), "held-s", pid, false);
     pause_over(&r);
