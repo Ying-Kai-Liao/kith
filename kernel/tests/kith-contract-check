@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """kith-contract-check — what the kernel prints for the host is what serve/contract/kernel/contract.json says.
 
-Runs the real `kith ls --json`, `kith project ls --json` and `kith <agent> --launch-json` (the owner's run and an
+Runs the real `kith ls --json`, `kith project ls --json`, `kith ask delegations --json` and `kith <agent> --launch-json` (the owner's run and an
 invited person's) in a throwaway HOME/KITH_HOME/KITH_STATE/KITH_AUTH with a stand-in claude, never the real ~/.kith.
 
 - The producer's strict check: every field the contract names is there (null where it may be), every enum value is a
@@ -165,6 +165,17 @@ try:
     run([auth, 'person', 'sam'])
     run([auth, 'member', 'echo', 'sam', 'preset=member'])
 
+    # Two delegation records, as kith-ask writes them (kernel/bin/kith-ask open_record): a chain that reached its cap and
+    # an ask from before the record existed. The ids and times are fixed, so the fixture is too.
+    run([sys.executable, '-c', 'import json, sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; '
+         'box = paths()["KITH_MACHINE"] / "live" / "ask"; box.mkdir(parents=True, exist_ok=True); '
+         '(box / "ask-20260101000000-aaaaaa.reg").write_text(json.dumps({"asked": "echo", "agent": "architect", '
+         '"person": None, "via": "terminal", "reply_to": {"session": "sess-1", "ask": None}, '
+         '"chain": "ask-20260101000000-aaaaaa", "hop": 0, "cross_hops": 0, "crossed": False, "cost": 5.25, '
+         '"cost_base": 0, "state": "capped", "at": 1767225600.0, "answered_at": 1767225660.0, "capped_at": 1767225660.0, '
+         '"cap_usd": 5})); (box / "ask-old-1.reg").write_text(json.dumps({"asked": "relay", "session": "sess-0", '
+         '"agent": "architect", "person": None, "via": "terminal", "at": 1767225000.0}))', str(KERNEL / 'lib')])
+
     cmds = C['commands']
     alpha = T / 'work' / 'alpha'
     cases = [  # fixture, command, its arguments, where it runs, extra env
@@ -172,6 +183,7 @@ try:
         ('project-ls', 'projectLs', cmds['projectLs']['args'], T, {}),
         ('launch', 'launch', ['echo', '--launch-json', '-p', 'alpha'], alpha, {}),
         ('launch-as-person', 'launch', ['echo', '--launch-json'], alpha, {'KITH_PERSON': 'sam', 'KITH_VIA': 'serve'}),
+        ('delegations', 'delegations', cmds['delegations']['args'], T, {}),
     ]
 
     # Paths in the fixtures: the temp folder, the kernel folder (also as a hook's shell word) and Xcode's, however

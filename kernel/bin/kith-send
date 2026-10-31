@@ -5,6 +5,7 @@
 #   kith-send --caption "text" FILE...       images show inline, anything else (html, pdf) as files
 #   kith-send --as image "🎨 generating…"    post as another agent (helpers reporting into the owner's thread)
 #   kith-send --to TARGET "text"|--caption…  ask:<id> (the caller's `kith ask --wait <id>` reads it), dm (Telegram, as below)
+#   kith-send --to ask:<id> --progress "text"  a progress note for that ask: kept for its --wait, never wakes the caller
 #
 # Inside a Discord task (kith serve sets KITH_DISCORD_WEBHOOK_URL + KITH_DISCORD_THREAD_ID) it posts into that thread,
 # named after the agent. A tool that names a Telegram chat (KITH_TELEGRAM_BOT_TOKEN + KITH_TELEGRAM_CHAT_ID in its
@@ -25,6 +26,7 @@ as=${KITH_AGENT:-kith}
 to=""
 [[ ${1:-} == --to ]] && { to=$2; shift 2; }
 [[ ${1:-} == --as ]] && { as=$2; shift 2; }
+[[ ${1:-} == --progress ]] && { progress=1; shift; } || progress=""
 agent=$as
 # Discord shows the agent's display_name (agent.md frontmatter) when it has one
 eval "$(python3 "$(dirname "$0")/../lib/kith_paths.py" --sh)"   # KITH_AGENTS
@@ -42,11 +44,12 @@ if [[ -n $to ]]; then
       id=${to#ask:}
       [[ $id =~ ^[A-Za-z0-9._-]+$ ]] || { echo "kith-send: bad target $to" >&2; exit 2; }
       [[ -f $1 ]] && kind=files || kind=text
-      python3 - "$KITH_MACHINE/live/ask/$id.jsonl" "$agent" "$kind" "$caption" "$@" <<'PY'
+      python3 - "$KITH_MACHINE/live/ask/$id.jsonl" "$agent" "$kind" "$caption" "$progress" "$@" <<'PY'
 import json, os, sys, time
-dest, who, kind, caption, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+dest, who, kind, caption, progress, rest = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6:]
 item = {'as': who, 'files': [os.path.abspath(f) for f in rest], 'caption': caption} if kind == 'files' \
     else {'as': who, 'text': ' '.join(rest)}
+item['kind'] = 'progress' if progress else 'answer'   # only an answer wakes the asker (kith ask)
 item['at'] = time.time()
 os.makedirs(os.path.dirname(dest), exist_ok=True)
 with open(dest, 'a') as f:   # kith ask --wait reads it line by line
