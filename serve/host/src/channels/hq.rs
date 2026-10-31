@@ -81,17 +81,26 @@ pub(crate) static TEST_ENV: Mutex<Vec<(&'static str, PathBuf)>> = Mutex::new(Vec
 
 /// Runs a tool without a terminal: its output, or None when it can't start or takes too long.
 pub async fn output(bin: &Path, args: &[&str]) -> Option<std::process::Output> {
+    output_with(bin, args, None).await
+}
+
+/// [`output`] with `stdin` written to the tool (a JSON document it reads), then closed.
+pub async fn output_with(bin: &Path, args: &[&str], stdin: Option<&str>) -> Option<std::process::Output> {
+    use tokio::io::AsyncWriteExt;
     let mut cmd = tokio::process::Command::new(bin);
     #[cfg(test)]
     cmd.envs(TEST_ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().map(|(k, v)| (*k, v)));
-    let child = cmd
+    let mut child = cmd
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .ok()?;
+    if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
+        pipe.write_all(text.as_bytes()).await.ok()?;
+    }
     tokio::time::timeout(TOOL_TIMEOUT, child.wait_with_output()).await.ok()?.ok()
 }
 

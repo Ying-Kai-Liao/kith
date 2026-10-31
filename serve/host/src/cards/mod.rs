@@ -12,6 +12,7 @@
 //! `follow_up` is its one call site; the setting `cards.resume` (default on) is the kill switch.
 
 pub mod access;
+pub mod autoallow;
 pub mod edge;
 pub mod resource;
 pub mod resume;
@@ -185,6 +186,23 @@ fn chat_of(hub: &Hub, id: &str) -> Option<crate::store::BotConfig> {
 
 /// The host half of `--permission-prompt-tool` for a -p run (A5, A6, A9). Never panics, never blocks past the window.
 pub async fn request_permission(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, input: &Value) -> Decision {
+    ask_for(hub, who, tool, input, None).await
+}
+
+/// The owner's own run was blocked by Claude Code's auto-mode classifier (`reason` is what it said, kith-permit's
+/// `denied` hook): a card for the owner with Allow once, Always allow and Deny (`autoallow`). The caller has checked that
+/// the token is the owner's.
+pub async fn request_auto_denied(
+    hub: &Arc<Hub>,
+    who: &RunIdentity,
+    tool: &str,
+    input: &Value,
+    reason: &str,
+) -> Decision {
+    ask_for(hub, who, tool, input, Some(reason)).await
+}
+
+async fn ask_for(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, input: &Value, auto: Option<&str>) -> Decision {
     if input.to_string().len() > MAX_INPUT {
         return deny("That request is too large to show for approval.");
     }
@@ -195,7 +213,8 @@ pub async fn request_permission(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, i
         }
         resource::Classified::Malformed(why) => return deny(format!("Can't ask about that: {why}.")),
     };
-    request_card(hub, who, tool, input, &resource, &shown).await
+    let resource = if auto.is_some() { autoallow::resource_of(&resource) } else { resource };
+    request_card(hub, who, tool, input, &resource, &shown, auto).await
 }
 
 /// The part after classification, split out so tests can name the resource.
@@ -206,6 +225,7 @@ async fn request_card(
     input: &Value,
     resource: &str,
     shown: &str,
+    auto: Option<&str>,
 ) -> Decision {
     let cfg = settings(&hub.store);
     // A file outside the run's grants is the owner's to allow, whoever the run is for (F11 step 2a).
@@ -216,7 +236,8 @@ async fn request_card(
         owner_run: who.scope == TokenScope::OwnerAsk,
         ask: crate::access::Ask::Tool { in_grants },
     };
-    let answerable_by = crate::access::approver(&hub.store, &req).await;
+    // An auto-mode card is for the owner's own run, whatever it touches.
+    let answerable_by = if auto.is_some() { None } else { crate::access::approver(&hub.store, &req).await };
     let now = now_ms();
     let new = NewCard {
         session: who.session.clone(),
@@ -245,7 +266,10 @@ async fn request_card(
     };
     // Listening comes first: an answer that lands the moment the card is shown must find this call.
     let (_waiting, rx) = Waiting::new(&card.id);
-    let extra = edge_extras(hub, who, &card).await;
+    let extra = match auto {
+        Some(reason) => Some(autoallow::extras(&who.agent, tool, input, reason).await),
+        None => edge_extras(hub, who, &card).await,
+    };
     let Some(card) = show(hub, who, &card, extra) else {
         return deny("Approvals aren't available right now.");
     };
@@ -339,6 +363,7 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
         access::entry_view(card, &name.unwrap_or_else(|| card.person.clone()))
     } else {
         let (yes, no) = match &extra {
+            Some((_, _, kept)) if kept["kind"] == "auto" => ("Allow once".into(), "Deny"),
             Some((_, _, kept)) => {
                 let name = person_name.clone().unwrap_or_else(|| who.person.clone());
                 (edge::once_label(kept, &name, &who.agent), "No")
@@ -382,7 +407,8 @@ fn show(hub: &Arc<Hub>, who: &RunIdentity, card: &Card, extra: Option<edge::Extr
         "source": "run",
     });
     if let Some(kept) = kept {
-        data["edge"] = kept;
+        let key = if kept["kind"] == "auto" { "autoAllow" } else { "edge" };
+        data[key] = kept;
     }
     if let Some(chain) = chain_of(card) {
         data["chain"] = chain.into();
@@ -499,6 +525,16 @@ pub fn answer(
         e.data["parked"] = false.into();
         hub.set_entry(entry_id, &e.data);
     }
+    if autoallow::is_auto(&card) {
+        if allow
+            && option_id == Some(autoallow::ALWAYS)
+            && let Some(kept) =
+                entry.data.get("autoAllow").filter(|k| k.is_object() && card.approver == "owner").cloned()
+        {
+            remember(hub, &card, kept);
+        }
+        return Ok(Outcome::Recorded { forward: settle(hub, &card, was_live, allow, option_id, person)? });
+    }
     let kept = entry.data.get("edge").filter(|e| e.is_object() && card.approver == "owner").cloned();
     if let Some(kept) = kept {
         let (hub, option, person) = (hub.clone(), option_id.map(str::to_owned), person.map(str::to_owned));
@@ -532,6 +568,21 @@ pub fn answer(
     Ok(Outcome::Recorded { forward: settle(hub, &card, was_live, allow, option_id, person)? })
 }
 
+/// Always allow on an auto-mode card: saves what the card offered for the agent, then says so on the card. Off the answer
+/// path: the run hears its yes at once, and a late answer (the run is gone) still saves.
+fn remember(hub: &Arc<Hub>, card: &Card, kept: Value) {
+    let (hub, card) = (hub.clone(), card.clone());
+    tokio::spawn(async move {
+        match autoallow::save(&card, &kept).await {
+            Ok(rule) => autoallow::remembered(&hub, &card, &rule, kept["ruleKind"].as_str().unwrap_or("rule")),
+            Err(why) => {
+                tracing::warn!(card = card.id, why, "couldn't remember an auto-mode card's always");
+                access::kept_once(&hub, &card, &why);
+            }
+        }
+    });
+}
+
 /// Tells whoever waits on an answered card, or owes its session the answer. True for a bot chat's card whose process
 /// was up: the caller forwards the answer to the bot's actor.
 fn settle(
@@ -544,7 +595,17 @@ fn settle(
 ) -> anyhow::Result<bool> {
     let mut forward = false;
     let said_no = if option_id.is_some() { "was denied" } else { "was cancelled" };
-    if card.tool == access::TOOL {
+    if autoallow::is_auto(card) {
+        // The blocked call is gone with its turn: a yes is heard by the hook still waiting, else it does nothing (no
+        // resume, no grant left for a later identical call).
+        let verdict = if allow { Verdict::Allow } else { Verdict::Deny("The approver said no.".into()) };
+        if was_live {
+            deliver(&card.id, &verdict);
+        }
+        if let Err(error) = hub.store.card_use(&card.id) {
+            tracing::warn!(error = format!("{error:#}"), card = card.id, "couldn't spend an auto-mode card");
+        }
+    } else if card.tool == access::TOOL {
         // No process waits on an escape card: the yes is applied at the session's next activation (see `access`).
         access::answered(hub, card, allow, option_id, person);
     } else if was_live && card.source == "run" {
@@ -764,6 +825,8 @@ fn auth_stamp() -> Vec<Option<std::time::SystemTime>> {
 
 #[cfg(test)]
 mod access_tests;
+#[cfg(test)]
+mod autoallow_tests;
 #[cfg(test)]
 mod edge_tests;
 #[cfg(test)]

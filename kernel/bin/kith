@@ -43,6 +43,7 @@
 #   kith door prepare AGENT DOOR|sweep|ls               a guest's doors: prepare one's cache (owner), stop them, list them (kith-door)
 #   kith cost [agents|agent <name>|...]                  what the agents cost, from the usage ledger (kith-cost)
 #   kith ask <agent> [-c] [--as NAME] "task"            ask an agent, get its answer back; -c continues (kith-ask)
+#   kith allow <agent> [--rm ID]                        what you said "Always allow" to for the agent in auto mode: list, forget one (kith-allow)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
 #   kith group add-bot|remove-bot <room> <bot>  ·  kith bot set <bot> [--wake-profile P] [--turn-timeout S]   a bot guest (Grok) in a group room; its wake settings (kith-group)
 #   kith keys add <service> --profile <account|service/account> [--for AGENT]   hand Kith a key through a card in the app (default AGENT: serve); never typed here (kith-keys)
@@ -84,7 +85,7 @@ set -euo pipefail
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
-[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,59p' "$0" | sed 's/^#   //'; exit 0; }
+[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,60p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
 [[ $1 == migrate ]] && exec "$KITH/bin/kith-migrate" "${@:2}"
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
@@ -105,6 +106,7 @@ case $1 in
   door)               shift; exec "$KITH/bin/kith-door" "${@:---help}" ;;
   cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
+  allow)              shift; exec "$KITH/bin/kith-allow" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;
   backup)             case ${2:-} in list|add|remove) shift; exec "$KITH/bin/kith-account" backup "$@" ;; esac
@@ -677,7 +679,7 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
   [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
-fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
+fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
 $learned
 $state_projects" python3 -I -c '
 import json, os, re, sys
@@ -723,6 +725,12 @@ for r in roots:
             if rule not in s["permissions"]["deny"]:
                 s["permissions"]["deny"].append(rule)
 s["permissions"]["deny"].extend(d for d in os.environ["DENY"].split("\n") if d)   # from the membership of the person the run is for
+# The allow lists behind the "Always allow" answer (lib/kith_allowed.py) are written by `kith allow` alone: no run may write
+# any agent allowed.json with its file tools, under either spelling of the agents folder.
+for a in dict.fromkeys(x for r in (os.environ["KITH_AGENTS"], os.environ["KITH_STATE"] + "/agents") for x in (r, os.path.realpath(r))):
+    rule = "Edit(/%s/*/allowed.json)" % a
+    if rule not in s["permissions"]["deny"]:
+        s["permissions"]["deny"].append(rule)
 # Anyone but the owner (an invited person, a bot): the OS sandbox of Claude Code (macOS seatbelt) around Bash and every
 # process it starts, so the files above are closed to a shell too and KITH_PERSON cannot be dodged by reading the
 # index or the serve token directly. Fails closed (failIfUnavailable), no escape hatch for the model, no excluded
@@ -784,6 +792,35 @@ if "defaultMode" in s["permissions"]:   # the agent author may still suggest a r
     s["permissions"]["defaultMode"] = current(s["permissions"]["defaultMode"])
     if os.environ["CAP_BYPASS"] == "1" and s["permissions"]["defaultMode"] == "bypassPermissions":
         s["permissions"]["defaultMode"] = "auto"   # a reader agent: held to auto, whoever suggested bypass
+# What the owner said is OK for this agent (kith allow): its rules join permissions.allow, its prose joins autoMode.allow.
+# Runs for anyone else never read the file.
+run_mode = os.environ["PERM_MODE"] or s["permissions"].get("defaultMode")
+if os.environ["P_OWNER"] == "1":
+    import kith_allowed
+    rules, notes, bad = kith_allowed.for_settings(os.environ["AGENT_HOME"] + "/allowed.json")
+    if bad:
+        print("kith: %s" % bad, file=sys.stderr)
+    allow.extend(r for r in rules if r not in allow)
+    if notes:
+        listed = s.setdefault("autoMode", {}).setdefault("allow", ["$defaults"])
+        listed.extend(n for n in notes if n not in listed)
+    # Auto mode has no prompt, so a call its classifier blocks is only a refusal. In a run the host can ask about, a
+    # PermissionDenied hook turns that into a card (Allow once, Always allow, Deny) and, on a yes, a PreToolUse hook lets the
+    # retry of that one call through. Not at the owner terminal: Claude Code shows its notice there. Needs the ask
+    # token, which only a run it started (or kith-permit issue) has; without one both hooks print nothing.
+    if run_mode == "auto" and os.environ["OWNER_TERMINAL"] != "1":
+        import shlex, uuid
+        permit = shlex.quote(os.environ["KITH_ROOT"] + "/bin/kith-permit")
+        once_dir = shlex.quote("%s/run/once/%s" % (os.environ["KITH_MACHINE"], uuid.uuid4().hex))
+        # The window the owner has to answer is set by the host, up to 10 minutes: the hook waits as long.
+        s["hooks"].setdefault("PermissionDenied", []).append(
+            {"hooks": [{"type": "command", "command": "%s denied --dir %s" % (permit, once_dir), "timeout": 660}]})
+        # Nothing is recorded in most runs: one test of the folder before any python starts.
+        s["hooks"].setdefault("PreToolUse", []).append(
+            {"hooks": [{"type": "command", "command": "[ -d %s ] || exit 0; exec %s once --dir %s" % (once_dir, permit, once_dir),
+                        "timeout": 10}]})
+        for r in dict.fromkeys((os.environ["KITH_MACHINE"], os.path.realpath(os.environ["KITH_MACHINE"]))):
+            s["permissions"]["deny"].append("Edit(/%s/run/once/**)" % r)
 try:
     installed = [p["id"] for p in json.loads(os.environ["PLUGINS"])]
 except (ValueError, KeyError, TypeError):
