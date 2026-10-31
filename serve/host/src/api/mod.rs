@@ -13,6 +13,7 @@ mod calls;
 mod cards;
 #[cfg(test)]
 mod contract_tests;
+mod delegations;
 pub mod devices;
 #[cfg(test)]
 mod error_tests;
@@ -241,6 +242,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match bots::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match delegations::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };
