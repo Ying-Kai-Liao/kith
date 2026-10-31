@@ -45,8 +45,10 @@ const HEADLINE_MIN: f64 = 0.6;
 const IMPORTANT_MIN: f64 = 0.6;
 /// ... and is dropped when its "this is a log line, suggestion or remark about the assistant" reaches this.
 const EXCLUDED_MIN: f64 = 0.7;
-const MIN_ROWS: usize = 2;
+const MIN_ROWS: usize = 1;
 const MAX_ROWS: usize = 5;
+/// A paragraph among the first blocks may offer its first sentence as the title when the whole is too long.
+const OPENING_BLOCKS: usize = 3;
 const MAX_LINKS: usize = 2;
 /// The title and headline questions' "no block does" option.
 const NONE: &str = "none";
@@ -170,6 +172,40 @@ fn label_value(line: &str) -> Option<(String, String)> {
     (plausible && !value.is_empty()).then(|| (label.to_owned(), value.to_owned()))
 }
 
+/// A bare figure: a number with at most a short unit or percent sign after it ("31.1", "about 5.3", "12%").
+fn figure(cell: &str) -> bool {
+    let c = cell.trim().trim_start_matches(['~', '≈']).trim();
+    let c = c.strip_prefix("about ").unwrap_or(c);
+    let digits = c.chars().take_while(|ch| ch.is_ascii_digit() || ".,".contains(*ch)).count();
+    digits > 0 && c[digits..].trim().chars().count() <= 4
+}
+
+/// The unit a table header names for its column ("GB", "Size (GB)"), when it is one of the usual ones.
+fn column_unit(header: &str) -> Option<&str> {
+    const UNITS: [&str; 15] =
+        ["B", "KB", "MB", "GB", "TB", "KiB", "MiB", "GiB", "TiB", "ms", "s", "%", "MHz", "GHz", "kB"];
+    let word = |c: char| !c.is_alphanumeric() && c != '%';
+    header.split(word).find(|t| UNITS.contains(t))
+}
+
+/// A table row as label and value. The label is the first cell, unless that one is a bare figure and another cell is
+/// words (`| GB | What |` tables): then the words label the figure. A figure under a unit header gets the unit.
+fn table_pair(cells: &[&str], header: Option<&[String]>) -> Option<(String, String)> {
+    let cells: Vec<String> = cells.iter().map(|c| plain(c)).collect();
+    let words = |c: &&String| !c.is_empty() && !figure(c);
+    let label_at = if figure(&cells[0]) { cells.iter().position(|c| words(&c)).unwrap_or(0) } else { 0 };
+    let value_at = if label_at == 0 { (1..cells.len()).find(|i| !cells[*i].is_empty())? } else { 0 };
+    if cells[label_at].is_empty() {
+        return None;
+    }
+    let mut value = cells[value_at].clone();
+    let unit = header.and_then(|h| h.get(value_at)).and_then(|h| column_unit(h));
+    if let Some(unit) = unit.filter(|u| figure(&value) && !value.contains(*u)) {
+        value = if unit == "%" { format!("{value}%") } else { format!("{value} {unit}") };
+    }
+    Some((cells[label_at].clone(), value))
+}
+
 fn add_with(blocks: &mut Vec<Block>, kind: Kind, text: &str, pair: Option<(String, String)>) {
     let text = text.trim();
     if !text.is_empty() {
@@ -197,9 +233,15 @@ pub fn split(text: &str) -> Vec<Block> {
     let mut fence: Option<Vec<&str>> = None;
     // The previous line was a table row: a separator right after it makes that row the table's header.
     let mut after_row = false;
+    // The header cells of the table being read (marks removed): the unit of a value column is often only named there.
+    let mut header: Option<Vec<String>> = None;
+    let mut last_cells: Option<Vec<String>> = None;
     let text = text.replace("\r\n", "\n");
     for line in text.split('\n') {
         let header_candidate = std::mem::take(&mut after_row);
+        if !line.trim_start().starts_with('|') {
+            header = None;
+        }
         if let Some(code) = fence.as_mut() {
             if line.trim().starts_with("```") {
                 let body = code.join("\n");
@@ -223,14 +265,14 @@ pub fn split(text: &str) -> Vec<Block> {
             if table_separator(line) {
                 if header_candidate && blocks.last().is_some_and(|b| b.kind == Kind::Row) {
                     blocks.pop();
+                    header = last_cells.take();
                 }
             } else {
                 let cells: Vec<&str> = line.trim().trim_matches('|').split('|').map(str::trim).collect();
-                let label = plain(cells[0]);
-                let value = cells[1..].iter().map(|c| plain(c)).find(|c| !c.is_empty());
-                let pair = value.filter(|_| !label.is_empty()).map(|v| (label, v));
+                let pair = table_pair(&cells, header.as_deref());
                 let before = blocks.len();
                 add_with(&mut blocks, Kind::Row, &cells.join(" | "), pair);
+                last_cells = Some(cells.iter().map(|c| plain(c)).collect());
                 after_row = blocks.len() > before;
             }
         } else if let Some(quote) = line.trim_start().strip_prefix('>') {
@@ -331,6 +373,36 @@ fn lead(b: &Block, max: usize) -> bool {
     b.kind != Kind::Code && b.pair.is_none() && b.i <= MAX_BLOCKS && plain(&b.text).chars().count() <= max
 }
 
+/// The first sentence of `text`: up to the first `.`, `!` or `?` that is followed by whitespace or the end (so
+/// "22.7 GB" and "e.g." don't end it).
+fn first_sentence(text: &str) -> &str {
+    const ABBREVIATIONS: [&str; 7] = ["e.g.", "i.e.", "vs.", "etc.", "approx.", "no.", "st."];
+    for (at, c) in text.char_indices() {
+        if !matches!(c, '.' | '!' | '?') || !text[at + 1..].chars().next().is_none_or(char::is_whitespace) {
+            continue;
+        }
+        let word = text[..=at].rsplit(char::is_whitespace).next().unwrap_or("").to_lowercase();
+        if !ABBREVIATIONS.contains(&word.as_str()) {
+            return &text[..=at];
+        }
+    }
+    text
+}
+
+/// What block `b` offers as the reply's title: its text when short enough, else (for one of the first paragraphs) its
+/// first sentence when that is. Always the reply's own words.
+fn title_of(b: &Block) -> Option<String> {
+    if lead(b, TITLE_CHARS) {
+        return Some(plain(&b.text));
+    }
+    if b.kind != Kind::Para || b.pair.is_some() || b.i > OPENING_BLOCKS {
+        return None;
+    }
+    let text = plain(&b.text);
+    let first = first_sentence(&text);
+    (first.chars().count() <= TITLE_CHARS).then(|| first.to_owned())
+}
+
 /// A block that can be a card row: it splits into a label and a value, both short enough to be a card line.
 fn row(b: &Block) -> Option<&(String, String)> {
     b.pair
@@ -359,7 +431,7 @@ pub fn ask_for(blocks: &[Block]) -> (Value, Map<String, Value>) {
         }}),
     );
     let mut titles: Map<String, Value> =
-        shown.iter().filter(|b| lead(b, TITLE_CHARS)).map(|b| (b.i.to_string(), json!(plain(&b.text)))).collect();
+        shown.iter().filter_map(|b| Some((b.i.to_string(), json!(title_of(b)?)))).collect();
     if !titles.is_empty() {
         // A reply whose only lead is a long sentence is better left plain than titled by it.
         titles.insert(NONE.into(), json!("None of the blocks works as a title for the reply."));
@@ -418,9 +490,9 @@ pub fn card_from(blocks: &[Block], answers: &Value) -> Option<Value> {
         return None;
     }
     let by_number = |n: usize| blocks.iter().find(|b| b.i == n && b.i <= MAX_BLOCKS);
-    let title_block = by_number(picked(&answers["title"], TITLE_MIN)?).filter(|b| lead(b, TITLE_CHARS))?;
+    let title_block = by_number(picked(&answers["title"], TITLE_MIN)?)?;
+    let title = title_of(title_block)?;
     // A verdict that Jev isn't sure of, or that repeats the title, is left out; the card still stands.
-    let title = plain(&title_block.text);
     let headline_block = picked(&answers["headline"], HEADLINE_MIN)
         .and_then(by_number)
         .filter(|b| b.i != title_block.i && lead(b, HEADLINE_CHARS) && plain(&b.text) != title);

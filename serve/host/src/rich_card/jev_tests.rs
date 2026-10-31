@@ -192,13 +192,21 @@ fn only_a_clear_result_with_a_title_and_rows_becomes_a_card() {
         assert!(card.is_some_and(|c| c["snapshot"].get("sub").is_none()));
     }
     // Exclusion vetoes; a row that isn't needed enough is not shown.
-    assert!(with(&["skip_3", "noul"], json!(0.7)).is_none(), "one row left is not a card");
-    assert!(with(&["need_2", "noul"], json!(0.59)).is_none());
+    assert!(
+        with(&["skip_3", "noul"], json!(0.7)).is_some_and(|c| c["snapshot"]["rows"].as_array().unwrap().len() == 1)
+    );
+    assert!(with(&["need_2", "noul"], json!(0.59)).is_some_and(|c| c["snapshot"]["rows"][0]["label"] == "Memory"));
     assert!(with(&["need_4", "noul"], json!(0.6)).is_some_and(|c| c["snapshot"]["rows"][2]["label"] == "Last backup"));
     // Without its exclusion answer a row is not shown.
     let mut missing = answers();
     missing.as_object_mut().unwrap().remove("skip_3");
-    assert!(card_from(&b, &missing).is_none());
+    assert!(card_from(&b, &missing).is_some_and(|c| c["snapshot"]["rows"][0]["label"] == "Free space"));
+    // No row at all is no card.
+    let mut none = answers();
+    for n in 2..=5 {
+        none[format!("need_{n}")] = json!({"noul": 0.2});
+    }
+    assert!(card_from(&b, &none).is_none());
     // A title that names no block, or a block that can't be one.
     assert!(with(&["title", "choice"], json!("99")).is_none());
     assert!(with(&["title", "choice"], json!("not a number")).is_none());
@@ -260,6 +268,68 @@ fn the_rows_are_the_top_five_by_need_in_reply_order() {
     let labels: Vec<&str> =
         card["snapshot"]["rows"].as_array().unwrap().iter().map(|r| r["label"].as_str().unwrap()).collect();
     assert_eq!(labels, ["Metric 4", "Metric 5", "Metric 6", "Metric 7", "Metric 8"]);
+}
+
+/// Lab's wrong rows (reply d8e31bd0d9): a table whose header names the unit, and a table whose first column is the figure.
+const DISK_TABLES: &str = "I mapped about 155 of the 203 GB in the data volume.\n\n**Whole internal disk (245 GB)**\n\n| Part | GB |\n|---|---|\n| Data volume (everything below) | 202.7 |\n| Free | about 5.3 |\n\n**Inside the data volume**\n\n| GB | What | Kind |\n|---|---|---|\n| **31.1** | `/tmp/caches`, your temporary files | probably cache |\n| 22.6 | `~/Workspace` | your code |\n";
+
+#[test]
+fn a_figure_in_a_table_keeps_its_unit_and_the_words_label_it() {
+    let pairs: Vec<_> = split(DISK_TABLES).into_iter().filter_map(|b| b.pair).collect();
+    let p = |l: &str, v: &str| (l.to_owned(), v.to_owned());
+    assert_eq!(
+        pairs,
+        [
+            p("Data volume (everything below)", "202.7 GB"),
+            p("Free", "about 5.3 GB"),
+            p("/tmp/caches, your temporary files", "31.1 GB"),
+            p("~/Workspace", "22.6 GB"),
+        ]
+    );
+    // A header that isn't a unit adds nothing, and a value that has its unit already keeps it as is.
+    let rows: Vec<_> = split("| Item | Size |\n|---|---|\n| Cache | 5 GB |\n| Logs | 2 |\n")
+        .into_iter()
+        .filter_map(|b| b.pair)
+        .collect();
+    assert_eq!(rows, [("Cache".to_owned(), "5 GB".to_owned()), ("Logs".to_owned(), "2".to_owned())]);
+    let rows: Vec<_> = split("| Item | Size (GB) |\n|---|---|\n| Cache | 5 GB |\n| Logs | 2 |\n")
+        .into_iter()
+        .filter_map(|b| b.pair)
+        .collect();
+    assert_eq!(rows, [("Cache".to_owned(), "5 GB".to_owned()), ("Logs".to_owned(), "2 GB".to_owned())]);
+    // The unit doesn't leak onto a later table without a header.
+    let rows: Vec<_> = split("| Part | GB |\n|---|---|\n| A | 1 |\n\ntext\n\n| B | 2 |\n")
+        .into_iter()
+        .filter_map(|b| b.pair)
+        .collect();
+    assert_eq!(rows[1], ("B".to_owned(), "2".to_owned()));
+}
+
+#[test]
+fn a_long_opening_paragraph_offers_its_first_sentence_as_the_title() {
+    let long = "Free space on the data volume fell from 6.7 to 5.3 GB while I scanned, so something is still writing to the disk, and I have not deleted or changed anything yet because the biggest folders need your say first. Details follow.";
+    let text = format!("{long}\n\n- Free: 5.3 GB\n- Swap: 11.8 GB\n");
+    let blocks = split(&text);
+    assert!(plain(&blocks[0].text).chars().count() > TITLE_CHARS);
+    let (_, q) = ask_for(&blocks);
+    assert!(q.get("title").is_none(), "a long first sentence is no title");
+    // With a sentence short enough, the sentence is the candidate, cut at the sentence end and not at "6.7".
+    let text = "Free space fell from 6.7 to 5.3 GB while I scanned. The biggest folders need your say before I delete anything, so I stopped here and did not change a single file on the disk today.\n\n- Free: 5.3 GB\n- Swap: 11.8 GB\n";
+    let blocks = split(text);
+    assert!(plain(&blocks[0].text).chars().count() > TITLE_CHARS);
+    let (_, q) = ask_for(&blocks);
+    assert_eq!(q["title"]["criteria"]["1"], "Free space fell from 6.7 to 5.3 GB while I scanned.");
+    let a = json!({
+        "kind": {"choice": "info", "probabilities": {"info": 0.95}},
+        "title": {"choice": "1", "probabilities": {"1": 0.9}},
+        "need_2": {"noul": 0.9}, "skip_2": {"noul": 0.05},
+    });
+    let card = card_from(&blocks, &a).unwrap();
+    assert_eq!(card["snapshot"]["title"], "Free space fell from 6.7 to 5.3 GB while I scanned.");
+    // A short paragraph stays whole; a later long paragraph offers nothing.
+    assert_eq!(first_sentence("Use e.g. a cache. Then stop."), "Use e.g. a cache.");
+    assert_eq!(first_sentence("No full stop here"), "No full stop here");
+    assert_eq!(first_sentence("Really? Yes."), "Really?");
 }
 
 #[test]
