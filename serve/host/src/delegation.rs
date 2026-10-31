@@ -27,6 +27,15 @@ async fn kernel() -> Result<std::path::PathBuf> {
     tokio::task::spawn_blocking(hq::bin).await?.ok_or_else(|| anyhow!("kith isn't installed on this computer"))
 }
 
+/// A kernel command that changes the cap or marks a card raised. The kernel refuses those from inside an agent's run
+/// (`KITH_AGENT`, `KITH_ASK_ID`, `CLAUDE_CODE_SESSION_ID`); a host started from an agent or a Claude Code terminal has
+/// them in its environment, and they are not the host's. Empty reads as unset.
+async fn as_owner(bin: &std::path::Path, args: &[&str]) -> Result<String> {
+    let blank: Vec<(String, String)> =
+        ["KITH_ASK_ID", "KITH_AGENT", "CLAUDE_CODE_SESSION_ID"].map(|k| (k.to_owned(), String::new())).into();
+    hq::run_env(bin, args, None, READ, None, &blank).await
+}
+
 /// The delegation records on this Mac, newest first.
 pub async fn list() -> Result<Vec<Delegation>> {
     let out = hq::run(&kernel().await?, &command::delegations(), None, READ).await?;
@@ -122,7 +131,7 @@ pub async fn sweep(hub: &Arc<Hub>) {
     for d in needing_a_card(&all) {
         // Told first: a crash after the card must not raise it again; a card that fails to save is logged.
         let Ok(bin) = kernel().await else { return };
-        if hq::run(&bin, &["ask", "--cap-told", &d.chain], None, READ).await.is_err() {
+        if as_owner(&bin, &["ask", "--cap-told", &d.chain]).await.is_err() {
             continue;
         }
         raise(hub, &all, d);
@@ -152,9 +161,9 @@ pub async fn respond(hub: &Hub, entry: &Entry, option: Option<&str>, by: &str) -
             let to = to.ok_or_else(|| anyhow!("the card has no amount to raise to"))?;
             let bin = kernel().await?;
             // Never lower it: the cap is the Mac's, and another chain's card may have raised it since. "none" stays none.
-            let now = hq::run(&bin, &["ask", "--cap"], None, READ).await?;
+            let now = as_owner(&bin, &["ask", "--cap"]).await?;
             if let Ok(current) = now.trim().parse::<f64>() {
-                hq::run(&bin, &["ask", "--cap", &current.max(to).to_string()], None, READ).await?;
+                as_owner(&bin, &["ask", "--cap", &current.max(to).to_string()]).await?;
             }
         }
         "leave" => {}
@@ -247,6 +256,33 @@ mod tests {
         let mut terminal = root;
         terminal.caller.agent = None;
         assert_eq!(label(&[terminal.clone()], &terminal), "echo, asked by a terminal");
+    }
+
+    // A host started inside an agent's run still changes the cap and marks cards, through the real kernel.
+    #[tokio::test]
+    async fn a_host_started_from_an_agent_still_sets_the_cap_and_marks_cards() {
+        use crate::channels::hq::TEST_ENV;
+        let _one = crate::remote::account::ONE_AT_A_TIME.lock().await;
+        let dir = std::env::temp_dir().join(format!("kith-delegation-k-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("home")).unwrap();
+        std::fs::create_dir_all(dir.join("state")).unwrap();
+        *TEST_ENV.lock().unwrap() = vec![
+            ("KITH_HOME", dir.join("home")),
+            ("KITH_STATE", dir.join("state")),
+            ("HOME", dir.clone()),
+            ("KITH_AGENT", "architect".into()),
+            ("KITH_ASK_ID", "ask-1".into()),
+            ("CLAUDE_CODE_SESSION_ID", "sess-1".into()),
+        ];
+        let kith = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith");
+        let set = as_owner(&kith, &["ask", "--cap", "7"]).await;
+        let told = as_owner(&kith, &["ask", "--cap-told", "ask-1"]).await;
+        let plain = hq::run(&kith, &["ask", "--cap", "9"], None, READ).await;
+        let shown = as_owner(&kith, &["ask", "--cap"]).await;
+        TEST_ENV.lock().unwrap().clear();
+        assert!(set.is_ok() && told.is_ok(), "{set:?} {told:?}");
+        assert!(plain.is_err(), "the kernel still refuses an agent's own call");
+        assert_eq!(shown.unwrap().trim(), "7");
     }
 
     // The raise-and-answer path on a real hub and the real kernel's `kith ask`.

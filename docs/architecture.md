@@ -300,7 +300,11 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   deep on one Mac and cross to another Mac at most twice, and may cost US$5 (`delegation.chain_cost_cap_usd` in
   `~/.kith/settings.json`, `kith ask --cap`): an ask past a cap is refused (exit 4, "ask the user before starting another
   chain"), asks already running finish, and the host (`delegation.rs`) puts one Needs-you card in front of the owner,
-  read from `kith ask delegations --json` through the kernel contract. Without a host the refusal alone says so. Not yet
+  read from `kith ask delegations --json` through the kernel contract. Without a host the refusal alone says so. The caps ask cooperative agents; they are not a security boundary
+  (an agent can unset the variables the kernel checks, or edit the settings file). `kith ask --cap N` and
+  `kith_settings.py set delegation.*` are refused from inside an agent's run (`KITH_AGENT`, `KITH_ASK_ID` or
+  `CLAUDE_CODE_SESSION_ID` set), so they are refused for the owner typing them in a Claude Code terminal too: raise the
+  cap with the card's Raise, or from a plain terminal. A parked cross-Mac ask stays open on the caller's Mac. Not yet
   in the architect's model (ChainDesign.tla): reply kinds, built from Kai's standing default.
 - **8. Lifecycle owns every stop.** Built as F12 (designs/2026-10-24-lifecycle.md; `kernel/lib/kith_lifecycle.py`,
   `kernel/bin/kith-lifecycle`, `kernel/tests/kith-lifecycle-check`). The writer claim (`live/terminal/<sid>.claim`) is the

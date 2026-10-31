@@ -422,6 +422,8 @@ if __name__ == '__main__':
             sys.exit(f'kith: {e}')
         sys.exit(0)
     if len(sys.argv) == 4 and sys.argv[1:3] == ['set', 'delegation.chain_cost_cap_usd']:
+        if any(os.environ.get(k) for k in ('KITH_ASK_ID', 'KITH_AGENT', 'CLAUDE_CODE_SESSION_ID')):
+            sys.exit('kith: the delegation cap is the owner\'s to change, not an agent\'s run')
         try:
             set_chain_cost_cap(sys.argv[3])
         except ValueError as e:
