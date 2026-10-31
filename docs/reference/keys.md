@@ -36,4 +36,6 @@ Profiles are `<service>/<account>` (`^[a-z0-9][a-z0-9._-]{0,39}$`), granted per 
   no resume. Resource `secret:<profile>><grant>`: a repeat joins the same card, and it never joins an agent's `secret:<service>` card.
   Refusals (400, fixed text): bad service/account/agent name, undeclared service or one with no secrets.
 - `listKeys {}` -> `{keys:[...]}`; `revokeKey {agent, service, profile}` -> `{ok:true}`.
-- Run socket `requestSecret {token, service, purpose}` -> `{ok, carded, message}` (owner token only).
+- Run socket `requestSecret {token, service, purpose}` -> `{ok, carded, message}` (owner token only). A service the agent
+  doesn't declare (no `kernel/services/<service>.json` or role `services/<service>.json`) gets no card; its `message` names
+  the file builder adds and says to ask again after.
