@@ -497,7 +497,7 @@ async fn stop_wins_over_a_yes_already_given_also_across_a_restart() {
     attempt(&r.hub, &card.id).await;
     assert_eq!(queue_says(&r, &card), "queued");
     // The Stop button: `Hub::stop_place` calls this first.
-    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    resume::stopped_lane(&r.hub, &chat, &Lane::main(&chat));
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn, "closed, not merely released");
     queue_says_eventually(&r, &card, "withdrawn").await;
     // Neither a restart nor the host's look brings the stopped turn back.
@@ -508,6 +508,35 @@ async fn stop_wins_over_a_yes_already_given_also_across_a_restart() {
     assert_eq!(attempt(&r.hub, &card.id).await, Step::Done);
 }
 
+/// Whether `end` was asked for `session`, waiting for the task Stop spawned to get there.
+async fn ended(session: &str) -> bool {
+    for _ in 0..100 {
+        let asked = crate::delegation::ENDED.lock().unwrap().iter().any(|(s, _)| s.iter().any(|x| x == session));
+        if asked {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    false
+}
+
+#[tokio::test]
+async fn a_stop_in_a_channel_thread_ends_the_delegations_of_its_sessions() {
+    let r = Rig::new().await;
+    resume::stopped_thread_of(&r.hub, "t:1#house", vec!["thread-sess-1".into()]);
+    assert!(ended("thread-sess-1").await, "the thread's asks end with its Stop (R8)");
+}
+
+#[tokio::test]
+async fn a_stop_of_one_bot_ends_only_that_bots_delegations_in_a_shared_chat() {
+    let r = Rig::new().await;
+    r.hub.store.kv_set("lane.session.botx@room1", "sess-botx").unwrap();
+    r.hub.store.kv_set("lane.session.boty@room1", "sess-boty").unwrap();
+    resume::stopped_lane(&r.hub, "botx", &Lane::main("room1"));
+    assert!(ended("sess-botx").await);
+    assert!(!crate::delegation::ENDED.lock().unwrap().iter().any(|(s, _)| s.iter().any(|x| x == "sess-boty")));
+}
+
 #[tokio::test]
 async fn after_a_stop_another_yes_makes_only_its_own_turn() {
     let r = Rig::new().await;
@@ -516,7 +545,7 @@ async fn after_a_stop_another_yes_makes_only_its_own_turn() {
     off(&r.hub);
     let old = bot_card_approved(&r, &chat, "");
     attempt(&r.hub, &old.id).await;
-    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    resume::stopped_lane(&r.hub, &chat, &Lane::main(&chat));
     queue_says_eventually(&r, &old, "withdrawn").await;
     let new = bot_card_approved(&r, &chat, "");
     assert_eq!(attempt(&r.hub, &new.id).await, Step::Done);
@@ -539,7 +568,7 @@ async fn a_stop_that_finds_a_turn_taken_but_not_started_drops_it() {
     let entry = bot_seen(&card)[0].entry.clone().unwrap();
     assert_eq!(queue_says(&r, &card), "running");
     // The actor's queue held the wake when Stop came: it is dropped, and the card ends.
-    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    resume::stopped_lane(&r.hub, &chat, &Lane::main(&chat));
     resume::not_started(&r.hub, &[entry], false);
     queue_says_eventually(&r, &card, "withdrawn").await;
     assert_eq!(r.hub.store.card(&card.id).unwrap().state, CardState::Withdrawn);
@@ -917,7 +946,7 @@ async fn a_stopped_saved_key_card_is_not_woken_later_even_if_its_request_was_on_
     let card = bot_card_approved(&r, &chat, "");
     // Stop closes it while an attempt had already claimed it and is about to enqueue (the stale copy below).
     assert!(r.hub.store.card_resume_claim(&card.id, now_ms()).unwrap());
-    resume::stopped_lane(&r.hub, &Lane::main(&chat));
+    resume::stopped_lane(&r.hub, &chat, &Lane::main(&chat));
     let door = door_of(&card).unwrap();
     resume::enqueue(&r.hub, &card, &door).await.unwrap();
     queue_says_eventually(&r, &card, "withdrawn").await;

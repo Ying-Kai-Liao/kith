@@ -206,7 +206,7 @@ impl Hub {
     /// Stop in one place: the actor there, and an actor whose turn talks there (a routine run in its thread).
     pub fn stop_place(&self, bot_id: &str, lane: &Lane) -> Result<()> {
         // Stop wins over a yes already given: the place's owed card wakes are withdrawn first (R8).
-        crate::cards::resume::stopped_lane(self, lane);
+        crate::cards::resume::stopped_lane(self, bot_id, lane);
         let running: Vec<String> = self
             .runtime
             .locked()

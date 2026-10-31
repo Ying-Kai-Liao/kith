@@ -62,6 +62,23 @@ impl State {
         }
     }
 
+    /// The Claude sessions of the thread a work key (`<thread>#<agent>`) names: the agent's own and those of its backups.
+    /// The `kith ask` jobs these started are what a Stop in the thread ends.
+    pub fn sessions_of(&self, wk: &str) -> Vec<String> {
+        let Some((key, agent)) = wk.rsplit_once('#') else { return Vec::new() };
+        let Some(th) = self.threads.get(key) else { return Vec::new() };
+        let own = th.get("sessions").and_then(|s| s.get(agent)).and_then(Value::as_str).map(str::to_owned);
+        let backups = th.get("backup_sessions").and_then(|b| b.get(agent)).and_then(Value::as_object);
+        let mut out: Vec<String> = own
+            .into_iter()
+            .chain(backups.into_iter().flatten().filter_map(|(_, v)| v.as_str().map(str::to_owned)))
+            .filter(|s| !s.is_empty())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
     /// Prunes to the newest [`KEEP`] threads and replies (those with queued messages stay), then writes the file
     /// by writing a temporary one and renaming it.
     pub fn save(&mut self, path: &Path) -> std::io::Result<()> {
@@ -143,6 +160,18 @@ mod tests {
             "inbox": {"telegram/hq:1:5#house": [["queued"]], "telegram/home:2:6#x": [["no"]]},
             "pending": {"p1": {"room": "telegram/hq:1", "task": "t"}, "p2": {"room": "telegram/home:2"}}
         })
+    }
+
+    #[test]
+    fn a_work_key_names_the_sessions_of_its_agent_and_backups() {
+        let mut st = State::default();
+        st.threads.insert(
+            "t:1".into(),
+            json!({"sessions": {"house": "s1", "other": "s9"}, "backup_sessions": {"house": {"b1": "s2"}}}),
+        );
+        assert_eq!(st.sessions_of("t:1#house"), vec!["s1", "s2"]);
+        assert_eq!(st.sessions_of("t:1#other"), vec!["s9"]);
+        assert!(st.sessions_of("t:2#house").is_empty() && st.sessions_of("t:1").is_empty());
     }
 
     #[test]

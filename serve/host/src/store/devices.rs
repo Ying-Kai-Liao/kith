@@ -161,6 +161,13 @@ impl Store {
         Ok(())
     }
 
+    /// Points an account device at the grant the cloud lists for it now (an undo grants a revoked device again, under a new id).
+    pub fn set_grant_id(&self, key: &str, grant_id: &str) -> Result<()> {
+        let c = self.db.locked();
+        c.execute("UPDATE devices SET grant_id = ?2 WHERE key = ?1", params![key, grant_id])?;
+        Ok(())
+    }
+
     pub fn touch_device(&self, key: &str) -> Result<()> {
         let c = self.db.locked();
         c.execute("UPDATE devices SET last_seen_at = ?2 WHERE key = ?1", params![key, now_ms()])?;

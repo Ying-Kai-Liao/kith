@@ -26,8 +26,28 @@ pub async fn sync(hub: &Hub, listed: Option<&[Listed]>, owner_uid: Option<&str>)
     if let Err(e) = apply(hub, bin.as_deref(), listed, owner_uid).await {
         tracing::warn!(error = format!("{e:#}"), "couldn't apply the cloud's memberships");
     }
+    if let Some(bin) = bin.as_deref() {
+        forget_removed(hub, bin).await;
+    }
     if let Err(e) = hub.store.audit_prune(now_ms()) {
         tracing::warn!(error = format!("{e:#}"), "couldn't prune the audit log");
+    }
+}
+
+/// A person removed while revoked (kith-auth `--rm`, or the owner dropping them from the list) no longer exists to be
+/// undone: what the revoke kept (device keys, invite token hashes) goes with them, whichever way they were removed.
+async fn forget_removed(hub: &Hub, bin: &Path) {
+    let Ok(kept) = hub.store.suspended_people() else { return };
+    if kept.is_empty() {
+        return;
+    }
+    // Only when kith-auth answers: a failed read must not look like everyone gone.
+    let Ok(people) = auth_people(bin).await else { return };
+    for gone in kept.iter().filter(|k| !people.iter().any(|p| &p.id == *k)) {
+        tracing::info!(person = gone, "a removed person's kept access goes");
+        if let Err(e) = hub.store.forget_suspended(gone) {
+            tracing::warn!(error = format!("{e:#}"), person = gone, "couldn't forget what a removed person kept");
+        }
     }
 }
 
@@ -108,6 +128,11 @@ pub async fn end_access(hub: &Hub, bin: Option<&Path>, person: &str) -> Result<(
         {
             return Ok(());
         }
+        // A removal (not a revoke) is final: what a revoke would have kept goes, and so does everything of theirs that is
+        // still running or owed (R5).
+        hub.store.forget_suspended(person)?;
+        crate::api::people::sweep_asks(hub, &[person.to_owned()]).await;
+        crate::api::botguests::sweep_claims(hub, vec![person.to_owned()], false).await;
         // Their bot guests lose their owner with the last membership.
         crate::api::botguests::revoke_owned_by(hub, person, "person").await;
         if let Some(bin) = bin
@@ -136,6 +161,9 @@ pub struct AuthPerson {
     /// Their Kith account, the one name a person has on every Mac of the owner; empty for one known only here.
     #[serde(default)]
     pub kith: String,
+    /// Their chat handles (`telegram` -> id) other than a Kith account.
+    #[serde(default)]
+    pub handles: std::collections::BTreeMap<String, String>,
     /// When they themselves were revoked (not merely the owner of a revoked bot's).
     #[serde(default)]
     pub revoked_at: Option<i64>,
@@ -158,9 +186,9 @@ pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
 /// and bots for the undo). Returns the people newly revoked here, whose running turns the caller stops. None (a cloud
 /// that predates revoking) changes nothing. An error fails the pull: this host stays out of sync rather than serve on
 /// access it could not apply (I2).
-pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Result<Vec<String>> {
-    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(vec![]) };
-    let mut cut = vec![];
+pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Result<Revoked> {
+    let (Some(bin), Some(listed)) = (bin, listed) else { return Ok(Revoked::default()) };
+    let mut out = Revoked::default();
     for p in auth_people(bin).await?.into_iter().filter(|p| !p.kith.is_empty() && !p.owner && p.bot_of.is_empty()) {
         let revoked = listed.contains(&p.kith);
         if revoked == p.revoked_at.is_some() {
@@ -171,11 +199,18 @@ pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Res
             .await
             .with_context(|| format!("kith-auth person {} {flag}", p.id))?;
         tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
-        if revoked {
-            cut.push(p.id);
-        }
+        if revoked { out.cut.push(p.id) } else { out.restored.push(p.id) }
     }
-    Ok(cut)
+    Ok(out)
+}
+
+/// The people [`apply_revoked`] changed here.
+#[derive(Default)]
+pub struct Revoked {
+    /// Newly revoked: the caller cuts them off.
+    pub cut: Vec<String>,
+    /// Undone on another Mac: the caller gives back what the revoke kept.
+    pub restored: Vec<String>,
 }
 
 /// Whether `person` is revoked here (their own state). False when kith-auth can't say: the caller then does what it
@@ -195,16 +230,8 @@ fn set_pending(store: &Store, ids: &[String]) {
     }
 }
 
-/// Tells the cloud a membership ended here; a failure is retried on later pulls (local access is already gone).
-pub async fn revoke_in_cloud(hub: &Hub, membership_id: &str) {
-    let mut ids = pending(&hub.store);
-    if !ids.iter().any(|i| i == membership_id) {
-        ids.push(membership_id.to_owned());
-        set_pending(&hub.store, &ids);
-    }
-    retry_revokes(hub).await;
-}
-
+/// Tells the cloud of memberships that ended here before a revoke kept them (earlier versions queued these); a failure
+/// is retried on later pulls.
 pub async fn retry_revokes(hub: &Hub) {
     let ids = pending(&hub.store);
     if ids.is_empty() {

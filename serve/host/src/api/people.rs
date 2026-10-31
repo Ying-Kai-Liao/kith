@@ -416,55 +416,80 @@ async fn revoke_person(hub: &Arc<Hub>, id: &str, revoke: bool) -> Result<Value> 
             )
         })?;
     }
-    {
-        let _w = AUTH_WRITES.lock().await;
-        account::run(&bin, &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"]).await?;
-    }
-    if revoke {
-        // What the host itself holds goes too, as before revoking was undoable: open invites, memberships (in the
-        // cloud too) and with them devices. Rows in kith-auth stay, so undo needs no record of them.
-        for invite in hub.store.invites()?.into_iter().filter(|i| i.person_id == id && i.open(now_ms())) {
-            revoke_invite(hub, &invite.invite_id).await?;
-        }
-        for m in hub.store.memberships()?.into_iter().filter(|m| m.person_id == id) {
-            hub.store.remove_membership(&m.membership_id)?;
-            crate::remote::members::revoke_in_cloud(hub, &m.membership_id).await;
-        }
-        crate::remote::members::end_access(hub, Some(&bin), id).await?;
-        cut_off(hub, id).await;
+    local_revoke(hub, &bin, id, revoke).await?;
+    if who.kith.is_empty() {
+        // Known only by a chat handle: the cloud knows nothing of them, so the owner's other computers hear it over Mac link.
+        crate::remote::handle_revokes::changed(hub, &who, revoke);
     }
     Ok(json!({"revoked": revoke, "everywhere": everywhere}))
+}
+
+/// This computer's half of a revoke or its undo, for the owner's own call, a change from the cloud and one from a paired
+/// computer: kith-auth's revoked state, then what the host holds. A revoke cuts the person off at once (R5) and keeps
+/// their devices, memberships and open invites for undo (R1, R2); an undo gives them back. Either repeats harmlessly.
+pub(crate) async fn local_revoke(hub: &Hub, bin: &Path, id: &str, revoke: bool) -> Result<()> {
+    {
+        let _w = AUTH_WRITES.lock().await;
+        account::run(bin, &["person", id, if revoke { "--revoke" } else { "--unrevoke" }, "--local"]).await?;
+    }
+    if revoke {
+        cut_off(hub, id).await;
+    } else {
+        restored(hub, id);
+    }
+    Ok(())
+}
+
+/// Undo: what the revoke kept is back as it was.
+pub(crate) fn restored(hub: &Hub, person: &str) {
+    match hub.store.restore_person(person) {
+        Ok(m) => tracing::info!(person, ?m, "an undone revoke gave back what it kept"),
+        Err(e) => tracing::warn!(
+            error = format!("{e:#}"),
+            person,
+            "couldn't give back a revoked person's devices and invites"
+        ),
+    }
+    hub.auth_changed();
 }
 
 /// After `person` was revoked here (by the owner or from the cloud): every turn of theirs and of their bots stops, and
 /// their devices go; their cards are withdrawn (R5).
 pub(crate) async fn cut_off(hub: &Hub, person: &str) {
-    for d in hub.store.devices_of(person).unwrap_or_default() {
-        if let Err(e) = hub.revoke_device(&d.key) {
-            tracing::warn!(error = format!("{e:#}"), person, "couldn't remove a revoked person's device");
-        }
+    // Their devices, memberships and open invites stop granting anything now and wait for an undo (R1, R2).
+    match hub.store.suspend_person(person) {
+        Ok(m) => tracing::info!(person, ?m, "a revoked person's devices, memberships and invites are kept for undo"),
+        Err(e) => tracing::warn!(error = format!("{e:#}"), person, "couldn't set aside a revoked person's devices"),
     }
+    hub.auth_changed();
     super::botguests::enforce(hub, person).await;
     stop_runs(hub, person, false).await;
-    // Their bots' runs a restarted host no longer knows, found by their claims.
-    let bots: Vec<String> = hub
-        .store
-        .bot_guests()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|g| g.state.live() && g.owner_person.as_deref() == Some(person))
-        .map(|g| g.person_id)
-        .collect();
-    if !bots.is_empty() {
-        super::botguests::sweep_claims(hub, bots, false).await;
-    }
-    crate::doors::sweep(&[person.to_owned()]).await;
+    // Their bots too, and the runs a restarted host no longer knows, found by their claims.
+    let mut ids = vec![person.to_owned()];
+    ids.extend(
+        hub.store
+            .bot_guests()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|g| g.state.live() && g.owner_person.as_deref() == Some(person))
+            .map(|g| g.person_id),
+    );
+    sweep_asks(hub, &ids).await;
+    super::botguests::sweep_claims(hub, ids, false).await;
     // Once nothing of theirs runs: the Claude Code temp folder their runs wrote in (<machine>/run/t/<id>).
     if let Some(bin) = account::bin().await
         && let Err(e) = account::run(&bin, &["person", person, "--clear-temp"]).await
     {
         tracing::warn!(error = format!("{e:#}"), person, "couldn't remove a revoked person's temp folder");
     }
+}
+
+/// Revoke and removal end what these people started and are owed (R5): their delegations (`kith ask` jobs, stopped, their
+/// records settled, no answer delivered later) and mailboxes, and the wakes and waiters of their sessions.
+pub(crate) async fn sweep_asks(hub: &Hub, persons: &[String]) {
+    crate::delegation::end(&[], persons).await;
+    let (state, persons) = (hub.terminal.env().state, persons.to_vec());
+    crate::wake::blocking(move || crate::wake::withdraw_person(&state, &persons)).await;
 }
 
 /// Stops the turns `person` has running: chats of their bots and runs of their linked chat accounts. With

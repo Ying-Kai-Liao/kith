@@ -42,6 +42,38 @@ pub async fn list() -> Result<Vec<Delegation>> {
     Ok(serde_json::from_str::<Delegations>(out.trim())?.delegations)
 }
 
+/// Stop, a revoke or a removal (R5, R8): the delegations those sessions or people started end in one step. Their --bg runs
+/// stop, their records settle `stopped`, no answer wakes the caller afterwards, and the wakes and waiters the callers are
+/// owed go. Nothing to end is fine. An error is logged: the access or the run is already stopped.
+pub async fn end(sessions: &[String], persons: &[String]) {
+    #[cfg(test)]
+    ENDED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((sessions.to_vec(), persons.to_vec()));
+    let Ok(bin) = kernel().await else { return };
+    end_with(&bin, sessions, persons).await;
+}
+
+/// What the tests asked to end: there is no kernel to ask.
+#[cfg(test)]
+pub static ENDED: std::sync::Mutex<Vec<(Vec<String>, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
+
+async fn end_with(bin: &std::path::Path, sessions: &[String], persons: &[String]) {
+    let (sessions, persons): (Vec<&String>, Vec<&String>) =
+        (sessions.iter().filter(|s| plain(s)).collect(), persons.iter().filter(|p| plain(p)).collect());
+    if sessions.is_empty() && persons.is_empty() {
+        return;
+    }
+    let mut args = vec!["ask", "--end"];
+    for s in &sessions {
+        args.extend(["--session", s.as_str()]);
+    }
+    for p in &persons {
+        args.extend(["--person", p.as_str()]);
+    }
+    if let Err(e) = as_owner(bin, &args).await {
+        tracing::warn!(error = format!("{e:#}"), "couldn't end the delegations of a stopped place");
+    }
+}
+
 #[allow(clippy::cast_precision_loss, reason = "micro-dollars far below 2^53")]
 fn usd(micro: i64) -> f64 {
     micro as f64 / 1e6
@@ -199,6 +231,8 @@ mod tests {
             answered_ms: None,
             capped_ms: capped.then_some(2),
             cap_card_ms: told.then_some(3),
+            brief: None,
+            session: None,
         }
     }
 
@@ -283,6 +317,61 @@ mod tests {
         assert!(set.is_ok() && told.is_ok(), "{set:?} {told:?}");
         assert!(plain.is_err(), "the kernel still refuses an agent's own call");
         assert_eq!(shown.unwrap().trim(), "7");
+    }
+
+    // Stop, a revoke and a removal end the delegations of a lane or a person through the real kernel (R5, R8).
+    #[tokio::test]
+    async fn ending_settles_the_lanes_asks_and_the_persons_and_no_later_answer_wakes_anyone() {
+        use crate::channels::hq::TEST_ENV;
+        let _one = crate::remote::account::ONE_AT_A_TIME.lock().await;
+        let dir = std::env::temp_dir().join(format!("kith-delegation-e-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(dir.join("home")).unwrap();
+        std::fs::create_dir_all(dir.join("state")).unwrap();
+        let env = [("KITH_HOME", dir.join("home")), ("KITH_STATE", dir.join("state")), ("HOME", dir.clone())];
+        *TEST_ENV.lock().unwrap() = env.to_vec();
+        let kith = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../kernel/bin/kith");
+        let boxdir = {
+            let mut cmd = std::process::Command::new("python3");
+            cmd.args([
+                "-c",
+                "import sys; sys.path.insert(0, sys.argv[1]); from kith_paths import paths; print(paths()['KITH_MACHINE'] / 'live' / 'ask')",
+                &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../kernel/lib").to_string_lossy(),
+            ]);
+            for (k, v) in &env {
+                cmd.env(k, v);
+            }
+            std::path::PathBuf::from(String::from_utf8(cmd.output().unwrap().stdout).unwrap().trim())
+        };
+        std::fs::create_dir_all(&boxdir).unwrap();
+        let reg = |id: &str, session: Option<&str>, person: Option<&str>| {
+            let reply = session.map_or(json!({}), |s| json!({"session": s}));
+            let body = json!({"asked": "echo", "agent": "architect", "person": person, "via": "terminal",
+                "reply_to": reply, "chain": id, "hop": 0, "cross_hops": 0, "crossed": false, "cost": 0.0,
+                "cost_base": 0.0, "state": "open", "at": 1.0});
+            std::fs::write(boxdir.join(format!("{id}.reg")), body.to_string()).unwrap();
+        };
+        let state_of = |id: &str| -> String {
+            let v: Value =
+                serde_json::from_str(&std::fs::read_to_string(boxdir.join(format!("{id}.reg"))).unwrap()).unwrap();
+            v["state"].as_str().unwrap().to_owned()
+        };
+        reg("ask-lane", Some("sess-lane"), None);
+        reg("ask-other", Some("sess-other"), None);
+        reg("ask-mia", Some("sess-mia"), Some("mia"));
+        reg("ask-old", None, None);
+        end_with(&kith, &["sess-lane".to_owned()], &[]).await;
+        assert_eq!(state_of("ask-lane"), "stopped");
+        assert_eq!(state_of("ask-other"), "open", "another lane's ask is untouched");
+        assert_eq!(state_of("ask-old"), "open", "an old record belongs to no lane");
+        // Stop beats an answer on its way: it is refused and wakes no one.
+        let late = as_owner(&kith, &["ask", "--answer", "ask-lane", "--as", "echo", "--", "too late"]).await.unwrap();
+        assert_eq!(late.trim(), "stopped");
+        end_with(&kith, &[], &["mia".to_owned()]).await;
+        assert_eq!(state_of("ask-mia"), "stopped", "a person's ask ends with their access");
+        assert_eq!(state_of("ask-other"), "open");
+        end_with(&kith, &["sess-lane".to_owned()], &["mia".to_owned()]).await;
+        assert_eq!(state_of("ask-lane"), "stopped", "ending twice is fine");
+        TEST_ENV.lock().unwrap().clear();
     }
 
     // The raise-and-answer path on a real hub and the real kernel's `kith ask`.

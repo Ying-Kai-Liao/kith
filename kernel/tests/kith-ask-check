@@ -342,4 +342,61 @@ expect "none turns the cap off" "$("$ASK" --cap none)" none
 "$ASK" --cap default >/dev/null
 expect "default brings it back" "$("$ASK" --cap)" 5
 
+# --- Stop, revoke, removal: kith ask --end (R5, R8) ---
+WAKE=$T/k/bin/kith-wake
+rstate() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["state"])' "$BOX/$1.reg"; }
+export STUB_SLEEP=30
+eb=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-end KITH_AGENT=architect "$ASK" --bg echo "long job" | idof)
+ek=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-keep KITH_AGENT=architect "$ASK" --bg echo "other job" | idof)
+export STUB_SLEEP=0
+sleep 2
+expect "a running --bg job is open" "$(rstate "$eb")" open
+python3 "$WAKE" enqueue sess-end --id end-w1 --agent architect -- "owed" >/dev/null
+python3 "$WAKE" wait --on at:+1h --session sess-end --agent architect >/dev/null
+KITH_AGENT=echo "$ASK" --end --session sess-end >/dev/null 2>&1; code=$?
+expect "an agent's run can't end delegations" "$code" 1
+expect "Stop's end: the lane's ask is ended" "$("$ASK" --end --session sess-end)" "ended $eb"
+expect "its record is settled stopped" "$(rstate "$eb")" stopped
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -e "$BGDIR/$eb.exit" ] && break; sleep 1; done
+expect "its run is stopped (the job has an exit code)" "$([ -e "$BGDIR/$eb.exit" ] && echo yes)" yes
+expect "the wake the lane was owed is withdrawn" "$(python3 "$WAKE" status end-w1)" withdrawn
+expect "its waiters are dropped" "$(python3 "$WAKE" ls | grep -c 'sess-end.*waiting')" 0
+expect "a late answer to it is dropped (Stop wins)" "$("$ASK" --answer "$eb" --as echo -- "too late")" stopped
+"$ASK" --sweep >/dev/null
+expect "and wakes no one" "$(queued | tr ' ' '\n' | grep -c '^sess-end:')" 0
+expect "another lane's job is untouched" "$(rstate "$ek")" open
+expect "ending twice is fine" "$("$ASK" --end --session sess-end)" "ended "
+# a card the ended ask parked on has nothing to resume
+pz=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-end2 KITH_AGENT=architect "$ASK" echo park 2>/dev/null | waitid)
+"$ASK" --end --session sess-end2 >/dev/null
+rm -f "$KITH_STATE/stub-args"
+"$ASK" --reply "$pz" echo --resume s1 -- "Kai approved" >/dev/null 2>&1; code=$?
+expect "a yes already given does not resume an ended ask (R8)" "$code: $([ -e "$KITH_STATE/stub-args" ] && echo resumed)" "0: "
+expect "the parked mark is gone" "$([ -e "$BOX/$pz.parked" ] && echo parked)" ""
+# removal and revoke end a person's asks, and the wakes their sessions are owed
+export STUB_SLEEP=30
+pj=$(cd "$T" && KITH_PERSON=mia CLAUDE_CODE_SESSION_ID=sess-mia "$ASK" --bg echo "mia job" | idof)
+export STUB_SLEEP=0
+sleep 2
+python3 "$WAKE" enqueue sess-mia --id mia-w1 --agent echo --person mia --door host -- "owed" >/dev/null
+expect "a person's ask is ended by the person" "$("$ASK" --end --person mia)" "ended $pj"
+expect "and the wakes their sessions are owed" "$(python3 "$WAKE" status mia-w1)" withdrawn
+# a record from before the delegation record belongs to no lane
+printf '{"asked":"echo","agent":"architect","person":null,"via":"terminal","at":%s}' "$(date +%s)" > "$BOX/ask-old-2.reg"
+"$ASK" --end --session sess-end --session sess-mia >/dev/null
+expect "an old registration with no session is no lane's" "$(rec ask-old-2 state)" open
+# Stop wins over an answer written in the same moment (R8): whichever comes second finds the ended record
+pw=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-race KITH_AGENT=architect "$ASK" echo park 2>/dev/null | waitid)
+"$ASK" --end --session sess-race >/dev/null
+expect "an answer after the end is refused" "$("$ASK" --answer "$pw" --as echo -- late)" stopped
+expect "nothing is owed to the lane" "$(queued | tr ' ' '\n' | grep -c '^sess-race:')" 0
+
+# The owner's peek: the record carries what was asked and the --bg run's session (host only; null before this)
+bk=$(cd "$T/w" && STUB_SID=sbrief "$ASK" --bg echo "peek at this one" | idof)
+ended "$bk"
+expect "the record keeps the ask's text" "$(rec "$bk" brief)" "peek at this one"
+expect "and the --bg run's session" "$(rec "$bk" session)" "sbrief"
+expect "a foreground ask keeps its text, with no session" "$(cd "$T" && "$ASK" echo "plain ask" >/dev/null 2>&1; rec "$(lastid)" brief session | tr '\n' ' ')" "plain ask None "
+expect "an old registration has neither" "$(rec ask-old-2 brief session | tr '\n' ' ')" "None None "
+
 [ "$fails" = 0 ] && echo "all kith-ask checks passed" || { echo "$fails check(s) failed"; exit 1; }
