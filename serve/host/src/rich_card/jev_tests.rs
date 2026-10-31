@@ -11,14 +11,48 @@ use std::sync::Mutex;
 
 const REPLY: &str = "Disk check on the Mac mini\n\n- Free space: 340 GB of 500 GB\n- Memory: 12 GB in use\n- Last backup: today 03:10\n- Full report: [Open report](https://example.com/report/1).\n\nNothing else needs attention right now, the machine looks healthy overall.";
 
-/// Jev's answers for `REPLY`'s blocks: a result, the first block its title, items 2 and 3 facts, item 5 a link.
+/// Jev's answers for `REPLY`'s blocks: a result, the first block its title, the closing remark its verdict, items 2
+/// and 3 needed rows (item 4 not needed, item 5 the report link), block 5 also a link.
 fn answers() -> Value {
     json!({
         "kind": {"choice": "info", "probabilities": {"info": 0.95, "plain": 0.03, "digest": 0.01, "draft": 0.01}},
         "title": {"choice": "1", "probabilities": {"1": 0.9}},
-        "fact_2": {"noul": 0.9}, "fact_3": {"noul": 0.8}, "fact_4": {"noul": 0.2},
+        "headline": {"choice": "6", "probabilities": {"6": 0.8, "none": 0.1}},
+        "need_2": {"noul": 0.9}, "need_3": {"noul": 0.8}, "need_4": {"noul": 0.2}, "need_5": {"noul": 0.4},
+        "skip_2": {"noul": 0.05}, "skip_3": {"noul": 0.05}, "skip_4": {"noul": 0.05}, "skip_5": {"noul": 0.1},
         "link_5": {"noul": 0.9},
     })
+}
+
+/// A real reply (the attachment of the v2 brief): a heading, a bold verdict line, a table with a header row, `Label:
+/// value` items, a log-style monitor list and suggestions.
+const DEVOPS: &str = include_str!("jev_fixture_devops.md");
+
+/// What Jev answers for `DEVOPS` (block numbers as `split` numbers them): the heading as the title, the bold line
+/// (2) as the verdict; the five table rows and the list items rated by need and exclusion.
+fn devops_answers() -> Value {
+    let mut a = json!({
+        "kind": {"choice": "info", "probabilities": {"info": 0.97}},
+        "title": {"choice": "1", "probabilities": {"1": 0.9, "2": 0.05}},
+        "headline": {"choice": "2", "probabilities": {"2": 0.88, "none": 0.05}},
+    });
+    // (block, need, skip)
+    for (n, need, skip) in [
+        (3, 0.95, 0.02), // Disk (internal)
+        (4, 0.2, 0.05),  // Disk (external): fine
+        (5, 0.4, 0.05),  // Memory: no pressure
+        (6, 0.9, 0.03),  // Swap
+        (7, 0.6, 0.05),  // CPU
+        (9, 0.35, 0.05),
+        (10, 0.2, 0.05),
+        (11, 0.2, 0.05),
+        (12, 0.1, 0.05),
+        (18, 0.7, 0.1), // Two problems are open
+    ] {
+        a[format!("need_{n}")] = json!({"noul": need});
+        a[format!("skip_{n}")] = json!({"noul": skip});
+    }
+    a
 }
 
 fn blocks() -> Vec<Block> {
@@ -61,6 +95,7 @@ fn a_reply_splits_into_numbered_blocks() {
         "# Plan\n\nFirst we look.\nThen we go.\n\n1. one\n   more of one\n2) two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nStatus: green\n\n```\ncode here\n```\n> quoted\n**Done**",
     );
     let shape: Vec<(usize, Kind, &str)> = b.iter().map(|b| (b.i, b.kind, b.text.as_str())).collect();
+    // The table's header row is never a block.
     assert_eq!(
         shape,
         [
@@ -68,14 +103,46 @@ fn a_reply_splits_into_numbered_blocks() {
             (2, Kind::Para, "First we look. Then we go."),
             (3, Kind::Item, "one more of one"),
             (4, Kind::Item, "two"),
-            (5, Kind::Row, "a | b"),
-            (6, Kind::Row, "1 | 2"),
-            (7, Kind::Kv, "Status: green"),
-            (8, Kind::Code, "code here"),
-            (9, Kind::Quote, "quoted"),
-            (10, Kind::Heading, "Done"),
+            (5, Kind::Row, "1 | 2"),
+            (6, Kind::Kv, "Status: green"),
+            (7, Kind::Code, "code here"),
+            (8, Kind::Quote, "quoted"),
+            (9, Kind::Heading, "Done"),
         ]
     );
+    assert_eq!(b[4].pair, Some(("1".into(), "2".into())));
+    assert_eq!(b[5].pair, Some(("Status".into(), "green".into())));
+    assert_eq!(b[2].pair, None);
+}
+
+#[test]
+fn the_devops_reply_splits_into_a_verdict_and_rows_with_labels_and_values() {
+    let b = split(DEVOPS);
+    let at = |i: usize| &b[i - 1];
+    assert_eq!((at(1).kind, at(1).text.as_str()), (Kind::Heading, "Machine health, 2026-11-01 00:25"));
+    // The bold lead line stays a candidate for the headline, its marks gone from the block text.
+    assert_eq!(
+        (at(2).kind, at(2).text.as_str()),
+        (Kind::Heading, "Overall: OK, but the disk is trending down and swap is in use.")
+    );
+    assert_eq!(at(2).pair, None, "a verdict is not a row");
+    // The table's header (`| | Now | Note |`) is gone; each body row is a block with its first cell and the next
+    // non-empty one.
+    assert!(b.iter().all(|b| !b.text.contains("Now |")));
+    for (i, label, value) in [
+        (3, "Disk (internal)", "22.7 GB free (10%) of 228 GB"),
+        (6, "Swap", "2.9 of 4.0 GB used"),
+        (7, "CPU", "Load 9.9, 9.0, 5.8 on 10 cores"),
+    ] {
+        assert_eq!(at(i).kind, Kind::Row);
+        assert_eq!(at(i).pair, Some((label.into(), value.into())), "block {i}");
+    }
+    // `Label: value` items: bold and code marks and the closing full stop come off.
+    assert_eq!(at(9).pair, Some(("Claude".into(), "3.8 GB across 11 processes".into())));
+    assert_eq!(at(10).pair, Some(("rustc".into(), "1.3 GB".into())));
+    // Prose items are not rows.
+    assert_eq!(at(15).pair, None);
+    assert_eq!(at(20).pair, None);
 }
 
 #[test]
@@ -88,13 +155,19 @@ fn a_short_or_single_block_reply_is_skipped_before_jev() {
 }
 
 #[test]
-fn only_a_clear_result_with_a_title_and_a_fact_becomes_a_card() {
+fn only_a_clear_result_with_a_title_and_rows_becomes_a_card() {
     let b = blocks();
     let card = card_from(&b, &answers()).unwrap();
     assert_eq!(card["type"], "result");
-    assert_eq!(card["snapshot"]["title"], "Disk check on the Mac mini");
-    assert_eq!(card["snapshot"]["facts"], json!(["Free space: 340 GB of 500 GB", "Memory: 12 GB in use"]));
-    assert_eq!(card["snapshot"]["links"], json!([{"label": "Open report", "url": "https://example.com/report/1"}]));
+    assert_eq!(card["v"], 2);
+    let snap = &card["snapshot"];
+    assert_eq!(snap["title"], "Disk check on the Mac mini");
+    assert_eq!(snap["sub"], "Nothing else needs attention right now, the machine looks healthy overall.");
+    assert_eq!(
+        snap["rows"],
+        json!([{"label": "Free space", "value": "340 GB of 500 GB"}, {"label": "Memory", "value": "12 GB in use"}])
+    );
+    assert_eq!(snap["links"], json!([{"label": "Open report", "url": "https://example.com/report/1"}]));
 
     let with = |path: &[&str], v: Value| {
         let mut a = answers();
@@ -109,15 +182,23 @@ fn only_a_clear_result_with_a_title_and_a_fact_becomes_a_card() {
     assert!(with(&["kind", "probabilities", "info"], json!(0.84)).is_none());
     assert!(with(&["kind", "choice"], json!("plain")).is_none());
     assert!(with(&["title", "probabilities", "1"], json!(0.59)).is_none());
-    assert!(
-        with(&["fact_2", "noul"], json!(0.49))
-            .is_some_and(|c| c["snapshot"]["facts"] == json!(["Memory: 12 GB in use"]))
-    );
-    // No fact clears: the title alone isn't a card.
-    let mut none = answers();
-    none["fact_2"]["noul"] = json!(0.1);
-    none["fact_3"]["noul"] = json!(0.1);
-    assert!(card_from(&b, &none).is_none());
+    // An unsure, absent or title-repeating verdict only drops `sub`; the card stands.
+    for card in [
+        with(&["headline", "probabilities", "6"], json!(0.59)),
+        with(&["headline", "choice"], json!("none")),
+        with(&["headline", "choice"], json!("1")),
+        with(&["headline"], json!(null)),
+    ] {
+        assert!(card.is_some_and(|c| c["snapshot"].get("sub").is_none()));
+    }
+    // Exclusion vetoes; a row that isn't needed enough is not shown.
+    assert!(with(&["skip_3", "noul"], json!(0.7)).is_none(), "one row left is not a card");
+    assert!(with(&["need_2", "noul"], json!(0.59)).is_none());
+    assert!(with(&["need_4", "noul"], json!(0.6)).is_some_and(|c| c["snapshot"]["rows"][2]["label"] == "Last backup"));
+    // Without its exclusion answer a row is not shown.
+    let mut missing = answers();
+    missing.as_object_mut().unwrap().remove("skip_3");
+    assert!(card_from(&b, &missing).is_none());
     // A title that names no block, or a block that can't be one.
     assert!(with(&["title", "choice"], json!("99")).is_none());
     assert!(with(&["title", "choice"], json!("not a number")).is_none());
@@ -125,39 +206,125 @@ fn only_a_clear_result_with_a_title_and_a_fact_becomes_a_card() {
 }
 
 #[test]
-fn every_string_on_a_card_comes_from_the_reply() {
-    let b = split(
-        "**Backup status**\n\n- **Disk:** `340 GB` free\n- Last run: [see log](https://example.com/log)\n- Next run: tomorrow 03:10\n\nThis paragraph is the reply's closing remark and is much longer than any fact line may be, so it can't fill a slot.",
+fn the_devops_reply_becomes_a_card_with_its_headline_and_the_numbers_that_matter() {
+    let blocks = split(DEVOPS);
+    let card = card_from(&blocks, &devops_answers()).unwrap();
+    assert_eq!(
+        card,
+        json!({"type": "result", "v": 2, "snapshot": {
+            "title": "Machine health, 2026-11-01 00:25",
+            "sub": "Overall: OK, but the disk is trending down and swap is in use.",
+            "rows": [
+                {"label": "Disk (internal)", "value": "22.7 GB free (10%) of 228 GB"},
+                {"label": "Swap", "value": "2.9 of 4.0 GB used"},
+                {"label": "CPU", "value": "Load 9.9, 9.0, 5.8 on 10 cores"},
+                {"label": "Two problems are open", "value": "swap (since 18:11) and bridge (since 10:26)"},
+            ],
+            "links": [],
+        }})
     );
-    let mut a = answers();
-    a["fact_5"] = json!({"noul": 0.99});
-    a["link_3"] = json!({"noul": 0.9});
-    a["link_5"] = json!({"noul": 0.0});
-    a["fact_2"] = json!({"noul": 0.9});
-    a["fact_3"] = json!({"noul": 0.9});
-    a["fact_4"] = json!({"noul": 0.9});
-    a["title"] = json!({"choice": "1", "probabilities": {"1": 0.9}});
-    let card = card_from(&b, &a).unwrap();
+}
+
+#[test]
+fn log_lines_and_suggestions_are_vetoed_however_important_jev_finds_them() {
+    let blocks = split(
+        "# Notes\n\nLog: I appended the line to the file\nSuggestion: you could free space\nDisk: 10 GB free\nSwap: 2 GB used\n\nAll fine here, nothing to do at all right now for you.",
+    );
+    let mut a = json!({
+        "kind": {"choice": "info", "probabilities": {"info": 0.9}},
+        "title": {"choice": "1", "probabilities": {"1": 0.9}},
+        "headline": {"choice": "none", "probabilities": {"none": 0.9}},
+    });
+    // Jev rates the log line and the suggestion important too, but excluded.
+    for (n, need, skip) in [(2, 0.9, 0.95), (3, 0.9, 0.9), (4, 0.9, 0.0), (5, 0.8, 0.0)] {
+        a[format!("need_{n}")] = json!({"noul": need});
+        a[format!("skip_{n}")] = json!({"noul": skip});
+    }
+    let rows = card_from(&blocks, &a).map(|c| c["snapshot"]["rows"].clone());
+    assert_eq!(rows, Some(json!([{"label": "Disk", "value": "10 GB free"}, {"label": "Swap", "value": "2 GB used"}])));
+}
+
+#[test]
+fn the_rows_are_the_top_five_by_need_in_reply_order() {
+    let items = (1..=8).map(|i| format!("- Metric {i}: {i} GB\n")).collect::<Vec<_>>().concat();
+    let blocks = split(&format!("# Report\n\n{items}\nThat is everything measured on the machine this time round."));
+    let mut a = json!({
+        "kind": {"choice": "info", "probabilities": {"info": 0.9}},
+        "title": {"choice": "1", "probabilities": {"1": 0.9}},
+    });
+    for n in 2..=9_u8 {
+        a[format!("need_{n}")] = json!({"noul": 0.6 + f64::from(n) / 100.0});
+        a[format!("skip_{n}")] = json!({"noul": 0.0});
+    }
+    let card = card_from(&blocks, &a).unwrap();
+    let labels: Vec<&str> =
+        card["snapshot"]["rows"].as_array().unwrap().iter().map(|r| r["label"].as_str().unwrap()).collect();
+    assert_eq!(labels, ["Metric 4", "Metric 5", "Metric 6", "Metric 7", "Metric 8"]);
+}
+
+#[test]
+fn a_reply_with_no_label_and_value_lines_gets_no_card() {
+    let blocks = split(
+        "# Plan\n\nWe will first read the code and then change it carefully, step by step.\n\n- Read the router\n- Change the router\n\nThat should do it for this round of work, I think.",
+    );
+    let (_, q) = ask_for(&blocks);
+    assert!(q.keys().all(|k| !k.starts_with("need_")));
+    let a = json!({
+        "kind": {"choice": "info", "probabilities": {"info": 0.99}},
+        "title": {"choice": "1", "probabilities": {"1": 0.99}},
+    });
+    assert!(card_from(&blocks, &a).is_none());
+}
+
+#[test]
+fn every_string_on_a_card_comes_from_the_reply() {
+    let card = card_from(&split(DEVOPS), &devops_answers()).unwrap();
     let snap = &card["snapshot"];
-    assert_eq!(snap["title"], "Backup status");
-    // Marks removed, no word added; the long closing paragraph (block 5) never fills a slot.
-    assert_eq!(snap["facts"], json!(["Disk: 340 GB free", "Last run: see log", "Next run: tomorrow 03:10"]));
-    assert_eq!(snap["links"], json!([{"label": "see log", "url": "https://example.com/log"}]));
-    for s in snap["facts"].as_array().unwrap().iter().chain([&snap["title"]]) {
+    let strings = snap["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| [r["label"].clone(), r["value"].clone()])
+        .chain([snap["title"].clone(), snap["sub"].clone()]);
+    let bare = plain(DEVOPS);
+    for s in strings {
         let s = s.as_str().unwrap();
-        assert!(s.split_whitespace().all(|w| b.iter().any(|b| b.text.contains(w))), "{s}");
+        assert!(s.split_whitespace().all(|w| bare.contains(w)), "{s}");
     }
 }
 
 #[test]
-fn what_jev_is_sent_is_capped_and_leaves_code_out_of_the_slots() {
+fn what_jev_is_sent_is_one_capped_call_with_every_decision_and_leaves_code_out() {
     let long = (1..=100).map(|i| format!("- Item {i}: {i} GB")).collect::<Vec<_>>().join("\n");
-    let (state, q) = ask_for(&split(&format!("Title\n\n```\nsecret = 1\n```\n\n{long}")));
+    let (state, q) =
+        ask_for(&split(&format!("Title\n\nA closing sentence comes first here.\n\n```\nsecret = 1\n```\n\n{long}")));
     assert_eq!(state["reply"].as_array().unwrap().len(), MAX_BLOCKS);
-    assert!(q.contains_key("kind") && q.contains_key("title"));
-    assert!(!q.contains_key("fact_2"), "a code block is never a fact");
-    assert!(!q.contains_key("fact_61"));
-    assert!(q.contains_key("fact_60"));
+    assert!(q.contains_key("kind") && q.contains_key("title") && q.contains_key("headline"));
+    assert!(!q.contains_key("need_3"), "a code block is never a row");
+    assert!(!q.contains_key("need_61"));
+    assert!(q.contains_key("need_4"));
+    assert!(q.contains_key("need_60") && q.contains_key("skip_60"));
+}
+
+#[test]
+fn the_question_set_for_the_devops_reply() {
+    let (state, q) = ask_for(&split(DEVOPS));
+    assert_eq!(state["reply"].as_array().unwrap().len(), 26);
+    // Title and headline choose among prose and headings only (rows are never offered); the headline can be none.
+    assert!(q["title"]["criteria"].get("1").is_some() && q["title"]["criteria"].get("2").is_some());
+    assert!(q["title"]["criteria"].get("3").is_none(), "a table row is not a title");
+    assert!(q["title"]["criteria"].get("none").is_some());
+    assert_eq!(q["headline"]["criteria"]["2"], "Overall: OK, but the disk is trending down and swap is in use.");
+    assert!(q["headline"]["criteria"].get("none").is_some());
+    // Each row candidate (five table rows, five label/value items) has a need and an exclusion question.
+    for n in [3, 4, 5, 6, 7, 9, 10, 11, 12, 18] {
+        assert_eq!(q[&format!("need_{n}")]["type"], "noul");
+        assert!(q[&format!("skip_{n}")]["instructions"].as_str().unwrap().contains(&format!("block {n}")));
+    }
+    for n in [1, 2, 8, 13, 15, 20] {
+        assert!(!q.contains_key(&format!("need_{n}")), "block {n} is not a row candidate");
+    }
+    assert_eq!(q.keys().filter(|k| k.starts_with("need_")).count(), 10);
 }
 
 #[test]
@@ -208,6 +375,7 @@ async fn an_answered_reply_gets_its_card_once_and_keeps_its_text() {
         seen.locked()[0]["state"]["reply"][0],
         json!({"block": 1, "kind": "para", "text": "Disk check on the Mac mini"})
     );
+    assert_eq!(e.data["richCard"]["v"], 2);
 
     // A card already there is never replaced.
     let mut own = e.data.clone();
@@ -271,4 +439,30 @@ fn the_switch_is_off_until_the_owner_turns_it_on() {
     assert_eq!(status(&store), json!({"enabled": false}));
     assert_eq!(set_enabled(&store, true).unwrap(), json!({"enabled": true}));
     assert_eq!(set_enabled(&store, false).unwrap(), json!({"enabled": false}));
+}
+
+/// The eval harness: the real `classify_traced` on live Jev over a labelled set, for the lab. Reads JSONL
+/// `{"id","text"}` lines from `JEV_EVAL_IN`, writes `{"id","card","answers","ms"}` (plus `error` when Jev failed) to
+/// `JEV_EVAL_OUT`, one reply at a time. Needs `JEV_API_KEY`; `JEV_EVAL_ONLY=<n>` caps the replies run. Run it from
+/// `serve/host` with `--bin kith-serve rich_card::jev::tests::eval_live -- --ignored --nocapture`.
+#[tokio::test]
+#[ignore = "calls the real Jev API; run by hand"]
+async fn eval_live() {
+    use std::io::Write;
+    let input = std::env::var("JEV_EVAL_IN").expect("JEV_EVAL_IN: a JSONL of {id, text}");
+    let output = std::env::var("JEV_EVAL_OUT").expect("JEV_EVAL_OUT: where to write the JSONL");
+    let only: usize = std::env::var("JEV_EVAL_ONLY").ok().and_then(|n| n.parse().ok()).unwrap_or(usize::MAX);
+    let jev = Jev::from_key(std::env::var("JEV_API_KEY").expect("JEV_API_KEY"));
+    let mut out = std::fs::File::create(output).unwrap();
+    for line in std::fs::read_to_string(input).unwrap().lines().filter(|l| !l.trim().is_empty()).take(only) {
+        let row: Value = serde_json::from_str(line).unwrap();
+        let started = std::time::Instant::now();
+        let traced = classify_traced(&jev, row["text"].as_str().unwrap_or_default()).await;
+        let ms = started.elapsed().as_millis();
+        let result = match traced {
+            Ok(t) => json!({"id": row["id"], "card": t.card, "answers": t.answers, "ms": ms}),
+            Err(e) => json!({"id": row["id"], "card": null, "answers": null, "ms": ms, "error": format!("{e:#}")}),
+        };
+        writeln!(out, "{result}").unwrap();
+    }
 }
