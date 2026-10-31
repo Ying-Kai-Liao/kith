@@ -30,6 +30,8 @@ const ACTIVE_MS: i64 = 30 * 60 * 1000;
 const GREET_MS: i64 = 60_000;
 /// Longest reason kept, in characters.
 const MAX_REASON: usize = 200;
+/// Longest result kept, in characters.
+const MAX_RESULT: usize = 600;
 /// How long `wait` holds a `callPerson` request open.
 const WAIT: Duration = Duration::from_secs(50);
 
@@ -63,6 +65,9 @@ pub struct Call {
     /// The agent that rang when it isn't the chat's own (`coder` working for `architect`): shown, never counted.
     pub from: Option<String>,
     pub reason: String,
+    /// What the call is about (`kith-call --result`: a bug and its PR link), kept for the chat line a declined or
+    /// missed call leaves, so the result isn't lost with the call.
+    pub result: Option<String>,
     pub created: i64,
     pub state: State,
     settled: i64,
@@ -185,6 +190,12 @@ fn clean(reason: &str) -> String {
     reason.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_REASON).collect()
 }
 
+/// A result: its lines kept (a bug and a link read better apart), cut to length.
+fn clean_result(result: &str) -> String {
+    let lines: Vec<&str> = result.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    lines.join("\n").chars().take(MAX_RESULT).collect()
+}
+
 /// What the rate limit counts: the calls of one chat to its person. Never the `from` a run names, which it picks.
 fn rate_key(chat: &str, person: Option<&str>) -> String {
     format!("{chat}\u{1f}{}", person.unwrap_or_default())
@@ -252,7 +263,13 @@ pub fn chat_of(hub: &Hub, agent: &str, person: Option<&str>) -> Option<String> {
 /// An agent rings its person. `bot_id` is the chat the agent works in, which also says who is called. The answer's
 /// `status` is `ringing`, `busy`, `rate-limited` or `not-allowed`. `from` is the agent a run says it is (`kith-call`
 /// sends `KITH_AGENT`): a label for the call screen only.
+#[cfg(test)]
 fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str, from: Option<&str>) -> Result<Value> {
+    ring_with(hub, bot_id, reason, from, None)
+}
+
+fn ring_with(hub: &Arc<Hub>, bot_id: &str, reason: &str, from: Option<&str>, result: Option<&str>) -> Result<Value> {
+    let result = result.map(clean_result).filter(|r| !r.is_empty());
     let reason = clean(reason);
     if reason.is_empty() {
         bail!("reason is required: say in a few words why you're calling");
@@ -284,6 +301,7 @@ fn ring(hub: &Arc<Hub>, bot_id: &str, reason: &str, from: Option<&str>) -> Resul
             person,
             from,
             reason,
+            result,
             created: now,
             state: State::Ringing,
             settled: now,
@@ -324,10 +342,16 @@ fn settle(hub: &Arc<Hub>, id: &str, to: State, who: Who) -> Result<Call> {
     if matches!(to, State::Declined | State::Missed) {
         let name = shown(hub, &call);
         // `missedCall` marks it for later styling; apps draw it as the notice it is.
-        let data = json!({
-            "text": format!("{name} tried to call: {}", call.reason),
-            "missedCall": true, "callState": to.as_str(), "callReason": call.reason,
-        });
+        // A call that carried a result (the health-check chain's bug and PR link) shows it in the same line, so a
+        // call nobody answered still leaves the result where the person will read it.
+        let text = match &call.result {
+            Some(result) => format!("{name} tried to call: {}\n{result}", call.reason),
+            None => format!("{name} tried to call: {}", call.reason),
+        };
+        let mut data = json!({"text": text, "missedCall": true, "callState": to.as_str(), "callReason": call.reason});
+        if let Some(result) = &call.result {
+            data["callResult"] = json!(result);
+        }
         // Always the main chat: the voice call talks there, so the call's lines and the greeting go with it.
         let lane = Lane::main(&call.bot_id);
         hub.add_entry(&lane, EntryKind::Notice, hub.store.max_turn(&call.bot_id), &data);
@@ -378,7 +402,19 @@ pub async fn ring_and_wait(
     from: Option<&str>,
     wait: bool,
 ) -> Result<Value> {
-    let mut out = ring(hub, bot_id, reason, from)?;
+    ring_and_wait_with(hub, bot_id, reason, from, None, wait).await
+}
+
+/// `ring_and_wait` with the result the call is about, kept for the line a declined or missed call leaves.
+pub async fn ring_and_wait_with(
+    hub: &Arc<Hub>,
+    bot_id: &str,
+    reason: &str,
+    from: Option<&str>,
+    result: Option<&str>,
+    wait: bool,
+) -> Result<Value> {
+    let mut out = ring_with(hub, bot_id, reason, from, result)?;
     let Some(id) = out["id"].as_str().filter(|_| wait).map(str::to_owned) else { return Ok(out) };
     let deadline = tokio::time::Instant::now() + WAIT;
     while tokio::time::Instant::now() < deadline {
