@@ -49,6 +49,10 @@ sid=$3
 printf '%s\n' "$*" >> "$KITH_STATE/stub-calls"
 [ -f "$KITH_STATE/live/terminal/$sid.claim" ] && echo held >> "$KITH_STATE/stub-claims"
 [ "${STUB_MODE:-ok}" = fail ] && exit 1
+if [ "${STUB_MODE:-ok}" = slow ]; then   # claude still writing: its own pid, then wait to be let go
+  echo $$ > "$KITH_STATE/stub-pid"
+  while [ ! -f "$KITH_STATE/stub-go" ]; do sleep 0.1; done
+fi
 python3 - "$sid" <<'PY'
 import datetime as dt, json, os, sys
 now = dt.datetime.now(dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
@@ -179,6 +183,25 @@ is "a session whose folder is gone is not compacted (resume would run in the wro
 fx r-nobin 55 150000 "$Q"
 is "claude missing: reported for that session, the sweep goes on" "$(KITH_CLAUDE=/nonexistent/claude python3 "$LC" sweep --session r-nobin | cut -c1-30)" "r-nobin compact failed: [Errno"
 
+# the claim names claude's own pid (claim-then-exec, I11): a sweep killed while claude writes leaves the claim with the writer
+fx k-kill 55 150000 "$Q"
+rm -f "$KITH_STATE/stub-pid" "$KITH_STATE/stub-go"
+STUB_MODE=slow python3 "$LC" sweep --session k-kill >/dev/null &
+sp=$!
+for _ in $(seq 100); do [[ -s $KITH_STATE/stub-pid ]] && break; sleep 0.1; done
+stub=$(cat "$KITH_STATE/stub-pid" 2>/dev/null)
+holder() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/k-kill.claim" 2>/dev/null; }
+is "compact's claim names the claude process, not the sweep" "$(holder)/$([[ $(holder) != "$sp" ]] && echo not-sweep)" "$stub/not-sweep"
+kill -KILL $sp 2>/dev/null
+wait $sp 2>/dev/null
+is "the sweep killed mid-compaction: claude still runs and still holds the claim" "$(kill -0 "$stub" 2>/dev/null && echo alive)/$(holder)" "alive/$stub"
+KITH_CLAIM_WAIT=0 python3 "$SK" claim k-kill $$ >/dev/null 2>&1
+is "...so a second writer is refused while claude writes" "$?" 1
+touch "$KITH_STATE/stub-go"
+for _ in $(seq 100); do kill -0 "$stub" 2>/dev/null || break; sleep 0.1; done
+KITH_CLAIM_WAIT=0 python3 "$SK" claim k-kill $$ >/dev/null 2>&1
+is "...and once claude has exited the session is free" "$?" 0
+rm -f "$REG/k-kill.claim" "$REG/k-kill.claim.lock"
 
 # a session the host keeps a conversation for is the host's to compact (one compactor per session)
 mkdir -p "$T/serve"
