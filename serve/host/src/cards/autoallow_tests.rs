@@ -158,7 +158,14 @@ async fn what_cannot_be_remembered_gets_no_always_option() {
     window(&r.hub, 20);
     let commands = ["rm -rf /tmp/build", "python3", "echo $AWS_SECRET_ACCESS_KEY", "git push origin main"];
     for (n, command) in commands.into_iter().enumerate() {
-        let call = ask_auto(&r.hub, owner_run(&format!("auto-f{n}")), "Bash", json!({"command": command}));
+        // Not REASON: it is hard_deny, which drops Always from any prose rule, so it would pass whatever the command's class.
+        let call = ask_auto_for(
+            &r.hub,
+            owner_run(&format!("auto-f{n}")),
+            "Bash",
+            json!({"command": command}),
+            "[Irreversible Local Destruction]",
+        );
         let card = shown(&r.hub).await;
         assert_eq!(ids(&data(&r, &card)), ["allow", "deny"], "{command}");
         answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
