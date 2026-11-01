@@ -13,6 +13,11 @@ kernel/bin/kith-send
 kernel/lib/kith_guard.py
 kernel/lib/kith_paths.py
 kernel/lib/guest-env.sh
+# what may be remembered or declared (lib/kith_guard.py must_ask is listed above)
+kernel/bin/kith-allow
+kernel/bin/kith-pkg
+kernel/lib/kith_allowed.py
+kernel/lib/kith_settings.py
 
 # the host's gates and the wire
 serve/host/src/api/roles.rs
@@ -41,6 +46,18 @@ serve/host/src/run_outbox.rs
 serve/host/src/doors.rs
 kernel/tests/kith-auth-props
 kernel/tests/kith-auth-props.py
+# the verify skills' test scripts
+kernel/tests/kith-auth-secret-check
+kernel/tests/kith-recall-check
+kernel/tests/kith-auth-revoke-check
+kernel/tests/kith-guest-sandbox-check
+kernel/tests/kith-guest-helper-check
+kernel/tests/kith-guest-door-check
+kernel/tests/kith-auth-c2-check
+kernel/tests/kith-helper-mcp-check
+kernel/tests/kith-hooks.test.ts
+kernel/tests/kith-allow-check
+kernel/tests/kith-must-ask-check
 # secret-cards
 serve/host/src/store/cards.rs
 serve/host/src/api/cards.rs
@@ -70,6 +87,9 @@ serve/host/src/api/events.rs
 serve/host/src/api/remote.rs
 serve/host/src/api/peers.rs
 serve/host/src/api/calls.rs
+serve/host/src/agent/bot/hq.rs
+serve/host/src/access.rs
+serve/host/src/calls.rs
 serve/host/src/store/botguests.rs
 serve/host/src/api/roles_props.rs
 serve/host/src/api/botguests_props.rs
