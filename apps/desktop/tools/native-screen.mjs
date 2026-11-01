@@ -8,15 +8,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 if (process.platform !== 'darwin') process.exit(0)
-const env = process.argv[2] ?? 'main'
-if (!['main', 'dev'].includes(env)) throw new Error(`unknown environment ${env}`)
-const name = env === 'dev' ? 'KithDevScreen' : 'KithScreen'
-const configuration = env === 'dev' ? 'DevRelease' : 'Release'
+const name = 'KithScreen'
+const configuration = 'Release'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const repo = join(root, '../..')
 const derived = join(repo, 'build/dd')
 execFileSync('xcodebuild', [
-  'build', '-project', join(repo, 'apps/Kith.xcodeproj'), '-scheme', env === 'dev' ? 'Screen Dev' : 'Screen', '-configuration', configuration,
+  'build', '-project', join(repo, 'apps/Kith.xcodeproj'), '-scheme', 'Screen', '-configuration', configuration,
   '-destination', 'generic/platform=macOS', '-derivedDataPath', derived, '-quiet',
   'CODE_SIGN_IDENTITY=-', 'CODE_SIGNING_REQUIRED=NO', 'CODE_SIGNING_ALLOWED=NO',
 ], { stdio: 'inherit' })

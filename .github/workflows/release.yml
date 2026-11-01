@@ -236,12 +236,12 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
-          npm run dist:mac:main -- --publish never -c.extraMetadata.version=${{ steps.v.outputs.version }}
+          npm run dist:mac -- --publish never -c.extraMetadata.version=${{ steps.v.outputs.version }}
       - name: Build the Mac app (unsigned dry run)
         if: ${{ steps.sign.outputs.skip != 'true' && (steps.sign.outputs.signed != 'true') }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run dist:mac:main -- --publish never -c.mac.notarize=false -c.extraMetadata.version=${{ steps.v.outputs.version }}
+        run: npm run dist:mac -- --publish never -c.mac.notarize=false -c.extraMetadata.version=${{ steps.v.outputs.version }}
       - name: Show the result
         if: steps.sign.outputs.skip != 'true'
         run: |
@@ -299,7 +299,7 @@ jobs:
           else v=$(node -p "require('./package.json').version"); fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
       - name: Build the Linux app
-        run: npm run dist:linux:main -- --${{ matrix.arch }} --publish never -c.extraMetadata.version=${{ steps.v.outputs.version }}
+        run: npm run dist:linux -- --${{ matrix.arch }} --publish never -c.extraMetadata.version=${{ steps.v.outputs.version }}
       - name: Show the result
         run: ls -la dist
       - uses: actions/upload-artifact@v4

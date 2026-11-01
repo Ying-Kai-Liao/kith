@@ -52,8 +52,7 @@ final class Driver {
 
     /// In the per-user temporary directory (private, and short enough for a socket path).
     private static var socketPath: String {
-        let development = Bundle.main.object(forInfoDictionaryKey: "KithEnvironment") as? String == "dev"
-        return NSTemporaryDirectory() + (development ? "kith-dev-cua/cua.sock" : "kith-cua/cua.sock")
+        NSTemporaryDirectory() + "kith-cua/cua.sock"
     }
 
     private static func listening(_ path: String) -> Bool {
