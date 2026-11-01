@@ -404,7 +404,7 @@ def serve():
         ok('dev.kith.serve: running')
     else:
         warn('dev.kith.serve is loaded but not running: kith serve restart (log in ~/.kith/serve)')
-    # The running host knows its environment's override too; the file and the build's default are the fallback.
+    # The running host knows the override too; the file and the build's default are the fallback.
     cloud = run(str(binary), 'cloud', '--port', '19224').stdout
     url = next((l.split(':', 1)[1].strip() for l in cloud.splitlines() if l.startswith('url:')), '')
     if url == '-':

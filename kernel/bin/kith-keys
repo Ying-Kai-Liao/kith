@@ -18,14 +18,14 @@ from pathlib import Path
 
 
 def host_endpoint():
-    """(data dir, port) of this install's kith serve. kith-serve owns the rule (dev 19224 / packaged main 19225); the
+    """(data dir, port) of this install's kith serve. kith-serve owns the rule (~/.kith/serve on 19224); the
     env overrides win. Same as kith-group."""
     data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
     if not (data and port):
         try:
             d, p = subprocess.run([str(Path(__file__).resolve().parent / 'kith-serve'), 'endpoint'], capture_output=True,
                                   text=True, timeout=4, check=True).stdout.split()
-        except Exception:  # noqa: BLE001 — fall back to the dev defaults
+        except Exception:  # noqa: BLE001 — fall back to the defaults
             d, p = str(Path.home() / '.kith' / 'serve'), '19224'
         data, port = data or d, port or p
     return Path(data), port
