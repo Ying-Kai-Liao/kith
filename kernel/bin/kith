@@ -679,7 +679,7 @@ if [[ $p_owner == 0 && -n ${KITH_RUN_OUTBOX:-} && -d $KITH_RUN_OUTBOX && -d $KIT
   [[ $(dirname "$ob") == "$(cd "$KITH_MACHINE/outbox" && pwd -P)" && $(basename "$ob") != .* ]] && run_outbox=$ob
 fi
 [[ -n $run_outbox ]] && writable+=$'\n'"$run_outbox"
-fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
+fill < "$pkg/settings.json" | P_OWNER=$p_owner P_TRUSTED=$p_trusted API_HELPER=$backup_api_helper DENY=$p_deny PLUGINS=$plugins PERM_MODE=$perm_mode CAP_BYPASS=$([[ $p_owner == 1 && $reads_others == 1 ]] && echo 1 || echo 0) OWNER_TERMINAL=$owner_terminal AGENT_HOME=$home PKG=$src_pkg MEM_PRE=$mem_pre MEM_POST=$mem_post LEDGER_PRE=$ledger_pre LEDGER_POST=$ledger_post WORK=$work CTMP=$ctmp HOOK="\"$KITH/bin/kith-cost\" tag" SESSIONS_HOOK="\"$KITH/bin/kith-sessions\" record" WRITABLE="$writable
 $learned
 $state_projects" python3 -I -c '
 import json, os, re, sys
@@ -731,6 +731,24 @@ for a in dict.fromkeys(x for r in (os.environ["KITH_AGENTS"], os.environ["KITH_S
     rule = "Edit(/%s/*/allowed.json)" % a
     if rule not in s["permissions"]["deny"]:
         s["permissions"]["deny"].append(rule)
+# The must-ask classes (kith_guard.must_ask_rules): asked whatever allows them (package, Always allow, a hook), as Claude
+# Code puts deny and ask before allow in every mode; a secret or login is refused. Every run gets the file rules; the
+# Bash rules are the owner run only, since anyone else is OS-sandboxed and its Bash needs no card (above). The classifier
+# gets one sentence per class for what the rules cannot spell.
+must = kith_guard.must_ask_rules(kith_guard.Places(package=os.environ["PKG"]))
+ask = s["permissions"].setdefault("ask", [])
+for lst, rules in ((s["permissions"]["deny"], must["deny"]), (ask, must["ask_files"])) \
+        + (((ask, must["ask_bash"]),) if os.environ["P_OWNER"] == "1" else ()):
+    lst.extend(r for r in rules if r not in lst)
+auto = s.setdefault("autoMode", {})
+auto["soft_deny"] = list(dict.fromkeys(["$defaults"] + [x for x in auto.get("soft_deny") or [] if isinstance(x, str)] + must["soft_deny"]))
+# A package may declare its routine work as autoMode.allow sentences (kith-pkg check refuses one naming a must-ask
+# class); owner runs keep them next to the defaults of Claude Code, runs for anyone else have none.
+declared = [x for x in auto.get("allow") or [] if isinstance(x, str)]
+if os.environ["P_OWNER"] == "1" and declared:
+    auto["allow"] = list(dict.fromkeys(["$defaults"] + declared))
+else:
+    auto.pop("allow", None)
 # Anyone but the owner (an invited person, a bot): the OS sandbox of Claude Code (macOS seatbelt) around Bash and every
 # process it starts, so the files above are closed to a shell too and KITH_PERSON cannot be dodged by reading the
 # index or the serve token directly. Fails closed (failIfUnavailable), no escape hatch for the model, no excluded
