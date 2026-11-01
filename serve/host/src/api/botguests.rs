@@ -11,7 +11,6 @@ use super::people::{AUTH_WRITES, auth_bin, chat_with, hex};
 use super::{roles, str_arg};
 use crate::LockExt;
 use crate::agent::bot::Cmd;
-use crate::environment::Environment;
 use crate::hub::Hub;
 use crate::remote::{account, botsync, cloud, crypto};
 use crate::store::{BotConversation, BotGuest, BotInvite, BotState, Entry, EntryKind, Lane, now_ms};
@@ -265,7 +264,7 @@ async fn create_bot_invite(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result
     let link = format!("{base}/b/{cid}/{invite_id}#t={token}&k={host_key}");
     let kith_link = format!(
         "{}://bot?c={cid}&i={invite_id}&t={token}&k={host_key}&r={}",
-        Environment::current().url_scheme(),
+        crate::environment::URL_SCHEME,
         enc(&base)
     );
     let share = share_text(&link, &bot.agents);

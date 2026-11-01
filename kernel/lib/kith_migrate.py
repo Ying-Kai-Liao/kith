@@ -449,13 +449,13 @@ def u_bin(m):
 # -- launcher
 
 def launcher_configs():
-    """The two places kith serve keeps its launcher: the dev build's and the packaged main build's."""
-    return [('config', NEW / 'serve/config.json'), ('main_config', NEW / 'serve-main/config.json')]
+    """The places kith serve keeps its launcher."""
+    return [('config', NEW / 'serve/config.json')]
 
 
 def s_launcher(m, dry):
     old, new = NEW / 'bin/hq-uv', NEW / 'bin/kith-uv'
-    say(f'rename {NEW}/bin/hq-uv to kith-uv, and the launcher kith serve reads from {launcher_configs()[0][1]} (and serve-main)')
+    say(f'rename {NEW}/bin/hq-uv to kith-uv, and the launcher kith serve reads from {launcher_configs()[0][1]}')
     if dry:
         return
     st = m['steps']['launcher']

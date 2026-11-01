@@ -241,11 +241,7 @@ async fn start() -> Result<(tokio::process::Child, String)> {
 fn endpoint_name() -> Result<String> {
     use std::os::unix::fs::PermissionsExt;
     let parent = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(crate::service::data_dir, std::path::PathBuf::from);
-    let folder = match crate::environment::Environment::current() {
-        crate::environment::Environment::Main => "kith-serve-main-cua",
-        crate::environment::Environment::Dev => "kith-serve-cua",
-    };
-    let dir = parent.join(folder);
+    let dir = parent.join("kith-serve-cua");
     std::fs::create_dir_all(&dir)?;
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
     let socket = dir.join("cua.sock");

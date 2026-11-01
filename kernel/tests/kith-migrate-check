@@ -112,7 +112,6 @@ build() {   # the live layout, scaled down
   (state_repo)
   printf '{"launcher": ["%s/.hq/bin/hq-uv", "run", "--quiet", "--script", "%s/hq/kernel/bin/kith-serve-launch"]}\n' "$HOME" "$HOME" \
     > "$HOME/.kith/serve/config.json"
-  mkdir -p "$HOME/.kith/serve-main"; cp "$HOME/.kith/serve/config.json" "$HOME/.kith/serve-main/config.json"
   echo data > "$HOME/.kith/serve/data.db"; echo co > "$HOME/.kith/hq-serve/README"
   ln -s "$REPO" "$HOME/hq"
   ln -s "$HOME/hq/kernel/bin/kith" "$HOME/.local/bin/kith"; ln -s "$HOME/hq/kernel/bin/hq" "$HOME/.local/bin/hq"
@@ -184,7 +183,7 @@ check "rewritten plists name ~/.kith and kith-* only" \
   "plist_has $LA/dev.kith.cost.plist $HOME/.kith/bin/kith-uv && plist_has $LA/dev.kith.cost.plist $HOME/kith/kernel/bin/kith-cost && ! grep -l '/.hq' $LA/*.plist"
 check "the launcher was renamed (not copied) to kith-uv" "[ -x $HOME/.kith/bin/kith-uv ] && [ ! -e $HOME/.kith/bin/hq-uv ]"
 check "dev.kith.serve and serve/config.json point at kith-uv, and nothing points at hq-uv" \
-  "plist_has $LA/dev.kith.serve.plist $HOME/.kith/bin/kith-uv && grep -q '$HOME/.kith/bin/kith-uv' $HOME/.kith/serve/config.json && ! grep -rq 'hq-uv' $LA $HOME/.kith/serve/config.json $HOME/.kith/serve-main/config.json $HOME/.claude/settings.json $HOME/.kith/settings.json"
+  "plist_has $LA/dev.kith.serve.plist $HOME/.kith/bin/kith-uv && grep -q '$HOME/.kith/bin/kith-uv' $HOME/.kith/serve/config.json && ! grep -rq 'hq-uv' $LA $HOME/.kith/serve/config.json $HOME/.claude/settings.json $HOME/.kith/settings.json"
 check "the final message names kith-uv for Full Disk Access" "grep -q 'Full Disk Access' $T/migrate-out && grep -q '$HOME/.kith/bin/kith-uv' $T/migrate-out"
 cat "$T/migrate-out" >&2
 check "old jobs booted out, new ones loaded" "grep -q 'bootout gui/[0-9]*/dev.hq.cost' $STUB_LOG && grep -q 'bootstrap gui/[0-9]* .*dev.kith.cost.plist' $STUB_LOG && grep -q 'bootstrap gui/[0-9]* .*dev.kith.sched.plist' $STUB_LOG"
@@ -270,10 +269,10 @@ mig --undo; rc=$?
 check "undo after that unloads the new jobs and loads the old ones" "[ $rc = 0 ] && grep -qx dev.hq.cost $STUB_LOADED && ! grep -q '^dev.kith.cost' $STUB_LOADED"
 
 # an earlier version's half-run: hq-uv already under ~/.kith/bin with its old name, no launcher step recorded
-build; snap > "$T/h0"; cp "$HOME/.kith/serve/config.json" "$T/h0.config"   # serve-main/config.json is the same text
+build; snap > "$T/h0"; cp "$HOME/.kith/serve/config.json" "$T/h0.config"
 STUB_LAUNCHCTL_FAIL=1 mig
 mv "$HOME/.kith/bin/kith-uv" "$HOME/.kith/bin/hq-uv"
-cp "$T/h0.config" "$HOME/.kith/serve/config.json"; cp "$T/h0.config" "$HOME/.kith/serve-main/config.json"
+cp "$T/h0.config" "$HOME/.kith/serve/config.json"
 python3 -I -c 'import json,sys; p=sys.argv[1]; m=json.load(open(p)); m["steps"].pop("launcher",None); json.dump(m,open(p,"w"))' "$HOME/.kith/migrate-manifest.json"
 mig; rc=$?
 check "a resumed run with hq-uv already under ~/.kith/bin ends at kith-uv" \
@@ -285,7 +284,7 @@ check "and the undo from there restores the original" "[ $rc = 0 ] && [ -e $HOME
 build; snap > "$T/o0"; cp "$HOME/.kith/serve/config.json" "$T/o0.config"
 mig
 mv "$HOME/.kith/bin/kith-uv" "$HOME/.kith/bin/hq-uv"
-for c in serve serve-main; do cp "$T/o0.config" "$HOME/.kith/$c/config.json"; done
+cp "$T/o0.config" "$HOME/.kith/serve/config.json"
 python3 -I - "$HOME" <<'PYEOF'
 import json, sys
 h = sys.argv[1]
@@ -296,8 +295,8 @@ m = json.load(open(p)); m['steps'].pop('launcher'); m['status'] = 'in-progress';
 json.dump(m, open(p, 'w'))
 PYEOF
 mig; rc=$?
-check "jobs an older run had moved, and serve-main/config.json, follow the launcher to kith-uv" \
-  "[ $rc = 0 ] && plist_has $LA/dev.kith.cost.plist $HOME/.kith/bin/kith-uv && ! grep -rq 'hq-uv' $LA $HOME/.kith/serve/config.json $HOME/.kith/serve-main/config.json"
+check "jobs an older run had moved follow the launcher to kith-uv" \
+  "[ $rc = 0 ] && plist_has $LA/dev.kith.cost.plist $HOME/.kith/bin/kith-uv && ! grep -rq 'hq-uv' $LA $HOME/.kith/serve/config.json"
 mig --undo; rc=$?
 check "and the undo from there restores the original" "[ $rc = 0 ] && snap | cmp -s - $T/o0"
 
