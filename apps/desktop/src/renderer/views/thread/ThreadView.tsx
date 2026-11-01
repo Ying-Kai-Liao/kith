@@ -1,11 +1,11 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { botGuestReadOnlyLine } from '@shared/bot-guest-chat'
-import { draftOf, isGroup, type Bot, type BotDraft } from '@shared/models'
-import { workingThreadIn } from '@shared/tasks'
+import { draftOf, isGroup, isWorkingIn, type Bot, type BotDraft } from '@shared/models'
+import { isTask, taskTitle, workingThreadIn } from '@shared/tasks'
 import { BotAvatar, GroupAvatar } from '../../components/Avatar'
 import { DropdownMenu, Spinner } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
-import { StatusChip } from '../../components/kith'
+import { LiveDot, pairOf, StatusChip } from '../../components/kith'
 import { SHOW_COMPUTER_EVENT } from '../../lib/computer-event'
 import type { BotStore } from '../../store/bot-store'
 import { chatSubtitle, showsComputerItem } from './chat-subtitle'
@@ -18,6 +18,7 @@ import { UpdateNeededCard } from '../UpdateNeededCard'
 import { buildChat, rowIn, useArrivals, type ChatItem } from './chat-items'
 import { BotConversationView, BotMessageRow } from './BotConversation'
 import { TopicCard } from './TopicCard'
+import { TaskCard } from './TaskCard'
 import { TopicPromptHost } from './TopicPrompt'
 import { ChatRow, lateQuoteOf, StepsRow, TimeSeparator, WorkingIndicator } from './ChatRows'
 import { AddToRoomSheet } from './AddToRoomSheet'
@@ -257,7 +258,7 @@ export const ThreadView = memo(function ThreadView({ botId }: { botId: string })
             </div>
           ) : (
             <>
-            {liveRun ? <LiveLine conversation={liveRun} botId={botId} lane={null} /> : null}
+            {liveRun ? <LiveLine conversation={liveRun} botId={botId} lane={null} /> : <WorkingNow botId={botId} />}
             <Composer
               botId={botId}
               onCall={!calling && bot && !callBlocked ? startCall : null}
@@ -378,8 +379,11 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
   const last = items[items.length - 1]
   const jump = usePresence(!following && items.length > 0, 200)
   // The replies of threads on screen are read here, in the chat.
-  const unread = items.flatMap((i) => (i.kind === 'entry' && (i.entry.data.thread?.unread ?? 0) > 0 ? [i.entry.id] : []))
-  const arrivals = useArrivals([...items.map((i) => i.id), ...(live ? ['working'] : [])], following)
+  const rootOf = (i: ChatItem) => (i.kind === 'entry' ? i.entry : i.kind === 'task' ? i.root : null)
+  const unread = items.flatMap((i) => ((rootOf(i)?.data.thread?.unread ?? 0) > 0 ? [rootOf(i)!.id] : []))
+  // Work in a task shows on its card's live line, so the chat's own indicator is for work outside the cards.
+  const inCard = !!working && all.some((i) => i.kind === 'task' && i.root.id === working)
+  const arrivals = useArrivals([...items.map((i) => i.id), ...(live && !inCard ? ['working'] : [])], following)
 
   const toBottom = (smooth = false) => {
     const el = scroller.current
@@ -411,19 +415,20 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
   const asked = useRef(new Set<string>())
   useEffect(() => {
     for (const item of items) {
-      if (item.kind !== 'entry') continue
-      const count = item.entry.data.thread?.count ?? 0
-      const key = `${item.entry.id}:${count}`
-      if (count === 0 || asked.current.has(key) || store.replies(botId, item.entry.id).length >= count) continue
+      const root = rootOf(item)
+      if (!root) continue
+      const count = root.data.thread?.count ?? 0
+      const key = `${root.id}:${count}`
+      if (count === 0 || asked.current.has(key) || store.replies(botId, root.id).length >= count) continue
       asked.current.add(key)
-      void store.loadThread(botId, item.entry.id)
+      void store.loadThread(botId, root.id)
     }
   })
 
   // A conversation opened from the bot detail or a notification: its first message into view, the chat left there.
   useLayoutEffect(() => {
     if (!focusId) return
-    const at = all.findIndex((i) => (i.kind === 'entry' && i.entry.id === focusId) || (i.kind === 'topic' && i.entries.some((e) => e.id === focusId)))
+    const at = all.findIndex((i) => (i.kind === 'entry' && i.entry.id === focusId) || (i.kind === 'topic' && i.entries.some((e) => e.id === focusId)) || (i.kind === 'task' && (i.root.id === focusId || i.thread.some((e) => e.id === focusId))))
     if (at < 0) {
       void store.loadThread(botId, focusId)
       return
@@ -449,10 +454,11 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
   })
 
   // A message the user sends brings the chat back to the newest.
-  const lastIsUser = last?.kind === 'entry' && last.entry.kind === 'user'
+  const newest = last?.kind === 'entry' ? last.entry : last?.kind === 'task' ? (last.thread.at(-1) ?? last.root) : null
+  const lastIsUser = newest?.kind === 'user'
   useEffect(() => {
     if (lastIsUser) setFollowing(true)
-  }, [last?.id, lastIsUser])
+  }, [newest?.id, lastIsUser])
 
   // Rows that grow after layout (images, the text size) keep a follower at the bottom.
   useEffect(() => {
@@ -495,7 +501,7 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
             </div>
           ))}
           {unread.map((id) => <ReadingThread key={id} botId={botId} root={id} />)}
-          {bot && live ? (
+          {bot && live && !inCard ? (
             <div className={arrivals.has('working') ? 'chat-working row-in' : 'chat-working'}>
               <WorkingIndicator bot={bot} thinking={store.currentThinking(botId, working ?? null)} />
             </div>
@@ -521,6 +527,57 @@ const Transcript = memo(function Transcript({ botId, focusId, openTrace, openRou
   )
 })
 
+/**
+ * A task at work whose card is off screen: one line above the box says so ("● Board badge fix  Running tests · 1:12"),
+ * with how many more are at work; a click brings the card into view.
+ */
+function WorkingNow({ botId }: { botId: string }) {
+  const store = useStore()
+  const bot = store.bots.get(botId)
+  const roots = bot && bot.tasks ? store.chat(botId).filter((e) => isTask(e) && isWorkingIn(bot, botId, e.id)) : []
+  const key = roots.map((e) => e.id).join(' ')
+  const [hidden, setHidden] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    if (!key) return
+    const ids = key.split(' ')
+    const seen = new Map<string, boolean>()
+    const update = () => setHidden(new Set(ids.filter((id) => !seen.get(id))))
+    const observer = new IntersectionObserver((records) => {
+      for (const r of records) seen.set((r.target as HTMLElement).dataset.task!, r.isIntersecting)
+      update()
+    }, { root: document.querySelector('.transcript') })
+    const watch = () => {
+      observer.disconnect()
+      for (const id of ids) {
+        const el = document.querySelector(`.transcript [data-task="${CSS.escape(id)}"]`)
+        if (el) observer.observe(el)
+        else seen.set(id, false)
+      }
+      update()
+    }
+    watch()
+    // Cards mount and unmount as the chat pages; look again when the list changes.
+    const list = document.querySelector('.transcript-content')
+    const mutations = new MutationObserver(watch)
+    if (list) mutations.observe(list, { childList: true })
+    return () => {
+      observer.disconnect()
+      mutations.disconnect()
+    }
+  }, [key])
+  const off = roots.filter((e) => hidden.has(e.id))
+  const first = off.at(-1)
+  if (!bot || !first) return null
+  return (
+    <button className="working-now press" onClick={() => document.querySelector(`.transcript [data-task="${CSS.escape(first.id)}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })}>
+      <LiveDot pair={pairOf(bot.avatarColor)} />
+      <b>{taskTitle(first)}</b>
+      <span className="working-now-what">{bot.activity || 'Working…'}</span>
+      {off.length > 1 ? <span className="working-now-more">{`+${off.length - 1}`}</span> : null}
+    </button>
+  )
+}
+
 /** A thread's replies are on screen in the chat: they are read. */
 function ReadingThread({ botId, root }: { botId: string; root: string }) {
   useReading(useStore(), botId, root)
@@ -534,6 +591,7 @@ function Row({ item, chat, focusId, openTrace, openRoutine, openBotChat }: { ite
   }
   if (item.kind === 'exchanges') return <BotMessageRow exchanges={item.exchanges} open={openBotChat} />
   if (item.kind === 'steps') return <StepsRow entries={item.entries} openTrace={openTrace} />
+  if (item.kind === 'task') return <TaskCard item={item} focusId={focusId} renderRow={(row) => <Row item={row} chat={chat} openTrace={openTrace} openRoutine={openRoutine} openBotChat={openBotChat} />} />
   if (item.kind === 'topic') return <TopicCard item={item} focusId={focusId} renderRow={(row) => <Row item={row} chat={chat} openTrace={openTrace} openRoutine={openRoutine} openBotChat={openBotChat} />} />
   if (item.kind === 'ending') return chat ? <EndLine botId={chat.id} text={item.text} more={item.more} /> : null
   const e = item.entry
