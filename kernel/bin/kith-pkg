@@ -213,6 +213,36 @@ def problems(home):
                 out.append(f'services/{f.name}: no kind (mcp, cli or login)')
         except ValueError as e:
             out.append(f'services/{f.name}: invalid JSON ({e})')
+    return out + must_ask_problems(home)
+
+
+def must_ask_problems(home):
+    """Routine a package declares (settings.json permissions.allow and autoMode.allow) that a must-ask class covers: the
+    run asks for it anyway (kith_guard.must_ask_rules), so declaring it is a mistake to fix in the package."""
+    import kith_guard
+    try:
+        s = json.loads((home / 'settings.json').read_text())
+    except (OSError, ValueError):
+        return []
+    agent = home.parent.name if home.name == 'role' else home.name
+    life_dir = str(life(agent))
+    p = paths()
+    values = {'KITH': str(KITH), 'HQ': str(KITH), 'AGENTS': str(p['KITH_AGENTS']), 'PACKAGE': str(home), 'AGENT': agent,
+              'AGENT_DIR': str(home), 'HOME_DIR': life_dir, 'HOME_REAL': os.path.realpath(life_dir),
+              'STATE': str(p['KITH_STATE']), 'MACHINE': str(p['KITH_MACHINE']), 'USER_HOME': str(Path.home())}
+    fill = lambda t: re.sub(r'\{\{([A-Z_]+)\}\}', lambda m: values.get(m.group(1), m.group(0)), t)  # noqa: E731
+    places = kith_guard.Places(package=home)
+    out = []
+    perms = s.get('permissions') if isinstance(s.get('permissions'), dict) else {}
+    for rule in perms.get('allow') or []:
+        c = isinstance(rule, str) and kith_guard.must_ask_rule(rule, fill, places)
+        if c:
+            out.append(f'settings.json: allow {rule} is must-ask ({c}); the run asks for it whatever allows it')
+    auto = s.get('autoMode') if isinstance(s.get('autoMode'), dict) else {}
+    for line in auto.get('allow') or []:
+        c = isinstance(line, str) and line != '$defaults' and kith_guard.sentence_class(line)
+        if c:
+            out.append(f'settings.json: autoMode.allow names a must-ask class ({c}): {line[:80]}')
     return out
 
 
