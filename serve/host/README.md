@@ -92,7 +92,7 @@ message seen and queued messages are copied from `~/.kith/bridge/state.json` whe
 only). State lives in `<data dir>/channels/state.json`. Also grant `jev-browser` to `serve`, or the router merges
 every message sent while an agent works. `GET /health` has a `channels` object with each connection's state.
 A host whose `KITH_SERVE_HOME` is not the default data folder (a test host) runs no channels: it neither asks hq-auth for
-grants nor reads the bridge's state, and `/health` shows `channels.off: "temporary home"`. Set `KITH_SERVE_CHANNELS=1` to run them in
+grants nor reads the bridge's state, and `/health` shows `channels.off: "temporary home"`. Set `KITH_SERVE_CHANNELS=on` (or `1`) to run them in
 such a home anyway.
 
 **Telegram** (`src/channels/telegram/`) is ported: grant `telegram` profiles to `serve`
