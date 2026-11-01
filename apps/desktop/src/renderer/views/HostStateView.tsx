@@ -13,7 +13,7 @@ export function HostStateView({ compact = false }: { compact?: boolean }) {
     case 'notInstalled':
       return <EmptyState compact={compact} icon="desktopcomputer" title={`Set up this ${isMac ? 'Mac' : 'computer'}`} message={`Kith runs your coding agents through the host, a small background service on this ${isMac ? 'Mac' : 'computer'}.`} action={['Install host', () => window.kith.host.install()]} />
     case 'missingBinary':
-      return <EmptyState compact={compact} icon="desktopcomputer.trianglebadge.exclamationmark" title="The host is missing" message={window.kith.appScheme === 'kith-dev' ? 'Rebuild Kith Dev with its development host, then open it again.' : "This copy of Kith doesn't include its host. Download Kith again from github.com/Ying-Kai-Liao/kith."} />
+      return <EmptyState compact={compact} icon="desktopcomputer.trianglebadge.exclamationmark" title="The host is missing" message="This copy of Kith doesn't include its host. Download Kith again from github.com/Ying-Kai-Liao/kith." />
     case 'failed':
       return <EmptyState compact={compact} icon="desktopcomputer.trianglebadge.exclamationmark" title="The host isn't running" message={state.message} action={['Try again', () => window.kith.host.restart()]} />
     default:

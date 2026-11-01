@@ -585,10 +585,10 @@ jobs:
           # SF Symbols masks and the DMG background are generated at build time, never committed.
           npm run icons
           swift ../packaging/dmg/background.swift build/dmg-background.tiff
-      - name: Build the Mac dev app (unsigned)
+      - name: Build the Mac app (unsigned, not notarized)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run dist:mac:dev -- --publish never
+        run: npm run dist:mac -- --publish never -c.mac.notarize=false
       - name: Show the result
         run: ls -la dist
 

@@ -16,6 +16,7 @@ const locations = [
   '/home/linuxbrew/.linuxbrew/bin',
   '/user home/.local/bin',
   '/Applications/Kith.app/Contents/Resources',
+  '/user home/.kith/serve/bin',
 ]
 
 function probe(installed: string[]) {
@@ -59,34 +60,22 @@ test('SSH reports command not found when no installation is reachable', { skip: 
   assert.equal(probe([]).status, 127)
 })
 
-for (const installed of ['mac', 'linux', 'production-only'] as const) {
-  test(`development SSH uses only its own host with ${installed} installed`, { skip: process.platform === 'win32' }, () => {
-    const root = mkdtempSync(join(tmpdir(), 'kith-dev-ssh-'))
-    try {
-      const home = join(root, 'user home')
-      const mac = join(root, 'Applications/Kith Dev.app/Contents/Resources/kith-serve')
-      const linux = join(home, '.kith/serve/bin/kith-serve')
-      const prod = join(home, '.local/bin/kith-serve')
-      for (const bin of [prod, ...(installed === 'mac' ? [mac] : installed === 'linux' ? [linux] : [])]) {
-        mkdirSync(join(bin, '..'), { recursive: true })
-        writeFileSync(bin, '#!/bin/sh\nprintf "%s\\n" "$0" "$KITH_SERVE_HOME" "$@"\n')
-        chmodSync(bin, 0o755)
-      }
-      const command = remoteInfoCommand(19224, '.kith/serve')
-        .replace(/^sh -lc '/, '').replace(/'$/, '')
-        .replaceAll('/Applications/', `${root}/Applications/`)
-      const result = spawnSync('/bin/sh', ['-c', command], {
-        encoding: 'utf8', env: { HOME: home, PATH: join(home, '.local/bin') },
-      })
-      assert.equal(result.status, installed === 'production-only' ? 127 : 0)
-      if (installed !== 'production-only') {
-        assert.deepEqual(result.stdout.trim().split('\n'), [installed === 'mac' ? mac : linux, join(home, '.kith/serve'), 'info', '--json', '--port', '19224'])
-      }
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
-  })
-}
+test('SSH points the remote host at the one data folder', { skip: process.platform === 'win32' }, () => {
+  const root = mkdtempSync(join(tmpdir(), 'kith-ssh-home-'))
+  try {
+    const home = join(root, 'user home')
+    const bin = join(home, '.kith/serve/bin/kith-serve')
+    mkdirSync(join(bin, '..'), { recursive: true })
+    writeFileSync(bin, '#!/bin/sh\nprintf "%s\\n" "$0" "$KITH_SERVE_HOME" "$@"\n')
+    chmodSync(bin, 0o755)
+    const command = remoteInfoCommand(19224).replace(/^sh -lc '/, '').replace(/'$/, '').replace(/:(\/[^:"]+)/g, (_, path: string) => `:${root}${path}`)
+    const result = spawnSync('/bin/sh', ['-c', command], { encoding: 'utf8', env: { HOME: home, PATH: '/nonexistent' } })
+    assert.equal(result.status, 0)
+    assert.deepEqual(result.stdout.trim().split('\n'), [bin, join(home, '.kith/serve'), 'info', '--json', '--port', '19224'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 const profile: SSHProfile = {
   id: 'test', host: 'test-mini', user: null, port: null, identityFile: null,

@@ -1,18 +1,15 @@
 // Builds the on-device speech helper (native/speech-macos, a SwiftPM package) into build/native/kith-speech
-// for the Mac app to bundle: node tools/native-speech.mjs dev|main. main: universal (arm64 + x86_64); dev: this
-// Mac's architecture only, since it never leaves the Mac that built it.
+// for the Mac app to bundle: node tools/native-speech.mjs. Universal (arm64 + x86_64).
 import { execFileSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 if (process.platform !== 'darwin') process.exit(0)
-const env = process.argv[2]
-if (!['dev', 'main'].includes(env)) throw new Error(`unknown environment ${env}`)
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = join(root, 'native/speech-macos')
 const out = join(root, 'build/native')
-const archs = env === 'dev' ? [process.arch === 'arm64' ? 'arm64' : 'x86_64'] : ['arm64', 'x86_64']
+const archs = ['arm64', 'x86_64']
 mkdirSync(out, { recursive: true })
 rmSync(join(out, 'kith-speech'), { force: true })
 const binaries = archs.map((arch) => {
