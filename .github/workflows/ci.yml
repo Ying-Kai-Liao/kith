@@ -131,9 +131,10 @@ jobs:
               - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             # What the root crate builds from: the host and the memory and wire crates, not guest or tts, which
-            # nothing in the host depends on. Those two get their own small job (host-crates).
+            # nothing in the host depends on. Those two get their own small job (host-crates). Also the kernel's bin
+            # and lib: host tests run the repo's own kernel commands (kith-allow, kith-auth, kith, ...) and what they import.
             host_core:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/**,kernel/lib/**,.github/workflows/ci.yml}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
