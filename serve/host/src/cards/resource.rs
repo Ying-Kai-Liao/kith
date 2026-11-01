@@ -212,7 +212,7 @@ fn sensitive_rel(rel: &str) -> bool {
 }
 
 /// macOS volumes ignore case, so `Secrets/ENV` is the same file: compare folded there.
-fn fold(p: &Path) -> PathBuf {
+pub fn fold(p: &Path) -> PathBuf {
     if cfg!(target_os = "macos") { PathBuf::from(p.to_string_lossy().to_lowercase()) } else { p.to_path_buf() }
 }
 
