@@ -156,8 +156,16 @@ async fn a_late_always_still_saves_and_a_late_once_does_nothing() {
 async fn what_cannot_be_remembered_gets_no_always_option() {
     let r = Rig::new().await;
     window(&r.hub, 20);
-    for (n, command) in ["rm -rf /tmp/build", "python3", "echo $AWS_SECRET_ACCESS_KEY"].into_iter().enumerate() {
-        let call = ask_auto(&r.hub, owner_run(&format!("auto-f{n}")), "Bash", json!({"command": command}));
+    let commands = ["rm -rf /tmp/build", "python3", "echo $AWS_SECRET_ACCESS_KEY", "git push origin main"];
+    for (n, command) in commands.into_iter().enumerate() {
+        // Not REASON: it is hard_deny, which drops Always from any prose rule, so it would pass whatever the command's class.
+        let call = ask_auto_for(
+            &r.hub,
+            owner_run(&format!("auto-f{n}")),
+            "Bash",
+            json!({"command": command}),
+            "[Irreversible Local Destruction]",
+        );
         let card = shown(&r.hub).await;
         assert_eq!(ids(&data(&r, &card)), ["allow", "deny"], "{command}");
         answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
@@ -173,7 +181,7 @@ async fn a_rule_a_permission_rule_cannot_hold_is_kept_as_a_sentence_naming_the_a
         &r.hub,
         owner_run("auto-g"),
         "Bash",
-        json!({"command": "git push origin main"}),
+        json!({"command": "git push origin feature"}),
         "[Irreversible Local Destruction]",
     );
     let card = shown(&r.hub).await;
@@ -186,7 +194,7 @@ async fn a_rule_a_permission_rule_cannot_hold_is_kept_as_a_sentence_naming_the_a
     let rules = saved(&r);
     assert_eq!(rules[0]["kind"], "prose");
     let text = rules[0]["rule"].as_str().unwrap();
-    assert!(text.contains("\"house\"") && text.contains("git push origin main"), "{text}");
+    assert!(text.contains("\"house\"") && text.contains("git push origin feature"), "{text}");
 }
 
 #[tokio::test]
@@ -221,7 +229,7 @@ async fn a_sentence_is_not_offered_when_the_block_is_a_hard_deny() {
     let r = Rig::new().await;
     window(&r.hub, 20);
     // A hard_deny block (Data Exfiltration) is not lifted by a sentence; an exact rule still resolves before the classifier.
-    let call = ask_auto(&r.hub, owner_run("auto-i"), "Bash", json!({"command": "git push origin main"}));
+    let call = ask_auto(&r.hub, owner_run("auto-i"), "Bash", json!({"command": "git push origin feature"}));
     let card = shown(&r.hub).await;
     assert_eq!(ids(&data(&r, &card)), ["allow", "deny"]);
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
