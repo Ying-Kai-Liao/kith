@@ -6,38 +6,30 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test } from 'node:test'
+import { identity } from './environment.ts'
 const require = createRequire(import.meta.url)
-const dev = require('../../tools/dev-builder.cjs')
 const { AppInfo } = require('app-builder-lib/out/appInfo')
-const { getWindowsInstallationDirName, getWindowsInstallationAppPackageName } = require('app-builder-lib/out/targets/targetUtil')
 const { parse } = require('yaml')
 const prod = parse(readFileSync(new URL('../../electron-builder.yml', import.meta.url), 'utf8'))
 const metadata = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
 
-test('Linux packages and Windows installation resources have separate development names', () => {
-  const mainInfo = new AppInfo({ config: prod, metadata })
-  const devInfo = new AppInfo({ config: dev, metadata: { ...metadata, ...dev.extraMetadata } })
-  assert.equal(mainInfo.linuxPackageName, 'kith-desktop')
-  assert.equal(devInfo.linuxPackageName, 'kith-desktop-dev')
-  assert.notEqual(devInfo.updaterCacheDirName, mainInfo.updaterCacheDirName)
-  assert.notEqual(getWindowsInstallationDirName(devInfo, true), getWindowsInstallationDirName(mainInfo, true))
-  assert.notEqual(getWindowsInstallationAppPackageName(devInfo.name), getWindowsInstallationAppPackageName(mainInfo.name))
-  assert.equal(dev.extraMetadata.desktopName, 'kith-dev.desktop')
+test('the packaged identity matches the app and its host', () => {
+  assert.equal(prod.appId, identity.appId)
+  assert.equal(prod.productName, identity.name)
+  assert.deepEqual(prod.protocols.flatMap((p: { schemes: string[] }) => p.schemes), [identity.scheme, identity.appId])
+  assert.equal(new AppInfo({ config: prod, metadata }).linuxPackageName, 'kith-desktop')
+  assert.deepEqual(prod.mac.extraFiles.map((f: { to: string }) => f.to), [
+    `Library/LoginItems/${identity.screenName}.app`,
+    `Library/LaunchAgents/${identity.screenLabel}.plist`,
+  ])
+  // The Windows sign-in entry starts the supervisor under the name the app expects.
+  assert.ok(prod.win.extraResources.some((f: { to: string }) => f.to === identity.supervisor))
 })
 
-test('development packaging registers only development callbacks and background helpers', () => {
-  assert.equal(dev.appId, 'com.yingkailiao.kith.dev')
-  assert.equal(dev.productName, 'Kith Dev')
-  assert.equal(dev.publish, null)
-  assert.ok(new RegExp(dev.mac.signIgnore[0]).test('KithDevScreen.app/Contents/Helpers/cua-driver'))
-  assert.deepEqual(dev.protocols.flatMap((p: { schemes: string[] }) => p.schemes), ['kith-dev', 'com.yingkailiao.kith.dev'])
-  assert.deepEqual(dev.mac.extraFiles.map((f: { to: string }) => f.to), [
-    'Library/LoginItems/KithDevScreen.app',
-    'Library/LaunchAgents/com.yingkailiao.kith.dev.screen.plist',
-  ])
-  assert.ok(dev.win.extraResources.some((f: { to: string }) => f.to === 'kith-servew.exe'))
-  assert.ok(!dev.win.extraResources.some((f: { to: string }) => f.to === 'kith-servew-main.exe'))
-  assert.equal(dev.linux.executableName, 'kith-dev')
+test('the screen helper agent is the one the app registers', () => {
+  const plist = readFileSync(new URL(`../../resources/mac/${identity.screenLabel}.plist`, import.meta.url), 'utf8')
+  assert.match(plist, new RegExp(`<string>${identity.screenLabel}</string>`))
+  assert.match(plist, new RegExp(`${identity.screenName}\\.app/Contents/MacOS/${identity.screenName}`))
 })
 
 test('the Mac app bundles the service binary and the kith release layout', () => {

@@ -5,8 +5,8 @@ use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const LABEL: &str = crate::environment::Environment::current().service_label();
-const UNIT: &str = crate::environment::Environment::current().systemd_unit();
+const LABEL: &str = crate::environment::SERVICE_LABEL;
+const UNIT: &str = crate::environment::SYSTEMD_UNIT;
 
 /// Stops the installed job, preserving its configuration for a later start.
 /// A manually started daemon is never mistaken for the service we own.

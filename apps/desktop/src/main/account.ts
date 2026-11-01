@@ -12,14 +12,12 @@ import { buildConfig, identity } from './environment'
 /**
  * The Kith account through Clerk's Frontend API, the way ClerkKit drives it on the native
  * apps: a device token in the `Authorization` header (`_is_native=true`), OAuth in the system
- * browser returning to `kith://callback` (`kith-dev` in the dev build), the token kept encrypted with the OS
+ * browser returning to `kith://callback` the token kept encrypted with the OS
  * keychain. An account never grants access to a computer by itself (spec §4.2).
  */
 
 const SCHEME = identity.scheme
 const REDIRECT = `${SCHEME}://callback`
-
-export const isMainEnvironment = () => identity.releaseUpdates
 
 /** `KITH_CLERK_PUBLISHABLE_KEY` / `KITH_CLOUD_URL`, else the build's account config. */
 const loadConfig = (): AccountConfig => resolveAccountConfig(process.env, buildConfig)
@@ -86,7 +84,7 @@ export class AccountService extends EventEmitter {
     error: null,
     user: null,
     cloudURL: this.config.cloudURL,
-    appleSignIn: appleSignInAvailable(identity.environment, this.config.clerkPublishableKey),
+    appleSignIn: appleSignInAvailable(this.config.clerkPublishableKey),
   }
 
   private get storePath() {

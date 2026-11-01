@@ -9,7 +9,6 @@ use super::devices::{Caller, NotAllowed, Principal, principal};
 use super::{roles, str_arg};
 use crate::LockExt;
 use crate::agent::bot::Cmd;
-use crate::environment::Environment;
 use crate::hub::Hub;
 use crate::remote::{account, cloud, crypto};
 use crate::store::{Invite, PersonRow, now_ms};
@@ -250,20 +249,19 @@ async fn make_invite(
         }
     }
     hub.store.set_person_made(&person, &made)?;
-    let (cid, env) = (hub.identity.computer_id(), Environment::current());
-    let app_link = format!("{}://invite?c={cid}&i={invite_id}&t={token}", env.url_scheme());
+    let cid = hub.identity.computer_id();
+    let app_link = format!("{}://invite?c={cid}&i={invite_id}&t={token}", crate::environment::URL_SCHEME);
     // The secret rides in the fragment so it never reaches the web host's logs; no `r=` (the page knows its cloud).
-    // The web client of the cloud this host is on: the production cloud serves it at kithbot.app/join, the Dev one is
-    // its own origin and talks to the dev cloud, so a host on the production cloud never hands that out.
+    // The web client of the cloud this host is on: the production cloud serves it at kithbot.app/join, any other cloud has no web client unless `KITH_WEB_ORIGIN` names one.
     let cloud_url = cloud::url(&hub.store);
     let web_origin = match cloud_url.as_deref() {
         Some(u) if cloud::is_main_cloud(u) => Some(cloud::links_base(u)),
-        _ => env.web_origin(),
+        _ => crate::environment::web_origin(),
     };
     let web_link = web_origin.map(|o| format!("{o}/join#c={cid}&i={invite_id}&t={token}"));
     // The cloud's page opens the app (or says how to get it); the token stays in the fragment here too.
     let page_link = cloud_url.map(|u| format!("{}/i/{cid}/{invite_id}#t={token}", cloud::links_base(&u)));
-    // `link` is what the share sheets show: the web link (a Dev web client), else the page link, else the app link.
+    // `link` is what the share sheets show: the web link (a configured web client), else the page link, else the app link.
     let link = web_link.as_deref().or(page_link.as_deref()).unwrap_or(&app_link);
     Ok(json!({"inviteId": invite_id, "link": link, "appLink": app_link, "kithLink": app_link, "webLink": web_link,
         "pageLink": page_link,

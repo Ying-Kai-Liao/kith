@@ -71,13 +71,13 @@ def host_db_path():
         return Path(os.environ['KITH_SERVE_DB'])
     if os.environ.get('KITH_SERVE_HOME'):
         folders = [Path(os.environ['KITH_SERVE_HOME'])]
-    else:   # the data folder kith-serve is configured for (dev or packaged); the newest store only when it can't say
+    else:   # the data folder kith-serve is configured for ; the newest store only when it can't say
         try:
             out = subprocess.run([str(Path(__file__).resolve().parent.parent / 'bin' / 'kith-serve'), 'endpoint'],
                                  capture_output=True, text=True, timeout=4, check=True).stdout.split()
             folders = [Path(out[0])]
         except Exception:  # noqa: BLE001
-            folders = [DOT / 'serve-main', DOT / 'serve']
+            folders = [DOT / 'serve']
     found = [f / 'serve.db' for f in folders if (f / 'serve.db').is_file()]
     return max(found, key=lambda p: p.stat().st_mtime, default=None)
 

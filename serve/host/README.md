@@ -14,7 +14,7 @@ Releases (`.github/workflows/release.yml`, `scripts/package-release.sh`) pack `b
 
 ## Cloud relay (optional)
 
-A Dev build uses Kai's public relay unless told otherwise; a Main build has none. To reach this
+The host uses the production cloud (`https://api.kithbot.app`) unless told otherwise. To reach this
 computer from outside the local network through another relay (the Worker in `../cloud`), set one in
 one of two ways, highest precedence first:
 
@@ -26,8 +26,7 @@ one of two ways, highest precedence first:
    ```
 
 `KITH_SERVE_CLOUD=off` (or the cloud switched off in the app) wins over both. A missing, empty or
-invalid file means the build's default: the Dev relay on a Dev build, none on Main (the cloud stays off
-and the status says no relay URL is set).
+invalid file means the default cloud.
 
 ## Launcher (macOS)
 
@@ -93,7 +92,7 @@ message seen and queued messages are copied from `~/.kith/bridge/state.json` whe
 only). State lives in `<data dir>/channels/state.json`. Also grant `jev-browser` to `serve`, or the router merges
 every message sent while an agent works. `GET /health` has a `channels` object with each connection's state.
 A host whose `KITH_SERVE_HOME` is not the default data folder (a test host) runs no channels: it neither asks hq-auth for
-grants nor reads the bridge's state, and `/health` shows `channels.off: "temporary home"`. Set `KITH_SERVE_CHANNELS=1` to run them in
+grants nor reads the bridge's state, and `/health` shows `channels.off: "temporary home"`. Set `KITH_SERVE_CHANNELS=on` (or `1`) to run them in
 such a home anyway.
 
 **Telegram** (`src/channels/telegram/`) is ported: grant `telegram` profiles to `serve`

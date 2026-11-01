@@ -7,7 +7,6 @@ import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron'
 import electronUpdater, { type UpdateInfo } from 'electron-updater'
 import type { UpdateState } from '../shared/ipc'
 import { UPDATE_FEED } from '../shared/update-feed'
-import { isMainEnvironment } from './account'
 import { identity } from './environment'
 import { prefs, type HostController } from './host-controller'
 
@@ -20,7 +19,7 @@ const { autoUpdater } = electronUpdater
  * coordinates its background services before the installer replaces the app: the host is
  * stopped first, and a restart marker makes the next launch reinstall it from the new bundle.
  */
-const enabled = app.isPackaged && isMainEnvironment() && UPDATE_FEED !== null
+const enabled = app.isPackaged && UPDATE_FEED !== null
 
 export class Updates extends EventEmitter {
   state: UpdateState = {

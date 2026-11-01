@@ -147,7 +147,7 @@ def kith_bin():
     own = KERNEL / 'bin' / 'kith'
     target = Path(os.environ.get('CARGO_TARGET_DIR') or KERNEL.parent / 'serve/host/target')
     built = [target / 'dev-app/kith', target / 'release/kith', target / 'debug/kith']
-    installed = [shutil.which('kith'), HOME / '.kith/serve/bin/kith-serve', HOME / '.kith/serve-main/bin/kith-serve']
+    installed = [shutil.which('kith'), HOME / '.kith/serve/bin/kith-serve']
     explicit = os.environ.get('KITH_BIN')
     candidates = [explicit, *built, *installed] if os.environ.get('KITH_DEV_BIN') == '1' else [explicit, *installed, *built]
     for c in candidates:

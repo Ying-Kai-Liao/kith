@@ -375,7 +375,7 @@ https://<cloud-host>/b/<computerId>/<inviteId>#t=<token>&k=<hostSignKey>
 ```
 
 - `<cloud-host>` is the host's configured cloud (`cloud::url`), so a self-hosted cloud works.
-- `<scheme>://bot?...` (`kith://`, or `kith-dev://` on a dev build) is the same data for an app or a tool that prefers a scheme (adds `r=<cloud url>`).
+- `<scheme>://bot?...` (`kith://`) is the same data for an app or a tool that prefers a scheme (adds `r=<cloud url>`).
 - Person invites (`createInvite`) return `appLink` (env scheme), `webLink` (`<web origin>/join#c=&i=&t=`, only when the build has a web origin; `KITH_WEB_ORIGIN` overrides it locally) and `link` (= `webLink` when present, else `appLink`; it is what the share sheets show). A web device asking for the owner's account is refused by the host.
 - `kith join` accepts either form.
 

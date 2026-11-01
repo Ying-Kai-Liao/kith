@@ -45,9 +45,6 @@ find_cargo() {
 # A packaged install (kith from a release tarball) has no serve/ source: its host is the kith binary itself, which
 # runs as the host when installed under the name kith-serve. kith sets KITH_BIN; else the binary beside share/.
 PACKAGED=0; [ -f "$HOST/Cargo.toml" ] || PACKAGED=1
-# The Mac app's main build ships a kith for the main environment (own data dir and port, see serve/host environment.rs);
-# its bundle says so in share/kith/env, so these commands never touch the dev service's paths.
-if [ $PACKAGED = 1 ] && [ "$(cat "$REPO/env" 2>/dev/null)" = main ]; then DATA=$HOME/.kith/serve-main; BIN=$DATA/bin/kith-serve; CONFIG=$DATA/config.json; PORT=19225; fi
 
 built_bin() {
   if [ $PACKAGED = 1 ]; then echo "${KITH_BIN:-$(cd "$REPO" && pwd -P)/../../bin/kith}"; else echo "${CARGO_TARGET_DIR:-$HOST/target}/dev-app/kith-serve"; fi
@@ -120,16 +117,15 @@ cmd_start() {
     echo "building kith-serve (dev-app profile)..."
     local log; log=$(mktemp "${TMPDIR:-/tmp}/kith-serve-build.XXXXXX")
     local lowprio=(); [ -x /usr/sbin/taskpolicy ] && lowprio=(/usr/sbin/taskpolicy -b)
-    # Build from inside serve/ so serve/rust-toolchain.toml picks the pinned Rust under rustup. KITH_SERVE_ENV is
-    # read at compile time: an exported `main` would build a main host (other port, folder, label) for the dev slot.
-    if ! (cd "$HOST" && PATH="$(dirname "$cargo"):$PATH" exec env -u KITH_SERVE_ENV ${lowprio[@]+"${lowprio[@]}"} "$cargo" build --profile dev-app --manifest-path "$HOST/Cargo.toml" --bin kith-serve) >"$log" 2>&1; then
+    # Build from inside serve/ so serve/rust-toolchain.toml picks the pinned Rust under rustup.
+    if ! (cd "$HOST" && PATH="$(dirname "$cargo"):$PATH" exec ${lowprio[@]+"${lowprio[@]}"} "$cargo" build --profile dev-app --manifest-path "$HOST/Cargo.toml" --bin kith-serve) >"$log" 2>&1; then
       tail -n 30 "$log" >&2
       rm -f "$log"
       echo "kith serve: build failed; the installed host (if any) is unchanged" >&2
       exit 1
     fi
     # The local voice helper (its own crate, Apple silicon only). A failed build only leaves local voice unavailable.
-    if [ "$(uname -s)-$(uname -m)" = Darwin-arm64 ] && ! (cd "$HOST" && PATH="$(dirname "$cargo"):$PATH" exec env -u KITH_SERVE_ENV ${lowprio[@]+"${lowprio[@]}"} "$cargo" build --profile dev-app --manifest-path "$HOST/Cargo.toml" -p kith-tts) >"$log" 2>&1; then
+    if [ "$(uname -s)-$(uname -m)" = Darwin-arm64 ] && ! (cd "$HOST" && PATH="$(dirname "$cargo"):$PATH" exec ${lowprio[@]+"${lowprio[@]}"} "$cargo" build --profile dev-app --manifest-path "$HOST/Cargo.toml" -p kith-tts) >"$log" 2>&1; then
       tail -n 30 "$log" >&2
       echo "kith serve: kith-tts didn't build; local voice stays unavailable" >&2
     fi
@@ -165,7 +161,7 @@ try: print(json.load(open(sys.argv[1])).get("relay_url") or "")
 except Exception: pass' "$CONFIG"
 }
 
-# The relay in use: ask the running host (it knows the environment's override too), else the file, else the
+# The relay in use: ask the running host (it knows the override too), else the file, else the
 # build's default (a kith serve build is Dev, which has a built-in relay).
 relay_line() {
   local u=""
