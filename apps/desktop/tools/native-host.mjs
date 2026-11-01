@@ -1,7 +1,8 @@
 // Builds the host the app bundles: node tools/native-host.mjs. macOS: build/native/kith-serve,
 // build/native/kith-tts (arm64) and build/native/kith/ (bin/kith + share/kith/kernel, the release
 // layout; universal). `fast` (the sandbox runs of tools/dev.mjs): the host's `dev-app` profile for this
-// Mac's architecture only, since that build never leaves the Mac that made it. Windows:
+// Mac's architecture only, since that build never leaves the Mac that made it. KITH_HOST_NATIVE_ONLY=1
+// does the same for the release profile (CI's unsigned build: its runner has no x86_64 target). Windows:
 // build/native/kith-serve.exe and kith-servew.exe (runs it at sign-in), plus the computer-use
 // driver the host starts from beside itself. Linux apps use the installed host, so there's
 // nothing to do there.
@@ -12,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 
 if (!['darwin', 'win32'].includes(process.platform)) process.exit(0)
 const fast = process.argv[2] === 'fast'
+const nativeOnly = fast || process.env.KITH_HOST_NATIVE_ONLY === '1'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const host = join(root, '../../serve/host')
 const out = join(root, 'build/native')
@@ -34,7 +36,7 @@ if (process.platform === 'win32') {
   run(process.execPath, [join(root, '../packaging/cua-driver/fetch.mjs'), 'windows-x86_64', out])
 } else {
   const native = process.arch === 'arm64' ? 'aarch64-apple-darwin' : 'x86_64-apple-darwin'
-  const targets = fast ? [native] : ['aarch64-apple-darwin', 'x86_64-apple-darwin']
+  const targets = nativeOnly ? [native] : ['aarch64-apple-darwin', 'x86_64-apple-darwin']
   for (const target of targets) build(target)
   // The local voice helper (kith-tts, its own crate) ships beside kith-serve; Apple silicon only, so an Intel
   // build has none and the host reports local voice unavailable.
