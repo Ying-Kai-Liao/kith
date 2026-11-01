@@ -21,7 +21,7 @@ fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let data = std::env::var_os("KITH_SERVE_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join(environment::Environment::current().data_folder())));
+        .or_else(|| dirs::home_dir().map(|h| h.join(environment::DATA_FOLDER)));
     // One supervisor per data folder: the Run key and the app can both start one, and the second's
     // host could only fail on the data folder's lock, forever. It waits a little first, since
     // `install` starts the new supervisor right after stopping the old one.

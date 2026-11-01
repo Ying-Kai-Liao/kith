@@ -14,7 +14,7 @@ Releases (`.github/workflows/release.yml`, `scripts/package-release.sh`) pack `b
 
 ## Cloud relay (optional)
 
-A Dev build uses Kai's public relay unless told otherwise; a Main build has none. To reach this
+The host uses the production cloud (`https://api.kithbot.app`) unless told otherwise. To reach this
 computer from outside the local network through another relay (the Worker in `../cloud`), set one in
 one of two ways, highest precedence first:
 
@@ -26,8 +26,7 @@ one of two ways, highest precedence first:
    ```
 
 `KITH_SERVE_CLOUD=off` (or the cloud switched off in the app) wins over both. A missing, empty or
-invalid file means the build's default: the Dev relay on a Dev build, none on Main (the cloud stays off
-and the status says no relay URL is set).
+invalid file means the default cloud.
 
 ## Launcher (macOS)
 
