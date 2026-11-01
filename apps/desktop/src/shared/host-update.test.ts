@@ -49,7 +49,7 @@ test('failed stop reports the error and cancellation reinstalls the service once
   f.host.resumeAfterCancelledUpdate()
   f.host.resumeAfterCancelledUpdate()
   await settle()
-  assert.deepEqual(f.calls, [['stop'], ['install', '--port', '19225']])
+  assert.deepEqual(f.calls, [['stop'], ['install', '--port', '19224']])
   await f.tick(1000)
 })
 
@@ -57,7 +57,7 @@ test('new app launch reinstalls the host and clears restart marker only after he
   const f = hostUpdateFixture({ restartMarker: true })
   const starting = f.host.refresh()
   await settle()
-  assert.deepEqual(f.calls, [['install', '--port', '19225']])
+  assert.deepEqual(f.calls, [['install', '--port', '19224']])
   assert.equal(f.prefs.get('hostRestartAfterAppUpdate'), true)
   f.behavior.reachable = false
   await f.tick(1000)
@@ -106,22 +106,38 @@ test('idle detection distinguishes working, offline and idle hosts', async () =>
 })
 
 
-test('development install and stop reject a production binary before touching its service', async () => {
-  const f = hostUpdateFixture({ environment: 'dev' })
-  f.behavior.binaryEnvironment = 'main'
-  await f.host.install()
-  assert.equal(f.host.state.kind, 'failed')
-  assert.deepEqual(f.calls, [])
-  assert.equal(await f.host.uninstall(), false)
-  assert.deepEqual(f.calls, [])
-})
-
-test('development service installs on its own port', async () => {
-  const f = hostUpdateFixture({ environment: 'dev' })
+test('the service installs on the one port', async () => {
+  const f = hostUpdateFixture()
   const installing = f.host.install()
   await settle()
   assert.deepEqual(f.calls, [['install', '--port', '19224']])
   await f.tick(1000)
   await installing
   assert.equal(f.host.state.kind, 'running')
+})
+
+// What `kith serve start` writes: dev.kith.serve through a launcher, HQ_BIN in its environment.
+const startedByKith = `<plist><dict><key>ProgramArguments</key><array><string>/home/test/.kith/bin/kith-uv</string><string>run</string></array><key>EnvironmentVariables</key><dict><key>HQ_BIN</key><string>/home/test/hq/kernel/bin/kith</string></dict></dict></plist>`
+
+for (const reachable of [true, false]) {
+  test(`a host installed by kith serve start is used, never installed or replaced (${reachable ? 'running' : 'stopped'})`, async () => {
+    const f = hostUpdateFixture({ service: startedByKith, restartMarker: true })
+    f.behavior.reachable = reachable
+    await f.host.refresh()
+    await f.tick(5000)
+    assert.deepEqual(f.calls.filter((args) => args[0] === 'install' || args[0] === 'uninstall' || args[0] === 'stop'), [])
+    assert.equal(f.host.state.kind, reachable ? 'running' : 'starting')
+    assert.equal(await f.host.uninstall(), false)
+    await f.host.prepareForUpdate()
+    assert.deepEqual(f.calls.filter((args) => args[0] === 'install' || args[0] === 'stop'), [])
+    assert.equal(await f.host.isIdleForUpdate(), true)
+  })
+}
+
+test('restarting an adopted host kickstarts its own job and installs nothing', async () => {
+  const f = hostUpdateFixture({ service: startedByKith })
+  await f.host.refresh()
+  await f.host.install()
+  assert.deepEqual(f.calls.map((args) => args[0]), ['print', 'kickstart'])
+  assert.ok(f.calls.every((args) => args.at(-1)?.endsWith('dev.kith.serve') || args[0] === 'print'))
 })

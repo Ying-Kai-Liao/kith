@@ -13,7 +13,7 @@ interface UpdatesInstance extends EventEmitter {
 
 type ShipIt = { request: boolean; job: 'none' | 'idle' | 'running' }
 
-export function updaterFixture(options: { packaged?: boolean; main?: boolean; prefs?: Record<string, unknown>; shipIt?: ShipIt; feed?: string | null } = {}) {
+export function updaterFixture(options: { packaged?: boolean; prefs?: Record<string, unknown>; shipIt?: ShipIt; feed?: string | null } = {}) {
   const removed: string[] = []
   const calls = { check: 0, download: 0, install: 0, prepare: 0, resume: 0, quit: 0 }
   // macOS's installer job: whether its update request exists, and its launchd state.
@@ -75,7 +75,6 @@ export function updaterFixture(options: { packaged?: boolean; main?: boolean; pr
     electron: { app, ipcMain: ipc, shell: { openPath: async (target: string) => { opened.push(target); return '' } }, BrowserWindow: { getFocusedWindow: () => behavior.focused }, powerMonitor: { getSystemIdleTime: () => behavior.idleSeconds } },
     'electron-updater': { autoUpdater: updater },
     '../shared/update-feed': { UPDATE_FEED: options.feed === undefined ? 'https://example.test/kith' : options.feed },
-    './account': { isMainEnvironment: () => options.main ?? true },
     './environment': { identity: { appId: 'com.yingkailiao.kith' } },
     './host-controller': { prefs: { get: (key: string) => preferences.get(key), set: (key: string, value: unknown) => preferences.set(key, value) } },
   }, {
