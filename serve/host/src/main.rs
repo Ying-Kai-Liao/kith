@@ -420,6 +420,44 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
     },
+    /// The coding engines an agent can run on: installed or not, and how to install or sign in.
+    Engines {
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+        #[command(subcommand)]
+        action: Option<EnginesAction>,
+    },
+}
+
+/// `kith engines <action> <id>`: print the command, never run it.
+#[derive(Subcommand)]
+enum EnginesAction {
+    /// The command that installs the engine on this platform.
+    Install { id: String },
+    /// The command that signs in to the engine.
+    Login { id: String },
+}
+
+/// `kith engines`: the kernel crate's table with this computer's PATH.
+fn print_engines(json: bool, action: Option<EnginesAction>) -> Result<()> {
+    use kith_kernel::engines;
+    let which = |bin: &str| backends::which(bin);
+    let Some(action) = action else {
+        println!(
+            "{}",
+            if json { engines::list_json(&which) } else { engines::list_text(&which).trim_end().to_owned() }
+        );
+        return Ok(());
+    };
+    let (EnginesAction::Install { id } | EnginesAction::Login { id }) = &action;
+    let engine = engines::find(id).ok_or_else(|| anyhow::anyhow!("no engine called {id} (kith engines lists them)"))?;
+    let line = match action {
+        EnginesAction::Install { .. } => engines::install_text(engine, cfg!(unix)),
+        EnginesAction::Login { .. } => engines::login_text(engine, &which),
+    };
+    println!("{}", line.map_err(|e| anyhow::anyhow!(e))?);
+    Ok(())
 }
 
 /// `kith paths`: the folders by the `kith-kernel` crate's rules, in the form `kith_paths.py` prints.
@@ -634,6 +672,7 @@ async fn main() -> Result<()> {
             match cmd {
                 KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                 KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
+                KernelCmd::Engines { json, action } => print_engines(json, action)?,
             }
             Ok(())
         }

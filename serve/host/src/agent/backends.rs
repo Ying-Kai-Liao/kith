@@ -15,429 +15,27 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
-pub struct Harness {
-    pub id: &'static str,
-    pub name: &'static str,
-    /// CLI names that mean "installed on this machine".
-    pub bins: &'static [&'static str],
-    /// The installed CLI's native ACP mode (`{bin}` = resolved binary path).
-    pub local: Option<&'static str>,
-    /// Entry in the ACP registry (adapter or pinned build).
-    pub registry: Option<&'static str>,
-    /// What to tell someone setting it up by hand.
-    pub setup: &'static str,
-    /// How Kith installs the CLI for you (in a setup terminal).
-    pub install: Option<Install>,
-    /// Shell command that signs in, run in a setup terminal (`{bin}` = the CLI).
-    pub login: &'static str,
-    /// How to tell whether it's signed in without starting it.
-    pub signed_in: Option<SignInCheck>,
+/// The table lives in the kernel crate (`kith_kernel::engines`), shared with the `kith` program. The host lists the
+/// rows that speak ACP; the kernel's other engines (hermes, dsh) run from the CLI only.
+pub use kith_kernel::engines::{Engine as Harness, Install};
+
+/// Every engine the phone can pick.
+pub fn harnesses() -> impl Iterator<Item = &'static Harness> {
+    kith_kernel::engines::ENGINES.iter().filter(|h| h.has_acp())
 }
 
-#[derive(Clone, Copy)]
-pub enum Install {
-    /// A vendor install script (`curl … | bash`), Unix only.
-    Script(&'static str),
-    /// Vendor install scripts for Unix and for Windows (PowerShell).
-    Scripts { unix: &'static str, windows: &'static str },
-    /// A global npm package, installed on the computer's Node or else Kith's (`kith-serve npm`).
-    Npm(&'static str),
+/// The command that installs `install` here: an npm package goes through Kith's own Node when the computer has none.
+pub fn install_command(install: Install) -> Option<String> {
+    install.command(cfg!(unix), &|pkg| {
+        crate::service::current_exe()
+            .ok()
+            .map(|exe| format!("{} npm install -g {pkg}", shell::quote(&exe.to_string_lossy())))
+    })
 }
 
-impl Install {
-    /// `None`: nothing Kith can run on this platform.
-    pub fn command(self) -> Option<String> {
-        match self {
-            Self::Script(s) | Self::Scripts { unix: s, .. } if cfg!(unix) => Some(s.to_owned()),
-            Self::Script(_) => None,
-            Self::Scripts { windows, .. } => Some(windows.to_owned()),
-            Self::Npm(pkg) => crate::service::current_exe()
-                .ok()
-                .map(|exe| format!("{} npm install -g {pkg}", shell::quote(&exe.to_string_lossy()))),
-        }
-    }
-}
-
-/// `<bin> <args>`, judged by exit code and stdout.
-#[derive(Clone, Copy)]
-pub struct SignInCheck {
-    pub args: &'static str,
-    pub ok: fn(bool, &str) -> bool,
-}
-
-fn exit_ok(success: bool, _: &str) -> bool {
-    success
-}
-
-fn claude_signed_in(_: bool, out: &str) -> bool {
-    serde_json::from_str::<Value>(out).is_ok_and(|v| v["loggedIn"] == true)
-}
-
-fn qoder_signed_in(_: bool, out: &str) -> bool {
-    serde_json::from_str::<Value>(out).is_ok_and(|v| v["logged_in"] == true)
-}
-
-fn says_logged_in(_: bool, out: &str) -> bool {
-    let out = out.to_lowercase();
-    out.contains("logged in") && !out.contains("not logged in")
-}
-
-pub const HARNESSES: &[Harness] = &[
-    Harness {
-        id: "claude",
-        name: "Claude Code",
-        bins: &["claude"],
-        local: None,
-        registry: Some("claude-acp"),
-        setup: "Install Claude Code and run `claude auth login`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://claude.ai/install.sh | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://claude.ai/install.ps1 | iex\"",
-        }),
-        login: "{bin} auth login",
-        signed_in: Some(SignInCheck { args: "auth status", ok: claude_signed_in }),
-    },
-    Harness {
-        id: "codex",
-        name: "Codex",
-        bins: &["codex"],
-        local: None,
-        registry: Some("codex-acp"),
-        setup: "Install Codex CLI and run `codex login --device-auth`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://chatgpt.com/codex/install.ps1 | iex\"",
-        }),
-        login: "{bin} login --device-auth",
-        signed_in: Some(SignInCheck { args: "login status", ok: exit_ok }),
-    },
-    Harness {
-        id: "cursor",
-        name: "Cursor",
-        bins: &["cursor-agent", "agent"],
-        local: Some("{bin} acp"),
-        registry: Some("cursor"),
-        setup: "Install Cursor CLI (curl https://cursor.com/install -fsS | bash) and run `cursor-agent login`.",
-        install: Some(Install::Scripts {
-            unix: "curl https://cursor.com/install -fsS | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm 'https://cursor.com/install?win32=true' | iex\"",
-        }),
-        login: "NO_OPEN_BROWSER=1 {bin} login",
-        signed_in: Some(SignInCheck { args: "status", ok: says_logged_in }),
-    },
-    Harness {
-        id: "pi",
-        name: "Pi",
-        bins: &["pi"],
-        local: None,
-        registry: Some("pi-acp"),
-        setup: "Install pi (npm install -g @earendil-works/pi-coding-agent), run `pi` and type /login.",
-        install: Some(Install::Npm("@earendil-works/pi-coding-agent")),
-        login: "{bin}",
-        signed_in: None,
-    },
-    Harness {
-        id: "omp",
-        name: "oh-my-pi",
-        bins: &["omp"],
-        local: Some("{bin} acp"),
-        registry: None,
-        setup: "Install oh-my-pi (curl -fsSL https://omp.sh/install | sh -s -- --binary) and run `omp login`.",
-        install: Some(Install::Scripts {
-            // The prebuilt binary: by default the scripts build through any Bun on PATH and stop when it's older than they need.
-            unix: "curl -fsSL https://omp.sh/install | sh -s -- --binary",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& ([scriptblock]::Create((irm https://omp.sh/install.ps1))) -Binary\"",
-        }),
-        login: "{bin} login",
-        signed_in: None,
-    },
-    Harness {
-        id: "opencode",
-        name: "OpenCode",
-        bins: &["opencode"],
-        local: Some("{bin} acp"),
-        registry: Some("opencode"),
-        setup: "Install OpenCode (curl -fsSL https://opencode.ai/install | bash) and run `opencode auth login`.",
-        install: Some(Install::Script("curl -fsSL https://opencode.ai/install | bash")),
-        login: "{bin} auth login",
-        signed_in: None,
-    },
-    Harness {
-        id: "grok",
-        name: "Grok Build",
-        bins: &["grok"],
-        local: Some("{bin} agent stdio"),
-        registry: Some("grok-build"),
-        setup: "Install Grok Build (curl -fsSL https://x.ai/cli/install.sh | bash) and run `grok login --device-auth`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://x.ai/cli/install.sh | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://x.ai/cli/install.ps1 | iex\"",
-        }),
-        login: "{bin} login --device-auth",
-        signed_in: None,
-    },
-    Harness {
-        id: "gemini",
-        name: "Gemini CLI",
-        bins: &["gemini"],
-        local: Some("{bin} --acp"),
-        registry: Some("gemini"),
-        setup: "Install Gemini CLI (npm install -g @google/gemini-cli) and run `gemini` to sign in with Google.",
-        install: Some(Install::Npm("@google/gemini-cli")),
-        login: "NO_BROWSER=true {bin}",
-        signed_in: None,
-    },
-    Harness {
-        id: "copilot",
-        name: "GitHub Copilot",
-        bins: &["copilot"],
-        local: Some("{bin} --acp --stdio"),
-        registry: Some("github-copilot-cli"),
-        setup: "Install Copilot CLI (curl -fsSL https://gh.io/copilot-install | bash) and run `copilot login`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://gh.io/copilot-install | bash",
-            windows: "winget install --id GitHub.Copilot -e",
-        }),
-        login: "{bin} login --device-code",
-        signed_in: None,
-    },
-    Harness {
-        id: "qwen",
-        name: "Qwen Code",
-        bins: &["qwen"],
-        local: Some("{bin} --acp"),
-        registry: Some("qwen-code"),
-        setup: "Install Qwen Code (its standalone installer), run `qwen` and type /auth.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.sh | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://qwen-code-assets.oss-cn-hangzhou.aliyuncs.com/installation/install-qwen-standalone.ps1 | iex\"",
-        }),
-        login: "{bin}",
-        signed_in: None,
-    },
-    Harness {
-        id: "goose",
-        name: "goose",
-        bins: &["goose"],
-        local: Some("{bin} acp"),
-        registry: Some("goose"),
-        setup: "Install goose and run `goose configure`.",
-        install: Some(Install::Script(
-            "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash",
-        )),
-        login: "{bin} configure",
-        signed_in: None,
-    },
-    Harness {
-        id: "kimi",
-        name: "Kimi Code",
-        bins: &["kimi"],
-        local: Some("{bin} acp"),
-        registry: Some("kimi"),
-        setup: "Install Kimi Code (curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash) and run `kimi login`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://code.kimi.com/kimi-code/install.sh | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://code.kimi.com/kimi-code/install.ps1 | iex\"",
-        }),
-        login: "{bin} login",
-        signed_in: None,
-    },
-    Harness {
-        id: "droid",
-        name: "Factory Droid",
-        bins: &["droid"],
-        local: Some("{bin} exec --output-format acp-daemon"),
-        registry: Some("factory-droid"),
-        setup: "Install Droid (curl -fsSL https://app.factory.ai/cli | sh) and sign in with `droid`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://app.factory.ai/cli | sh",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://app.factory.ai/cli/windows | iex\"",
-        }),
-        login: "{bin}",
-        signed_in: None,
-    },
-    Harness {
-        id: "amp",
-        name: "Amp",
-        bins: &["amp"],
-        local: None,
-        registry: Some("amp-acp"),
-        setup: "Install Amp (curl -fsSL https://ampcode.com/install.sh | bash) and run `amp login`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://ampcode.com/install.sh | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://ampcode.com/install.ps1 | iex\"",
-        }),
-        login: "{bin} login",
-        signed_in: None,
-    },
-    Harness {
-        id: "kilo",
-        name: "Kilo",
-        bins: &["kilo"],
-        local: Some("{bin} acp"),
-        registry: Some("kilo"),
-        setup: "Install Kilo CLI (npm install -g @kilocode/cli) and run `kilo auth login`.",
-        install: Some(Install::Npm("@kilocode/cli")),
-        login: "{bin} auth login",
-        signed_in: Some(SignInCheck { args: "profile --json", ok: exit_ok }),
-    },
-    Harness {
-        id: "cline",
-        name: "Cline",
-        bins: &["cline"],
-        local: Some("{bin} --acp"),
-        registry: Some("cline"),
-        setup: "Install Cline CLI (npm install -g cline) and run `cline auth`.",
-        install: Some(Install::Npm("cline")),
-        login: "{bin} auth",
-        signed_in: None,
-    },
-    Harness {
-        id: "auggie",
-        name: "Auggie",
-        bins: &["auggie"],
-        local: Some("{bin} --acp"),
-        registry: Some("auggie"),
-        setup: "Install Auggie (npm install -g @augmentcode/auggie) and run `auggie login`.",
-        install: Some(Install::Npm("@augmentcode/auggie")),
-        login: "{bin} login",
-        signed_in: Some(SignInCheck { args: "account status", ok: exit_ok }),
-    },
-    Harness {
-        id: "vibe",
-        name: "Mistral Vibe",
-        bins: &["vibe-acp", "vibe"],
-        local: None,
-        registry: Some("mistral-vibe"),
-        setup: "Install Mistral Vibe (curl -LsSf https://mistral.ai/vibe/install.sh | bash) and run `vibe --setup`.",
-        install: Some(Install::Script("curl -LsSf https://mistral.ai/vibe/install.sh | bash")),
-        login: "vibe --setup",
-        signed_in: None,
-    },
-    Harness {
-        id: "kiro",
-        name: "Kiro CLI",
-        bins: &["kiro-cli"],
-        local: Some("{bin} acp"),
-        registry: None,
-        setup: "Install Kiro CLI (curl -fsSL https://cli.kiro.dev/install | bash) and run `kiro-cli login`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://cli.kiro.dev/install | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm 'https://cli.kiro.dev/install.ps1' | iex\"",
-        }),
-        login: "{bin} login",
-        signed_in: None,
-    },
-    Harness {
-        id: "devin",
-        name: "Devin",
-        bins: &["devin"],
-        local: Some("{bin} acp"),
-        registry: Some("devin"),
-        setup: "Install the Devin CLI (curl -fsSL https://cli.devin.ai/install.sh | bash) and run `devin auth login`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://cli.devin.ai/install.sh | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://cli.devin.ai/install.ps1 | iex\"",
-        }),
-        login: "{bin} auth login",
-        signed_in: None,
-    },
-    Harness {
-        id: "qoder",
-        name: "Qoder CLI",
-        bins: &["qodercli"],
-        local: Some("{bin} --acp"),
-        registry: Some("qoder"),
-        setup: "Install Qoder CLI (curl -fsSL https://qoder.com/install | bash) and run `qodercli login`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://qoder.com/install | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://qoder.com/install.ps1 | iex\"",
-        }),
-        login: "{bin} login",
-        signed_in: Some(SignInCheck { args: "status -o json", ok: qoder_signed_in }),
-    },
-    Harness {
-        id: "codebuddy",
-        name: "CodeBuddy Code",
-        bins: &["codebuddy", "cbc"],
-        local: Some("{bin} --acp"),
-        registry: Some("codebuddy-code"),
-        setup: "Install CodeBuddy Code (npm install -g @tencent-ai/codebuddy-code) and sign in with `codebuddy`.",
-        install: Some(Install::Npm("@tencent-ai/codebuddy-code")),
-        login: "{bin}",
-        signed_in: None,
-    },
-    Harness {
-        id: "minimax",
-        name: "MiniMax Code",
-        bins: &["mcode"],
-        local: Some("{bin} acp"),
-        registry: Some("minimax-code"),
-        setup: "Install MiniMax Code (npm install -g @minimax-ai/code) and run `mcode login`.",
-        install: Some(Install::Npm("@minimax-ai/code")),
-        login: "{bin} login",
-        signed_in: None,
-    },
-    Harness {
-        id: "junie",
-        name: "Junie",
-        bins: &["junie"],
-        local: Some("{bin} --acp=true"),
-        registry: Some("junie"),
-        setup: "Install Junie (curl -fsSL https://junie.jetbrains.com/install.sh | bash) and sign in with `junie`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://junie.jetbrains.com/install.sh | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"iex (irm 'https://junie.jetbrains.com/install.ps1')\"",
-        }),
-        login: "{bin}",
-        signed_in: None,
-    },
-    Harness {
-        id: "antigravity",
-        name: "Google Antigravity",
-        bins: &["agy"],
-        local: None,
-        registry: Some("antigravity-acp"),
-        setup: "Install the Antigravity CLI (curl -fsSL https://antigravity.google/cli/install.sh | bash) and sign in with `agy`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://antigravity.google/cli/install.sh | bash",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://antigravity.google/cli/install.ps1 | iex\"",
-        }),
-        login: "{bin}",
-        signed_in: None,
-    },
-    Harness {
-        id: "cortex",
-        name: "Cortex Code",
-        bins: &["cortex"],
-        local: Some("{bin} acp serve"),
-        registry: Some("cortex-code"),
-        setup: "Install Cortex Code (curl -LsS https://ai.snowflake.com/static/cc-scripts/install.sh | sh) and set up a connection with `cortex`.",
-        install: Some(Install::Scripts {
-            unix: "curl -LsS https://ai.snowflake.com/static/cc-scripts/install.sh | sh",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://ai.snowflake.com/static/cc-scripts/install.ps1 | iex\"",
-        }),
-        login: "{bin}",
-        signed_in: None,
-    },
-    Harness {
-        id: "poolside",
-        name: "Poolside",
-        bins: &["pool"],
-        local: Some("{bin} acp"),
-        registry: Some("poolside"),
-        setup: "Install Poolside (curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh) and run `pool login`.",
-        install: Some(Install::Scripts {
-            unix: "curl -fsSL https://downloads.poolside.ai/pool/install.sh | sh",
-            windows: "powershell -NoProfile -ExecutionPolicy Bypass -Command \"irm https://downloads.poolside.ai/pool/install.ps1 | iex\"",
-        }),
-        login: "{bin} login",
-        signed_in: None,
-    },
-];
-
+/// By id only: a stored bot's backend is never an alias.
 pub fn harness(id: &str) -> Option<&'static Harness> {
-    HARNESSES.iter().find(|h| h.id == id)
+    harnesses().find(|h| h.id == id)
 }
 
 // MARK: PATH hydration
@@ -566,8 +164,7 @@ pub fn list() -> Vec<Value> {
 
 /// `list()` over a given registry (the test feeds a fixed one).
 fn list_from(registry: &[Value]) -> Vec<Value> {
-    let mut out: Vec<Value> = HARNESSES
-        .iter()
+    let mut out: Vec<Value> = harnesses()
         .map(|h| {
             let path = h.bins.iter().find_map(|b| which(b));
             let reg = h.registry.and_then(|id| registry.iter().find(|a| a["id"] == id));
@@ -583,7 +180,7 @@ fn list_from(registry: &[Value]) -> Vec<Value> {
                 "description": reg.and_then(|a| a["description"].as_str()).unwrap_or_default(),
                 "installHint": h.setup,
                 "signedIn": signed_in(h.id),
-                "canInstall": h.install.and_then(Install::command).is_some(),
+                "canInstall": h.install.and_then(install_command).is_some(),
                 "node": node.map(node::State::name),
                 "command": h.local.unwrap_or_default(),
                 "registry": h.registry,
@@ -592,7 +189,7 @@ fn list_from(registry: &[Value]) -> Vec<Value> {
         })
         .collect();
     // Registry agents we don't know by name: runnable, but you sign in yourself.
-    let known: HashSet<&str> = HARNESSES.iter().filter_map(|h| h.registry).collect();
+    let known: HashSet<&str> = harnesses().filter_map(|h| h.registry).collect();
     for a in registry {
         let id = a["id"].as_str().unwrap_or_default();
         if id.is_empty() || known.contains(id) || id == "github-copilot" {
@@ -637,7 +234,7 @@ pub fn set_signed_in(id: &str, state: Option<bool>) {
 
 /// Re-checks every installed harness that can report its sign-in state.
 pub async fn refresh_sign_in() {
-    let checks = HARNESSES.iter().filter_map(|h| {
+    let checks = harnesses().filter_map(|h| {
         let check = h.signed_in?;
         let bin = h.bins.iter().find_map(|b| which(b))?;
         Some(async move {
@@ -648,7 +245,7 @@ pub async fn refresh_sign_in() {
                 .kill_on_drop(true)
                 .output();
             let ok = match tokio::time::timeout(Duration::from_secs(15), run).await {
-                Ok(Ok(out)) => Some((check.ok)(out.status.success(), &String::from_utf8_lossy(&out.stdout))),
+                Ok(Ok(out)) => Some(check.ok.eval(out.status.success(), &String::from_utf8_lossy(&out.stdout))),
                 Ok(Err(e)) => {
                     tracing::info!(backend = h.id, error = %e, "sign-in check failed");
                     None
@@ -668,8 +265,7 @@ pub async fn refresh_sign_in() {
 pub fn belongs_to_other(backend: &str, program: &str) -> bool {
     let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or(program);
     let own = |h: &Harness| h.id == backend || h.registry == Some(backend);
-    HARNESSES.iter().any(|h| !own(h) && h.bins.contains(&name))
-        && !HARNESSES.iter().any(|h| own(h) && h.bins.contains(&name))
+    harnesses().any(|h| !own(h) && h.bins.contains(&name)) && !harnesses().any(|h| own(h) && h.bins.contains(&name))
 }
 
 pub fn is_known(id: &str) -> bool {
@@ -766,8 +362,8 @@ mod tests {
 
     #[test]
     fn every_harness_is_unique() {
-        let ids: HashSet<_> = HARNESSES.iter().map(|h| h.id).collect();
-        assert_eq!(ids.len(), HARNESSES.len());
+        let ids: HashSet<_> = harnesses().map(|h| h.id).collect();
+        assert_eq!(ids.len(), harnesses().count());
     }
 
     /// What the app sees, pinned: the table moved into the `kith-kernel` crate and this JSON must not change.
@@ -830,8 +426,7 @@ mod tests {
             (false, "Logged in"),
         ];
         Value::Array(
-            HARNESSES
-                .iter()
+            harnesses()
                 .map(|h| {
                     json!({
                         "id": h.id, "name": h.name, "bins": h.bins, "local": h.local, "registry": h.registry,
@@ -843,7 +438,7 @@ mod tests {
                         }),
                         "signedIn": h.signed_in.map(|c| json!({
                             "args": c.args,
-                            "probes": probes.iter().map(|(ok, out)| (c.ok)(*ok, out)).collect::<Vec<_>>(),
+                            "probes": probes.iter().map(|(ok, out)| c.ok.eval(*ok, out)).collect::<Vec<_>>(),
                         })),
                     })
                 })
