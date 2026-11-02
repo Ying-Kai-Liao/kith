@@ -697,7 +697,9 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Sub::Kernel { cmd } => {
-            if let KernelCmd::RunOnce { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task } = cmd {
+            if let KernelCmd::RunOnce { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task } =
+                cmd
+            {
                 let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }

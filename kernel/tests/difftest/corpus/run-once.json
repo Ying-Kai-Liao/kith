@@ -1,0 +1,125 @@
+[
+  {
+    "name": "run-once-qwen",
+    "command": "run-once",
+    "needs": "rust",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "kith/agents/echo/role"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: qwen\n---\nYou echo.\n"
+      },
+      {
+        "run": [
+          "git",
+          "init",
+          "-q",
+          "{KITH_HOME}/agents/echo/role"
+        ]
+      },
+      {
+        "run": [
+          "git",
+          "-C",
+          "{KITH_HOME}/agents/echo/role",
+          "commit",
+          "-q",
+          "--allow-empty",
+          "-m",
+          "init"
+        ]
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "FAKE_ACP_ANSWER": "fake-answer"
+    },
+    "run": [
+      [
+        "echo",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<VER>"
+      ]
+    ]
+  },
+  {
+    "name": "run-once-qwen-cost",
+    "command": "run-once",
+    "needs": "rust",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "mkdir": "kith/agents/echo/role"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nharness: qwen\n---\nYou echo.\n"
+      },
+      {
+        "run": [
+          "git",
+          "init",
+          "-q",
+          "{KITH_HOME}/agents/echo/role"
+        ]
+      },
+      {
+        "run": [
+          "git",
+          "-C",
+          "{KITH_HOME}/agents/echo/role",
+          "commit",
+          "-q",
+          "--allow-empty",
+          "-m",
+          "init"
+        ]
+      }
+    ],
+    "env": {
+      "KITH_STATE": "{KITH_HOME}/state",
+      "FAKE_ACP_ANSWER": "fake-answer",
+      "FAKE_ACP_COST": "0.25"
+    },
+    "run": [
+      [
+        "echo",
+        "hello world"
+      ]
+    ],
+    "ignore": [
+      "/\\.git/",
+      "/store/"
+    ],
+    "normalize": [
+      [
+        "@\\d{8}T\\d{6}\\.\\d+",
+        "@<TS>"
+      ],
+      [
+        "\\b[0-9a-f]{10}\\b",
+        "<VER>"
+      ]
+    ]
+  }
+]

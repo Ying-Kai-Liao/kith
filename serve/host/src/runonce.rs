@@ -28,7 +28,8 @@ pub struct Args {
 
 /// Runs it and returns the exit code.
 pub async fn run(a: Args) -> Result<i32> {
-    let engine = engines::find(&a.engine).ok_or_else(|| anyhow!("no engine called {} (kith engines lists them)", a.engine))?;
+    let engine =
+        engines::find(&a.engine).ok_or_else(|| anyhow!("no engine called {} (kith engines lists them)", a.engine))?;
     let command = match a.acp_command.clone().or_else(|| std::env::var("KITH_RUN_ONCE_ACP_COMMAND").ok()) {
         Some(c) if !c.is_empty() => c,
         _ => {

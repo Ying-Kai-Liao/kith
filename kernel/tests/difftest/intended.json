@@ -1,4 +1,7 @@
 [
   {"case": "engines-list", "facet": "step*", "why": "host engines join the kernel's list (A2): the core lists all of its table with names, aliases, ACP modes and what each enforces; the Python side lists harness.py's engines and claude"},
-  {"case": "engines-install-login", "facet": "step*", "why": "host engines join the kernel's list (A2): install and login print a command from the core's table, which the Python side does not have"}
+  {"case": "engines-install-login", "facet": "step*", "why": "host engines join the kernel's list (A2): install and login print a command from the core's table, which the Python side does not have"},
+  {"case": "run-once-*", "facet": "fakes", "why": "A2b-1: the one-shot goes over the engine's ACP mode (`qwen --acp`) instead of its own `qwen -o json -p` flags; the log of fake calls shows the other command line"},
+  {"case": "run-once-*", "facet": "step*.stderr", "why": "A2b-1: ACP sessions have one working directory, so the run says which of the agent's extra directories it goes without (native qwen takes --include-directories)"},
+  {"case": "run-once-qwen-cost", "facet": "state:kith/state/cost.db", "why": "A2b-1: the ledger row carries the cost the engine reports over ACP; qwen's own JSON output reports none, so the native row has cost null (the row's shape is the same)"}
 ]

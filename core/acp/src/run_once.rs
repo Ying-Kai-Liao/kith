@@ -36,7 +36,9 @@ pub struct Usage {
 impl Usage {
     /// ACP's `usage` (`inputTokens`, `outputTokens`, `cachedReadTokens`, `cachedWriteTokens`), also under `_meta`.
     pub fn of(result: &Value) -> Option<Self> {
-        let u = [&result["usage"], &result["_meta"]["usage"]].into_iter().find(|u| u.is_object())?;
+        let u = [&result["usage"], &result["_meta"]["usage"]]
+            .into_iter()
+            .find(|u| u.is_object())?;
         let n = |names: [&str; 2]| names.iter().find_map(|k| u[*k].as_u64()).unwrap_or(0);
         let usage = Self {
             input: n(["inputTokens", "input_tokens"]),
@@ -79,12 +81,20 @@ impl Outcome {
 /// The cost in dollars an agent reports: in the prompt result (`usage.costUsd`, `_meta.costUsd`, `_meta.cost_usd`) or
 /// in a `usage_update` (`cost: {amount, currency}`).
 fn cost_of(v: &Value) -> Option<f64> {
-    let direct = [&v["costUsd"], &v["cost_usd"], &v["usage"]["costUsd"], &v["_meta"]["costUsd"], &v["_meta"]["cost_usd"]]
-        .into_iter()
-        .find_map(Value::as_f64);
+    let direct = [
+        &v["costUsd"],
+        &v["cost_usd"],
+        &v["usage"]["costUsd"],
+        &v["_meta"]["costUsd"],
+        &v["_meta"]["cost_usd"],
+    ]
+    .into_iter()
+    .find_map(Value::as_f64);
     direct.or_else(|| {
         let c = &v["cost"];
-        let usd = c["currency"].as_str().is_none_or(|cur| cur.eq_ignore_ascii_case("usd"));
+        let usd = c["currency"]
+            .as_str()
+            .is_none_or(|cur| cur.eq_ignore_ascii_case("usd"));
         usd.then(|| c["amount"].as_f64()).flatten()
     })
 }
@@ -96,7 +106,11 @@ pub fn mcp_servers(config: &Value) -> Value {
     let pairs = |v: &Value, key: &str| -> Vec<Value> {
         v.get(key)
             .and_then(Value::as_object)
-            .map(|o| o.iter().map(|(k, v)| json!({"name": k, "value": v.as_str().unwrap_or_default()})).collect())
+            .map(|o| {
+                o.iter()
+                    .map(|(k, v)| json!({"name": k, "value": v.as_str().unwrap_or_default()}))
+                    .collect()
+            })
             .unwrap_or_default()
     };
     let list = map.as_object().into_iter().flatten().map(|(name, s)| {
@@ -120,11 +134,21 @@ pub async fn run_once(spec: RunSpec) -> Result<Outcome> {
     acp.kill().await;
     crate::stopped().await;
     result.unwrap_or_else(|_| {
-        Err(Failure::error(FailureKind::Timeout, format!("the engine did not finish within {}s", spec.timeout.as_secs())))
+        Err(Failure::error(
+            FailureKind::Timeout,
+            format!(
+                "the engine did not finish within {}s",
+                spec.timeout.as_secs()
+            ),
+        ))
     })
 }
 
-async fn session(acp: &Acp, rx: &mut tokio::sync::mpsc::UnboundedReceiver<Incoming>, spec: &RunSpec) -> Result<Outcome> {
+async fn session(
+    acp: &Acp,
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<Incoming>,
+    spec: &RunSpec,
+) -> Result<Outcome> {
     // The handshake is answered before anything else is read, but a hung agent still ends at the run's deadline.
     acp.request(
         "initialize",
@@ -135,13 +159,23 @@ async fn session(acp: &Acp, rx: &mut tokio::sync::mpsc::UnboundedReceiver<Incomi
         }),
     )
     .await?;
-    let created = acp.request("session/new", json!({"cwd": spec.cwd, "mcpServers": spec.mcp_servers})).await?;
-    let sid = created["sessionId"].as_str().ok_or_else(|| anyhow!("agent returned no sessionId"))?.to_owned();
+    let created = acp
+        .request(
+            "session/new",
+            json!({"cwd": spec.cwd, "mcpServers": spec.mcp_servers}),
+        )
+        .await?;
+    let sid = created["sessionId"]
+        .as_str()
+        .ok_or_else(|| anyhow!("agent returned no sessionId"))?
+        .to_owned();
     if let Some(model) = spec.model.as_deref().filter(|m| !m.is_empty()) {
         select_model(acp, &created, &sid, model).await?;
     }
-    let prompt =
-        acp.request("session/prompt", json!({"sessionId": sid, "prompt": [{"type": "text", "text": spec.task}]}));
+    let prompt = acp.request(
+        "session/prompt",
+        json!({"sessionId": sid, "prompt": [{"type": "text", "text": spec.task}]}),
+    );
     tokio::pin!(prompt);
     let mut text = String::new();
     let mut cost = None;
@@ -172,17 +206,37 @@ async fn select_model(acp: &Acp, created: &Value, sid: &str, model: &str) -> Res
             .iter()
             .filter(is_select)
             .find(|v| v["category"] == "model")
-            .or_else(|| options.iter().filter(is_select).find(|v| v["id"] == "model" || v["id"] == "models"))
+            .or_else(|| {
+                options
+                    .iter()
+                    .filter(is_select)
+                    .find(|v| v["id"] == "model" || v["id"] == "models")
+            })
     });
     let (method, params) = match option.and_then(|o| o["id"].as_str()) {
-        Some(id) => ("session/set_config_option", json!({"sessionId": sid, "configId": id, "value": model})),
-        None => ("session/set_model", json!({"sessionId": sid, "modelId": model})),
+        Some(id) => (
+            "session/set_config_option",
+            json!({"sessionId": sid, "configId": id, "value": model}),
+        ),
+        None => (
+            "session/set_model",
+            json!({"sessionId": sid, "modelId": model}),
+        ),
     };
-    acp.request(method, params).await.map(|_| ()).map_err(|e| e.context(format!("Couldn't select model {model}")))
+    acp.request(method, params)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.context(format!("Couldn't select model {model}")))
 }
 
 /// Keeps reply text and the reported cost; answers what the agent asks of us. Errors once the agent is gone.
-async fn handle(acp: &Acp, inc: Option<Incoming>, text: &mut String, cost: &mut Option<f64>, approve: bool) -> Result<()> {
+async fn handle(
+    acp: &Acp,
+    inc: Option<Incoming>,
+    text: &mut String,
+    cost: &mut Option<f64>,
+    approve: bool,
+) -> Result<()> {
     match inc {
         None => Err(Failure::error(FailureKind::Exited, "agent process exited")),
         Some(Incoming::Closed { stderr_tail }) => {
@@ -210,7 +264,9 @@ async fn handle(acp: &Acp, inc: Option<Incoming>, text: &mut String, cost: &mut 
                 let allow = approve
                     .then(|| {
                         params["options"].as_array().and_then(|o| {
-                            o.iter().find(|o| o["kind"].as_str().is_some_and(|k| k.starts_with("allow")))
+                            o.iter().find(|o| {
+                                o["kind"].as_str().is_some_and(|k| k.starts_with("allow"))
+                            })
                         })
                     })
                     .flatten()
@@ -236,9 +292,25 @@ mod tests {
         let u = Usage::of(
             &json!({"stopReason": "end_turn", "usage": {"inputTokens": 7, "outputTokens": 3, "cachedReadTokens": 2}}),
         );
-        assert_eq!(u, Some(Usage { input: 7, output: 3, cache_read: 2, cache_write: 0 }));
+        assert_eq!(
+            u,
+            Some(Usage {
+                input: 7,
+                output: 3,
+                cache_read: 2,
+                cache_write: 0
+            })
+        );
         let meta = Usage::of(&json!({"_meta": {"usage": {"input_tokens": 5, "output_tokens": 1}}}));
-        assert_eq!(meta, Some(Usage { input: 5, output: 1, cache_read: 0, cache_write: 0 }));
+        assert_eq!(
+            meta,
+            Some(Usage {
+                input: 5,
+                output: 1,
+                cache_read: 0,
+                cache_write: 0
+            })
+        );
         assert_eq!(Usage::of(&json!({"stopReason": "end_turn"})), None);
         assert_eq!(Usage::of(&json!({"usage": {}})), None);
     }
@@ -246,8 +318,14 @@ mod tests {
     #[test]
     fn cost_comes_from_the_result_or_a_usage_update_in_dollars_only() {
         assert_eq!(cost_of(&json!({"_meta": {"costUsd": 0.5}})), Some(0.5));
-        assert_eq!(cost_of(&json!({"cost": {"amount": 0.25, "currency": "USD"}})), Some(0.25));
-        assert_eq!(cost_of(&json!({"cost": {"amount": 3.0, "currency": "EUR"}})), None);
+        assert_eq!(
+            cost_of(&json!({"cost": {"amount": 0.25, "currency": "USD"}})),
+            Some(0.25)
+        );
+        assert_eq!(
+            cost_of(&json!({"cost": {"amount": 3.0, "currency": "EUR"}})),
+            None
+        );
         assert_eq!(cost_of(&json!({"stopReason": "end_turn"})), None);
     }
 
@@ -258,7 +336,10 @@ mod tests {
             "b": {"url": "http://h/mcp", "headers": {"Authorization": "t"}},
         }});
         let list = mcp_servers(&cfg);
-        assert_eq!(list[0], json!({"name": "a", "command": "node", "args": ["x.js"], "env": [{"name": "K", "value": "v"}]}));
+        assert_eq!(
+            list[0],
+            json!({"name": "a", "command": "node", "args": ["x.js"], "env": [{"name": "K", "value": "v"}]})
+        );
         assert_eq!(
             list[1],
             json!({"type": "http", "name": "b", "url": "http://h/mcp", "headers": [{"name": "Authorization", "value": "t"}]})

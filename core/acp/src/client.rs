@@ -52,12 +52,22 @@ fn shell_command(command: &str) -> Command {
 }
 
 /// Agents [`Acp::kill`] is still stopping, for the host to wait for before it exits.
-static STOPPING: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>> = std::sync::Mutex::new(Vec::new());
+static STOPPING: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>> =
+    std::sync::Mutex::new(Vec::new());
 
 pub enum Incoming {
-    Notification { method: String, params: Value },
-    Request { id: Value, method: String, params: Value },
-    Closed { stderr_tail: String },
+    Notification {
+        method: String,
+        params: Value,
+    },
+    Request {
+        id: Value,
+        method: String,
+        params: Value,
+    },
+    Closed {
+        stderr_tail: String,
+    },
 }
 
 /// In-flight requests by JSON-RPC id. A std mutex: it's never held across an `.await`.
@@ -101,7 +111,9 @@ pub fn needs_sign_in(e: &anyhow::Error) -> bool {
 /// adapter gave no category. Claude's adapter answers every later prompt on a session whose query
 /// stream ended with one ("The Claude Agent session has ended") until the session is closed.
 pub fn may_end_session(e: &anyhow::Error) -> bool {
-    e.chain().filter_map(|c| c.downcast_ref::<RpcError>()).any(|r| r.code == INTERNAL_ERROR && r.kind.is_none())
+    e.chain()
+        .filter_map(|c| c.downcast_ref::<RpcError>())
+        .any(|r| r.code == INTERNAL_ERROR && r.kind.is_none())
 }
 
 /// An agent turn that ended because the account's usage ran out, not because of anything in the turn. Found from the
@@ -115,11 +127,18 @@ pub struct Depleted {
 /// Whether `e` is a usage limit: Claude's `rate_limit`, Codex's `usage_limit_reached` (either spelling of the
 /// identifier, snake or camel case).
 pub fn depleted(e: &anyhow::Error) -> Option<Depleted> {
-    e.chain().filter_map(|c| c.downcast_ref::<RpcError>()).find_map(|r| {
-        let kind = r.kind.as_deref()?.replace('_', "").to_ascii_lowercase();
-        matches!(kind.as_str(), "ratelimit" | "usagelimitreached" | "usagelimitexceeded")
-            .then_some(Depleted { resets_at: r.resets_at })
-    })
+    e.chain()
+        .filter_map(|c| c.downcast_ref::<RpcError>())
+        .find_map(|r| {
+            let kind = r.kind.as_deref()?.replace('_', "").to_ascii_lowercase();
+            matches!(
+                kind.as_str(),
+                "ratelimit" | "usagelimitreached" | "usagelimitexceeded"
+            )
+            .then_some(Depleted {
+                resets_at: r.resets_at,
+            })
+        })
 }
 
 /// An epoch given in seconds or milliseconds, in seconds.
@@ -147,7 +166,11 @@ pub struct Failure {
 
 impl Failure {
     pub fn error(kind: FailureKind, message: impl Into<String>) -> anyhow::Error {
-        Self { kind, message: message.into() }.into()
+        Self {
+            kind,
+            message: message.into(),
+        }
+        .into()
     }
 }
 
@@ -169,7 +192,9 @@ impl Answer {
         match self.rx.await {
             Ok(Ok(v)) => Ok(v),
             Ok(Err(e)) => {
-                let msg = e["message"].as_str().map_or_else(|| e.to_string(), str::to_owned);
+                let msg = e["message"]
+                    .as_str()
+                    .map_or_else(|| e.to_string(), str::to_owned);
                 let message = match e["data"]["details"].as_str().or(e["data"].as_str()) {
                     Some(d) => format!("{msg} ({d})"),
                     None => msg,
@@ -179,7 +204,9 @@ impl Answer {
                     .iter()
                     .filter_map(|key| e["data"][key].as_str())
                     .find(|k| {
-                        !k.is_empty() && k.len() <= 40 && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                        !k.is_empty()
+                            && k.len() <= 40
+                            && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
                     })
                     .map(str::to_owned);
                 let resets_at = ["resetsAt", "resets_at"]
@@ -187,7 +214,13 @@ impl Answer {
                     .find_map(|key| e["data"][key].as_i64())
                     .filter(|t| *t > 0)
                     .map(epoch_secs);
-                Err(RpcError { code: e["code"].as_i64().unwrap_or_default(), message, kind, resets_at }.into())
+                Err(RpcError {
+                    code: e["code"].as_i64().unwrap_or_default(),
+                    message,
+                    kind,
+                    resets_at,
+                }
+                .into())
             }
             // The reader drops every waiter when the process goes away.
             Err(_) => Err(Failure::error(FailureKind::Exited, "agent process exited")),
@@ -228,7 +261,9 @@ impl Acp {
         // Its own group, so `kill` can stop everything it started.
         #[cfg(unix)]
         process.process_group(0);
-        let mut child = process.spawn().with_context(|| format!("starting `{command}`"))?;
+        let mut child = process
+            .spawn()
+            .with_context(|| format!("starting `{command}`"))?;
         let stdin = child.stdin.take().expect("stdin is piped");
         let stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
@@ -238,7 +273,9 @@ impl Acp {
         let (tx, rx) = mpsc::unbounded_channel();
         let pending = Pending::default();
 
-        let tail = Arc::new(std::sync::Mutex::new(VecDeque::<String>::with_capacity(STDERR_TAIL_LINES)));
+        let tail = Arc::new(std::sync::Mutex::new(VecDeque::<String>::with_capacity(
+            STDERR_TAIL_LINES,
+        )));
         {
             let tail = tail.clone();
             tokio::spawn(async move {
@@ -265,10 +302,17 @@ impl Acp {
                     let method = msg["method"].as_str().map(str::to_owned);
                     match (method, msg.get("id").cloned()) {
                         (Some(method), Some(id)) if !id.is_null() => {
-                            let _ = tx.send(Incoming::Request { id, method, params: msg["params"].clone() });
+                            let _ = tx.send(Incoming::Request {
+                                id,
+                                method,
+                                params: msg["params"].clone(),
+                            });
                         }
                         (Some(method), _) => {
-                            let _ = tx.send(Incoming::Notification { method, params: msg["params"].clone() });
+                            let _ = tx.send(Incoming::Notification {
+                                method,
+                                params: msg["params"].clone(),
+                            });
                         }
                         (None, Some(id)) => {
                             if let Some(id) = id.as_i64()
@@ -310,7 +354,9 @@ impl Acp {
         let mut line = serde_json::to_vec(&msg)?;
         line.push(b'\n');
         let mut stdin = self.stdin.lock().await;
-        let stdin = stdin.as_mut().ok_or_else(|| Failure::error(FailureKind::Exited, "agent stopped"))?;
+        let stdin = stdin
+            .as_mut()
+            .ok_or_else(|| Failure::error(FailureKind::Exited, "agent stopped"))?;
         stdin.write_all(&line).await?;
         stdin.flush().await?;
         Ok(())
@@ -326,20 +372,24 @@ impl Acp {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = oneshot::channel();
         self.pending.locked().insert(id, tx);
-        self.write(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await?;
+        self.write(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}))
+            .await?;
         Ok(Answer { rx })
     }
 
     pub async fn notify(&self, method: &str, params: Value) -> Result<()> {
-        self.write(json!({"jsonrpc": "2.0", "method": method, "params": params})).await
+        self.write(json!({"jsonrpc": "2.0", "method": method, "params": params}))
+            .await
     }
 
     pub async fn respond(&self, id: Value, result: Value) -> Result<()> {
-        self.write(json!({"jsonrpc": "2.0", "id": id, "result": result})).await
+        self.write(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+            .await
     }
 
     pub async fn respond_error(&self, id: Value, code: i64, message: &str) -> Result<()> {
-        self.write(json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})).await
+        self.write(json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}))
+            .await
     }
 
     /// Stops the agent and everything it started, without waiting for it. Closing its stdin
@@ -368,7 +418,9 @@ pub async fn stopped() {
 async fn reap(mut child: Child) {
     let Some(pid) = child.id() else { return };
     let deadline = Instant::now() + EXIT_GRACE;
-    let exited = tokio::time::timeout_at(deadline, child.wait()).await.is_ok();
+    let exited = tokio::time::timeout_at(deadline, child.wait())
+        .await
+        .is_ok();
     if !exited || outlived(pid, deadline).await {
         let mut tree = if cfg!(windows) {
             let mut c = Command::new("taskkill");
@@ -379,7 +431,11 @@ async fn reap(mut child: Child) {
             c.args(["-KILL", "--", &format!("-{pid}")]);
             c
         };
-        let _ = tree.stdout(Stdio::null()).stderr(Stdio::null()).status().await;
+        let _ = tree
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await;
     }
     // Already exited is fine; anything else is worth a log line.
     if let Err(error) = child.kill().await
@@ -392,7 +448,9 @@ async fn reap(mut child: Child) {
 /// Whether part of the exited agent's process group is still running at `deadline`.
 #[cfg(unix)]
 async fn outlived(pid: u32, deadline: Instant) -> bool {
-    let Ok(group) = libc::pid_t::try_from(pid) else { return true };
+    let Ok(group) = libc::pid_t::try_from(pid) else {
+        return true;
+    };
     // SAFETY: signal 0 sends nothing; it only checks that the group still has a process.
     let running = || unsafe { libc::killpg(group, 0) } == 0;
     while running() && Instant::now() < deadline {
@@ -412,14 +470,30 @@ async fn outlived(_pid: u32, _deadline: Instant) -> bool {
 /// Plain-text rendering of an ACP content block list / tool-call content list.
 pub fn content_text(v: &Value) -> String {
     match v {
-        Value::Array(items) => items.iter().map(content_text).filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n"),
+        Value::Array(items) => items
+            .iter()
+            .map(content_text)
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
         Value::Object(o) => match o.get("type").and_then(Value::as_str) {
-            Some("text") => o.get("text").and_then(Value::as_str).unwrap_or_default().to_owned(),
+            Some("text") => o
+                .get("text")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             Some("content") => o.get("content").map(content_text).unwrap_or_default(),
-            Some("resource_link") => o.get("uri").and_then(Value::as_str).unwrap_or_default().to_owned(),
-            Some("resource") => {
-                o.get("resource").and_then(|r| r.get("text")).and_then(Value::as_str).unwrap_or_default().to_owned()
-            }
+            Some("resource_link") => o
+                .get("uri")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
+            Some("resource") => o
+                .get("resource")
+                .and_then(|r| r.get("text"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_owned(),
             _ => String::new(),
         },
         _ => String::new(),
@@ -456,11 +530,16 @@ mod tests {
     async fn an_error_keeps_the_adapters_category_only_when_it_is_an_identifier() {
         let kind = |data: Value| async move {
             let (tx, rx) = oneshot::channel();
-            let _ = tx.send(Err(json!({"code": -32603, "message": "Internal error", "data": data})));
+            let _ = tx.send(Err(
+                json!({"code": -32603, "message": "Internal error", "data": data}),
+            ));
             let e = Answer { rx }.response().await.expect_err("an error answer");
             e.downcast::<RpcError>().expect("an RpcError").kind
         };
-        assert_eq!(kind(json!({"errorKind": "rate_limit"})).await.as_deref(), Some("rate_limit"));
+        assert_eq!(
+            kind(json!({"errorKind": "rate_limit"})).await.as_deref(),
+            Some("rate_limit")
+        );
         assert_eq!(kind(json!({"errorKind": "Usage: /Users/me"})).await, None);
         assert_eq!(kind(json!({"errorKind": ""})).await, None);
         assert_eq!(kind(json!("details")).await, None);
@@ -470,11 +549,21 @@ mod tests {
     async fn only_a_usage_limit_is_depletion() {
         let failed = |data: Value| async move {
             let (tx, rx) = oneshot::channel();
-            let _ = tx.send(Err(json!({"code": -32603, "message": "Internal error", "data": data})));
+            let _ = tx.send(Err(
+                json!({"code": -32603, "message": "Internal error", "data": data}),
+            ));
             Answer { rx }.response().await.expect_err("an error answer")
         };
-        let limited = depleted(&failed(json!({"errorKind": "rate_limit", "resetsAt": 1_790_000_000_000_i64})).await);
-        assert_eq!(limited, Some(Depleted { resets_at: Some(1_790_000_000) }), "milliseconds become seconds");
+        let limited = depleted(
+            &failed(json!({"errorKind": "rate_limit", "resetsAt": 1_790_000_000_000_i64})).await,
+        );
+        assert_eq!(
+            limited,
+            Some(Depleted {
+                resets_at: Some(1_790_000_000)
+            }),
+            "milliseconds become seconds"
+        );
         assert_eq!(
             depleted(&failed(json!({"errorKind": "usage_limit_reached"})).await),
             Some(Depleted { resets_at: None })
@@ -503,11 +592,15 @@ mod tests {
             &[],
         )
         .unwrap();
-        let ready = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap();
+        let ready = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .unwrap();
         assert!(matches!(ready, Some(Incoming::Notification { .. })));
         acp.kill().await;
         // Killing only the shell leaves sleep holding stdout for 60 seconds.
-        let closed = tokio::time::timeout(EXIT_GRACE + Duration::from_secs(3), rx.recv()).await.unwrap();
+        let closed = tokio::time::timeout(EXIT_GRACE + Duration::from_secs(3), rx.recv())
+            .await
+            .unwrap();
         assert!(matches!(closed, Some(Incoming::Closed { .. })));
     }
 
@@ -524,7 +617,10 @@ mod tests {
         acp.kill().await;
         let saved = tokio::time::timeout(EXIT_GRACE, rx.recv()).await.unwrap();
         assert!(matches!(saved, Some(Incoming::Notification { method, .. }) if method == "saved"));
-        assert!(acp.notify("x", json!({})).await.is_err(), "a stopped agent takes no more messages");
+        assert!(
+            acp.notify("x", json!({})).await.is_err(),
+            "a stopped agent takes no more messages"
+        );
     }
 
     /// Settles whether a person's warm agent process dies with the host: a dropped `Acp` (the host stopping or the bot
@@ -533,10 +629,16 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_dropped_agent_process_is_killed() {
-        let (acp, mut rx) =
-            Acp::spawn(r#"sh -c 'echo "{\"jsonrpc\":\"2.0\",\"method\":\"ready\"}"; sleep 300'"#, "/tmp", &[]).unwrap();
+        let (acp, mut rx) = Acp::spawn(
+            r#"sh -c 'echo "{\"jsonrpc\":\"2.0\",\"method\":\"ready\"}"; sleep 300'"#,
+            "/tmp",
+            &[],
+        )
+        .unwrap();
         let pid = acp.pid().unwrap();
-        let ready = tokio::time::timeout(Duration::from_secs(3), rx.recv()).await.unwrap();
+        let ready = tokio::time::timeout(Duration::from_secs(3), rx.recv())
+            .await
+            .unwrap();
         assert!(matches!(ready, Some(Incoming::Notification { .. })));
         drop(acp);
         let pid = libc::pid_t::try_from(pid).unwrap();
@@ -555,7 +657,12 @@ mod tests {
     async fn request_response_roundtrip() {
         // A fake agent: answers `initialize`, then sends a notification and exits.
         let script = r#"read l; id=$(echo "$l" | sed 's/.*"id":\([0-9]*\).*/\1/'); echo "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"ok\":true}}"; echo '{"jsonrpc":"2.0","method":"session/update","params":{"x":1}}'"#;
-        let (acp, mut rx) = Acp::spawn(&format!("sh -c '{}'", script.replace('\'', "'\\''")), "/tmp", &[]).unwrap();
+        let (acp, mut rx) = Acp::spawn(
+            &format!("sh -c '{}'", script.replace('\'', "'\\''")),
+            "/tmp",
+            &[],
+        )
+        .unwrap();
         let res = acp.request("initialize", json!({})).await.unwrap();
         assert_eq!(res["ok"], true);
         match rx.recv().await.unwrap() {

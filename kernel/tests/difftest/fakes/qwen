@@ -1,0 +1,11 @@
+#!/bin/sh
+# A fake Qwen Code: `qwen --acp` is the fake ACP agent (kernel/tests/fakes/fake-acp-agent); the one-shot run
+# (`qwen ... -o json -p TASK`) answers FAKE_ACP_ANSWER as `qwen -o json` does, so the Python path (harness.py's own) and
+# the core's ACP path can be compared on the same engine.
+[ -n "${DIFFTEST_FAKELOG:-}" ] && printf 'qwen %s\n' "$*" >> "$DIFFTEST_FAKELOG"
+for a in "$@"; do
+  if [ "$a" = "--acp" ]; then
+    exec python3 "$(cd "$(dirname "$0")" && pwd)/../../fakes/fake-acp-agent"
+  fi
+done
+printf '[{"type":"result","result":"%s","session_id":"fake-session-1","num_turns":1,"usage":{"input_tokens":10,"output_tokens":5,"cache_read_input_tokens":2}}]\n' "${FAKE_ACP_ANSWER:-fake-qwen-run}"

@@ -3,6 +3,7 @@
 
 FAKE_ACP_MODE   ok (default) | signin (session/new says authentication required) | depleted (the prompt fails with a
                 usage limit) | hang (the prompt is never answered) | crash (exits during the prompt, saying why on stderr)
+FAKE_ACP_ANSWER  the answer, instead of echoing the task
 FAKE_ACP_COST   dollars to report in the prompt result (default: none reported)
 FAKE_ACP_PIDFILE  file to write this process's pid to (a test checks nothing is left running)
 FAKE_ACP_LOG    file to append every request's method and params to, one JSON line each
@@ -53,7 +54,7 @@ for line in sys.stdin:
             reply(id, error={'code': -32603, 'message': 'Internal error',
                              'data': {'errorKind': 'rate_limit', 'resetsAt': 1790000000}})
         else:
-            for part in ('echo: ', task):
+            for part in (('', os.environ['FAKE_ACP_ANSWER']) if os.environ.get('FAKE_ACP_ANSWER') else ('echo: ', task)):
                 send({'jsonrpc': '2.0', 'method': 'session/update', 'params': {
                     'sessionId': params.get('sessionId'),
                     'update': {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': part}}}})

@@ -6,7 +6,7 @@ pub use kith_acp::*;
 
 /// Hands the crate the host's command-line rules (Windows quoting, `shell::exec`). Once, at startup.
 pub fn init() {
-    kith_acp::set_shell(|command| crate::shell::exec(command).tokio());
+    set_shell(|command| crate::shell::exec(command).tokio());
 }
 
 #[cfg(test)]
