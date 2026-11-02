@@ -40,11 +40,16 @@ pub struct Die {
 type R<T> = Result<T, Die>;
 
 fn die<T>(msg: impl Into<String>) -> R<T> {
-    Err(Die { msg: msg.into(), code: 1 })
+    Err(Die {
+        msg: msg.into(),
+        code: 1,
+    })
 }
 
 /// The tables `load_auth` gives every auth.json, in order.
-const TABLES: [&str; 9] = ["profiles", "grants", "env", "people", "presets", "members", "invites", "retired", "once"];
+const TABLES: [&str; 9] = [
+    "profiles", "grants", "env", "people", "presets", "members", "invites", "retired", "once",
+];
 /// The membership row for every person kith knows.
 const EVERYONE: &str = "*";
 /// Modes that run any command without asking.
@@ -101,8 +106,13 @@ impl Ctx {
             person: env("KITH_PERSON"),
             now_ms: now_ms(),
             sandbox: Sandbox::Os,
-            serve: env("KITH_SERVE_DIR")
-                .map_or_else(|| ServeDir::Endpoint { kernel: kernel.to_path_buf(), home }, |d| ServeDir::Fixed(PathBuf::from(d))),
+            serve: env("KITH_SERVE_DIR").map_or_else(
+                || ServeDir::Endpoint {
+                    kernel: kernel.to_path_buf(),
+                    home,
+                },
+                |d| ServeDir::Fixed(PathBuf::from(d)),
+            ),
         }
     }
 
@@ -113,7 +123,11 @@ impl Ctx {
         if plain {
             for root in [self.agents.clone(), self.kernel.join("agents")] {
                 let d = root.join(agent);
-                let pkg = if d.join("role/agent.md").is_file() { d.join("role") } else { d };
+                let pkg = if d.join("role/agent.md").is_file() {
+                    d.join("role")
+                } else {
+                    d
+                };
                 if pkg.join("agent.md").is_file() {
                     return pkg;
                 }
@@ -126,11 +140,15 @@ impl Ctx {
         match &self.serve {
             ServeDir::Fixed(d) => d.clone(),
             ServeDir::Endpoint { kernel, home } => {
-                let asked = run_with_timeout(&kernel.join("bin/kith-serve"), &["endpoint"], Duration::from_secs(4))
-                    .and_then(|out| {
-                        let words: Vec<&str> = out.split_whitespace().collect();
-                        (words.len() == 2).then(|| PathBuf::from(words[0]))
-                    });
+                let asked = run_with_timeout(
+                    &kernel.join("bin/kith-serve"),
+                    &["endpoint"],
+                    Duration::from_secs(4),
+                )
+                .and_then(|out| {
+                    let words: Vec<&str> = out.split_whitespace().collect();
+                    (words.len() == 2).then(|| PathBuf::from(words[0]))
+                });
                 asked.unwrap_or_else(|| home.join(".kith/serve"))
             }
         }
@@ -145,7 +163,9 @@ impl Ctx {
 }
 
 pub fn now_ms() -> f64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64() * 1000.0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
 }
 
 /// The account's home folder by the OS's password database (`pwd.getpwuid(...).pw_dir`), not `$HOME`: a guest's shell
@@ -158,7 +178,13 @@ fn os_home() -> Option<PathBuf> {
 
 /// Run a program and read its standard output; `None` when it can't start, outlives `limit`, or fails.
 fn run_with_timeout(program: &Path, args: &[&str], limit: Duration) -> Option<String> {
-    let mut child = Command::new(program).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut child = Command::new(program)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
     let mut stdout = child.stdout.take()?;
     let reader = std::thread::spawn(move || {
         let mut s = String::new();
@@ -276,7 +302,10 @@ pub fn load_auth_locked(c: &Ctx) -> R<Locked> {
 
 fn lock_auth(c: &Ctx) -> R<File> {
     if let Some(parent) = c.auth.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| Die { msg: format!("{}: {e}", parent.display()), code: 1 })?;
+        std::fs::create_dir_all(parent).map_err(|e| Die {
+            msg: format!("{}: {e}", parent.display()),
+            code: 1,
+        })?;
     }
     let mut name = c.auth.file_name().unwrap_or_default().to_os_string();
     name.push(".lock");
@@ -284,14 +313,23 @@ fn lock_auth(c: &Ctx) -> R<File> {
         .append(true)
         .create(true)
         .open(c.auth.with_file_name(name))
-        .map_err(|e| Die { msg: format!("{}: {e}", c.auth.display()), code: 1 })?;
-    lock.lock_exclusive().map_err(|e| Die { msg: format!("{}: {e}", c.auth.display()), code: 1 })?;
+        .map_err(|e| Die {
+            msg: format!("{}: {e}", c.auth.display()),
+            code: 1,
+        })?;
+    lock.lock_exclusive().map_err(|e| Die {
+        msg: format!("{}: {e}", c.auth.display()),
+        code: 1,
+    })?;
     Ok(lock)
 }
 
 /// `save_auth`: invites that have run out and empty tables go, then the file is replaced atomically. Needs the lock.
 pub fn save_auth(c: &Ctx, held: &Locked) -> R<()> {
-    let fail = |e: std::io::Error| Die { msg: format!("{}: {e}", c.auth.display()), code: 1 };
+    let fail = |e: std::io::Error| Die {
+        msg: format!("{}: {e}", c.auth.display()),
+        code: 1,
+    };
     let mut data = held.auth.as_object().cloned().unwrap_or_default();
     let now = c.now_ms / 1000.0;
     let live: Map<String, Value> = get(&Value::Object(data.clone()), "invites")
@@ -307,30 +345,48 @@ pub fn save_auth(c: &Ctx, held: &Locked) -> R<()> {
     data.retain(|k, v| truthy(v) || matches!(k.as_str(), "profiles" | "grants" | "env"));
     let text = pyjson::dumps_indent(&Value::Object(data)) + "\n";
 
-    let dir = c.auth.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let dir = c
+        .auth
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
     std::fs::create_dir_all(dir).map_err(fail)?;
     let tmp = unique_tmp(&c.auth);
     let write = || -> std::io::Result<()> {
-        let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)?;
         f.write_all(text.as_bytes())?;
         f.flush()?;
         f.sync_all()?;
         std::fs::rename(&tmp, &c.auth)?;
         File::open(dir)?.sync_all()
     };
-    write().inspect_err(|_| {
-        let _ = std::fs::remove_file(&tmp);
-    })
-    .map_err(fail)
+    write()
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&tmp);
+        })
+        .map_err(fail)
 }
 
 /// A name of its own in the file's folder, as `tempfile.mkstemp(prefix='auth.json.', suffix='.tmp')` makes one.
 fn unique_tmp(auth: &Path) -> PathBuf {
     static COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let n = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
-    let name = auth.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-    auth.with_file_name(format!("{name}.{:x}{:x}{n:x}.tmp", std::process::id(), nanos))
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let name = auth
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    auth.with_file_name(format!(
+        "{name}.{:x}{:x}{n:x}.tmp",
+        std::process::id(),
+        nanos
+    ))
 }
 
 // --- the rules ----------------------------------------------------------------------------------------------------------
@@ -343,13 +399,20 @@ pub fn canonical(auth: &Value, pid: &str) -> String {
     }
     people
         .as_object()
-        .and_then(|o| o.iter().find(|(_, v)| arr(get(v, "was")).iter().any(|w| w.as_str() == Some(pid))))
+        .and_then(|o| {
+            o.iter()
+                .find(|(_, v)| arr(get(v, "was")).iter().any(|w| w.as_str() == Some(pid)))
+        })
         .map_or_else(|| pid.to_owned(), |(p, _)| p.clone())
 }
 
 /// The person marked `owner`, if any.
 pub fn owner(auth: &Value) -> Option<String> {
-    get(auth, "people").as_object()?.iter().find(|(_, v)| truthy(get(v, "owner"))).map(|(p, _)| p.clone())
+    get(auth, "people")
+        .as_object()?
+        .iter()
+        .find(|(_, v)| truthy(get(v, "owner")))
+        .map(|(p, _)| p.clone())
 }
 
 pub fn is_owner(auth: &Value, person: &str) -> bool {
@@ -359,7 +422,10 @@ pub fn is_owner(auth: &Value, person: &str) -> bool {
 /// The person a bot belongs to (their id as it is now), or `None` for anyone who is not a bot.
 pub fn parent_of(auth: &Value, person: &str) -> Option<String> {
     let parent = get(get(get(auth, "people"), person), "bot_of");
-    parent.as_str().filter(|p| !p.is_empty()).map(|p| canonical(auth, p))
+    parent
+        .as_str()
+        .filter(|p| !p.is_empty())
+        .map(|p| canonical(auth, p))
 }
 
 /// `cut_off`: whether the person, or the person a bot of theirs answers to, is revoked.
@@ -382,7 +448,11 @@ fn bots_of(auth: &Value, person: &str) -> Vec<String> {
         .as_object()
         .map(|o| {
             o.iter()
-                .filter(|(_, v)| get(v, "bot_of").as_str().is_some_and(|b| !b.is_empty() && canonical(auth, b) == person))
+                .filter(|(_, v)| {
+                    get(v, "bot_of")
+                        .as_str()
+                        .is_some_and(|b| !b.is_empty() && canonical(auth, b) == person)
+                })
                 .map(|(b, _)| b.clone())
                 .collect()
         })
@@ -417,7 +487,11 @@ fn access_of(row: &Value) -> Map<String, Value> {
     ["read", "write", "domains"]
         .into_iter()
         .map(|k| {
-            let vs: Vec<Value> = arr(get(a, k)).iter().filter(|v| v.is_string()).cloned().collect();
+            let vs: Vec<Value> = arr(get(a, k))
+                .iter()
+                .filter(|v| v.is_string())
+                .cloned()
+                .collect();
             (k.to_owned(), Value::Array(vs))
         })
         .collect()
@@ -435,11 +509,19 @@ fn held(have: &Value, kind: &str, value: &Value) -> bool {
     if kind == "read" {
         roots.extend(arr(get(have, "read")));
     }
-    roots.iter().filter_map(|r| r.as_str()).any(|r| value == r || value.starts_with(&format!("{}/", r.trim_end_matches('/'))))
+    roots
+        .iter()
+        .filter_map(|r| r.as_str())
+        .any(|r| value == r || value.starts_with(&format!("{}/", r.trim_end_matches('/'))))
 }
 
 fn free_shell(v: &Value) -> bool {
     v.as_str().is_some_and(|m| FREE_SHELL.contains(&m))
+}
+
+/// Whether a helpers list names the agent.
+fn calls(helpers: &[Value], agent: &str) -> bool {
+    helpers.iter().any(|h| h.as_str() == Some(agent))
 }
 
 /// What a run of an agent for a person gets, evaluated over one auth.json snapshot.
@@ -452,7 +534,12 @@ pub struct Rules<'a> {
 
 impl<'a> Rules<'a> {
     pub fn new(c: &'a Ctx, auth: &'a Value) -> Self {
-        Rules { c, auth, jobs: RefCell::default(), depth: Cell::new(0) }
+        Rules {
+            c,
+            auth,
+            jobs: RefCell::default(),
+            depth: Cell::new(0),
+        }
     }
 
     fn deeper(&self) -> R<()> {
@@ -466,14 +553,28 @@ impl<'a> Rules<'a> {
     /// `jobs_of`: the jobs the agent's package declares.
     fn jobs_of(&self, pkg: &str) -> Rc<Vec<Job>> {
         let mut cache = self.jobs.borrow_mut();
-        Rc::clone(cache.entry(pkg.to_owned()).or_insert_with(|| Rc::new(jobs::read(&self.c.package_dir(pkg).join("capabilities.yaml")))))
+        Rc::clone(cache.entry(pkg.to_owned()).or_insert_with(|| {
+            Rc::new(jobs::read(
+                &self.c.package_dir(pkg).join("capabilities.yaml"),
+            ))
+        }))
     }
 
     /// `acting`: the person this run works for; never the owner inside a guest's sandbox: then it is no one (`-`).
     pub fn acting(&self) -> String {
-        let named = self.c.person.clone().filter(|p| !p.is_empty()).or_else(|| owner(self.auth)).unwrap_or_default();
+        let named = self
+            .c
+            .person
+            .clone()
+            .filter(|p| !p.is_empty())
+            .or_else(|| owner(self.auth))
+            .unwrap_or_default();
         let person = canonical(self.auth, &named);
-        if is_owner(self.auth, &person) && self.c.in_guest_sandbox() { "-".to_owned() } else { person }
+        if is_owner(self.auth, &person) && self.c.in_guest_sandbox() {
+            "-".to_owned()
+        } else {
+            person
+        }
     }
 
     /// `job_grants`: what the person's ticks on their own row of pkg grant, each cut to the package as it is now.
@@ -507,7 +608,10 @@ impl<'a> Rules<'a> {
         };
         let mut out: Vec<Value> = arr(get(row, "helpers")).to_vec();
         out.extend(self.job_grants(pkg, person)[1].iter().cloned());
-        if once && let Some(left) = own_row(self.auth, pkg, person).and_then(|o| get(o, "helper_once").as_object()) {
+        if once
+            && let Some(left) =
+                own_row(self.auth, pkg, person).and_then(|o| get(o, "helper_once").as_object())
+        {
             for (h, until) in left {
                 if until.as_f64().is_some_and(|u| u > self.c.now_ms) {
                     out.push(Value::String(h.clone()));
@@ -517,13 +621,15 @@ impl<'a> Rules<'a> {
         dedupe(out)
     }
 
-    fn calls(&self, helpers: &[Value], agent: &str) -> bool {
-        helpers.iter().any(|h| h.as_str() == Some(agent))
-    }
-
     /// `may`: (allowed, why). Access is a membership row; a helper is allowed when the caller's membership lists it or a
     /// ticked job of it does (once: or a "just this once" on it, see `helpers_in`).
-    pub fn may(&self, person: &str, agent: &str, via: Option<&str>, once: bool) -> R<(bool, String)> {
+    pub fn may(
+        &self,
+        person: &str,
+        agent: &str,
+        via: Option<&str>,
+        once: bool,
+    ) -> R<(bool, String)> {
         self.deeper()?;
         let via = via.filter(|v| !v.is_empty());
         let person = canonical(self.auth, person);
@@ -533,7 +639,10 @@ impl<'a> Rules<'a> {
         }
         let entry = get(get(self.auth, "people"), person);
         if !has(get(self.auth, "people"), person) {
-            return Ok((false, format!("'{person}' is not a person in kith (kith-auth people)")));
+            return Ok((
+                false,
+                format!("'{person}' is not a person in kith (kith-auth people)"),
+            ));
         }
         if truthy(get(entry, "revoked")) {
             // before any row, the `*` row included: revoke beats every row, and undo finds them all as they were
@@ -544,15 +653,24 @@ impl<'a> Rules<'a> {
         }
         if row_of(self.auth, agent, person).is_some() {
             let own = has(get(get(self.auth, "members"), agent), person);
-            return Ok((true, if own { "member" } else { "member (everyone)" }.to_owned()));
+            return Ok((
+                true,
+                if own { "member" } else { "member (everyone)" }.to_owned(),
+            ));
         }
         if let Some(via) = via {
             let helpers = self.helpers_in(via, person, row_of(self.auth, via, person), once);
-            if self.calls(&helpers, agent) {
+            if calls(&helpers, agent) {
                 return Ok((true, format!("helper of {via}")));
             }
         }
-        Ok((false, format!("{person} may not use {agent}{}", via.map_or(String::new(), |v| format!(" (not in their {v} helpers)")))))
+        Ok((
+            false,
+            format!(
+                "{person} may not use {agent}{}",
+                via.map_or(String::new(), |v| format!(" (not in their {v} helpers)"))
+            ),
+        ))
     }
 
     /// `bot_row`: the bot's own membership row for agent, else the caller's (a helper runs with the caller's row). The
@@ -564,21 +682,27 @@ impl<'a> Rules<'a> {
         let via = via?;
         let theirs = own_row(self.auth, via, bot);
         let helpers = self.helpers_in(via, bot, theirs, once);
-        if self.calls(&helpers, agent) { theirs } else { None }
+        if calls(&helpers, agent) { theirs } else { None }
     }
 
     /// `bot_may`: a bot may use an agent only with a row of its own AND while its owner may use it right now.
     fn bot_may(&self, bot: &str, agent: &str, via: Option<&str>, once: bool) -> R<(bool, String)> {
         let parent = parent_of(self.auth, bot);
         let Some(parent) = parent.filter(|p| has(get(self.auth, "people"), p)) else {
-            let raw = get(get(get(self.auth, "people"), bot), "bot_of").as_str().unwrap_or_default().to_owned();
+            let raw = get(get(get(self.auth, "people"), bot), "bot_of")
+                .as_str()
+                .unwrap_or_default()
+                .to_owned();
             return Ok((false, format!("{bot}'s owner '{raw}' is gone")));
         };
         if self.bot_row(agent, bot, via, once).is_none() {
             return Ok((false, format!("{bot} may not use {agent}")));
         }
         if !self.may(&parent, agent, via, false)?.0 {
-            return Ok((false, format!("{bot} may not use {agent}: its owner {parent} may not")));
+            return Ok((
+                false,
+                format!("{bot} may not use {agent}: its owner {parent} may not"),
+            ));
         }
         Ok((true, format!("bot of {parent}")))
     }
@@ -593,13 +717,20 @@ impl<'a> Rules<'a> {
         match key {
             "guest" => Ok(serde_json::json!({"mode": "default"})),
             "member" => Ok(serde_json::json!({"mode": "acceptEdits"})),
-            _ => die(format!("no preset '{key}' (kith-auth preset {key} mode=..)")),
+            _ => die(format!(
+                "no preset '{key}' (kith-auth preset {key} mode=..)"
+            )),
         }
     }
 
     /// `with_jobs`: the run's access with its ticked jobs' domains added, its doors and the names of its ticks, all from
     /// the person's own row of pkg.
-    fn with_jobs(&self, pkg: &str, person: &str, mut access: Map<String, Value>) -> Map<String, Value> {
+    fn with_jobs(
+        &self,
+        pkg: &str,
+        person: &str,
+        mut access: Map<String, Value>,
+    ) -> Map<String, Value> {
         let granted = self.job_grants(pkg, person);
         let mut domains: Vec<Value> = arr(access.get("domains").unwrap_or(&NULL)).to_vec();
         domains.extend(granted[0].iter().cloned());
@@ -609,7 +740,11 @@ impl<'a> Rules<'a> {
             && !ticks.is_empty()
         {
             let jobs = self.jobs_of(pkg);
-            names = ticks.keys().filter(|n| jobs.iter().any(|j| j.name == **n)).cloned().collect();
+            names = ticks
+                .keys()
+                .filter(|n| jobs.iter().any(|j| j.name == **n))
+                .cloned()
+                .collect();
             names.sort();
         }
         let mut out = Map::new();
@@ -621,7 +756,13 @@ impl<'a> Rules<'a> {
 
     /// `resolve`: what a run of agent for person gets: whether it may run, and the person's settings over the agent's. A
     /// helper reached through the caller's helpers list runs with the caller's membership, so calling one never loosens it.
-    pub fn resolve(&self, agent: &str, person: &str, via: Option<&str>, once: bool) -> R<Map<String, Value>> {
+    pub fn resolve(
+        &self,
+        agent: &str,
+        person: &str,
+        via: Option<&str>,
+        once: bool,
+    ) -> R<Map<String, Value>> {
         self.deeper()?;
         let via = via.filter(|v| !v.is_empty());
         let person = canonical(self.auth, person);
@@ -654,9 +795,21 @@ impl<'a> Rules<'a> {
         let p = self.preset(&get_or(row, "preset", "guest".into()))?;
         let mode = {
             let asked = get(row, "mode");
-            let mode = if truthy(asked) { asked.clone() } else { get_or(&p, "mode", "default".into()) };
-            let trusted = if truthy(asked) { get(row, "trusted") } else { get(&p, "trusted") };
-            if free_shell(&mode) && !truthy(trusted) { Value::from("default") } else { mode }
+            let mode = if truthy(asked) {
+                asked.clone()
+            } else {
+                get_or(&p, "mode", "default".into())
+            };
+            let trusted = if truthy(asked) {
+                get(row, "trusted")
+            } else {
+                get(&p, "trusted")
+            };
+            if free_shell(&mode) && !truthy(trusted) {
+                Value::from("default")
+            } else {
+                mode
+            }
         };
         let deny = dedupe([arr(get(&p, "deny")), arr(get(row, "deny"))].concat());
         let row_agent = row_of(self.auth, agent, person).is_some();
@@ -664,14 +817,37 @@ impl<'a> Rules<'a> {
         out.insert("mode".to_owned(), mode.clone());
         out.insert("deny".to_owned(), Value::Array(deny));
         out.insert("model".to_owned(), get_or(row, "model", "".into()));
-        out.insert("env".to_owned(), get_or(row, "env", Value::Object(Map::new())));
-        out.insert("helpers".to_owned(), Value::Array(self.helpers_in(pkg, person, Some(row), false)));
+        out.insert(
+            "env".to_owned(),
+            get_or(row, "env", Value::Object(Map::new())),
+        );
+        out.insert(
+            "helpers".to_owned(),
+            Value::Array(self.helpers_in(pkg, person, Some(row), false)),
+        );
         out.insert("budget".to_owned(), get_or(row, "budget", "".into()));
-        out.insert("budget_agent".to_owned(), if row_agent { agent.into() } else { via.map_or(Value::Null, Value::from) });
-        out.insert("was".to_owned(), get_or(me, "was", Value::Array(Vec::new())));
-        out.insert("trusted".to_owned(), (truthy(get(row, "trusted")) || truthy(get(&p, "trusted"))).into());
+        out.insert(
+            "budget_agent".to_owned(),
+            if row_agent {
+                agent.into()
+            } else {
+                via.map_or(Value::Null, Value::from)
+            },
+        );
+        out.insert(
+            "was".to_owned(),
+            get_or(me, "was", Value::Array(Vec::new())),
+        );
+        out.insert(
+            "trusted".to_owned(),
+            (truthy(get(row, "trusted")) || truthy(get(&p, "trusted"))).into(),
+        );
         out.extend(self.with_jobs(pkg, person, access_of(row)));
-        let asked = if truthy(get(row, "mode")) { get(row, "mode") } else { get(&p, "mode") };
+        let asked = if truthy(get(row, "mode")) {
+            get(row, "mode")
+        } else {
+            get(&p, "mode")
+        };
         if free_shell(asked) && &mode != asked {
             out.insert("downgraded".to_owned(), asked.clone());
         }
@@ -680,11 +856,22 @@ impl<'a> Rules<'a> {
 
     /// `resolve_bot`: a bot's run: a guest, inside what its owner gets. It spends from its owner's budget, counted with
     /// everything else the owner's line holds (`was`).
-    fn resolve_bot(&self, agent: &str, bot: &str, via: Option<&str>, mut out: Map<String, Value>, once: bool) -> R<Map<String, Value>> {
+    fn resolve_bot(
+        &self,
+        agent: &str,
+        bot: &str,
+        via: Option<&str>,
+        mut out: Map<String, Value>,
+        once: bool,
+    ) -> R<Map<String, Value>> {
         let Some(row) = self.bot_row(agent, bot, via, once) else {
             return die(format!("{bot} has no membership of {agent}"));
         };
-        let pkg = if own_row(self.auth, agent, bot).is_some() { agent } else { via.unwrap_or_default() };
+        let pkg = if own_row(self.auth, agent, bot).is_some() {
+            agent
+        } else {
+            via.unwrap_or_default()
+        };
         let parent = parent_of(self.auth, bot).unwrap_or_default();
         let pr = self.resolve(agent, &parent, via, false)?;
         let p = self.preset(&"guest".into())?;
@@ -697,31 +884,63 @@ impl<'a> Rules<'a> {
         let mut was: Vec<Value> = Vec::new();
         for b in bots_of(self.auth, &parent).into_iter().filter(|b| b != bot) {
             was.push(Value::String(b.clone()));
-            was.extend(arr(get(get(get(self.auth, "people"), &b), "was")).iter().cloned());
+            was.extend(
+                arr(get(get(get(self.auth, "people"), &b), "was"))
+                    .iter()
+                    .cloned(),
+            );
         }
         let (budget, budget_agent) = if owner_parent {
             // the owner's own runs are uncapped; the optional cap covers their bots together and leaves out their own runs
             let cap = get(self.auth, "owner_bots_budget");
-            (if truthy(cap) { cap.clone() } else { "".into() }, Value::from(""))
+            (
+                if truthy(cap) { cap.clone() } else { "".into() },
+                Value::from(""),
+            )
         } else {
             let mut all: Vec<Value> = vec![Value::String(parent.clone())];
-            all.extend(arr(get(get(get(self.auth, "people"), &parent), "was")).iter().cloned());
+            all.extend(
+                arr(get(get(get(self.auth, "people"), &parent), "was"))
+                    .iter()
+                    .cloned(),
+            );
             all.extend(arr(pr.get("was").unwrap_or(&NULL)).iter().cloned());
             all.extend(was);
             was = all;
-            (pr.get("budget").cloned().unwrap_or_else(|| "".into()), pr.get("budget_agent").cloned().unwrap_or_else(|| "".into()))
+            (
+                pr.get("budget").cloned().unwrap_or_else(|| "".into()),
+                pr.get("budget_agent").cloned().unwrap_or_else(|| "".into()),
+            )
         };
         let mode = {
             let m = get(&p, "mode");
-            if free_shell(m) && !truthy(get(&p, "trusted")) { Value::from("default") } else { get_or(&p, "mode", "default".into()) }
+            if free_shell(m) && !truthy(get(&p, "trusted")) {
+                Value::from("default")
+            } else {
+                get_or(&p, "mode", "default".into())
+            }
         };
-        let deny = dedupe([arr(get(&p, "deny")), arr(get(row, "deny")), arr(pr.get("deny").unwrap_or(&NULL))].concat());
-        let model = if truthy(get(row, "model")) { get(row, "model").clone() } else { pr.get("model").cloned().unwrap_or_else(|| "".into()) };
+        let deny = dedupe(
+            [
+                arr(get(&p, "deny")),
+                arr(get(row, "deny")),
+                arr(pr.get("deny").unwrap_or(&NULL)),
+            ]
+            .concat(),
+        );
+        let model = if truthy(get(row, "model")) {
+            get(row, "model").clone()
+        } else {
+            pr.get("model").cloned().unwrap_or_else(|| "".into())
+        };
         out.insert("preset".to_owned(), "guest".into());
         out.insert("mode".to_owned(), mode);
         out.insert("deny".to_owned(), Value::Array(deny));
         out.insert("model".to_owned(), model);
-        out.insert("env".to_owned(), get_or(row, "env", Value::Object(Map::new())));
+        out.insert(
+            "env".to_owned(),
+            get_or(row, "env", Value::Object(Map::new())),
+        );
         out.insert("helpers".to_owned(), Value::Array(helpers));
         out.insert("budget".to_owned(), budget);
         out.insert("budget_agent".to_owned(), budget_agent);
@@ -733,32 +952,53 @@ impl<'a> Rules<'a> {
 
     /// `owner_cut`: a bot's grants (any of access, doors, jobs) never more than its owner holds: each cut to what the
     /// owner's run of agent (through via) has. The owner's own bots are capped by nothing.
-    fn owner_cut(&self, agent: &str, bot: &str, grants: Map<String, Value>, via: Option<&str>, pr: Option<&Map<String, Value>>) -> R<Map<String, Value>> {
+    fn owner_cut(
+        &self,
+        agent: &str,
+        bot: &str,
+        grants: Map<String, Value>,
+        via: Option<&str>,
+        pr: Option<&Map<String, Value>>,
+    ) -> R<Map<String, Value>> {
         let parent = parent_of(self.auth, bot).unwrap_or_default();
         if is_owner(self.auth, &parent) {
             return Ok(grants);
         }
         let own;
-        let pr = match pr {
-            Some(p) => p,
-            None => {
-                own = self.resolve(agent, &parent, via, false)?;
-                &own
-            }
+        let pr = if let Some(p) = pr {
+            p
+        } else {
+            own = self.resolve(agent, &parent, via, false)?;
+            &own
         };
         let mut out = grants;
         if let Some(access) = out.get("access").and_then(Value::as_object) {
             let theirs = pr.get("access").unwrap_or(&NULL);
             let cut: Map<String, Value> = access
                 .iter()
-                .map(|(k, vs)| (k.clone(), Value::Array(arr(vs).iter().filter(|v| held(theirs, k, v)).cloned().collect())))
+                .map(|(k, vs)| {
+                    (
+                        k.clone(),
+                        Value::Array(
+                            arr(vs)
+                                .iter()
+                                .filter(|v| held(theirs, k, v))
+                                .cloned()
+                                .collect(),
+                        ),
+                    )
+                })
                 .collect();
             out.insert("access".to_owned(), Value::Object(cut));
         }
         for k in ["doors", "jobs"] {
             if let Some(vs) = out.get(k) {
                 let theirs = arr(pr.get(k).unwrap_or(&NULL));
-                let kept: Vec<Value> = arr(vs).iter().filter(|x| theirs.contains(x)).cloned().collect();
+                let kept: Vec<Value> = arr(vs)
+                    .iter()
+                    .filter(|x| theirs.contains(x))
+                    .cloned()
+                    .collect();
                 out.insert(k.to_owned(), Value::Array(kept));
             }
         }
@@ -782,8 +1022,8 @@ impl<'a> Rules<'a> {
             None | Some(Value::Null | Value::Bool(false)) => Some(0.0),
             Some(Value::Bool(true)) => Some(1.0),
             Some(Value::Number(n)) => n.as_f64(),
-            Some(Value::String(t)) if !t.is_empty() => t.trim().parse::<f64>().ok(),
-            Some(Value::String(_)) => Some(0.0),
+            Some(Value::String(t)) if t.is_empty() => Some(0.0),
+            Some(Value::String(t)) => t.trim().parse::<f64>().ok(),
             Some(other) => (!truthy(other)).then_some(0.0),
         };
         // a value Python's `float()` refuses reads as "never linked"
@@ -818,11 +1058,19 @@ pub struct Outcome {
 
 impl Outcome {
     fn out(text: String, code: i32) -> Outcome {
-        Outcome { stdout: text + "\n", stderr: String::new(), code }
+        Outcome {
+            stdout: text + "\n",
+            stderr: String::new(),
+            code,
+        }
     }
 
-    fn died(d: Die) -> Outcome {
-        Outcome { stdout: String::new(), stderr: format!("kith-auth: {}\n", d.msg), code: d.code }
+    fn died(d: &Die) -> Outcome {
+        Outcome {
+            stdout: String::new(),
+            stderr: format!("kith-auth: {}\n", d.msg),
+            code: d.code,
+        }
     }
 }
 
@@ -830,19 +1078,27 @@ impl Outcome {
 pub fn run(c: &Ctx, verb: &str, args: &[String]) -> Outcome {
     match command(c, verb, args) {
         Ok(o) => o,
-        Err(d) => Outcome::died(d),
+        Err(d) => Outcome::died(&d),
     }
 }
 
 fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
     if !matches!(verb, "may" | "resolve") {
-        return Err(Die { msg: format!("unknown command: {verb} (kith-auth --help)"), code: 2 });
+        return Err(Die {
+            msg: format!("unknown command: {verb} (kith-auth --help)"),
+            code: 2,
+        });
     }
     let resolve = verb == "resolve";
-    let once = args.iter().any(|a| a == if resolve { "--take-once" } else { "--once" });
+    let once = args
+        .iter()
+        .any(|a| a == if resolve { "--take-once" } else { "--once" });
     // `kith kernel secrets resolve ... --json` is accepted; the answer is JSON either way
     let (mut opts, mut rest): (HashMap<&str, String>, Vec<&str>) = (HashMap::new(), Vec::new());
-    let mut it = args.iter().map(String::as_str).filter(|a| !matches!(*a, "--take-once" | "--once") && !(resolve && *a == "--json"));
+    let mut it = args
+        .iter()
+        .map(String::as_str)
+        .filter(|a| !matches!(*a, "--take-once" | "--once") && (!resolve || *a != "--json"));
     while let Some(a) = it.next() {
         if matches!(a, "--via" | "--person") {
             opts.insert(a, it.next().unwrap_or_default().to_owned());
@@ -852,7 +1108,10 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
     }
     let auth = load_auth(c)?;
     let rules = Rules::new(c, &auth);
-    let via = opts.get("--via").map(String::as_str).filter(|v| !v.is_empty());
+    let via = opts
+        .get("--via")
+        .map(String::as_str)
+        .filter(|v| !v.is_empty());
     if !resolve && rest.len() == 2 {
         // --once: a "just this once" counts (kith-permit's ask_helper, so a yes answered late isn't asked again)
         let (ok, why) = rules.may(rest[0], rest[1], via, once)?;
@@ -860,7 +1119,11 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
     }
     if resolve && rest.len() == 1 {
         let agent = rest[0];
-        let person = opts.get("--person").filter(|p| !p.is_empty()).cloned().unwrap_or_else(|| rules.acting());
+        let person = opts
+            .get("--person")
+            .filter(|p| !p.is_empty())
+            .cloned()
+            .unwrap_or_else(|| rules.acting());
         let mut res = rules.resolve(agent, &person, via, false)?;
         let held = rules.bridge_held(&person);
         // not while held: bin/kith asks again until in sync, and the once goes to the launch that runs
@@ -871,11 +1134,17 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
             let mut locked = load_auth_locked(c)?;
             let rules = Rules::new(c, &locked.auth);
             res = rules.resolve(agent, &person, via, true)?;
-            let (allowed, who) = (res["allowed"] == Value::Bool(true), res["person"].as_str().unwrap_or_default().to_owned());
+            let (allowed, who) = (
+                res["allowed"] == Value::Bool(true),
+                res["person"].as_str().unwrap_or_default().to_owned(),
+            );
             drop(rules);
             if allowed && take_once(&mut locked.auth, &who, agent, via) {
                 save_auth(c, &locked)?;
-                let why = format!("{} (just this once)", res["why"].as_str().unwrap_or_default());
+                let why = format!(
+                    "{} (just this once)",
+                    res["why"].as_str().unwrap_or_default()
+                );
                 res.insert("why".to_owned(), why.into());
             }
         }
@@ -883,5 +1152,8 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
         res.insert("held".to_owned(), held.into());
         return Ok(Outcome::out(pyjson::dumps(&Value::Object(res)), 0));
     }
-    Err(Die { msg: format!("{verb}: see kith-auth --help"), code: 2 })
+    Err(Die {
+        msg: format!("{verb}: see kith-auth --help"),
+        code: 2,
+    })
 }

@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 /// The pieces a job grants, in the order `kith_jobs.PIECES` lists them.
 pub const PIECES: [&str; 3] = ["domains", "helpers", "doors"];
 
-const DOOR_KEYS: [&str; 10] = ["name", "label", "npm", "lockfile", "chrome", "tools", "bin", "args", "writes", "env"];
+const DOOR_KEYS: [&str; 10] = [
+    "name", "label", "npm", "lockfile", "chrome", "tools", "bin", "args", "writes", "env",
+];
 const TOOLS: [&str; 3] = ["node", "ffmpeg", "ffprobe"];
 
 /// A job as `kith_jobs.read` returns it: its name and its pieces (a door as `name@digest`).
@@ -61,7 +63,11 @@ fn splitlines(text: &str) -> Vec<&str> {
     let mut start = 0;
     let mut chars = text.char_indices().peekable();
     while let Some((i, c)) = chars.next() {
-        if matches!(c, '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{1c}'..='\u{1e}' | '\u{85}' | '\u{2028}' | '\u{2029}') {
+        if matches!(
+            c,
+            '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{1c}'
+                ..='\u{1e}' | '\u{85}' | '\u{2028}' | '\u{2029}'
+        ) {
             out.push(&text[start..i]);
             start = i + c.len_utf8();
             if c == '\r'
@@ -155,9 +161,9 @@ fn block(text: &str, key: &str) -> Vec<Option<Item>> {
             items.push(Some(Vec::new()));
         }
         // `([a-z_]+):\s*(.*)`
-        let kv = body_text
-            .split_once(':')
-            .filter(|(k, _)| !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_'));
+        let kv = body_text.split_once(':').filter(|(k, _)| {
+            !k.is_empty() && k.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        });
         let last = items.last_mut().expect("an item was just pushed");
         let bad = last.as_ref().is_some_and(|item| match kv {
             Some((k, _)) => item.iter().any(|(have, _)| have == k),
@@ -222,15 +228,22 @@ pub fn valid_domain(d: &str) -> bool {
         !b.is_empty()
             && b.len() <= 63
             && first(b[0])
-            && b.iter().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
+            && b.iter()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
             && (b.len() == 1 || b[b.len() - 1] != '-')
     };
-    init.iter().all(|l| label(l, |c| c.is_ascii_lowercase() || c.is_ascii_digit())) && label(last, |c| c.is_ascii_lowercase())
+    init.iter()
+        .all(|l| label(l, |c| c.is_ascii_lowercase() || c.is_ascii_digit()))
+        && label(last, |c| c.is_ascii_lowercase())
 }
 
 fn relative(p: Option<&V>) -> bool {
     match p {
-        Some(V::Str(p)) => !p.is_empty() && !p.starts_with('/') && p.split('/').all(|x| !matches!(x, "" | "." | "..")),
+        Some(V::Str(p)) => {
+            !p.is_empty()
+                && !p.starts_with('/')
+                && p.split('/').all(|x| !matches!(x, "" | "." | ".."))
+        }
         _ => false,
     }
 }
@@ -251,7 +264,9 @@ fn npm_spec(s: &str) -> bool {
         return false;
     };
     let ok_pkg = match pkg.strip_prefix('@') {
-        Some(scoped) => scoped.split_once('/').is_some_and(|(scope, n)| name(scope) && name(n)),
+        Some(scoped) => scoped
+            .split_once('/')
+            .is_some_and(|(scope, n)| name(scope) && name(n)),
         None => name(pkg),
     };
     let (core, pre) = match ver.split_once('-') {
@@ -261,13 +276,21 @@ fn npm_spec(s: &str) -> bool {
     let nums: Vec<&str> = core.split('.').collect();
     ok_pkg
         && nums.len() == 3
-        && nums.iter().all(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
-        && pre.is_none_or(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-')))
+        && nums
+            .iter()
+            .all(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+        && pre.is_none_or(|p| {
+            !p.is_empty()
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+        })
 }
 
 fn env_value(v: &str) -> bool {
     matches!(v, "$chrome" | "$node" | "$ffmpeg" | "$ffprobe")
-        || (v.len() <= 64 && v.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
+        || (v.len() <= 64
+            && v.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')))
 }
 
 fn env_name(k: &str) -> bool {
@@ -278,8 +301,20 @@ fn env_name(k: &str) -> bool {
 }
 
 fn env_kept(k: &str) -> bool {
-    matches!(k, "PATH" | "HOME" | "TMPDIR" | "LANG" | "SHELL" | "USER" | "NODE_OPTIONS" | "NODE_PATH" | "NODE_EXTRA_CA_CERTS")
-        || ["KITH_", "DYLD_", "LD_", "npm_"].iter().any(|p| k.starts_with(p))
+    matches!(
+        k,
+        "PATH"
+            | "HOME"
+            | "TMPDIR"
+            | "LANG"
+            | "SHELL"
+            | "USER"
+            | "NODE_OPTIONS"
+            | "NODE_PATH"
+            | "NODE_EXTRA_CA_CERTS"
+    ) || ["KITH_", "DYLD_", "LD_", "npm_"]
+        .iter()
+        .any(|p| k.starts_with(p))
 }
 
 fn door_ok(d: &Item, base: &Path) -> bool {
@@ -289,9 +324,13 @@ fn door_ok(d: &Item, base: &Path) -> bool {
     if !matches!(field(d, "name"), Some(V::Str(n)) if agent_name(n)) {
         return false;
     }
-    let (Some(npm), Some(tools), Some(_), Some(writes), Some(env)) =
-        (list(d, "npm"), list(d, "tools"), list(d, "args"), list(d, "writes"), list(d, "env"))
-    else {
+    let (Some(npm), Some(tools), Some(_), Some(writes), Some(env)) = (
+        list(d, "npm"),
+        list(d, "tools"),
+        list(d, "args"),
+        list(d, "writes"),
+        list(d, "env"),
+    ) else {
         return false;
     };
     if npm.is_empty() || !npm.iter().all(|s| npm_spec(s)) {
@@ -326,7 +365,9 @@ fn door_ok(d: &Item, base: &Path) -> bool {
             return false;
         }
         let rest: String = v.chars().skip(1).collect();
-        if (v == "$chrome" && field(d, "chrome").is_none()) || (TOOLS.contains(&rest.as_str()) && !tools.contains(&rest)) {
+        if (v == "$chrome" && field(d, "chrome").is_none())
+            || (TOOLS.contains(&rest.as_str()) && !tools.contains(&rest))
+        {
             return false;
         }
     }
@@ -342,11 +383,16 @@ fn lockfile_ok(d: &Item, base: &Path) -> bool {
     };
     let path = base.join(l);
     let is_file = path.metadata().is_ok_and(|m| m.is_file());
-    let is_link = path.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink());
+    let is_link = path
+        .symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_symlink());
     let inside = std::fs::canonicalize(&path)
         .ok()
         .zip(std::fs::canonicalize(base).ok())
-        .is_some_and(|(p, b)| p.to_string_lossy().starts_with(&format!("{}/", b.to_string_lossy())));
+        .is_some_and(|(p, b)| {
+            p.to_string_lossy()
+                .starts_with(&format!("{}/", b.to_string_lossy()))
+        });
     is_file && !is_link && inside
 }
 
@@ -358,12 +404,16 @@ fn door_digest(d: &Item, lock: &[u8]) -> String {
         .map(|(k, v)| (k.as_str(), v.json()))
         .collect();
     kept.sort_by(|a, b| a.0.cmp(b.0));
-    let obj: serde_json::Map<String, Value> = kept.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
+    let obj: serde_json::Map<String, Value> =
+        kept.into_iter().map(|(k, v)| (k.to_owned(), v)).collect();
     let mut hasher = Sha256::new();
     hasher.update(super::pyjson::dumps(&Value::Object(obj)).as_bytes());
     hasher.update([0u8]);
     hasher.update(lock);
-    let hex: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+    let hex = hasher.finalize().iter().fold(String::new(), |mut s, b| {
+        let _ = std::fmt::Write::write_fmt(&mut s, format_args!("{b:02x}"));
+        s
+    });
     hex[..12].to_owned()
 }
 
@@ -397,7 +447,11 @@ fn doors(caps: &Path, text: &str) -> Vec<(String, String)> {
 
 /// The valid jobs of a capabilities.yaml in package order (`kith_jobs.read(caps)[0]`).
 pub fn read(caps: &Path) -> Vec<Job> {
-    let text = if caps.is_file() { String::from_utf8_lossy(&std::fs::read(caps).unwrap_or_default()).into_owned() } else { String::new() };
+    let text = if caps.is_file() {
+        String::from_utf8_lossy(&std::fs::read(caps).unwrap_or_default()).into_owned()
+    } else {
+        String::new()
+    };
     let helpers = inline(&text, "helpers");
     let doors = doors(caps, &text);
     let mut jobs: Vec<Job> = Vec::new();
@@ -405,7 +459,12 @@ pub fn read(caps: &Path) -> Vec<Job> {
         let Some(j) = j.filter(|j| !j.is_empty()) else {
             continue;
         };
-        if j.iter().any(|(k, _)| !matches!(k.as_str(), "name" | "label" | "domains" | "helpers" | "doors")) {
+        if j.iter().any(|(k, _)| {
+            !matches!(
+                k.as_str(),
+                "name" | "label" | "domains" | "helpers" | "doors"
+            )
+        }) {
             continue;
         }
         let Some(V::Str(name)) = field(&j, "name").cloned() else {
@@ -417,7 +476,9 @@ pub fn read(caps: &Path) -> Vec<Job> {
         if matches!(field(&j, "label"), Some(V::List(_) | V::Open)) {
             continue;
         }
-        let (Some(domains), Some(hs), Some(ds)) = (list(&j, "domains"), list(&j, "helpers"), list(&j, "doors")) else {
+        let (Some(domains), Some(hs), Some(ds)) =
+            (list(&j, "domains"), list(&j, "helpers"), list(&j, "doors"))
+        else {
             continue;
         };
         if !domains.iter().all(|d| valid_domain(d))
@@ -442,7 +503,11 @@ pub fn read(caps: &Path) -> Vec<Job> {
             doors: dedupe(ds)
                 .into_iter()
                 .map(|d| {
-                    let digest = doors.iter().find(|(n, _)| *n == d).map(|(_, g)| g.clone()).unwrap_or_default();
+                    let digest = doors
+                        .iter()
+                        .find(|(n, _)| *n == d)
+                        .map(|(_, g)| g.clone())
+                        .unwrap_or_default();
                     format!("{d}@{digest}")
                 })
                 .collect(),
@@ -462,7 +527,10 @@ pub fn effective(tick: &Value, job: Option<&Job>) -> [Vec<Value>; 3] {
             .and_then(Value::as_array)
             .map(|vs| {
                 vs.iter()
-                    .filter(|v| v.as_str().is_some_and(|s| job.piece(k).iter().any(|p| p == s)))
+                    .filter(|v| {
+                        v.as_str()
+                            .is_some_and(|s| job.piece(k).iter().any(|p| p == s))
+                    })
                     .cloned()
                     .collect()
             })

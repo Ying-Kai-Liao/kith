@@ -97,9 +97,14 @@ fn number(n: &serde_json::Number) -> String {
     let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
     // `exp + 1` digits sit before the point
     let body = match usize::try_from(exp + 1) {
-        Ok(p) if p >= digits.len() && p > 0 => format!("{digits}{}.0", "0".repeat(p - digits.len())),
+        Ok(p) if p >= digits.len() && p > 0 => {
+            format!("{digits}{}.0", "0".repeat(p - digits.len()))
+        }
         Ok(p) if p > 0 => format!("{}.{}", &digits[..p], &digits[p..]),
-        _ => format!("0.{}{digits}", "0".repeat(usize::try_from(-(exp + 1)).unwrap_or(0))),
+        _ => format!(
+            "0.{}{digits}",
+            "0".repeat(usize::try_from(-(exp + 1)).unwrap_or(0))
+        ),
     };
     format!("{}{body}", if negative { "-" } else { "" })
 }
@@ -156,7 +161,11 @@ fn ws(s: &[char], mut i: usize) -> usize {
 fn top(s: &[char]) -> Result<(), E> {
     let end = value(s, ws(s, 0))?;
     let end = ws(s, end);
-    if end == s.len() { Ok(()) } else { Err(("Extra data", end)) }
+    if end == s.len() {
+        Ok(())
+    } else {
+        Err(("Extra data", end))
+    }
 }
 
 fn word(s: &[char], i: usize, w: &str) -> bool {

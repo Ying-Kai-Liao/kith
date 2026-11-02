@@ -816,7 +816,9 @@ async fn main() -> Result<()> {
                 KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                 KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
                 KernelCmd::Engines { json, action } => print_engines(json, action)?,
-                KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } => unreachable!("handled above"),
+                KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } | KernelCmd::Secrets { .. } => {
+                    unreachable!("handled above")
+                }
             }
             Ok(())
         }
