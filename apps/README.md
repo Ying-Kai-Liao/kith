@@ -23,23 +23,22 @@ The desktop app sends nothing to PostHog itself; it goes through the host, which
 
 ## Host and accounts
 
-The Mac app runs against `kith-serve` (built from `serve/host`): dev data in `~/.kith/serve` on
-port 19224, launchd job `dev.kith.serve`; main uses `~/.kith/serve-main`, 19225 and
-`dev.kith.serve.main`. If `kith serve start` already installed the job, the app adopts it and never
-rewrites its plist. Inside the app, `Contents/Resources/kith-serve` is the service binary (the plist
+There is one Kith desktop app and one host per computer. The app runs against `kith-serve` (built from
+`serve/host`): data in `~/.kith/serve` on port 19224, launchd job `dev.kith.serve`. If `kith serve
+start` (or anything else) already installed the job, the app uses it and never installs, replaces or
+updates it; only with nothing installed does it install its bundled host there. Inside the app, `Contents/Resources/kith-serve` is the service binary (the plist
 and the binary-hash check point at it) and `Contents/Resources/kith/` is the release layout: `bin/kith`
 (the same crate's `kith` name, universal) with `share/kith/kernel` beside it, filled by
 `scripts/stage-kernel.sh` (the script `scripts/package-release.sh` uses too). So
 `"…/Resources/kith/bin/kith" --version`, `serve status` and `doctor` work as an installed `kith` does.
-Accounts are off until a build is given a Clerk application: `shared/Config/*.plist` stay empty
+Accounts are off until a build is given a Clerk application: `shared/Config/*.plist` (the desktop app reads `main.plist`) stay empty
 (never commit a key), and the sign-in buttons stay hidden or disabled, so Kith runs on QR pairing
 alone. To turn them on, set two variables in the environment of the build (or of a development run):
 
 - `KITH_CLERK_PUBLISHABLE_KEY`: the Kith Clerk app's publishable key (`pk_test_…` / `pk_live_…`), with
-  Google, Apple and GitHub enabled and `kith://callback` and `kith-dev://callback` (plus the iOS
-  bundle ids' `://callback`) in its native redirect allowlist. The Apple button shows only on Main builds
-  with a `pk_live_…` key; the development instance can't do Apple.
-- `KITH_CLOUD_URL`: the Kith cloud's `https://` address (`https://api.kithbot.app` for Main builds).
+  Google, Apple and GitHub enabled and `kith://callback` (plus the iOS bundle ids' `://callback`) in its native redirect allowlist. The
+  Apple button shows only with a `pk_live_…` key; the development instance can't do Apple.
+- `KITH_CLOUD_URL`: the Kith cloud's `https://` address (`https://api.kithbot.app`).
 
 The desktop build writes them into `resources/account-config.json` (`tools/account-config.mjs`, run by
 `npm run dev` and `dist:*`); the iOS build patches them into the app's `AccountConfig.plist` in the

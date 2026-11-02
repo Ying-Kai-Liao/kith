@@ -74,25 +74,20 @@ fn env_url() -> Option<String> {
         .filter(|u| valid_url(&format!("{u}/")))
 }
 
-/// The relay a Dev build uses when nothing else is set (the relay is public).
-const DEV_RELAY: &str = "https://kith-cloud-dev.lykevin890919.workers.dev";
-/// The production cloud a Main build uses when nothing else is set.
+/// The production cloud, used when nothing else is set.
 const MAIN_CLOUD: &str = "https://api.kithbot.app";
+#[cfg(test)]
+const OTHER_CLOUD: &str = "https://cloud.example.com";
 /// Where people open shared links for the production cloud (the apex serves the invite pages).
 const MAIN_LINKS: &str = "https://kithbot.app";
 
 fn default_url() -> String {
-    use crate::environment::Environment;
-    let url = match Environment::current() {
-        Environment::Dev => DEV_RELAY,
-        Environment::Main => MAIN_CLOUD,
-    };
-    url.to_owned()
+    MAIN_CLOUD.to_owned()
 }
 
 /// The base that shareable pages (`/i/<computer>/<invite>`) live under: the production cloud's apex
 /// domain, or any other cloud's own URL.
-/// Whether `cloud_url` is the production cloud (a Dev host can be pointed at it with `kith serve relay`).
+/// Whether `cloud_url` is the production cloud (a host can be pointed elsewhere with `kith serve relay`).
 pub fn is_main_cloud(cloud_url: &str) -> bool {
     cloud_url.trim().trim_end_matches('/') == MAIN_CLOUD
 }
@@ -1177,13 +1172,13 @@ mod tests {
             ),
             s("e")
         );
-        assert!(valid_url(&format!("{DEV_RELAY}/")));
+        assert!(valid_url(&format!("{OTHER_CLOUD}/")));
     }
 
     #[test]
     fn only_the_production_cloud_counts_as_main() {
         assert!(is_main_cloud(MAIN_CLOUD) && is_main_cloud(&format!(" {MAIN_CLOUD}/ ")));
-        assert!(!is_main_cloud(DEV_RELAY) && !is_main_cloud("http://127.0.0.1:8792"));
+        assert!(!is_main_cloud(OTHER_CLOUD) && !is_main_cloud("http://127.0.0.1:8792"));
     }
 
     #[test]
@@ -1191,7 +1186,7 @@ mod tests {
         assert!(valid_url(&format!("{MAIN_CLOUD}/")));
         assert_eq!(links_base("https://api.kithbot.app"), "https://kithbot.app");
         assert_eq!(links_base("https://api.kithbot.app/"), "https://kithbot.app");
-        assert_eq!(links_base(DEV_RELAY), DEV_RELAY);
+        assert_eq!(links_base(OTHER_CLOUD), OTHER_CLOUD);
         assert_eq!(links_base("http://127.0.0.1:8787/"), "http://127.0.0.1:8787");
     }
 

@@ -13,10 +13,7 @@ use std::time::Duration;
 use zeroize::Zeroizing;
 
 const PREFIX: &str = "vault:v1:";
-const SERVICE: &str = match crate::environment::Environment::current() {
-    crate::environment::Environment::Main => "dev.kith.serve.main.credentials",
-    crate::environment::Environment::Dev => "dev.kith.serve.credentials",
-};
+const SERVICE: &str = "dev.kith.serve.credentials";
 
 /// How long a caller waits for the OS credential store. A locked Keychain can sit on an access prompt nobody sees
 /// (a freshly signed host binary asks again); the host must keep answering other requests meanwhile.

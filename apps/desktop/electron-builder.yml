@@ -2,7 +2,7 @@
 # CI puts the native pieces in place first (see .github/workflows/release-desktop.yml):
 #   build/native/kith-serve        the host for this platform (macOS: universal)
 #   build/native/kith/             macOS: bin/kith (universal) + share/kith/kernel, as in the release tarball
-#   build/native/kith-serve.exe    Windows: the host, and kith-servew-main.exe that runs it at sign-in
+#   build/native/kith-serve.exe    Windows: the host, and kith-servew.exe that runs it at sign-in
 #   build/native/kith-speech      macOS on-device speech helper
 #   build/native/KithScreen.app   macOS screen helper (Xcode `Screen` target, with cua-driver inside)
 #   build/native/cua-driver.exe     Windows: the computer-use driver and its UI Automation helper
@@ -26,7 +26,7 @@ protocols:
     schemes: [kith, com.yingkailiao.kith]
 # The app's own updates (src/shared/update-feed.ts): electron-updater reads app-update.yml, generated from this block,
 # and finds latest-mac.yml on the latest non-prerelease Release of the repo. electron-builder never uploads itself: the
-# release workflow runs it with --publish never and attaches the files. Dev builds set publish: null.
+# release workflow runs it with --publish never and attaches the files.
 publish:
   provider: github
   owner: Ying-Kai-Liao
@@ -117,8 +117,8 @@ win:
   extraResources:
     - from: build/native/kith-serve.exe
       to: kith-serve.exe
-    - from: build/native/kith-servew-main.exe
-      to: kith-servew-main.exe
+    - from: build/native/kith-servew.exe
+      to: kith-servew.exe
     # The computer-use driver bots act through; the host starts it from beside itself.
     - from: build/native/cua-driver.exe
       to: cua-driver.exe

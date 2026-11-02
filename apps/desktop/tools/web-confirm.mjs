@@ -40,7 +40,7 @@ let pending: { computerId: string } | null = empty ? null : { computerId: 'demo-
 provideWebSession({
   ready: async () => {},
   support: async () => null,
-  pendingLink: async () => pending && { ...pending, appLink: 'kith-dev://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678' },
+  pendingLink: async () => pending && { ...pending, appLink: 'kith://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678' },
   discardPending: async () => { calls.push('discardPending'); pending = null },
   signInAgain: async () => {},
 })
@@ -102,7 +102,7 @@ try {
   check(/Join a computer on Kith\?/.test(text) && /Not now/.test(text), 'the confirm screen asks before joining')
   check((await calls(waiting)).length === 0, 'nothing ran before the click: no takePending, accept, requestAccess or proveInvite')
   const openApp = waiting.getByRole('link', { name: 'Open in the Kith app' })
-  check((await openApp.getAttribute('href')) === 'kith-dev://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678', 'the app offer is a plain anchor to the kith-dev link')
+  check((await openApp.getAttribute('href')) === 'kith://invite?c=demo-mac-computer-id&i=inv_1&t=tok_12345678', 'the app offer is a plain anchor to the kith link')
   await waiting.waitForTimeout(1500)
   check(waiting.url() === base, 'no auto-redirect')
   check((await calls(waiting)).length === 0, 'and still nothing after waiting')

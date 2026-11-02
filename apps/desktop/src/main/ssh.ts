@@ -1,4 +1,3 @@
-import { identity } from './environment'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, promises as fs, readFileSync, statSync } from 'node:fs'
@@ -370,7 +369,7 @@ class SSHComputers {
     }
 
     this.setStatus(id, { kind: 'connecting', step: 'Signing in…' })
-    const result = await run(SSH, infoArguments(profile, home, identity.dataFolder, dataDir))
+    const result = await run(SSH, infoArguments(profile, home, dataDir))
     if (token.cancelled) return idle
     if (result.status === 255) {
       if (authRefused(result.stderr)) return stop({ kind: 'failed', message: signInRefused(profile) })

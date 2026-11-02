@@ -10,7 +10,7 @@ T=$(mktemp -d "$(dirname "${TMPDIR:-/tmp}/x")/kith-serve-check.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home
 mkdir -p "$HOME" "$T/repo/kernel/bin" "$T/repo/serve/host/src" "$T/stubs" "$T/target/dev-app"
-unset KITH_HOME CARGO_TARGET_DIR KITH_KERNEL_BIN HQ_BIN KITH_SERVE_LAUNCHER KITH_SERVE_ENV KITH_SERVE_DEV
+unset KITH_HOME CARGO_TARGET_DIR KITH_KERNEL_BIN HQ_BIN KITH_SERVE_LAUNCHER KITH_SERVE_DEV
 export CARGO_TARGET_DIR=$T/target
 
 cp "$KERNEL/bin/kith-serve" "$T/repo/kernel/bin/"
@@ -97,9 +97,6 @@ check "--no-build never runs cargo" "[ $(count 'cargo build.*--bin kith-serve') 
 
 : > "$STUB_LOG.kith"; KITH_KERNEL_BIN=/elsewhere/kith "$SERVE" start --no-build >/dev/null 2>&1
 check "an explicit KITH_KERNEL_BIN is kept (and handed on as HQ_BIN too)" "grep -qx '/elsewhere/kith' '$STUB_LOG.kith' && grep -qx /elsewhere/kith '$STUB_LOG.hqbin'"
-: > "$STUB_LOG.build"; KITH_SERVE_ENV=main "$SERVE" start >/dev/null 2>&1
-check "an exported KITH_SERVE_ENV never reaches the build" "grep -q 'env=unset' '$STUB_LOG.build' && ! grep -q 'env=main' '$STUB_LOG.build'"
-
 # a relative CARGO_TARGET_DIR is resolved before the build moves into serve/host
 mkdir -p "$T/work"; rm -rf "$T/work/reltarget"; rm -f "$BIN"
 (cd "$T/work" && CARGO_TARGET_DIR=reltarget "$SERVE" start >/dev/null 2>&1)
@@ -201,13 +198,14 @@ printf '#!/bin/sh\n' > "$P/bin/kith-tts"; chmod +x "$P/bin/kith-tts"; : > "$STUB
 check "packaged start installs kith-tts beside the host" "cmp -s '$P/bin/kith-tts' '$HOME/.kith/serve/bin/kith-tts'"
 rm -f "$P/bin/kith-tts"
 
-# the Mac app's main bundle (share/kith/env says main) keeps to the main data dir and port, never the dev ones
+# a bundle that still carries share/kith/env (older app builds wrote "main") installs into the one host, on its port
 echo main > "$P/share/kith/env"; rm -rf "$HOME/.kith/serve/bin"; : > "$STUB_LOG"
 out=$("$P/share/kith/kernel/bin/kith-serve" start 2>&1); rc=$?
-check "main bundle start succeeds" "[ $rc = 0 ]"
-check "main bundle installs under serve-main" "cmp -s '$P/bin/kith' '$HOME/.kith/serve-main/bin/kith-serve'"
-check "main bundle uses port 19225" "grep -q 'install --port 19225' '$STUB_LOG'"
-check "main bundle leaves the dev dir alone" "[ ! -e '$HOME/.kith/serve/bin' ]"
+check "bundle start succeeds" "[ $rc = 0 ]"
+check "bundle installs under serve" "cmp -s '$P/bin/kith' '$HOME/.kith/serve/bin/kith-serve'"
+check "bundle uses port 19224" "grep -q 'install --port 19224' '$STUB_LOG'"
+check "bundle makes no serve-main" "[ ! -e '$HOME/.kith/serve-main' ]"
+rm -f "$P/share/kith/env"
 
 # The local voice helper: copied beside the host when a build exists, absent is fine, a changed one replaces the old.
 check "no built kith-tts: install goes on, none copied" "[ ! -e '$HOME/.kith/serve/bin/kith-tts' ]"

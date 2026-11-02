@@ -13,6 +13,6 @@ export const webConfig = {
   cloudURL: resolved.cloudURL ?? '',
   clerkPublishableKey: resolved.clerkPublishableKey ?? '',
   version: __KITH_WEB__.version,
-  /** The scheme of the Kith app a person may already have; the dev build's. */
-  appScheme: 'kith-dev',
+  /** The scheme of the Kith app a person may already have. */
+  appScheme: 'kith',
 }
