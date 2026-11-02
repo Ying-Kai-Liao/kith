@@ -1,0 +1,10 @@
+{
+  "command": "new",
+  "type": "NewAgent",
+  "body": {
+    "agent": "gamma",
+    "home": "/tmp/kith/kith/agents/gamma",
+    "dir": "/tmp/kith/kith/agents/gamma/role",
+    "description": "the gamma agent"
+  }
+}
