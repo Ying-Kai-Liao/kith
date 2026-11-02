@@ -48,11 +48,10 @@ impl Layout {
         Self::for_home(&kith_kernel::paths::process_home())
     }
 
-    /// `from_env` for a given home folder: the folders `kith paths` says, `KITH_AGENTS` aside.
+    /// `from_env` for a given home folder: the state and agents folders `kith paths` says.
     pub(crate) fn for_home(home: &Path) -> Self {
         let p = crate::kernel::folders(home);
-        let agents = crate::kernel::var("AGENTS").map_or(p.agents, PathBuf::from);
-        Self::new(p.state, agents)
+        Self::new(p.state, p.agents)
     }
 
     pub fn new(state: PathBuf, agents: PathBuf) -> Self {

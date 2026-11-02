@@ -45,26 +45,39 @@ impl Paths {
             ("CACHE", &self.cache),
             ("STORE", &self.store),
         ];
-        ["KITH_", "HQ_"].iter().flat_map(|p| own.iter().map(move |(k, v)| (format!("{p}{k}"), *v))).collect()
+        ["KITH_", "HQ_"]
+            .iter()
+            .flat_map(|p| own.iter().map(move |(k, v)| (format!("{p}{k}"), *v)))
+            .collect()
     }
 
     /// The same text as `kith_paths.py --json`.
     pub fn json(&self) -> String {
-        let fields: Vec<String> =
-            self.entries().iter().map(|(k, v)| format!("{}: {}", quote(k), quote(&v.to_string_lossy()))).collect();
+        let fields: Vec<String> = self
+            .entries()
+            .iter()
+            .map(|(k, v)| format!("{}: {}", quote(k), quote(&v.to_string_lossy())))
+            .collect();
         format!("{{{}}}", fields.join(", "))
     }
 
     /// The same text as `kith_paths.py` with no argument.
     pub fn text(&self) -> String {
-        let lines: Vec<String> = self.entries().iter().map(|(k, v)| format!("{k:<15} {}\n", v.display())).collect();
+        let lines: Vec<String> = self
+            .entries()
+            .iter()
+            .map(|(k, v)| format!("{k:<15} {}\n", v.display()))
+            .collect();
         lines.concat()
     }
 
     /// The same text as `kith_paths.py --sh`.
     pub fn sh(&self) -> String {
-        let lines: Vec<String> =
-            self.entries().iter().map(|(k, v)| format!("export {k}={}\n", shell_quote(&v.to_string_lossy()))).collect();
+        let lines: Vec<String> = self
+            .entries()
+            .iter()
+            .map(|(k, v)| format!("export {k}={}\n", shell_quote(&v.to_string_lossy())))
+            .collect();
         lines.concat()
     }
 }
@@ -96,7 +109,10 @@ fn quote(s: &str) -> String {
 
 /// `shlex.quote`.
 fn shell_quote(s: &str) -> String {
-    if !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || "@%+=:,./-_".contains(c)) {
+    if !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "@%+=:,./-_".contains(c))
+    {
         s.to_owned()
     } else {
         format!("'{}'", s.replace('\'', "'\"'\"'"))
@@ -114,7 +130,11 @@ fn getenv(env: Env<'_>, name: &str) -> String {
 /// A path the way Python's `Path()` spells it: no `.` parts, no doubled or trailing slash.
 fn norm(p: &Path) -> PathBuf {
     let out: PathBuf = p.components().filter(|c| *c != Component::CurDir).collect();
-    if out.as_os_str().is_empty() { PathBuf::from(".") } else { out }
+    if out.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        out
+    }
 }
 
 /// `os.path.expanduser` for `~` and `~/...` (another user's `~name` stays as written).
@@ -128,8 +148,13 @@ fn expanduser(home: &Path, s: &str) -> PathBuf {
 
 /// `os.path.realpath` (not strict): symlinks resolved as far as the path exists, the rest kept as written.
 pub fn realpath(p: &Path) -> PathBuf {
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().unwrap_or_default().join(p) };
-    let mut pending: VecDeque<OsString> = abs.components().map(|c| c.as_os_str().to_owned()).collect();
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    };
+    let mut pending: VecDeque<OsString> =
+        abs.components().map(|c| c.as_os_str().to_owned()).collect();
     let mut out = PathBuf::new();
     let mut hops = 0;
     while let Some(c) = pending.pop_front() {
@@ -147,7 +172,11 @@ pub fn realpath(p: &Path) -> PathBuf {
                     if target.is_absolute() {
                         out = PathBuf::from("/");
                     }
-                    for part in target.components().rev().filter(|p| *p != Component::RootDir) {
+                    for part in target
+                        .components()
+                        .rev()
+                        .filter(|p| *p != Component::RootDir)
+                    {
                         pending.push_front(part.as_os_str().to_owned());
                     }
                 }
@@ -169,8 +198,8 @@ pub fn state_dir(home: &Path, env: Env<'_>) -> (PathBuf, bool) {
     if !given.is_empty() {
         let d = expanduser(home, given);
         // <home>/state is what the old link layout exports as KITH_STATE; children must not mistake it for a choice.
-        let old_export =
-            d.file_name().is_some_and(|n| n == "state") && d.parent().is_some_and(|p| p.join("kernel").is_dir());
+        let old_export = d.file_name().is_some_and(|n| n == "state")
+            && d.parent().is_some_and(|p| p.join("kernel").is_dir());
         return (d, !old_export);
     }
     let (dot, old) = (home.join(".kith"), home.join(".hq"));
@@ -210,7 +239,9 @@ pub fn paths(home: &Path, kernel: &Path, env: Env<'_>) -> Paths {
     let given = given.trim();
     let (linked, old_linked) = (home.join("kith"), home.join("hq"));
     let fallback = if kernel.file_name().is_some_and(|n| n == "kernel") {
-        kernel.parent().map_or_else(|| kernel.to_path_buf(), Path::to_path_buf)
+        kernel
+            .parent()
+            .map_or_else(|| kernel.to_path_buf(), Path::to_path_buf)
     } else {
         kernel.to_path_buf()
     };
@@ -225,9 +256,21 @@ pub fn paths(home: &Path, kernel: &Path, env: Env<'_>) -> Paths {
     } else {
         fallback
     };
-    let state = if mine { dot.clone() } else { kith.join("state") };
-    let agents = kith.join("agents");
-    let (home_real, state_real, agents_real) = (realpath(&kith), realpath(&state), realpath(&agents));
+    let state = if mine {
+        dot.clone()
+    } else {
+        kith.join("state")
+    };
+    // KITH_AGENTS (HQ_AGENTS) moves the agents folder alone; kith_paths.py reads it too.
+    let given_agents = getenv(env, "AGENTS");
+    let given_agents = given_agents.trim();
+    let agents = if given_agents.is_empty() {
+        kith.join("agents")
+    } else {
+        expanduser(home, given_agents)
+    };
+    let (home_real, state_real, agents_real) =
+        (realpath(&kith), realpath(&state), realpath(&agents));
     let (machine, secrets, logs, cache, store);
     if mine {
         machine = dot.clone();
@@ -240,10 +283,25 @@ pub fn paths(home: &Path, kernel: &Path, env: Env<'_>) -> Paths {
         secrets = config.clone();
         machine = config;
         logs = first([home.join("Library/Logs/kith"), home.join("Library/Logs/hq")]);
-        cache = first([home.join("Library/Caches/kith"), home.join("Library/Caches/hq")]);
+        cache = first([
+            home.join("Library/Caches/kith"),
+            home.join("Library/Caches/hq"),
+        ]);
         store = agents.join(".store");
     }
-    Paths { home: kith, state, agents, home_real, state_real, agents_real, machine, secrets, logs, cache, store }
+    Paths {
+        home: kith,
+        state,
+        agents,
+        home_real,
+        state_real,
+        agents_real,
+        machine,
+        secrets,
+        logs,
+        cache,
+        store,
+    }
 }
 
 /// The process environment, as `Env`.
@@ -253,7 +311,10 @@ pub fn process_env(name: &str) -> Option<String> {
 
 /// `$HOME` (Python's `Path.home()`); empty when it is not set.
 pub fn process_home() -> PathBuf {
-    std::env::var_os("HOME").filter(|h| !h.is_empty()).map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 /// `paths` for this process: its `$HOME` and environment, and the given kernel folder.

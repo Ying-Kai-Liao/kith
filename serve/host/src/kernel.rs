@@ -65,8 +65,8 @@ pub fn route(args: &[OsString]) -> Route {
         Some("memory") if rest.get(1).and_then(|a| a.to_str()).is_some_and(|v| MEMORY_VERBS.contains(&v)) => {
             Route::Host(host_args(&[], rest))
         }
-        // `kith paths`: the folders, answered here by the kith-kernel crate.
-        Some("paths") => Route::Host(host_args(&[], rest)),
+        // `kith paths` and `kith kernel ...`: answered here by the kith-kernel crate.
+        Some("paths" | "kernel") => Route::Host(host_args(&[], rest)),
         Some(s) if HOST_INTERNAL.contains(&s) => Route::Host(host_args(&[], rest)),
         _ => kernel(rest),
     }
@@ -113,11 +113,18 @@ pub fn both(name: &str, value: &str) -> [(String, String); 2] {
     [(format!("KITH_{new}"), value.to_owned()), (format!("HQ_{name}"), value.to_owned())]
 }
 
-/// This Mac's Kith folder, by the kernel's rules (`kernel/lib/kith_paths.py` is the source of truth; the `kith-kernel`
-/// crate is its port): `KITH_STATE`/`HQ_STATE`, else `~/.kith` once `~/.kith/.migrated` exists, else a real `~/.hq`
-/// (not migrated yet), else `~/.kith`.
+/// The state folder, `KITH_STATE` in `kernel/lib/kith_paths.py` (the source of truth; the `kith-kernel` crate is its
+/// port): `KITH_STATE`/`HQ_STATE`, else `~/.kith` once `~/.kith/.migrated` exists, else a real `~/.hq` (not migrated
+/// yet), else `~/.kith`; in the old link layout (`~/.hq` links elsewhere) `<home>/state`, while the machine's own things
+/// are in `~/.config/kith`: `machine_dir` is for those.
+pub fn state_dir(home: &Path) -> PathBuf {
+    folders(home).state
+}
+
+/// Where this Mac keeps what only it needs (`KITH_MACHINE`: auth, accounts, the host socket, live/ask): the state
+/// folder on a real install, `~/.config/kith` in the old link layout.
 pub fn machine_dir(home: &Path) -> PathBuf {
-    kith_kernel::paths::state_dir(home, &kith_kernel::paths::process_env).0
+    folders(home).machine
 }
 
 /// All the kernel's folders for this process (`kith paths`): `KITH_HOME`/`HQ_HOME`, else `~/kith`, else `~/hq`, and
@@ -222,6 +229,7 @@ mod tests {
         assert_eq!(route(&v(&["kith", "memory", "search", "x"])), Route::Kernel(v(&["memory", "search", "x"])));
         assert_eq!(route(&v(&["kith", "memory", "log", "f"])), Route::Host(v(&["kith serve", "memory", "log", "f"])));
         assert_eq!(route(&v(&["kith", "paths", "--json"])), Route::Host(v(&["kith serve", "paths", "--json"])));
+        assert_eq!(route(&v(&["kith", "kernel", "version"])), Route::Host(v(&["kith serve", "kernel", "version"])));
     }
 
     #[test]
@@ -253,7 +261,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&t);
         let (new, old) = (t.join(".kith"), t.join(".hq"));
         let check = |want: &Path| {
-            assert_eq!(machine_dir(&t), want);
+            assert_eq!(state_dir(&t), want);
             assert_eq!(folders(&t).state, want);
             assert_eq!(crate::hqmem::Layout::for_home(&t).state, want);
         };
@@ -264,6 +272,20 @@ mod tests {
         // Migrated while a real ~/.hq is still there: ~/.kith.
         std::fs::write(new.join(".migrated"), "").unwrap();
         check(&new);
+        assert_eq!(machine_dir(&t), new);
+        std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    /// Old link layout (`~/.hq` links elsewhere): the state is `<home>/state`, the machine's own things `~/.config/kith`.
+    #[test]
+    fn machine_is_not_state_in_the_old_link_layout() {
+        let t = std::env::temp_dir().join(format!("kith-oldlink-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        std::fs::create_dir_all(t.join("disk/kernel")).unwrap();
+        std::os::unix::fs::symlink(t.join("disk"), t.join(".hq")).unwrap();
+        assert_eq!(machine_dir(&t), t.join(".config/kith"));
+        assert_eq!(state_dir(&t).file_name().unwrap(), "state");
+        assert_eq!(crate::hqmem::Layout::for_home(&t).state, state_dir(&t));
         std::fs::remove_dir_all(&t).unwrap();
     }
 

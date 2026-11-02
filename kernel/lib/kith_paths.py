@@ -27,6 +27,7 @@ Which one is this Mac's, since ~/.kith can exist long before the state moves (ki
   ~/.kith exists (no ~/.hq)         ~/.kith  (a Mac that never had ~/.hq, kith serve's serve/ in it, or a fresh install)
   nothing yet                      state in <home>/state until install.sh makes ~/.kith
 
+KITH_AGENTS (HQ_AGENTS) set: that folder for agents/ alone.
 KITH_HOME (HQ_HOME) set: that folder instead of ~/kith, else ~/kith when it exists, else ~/hq. Without either link:
 the Kith folder around the kernel when it sits there as kernel/, else the kernel folder. Before ~/.hq became a real
 folder it was a link to the Kith folder; then the state is <home>/state, machine things are in ~/.config/kith,
@@ -108,7 +109,9 @@ def paths():
     fallback = KERNEL.parent if KERNEL.name == 'kernel' else KERNEL
     home = (Path(os.path.expanduser(given)) if given else linked if linked.is_dir()
             else old_linked if old_linked.is_dir() else dot if dot.is_symlink() and dot.is_dir() else fallback)
-    out = {'KITH_HOME': home, 'KITH_STATE': dot if mine else home / 'state', 'KITH_AGENTS': home / 'agents'}
+    given_agents = getenv('AGENTS').strip()   # moves the agents folder alone
+    agents = Path(os.path.expanduser(given_agents)) if given_agents else home / 'agents'
+    out = {'KITH_HOME': home, 'KITH_STATE': dot if mine else home / 'state', 'KITH_AGENTS': agents}
     out.update({k + '_REAL': Path(os.path.realpath(v)) for k, v in list(out.items())})
     if mine:
         out.update(KITH_MACHINE=dot, KITH_SECRETS=dot / 'secrets', KITH_LOGS=dot / 'logs', KITH_CACHE=dot / 'cache',
@@ -118,7 +121,7 @@ def paths():
         out.update(KITH_MACHINE=config, KITH_SECRETS=config,
                    KITH_LOGS=_first(HOME / 'Library/Logs/kith', HOME / 'Library/Logs/hq'),
                    KITH_CACHE=_first(HOME / 'Library/Caches/kith', HOME / 'Library/Caches/hq'),
-                   KITH_STORE=home / 'agents' / '.store')
+                   KITH_STORE=agents / '.store')
     return out
 
 

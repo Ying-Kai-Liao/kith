@@ -128,13 +128,13 @@ jobs:
           predicate-quantifier: every
           filters: |
             host:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             # What the root crate builds from: the host and the memory and wire crates, not guest or tts, which
             # nothing in the host depends on. Those two get their own small job (host-crates). Also the kernel's bin
             # and lib: host tests run the repo's own kernel commands (kith-allow, kith-auth, kith, ...) and what they import.
             host_core:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/**,kernel/lib/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/**,kernel/lib/**,.github/workflows/ci.yml}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -366,12 +366,14 @@ jobs:
       - name: Build the test archive
         working-directory: serve/host
         run: cargo nextest archive --workspace --exclude kith-guest --exclude kith-tts --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
-      # kith_paths.py and the kith-kernel crate must say the same about every layout of the folders. The test binaries
-      # above already built the host's dependencies, so this adds the one kith program.
-      - name: Folder rules parity (kith_paths.py vs kith paths)
+      # The Rust core against the Python kernel, the same CLI line both ways (kernel/tests/difftest): the test binaries above
+      # already built the host's dependencies, so this adds the one kith program. Its router finds it through KITH_BIN.
+      - name: Core parity (difftest --rust)
         run: |
           cargo build --manifest-path serve/host/Cargo.toml --bin kith
-          KITH_PARITY_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-paths-parity-check
+          kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
+      - name: Core dependency rules
+        run: kernel/tests/kith-core-deps-check
       - uses: actions/upload-artifact@v4
         with:
           name: host-tests

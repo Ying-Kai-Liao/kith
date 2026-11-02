@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# kith-core-deps-check — the core crate (core/kernel, package kith-kernel) must stay light and sync: the CLI and the host
+# both link it, so none of the host's server stack may come in through it (docs/plans/core-design.md section 2, rule 6).
+# Fails when `cargo tree -p kith-kernel` (normal and build dependencies) lists a banned crate.
+#
+#   kernel/tests/kith-core-deps-check          needs cargo and the pinned toolchain; reads the host workspace's Cargo.lock
+set -uo pipefail
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd -P)"
+BANNED='axum|tower|tower-http|tokio|reqwest|ratatui|crossterm|kith-wire'
+
+tree=$(cd "$REPO/serve/host" && cargo tree -p kith-kernel -e normal,build --prefix none --locked 2>&1) \
+  || { echo "cargo tree failed:"; echo "$tree"; exit 1; }
+bad=$(printf '%s\n' "$tree" | awk '{print $1}' | grep -E -x "$BANNED" | sort -u)
+if [[ -n $bad ]]; then
+  echo "kith-kernel depends on crates the core must not use:"
+  printf '  %s\n' $bad
+  echo "see docs/plans/core-design.md section 2 (dependency rules)"
+  exit 1
+fi
+echo "ok   kith-kernel dependencies: $(printf '%s\n' "$tree" | sort -u | wc -l | tr -d ' ') crate(s), none banned"

@@ -1,0 +1,1016 @@
+[
+ {
+  "name": "paths-migrated-marker-with-real-hq",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/.hq"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-real-hq-only",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.hq"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-real-hq-and-kith-serve-no-marker",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.hq"
+   },
+   {
+    "mkdir": "home/.kith/serve"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-hq-linked-to-kith",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "link": "home/.hq",
+    "to": ".kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-hq-linked-elsewhere-old-link-layout",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk/kernel"
+   },
+   {
+    "link": "home/.hq",
+    "to": "disk"
+   },
+   {
+    "link": "home/kith",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-old-link-layout-hq-named-folders",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk/kernel"
+   },
+   {
+    "mkdir": "home/.config/hq"
+   },
+   {
+    "mkdir": "home/Library/Logs/hq"
+   },
+   {
+    "mkdir": "home/Library/Caches/hq"
+   },
+   {
+    "link": "home/.hq",
+    "to": "disk"
+   },
+   {
+    "link": "home/hq",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-old-link-layout-kith-named-folders",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk/kernel"
+   },
+   {
+    "mkdir": "home/.config/kith"
+   },
+   {
+    "mkdir": "home/.config/hq"
+   },
+   {
+    "mkdir": "home/Library/Logs/kith"
+   },
+   {
+    "mkdir": "home/Library/Caches/kith"
+   },
+   {
+    "link": "home/.hq",
+    "to": "disk"
+   },
+   {
+    "link": "home/kith",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-only-dot-kith",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-dot-kith-as-a-link-no-kith-folder",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk"
+   },
+   {
+    "link": "home/.kith",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-nothing-at-all",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-state-given",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.hq"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_STATE": "{HOME}/chosen/s"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-state-given-with-tilde-and-padding",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_STATE": "  ~/chosen/"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-state-blank-falls-back",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.hq"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_STATE": "   "
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-hq-state-given",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "HQ_STATE": "{HOME}/old/s"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-kith-state-beats-hq-state",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_STATE": "{HOME}/new",
+   "HQ_STATE": "{HOME}/old"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-empty-kith-state-hq-state-set",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_STATE": "",
+   "HQ_STATE": "{HOME}/old"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-home-given",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": "{HOME}/elsewhere"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-home-given-with-tilde-missing-folder",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": "~/nope/../there"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-hq-home-given",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.hq"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "HQ_HOME": "{HOME}/old-home"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-state-is-home-state-with-kernel",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk/kernel"
+   },
+   {
+    "link": "home/kith",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_STATE": "{HOME}/disk/state"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-state-is-home-state-through-the-kith-link",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk/kernel"
+   },
+   {
+    "link": "home/kith",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_STATE": "{HOME}/kith/state"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-state-is-home-state-without-a-kernel",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk"
+   },
+   {
+    "mkdir": "home/kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_STATE": "{HOME}/disk/state"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-kith-link-variant",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk"
+   },
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "link": "home/kith",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-hq-link-variant",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk"
+   },
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "link": "home/hq",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-kith-and-hq-both-present",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/kith"
+   },
+   {
+    "mkdir": "home/hq"
+   },
+   {
+    "mkdir": "home/.kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-kith-real-hq-linked-to-kith",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/kith"
+   },
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "link": "home/.hq",
+    "to": ".kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-dangling-hq-link",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "link": "home/.hq",
+    "to": "nowhere"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-marker-only",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "write": "home/.kith/.migrated",
+    "text": ""
+   }
+  ],
+  "env": {
+   "KITH_HOME": "{HOME}/x"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-agents-given",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.hq"
+   },
+   {
+    "mkdir": "home/kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_AGENTS": "{HOME}/elsewhere/agents"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-hq-agents-given-with-tilde",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "HQ_AGENTS": "~/a"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-agents-given-old-link-layout-moves-the-store",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/disk/kernel"
+   },
+   {
+    "link": "home/.hq",
+    "to": "disk"
+   },
+   {
+    "link": "home/kith",
+    "to": "disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_AGENTS": "{HOME}/x/agents"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-agents-blank-falls-back",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null,
+   "KITH_AGENTS": "  "
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-space-in-the-path",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/my disk/kernel"
+   },
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "link": "home/kith",
+    "to": "my disk"
+   }
+  ],
+  "env": {
+   "KITH_HOME": null
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ },
+ {
+  "name": "paths-non-ascii-in-the-path",
+  "command": "paths",
+  "needs": "rust",
+  "setup": [
+   {
+    "mkdir": "home/.kith"
+   },
+   {
+    "mkdir": "home/Käse"
+   }
+  ],
+  "env": {
+   "KITH_HOME": "{HOME}/Käse"
+  },
+  "run": [
+   [
+    "paths",
+    "--json"
+   ],
+   [
+    "paths"
+   ],
+   [
+    "paths",
+    "--sh"
+   ]
+  ]
+ }
+]

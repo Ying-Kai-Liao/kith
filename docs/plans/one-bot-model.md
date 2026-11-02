@@ -69,7 +69,7 @@ and `--json` first and the app calling it after.
   command to the core. Reviewed by the architect agent before A1's code.
 - [x] **A0b. Differential harness.** The verification below, as a test runner, before the first module moves.
   `kernel/tests/difftest/` (README there); run it with `kernel/tests/kith-difftest-check`.
-- [ ] **A1. Folder rules.** One Rust implementation of where kith's folders are (`kernel/lib/kith_paths.py`,
+- [x] **A1. Folder rules.** One Rust implementation of where kith's folders are (`kernel/lib/kith_paths.py`,
   `serve/host/src/kernel.rs::machine_dir`, `hqmem::Layout::from_env` disagree today: `.migrated` is respected by two
   and not the third). New crate under `serve/` (name it in the PR), linked by the host, exposed to Python through the
   `kith` binary the way `kith memory check` already is. `kith_paths.py` asks it, or is checked against it in CI.
@@ -191,3 +191,4 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: A0b done: `kernel/tests/difftest/kith-difftest` runs corpus cases on an OLD and a NEW side and reports
   green/red per command (`--summary`); seed corpus passes OLD against OLD. `kernel/bin/kith` does not read KITH_CORE yet.
 - 2026-11-03: A0 done: [core-design.md](core-design.md) (crate `kith-kernel` in `core/kernel`, per-command switching through `kernel/lib/core-switched.txt`, `KITH_CORE=python|rust` for the harness), reviewed by the architect agent (12 points, each adopted or answered in its section 13).
+- 2026-11-03: A1 done: crate `kith-kernel` (`core/kernel/`, an out-of-tree member of the `serve/host` workspace), module `paths`; the host's `machine_dir`/`state_dir`/`home_dir`, `hqmem::Layout` and the `auth.json` stamp call it. `kernel/bin/kith` routes `kith paths` through `kernel/lib/kith-core.sh`; `paths` is the first line of `kernel/lib/core-switched.txt`, switched on a green harness run (34 `paths-*` corpus cases, all the same; `kith-difftest --rust`). `KITH_AGENTS` is now part of the folder rules in `kith_paths.py` too. CI: `kith-difftest --rust` and `kernel/tests/kith-core-deps-check` in the host-build job.

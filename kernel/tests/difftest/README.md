@@ -14,17 +14,18 @@ epochs, uuids, long hex ids, plus the case's own `normalize` rules. The environm
 
 ```
 kernel/tests/difftest/kith-difftest                 the corpus; OLD = kernel/bin/kith (KITH_CORE=python), NEW = same (KITH_CORE=rust)
-kernel/tests/difftest/kith-difftest --rust          also the cases marked "needs": "rust"
+kernel/tests/difftest/kith-difftest --rust [--bin KITH]   also the cases marked "needs": "rust"
 kernel/tests/difftest/kith-difftest --old 'CMD' --new 'CMD'   any two command prefixes (case arguments are appended)
 kernel/tests/difftest/kith-difftest --case 'auth-*' --keep     some cases; keep the throwaway folders to look at
 kernel/tests/difftest/kith-difftest --summary out.json         green/red per command (see below)
 kernel/tests/kith-difftest-check                    self-test + the corpus, as CI runs it
 ```
 
-Which side is which: `KITH_CORE=python` is today's kernel. `KITH_CORE=rust` is meant to route a command to the core
-where the core implements it. `kernel/bin/kith` does not read `KITH_CORE` yet (until a command is switched both sides
-are the same program), so the default run is OLD against OLD, which proves the runner is deterministic. When the core
-exists, point `--new` at it, or let the dispatcher read `KITH_CORE`.
+Which side is which: `KITH_CORE=python` is today's kernel. `KITH_CORE=rust` routes a command to the core where the core
+implements it (`kernel/lib/kith-core.sh`; `kernel/bin/kith` calls it for `paths` so far). The NEW side finds the Rust
+program through `KITH_BIN`, which the runner sets from `--bin`, `$KITH_DIFFTEST_BIN`, or a cargo build in `$CARGO_TARGET_DIR`
+/ `serve/host/target`. Cases for verbs the core does not have yet are the same program on both sides, which proves the
+runner is deterministic. Or point `--new` at any other program.
 
 ## Per-command summary
 
@@ -43,7 +44,7 @@ Add an object to a file in `corpus/` (a list per file). Fields:
 | `command` | which command it is evidence for (default: first word of the first line) |
 | `setup` | steps: `{"write": path, "text": ..., "mode": "755"}`, `{"mkdir": path}`, `{"link": path, "to": target}`, `{"sqlite": path, "sql": ...}`, `{"fake": "gh", "script": "#!/bin/sh..."}` (a program of your own ahead of the shared fakes), `{"run": [argv], "cwd": ...}` (e.g. `git init`). Paths are relative to the side's root (`home/`, `kith/`, `tmp/`); `{HOME}`, `{KITH_HOME}`, `{TMP}`, `{ROOT}` in text, targets, scripts and args are that side's own paths |
 | `run` | list of command lines, each a list of arguments after the program (`["auth", "ls"]`) |
-| `env` | extra environment (values may use the `{...}` paths) |
+| `env` | extra environment (values may use the `{...}` paths; `null` leaves a variable out, e.g. the default `KITH_HOME`) |
 | `stdin` | text for stdin (default: empty, never a TTY) |
 | `cwd` | folder to run in, relative to the root (default `home`) |
 | `normalize` | extra `[regex, replacement]` pairs, applied to every text of both sides |

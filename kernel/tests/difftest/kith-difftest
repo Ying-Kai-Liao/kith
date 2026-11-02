@@ -37,6 +37,16 @@ FAKES = HERE / 'fakes'
 ABSENT = '<absent>\n'
 SIDES = ('old', 'new')
 CORE = {'old': 'python', 'new': 'rust'}
+RUST_BIN = ''   # the kith program the NEW side's router uses; main() sets it for a run with the Rust cases
+
+
+def find_rust_bin():
+    """--bin, else $KITH_DIFFTEST_BIN, else a build under $CARGO_TARGET_DIR or serve/host/target (debug, then release)."""
+    for t in (os.environ.get('CARGO_TARGET_DIR'), str(KERNEL.parent / 'serve/host/target')):
+        for kind in ('debug', 'release'):
+            if t and os.access(Path(t) / kind / 'kith', os.X_OK):
+                return str(Path(t) / kind / 'kith')
+    return ''
 TIMEOUT = 90
 # The VCS's binary internals hold commit times and hashes of them; refs, HEAD, config and logs are still compared.
 GIT_NOISE = [r'/\.git/(index|objects/)']
@@ -119,8 +129,13 @@ def base_env(side, side_dir, case):
         'GIT_COMMITTER_NAME': 'difftest', 'GIT_COMMITTER_EMAIL': 'd@example.invalid',
         'GIT_AUTHOR_DATE': '2026-01-01T00:00:00Z', 'GIT_COMMITTER_DATE': '2026-01-01T00:00:00Z',
     }
+    if side == 'new' and RUST_BIN:
+        env['KITH_BIN'] = RUST_BIN   # where the router finds the Rust program (kernel/lib/kith-core.sh)
     for k, v in case.get('env', {}).items():
-        env[k] = subst(v, side_dir)
+        if v is None:   # null: this variable is not set at all (e.g. no KITH_HOME, to test the folder rules)
+            env.pop(k, None)
+        else:
+            env[k] = subst(v, side_dir)
     return env
 
 
@@ -395,6 +410,7 @@ def main(argv=None):
     ap.add_argument('--intended', default=str(HERE / 'intended.json'))
     ap.add_argument('--case', action='append', help='only cases whose name matches this glob')
     ap.add_argument('--rust', action='store_true', help='also run the cases that need the Rust binary (implied by --new)')
+    ap.add_argument('--bin', help='the kith program for the Rust cases (default: $KITH_DIFFTEST_BIN, else a cargo build in serve/host/target)')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--keep', action='store_true', help='keep the throwaway folders')
     ap.add_argument('--summary', metavar='FILE', help='write a JSON summary per command (green/red) to FILE; "-" for stdout')
@@ -404,6 +420,10 @@ def main(argv=None):
     cases = load_corpus(a.corpus or [HERE / 'corpus'])
     if a.case:
         cases = [c for c in cases if any(fnmatch.fnmatchcase(c['name'], g) for g in a.case)]
+    global RUST_BIN
+    RUST_BIN = a.bin or os.environ.get('KITH_DIFFTEST_BIN') or (find_rust_bin() if (a.rust or a.new) else '')
+    if (a.rust or a.new) and not RUST_BIN and any(c.get('needs') == 'rust' for c in cases):
+        raise SystemExit('no kith program for the Rust cases: build one (cargo build --bin kith in serve/host) or pass --bin')
     if not (a.rust or a.new):
         skipped = [c['name'] for c in cases if c.get('needs') == 'rust']
         cases = [c for c in cases if c.get('needs') != 'rust']

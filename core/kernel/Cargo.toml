@@ -6,6 +6,8 @@ rust-version = "1.88"
 description = "The kernel's rules in Rust, shared by the kith program and the host: where Kith's folders are"
 license = "Apache-2.0"
 publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/): cargo only searches parent folders for a root.
+workspace = "../../serve/host"
 
 [lib]
 name = "kith_kernel"

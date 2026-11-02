@@ -256,6 +256,12 @@ enum Sub {
         #[arg(long, hide = true)]
         kernel: Option<std::path::PathBuf>,
     },
+    /// The kernel's rules in Rust, as the `kith` router in `kernel/bin/kith` calls them.
+    #[command(hide = true)]
+    Kernel {
+        #[command(subcommand)]
+        cmd: KernelCmd,
+    },
     /// Built-in MCP servers that bots are started with (stdio).
     #[command(hide = true)]
     Mcp {
@@ -397,6 +403,42 @@ fn write_token_file(token: &str) -> Result<()> {
     }
     std::fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))?;
     Ok(())
+}
+
+/// What `kith kernel <module> ...` can be asked.
+#[derive(Subcommand)]
+enum KernelCmd {
+    /// The interface version and modules of this build: `{"abi":1,"modules":[...]}`.
+    Version,
+    /// Where Kith's folders are, as `kith paths`.
+    Paths {
+        #[arg(long, conflicts_with = "sh")]
+        json: bool,
+        #[arg(long)]
+        sh: bool,
+        /// The kernel folder, for the fallback when neither ~/kith nor ~/hq exists (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+    },
+}
+
+/// `kith paths`: the folders by the `kith-kernel` crate's rules, in the form `kith_paths.py` prints.
+fn print_paths(json: bool, sh: bool, kernel: Option<&std::path::Path>) {
+    let home = kith_kernel::paths::process_home();
+    let p = match kernel {
+        Some(k) => kith_kernel::paths::paths(&home, k, &kith_kernel::paths::process_env),
+        None => kernel::folders(&home),
+    };
+    print!(
+        "{}",
+        if json {
+            format!("{}\n", p.json())
+        } else if sh {
+            p.sh()
+        } else {
+            p.text()
+        }
+    );
 }
 
 #[tokio::main]
@@ -585,21 +627,14 @@ async fn main() -> Result<()> {
         }
         Sub::Memory { cmd } => std::process::exit(hqmem::run(cmd)?),
         Sub::Paths { json, sh, kernel } => {
-            let home = kith_kernel::paths::process_home();
-            let p = match kernel {
-                Some(k) => kith_kernel::paths::paths(&home, &k, &kith_kernel::paths::process_env),
-                None => kernel::folders(&home),
-            };
-            print!(
-                "{}",
-                if json {
-                    format!("{}\n", p.json())
-                } else if sh {
-                    p.sh()
-                } else {
-                    p.text()
-                }
-            );
+            print_paths(json, sh, kernel.as_deref());
+            Ok(())
+        }
+        Sub::Kernel { cmd } => {
+            match cmd {
+                KernelCmd::Version => println!("{}", kith_kernel::version_json()),
+                KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
+            }
             Ok(())
         }
         Sub::Node => agent::node::add().await,

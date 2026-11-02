@@ -152,7 +152,7 @@ pub fn roots() -> Roots {
         return r;
     }
     let mut r = Roots::default();
-    Roots::add(&mut r.kith, crate::kernel::machine_dir(&dirs::home_dir().unwrap_or_default()));
+    Roots::add(&mut r.kith, crate::kernel::state_dir(&dirs::home_dir().unwrap_or_default()));
     Roots::add(&mut r.whole, crate::service::data_dir());
     let mut settled = true;
     if let Some(k) = crate::kernel::current_kernel() {

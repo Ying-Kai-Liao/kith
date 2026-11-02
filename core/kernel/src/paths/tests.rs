@@ -1,6 +1,8 @@
 //! The layouts of `kernel/lib/kith_paths.py`, each in a throwaway home with an injected environment.
 //! `kernel/tests/kith-paths-parity-check` runs the same layouts through both implementations.
 
+#![allow(clippy::unwrap_used)]
+
 use super::*;
 use std::os::unix::fs::symlink;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -32,7 +34,10 @@ impl Home {
         self
     }
     fn paths(&self, env: &[(&str, &str)]) -> Paths {
-        let env: Vec<(String, String)> = env.iter().map(|(k, v)| ((*k).to_owned(), (*v).to_owned())).collect();
+        let env: Vec<(String, String)> = env
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
         let lookup = move |name: &str| env.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone());
         paths(&self.0, &self.p("kernel-elsewhere/kernel"), &lookup)
     }
@@ -79,7 +84,10 @@ fn old_folder_linked_to_the_new_one() {
 #[test]
 fn old_folder_linked_elsewhere_is_the_old_link_layout() {
     let h = Home::new();
-    h.dir("elsewhere/kernel").dir("elsewhere/agents").link(".hq", "elsewhere").link("kith", "elsewhere");
+    h.dir("elsewhere/kernel")
+        .dir("elsewhere/agents")
+        .link(".hq", "elsewhere")
+        .link("kith", "elsewhere");
     let p = h.paths(&[]);
     assert_eq!(state_dir(&h.0, &|_| None), (h.p(".hq"), false));
     assert_eq!(p.home, h.p("kith"));
@@ -128,12 +136,31 @@ fn state_given_wins_and_old_names_work() {
     let h = Home::new();
     h.dir(".hq");
     let p = h.paths(&[("KITH_STATE", "/somewhere/else")]);
-    assert_eq!((p.state, p.machine), (PathBuf::from("/somewhere/else"), PathBuf::from("/somewhere/else")));
-    assert_eq!(h.paths(&[("HQ_STATE", "/old/name")]).state, PathBuf::from("/old/name"));
+    assert_eq!(
+        (p.state, p.machine),
+        (
+            PathBuf::from("/somewhere/else"),
+            PathBuf::from("/somewhere/else")
+        )
+    );
+    assert_eq!(
+        h.paths(&[("HQ_STATE", "/old/name")]).state,
+        PathBuf::from("/old/name")
+    );
     // KITH_ beats HQ_; an empty KITH_ counts as unset; blanks are trimmed away.
-    assert_eq!(h.paths(&[("KITH_STATE", "/new"), ("HQ_STATE", "/old")]).state, PathBuf::from("/new"));
-    assert_eq!(h.paths(&[("KITH_STATE", ""), ("HQ_STATE", "/old")]).state, PathBuf::from("/old"));
-    assert_eq!(h.paths(&[("KITH_STATE", "  /padded  ")]).state, PathBuf::from("/padded"));
+    assert_eq!(
+        h.paths(&[("KITH_STATE", "/new"), ("HQ_STATE", "/old")])
+            .state,
+        PathBuf::from("/new")
+    );
+    assert_eq!(
+        h.paths(&[("KITH_STATE", ""), ("HQ_STATE", "/old")]).state,
+        PathBuf::from("/old")
+    );
+    assert_eq!(
+        h.paths(&[("KITH_STATE", "  /padded  ")]).state,
+        PathBuf::from("/padded")
+    );
     assert_eq!(h.paths(&[("KITH_STATE", "   ")]).state, h.p(".hq"));
     // A leading ~ is the home folder.
     assert_eq!(h.paths(&[("KITH_STATE", "~/s")]).state, h.p("s"));
@@ -167,6 +194,27 @@ fn kith_home_given_and_the_links() {
     assert_eq!(h.paths(&[]).home, h.p("hq"));
     h.dir("kith");
     assert_eq!(h.paths(&[]).home, h.p("kith"));
+}
+
+#[test]
+fn agents_given_moves_the_agents_folder_alone() {
+    let h = Home::new();
+    h.dir(".hq").dir("kith");
+    let given = h.p("elsewhere/agents");
+    let p = h.paths(&[("KITH_AGENTS", given.to_str().unwrap())]);
+    assert_eq!(
+        (p.home, p.agents.clone(), p.state),
+        (h.p("kith"), given.clone(), h.p(".hq"))
+    );
+    assert_eq!(h.paths(&[("HQ_AGENTS", "~/a")]).agents, h.p("a"));
+    assert_eq!(h.paths(&[("KITH_AGENTS", "  ")]).agents, h.p("kith/agents"));
+    // The old link layout keeps its snapshots under the agents folder it was given.
+    let h = Home::new();
+    h.dir("disk/kernel")
+        .link(".hq", "disk")
+        .link("kith", "disk");
+    let p = h.paths(&[("KITH_AGENTS", "/x/agents")]);
+    assert_eq!(p.store, PathBuf::from("/x/agents/.store"));
 }
 
 #[test]
