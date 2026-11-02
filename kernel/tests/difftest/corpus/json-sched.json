@@ -1,0 +1,181 @@
+[
+  {
+    "name": "sched-json-ls-log-empty",
+    "command": "schedule",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"
+      }
+    ],
+    "run": [
+      [
+        "schedule",
+        "ls",
+        "--json"
+      ],
+      [
+        "schedule",
+        "ls",
+        "echo",
+        "--json"
+      ],
+      [
+        "schedule",
+        "log",
+        "--json"
+      ],
+      [
+        "schedule",
+        "ls",
+        "nobody",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "sched-json-add-pause-resume-rm",
+    "command": "schedule",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"
+      }
+    ],
+    "run": [
+      [
+        "schedule",
+        "add",
+        "echo",
+        "0 8 * * *",
+        "say hi",
+        "--id",
+        "hi",
+        "--json"
+      ],
+      [
+        "schedule",
+        "add",
+        "echo",
+        "99 8 * * *",
+        "bad",
+        "--json"
+      ],
+      [
+        "schedule",
+        "pause",
+        "echo",
+        "hi",
+        "--json"
+      ],
+      [
+        "schedule",
+        "pause",
+        "echo",
+        "hi",
+        "--json"
+      ],
+      [
+        "schedule",
+        "ls",
+        "echo",
+        "--json"
+      ],
+      [
+        "schedule",
+        "resume",
+        "echo",
+        "hi",
+        "--json"
+      ],
+      [
+        "schedule",
+        "rm",
+        "echo",
+        "hi",
+        "--json"
+      ],
+      [
+        "schedule",
+        "rm",
+        "echo",
+        "hi",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "sched-json-run-refused-log",
+    "command": "schedule",
+    "setup": [
+      {
+        "mkdir": "kith/state/sched"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"
+      },
+      {
+        "write": "kith/agents/echo/jobs.json",
+        "text": "[{\"id\":\"daily\",\"cron\":\"0 8 * * *\",\"task\":\"say hi\"}]\n"
+      },
+      {
+        "write": "kith/state/sched/state.json",
+        "text": "{\"tick\":\"2026-10-22T10:00\",\"last\":{\"echo/daily\":{\"at\":\"2026-10-22T08:00\",\"pid\":999999,\"log\":\"/x\",\"why\":\"due\"},\"echo/other\":{\"at\":\"2026-10-23T08:00\",\"pid\":999999,\"log\":\"/y\",\"why\":\"run by hand\"}}}\n"
+      }
+    ],
+    "run": [
+      [
+        "schedule",
+        "run",
+        "echo",
+        "nope",
+        "--json"
+      ],
+      [
+        "schedule",
+        "run",
+        "ghost",
+        "daily",
+        "--json"
+      ],
+      [
+        "schedule",
+        "log",
+        "--json"
+      ],
+      [
+        "schedule",
+        "log",
+        "echo/daily",
+        "5",
+        "--json"
+      ],
+      [
+        "schedule",
+        "log",
+        "echo",
+        "daily",
+        "--json"
+      ],
+      [
+        "schedule",
+        "log",
+        "echo",
+        "--json"
+      ],
+      [
+        "schedule",
+        "ls",
+        "echo",
+        "--json"
+      ]
+    ]
+  }
+]
