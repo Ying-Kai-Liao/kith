@@ -2590,7 +2590,7 @@ def cmd_member(args):
         if kv.get('mode') and kv['mode'] != 'default':
             die(f"{pid} is a bot: it runs in the guest preset's mode", 2)
     for agent in names:
-        if agent not in agent_dirs():
+        if '--rm' not in flags and agent not in agent_dirs():   # taking access away needs no folder: a row must not wait for one to come back
             die(f"no agent '{agent}' (kith ls)")
         if '--rm' in flags:
             n = drop_self_approved(auth, agent, pid) if pid != EVERYONE else 0   # their bots' rows keep nothing of theirs
