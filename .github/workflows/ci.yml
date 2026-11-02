@@ -41,6 +41,7 @@ jobs:
       # pull_request is empty on other events, so it is only read for pull requests.
       heavy: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ci:full')) }}
       kernel: ${{ steps.f.outputs.kernel }}
+      kernel_host: ${{ steps.f.outputs.kernel_host }}
       host: ${{ steps.h.outputs.host }}
       host_core: ${{ steps.h.outputs.host_core }}
       cloud: ${{ steps.h.outputs.cloud }}
@@ -65,6 +66,14 @@ jobs:
             kernel:
               - 'kernel/**'
               - 'serve/contract/kernel/**'
+              - 'scripts/ci/**'
+              - '.github/workflows/ci.yml'
+            # The kernel files the host's own unit tests run for real (the list: scripts/ci/host-kernel-tests.txt). A
+            # change here runs only those tests (host-kernel), not the whole host suite.
+            kernel_host:
+              - 'kernel/bin/**'
+              - 'kernel/lib/**'
+              - 'scripts/ci/**'
               - '.github/workflows/ci.yml'
             licenses:
               - '**/Cargo.lock'
@@ -131,10 +140,10 @@ jobs:
               - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             # What the root crate builds from: the host and the memory and wire crates, not guest or tts, which
-            # nothing in the host depends on. Those two get their own small job (host-crates). Also the kernel's bin
-            # and lib: host tests run the repo's own kernel commands (kith-allow, kith-auth, kith, ...) and what they import.
+            # nothing in the host depends on. Those two get their own small job (host-crates). The kernel's bin and lib
+            # are not here: the host tests that run them are the host-kernel job (filter kernel_host above).
             host_core:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/**,kernel/lib/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -162,89 +171,86 @@ jobs:
             e2e:
               - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,serve/cloud/**,.github/workflows/ci.yml}'
               - '!**/*.md'
+  # The kernel's own checks in three parallel shards, balanced by measured time (about 2.5 minutes each). Every check
+  # runs exactly once; a shard runs all its checks even after one fails, then fails naming each failed check.
   kernel:
+    name: kernel (${{ matrix.shard }}/3)
     needs: changes
     if: needs.changes.outputs.kernel == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            checks: |
+              bash -n kernel/bin/kith|bash -n kernel/bin/kith
+              Migrate check|kernel/tests/kith-migrate-check
+              Guest sandbox check|kernel/tests/kith-guest-sandbox-check
+              Launchd check|kernel/tests/kith-launchd-check
+              Project check|kernel/tests/kith-project-check
+              Contract check (what the host reads, serve/contract/kernel)|kernel/tests/kith-contract-check
+              Serve check|kernel/tests/kith-serve-check
+              Info check|kernel/tests/kith-info-check
+              Harness check (kith <agent> set harness, no Claude model on another harness)|kernel/tests/kith-harness-check
+              Unknown agent check|kernel/tests/kith-unknown-agent-check
+              Self-update check|kernel/tests/kith-self-update-check
+              Pkg EINTR check|kernel/tests/kith-pkg-eintr-check
+          - shard: 2
+            checks: |
+              Auth property check|kernel/tests/kith-auth-props
+              Ask check|kernel/tests/kith-ask-check
+              Auth check|kernel/tests/kith-auth-check
+              Auth lock check|kernel/tests/kith-auth-lock-check
+              Auth revoke check|kernel/tests/kith-auth-revoke-check
+              Helper MCP grants check|kernel/tests/kith-helper-mcp-check
+              Cost bots check|kernel/tests/kith-cost-bots-check
+              Call check|kernel/tests/kith-call-check
+              Chain check|kernel/tests/kith-chain-check
+          - shard: 3
+            bun: true
+            checks: |
+              Lifecycle check|kernel/tests/kith-lifecycle-check
+              Schedule person check|kernel/tests/kith-sched-person-check
+              Terminal flags check|kernel/tests/kith-terminal-flags-check
+              Recall check|kernel/tests/kith-recall-check
+              Load check|kernel/tests/kith-load-check
+              Guest helper check|kernel/tests/kith-guest-helper-check
+              Wake check|kernel/tests/kith-wake-check
+              Guest jobs check|kernel/tests/kith-guest-jobs-check
+              Schedule jobs file check|kernel/tests/kith-sched-jobs-check
+              Send check|kernel/tests/kith-send-check
+              Schedule origin check|kernel/tests/kith-sched-origin-check
+              Plugin hooks test|bun test kernel/tests/kith-hooks.test.ts
+              Trajectory check|kernel/tests/kith-trajectory-check
+              Bug check|kernel/tests/kith-bug-check
+              Guest door check|kernel/tests/kith-guest-door-check
     steps:
       - uses: actions/checkout@v4
-      - name: bash -n kernel/bin/kith
-        run: bash -n kernel/bin/kith
       - uses: astral-sh/setup-uv@v5
-      - name: Launchd check
-        run: kernel/tests/kith-launchd-check
-      - name: Project check
-        run: kernel/tests/kith-project-check
-      - name: Contract check (what the host reads, serve/contract/kernel)
-        run: kernel/tests/kith-contract-check
-      - name: Serve check
-        run: kernel/tests/kith-serve-check
-      - name: Info check
-        run: kernel/tests/kith-info-check
-      - name: Harness check (kith <agent> set harness, no Claude model on another harness)
-        run: kernel/tests/kith-harness-check
-      - name: Migrate check
-        run: kernel/tests/kith-migrate-check
-      - name: Unknown agent check
-        run: kernel/tests/kith-unknown-agent-check
-      - name: Self-update check
-        run: kernel/tests/kith-self-update-check
-      - name: Pkg EINTR check
-        run: kernel/tests/kith-pkg-eintr-check
-      - name: Auth check
-        run: kernel/tests/kith-auth-check
-      - name: Auth lock check
-        run: kernel/tests/kith-auth-lock-check
-      - name: Auth property check
-        run: kernel/tests/kith-auth-props
-      - name: Auth revoke check
-        run: kernel/tests/kith-auth-revoke-check
-      - name: Helper MCP grants check
-        run: kernel/tests/kith-helper-mcp-check
-      - name: Cost bots check
-        run: kernel/tests/kith-cost-bots-check
-      - name: Call check
-        run: kernel/tests/kith-call-check
-      - name: Chain check
-        run: kernel/tests/kith-chain-check
-      - name: Ask check
-        run: kernel/tests/kith-ask-check
-      - name: Wake check
-        run: kernel/tests/kith-wake-check
-      - name: Lifecycle check
-        run: kernel/tests/kith-lifecycle-check
-      - name: Schedule person check
-        run: kernel/tests/kith-sched-person-check
-      - name: Schedule jobs file check
-        run: kernel/tests/kith-sched-jobs-check
-      - name: Send check
-        run: kernel/tests/kith-send-check
-      - name: Schedule origin check
-        run: kernel/tests/kith-sched-origin-check
-      - name: Terminal flags check
-        run: kernel/tests/kith-terminal-flags-check
       - uses: oven-sh/setup-bun@v2
+        if: matrix.bun
         with:
           bun-version: 1.3.8
-      - name: Plugin hooks test
-        run: bun test kernel/tests/kith-hooks.test.ts
-      - name: Trajectory check
-        run: kernel/tests/kith-trajectory-check
-      - name: Recall check
-        run: kernel/tests/kith-recall-check
-      - name: Bug check
-        run: kernel/tests/kith-bug-check
-      - name: Guest sandbox check
-        run: kernel/tests/kith-guest-sandbox-check
-      - name: Guest helper check
-        run: kernel/tests/kith-guest-helper-check
-      - name: Guest jobs check
-        run: kernel/tests/kith-guest-jobs-check
-      - name: Guest door check
-        run: kernel/tests/kith-guest-door-check
-      - name: Load check
-        run: kernel/tests/kith-load-check
+      - name: Checks
+        env:
+          CHECKS: ${{ matrix.checks }}
+        run: |
+          failed=0
+          while IFS='|' read -r name cmd; do
+            [ -n "$name" ] || continue
+            echo "::group::$name"
+            # stdin from /dev/null: a check that reads stdin must not eat the rest of the list.
+            if bash -c "$cmd" </dev/null; then
+              echo "::endgroup::"
+            else
+              echo "::endgroup::"
+              echo "::error title=kernel check failed::$name ($cmd)"
+              failed=$((failed + 1))
+            fi
+          done <<< "$CHECKS"
+          [ "$failed" = 0 ] || { echo "$failed check(s) failed in this shard, see the ::error lines above"; exit 1; }
 
   # Exits 0 when every row of verification/threads/checks.tsv matches its expected pass/fail, so green means no
   # change from the recorded baseline (some rows are known findings on purpose).
@@ -390,6 +396,53 @@ jobs:
           --extract-to . --extract-overwrite
           --workspace-remap .
           -E 'not kind(test)'
+
+  # A kernel-only change (kernel/bin, kernel/lib) runs just the host unit tests that run real kernel files, listed in
+  # scripts/ci/host-kernel-tests.txt, instead of the whole host suite. Builds and runs in one job on the same cache as
+  # host-build. When host_core is also set, host-test already runs them.
+  # Three shards: the tests themselves are the cost (each starts the real kith-auth), the build is a warm-cache 2-3 minutes.
+  host-kernel:
+    name: host-kernel (${{ matrix.shard }}/3)
+    needs: changes
+    if: needs.changes.outputs.kernel_host == 'true' && needs.changes.outputs.host_core != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: host-linux-test
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.100
+      - name: Run the listed tests
+        working-directory: serve/host
+        run: >-
+          cargo nextest run --profile ci --workspace --exclude kith-guest --exclude kith-tts
+          --partition count:${{ matrix.shard }}/3
+          -E "($(sh ../../scripts/ci/host-kernel-tests.sh filter)) & not kind(test)"
+
+  # Fails when a host unit test reads the kernel (a path into kernel/, or the api Rig that runs the real kith-auth) and
+  # is not in scripts/ci/host-kernel-tests.txt: such a test would not run on a kernel-only change.
+  host-kernel-check:
+    needs: changes
+    if: needs.changes.outputs.host == 'true' || needs.changes.outputs.kernel == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/ci/host-kernel-tests.sh check
 
   # The slow integration tests (tests/*.rs, each spawns a real kith-serve and python fixtures) in three shards
   # (heavy tier). The test binaries bake in absolute paths (CARGO_MANIFEST_DIR, CARGO_BIN_EXE_kith-serve), so the
@@ -741,7 +794,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() }}
-    needs: [changes, kernel, host, host-build, host-test, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
