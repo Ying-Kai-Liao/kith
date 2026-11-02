@@ -439,6 +439,15 @@ enum KernelCmd {
         #[command(subcommand)]
         action: AccountsAction,
     },
+    /// How far a chain of `kith ask`s may go: the hop caps and the chain cost cap, read-only (the answers of `kith-ask`'s
+    /// own checks; not routed from `kith ask` yet).
+    Delegation {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long, global = true)]
+        kernel: Option<std::path::PathBuf>,
+        #[command(subcommand)]
+        action: DelegationAction,
+    },
     /// Who may use which agent, and with what settings: the read half of `kith-auth` (`resolve`, `may`; a "just this once"
     /// helper grant is used up by `resolve --take-once`). Prints what `kith-auth` prints, with its exit codes.
     Secrets {
@@ -480,6 +489,30 @@ enum KernelCmd {
         #[arg(last = true)]
         task: Vec<String>,
     },
+}
+
+/// What `kith kernel delegation ...` can be asked.
+#[derive(Subcommand)]
+enum DelegationAction {
+    /// The caps: `{max_local_hops, max_cross_hops, refused_exit, default_cap_usd}`.
+    Limits,
+    /// The chain cost cap in dollars (`none` for no cap), as `kith ask --cap` shows it.
+    Cap,
+    /// The delegation record of ask ID, as the code reads it (an old registration reads as a root ask); exit 1 when
+    /// there is none.
+    Record { id: String },
+    /// Whether the ask running now (this environment's `KITH_ASK_*` variables) may start another ask. Prints the chain, hop and
+    /// cross hops its record would get, or the refusal on stderr and exit 4.
+    Check {
+        /// The ask's id (default: a probe).
+        #[arg(long, default_value = "ask-check")]
+        id: String,
+        /// The ask goes to an agent on another Mac.
+        #[arg(long)]
+        crossing: bool,
+    },
+    /// Whether ask ID waits on a card: `true` or `false`.
+    Parked { id: String },
 }
 
 /// The verbs of `lib/kith_accounts.py` that read, and `kith account list`.
@@ -546,6 +579,37 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
             4
         }
     }
+}
+
+/// `kith kernel delegation <verb>`; the refusal exits 4 (`REFUSED`), as `kith ask` does.
+fn print_delegation(kernel: Option<std::path::PathBuf>, action: DelegationAction) -> i32 {
+    use kith_kernel::delegation as d;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let machine = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env).machine;
+    match action {
+        DelegationAction::Limits => println!("{}", d::limits_json()),
+        DelegationAction::Cap => {
+            println!("{}", d::chain_cost_cap(&machine).map_or_else(|| "none".to_owned(), d::pct_g));
+        }
+        DelegationAction::Record { id } => {
+            match d::safe_id(&id).then(|| d::read_reg(&d::box_dir(&machine), &id)).flatten() {
+                Some(reg) => println!("{}", serde_json::Value::Object(reg)),
+                None => return 1,
+            }
+        }
+        DelegationAction::Check { id, crossing } => {
+            match d::check(&machine, &kith_kernel::paths::process_env, &id, crossing) {
+                Ok(v) => println!("{v}"),
+                Err(d::Refusal(why)) => {
+                    eprintln!("kith ask: {why}");
+                    return d::REFUSED;
+                }
+            }
+        }
+        DelegationAction::Parked { id } => println!("{}", d::safe_id(&id) && d::parked(&machine, &id)),
+    }
+    0
 }
 
 /// `kith kernel secrets <verb> ...`: the answers of `kith-auth may` and `kith-auth resolve`, with its exit codes.
@@ -1011,6 +1075,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Accounts { kernel, action } = cmd {
                 std::process::exit(print_accounts(kernel, action));
             }
+            if let KernelCmd::Delegation { kernel, action } = cmd {
+                std::process::exit(print_delegation(kernel, action));
+            }
             match cmd {
                 KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                 KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
@@ -1075,7 +1142,10 @@ async fn main() -> Result<()> {
                 KernelCmd::Launch { what: LaunchCmd::Whole(args) } => {
                     std::process::exit(launch_cmd::print_whole(&args));
                 }
-                KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } | KernelCmd::Secrets { .. } => {
+                KernelCmd::RunOnce { .. }
+                | KernelCmd::Accounts { .. }
+                | KernelCmd::Delegation { .. }
+                | KernelCmd::Secrets { .. } => {
                     unreachable!("handled above")
                 }
             }
