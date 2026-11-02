@@ -165,11 +165,14 @@ fn guest_denies_every_other_agent_and_the_owner_files() {
     }
     has(format!("Read(/{root}/kith/state/user.md)"));
     // their own memory and their own person file are not denied
-    assert!(
-        !deny
-            .iter()
-            .any(|d| d.contains("memory/people/sam") || d.ends_with("people/sam.md)"))
-    );
+    for tool in ["Read", "Edit"] {
+        for own in [
+            format!("{tool}(/{root}/kith/agents/echo/memory/people/sam/**)"),
+            format!("{tool}(/{root}/kith/state/people/sam.md)"),
+        ] {
+            assert!(!deny.contains(&own), "own path denied: {own}");
+        }
+    }
     // the membership's own deny comes first of the guest rules, and the secrets stay denied
     assert!(deny.contains(&"Bash(curl:*)".to_owned()));
     assert!(

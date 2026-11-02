@@ -1021,7 +1021,10 @@ fn fill(i: &Input<'_>, f: &Folders, src_pkg: &str, pkg: &str) -> R<Value> {
         ("{{AGENT}}", i.agent.to_owned()),
     ];
     for (k, v) in &fills {
-        text = text.replace(k, v);
+        // The text is JSON, so a path goes in as a JSON string body: a backslash or quote in it stays a character of the
+        // path. (Bash's sed turns `&` into the placeholder and drops a backslash; see intended.json.)
+        let lit = serde_json::to_string(v).unwrap_or_default();
+        text = text.replace(k, lit.trim_matches('"'));
     }
     match serde_json::from_str::<Value>(&text) {
         Ok(v @ Value::Object(_)) => Ok(v),

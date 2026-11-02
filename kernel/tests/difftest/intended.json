@@ -3,5 +3,7 @@
   {"case": "engines-install-login", "facet": "step*", "why": "host engines join the kernel's list (A2): install and login print a command from the core's table, which the Python side does not have"},
   {"case": "run-once-*", "facet": "fakes", "why": "A2b-1: the one-shot goes over the engine's ACP mode (`qwen --acp`) instead of its own `qwen -o json -p` flags; the log of fake calls shows the other command line"},
   {"case": "run-once-*", "facet": "step*.stderr", "why": "A2b-1: ACP sessions have one working directory, so the run says which of the agent's extra directories it goes without (native qwen takes --include-directories)"},
-  {"case": "run-once-qwen-cost", "facet": "state:kith/state/cost.db", "why": "A2b-1: the ledger row carries the cost the engine reports over ACP; qwen's own JSON output reports none, so the native row has cost null (the row's shape is the same)"}
+  {"case": "run-once-qwen-cost", "facet": "state:kith/state/cost.db", "why": "A2b-1: the ledger row carries the cost the engine reports over ACP; qwen's own JSON output reports none, so the native row has cost null (the row's shape is the same)"},
+  {"case": "launch-settings-*-home-amp", "facet": "step*.pick", "why": "A3-4: bash's sed fill treats & in the replacement as the matched text, so a home folder with & in it puts the placeholder `{{USER_HOME}}` into the rules; Rust writes the path literally"},
+  {"case": "launch-settings-*-home-backslash", "facet": "step*.pick", "why": "A3-4: bash's sed fill drops a backslash in the replacement (a\\b becomes ab); Rust writes the path literally"}
 ]

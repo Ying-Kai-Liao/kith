@@ -6791,6 +6791,1467 @@
   "stderr": false
  },
  {
+  "name": "launch-settings-guest-odd-names",
+  "command": "launch-settings",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/settings.json",
+    "text": "{\"permissions\": {\"allow\": [\"Bash(git status:*)\", \"Bash(python3:*)\", \"Bash(sh)\", \"Bash({{KITH}}/bin/project-id:*)\", \"Read({{MEMORY_DIR}}/**)\", \"Bash(npx prettier:*)\"], \"deny\": [\"Read(/etc/secret-thing)\"]}, \"enabledPlugins\": {\"mine@own\": false}, \"autoMode\": {\"soft_deny\": [\"Never poke the bear.\"], \"allow\": [\"Routine thing for {{AGENT}}\"]}, \"env\": {\"FOO\": \"{{AGENT}}\"}}"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"--version \"*) echo \"2.1.309 (Claude Code)\" ;;\n  \"plugin list\") echo '[{\"id\":\"kith@kith\"},{\"id\":\"hq@hq\"},{\"id\":\"baz@qux\"},{\"id\":\"foo@bar\"}]' ;;\n  *) echo fake-claude-run ;;\nesac\nexit 0\n"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "write": "kith/agents/Zed/role/agent.md",
+    "text": "---\nname: Zed\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/alpha/role/agent.md",
+    "text": "---\nname: alpha\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/Beta/role/agent.md",
+    "text": "---\nname: Beta\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/\u00c9clair/role/agent.md",
+    "text": "---\nname: \u00c9clair\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/my agent/role/agent.md",
+    "text": "---\nname: my agent\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/zulu/role/agent.md",
+    "text": "---\nname: zulu\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/_under/role/agent.md",
+    "text": "---\nname: _under\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/a-b/role/agent.md",
+    "text": "---\nname: a-b\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/a.b/role/agent.md",
+    "text": "---\nname: a.b\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/Zeta.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/Zeta.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/alpha.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/alpha.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/\u00e4rger.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/\u00e4rger.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/my notes.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/my notes.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/Beta dir/x.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/Beta dir/x.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/Zed/MEMORY.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/Zed/n.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/state/people/Zed.md",
+    "text": "P\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/alpha/MEMORY.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/alpha/n.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/state/people/alpha.md",
+    "text": "P\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/\u00c9mile/MEMORY.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/\u00c9mile/n.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/state/people/\u00c9mile.md",
+    "text": "P\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/j o/MEMORY.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/j o/n.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/state/people/j o.md",
+    "text": "P\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "sam"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "settings",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--snapshot",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "settings",
+   "new": "settings"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-settings-guest-odd-names-sandbox",
+  "command": "launch-settings",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/settings.json",
+    "text": "{\"permissions\": {\"allow\": [\"Bash(git status:*)\", \"Bash(python3:*)\", \"Bash(sh)\", \"Bash({{KITH}}/bin/project-id:*)\", \"Read({{MEMORY_DIR}}/**)\", \"Bash(npx prettier:*)\"], \"deny\": [\"Read(/etc/secret-thing)\"]}, \"enabledPlugins\": {\"mine@own\": false}, \"autoMode\": {\"soft_deny\": [\"Never poke the bear.\"], \"allow\": [\"Routine thing for {{AGENT}}\"]}, \"env\": {\"FOO\": \"{{AGENT}}\"}}"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"--version \"*) echo \"2.1.309 (Claude Code)\" ;;\n  \"plugin list\") echo '[{\"id\":\"kith@kith\"},{\"id\":\"hq@hq\"},{\"id\":\"baz@qux\"},{\"id\":\"foo@bar\"}]' ;;\n  *) echo fake-claude-run ;;\nesac\nexit 0\n"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "write": "kith/agents/Zed/role/agent.md",
+    "text": "---\nname: Zed\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/alpha/role/agent.md",
+    "text": "---\nname: alpha\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/Beta/role/agent.md",
+    "text": "---\nname: Beta\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/\u00c9clair/role/agent.md",
+    "text": "---\nname: \u00c9clair\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/my agent/role/agent.md",
+    "text": "---\nname: my agent\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/zulu/role/agent.md",
+    "text": "---\nname: zulu\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/_under/role/agent.md",
+    "text": "---\nname: _under\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/a-b/role/agent.md",
+    "text": "---\nname: a-b\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/a.b/role/agent.md",
+    "text": "---\nname: a.b\ndescription: x\n---\nx\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/Zeta.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/Zeta.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/alpha.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/alpha.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/\u00e4rger.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/\u00e4rger.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/my notes.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/my notes.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/Beta dir/x.md",
+    "text": "m\n"
+   },
+   {
+    "write": "kith/agents/echo/files/Beta dir/x.md",
+    "text": "f\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/Zed/MEMORY.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/Zed/n.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/state/people/Zed.md",
+    "text": "P\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/alpha/MEMORY.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/alpha/n.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/state/people/alpha.md",
+    "text": "P\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/\u00c9mile/MEMORY.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/\u00c9mile/n.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/state/people/\u00c9mile.md",
+    "text": "P\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/j o/MEMORY.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/j o/n.md",
+    "text": "p\n"
+   },
+   {
+    "write": "kith/state/people/j o.md",
+    "text": "P\n"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "sam"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "settings",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--snapshot",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "settings",
+   "new": "settings"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-settings-owner-home-amp",
+  "command": "launch-settings",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/settings.json",
+    "text": "{\"permissions\": {\"allow\": [\"Bash(git status:*)\", \"Bash(python3:*)\", \"Bash(sh)\", \"Bash({{KITH}}/bin/project-id:*)\", \"Read({{MEMORY_DIR}}/**)\", \"Bash(npx prettier:*)\", \"Read({{USER_HOME}}/x/**)\"], \"deny\": [\"Read(/etc/secret-thing)\"]}, \"enabledPlugins\": {\"mine@own\": false}, \"autoMode\": {\"soft_deny\": [\"Never poke the bear.\"], \"allow\": [\"Routine thing for {{AGENT}}\"]}, \"env\": {\"FOO\": \"{{AGENT}}\"}}"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"--version \"*) echo \"2.1.309 (Claude Code)\" ;;\n  \"plugin list\") echo '[{\"id\":\"kith@kith\"},{\"id\":\"hq@hq\"},{\"id\":\"baz@qux\"},{\"id\":\"foo@bar\"}]' ;;\n  *) echo fake-claude-run ;;\nesac\nexit 0\n"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/a&b"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "HOME": "{HOME}/a&b"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "settings",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--snapshot",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "settings",
+   "new": "settings"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-settings-guest-home-amp",
+  "command": "launch-settings",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/settings.json",
+    "text": "{\"permissions\": {\"allow\": [\"Bash(git status:*)\", \"Bash(python3:*)\", \"Bash(sh)\", \"Bash({{KITH}}/bin/project-id:*)\", \"Read({{MEMORY_DIR}}/**)\", \"Bash(npx prettier:*)\", \"Read({{USER_HOME}}/x/**)\"], \"deny\": [\"Read(/etc/secret-thing)\"]}, \"enabledPlugins\": {\"mine@own\": false}, \"autoMode\": {\"soft_deny\": [\"Never poke the bear.\"], \"allow\": [\"Routine thing for {{AGENT}}\"]}, \"env\": {\"FOO\": \"{{AGENT}}\"}}"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"--version \"*) echo \"2.1.309 (Claude Code)\" ;;\n  \"plugin list\") echo '[{\"id\":\"kith@kith\"},{\"id\":\"hq@hq\"},{\"id\":\"baz@qux\"},{\"id\":\"foo@bar\"}]' ;;\n  *) echo fake-claude-run ;;\nesac\nexit 0\n"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/a&b"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "sam",
+   "HOME": "{HOME}/a&b"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "settings",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--snapshot",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "settings",
+   "new": "settings"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-settings-owner-home-backslash",
+  "command": "launch-settings",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/settings.json",
+    "text": "{\"permissions\": {\"allow\": [\"Bash(git status:*)\", \"Bash(python3:*)\", \"Bash(sh)\", \"Bash({{KITH}}/bin/project-id:*)\", \"Read({{MEMORY_DIR}}/**)\", \"Bash(npx prettier:*)\", \"Read({{USER_HOME}}/x/**)\"], \"deny\": [\"Read(/etc/secret-thing)\"]}, \"enabledPlugins\": {\"mine@own\": false}, \"autoMode\": {\"soft_deny\": [\"Never poke the bear.\"], \"allow\": [\"Routine thing for {{AGENT}}\"]}, \"env\": {\"FOO\": \"{{AGENT}}\"}}"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"--version \"*) echo \"2.1.309 (Claude Code)\" ;;\n  \"plugin list\") echo '[{\"id\":\"kith@kith\"},{\"id\":\"hq@hq\"},{\"id\":\"baz@qux\"},{\"id\":\"foo@bar\"}]' ;;\n  *) echo fake-claude-run ;;\nesac\nexit 0\n"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/a\\b"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "HOME": "{HOME}/a\\b"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "settings",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--snapshot",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "settings",
+   "new": "settings"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-settings-guest-home-backslash",
+  "command": "launch-settings",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/settings.json",
+    "text": "{\"permissions\": {\"allow\": [\"Bash(git status:*)\", \"Bash(python3:*)\", \"Bash(sh)\", \"Bash({{KITH}}/bin/project-id:*)\", \"Read({{MEMORY_DIR}}/**)\", \"Bash(npx prettier:*)\", \"Read({{USER_HOME}}/x/**)\"], \"deny\": [\"Read(/etc/secret-thing)\"]}, \"enabledPlugins\": {\"mine@own\": false}, \"autoMode\": {\"soft_deny\": [\"Never poke the bear.\"], \"allow\": [\"Routine thing for {{AGENT}}\"]}, \"env\": {\"FOO\": \"{{AGENT}}\"}}"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"--version \"*) echo \"2.1.309 (Claude Code)\" ;;\n  \"plugin list\") echo '[{\"id\":\"kith@kith\"},{\"id\":\"hq@hq\"},{\"id\":\"baz@qux\"},{\"id\":\"foo@bar\"}]' ;;\n  *) echo fake-claude-run ;;\nesac\nexit 0\n"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/a\\b"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "sam",
+   "HOME": "{HOME}/a\\b"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "settings",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--snapshot",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "settings",
+   "new": "settings"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-settings-owner-home-space",
+  "command": "launch-settings",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/settings.json",
+    "text": "{\"permissions\": {\"allow\": [\"Bash(git status:*)\", \"Bash(python3:*)\", \"Bash(sh)\", \"Bash({{KITH}}/bin/project-id:*)\", \"Read({{MEMORY_DIR}}/**)\", \"Bash(npx prettier:*)\", \"Read({{USER_HOME}}/x/**)\"], \"deny\": [\"Read(/etc/secret-thing)\"]}, \"enabledPlugins\": {\"mine@own\": false}, \"autoMode\": {\"soft_deny\": [\"Never poke the bear.\"], \"allow\": [\"Routine thing for {{AGENT}}\"]}, \"env\": {\"FOO\": \"{{AGENT}}\"}}"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"--version \"*) echo \"2.1.309 (Claude Code)\" ;;\n  \"plugin list\") echo '[{\"id\":\"kith@kith\"},{\"id\":\"hq@hq\"},{\"id\":\"baz@qux\"},{\"id\":\"foo@bar\"}]' ;;\n  *) echo fake-claude-run ;;\nesac\nexit 0\n"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/a b"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "HOME": "{HOME}/a b"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "settings",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--snapshot",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "settings",
+   "new": "settings"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
+  "name": "launch-settings-guest-home-space",
+  "command": "launch-settings",
+  "needs": "rust",
+  "new_prog": "rust",
+  "bin_both": true,
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/settings.json",
+    "text": "{\"permissions\": {\"allow\": [\"Bash(git status:*)\", \"Bash(python3:*)\", \"Bash(sh)\", \"Bash({{KITH}}/bin/project-id:*)\", \"Read({{MEMORY_DIR}}/**)\", \"Bash(npx prettier:*)\", \"Read({{USER_HOME}}/x/**)\"], \"deny\": [\"Read(/etc/secret-thing)\"]}, \"enabledPlugins\": {\"mine@own\": false}, \"autoMode\": {\"soft_deny\": [\"Never poke the bear.\"], \"allow\": [\"Routine thing for {{AGENT}}\"]}, \"env\": {\"FOO\": \"{{AGENT}}\"}}"
+   },
+   {
+    "run": [
+     "git",
+     "init",
+     "-q"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "add",
+     "-A"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "run": [
+     "git",
+     "-c",
+     "user.name=t",
+     "-c",
+     "user.email=t@example.com",
+     "commit",
+     "-qm",
+     "init",
+     "--allow-empty"
+    ],
+    "cwd": "kith/agents/echo/role"
+   },
+   {
+    "fake": "claude",
+    "script": "#!/bin/sh\ncase \"$1 $2\" in\n  \"--version \"*) echo \"2.1.309 (Claude Code)\" ;;\n  \"plugin list\") echo '[{\"id\":\"kith@kith\"},{\"id\":\"hq@hq\"},{\"id\":\"baz@qux\"},{\"id\":\"foo@bar\"}]' ;;\n  *) echo fake-claude-run ;;\nesac\nexit 0\n"
+   },
+   {
+    "write": "kith/state/user.md",
+    "text": "About the owner.\n"
+   },
+   {
+    "write": "kith/agents/other/role/agent.md",
+    "text": "---\nname: other\ndescription: another\n---\nOther.\n"
+   },
+   {
+    "write": "kith/agents/other/memory/MEMORY.md",
+    "text": "other memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/MEMORY.md",
+    "text": "owner memory\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/shared/MEMORY.md",
+    "text": "shared craft\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/sam/MEMORY.md",
+    "text": "sam likes tea\n"
+   },
+   {
+    "write": "kith/agents/echo/memory/people/ann/MEMORY.md",
+    "text": "ann likes coffee\n"
+   },
+   {
+    "write": "kith/agents/echo/files/people/ann/note.md",
+    "text": "ann file\n"
+   },
+   {
+    "write": "kith/agents/echo/files/report.md",
+    "text": "owner output\n"
+   },
+   {
+    "write": "kith/state/people/sam.md",
+    "text": "Sam.\n"
+   },
+   {
+    "write": "kith/state/people/ann.md",
+    "text": "Ann.\n"
+   },
+   {
+    "write": "kith/state/secrets/auth.json",
+    "text": "{\"profiles\": {}, \"grants\": {}, \"env\": {}, \"people\": {\"kai\": {\"owner\": true, \"name\": \"Kai\"}, \"sam\": {\"name\": \"Sam\", \"lang\": \"en\"}, \"ann\": {\"name\": \"Ann\"}, \"bot-ab12cd34\": {\"bot_of\": \"sam\", \"name\": \"Samsbot\"}}, \"members\": {\"echo\": {\"sam\": {\"mode\": \"acceptEdits\", \"deny\": [\"Bash(curl:*)\", \"Read(/tmp/nope/**)\"]}, \"ann\": {\"mode\": \"bypassPermissions\", \"trusted\": true}, \"bot-ab12cd34\": {}}}}"
+   },
+   {
+    "mkdir": "home/a b"
+   }
+  ],
+  "env": {
+   "KITH_STATE": "{KITH_HOME}/state",
+   "KITH_PERSON": "sam",
+   "HOME": "{HOME}/a b"
+  },
+  "run_old": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "run_new": [
+   [
+    "kernel",
+    "launch",
+    "settings",
+    "echo",
+    "--kernel",
+    "{KERNEL}",
+    "--snapshot",
+    "--json"
+   ]
+  ],
+  "run": [
+   [
+    "echo",
+    "--launch-json"
+   ]
+  ],
+  "pick": {
+   "old": "settings",
+   "new": "settings"
+  },
+  "normalize": [
+   [
+    "(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])",
+    "<h>"
+   ]
+  ],
+  "only": [
+   "pick",
+   "exit"
+  ],
+  "stderr": false
+ },
+ {
   "name": "launch-settings-codex-guest-refused",
   "command": "launch-settings",
   "needs": "rust",
