@@ -335,6 +335,8 @@ async fn write_now(
             if let Some(root) = thread {
                 show_on_row(hub, root, &summary);
             }
+            // The bot's synced row carries the newest summary (`lastSummary`): refresh it now, not at its next update.
+            hub.emit_bot(bot);
             Ok(Wrote::Yes)
         }
         Err(Refused::Check(refusal)) => {
@@ -363,6 +365,10 @@ pub fn forget_now(hub: &Arc<Hub>, thread: &str) -> Result<()> {
         && clear_row_summary(&mut root.data)
     {
         hub.set_entry(thread, &root.data);
+    }
+    let bot = thread.strip_prefix("main:").map(str::to_owned).or_else(|| hub.store.entry(thread).map(|e| e.bot_id));
+    if let Some(bot) = bot {
+        hub.emit_bot(&bot);
     }
     Ok(())
 }
