@@ -12,6 +12,7 @@ import {
   parseDiff, parseHistory, parseMemoryList, parseRead, parseSave, parseTidyUps, parseUndo,
   type HqMemoryDiff, type HqMemoryList, type HqMemoryRead, type HqMemoryVersion, type HqSaveResult, type HqTidyUp, type HqUndoResult,
 } from '@shared/hq-memory'
+import { parseAvailable, parseMarket, parsePreview, parseTools, type AvailableConnector, type InstallPreview, type KithTools, type MarketBot } from '@shared/kith-tools'
 import { isUnsupportedHost, parseAccessLedger, parseKithInfoResult, parseSearchResult, type AccessGrant, type KithInfoResult, type KithSearchResult } from '@shared/kith-info'
 import { isAccessRemoved, parseGranted } from '@shared/mac-role'
 import { parseAudit, parseCreatedInvite, parseInvites, parsePeople, type AuditRow, type CreatedInvite, type PendingInvite, type Person, type Role } from '@shared/people'
@@ -341,6 +342,57 @@ export class HostClient {
   /** A Schedule card's button on a kith job (owner only): kith-sched does it, and the answer is the agent's info read back. */
   async kithSchedule(botId: string, id: string, op: 'pause' | 'resume' | 'run' | 'remove'): Promise<KithInfoResult> {
     return parseKithInfoResult(await this.call('kithSchedule', { botId, id, op }, 60_000))
+  }
+
+  // Connectors, skills and shared bots on a kith agent (owner only): each is one `kith … --json` line, answered as printed.
+  // A refused line throws with the CLI's own error text.
+  /** A kith agent's connectors and skills; `only` reads one half. A half that failed comes with its `…Error`. */
+  async kithTools(botId: string, only?: 'connectors' | 'skills'): Promise<KithTools> {
+    return parseTools(await this.call('kithTools', { botId, ...(only ? { only } : {}) }, 90_000))
+  }
+
+  /** Lets the agent use a connector installed on this computer (`kith <agent> connect`). */
+  kithConnect(botId: string, connector: string) {
+    return this.call('kithConnect', { botId, connector }, 60_000)
+  }
+
+  kithDisconnect(botId: string, connector: string) {
+    return this.call('kithDisconnect', { botId, connector }, 60_000)
+  }
+
+  /** Links a skill from anthropics/skills (or another GitHub link) to the agent (`kith <agent> skill add`). */
+  kithSkillAdd(botId: string, skill: string) {
+    return this.call('kithSkillAdd', { botId, skill }, 150_000)
+  }
+
+  kithSkillRemove(botId: string, skill: string) {
+    return this.call('kithSkillRemove', { botId, skill }, 90_000)
+  }
+
+  /** The connectors this computer can connect, with the agents that have each (`kith connectors --json`). */
+  async kithConnectorsAvailable(): Promise<AvailableConnector[]> {
+    return parseAvailable(await this.call('kithConnectorsAvailable', {}, 60_000))
+  }
+
+  /** The anthropics/skills catalog (`kith skills available --json`). */
+  async kithSkillsAvailable(refresh = false): Promise<{ name: string; description: string }[]> {
+    const rows = await this.call<{ name?: string; description?: string }[]>('kithSkillsAvailable', refresh ? { refresh: true } : {}, 150_000)
+    return (Array.isArray(rows) ? rows : []).filter((r) => r.name).map((r) => ({ name: r.name!, description: r.description ?? '' }))
+  }
+
+  /** Shared bots (`kith market [words] [--new] --json`). */
+  async kithMarket(query = '', fresh = false): Promise<MarketBot[]> {
+    return parseMarket(await this.call('kithMarket', { query, ...(fresh ? { new: true } : {}) }, 90_000))
+  }
+
+  /** What installing a shared bot would do here, before anything is kept. */
+  async kithInstallPreview(link: string): Promise<InstallPreview> {
+    return parsePreview(await this.call('kithInstallPreview', { link }, 150_000))
+  }
+
+  /** Installs a shared bot (`--as` when its name is taken); the host's roster picks the new agent up on its own. */
+  kithInstall(link: string, as: string | null) {
+    return this.call<{ ok: boolean; name: string }>('kithInstall', { link, ...(as ? { as } : {}) }, 300_000)
   }
 
   /** The backup chain: global order, per-agent orders and each entry's state. A host before this call answers 404. */
