@@ -14,10 +14,12 @@
 pub mod access;
 pub mod autoallow;
 pub mod edge;
+pub mod history;
 pub mod resource;
 pub mod resume;
 pub mod room_secret;
 pub mod secret;
+pub mod session;
 
 use crate::hub::Hub;
 use crate::runauth::{RunIdentity, TokenScope};
@@ -189,20 +191,49 @@ pub async fn request_permission(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, i
     ask_for(hub, who, tool, input, None).await
 }
 
-/// The owner's own run was blocked by Claude Code's auto-mode classifier (`reason` is what it said, kith-permit's
-/// `denied` hook): a card for the owner with Allow once, Always allow and Deny (`autoallow`). The caller has checked that
-/// the token is the owner's.
+/// What kith-permit's `denied` hook says about a call auto mode blocked: the classifier's reason, and the Claude session
+/// the hook ran in ('' when it had none).
+pub struct AutoDenied<'a> {
+    pub reason: &'a str,
+    pub claude_session: &'a str,
+}
+
+/// An auto-mode card's own facts, past the kernel's check.
+struct Auto {
+    reason: String,
+    checked: autoallow::Checked,
+    claude_session: String,
+}
+
+/// The owner's own run was blocked by Claude Code's auto-mode classifier (kith-permit's `denied` hook): a This session
+/// grant for exactly this action lets it through with no card; else a card for the owner with Allow once, Deny, This
+/// session and Always allow (`autoallow`, `session`). The card shows and keeps the input with key-shaped text redacted;
+/// a call that carried a key offers neither grant. The caller has checked that the token is the owner's.
 pub async fn request_auto_denied(
     hub: &Arc<Hub>,
     who: &RunIdentity,
     tool: &str,
     input: &Value,
-    reason: &str,
+    auto: AutoDenied<'_>,
 ) -> Decision {
-    ask_for(hub, who, tool, input, Some(reason)).await
+    if input.to_string().len() > MAX_INPUT {
+        return deny("That request is too large to show for approval.");
+    }
+    let Some(checked) = autoallow::check(&who.agent, tool, input, auto.reason).await else {
+        return deny("Approvals aren't available right now, so no card could be shown.");
+    };
+    if let Some(d) = &checked.derived
+        && let Some(g) = session::granted(hub, who, auto.claude_session, d, &checked.settings)
+    {
+        session::hit(&g, tool, input);
+        return Decision { allow: true, message: "Allowed for this session.".into(), waiting: false };
+    }
+    let shown = checked.input.clone();
+    let auto = Auto { reason: auto.reason.to_owned(), checked, claude_session: auto.claude_session.to_owned() };
+    ask_for(hub, who, tool, &shown, Some(&auto)).await
 }
 
-async fn ask_for(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, input: &Value, auto: Option<&str>) -> Decision {
+async fn ask_for(hub: &Arc<Hub>, who: &RunIdentity, tool: &str, input: &Value, auto: Option<&Auto>) -> Decision {
     if input.to_string().len() > MAX_INPUT {
         return deny("That request is too large to show for approval.");
     }
@@ -225,7 +256,7 @@ async fn request_card(
     input: &Value,
     resource: &str,
     shown: &str,
-    auto: Option<&str>,
+    auto: Option<&Auto>,
 ) -> Decision {
     let cfg = settings(&hub.store);
     // A file outside the run's grants is the owner's to allow, whoever the run is for (F11 step 2a).
@@ -261,17 +292,17 @@ async fn request_card(
         Ok(Opened::New(c) | Opened::Joined(c)) => c,
         Err(error) => {
             tracing::error!(error = format!("{error:#}"), "couldn't store an approval card");
-            return deny("Approvals aren't available right now.");
+            return deny("Approvals aren't available right now, so no card could be shown.");
         }
     };
     // Listening comes first: an answer that lands the moment the card is shown must find this call.
     let (_waiting, rx) = Waiting::new(&card.id);
     let extra = match auto {
-        Some(reason) => Some(autoallow::extras(&who.agent, tool, input, reason).await),
+        Some(a) => Some(autoallow::extras(&who.agent, &a.reason, Some(&a.checked), &a.claude_session)),
         None => edge_extras(hub, who, &card).await,
     };
     let Some(card) = show(hub, who, &card, extra) else {
-        return deny("Approvals aren't available right now.");
+        return deny("Approvals aren't available right now, so no card could be shown.");
     };
     let label = approver_label(hub, &card).await;
     match tokio::time::timeout(cfg.window, rx).await {
@@ -526,12 +557,13 @@ pub fn answer(
         hub.set_entry(entry_id, &e.data);
     }
     if autoallow::is_auto(&card) {
-        if allow
-            && option_id == Some(autoallow::ALWAYS)
-            && let Some(kept) =
-                entry.data.get("autoAllow").filter(|k| k.is_object() && card.approver == "owner").cloned()
-        {
-            remember(hub, &card, kept);
+        let kept = entry.data.get("autoAllow").filter(|k| k.is_object() && card.approver == "owner").cloned();
+        match (allow, option_id, kept) {
+            (true, Some(autoallow::ALWAYS), Some(kept)) => remember(hub, &card, kept),
+            (true, Some(session::SESSION), Some(kept)) if person.is_none() && card.person.is_empty() => {
+                session::grant(hub, &card, &kept);
+            }
+            _ => {}
         }
         return Ok(Outcome::Recorded { forward: settle(hub, &card, was_live, allow, option_id, person)? });
     }
@@ -733,6 +765,7 @@ pub fn withdraw_person(hub: &Hub, person: &str, agent: Option<&str>) {
 /// Past their deadline, cards expire: silence is no (A1).
 pub fn sweep(hub: &Hub) {
     expire(hub, now_ms());
+    session::sweep(hub, now_ms());
 }
 
 fn expire(hub: &Hub, at: i64) {
@@ -831,6 +864,8 @@ mod autoallow_tests;
 mod edge_tests;
 #[cfg(test)]
 mod props;
+#[cfg(test)]
+mod session_tests;
 #[cfg(test)]
 mod tests;
 

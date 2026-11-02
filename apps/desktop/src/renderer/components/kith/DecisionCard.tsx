@@ -26,6 +26,8 @@ interface Common {
   details?: ReactNode
   /** The card was answered or expired: the outcome replaces the buttons. */
   outcome?: string
+  /** A small button at the end of the outcome line ("Remove" on a live This session grant). No confirm. */
+  outcomeAction?: { label: string; run: () => void }
   /** An old run still holds the session this approved card resumes in: the held row, under the outcome. */
   held?: ReactNode
   /** A guest's prompt that is the owner's to answer: the buttons give way to "Waiting for <name>". */
@@ -36,11 +38,11 @@ interface Common {
 
 export type DecisionCardProps =
   | (Common & { kind: 'question'; options: DecisionOption[]; onChoose: (id: string) => void })
-  | (Common & { kind: 'permission'; onAllow: () => void; onDeny: () => void; onAlways?: () => void; /** The allow button's words ("Allow" by default). */ allowLabel?: string; /** The always button's words ("Always" by default). */ alwaysLabel?: string })
+  | (Common & { kind: 'permission'; onAllow: () => void; onDeny: () => void; onAlways?: () => void; /** This session: after Deny, before Always, so a habit tap never lands on a wider grant. */ onSession?: () => void; /** The allow button's words ("Allow" by default). */ allowLabel?: string; /** The always button's words ("Always" by default). */ alwaysLabel?: string })
 
 /** A question waiting on you, or a permission prompt. While it waits the card is tinted in the agent's pair (grey once answered); no amber. */
 export function DecisionCard(props: DecisionCardProps) {
-  const { pair, heading, leading, title, subject, place, details, outcome, held, waiting, pending = null } = props
+  const { pair, heading, leading, title, subject, place, details, outcome, outcomeAction, held, waiting, pending = null } = props
   const busy = pending !== null && pending !== false
   const buttons =
     props.kind === 'question'
@@ -48,6 +50,7 @@ export function DecisionCard(props: DecisionCardProps) {
       : [
           { id: 'allow', label: props.allowLabel ?? 'Allow', tone: 'ink' as const, run: props.onAllow },
           { id: 'deny', label: 'Deny', tone: 'deny' as const, run: props.onDeny },
+          ...(props.onSession ? [{ id: 'session', label: 'This session', tone: 'plain' as const, run: props.onSession }] : []),
           ...(props.onAlways ? [{ id: 'always', label: props.alwaysLabel ?? 'Always', tone: 'plain' as const, run: props.onAlways }] : []),
         ]
   return (
@@ -69,7 +72,14 @@ export function DecisionCard(props: DecisionCardProps) {
       {details}
       {outcome ? (
         <>
-          <div className="kc-decision-outcome kith-text-secondary">{held ? `${outcome} · waiting to go on` : outcome}</div>
+          <div className="kc-decision-outcome kith-text-secondary">
+            <span>{held ? `${outcome} · waiting to go on` : outcome}</span>
+            {outcomeAction ? (
+              <button className="kc-decision-outcome-action" onClick={outcomeAction.run}>
+                {outcomeAction.label}
+              </button>
+            ) : null}
+          </div>
           {held}
         </>
       ) : waiting ? (

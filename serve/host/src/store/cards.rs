@@ -437,6 +437,18 @@ impl Store {
         Ok(if n == 1 { get(&c, id)? } else { None })
     }
 
+    /// The newest `limit` of the owner's own cards, any state (`kith cards history`): never an invited person's or a bot
+    /// guest's.
+    pub fn cards_recent(&self, limit: usize) -> Vec<Card> {
+        let c = self.db.locked();
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        super::logged(
+            "recent cards",
+            list(&c, "WHERE approver = 'owner' AND person = '' ORDER BY created_at DESC LIMIT ?1", [limit]),
+        )
+        .unwrap_or_default()
+    }
+
     /// The open cards, oldest first: what the re-derive goes over.
     pub fn cards_open_all(&self) -> Vec<Card> {
         let c = self.db.locked();

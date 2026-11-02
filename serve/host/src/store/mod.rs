@@ -18,6 +18,7 @@ mod people;
 mod room_bots;
 mod room_secrets;
 mod schema;
+mod session_grants;
 mod suspended;
 mod threads;
 
@@ -34,6 +35,7 @@ pub use peers::{PeerIn, PeerOut};
 pub use people::{Invite, Membership, PersonRow};
 pub use room_bots::RoomPoint;
 pub use room_secrets::{RoomSecret, SecretTo};
+pub use session_grants::{NewSessionGrant, SessionGrant};
 pub use suspended::HandleRevoke;
 #[cfg(test)]
 pub use suspended::Moved;
