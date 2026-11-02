@@ -137,6 +137,32 @@ final class KithInfoStore {
         }
     }
 
+    /// Why the last harness/model/effort change failed (the CLI's own words, or the host's when it predates the method);
+    /// the old value stays shown. `setting` names the row.
+    private(set) var settingError: (setting: String, text: String)?
+    /// The setting being written; its row is disabled meanwhile.
+    private(set) var savingSetting: String?
+
+    /// Writes the harness, model or effort through to hq (`kith <agent> set <setting> <value> --json`); what shows
+    /// afterwards is hq's answer, read back. `model` is kept alongside a harness change.
+    func setSetting(_ setting: String, _ value: String, model: String? = nil) async {
+        guard savingSetting == nil else { return }
+        savingSetting = setting
+        settingError = nil
+        defer { savingSetting = nil }
+        do {
+            let response = try await client().kithSetSetting(botId: botId, setting: setting, value: value, model: model)
+            if response.info != nil {
+                refreshError = nil
+                phase = .loaded(response)
+            } else {
+                settingError = (setting, response.error ?? "kith has no answer")
+            }
+        } catch {
+            settingError = (setting, error.localizedDescription)
+        }
+    }
+
     /// A Schedule card's button: kith-sched does it, and the info read back is what every card of this agent shows.
     /// Throws why it failed.
     func schedule(_ id: String, op: ScheduleOp) async throws {

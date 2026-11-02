@@ -488,6 +488,14 @@ public extension HostClient {
         return try await call("kithSetCallModel", Body(botId: botId, model: model), timeout: 60)
     }
 
+    /// Writes an hq bot's harness, model or effort through to hq (`kith <agent> set harness|model|effort <value>`, with
+    /// `--model` when a harness change names the model to keep). `default` forgets the value. The answer is hq's info
+    /// read back; a refusal comes back as `error`. A host before this method answers with an unknown-method error.
+    func kithSetSetting(botId: String, setting: String, value: String, model: String? = nil) async throws -> KithInfoResponse {
+        struct Body: Encodable { var botId: String; var setting: String; var value: String; var model: String? }
+        return try await call("kithSetSetting", Body(botId: botId, setting: setting, value: value, model: model), timeout: 60)
+    }
+
     /// A Schedule card's button on a Kith job (`kith-sched pause|resume|run|rm`): `op` is pause, resume, run or remove.
     /// Owner only; the answer is hq's info read back.
     func kithSchedule(botId: String, id: String, op: String) async throws -> KithInfoResponse {

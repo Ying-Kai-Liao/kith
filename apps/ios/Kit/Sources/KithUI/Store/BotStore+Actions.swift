@@ -474,6 +474,8 @@ extension BotStore {
 
     public func save(_ draft: BotDraft) async throws -> Bot {
         let client = try await ready()
+        // A kith agent's engine, model and tools are kith's: never send them as changes.
+        let draft = draft.id.flatMap { bots[$0] }.map { draft.keepingKithOwned(from: $0) } ?? draft
         let bot = draft.id == nil ? try await client.createBot(draft) : try await client.updateBot(draft)
         bots[bot.id] = bot
         return bot

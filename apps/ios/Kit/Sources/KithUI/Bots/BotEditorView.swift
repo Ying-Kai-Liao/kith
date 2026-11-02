@@ -143,7 +143,7 @@ struct BotSettingsForm: View {
                     }
                 }
                 if shown.instructions { instructionsRow }
-                if shown.backendPicker { agentPicker }
+                if shown.backendPicker, !isKithAgent { agentPicker }
                 settingsRows
             }
             if let error {
@@ -218,8 +218,15 @@ struct BotSettingsForm: View {
         .accessibilityLabel("Mode")
     }
 
+    /// An hq agent: kith holds its engine, model, effort and tools (`kith <agent> set …`), so the host's own controls never show.
+    private var isKithAgent: Bool { !(model.bots[draft.id ?? ""]?.hqAgent ?? "").isEmpty }
+
     @ViewBuilder private var settingsRows: some View {
-        if let kith, !shown.kithSettings { HqSettingsRows(store: kith, showsPermission: !permissionInAccess) } else { modelPicker }
+        if isKithAgent, kith == nil {
+            Text("Engine, model and effort are set from this agent's details page.").font(.footnote).foregroundStyle(Palette.secondary)
+        } else if let kith, isKithAgent {
+            HqSettingsRows(store: kith, showsPermission: !permissionInAccess)
+        } else if let kith, !shown.kithSettings { HqSettingsRows(store: kith, showsPermission: !permissionInAccess) } else { modelPicker }
     }
 
     private var modelPicker: some View {
@@ -295,7 +302,7 @@ struct BotSettingsForm: View {
                     }
                 }
                 if part == .all {
-                    agentPicker
+                    if !isKithAgent { agentPicker }
                     settingsRows
                 }
                 ValueRow("Folder") {
@@ -359,6 +366,10 @@ struct BotSettingsForm: View {
                 }
             }
 
+            if isKithAgent {
+                Text("This agent's tools and skills are kept by Kith. Change them with kith on the Mac or in the Mac app.")
+                    .font(.footnote).foregroundStyle(Palette.secondary)
+            } else {
             PluginToggles(
                 title: "Connectors",
                 empty: "No connectors yet. Add GitHub, Linear, Notion and more from Extensions.",
@@ -372,6 +383,7 @@ struct BotSettingsForm: View {
                 selection: Binding(get: { draft.skills ?? [] }, set: { draft.skills = $0 }),
                 info: { id in viewingSkill = model.installedSkills.first { $0.id == id }.map(SkillRef.init) }
             )
+            }
             if let error {
                 Text(error).font(.footnote).foregroundStyle(Palette.danger)
             }
