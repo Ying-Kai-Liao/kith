@@ -977,7 +977,9 @@ mod tests {
         assert_eq!((o["model"].as_str(), o["effort"].as_str()), (Some("haiku"), Some("low")));
         assert_eq!(o["settings"]["permissions"]["defaultMode"], "auto");
         assert!(o["settings"]["hooks"].is_object(), "hq's hook survives");
-        for server in ["chat", "memory", "team", "routines", "connectors"] {
+        // Installed connectors reach a kith agent as granted services in the kernel's mcp-config (the `files` entry
+        // above is such a service), never from the host's own connector list; "connectors" is the sign-in helper.
+        for server in ["chat", "memory", "team", "routines", "connectors", "composio"] {
             assert!(!meta.to_string().contains(&format!("\"{server}\"")), "{server}");
         }
     }

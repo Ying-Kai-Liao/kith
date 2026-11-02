@@ -46,6 +46,7 @@
 #   kith allow <agent> [--rm ID]                        what you said "Always allow" to for the agent in auto mode: list, forget one (kith-allow)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
 #   kith group add-bot|remove-bot <room> <bot>  ·  kith bot set <bot> [--wake-profile P] [--turn-timeout S]   a bot guest (Grok) in a group room; its wake settings (kith-group)
+#   kith connector ls|search|info|install|remove [--json]   the MCP connectors installed on this Mac, through the host (kith-connector)
 #   kith keys add <service> --profile <account|service/account> [--for AGENT]   hand Kith a key through a card in the app (default AGENT: serve); never typed here (kith-keys)
 #   kith link [NAME] [--accept [CODE] | --deny] | unlink NAME   pair this Mac with another of your account's (kith-serve)
 #   kith memory search <words> [--agent NAME|--all]      search what the agents wrote down (kith-memory)
@@ -125,6 +126,7 @@ case $1 in
   wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   group|bot)          exec "$KITH/bin/kith-group" "$@" ;;
+  connector)          shift; exec "$KITH/bin/kith-connector" "${@:---help}" ;;
   keys)               shift; exec "$KITH/bin/kith-keys" "${@:---help}" ;;
   serve)              shift; exec "$KITH/bin/kith-serve" "${@:-help}" ;;
   link|unlink)        exec "$KITH/bin/kith-serve" "$@" ;;

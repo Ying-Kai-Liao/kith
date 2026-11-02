@@ -2,7 +2,7 @@
 //! servers, listing and removal.
 
 use super::registry::{listing, registry_server};
-use super::{Connector, add_connector, composio, connectors, oauth, unique_id, update_connectors};
+use super::{Connector, add_connector, composio, connector_id, connectors, oauth, update_connectors};
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -158,7 +158,7 @@ pub async fn install_connector(store: &crate::store::Store, name: &str, option: 
     let title =
         listing(&server, &all).and_then(|l| l["title"].as_str().map(str::to_owned)).unwrap_or_else(|| name.into());
     let mut c = Connector {
-        id: unique_id(&title, &all.iter().map(|c| c.id.clone()).collect::<Vec<_>>()),
+        id: connector_id(&title, &all),
         name: title,
         description: server["description"].as_str().unwrap_or_default().to_owned(),
         registry_name: Some(name.to_owned()),
@@ -261,7 +261,7 @@ pub async fn import_connectors(store: &crate::store::Store, config: &str) -> Res
     update_connectors(store, |all| {
         let mut added = vec![];
         for mut c in pending {
-            c.id = unique_id(&c.name, &all.iter().map(|c| c.id.clone()).collect::<Vec<_>>());
+            c.id = connector_id(&c.name, all);
             added.push(c.public());
             all.push(c);
         }
@@ -294,7 +294,7 @@ async fn custom(name: &str, b: &Value, all: &[Connector]) -> Result<Connector> {
         v.as_object().into_iter().flatten().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect()
     };
     let mut c = Connector {
-        id: unique_id(name, &all.iter().map(|c| c.id.clone()).collect::<Vec<_>>()),
+        id: connector_id(name, all),
         name: name.to_owned(),
         description: b["description"].as_str().unwrap_or_default().to_owned(),
         registry_name: None,
