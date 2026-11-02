@@ -196,3 +196,52 @@ export const secretEntries: SeedEntry[] = [
     },
   },
 ]
+
+/**
+ * `?tasks`: one more bot, Builder, whose chat has a task in each state (screenshots of task cards): done (from
+ * Telegram), held by a terminal, waiting on an approval, and at work. Builder works two lanes at once.
+ */
+export const taskBot: SeedBot = {
+  id: 'builder', name: 'Builder', description: 'Builds pace features', avatarColor: 'kith:sky', avatarShape: 'blob', backend: 'claude', model: 'opus',
+  status: 'working', activity: 'Running npm test', folder: pace,
+}
+export const taskLanes = [{ chat: 'builder', thread: 't4' }, { chat: 'builder', thread: 't3' }]
+
+const inTask = (e: SeedEntry, task: string): SeedEntry => ({ ...e, threadId: task })
+const step = (id: string, task: string, at: number, title: string, toolKind: string, output = '') => inTask(tool(id, 'builder', at, title, toolKind, output), task)
+const said = (id: string, task: string, at: number, text: string, final = true): SeedEntry => ({ id, botId: 'builder', kind: 'agent', at, threadId: task, data: { text, final, author: 'builder' } })
+
+export const taskEntries: SeedEntry[] = [
+  { ...user('t1', 'builder', 95, 'Rename paceFor to paceOf everywhere.', undefined, true), data: { text: 'Rename paceFor to paceOf everywhere.', status: 'sent', task: true, thread: { count: 0, lastAt: 0, authors: [], origin: 'telegram', status: 'done' } } },
+  step('t1a', 't1', 95, 'Search paceFor', 'search'),
+  step('t1b', 't1', 94, 'Edit 6 files', 'edit'),
+  said('t1c', 't1', 93, 'Renamed in 6 files. The README still says paceFor; should I change it too?'),
+  inTask(user('t1d', 'builder', 92, 'Yes, the README too.'), 't1'),
+  step('t1e', 't1', 92, 'Edit README.md', 'edit'),
+  step('t1f', 't1', 91, 'npm test', 'execute', '6 passing (14ms)'),
+  said('t1g', 't1', 90, 'Done: `paceOf` everywhere, README included. All 6 tests pass.'),
+
+  { ...user('t2', 'builder', 70, 'Sketch the weekly totals chart in the terminal with me.', undefined, true), data: { text: 'Sketch the weekly totals chart in the terminal with me.', status: 'sent', task: true, thread: { count: 0, lastAt: 0, authors: [], origin: 'app', status: 'done', liveWriter: 'terminal', liveBusy: false } } },
+  step('t2a', 't2', 69, 'Read src/chart.js', 'read'),
+  said('t2b', 't2', 66, 'A bar per week, distance on the left axis. I left a draft in `src/chart.js`; carry on from the terminal.'),
+
+  user('t3', 'builder', 22, 'Guard weeklyTotals against runs with no date.', undefined, true),
+  step('t3a', 't3', 21, 'Read src/pace.js', 'read'),
+  said('t3b', 't3', 20, 'Runs with no date should be skipped, not counted. That needs one edit.'),
+  {
+    id: 't3c', botId: 'builder', kind: 'permission', at: 19, threadId: 't3',
+    data: {
+      title: 'Edit src/pace.js', toolKind: 'edit', cwd: CWD, status: 'pending', author: 'builder',
+      options: [
+        { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+        { optionId: 'always', name: 'Always allow', kind: 'allow_always' },
+        { optionId: 'deny', name: 'Deny', kind: 'reject_once' },
+      ],
+    },
+  },
+
+  user('t4', 'builder', 6, 'Add a monthly view next to the weekly one.', undefined, true),
+  step('t4a', 't4', 5, 'Read src/pace.js', 'read'),
+  step('t4b', 't4', 4, 'Edit src/pace.js', 'edit'),
+  said('t4c', 't4', 3, 'monthlyTotals is in; running the tests now.', false),
+]

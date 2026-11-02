@@ -35,8 +35,10 @@ import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
 import { toolRowOf, VISIBLE_STEPS } from '@shared/thread-feed'
 import { askIdOf } from '@shared/handoff-peek'
 import { botGuestSender } from '@shared/bot-guest-chat'
+import { taskOf } from '@shared/tasks'
 import { queuedLine } from '@shared/thread-writer'
 import { quoteOf, quotesOf } from './reply-quote'
+import { targetsOf } from './task-target'
 import { richCardOf, type RichCard } from '@shared/rich-card'
 import { resultView } from '@shared/result-card'
 import { NewsCard, PlanCard, ResultCard, ScheduleCard } from './RichCards'
@@ -67,7 +69,8 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
   const store = useStore()
   // Reply is a quote above the composer; the host has no reply link.
   const quote = quoteOf(entry.data.text)
-  const reply = quote && !chat?.botGuest ? () => quotesOf(store).set(entry.botId, quote) : undefined
+  // A reply to a task's message goes in that task.
+  const reply = quote && !chat?.botGuest ? () => { quotesOf(store).set(entry.botId, quote); targetsOf(store).set(entry.botId, taskOf(entry)) } : undefined
   const guestSender = botGuestSender(chat, entry)
   const botPost = entry.kind === 'user' ? botPostOf(chat, entry, guestSender?.name) : null
   switch (entry.kind) {
