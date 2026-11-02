@@ -182,6 +182,14 @@ jobs:
         run: kernel/tests/kith-serve-check
       - name: Info check
         run: kernel/tests/kith-info-check
+      - name: Differential harness (same CLI line, same result) self-test and seed corpus
+        run: kernel/tests/kith-difftest-check --summary difftest-summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: difftest-summary
+          path: difftest-summary.json
+          if-no-files-found: ignore
       - name: Harness check (kith <agent> set harness, no Claude model on another harness)
         run: kernel/tests/kith-harness-check
       - name: Migrate check
