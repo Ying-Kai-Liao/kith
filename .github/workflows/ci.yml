@@ -200,6 +200,8 @@ jobs:
         run: kernel/tests/kith-unknown-agent-check
       - name: Self-update check
         run: kernel/tests/kith-self-update-check
+      - name: Footguns check
+        run: kernel/tests/kith-footguns-check
       - name: Pkg EINTR check
         run: kernel/tests/kith-pkg-eintr-check
       - name: Auth check

@@ -55,20 +55,20 @@ kith builder                           # meet the starter: it learns who you are
 kith install <owner>/<repo>            # an agent someone shared: any GitHub repo with an agent.md at its root
 kith new reading "tracks what I read"  # or start one yourself
 kith doctor                            # check everything, with what to fix
-kith backup                            # everything to private GitHub repos: state, memories, your agents
+kith backup run                            # everything to private GitHub repos: state, memories, your agents
 ```
 Desktop app, one click: <https://kithbot.app/download>, or directly <https://kithbot.app/download/mac> (macOS, Apple silicon and Intel)
 and <https://kithbot.app/download/linux> (Linux x64, AppImage).
 
 Kith was called hq until 2026-10-22. The `hq` command still works as an alias (so do `hq-send`, `hq-auth`, `hq-pkg`, `hq-state`, `hq-new`, `hq-cost`, `hq-who`, `hq-serve` and `hq-doctor`, which older agents call), a Mac with an existing `~/.hq`
-keeps using it until `kith migrate` moves it to `~/.kith`, and `~/hq` stays a link to the same folder as `~/kith`.
+keeps using it until `kith migrate run` moves it to `~/.kith`, and `~/hq` stays a link to the same folder as `~/kith`.
 Old `HQ_*` variables, `dev.hq.*` jobs and `hq-agent` repos are still read.
 
 Step by step, with the Mac app and the iPhone app: [docs/install.md](docs/install.md). Invited to someone else's Kith:
 [docs/invited.md](docs/invited.md).
 
 The download installs the `kith` binary and the kernel under `~/.kith`, then runs the same `install.sh`; run it again to
-upgrade, or run `kith update`, which updates kith by however you installed it (git checkout, Homebrew or this download; the desktop app: <https://kithbot.app/download/mac>). `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` (a local file) are in the script's header. Homebrew:
+upgrade, or run `kith update self`, which updates kith by however you installed it (git checkout, Homebrew or this download; the desktop app: <https://kithbot.app/download/mac>). `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` (a local file) are in the script's header. Homebrew:
 `packaging/homebrew/kith.rb` (for the tap [`Ying-Kai-Liao/homebrew-kith`](https://github.com/Ying-Kai-Liao/homebrew-kith)). Releases are built by `.github/workflows/release.yml`
 on a `v*` tag.
 
@@ -88,7 +88,7 @@ This repo is the kernel only: no agents ship with it. `install.sh` links the `ki
 adapter plugin (`adapters/claude-code`, served by this repo's own marketplace), then runs `kith init`: it checks what
 kith needs (git and its identity, Claude Code, gh), makes `~/.kith` and the agents folder (each a git repo), a
 `user.md` for your agents to fill in, asks once whether to back everything up to private GitHub repos (off by
-default: it stays on this Mac, which Time Machine backs up; `kith backup` later), and offers the builder, the
+default: it stays on this Mac, which Time Machine backs up; `kith backup run` later), and offers the builder, the
 agent that builds the others, then lists the agents people shared (GitHub repos tagged `kith-agent`) to install
 any by number; `kith market` shows that list any time. Run `kith init` again any time; it only does what is missing.
 On a new Mac, `install.sh` finds your backup through your GitHub login and offers to bring it back. Then, in any Claude Code session:
@@ -109,7 +109,7 @@ version that passes its checks is committed there automatically, so its history 
 kith install <owner>/<repo>                      # or a github.com URL; .../tree/<ref>/<folder> for one agent in a bigger repo
 kith install <link> --as <name>                  # under another name
 kith install <link> --yes                        # without the question (the summary is always printed)
-kith update                                      # kith itself (git pull --ff-only, brew upgrade or the installer, by how you installed it)
+kith update self                                      # kith itself (git pull --ff-only, brew upgrade or the installer, by how you installed it)
 kith update <agent>|--all                        # an agent: pull upstream (--all: kith first, then every agent) (fast-forward only; your edits are never overwritten)
 kith history <agent>                             # every committed version
 kith restore <agent> <commit>                    # bring one back, as a new commit (undo with another restore)
@@ -130,7 +130,7 @@ adds them later.
 public repo shows every old commit. `--fresh` publishes a separate public copy instead: one commit per publish
 with the agent as it is now (its files still checked), while the agent's own repo keeps every version and stays
 private. Every share writes a README from `agent.md` unless the agent has one. An agent installed from someone else keeps their repo as `upstream`; `kith share`
-makes yours `origin`, so `kith update` still pulls their changes.
+makes yours `origin`, so `kith update <agent>` still pulls their changes.
 
 ## Repos, and where each change goes
 Agent repos carry the GitHub topic `kith-agent` (`kith share` adds it) and the kernel `kith`, so they group without an
@@ -152,13 +152,13 @@ their authors' repos (+0). Several agents can share one repo, installed by folde
 | You change | It goes to | Saved by |
 |---|---|---|
 | An agent (you edit it, ask it to change, or it learns a skill) | that agent's repo | committed automatically on its next run; pushed by `kith-state commit` or `kith push <name>` |
-| A new agent (`kith-new`, or ask the builder) | a new local repo in the agents folder | `kith backup` once creates its private GitHub repo; from then on as above |
+| A new agent (`kith-new`, or ask the builder) | a new local repo in the agents folder | `kith backup run` once creates its private GitHub repo; from then on as above |
 | The kernel or `PROTOCOL.md` | this repo | a normal commit and push; it's public, so `kith-pkg check --share` first |
 | A service (`kernel/services/<name>.json`) | this repo | as the kernel; it names its secrets, never their values |
 | Memory and data | the agents repo | `kith-state commit` |
 | Your profile, projects, which agents you have | the state repo | `kith-state commit` |
 
-`kith backup` does all of it at once: a private repo for each piece that has none yet (it lists them and asks), then
+`kith backup run` does all of it at once: a private repo for each piece that has none yet (it lists them and asks), then
 commits and pushes everything. Saying yes to backups in `kith init` also runs it every night at 03:00 (`kith backup
 --nightly`, a LaunchAgent; `--nightly off` stops it), so a new agent of yours gets its private repo the next night.
 `kith doctor` says in one line what is backed up, what changed since, and what is

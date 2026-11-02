@@ -1,12 +1,12 @@
 # Moving from hq
 
 A Mac that ran hq keeps working untouched: `~/.hq` stays its state, the `dev.hq.*` jobs keep ticking and the `hq`
-command still answers. `kith migrate` moves it to the Kith names, and `kith migrate --undo` moves it back.
+command still answers. `kith migrate run` moves it to the Kith names, and `kith migrate run --undo` moves it back.
 
 ```
-kith migrate --dry-run    every step, nothing changed
-kith migrate              do it
-kith migrate --undo       reverse it exactly
+kith migrate run --dry-run    every step, nothing changed
+kith migrate run              do it
+kith migrate run --undo       reverse it exactly
 kith doctor               "migration" says unmigrated, migrated or partly migrated, and what is still on an hq name
 ```
 
@@ -20,7 +20,7 @@ kith doctor               "migration" says unmigrated, migrated or partly migrat
    `serve/` (kith serve's data): it stays. A name in both folders (other than an empty folder) stops the migration before
    anything moves.
 4. **exclude** the state repo is now `~/.kith`, so what was already there (`serve/`, `hq-serve/`) goes into
-   `.git/info/exclude`: `kith backup` never commits it.
+   `.git/info/exclude`: `kith backup run` never commits it.
 5. **home** `~/kith` becomes a link to what `~/hq` leads to; `~/hq` stays.
 6. **bin** `~/.local/bin/kith` and `hq` lead to `~/kith/kernel/bin/kith`.
 7. **jobs** each `dev.hq.<x>` becomes `dev.kith.<x>`. sched and backup are reinstalled by their own installers
@@ -30,7 +30,7 @@ kith doctor               "migration" says unmigrated, migrated or partly migrat
 8. **plugin** Claude Code: marketplace `kith` added, `kith@kith` installed, `hq@hq` and the `hq` marketplace removed.
 9. **settings** `~/.hq` paths in `~/.claude/settings.json` and `~/.kith/settings.json` become `~/.kith` paths
    (`hq@hq` in the plugins list of the latter becomes `kith@kith`). Nothing in a git repo's history changes; the state
-   repo's `settings.json` shows as modified until the next `kith backup`.
+   repo's `settings.json` shows as modified until the next `kith backup run`.
 
 Every step is written to `~/.kith/migrate-manifest.json` as it finishes.
 

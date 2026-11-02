@@ -37,42 +37,42 @@ mkdir -p "$KITH_HOME/agents/dev/role" "$KITH_HOME/state"
 upstream_commit() { echo "$1" > "$T/seed/marker"; git -C "$T/seed" commit -q -am "$1" && git -C "$T/seed" push -q origin HEAD:main; }
 head_of() { git -C "$KITH_HOME" rev-parse HEAD; }
 
-out=$("$KITH_BIN" update 2>&1); rc=$?
+out=$("$KITH_BIN" update self 2>&1); rc=$?
 check "up to date: says so, exit 0" '[[ $rc == 0 && $out == *"up to date"* ]]'
 check "untracked agents/ is not dirty" '[[ $out != *uncommitted* ]]'
 
 upstream_commit two
 before=$(head_of)
 echo local > "$KITH_HOME/marker"
-out=$("$KITH_BIN" update 2>&1); rc=$?
+out=$("$KITH_BIN" update self 2>&1); rc=$?
 check "dirty tree: refuses, non-zero, nothing changed" '[[ $rc != 0 && $out == *uncommitted* && $(head_of) == "$before" && $(cat "$KITH_HOME/marker") == local ]]'
 git -C "$KITH_HOME" checkout -q marker
 
-out=$("$KITH_BIN" update 2>&1); rc=$?
+out=$("$KITH_BIN" update self 2>&1); rc=$?
 check "behind: fast-forwards and prints before/after" '[[ $rc == 0 && $out == *"before: "* && $out == *"after: "*two* && $(cat "$KITH_HOME/marker") == two ]]'
-out=$("$KITH_BIN" update 2>&1); rc=$?
+out=$("$KITH_BIN" update self 2>&1); rc=$?
 check "second run: up to date" '[[ $rc == 0 && $out == *"up to date"* ]]'
 
 echo mine > "$KITH_HOME/mine"; git -C "$KITH_HOME" add mine && git -C "$KITH_HOME" commit -q -m mine
 upstream_commit three
 before=$(head_of)
-out=$("$KITH_BIN" update 2>&1); rc=$?
+out=$("$KITH_BIN" update self 2>&1); rc=$?
 check "diverged: refuses, non-zero, nothing changed" '[[ $rc != 0 && $out == *"cannot fast-forward"* && $(head_of) == "$before" && $(cat "$KITH_HOME/marker") == two ]]'
 git -C "$KITH_HOME" reset -q --hard origin/main
 
 git -C "$KITH_HOME" checkout -q --detach
-out=$("$KITH_BIN" update 2>&1); rc=$?
+out=$("$KITH_BIN" update self 2>&1); rc=$?
 check "detached HEAD: nothing to pull from, non-zero" '[[ $rc != 0 && $out == *"detached"* ]]'
 git -C "$KITH_HOME" checkout -q main
 git -C "$KITH_HOME" checkout -q -b lonely
-out=$("$KITH_BIN" update 2>&1); rc=$?
+out=$("$KITH_BIN" update self 2>&1); rc=$?
 check "no upstream: says so, non-zero" '[[ $rc != 0 && $out == *"no upstream"* ]]'
 git -C "$KITH_HOME" checkout -q main
 
 # --- the doctor's line -----------------------------------------------------------------------------------------
 upstream_commit four
 out=$(KITH_ROOT="$KITH_HOME/kernel" "$KITH_HOME/kernel/bin/kith-self-update" --check 2>&1); rc=$?
-check "doctor line: 1 commit behind" '[[ $rc == 0 && $out == "kith is 1 commit behind origin/main: kith update" ]]'
+check "doctor line: 1 commit behind" '[[ $rc == 0 && $out == "kith is 1 commit behind origin/main: kith update self" ]]'
 git -C "$KITH_HOME" remote set-url origin "$T/gone.git"
 out=$(KITH_ROOT="$KITH_HOME/kernel" "$KITH_HOME/kernel/bin/kith-self-update" --check 2>&1); rc=$?
 check "doctor line: offline is silent, exit 0" '[[ $rc == 0 && -z $out ]]'
@@ -114,21 +114,21 @@ link_kernel() { mkdir -p "$(dirname "$1")" && ln -s "$KERNEL" "$1"; }
 
 link_kernel "$T/brewroot/Cellar/kith/1.0/share/kith/kernel"
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" "$T/brewroot/Cellar/kith/1.0/share/kith/kernel/bin/kith" update 2>&1); rc=$?
+out=$(PATH="$T/stub:$PATH" "$T/brewroot/Cellar/kith/1.0/share/kith/kernel/bin/kith" update self 2>&1); rc=$?
 check "Homebrew: runs brew upgrade kith" '[[ $rc == 0 && $(cat "$T/calls") == "brew upgrade kith" ]]'
 
 link_kernel "$T/rel/share/kith/kernel"
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" KITH_REPO=me/fork "$T/rel/share/kith/kernel/bin/kith" update 2>&1); rc=$?
+out=$(PATH="$T/stub:$PATH" KITH_REPO=me/fork "$T/rel/share/kith/kernel/bin/kith" update self 2>&1); rc=$?
 check "install.sh layout: pipes install.sh from KITH_REPO into sh, for this prefix" \
   '[[ $rc == 0 && $(cat "$T/calls") == *"curl -fsSL https://raw.githubusercontent.com/me/fork/main/scripts/install.sh KITH_PREFIX=$T/rel KITH_REPO=me/fork"* && $(cat "$T/calls") == *ran-install-sh* ]]'
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" "$T/rel/share/kith/kernel/bin/kith" update 2>&1)
+out=$(PATH="$T/stub:$PATH" "$T/rel/share/kith/kernel/bin/kith" update self 2>&1)
 check "install.sh layout: default repo" '[[ $(cat "$T/calls") == *"Ying-Kai-Liao/kith/main/scripts/install.sh"* ]]'
 
 link_kernel "$T/Kith.app/Contents/Resources/kith/kernel"
 : > "$T/calls"
-out=$(PATH="$T/stub:$PATH" "$T/Kith.app/Contents/Resources/kith/kernel/bin/kith" update 2>&1); rc=$?
+out=$(PATH="$T/stub:$PATH" "$T/Kith.app/Contents/Resources/kith/kernel/bin/kith" update self 2>&1); rc=$?
 check "desktop app: prints the download link, changes nothing" '[[ $rc == 0 && $out == *https://kithbot.app/download/mac* && ! -s $T/calls ]]'
 
 # --- the name kith is the command's ----------------------------------------------------------------------------------
