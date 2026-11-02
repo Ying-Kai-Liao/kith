@@ -226,6 +226,7 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         cancel_deadline: None,
         exit_tail: None,
         conn_started_as: None,
+        conn_dirs: Vec::new(),
         serving: None,
         conn_serving: None,
         conn_account: None,
@@ -456,6 +457,8 @@ struct Actor {
     exit_tail: Option<String>,
     /// hq bots: the env and folder the agent process was started with.
     conn_started_as: Option<(Vec<(String, String)>, String)>,
+    /// hq bots: the folders the agent process's launch added beside its working folder (`send_file` reads only there).
+    conn_dirs: Vec<String>,
     /// hq bots with backup accounts (see `failover`): the chain entry whose login answers this actor's turns now
     /// (`None`: the agent's own), and the entry the live process was started for.
     serving: Option<String>,
