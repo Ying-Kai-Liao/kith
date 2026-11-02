@@ -288,20 +288,23 @@ exit 1
                 "scratch --launch-json -H codex -m gpt-5"
             ]
         );
-        // Codex is for a thread that asked, never for an agent that merely runs on it.
-        let mut stray = fake_kith_codex(&rig.dir);
-        *hq::TEST_KERNEL_BIN.lock().unwrap() = Some(std::mem::take(&mut stray));
+        // Every engine of the kernel's table starts, whoever asked (A2: all through `--launch-json`).
+        *hq::TEST_KERNEL_BIN.lock().unwrap() = Some(fake_kith_harness(&rig.dir, "codex"));
+        assert_eq!(go(None).await.unwrap().harness, Some(hq::Harness::Codex));
+        // An engine this host doesn't know is never started.
+        *hq::TEST_KERNEL_BIN.lock().unwrap() = Some(fake_kith_harness(&rig.dir, "no-such-engine"));
         assert!(go(None).await.is_err());
     }
 
-    /// A kith whose launch says Codex whatever was asked.
-    fn fake_kith_codex(dir: &Path) -> PathBuf {
-        let bin = dir.join("kith-codex");
+    /// A kith whose launch says `harness` whatever was asked.
+    fn fake_kith_harness(dir: &Path, harness: &str) -> PathBuf {
+        let bin = dir.join(format!("kith-{harness}"));
         std::fs::write(
             &bin,
             r#"#!/bin/sh
-printf '{"version":1,"agent":"scratch","agent_version":"1","harness":"codex","cwd":"","env":{},"system_prompt":"","mcp_servers":{},"add_dirs":[],"allowed_tools":[],"disable_slash_commands":false,"cost_tag":{"agent":"scratch","version":"1","via":"serve"}}\n'
-"#,
+printf '{"version":1,"agent":"scratch","agent_version":"1","harness":"HARNESS","cwd":"","env":{},"system_prompt":"","mcp_servers":{},"add_dirs":[],"allowed_tools":[],"disable_slash_commands":false,"cost_tag":{"agent":"scratch","version":"1","via":"serve"}}\n'
+"#
+            .replace("HARNESS", harness),
         )
         .unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -318,8 +321,8 @@ printf '{"version":1,"agent":"scratch","agent_version":"1","harness":"codex","cw
             let hub = rig.hub.clone();
             async move { super::super::bots::call(&hub, "send", b).await }
         };
-        let err = send(json!({"engine": "gemini"})).await.unwrap_err();
-        assert!(err.to_string().contains("codex"), "{err}");
+        let err = send(json!({"engine": "no-such-engine"})).await.unwrap_err();
+        assert!(err.to_string().contains("no-such-engine"), "{err}");
         assert!(rig.hub.store.history(&bot, i64::MAX, 10).unwrap().is_empty(), "nothing saved");
 
         let ControlFlow::Break(first) = send(json!({"engine": "codex", "engineModel": "gpt-5"})).await.unwrap() else {
@@ -341,7 +344,12 @@ printf '{"version":1,"agent":"scratch","agent_version":"1","harness":"codex","cw
         assert_eq!(ThreadEngine::ask(Some(" "), Some("")).unwrap(), None);
         let e = ThreadEngine::ask(None, Some("opus")).unwrap().unwrap();
         assert_eq!((e.harness.as_str(), e.model.as_deref()), ("claude", Some("opus")));
-        assert!(ThreadEngine::ask(Some("gemini"), None).is_err());
+        // Any engine of the kernel's table that speaks ACP, not only Claude and Codex.
+        for h in crate::agent::backends::harnesses() {
+            assert_eq!(ThreadEngine::ask(Some(h.id), None).unwrap().unwrap().harness, h.id);
+        }
+        assert!(ThreadEngine::ask(Some("gemini"), None).is_ok());
+        assert!(ThreadEngine::ask(Some("no-such-engine"), None).is_err());
         for bad in ["--model", "-x", "a b", "a;b", &"m".repeat(65)] {
             assert!(ThreadEngine::ask(Some("claude"), Some(bad)).is_err(), "{bad}");
         }

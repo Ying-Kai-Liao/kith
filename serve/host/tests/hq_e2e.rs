@@ -770,16 +770,26 @@ async fn the_hosts_own_copy_never_overrides_hq() {
     let id = s.house().await["id"].as_str().unwrap().to_owned();
     // hq bots start with tasks on; this test reads the main chat.
     s.host.call("updateBot", json!({"id": id, "tasks": false})).await;
-    let edited = s
-        .host
-        .call(
-            "updateBot",
-            json!({"id": id, "model": "opus", "modelOptions": {"effort": "high"}, "fastMode": true, "permission": "auto"}),
-        )
-        .await;
+    // Model, effort and Fast mode are refused with the kith command that sets them, not dropped.
+    for (patch, command) in [
+        (json!({"model": "opus"}), "kith house set model"),
+        (json!({"modelOptions": {"effort": "high"}}), "kith house set effort"),
+        (json!({"fastMode": true}), "no Fast mode"),
+    ] {
+        let mut body = patch.clone();
+        body["id"] = json!(id);
+        let why = s.host.refused("updateBot", body).await;
+        assert!(why.contains(command), "{patch}: {why}");
+    }
+    // The permission is not the host's either, but an edit of it is only left unstored.
+    let edited = s.host.call("updateBot", json!({"id": id, "permission": "auto"})).await;
     assert_eq!(edited["bot"]["permission"], "default", "the edit of an hq bot's permission isn't stored");
     assert_eq!(edited["bot"]["fastMode"], false);
     assert!(edited["bot"]["model"].is_null());
+    // A full-row echo of what the host shows still goes through.
+    let echo = s.host.call("updateBot", edited["bot"].clone()).await;
+    assert_eq!(echo["bot"]["permission"], "default");
+    assert!(echo["bot"]["model"].is_null());
 
     s.host.reply(&id, "hello").await;
     let launch = &s.launches()[0];
