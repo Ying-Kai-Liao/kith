@@ -442,14 +442,14 @@ def stored(agent, key):
 
 def set_with_json(key, agent, value, setter):
     """`kith A set ... --json`: run the setter, print {agent, setting, value, previous, changed}; an error is
-    {"error": ...} on stdout, exit 1 as without --json, nothing on stderr."""
+    {"ok": false, "error": ...} on stdout, exit 1 as without --json, nothing on stderr."""
     name = {'permission_mode': 'permission', 'call_model': 'call-model', 'at_limit': 'at-limit', 'limit': 'limit'}[key]
     try:
         before = stored(agent, key)
         setter()
         after = stored(agent, key)
     except ValueError as e:
-        print(json.dumps({'error': f'kith: {e}'}))
+        print(json.dumps({'ok': False, 'error': f'kith: {e}'}))
         sys.exit(1)
     print(json.dumps({'agent': agent, 'setting': name, 'value': after, 'previous': before, 'changed': before != after}))
     sys.exit(0)

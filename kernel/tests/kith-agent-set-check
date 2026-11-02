@@ -47,7 +47,7 @@ BEFORE=$(cat "$A/agent.md")
 "$KITH" echo set effort loud >/dev/null 2>"$T/err"; rc=$?
 check "bad effort: non-zero, lists the valid ones on stderr, file untouched" "[ $rc != 0 ] && grep -q 'low, medium, high, xhigh, max' '$T/err' && [ \"\$(cat '$A/agent.md')\" = \"\$BEFORE\" ]"
 OUT=$("$KITH" echo set effort loud --json 2>"$T/err"); rc=$?
-check "bad effort --json: error object on stdout, nothing on stderr, non-zero" "[ $rc != 0 ] && jv '\"error\" in d' | grep -q True && [ ! -s '$T/err' ]"
+check "bad effort --json: error object on stdout, nothing on stderr, non-zero" "[ $rc != 0 ] && jv '(d.get(\"ok\"), \"error\" in d, len(d))' | grep -q '(False, True, 2)' && [ ! -s '$T/err' ]"
 "$KITH" echo set effort default >/dev/null
 check "effort default removes the line" "[ \"\$(fm)\" = '' ]"
 
@@ -73,7 +73,7 @@ check "set harness --json: value, previous, model dropped" "[ \"\$(jv '(d[\"sett
 "$KITH" echo set model sonnet >/dev/null 2>"$T/err"; rc=$?
 check "Claude model on codex refused, names the harness and the way out" "[ $rc = 2 ] && grep -q 'runs on codex' '$T/err' && grep -q 'set harness claude --model sonnet' '$T/err' && [ \"\$(fm)\" = 'harness: codex effort: medium ' ]"
 OUT=$("$KITH" echo set model opus --json 2>"$T/err"); rc=$?
-check "same refusal with --json" "[ $rc = 2 ] && jv 'd[\"error\"]' | grep -q 'Claude model' && [ ! -s '$T/err' ]"
+check "same refusal with --json" "[ $rc = 2 ] && jv '(d[\"ok\"], len(d))' | grep -q '(False, 2)' && jv 'd[\"error\"]' | grep -q 'Claude model' && [ ! -s '$T/err' ]"
 "$KITH" echo set harness codex --model sonnet >/dev/null 2>&1; rc=$?
 check "set harness codex --model <Claude model> refused" "[ $rc = 2 ]"
 "$KITH" echo set model gpt-5 >/dev/null
@@ -81,7 +81,7 @@ check "codex model accepted" "[ \"\$(fm)\" = 'harness: codex model: gpt-5 effort
 "$KITH" echo set harness claude --model opus >/dev/null
 check "back on claude" "[ \"\$(fm)\" = 'model: opus effort: medium ' ]"
 "$KITH" echo set harness nope --json >"$T/out" 2>"$T/err"; rc=$?
-check "set harness bad --json: error object" "[ $rc = 2 ] && j 'd[\"error\"]' < '$T/out' | grep -q 'unknown harness' && [ ! -s '$T/err' ]"
+check "set harness bad --json: error object" "[ $rc = 2 ] && j '(d[\"ok\"], len(d))' < '$T/out' | grep -q '(False, 2)' && j 'd[\"error\"]' < '$T/out' | grep -q 'unknown harness' && [ ! -s '$T/err' ]"
 
 # ---- settings commands with --json ----
 OUT=$("$KITH" echo set permission plan --json)
@@ -97,11 +97,18 @@ check "set limit none --json" "[ \"\$(jv '(d[\"value\"],d[\"previous\"])')\" = \
 OUT=$("$KITH" echo set at-limit hold --json)
 check "set at-limit --json" "[ \"\$(jv '(d[\"setting\"],d[\"value\"])')\" = \"('at-limit', 'hold')\" ]"
 OUT=$("$KITH" echo set at-limit sometimes --json 2>"$T/err"); rc=$?
-check "set at-limit bad --json: error object, non-zero" "[ $rc != 0 ] && jv '\"error\" in d' | grep -q True && [ ! -s '$T/err' ]"
+check "set at-limit bad --json: error object, non-zero" "[ $rc != 0 ] && jv '(d.get(\"ok\"), \"error\" in d, len(d))' | grep -q '(False, True, 2)' && [ ! -s '$T/err' ]"
 OUT=$("$KITH" ghost set effort low --json 2>"$T/err"); rc=$?
-check "unknown agent --json: error object, exit 1" "[ $rc = 1 ] && jv 'd[\"error\"]' | grep -q 'no agent' && [ ! -s '$T/err' ]"
+check "unknown agent --json: error object, exit 1" "[ $rc = 1 ] && jv '(d[\"ok\"], len(d))' | grep -q '(False, 2)' && jv 'd[\"error\"]' | grep -q 'no agent' && [ ! -s '$T/err' ]"
 "$KITH" echo set effort >/dev/null 2>"$T/err"; rc=$?
 check "usage text lists model, effort and --json" "[ $rc = 2 ] && grep -q 'set model' '$T/err' && grep -q 'set effort' '$T/err' && grep -q -- '--json' '$T/err'"
+
+# ---- one error shape for every set command: {"ok": false, "error": ...}, stdout only ----
+shape() { python3 -c 'import json,sys; d=json.loads(sys.stdin.read()); print(d.get("ok") is False and isinstance(d.get("error"), str) and len(d) == 2)'; }
+for line in "set effort loud" "set model 'bad model!'" "set harness nope" "set at-limit sometimes" "set permission nonsense" "set limit abc" "set call-model 'x y'" "set bogus x" "set effort"; do
+  eval "OUT=\$(\"\$KITH\" echo $line --json 2>'$T/err')"; rc=$?
+  check "error shape [$line]: {ok:false,error}, non-zero, nothing on stderr" "[ $rc != 0 ] && [ \"\$(echo \"\$OUT\" | shape)\" = True ] && [ ! -s '$T/err' ]"
+done
 
 # ---- a model per backup entry ----
 mkdir -p "$KITH_STATE/accounts/claude/school"

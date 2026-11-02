@@ -18,7 +18,7 @@
 #                                 MCP servers, projects, schedules, cost and memory; read-only, local, each part fails soft (kith-info)
 #   kith <agent> set permission MODE   this Mac's permission mode for the agent (MODE '' forgets it); its next run uses it
 #   kith <agent> set harness H [--model M] | model M|default | effort E|default | call-model M | limit N|none | at-limit MODE   [--json]
-#                                 agent settings; --json: one object {agent,setting,value,previous,changed}; an error is {"error":".."} on stdout, same exit code
+#                                 agent settings; --json: one object {agent,setting,value,previous,changed}; an error is {"ok":false,"error":".."} on stdout, same exit code
 #   kith <agent> --launch-json [--hold PID] [...]   for a program that starts the run itself (kith serve): one JSON object on stdout
 #                                 with everything the run needs (env, cwd, system_prompt, settings, MCP servers, directories,
 #                                 claude_args to give claude as-is). Claude and Codex (Codex: settings and claude_args null); ignores
@@ -210,11 +210,11 @@ agent=$1; shift
 # what an owner's run does once the agent is at it (see kith_settings.py; kith-cost limit AGENT shows where it stands).
 if [[ ${1:-} == set ]]; then
   # --json anywhere after `set`: one JSON object on stdout, {"agent","setting","value","previous","changed"} (+ what the setting
-  # needs); an error is {"error": "..."} on stdout with the same non-zero exit and nothing on stderr.
+  # needs); an error is {"ok": false, "error": "..."} on stdout with the same non-zero exit and nothing on stderr.
   set_json=0 set_args=()
   for a in "${@:2}"; do if [[ $a == --json ]]; then set_json=1; else set_args+=("$a"); fi; done
   set -- set "${set_args[@]+"${set_args[@]}"}"
-  set_fail() { if [[ $set_json == 1 ]]; then python3 -c 'import json,sys; print(json.dumps({"error": sys.argv[1]}))' "$1"; else echo "$1" >&2; fi; exit "${2:-2}"; }
+  set_fail() { if [[ $set_json == 1 ]]; then python3 -c 'import json,sys; print(json.dumps({"ok": False, "error": sys.argv[1]}))' "$1"; else echo "$1" >&2; fi; exit "${2:-2}"; }
   [[ -n $(agent_dir "$agent") ]] || set_fail "kith: no agent '$agent' (try: kith ls)" 1
   jflag=(); [[ $set_json == 1 ]] && jflag=(--json)
   if [[ ${2:-} == call-model && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set call_model "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
@@ -230,7 +230,7 @@ if [[ ${1:-} == set ]]; then
        kith $agent set harness H [--model M]   (claude, codex, ...: the harness it runs on; drops a model of the old one)
        kith $agent set model M|default    (agent.md's model; a Claude model needs a Claude harness; default removes the line)
        kith $agent set effort E|default   (low, medium, high, xhigh or max; default removes the line)
-       add --json to any of them: one JSON object on stdout; an error is {\"error\": \"...\"} on stdout, same exit code" 2
+       add --json to any of them: one JSON object on stdout; an error is {\"ok\": false, \"error\": \"...\"} on stdout, same exit code" 2
 fi
 # kith AGENT connect|disconnect|connectors, skill add|remove, skills: connectors and skills as grants on the agent.
 case ${1:-} in
