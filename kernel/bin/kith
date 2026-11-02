@@ -99,7 +99,7 @@ eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
 
 case $1 in
   update)             # no agent: kith itself; --all: kith first, then the agents (a failed kith update still lets the agents update, but the exit is non-zero)
-                      [[ $# -eq 1 ]] && exec "$KITH/bin/kith-self-update"
+                      [[ $# -eq 1 || ( $# -eq 2 && $2 == --dev ) ]] && exec "$KITH/bin/kith-self-update" "${@:2}"
                       if [[ $2 == --all ]]; then rc=0; "$KITH/bin/kith-self-update" || rc=$?; "$KITH/bin/kith-pkg" "$@" || rc=$?; exit $rc; fi
                       exec "$KITH/bin/kith-pkg" "$@" ;;
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
@@ -1013,7 +1013,7 @@ for k in ("KITH_WORK", "CLAUDE_ENV_FILE"):
 json.dump(s, open(f, "w"), indent=1)' "$runs/$$.settings.json"
 fi
 # The read-only kernel commands PROTOCOL tells agents to run, allowed without a prompt. Under every path the kernel
-# has (logical, resolved, ~/kith/kernel) and, since a path with a space gets quoted, with the program in quotes too.
+# has (logical, resolved, cli/current) and, since a path with a space gets quoted, with the program in quotes too.
 readonly_cmds=("project-id" "project-id --list" "project-id --info:*" "project-id --children:*" "kith-memory search:*" "kith-who:*" "hq-who:*")
 allowed=()
 while IFS= read -r base; do
@@ -1022,7 +1022,7 @@ while IFS= read -r base; do
     name=${c%%[ :]*}; rest=${c#"$name"}
     allowed+=("Bash($base/bin/$c)" "Bash(\"$base/bin/$name\"$rest)")
   done
-done < <(printf '%s\n' "$KITH" "$kith_real" "$KITH_HOME/kernel" | awk '!seen[$0]++')
+done < <(printf '%s\n' "$KITH" "$kith_real" "${KITH_KERNEL:-$KITH_MACHINE/cli/current/share/kith/kernel}" | awk '!seen[$0]++')
 # The way out of the guest sandbox is a request, not a prompt: asking is always allowed (the host makes the card, F11 2b).
 [[ $p_owner == 0 ]] && allowed+=("mcp__kithpermit__request_access" "mcp__kithpermit__report_bug" "mcp__kithpermit__ask_helper")
 # Each agent carries only its own tools: the shared services it needs and is granted (kith-auth), its own mcp.json
