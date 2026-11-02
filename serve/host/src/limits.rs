@@ -50,9 +50,7 @@ fn agent_of(b: &Value) -> Result<&str> {
 }
 
 async fn kernel() -> Result<std::path::PathBuf> {
-    tokio::task::spawn_blocking(hq::bin)
-        .await?
-        .ok_or_else(|| anyhow!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)"))
+    tokio::task::spawn_blocking(hq::bin).await?.ok_or_else(|| anyhow!("{}", hq::missing()))
 }
 
 /// `kith args…`, its stdout as JSON.

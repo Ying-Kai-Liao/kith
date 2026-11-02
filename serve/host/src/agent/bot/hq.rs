@@ -391,7 +391,7 @@ impl Actor {
                 }
                 self.hub.set_runtime(&self.rt, |r| r.activity = "Starting agent…".into());
                 let Some(bin) = tokio::task::spawn_blocking(hq::bin).await? else {
-                    bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+                    bail!("{}", hq::missing());
                 };
                 // The place's own folder or project, else the bot's default; hq runs in it so the kernel finds the project.
                 let target = folder::resolve(&self.hub.store, &self.cfg, &self.lane_of(slot)).await;
