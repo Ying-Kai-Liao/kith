@@ -38,6 +38,11 @@ impl Registry {
         self.0.contains_key(id)
     }
 
+    /// One project's entry (`home`, `paths`, `parent`, ...).
+    pub fn entry(&self, id: &str) -> Option<&Value> {
+        self.0.get(id)
+    }
+
     pub fn known(&self) -> Vec<&str> {
         self.0.keys().map(String::as_str).collect()
     }

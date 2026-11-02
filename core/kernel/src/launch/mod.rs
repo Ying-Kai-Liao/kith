@@ -9,8 +9,16 @@
 )]
 
 pub mod facets;
+pub mod guard;
+pub mod machine;
+pub mod mcp;
 pub mod prompt;
+pub mod settings;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::many_single_char_names)]
 mod tests;
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::many_single_char_names)]
+mod settings_tests;
