@@ -106,7 +106,7 @@ printf -- '---\nname: bare\ndescription: nothing else\nharness: codex\n---\nHi.\
 OUT=$("$KITH" bare --info-json 2>/dev/null); rc=$?
 check "bare agent on another harness prints info" "[ $rc = 0 ] && is \"(d['harness'], d['model'], d['skills'], d['tools'], d['mcp_servers'], d['permission_mode'], d['role']['sections'])\" \"('codex', None, [], [], [], None, [])\""
 "$KITH" nope --info-json >/dev/null 2>"$T/err"; rc=$?
-check "unknown agent: exit 1 and a message" "[ $rc = 1 ] && grep -q \"no agent 'nope'\" $T/err"
+check "unknown agent: the dispatcher's exit 2 and its message (like every unknown word)" "[ $rc = 2 ] && grep -q 'no agent named \"nope\"' $T/err"
 
 # a run for someone other than the owner gets no agent details
 KITH_PERSON=mallory "$KITH" echo --info-json >/dev/null 2>"$T/err"; rc=$?
