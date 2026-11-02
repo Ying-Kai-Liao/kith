@@ -38,6 +38,7 @@ agent() { # name harness-or-empty
 }
 # The launch object with the throwaway roots made stable.
 launch() { (cd "$T/home" && "$KITH" "$@" --launch-json 2>"$T/err") | sed -e "s#$T#<T>#g" -e "s#$KERNEL#<K>#g" -E -e 's/@[0-9a-f]{10}/@<h>/g' -e 's/"[0-9a-f]{10}"/"<h>"/g' -e 's/[0-9a-f]{32}/<id>/g' -e 's/date=\\"[0-9-]+\\"/date=\\"<d>\\"/g'; }
+AUTH=$KERNEL/bin/kith-auth
 agent cl ""; agent cx codex; agent gm gemini; agent ag agy; agent nope nosuchengine
 
 for pair in "cl claude" "cx codex"; do
@@ -47,13 +48,14 @@ for pair in "cl claude" "cx codex"; do
   check "$2 launch-json is the golden one" "[ \"\$out\" = \"\$(cat '$FIX/launch-$2.json')\" ]"
 done
 
-BIN=${KITH_DIFFTEST_BIN:-$(python3 "$KERNEL/lib/kith_paths.py" --bin 2>/dev/null || true)}
+BIN=${KITH_DIFFTEST_BIN:-${KITH_BIN:-}}
+[ -n "$BIN" ] && export KITH_BIN=$BIN   # the kernel finds its Rust program here (kith_paths.py --bin)
 if [ -n "$BIN" ] && "$BIN" kernel engines --json >/dev/null 2>&1; then
-  g=$(launch gm)
+  g=$(launch gm | sed "s#<T>#$T#g")
   py() { printf '%s' "$g" | python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
   check "gemini: engine id" "[ \"\$(py 'd[\"engine\"]')\" = gemini ]"
-  check "gemini: acp command is the engine's own ACP mode" "[ \"\$(py 'd[\"acp\"][\"command\"]')\" = '$T/bin/gemini' ] && [ \"\$(py 'd[\"acp\"][\"args\"]')\" = \"['--acp']\" ]"
-  check "gemini: role prompt delivery is data" "[ \"\$(py 'd[\"role_prompt\"]')\" = first-message ]"
+  check "gemini: acp command is the engine's own ACP mode" "[ \"\$(py 'd[\"acp\"][\"command\"]+\" \"+\" \".join(d[\"acp\"][\"args\"])')\" = '$T/bin/gemini --acp' ]"
+  check "gemini: role prompt delivery is data" "[ \"\$(py 'd[\"role_prompt\"]')\" = none ]"
   check "gemini: the role prompt is carried" "[ \"\$(py '\"You are gm\" in d[\"system_prompt\"]')\" = True ]"
   check "gemini: harness stays the agent's word" "[ \"\$(py 'd[\"harness\"]')\" = gemini ]"
   check "agy (alias) resolves to its engine" "launch ag | grep -q '\"engine\": \"antigravity\"'"
@@ -66,10 +68,14 @@ fi
 (cd "$T/home" && "$KITH" nope --launch-json >/dev/null 2>"$T/err"); rc=$?
 check "an unknown engine is an error, never a silent wrong launch" "[ $rc != 0 ]"
 
+"$AUTH" person sam name=Sam >/dev/null 2>&1
+for a in cl cx gm; do "$AUTH" member $a sam mode=default >/dev/null 2>&1; done
 # Guests: an engine without the hooks is refused with 3 (4 with a backup chain).
 (cd "$T/home" && KITH_PERSON=sam "$KITH" gm --launch-json >/dev/null 2>"$T/err"); rc=$?
 check "guest run on gemini is refused, exit 3" "[ $rc = 3 ] && grep -q 'anyone but the owner' '$T/err'"
 (cd "$T/home" && KITH_PERSON=sam "$KITH" cx --launch-json >/dev/null 2>"$T/err"); rc=$?
 check "guest run on codex is refused, exit 3" "[ $rc = 3 ] && grep -q 'anyone but the owner' '$T/err'"
+(cd "$T/home" && KITH_PERSON=sam "$KITH" cl --launch-json >/dev/null 2>"$T/err"); rc=$?
+check "guest run on claude still starts" "[ $rc = 0 ]"
 
 [ $fails = 0 ] && echo "all launch-engines checks passed" || { echo "$fails check(s) failed"; exit 1; }

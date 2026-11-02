@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "b7375e445dfc570e4853ac755ff68ef3f2bd343ed2c0720cd6ff89f8bafdcf25";
+pub const CONTRACT_SHA256: &str = "693ae62fa5bfc96f0da17a67cb934b2600100260b818d4fc879bd1ede77240c7";
 
 /// The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -47,6 +47,32 @@ impl Harness {
             Self::Dsh => "dsh",
             Self::Opencode => "opencode",
             Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// How an engine takes the agent's role prompt, from the engine table's `enforces`: `flag` (a flag or ACP option on the command line), `env` (an environment variable), `first-message` (in front of the first message), `none` (not known to be deliverable: the host puts it in front of the first message). One this version doesn't know is read as none.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum RolePrompt {
+    #[serde(rename = "flag")]
+    Flag,
+    #[serde(rename = "env")]
+    Env,
+    #[serde(rename = "first-message")]
+    FirstMessage,
+    /// Also what a value this version doesn't know is read as.
+    #[default]
+    #[serde(rename = "none", other)]
+    None,
+}
+
+impl RolePrompt {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Flag => "flag",
+            Self::Env => "env",
+            Self::FirstMessage => "first-message",
+            Self::None => "none",
         }
     }
 }
@@ -154,7 +180,7 @@ pub struct Project {
     pub exists: bool,
 }
 
-/// `kith <agent> --launch-json`: how to start the agent, for claude and codex. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.
+/// `kith <agent> --launch-json`: how to start the agent, for claude and codex and, additively, any other engine the table lists with an ACP mode: `engine` is the table id (null for claude and codex, which print what they always did), `acp` the installed CLI's own ACP program (null when it has none here: the host then starts the `registry` build), `role_prompt` how the engine takes `system_prompt`. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Launch {
     pub version: i64,
@@ -192,6 +218,22 @@ pub struct Launch {
     pub account: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acp: Option<AcpStart>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_prompt: Option<RolePrompt>,
+}
+
+/// How to start an engine over ACP, from the engine table (`kith kernel engines launch <id> --json`): the installed CLI's own ACP mode as a program. `env` is extra environment for it (the engine's keys are the host's own).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct AcpStart {
+    pub command: String,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
 }
 
 /// What the cost ledger files a run's usage under. `via` is where the run came from (terminal, serve, a channel).
@@ -309,6 +351,7 @@ pub const COMMANDS: &[(&str, &str)] = &[("ls", "[Agent]"), ("projectLs", "Projec
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
     enums: &[
         crate::check::EnumSchema { name: "Harness", values: &["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode"], unknown: "unknown" },
+        crate::check::EnumSchema { name: "RolePrompt", values: &["flag", "env", "first-message", "none"], unknown: "none" },
         crate::check::EnumSchema { name: "PermissionMode", values: &["default", "acceptEdits", "plan", "auto", "bypassPermissions"], unknown: "default" },
         crate::check::EnumSchema { name: "DelegationState", values: &["open", "answered", "capped", "stopped"], unknown: "unknown" },
     ],
@@ -317,7 +360,8 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "NewAgent", fields: &[("agent", "string"), ("home", "string"), ("dir", "string"), ("description", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "Projects", fields: &[("projects", "[Project]")], may_omit: &[] },
         crate::check::TypeSchema { name: "Project", fields: &[("id", "string"), ("paths", "[string]"), ("home", "string?"), ("remotes", "[string]"), ("parent", "string?"), ("memory", "string"), ("exists", "bool")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Launch", fields: &[("version", "int"), ("agent", "string"), ("agent_version", "string"), ("harness", "Harness?"), ("cwd", "string"), ("env", "{string}"), ("system_prompt", "string"), ("settings", "json?"), ("mcp_servers", "json"), ("add_dirs", "[string]"), ("allowed_tools", "[string]"), ("disable_slash_commands", "bool"), ("model", "string?"), ("effort", "string?"), ("project", "string?"), ("call_model", "string?"), ("permission_mode", "PermissionMode?"), ("cost_tag", "CostTag"), ("claude_args", "[string]?"), ("backup", "string?"), ("provider", "Harness?"), ("account", "string?"), ("account_id", "string?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Launch", fields: &[("version", "int"), ("agent", "string"), ("agent_version", "string"), ("harness", "Harness?"), ("cwd", "string"), ("env", "{string}"), ("system_prompt", "string"), ("settings", "json?"), ("mcp_servers", "json"), ("add_dirs", "[string]"), ("allowed_tools", "[string]"), ("disable_slash_commands", "bool"), ("model", "string?"), ("effort", "string?"), ("project", "string?"), ("call_model", "string?"), ("permission_mode", "PermissionMode?"), ("cost_tag", "CostTag"), ("claude_args", "[string]?"), ("backup", "string?"), ("provider", "Harness?"), ("account", "string?"), ("account_id", "string?"), ("engine", "string?"), ("acp", "AcpStart?"), ("registry", "string?"), ("role_prompt", "RolePrompt?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "AcpStart", fields: &[("command", "string"), ("args", "[string]"), ("env", "{string}")], may_omit: &[] },
         crate::check::TypeSchema { name: "CostTag", fields: &[("agent", "string"), ("version", "string"), ("model", "string?"), ("effort", "string?"), ("via", "string"), ("project", "string?"), ("person", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "Delegations", fields: &[("delegations", "[Delegation]")], may_omit: &[] },
         crate::check::TypeSchema { name: "Delegation", fields: &[("id", "string"), ("agent", "string"), ("chain", "string"), ("hop", "int"), ("cross_hops", "int"), ("crossed", "bool"), ("caller", "Caller"), ("reply_to", "ReplyTo"), ("state", "DelegationState"), ("cost_micro_usd", "int?"), ("chain_cost_micro_usd", "int?"), ("cap_micro_usd", "int?"), ("started_ms", "int"), ("answered_ms", "int?"), ("capped_ms", "int?"), ("cap_card_ms", "int?"), ("brief", "string?"), ("session", "string?")], may_omit: &[] },
@@ -335,6 +379,7 @@ pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_j
         "Projects" => serde_json::from_value::<Projects>(value).map(drop),
         "Project" => serde_json::from_value::<Project>(value).map(drop),
         "Launch" => serde_json::from_value::<Launch>(value).map(drop),
+        "AcpStart" => serde_json::from_value::<AcpStart>(value).map(drop),
         "CostTag" => serde_json::from_value::<CostTag>(value).map(drop),
         "Delegations" => serde_json::from_value::<Delegations>(value).map(drop),
         "Delegation" => serde_json::from_value::<Delegation>(value).map(drop),

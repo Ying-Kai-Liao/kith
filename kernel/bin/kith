@@ -655,8 +655,21 @@ unset KITH_LAUNCH_ASK_ID KITH_ASK_ID HQ_LAUNCH_ASK_ID HQ_ASK_ID
 sid_file=${KITH_LAUNCH_SID_FILE:-}
 unset KITH_LAUNCH_SID_FILE
 [[ $p_owner == 1 && -z ${KITH_PERSON:-} && -n $ask_id ]] && export KITH_ASK_ID=$ask_id
+# The engine table's row for $1 (an id or alias), from the Rust program's `kernel engines launch`; fails without one.
+engine_spec() {
+  local bin
+  bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
+  "$bin" kernel version 2>/dev/null | grep -q '"engines"' || return 1
+  "$bin" kernel engines launch "$1" --json 2>/dev/null
+}
+engine_spec=""
 if [[ $launch -eq 1 ]]; then
-  case $harness in claude|codex) ;; *) echo "kith: $agent runs on $harness; --launch-json covers claude and codex only for now" >&2; exit $([[ -n $backup ]] && echo 4 || echo 1) ;; esac
+  # Any other engine the Rust core's table lists with an ACP mode (kith kernel engines launch): its row goes into the launch
+  # object. No program, or one from before the subcommand, is today's error: never a silent wrong launch.
+  case $harness in claude|codex) ;; *)
+    engine_spec=$(engine_spec "$harness") && [[ $(printf '%s' "$engine_spec" | python3 -I -c 'import json,sys; d=json.load(sys.stdin); print(1 if d.get("acp") or d.get("registry") else 0)' 2>/dev/null) == 1 ]] \
+      || { echo "kith: $agent runs on $harness; --launch-json covers claude and codex only for now" >&2; exit $([[ -n $backup ]] && echo 4 || echo 1); } ;;
+  esac
   out_format="" resume=""; unset KITH_CLAUDE_ARGS HQ_CLAUDE_ARGS
   export KITH_VIA=${KITH_VIA:-terminal}
 fi
@@ -671,7 +684,9 @@ reads_others=$(python3 "$KITH/lib/kith_settings.py" reads-others "$pkg/capabilit
 # only Claude Code can enforce keep the run on Claude Code.
 if [[ $p_owner == 0 ]]; then
   perm_mode=$p_mode
-  [[ $harness == claude ]] \
+  # Which engines can hold a guest run to its rules is the engine table's (serves_guests: tool hooks, a permission mode and
+  # per-run MCP); today that is Claude Code alone. The rest of this branch builds Claude Code's rules.
+  [[ $harness == claude ]] || [[ $(engine_spec "$harness" | python3 -I -c 'import json,sys; print(json.load(sys.stdin).get("serves_guests") is True)' 2>/dev/null) == True ]] \
     || { echo "kith: $agent for ${KITH_PERSON}: runs for anyone but the owner need Claude Code (path rules), not $harness" >&2; exit $([[ -n $backup ]] && echo 4 || echo 3); }
   # Their reads are an allowlist (permissions.blockReadsOutsideWorkingDirectories for the file tools, sandbox denyRead of
   # the home folder for Bash), which Claude Code enforces from 2.1.257: an older or unreadable version is no run at all.
@@ -1142,7 +1157,7 @@ emit_launch() {
   local work_env=""; [[ $p_owner == 1 ]] || work_env="CLAUDE_CODE_TMPDIR KITH_WORK CLAUDE_ENV_FILE"
   ENV_NAMES="$(python3 "$KITH/lib/kith_paths.py" --sh | sed -n 's/^export \([A-Z_]*\)=.*/\1/p' | paste -sd' ' -) KITH_ROOT KITH_AGENT KITH_AGENT_DIR KITH_AGENT_HOME KITH_AGENT_VERSION KITH_MODEL KITH_EFFORT KITH_PROJECT KITH_PERSON KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ROOM KITH_ROOM_MEMBERS KITH_ROOM_OWNER_ONLY KITH_VIA KITH_PROVIDER KITH_ACCOUNT KITH_ACCOUNT_ID KITH_ACCOUNT_VAR KITH_OWNER CLAUDE_CODE_ARTIFACT $backup_cfg_var $p_env_names $work_env HQ_ROOT HQ_AGENT HQ_AGENT_DIR HQ_AGENT_HOME HQ_AGENT_VERSION HQ_MODEL HQ_EFFORT HQ_PROJECT HQ_PERSON HQ_VIA" \
     ADD_DIRS=$add_dirs ALLOWED=$allowed_tools SETTINGS=$settings MCP=$(merged_mcp) PROMPT=$prompt PERM_MODE=$perm_mode NO_SLASH=$no_slash CALL_MODEL=$call_model \
-    BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib \
+    BACKUP=$backup HARNESS=$harness KITH_LIB=$KITH/lib ENGINE_SPEC=$engine_spec \
     python3 -I -c '
 import json, os
 e = os.environ.get
@@ -1153,6 +1168,10 @@ env = {k: os.environ[k] for k in e("ENV_NAMES").split() if k in os.environ}
 settings = json.loads(e("SETTINGS"))
 nz = lambda k: e(k) or None
 claude = e("HARNESS") == "claude"
+# Another engine (not claude, not codex): its table row, so the host can start it over ACP. Additive; claude and codex print
+# what they always printed.
+spec = json.loads(e("ENGINE_SPEC") or "null")
+extra = {} if not spec else {"engine": spec["engine"], "acp": spec["acp"], "role_prompt": spec["role_prompt"], "registry": spec["registry"]}
 print(json.dumps({
     "version": 1, "agent": e("KITH_AGENT"), "agent_version": e("KITH_AGENT_VERSION"), "harness": e("HARNESS"), "cwd": os.getcwd(),
     "env": env, "system_prompt": e("PROMPT"), "settings": settings, "mcp_servers": json.loads(e("MCP"))["mcpServers"],
@@ -1163,7 +1182,7 @@ print(json.dumps({
     "cost_tag": {"agent": e("KITH_AGENT"), "version": e("KITH_AGENT_VERSION"), "model": nz("KITH_MODEL"), "effort": nz("KITH_EFFORT"),
                  "via": e("KITH_VIA"), "project": nz("KITH_PROJECT"), "person": nz("KITH_PERSON")},
     "claude_args": sys.argv[1:] if claude else None,
-    "backup": nz("BACKUP"), "provider": nz("KITH_PROVIDER"), "account": nz("KITH_ACCOUNT"), "account_id": nz("KITH_ACCOUNT_ID")}))' "$@" >&3
+    "backup": nz("BACKUP"), "provider": nz("KITH_PROVIDER"), "account": nz("KITH_ACCOUNT"), "account_id": nz("KITH_ACCOUNT_ID"), **extra}))' "$@" >&3
 }
 # Codex (or another harness the launch JSON covers): the same facts, without Claude's settings.
 if [[ $launch -eq 1 && $harness != claude ]]; then emit_launch; exit 0; fi
