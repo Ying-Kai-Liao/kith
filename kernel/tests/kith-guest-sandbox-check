@@ -109,7 +109,7 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: sandbox on, fail closed, no escape hatch" "$(q "$S" '(sb.get("enabled"), sb.get("failIfUnavailable"), sb.get("allowUnsandboxedCommands"))')" "(True, True, False)"
   expect "$who: no excluded commands" "$(q "$S" '"excludedCommands" in sb')" False
   expect "$who: no network but the fixed host socket (both spellings), even with no KITH_RUN_SOCKET" "$(q "$S" "sb['network']['allowUnixSockets'] == ['$T/linked state/run/host.sock', '$T/real state/run/host.sock']")" True
-  expect "$who: no local servers (a stray one could take the host's port), no domains beyond the allowlist" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(None, False)"
+  expect "$who: no local servers (a stray one could take the host's port), no domains unless the package or the owner grants some" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(None, False)"
   W=$KITH_HOME/agents/echo/files/people/$who/.work
   expect "$who: the workspace is writable, given to the shell only" "$(q "$S" "'$W' in aw and s['env'].get('KITH_WORK') == '$W' and s['env'].get('CLAUDE_ENV_FILE','').endswith('/lib/guest-env.sh')")" True
   expect "$who: the settings env (Claude Code, hooks, MCP servers) holds no workspace var and no path inside their folder but KITH_WORK" "$(q "$S" "[k for k in $WORKVARS if k in s['env']], sorted(k for k, v in s['env'].items() if '/people/$who' in str(v))")" "([], ['KITH_WORK'])"
@@ -329,6 +329,33 @@ expect "a revoke (no cloud link) removes it" "$([ -e "$H" ] && echo kept || echo
 KITH_STATE=$ST KITH_PERSON=gone lj 1 >/dev/null; KITH_STATE=$ST "$AUTH" person gone --rm >/dev/null 2>&1
 expect "person --rm removes it" "$([ -e "$ST/run/t/gone" ] && echo kept || echo gone)" gone
 rm -rf "$ST"
+
+# --- Guest domains: the hosts every guest of an agent reaches without a card ------------------------------------------------
+doms() { q "$(KITH_PERSON=$1 settings)" 'sb.get("network", {}).get("allowedDomains")'; }
+printf 'guest_domains: [pypi.org, files.pythonhosted.org, "*.evil.com", 10.0.0.1, pypi.org]\n' > "$KITH_HOME/agents/echo/role/capabilities.yaml"
+for who in guest bot-3f9a1c2e; do
+  expect "$who: the package's guest_domains are allowed (deduped; a wildcard and an address are dropped)" "$(doms $who)" "['pypi.org', 'files.pythonhosted.org']"
+done
+expect "owner: no sandbox, so no domains" "$(q "$(settings)" '"sandbox" in s')" False
+expect "kith-pkg check reports the dropped hosts and still passes" "$("$KERNEL/bin/kith-pkg" check echo 2>&1 | grep -c 'note: guest_domains: .* is not a plain host name')" 2
+"$AUTH" agent-access echo domain github.com >/dev/null 2>&1
+expect "an owner-kept host joins the package's" "$(doms guest)" "['pypi.org', 'files.pythonhosted.org', 'github.com']"
+expect "a bot guest gets it too" "$(doms bot-3f9a1c2e)" "['pypi.org', 'files.pythonhosted.org', 'github.com']"
+expect "a second save of the same host is one entry" "$("$AUTH" agent-access echo domain github.com >/dev/null 2>&1; "$AUTH" agent-access echo --json | python3 -c 'import json,sys; print([r["domain"] for r in json.load(sys.stdin)])')" "['pypi.org', 'files.pythonhosted.org', 'github.com']"
+expect "agent-access refuses a wildcard" "$("$AUTH" agent-access echo domain '*.x.com' >/dev/null 2>&1; echo $?)" 2
+expect "another agent's guests get none of it" "$("$AUTH" agent-access other --json)" "[]"
+expect "the ledger lists them under person *, the package's marked" "$("$AUTH" ledger --json | python3 -c 'import json,sys; print(sorted((e["target"], e["approved_by"]) for e in json.load(sys.stdin) if e["person"] == "*"))')" "[('files.pythonhosted.org', 'package'), ('github.com', 'owner'), ('pypi.org', 'package')]"
+"$AUTH" person nobody name=Nobody >/dev/null 2>&1
+expect "a person with no access to the agent gets no run, so none of it" "$(cd "$KITH_HOME/agents/echo" && KITH_PERSON=nobody "$KITH" echo --launch-json >/dev/null 2>&1; echo $?)" 3
+"$AUTH" person temp name=Temp >/dev/null 2>&1; "$AUTH" member echo temp mode=default >/dev/null 2>&1
+expect "a member has them" "$(doms temp)" "['pypi.org', 'files.pythonhosted.org', 'github.com']"
+"$AUTH" person temp --rm >/dev/null 2>&1
+expect "removing a person leaves the owner's agent-level host alone" "$("$AUTH" agent-access echo --json | grep -c github.com)" 1
+expect "ledger --rm takes a kept host away" "$("$AUTH" ledger --rm domain:echo:\*:github.com >/dev/null 2>&1; doms guest)" "['pypi.org', 'files.pythonhosted.org']"
+expect "ledger --rm refuses a package-declared host" "$("$AUTH" ledger --rm domain:echo:\*:pypi.org >/dev/null 2>&1; echo $?)" 1
+expect "agent-access --rm of a missing host is quiet" "$("$AUTH" agent-access echo domain nowhere.com --rm >/dev/null 2>&1; echo $?)" 0
+rm -f "$KITH_HOME/agents/echo/role/capabilities.yaml"
+expect "no capabilities and nothing kept: no allowedDomains again" "$(doms guest)" "None"
 
 # --- The real thing (KITH_REAL_SANDBOX=1, macOS, a logged-in claude): a guest run under Claude Code's own sandbox ------------
 # Everything above reads the generated JSON; this runs a real `claude -p` as the guest (the model is told to run one probe

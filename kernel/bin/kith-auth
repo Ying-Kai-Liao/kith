@@ -110,6 +110,12 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           approved it (themselves, or their bot's owner), refused unless they are a
                                           member of the agent now; without it the owner did. A member made a guest
                                           loses the entries they approved.
+  kith-auth agent-access <agent> [--json] | <agent> domain <host> [--rm]
+                                          "always, for everyone" on an edge card: a website every guest of that agent (an
+                                          invited person, a bot guest; never the owner) may reach, kept on the agent so it
+                                          needs no row. With no host: lists them, the package's `guest_domains:` too. They
+                                          join `access` in `resolve` and the ledger (person `*`). Owner's only; a person
+                                          removed, or a bot, still gets no more than they are allowed to run with.
   kith-auth jobs <agent> [--person ID] [--domain HOST | --helper NAME | --door NAME[@DIGEST]] [--json]
                                           read-only: the jobs the agent's capabilities.yaml declares (domains, helpers,
                                           doors), for a person ticked or not and what a package update added since the
@@ -239,7 +245,7 @@ def load_auth(write=False):
         data = {}
     except ValueError as e:
         die(f'{AUTH}: invalid JSON ({e})')
-    for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites', 'retired', 'once'):
+    for table in ('profiles', 'grants', 'env', 'people', 'presets', 'members', 'invites', 'retired', 'once', 'agent_access'):
         data.setdefault(table, {})
     return data
 
@@ -1204,17 +1210,33 @@ def resolve(auth, agent, person, via=None, once=False):
                budget=row.get('budget', ''), budget_agent=agent if row_of(auth, agent, person) is not None else via,
                was=auth['people'].get(person, {}).get('was', []))
     out['trusted'] = bool(row.get('trusted') or p.get('trusted'))
-    out.update(with_jobs(auth, pkg, person, access_of(row)))
+    out.update(with_jobs(auth, pkg, person, access_of(row), agent))
     asked = row.get('mode') or p.get('mode')
     if asked in FREE_SHELL and out['mode'] != asked:
         out['downgraded'] = asked   # shown in the listing, so the fall back to default isn't silent
     return out
 
 
-def with_jobs(auth, pkg, person, access):
-    """The run's access with its ticked jobs' domains added, its doors (inert until the render door, step 2) and the
-    names of its ticks, all from the person's own row of pkg."""
+_GUEST_DOMAINS = {}
+
+
+def agent_domains(auth, agent):
+    """The hosts every guest of agent may reach, whoever they are: the ones its package declares (`guest_domains:`, the
+    owner's consent at install) and the ones the owner kept for everyone on a card (`agent_access`). Plain host names only."""
+    import kith_guard
+    if agent not in _GUEST_DOMAINS:
+        import kith_jobs
+        _GUEST_DOMAINS[agent] = kith_jobs.guest_domains(agent_dirs().get(agent, AGENTS / agent) / 'capabilities.yaml')[0]
+    row = auth.get('agent_access', {}).get(agent)
+    kept = row.get('domains') if isinstance(row, dict) and isinstance(row.get('domains'), list) else []
+    return [d for d in dict.fromkeys(_GUEST_DOMAINS[agent] + kept) if kith_guard.valid_domain(d)]
+
+
+def with_jobs(auth, pkg, person, access, agent=None):
+    """The run's access with its ticked jobs' domains and the agent's own for every guest (agent_domains) added, its
+    doors (inert until the render door, step 2) and the names of its ticks, all from the person's own row of pkg."""
     g = job_grants(auth, pkg, person)
+    g = {**g, 'domains': g['domains'] + (agent_domains(auth, agent) if agent else [])}
     own = auth['members'].get(pkg, {}).get(person)
     ticks = own.get('jobs') if isinstance(own, dict) and isinstance(own.get('jobs'), dict) else {}
     return {'access': {**access, 'domains': list(dict.fromkeys(access['domains'] + g['domains']))},
@@ -1246,7 +1268,7 @@ def resolve_bot(auth, agent, bot, via, out, once=False):
                deny=list(dict.fromkeys(p.get('deny', []) + row.get('deny', []) + pr.get('deny', []))),
                model=row.get('model') or pr.get('model', ''), env=row.get('env', {}), helpers=helpers,
                budget=budget, budget_agent=budget_agent, was=list(dict.fromkeys(was)))
-    out.update(owner_cut(auth, agent, bot, with_jobs(auth, pkg, bot, access_of(row)), via, pr))
+    out.update(owner_cut(auth, agent, bot, with_jobs(auth, pkg, bot, access_of(row), agent), via, pr))
     return out
 
 
@@ -1339,6 +1361,53 @@ def cmd_access(args):
         row['access_by'][key] = None
     save_auth(auth)
     print(f'{pid} may {kind} {value} beyond the box for {agent}')
+
+
+def drop_agent_domain(auth, agent, host):
+    """Takes one host out of the agent's kept guest domains (as written: nothing else is checked). True if it was there."""
+    kept = auth.get('agent_access', {}).get(agent)
+    if not isinstance(kept, dict) or host not in (kept.get('domains') or []):
+        return False
+    kept['domains'].remove(host)
+    for meta in ('since', 'by'):
+        if isinstance(kept.get(meta), dict):
+            kept[meta].pop(host, None)
+    if not kept['domains']:
+        auth['agent_access'].pop(agent)
+    return True
+
+
+def cmd_agent_access(args):
+    """The always-for-everyone half of an edge card: a host every guest of the agent (invited people and bot guests, never
+    the owner) may reach, kept on the agent, not on a person's row, so it needs no membership and a person removed leaves it
+    alone. One command is one transaction under the auth.json lock. With no host: lists them (package-declared ones too)."""
+    if len(args) == 1 and AGENT_RE.match(args[0]) or args[1:] == ['--json']:
+        auth = load_auth()
+        kept = (auth['agent_access'].get(args[0]) or {}).get('domains') or []
+        rows = [{'domain': d, 'by': 'owner' if d in kept else 'package'} for d in agent_domains(auth, args[0])]
+        print(json.dumps(rows) if args[1:] else '\n'.join(f"{r['domain']}  ({r['by']})" for r in rows))
+        return
+    if len(args) not in (3, 4) or args[1] != 'domain' or (len(args) == 4 and args[3] != '--rm') or not AGENT_RE.match(args[0]):
+        die('agent-access <agent> [--json] | agent-access <agent> domain <host> [--rm]', 2)
+    agent, _, host = args[:3]
+    import kith_guard
+    if len(args) == 4:
+        auth = load_auth(write=True)
+        if drop_agent_domain(auth, agent, host):
+            save_auth(auth)
+        print(f'{host} is no longer kept for everyone {agent} is shared with')
+        return
+    if not kith_guard.valid_domain(host):
+        die(f"'{host}' is not a plain host name (no wildcard, address or port)", 2)
+    auth = load_auth(write=True)
+    kept = auth['agent_access'].setdefault(agent, {})
+    have = kept.setdefault('domains', [])
+    if host not in have:
+        have.append(host)
+        kept.setdefault('since', {})[host] = int(time.time() * 1000)
+        kept.setdefault('by', {})[host] = None
+    save_auth(auth)
+    print(f'every guest of {agent} may reach {host} beyond the box')
 
 
 def approver_of(auth, agent, pid, by):
@@ -1634,6 +1703,17 @@ def ledger(auth):
             for h in row.get('helpers') or []:
                 if isinstance(h, str):
                     add('helper', agent, pid, h, hsince.get(h))
+    # the hosts every guest of an agent reaches: person `*`; approved_by `package` for the ones its package declares
+    for agent in sorted({*auth.get('agent_access', {}), *agent_dirs()}):
+        kept = auth.get('agent_access', {}).get(agent)
+        kept = kept if isinstance(kept, dict) else {}
+        since = kept.get('since') if isinstance(kept.get('since'), dict) else {}
+        by = kept.get('by') if isinstance(kept.get('by'), dict) else {}
+        for d in agent_domains(auth, agent):
+            if d in (kept.get('domains') or []):
+                add('domain', agent, EVERYONE, d, since.get(d), ('owner' if by.get(d) is None else by[d]) if d in by else None)
+            else:
+                add('domain', agent, EVERYONE, d, None, 'package')
     for k, svcs in auth['grants'].items():
         agent, at, pid = k.partition('@')
         if not at or not isinstance(svcs, dict) or is_owner(auth, canonical(auth, pid)):
@@ -1677,6 +1757,10 @@ def remove_grant(key):
             if isinstance(row.get('helper_since'), dict):
                 row['helper_since'].pop(target, None)
     else:
+        if kind == 'domain' and pid == EVERYONE:
+            gone = drop_agent_domain(auth, agent, target)
+            if not gone and target in agent_domains(auth, agent):
+                die(f'{target} is declared by the package of {agent} (guest_domains in capabilities.yaml), not kept by a card')
         row = auth['members'].get(agent, {}).get(pid)
         have = row.get('access') if isinstance(row, dict) and isinstance(row.get('access'), dict) else {}
         listed = have.get(ACCESS_KINDS[kind])
@@ -2593,6 +2677,8 @@ def main(argv):
             print(json.dumps({**res, 'held': held}))
             return
         die(f'{cmd}: see kith-auth --help', 2)
+    elif cmd == 'agent-access':
+        cmd_agent_access(rest)
     elif cmd == 'access':
         cmd_access(rest)
     elif cmd == 'ledger':

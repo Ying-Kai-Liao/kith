@@ -787,6 +787,19 @@ if os.environ["P_OWNER"] == "0":
         # No local servers (allowLocalBinding): with the host down, one left running could take its loopback port and be
         # sent the serve token by kith-permit, kith-recall or kith-call. A render preview runs in the render door instead.
         "network": {"allowUnixSockets": list(dict.fromkeys(socks))}}
+    # The hosts every guest of this agent reaches without a card: the guest_domains of its package and the ones the owner kept
+    # "for everyone". Asked of kith-auth here, not of the host, so a launch with no run socket (hq -p, a run of a channel) has
+    # them too; no answer is none. A bot is cut to what its owner holds in `resolve`, and both are given the same list.
+    try:
+        import subprocess
+        out = subprocess.run([os.environ["KITH_ROOT"] + "/bin/kith-auth", "agent-access", os.path.basename(os.environ["AGENT_HOME"]), "--json"],
+                             capture_output=True, text=True, timeout=20, check=True).stdout
+        hosts = [r["domain"] for r in json.loads(out) if isinstance(r, dict) and kith_guard.valid_domain(r.get("domain"))]
+    except Exception as e:  # noqa: BLE001
+        hosts = []
+        print("kith: could not read the guest domains of the agent (%s); the run goes on without them" % e, file=sys.stderr)
+    if hosts:
+        s["sandbox"]["network"]["allowedDomains"] = list(dict.fromkeys(hosts))
 allow = s["permissions"].setdefault("allow", [])
 if os.environ["P_OWNER"] == "0":   # no broad Bash rule for the run of an invited person unless the membership is trusted (F11)
     sys.path.insert(0, os.environ["KITH_ROOT"] + "/lib")
