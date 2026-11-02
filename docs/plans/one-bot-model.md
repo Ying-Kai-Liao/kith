@@ -11,9 +11,14 @@ Survey this plan is built on: [cli-host-gap-map.md](cli-host-gap-map.md).
 - **Quick, throwaway chats go to one built-in agent, not to new agents.** A `scratch` agent ships with kith; a quick
   chat is a new thread with it (engine and model picked per thread). "Keep this as an agent" turns a thread into a
   real agent with `kith new`. No folder, repo or GitHub backup per experiment.
-- **The kernel moves to Rust, module by module**, as a crate the CLI and the host both link. The CLI's commands and
-  their `--json` stay the contract, so the apps never notice a module moving. Python keeps the parts that are still
-  changing fast (packages, agent settings, people) until they settle.
+- **A fresh core, not a rewrite of everything.** The kernel is redesigned in Rust as the one core (one agent model,
+  one secret store, one scheduler, one set of folder rules, engines over ACP), a crate the CLI and the host both link.
+  It is designed fresh, not ported line by line. The host becomes a thin server over it; the apps, cloud and relay are
+  kept, since they talk to the same host API. The CLI's commands and their `--json` stay the contract. Python keeps
+  the parts that are still changing fast (packages, agent settings, people) until they settle. Settled 2026-11-03,
+  instead of rebuilding the whole app.
+- **Same CLI line, same result.** The new core is verified by running the same CLI lines against the old kernel and
+  the new one and comparing (see Verification). The model-checked safety specs stay for what that can't see (races).
 - **Engines (ACP) move into the kernel.** Detection and ACP launch for every engine, today in
   `serve/host/src/agent/backends.rs`, become the kernel crate's first big module. The CLI and the host ask the kernel
   how to run any engine.
@@ -54,15 +59,21 @@ bots moves no user data. The work is giving kith agents what host bots could do,
 Three tracks. A and B can run in parallel; C needs pieces of both. Each step is one PR (or a few), with a CLI command
 and `--json` first and the app calling it after.
 
-### A. Rust kernel crate
+### A. The core (Rust crate, designed fresh)
 
+- [ ] **A0. Core design.** A short design doc (`docs/plans/core-design.md`): the agent model, secrets, scheduler,
+  folders, engines, and how the host and the CLI sit on the crate. Reviewed by the architect agent before A1's code.
+- [ ] **A0b. Differential harness.** The verification below, as a test runner, before the first module moves.
 - [ ] **A1. Folder rules.** One Rust implementation of where kith's folders are (`kernel/lib/kith_paths.py`,
   `serve/host/src/kernel.rs::machine_dir`, `hqmem::Layout::from_env` disagree today: `.migrated` is respected by two
   and not the third). New crate under `serve/` (name it in the PR), linked by the host, exposed to Python through the
   `kith` binary the way `kith memory check` already is. `kith_paths.py` asks it, or is checked against it in CI.
   Done when: one implementation, the three callers agree, a test proves it. Gap map #6; architect ranked it first.
 - [ ] **A2. Engines and ACP.** Move engine detection and ACP launch from `agent/backends.rs` into the crate. The kernel's
-  harness list becomes the crate's list (today 8 in `adapters/harness.py` vs 27 in the host). `--launch-json` works for
+  harness list becomes the crate's list (today 8 in `adapters/harness.py` vs 27 in the host). An engine is the program
+  that runs a bot's turns (Claude Code, Codex, Gemini CLI...), not a bot. The host drives all 27 through ACP, each one a
+  table entry (command, install, sign-in), so this is one table and one launcher. One-shot runs move to ACP too, so
+  `adapters/harness.py`'s per-engine code (8 hand-written paths) goes away instead of growing to 27. `--launch-json` works for
   every engine, not just claude and codex (`kernel/bin/kith`, the `launch` branch). Done when: a kith agent with
   `harness: gemini` (or any listed engine) runs in the app and the terminal.
 - [ ] **A3. The launch path.** `kith <agent> --launch-json` (prompt assembly, settings, MCP config, accounts) in Rust.
@@ -70,7 +81,13 @@ and `--json` first and the app calling it after.
 - [ ] **A4. Writer claims and delegation limits.** One implementation of the thread writer claim (`kith-sessions` vs
   `serve/host/src/terminal/claim.rs`) and the hop caps (3 copies: `kernel/bin/kith-ask`, `api/delegations.rs`,
   `chat/team/requests.rs`). Model-checked properties exist (`thread-writers` skill); keep them passing.
-- [ ] **A5. Onward, as modules settle:** secrets API (after B2), scheduler (after B3), packages, settings.
+- [ ] **A5. One secret store** in the core: kith-auth's model plus everything in the host vault (connector logins,
+  Composio, 1Password, voice and router keys); the Jev key stops being read from both (`chat/router.rs` vs
+  `rich_card/jev.rs`). Gap map #2. The `secret-cards`, `revoke-access` and `invitee-access` checks must keep passing.
+- [ ] **A6. One scheduler** in the core: `kith-sched`'s jobs and the host's routines as one thing, `kith schedule
+  ... --json`. Decide the cron dialect (kith-sched: local time, `@daily`; routines: IANA timezone, intervals, once,
+  webhook and event triggers).
+- [ ] **A7. Onward, as they settle:** packages, agent settings, people and invites.
 
 ### B. CLI surface (Python for now, ported later)
 
@@ -84,12 +101,7 @@ and `--json` first and the app calling it after.
   an agent. Includes the Marketplace layout from 2026-11-03: a **Bots** section for shared kith agents (GitHub topic
   `kith-agent`, needs `kith market --json` and a non-interactive `kith install` preview), and today's "Agents" renamed
   **Engines**.
-- [ ] **B3. One secret store.** Connector logins, Composio, 1Password, the voice and router keys move from the host
-  vault into `kith-auth`. The Jev key stops being read from both (`chat/router.rs` vs `rich_card/jev.rs`). Gap map #2.
-  Run the `secret-cards`, `revoke-access` and `invitee-access` checks.
-- [ ] **B4. One scheduler.** Host routines become `kith-sched` jobs (`jobs.json` stays the one definition; the host may
-  be what runs them). `kith schedule ... --json`. Decide the cron dialect (kith-sched: local time, `@daily`; routines:
-  IANA timezone, intervals, once, webhook and event triggers).
+- B3, B4 (secrets, scheduler): moved to the core as A5 and A6, built once there instead of merged in Python first.
 - [ ] **B5. Accounts and people.** `kith account add/remove` get app methods; app and bot invites get CLI commands
   (gap map #7, #8).
 - [ ] **B6. `--json` everywhere a client needs it** (list in the gap map), and the footguns: bare `kith backup`,
@@ -109,12 +121,31 @@ and `--json` first and the app calling it after.
 ## Order
 
 ```
-A1 ─► A2 ─► A3 ─► A4 ─► A5
-B1 ─► B2 ─► B3 ─► B4      (B5, B6 any time)
-C1 any time;  C2 after B1;  C3 after A2+B1+B2;  C4 before C5;  C5 last
+A0 ─► A0b ─► A1 ─► A2 ─► A3 ─► A4 ─► A5 ─► A6 ─► A7
+B1 ─► B2                  (B5, B6 any time)
+C1 any time;  C2 after B1;  C3 after A2+B1+B2;  C4 before C5;  C5 last (after A5, A6)
 ```
 
-First up: **A1** (folder rules in Rust) and **B2** (connector and skill grants in the CLI), in parallel.
+First up: **A0** (core design, then A0b and A1) and **B2** (connector and skill grants in the CLI), in parallel.
+
+## Verification: same CLI line, same result
+
+Every module that moves into the core is checked by running the same CLI lines against the old kernel and the new
+core, each in its own throwaway HOME and KITH_HOME, and comparing:
+
+- **What it printed:** stdout, and `--json` compared as data, plus the exit code.
+- **What it did:** a diff of the state folders afterwards (files, and rows in the SQLite stores).
+- **Normalised first:** timestamps, generated ids, temp paths, ordering where order means nothing.
+- **Fakes for the outside world**, as the kernel tests already do: `gh`, git remotes, the Keychain, the engine
+  programs (`claude`, `codex`, ...). Nothing real is touched.
+- **Intended differences are listed**, each with why (the footgun fixes in B6, the Claude-model guard from B0, ...).
+  A difference not on the list fails.
+- **The corpus** starts from the existing `kernel/tests/*-check` scripts and every command in the gap map, and grows
+  with each bug found.
+
+What it can't see: two things at the same moment (two writers on one thread, a revoke during a run). The TLA+ models
+and property tests (`thread-writers`, `revoke-access`, `secret-cards`, `run-tokens`, `invitee-access`) stay the spec
+for those, and run against the new core.
 
 ## Rules for whoever picks a step up
 
@@ -126,3 +157,5 @@ First up: **A1** (folder rules in Rust) and **B2** (connector and skill grants i
 ## Log
 
 - 2026-11-03: plan written; decisions recorded. B0 done in PR #582. Issue #578 opened for a model per backup entry.
+- 2026-11-03: fresh core instead of a whole-app rebuild; verification is the same CLI line giving the same result.
+  Secrets and scheduler moved from B to the core (A5, A6). A0 (design) and A0b (differential harness) added before A1.
