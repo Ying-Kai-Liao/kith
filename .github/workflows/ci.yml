@@ -218,6 +218,8 @@ jobs:
         run: kernel/tests/kith-footguns-check
       - name: Pkg EINTR check
         run: kernel/tests/kith-pkg-eintr-check
+      - name: People check (kith people, kith invite, kith bot ls|invite|revoke|decide|auto-allow --json, against a stub host)
+        run: kernel/tests/kith-people-check
       - name: Auth check
         run: kernel/tests/kith-auth-check
       - name: Auth lock check
