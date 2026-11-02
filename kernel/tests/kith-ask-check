@@ -137,10 +137,13 @@ expect "then gives the answer" "$("$ASK" --wait "$pe" --timeout 5 2>/dev/null | 
 # --to: a follow-up to a running --bg job is a wake of its session (kith-wake), delivered once the job's turn ends
 unset KITH_WAKE_NO_KICK
 ended() { n=0; until [ -f "$BGDIR/$1.exit" ] || [ $n -gt 100 ]; do sleep 0.2; n=$((n + 1)); done; }
+# a --bg job takes a moment to write its session file; a --to sent before that says "no session", not "not yours"
+hassid() { n=0; until [ -s "$BGDIR/$1.sid" ] || [ -f "$BGDIR/$1.exit" ] || [ $n -gt 300 ]; do sleep 0.2; n=$((n + 1)); done; }
 touch "$KITH_STATE/stub-resumes"
 resumes() { grep -c -- "--resume $1 " "$KITH_STATE/stub-resumes"; }
 mkdir -p "$T/w"
-j=$(cd "$T/w" && STUB_SLEEP=4 STUB_SID=sj "$ASK" --bg echo "build it" | idof)
+j=$(cd "$T/w" && STUB_SLEEP=10 STUB_SID=sj "$ASK" --bg echo "build it" | idof)
+hassid "$j"
 expect "--to a running job: queued" "$("$ASK" --to "$j" "also do X" 2>"$T/err")" queued
 expect "it says the job is still running" "$(grep -c 'is still running' "$T/err")" 1
 expect "a second message merges" "$("$ASK" --to "$j" "and Y" 2>/dev/null)" merged
@@ -175,7 +178,8 @@ expect "for that session" "$(queued)" "s1:later please"
 rm "$KITH_STATE/live/terminal/s1.claim"
 
 # a person's job: the owner or that person (while they may still ask the agent) may send to it; its turn stays theirs
-pj=$(cd "$T/w" && STUB_SLEEP=3 STUB_SID=sp KITH_PERSON=bob "$ASK" --bg echo "bob's job" | idof)
+pj=$(cd "$T/w" && STUB_SLEEP=20 STUB_SID=sp KITH_PERSON=bob "$ASK" --bg echo "bob's job" | idof)
+hassid "$pj"
 expect "another person can't send to it" "$(KITH_PERSON=eve "$ASK" --to "$pj" "hi" 2>&1)" "kith ask: $pj is not one of your jobs"
 expect "nor its person without kith-auth's yes" "$(KITH_PERSON=bob "$ASK" --to "$pj" "hi" 2>&1)" "kith ask: $pj is not one of your jobs"
 printf '#!/bin/sh\necho "{\\"allowed\\": true}"\n' > "$T/k/bin/kith-auth"; chmod +x "$T/k/bin/kith-auth"
@@ -348,6 +352,7 @@ rstate() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["stat
 export STUB_SLEEP=30
 eb=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-end KITH_AGENT=architect "$ASK" --bg echo "long job" | idof)
 ek=$(cd "$T" && CLAUDE_CODE_SESSION_ID=sess-keep KITH_AGENT=architect "$ASK" --bg echo "other job" | idof)
+hassid "$eb"; hassid "$ek"
 export STUB_SLEEP=0
 sleep 2
 expect "a running --bg job is open" "$(rstate "$eb")" open
@@ -376,6 +381,7 @@ expect "the parked mark is gone" "$([ -e "$BOX/$pz.parked" ] && echo parked)" ""
 # removal and revoke end a person's asks, and the wakes their sessions are owed
 export STUB_SLEEP=30
 pj=$(cd "$T" && KITH_PERSON=mia CLAUDE_CODE_SESSION_ID=sess-mia "$ASK" --bg echo "mia job" | idof)
+hassid "$pj"
 export STUB_SLEEP=0
 sleep 2
 python3 "$WAKE" enqueue sess-mia --id mia-w1 --agent echo --person mia --door host -- "owed" >/dev/null
