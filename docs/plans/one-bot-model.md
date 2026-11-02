@@ -67,7 +67,8 @@ and `--json` first and the app calling it after.
 - [ ] **A0. Core design.** A short design doc (`docs/plans/core-design.md`): the agent model, secrets, scheduler,
   folders, engines, how the host and the CLI sit on the crate, the `core/` layout, and how `kith`'s dispatcher routes a
   command to the core. Reviewed by the architect agent before A1's code.
-- [ ] **A0b. Differential harness.** The verification below, as a test runner, before the first module moves.
+- [x] **A0b. Differential harness.** The verification below, as a test runner, before the first module moves.
+  `kernel/tests/difftest/` (README there); run it with `kernel/tests/kith-difftest-check`.
 - [ ] **A1. Folder rules.** One Rust implementation of where kith's folders are (`kernel/lib/kith_paths.py`,
   `serve/host/src/kernel.rs::machine_dir`, `hqmem::Layout::from_env` disagree today: `.migrated` is respected by two
   and not the third). New crate under `serve/` (name it in the PR), linked by the host, exposed to Python through the
@@ -176,3 +177,5 @@ for those, and run against the new core.
   Secrets and scheduler moved from B to the core (A5, A6). A0 (design) and A0b (differential harness) added before A1.
 - 2026-11-03: the core is built beside the kernel in a top-level `core/` folder of this repo (not a new repo, not
   under `serve/`), and switched over one command at a time when its comparison stays green.
+- 2026-11-03: A0b done: `kernel/tests/difftest/kith-difftest` runs corpus cases on an OLD and a NEW side and reports
+  green/red per command (`--summary`); seed corpus passes OLD against OLD. `kernel/bin/kith` does not read KITH_CORE yet.
