@@ -35,7 +35,7 @@ KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
     os.path.normpath(os.path.join(os.environ.get('PWD') or os.getcwd(), sys.argv[0])))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_launchd  # noqa: E402
-from kith_paths import paths, retire_old_job, launcher as kith_launcher  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import paths, retire_old_job, stable_kernel, launcher as kith_launcher  # noqa: E402  the one place that knows where kith's folders are
 STATE, AGENTS = paths()['KITH_STATE'], paths()['KITH_AGENTS']
 sys.stdout.reconfigure(line_buffering=True)   # in order with the tools it runs, also when piped
 LABEL = 'dev.kith.backup'
@@ -227,7 +227,7 @@ def nightly(on):
     p = paths()
     logs = p['KITH_LOGS']
     logs.mkdir(parents=True, exist_ok=True)
-    me = p['KITH_HOME'] / 'kernel/bin/kith-state'   # the address, not the disk path: the kith folder can move
+    me = stable_kernel() / 'bin/kith-state'   # cli/current: an update moves the link, the plist stays
     launcher = kith_launcher()      # uv with Full Disk Access, for a repo on an external disk
     argv = [str(launcher), 'run', '--quiet', '--script', str(me)] if launcher.exists() else [str(me)]
     PLIST.parent.mkdir(parents=True, exist_ok=True)

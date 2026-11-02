@@ -9,7 +9,7 @@ import type { EngineInterface, Register } from 'claude-code'
 //   classic.SubagentStop  if the agent didn't write its session file, write a short stub from its last message (never
 //                      blocks: a second turn would replace the helper's report with the answer to the nudge)
 //   /kith, mcp__kith__invoke  list agents; call one with an explicit project (invoke waits for the report and returns it)
-// The kernel comes from kith_path (default ~/kith/kernel, else ~/hq/kernel, ~/.kith/kernel, ~/Workspace/kith); agents and state from the resolver, as every
+// The kernel comes from kith_path (default the installed CLI's, ~/.kith/cli/current/share/kith/kernel); agents and state from the resolver, as every
 // kernel tool finds them (lib/kith_paths.py).
 
 type Spawned = { agent: string; project: string; isNamed: boolean; cwd: string; task: string; startedMs: number; sessionsDir?: string }
@@ -38,10 +38,16 @@ function frontmatter(text: string): { fields: Record<string, string>; body: stri
 async function kithRoot($: EngineInterface, configured: unknown): Promise<string> {
   const set = typeof configured === 'string' ? configured.trim() : ''
   const home = (await $.env.get('HOME')) ?? ''
+  const override = ((await $.env.get('KITH_KERNEL')) ?? '').trim()   // the developer override, ahead of everything
+  if (override) return override.replace(/^~(?=\/)/, home)
   if (set) return set.replace(/^~(?=\/)/, home)
-  // ~/kith/kernel is where install.sh puts it; ~/hq/kernel, ~/.kith/kernel, ~/.hq/kernel and ~/Workspace/kith are where older installs have it (hq_path is the config key before the rename).
-  for (const k of [`${home}/kith/kernel`, `${home}/hq/kernel`, `${home}/.kith/kernel`, `${home}/.hq/kernel`]) if (await $.fs.exists(`${k}/bin/kith-pkg`)) return k
-  return `${home}/Workspace/kith`
+  // The installed CLI's stable path (scripts/install.sh keeps cli/current on the release in use, ~/.hq on a Mac that has not migrated).
+  // Never a checkout found by looking around: a developer points kith_path (or KITH_KERNEL) at theirs.
+  for (const m of [`${home}/.kith`, `${home}/.hq`]) {
+    const k = `${m}/cli/current/share/kith/kernel`
+    if (await $.fs.exists(`${k}/bin/kith-pkg`)) return k
+  }
+  return `${home}/.kith/cli/current/share/kith/kernel`
 }
 
 // Where things are, from the kernel's one resolver (lib/kith_paths.py): the state folder (~/.kith) and

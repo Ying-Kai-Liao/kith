@@ -10,7 +10,7 @@ by running migrate again or reversed with --undo):
             written, ~/.hq replaced by a link to ~/.kith. A name in both folders other than an empty folder: nothing moves
   exclude   ~/.kith/.git/info/exclude names what was in ~/.kith before (serve/, ...), so kith backup never commits it
   home      ~/kith made a link to what ~/hq leads to; ~/hq stays
-  bin       ~/.local/bin/kith and hq lead to ~/kith/kernel/bin/kith
+  bin       ~/.local/bin/kith and hq lead to the installed CLI, ~/.kith/cli/current/bin/kith (none installed: left as they are)
   launcher  ~/.kith/bin/hq-uv renamed to kith-uv (Full Disk Access is per path, so it is granted again anyway); the
             launcher in ~/.kith/serve/config.json follows it
   jobs      each dev.hq.<x> job replaced by dev.kith.<x>: sched and backup through their own installers, the others by
@@ -408,11 +408,11 @@ def u_home(m):
 
 
 def s_bin(m, dry):
-    say(f'point {BIN}/kith and {BIN}/hq at {HOME}/kith/kernel/bin/kith')
+    say(f'point {BIN}/kith and {BIN}/hq at {NEW}/cli/current/bin/kith')
     if dry:
         return
     st = m['steps']['bin']
-    cmd = HOME / 'kith/kernel/bin/kith'
+    cmd = NEW / 'cli/current/bin/kith'   # the installed release (scripts/install.sh), never a checkout
     k = BIN / 'kith'
     keep = k.is_symlink() and not str(link_target(k)).startswith((str(HOME / 'hq'), str(HOME / 'kith')))
     if keep:   # a packaged install links the release binary: it answers to both names
@@ -420,7 +420,7 @@ def s_bin(m, dry):
     elif cmd.exists():
         target = str(cmd)
     else:
-        st['skipped'] = f'{cmd} is not there'
+        st['skipped'] = f'{cmd} is not there: install the CLI with scripts/install.sh'
         return
     if 'before' not in st:   # the first run's record is the one that counts
         st['before'] = {n: (os.readlink(BIN / n) if (BIN / n).is_symlink() else None) for n in ('kith', 'hq')}
