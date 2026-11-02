@@ -26,7 +26,7 @@ const LATER_IMPORT: usize = 4000;
 /// How long a take-over waits for the terminal's process to end.
 const EXIT_WAIT: Duration = Duration::from_secs(5);
 
-/// The summary keys the terminal owns, and the thread's prose summary (written by `chat::memory::summary`); entries
+/// The summary keys the terminal owns, and the thread's prose summary (written by `hqmem::summary`); entries
 /// don't produce them.
 const SUMMARY_KEYS: [&str; 8] =
     ["origin", "originLabel", "originBot", "liveWriter", "liveBusy", "terminal", "summary", "summaryAudience"];

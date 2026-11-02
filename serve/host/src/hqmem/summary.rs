@@ -7,7 +7,7 @@
 //! the apps. Threads that were quiet before the sweeper first ran get no summary until they are resumed (a message
 //! in the thread) or the owner asks (`kith summarise --thread <id>`): no bulk backfill.
 
-use super::hq_tidy::{Tag, record_cost};
+use super::cost::{Tag, record_cost};
 use crate::LockExt;
 use crate::chat::oneshot;
 use crate::hub::Hub;
@@ -205,6 +205,13 @@ pub fn facets(cfg: &BotConfig, root: Option<&Entry>) -> Facets {
     }
 }
 
+/// The runs of a user message the user typed themselves: not pasted, quoted or forwarded text.
+fn typed_by_user(data: &serde_json::Value) -> Vec<String> {
+    let pasted: Vec<String> =
+        data["pasted"].as_array().into_iter().flatten().filter_map(|p| p.as_str().map(str::to_owned)).collect();
+    kith_mem::evidence::typed(data["text"].as_str().unwrap_or_default(), &pasted)
+}
+
 /// What the run reads: the thread's chat messages as `speaker: text`, the newest [`READ_MESSAGES`], cut.
 fn material(entries: &[Entry]) -> (String, Vec<i64>) {
     let mut lines: Vec<String> = Vec::new();
@@ -217,7 +224,7 @@ fn material(entries: &[Entry]) -> (String, Vec<i64>) {
             e.data["author"].as_str().unwrap_or("agent").to_owned()
         };
         let text = if e.kind == EntryKind::User.as_str() {
-            super::notices::typed(&e.data).join("\n")
+            typed_by_user(&e.data).join("\n")
         } else {
             e.data["text"].as_str().unwrap_or_default().to_owned()
         };

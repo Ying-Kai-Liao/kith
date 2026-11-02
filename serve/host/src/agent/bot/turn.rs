@@ -236,7 +236,7 @@ impl Actor {
         self.lane = lane.clone();
         self.hub.set_task_status(&lane, TaskState::Working);
         if !hidden {
-            memory::summary::resume(&self.hub, &lane);
+            crate::hqmem::summary::resume(&self.hub, &lane);
         }
         self.turn = Some(turn);
         self.project_divider();

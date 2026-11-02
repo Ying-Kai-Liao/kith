@@ -692,7 +692,7 @@ fn recap(audience: &str) -> kith_mem::summary::Summary {
 fn root_with_summary(r: &Rig, bot: &str, audience: &str) -> crate::store::Entry {
     use crate::store::{EntryKind, Lane};
     let mut data = json!({"text": "hi", "thread": {"count": 1}});
-    crate::chat::memory::summary::set_row_summary(&mut data, &recap(audience));
+    crate::hqmem::summary::set_row_summary(&mut data, &recap(audience));
     r.hub.store.insert_entry(&Lane::main(bot), EntryKind::User, 1, &data).unwrap()
 }
 
