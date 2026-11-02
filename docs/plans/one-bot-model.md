@@ -54,7 +54,7 @@ bots moves no user data. The work is giving kith agents what host bots could do,
 | Every bot now depends on the kernel's environment (Python, uv), which already breaks on `brew upgrade uv` | Rust kernel; meanwhile a clear "kernel unavailable" state and `kith doctor` checks in the app (C2) |
 | Two launch styles per engine (one-shot adapters in `adapters/harness.py`, ACP in the host) | Engines move into the kernel crate with both styles (A2) |
 | Launch overhead: `kith <agent> --launch-json` takes ~0.66 s, spread over ~3,000 Bash lines and 15 Python processes | Ported to Rust (A3). Interim if it matters first: one Python process for the whole plan, cached on unchanged inputs |
-| Host memory has features the app shows (thread and row summaries, shared project memory) | Kith memory reaches parity before the host path is deleted (C4) |
+| Host memory has features the app shows (thread and row summaries, shared project memory) | Parity reached (C4): summaries, delete a file, forget a fact work on kith memory; pin, archive, clear, add entry, the per-bot shared switch and promotions are deliberately not carried over (shared project memory is the kith user layer) |
 | Settings edited in the app become package commits, so they apply on every Mac | Per-Mac choices go in kith settings, like permission mode already does (B1) |
 
 ## Tracks
@@ -119,7 +119,7 @@ and `--json` first and the app calling it after.
 - [ ] **C2. "New bot" calls `kith new --json`.** The host keeps only how a bot looks (avatar, pin, order,
   notifications). A "kernel unavailable" state and `kith doctor` checks in the app.
 - [ ] **C3. Engines and tools in the app go through the CLI** (needs A2, B1, B2).
-- [ ] **C4. Memory parity.** Thread and row summaries and shared project memory work on kith memory.
+- [x] **C4. Memory parity.** Thread and row summaries and shared project memory work on kith memory.
 - [ ] **C5. Delete the host-native path.** `hq_agent` required; the host's own bot launch, chat memory, vault use and
   routines for bots removed. Any host bot left on a Mac gets "make it a kith agent" first.
 
@@ -197,3 +197,4 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: B2 done: kernel CLI in #590, host mirror + `kith connector` in #589, `kith market`/`install --preview` in #593, and the app (this PR): the Marketplace puts connectors and skills onto a kith agent through the CLI, adds the Bots section, renames Agents to Engines; the bot page lists and removes the agent's connectors and skills. Custom hand-written skills are hidden (no CLI path); secrets stay in the host vault until A5.
 - 2026-11-03: B1 done: `kith <agent> set model|effort`, --json on every set, a model per backup entry (`claude@sonnet`), the app's agent editor calls them (PRs #598, #603).
 - 2026-11-03: B6 footguns done: bare `kith backup|update|migrate` print usage (verbs `backup run`, `update self`, `migrate run`); an unknown word after `kith` never starts a run (PR #596). The rest of B6 (--json list) stays open.
+- 2026-11-03: C4 done: the row shows the thread summary (PR #606), summaries moved to `hqmem/summary.rs` with `kith memory summary show|forget|write --thread --json` (PR #608), and `kith memory rm <file> [--json]` + `kith memory forget <text> --json` with `kithMemoryDelete` / `kithMemoryForget` and the apps' Delete file and Forget a fact (this PR). Not carried over: pin, archive, clear, add entry, the shared switch, promotions (no CLI); shared project memory is the kith user layer (user.md, people/, projects/).

@@ -262,6 +262,17 @@ extension HostClient {
         return try await call("kithMemoryRestore", Body(botId: botId, shared: shared, name: name, version: version), timeout: 30)
     }
 
+    /// Owner only. The deletion is a version, so `hqMemoryRestore` brings the file back; the answer is the version made.
+    public func hqMemoryDelete(botId: String, shared: Bool, name: String) async throws -> HqMemoryWrite {
+        try await call("kithMemoryDelete", FileBody(botId: botId, shared: shared, name: name), timeout: 30)
+    }
+
+    /// Owner only: keeps a fact out of every agent's memory (`kith memory forget`).
+    public func hqMemoryForget(botId: String, text: String) async throws {
+        struct Body: Encodable { var botId: String; var text: String }
+        let _: Empty = try await call("kithMemoryForget", Body(botId: botId, text: text), timeout: 30)
+    }
+
     public func hqTidyUps(botId: String, limit: Int = 20) async throws -> [HqTidyUp] {
         struct Body: Encodable { var botId: String; var limit: Int }
         do {

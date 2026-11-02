@@ -22,6 +22,8 @@ pub const METHODS: &[&str] = &[
     "kithMemoryHistory",
     "kithMemoryDiff",
     "kithMemoryRestore",
+    "kithMemoryDelete",
+    "kithMemoryForget",
     "kithMemoryTidyUps",
     "kithMemoryUndoTidy",
     "kithMemoryPromotions",
@@ -77,6 +79,20 @@ pub fn call(hub: &Hub, method: &str, b: &Value) -> Result<Value> {
             let out = hqmem::restore(&hqmem::open(&layout)?, &layout, &agent, shared, file()?, version)?;
             hub.emit_bot(str_arg(b, "botId")?);
             out
+        }
+        "kithMemoryDelete" => {
+            let out = hqmem::delete(&hqmem::open(&layout)?, &layout, &agent, shared, file()?)?;
+            hub.emit_bot(str_arg(b, "botId")?);
+            out
+        }
+        // Owner-only like the rest of this tab: the fact is kept out of every agent's memory, as `kith memory forget`.
+        "kithMemoryForget" => {
+            let text = str_arg(b, "text")?.trim();
+            if text.is_empty() {
+                bail!("text required");
+            }
+            hqmem::forget(&hqmem::open(&layout)?, text)?;
+            json!({"forgotten": true, "text": text})
         }
         "kithMemoryTidyUps" | "kithMemoryDreams" => {
             let runs = tidy::runs(&hqmem::open(&layout)?, &agent, count(b, "limit", RUNS_DEFAULT, RUNS_MAX))?;

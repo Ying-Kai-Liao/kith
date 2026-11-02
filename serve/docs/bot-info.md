@@ -157,6 +157,8 @@ layer, `MEMORY.md`, `people/mum.md`; anything that isn't a Markdown memory file 
 | `kithMemoryHistory` | `shared`, `name`, `limit?` (50, max 500) | `{ name, shared, versions: [version] }`, newest first |
 | `kithMemoryDiff` | `shared`, `name`, `from?`, `to?` (version ids) | `{ from, to, diff }`; by default the version before the newest to the newest; `diff` has `- `/`+ ` lines, `  ` context, `…` gaps |
 | `kithMemoryRestore` | `shared`, `name`, `version` | `{ version, warnings }`: the file becomes that version's content, as a new version (cause `restore`) |
+| `kithMemoryDelete` | `shared`, `name` | `{ version }`: the file is removed and the deletion is a version (cause `delete`), so `kithMemoryRestore` brings it back. MEMORY.md is refused. Owner only (as `kith memory rm`) |
+| `kithMemoryForget` | `text` | `{ forgotten: true, text }`: no agent or tidy writes the fact again (as `kith memory forget`). Owner only |
 | `kithMemoryTidyUps` | `limit?` (20, max 100) | `{ tidyUps: [tidyUp] }`, newest first |
 | `kithMemoryUndoTidy` | `id` | `{ restored: [label], refused: [{ file, reason }], undone }` |
 | `kithMemoryPromotions` | `status?` (`pending` default, `declined`, `approved`, `stale`), `limit?` | `{ promotions: [{ id, file, from, audience, room, projects, reason, asks, status, at, decidedAt }] }` |

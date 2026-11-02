@@ -1,8 +1,8 @@
-//! `kith memory check | log | diff | undo | forget`: the commands over the agents' memory files. (`ls` and `search`
+//! `kith memory check | log | diff | undo | rm | forget`: the commands over the agents' memory files. (`ls` and `search`
 //! stay in the kernel's kith-memory, which hands these here.)
 
 use super::hook::{self, Phase};
-use super::{Layout, Target, Who, forget, guard, open, put, read, record_undo, sync, tidy};
+use super::{Layout, Target, Who, forget, guard, open, put, read, record_undo, remove, sync, tidy};
 use anyhow::{Context, Result, bail};
 use clap::Subcommand;
 use kith_mem::files::{self, Author, Cause, Version};
@@ -50,10 +50,20 @@ pub enum Cmd {
         #[command(flatten)]
         env: Env,
     },
+    /// Delete a memory file. The deletion is a version: `log` shows it and `undo` brings the file back.
+    Rm {
+        file: PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[command(flatten)]
+        env: Env,
+    },
     /// Keep a fact out of memory: no agent or tidy writes it again.
     Forget {
         #[arg(required = true, num_args = 1..)]
         text: Vec<String>,
+        #[arg(long)]
+        json: bool,
         #[command(flatten)]
         env: Env,
     },
@@ -283,14 +293,44 @@ pub fn run(cmd: Cmd) -> Result<i32> {
                 (None, None) => bail!("which agent? kith memory tidy <agent>"),
             }
         }
-        Cmd::Forget { text, env } => {
+        Cmd::Rm { file, json, env } => {
+            // A guest's or a person's run may not delete the owner's files; the owner's own agent may.
+            if !super::summary_cli::owner_only(|k| std::env::var(k).ok()) {
+                eprintln!("Refused: only the owner's runs delete memory files");
+                return Ok(1);
+            }
+            let (conn, target) = history(&env, &file)?;
+            match remove(&conn, &env.layout(), &target, checker()) {
+                Ok(version) => {
+                    if json {
+                        let body = json!({"deleted": true, "file": target.label(), "path": target.path, "cause": cause_label(&version)});
+                        writeln!(out, "{body}")?;
+                    } else {
+                        writeln!(out, "{}: deleted (`kith memory undo` brings it back)", target.label())?;
+                    }
+                    Ok(0)
+                }
+                Err(e) if e.downcast_ref::<super::RemoveError>().is_some() => {
+                    eprintln!("Refused: {} ({e})", target.label());
+                    Ok(1)
+                }
+                Err(e) => Err(e),
+            }
+        }
+        Cmd::Forget { text, json, env } => {
             let layout = env.layout();
             let conn = open(&layout)?;
             let text = text.join(" ");
             forget(&conn, &text)?;
-            writeln!(out, "Forgotten: no agent or tidy will write that to memory again.")?;
-            for (label, line) in lines_with(&layout, &text) {
-                writeln!(out, "still written in {label}: {line}")?;
+            let still = lines_with(&layout, &text);
+            if json {
+                let still: Vec<_> = still.iter().map(|(file, line)| json!({"file": file, "line": line})).collect();
+                writeln!(out, "{}", json!({"forgotten": true, "text": text, "stillWritten": still}))?;
+            } else {
+                writeln!(out, "Forgotten: no agent or tidy will write that to memory again.")?;
+                for (label, line) in still {
+                    writeln!(out, "still written in {label}: {line}")?;
+                }
             }
             Ok(0)
         }

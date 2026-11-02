@@ -83,6 +83,17 @@ final class HqMemoryStore {
         }
     }
 
+    func delete(shared: Bool, name: String) async -> HqMemoryWrite? {
+        await write { try await $0.hqMemoryDelete(botId: botId, shared: shared, name: name) }
+    }
+
+    /// Keeps a fact out of memory for good; false when it failed (`writeError` says why).
+    func forget(_ text: String) async -> Bool {
+        let fact = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !fact.isEmpty else { return false }
+        return await write { try await $0.hqMemoryForget(botId: botId, text: fact) } != nil
+    }
+
     func save(shared: Bool, name: String, text: String) async -> HqMemoryWrite? {
         await write { try await $0.hqMemorySave(botId: botId, shared: shared, name: name, text: text) }
     }
