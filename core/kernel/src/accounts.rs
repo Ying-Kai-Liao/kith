@@ -1,0 +1,1048 @@
+//! Accounts: what a backup-chain entry or a main account means, whether it is ready, and the environment it launches
+//! with. A port of the read side of `kernel/lib/kith_accounts.py` (named logins, the backup chain, per-account env),
+//! which stays the source of truth while the Python path is the default; `kernel/tests/difftest` fails when the two
+//! differ. Reads only: `kith account add|use|remove` and `kith backup add|remove|set|reset` stay Python.
+//!
+//! Everything outside the file system goes through [`Outside`] (a harness's status command, the `kith-auth granted`
+//! lookup, a program on PATH), so each rule is tested in a tempdir with fakes. No token, credential file or Keychain
+//! item is ever read here: readiness is asked of the harness's own status command.
+
+use rusqlite::{Connection, OpenFlags, types::Value as Sql};
+use serde_json::Value;
+use std::fmt::Write as _;
+use std::io::Read as _;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// How long a harness status command or the grants lookup may take (`STATUS_TIMEOUT`).
+const STATUS_TIMEOUT: Duration = Duration::from_secs(20);
+/// What `logged_in` reads a status command that timed out as (the same code Python's `run_harness` answers).
+const TIMED_OUT: i32 = 124;
+
+/// What this module asks of the outside world.
+pub trait Outside {
+    /// Run a status command with `env` added to the process environment: (exit code, or `None` when the program is not
+    /// installed; stdout). A command that outlives [`STATUS_TIMEOUT`] answers `Some(124)`.
+    fn status(&self, argv: &[&str], env: &[(&str, &str)]) -> (Option<i32>, String);
+    /// The profiles `kith-auth granted --for AGENT SERVICE` names (names only; no secret is read).
+    fn granted(&self, agent: &str, service: &str) -> Vec<String>;
+    /// Whether a program is on PATH.
+    fn on_path(&self, program: &str) -> bool;
+}
+
+/// Where things are, and the outside world.
+pub struct Ctx<'a> {
+    /// `KITH_MACHINE`: `settings.json`, `cost.db` and `accounts/` live here.
+    pub machine: PathBuf,
+    /// `KITH_AGENTS`: the user's agents.
+    pub agents: PathBuf,
+    /// The kernel folder (`bin/kith-auth` is named in an API-key entry's helper command).
+    pub kernel: PathBuf,
+    pub out: &'a dyn Outside,
+}
+
+/// The real thing: child processes and the process PATH.
+pub struct System {
+    pub kernel: PathBuf,
+}
+
+impl Outside for System {
+    fn status(&self, argv: &[&str], env: &[(&str, &str)]) -> (Option<i32>, String) {
+        // A program that is not there (or can't start) is "not installed", as Python's FileNotFoundError reads.
+        run_with_timeout(argv, env).unwrap_or((None, String::new()))
+    }
+
+    fn granted(&self, agent: &str, service: &str) -> Vec<String> {
+        if agent.is_empty() {
+            return Vec::new();
+        }
+        let auth = self.kernel.join("bin/kith-auth");
+        match run_with_timeout(
+            &[&auth.to_string_lossy(), "granted", "--for", agent, service],
+            &[],
+        ) {
+            Ok((Some(0), out)) => out.split_whitespace().map(str::to_owned).collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn on_path(&self, program: &str) -> bool {
+        let Some(path) = std::env::var_os("PATH") else {
+            return false;
+        };
+        std::env::split_paths(&path).any(|d| is_executable(&d.join(program)))
+    }
+}
+
+fn is_executable(p: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+/// `subprocess.run(..., capture_output, timeout=20, stdin=DEVNULL)`: stdout only; stderr is dropped.
+fn run_with_timeout(argv: &[&str], env: &[(&str, &str)]) -> std::io::Result<(Option<i32>, String)> {
+    let mut child = Command::new(argv[0])
+        .args(&argv[1..])
+        .envs(env.iter().copied())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut stdout = child.stdout.take();
+    let reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(s) = stdout.as_mut() {
+            let _ = s.read_to_end(&mut buf);
+        }
+        String::from_utf8_lossy(&buf).into_owned()
+    });
+    let start = Instant::now();
+    let code = loop {
+        if let Some(status) = child.try_wait()? {
+            break status.code().unwrap_or(-1);
+        }
+        if start.elapsed() >= STATUS_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            return Ok((Some(TIMED_OUT), String::new()));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    Ok((Some(code), reader.join().unwrap_or_default()))
+}
+
+// --- Python's output forms ------------------------------------------------------------------------------------------
+
+/// A JSON value that keeps the order its keys were added in, printed the way Python's `json.dumps` does.
+#[derive(Clone, Debug)]
+pub enum J {
+    Null,
+    Bool(bool),
+    Int(i64),
+    Str(String),
+    Arr(Vec<J>),
+    Obj(Vec<(&'static str, J)>),
+}
+
+impl J {
+    fn s(v: &str) -> J {
+        J::Str(v.to_owned())
+    }
+
+    fn opt(v: Option<&str>) -> J {
+        v.map_or(J::Null, J::s)
+    }
+
+    /// `json.dumps(v)`: `", "` and `": "` separators, non-ASCII as `\uXXXX`.
+    pub fn dumps(&self) -> String {
+        let mut out = String::new();
+        self.write(&mut out);
+        out
+    }
+
+    fn write(&self, out: &mut String) {
+        match self {
+            J::Null => out.push_str("null"),
+            J::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            J::Int(n) => {
+                let _ = write!(out, "{n}");
+            }
+            J::Str(s) => quote(s, out),
+            J::Arr(items) => {
+                out.push('[');
+                for (i, v) in items.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    v.write(out);
+                }
+                out.push(']');
+            }
+            J::Obj(fields) => {
+                out.push('{');
+                for (i, (k, v)) in fields.iter().enumerate() {
+                    if i > 0 {
+                        out.push_str(", ");
+                    }
+                    quote(k, out);
+                    out.push_str(": ");
+                    v.write(out);
+                }
+                out.push('}');
+            }
+        }
+    }
+}
+
+fn quote(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            c if (' '..='~').contains(&c) => out.push(c),
+            c => {
+                let mut units = [0u16; 2];
+                for u in c.encode_utf16(&mut units) {
+                    let _ = write!(out, "\\u{u:04x}");
+                }
+            }
+        }
+    }
+    out.push('"');
+}
+
+/// `shlex.quote`.
+fn sh_quote(s: &str) -> String {
+    if !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "@%+=:,./-_".contains(c))
+    {
+        s.to_owned()
+    } else {
+        format!("'{}'", s.replace('\'', "'\"'\"'"))
+    }
+}
+
+// --- entry ids --------------------------------------------------------------------------------------------------------
+
+/// A Claude model name or alias (`CLAUDE_MODEL_RE`); it means nothing to another harness.
+pub fn is_claude_model(model: &str) -> bool {
+    ["opus", "sonnet", "haiku", "fable", "claude-"]
+        .iter()
+        .any(|p| model.starts_with(p))
+        || model == "best"
+        || model == "opusplan"
+}
+
+/// `(id without the model, model)`: an entry is `<harness>[:<name>][@<model>]`.
+pub fn split(entry: &str) -> (&str, Option<&str>) {
+    match entry.split_once('@') {
+        Some((base, model)) => (base, Some(model)),
+        None => (entry, None),
+    }
+}
+
+/// What Python's `$` allows before the end: one trailing newline.
+fn dollar(s: &str) -> &str {
+    s.strip_suffix('\n').unwrap_or(s)
+}
+
+fn model_ok(model: &str) -> bool {
+    let m = dollar(model);
+    !m.is_empty()
+        && m.chars()
+            .all(|c| c.is_alphanumeric() || "_.:[]/-".contains(c))
+}
+
+/// `(harness, name)`; the error says what is wrong with the id. A trailing `@model` is checked and left out.
+pub fn parse(entry: &str) -> Result<(String, Option<String>), String> {
+    let (base, model) = split(entry);
+    if let Some(m) = model
+        && !model_ok(m)
+    {
+        return Err(format!(
+            "'{base}@{m}': @ needs a model name (claude@sonnet, claude:work@opus)"
+        ));
+    }
+    let id = dollar(base);
+    let (harness, name) = match id.split_once(':') {
+        Some((h, n)) => (h, Some(n)),
+        None => (id, None),
+    };
+    let mut hc = harness.chars();
+    let harness_ok = hc.next().is_some_and(|c| c.is_ascii_lowercase())
+        && hc.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+    let name_ok = name.is_none_or(|n| {
+        let mut nc = n.chars();
+        nc.next().is_some_and(|c| c.is_ascii_alphanumeric())
+            && nc.all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+    });
+    if !harness_ok || !name_ok {
+        return Err(format!(
+            "'{base}' is not a backup id: use <harness> or <harness>:<name>, with @<model> for a model of its own \
+             (claude, claude:work, claude@sonnet, claude-api:main, codex)"
+        ));
+    }
+    if harness == "claude-api" && name.is_none() {
+        return Err("claude-api needs a profile: claude-api:<profile>".to_owned());
+    }
+    Ok((harness.to_owned(), name.map(str::to_owned)))
+}
+
+/// The entry harnesses that can be an agent's main account: its own, and for Claude an API key too.
+pub fn family(harness: &str) -> Vec<&str> {
+    match harness {
+        "claude" => vec!["claude", "claude-api"],
+        h => vec![h],
+    }
+}
+
+/// An error unless the entry's model can belong to its harness: a Claude model on another one (the B0 rule).
+pub fn check_entry_model(entry: &str) -> Result<(), String> {
+    let (h, _) = parse(entry)?;
+    if let Some(model) = split(entry).1
+        && is_claude_model(model)
+        && !family("claude").contains(&h.as_str())
+    {
+        return Err(format!(
+            "{model} is a Claude model and {h} is not Claude: use {h}@<a {h} model>, or claude@{model}"
+        ));
+    }
+    Ok(())
+}
+
+/// An error unless `entry` can be the main account of an agent on `harness`.
+pub fn check_main(entry: &str, harness: &str) -> Result<(), String> {
+    if split(entry).1.is_some() {
+        return Err(format!(
+            "{entry}: a main account takes no @model (the agent's own model applies); @model is for backups"
+        ));
+    }
+    let (h, _) = parse(entry)?;
+    if !family(harness).contains(&h.as_str()) {
+        let ok: Vec<&str> = family(harness)
+            .into_iter()
+            .map(|x| {
+                if x == "claude-api" {
+                    "claude-api:<profile>"
+                } else {
+                    x
+                }
+            })
+            .collect();
+        return Err(format!(
+            "{entry} can't be the main account of a {harness} agent: use {} or <harness>:<name> of those (a backup can be of another harness)",
+            ok.join(", ")
+        ));
+    }
+    Ok(())
+}
+
+// --- settings ---------------------------------------------------------------------------------------------------------
+
+type Map = serde_json::Map<String, Value>;
+
+fn valid_limit(v: &Value) -> bool {
+    v.is_number() && v.as_f64().is_some_and(|n| n > 0.0 && n < 1e7)
+}
+
+/// Whether one level of `settings.json` (the file, or one agent) is usable, as `kith_settings.read` checks it.
+fn level_ok(d: &Map) -> bool {
+    match d.get("backups") {
+        None => {}
+        Some(Value::Array(b)) if b.iter().all(Value::is_string) => {}
+        Some(_) => return false,
+    }
+    if d.get("account")
+        .is_some_and(|a| a.as_str().is_none_or(str::is_empty))
+    {
+        return false;
+    }
+    if let Some(m) = d.get("permission_mode") {
+        // a retired mode reads as the mode that replaced it
+        let current = m.as_str().map(|m| match m {
+            "manual" => "default",
+            "dontAsk" => "auto",
+            m => m,
+        });
+        if !current.is_some_and(|m| {
+            [
+                "default",
+                "acceptEdits",
+                "plan",
+                "auto",
+                "bypassPermissions",
+            ]
+            .contains(&m)
+        }) {
+            return false;
+        }
+    }
+    if d.get("at_limit").is_some_and(|a| {
+        a.as_str()
+            .is_none_or(|a| !["ask", "tell", "hold"].contains(&a))
+    }) {
+        return false;
+    }
+    d.get("limit").is_none_or(valid_limit)
+}
+
+/// What `settings.json` sets (`kith_settings.read`): nothing when the file is missing or can't be used.
+pub fn read_settings(machine: &Path) -> Map {
+    let Ok(text) = std::fs::read_to_string(machine.join("settings.json")) else {
+        return Map::new();
+    };
+    let Ok(Value::Object(s)) = serde_json::from_str::<Value>(&text) else {
+        return Map::new();
+    };
+    let no_agents = Map::new();
+    let agents = match s.get("agents") {
+        None => &no_agents,
+        Some(Value::Object(a)) if a.values().all(Value::is_object) => a,
+        Some(_) => return Map::new(),
+    };
+    if s.get("plugins")
+        .is_some_and(|p| !p.as_array().is_some_and(|p| p.iter().all(Value::is_string)))
+    {
+        return Map::new();
+    }
+    if !level_ok(&s) || !agents.values().all(|a| a.as_object().is_some_and(level_ok)) {
+        return Map::new();
+    }
+    match s.get("delegation") {
+        None => {}
+        Some(Value::Object(d)) => {
+            if d.get("chain_cost_cap_usd")
+                .is_some_and(|c| c.as_str() != Some("none") && !valid_limit(c))
+            {
+                return Map::new();
+            }
+        }
+        Some(_) => return Map::new(),
+    }
+    s
+}
+
+fn agent_settings<'a>(s: &'a Map, agent: &str) -> Option<&'a Map> {
+    if agent.is_empty() {
+        return None;
+    }
+    s.get("agents")?.get(agent)?.as_object()
+}
+
+/// The backup chain that applies to the agent: its own list, else the global one (`kith_settings.backups`).
+pub fn backups(machine: &Path, agent: &str) -> Vec<String> {
+    let s = read_settings(machine);
+    let list = |v: &Value| {
+        v.as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|i| i.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    match agent_settings(&s, agent).and_then(|a| a.get("backups")) {
+        Some(own) => list(own),
+        None => s.get("backups").map(list).unwrap_or_default(),
+    }
+}
+
+// --- the agent ----------------------------------------------------------------------------------------------------------
+
+/// The agent's `agent.md`, found as `bin/kith`'s `agent_dir` finds it; `None` when there is no such agent.
+pub fn agent_md_of(ctx: &Ctx<'_>, agent: &str) -> Option<PathBuf> {
+    [
+        ctx.agents.join(agent).join("role"),
+        ctx.agents.join(agent),
+        ctx.kernel.join("agents").join(agent),
+    ]
+    .into_iter()
+    .map(|d| d.join("agent.md"))
+    .find(|f| f.is_file())
+}
+
+/// The harness `agent.md` names (`claude-code` reads as `claude`); `claude` when it names none or there is no file.
+pub fn agent_harness(agent_md: Option<&Path>) -> String {
+    let named = agent_md
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|text| {
+            let rest = text.strip_prefix("---\n")?;
+            let front = &rest[..rest.find("\n---")?];
+            front.lines().find_map(|line| {
+                let v = line
+                    .strip_prefix("harness:")?
+                    .trim_start_matches([' ', '\t']);
+                let word: String = v.chars().take_while(|c| !c.is_whitespace()).collect();
+                (!word.is_empty()).then_some(word)
+            })
+        });
+    match named.as_deref() {
+        None | Some("claude-code") => "claude".to_owned(),
+        Some(h) => h.to_owned(),
+    }
+}
+
+/// The agent's main account id: its own setting, else the global one, when of the agent's harness family; else the
+/// harness itself (its default login).
+pub fn main_id(
+    ctx: &Ctx<'_>,
+    agent: &str,
+    agent_md: Option<&Path>,
+    harness: Option<&str>,
+) -> String {
+    let own = match harness {
+        Some(h) if !h.is_empty() => h.to_owned(),
+        _ => match agent_md {
+            Some(p) if !p.as_os_str().is_empty() => agent_harness(Some(p)),
+            _ => agent_harness(agent_md_of(ctx, agent).as_deref()),
+        },
+    };
+    let s = read_settings(&ctx.machine);
+    let candidates = [
+        agent_settings(&s, agent).and_then(|a| a.get("account")),
+        s.get("account"),
+    ];
+    for entry in candidates.into_iter().flatten() {
+        if let Some(e) = entry.as_str().filter(|e| !e.is_empty())
+            && check_main(e, &own).is_ok()
+        {
+            return e.to_owned();
+        }
+    }
+    own
+}
+
+// --- readiness ----------------------------------------------------------------------------------------------------------
+
+/// `(ready, why)`: the harness's own status command, in the account's dir when it has one.
+fn logged_in(ctx: &Ctx<'_>, harness: &str, directory: Option<&Path>) -> (bool, Option<String>) {
+    let (argv, var): (&[&str], &str) = if harness == "claude" {
+        (&["claude", "auth", "status"], "CLAUDE_CONFIG_DIR")
+    } else {
+        (&["codex", "login", "status"], "CODEX_HOME")
+    };
+    let dir = directory.map(|d| d.to_string_lossy().into_owned());
+    let env: Vec<(&str, &str)> = dir.as_deref().map(|d| (var, d)).into_iter().collect();
+    let (code, out) = ctx.out.status(argv, &env);
+    match code {
+        None => (false, Some(format!("{harness} is not installed"))),
+        Some(TIMED_OUT) => (false, Some(format!("{harness} did not answer"))),
+        Some(c) if c != 0 => (false, Some("not logged in".to_owned())),
+        Some(_) => {
+            if let Ok(Value::Object(d)) = serde_json::from_str::<Value>(&out)
+                && d.get("loggedIn") == Some(&Value::Bool(false))
+            {
+                return (false, Some("not logged in".to_owned()));
+            }
+            (true, None)
+        }
+    }
+}
+
+pub fn account_dir(ctx: &Ctx<'_>, harness: &str, name: &str) -> PathBuf {
+    ctx.machine.join("accounts").join(harness).join(name)
+}
+
+/// The one command that makes an entry ready.
+pub fn fix(entry: &str, agent: &str) -> Result<Option<String>, String> {
+    let (harness, name) = parse(entry)?;
+    Ok(match (harness.as_str(), name) {
+        ("claude" | "codex", Some(n)) => Some(format!("kith account add {harness} {n}")),
+        ("claude", None) => Some("claude auth login".to_owned()),
+        ("codex", None) => Some("codex login".to_owned()),
+        ("claude-api", n) => {
+            let n = n.unwrap_or_default();
+            let who = if agent.is_empty() { "<agent>" } else { agent };
+            Some(format!(
+                "kith auth set anthropic/{n} ANTHROPIC_API_KEY && kith auth grant {who} anthropic anthropic/{n}"
+            ))
+        }
+        _ => None,
+    })
+}
+
+fn no_key(agent: &str, name: &str) -> String {
+    let who = if agent.is_empty() { "the agent" } else { agent };
+    format!("no anthropic/{name} key granted to {who}")
+}
+
+fn granted(ctx: &Ctx<'_>, agent: &str) -> Vec<String> {
+    ctx.out.granted(agent, "anthropic")
+}
+
+/// `(ready, why)`. Unknown harnesses are never ready here.
+pub fn check(ctx: &Ctx<'_>, entry: &str, agent: &str) -> Result<(bool, Option<String>), String> {
+    let (harness, name) = parse(entry)?;
+    Ok(match (harness.as_str(), name) {
+        ("claude-api", n) => {
+            let n = n.unwrap_or_default();
+            if !ctx.out.on_path("claude") {
+                (false, Some("claude is not installed".to_owned()))
+            } else if granted(ctx, agent).contains(&format!("anthropic/{n}")) {
+                (true, None)
+            } else {
+                (false, Some(no_key(agent, &n)))
+            }
+        }
+        ("claude" | "codex", None) => logged_in(ctx, &harness, None),
+        ("claude" | "codex", Some(n)) => {
+            let d = account_dir(ctx, &harness, &n);
+            if d.is_dir() {
+                logged_in(ctx, &harness, Some(&d))
+            } else {
+                (false, Some(format!("no account {n}")))
+            }
+        }
+        (h, _) => (false, Some(format!("{h} is not supported yet"))),
+    })
+}
+
+/// `(ready, why)` without asking the harness: the account's folder is there, or the API key is granted. For the main
+/// account, which every run applies: a logged-out one is the harness's to say, at once and in its words.
+fn present(ctx: &Ctx<'_>, entry: &str, agent: &str) -> Result<(bool, Option<String>), String> {
+    let (harness, name) = parse(entry)?;
+    if let ("claude" | "codex", Some(n)) = (harness.as_str(), name.as_deref())
+        && !account_dir(ctx, &harness, n).is_dir()
+    {
+        return Ok((false, Some(format!("no account {n}"))));
+    }
+    if harness == "claude-api" {
+        let n = name.unwrap_or_default();
+        if !granted(ctx, agent).contains(&format!("anthropic/{n}")) {
+            return Ok((false, Some(no_key(agent, &n))));
+        }
+    }
+    Ok((true, None))
+}
+
+// --- the chain ----------------------------------------------------------------------------------------------------------
+
+fn kind(harness: &str) -> &'static str {
+    if harness == "claude-api" {
+        "api-key"
+    } else {
+        "subscription"
+    }
+}
+
+fn entry_json(ctx: &Ctx<'_>, entry: &str, agent: &str, primary: bool) -> Result<J, String> {
+    let (harness, name) = parse(entry)?;
+    // The main account on the default login stays ready as it always was: the host may hold that login's keys where
+    // `auth status` can't see them. A named or API-key main account is checked like any entry.
+    let (ready, why) = if primary && name.is_none() {
+        (true, None)
+    } else {
+        check(ctx, entry, agent)?
+    };
+    let mut f = vec![
+        ("id", J::s(entry)),
+        (
+            "harness",
+            J::s(if harness == "claude-api" {
+                "claude"
+            } else {
+                &harness
+            }),
+        ),
+        ("account", J::opt(name.as_deref())),
+        ("model", J::opt(split(entry).1)),
+        (
+            "kind",
+            J::s(if primary { "primary" } else { kind(&harness) }),
+        ),
+        ("ready", J::Bool(ready)),
+    ];
+    if !ready {
+        f.push(("why", J::opt(why.as_deref())));
+    }
+    Ok(J::Obj(f))
+}
+
+/// `backups-json`: the chain for `kith AGENT --backups-json`, the main account first.
+pub fn chain(ctx: &Ctx<'_>, agent: &str, agent_md: &Path) -> J {
+    let ids = backups(&ctx.machine, agent);
+    let main = main_id(ctx, agent, Some(agent_md), None);
+    let mut items = vec![entry_json(ctx, &main, agent, true).unwrap_or(J::Null)];
+    let mut seen = vec![main];
+    for i in ids {
+        if seen.contains(&i) {
+            continue; // the main account, or an id listed twice: an account is in the chain once
+        }
+        seen.push(i.clone());
+        // a hand-edited bad id: listed as not ready rather than failing the whole chain
+        items.push(entry_json(ctx, &i, agent, false).unwrap_or_else(|e| {
+            J::Obj(vec![
+                ("id", J::Str(i.clone())),
+                ("harness", J::Null),
+                ("account", J::Null),
+                ("model", J::Null),
+                ("kind", J::s("unknown")),
+                ("ready", J::Bool(false)),
+                ("why", J::Str(e)),
+            ])
+        }));
+    }
+    J::Obj(vec![
+        ("version", J::Int(1)),
+        ("agent", J::s(agent)),
+        ("chain", J::Arr(items)),
+    ])
+}
+
+/// The main account for the apps and `kith account use --json`: with an agent, the one its runs use and where that comes
+/// from (`agent`, `global`, or `default` for the harness's login); without, the global setting (id null when none).
+pub fn main_json(ctx: &Ctx<'_>, agent: &str) -> J {
+    let s = read_settings(&ctx.machine);
+    let (entry, harness, source): (Option<String>, Option<String>, &str) = if agent.is_empty() {
+        let e = s
+            .get("account")
+            .and_then(Value::as_str)
+            .filter(|e| !e.is_empty())
+            .map(str::to_owned);
+        (e, None, "global")
+    } else {
+        let md = agent_md_of(ctx, agent);
+        let harness = agent_harness(md.as_deref());
+        let entry = main_id(ctx, agent, md.as_deref(), Some(&harness));
+        let own = agent_settings(&s, agent)
+            .and_then(|a| a.get("account"))
+            .and_then(Value::as_str);
+        let source = if Some(entry.as_str()) == own {
+            "agent"
+        } else if entry == harness {
+            "default"
+        } else {
+            "global"
+        };
+        (Some(entry), Some(harness), source)
+    };
+    let mut out = vec![
+        ("id", J::opt(entry.as_deref())),
+        ("source", J::s(source)),
+        ("harness", J::opt(harness.as_deref())),
+    ];
+    if let Some(entry) = entry {
+        // a hand-edited bad id is reported as not ready, with the parse error as the reason
+        let (ready, why) = match entry_json(ctx, &entry, agent, true) {
+            Ok(J::Obj(e)) => {
+                let ready = e
+                    .iter()
+                    .any(|(k, v)| *k == "ready" && matches!(v, J::Bool(true)));
+                (
+                    ready,
+                    e.iter().find(|(k, _)| *k == "why").map(|(_, v)| v.clone()),
+                )
+            }
+            Ok(_) => (false, None),
+            Err(why) => (false, Some(J::Str(why))),
+        };
+        out.push(("ready", J::Bool(ready)));
+        if !ready {
+            out.push(("why", why.unwrap_or(J::Null)));
+            if let Ok(f) = fix(&entry, agent) {
+                out.push(("fix", J::opt(f.as_deref())));
+            }
+        }
+    }
+    J::Obj(out)
+}
+
+// --- launch -------------------------------------------------------------------------------------------------------------
+
+/// The apiKeyHelper command: prints the key on demand, run by Claude Code, so the key never passes through us.
+fn api_helper(ctx: &Ctx<'_>, agent: &str, name: &str) -> String {
+    let auth = ctx.kernel.join("bin/kith-auth");
+    let profile = format!("anthropic/{name}");
+    [
+        auth.to_string_lossy().as_ref(),
+        "get",
+        "--for",
+        agent,
+        "--profile",
+        &profile,
+        "anthropic",
+        "ANTHROPIC_API_KEY",
+    ]
+    .iter()
+    .map(|a| sh_quote(a))
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
+/// `launch-env`: shell assignments for `bin/kith`; the error (exit 4) says why the entry can't run. `light`: the main
+/// account's check (`present`), not the harness's status command.
+pub fn launch_env(ctx: &Ctx<'_>, agent: &str, entry: &str, light: bool) -> Result<String, String> {
+    let (harness, name) = parse(entry)?;
+    if !["claude", "claude-api", "codex"].contains(&harness.as_str()) {
+        return Err(format!(
+            "{entry}: {harness} is not supported in launch-json yet"
+        ));
+    }
+    let mut model = split(entry).1.map(str::to_owned);
+    if model.is_none() && !light {
+        // --backup claude for a chain entry claude@sonnet: the id without its model finds it, unless the chain lists the
+        // plain id too (the exact entry wins).
+        let ids = backups(&ctx.machine, agent);
+        if !ids.iter().any(|i| i == entry) {
+            model = ids.iter().find_map(|i| match split(i) {
+                (b, Some(m)) if b == entry && !m.is_empty() => Some(m.to_owned()),
+                _ => None,
+            });
+        }
+    }
+    let (ready, why) = if light {
+        present(ctx, entry, agent)?
+    } else {
+        check(ctx, entry, agent)?
+    };
+    if !ready {
+        let hint = fix(entry, agent)?;
+        return Err(format!("{entry}: {}", why.unwrap_or_default())
+            + &hint
+                .map(|h| format!(" (make it ready: {h})"))
+                .unwrap_or_default());
+    }
+    let run_harness = if harness == "claude-api" {
+        "claude"
+    } else {
+        harness.as_str()
+    };
+    let (mut cfg_var, mut cfg_dir) = ("", String::new());
+    if let (Some(n), "claude" | "codex") = (name.as_deref(), harness.as_str()) {
+        cfg_var = if harness == "claude" {
+            "CLAUDE_CONFIG_DIR"
+        } else {
+            "CODEX_HOME"
+        };
+        cfg_dir = account_dir(ctx, &harness, n).to_string_lossy().into_owned();
+    }
+    let helper = if harness == "claude-api" {
+        api_helper(ctx, agent, name.as_deref().unwrap_or_default())
+    } else {
+        String::new()
+    };
+    Ok(format!(
+        "backup_harness={} backup_account={} backup_cfg_var={} backup_cfg_dir={} backup_api_helper={} backup_model={}",
+        sh_quote(run_harness),
+        sh_quote(name.as_deref().unwrap_or_default()),
+        sh_quote(cfg_var),
+        sh_quote(&cfg_dir),
+        sh_quote(&helper),
+        sh_quote(model.as_deref().unwrap_or_default())
+    ))
+}
+
+/// `main-env`: `bin/kith`'s assignments for a run on the main account: `main_id` plus `launch-env`'s (empty for the
+/// default login).
+pub fn main_env(ctx: &Ctx<'_>, agent: &str, agent_md: &Path) -> Result<String, String> {
+    let entry = main_id(ctx, agent, Some(agent_md), None);
+    let env = if parse(&entry)?.1.is_none() {
+        "backup_harness='' backup_account='' backup_cfg_var='' backup_cfg_dir='' backup_api_helper=''".to_owned()
+    } else {
+        launch_env(ctx, agent, &entry, true)
+            .map_err(|e| format!("{agent}'s main account {e}; or run on the default login: kith account use --reset --agent {agent}"))?
+    };
+    Ok(format!("main_id={} {env}", sh_quote(&entry)))
+}
+
+// --- the cost ledger ----------------------------------------------------------------------------------------------------
+
+/// A ledger text column the way Python's truthiness reads it: empty or null is nothing.
+fn text(v: &Sql) -> Option<String> {
+    match v {
+        Sql::Text(s) if !s.is_empty() => Some(s.clone()),
+        Sql::Integer(n) if *n != 0 => Some(n.to_string()),
+        Sql::Real(f) if *f != 0.0 => Some(f.to_string()),
+        _ => None,
+    }
+}
+
+/// A ledger row's account id; `None` when it can't tell. Rows from before `account_id`: `provider[:account]`; rows from
+/// before `provider` don't say.
+fn ledger_id(provider: &Sql, account: &Sql, account_id: &Sql) -> Option<String> {
+    text(account_id)
+        .or_else(|| text(provider).map(|p| text(account).map_or(p.clone(), |a| format!("{p}:{a}"))))
+}
+
+/// The ledger, read-only; `None` without a session id or a ledger file.
+fn ledger(machine: &Path, sid: &str) -> Option<Connection> {
+    let db = machine.join("cost.db");
+    if sid.is_empty() || !db.is_file() {
+        return None;
+    }
+    Connection::open_with_flags(
+        db,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()
+}
+
+/// The first row of `select <columns> from runs where session = sid`, the columns the `runs` table of this ledger has.
+fn run_row(
+    c: &Connection,
+    sid: &str,
+    pick: &dyn Fn(&[String]) -> Option<String>,
+) -> rusqlite::Result<Option<Vec<Sql>>> {
+    let cols: Vec<String> = c
+        .prepare("pragma table_info(runs)")?
+        .query_map([], |r| r.get::<_, String>(1))?
+        .collect::<Result<_, _>>()?;
+    let Some(select) = pick(&cols) else {
+        return Ok(None);
+    };
+    let mut st = c.prepare(&format!("select {select} from runs where session = ?"))?;
+    let n = st.column_count();
+    let mut rows = st.query([sid])?;
+    match rows.next()? {
+        Some(r) => Ok(Some(
+            (0..n)
+                .map(|i| r.get::<_, Sql>(i))
+                .collect::<rusqlite::Result<_>>()?,
+        )),
+        None => Ok(None),
+    }
+}
+
+/// The account id the session was made under, from the cost ledger; `None` when the ledger doesn't know it.
+pub fn session_account(machine: &Path, sid: &str) -> Option<String> {
+    let c = ledger(machine, sid)?;
+    let row = run_row(&c, sid, &|cols| {
+        let has = |n: &str| cols.iter().any(|c| c == n);
+        has("provider").then(|| {
+            format!(
+                "provider, account, {}",
+                if has("account_id") {
+                    "account_id"
+                } else {
+                    "null"
+                }
+            )
+        })
+    })
+    .ok()??;
+    ledger_id(&row[0], &row[1], &row[2])
+}
+
+/// What a session started with, from the cost ledger (the run's tag): `harness` is claude for a row from before provider.
+#[derive(Debug, PartialEq, Eq)]
+pub struct SessionRun {
+    pub agent: Option<String>,
+    pub harness: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+pub fn session_run(machine: &Path, sid: &str) -> Option<SessionRun> {
+    let c = ledger(machine, sid)?;
+    let row = run_row(&c, sid, &|cols| {
+        Some(format!(
+            "agent, {}, model, effort",
+            if cols.iter().any(|c| c == "provider") {
+                "provider"
+            } else {
+                "null"
+            }
+        ))
+    })
+    .ok()??;
+    Some(SessionRun {
+        agent: match &row[0] {
+            Sql::Text(s) => Some(s.clone()),
+            _ => None,
+        },
+        harness: text(&row[1]).unwrap_or_else(|| "claude".to_owned()),
+        model: text(&row[2]),
+        effort: text(&row[3]),
+    })
+}
+
+impl SessionRun {
+    /// `session-run SID`'s JSON.
+    pub fn json(&self) -> J {
+        J::Obj(vec![
+            ("agent", J::opt(self.agent.as_deref())),
+            ("harness", J::s(&self.harness)),
+            ("model", J::opt(self.model.as_deref())),
+            ("effort", J::opt(self.effort.as_deref())),
+        ])
+    }
+
+    /// `session-run SID --sh`: what `bin/kith` evals for a resumed thread.
+    pub fn sh(&self) -> String {
+        sh_line(&self.harness, self.model.as_deref(), self.effort.as_deref())
+    }
+}
+
+/// The `--sh` line; also for a session the ledger doesn't know (all empty).
+pub fn sh_line(harness: &str, model: Option<&str>, effort: Option<&str>) -> String {
+    format!(
+        "s_harness={} s_model={} s_effort={}",
+        sh_quote(harness),
+        sh_quote(model.unwrap_or_default()),
+        sh_quote(effort.unwrap_or_default())
+    )
+}
+
+// --- `kith account list` --------------------------------------------------------------------------------------------------
+
+struct Row {
+    id: String,
+    harness: &'static str,
+    name: String,
+    dir: String,
+    ok: bool,
+    why: Option<String>,
+}
+
+/// `kith account list [--json]`: each extra account, its harness and whether it is logged in.
+pub fn list(ctx: &Ctx<'_>, json: bool) -> String {
+    let mut rows = Vec::new();
+    for harness in ["claude", "codex"] {
+        let root = ctx.machine.join("accounts").join(harness);
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(&root)
+            .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).collect())
+            .unwrap_or_default();
+        dirs.sort();
+        for d in dirs {
+            let name = d
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if d.is_dir() && !name.starts_with('.') {
+                let (ok, why) = logged_in(ctx, harness, Some(&d));
+                rows.push(Row {
+                    id: format!("{harness}:{name}"),
+                    harness,
+                    name,
+                    dir: d.to_string_lossy().into_owned(),
+                    ok,
+                    why,
+                });
+            }
+        }
+    }
+    if json {
+        let items = rows
+            .iter()
+            .map(|r| {
+                let mut f = vec![
+                    ("id", J::s(&r.id)),
+                    ("harness", J::s(r.harness)),
+                    ("name", J::s(&r.name)),
+                    ("dir", J::s(&r.dir)),
+                    ("logged_in", J::Bool(r.ok)),
+                ];
+                if !r.ok {
+                    f.push(("why", J::opt(r.why.as_deref())));
+                }
+                J::Obj(f)
+            })
+            .collect();
+        return J::Arr(items).dumps() + "\n";
+    }
+    if rows.is_empty() {
+        return "no extra accounts (kith account add claude|codex <name>)\n".to_owned();
+    }
+    let mut out = String::new();
+    for r in &rows {
+        let state = if r.ok {
+            "logged in"
+        } else {
+            r.why.as_deref().unwrap_or_default()
+        };
+        let _ = writeln!(out, "{:<20} {:<7} {state}", r.id, r.harness);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests;
