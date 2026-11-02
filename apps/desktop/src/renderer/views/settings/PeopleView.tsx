@@ -51,7 +51,12 @@ export function PeopleView() {
             <IconButton title="Dismiss" icon="xmark" onClick={() => people.dismissRemoved()} />
           </div>
         ) : null}
-        {people.people.length === 0 ? (
+        {people.loadFailed && people.people.length === 0 ? (
+          <div className="settings-row">
+            <Text grow tone="danger">Couldn't read the people list. {people.error}</Text>
+            <Button kind="secondary" onClick={() => void people.load()} disabled={people.busy}>Retry</Button>
+          </div>
+        ) : people.people.length === 0 ? (
           <div className="settings-row"><Text tone="secondary">No one yet.</Text></div>
         ) : (
           people.people.map((person) => (
@@ -104,6 +109,7 @@ export function PeopleView() {
 
 function PersonRow({ person, busy, onRestore, onEdit, onInvite, onRemove }: { person: Person; busy: boolean; onRestore: () => void; onEdit: () => void; onInvite: () => void; onRemove: () => void }) {
   const agents = Object.entries(person.agents)
+  const everyone = Object.entries(person.everyoneAgents)
   const seen = Math.max(0, ...person.devices.map((d) => d.lastSeenAt ?? 0))
   return (
     <VStack gap={6}>
@@ -112,10 +118,13 @@ function PersonRow({ person, busy, onRestore, onEdit, onInvite, onRemove }: { pe
         <VStack grow className="settings-stack">
           <Text truncate>{person.name}</Text>
           <Text size="caption" tone="secondary">
-            {agents.length ? agents.map(([a, r]) => `${a} (${r})`).join(', ') : 'No agents'}
+            {agents.length ? agents.map(([a, r]) => `${a} (${r})`).join(', ') : everyone.length ? 'No agents of their own' : 'No agents'}
           </Text>
+          {everyone.length ? (
+            <Text size="caption" tone="secondary">everyone: {everyone.map(([a, r]) => `${a} (${r})`).join(', ')}</Text>
+          ) : null}
           <Text size="caption" tone="secondary">
-            {person.revoked ? 'Access revoked' : !person.joined ? (person.openInvites ? 'Invite sent' : 'Hasn\'t joined') : seen ? `Last seen ${relativeDay(new Date(seen))}` : 'Joined'}
+            {person.revoked ? 'Access revoked' : !person.joined ? (person.openInvites ? 'Invite sent' : person.createdAt === null ? 'Added from the terminal, not joined' : 'Hasn\'t joined') : seen ? `Last seen ${relativeDay(new Date(seen))}` : 'Joined'}
           </Text>
         </VStack>
         {person.revoked ? (
