@@ -54,6 +54,12 @@ async fn changing_access_survives_a_lost_agent_folder() {
     joined(&r).await;
     lose_agent_folder(&r, "house");
     let out = call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "member"}})).await.unwrap();
+    // Taking access away needs no folder: house goes, and a recreated folder would not bring it back.
     assert_eq!(out["person"]["agents"], json!({"money": "member"}));
+    assert!(
+        out["warnings"].as_array().is_none_or(|w| w.iter().all(|w| !w.as_str().unwrap().contains("house"))),
+        "{out}"
+    );
+    assert!(!r.allowed("sam", "house"));
     assert!(r.allowed("sam", "money"));
 }
