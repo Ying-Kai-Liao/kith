@@ -100,7 +100,7 @@ and `--json` first and the app calling it after.
   (PR #582).
 - [ ] **B1. Agent settings.** `kith <agent> set model|effort` beside `set harness`, all with `--json`. The app's agent
   editor calls them. A model per backup entry (issue #578).
-- [ ] **B2. Connectors and skills as grants.** `kith <agent> connect <connector>` / `disconnect`, `kith <agent> skill
+- [x] **B2. Connectors and skills as grants.** `kith <agent> connect <connector>` / `disconnect`, `kith <agent> skill
   add|remove <id>`, list commands with `--json`. The install logic behind the app's Marketplace
   (`serve/host/src/market/`: MCP registry, Anthropic skills, Composio) moves behind these; the Marketplace installs onto
   an agent. Includes the Marketplace layout from 2026-11-03: a **Bots** section for shared kith agents (GitHub topic
@@ -191,3 +191,5 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: A0b done: `kernel/tests/difftest/kith-difftest` runs corpus cases on an OLD and a NEW side and reports
   green/red per command (`--summary`); seed corpus passes OLD against OLD. `kernel/bin/kith` does not read KITH_CORE yet.
 - 2026-11-03: A0 done: [core-design.md](core-design.md) (crate `kith-kernel` in `core/kernel`, per-command switching through `kernel/lib/core-switched.txt`, `KITH_CORE=python|rust` for the harness), reviewed by the architect agent (12 points, each adopted or answered in its section 13).
+- 2026-11-03: C1 CLI: built-in `scratch` agent (`kernel/agents/scratch`, no install step, listed as `builtin`, never backed up or shared), engine and model per chat and kept on `--resume`, `kith scratch keep <thread> <name>` makes a real agent via `kith new --instructions` (PR #597). The app half of C1 is still open.
+- 2026-11-03: B2 done: kernel CLI in #590, host mirror + `kith connector` in #589, `kith market`/`install --preview` in #593, and the app (this PR): the Marketplace puts connectors and skills onto a kith agent through the CLI, adds the Bots section, renames Agents to Engines; the bot page lists and removes the agent's connectors and skills. Custom hand-written skills are hidden (no CLI path); secrets stay in the host vault until A5.
