@@ -47,6 +47,9 @@ async function kithRoot($: EngineInterface, configured: unknown): Promise<string
     const k = `${m}/cli/current/share/kith/kernel`
     if (await $.fs.exists(`${k}/bin/kith-pkg`)) return k
   }
+  // No installed CLI at all (a Mac that has not moved to the release layout yet): the kernel it has is the only one, so the
+  // old addresses are not a silent checkout pick-up. Once cli/current exists they are never looked at.
+  for (const k of [`${home}/kith/kernel`, `${home}/hq/kernel`, `${home}/.kith/kernel`, `${home}/.hq/kernel`]) if (await $.fs.exists(`${k}/bin/kith-pkg`)) return k
   return `${home}/.kith/cli/current/share/kith/kernel`
 }
 

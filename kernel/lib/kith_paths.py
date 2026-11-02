@@ -116,7 +116,15 @@ def stable_kernel():
     if given:
         return Path(os.path.expanduser(given))
     cur = cli_current() / 'share/kith/kernel'
-    return cur if cur.is_dir() else KERNEL
+    if cur.is_dir():
+        return cur
+    # No installed CLI: this kernel, by its logical address (~/kith/kernel) when that leads here, so a path with a
+    # volume name and spaces is not written into plists.
+    for home in (getenv('HOME').strip(), str(HOME / 'kith'), str(HOME / 'hq')):
+        c = Path(os.path.expanduser(home)) / 'kernel' if home else None
+        if c and c.is_dir() and os.path.samefile(c, KERNEL):
+            return c
+    return KERNEL
 
 
 def _first(*candidates):
