@@ -204,6 +204,7 @@
         "fastModeIssue": "string?",
         "unread": "int",
         "lastMessage": "string?",
+        "lastSummary": "string?",
         "lastAt": "int",
         "botGuest": "BotGuestRef?"
       },

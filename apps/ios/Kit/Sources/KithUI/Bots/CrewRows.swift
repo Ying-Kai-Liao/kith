@@ -33,7 +33,7 @@ public enum CrewRows {
         if bot.needsInput { return using + (bot.activity.isEmpty ? "Needs your approval" : bot.activity) }
         if bot.isWorking { return using + (bot.activity.isEmpty ? "Working…" : bot.activity) }
         if bot.status == "error" { return using + MessagePreview.text(bot.lastMessage ?? "Something went wrong") }
-        return using + MessagePreview.text(bot.lastMessage ?? (bot.isGroup ? "\(bot.members.count) agents" : "\(store.backendName(bot.backend)) · \(bot.folderName)"))
+        return using + MessagePreview.text(bot.rowLine ?? (bot.isGroup ? "\(bot.members.count) agents" : "\(store.backendName(bot.backend)) · \(bot.folderName)"))
     }
 
     public static func orderItem(_ item: RosterItem, computerIndex: Int = 0) -> CrewOrderItem {

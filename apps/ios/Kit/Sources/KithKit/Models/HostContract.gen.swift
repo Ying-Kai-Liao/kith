@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "dcc5b25fce70bc9615f4b9e5437113f17e5dd3a6b5476c677bcd71f587804878"
+    public static let sha256 = "e7a6f1c0cb520e841e10bd3f0cea69cd71c3671b5f5413e706a813bb0c1d0550"
 }
 
 extension HostContract {
@@ -476,10 +476,11 @@ extension HostContract {
         public var fastModeIssue: String?
         public var unread: Int64
         public var lastMessage: String?
+        public var lastSummary: String?
         public var lastAt: Int64
         public var botGuest: BotGuestRef?
 
-        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
+        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastSummary: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
             self.id = id
             self.kind = kind
             self.members = members
@@ -527,6 +528,7 @@ extension HostContract {
             self.fastModeIssue = fastModeIssue
             self.unread = unread
             self.lastMessage = lastMessage
+            self.lastSummary = lastSummary
             self.lastAt = lastAt
             self.botGuest = botGuest
         }
