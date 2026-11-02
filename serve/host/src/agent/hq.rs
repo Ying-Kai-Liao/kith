@@ -24,12 +24,12 @@ pub const ACP_COMMAND_ENV: &str = "KITH_SERVE_HQ_ACP_COMMAND";
 #[cfg(test)]
 pub(crate) static TEST_KERNEL_BIN: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
 
-/// The `kith` to run: `KITH_KERNEL_BIN` (the old `HQ_BIN`) when set (an empty value turns it off), else `kith` on PATH,
-/// else `hq` on PATH (installed before the rename), else `~/.local/bin/kith` or `~/.local/bin/hq`, else the entry of
-/// the kernel packaged with this binary (the Mac app, a release install).
-/// Blocking: looking on PATH may ask the login shell.
+/// The `kith` to run: `KITH_KERNEL_BIN` (the old `HQ_BIN`) when set (an empty value turns it off), else the entry of
+/// the kernel the host found (`kernel::current_kernel`: the installed CLI, never whatever `kith` is on PATH), provided
+/// the CLI passes the version gate (`refusal`). Looked up per call, so a `kith update` reaches the next run.
+/// Blocking: reads the kernel's VERSION.
 pub fn bin() -> Option<PathBuf> {
-    // A unit test never reaches the developer's own kernel (`which kith`, ~/.local/bin, the packaged one): running it
+    // A unit test never reaches the developer's own kernel (the installed one, a checkout): running it
     // would start real agents. Only a kernel the test names through `TEST_KERNEL_BIN` is found.
     #[cfg(test)]
     {
@@ -44,13 +44,33 @@ fn found() -> Option<PathBuf> {
     if let Some(set) = ["KITH_KERNEL_BIN", "HQ_BIN"].iter().find_map(std::env::var_os) {
         return (!set.is_empty()).then(|| PathBuf::from(set));
     }
-    crate::agent::backends::which("kith")
-        .or_else(|| crate::agent::backends::which("hq"))
-        .or_else(|| {
-            let bin = dirs::home_dir()?.join(".local/bin");
-            ["kith", "hq"].iter().map(|n| bin.join(n)).find(|p| p.is_file())
-        })
-        .or_else(|| crate::kernel::entry_in(&crate::kernel::current_kernel()?))
+    let cli = crate::kernel::current_cli();
+    if !cli.ok {
+        return None;
+    }
+    crate::kernel::entry_in(cli.kernel.as_deref()?)
+}
+
+/// Why agent runs are refused right now (the CLI is missing or too old), for the message a failed start shows.
+/// None when they may run, always so in a unit test and with `KITH_KERNEL_BIN` set (the same escape `bin` honours).
+pub fn refusal() -> Option<String> {
+    #[cfg(test)]
+    {
+        None
+    }
+    #[cfg(not(test))]
+    {
+        if ["KITH_KERNEL_BIN", "HQ_BIN"].iter().any(|k| std::env::var_os(k).is_some()) {
+            return None;
+        }
+        crate::kernel::current_cli().refusal()
+    }
+}
+
+/// The message for a start that found no kith: the gate's, else that there is none.
+pub fn missing() -> String {
+    refusal()
+        .unwrap_or_else(|| "kith isn't installed on this computer (set KITH_KERNEL_BIN, or install the CLI)".into())
 }
 
 /// What the host does with an agent of `kith ls --json` (the kernel contract's `Agent`).
@@ -361,7 +381,7 @@ pub async fn projects(fresh: bool) -> Result<Vec<Project>> {
         return Ok(list);
     }
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
-        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+        bail!("{}", missing());
     };
     let out = run(&bin, &command::project_ls(), None, LIST_TIMEOUT).await?;
     let list = serde_json::from_str::<kernel::Projects>(out.trim())
@@ -405,7 +425,7 @@ fn slot(agent: &str) -> std::sync::Arc<InfoSlot> {
 
 async fn run_info(agent: &str) -> Result<Value> {
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
-        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+        bail!("{}", missing());
     };
     let out = run(&bin, &[agent, "--info-json"], None, INFO_TIMEOUT).await?;
     let info: Value = serde_json::from_str(out.trim())
@@ -427,7 +447,7 @@ impl InfoRun {
 /// entry point (kith's own error text on failure, e.g. a mode it doesn't know). Returns the info read back from hq.
 pub async fn set_permission(agent: &str, mode: &str) -> Result<InfoRun> {
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
-        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+        bail!("{}", missing());
     };
     run(&bin, &[agent, "set", "permission", mode], None, LIST_TIMEOUT).await?;
     Ok(refill(agent, true).await)
@@ -437,7 +457,7 @@ pub async fn set_permission(agent: &str, mode: &str) -> Result<InfoRun> {
 /// keeps the agent's own model). Returns the info read back from hq.
 pub async fn set_call_model(agent: &str, model: &str) -> Result<InfoRun> {
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
-        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+        bail!("{}", missing());
     };
     run(&bin, &[agent, "set", "call-model", model], None, LIST_TIMEOUT).await?;
     Ok(refill(agent, true).await)
@@ -448,7 +468,7 @@ pub async fn set_call_model(agent: &str, model: &str) -> Result<InfoRun> {
 /// as kith-info reads it now, never the caller's word. Returns the info read back from hq.
 pub async fn schedule(agent: &str, id: &str, op: &str) -> Result<InfoRun> {
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
-        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+        bail!("{}", missing());
     };
     let info = refill(agent, true).await.info.map_err(|e| anyhow!("can't read {agent}'s schedules: {e}"))?;
     let job = info["schedules"]
@@ -532,7 +552,7 @@ pub fn cached_call_model(agent: &str) -> Option<String> {
 /// `kith memory search <query> --agent <agent> --json -n <limit>`: the `hits` list as kith printed it.
 pub async fn memory_search(agent: &str, query: &str, limit: usize) -> Result<Vec<Value>> {
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
-        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+        bail!("{}", missing());
     };
     let n = limit.to_string();
     // The query stays before `--agent <name>`: kith reads words up to the first flag as the query, so a query can't
@@ -551,7 +571,7 @@ pub async fn memory_search(agent: &str, query: &str, limit: usize) -> Result<Vec
 /// `kith project add <id> <path>`: kith's own error text on failure (a taken id, a path that isn't a folder…).
 pub async fn project_add(id: &str, path: &str) -> Result<()> {
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
-        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+        bail!("{}", missing());
     };
     run(&bin, &["project", "add", id, path], None, LIST_TIMEOUT).await?;
     // The next list must show it.

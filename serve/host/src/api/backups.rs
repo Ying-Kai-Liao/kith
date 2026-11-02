@@ -38,9 +38,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
 }
 
 async fn kith() -> Result<std::path::PathBuf> {
-    tokio::task::spawn_blocking(hq::bin)
-        .await?
-        .ok_or_else(|| anyhow!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)"))
+    tokio::task::spawn_blocking(hq::bin).await?.ok_or_else(|| anyhow!("{}", hq::missing()))
 }
 
 fn json_of(out: &str, what: &str) -> Result<Value> {
