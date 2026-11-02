@@ -114,7 +114,7 @@ and `--json` first and the app calling it after.
 
 ### C. The app makes kith agents
 
-- [ ] **C1. Built-in `scratch` agent.** Ships with kith; threads with it are the quick chats. "Keep as agent" makes a
+- [x] **C1. Built-in `scratch` agent.** Ships with kith; threads with it are the quick chats. "Keep as agent" makes a
   real agent from a thread. Never backed up or shared.
 - [ ] **C2. "New bot" calls `kith new --json`.** The host keeps only how a bot looks (avatar, pin, order,
   notifications). A "kernel unavailable" state and `kith doctor` checks in the app.

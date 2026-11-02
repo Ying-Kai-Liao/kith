@@ -163,7 +163,7 @@ impl Hub {
 /// Its chat auto-threads: each burst of messages is a task in a thread of its own, as in any bot's chat.
 fn new_bot(agent: &HqAgent) -> BotConfig {
     serde_json::from_value(json!({
-        "id": "", "name": agent.name, "description": agent.description, "backend": "claude", "cwd": agent.home,
+        "id": "", "name": if agent.is_builtin() { "Quick chats" } else { agent.name.as_str() }, "description": agent.description, "backend": "claude", "cwd": agent.home,
         "hqAgent": agent.name, "permission": "default", "connectors": [], "skills": [], "builtin": agent.is_builtin(),
     }))
     .expect("a valid bot")

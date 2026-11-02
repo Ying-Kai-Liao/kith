@@ -63,6 +63,8 @@ export interface Bot {
   memoryRev: number
   /** The Kith agent this bot runs (`kith <agent>`); the host sends it only on Kith bots. */
   hqAgent?: string | null
+  /** The bot of an agent that ships with Kith (scratch): reached through Quick chat, sorted last in the roster. */
+  builtin?: boolean
   autoName: boolean
   /** Each burst of the user's chat is a task with its own thread and session; false keeps one conversation. */
   tasks: boolean
@@ -142,6 +144,7 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     harnessMemory: raw.harnessMemory ?? null,
     memoryRev: raw.memoryRev ?? 0,
     hqAgent: raw.hqAgent || null,
+    ...(raw.builtin === true ? { builtin: true } : {}),
     autoName: raw.autoName ?? false,
     // A host sends `tasks` only when it's off; one without tasks never marks a message as one.
     tasks: raw.kind !== 'group' && raw.tasks !== false,
