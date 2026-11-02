@@ -70,6 +70,7 @@
 #   kith bug "<title>" [--details TEXT|-]|list|show ID|send ID|publish ID   report a bug: the owner's stays on this Mac with the transcript; anyone else's is a redacted GitHub issue after a yes (kith-bug)
 #   kith migrate run [--dry-run|--undo|--force]        move this Mac from ~/.hq and the dev.hq.* jobs to ~/.kith and dev.kith.*, reversibly (kith-migrate)
 #   kith paths [--json|--sh]                           where Kith's folders are (lib/kith_paths.py; the core's paths module when switched)
+#   kith engines [--json] | install ID | login ID       the coding engines: installed or not, and the command to install or sign in (lib/kith_engines.py; the core's engines module when switched)
 #   kith serve start|stop|restart|status|relay [URL]     Kith's host on this Mac (launchd dev.kith.serve, port 19224); `kith` is the same command (kith-serve)
 #
 # Bare `kith backup`, `kith update` and `kith migrate` print their verbs and exit 2: each acts on real state, so none starts
@@ -112,6 +113,7 @@ fi
 # Verbs the Rust core has taken over are listed in lib/core-switched.txt; kith_core_exec returns when this one isn't, or
 # the program is missing or older, and the Python below answers (docs/plans/core-design.md section 3).
 if [[ $1 == paths ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec paths --kernel "$KITH" "${@:2}" || true; exec python3 "$KITH/lib/kith_paths.py" "${@:2}"; fi
+if [[ $1 == engines ]]; then . "$KITH/lib/kith-core.sh"; kith_core_exec engines "${@:2}" || true; exec python3 "$KITH/lib/kith_engines.py" "${@:2}"; fi
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
 export KITH_ROOT=$KITH
 # Where things are, from the one place that knows (lib/kith_paths.py): KITH_HOME (~/kith) holding kernel/ and agents/ (each

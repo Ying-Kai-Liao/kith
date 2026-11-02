@@ -13,8 +13,9 @@ workspace = "../../serve/host"
 name = "kith_kernel"
 path = "src/lib.rs"
 
-# Std only for now: the CLI and the host both link this, so it stays light as more kernel modules move in.
+# Std and serde_json: the CLI and the host both link this, so it stays light as more kernel modules move in.
 [dependencies]
+serde_json = "1.0.151"
 
 [lints.rust]
 unsafe_code = "forbid"

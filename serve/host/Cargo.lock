@@ -2134,6 +2134,9 @@ dependencies = [
 [[package]]
 name = "kith-kernel"
 version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "kith-mem"

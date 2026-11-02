@@ -1,1 +1,4 @@
-[]
+[
+  {"case": "engines-list", "facet": "step*", "why": "host engines join the kernel's list (A2): the core lists all of its table with names, aliases, ACP modes and what each enforces; the Python side lists harness.py's engines and claude"},
+  {"case": "engines-install-login", "facet": "step*", "why": "host engines join the kernel's list (A2): install and login print a command from the core's table, which the Python side does not have"}
+]
