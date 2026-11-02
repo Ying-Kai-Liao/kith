@@ -6,7 +6,7 @@ use crate::LockExt as _;
 use crate::store::BotConfig;
 use anyhow::{Context, Result, anyhow, bail};
 use kith_wire::kernel::{self, command};
-pub use kith_wire::kernel::{Agent as HqAgent, Harness, PermissionMode, Project};
+pub use kith_wire::kernel::{Agent as HqAgent, Harness, PermissionMode, Project, RolePrompt};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::path::{Path, PathBuf};
@@ -55,8 +55,9 @@ fn found() -> Option<PathBuf> {
 
 /// What the host does with an agent of `kith ls --json` (the kernel contract's `Agent`).
 pub trait AgentExt {
-    /// Whether the host can run it: `kith <agent> --launch-json` covers Claude agents only. A kernel from before it
-    /// listed a harness ran every agent on Claude; one this version doesn't know is never started.
+    /// Whether the host can run it: Claude, and every engine of the core's table with an ACP mode (`kith <agent>
+    /// --launch-json` carries the rest). A kernel from before it listed a harness ran every agent on Claude; one this
+    /// version doesn't know is never started.
     fn runnable(&self) -> bool;
 
     /// Whether it ships with the kernel (scratch). A kernel from before it listed the flag has none.
@@ -65,7 +66,9 @@ pub trait AgentExt {
 
 impl AgentExt for HqAgent {
     fn runnable(&self) -> bool {
-        self.harness.unwrap_or(Harness::Claude) == Harness::Claude
+        let harness = self.harness.unwrap_or(Harness::Claude);
+        harness == Harness::Claude
+            || kith_kernel::engines::find(harness.as_str()).is_some_and(kith_kernel::engines::Engine::has_acp)
     }
 
     fn is_builtin(&self) -> bool {
@@ -83,8 +86,10 @@ pub struct ThreadEngine {
     pub model: Option<String>,
 }
 
-/// The engines a quick chat can pick: the ones the host starts (Claude, and Codex through its backup path).
-pub const THREAD_ENGINES: [&str; 2] = ["claude", "codex"];
+/// Whether a quick chat can run on `harness`: any engine of the core's table with an ACP mode.
+fn thread_engine(harness: &str) -> bool {
+    kith_kernel::engines::find(harness).is_some_and(kith_kernel::engines::Engine::has_acp)
+}
 
 impl ThreadEngine {
     /// What a client asked for, checked: a known engine and a model that can only be a model name (it becomes an
@@ -98,8 +103,8 @@ impl ThreadEngine {
             return Ok(None);
         }
         let harness = harness.unwrap_or("claude");
-        if !THREAD_ENGINES.contains(&harness) {
-            bail!("a quick chat runs on {}, not {harness}", THREAD_ENGINES.join(" or "));
+        if !thread_engine(harness) {
+            bail!("a quick chat can't run on {harness} (`kith engines` lists the ones it can)");
         }
         if let Some(model) = model
             && (model.len() > 64
@@ -161,8 +166,12 @@ impl Launch {
     /// has it; this does not rely on that), and the mode is the membership's, never a free shell. The kernel already
     /// resolves the mode from the membership; this is the host's own check that nothing above it says otherwise.
     fn confine_to(&mut self, person: &str) -> Result<()> {
-        if self.is_codex() {
-            bail!("{} runs on Codex; runs for anyone but the owner need Claude Code", self.agent);
+        // Only an engine the table says can hold a guest's rules (hooks, a permission mode, per-run servers) serves
+        // them; the kernel refuses the rest at launch, and this is the host's own check on its answer.
+        if let Some(other) = self.other_engine()
+            && !kith_kernel::engines::find(other).is_some_and(kith_kernel::engines::Engine::serves_guests)
+        {
+            bail!("{} runs on {other}; runs for anyone but the owner need Claude Code", self.agent);
         }
         if let Some(seen) = self.env.get("KITH_PERSON").filter(|p| p.as_str() != person) {
             bail!("the kernel launched this run for {seen}, not {person}");
@@ -193,10 +202,15 @@ impl Launch {
         Ok(())
     }
 
-    /// Whether this launch runs Codex (a backup entry), whose sessions take ACP's own parameters instead of Claude's
-    /// `_meta`.
+    /// Whether this launch runs Codex, whose sessions take ACP's own parameters instead of Claude's `_meta`.
     pub fn is_codex(&self) -> bool {
         self.harness == Some(Harness::Codex)
+    }
+
+    /// The engine this launch runs when it is not Claude: `codex`, or the table id the kernel printed for any other
+    /// ACP engine. Their sessions take ACP's own parameters instead of Claude's `_meta`. None: a Claude run.
+    pub fn other_engine(&self) -> Option<&str> {
+        if self.is_codex() { Some("codex") } else { self.engine.as_deref() }
     }
 
     /// Whether a session made under `made` may be loaded by this run: only under the account that made it. A session
@@ -779,19 +793,14 @@ pub async fn launch(
     if let Some(person) = person {
         launch.confine_to(person)?;
     }
-    // A backup entry may run on another harness the host knows (Codex); the agent's own login is Claude.
-    // A harness this version doesn't know is never started.
-    let runs = if backup.is_some() || engine.is_some_and(|e| e.harness == "codex") {
-        [Harness::Claude, Harness::Codex].as_slice()
-    } else {
-        [Harness::Claude].as_slice()
-    };
+    // Claude, Codex and every engine the kernel printed a table row for (`engine`) start. A harness this version
+    // doesn't know is never started.
     if let Some(harness) = launch.harness
-        && !runs.contains(&harness)
+        && harness != Harness::Claude
+        && launch.other_engine().is_none()
     {
         let on = if harness == Harness::Unknown { "a harness this host doesn't know" } else { harness.as_str() };
-        let runs: Vec<&str> = runs.iter().map(|h| h.as_str()).collect();
-        bail!("{agent} runs on {on}; the host starts {} agents only", runs.join(" and "));
+        bail!("{agent} runs on {on}; the host starts agents on Claude, Codex and the engines `kith engines` lists");
     }
     Ok(launch)
 }
@@ -1237,6 +1246,34 @@ mod tests {
         assert_eq!(meta["claudeCode"]["options"]["settings"]["permissions"]["disableBypassPermissionsMode"], "disable");
         let owner = printed_launch(json!({"harness": "claude"}));
         assert!(owner.meta()["claudeCode"]["options"].get("allowDangerouslySkipPermissions").is_none());
+    }
+
+    #[test]
+    fn a_launch_for_another_acp_engine_is_acps_own_session_and_never_a_guests() {
+        let gemini = printed_launch(json!({
+            "harness": "gemini", "engine": "gemini", "acp": null, "registry": "gemini", "role_prompt": "none",
+        }));
+        assert_eq!(gemini.other_engine(), Some("gemini"));
+        assert_eq!(gemini.role_prompt, Some(RolePrompt::None));
+        assert_eq!(printed_launch(json!({"harness": "codex"})).other_engine(), Some("codex"));
+        assert_eq!(printed_launch(json!({"harness": "claude"})).other_engine(), None);
+        let mut guest = gemini.clone();
+        assert!(guest.confine_to("sam").unwrap_err().to_string().contains("need Claude Code"));
+        // The table decides who may run for guests, not a list here.
+        assert!(!kith_kernel::engines::find("gemini").unwrap().serves_guests());
+        assert!(kith_kernel::engines::find("claude").unwrap().serves_guests());
+    }
+
+    #[test]
+    fn an_agent_is_runnable_on_claude_and_every_acp_engine_of_the_table() {
+        let on = |harness: Option<Harness>| HqAgent { harness, ..Default::default() };
+        for h in [None, Some(Harness::Claude), Some(Harness::Codex), Some(Harness::Gemini), Some(Harness::Agy)] {
+            assert!(on(h).runnable(), "{h:?}");
+        }
+        // No ACP mode, or a word this version doesn't know.
+        for h in [Harness::Hermes, Harness::Dsh, Harness::Unknown] {
+            assert!(!on(Some(h)).runnable(), "{h:?}");
+        }
     }
 
     #[test]

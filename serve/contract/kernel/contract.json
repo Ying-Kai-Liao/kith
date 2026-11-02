@@ -4,9 +4,14 @@
   "fieldCase": "snake",
   "enums": {
     "Harness": {
-      "doc": "The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.",
-      "values": ["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode"],
+      "doc": "The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, codex, and any engine of the core's table with an ACP mode (`kith engines`); `agy` is the kernel's word for antigravity. One this version doesn't know is its own state: the host doesn't start it.",
+      "values": ["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode", "cursor", "omp", "grok", "gemini", "copilot", "goose", "kimi", "droid", "amp", "kilo", "cline", "auggie", "vibe", "kiro", "devin", "qoder", "codebuddy", "minimax", "junie", "antigravity", "cortex", "poolside"],
       "unknown": "unknown"
+    },
+    "RolePrompt": {
+      "doc": "How an engine takes the agent's role prompt, from the engine table's `enforces`: `flag` (a flag or ACP option on the command line), `env` (an environment variable), `first-message` (in front of the first message), `none` (not known to be deliverable: the host puts it in front of the first message). One this version doesn't know is read as none.",
+      "values": ["flag", "env", "first-message", "none"],
+      "unknown": "none"
     },
     "PermissionMode": {
       "doc": "The Claude Code permission mode a run starts in (kernel/lib/kith_settings.py CHOICES); a Codex run gets the host's translation. One this version doesn't know starts the run in default, which asks before every change.",
@@ -60,7 +65,7 @@
       }
     },
     "Launch": {
-      "doc": "`kith <agent> --launch-json`: how to start the agent, for claude and codex. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.",
+      "doc": "`kith <agent> --launch-json`: how to start the agent, for claude and codex and, additively, any other engine the table lists with an ACP mode: `engine` is the table id (left out for claude and codex, which print what they always did), `acp` the installed CLI's own ACP program (null when it has none here: the host then starts the `registry` build), `role_prompt` how the engine takes `system_prompt`. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.",
       "fields": {
         "version": "int",
         "agent": "string",
@@ -84,7 +89,20 @@
         "backup": "string?",
         "provider": "Harness?",
         "account": "string?",
-        "account_id": "string?"
+        "account_id": "string?",
+        "engine": "string?",
+        "acp": "AcpStart?",
+        "registry": "string?",
+        "role_prompt": "RolePrompt?"
+      },
+      "mayOmit": ["engine", "acp", "registry", "role_prompt"]
+    },
+    "AcpStart": {
+      "doc": "How to start an engine over ACP, from the engine table (`kith kernel engines launch <id> --json`): the installed CLI's own ACP mode as a program. `env` is extra environment for it (the engine's keys are the host's own).",
+      "fields": {
+        "command": "string",
+        "args": "[string]",
+        "env": "{string}"
       }
     },
     "CostTag": {

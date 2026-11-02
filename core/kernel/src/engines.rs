@@ -187,6 +187,14 @@ impl Engine {
         .collect()
     }
 
+    /// Whether Kith can hold a guest run (an invited person's, a bot guest's) to its rules on this engine: the tool
+    /// hooks (deny rules, the ledger), a permission mode to confine them to, and per-run MCP servers (only
+    /// `kithpermit`). Only Claude Code has all three today; a guest run on any other engine is refused at launch and the
+    /// app hides the engine from guest-facing choices. The owner may run any engine.
+    pub const fn serves_guests(&self) -> bool {
+        self.enforces.tool_hooks && self.enforces.permission_modes && self.enforces.per_run_mcp
+    }
+
     /// The sign-in command with `{bin}` resolved. Empty when none is known.
     pub fn login_command(&self, bin: &str) -> String {
         self.login.replace("{bin}", bin)
@@ -236,6 +244,34 @@ pub fn describe(e: &Engine, which: &dyn Fn(&str) -> Option<PathBuf>) -> Value {
             "role_prompt": e.enforces.role_prompt.name(),
             "interactive": e.enforces.interactive,
         },
+    })
+}
+
+/// How to start `e` for a run, as `kith kernel engines launch <id> --json` prints it and `kith <agent> --launch-json`
+/// copies into the launch object: the engine's id, its own ACP mode as a program (`acp`, null when the CLI is not
+/// installed or has no ACP mode of its own: the host then starts the registry build named in `registry`), how the
+/// role prompt reaches it, and whether it can serve guests. Nothing here starts a process.
+pub fn launch_spec(e: &Engine, which: &dyn Fn(&str) -> Option<PathBuf>) -> Value {
+    let found = detect(e, which);
+    let acp = match (e.local, &found) {
+        (Some(template), Some((_, path))) => {
+            let args: Vec<&str> = template
+                .strip_prefix("{bin}")
+                .unwrap_or(template)
+                .split_whitespace()
+                .collect();
+            json!({ "command": path.to_string_lossy(), "args": args, "env": {} })
+        }
+        _ => Value::Null,
+    };
+    json!({
+        "engine": e.id,
+        "installed": found.is_some(),
+        "acp": acp,
+        "registry": e.registry,
+        "role_prompt": e.enforces.role_prompt.name(),
+        "serves_guests": e.serves_guests(),
+        "interactive": e.enforces.interactive,
     })
 }
 
@@ -1020,5 +1056,40 @@ mod tests {
             "NO_OPEN_BROWSER=1 agent login"
         );
         assert!(login_text(find("hermes").unwrap(), &nothing).is_err());
+    }
+
+    #[test]
+    fn only_an_engine_with_every_hook_serves_guests() {
+        let guests: Vec<&str> = ENGINES
+            .iter()
+            .filter(|e| e.serves_guests())
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(
+            guests,
+            ["claude"],
+            "a guest run's rules are enforced by Claude Code alone"
+        );
+    }
+
+    #[test]
+    fn launch_spec_starts_the_installed_cli_in_its_acp_mode() {
+        let which = |b: &str| (b == "gemini").then(|| PathBuf::from("/x/gemini"));
+        let spec = launch_spec(find("gemini").unwrap(), &which);
+        assert_eq!(spec["engine"], "gemini");
+        assert_eq!(
+            spec["acp"],
+            json!({"command": "/x/gemini", "args": ["--acp"], "env": {}})
+        );
+        assert_eq!(spec["registry"], "gemini");
+        assert_eq!(spec["serves_guests"], false);
+        // Not installed: the host starts the registry build.
+        let spec = launch_spec(find("gemini").unwrap(), &nothing);
+        assert!(spec["acp"].is_null() && spec["installed"] == false);
+        // An alias names the same row.
+        assert_eq!(
+            launch_spec(find("agy").unwrap(), &nothing)["engine"],
+            find("agy").unwrap().id
+        );
     }
 }

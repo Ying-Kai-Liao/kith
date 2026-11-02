@@ -220,10 +220,10 @@ mod tests {
     fn a_spec_checks_each_item_of_a_list() {
         let s: &Schema = &crate::kernel::SCHEMA;
         let agents = json!([{"name": "a", "description": "", "home": "/h", "model": null, "effort": null, "harness": "claude", "builtin": false},
-            {"name": "b", "description": "", "home": "/h", "model": null, "effort": null, "harness": "gemini", "builtin": false}]);
+            {"name": "b", "description": "", "home": "/h", "model": null, "effort": null, "harness": "frobnicator", "builtin": false}]);
         assert_eq!(
             s.check_spec("[Agent]", &agents, Mode::Producer),
-            [r#"Agent[1].harness: "gemini" is not a Harness"#]
+            [r#"Agent[1].harness: "frobnicator" is not a Harness"#]
         );
         assert_eq!(s.check_spec("[Agent]", &agents, Mode::Consumer), Vec::<String>::new());
         assert_eq!(s.check_spec("[Agent]", &json!({}), Mode::Consumer), ["Agent: not a list"]);

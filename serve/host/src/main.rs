@@ -424,7 +424,7 @@ enum KernelCmd {
     /// The coding engines an agent can run on: installed or not, and how to install or sign in.
     Engines {
         /// Print JSON.
-        #[arg(long)]
+        #[arg(long, global = true)]
         json: bool,
         #[command(subcommand)]
         action: Option<EnginesAction>,
@@ -464,6 +464,9 @@ enum EnginesAction {
     Install { id: String },
     /// The command that signs in to the engine.
     Login { id: String },
+    /// How to start the engine for a run (`kith <agent> --launch-json` copies it): its ACP program, role prompt delivery,
+    /// whether it serves guests. Always JSON.
+    Launch { id: String },
 }
 
 /// `kith engines`: the kernel crate's table with this computer's PATH.
@@ -477,11 +480,12 @@ fn print_engines(json: bool, action: Option<EnginesAction>) -> Result<()> {
         );
         return Ok(());
     };
-    let (EnginesAction::Install { id } | EnginesAction::Login { id }) = &action;
+    let (EnginesAction::Install { id } | EnginesAction::Login { id } | EnginesAction::Launch { id }) = &action;
     let engine = engines::find(id).ok_or_else(|| anyhow::anyhow!("no engine called {id} (kith engines lists them)"))?;
     let line = match action {
         EnginesAction::Install { .. } => engines::install_text(engine, cfg!(unix)),
         EnginesAction::Login { .. } => engines::login_text(engine, &which),
+        EnginesAction::Launch { .. } => Ok(engines::launch_spec(engine, &which).to_string()),
     };
     println!("{}", line.map_err(|e| anyhow::anyhow!(e))?);
     Ok(())
