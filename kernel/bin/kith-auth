@@ -2745,6 +2745,37 @@ def take_opts(args, names):
     return opts, rest
 
 
+def do_grant(who, svc, profile, known_only=False):
+    """grant <agent[,agent]|--all> <service> <profile[,profile]>: writes auth.json. Returns (agents, profiles, changed,
+    uses). known_only (--json): an agent this Mac has no such package for is refused, as the text form never did."""
+    service(svc, None if who == '--all' else who.split(',')[0].split('@')[0])
+    # agent@person: that person's own account for the agent (tried first in their runs)
+    base = lambda a: a.split('@', 1)[0]
+    uses = (lambda a: uses_browser(base(a))) if svc == 'browser' else (lambda a: svc in needs(base(a)))
+    names = [a for a in agents() if uses(a)] if who == '--all' else [a for a in who.split(',') if a]
+    if not names:
+        die(f'no agent lists {svc} in its needs' if who == '--all' else 'no agent named', 2)
+    if known_only:
+        for a in names:
+            if base(a) not in agents() and a not in ('bridge', 'serve'):
+                die(f"no agent '{a}' (kith ls)")
+    auth = load_auth(write=True)
+    before = json.dumps(auth, sort_keys=True)
+    for a in names:
+        if '@' in a:
+            need_person(auth, a.split('@', 1)[1])
+    profiles = [p for p in profile.split(',') if p]
+    if any(not p.startswith(svc + '/') for p in profiles):
+        die(f'a {svc} grant takes {svc}/<account> profiles', 2)
+    for p in profiles:
+        ensure_profile(auth, svc, p, names[0].split('@')[0])
+    for agent in names:
+        auth['grants'].setdefault(agent, {})[svc] = profiles if len(profiles) > 1 else profiles[0]
+    changed = json.dumps(auth, sort_keys=True) != before
+    save_auth(auth)
+    return names, profiles, changed, uses
+
+
 def main_json(cmd, rest):
     if cmd == 'ls':
         if rest:
@@ -2761,30 +2792,8 @@ def main_json(cmd, rest):
     elif cmd == 'grant':
         if len(rest) != 3:
             die('grant <agent[,agent]|--all> <service> <profile[,profile]> [--json]', 2)
-        who, svc, profile = rest
-        service(svc, None if who == '--all' else who.split(',')[0].split('@')[0])
-        names = [a for a in agents() if (uses_browser(a) if svc == 'browser' else svc in needs(a))] if who == '--all' \
-            else [a for a in who.split(',') if a]
-        if not names:
-            die(f'no agent lists {svc} in its needs' if who == '--all' else 'no agent named', 2)
-        for a in names:
-            if a.split('@', 1)[0] not in agents() and a not in ('bridge', 'serve'):
-                die(f"no agent '{a}' (kith ls)")
-        auth = load_auth(write=True)
-        before = json.dumps(auth, sort_keys=True)
-        for a in names:
-            if '@' in a:
-                need_person(auth, a.split('@', 1)[1])
-        profiles = [p for p in profile.split(',') if p]
-        if any(not p.startswith(svc + '/') for p in profiles):
-            die(f'a {svc} grant takes {svc}/<account> profiles', 2)
-        for p in profiles:
-            ensure_profile(auth, svc, p, names[0].split('@')[0])
-        for a in names:
-            auth['grants'].setdefault(a, {})[svc] = profiles if len(profiles) > 1 else profiles[0]
-        changed = json.dumps(auth, sort_keys=True) != before
-        save_auth(auth)
-        print(json.dumps({'ok': True, 'agent': who, 'agents': names, 'service': svc, 'profile': profile,
+        names, profiles, changed, _ = do_grant(*rest, known_only=True)
+        print(json.dumps({'ok': True, 'agent': rest[0], 'agents': names, 'service': rest[1], 'profile': rest[2],
                           'changed': changed}))
 
 
@@ -2800,26 +2809,8 @@ def main(argv):
     if cmd == 'ls':
         cmd_ls()
     elif cmd == 'grant' and len(rest) == 3:
-        who, svc, profile = rest
-        service(svc, None if who == '--all' else who.split(',')[0].split('@')[0])
-        # agent@person: that person's own account for the agent (tried first in their runs)
-        base = lambda a: a.split('@', 1)[0]
-        uses = (lambda a: uses_browser(base(a))) if svc == 'browser' else (lambda a: svc in needs(base(a)))
-        names = [a for a in agents() if uses(a)] if who == '--all' else [a for a in who.split(',') if a]
-        if not names:
-            die(f'no agent lists {svc} in its needs' if who == '--all' else 'no agent named', 2)
-        auth = load_auth(write=True)
-        for a in names:
-            if '@' in a:
-                need_person(auth, a.split('@', 1)[1])
-        profiles = [p for p in profile.split(',') if p]
-        if any(not p.startswith(svc + '/') for p in profiles):
-            die(f'a {svc} grant takes {svc}/<account> profiles', 2)
-        for p in profiles:
-            ensure_profile(auth, svc, p, names[0].split('@')[0])
-        for agent in names:
-            auth['grants'].setdefault(agent, {})[svc] = profiles if len(profiles) > 1 else profiles[0]
-        save_auth(auth)
+        names, profiles, _, uses = do_grant(*rest)
+        svc = rest[1]
         for agent in names:
             print(f'{agent} may use {svc} as {", ".join(profiles)}' + ('' if uses(agent) or agent in ('bridge', 'serve')
                                                                        else f' (not in its needs yet)'))

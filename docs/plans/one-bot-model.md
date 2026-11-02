@@ -109,7 +109,7 @@ and `--json` first and the app calling it after.
 - B3, B4 (secrets, scheduler): moved to the core as A5 and A6, built once there instead of merged in Python first.
 - [ ] **B5. Accounts and people.** `kith account add/remove` get app methods; app and bot invites get CLI commands
   (gap map #7, #8).
-- [ ] **B6. `--json` everywhere a client needs it** (list in the gap map), and the footguns: bare `kith backup`,
+- [x] **B6. `--json` everywhere a client needs it** (list in the gap map), and the footguns: bare `kith backup`,
   `kith update`, `kith migrate` print usage instead of acting; an unknown word after `kith` doesn't start a run.
 
 ### C. The app makes kith agents
@@ -200,3 +200,4 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: A2a: engines table in core (PR #615): module `engines` in `kith-kernel`, 29 rows (the host's 27 plus hermes and dsh, the kernel's native engines) with aliases, ACP modes, install/login/sign-in probes as data, `oneshot`, env and `enforces`; the host's `backends.rs` reads it (wire shape pinned by a golden test); `kith engines [--json]|install ID|login ID` (`kith kernel engines`) switched in `core-switched.txt`. A2 stays open for A2b (kith-acp, run_once, guest refusal, harness.py per-engine code).
 - 2026-11-03: C4 done: the row shows the thread summary (PR #606), summaries moved to `hqmem/summary.rs` with `kith memory summary show|forget|write --thread --json` (PR #608), and `kith memory rm <file> [--json]` + `kith memory forget <text> --json` with `kithMemoryDelete` / `kithMemoryForget` and the apps' Delete file and Forget a fact (this PR). Not carried over: pin, archive, clear, add entry, the shared switch, promotions (no CLI); shared project memory is the kith user layer (user.md, people/, projects/).
 - 2026-11-03: C2 done: `kith new --json` (PR #611), host `newKithAgent`/`kernelStatus` (PR #613), the app's New bot makes a kith agent and shows a kernel-unavailable state (this PR). iOS New bot still uses createBot (follow-up after rust-rebuild reaches main).
+- 2026-11-03: B6 done: --json on the gap-map commands: kith-pkg verbs versions/history/pin/unpin/rollback/restore/share/deps/update/push/commit (PR #614); doctor, remote ls|add|rm, ask ls, bug list|show|create, backup add|remove, update self --check, wake status, kith-lifecycle status, kith-chain seen|sig|ls, project and project notes (PR #616); schedule ls|add|rm|pause|resume|run|log (PR #618); auth ls|granted|grant|revoke, no secret values (this PR). Each has a CLI-line check in CI and difftest cases in corpus/json-*.json. Left as is: bare `install --json` still needs --preview/--yes; `update --all --json` and `bug send --json` have no JSON form.
