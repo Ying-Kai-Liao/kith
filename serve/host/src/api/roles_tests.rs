@@ -939,3 +939,57 @@ async fn a_bots_row_summary_follows_the_same_audience_rule_as_its_thread_rows() 
         assert_eq!(!row(&theirs).is_null(), shown, "{audience}");
     }
 }
+
+/// A membership changed with `kith-auth member` (not through the app) is what the host's access reads follow: the
+/// own-chat events of a member, `startChat`, and what `setPersonAccess` takes away.
+#[tokio::test]
+async fn memberships_changed_in_kith_auth_are_followed() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    r.owner_bot("money");
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    let started = call(&r, &sam, "startChat", json!({"agent": "house"})).await.unwrap();
+    let chat = started["bot"]["id"].as_str().unwrap().to_owned();
+    let hears = || roles::event_for(&r.hub.store, Some("sam"), json!({"type": "bot", "bot": {"id": chat}})).is_some();
+    assert!(hears());
+
+    // Removed with the CLI: startChat stops at once, their events at the next look at kith-auth.
+    r.auth(&["member", "house", "sam", "--rm"]);
+    assert!(call(&r, &sam, "startChat", json!({"agent": "house"})).await.unwrap_err().is::<NotAllowed>());
+    members::refresh_mirror(&r.hub).await;
+    assert!(!hears());
+
+    // Added with the CLI: seen after the look, and the chat starts even though the copy never heard of it.
+    r.auth(&["member", "house", "sam", "preset=member"]);
+    r.auth(&["member", "money", "sam", "preset=guest"]);
+    call(&r, &sam, "startChat", json!({"agent": "money"})).await.unwrap();
+    assert!(!hears(), "not before the look");
+    members::refresh_mirror(&r.hub).await;
+    assert!(hears());
+    assert_eq!(r.hub.store.person("sam").unwrap().agents.keys().collect::<Vec<_>>(), ["house", "money"]);
+
+    // The copy lying about a grant never lets startChat through.
+    let lie = std::collections::BTreeMap::from([("money".to_owned(), "member".to_owned())]);
+    r.hub.store.set_person_agents("sam", &lie).unwrap();
+    r.auth(&["member", "money", "sam", "--rm"]);
+    assert!(call(&r, &sam, "startChat", json!({"agent": "money"})).await.unwrap_err().is::<NotAllowed>());
+
+    // Unticking a row the CLI added removes it from kith-auth; the `*` row is left alone.
+    r.auth(&["member", "money", "sam", "preset=guest"]);
+    r.auth(&["member", "money", "*", "preset=guest"]);
+    call(&r, &Caller::Local, "setPersonAccess", json!({"personId": "sam", "agents": {"house": "member"}}))
+        .await
+        .unwrap();
+    let row = members::auth_person(&r.bin, "sam").await.unwrap().unwrap();
+    let own: Vec<&str> = row.agents.iter().filter(|a| a.via == "own").map(|a| a.agent.as_str()).collect();
+    assert_eq!(own, ["house"]);
+    assert!(row.agents.iter().any(|a| a.via == "everyone" && a.agent == "money"));
+    assert_eq!(r.hub.store.person("sam").unwrap().agents.keys().collect::<Vec<_>>(), ["house"]);
+
+    // kith-auth that can't be read stops the change before anything is done.
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.dir.join("no-such-kith-auth"));
+    let broken =
+        call(&r, &Caller::Local, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "guest"}})).await;
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.bin.clone());
+    assert!(broken.is_err());
+}

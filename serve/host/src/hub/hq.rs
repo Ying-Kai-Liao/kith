@@ -44,6 +44,7 @@ pub fn start(hub: &Arc<Hub>) {
     if cfg!(test) {
         return;
     }
+    crate::remote::members::start_mirror(hub);
     let hub = hub.clone();
     tokio::spawn(async move {
         loop {
