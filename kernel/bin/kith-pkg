@@ -96,6 +96,7 @@ KEEP = 2                                                     # newest versions k
 
 
 EINTR_TRIES, EINTR_SLEEP = 4, 0.25
+GITHUB = os.environ.get('KITH_GITHUB_GIT', 'https://github.com').rstrip('/')   # tests point it at a local folder
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 
 
@@ -437,7 +438,7 @@ def fetch(home, force=False):
             git = lambda *a: subprocess.run(['git', '-C', tmp, *a], env=env, capture_output=True, text=True,
                                             timeout=300)
             whole = any(p == '.' for _, p in items)     # a repo that is itself the skill
-            steps = [('init', '-q'), ('remote', 'add', 'origin', f'https://github.com/{repo}.git'),
+            steps = [('init', '-q'), ('remote', 'add', 'origin', f'{GITHUB}/{repo}.git'),
                      *([] if whole else [('sparse-checkout', 'set', '--no-cone', *[f'/{p}/' for _, p in items])]),
                      ('fetch', '-q', '--depth', '1', '--filter=blob:none', 'origin', ref),
                      ('checkout', '-q', 'FETCH_HEAD')]
