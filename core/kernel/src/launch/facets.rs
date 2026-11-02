@@ -46,7 +46,10 @@ pub fn split_frontmatter(text: &str) -> (HashMap<String, String>, String) {
                 if let Some((k, v)) = line.split_once(':') {
                     let k = strip(k);
                     if !k.is_empty() && k.chars().all(|c| c.is_ascii_alphabetic() || c == '_') {
-                        fm.insert(k.to_lowercase(), strip(v).trim_matches(|c| c == '"' || c == '\'').to_owned());
+                        fm.insert(
+                            k.to_lowercase(),
+                            strip(v).trim_matches(|c| c == '"' || c == '\'').to_owned(),
+                        );
                     }
                 }
             }
@@ -120,7 +123,11 @@ pub fn folder_defaults(rel: &str, agent: &str) -> Facets {
             f.room = parts[1].to_owned();
         }
         "projects" if id1 => f.projects = vec![parts[1].to_owned()],
-        "projects" if parts.len() == 2 && parts[1].ends_with(".md") && is_id(&parts[1][..parts[1].len() - 3]) => {
+        "projects"
+            if parts.len() == 2
+                && parts[1].ends_with(".md")
+                && is_id(&parts[1][..parts[1].len() - 3]) =>
+        {
             f.projects = vec![parts[1][..parts[1].len() - 3].to_owned()];
         }
         "sessions" if parts.len() == 2 => {
@@ -140,7 +147,10 @@ pub fn apply_frontmatter(defaults: &Facets, fm: &HashMap<String, String>) -> Fac
     if !a.is_empty() && valid_audience(a) && (a == defaults.audience || a == "owner") {
         f.audience = a.to_owned();
     }
-    if let Some(r) = fm.get("room").filter(|r| !r.is_empty() && is_id(&r.replace(':', "-"))) {
+    if let Some(r) = fm
+        .get("room")
+        .filter(|r| !r.is_empty() && is_id(&r.replace(':', "-")))
+    {
         f.room.clone_from(r);
     }
     if let Some(p) = fm.get("projects") {
@@ -186,7 +196,11 @@ pub struct Reader {
 
 impl Reader {
     fn who(&self) -> &str {
-        if self.kind == Kind::Owner { "owner" } else { &self.id }
+        if self.kind == Kind::Owner {
+            "owner"
+        } else {
+            &self.id
+        }
     }
 }
 
@@ -207,7 +221,10 @@ pub fn is_group_room(room: &str, reader: &Reader) -> bool {
 /// The audience values one reader may see.
 pub fn audience_set(reader: &Reader, room: &str) -> BTreeSet<String> {
     let mut set: BTreeSet<String> = match reader.kind {
-        Kind::Owner => ["owner", "shared"].iter().map(|s| (*s).to_owned()).collect(),
+        Kind::Owner => ["owner", "shared"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect(),
         Kind::Person => ["shared".to_owned(), format!("person:{}", reader.id)].into(),
         Kind::Guest => ["shared".to_owned()].into(),
     };
@@ -252,7 +269,9 @@ fn read(path: &Path) -> Option<String> {
     if meta.file_type().is_symlink() || !meta.is_file() {
         return None;
     }
-    fs::read(path).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    fs::read(path)
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 fn mtime(path: &Path) -> f64 {
@@ -271,7 +290,9 @@ fn walk_md(dir: &Path, out: &mut Vec<PathBuf>) {
         if t.is_dir() {
             walk_md(&p, out);
         }
-        if p.file_name().is_some_and(|n| n.to_string_lossy().ends_with(".md")) {
+        if p.file_name()
+            .is_some_and(|n| n.to_string_lossy().ends_with(".md"))
+        {
             out.push(p);
         }
     }
@@ -285,7 +306,10 @@ struct Note {
 }
 
 fn rel_of(mem: &Path, p: &Path) -> String {
-    p.strip_prefix(mem).unwrap_or(p).to_string_lossy().into_owned()
+    p.strip_prefix(mem)
+        .unwrap_or(p)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// The `.md` files under `mem/folder`; links are not followed.
@@ -304,7 +328,12 @@ fn notes(mem: &Path, folder: &str, agent: &str) -> Vec<Note> {
             (!strip(&text).is_empty()).then(|| {
                 let rel = rel_of(mem, p);
                 let facets = facets_for(&rel, agent, &text);
-                Note { rel, text, mtime: mtime(p), facets }
+                Note {
+                    rel,
+                    text,
+                    mtime: mtime(p),
+                    facets,
+                }
             })
         })
         .collect()
@@ -316,7 +345,12 @@ fn project_notes(mem: &Path, p: &str, agent: &str) -> Vec<Note> {
     let rel = format!("projects/{p}.md");
     if let Some(text) = read(&mem.join(&rel)).filter(|t| !strip(t).is_empty()) {
         let facets = facets_for(&rel, agent, &text);
-        v.push(Note { mtime: mtime(&mem.join(&rel)), rel, text, facets });
+        v.push(Note {
+            mtime: mtime(&mem.join(&rel)),
+            rel,
+            text,
+            facets,
+        });
     }
     v.sort_by(|a, b| {
         let key = |n: &Note| !INDEX_NAMES.contains(&n.rel.rsplit('/').next().unwrap_or(""));
@@ -327,8 +361,15 @@ fn project_notes(mem: &Path, p: &str, agent: &str) -> Vec<Note> {
 
 fn tag(path: &str, text: &str, scope: &str) -> String {
     let text = text.replace("</long-term-memory>", "<\u{200b}/long-term-memory>");
-    let scope = if scope.is_empty() { String::new() } else { format!(" scope=\"{scope}\"") };
-    format!("<long-term-memory path=\"{path}\"{scope}>\n{}\n</long-term-memory>", text.trim_end_matches('\n'))
+    let scope = if scope.is_empty() {
+        String::new()
+    } else {
+        format!(" scope=\"{scope}\"")
+    };
+    format!(
+        "<long-term-memory path=\"{path}\"{scope}>\n{}\n</long-term-memory>",
+        text.trim_end_matches('\n')
+    )
 }
 
 // ---- the room-note ledger
@@ -338,7 +379,11 @@ fn tag(path: &str, text: &str, scope: &str) -> String {
 /// never in a channel run.
 pub fn env_members(kind: Kind, env: &dyn Fn(&str) -> Option<String>) -> Option<Vec<String>> {
     let raw = env("KITH_ROOM_MEMBERS").unwrap_or_default();
-    let ids: Vec<String> = raw.split(',').map(|x| strip(x).to_lowercase()).filter(|m| is_id(m)).collect();
+    let ids: Vec<String> = raw
+        .split(',')
+        .map(|x| strip(x).to_lowercase())
+        .filter(|m| is_id(m))
+        .collect();
     if !ids.is_empty() {
         return Some(ids);
     }
@@ -355,15 +400,25 @@ pub fn read_ledger(state: &Path, agent: &str, room: &str) -> HashMap<String, Vec
     if !(is_id(agent) && is_id(room)) {
         return HashMap::new();
     }
-    let f = state.join("room-ledger").join(agent).join(format!("{room}.json"));
-    let Some(serde_json::Value::Object(d)) = fs::read_to_string(f).ok().and_then(|t| serde_json::from_str(&t).ok())
+    let f = state
+        .join("room-ledger")
+        .join(agent)
+        .join(format!("{room}.json"));
+    let Some(serde_json::Value::Object(d)) = fs::read_to_string(f)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
     else {
         return HashMap::new();
     };
     d.into_iter()
         .filter_map(|(k, v)| {
             let a = v.as_array()?;
-            Some((k, a.iter().filter_map(|x| x.as_str().map(str::to_owned)).collect()))
+            Some((
+                k,
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_owned))
+                    .collect(),
+            ))
         })
         .collect()
 }
@@ -451,7 +506,14 @@ pub fn load_memory(a: &LoadArgs<'_>) -> Loaded {
             continue; // the owner sees the shared part only when there is one
         }
         let facets = facets_for(&rel, agent, &t);
-        cands.push(Cand { path: path_str(&mem.join(&rel)), text: t, mtime: 0.0, facets, scope, protected: true });
+        cands.push(Cand {
+            path: path_str(&mem.join(&rel)),
+            text: t,
+            mtime: 0.0,
+            facets,
+            scope,
+            protected: true,
+        });
     }
     if !room.is_empty() && is_id(&room) {
         let ids: Option<Vec<String>> = a.members.map(|m| m.iter().map(|r| r.id.clone()).collect());
@@ -461,7 +523,9 @@ pub fn load_memory(a: &LoadArgs<'_>) -> Loaded {
             if group
                 && let Some(ledger) = a.ledger
                 && n.facets.audience == format!("room:{room}")
-                && !ids.as_ref().is_some_and(|ids| room_note_ok(ledger, &n.rel, ids))
+                && !ids
+                    .as_ref()
+                    .is_some_and(|ids| room_note_ok(ledger, &n.rel, ids))
             {
                 continue; // not everyone here was there when it was written
             }
@@ -493,7 +557,16 @@ pub fn load_memory(a: &LoadArgs<'_>) -> Loaded {
             shown.push(c);
         } else if group
             && !strip(&c.text).is_empty()
-            && loads(&c.facets, &solo, if c.facets.room.is_empty() { &room } else { &solo_room }, a.projects)
+            && loads(
+                &c.facets,
+                &solo,
+                if c.facets.room.is_empty() {
+                    &room
+                } else {
+                    &solo_room
+                },
+                a.projects,
+            )
         {
             withheld = true;
         }
@@ -503,20 +576,39 @@ pub fn load_memory(a: &LoadArgs<'_>) -> Loaded {
     oldest.sort_by(|&x, &y| shown[x].mtime.total_cmp(&shown[y].mtime));
     let mut gone = vec![false; shown.len()];
     for i in oldest {
-        let total: usize = shown.iter().zip(&gone).filter(|(_, g)| !**g).map(|(c, _)| chars(&c.text)).sum();
+        let total: usize = shown
+            .iter()
+            .zip(&gone)
+            .filter(|(_, g)| !**g)
+            .map(|(c, _)| chars(&c.text))
+            .sum();
         if total <= a.cap {
             break;
         }
         gone[i] = true;
         more += 1;
     }
-    let kept: Vec<&Cand> = shown.iter().zip(&gone).filter(|(_, g)| !**g).map(|(c, _)| c).collect();
-    let mut block = kept.iter().map(|c| tag(&c.path, &c.text, &c.scope)).collect::<Vec<_>>().join("\n");
+    let kept: Vec<&Cand> = shown
+        .iter()
+        .zip(&gone)
+        .filter(|(_, g)| !**g)
+        .map(|(c, _)| c)
+        .collect();
+    let mut block = kept
+        .iter()
+        .map(|c| tag(&c.path, &c.text, &c.scope))
+        .collect::<Vec<_>>()
+        .join("\n");
     if withheld {
         block.push('\n');
         block.push_str(WITHHELD);
     }
-    Loaded { block, loaded: kept.len(), more, group }
+    Loaded {
+        block,
+        loaded: kept.len(),
+        more,
+        group,
+    }
 }
 
 fn cut(text: &str, cap: usize) -> String {
@@ -531,7 +623,13 @@ fn cut(text: &str, cap: usize) -> String {
 fn is_open_line(line: &str, agent: &str) -> bool {
     let b = line.as_bytes();
     b.len() >= 10
-        && b[..10].iter().enumerate().all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() })
+        && b[..10].iter().enumerate().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                *c == b'-'
+            } else {
+                c.is_ascii_digit()
+            }
+        })
         && line[10..].starts_with(&format!(" \u{b7} {agent} \u{b7} open:"))
 }
 
@@ -550,7 +648,11 @@ pub fn start_files(
     if project.is_empty() || !is_id(project) {
         return String::new();
     }
-    let room = if is_one_to_one(room, reader) { own_room(agent, reader) } else { room.to_owned() };
+    let room = if is_one_to_one(room, reader) {
+        own_room(agent, reader)
+    } else {
+        room.to_owned()
+    };
     let aud = load_audiences(reader, &room, members);
     let mem = home.join("memory");
     let mut out = vec![];
@@ -565,29 +667,53 @@ pub fn start_files(
         && aud.contains(&f.audience)
         && (f.room.is_empty() || f.room == room)
     {
-        out.push(tag(&path_str(&mem.join(&rel)), &cut(&t, START_CAP), &format!("session:{project}")));
+        out.push(tag(
+            &path_str(&mem.join(&rel)),
+            &cut(&t, START_CAP),
+            &format!("session:{project}"),
+        ));
     }
     let d = state.join("projects").join(project);
     if let Some(t) = read(&d.join("codebase.md")).filter(|t| !strip(t).is_empty()) {
-        out.push(tag(&path_str(&d.join("codebase.md")), &cut(&t, START_CAP), &format!("project:{project}")));
+        out.push(tag(
+            &path_str(&d.join("codebase.md")),
+            &cut(&t, START_CAP),
+            &format!("project:{project}"),
+        ));
     }
     if let Some(t) = read(&d.join("decisions.md")).filter(|t| !strip(t).is_empty()) {
         let lines: Vec<&str> = t.split('\n').filter(|x| !strip(x).is_empty()).collect();
         let (before, tail) = lines.split_at(lines.len().saturating_sub(DECISIONS_TAIL));
-        let opens: Vec<&str> = before.iter().copied().filter(|x| is_open_line(x, agent)).collect();
+        let opens: Vec<&str> = before
+            .iter()
+            .copied()
+            .filter(|x| is_open_line(x, agent))
+            .collect();
         let mut text = String::new();
         if !opens.is_empty() {
             let shown = &opens[opens.len().saturating_sub(OWN_OPEN_MAX)..];
-            let newest =
-                if opens.len() > OWN_OPEN_MAX { format!(", the newest {OWN_OPEN_MAX} here") } else { String::new() };
+            let newest = if opens.len() > OWN_OPEN_MAX {
+                format!(", the newest {OWN_OPEN_MAX} here")
+            } else {
+                String::new()
+            };
             text = format!(
                 "Your own open lines older than the last {DECISIONS_TAIL} ({}{newest}; all: grep '\u{b7} {agent} \u{b7} open:'):\n{}\n\n",
                 opens.len(),
                 shown.join("\n")
             );
         }
-        text.push_str(&format!("The last {} of {} lines:\n{}", tail.len(), lines.len(), tail.join("\n")));
-        out.push(tag(&path_str(&d.join("decisions.md")), &cut(&text, 2 * START_CAP), &format!("project:{project}")));
+        text.push_str(&format!(
+            "The last {} of {} lines:\n{}",
+            tail.len(),
+            lines.len(),
+            tail.join("\n")
+        ));
+        out.push(tag(
+            &path_str(&d.join("decisions.md")),
+            &cut(&text, 2 * START_CAP),
+            &format!("project:{project}"),
+        ));
     }
     out.join("\n")
 }
@@ -621,8 +747,13 @@ fn room_ok(r: &str) -> bool {
 /// `kith_facets.py load`: the whole memory part of a launch prompt.
 pub fn load(r: &Request<'_>, env: &dyn Fn(&str) -> Option<String>) -> Load {
     let mut cap = LOAD_CAP;
-    if let Some(text) = fs::read(r.agent_md).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
-        && let Some(n) = split_frontmatter(&text).0.get("memory_cap").and_then(|v| v.trim().parse::<i64>().ok())
+    if let Some(text) = fs::read(r.agent_md)
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        && let Some(n) = split_frontmatter(&text)
+            .0
+            .get("memory_cap")
+            .and_then(|v| v.trim().parse::<i64>().ok())
         && n > 0
     {
         cap = usize::try_from(n).unwrap_or(cap);
@@ -637,11 +768,19 @@ pub fn load(r: &Request<'_>, env: &dyn Fn(&str) -> Option<String>) -> Load {
     let mut reader = Reader {
         kind: r.kind,
         id: r.person.to_owned(),
-        rooms: r.rooms.split_whitespace().filter(|x| is_id(x)).map(str::to_owned).collect(),
+        rooms: r
+            .rooms
+            .split_whitespace()
+            .filter(|x| is_id(x))
+            .map(str::to_owned)
+            .collect(),
     };
     if room.is_empty() && r.kind != Kind::Guest {
         // A channel group chat sets no room: a group VIA without one is a group (shared only)
-        room = if matches!(env("KITH_VIA").as_deref(), Some("telegram" | "slack" | "discord" | "group")) {
+        room = if matches!(
+            env("KITH_VIA").as_deref(),
+            Some("telegram" | "slack" | "discord" | "group")
+        ) {
             "?".to_owned()
         } else {
             own_room(r.agent, &reader)
@@ -649,10 +788,18 @@ pub fn load(r: &Request<'_>, env: &dyn Fn(&str) -> Option<String>) -> Load {
     }
     let ids = env_members(r.kind, env);
     let members: Option<Vec<Reader>> = ids.as_ref().map(|ids| {
-        ids.iter().map(|m| Reader { kind: Kind::Person, id: m.clone(), rooms: vec![room.clone()] }).collect()
+        ids.iter()
+            .map(|m| Reader {
+                kind: Kind::Person,
+                id: m.clone(),
+                rooms: vec![room.clone()],
+            })
+            .collect()
     });
     if r.kind == Kind::Person
-        && ids.as_ref().is_some_and(|ids| ids.iter().any(|i| i == r.person))
+        && ids
+            .as_ref()
+            .is_some_and(|ids| ids.iter().any(|i| i == r.person))
         && is_id(&room)
         && !reader.rooms.contains(&room)
     {
@@ -663,7 +810,11 @@ pub fn load(r: &Request<'_>, env: &dyn Fn(&str) -> Option<String>) -> Load {
     } else {
         HashMap::new()
     };
-    let projects: Vec<String> = if r.project.is_empty() { vec![] } else { vec![r.project.to_owned()] };
+    let projects: Vec<String> = if r.project.is_empty() {
+        vec![]
+    } else {
+        vec![r.project.to_owned()]
+    };
     let out = load_memory(&LoadArgs {
         agent: r.agent,
         home: r.home,
@@ -678,10 +829,26 @@ pub fn load(r: &Request<'_>, env: &dyn Fn(&str) -> Option<String>) -> Load {
     let attrs = format!(
         " loaded=\"{}\"{}{}",
         out.loaded,
-        if out.more > 0 { format!(" more=\"{}\"", out.more) } else { String::new() },
+        if out.more > 0 {
+            format!(" more=\"{}\"", out.more)
+        } else {
+            String::new()
+        },
         if out.group { " room=\"group\"" } else { "" }
     );
-    let start = start_files(r.agent, r.home, &reader, &room, r.project, members.as_deref(), r.state);
-    let block = [out.block, start].into_iter().filter(|b| !b.is_empty()).collect::<Vec<_>>().join("\n");
+    let start = start_files(
+        r.agent,
+        r.home,
+        &reader,
+        &room,
+        r.project,
+        members.as_deref(),
+        r.state,
+    );
+    let block = [out.block, start]
+        .into_iter()
+        .filter(|b| !b.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
     Load { block, attrs }
 }

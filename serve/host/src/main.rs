@@ -832,7 +832,9 @@ async fn main() -> Result<()> {
                 KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                 KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
                 KernelCmd::Engines { json, action } => print_engines(json, action)?,
-                KernelCmd::Launch { what: LaunchCmd::Prompt { agent, person, project, pkg, kernel, cwd, date, json } } => {
+                KernelCmd::Launch {
+                    what: LaunchCmd::Prompt { agent, person, project, pkg, kernel, cwd, date, json },
+                } => {
                     print_launch_prompt(LaunchPromptArgs { agent, person, project, pkg, kernel, cwd, date, json })?;
                 }
                 KernelCmd::RunOnce { .. } => unreachable!("handled above"),

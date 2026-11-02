@@ -22,9 +22,16 @@ pub struct Registry(serde_json::Map<String, Value>);
 impl Registry {
     pub fn load(state: &Path) -> Result<Self, String> {
         let f = state.join("projects.json");
-        let Ok(text) = fs::read_to_string(&f) else { return Ok(Registry(serde_json::Map::new())) };
+        let Ok(text) = fs::read_to_string(&f) else {
+            return Ok(Registry(serde_json::Map::new()));
+        };
         let v: Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", f.display()))?;
-        Ok(Registry(v.get("projects").and_then(Value::as_object).cloned().unwrap_or_default()))
+        Ok(Registry(
+            v.get("projects")
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default(),
+        ))
     }
 
     pub fn has(&self, id: &str) -> bool {
@@ -41,7 +48,11 @@ impl Registry {
         let mut cur = id.to_owned();
         while self.0.contains_key(&cur) && !out.contains(&cur) {
             out.push(cur.clone());
-            cur = self.0[&cur].get("parent").and_then(Value::as_str).unwrap_or("").to_owned();
+            cur = self.0[&cur]
+                .get("parent")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned();
         }
         out
     }
@@ -49,12 +60,13 @@ impl Registry {
     /// The projects `id` holds and theirs, each after its parent, sorted.
     pub fn held(&self, id: &str) -> Vec<String> {
         fn go(r: &Registry, id: &str, seen: &mut Vec<String>) -> Vec<String> {
-            let mut kids: Vec<&String> = r
-                .0
-                .iter()
-                .filter(|(q, p)| p.get("parent").and_then(Value::as_str) == Some(id) && !seen.contains(q))
-                .map(|(q, _)| q)
-                .collect();
+            let mut kids: Vec<&String> =
+                r.0.iter()
+                    .filter(|(q, p)| {
+                        p.get("parent").and_then(Value::as_str) == Some(id) && !seen.contains(q)
+                    })
+                    .map(|(q, _)| q)
+                    .collect();
             kids.sort();
             let mut out = vec![];
             for c in kids {
@@ -87,7 +99,12 @@ pub struct Who {
 
 impl Who {
     pub fn owner() -> Self {
-        Who { owner: true, id: String::new(), line: String::new(), rooms: String::new() }
+        Who {
+            owner: true,
+            id: String::new(),
+            line: String::new(),
+            rooms: String::new(),
+        }
     }
 
     pub fn kind(&self) -> Kind {
@@ -102,18 +119,30 @@ impl Who {
 
     /// `person` is `KITH_PERSON`; `auth` is `auth.json` (`None` when it is missing). An unknown person is not the owner.
     pub fn resolve(auth: Option<&Value>, person: Option<&str>) -> Self {
-        let Some(person) = person.filter(|p| !p.is_empty()) else { return Self::owner() };
+        let Some(person) = person.filter(|p| !p.is_empty()) else {
+            return Self::owner();
+        };
         let empty = serde_json::Map::new();
-        let people = auth.and_then(|a| a.get("people")).and_then(Value::as_object).unwrap_or(&empty);
+        let people = auth
+            .and_then(|a| a.get("people"))
+            .and_then(Value::as_object)
+            .unwrap_or(&empty);
         let id = if people.contains_key(person) {
             person.to_owned()
         } else {
             people
                 .iter()
-                .find(|(_, v)| v.get("was").and_then(Value::as_array).is_some_and(|w| w.iter().any(|x| x == person)))
+                .find(|(_, v)| {
+                    v.get("was")
+                        .and_then(Value::as_array)
+                        .is_some_and(|w| w.iter().any(|x| x == person))
+                })
                 .map_or_else(|| person.to_owned(), |(k, _)| k.clone())
         };
-        let owner_id = people.iter().find(|(_, v)| v.get("owner").is_some_and(truthy)).map(|(k, _)| k.as_str());
+        let owner_id = people
+            .iter()
+            .find(|(_, v)| v.get("owner").is_some_and(truthy))
+            .map(|(k, _)| k.as_str());
         let owner = owner_id == Some(id.as_str());
         let me = people.get(&id);
         // A name goes into the <session/> tag, so anyone but the owner loses what could close or forge a tag.
@@ -121,7 +150,9 @@ impl Who {
             if owner {
                 s.replace('"', "")
             } else {
-                s.chars().filter(|c| !matches!(c, '<' | '>' | '"' | '\u{0}'..='\u{1f}' | '\u{7f}')).collect()
+                s.chars()
+                    .filter(|c| !matches!(c, '<' | '>' | '"' | '\u{0}'..='\u{1f}' | '\u{7f}'))
+                    .collect()
             }
         };
         let mut attrs = vec![format!("person=\"{}\"", clean(&id))];
@@ -131,7 +162,12 @@ impl Who {
                 attrs.push(format!("{k}=\"{}\"", clean(&s)));
             }
         }
-        Who { owner, id, line: format!(" {}", attrs.join(" ")), rooms: String::new() }
+        Who {
+            owner,
+            id,
+            line: format!(" {}", attrs.join(" ")),
+            rooms: String::new(),
+        }
     }
 }
 
@@ -150,15 +186,24 @@ fn truthy(v: &Value) -> bool {
 
 /// The agent's package folder (the one holding agent.md): `<agents>/<name>/role`, `<agents>/<name>`, then the kernel's own.
 pub fn agent_dir(p: &Paths, kernel: &Path, agent: &str) -> Option<PathBuf> {
-    [p.agents.join(agent).join("role"), p.agents.join(agent), kernel.join("agents").join(agent)]
-        .into_iter()
-        .find(|d| d.join("agent.md").is_file())
+    [
+        p.agents.join(agent).join("role"),
+        p.agents.join(agent),
+        kernel.join("agents").join(agent),
+    ]
+    .into_iter()
+    .find(|d| d.join("agent.md").is_file())
 }
 
 /// Claude Code's own temp folder for a guest, as `kith_paths.py guest_tmp` decides it: `<machine>/run/t/<id>`, or the
 /// first 8 hex digits of `hash(id)` when that is too long, `None` when even that does not fit 44 bytes with
 /// `/claude-<uid>`. `machine` is the real path; `hash` is the SHA-256 hex of its argument (kept out of this crate).
-pub fn guest_tmp(machine_real: &Path, id: &str, uid: u32, hash: &dyn Fn(&str) -> String) -> Option<PathBuf> {
+pub fn guest_tmp(
+    machine_real: &Path,
+    id: &str,
+    uid: u32,
+    hash: &dyn Fn(&str) -> String,
+) -> Option<PathBuf> {
     let base = machine_real.join("run").join("t");
     let short = hash(id)[..8].to_owned();
     [id.to_owned(), short]
@@ -218,7 +263,9 @@ fn body(text: &str) -> String {
 }
 
 fn read_lossy(p: &Path) -> Option<String> {
-    fs::read(p).ok().map(|b| String::from_utf8_lossy(&b).into_owned())
+    fs::read(p)
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
 /// The prompt template: the pinned `prompt.md`, else the live agent.md body, a blank line and PROTOCOL.md.
@@ -244,7 +291,9 @@ pub struct Dirs {
 
 pub fn dirs(i: &Input<'_>) -> Dirs {
     let home = if i.src_pkg.file_name().is_some_and(|n| n == "role") {
-        i.src_pkg.parent().map_or_else(|| i.src_pkg.to_path_buf(), Path::to_path_buf)
+        i.src_pkg
+            .parent()
+            .map_or_else(|| i.src_pkg.to_path_buf(), Path::to_path_buf)
     } else {
         i.paths.state.join("agents").join(i.agent)
     };
@@ -262,7 +311,11 @@ pub fn dirs(i: &Input<'_>) -> Dirs {
             mem: home.join("memory/people").join(&i.who.id),
             work: files.join(".work"),
             files,
-            person_file: i.paths.state.join("people").join(format!("{}.md", i.who.id)),
+            person_file: i
+                .paths
+                .state
+                .join("people")
+                .join(format!("{}.md", i.who.id)),
             home,
         }
     }
@@ -271,12 +324,19 @@ pub fn dirs(i: &Input<'_>) -> Dirs {
 /// The system prompt, byte for byte what `kith AGENT --launch-json` carries as `system_prompt`.
 pub fn build(i: &Input<'_>) -> Result<String, String> {
     if !i.project.is_empty() && !i.registry.has(i.project) {
-        return Err(format!("kith: unknown project '{}'. Known: {}", i.project, i.registry.known().join(" ")));
+        return Err(format!(
+            "kith: unknown project '{}'. Known: {}",
+            i.project,
+            i.registry.known().join(" ")
+        ));
     }
-    if !i.who.owner && !(!i.who.id.is_empty()
-        && i.who.id.starts_with(|c: char| c.is_ascii_lowercase())
-        && i.who.id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'))
-    {
+    let plain = |id: &str| {
+        id.starts_with(|c: char| c.is_ascii_lowercase())
+            && id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    };
+    if !i.who.owner && !plain(&i.who.id) {
         return Err(format!("kith: bad person id '{}' from kith-auth", i.who.id));
     }
     let d = dirs(i);
@@ -326,20 +386,38 @@ pub fn build(i: &Input<'_>) -> Result<String, String> {
     let (parents, held) = if i.project.is_empty() {
         (vec![], vec![])
     } else {
-        (i.registry.chain(i.project).split_off(1), i.registry.held(i.project))
+        (
+            i.registry.chain(i.project).split_off(1),
+            i.registry.held(i.project),
+        )
     };
-    let mut tag = format!("<session project=\"{}\"{}", if i.project.is_empty() { "none" } else { i.project }, load.attrs);
+    let mut tag = format!(
+        "<session project=\"{}\"{}",
+        if i.project.is_empty() {
+            "none"
+        } else {
+            i.project
+        },
+        load.attrs
+    );
     if !parents.is_empty() {
         tag.push_str(&format!(" parents=\"{}\"", parents.join(" ")));
     }
     if !held.is_empty() {
         tag.push_str(&format!(" holds=\"{}\"", held.join(" ")));
     }
-    tag.push_str(&format!(" cwd=\"{}\" date=\"{}\"{}/>", i.cwd, i.date, i.who.line));
+    tag.push_str(&format!(
+        " cwd=\"{}\" date=\"{}\"{}/>",
+        i.cwd, i.date, i.who.line
+    ));
     let mut prompt = format!("{text}\n{}\n{tag}", load.block);
     // A guest's run is told its limits up front, so it doesn't learn them one refused command at a time.
     if !i.who.owner {
-        let note = if i.ctmp_note.is_empty() { String::new() } else { format!(" {}", i.ctmp_note) };
+        let note = if i.ctmp_note.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", i.ctmp_note)
+        };
         prompt.push_str(&format!(
             "\n\n<limits>This run is in a sandbox for {id}. You can write only in {files} (their files; tool caches in {work}),\n{mem} (their memory) and $TMPDIR (temp files). /tmp, the owner's folders and other agents' folders are closed.\nShell commands inside the sandbox run without asking. Anything past it asks the owner: a website or a file outside\nthese folders with the request_access tool, another agent with the ask_helper tool (agent and task); `kith ask`\ndoesn't work from your shell.{note}</limits>",
             id = i.who.id,
