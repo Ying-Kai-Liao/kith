@@ -4,6 +4,7 @@ use super::fast_mode::Listing;
 use super::{Actor, Seg, SegKind};
 use crate::access::{self, Ask, Request};
 use crate::agent::acp::{self, Incoming};
+use crate::cards::autoallow;
 use crate::chat::tasks::TaskState;
 use crate::hub::BotStatus;
 use crate::remote::push::{self, AlertKind};
@@ -16,6 +17,44 @@ use std::time::{Duration, Instant};
 /// switch the session to bypass, auto or accept-edits.
 fn once_only(options: Vec<Value>) -> Vec<Value> {
     options.into_iter().filter(|o| matches!(o["kind"].as_str(), Some("allow_once" | "reject_once"))).collect()
+}
+
+/// The owner's replacement for Claude's own "don't ask again" (its optionId `allow-always`): that one makes Claude
+/// Code write an exact-command rule into the agent's shared folder, which never matches again.
+const DERIVED_ALWAYS: &str = "kith-derived-always";
+
+/// An owner card's Claude-native always option: a rule-saving `allow_always`, not an exit-plan mode switch.
+fn native_always(o: &Value) -> bool {
+    o["kind"] == "allow_always" && !o["optionId"].as_str().is_some_and(|id| id.starts_with("exit-plan"))
+}
+
+/// Swaps Claude's `allow-always` for ours when the card has something to remember. `derived` None drops the option;
+/// a card where Claude offered no `allow_once` (the pick could not be answered) is left as it is.
+fn derived_always(options: Vec<Value>, derived: Option<&autoallow::Derived>) -> Vec<Value> {
+    if !options.iter().any(native_always) || !options.iter().any(|o| o["kind"] == "allow_once") {
+        return options;
+    }
+    let mut out = Vec::with_capacity(options.len());
+    for o in options {
+        if !native_always(&o) {
+            out.push(o);
+        } else if let Some(d) = derived {
+            let rule: String = d.rule.chars().filter(|c| !c.is_control()).take(120).collect();
+            out.push(
+                json!({"optionId": DERIVED_ALWAYS, "name": format!("Always allow: {rule}"), "kind": "allow_always"}),
+            );
+        }
+    }
+    out
+}
+
+/// What Claude hears for a pick: our always option is a yes to this one request (Claude writes no rule), the rest go
+/// through unchanged.
+fn adapter_pick<'a>(offered: &'a Value, chosen: &'a str) -> Option<&'a str> {
+    if chosen != DERIVED_ALWAYS {
+        return Some(chosen);
+    }
+    offered.as_array()?.iter().find(|o| o["kind"] == "allow_once")?["optionId"].as_str()
 }
 
 impl Actor {
@@ -245,6 +284,17 @@ impl Actor {
             let who = who.unwrap_or_else(|| person.clone());
             kept = crate::cards::edge::for_acp(person, &who, agent, &tool_name, raw, &mut options).await;
         }
+        // An owner's run: Claude's "don't ask again" becomes a Kith rule, or goes when nothing safe can be derived.
+        let mut derived = None;
+        if self.cfg.person.is_none()
+            && options.iter().any(native_always)
+            && let Some(agent) = self.cfg.hq_agent.clone()
+        {
+            let reason = autoallow::clean_reason(&title);
+            let lookup = autoallow::derive(&agent, &tool_name, raw, &reason);
+            derived = tokio::time::timeout(Duration::from_secs(8), lookup).await.ok().flatten().map(|d| (d, reason));
+            options = derived_always(options, derived.as_ref().map(|(d, _)| d));
+        }
         let mut detail = json!({"output": "", "diffs": []});
         merge_tool_content(&mut detail, &tool["content"]);
         if let Some((text, _)) = &kept
@@ -270,6 +320,9 @@ impl Actor {
         let mut data = data;
         if let Some((_, edge)) = kept {
             data["edge"] = edge;
+        }
+        if let Some((d, reason)) = derived {
+            data["derived"] = json!({"rule": d.rule, "ruleKind": d.kind, "reason": reason});
         }
         // Who the run waits for when it isn't the asker: the owner, or a bot's owner person.
         let mut waiting_for = None;
@@ -416,7 +469,8 @@ impl Actor {
         }
         // The host's own "always" and job options reach the agent as its allow_once (cards/edge.rs).
         let offered = self.hub.store.entry(entry_id).map(|e| e.data["options"].clone()).unwrap_or_default();
-        let outcome = match option_id.as_deref().and_then(|o| crate::cards::edge::adapter_option(&offered, o)) {
+        let pick = |o| crate::cards::edge::adapter_option(&offered, o).and_then(|o| adapter_pick(&offered, o));
+        let outcome = match option_id.as_deref().and_then(pick) {
             Some(o) => json!({"outcome": {"outcome": "selected", "optionId": o}}),
             None => json!({"outcome": {"outcome": "cancelled"}}),
         };
@@ -437,6 +491,9 @@ impl Actor {
             }
             // The yes was heard by the agent: the once grant stays spent (C3), or the question is closed for good.
             crate::cards::delivered(&self.hub.store, entry_id, allowed);
+            if option_id.as_deref() == Some(DERIVED_ALWAYS) {
+                self.remember_derived(entry_id);
+            }
         } else {
             crate::cards::undelivered(&self.hub.store, entry_id);
         }
@@ -452,6 +509,23 @@ impl Actor {
                 r.activity = "Continuing…".into();
             });
         }
+    }
+
+    /// "Always allow: <rule>" on an owner's card: saves the rule derived when the card opened, the way an auto-mode
+    /// card's always does, off the answer path. A card answers once, so a double tap saves once.
+    fn remember_derived(&self, entry_id: &str) {
+        let Some(card) = self.hub.store.card_by_entry(entry_id) else { return };
+        let Some(kept) = self.hub.store.entry(entry_id).map(|e| e.data["derived"].clone()).filter(Value::is_object)
+        else {
+            return;
+        };
+        let hub = self.hub.clone();
+        tokio::spawn(async move {
+            match autoallow::save(&card, &kept).await {
+                Ok(rule) => autoallow::remembered(&hub, &card, &rule, kept["ruleKind"].as_str().unwrap_or("rule")),
+                Err(why) => tracing::warn!(card = card.id, why, "couldn't remember an acp card's always"),
+            }
+        });
     }
 
     /// A `send_message`: the user's next bubble, in the turn's lane, right away. Only in the
@@ -611,6 +685,64 @@ mod tests {
         assert_eq!(kept, ["exit-plan-default", "reject"]);
         let card = json!({"options": [{"optionId": "reject"}]});
         assert!(crate::api::roles::offered(&card, "reject") && !crate::api::roles::offered(&card, "exit-plan-bypass"));
+    }
+
+    fn claude_options() -> Vec<Value> {
+        vec![
+            json!({"optionId": "allow", "name": "Yes", "kind": "allow_once"}),
+            json!({"optionId": "allow-always", "name": "Yes, and don't ask again", "kind": "allow_always"}),
+            json!({"optionId": "reject", "name": "No", "kind": "reject_once"}),
+            json!({"optionId": "reject-always", "name": "Never", "kind": "reject_always"}),
+        ]
+    }
+
+    fn ids(options: &[Value]) -> Vec<&str> {
+        options.iter().map(|o| o["optionId"].as_str().unwrap()).collect()
+    }
+
+    #[test]
+    fn an_owner_card_offers_the_derived_rule_in_place_of_claudes_always() {
+        let d = autoallow::Derived { kind: "rule".into(), rule: "Bash(grep:*)".into() };
+        let out = derived_always(claude_options(), Some(&d));
+        assert_eq!(ids(&out), ["allow", DERIVED_ALWAYS, "reject", "reject-always"]);
+        assert_eq!(out[1]["name"], "Always allow: Bash(grep:*)");
+        assert_eq!(out[1]["kind"], "allow_always");
+    }
+
+    #[test]
+    fn nothing_derived_means_no_always_option() {
+        assert_eq!(ids(&derived_always(claude_options(), None)), ["allow", "reject", "reject-always"]);
+    }
+
+    #[test]
+    fn picking_it_answers_claude_with_the_allow_once_option() {
+        let d = autoallow::Derived { kind: "rule".into(), rule: "r".into() };
+        let offered = Value::Array(derived_always(claude_options(), Some(&d)));
+        assert_eq!(adapter_pick(&offered, DERIVED_ALWAYS), Some("allow"));
+        assert_eq!(adapter_pick(&offered, "reject"), Some("reject"));
+        // No allow_once offered: nothing to answer with.
+        assert_eq!(adapter_pick(&json!([{"optionId": "x", "kind": "reject_once"}]), DERIVED_ALWAYS), None);
+    }
+
+    #[test]
+    fn exit_plan_cards_and_cards_without_allow_once_are_left_alone() {
+        let d = autoallow::Derived { kind: "rule".into(), rule: "r".into() };
+        let plan = vec![
+            json!({"optionId": "exit-plan-bypass", "name": "b", "kind": "allow_always"}),
+            json!({"optionId": "exit-plan-default", "name": "d", "kind": "allow_once"}),
+            json!({"optionId": "reject", "name": "No", "kind": "reject_once"}),
+        ];
+        assert_eq!(derived_always(plan.clone(), Some(&d)), plan);
+        let no_once = vec![claude_options().remove(1), claude_options().remove(2)];
+        assert_eq!(derived_always(no_once.clone(), Some(&d)), no_once);
+    }
+
+    #[test]
+    fn an_invitee_card_never_sees_the_derived_option() {
+        let d = autoallow::Derived { kind: "rule".into(), rule: "r".into() };
+        // The invitee path filters first; what is left has no allow_always for the rewrite to touch.
+        let out = derived_always(once_only(claude_options()), Some(&d));
+        assert_eq!(ids(&out), ["allow", "reject"]);
     }
 
     #[test]
