@@ -26,6 +26,8 @@
 #                                 unless one is chosen; a session is resumed only under the account it was made under.
 #   kith <agent> --backup ID [task]  a normal run (interactive or one-shot) on that backup chain entry: claude:<name> and claude-api:<profile>
 #                                 on Claude Code, codex[:<name>] on Codex; exit 4 when it can't run. KITH_PROVIDER/KITH_ACCOUNT say which.
+#                                 A one-shot another run started (kith ask) or a schedule started, with no --backup, skips chain entries
+#                                 marked out and moves to the next on a usage-limit failure (marks kept in serve/kernel-backups-out.json).
 #   kith <agent> --backups-json     for a program: the agent's backup chain as one JSON object, each entry with whether it is ready
 #                                 Nothing in it points at a temp file. The pinned snapshot (KITH_AGENT_DIR) is kept while --hold's
 #                                 pid (default: the caller) lives; pass the long-lived process's pid. KITH_VIA=<name> tags the cost ledger.
@@ -228,6 +230,7 @@ if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/
 # checked as one (--via the agent that called it; --take-once uses up a "just this once" from the helper card). Fails
 # closed: no answer from kith-auth, no run.
 nested=0; [[ -n ${KITH_AGENT:-} ]] && nested=1   # started by another run (KITH_AGENT is exported further down)
+caller_env=${KITH_AGENT:-}   # the caller's name as it came in (exported over with this agent's a little below)
 caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trusted=0 p_mode="" p_model="" p_deny="" p_line="" p_env_names="" p_rooms=""
 if [[ -n ${KITH_PERSON:-} ]]; then
   # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
@@ -360,6 +363,7 @@ sys.exit("kith: MCP servers not connected: %s" % bad if bad else 0)'
   exit $?
 fi
 
+chain_args=("$@")   # for the chain walk below
 print=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper=""
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -400,6 +404,14 @@ if [[ -n $resume_thread || -n $resume_pick ]]; then
   resolved=$(python3 "$KITH/bin/kith-sessions" resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit 1
   eval "$resolved"
   [[ -z $r_cwd ]] || cd "$r_cwd" || exit 1
+fi
+# A one-shot that no host is picking the account for (another run's `kith ask`, a schedule: KITH_AGENT or
+# KITH_BACKUP_CHAIN) walks the backup chain: entries marked out are skipped, and a usage-limit failure moves to the next
+# one (lib/kith_accounts.py run-chain, each attempt a whole `kith AGENT --backup ID` run). Not for an explicit --backup,
+# --launch-json (the host picks), --print, a terminal's --resume/-r/-c, or an attempt of the walk itself.
+if [[ $# -gt 0 && -z $backup && $launch -eq 0 && $print -eq 0 && -z $resume_thread && -z $resume_pick && -z ${KITH_CHAIN_CHILD:-} ]] \
+   && [[ $p_owner == 1 ]] && [[ $nested -eq 1 || -n ${KITH_BACKUP_CHAIN:-} ]]; then
+  exec env -u KITH_AGENT_DIR -u KITH_AGENT_HOME -u KITH_AGENT_VERSION -u KITH_AGENT ${caller_env:+KITH_AGENT=$caller_env} python3 "$KITH/lib/kith_accounts.py" run-chain "$agent" "$src_pkg/agent.md" "$KITH/bin/kith" -- "${chain_args[@]}"
 fi
 # A program reads stdout as the JSON alone: whatever a helper prints on the way goes to stderr; fd 3 is the real stdout.
 [[ $print -eq 1 ]] && launch=0

@@ -26,9 +26,10 @@ SessionStart): it is resumed only under that account.
   kith_accounts.py launch-env AGENT ID           shell assignments for bin/kith; exit 4 + one line on stderr when not runnable
   kith_accounts.py main-env AGENT AGENT.MD       the main account for bin/kith: main_id=ID plus launch-env's assignments
                                                  (empty for the default login); exit 4 + one line when it can't run
+  kith_accounts.py run-chain AGENT AGENT.MD KITH -- ARGS...   a non-interactive one-shot over the chain (see run_chain)
   kith_accounts.py session-account SID           the account id a session was made under ('' when the ledger doesn't know it)
 """
-import json, os, re, shlex, subprocess, sys
+import json, os, re, shlex, subprocess, sys, tempfile, time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -332,9 +333,91 @@ def session_account(sid):
     return ledger_id(*row) if row else None
 
 
+# --- a one-shot over the chain (bin/kith, when another run or a schedule started it) -------------------------------------
+# The host picks an account per turn itself and passes --backup. A run kith starts on its own (an agent asking another,
+# a schedule) has no host in between, so this is the same walk in the kernel: skip entries marked out, run on the first
+# ready one, and on a usage-limit message mark it out and move to the next. Each attempt is a whole `kith AGENT --backup
+# ID ...` child, so it claims its session and execs claude as any run does.
+LIMIT_RE = re.compile(r"you've hit your .{0,30}limit|usage limit|weekly limit|rate.?limit", re.I)
+OUT_FOR = 3600   # as the host: how long an entry stays out when the provider didn't say when its limit lifts
+
+
+def out_files():
+    """The host's backups.json (read only: the host holds it in memory and rewrites it) and our own mark file beside it."""
+    d = machine() / 'serve'
+    return [d / 'backups.json', d / 'kernel-backups-out.json']
+
+
+def out_ids(now=None):
+    """Ids marked out until a time in the future, by either file. A missing or corrupt file marks nothing."""
+    now = now or time.time()
+    out = set()
+    for f in out_files():
+        try:
+            d = json.loads(f.read_text())
+            out |= {k for k, v in d.items() if isinstance(v, dict) and float(v.get('out_until', 0)) > now}
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    return out
+
+
+def mark_out(entry, now=None):
+    """Mark an entry out in our own file, atomically; the host's file is never written."""
+    now = int(now or time.time())
+    f = out_files()[1]
+    try:
+        d = json.loads(f.read_text())
+        d = {k: v for k, v in d.items() if isinstance(v, dict) and float(v.get('out_until', 0)) > now}
+    except (OSError, ValueError, TypeError, AttributeError):
+        d = {}
+    d[entry] = {'out_until': now + OUT_FOR, 'reason': 'rate_limit', 'since': now}
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=f.parent, prefix='.kernel-out.')
+        with os.fdopen(fd, 'w') as fh:
+            json.dump(d, fh)
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
+def limited(code, text):
+    """A failed run whose short output says the account is out of usage (a long output that mentions limits is a task)."""
+    return code != 0 and len(text) < 4000 and bool(LIMIT_RE.search(text))
+
+
+def run_chain(agent, agent_md, kith, args):
+    main = main_id(agent, agent_md)
+    ids = [main] + [i for i in kith_settings.backups(agent)[0] if i != main]
+    out = out_ids()
+    todo = [i for i in ids if i not in out] or [main]   # all out: the main account as always, it says what's wrong
+    code, final, errs = 4, '', []
+    for n, entry in enumerate(todo):
+        argv = [str(kith), agent] + ([] if n == 0 and entry == main else ['--backup', entry]) + args
+        with tempfile.TemporaryFile('w+') as so, tempfile.TemporaryFile('w+') as se:
+            code = subprocess.run(argv, stdout=so, stderr=se, env={**os.environ, 'KITH_CHAIN_CHILD': '1'}).returncode
+            so.seek(0); se.seek(0)
+            final, err = so.read(), se.read()
+        sys.stderr.write(err)
+        if code == 4 and n + 1 < len(todo):   # this entry can't run (not logged in): the next one
+            print(f'kith: {entry} can\'t run; trying {todo[n + 1]}', file=sys.stderr)
+            continue
+        if limited(code, final + err):
+            mark_out(entry)
+            if n + 1 < len(todo):
+                print(f'kith: {entry} is out of usage; moving to {todo[n + 1]}', file=sys.stderr)
+                continue
+        break
+    sys.stdout.write(final)
+    sys.stdout.flush()
+    return code
+
+
 if __name__ == '__main__':
     a = sys.argv[1:]
     try:
+        if len(a) >= 5 and a[0] == 'run-chain' and a[4] == '--':
+            sys.exit(run_chain(a[1], a[2], a[3], a[5:]))
         if len(a) == 3 and a[0] == 'backups-json':
             print(json.dumps(chain(a[1], a[2])))
         elif len(a) == 3 and a[0] == 'launch-env':
