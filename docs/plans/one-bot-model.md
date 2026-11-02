@@ -14,7 +14,10 @@ Survey this plan is built on: [cli-host-gap-map.md](cli-host-gap-map.md).
 - **A fresh core, not a rewrite of everything.** The kernel is redesigned in Rust as the one core (one agent model,
   one secret store, one scheduler, one set of folder rules, engines over ACP), a crate the CLI and the host both link.
   It is designed fresh, not ported line by line. The host becomes a thin server over it; the apps, cloud and relay are
-  kept, since they talk to the same host API. The CLI's commands and their `--json` stay the contract. Python keeps
+  kept, since they talk to the same host API. The CLI's commands and their `--json` stay the contract. It is built
+  **beside** the current kernel, in a top-level `core/` folder of this repo (a Cargo workspace member the host links),
+  not in a new repo: the harness needs the old kernel and the new core at the same commit, and the host links the
+  crate. Nothing switches on a set day: each command moves when it is proven (see Switching over). Python keeps
   the parts that are still changing fast (packages, agent settings, people) until they settle. Settled 2026-11-03,
   instead of rebuilding the whole app.
 - **Same CLI line, same result.** The new core is verified by running the same CLI lines against the old kernel and
@@ -62,7 +65,8 @@ and `--json` first and the app calling it after.
 ### A. The core (Rust crate, designed fresh)
 
 - [ ] **A0. Core design.** A short design doc (`docs/plans/core-design.md`): the agent model, secrets, scheduler,
-  folders, engines, and how the host and the CLI sit on the crate. Reviewed by the architect agent before A1's code.
+  folders, engines, how the host and the CLI sit on the crate, the `core/` layout, and how `kith`'s dispatcher routes a
+  command to the core. Reviewed by the architect agent before A1's code.
 - [ ] **A0b. Differential harness.** The verification below, as a test runner, before the first module moves.
 - [ ] **A1. Folder rules.** One Rust implementation of where kith's folders are (`kernel/lib/kith_paths.py`,
   `serve/host/src/kernel.rs::machine_dir`, `hqmem::Layout::from_env` disagree today: `.migrated` is respected by two
@@ -128,6 +132,17 @@ C1 any time;  C2 after B1;  C3 after A2+B1+B2;  C4 before C5;  C5 last (after A5
 
 First up: **A0** (core design, then A0b and A1) and **B2** (connector and skill grants in the CLI), in parallel.
 
+## Switching over: one command at a time
+
+- The core is built in `core/` and runs nothing real until a command is switched.
+- `kith`'s dispatcher (`kernel/bin/kith`) already sends some commands to the Rust binary (`kith memory check` and the
+  `kith serve` subcommands). A command is switched by routing it to the core there.
+- **The rule:** a command switches when its same-CLI-line comparison is green across recent merges, so its Python side
+  has stopped changing.
+- New kernel features keep landing in Python meanwhile, each with CLI-line tests. Those tests join the comparison
+  corpus, so the core has to match them too and drift shows up as a failing comparison.
+- When nothing is left on the Python side, it is deleted.
+
 ## Verification: same CLI line, same result
 
 Every module that moves into the core is checked by running the same CLI lines against the old kernel and the new
@@ -159,3 +174,5 @@ for those, and run against the new core.
 - 2026-11-03: plan written; decisions recorded. B0 done in PR #582. Issue #578 opened for a model per backup entry.
 - 2026-11-03: fresh core instead of a whole-app rebuild; verification is the same CLI line giving the same result.
   Secrets and scheduler moved from B to the core (A5, A6). A0 (design) and A0b (differential harness) added before A1.
+- 2026-11-03: the core is built beside the kernel in a top-level `core/` folder of this repo (not a new repo, not
+  under `serve/`), and switched over one command at a time when its comparison stays green.
