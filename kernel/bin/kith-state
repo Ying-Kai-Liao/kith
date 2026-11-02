@@ -66,10 +66,27 @@ def git(repo, *args, check=True):
     return subprocess.run(['git', *args], cwd=repo, capture_output=True, text=True, check=check)
 
 
+def exclude_builtins(repo):
+    """A built-in agent (scratch) keeps nothing long-term; whatever its folder holds in the state repo is not backed up."""
+    listed = subprocess.run([str(KITH / 'bin' / 'kith-pkg'), 'list', '--json'], capture_output=True, text=True).stdout
+    try:
+        names = [n for n, o in json.loads(listed or '{}').items() if o.get('builtin')]
+    except ValueError:
+        return
+    f = repo / '.git' / 'info' / 'exclude'
+    have = f.read_text().split('\n') if f.is_file() else []
+    want = [f'/agents/{n}/' for n in names if f'/agents/{n}/' not in have]
+    if want:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text('\n'.join(have).rstrip('\n') + '\n' + '\n'.join(want) + '\n')
+
+
 def commit_repo(repo, label):
     if not (repo / '.git').exists():
         print(f'kith-state: {repo} is not a git repo; skipped')
         return
+    if repo == STATE:
+        exclude_builtins(repo)
     git(repo, 'add', '-A')
     if git(repo, 'diff', '--cached', '--quiet', check=False).returncode == 0:
         print(f'kith-state: {label}: nothing changed')
@@ -142,7 +159,7 @@ def pieces():
         piece('memories', AGENTS, 'memories')
     listed = subprocess.run([str(KITH / 'bin' / 'kith-pkg'), 'list', '--json'], capture_output=True, text=True).stdout
     for name, o in sorted(json.loads(listed or '{}').items()):
-        if not o.get('legacy'):
+        if not o.get('legacy') and not o.get('builtin'):   # a built-in (scratch) is never backed up
             piece(name, Path(o['dir']), 'agent')
     return out
 

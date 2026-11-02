@@ -26,6 +26,7 @@ SessionStart): it is resumed only under that account.
   kith_accounts.py launch-env AGENT ID           shell assignments for bin/kith; exit 4 + one line on stderr when not runnable
   kith_accounts.py main-env AGENT AGENT.MD       the main account for bin/kith: main_id=ID plus launch-env's assignments
                                                  (empty for the default login); exit 4 + one line when it can't run
+  kith_accounts.py session-run SID [--sh]         the harness, model and effort a session started with ({} when the ledger doesn't know it)
   kith_accounts.py session-account SID           the account id a session was made under ('' when the ledger doesn't know it)
 """
 import json, os, re, shlex, subprocess, sys
@@ -369,6 +370,26 @@ def session_account(sid):
     return ledger_id(*row) if row else None
 
 
+def session_run(sid):
+    """{agent, harness, model, effort} a session was started with, from the cost ledger (the run's tag: KITH_PROVIDER,
+    KITH_MODEL, KITH_EFFORT); None when the ledger doesn't know it. Harness is claude for a row from before provider."""
+    import sqlite3
+    db = machine() / 'cost.db'
+    if not sid or not db.is_file():
+        return None
+    try:
+        c = sqlite3.connect(db.as_uri() + '?mode=ro', uri=True)
+        try:
+            cols = [r[1] for r in c.execute('pragma table_info(runs)')]
+            pick = 'provider' if 'provider' in cols else 'null'
+            row = c.execute(f'select agent, {pick}, model, effort from runs where session = ?', (sid,)).fetchone()
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return None
+    return {'agent': row[0], 'harness': row[1] or 'claude', 'model': row[2] or None, 'effort': row[3] or None} if row else None
+
+
 if __name__ == '__main__':
     a = sys.argv[1:]
     try:
@@ -378,6 +399,13 @@ if __name__ == '__main__':
             print(launch_env(a[1], a[2]))
         elif len(a) == 3 and a[0] == 'main-env':
             print(main_env(a[1], a[2]))
+        elif len(a) in (2, 3) and a[0] == 'session-run':
+            r = session_run(a[1]) or {}
+            if len(a) == 3 and a[2] == '--sh':   # for bin/kith: the harness and model a resumed thread keeps
+                print(f"s_harness={shlex.quote(r.get('harness') or '')} s_model={shlex.quote(r.get('model') or '')} "
+                      f"s_effort={shlex.quote(r.get('effort') or '')}")
+            else:
+                print(json.dumps(r))
         elif len(a) == 2 and a[0] == 'session-account':
             print(session_account(a[1]) or '')
         else:

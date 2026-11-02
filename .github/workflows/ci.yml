@@ -194,6 +194,8 @@ jobs:
         run: kernel/tests/kith-harness-check
       - name: Agent set check (kith <agent> set model|effort, --json, a model per backup entry)
         run: kernel/tests/kith-agent-set-check
+      - name: Scratch check (the built-in scratch agent: engine per chat, never backed up or shared, keep as an agent)
+        run: kernel/tests/kith-scratch-check
       - name: Grants check (connectors and skills as grants on an agent)
         run: kernel/tests/kith-grants-check
       - name: Migrate check

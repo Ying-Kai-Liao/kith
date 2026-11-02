@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # kith-new — scaffold a new kith agent with the repo's conventions; the builder agent fills in the judgement parts.
 #
-#   kith-new <name> "<description>"     create the agent in the agents folder as its own git repo (fails if it exists)
+#   kith-new <name> "<description>" [--instructions FILE|-]
+#                                       create the agent in the agents folder as its own git repo (fails if it exists);
+#                                       --instructions: FILE (or stdin) is the first draft of agent.md's opening paragraph,
+#                                       in place of the TODO line (kith scratch keep uses it; nothing is asked either way)
 #
 # Creates agent.md (frontmatter + section skeleton), capabilities.yaml, settings.json (every installed plugin off
 # except kith: an agent carries only its own tools), skills/learned/, and its state (memory/) in the state folder
@@ -12,7 +15,18 @@ set -euo pipefail
 # Follow the script's own symlinks but keep the repo's logical path (it may be a symlink to a path with spaces).
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
-name=${1:-}; desc=${2:-}
+instr_from=""; args=()
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --instructions) instr_from=${2:?kith-new: --instructions needs a file or -}; shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+name=${args[0]:-}; desc=${args[1]:-}
+instr=""
+if [[ -n $instr_from ]]; then
+  if [[ $instr_from == - ]]; then instr=$(cat); else instr=$(cat "$instr_from") || { echo "kith-new: can't read $instr_from" >&2; exit 2; }; fi
+fi
 [[ $name =~ ^[a-z][a-z0-9-]{1,30}$ ]] || { echo "kith-new: name must be lowercase letters, digits, dashes (got '$name')" >&2; exit 2; }
 [[ $name != kith ]] || { echo "kith-new: an agent can't be called 'kith' (it is the command's own name)" >&2; exit 2; }
 [[ -n $desc && $desc != *": "* ]] || { echo "kith-new: give a one-line description without ': ' in it" >&2; exit 2; }
@@ -26,6 +40,9 @@ state="$agents/$name"
 mkdir -p "$home/skills/learned" "$state/memory/projects" "$state/memory/sessions"
 touch "$home/skills/learned/.keep"
 
+intro=$instr
+[[ -n $intro ]] || intro="You are the user's $name specialist. TODO(builder): one paragraph on who you are and what you are for."
+
 cat > "$home/agent.md" <<EOF
 ---
 name: $name
@@ -33,7 +50,7 @@ description: $desc
 memory: user
 ---
 
-You are the user's $name specialist. TODO(builder): one paragraph on who you are and what you are for.
+$intro
 
 ## How you work
 - TODO(builder): 3–6 bullets: how you approach the work, what is state (read from source every time) vs memory,
