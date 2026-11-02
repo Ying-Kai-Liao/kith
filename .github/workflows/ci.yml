@@ -194,6 +194,8 @@ jobs:
         run: kernel/tests/kith-harness-check
       - name: Agent set check (kith <agent> set model|effort, --json, a model per backup entry)
         run: kernel/tests/kith-agent-set-check
+      - name: Account check (kith account add|remove|list --json, the login command returned and not run)
+        run: kernel/tests/kith-account-check
       - name: Schedule json check (kith schedule ls|add|rm|pause|resume|run|log --json, the error object)
         run: kernel/tests/kith-sched-json-check
       - name: Auth json check (kith auth ls|granted|grant|revoke --json, no secret value in any output)

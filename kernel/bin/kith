@@ -5,7 +5,7 @@
 #   kith doctor                     check the install: links, repos, agents, services, plugin, background jobs
 #   kith backup run [--yes|--check|--nightly [off]]   everything to private GitHub repos, making the missing ones; --check says what isn't; --nightly at 03:00 (kith-state)
 #   kith backup list|add|remove ...                      the backup chain kith serve moves to when the agent's own harness runs out of usage (kith-account)
-#   kith account add|list|remove ...                     extra Claude / Codex logins for that chain, one folder each (kith-account)
+#   kith account add|list|remove ... [--json]            extra Claude / Codex logins for that chain, one folder each (kith-account); add --json returns the login command instead of running it
 #   kith account use <id> [--agent A] | --reset           the main account an agent's runs use; the chain sits on top of it
 #   kith ls [--json]                list agents (--json: name, description, home, model, effort, harness, for programs)
 #   kith send-to <service> "text" [--body FILE|-] [--profile P] [--for A] [--json]   push to a bot's webhook (grok); "sent" = a run started (success:true), not a reply; Grok caps 200 runs/h per routine, silently (kith-send-to)
