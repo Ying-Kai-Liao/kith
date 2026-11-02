@@ -54,6 +54,17 @@
     "run": [["project", "ls", "--json"], ["project", "root"]]
   },
   {
+    "name": "agent-connectors-skills-json",
+    "command": "connectors",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"},
+      {"write": "kith/agents/echo/role/skills/greet/SKILL.md", "text": "---\nname: greet\ndescription: Say hello\n---\nbody\n"}
+    ],
+    "sort_lists": true,
+    "run": [["echo", "connectors", "--json"], ["echo", "skills", "--json"], ["connectors", "--json"]]
+  },
+  {
     "name": "unknown-agent-refused",
     "command": "unknown",
     "setup": [{"mkdir": "kith/state"}],
