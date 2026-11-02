@@ -180,9 +180,11 @@ async fn session(
     let mut text = String::new();
     let mut cost = None;
     let result = loop {
+        // Biased: when the process dies, `Closed` (with its stderr) is queued before the request fails.
         tokio::select! {
-            r = &mut prompt => break r?,
+            biased;
             inc = rx.recv() => handle(acp, inc, &mut text, &mut cost, spec.approve).await?,
+            r = &mut prompt => break r?,
         }
     };
     // Whatever the agent streamed before its answer is already queued.

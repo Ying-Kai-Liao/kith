@@ -17,6 +17,8 @@ use tokio::time::Instant;
 
 /// stderr lines kept to explain a crash.
 const STDERR_TAIL_LINES: usize = 12;
+/// How long a closed agent's stderr gets to drain before its tail is reported anyway.
+const STDERR_DRAIN: Duration = Duration::from_secs(1);
 /// How long a stopped agent gets to exit by itself before what's left of it is killed.
 const EXIT_GRACE: Duration = Duration::from_secs(10);
 
@@ -276,7 +278,7 @@ impl Acp {
         let tail = Arc::new(std::sync::Mutex::new(VecDeque::<String>::with_capacity(
             STDERR_TAIL_LINES,
         )));
-        {
+        let stderr_task = {
             let tail = tail.clone();
             tokio::spawn(async move {
                 let mut lines = BufReader::new(stderr).lines();
@@ -288,8 +290,8 @@ impl Acp {
                     }
                     t.push_back(line);
                 }
-            });
-        }
+            })
+        };
         {
             let pending = pending.clone();
             tokio::spawn(async move {
@@ -328,10 +330,16 @@ impl Acp {
                         _ => {}
                     }
                 }
-                // Process gone: dropping the waiters fails them as `FailureKind::Exited`.
-                pending.locked().clear();
+                // Stdout can hit EOF before the last stderr lines are read (it does on Linux): let the
+                // stderr reader finish so the tail says why the process died. Bounded, since a
+                // grandchild may hold stderr open after the child is gone.
+                let _ = tokio::time::timeout(STDERR_DRAIN, stderr_task).await;
+                // Closed goes out before the waiters drop, so a caller that sees its request fail can
+                // already find the reason queued.
                 let stderr_tail = tail.locked().iter().cloned().collect::<Vec<_>>().join("\n");
                 let _ = tx.send(Incoming::Closed { stderr_tail });
+                // Process gone: dropping the waiters fails them as `FailureKind::Exited`.
+                pending.locked().clear();
             });
         }
 
@@ -670,5 +678,38 @@ mod tests {
             _ => panic!("expected notification"),
         }
         assert!(matches!(rx.recv().await.unwrap(), Incoming::Closed { .. }));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn closed_carries_stderr_written_after_stdout_ended() {
+        // stdout reaches EOF at once; a straggler writes to stderr a moment later.
+        let (_acp, mut rx) = Acp::spawn(
+            r#"sh -c '(sleep 0.3; echo "out of memory" >&2) >/dev/null & exit 3'"#,
+            "/tmp",
+            &[],
+        )
+        .unwrap();
+        match rx.recv().await.unwrap() {
+            Incoming::Closed { stderr_tail } => assert_eq!(stderr_tail, "out of memory"),
+            _ => panic!("expected Closed"),
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_held_open_stderr_does_not_block_closed() {
+        let started = Instant::now();
+        let (_acp, mut rx) = Acp::spawn(
+            r#"sh -c 'echo before >&2; sleep 30 >/dev/null & exit 0'"#,
+            "/tmp",
+            &[],
+        )
+        .unwrap();
+        match rx.recv().await.unwrap() {
+            Incoming::Closed { stderr_tail } => assert_eq!(stderr_tail, "before"),
+            _ => panic!("expected Closed"),
+        }
+        assert!(started.elapsed() < STDERR_DRAIN + Duration::from_secs(3));
     }
 }
