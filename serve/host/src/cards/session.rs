@@ -229,7 +229,9 @@ pub fn tag_tool(hub: &Hub, agent: &str, run_session: &str, raw: &Value, data: &m
     let grant = {
         let mut hits = HITS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // The newest: the row follows the call the grant let through last.
-        let at = hits.iter().rposition(|h| h.agent == agent && h.run_session == run_session && h.key == key && now - h.at < TAG_WINDOW_MS)?;
+        let at = hits.iter().rposition(|h| {
+            h.agent == agent && h.run_session == run_session && h.key == key && now - h.at < TAG_WINDOW_MS
+        })?;
         hits.remove(at).grant
     };
     let g = hub.store.session_grant(&grant)?;

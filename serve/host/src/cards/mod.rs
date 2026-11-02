@@ -560,7 +560,9 @@ pub fn answer(
         let kept = entry.data.get("autoAllow").filter(|k| k.is_object() && card.approver == "owner").cloned();
         match (allow, option_id, kept) {
             (true, Some(autoallow::ALWAYS), Some(kept)) => remember(hub, &card, kept),
-            (true, Some(session::SESSION), Some(kept)) if person.is_none() && card.person.is_empty() => session::grant(hub, &card, &kept),
+            (true, Some(session::SESSION), Some(kept)) if person.is_none() && card.person.is_empty() => {
+                session::grant(hub, &card, &kept);
+            }
             _ => {}
         }
         return Ok(Outcome::Recorded { forward: settle(hub, &card, was_live, allow, option_id, person)? });

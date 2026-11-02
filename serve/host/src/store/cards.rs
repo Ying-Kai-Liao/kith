@@ -442,7 +442,11 @@ impl Store {
     pub fn cards_recent(&self, limit: usize) -> Vec<Card> {
         let c = self.db.locked();
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        super::logged("recent cards", list(&c, "WHERE approver = 'owner' AND person = '' ORDER BY created_at DESC LIMIT ?1", [limit])).unwrap_or_default()
+        super::logged(
+            "recent cards",
+            list(&c, "WHERE approver = 'owner' AND person = '' ORDER BY created_at DESC LIMIT ?1", [limit]),
+        )
+        .unwrap_or_default()
     }
 
     /// The open cards, oldest first: what the re-derive goes over.
