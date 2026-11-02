@@ -633,6 +633,8 @@ def cmd_set_harness(agent, harness, model=None):
     if model is not None and not re.fullmatch(r'[\w.:\[\]/-]+', model):
         die(f"not a model name: {model!r}", 2)
     home = agent_home(agent)
+    if builtin(home):
+        die(f'{agent} is built in: its engine and model are picked per chat (kith {agent} -H HARNESS -m MODEL)')
     f = home / 'agent.md'
     text = f.read_text()
     m = re.match(r'^---\n(.*?)\n---\n?', text, re.S)
@@ -694,6 +696,12 @@ def git(home, *args, check=False, timeout=120):
     if check and r.returncode:
         die(f'git {args[0]} in {home}: {(r.stderr or r.stdout).strip()}')
     return r
+
+
+def builtin(home):
+    """True for an agent that ships with kith (kernel/agents/<name>, e.g. scratch): no repo of its own, never backed up
+    or shared. Keyed on where the agent resolves, so a user's own agent of the same name is an ordinary agent."""
+    return Path(home).parent == KITH / 'agents'
 
 
 def owned(home):
@@ -977,10 +985,16 @@ def ensure_readme(home, agent, link):
                f'<profile>`): {", ".join(svc)}.\n' if svc else '')))
 
 
+def refuse_builtin(agent, home):
+    if builtin(home):
+        die(f'{agent} is built in and never shared; kith {agent} keep <thread> <name> makes it a real agent')
+
+
 def cmd_publish(agent, repo_name=None):
     """A public copy without the history: one commit per publish, holding the agent as it is now. The agent's own
     repo (origin) keeps every version and stays as private as it is."""
     home = agent_home(agent)
+    refuse_builtin(agent, home)
     if not owned(home) or repo_root(home).resolve() != home.resolve():
         die(f'{agent}: only an agent that is its own repo in the agents folder can be published')
     url = git(home, 'remote', 'get-url', 'public').stdout.strip()
@@ -1023,6 +1037,7 @@ def cmd_publish(agent, repo_name=None):
 
 def cmd_share(agent, public):
     home = agent_home(agent)
+    refuse_builtin(agent, home)
     if not owned(home):
         die(f'{agent} is not in the agents folder ({AGENTS})')
     root = repo_root(home)
@@ -1207,12 +1222,14 @@ def cmd_list(as_json):
             o['unpushed'] = int(ahead) if ahead.isdigit() else None
         else:
             o['legacy'] = True
+        if builtin(home):
+            o['builtin'] = True   # ships with kith: not backed up, not shared (kith-state, cmd_share)
         out[name] = o
     if as_json:
         print(json.dumps(out))
         return
     for name, o in out.items():
-        where = 'in the kith repo (legacy)' if o.get('legacy') else (o['remote'].removeprefix('https://github.com/')
+        where = 'built in' if o.get('builtin') else 'in the kith repo (legacy)' if o.get('legacy') else (o['remote'].removeprefix('https://github.com/')
                                                                    .removesuffix('.git') or 'local only')
         flags = [f for f, on in (('edits', o.get('dirty')), (f'{o.get("unpushed")} unpushed', o.get('unpushed')))
                  if on]

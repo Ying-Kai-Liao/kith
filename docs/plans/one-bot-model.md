@@ -176,3 +176,4 @@ for those, and run against the new core.
   Secrets and scheduler moved from B to the core (A5, A6). A0 (design) and A0b (differential harness) added before A1.
 - 2026-11-03: the core is built beside the kernel in a top-level `core/` folder of this repo (not a new repo, not
   under `serve/`), and switched over one command at a time when its comparison stays green.
+- 2026-11-03: C1 CLI: built-in `scratch` agent (`kernel/agents/scratch`, no install step, listed as `builtin`, never backed up or shared), engine and model per chat and kept on `--resume`, `kith scratch keep <thread> <name>` makes a real agent via `kith new --instructions` (PR #N). The app half of C1 is still open.
