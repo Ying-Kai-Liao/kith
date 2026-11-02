@@ -35,11 +35,12 @@
 #   kith scratch thread <id> [--json]                    which engine and model a scratch thread runs on (--resume keeps them unless -H/-m say otherwise)
 #   kith scratch keep <thread-id> <name> [--json]        make a real agent of a scratch thread: its summary becomes the description and a first draft of agent.md (kith-scratch)
 #   kith install <github-link> [--as NAME]               add an agent; each agent is its own git repo
+#   kith install <github-link> [--as NAME] --preview [--json]   what it would do here, keeping nothing; --yes --json installs
 #   kith update                                          update kith itself: git pull, brew upgrade or install.sh again, by how it was installed; desktop app: the download link (kith-self-update)
 #   kith update|push|commit <agent>|--all                pull from, push to or commit the agent's repo; update --all: kith first, then every agent
 #   kith history <agent> | kith restore <agent> <commit>   every good version is committed; restore any of them
 #   kith share <agent> [--public [--fresh]]              put it on GitHub; --fresh: a public copy without its history
-#   kith market [words]                                  agents people shared: pick any by number to install
+#   kith market [words] [--new] [--json]                 agents people shared: pick any by number to install (--json: the list)
 #   kith search [words] [--mine]                         find agents on GitHub (repos tagged hq-agent)
 #   kith deps <agent>|--all [--install]                  programs an agent runs that this Mac lacks; --install adds them
 #   kith <agent> connect|disconnect <connector> [--profile P] [--json]   grant the agent a connector of this Mac (kith-auth); kith <agent> connectors [--json]: what it has

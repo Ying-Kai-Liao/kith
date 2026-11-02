@@ -64,10 +64,11 @@ and `--json` first and the app calling it after.
 
 ### A. The core (Rust crate, designed fresh)
 
-- [ ] **A0. Core design.** A short design doc (`docs/plans/core-design.md`): the agent model, secrets, scheduler,
+- [x] **A0. Core design.** A short design doc (`docs/plans/core-design.md`): the agent model, secrets, scheduler,
   folders, engines, how the host and the CLI sit on the crate, the `core/` layout, and how `kith`'s dispatcher routes a
   command to the core. Reviewed by the architect agent before A1's code.
-- [ ] **A0b. Differential harness.** The verification below, as a test runner, before the first module moves.
+- [x] **A0b. Differential harness.** The verification below, as a test runner, before the first module moves.
+  `kernel/tests/difftest/` (README there); run it with `kernel/tests/kith-difftest-check`.
 - [ ] **A1. Folder rules.** One Rust implementation of where kith's folders are (`kernel/lib/kith_paths.py`,
   `serve/host/src/kernel.rs::machine_dir`, `hqmem::Layout::from_env` disagree today: `.migrated` is respected by two
   and not the third). New crate under `serve/` (name it in the PR), linked by the host, exposed to Python through the
@@ -169,6 +170,17 @@ for those, and run against the new core.
 - A change that touches people, invites, secrets, threads or tokens runs the matching property checks (see the skills
   `invitee-access`, `revoke-access`, `secret-cards`, `thread-writers`, `run-tokens`).
 
+## The `rust-rebuild` branch
+
+Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode). Other managers merge into it too.
+
+- Track A PRs branch from `rust-rebuild` and target it.
+- `ci.yml` runs only for `main`, so these PRs get no automatic CI. The manager runs the kernel and core tests locally
+  before merging, and runs CI by hand (`gh workflow run ci.yml --ref rust-rebuild`) at milestones (after A0b and A1
+  land) and fixes what it finds.
+- `origin/main` is merged into `rust-rebuild` at least once a day. No iOS changes on it.
+- `rust-rebuild` goes to `main` later through one normal PR with full CI.
+
 ## Log
 
 - 2026-11-03: plan written; decisions recorded. B0 done in PR #582. Issue #578 opened for a model per backup entry.
@@ -176,4 +188,7 @@ for those, and run against the new core.
   Secrets and scheduler moved from B to the core (A5, A6). A0 (design) and A0b (differential harness) added before A1.
 - 2026-11-03: the core is built beside the kernel in a top-level `core/` folder of this repo (not a new repo, not
   under `serve/`), and switched over one command at a time when its comparison stays green.
+- 2026-11-03: A0b done: `kernel/tests/difftest/kith-difftest` runs corpus cases on an OLD and a NEW side and reports
+  green/red per command (`--summary`); seed corpus passes OLD against OLD. `kernel/bin/kith` does not read KITH_CORE yet.
+- 2026-11-03: A0 done: [core-design.md](core-design.md) (crate `kith-kernel` in `core/kernel`, per-command switching through `kernel/lib/core-switched.txt`, `KITH_CORE=python|rust` for the harness), reviewed by the architect agent (12 points, each adopted or answered in its section 13).
 - 2026-11-03: C1 CLI: built-in `scratch` agent (`kernel/agents/scratch`, no install step, listed as `builtin`, never backed up or shared), engine and model per chat and kept on `--resume`, `kith scratch keep <thread> <name>` makes a real agent via `kith new --instructions` (PR #597). The app half of C1 is still open.
