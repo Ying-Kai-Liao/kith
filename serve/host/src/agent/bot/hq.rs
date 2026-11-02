@@ -409,6 +409,10 @@ impl Actor {
                 crate::runauth::grant_for(p, &agent, Some(room.as_str()), &conversation, target.project.as_deref())
             });
             let reservation = access.as_ref().map(|(grant, _)| Reservation::open(grant.run_id(), carried));
+            // A quick chat's thread keeps the engine and model it was started with, on every launch.
+            let engine = slot
+                .filter(|_| self.cfg.builtin && backup.is_none())
+                .and_then(|root| hq::ThreadEngine::of_thread(&self.hub.store, &self.cfg.id, root));
             match hq::launch(
                 bin,
                 &agent,
@@ -419,6 +423,7 @@ impl Actor {
                 &room,
                 &self.run_members(),
                 access.as_ref(),
+                engine.as_ref(),
             )
             .await
             {

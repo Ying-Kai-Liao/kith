@@ -47,6 +47,7 @@ mod roles_tests;
 mod room_points_props;
 #[cfg(test)]
 mod room_secrets_props;
+mod scratch;
 mod threads;
 
 pub use events::{events_stream, term_events};
@@ -247,6 +248,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match bots::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match scratch::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

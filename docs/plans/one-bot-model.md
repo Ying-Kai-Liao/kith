@@ -114,7 +114,7 @@ and `--json` first and the app calling it after.
 
 ### C. The app makes kith agents
 
-- [ ] **C1. Built-in `scratch` agent.** Ships with kith; threads with it are the quick chats. "Keep as agent" makes a
+- [x] **C1. Built-in `scratch` agent.** Ships with kith; threads with it are the quick chats. "Keep as agent" makes a
   real agent from a thread. Never backed up or shared.
 - [ ] **C2. "New bot" calls `kith new --json`.** The host keeps only how a bot looks (avatar, pin, order,
   notifications). A "kernel unavailable" state and `kith doctor` checks in the app.
@@ -192,6 +192,7 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
   green/red per command (`--summary`); seed corpus passes OLD against OLD. `kernel/bin/kith` does not read KITH_CORE yet.
 - 2026-11-03: A0 done: [core-design.md](core-design.md) (crate `kith-kernel` in `core/kernel`, per-command switching through `kernel/lib/core-switched.txt`, `KITH_CORE=python|rust` for the harness), reviewed by the architect agent (12 points, each adopted or answered in its section 13).
 - 2026-11-03: C1 CLI: built-in `scratch` agent (`kernel/agents/scratch`, no install step, listed as `builtin`, never backed up or shared), engine and model per chat and kept on `--resume`, `kith scratch keep <thread> <name>` makes a real agent via `kith new --instructions` (PR #597). The app half of C1 is still open.
+- 2026-11-03: C1 app: Quick chat + Keep as agent (PR #607).
 - 2026-11-03: B2 done: kernel CLI in #590, host mirror + `kith connector` in #589, `kith market`/`install --preview` in #593, and the app (this PR): the Marketplace puts connectors and skills onto a kith agent through the CLI, adds the Bots section, renames Agents to Engines; the bot page lists and removes the agent's connectors and skills. Custom hand-written skills are hidden (no CLI path); secrets stay in the host vault until A5.
 - 2026-11-03: B1 done: `kith <agent> set model|effort`, --json on every set, a model per backup entry (`claude@sonnet`), the app's agent editor calls them (PRs #598, #603).
 - 2026-11-03: B6 footguns done: bare `kith backup|update|migrate` print usage (verbs `backup run`, `update self`, `migrate run`); an unknown word after `kith` never starts a run (PR #596). The rest of B6 (--json list) stays open.

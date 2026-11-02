@@ -219,8 +219,8 @@ mod tests {
     #[test]
     fn a_spec_checks_each_item_of_a_list() {
         let s: &Schema = &crate::kernel::SCHEMA;
-        let agents = json!([{"name": "a", "description": "", "home": "/h", "model": null, "effort": null, "harness": "claude"},
-            {"name": "b", "description": "", "home": "/h", "model": null, "effort": null, "harness": "gemini"}]);
+        let agents = json!([{"name": "a", "description": "", "home": "/h", "model": null, "effort": null, "harness": "claude", "builtin": false},
+            {"name": "b", "description": "", "home": "/h", "model": null, "effort": null, "harness": "gemini", "builtin": false}]);
         assert_eq!(
             s.check_spec("[Agent]", &agents, Mode::Producer),
             [r#"Agent[1].harness: "gemini" is not a Harness"#]

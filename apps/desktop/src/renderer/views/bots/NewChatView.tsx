@@ -5,6 +5,7 @@ import { Hairline, IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { SheetPage } from '../../components/Overlay'
 import { parseLabels } from '@shared/room-labels'
+import { QUICK_ENGINES, quickEngine } from '@shared/quick-chat'
 import { HStack, Spacer } from '../../components/Stack'
 import { Text } from '../../components/Text'
 import { useStore } from '../../store/context'
@@ -19,12 +20,16 @@ import './bots.css'
  * Picked bots become chips in the To: field; one opens its chat, several start a
  * group chat with them (or open the one they already share). Whatever you typed is sent.
  * `group` is "New group chat": the same page, but it only gathers bots and needs two.
+ * `quick` is "Quick chat": Kith's built-in scratch bot is already picked, and the engine and model can be chosen for this chat.
  */
-export function NewChatView({ group, onClose }: { group: boolean; onClose: () => void }) {
+export function NewChatView({ group, quick = false, onClose }: { group: boolean; quick?: boolean; onClose: () => void }) {
   const store = useStore()
   const [query, setQuery] = useState('')
   const [draft, setDraft] = useState('')
-  const [recipients, setRecipients] = useState<string[]>([])
+  const [recipients, setRecipients] = useState<string[]>(() => (quick && store.quickChatBot ? [store.quickChatBot.id] : []))
+  // A quick chat's own engine and model; both empty is scratch's own.
+  const [engine, setEngine] = useState('')
+  const [model, setModel] = useState('')
   const [creating, setCreating] = useState(false)
   // A new group chat's purpose labels, typed as "launch, q4 plan".
   const [labels, setLabels] = useState('')
@@ -35,7 +40,7 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
 
   // Bots not picked yet; a group can only be opened on its own, so groups go once someone's picked.
   const q = query.trim().toLowerCase()
-  const matches = store.roster.filter((b) => !recipients.includes(b.id) && !(isGroup(b) && (group || recipients.length > 0)) && (!q || b.name.toLowerCase().includes(q)))
+  const matches = store.roster.filter((b) => !recipients.includes(b.id) && !b.builtin && !(isGroup(b) && (group || recipients.length > 0)) && (!q || b.name.toLowerCase().includes(q)))
   const picked = recipients.map((id) => store.bots.get(id)).filter((b): b is Bot => !!b)
 
   const toPrompt = group ? (recipients.length < 2 ? 'Add agents to the group' : 'Add another agent') : recipients.length ? 'Add another agent' : 'Search or make an agent'
@@ -45,6 +50,8 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
       : 'Message the group'
     : picked.length === 0
       ? 'Message an agent'
+      : picked.length === 1 && picked[0]!.builtin
+        ? 'Start a quick chat'
       : `Message ${picked.map((b) => b.name).join(', ')}`
 
   useEffect(() => {
@@ -61,7 +68,9 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
   const open = (id: string, folder: StartingPick | null = null) => {
     const text = draft.trim()
     store.setSelection(id)
-    if (text) store.send(text, id, null, [], undefined, [], false, folder?.start ?? null)
+    // A quick chat is a new thread each time, with the engine and model picked here.
+    if (text && store.bots.get(id)?.builtin) store.send(text, id, null, [], undefined, [], true, folder?.start ?? null, null, null, quickEngine(engine, model))
+    else if (text) store.send(text, id, null, [], undefined, [], false, folder?.start ?? null)
     // With nothing to send, the pick goes straight to the chat's place.
     else if (folder) store.setPlaceFolder(id, folder.start).catch((e: unknown) => store.setError(errorText(e)))
     onClose()
@@ -203,6 +212,14 @@ export function NewChatView({ group, onClose }: { group: boolean; onClose: () =>
         <div className="place-chip-row compose-folder">
           <StartingFolderChip key={picked[0]!.id} inherited={picked[0]!.folder} value={startFolder} onChange={setStartFolder} />
         </div>
+      ) : null}
+      {!group && picked.length === 1 && picked[0]!.builtin ? (
+        <HStack gap={8} className="compose-engine">
+          <select className="field-box" value={engine} aria-label="Engine" onChange={(e) => setEngine(e.target.value)}>
+            {QUICK_ENGINES.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+          <input className="field-box" value={model} placeholder="Model (optional)" aria-label="Model" spellCheck={false} onChange={(e) => setModel(e.target.value)} />
+        </HStack>
       ) : null}
       {group ? (
         <input className="field-box compose-labels" value={labels} placeholder="Labels (optional): launch, q4 plan" aria-label="Labels" onChange={(e) => setLabels(e.target.value)} />

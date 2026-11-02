@@ -43,6 +43,7 @@ import { NewsCard, PlanCard, ResultCard, ScheduleCard } from './RichCards'
 import { lateOf } from '@shared/conversation'
 import { BotTag, LateTag } from './Tags'
 import { topicMenuItems } from './TopicPrompt'
+import { keepAgentMenuItems } from './KeepAgentPrompt'
 
 /** The first line of the message that opened the run a reply belongs to, for a late reply to quote; null when unknown. */
 export function lateQuoteOf(store: BotStore, entry: Entry): string | null {
@@ -295,6 +296,7 @@ export function UserBubble({ entry, botWorking, reply }: { entry: Entry; botWork
               { title: 'Copy', icon: 'square.on.square', action: copy },
               ...(status === 'queued' ? [{ title: 'Unsend', icon: 'arrow.uturn.backward', action: () => store.unsend(entry) }] : []),
               ...topicMenuItems(store, entry),
+              ...keepAgentMenuItems(store, entry),
             ]}
           >
             {entry.data.text}
