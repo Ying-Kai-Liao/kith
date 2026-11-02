@@ -293,6 +293,7 @@ async fn people(hub: &Arc<Hub>) -> Result<Value> {
     let bin = account::bin().await.ok_or_else(|| anyhow!("can't list people: kith-auth wasn't found"))?;
     let auth =
         crate::remote::members::auth_people(&bin).await.context("can't list people: kith-auth wasn't readable")?;
+    crate::remote::members::mirror_agents(&hub.store, &auth);
     let connected = hub.connected.locked().clone();
     let memberships = hub.store.memberships()?;
     let invites = hub.store.invites()?;
@@ -349,6 +350,17 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         let _w = AUTH_WRITES.lock().await;
         if changed_agents {
             let want = roles_of(&b["agents"])?;
+            // What kith-auth says they hold by their own row, whoever made it (the owner may have added one with the
+            // CLI): a read that fails stops here, before anything is changed.
+            let held: Vec<String> = crate::remote::members::auth_person(&bin, id)
+                .await
+                .context("couldn't read what kith-auth says they hold")?
+                .ok_or_else(|| anyhow!("`{id}` isn't a person in kith-auth"))?
+                .agents
+                .into_iter()
+                .filter(|r| r.via == "own")
+                .map(|r| r.agent)
+                .collect();
             let mut made = person.made.clone();
             for (agent, role) in &want {
                 let had = roles::may_use(id, agent).await;
@@ -357,18 +369,23 @@ async fn set_person_access(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
                     made.push(agent.clone());
                 }
             }
-            // Only a membership this host made is taken away again; one the owner gave by hand is left, and just no longer listed.
-            // kith-auth refusing (say the agent's folder is gone) must not stop the rest: it is reported, and the
-            // membership stays in `made` so a later change tries again.
-            for agent in person.agents.keys().filter(|a| !want.contains_key(*a)) {
-                if made.contains(agent) {
-                    match account::run(&bin, &["member", agent, id, "--rm"]).await {
-                        Ok(_) => made.retain(|m| m != agent),
-                        Err(e) => warnings.push(format!("couldn't take {agent} away from {id}: {e:#}")),
-                    }
+            // An unticked own row goes, whoever made it; the `*` row is never touched from here. kith-auth refusing
+            // (say the agent's folder is gone) must not stop the rest: it is reported, and the row stays in `made`
+            // so a later change tries again.
+            for agent in held.iter().filter(|a| !want.contains_key(*a)) {
+                match account::run(&bin, &["member", agent, id, "--rm"]).await {
+                    Ok(_) => made.retain(|m| m != agent),
+                    Err(e) => warnings.push(format!("couldn't take {agent} away from {id}: {e:#}")),
                 }
             }
-            hub.store.set_person_agents(id, &want)?;
+            // The copy follows kith-auth, not what was asked: a row that wouldn't go still shows.
+            match crate::remote::members::auth_people(&bin).await {
+                Ok(auth) => crate::remote::members::mirror_agents(&hub.store, &auth),
+                Err(e) => {
+                    warnings.push(format!("couldn't read kith-auth after the change: {e:#}"));
+                    hub.store.set_person_agents(id, &BTreeMap::new())?;
+                }
+            }
             hub.store.set_person_made(id, &made)?;
         }
         if !b["projects"].is_null() {
@@ -635,8 +652,7 @@ async fn start_chat(hub: &Arc<Hub>, caller: &Caller, b: &Value) -> Result<Value>
         bail!("Your chat with an agent is the one on the home screen.");
     };
     let agent = str_arg(b, "agent")?;
-    let granted = hub.store.person(&person).is_some_and(|p| p.agents.contains_key(agent));
-    if !granted || !roles::may_use(&person, agent).await {
+    if !roles::may_use(&person, agent).await {
         return Err(NotAllowed(format!("You don't have access to {agent}.")).into());
     }
     Ok(roles::shape_bot(json!({"bot": chat_with(hub, &person, agent).await?})))

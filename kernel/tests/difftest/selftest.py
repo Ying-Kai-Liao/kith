@@ -97,6 +97,25 @@ class SelfTest(unittest.TestCase):
         self.assertIn('+7', out)
         self.assertIn('+oops', out)
 
+    def test_json_field_compare_and_facet_filter(self):
+        """pick: one field of each side's JSON, under its own key; only: the other facets (state, stderr) are left out."""
+        def sh(script):
+            return ['/bin/sh', '-c', script, 'sh']
+        case = {'name': 'pick', 'run': [['a']], 'run_new': [['b']], 'pick': {'old': 'system_prompt', 'new': 'prompt'},
+                'only': ['pick', 'exit']}
+        old = sh('echo \'{"system_prompt": "hello", "env": 1}\'; echo noise >&2; echo x > "$HOME/stray"')
+        same = sh('echo \'{"prompt": "hello", "other": 2}\'')
+        differs = sh('echo \'{"prompt": "bye"}\'')
+        pre = lambda new: {'default': {'old': KITH, 'new': KITH}, 'old': old, 'new': new}   # noqa: E731
+        out = io.StringIO()
+        failed, _, _, _ = (lambda r: (r[0], r[1], r[2], None))(D.run_all([case], pre(same), [], jobs=1, out=out))
+        self.assertEqual(failed, [], out.getvalue())
+        out = io.StringIO()
+        failed, _, _, _ = (lambda r: (r[0], r[1], r[2], None))(D.run_all([case], pre(differs), [], jobs=1, out=out))
+        self.assertEqual(failed, ['pick'])
+        self.assertIn('step0.pick', out.getvalue())
+        self.assertIn('+bye', out.getvalue())
+
     def test_throwaway_roots_never_leak(self):
         # Two different roots and a generated id/time in the output normalise to the same text.
         with tempfile.TemporaryDirectory() as t:

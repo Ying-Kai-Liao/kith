@@ -429,6 +429,15 @@ enum KernelCmd {
         #[command(subcommand)]
         action: Option<EnginesAction>,
     },
+    /// Backup-chain entries and the main account: readiness and the environment they launch with (read-only; the same
+    /// answers as the kernel's `lib/kith_accounts.py`).
+    Accounts {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long, global = true)]
+        kernel: Option<std::path::PathBuf>,
+        #[command(subcommand)]
+        action: AccountsAction,
+    },
     /// What a launch assembles, one piece at a time (not routed from `kith AGENT` yet).
     Launch {
         #[command(subcommand)]
@@ -460,6 +469,72 @@ enum KernelCmd {
         #[arg(last = true)]
         task: Vec<String>,
     },
+}
+
+/// The verbs of `lib/kith_accounts.py` that read, and `kith account list`.
+#[derive(Subcommand)]
+enum AccountsAction {
+    /// The chain for `kith AGENT --backups-json`.
+    BackupsJson { agent: String, agent_md: String },
+    /// Shell assignments for a backup chain entry; exit 4 and one line on stderr when it can't run.
+    LaunchEnv { agent: String, entry: String },
+    /// `main_id=ID` plus the assignments of the agent's main account; exit 4 when it can't run.
+    MainEnv { agent: String, agent_md: String },
+    /// The harness, model and effort a session started with (`{}` when the cost ledger doesn't know it).
+    SessionRun {
+        sid: String,
+        /// Shell assignments for `bin/kith`.
+        #[arg(long)]
+        sh: bool,
+    },
+    /// The account id a session was made under (empty when the cost ledger doesn't know it).
+    SessionAccount { sid: String },
+    /// Each extra account and whether it is logged in (`kith account list`).
+    #[command(alias = "ls")]
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// `kith kernel accounts <verb>`; the exit code (4 for "can't run", as the Python verbs).
+fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) -> i32 {
+    use kith_kernel::accounts::{self, Ctx, System, sh_line};
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let p = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env);
+    let system = System { kernel: kernel.clone() };
+    let ctx = Ctx { machine: p.machine.clone(), agents: p.agents.clone(), kernel, out: &system };
+    let result: Result<String, String> = match action {
+        AccountsAction::BackupsJson { agent, agent_md } => {
+            Ok(accounts::chain(&ctx, &agent, std::path::Path::new(&agent_md)).dumps())
+        }
+        AccountsAction::LaunchEnv { agent, entry } => accounts::launch_env(&ctx, &agent, &entry, false),
+        AccountsAction::MainEnv { agent, agent_md } => {
+            accounts::main_env(&ctx, &agent, std::path::Path::new(&agent_md))
+        }
+        AccountsAction::SessionRun { sid, sh } => Ok(match (accounts::session_run(&ctx.machine, &sid), sh) {
+            (Some(r), true) => r.sh(),
+            (Some(r), false) => r.json().dumps(),
+            (None, true) => sh_line("", None, None),
+            (None, false) => "{}".to_owned(),
+        }),
+        AccountsAction::SessionAccount { sid } => Ok(accounts::session_account(&ctx.machine, &sid).unwrap_or_default()),
+        AccountsAction::List { json } => {
+            print!("{}", accounts::list(&ctx, json));
+            return 0;
+        }
+    };
+    match result {
+        Ok(out) => {
+            println!("{out}");
+            0
+        }
+        Err(e) => {
+            eprintln!("kith: {e}");
+            4
+        }
+    }
 }
 
 /// `kith kernel launch <piece>`.
@@ -828,6 +903,9 @@ async fn main() -> Result<()> {
                 let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
+            if let KernelCmd::Accounts { kernel, action } = cmd {
+                std::process::exit(print_accounts(kernel, action));
+            }
             match cmd {
                 KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                 KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
@@ -837,7 +915,7 @@ async fn main() -> Result<()> {
                 } => {
                     print_launch_prompt(LaunchPromptArgs { agent, person, project, pkg, kernel, cwd, date, json })?;
                 }
-                KernelCmd::RunOnce { .. } => unreachable!("handled above"),
+                KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } => unreachable!("handled above"),
             }
             Ok(())
         }

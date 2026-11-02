@@ -304,11 +304,21 @@ def run_side(side, work, case, prefix):
 
 # --- comparing -------------------------------------------------------------------------------------------------------
 
+def case_prefix(case, side):
+    """A case's own program for a side (`"program": {"old": [...], "new": [...]}`), for a verb the `kith` router does not
+    reach yet: the Python helper on one side, `kith kernel <module> <verb>` on the other. `{KERNEL}` is the kernel
+    folder and `{BIN}` the Rust program."""
+    argv = case.get('program', {}).get(side)
+    return [a.replace('{KERNEL}', str(KERNEL)).replace('{BIN}', RUST_BIN or '') for a in argv] if argv else None
+
+
 def compare(case, prefixes, keep=False):
     """-> {facet: (old, new)} of the facets that differ."""
     work = Path(tempfile.mkdtemp(prefix='kith-difftest.', dir=os.environ.get('TMPDIR') or '/tmp')).resolve()
     try:
         def prefix(s):
+            if case_prefix(case, s):
+                return case_prefix(case, s)
             if prefixes.get(s):
                 return prefixes[s]
             if s == 'new' and case.get('new_prog') == 'rust':   # the Rust program itself, for a verb the router does not reach yet

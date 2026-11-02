@@ -9,13 +9,15 @@
 
 A git checkout that is dirty, has no upstream or can't fast-forward is left as it is and the exit code is 1:
 never a force, a stash or a reset.
+
+KITH_SELF_ROOT=<kernel folder> points it at another checkout (tests); it is read before KITH_ROOT, which `kith` sets for itself.
 """
 import json, os, re, shutil, subprocess, sys
 from pathlib import Path
 
 APP_LINK = 'https://kithbot.app/download/mac'
 # The logical path (symlinks not resolved): it may be a link to a path with spaces, and install layouts are told apart by it.
-KERNEL = Path(os.path.abspath(os.environ.get('KITH_ROOT') or Path(__file__).parent.parent))
+KERNEL = Path(os.path.abspath(os.environ.get('KITH_SELF_ROOT') or os.environ.get('KITH_ROOT') or Path(__file__).parent.parent))
 REPO = os.environ.get('KITH_REPO') or 'Ying-Kai-Liao/kith'
 
 
