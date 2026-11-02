@@ -15,7 +15,12 @@ export interface PersonDevice {
 export interface Person {
   personId: string
   name: string
+  /** Agents on the person's own membership rows: the ones Edit access changes. */
   agents: Record<string, Role>
+  /** Agents everyone holds (the `*` row). Shown, never edited per person, never sent back as theirs. */
+  everyoneAgents: Record<string, Role>
+  /** Null for a person made only in kith-auth (from the terminal). */
+  createdAt: number | null
   projects: string[]
   joined: boolean
   openInvites: number
@@ -70,6 +75,8 @@ export function parsePeople(raw: unknown): Person[] {
       personId: str(r.personId),
       name: str(r.name) || str(r.personId),
       agents: roles(r.agents),
+      everyoneAgents: roles(r.everyoneAgents),
+      createdAt: num(r.createdAt),
       projects: list(r.projects).map(str),
       joined: r.joined === true,
       openInvites: num(r.openInvites) ?? 0,
