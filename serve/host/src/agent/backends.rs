@@ -561,7 +561,11 @@ pub fn on_path(bin: &str) -> bool {
 
 /// Every harness the phone can pick, installed ones first.
 pub fn list() -> Vec<Value> {
-    let registry = registry::agents();
+    list_from(&registry::agents())
+}
+
+/// `list()` over a given registry (the test feeds a fixed one).
+fn list_from(registry: &[Value]) -> Vec<Value> {
     let mut out: Vec<Value> = HARNESSES
         .iter()
         .map(|h| {
@@ -589,7 +593,7 @@ pub fn list() -> Vec<Value> {
         .collect();
     // Registry agents we don't know by name: runnable, but you sign in yourself.
     let known: HashSet<&str> = HARNESSES.iter().filter_map(|h| h.registry).collect();
-    for a in &registry {
+    for a in registry {
         let id = a["id"].as_str().unwrap_or_default();
         if id.is_empty() || known.contains(id) || id == "github-copilot" {
             continue;
@@ -738,9 +742,13 @@ pub fn local_candidate(id: &str) -> Option<registry::Cmd> {
 mod tests {
     use super::*;
 
+    /// The tests below set the search path and the sign-in cache, which are process-wide.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[cfg(unix)]
     #[test]
     fn detects_executables_on_search_path() {
+        let _one = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let dir = std::env::temp_dir().join(format!("kith-bin-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let bin = dir.join("fake-harness");
@@ -760,5 +768,82 @@ mod tests {
     fn every_harness_is_unique() {
         let ids: HashSet<_> = HARNESSES.iter().map(|h| h.id).collect();
         assert_eq!(ids.len(), HARNESSES.len());
+    }
+
+    /// What the app sees, pinned: the table moved into the `kith-kernel` crate and this JSON must not change.
+    /// `UPDATE_GOLDEN=1` rewrites the fixtures (only ever from a base whose behaviour is the intended one).
+    #[test]
+    fn wire_shape_is_pinned() {
+        let _one = TEST_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let dir = std::env::temp_dir().join(format!("kith-golden-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for bin in ["claude", "cursor-agent", "cbc", "pool"] {
+            let p = dir.join(bin);
+            std::fs::write(&p, "#!/bin/sh\n").unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+        *SEARCH_PATH.locked() = vec![dir.clone()];
+        set_signed_in("claude", Some(true));
+        set_signed_in("codex", Some(false));
+        let registry = vec![
+            json!({"id": "claude-acp", "name": "Claude", "description": "adapter", "distribution": {"npx": {"package": "x"}}}),
+            json!({"id": "cursor", "name": "Cursor", "description": "c", "distribution": {"binary": {}}}),
+            json!({"id": "kilo", "name": "Kilo", "description": "k", "distribution": {"npx": {"package": "@kilocode/cli@1.2.3"}}}),
+            json!({"id": "somebody-else", "name": "Somebody", "description": "s", "distribution": {"uvx": {"package": "y"}}}),
+        ];
+        let mut listed = list_from(&registry);
+        SEARCH_PATH.locked().clear();
+        set_signed_in("claude", None);
+        set_signed_in("codex", None);
+        let root = dir.to_string_lossy().into_owned();
+        for v in &mut listed {
+            if let Some(p) = v["path"].as_str() {
+                v["path"] = json!(p.replace(&root, "<DIR>"));
+            }
+        }
+        std::fs::remove_dir_all(&dir).ok();
+        let got = serde_json::to_string_pretty(&json!({"list": listed, "table": table_snapshot()})).unwrap() + "\n";
+        let fixture = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/backends-wire.json");
+        if std::env::var_os("UPDATE_GOLDEN").is_some() {
+            std::fs::write(fixture, &got).unwrap();
+        }
+        assert_eq!(got, std::fs::read_to_string(fixture).unwrap(), "the wire shape of backends changed");
+    }
+
+    /// Every field of every row the host reads, in a form that does not depend on how the table is stored.
+    fn table_snapshot() -> Value {
+        let probes = [
+            (true, "{\"loggedIn\":true}"),
+            (false, "{\"loggedIn\":false}"),
+            (true, "{\"logged_in\":true}"),
+            (true, "Logged in as x"),
+            (true, "Not logged in"),
+            (true, "nothing"),
+            (false, "Logged in"),
+        ];
+        Value::Array(
+            HARNESSES
+                .iter()
+                .map(|h| {
+                    json!({
+                        "id": h.id, "name": h.name, "bins": h.bins, "local": h.local, "registry": h.registry,
+                        "setup": h.setup, "login": h.login,
+                        "install": h.install.map(|i| match i {
+                            Install::Script(s) => json!({"script": s}),
+                            Install::Scripts { unix, windows } => json!({"unix": unix, "windows": windows}),
+                            Install::Npm(p) => json!({"npm": p}),
+                        }),
+                        "signedIn": h.signed_in.map(|c| json!({
+                            "args": c.args,
+                            "probes": probes.iter().map(|(ok, out)| (c.ok)(*ok, out)).collect::<Vec<_>>(),
+                        })),
+                    })
+                })
+                .collect(),
+        )
     }
 }
