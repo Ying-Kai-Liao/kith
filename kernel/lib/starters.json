@@ -1,7 +1,7 @@
 {
   "$comment": "Agents kith init offers on a fresh install, so it starts with someone who can build the rest. link: what kith install takes; null until published.",
   "builder": {
-    "link": "Ying-Kai-Liao/hq-builder",
+    "link": "Ying-Kai-Liao/kith-builder",
     "about": "builds your other agents with you: say what you need, it sets one up"
   },
   "coder": {
