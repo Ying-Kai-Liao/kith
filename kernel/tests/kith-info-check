@@ -121,8 +121,8 @@ KEPT=$(KITH_STATE=$KITH_MACHINE python3 "$KERNEL/lib/kith_settings.py" permissio
 check "set permission: an unknown mode is refused and changes nothing" "[ $rc = 1 ] && grep -q 'not one of' $T/err && [ $KEPT = plan ]"
 "$KITH" nope set permission auto 2>"$T/err"; rc=$?
 check "set permission: unknown agent" "[ $rc = 1 ] && grep -q \"no agent 'nope'\" $T/err"
-"$KITH" echo set model opus 2>/dev/null; rc=$?
-check "set: only permission is settable" "[ $rc = 2 ]"
+"$KITH" echo set bogus opus 2>/dev/null; rc=$?
+check "set: an unknown setting is a usage error" "[ $rc = 2 ]"
 "$KITH" echo set permission '' 2>/dev/null; rc=$?
 OUT=$("$KITH" echo --info-json 2>/dev/null)
 check "set permission '': forgets the choice, kith's default applies again" "[ $rc = 0 ] && is \"d['permission_mode']\" auto"
