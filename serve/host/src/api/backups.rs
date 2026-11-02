@@ -377,7 +377,9 @@ mod tests {
 
     #[test]
     fn ids_follow_what_kith_account_takes() {
-        for ok in ["claude", "claude:work", "claude@sonnet", "claude:work@opus", "codex@gpt-5:high", "claude@claude-opus-4-5"] {
+        for ok in
+            ["claude", "claude:work", "claude@sonnet", "claude:work@opus", "codex@gpt-5:high", "claude@claude-opus-4-5"]
+        {
             assert!(valid_id(ok), "{ok}");
         }
         for bad in ["", "-x", "claude@", "claude@-x", "claude@a b", "claude :x", "Claude", "claude:@x", "claude@a;b"] {
