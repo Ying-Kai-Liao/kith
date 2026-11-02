@@ -540,15 +540,21 @@ pub async fn set_setting(agent: &str, setting: &str, value: &str, extra: &[&str]
     let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
         bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
     };
-    let mut args = vec![agent, "set", setting, value];
-    args.extend_from_slice(extra);
-    args.push("--json");
+    let args = set_setting_args(agent, setting, value, extra);
     let out = run(&bin, &args, None, LIST_TIMEOUT).await.map_err(|e| setting_error(setting, &e))?;
     // An older kith prints plain text for a `set` it knows and fails on one it doesn't; neither is JSON.
     match serde_json::from_str::<Value>(out.trim()) {
         Ok(said) if said.is_object() => Ok(refill(agent, true).await),
         _ => Err(old_kith(setting)),
     }
+}
+
+/// The argv of `set_setting`: exactly the line a person types, `kith <agent> set <setting> <value> [--model M] --json`.
+fn set_setting_args<'a>(agent: &'a str, setting: &'a str, value: &'a str, extra: &[&'a str]) -> Vec<&'a str> {
+    let mut args = vec![agent, "set", setting, value];
+    args.extend_from_slice(extra);
+    args.push("--json");
+    args
 }
 
 fn old_kith(setting: &str) -> anyhow::Error {
@@ -1057,6 +1063,17 @@ pub(crate) fn printed_launch(over: Value) -> Launch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The same CLI line gives the same result: the app's model, effort and harness picks run the line a person types.
+    #[test]
+    fn a_setting_runs_the_line_a_person_types() {
+        assert_eq!(set_setting_args("house", "model", "opus", &[]), ["house", "set", "model", "opus", "--json"]);
+        assert_eq!(set_setting_args("house", "effort", "high", &[]), ["house", "set", "effort", "high", "--json"]);
+        assert_eq!(
+            set_setting_args("house", "harness", "codex", &["--model", "gpt-5"]),
+            ["house", "set", "harness", "codex", "--model", "gpt-5", "--json"]
+        );
+    }
 
     fn bot(model: Option<&str>) -> BotConfig {
         serde_json::from_value(json!({

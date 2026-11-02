@@ -1082,6 +1082,14 @@ pub fn run(c: &Ctx, verb: &str, args: &[String]) -> Outcome {
     }
 }
 
+fn usage(verb: &str) -> String {
+    if verb == "resolve" {
+        "usage: kith kernel secrets resolve <agent> [--person ID] [--via AGENT] [--take-once] [--json]".to_owned()
+    } else {
+        "usage: kith kernel secrets may <id> <agent> [--via AGENT] [--once]".to_owned()
+    }
+}
+
 fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
     if !matches!(verb, "may" | "resolve") {
         return Err(Die {
@@ -1090,6 +1098,26 @@ fn command(c: &Ctx, verb: &str, args: &[String]) -> R<Outcome> {
         });
     }
     let resolve = verb == "resolve";
+    // An argument that starts with `-` and is no flag of this verb is usage, never an agent or a person: `--help` must
+    // not read auth.json (kith-auth would take it as a name).
+    let mut skip = false;
+    for a in args {
+        if std::mem::take(&mut skip) {
+            continue;
+        }
+        match a.as_str() {
+            "--via" | "--person" => skip = true,
+            "--take-once" | "--json" if resolve => {}
+            "--once" if !resolve => {}
+            f if f.starts_with('-') && f != "-" => {
+                return Err(Die {
+                    msg: usage(verb),
+                    code: 2,
+                });
+            }
+            _ => {}
+        }
+    }
     let once = args
         .iter()
         .any(|a| a == if resolve { "--take-once" } else { "--once" });

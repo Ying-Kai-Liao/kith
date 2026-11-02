@@ -907,6 +907,38 @@ fn resolve_accepts_json_as_a_no_op_and_may_does_not() {
 }
 
 #[test]
+fn an_unknown_dash_argument_is_usage_and_reads_no_auth_json() {
+    let t = Tmp::new("usage");
+    let c = ctx(&t);
+    // no auth.json at all: reading it would create the lock file's folder, usage must touch nothing
+    for list in [
+        vec!["--help"],
+        vec!["-h"],
+        vec!["house", "--bogus"],
+        vec!["house", "--person", "sam", "-x"],
+        vec!["--once", "x"],
+    ] {
+        let o = run(&c, "resolve", &args(&list));
+        assert_eq!(o.code, 2, "{list:?}");
+        assert!(
+            o.stderr
+                .starts_with("kith-auth: usage: kith kernel secrets resolve"),
+            "{list:?}"
+        );
+        assert_eq!(o.stdout, "");
+    }
+    let o = run(&c, "may", &args(&["--help"]));
+    assert_eq!(o.code, 2);
+    assert!(!t.0.join("secrets").exists(), "nothing was created or read");
+    // a flag's value may start with a dash; known flags still work
+    write_auth(&c, &people());
+    assert_eq!(
+        run(&c, "resolve", &args(&["house", "--via", "-x", "--json"])).code,
+        0
+    );
+}
+
+#[test]
 fn resolve_acts_for_kith_person_and_the_owner_in_a_sandbox_is_no_one() {
     let t = Tmp::new("acting");
     write_auth(&ctx(&t), &people());

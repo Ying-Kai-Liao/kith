@@ -1,5 +1,5 @@
 import { callModelLabel, callModels, EFFORT_LEVELS, HARNESSES, hqSettings, PERMISSION_MODES, permissionLabel } from '@shared/bot-sections'
-import { ChoicePicker, ValueRow } from '../../../components/Controls'
+import { Button, ChoicePicker, ValueRow } from '../../../components/Controls'
 import { Text } from '../../../components/Text'
 import type { KithInfoStore } from '../../../store/kith-info-store'
 import { useAgentModels } from '../agent-models'
@@ -46,8 +46,16 @@ export function HqSettings({ kith, inSheet = false }: { kith: KithInfoStore; inS
   const rows = hqSettings(kith.info).filter((r) => !(inSheet && r.key === 'permission'))
   const catalog = useAgentModels(kith.info?.harness ?? 'claude').catalog
   const saving = kith.settingSaving
+  // Kith's answer is the only source of these rows: when it is missing, say why and offer Retry, never host-native pickers.
+  const unavailable = kith.info ? null : kith.unsupported ? 'this host predates the Kith details call; update the host' : kith.error
   return (
     <>
+      {unavailable ? (
+        <div className="kith-banner" role="alert">
+          <span>Kith settings unavailable: {unavailable}</span>
+          <Button kind="secondary" disabled={kith.loading} onClick={() => void kith.load(true)}>{kith.loading ? 'Retrying…' : 'Retry'}</Button>
+        </div>
+      ) : null}
       {rows.map((row) => (
         <ValueRow key={row.key} label={row.label} detail={row.hint}>
           {row.editable && row.key === 'callModel' ? (

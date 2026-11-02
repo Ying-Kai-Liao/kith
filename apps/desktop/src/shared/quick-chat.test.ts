@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { keepNameError, QUICK_ENGINES, quickChatBot, quickEngine } from './quick-chat.ts'
+import { keepNameError, parseQuickEngines, QUICK_ENGINES, quickChatBot, quickEngine } from './quick-chat.ts'
 import { normalizeBot } from './models.ts'
 
 const bot = (over: Record<string, unknown>) => normalizeBot({ id: 'b', ...over } as never)
@@ -33,4 +33,22 @@ test('a kept agent needs a name without spaces or a leading dash', () => {
   assert.ok(keepNameError('-H'))
   assert.ok(keepNameError('x'.repeat(65)))
   assert.equal(keepNameError('trip-planner'), null)
+})
+
+test('the quick-chat engines are the installed ones with an ACP mode, from kith engines --json', () => {
+  const listed = parseQuickEngines({
+    engines: [
+      { id: 'claude', name: 'Claude Code', installed: true, acp: ['registry'] },
+      { id: 'codex', name: 'Codex CLI', installed: false, acp: ['local', 'registry'] },
+      { id: 'hermes', name: 'Hermes', installed: true, acp: [] },
+      { id: 'gemini', installed: true, acp: ['local'] },
+    ],
+  })
+  assert.deepEqual(listed, [
+    { id: '', label: 'Default' },
+    { id: 'claude', label: 'Claude Code' },
+    { id: 'gemini', label: 'gemini' },
+  ])
+  assert.throws(() => parseQuickEngines({ engines: [{ id: 'claude', installed: true }] }), /ACP/, 'an older kith has no acp field')
+  assert.throws(() => parseQuickEngines({}), /did not list/)
 })

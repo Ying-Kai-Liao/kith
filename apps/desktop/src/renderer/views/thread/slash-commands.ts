@@ -21,9 +21,9 @@ export function slashQuery(draft: string): string | null {
   return /^\/\S*$/.test(draft) ? draft.slice(1) : null
 }
 
-/** The bot's built-in commands; a group has none (each member has its own agent). */
+/** The bot's built-in commands; a group has none (each member has its own agent), nor has a kith agent: `kith <agent> set` has no Fast mode, and the host would drop `/fast`. */
 function builtIn(bot: Bot): SlashCommand[] {
-  if (bot.kind === 'group') return []
+  if (bot.kind === 'group' || bot.hqAgent) return []
   return fastModeShown(bot)
     ? [{ name: 'fast', icon: 'bolt', title: 'Fast mode', detail: fastModeDetail(bot), warning: fastModeState(bot) === 'refused', action: { kind: 'fast' } }]
     : []

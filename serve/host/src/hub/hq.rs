@@ -215,8 +215,27 @@ mod tests {
         assert!(bot.model.is_none() && bot.connectors.is_empty() && bot.skills.is_empty());
 
         hub.update_bot(&json!({"id": bot.id, "name": "Home", "pinned": true, "notify": false, "permission": "auto",
-            "model": "opus", "hqAgent": "other", "backend": "codex"}))
+            "hqAgent": "other"}))
             .unwrap();
+        // An engine, model, effort or tool change is the CLI's: refused with the command, not dropped. An echo passes.
+        for (patch, command) in [
+            (json!({"model": "opus"}), "kith house set model"),
+            (json!({"backend": "codex"}), "kith house set harness"),
+            (json!({"modelOptions": {"effort": "high"}}), "kith house set effort"),
+            (json!({"fastMode": true}), "no Fast mode"),
+            (json!({"connectors": ["github"]}), "kith house connect"),
+            (json!({"skills": ["pdf"]}), "kith house skill add"),
+        ] {
+            let mut patch = patch;
+            patch["id"] = json!(bot.id);
+            let e = hub.update_bot(&patch).unwrap_err().to_string();
+            assert!(e.contains(command), "{patch}: {e}");
+        }
+        hub.update_bot(
+            &json!({"id": bot.id, "backend": "claude", "model": null, "modelOptions": {}, "fastMode": false,
+            "connectors": [], "skills": []}),
+        )
+        .unwrap();
         let done = hub.apply_hq_agents(&[agent(&dir, "house", "keeps the house tidy")]).unwrap();
         assert!(done.created.is_empty(), "never a second bot: {done:?}");
         let all = bots(&hub);

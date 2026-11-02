@@ -323,6 +323,7 @@ export function MarketplaceView({ computers, computer, onComputer, appsFirst = f
           </MarketSection>
           {!appsFirst ? <ComposioSection query={query} searchToken={searchToken} /> : null}
           <MarketSection title="Skills">
+            {kith.skillReadError ? <Text size="footnote" tone="danger" role="alert">Some agents' skills could not be read: {kith.skillReadError}</Text> : null}
             {loadingSkills ? (
               <SkeletonGrid />
             ) : (

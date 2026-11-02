@@ -448,6 +448,11 @@ enum KernelCmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
+    /// What a launch assembles, one piece at a time (not routed from `kith AGENT` yet).
+    Launch {
+        #[command(subcommand)]
+        what: LaunchCmd,
+    },
     /// One task on one engine over ACP: the answer on stdout (the task after `--`, or on stdin).
     RunOnce {
         engine: String,
@@ -554,6 +559,122 @@ fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
     eprint!("{}", out.stderr);
     let _ = std::io::stdout().flush();
     out.code
+}
+
+/// `kith kernel launch <piece>`.
+#[derive(Subcommand)]
+enum LaunchCmd {
+    /// The system prompt a run of the agent gets (`kith AGENT --launch-json`'s `system_prompt`). Reads the agent's
+    /// folders; writes nothing and checks no access (`kith-auth` does at launch).
+    Prompt {
+        agent: String,
+        /// Whom the run is for (`KITH_PERSON`); the owner when left out.
+        #[arg(long)]
+        person: Option<String>,
+        /// The project the run is in (`-p`). Finding it from the working folder stays with `project-id`.
+        #[arg(long)]
+        project: Option<String>,
+        /// The pinned package folder (default: the agent's live folder).
+        #[arg(long)]
+        pkg: Option<std::path::PathBuf>,
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        /// The working folder shown in the prompt (default: `$PWD`).
+        #[arg(long)]
+        cwd: Option<String>,
+        /// The date shown in the prompt, `YYYY-MM-DD` (default: today).
+        #[arg(long)]
+        date: Option<String>,
+        /// Print `{"prompt": "..."}`.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+/// What `kith kernel launch prompt` was asked.
+struct LaunchPromptArgs {
+    agent: String,
+    person: Option<String>,
+    project: Option<String>,
+    pkg: Option<std::path::PathBuf>,
+    kernel: Option<std::path::PathBuf>,
+    cwd: Option<String>,
+    date: Option<String>,
+    json: bool,
+}
+
+/// `kith kernel launch prompt`: the prompt a launch assembles, from the `kith-kernel` crate.
+fn print_launch_prompt(a: LaunchPromptArgs) -> Result<()> {
+    use kith_kernel::launch::prompt;
+    let run = |prog: &str, args: &[&str]| -> Option<String> {
+        let o = std::process::Command::new(prog).args(args).output().ok().filter(|o| o.status.success())?;
+        Some(String::from_utf8_lossy(&o.stdout).trim().to_owned())
+    };
+    let agent = a.agent.as_str();
+    let home = kith_kernel::paths::process_home();
+    let (p, kernel_dir) = match a.kernel {
+        Some(k) => (kith_kernel::paths::paths(&home, &k, &kith_kernel::paths::process_env), k),
+        None => (
+            kernel::folders(&home),
+            kernel::current_kernel().ok_or_else(|| anyhow::anyhow!("kith: can't find the kernel folder (--kernel)"))?,
+        ),
+    };
+    let src_pkg = prompt::agent_dir(&p, &kernel_dir, agent)
+        .ok_or_else(|| anyhow::anyhow!("kith: no agent named \"{agent}\"."))?;
+    let auth_file = kith_kernel::paths::process_env("KITH_AUTH")
+        .filter(|f| !f.is_empty())
+        .map_or_else(|| p.secrets.join("auth.json"), std::path::PathBuf::from);
+    let auth = std::fs::read_to_string(auth_file).ok().and_then(|t| serde_json::from_str(&t).ok());
+    let who = prompt::Who::resolve(auth.as_ref(), a.person.as_deref());
+    let registry = prompt::Registry::load(&p.state).map_err(|e| anyhow::anyhow!(e))?;
+    let ctmp_note = if who.owner {
+        String::new()
+    } else {
+        use sha2::{Digest as _, Sha256};
+        let hash = |s: &str| {
+            use std::fmt::Write as _;
+            Sha256::digest(s.as_bytes()).iter().fold(String::new(), |mut a, b| {
+                let _ = write!(a, "{b:02x}");
+                a
+            })
+        };
+        let uid = run("id", &["-u"]).and_then(|u| u.parse().ok()).unwrap_or(0);
+        let machine = kith_kernel::paths::realpath(&p.machine);
+        if prompt::guest_tmp(&machine, &who.id, uid, &hash).is_some() {
+            String::new()
+        } else {
+            prompt::ctmp_note(&p.machine, &who.id)
+        }
+    };
+    let cwd = a
+        .cwd
+        .or_else(|| std::env::var("PWD").ok().filter(|d| !d.is_empty()))
+        .or_else(|| std::env::current_dir().ok().map(|d| d.to_string_lossy().into_owned()))
+        .unwrap_or_default();
+    let date = a.date.or_else(|| run("date", &["+%F"])).unwrap_or_default();
+    let input = prompt::Input {
+        agent,
+        paths: &p,
+        kernel: &kernel_dir,
+        src_pkg: &src_pkg,
+        pkg: a.pkg.as_deref().unwrap_or(&src_pkg),
+        who: &who,
+        project: a.project.as_deref().unwrap_or(""),
+        registry: &registry,
+        cwd: &cwd,
+        date: &date,
+        ctmp_note: &ctmp_note,
+        user_home: &home,
+        env: &kith_kernel::paths::process_env,
+    };
+    let text = prompt::build(&input).map_err(|e| anyhow::anyhow!(e))?;
+    if a.json {
+        println!("{}", json!({ "prompt": text }));
+    } else {
+        println!("{text}");
+    }
+    Ok(())
 }
 
 /// `kith engines <action> <id>`: print the command, never run it.
@@ -816,6 +937,11 @@ async fn main() -> Result<()> {
                 KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                 KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
                 KernelCmd::Engines { json, action } => print_engines(json, action)?,
+                KernelCmd::Launch {
+                    what: LaunchCmd::Prompt { agent, person, project, pkg, kernel, cwd, date, json },
+                } => {
+                    print_launch_prompt(LaunchPromptArgs { agent, person, project, pkg, kernel, cwd, date, json })?;
+                }
                 KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } | KernelCmd::Secrets { .. } => {
                     unreachable!("handled above")
                 }

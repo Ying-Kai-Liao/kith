@@ -4,6 +4,7 @@
 
 pub mod accounts;
 pub mod engines;
+pub mod launch;
 pub mod paths;
 pub mod secrets;
 

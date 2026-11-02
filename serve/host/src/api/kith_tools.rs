@@ -61,6 +61,14 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
     }))
 }
 
+/// `kith <agent> connect <connector> --json`: the same line (and the same name check) as `kithConnect`, for a connection
+/// setup card answered in a chat. The CLI's error comes back as the error.
+pub(crate) async fn connect(agent: &str, connector: &str) -> Result<Value> {
+    let args = args_for("kithConnect", Some(agent), &json!({"connector": connector}))?;
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    hq::json_cmd(&args).await
+}
+
 fn needs_bot(method: &str) -> bool {
     matches!(method, "kithConnect" | "kithDisconnect" | "kithSkillAdd" | "kithSkillRemove")
 }
@@ -167,6 +175,12 @@ mod tests {
         assert_eq!(line("kithInstallPreview", None, json!({"link": "a/b"})), "install a/b --preview --json");
         assert_eq!(line("kithInstall", None, json!({"link": "a/b", "as": "b2"})), "install a/b --as b2 --yes --json");
         assert_eq!(line("kithInstall", None, json!({"link": "a/b"})), "install a/b --yes --json");
+    }
+
+    #[test]
+    fn a_setup_card_connects_with_the_same_line() {
+        let args = args_for("kithConnect", Some("nova"), &json!({"connector": "notion"})).unwrap();
+        assert_eq!(args, ["nova", "connect", "notion", "--json"]);
     }
 
     #[test]
