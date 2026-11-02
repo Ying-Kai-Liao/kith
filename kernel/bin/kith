@@ -32,7 +32,7 @@
 #                                 Nothing in it points at a temp file. The pinned snapshot (KITH_AGENT_DIR) is kept while --hold's
 #                                 pid (default: the caller) lives; pass the long-lived process's pid. KITH_VIA=<name> tags the cost ledger.
 #   kith versions|pin|unpin|rollback <agent> [VERSION]   agent package versions (kith-pkg)
-#   kith new <name> "<description>"                      start a new agent (kith-new)
+#   kith new <name> "<description>" [--json]                   start a new agent (kith-new)
 #   kith scratch [-H harness] [-m model] [task...]       the built-in agent for quick chats: a new thread each time, engine and model per chat, nothing kept long-term
 #   kith scratch thread <id> [--json]                    which engine and model a scratch thread runs on (--resume keeps them unless -H/-m say otherwise)
 #   kith scratch keep <thread-id> <name> [--json]        make a real agent of a scratch thread: its summary becomes the description and a first draft of agent.md (kith-scratch)
