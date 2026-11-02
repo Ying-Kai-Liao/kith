@@ -14,8 +14,8 @@
                                   wake this session once WHAT happened: ci:OWNER/REPO#PR (its checks finished, or it was
                                   merged or closed), pid:N (the process exited), at:TIME (+30m, or local 2026-10-27T15:00)
   kith-wake ls [--json]           what is owed (and, without --json, what is waited for)
-  kith-wake status ID             where request ID is: queued, running, how it was answered (answered, failed, withdrawn,
-                                  ...) or unknown, and the turn that carried it
+  kith-wake status ID [--json]    where request ID is: queued, running, how it was answered (answered, failed, withdrawn,
+                                  ...) or unknown, and the turn that carried it; --json: {"id", "state", "run"}
 
 A wake request is one thing that happened for a session: a card answered, a waiter fired, a reply came. Requests for one
 session merge into one item and one turn (S5). Every request carries an id; one whose id is already queued, answered or
@@ -688,6 +688,7 @@ def main(argv):
     wt.add_argument('note', nargs='*')
     st = sub.add_parser('status')
     st.add_argument('id')
+    st.add_argument('--json', action='store_true')
     ls = sub.add_parser('ls')
     ls.add_argument('--json', action='store_true')
     a = p.parse_args(argv)
@@ -721,7 +722,10 @@ def main(argv):
               f'the terminal to close')
     elif a.cmd == 'status':
         how, run = status(a.id)
-        print(f'{how} {run}' if run else how)
+        if a.json:
+            print(json.dumps({'id': a.id, 'state': how, 'run': run or None}))
+        else:
+            print(f'{how} {run}' if run else how)
     elif a.cmd == 'ls':
         rows = [it for _, it in items()]
         if a.json:

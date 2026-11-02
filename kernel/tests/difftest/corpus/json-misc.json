@@ -1,0 +1,364 @@
+[
+  {
+    "name": "doctor-json",
+    "command": "doctor",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+      }
+    ],
+    "run": [
+      [
+        "doctor",
+        "--json"
+      ]
+    ],
+    "stderr": false
+  },
+  {
+    "name": "remote-json",
+    "command": "remote",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "fake": "ssh",
+        "script": "#!/bin/sh\nfor last; do :; done\ncase \" $* \" in *@down\\ *) echo 'ssh: connect refused' >&2; exit 255 ;; esac\ncase $last in\n  *'command -v kith'*) echo /fake/bin/kith ;;\n  *' ls'*) printf 'butler  a butler\\nhouse   the house\\n' ;;\nesac\n"
+      }
+    ],
+    "run": [
+      [
+        "remote",
+        "ls",
+        "--json"
+      ],
+      [
+        "remote",
+        "add",
+        "mini",
+        "you@mini",
+        "--json"
+      ],
+      [
+        "remote",
+        "add",
+        "down",
+        "you@down",
+        "--json"
+      ],
+      [
+        "remote",
+        "add",
+        "Bad Name",
+        "you@mini",
+        "--json"
+      ],
+      [
+        "remote",
+        "ls",
+        "--json"
+      ],
+      [
+        "remote",
+        "rm",
+        "mini",
+        "--json"
+      ],
+      [
+        "remote",
+        "rm",
+        "mini",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "ask-ls-json",
+    "command": "ask",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      }
+    ],
+    "run": [
+      [
+        "ask",
+        "ls",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "bug-json-owner",
+    "command": "bug",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "run": [
+          "git",
+          "init",
+          "-q",
+          "{KITH_HOME}/state"
+        ]
+      },
+      {
+        "write": "kith/state/.gitignore",
+        "text": "*\n"
+      }
+    ],
+    "env": {
+      "KITH_OWNER": "1",
+      "CLAUDE_CODE_SESSION_ID": null
+    },
+    "normalize": [
+      [
+        "\\d{8}-\\d{6}-[0-9a-f]{4}",
+        "<BUGID>"
+      ]
+    ],
+    "run": [
+      [
+        "bug",
+        "list",
+        "--json"
+      ],
+      [
+        "bug",
+        "A bug",
+        "--details",
+        "it breaks",
+        "--json"
+      ],
+      [
+        "bug",
+        "list",
+        "--json"
+      ],
+      [
+        "bug",
+        "show",
+        "nope",
+        "--json"
+      ]
+    ],
+    "ignore": [
+      "/bugs/"
+    ]
+  },
+  {
+    "name": "backup-json",
+    "command": "backup",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+      }
+    ],
+    "run": [
+      [
+        "backup",
+        "list",
+        "--json"
+      ],
+      [
+        "backup",
+        "add",
+        "codex",
+        "--json"
+      ],
+      [
+        "backup",
+        "add",
+        "codex",
+        "--json"
+      ],
+      [
+        "backup",
+        "add",
+        "claude:second",
+        "--at",
+        "1",
+        "--agent",
+        "echo",
+        "--json"
+      ],
+      [
+        "backup",
+        "add",
+        "claude:x",
+        "--at",
+        "0",
+        "--json"
+      ],
+      [
+        "backup",
+        "remove",
+        "codex",
+        "--json"
+      ],
+      [
+        "backup",
+        "remove",
+        "codex",
+        "--json"
+      ],
+      [
+        "backup",
+        "list",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "update-self-check-json",
+    "command": "update",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      }
+    ],
+    "env": {
+      "KITH_ROOT": "{KITH_HOME}/kernel"
+    },
+    "run": [
+      [
+        "update",
+        "self",
+        "--check",
+        "--json"
+      ],
+      [
+        "update",
+        "self",
+        "--check"
+      ],
+      [
+        "update",
+        "self",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "wake-json",
+    "command": "wake",
+    "setup": [
+      {
+        "mkdir": "kith/state"
+      }
+    ],
+    "run": [
+      [
+        "wake",
+        "status",
+        "w-1",
+        "--json"
+      ],
+      [
+        "wake",
+        "enqueue",
+        "S1",
+        "--id",
+        "w-2",
+        "--agent",
+        "echo",
+        "--door",
+        "host",
+        "--",
+        "hello"
+      ],
+      [
+        "wake",
+        "status",
+        "w-2",
+        "--json"
+      ],
+      [
+        "wake",
+        "status",
+        "w-2"
+      ],
+      [
+        "wake",
+        "ls",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "project-bare-json",
+    "command": "project",
+    "setup": [
+      {
+        "mkdir": "home/work/alpha"
+      },
+      {
+        "mkdir": "home/work/inner"
+      },
+      {
+        "mkdir": "kith/state"
+      }
+    ],
+    "cwd": "home/work/inner",
+    "run": [
+      [
+        "project",
+        "--json"
+      ],
+      [
+        "project",
+        "add",
+        "alpha",
+        "{HOME}/work/alpha"
+      ],
+      [
+        "project",
+        "add",
+        "inner",
+        "{HOME}/work/inner",
+        "--in",
+        "alpha"
+      ],
+      [
+        "project",
+        "--json"
+      ],
+      [
+        "project",
+        "/nowhere",
+        "--json"
+      ]
+    ]
+  },
+  {
+    "name": "project-notes-json",
+    "command": "project",
+    "setup": [
+      {
+        "mkdir": "kith/state/projects/inner"
+      },
+      {
+        "write": "kith/agents/echo/role/agent.md",
+        "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
+      }
+    ],
+    "run": [
+      [
+        "project",
+        "notes",
+        "inner",
+        "--json"
+      ]
+    ]
+  }
+]

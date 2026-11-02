@@ -9,7 +9,7 @@
                           lasts while claude writes even if the sweep dies. End is written only under the claim too (rule 12). Prints one
                           line per session it acted on. --at-sleep: ask now (a 5-minute cache has no timer; the wrapper
                           calls it as a session goes to sleep).
-  kith-lifecycle status SID   what is known: how it ended (idle, quit, ... or crash), the decision, outstanding work
+  kith-lifecycle status SID [--json]   what is known: how it ended (idle, quit, ... or crash), the decision, outstanding work
   kith-lifecycle intent SID WHY PID   write an intent (before a signal; the host's stop paths do the same in Rust)
 
 Rules this keeps: one compactor per session: only a session with no live process and no claim is touched, and a live
@@ -298,6 +298,7 @@ def main(argv):
     s.add_argument('--at-sleep', action='store_true')
     st = sub.add_parser('status')
     st.add_argument('session')
+    st.add_argument('--json', action='store_true')   # accepted for symmetry: status always prints the one JSON object
     i = sub.add_parser('intent')
     i.add_argument('session')
     i.add_argument('why')
