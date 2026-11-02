@@ -433,7 +433,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("17"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -454,7 +454,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("17"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -477,7 +477,7 @@ mod tests {
                 .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("17"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
         assert!(s.peers_in().unwrap().is_empty() && s.peers_out().unwrap().is_empty());
     }
 
@@ -497,7 +497,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("17"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         assert!(s.push_tickets().is_empty(), "push tickets have a voip column");
         drop(s);
