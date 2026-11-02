@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# kith-auth-json-check — `kith auth ls|granted|grant|revoke --json`: one JSON object on stdout, {"ok": false, "error"} and a
+# non-zero exit on a refusal, grant/revoke say whether anything changed, text output unchanged, and no secret value (a
+# Keychain item, an env value in auth.json, an inline token) ever appears in any --json output. CLI lines in, stdout / exit
+# code / auth.json out, so the same lines can check another implementation. Throwaway HOME / KITH_HOME / KITH_AUTH, fake
+# `security` on PATH; never the real Keychain.
+#
+#   kernel/tests/kith-auth-json-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-auth-json.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_PERSON KITH_AGENT HQ_HOME KITH_AUTH_PROFILE
+mkdir -p "$HOME" "$KITH_HOME/state" "$KITH_HOME/agents/echo/role" "$T/bin"
+export KITH_STATE=$KITH_HOME/state
+printf -- '---\nname: echo\ndescription: test\n---\nbody\n' > "$KITH_HOME/agents/echo/role/agent.md"
+printf 'needs: [notion, slack]\n' > "$KITH_HOME/agents/echo/role/capabilities.yaml"
+SECRET="sk$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+ENVSECRET="ev$(python3 -c 'import uuid; print(uuid.uuid4().hex)')"
+# the Keychain holds SECRET for every item asked for
+printf '#!/bin/sh\necho "%s"\n' "$SECRET" > "$T/bin/security"; chmod +x "$T/bin/security"
+export PATH=$T/bin:$PATH KITH_SECURITY_BIN=$T/bin/security
+
+K=$KERNEL/bin/kith
+fails=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+export OUT=
+jv() { python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(__import__("sys").argv[1]))' "$1"; }
+: > "$T/all.out"
+run() { OUT=$("$K" auth "$@" 2>"$T/err"); rc=$?; printf '%s\n' "$OUT" >> "$T/all.out"; }
+
+# ---- empty auth.json ----
+run ls --json
+check "ls --json, nothing granted: one object, exit 0" "[ $rc = 0 ] && [ \"\$(jv \"sorted(d)\")\" = \"['agents']\" ]"
+check "ls --json lists echo's two needs as not granted" "[ \"\$(jv \"[(s['service'], s['profile'], s['status']) for s in d['agents'][0]['services']]\")\" = \"[('notion', None, 'not granted'), ('slack', None, 'not granted')]\" ]"
+check "nothing on stderr in --json mode" "[ ! -s $T/err ]"
+
+# ---- grant ----
+run grant echo notion notion/library --json
+check "grant --json: ok, names, changed true" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['agent'], d['service'], d['profile'], d['changed'])\")\" = \"(True, 'echo', 'notion', 'notion/library', True)\" ]"
+run grant echo notion notion/library --json
+check "grant twice: changed false, still ok" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['changed'])\")\" = '(True, False)' ]"
+
+run granted notion --json
+check "granted --json: {service, grants}" "[ $rc = 0 ] && [ \"\$(jv \"d\")\" = \"{'service': 'notion', 'grants': []}\" ]"
+OUT=$(KITH_AGENT=echo "$K" auth granted notion --json); printf '%s\n' "$OUT" >> "$T/all.out"
+check "granted --json for the agent in KITH_AGENT" "[ \"\$(jv \"d\")\" = \"{'service': 'notion', 'grants': ['notion/library']}\" ]"
+OUT=$("$K" auth granted --for echo notion --json)
+check "granted --for AGENT --json" "[ \"\$(jv \"d['grants']\")\" = \"['notion/library']\" ]"
+check "granted text output unchanged" "[ \"\$(KITH_AGENT=echo '$K' auth granted notion)\" = 'notion/library' ]"
+
+# a profile that reads the Keychain, an env value on the grant, an inline token: none may leak
+python3 - <<PY
+import json, os
+p = os.environ['KITH_AUTH']; d = json.load(open(p))
+d['profiles']['notion/library'] = {'NOTION_API_KEY': 'keychain:kith/notion/library#NOTION_API_KEY'}
+d['profiles']['slack/team'] = {'SLACK_BOT_TOKEN': '$SECRET'}
+d['grants']['echo']['slack'] = 'slack/team'
+d['env'] = {'echo': {'notion': {'NOTION_VERSION': '$ENVSECRET'}}}
+json.dump(d, open(p, 'w'))
+PY
+run ls --json
+check "ls --json: granted rows carry profile, status and env var names" "[ \"\$(jv \"[(s['service'], s['profile'], s['env']) for s in d['agents'][0]['services']]\")\" = \"[('notion', 'notion/library', ['NOTION_VERSION']), ('slack', 'slack/team', [])]\" ]"
+check "ls text output unchanged (profile column, env value shown)" "'$K' auth ls | grep -q 'NOTION_VERSION=$ENVSECRET' && '$K' auth ls | grep -q 'notion/library'"
+run grant echo notion notion/other --json
+check "grant another profile of a held service: changed true" "[ \"\$(jv \"d['changed']\")\" = 'True' ]"
+
+# ---- refusals ----
+run grant echo nosuchservice nosuchservice/x --json
+check "grant unknown service: ok false + error, non-zero, nothing on stderr" "[ $rc != 0 ] && [ \"\$(jv \"d['ok']\")\" = 'False' ] && [ -n \"\$(jv \"d['error']\")\" ] && [ ! -s $T/err ]"
+run grant ghost notion notion/x --json
+check "grant unknown agent: ok false, non-zero" "[ $rc != 0 ] && [ \"\$(jv \"d['ok']\")\" = 'False' ] && echo \"\$OUT\" | grep -q ghost"
+run grant echo notion slack/x --json
+check "grant wrong-service profile: ok false, exit 2 as text" "[ $rc = 2 ] && [ \"\$(jv \"d['ok']\")\" = 'False' ]"
+check "a refusal prints exactly one object" "[ \$(printf '%s\n' \"\$OUT\" | wc -l) = 1 ]"
+run grant echo notion --json
+check "grant with missing args: ok false, exit 2" "[ $rc = 2 ] && [ \"\$(jv \"d['ok']\")\" = 'False' ]"
+run granted --json
+check "granted with no service: ok false" "[ $rc = 2 ] && [ \"\$(jv \"d['ok']\")\" = 'False' ]"
+run revoke ghost notion --json
+check "revoke unknown agent: ok false, non-zero" "[ $rc != 0 ] && [ \"\$(jv \"d['ok']\")\" = 'False' ]"
+
+# ---- revoke ----
+run revoke echo slack --json
+check "revoke --json: ok, changed true" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['agent'], d['service'], d['changed'])\")\" = \"(True, 'echo', 'slack', True)\" ]"
+run revoke echo slack --json
+check "revoke twice: ok, changed false (text mode also succeeds)" "[ $rc = 0 ] && [ \"\$(jv \"(d['ok'], d['changed'])\")\" = '(True, False)' ]"
+run revoke echo notion --profile notion/other --json
+check "revoke --profile: changed true, profile named" "[ \"\$(jv \"(d['profile'], d['changed'])\")\" = \"('notion/other', True)\" ]"
+run revoke echo notion --profile notion/other --json
+check "revoke --profile twice: changed false" "[ \"\$(jv \"d['changed']\")\" = 'False' ]"
+check "text revoke unchanged" "[ \"\$('$K' auth revoke echo notion)\" = 'echo may no longer use notion' ]"
+run ls --json
+check "ls --json after the revokes: both not granted again" "[ \"\$(jv \"[s['status'] for s in d['agents'][0]['services']]\")\" = \"['not granted', 'not granted']\" ]"
+
+# ---- retired entry: a grant whose agent is gone can still be revoked ----
+python3 - <<PY
+import json, os
+p = os.environ['KITH_AUTH']; d = json.load(open(p)); d['grants']['gone'] = {'notion': 'notion/old'}; json.dump(d, open(p, 'w'))
+PY
+run revoke gone notion --json
+check "revoke a retired agent's grant: changed true" "[ $rc = 0 ] && [ \"\$(jv \"d['changed']\")\" = 'True' ]"
+
+# ---- no secret anywhere ----
+check "no Keychain value, token or env value in any --json output" "! grep -q -e '$SECRET' -e '$ENVSECRET' $T/all.out"
+[ "$fails" = 0 ] || { echo "$fails check(s) failed"; exit 1; }
