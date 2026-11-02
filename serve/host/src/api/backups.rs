@@ -168,13 +168,27 @@ async fn read(hub: &Hub) -> Result<Value> {
     Ok(json!({"global": ids(&global), "agents": per_agent, "entries": entries, "main": main}))
 }
 
+/// What `kith account` takes: `<harness>[:<name>][@<model>]` (`kernel/lib/kith_accounts.py`'s `parse`), never a leading `-`.
 fn valid_id(id: &str) -> bool {
+    let (id, model) = id.split_once('@').map_or((id, None), |(i, m)| (i, Some(m)));
     let (harness, name) = id.split_once(':').map_or((id, None), |(h, n)| (h, Some(n)));
     let word = |s: &str, first: fn(char) -> bool| {
         s.chars().next().is_some_and(first)
             && s.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
     };
-    word(harness, |c| c.is_ascii_lowercase()) && name.is_none_or(|n| word(n, |c| c.is_ascii_alphanumeric()))
+    // The model's own charset is wider (`MODEL_RE`): `claude-opus-4-5`, `gpt-5:high`, `a/b[1m]`.
+    let model_ok = |m: &str| {
+        m.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+            && m.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '[' | ']' | '/'))
+    };
+    word(harness, |c| c.is_ascii_lowercase())
+        && name.is_none_or(|n| word(n, |c| c.is_ascii_alphanumeric()))
+        && model.is_none_or(model_ok)
+}
+
+/// An agent name: an id with no account or model part.
+fn valid_agent(id: &str) -> bool {
+    valid_id(id) && !id.contains([':', '@'])
 }
 
 /// `accountSet {agent: string|null, account: string|null}`: the main account of one agent or (agent null) of every
@@ -183,7 +197,7 @@ fn valid_id(id: &str) -> bool {
 async fn set_main(hub: &Hub, b: &Value) -> Result<()> {
     let agent = match &b["agent"] {
         Value::Null => None,
-        Value::String(a) if valid_id(a) && !a.contains(':') => Some(a.as_str()),
+        Value::String(a) if valid_agent(a) => Some(a.as_str()),
         _ => bail!("`agent` must be an agent name or null"),
     };
     let mut args = vec!["account", "use"];
@@ -220,7 +234,7 @@ async fn set_main(hub: &Hub, b: &Value) -> Result<()> {
 async fn set(hub: &Hub, b: &Value) -> Result<()> {
     let agent = match &b["agent"] {
         Value::Null => None,
-        Value::String(a) if valid_id(a) && !a.contains(':') => Some(a.as_str()),
+        Value::String(a) if valid_agent(a) => Some(a.as_str()),
         _ => bail!("`agent` must be an agent name or null"),
     };
     let bin = kith().await?;
@@ -355,4 +369,20 @@ async fn remove_account(b: &Value) -> Result<Value> {
         o.remove("dir");
     }
     Ok(doc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ids_follow_what_kith_account_takes() {
+        for ok in ["claude", "claude:work", "claude@sonnet", "claude:work@opus", "codex@gpt-5:high", "claude@claude-opus-4-5"] {
+            assert!(valid_id(ok), "{ok}");
+        }
+        for bad in ["", "-x", "claude@", "claude@-x", "claude@a b", "claude :x", "Claude", "claude:@x", "claude@a;b"] {
+            assert!(!valid_id(bad), "{bad}");
+        }
+        assert!(valid_agent("alice") && !valid_agent("claude@sonnet") && !valid_agent("claude:work"));
+    }
 }

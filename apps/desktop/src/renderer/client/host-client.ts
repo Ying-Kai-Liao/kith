@@ -351,6 +351,11 @@ export class HostClient {
     return parseKithInfoResult(await this.call('kithSetSetting', { botId, setting, value, ...(model ? { model } : {}) }, 60_000))
   }
 
+  /** The engines table as `kith engines --json` prints it (owner only). A kith that can't run answers with its own error. */
+  async kithEngines(): Promise<unknown> {
+    return this.call('kithEngines', {}, 60_000)
+  }
+
   /** Makes a kith agent (`kith new --json`; owner only). A refusal throws the host's own words. `bot` is null while the roster lags or its engine isn't one the host runs. */
   async newKithAgent(params: Record<string, string>): Promise<NewAgentResult<Bot>> {
     return parseNewAgentResult<Bot>(await this.call('newKithAgent', params, 240_000))

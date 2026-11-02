@@ -24,13 +24,51 @@ pub fn harnesses() -> impl Iterator<Item = &'static Harness> {
     kith_kernel::engines::ENGINES.iter().filter(|h| h.has_acp())
 }
 
-/// The command that installs `install` here: an npm package goes through Kith's own Node when the computer has none.
+/// Whether `install` has a command on this platform (the table's data). What runs is `kith engines install <id>`'s
+/// line ([`install_line`]), not this one.
 pub fn install_command(install: Install) -> Option<String> {
-    install.command(cfg!(unix), &|pkg| {
-        crate::service::current_exe()
-            .ok()
-            .map(|exe| format!("{} npm install -g {pkg}", shell::quote(&exe.to_string_lossy())))
-    })
+    install.command(cfg!(unix), &|pkg| Some(format!("npm install -g {pkg}")))
+}
+
+/// The argv after `kith` for `kith engines <op> <id>`; `op` is `install` or `login`. An id that looks like an option
+/// or holds anything beyond an engine id's characters is refused before any process starts.
+pub fn engine_args(op: &str, id: &str) -> anyhow::Result<[String; 3]> {
+    anyhow::ensure!(matches!(op, "install" | "login"), "kith engines has no `{op}`");
+    let plain = !id.is_empty()
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && !id.starts_with('-');
+    anyhow::ensure!(plain, "`{id}` is not an engine id");
+    Ok(["engines".to_owned(), op.to_owned(), id.to_owned()])
+}
+
+/// The line `kith engines <op> <id>` prints, to run in a terminal. kith's own error text comes back as the error.
+pub async fn engine_line(op: &str, id: &str) -> anyhow::Result<String> {
+    let Some(bin) = tokio::task::spawn_blocking(crate::agent::hq::bin).await? else {
+        anyhow::bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+    };
+    engine_line_at(&bin, op, id).await
+}
+
+async fn engine_line_at(bin: &Path, op: &str, id: &str) -> anyhow::Result<String> {
+    let args = engine_args(op, id)?;
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let out = crate::agent::hq::run(bin, &args, None, Duration::from_secs(30)).await?;
+    let line = out.trim();
+    anyhow::ensure!(!line.is_empty(), "`kith {}` printed no command", args.join(" "));
+    Ok(line.to_owned())
+}
+
+/// `kith engines install <id>`'s line. A computer with no npm gets Kith's own Node for `npm install -g` lines.
+pub async fn install_line(id: &str) -> anyhow::Result<String> {
+    let line = engine_line("install", id).await?;
+    Ok(with_kith_npm(&line, which("npm").is_some(), crate::service::current_exe().ok().as_deref()))
+}
+
+fn with_kith_npm(line: &str, has_npm: bool, exe: Option<&Path>) -> String {
+    match (line.strip_prefix("npm "), has_npm, exe) {
+        (Some(rest), false, Some(exe)) => format!("{} npm {rest}", shell::quote(&exe.to_string_lossy())),
+        _ => line.to_owned(),
+    }
 }
 
 /// By id only: a stored bot's backend is never an alias.
@@ -166,7 +204,8 @@ pub fn list() -> Vec<Value> {
 fn list_from(registry: &[Value]) -> Vec<Value> {
     let mut out: Vec<Value> = harnesses()
         .map(|h| {
-            let path = h.bins.iter().find_map(|b| which(b));
+            // The core's own lookup, so the sheet and `kith engines --json` read installed and path the same way.
+            let path = kith_kernel::engines::detect(h, &which).map(|(_, p)| p);
             let reg = h.registry.and_then(|id| registry.iter().find(|a| a["id"] == id));
             let native = path.is_some() && h.local.is_some();
             let runnable = native || reg.is_some_and(|a| registry::launch_kind(a).is_some());
@@ -311,20 +350,6 @@ pub fn login_available(id: &str) -> bool {
         .is_some_and(|h| h.bins.iter().any(|b| on_path(b)) || !h.login.contains("{bin}") || registry_cli(h).is_some())
 }
 
-/// Kith's own sign-in command for `id`, with `{bin}` resolved.
-pub async fn login_command(id: &str) -> anyhow::Result<String> {
-    let h = harness(id).ok_or_else(|| anyhow::anyhow!("no sign-in command for {id}"))?;
-    let bin = match h.bins.iter().find_map(|b| which(b)) {
-        Some(p) => shell::quote(&p.to_string_lossy()),
-        None => match registry_cli(h) {
-            Some(agent) => registry::command(&agent, |_| {}).await?.program,
-            None if !h.login.contains("{bin}") => String::new(),
-            None => anyhow::bail!("Install {} first.", h.name),
-        },
-    };
-    Ok(h.login.replace("{bin}", &bin))
-}
-
 /// The installed CLI's own ACP mode, if it has one and it's installed.
 pub fn local_candidate(id: &str) -> Option<registry::Cmd> {
     let h = harness(id)?;
@@ -340,6 +365,41 @@ mod tests {
 
     /// The tests below set the search path and the sign-in cache, which are process-wide.
     static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn builds_exactly_the_kith_engines_line_and_refuses_options() {
+        assert_eq!(engine_args("install", "claude").unwrap(), ["engines", "install", "claude"]);
+        assert_eq!(engine_args("login", "gemini-cli").unwrap(), ["engines", "login", "gemini-cli"]);
+        for bad in ["", "-h", "--json", "a b", "a;b", "$(x)", "a\nb"] {
+            assert!(engine_args("install", bad).is_err(), "{bad:?}");
+        }
+        assert!(engine_args("list", "claude").is_err());
+        assert_eq!(with_kith_npm("npm install -g x", false, Some(Path::new("/k/kith"))), "/k/kith npm install -g x");
+        assert_eq!(with_kith_npm("npm install -g x", true, Some(Path::new("/k/kith"))), "npm install -g x");
+        assert_eq!(with_kith_npm("curl a | sh", false, Some(Path::new("/k/kith"))), "curl a | sh");
+    }
+
+    /// The host runs the CLI and takes its line as printed; a refusal comes back as the CLI's text.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runs_kith_engines_and_shows_its_errors() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = std::env::temp_dir().join(format!("kith-eng-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let kith = dir.join("kith");
+        std::fs::write(
+            &kith,
+            "#!/bin/sh\nif [ \"$3\" = nope ]; then echo \"No sign-in command known for Nope.\" >&2; exit 1; fi\necho \"line: $*\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&kith, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert_eq!(engine_line_at(&kith, "install", "claude").await.unwrap(), "line: engines install claude");
+        assert_eq!(engine_line_at(&kith, "login", "codex").await.unwrap(), "line: engines login codex");
+        let err = engine_line_at(&kith, "login", "nope").await.unwrap_err();
+        assert!(format!("{err:#}").contains("No sign-in command known for Nope."), "{err:#}");
+        assert!(engine_line_at(&kith, "install", "--json").await.is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[cfg(unix)]
     #[test]
