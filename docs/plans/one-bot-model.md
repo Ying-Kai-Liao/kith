@@ -191,3 +191,4 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: A0b done: `kernel/tests/difftest/kith-difftest` runs corpus cases on an OLD and a NEW side and reports
   green/red per command (`--summary`); seed corpus passes OLD against OLD. `kernel/bin/kith` does not read KITH_CORE yet.
 - 2026-11-03: A0 done: [core-design.md](core-design.md) (crate `kith-kernel` in `core/kernel`, per-command switching through `kernel/lib/core-switched.txt`, `KITH_CORE=python|rust` for the harness), reviewed by the architect agent (12 points, each adopted or answered in its section 13).
+- 2026-11-03: C1 CLI: built-in `scratch` agent (`kernel/agents/scratch`, no install step, listed as `builtin`, never backed up or shared), engine and model per chat and kept on `--resume`, `kith scratch keep <thread> <name>` makes a real agent via `kith new --instructions` (PR #597). The app half of C1 is still open.
