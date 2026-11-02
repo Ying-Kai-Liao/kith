@@ -518,6 +518,42 @@ pub async fn set_call_model(agent: &str, model: &str) -> Result<InfoRun> {
     Ok(refill(agent, true).await)
 }
 
+/// `kith <agent> set model|effort|harness <value> [--model M] --json`: the agent's own setting in its agent.md, used by
+/// its next run from any entry point. `value` may be `default` (forget it); `extra` is `["--model", M]` for a harness
+/// change. Kith's own refusal text comes back as the error (a Claude model on a non-Claude harness, say). Returns the
+/// info read back from hq, so the app sees the new value.
+pub async fn set_setting(agent: &str, setting: &str, value: &str, extra: &[&str]) -> Result<InfoRun> {
+    let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
+        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+    };
+    let mut args = vec![agent, "set", setting, value];
+    args.extend_from_slice(extra);
+    args.push("--json");
+    let out = run(&bin, &args, None, LIST_TIMEOUT).await.map_err(|e| setting_error(setting, &e))?;
+    // An older kith prints plain text for a `set` it knows and fails on one it doesn't; neither is JSON.
+    match serde_json::from_str::<Value>(out.trim()) {
+        Ok(said) if said.is_object() => Ok(refill(agent, true).await),
+        _ => Err(old_kith(setting)),
+    }
+}
+
+fn old_kith(setting: &str) -> anyhow::Error {
+    anyhow!("this Mac's kith can't set the {setting} this way; update kith (`kith update self`) and try again")
+}
+
+/// Kith's own sentence from a failed `set`: `run` wraps it as "`kith … --json` failed (exit status: 2): <text>".
+fn setting_error(setting: &str, e: &anyhow::Error) -> anyhow::Error {
+    let text = format!("{e:#}");
+    let Some(rest) = text.strip_prefix('`').and_then(|t| t.split_once("): ")).map(|(_, r)| r.trim()) else {
+        return anyhow!("{text}");
+    };
+    // An older kith has no `set model` / `set effort`: it prints its usage.
+    if rest.is_empty() || rest.to_lowercase().starts_with("usage") {
+        return old_kith(setting);
+    }
+    anyhow!("{}", rest.strip_prefix("kith: ").unwrap_or(rest))
+}
+
 /// `kith schedule <op> <agent> <id>` (pause, resume, run or rm) as the person the job runs for, so kith-sched stays
 /// the only writer of jobs.json and its own "only they or the owner can run it" rule applies. The person is the job's
 /// as kith-info reads it now, never the caller's word. Returns the info read back from hq.
@@ -1202,6 +1238,17 @@ mod tests {
             "no words, no recall"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_failed_set_says_kiths_sentence_and_an_old_kith_says_to_update() {
+        let failed = |why: &str| anyhow!("`kith echo set model opus --json` failed (exit status: 2): {why}");
+        let said = setting_error("model", &failed("a Claude model needs a Claude harness")).to_string();
+        assert_eq!(said, "a Claude model needs a Claude harness");
+        let usage = setting_error("model", &failed("usage: kith <agent> set permission MODE")).to_string();
+        assert!(usage.contains("update kith"), "{usage}");
+        let other = setting_error("model", &anyhow!("kith took longer than 30s")).to_string();
+        assert_eq!(other, "kith took longer than 30s");
     }
 
     #[test]

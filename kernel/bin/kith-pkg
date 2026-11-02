@@ -397,9 +397,10 @@ def link_same(src, old, target):
         return False
 
 
-def pointers(agent):
+def pointers(agent, create=True):
     d = STORE / '.pointers'
-    d.mkdir(parents=True, exist_ok=True)
+    if create:   # a read (kith ls, kith doctor) leaves no folder behind
+        d.mkdir(parents=True, exist_ok=True)
     return d / f'{agent}.good', d / f'{agent}.pin'
 
 
@@ -1433,7 +1434,7 @@ def cmd_market(words, new_only, as_json=False):
 def cmd_list(as_json):
     out = {}
     for name, home in installed().items():
-        good = read(pointers(name)[0])
+        good = read(pointers(name, create=False)[0])
         o = {'dir': str(home), 'version': good}
         if owned(home):
             o['remote'] = git(home, 'remote', 'get-url', 'origin').stdout.strip()

@@ -98,8 +98,8 @@ and `--json` first and the app calling it after.
 
 - [x] **B0. Harness setting.** `kith <agent> set harness H [--model M]`; a Claude model never reaches another harness
   (PR #582).
-- [ ] **B1. Agent settings.** `kith <agent> set model|effort` beside `set harness`, all with `--json`. The app's agent
-  editor calls them. A model per backup entry (issue #578).
+- [x] **B1. Agent settings.** `kith <agent> set model|effort` beside `set harness`, all with `--json`. The app's agent
+  editor calls them. A model per backup entry (issue #578). (PRs #598, #603)
 - [x] **B2. Connectors and skills as grants.** `kith <agent> connect <connector>` / `disconnect`, `kith <agent> skill
   add|remove <id>`, list commands with `--json`. The install logic behind the app's Marketplace
   (`serve/host/src/market/`: MCP registry, Anthropic skills, Composio) moves behind these; the Marketplace installs onto
@@ -194,3 +194,5 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: C1 CLI: built-in `scratch` agent (`kernel/agents/scratch`, no install step, listed as `builtin`, never backed up or shared), engine and model per chat and kept on `--resume`, `kith scratch keep <thread> <name>` makes a real agent via `kith new --instructions` (PR #597). The app half of C1 is still open.
 - 2026-11-03: C1 app: Quick chat + Keep as agent (PR #607).
 - 2026-11-03: B2 done: kernel CLI in #590, host mirror + `kith connector` in #589, `kith market`/`install --preview` in #593, and the app (this PR): the Marketplace puts connectors and skills onto a kith agent through the CLI, adds the Bots section, renames Agents to Engines; the bot page lists and removes the agent's connectors and skills. Custom hand-written skills are hidden (no CLI path); secrets stay in the host vault until A5.
+- 2026-11-03: B1 done: `kith <agent> set model|effort`, --json on every set, a model per backup entry (`claude@sonnet`), the app's agent editor calls them (PRs #598, #603).
+- 2026-11-03: B6 footguns done: bare `kith backup|update|migrate` print usage (verbs `backup run`, `update self`, `migrate run`); an unknown word after `kith` never starts a run (PR #596). The rest of B6 (--json list) stays open.

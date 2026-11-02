@@ -168,6 +168,21 @@ impl Store {
         logged("unread roots", roots).unwrap_or_default()
     }
 
+    /// The newest thread summary on a root of this bot, with who may see it: `(text, audience)`. A forgotten thread's
+    /// row carries none (the host strips it), so none is returned for it.
+    pub fn last_thread_summary(&self, id: &str) -> Option<(String, String)> {
+        let c = self.db.locked();
+        let row = c.query_row(
+            "SELECT json_extract(data, '$.thread.summary.text'), json_extract(data, '$.thread.summaryAudience')
+             FROM entries WHERE bot_id = ?1 AND thread_id IS NULL AND
+               json_extract(data, '$.thread.summary.text') IS NOT NULL
+             ORDER BY json_extract(data, '$.thread.summary.writtenAt') DESC, seq DESC LIMIT 1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?.unwrap_or_default())),
+        );
+        logged("last thread summary", row.optional()).flatten().filter(|(t, _)| !t.is_empty())
+    }
+
     /// Newest chat-visible line in the main chat or a task's thread for the roster preview, with its
     /// author (`None` for the user; a group reply names the bot that wrote it).
     pub fn last_message(&self, id: &str) -> Option<LastMessage> {

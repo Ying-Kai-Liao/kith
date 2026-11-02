@@ -3,7 +3,7 @@
   "type": "BotAnswer",
   "body": {
     "bot": {
-      "id": "3b57e3dc-debc-4c43-8c6b-a48b31e67428",
+      "id": "07497f38-6372-45bb-a21f-d10d1cca365c",
       "kind": "agent",
       "members": [],
       "name": "house",
@@ -12,8 +12,8 @@
       "avatarShape": "blob",
       "avatarSource": "auto",
       "backend": "claude",
-      "lastMessage": null,
-      "lastAt": 1792998619785,
+      "lastSummary": null,
+      "lastAt": 1793638702255,
       "permission": "default",
       "model": null,
       "modelOptions": {},
@@ -31,9 +31,9 @@
       "tasks": false,
       "hqAgent": "house",
       "person": "sam",
-      "createdAt": 1792998619785,
+      "createdAt": 1793638702255,
       "managedWorkspace": false,
-      "unread": 0,
+      "lastMessage": null,
       "sharedMemory": false,
       "memoryRev": 0,
       "workingLanes": [],
@@ -45,7 +45,8 @@
       "workingChat": null,
       "fastModeSupport": "unknown",
       "fastModeIssue": null,
-      "workingThread": null
+      "workingThread": null,
+      "unread": 0
     }
   }
 }

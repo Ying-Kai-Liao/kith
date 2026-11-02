@@ -86,6 +86,31 @@ export class KithInfoStore extends Observable {
     this.changed()
   }
 
+  /** Why the last model, effort or harness change failed (kith's own sentence); the old value stays shown. */
+  settingError: { setting: 'model' | 'effort' | 'harness'; text: string } | null = null
+  settingSaving = false
+
+  /** Writes the agent's model, effort or harness through to kith; what shows afterwards is kith's answer, read back. */
+  async setSetting(setting: 'model' | 'effort' | 'harness', value: string, model?: string): Promise<void> {
+    if (this.settingSaving) return
+    this.settingSaving = true
+    this.settingError = null
+    this.changed()
+    try {
+      const result = await (await this.client()).kithSetSetting(this.botId, setting, value, model)
+      if (result.info) {
+        this.info = result.info
+        this.error = null
+        this.refreshError = null
+        this.fetchedAt = result.fetchedAt
+      } else this.settingError = { setting, text: result.error ?? 'Kith gave no answer' }
+    } catch (error) {
+      this.settingError = { setting, text: message(error) }
+    }
+    this.settingSaving = false
+    this.changed()
+  }
+
   /** A Schedule card's button: kith-sched does it, and the info read back is what every card of this agent shows. Throws why it failed. */
   async schedule(id: string, op: 'pause' | 'resume' | 'run' | 'remove'): Promise<void> {
     const result = await (await this.client()).kithSchedule(this.botId, id, op)

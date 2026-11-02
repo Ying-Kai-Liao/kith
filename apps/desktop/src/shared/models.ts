@@ -79,6 +79,10 @@ export interface Bot {
   workingLanes?: WorkingLane[] | null
   unread: number
   lastMessage?: string | null
+  /** The newest thread summary the viewer may see (host `lastSummary`); the row shows it when `rowShowsSummary` is on. */
+  lastSummary?: string | null
+  /** The owner's setting: show `lastSummary` as the row's line instead of the last message. */
+  rowShowsSummary?: boolean
   lastAt: number
   /** A bot guest's conversations with this agent (a per-person copy of the chat); absent on every other row and from an older host. */
   botGuest?: BotGuestRef
@@ -158,6 +162,8 @@ export function normalizeBot(raw: Partial<Bot> & { id: string }): Bot {
     workingLanes: raw.workingLanes ?? null,
     unread: raw.unread ?? 0,
     lastMessage: raw.lastMessage ?? null,
+    lastSummary: raw.lastSummary ?? null,
+    rowShowsSummary: raw.rowShowsSummary ?? false,
     lastAt: raw.lastAt ?? createdAt,
     ...(raw.botGuest !== undefined && normalizeBotGuest(raw.botGuest) ? { botGuest: normalizeBotGuest(raw.botGuest)! } : {}),
   }
@@ -612,6 +618,7 @@ export interface BotDraft {
   computer?: boolean
   sharedMemory?: boolean
   harnessMemory?: boolean
+  rowShowsSummary?: boolean
 }
 
 export function draftOf(bot: Bot): BotDraft {
@@ -636,6 +643,7 @@ export function draftOf(bot: Bot): BotDraft {
     connectors: bot.connectors,
     skills: bot.skills,
     computer: bot.computer,
+    rowShowsSummary: bot.rowShowsSummary ?? false,
   }
 }
 
