@@ -49,29 +49,47 @@ async fn run(agent: &str, flag: &str, body: &Value) -> Option<std::process::Outp
     crate::channels::hq::output_with(&bin, &[agent, flag], Some(&body.to_string())).await
 }
 
-/// `kith allow <agent> --derive`: None when the kernel refuses to remember the call (or can't be reached).
-pub async fn derive(agent: &str, tool: &str, input: &Value, reason: &str) -> Option<Derived> {
+/// What `kith allow <agent> --derive` says about a blocked call: what Always allow (and This session) would cover, if
+/// anything; the input with key-shaped text redacted, which is what a card shows and stores; and the agent's settings
+/// digest, which a This session grant is made under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Checked {
+    pub derived: Option<Derived>,
+    pub input: Value,
+    pub settings: String,
+}
+
+/// `kith allow <agent> --derive`. None when the kernel can't be reached or answers nothing usable: the caller then
+/// shows nothing of the input it couldn't redact (see `cards::ask_for`).
+pub async fn check(agent: &str, tool: &str, input: &Value, reason: &str) -> Option<Checked> {
     let out = run(agent, "--derive", &json!({"tool": tool, "input": input, "reason": reason})).await?;
     let v: Value = serde_json::from_slice(&out.stdout).ok()?;
-    if v["ok"] != true {
-        return None;
-    }
-    Some(Derived { kind: v["kind"].as_str()?.to_owned(), rule: v["rule"].as_str()?.to_owned() })
+    let derived = (v["ok"] == true)
+        .then(|| Some(Derived { kind: v["kind"].as_str()?.to_owned(), rule: v["rule"].as_str()?.to_owned() }))
+        .flatten();
+    let input = v.get("input").filter(|i| i.is_object() || i.is_null())?.clone();
+    Some(Checked { derived, input, settings: v["settings"].as_str().unwrap_or_default().to_owned() })
 }
 
 /// What the owner's card adds: the classifier's reason (and what Always allow would remember) as a line of text, the
-/// Always allow option when the kernel will remember this call, and what it offered, kept on the entry.
-pub async fn extras(agent: &str, tool: &str, input: &Value, reason: &str) -> edge::Extra {
+/// This session and Always allow options when the kernel will remember this call, and what it offered, kept on the
+/// entry. `claude_session` is the Claude session a This session grant would belong to.
+pub fn extras(agent: &str, reason: &str, checked: Option<&Checked>, claude_session: &str) -> edge::Extra {
     let reason = clean_reason(reason);
     let mut text = format!("Auto mode blocked this: {reason}");
     let mut options = Vec::new();
     let mut kept = json!({"kind": "auto", "reason": reason});
-    if let Some(d) = derive(agent, tool, input, &reason).await {
+    if let Some(c) = checked
+        && let Some(d) = &c.derived
+    {
         let shown = if d.kind == "rule" { d.rule.clone() } else { format!("this exact action, for {agent}") };
-        text = format!("{text}\nAlways allow remembers {shown}.");
+        text = format!("{text}\nThis session allows {shown} until this task ends; Always allow remembers it.");
+        options.push(json!({"optionId": super::session::SESSION, "name": "This session", "kind": "allow_session"}));
         options.push(json!({"optionId": ALWAYS, "name": "Always allow", "kind": "allow_always"}));
-        kept["rule"] = d.rule.into();
-        kept["ruleKind"] = d.kind.into();
+        kept["rule"] = d.rule.clone().into();
+        kept["ruleKind"] = d.kind.clone().into();
+        kept["settings"] = c.settings.clone().into();
+        kept["claudeSession"] = claude_session.into();
     }
     (text, options, kept)
 }

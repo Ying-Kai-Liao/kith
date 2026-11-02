@@ -438,6 +438,13 @@ impl Store {
     }
 
     /// The open cards, oldest first: what the re-derive goes over.
+    /// The newest `limit` cards, any state (`kith cards history`).
+    pub fn cards_recent(&self, limit: usize) -> Vec<Card> {
+        let c = self.db.locked();
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        super::logged("recent cards", list(&c, "ORDER BY created_at DESC LIMIT ?1", [limit])).unwrap_or_default()
+    }
+
     pub fn cards_open_all(&self) -> Vec<Card> {
         let c = self.db.locked();
         super::logged("open cards", list(&c, "WHERE state IN ('pending','live','parked') ORDER BY created_at", []))

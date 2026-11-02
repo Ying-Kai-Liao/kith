@@ -357,8 +357,15 @@ def call_host(method, body, env=os.environ, timeout=30):
 # ---- auto mode: a card for a call the classifier blocked, and the one-shot that lets its retry through
 
 ONCE_KEEP_S = 24 * 3600
-# What the classifier said when it gave no verdict: Claude Code ignores retry for these, so a card would be a yes that does nothing.
+# What the classifier said when it gave no verdict. Claude Code ignores retry for these: the card's yes is a one-shot for
+# the model's next try of the same call (and This session / Always allow for later ones), and a no can't be told.
 NO_VERDICT = ('Auto mode could not evaluate', 'Classifier unavailable')
+# A refusal the model is told: the hook asks for a retry, and the PreToolUse hook refuses that retry with the reason (the
+# PermissionDenied hook can't give the model text). The note lives a minute; one call is told at most once in 10 minutes.
+NOTE_S = 60
+TOLD_S = 600
+NO_CARD = ('Auto mode blocked this, and no card could be shown: %s. Don\'t retry it or try another way around; tell Kai '
+           'what you needed and why.')
 
 
 def once_key(tool, tool_input):
@@ -400,35 +407,81 @@ def keep_once(once_dir, key, now=None):
         f.write('%d\n' % now)
 
 
+RETRY = json.dumps({'hookSpecificOutput': {'hookEventName': 'PermissionDenied', 'retry': True}})
+
+
+def tell(once_dir, key, text, now=None):
+    """Leaves `text` for the PreToolUse hook to refuse the retry with, and invites the retry: RETRY, or '' when this call
+    was told within TOLD_S (a model that keeps retrying is not told again and again) or there is nowhere to write."""
+    now = now or time.time()
+    try:
+        if now - os.stat(os.path.join(once_dir, 'told-' + key)).st_mtime < TOLD_S:
+            return ''
+    except OSError:
+        pass
+    try:
+        keep_once(once_dir, 'told-' + key, now)
+        with open(os.path.join(once_dir, 'note-' + key), 'w') as f:
+            f.write(text)
+    except OSError:
+        return ''
+    return RETRY
+
+
 def denied(raw, once_dir, env=os.environ):
-    """The PermissionDenied hook's output (a JSON line, or '' for no opinion). Owner runs only: the ask token, never a guest's."""
+    """The PermissionDenied hook's output (a JSON line, or '' for no opinion). Owner runs only: the ask token, never a guest's.
+    A yes records a one-shot and invites the retry; anything else is told to the model on that retry (see `tell`)."""
     d = hook_input(raw)
     reason = d.get('reason') if d else None
-    if not d or d.get('hook_event_name') != 'PermissionDenied' or not isinstance(reason, str) or not reason.strip() \
-            or reason.startswith(NO_VERDICT):
+    if not d or d.get('hook_event_name') != 'PermissionDenied' or not isinstance(reason, str) or not reason.strip():
         return ''
-    if not (env.get('KITH_ASK_TOKEN') and env.get('KITH_ASK_SOCKET')) or env.get('KITH_RUN_TOKEN'):
+    if env.get('KITH_RUN_TOKEN'):
         return ''
-    reply = call_host('requestPermission', {'tool': d['tool_name'], 'input': d['tool_input'], 'autoMode': {'reason': reason}},
+    no_verdict = reason.startswith(NO_VERDICT)
+    key = once_key(d['tool_name'], d['tool_input'])
+    if not (env.get('KITH_ASK_TOKEN') and env.get('KITH_ASK_SOCKET')):
+        return '' if no_verdict else tell(once_dir, key, NO_CARD % 'this run has no way to reach the Kith app')
+    mode = {'reason': reason}
+    if isinstance(d.get('session_id'), str) and d['session_id']:
+        mode['session'] = d['session_id']
+    reply = call_host('requestPermission', {'tool': d['tool_name'], 'input': d['tool_input'], 'autoMode': mode},
                       {k: env[k] for k in ('KITH_ASK_TOKEN', 'KITH_ASK_SOCKET')}, timeout=WAIT_S)
     if not (reply and reply.get('ok') is True and reply.get('behavior') == 'allow'):
-        return ''
+        if no_verdict:
+            return ''
+        if not reply:
+            return tell(once_dir, key, NO_CARD % 'the Kith host didn\'t answer')
+        said = reply.get('message') or reply.get('error')
+        return tell(once_dir, key, 'Auto mode blocked this. %s' % (said if isinstance(said, str) and said else 'It was not approved.'))
     try:
-        keep_once(once_dir, once_key(d['tool_name'], d['tool_input']))
+        keep_once(once_dir, key)
     except OSError:
         return ''     # nowhere to record it: the retry would be refused again, so don't invite it
-    return json.dumps({'hookSpecificOutput': {'hookEventName': 'PermissionDenied', 'retry': True}})
+    return RETRY
 
 
 def once(raw, once_dir):
-    """The PreToolUse hook's output: allow (and use up the one-shot) when this exact call was approved, else ''."""
+    """The PreToolUse hook's output: allow (and use up the one-shot) when this exact call was approved; refuse it with the
+    reason when `denied` left a note for its retry a moment ago; else ''."""
     d = hook_input(raw)
     if not d or d.get('hook_event_name') != 'PreToolUse':
         return ''
+    key = once_key(d['tool_name'], d['tool_input'])
     try:
-        os.unlink(os.path.join(once_dir, once_key(d['tool_name'], d['tool_input'])))
+        os.unlink(os.path.join(once_dir, key))
     except OSError:
-        return ''
+        note = os.path.join(once_dir, 'note-' + key)
+        try:
+            fresh = time.time() - os.stat(note).st_mtime <= NOTE_S
+            with open(note) as f:
+                text = f.read()
+            os.unlink(note)
+        except OSError:
+            return ''
+        if not fresh or not text:
+            return ''
+        return json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'deny',
+                                                  'permissionDecisionReason': text}})
     return json.dumps({'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'allow',
                                               'permissionDecisionReason': 'kith: you allowed this once'}})
 

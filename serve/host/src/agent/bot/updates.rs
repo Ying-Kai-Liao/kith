@@ -105,7 +105,15 @@ impl Actor {
                 merge_tool_content(&mut data, &u["content"]);
                 crate::chat::memory::files::touched(&self.hub.store, &self.cfg, &data);
                 let title = data["title"].as_str().unwrap_or("Tool").to_owned();
+                // A call a This session grant let through says so on its row (the owner's own chat only).
+                let grant = match (&self.cfg.hq_agent, &self.cfg.person) {
+                    (Some(agent), None) => crate::cards::session::tag_tool(&self.hub, agent, &u["rawInput"], &mut data),
+                    _ => None,
+                };
                 if let Some(e) = self.add(EntryKind::Tool, turn, data) {
+                    if let Some(g) = grant {
+                        crate::cards::session::tagged(&self.hub, &g, &e.id);
+                    }
                     self.tools.insert(tool_id, e.id);
                 }
                 self.set_activity(super::activity(&title));
