@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Bot, BotDraft } from '@shared/models'
+import type { BotDraft } from '@shared/models'
 import type { BotStore } from '../../store/bot-store'
 
 /** An installed connector (host `connectors`). */
@@ -72,13 +72,6 @@ export function usePlugins(store: BotStore): Plugins | null {
     }
   }, [store, online])
   return plugins
-}
-
-/** Creates an unnamed bot with sensible defaults and opens it (desktop compose flow). */
-export async function createDefaultBot(store: BotStore): Promise<Bot> {
-  const bot = await store.save(fillDefaults(store, newDraft(), await loadPlugins(store)))
-  store.setSelection(bot.id)
-  return bot
 }
 
 export const lastPathComponent = (path: string) => path.split('/').filter(Boolean).pop() ?? path

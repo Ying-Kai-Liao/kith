@@ -22,6 +22,7 @@ import { expireCalls, type IncomingCall } from '@shared/incoming-call'
 import { failureOf, OWN_TURN, type HeldPhase } from '@shared/held-run'
 import { DEFAULT_TURNS } from '@shared/conversation'
 import { parsePeek, parsePeeks, type Peek } from '@shared/handoff-peek'
+import type { KernelStatus } from '@shared/new-agent'
 import { FileDownloads } from './file-downloads'
 import { BotSync, sleep } from './bot-sync'
 
@@ -438,6 +439,55 @@ export class BotStore extends BotSync {
     const res = await this.withLink((c) => c.keepScratchThread(root.botId, root.id, name.trim()))
     this.onRosterChanged?.()
     return res
+  }
+
+  /** Whether the kernel can run, as the host last said; null before the first answer or on a host that can't say. */
+  kernel: KernelStatus | null = null
+  private kernelChecking: Promise<KernelStatus | null> | null = null
+
+  /** Asks the host whether the kernel can run (`refresh`: now, not its short-lived copy). Never throws: an old host just leaves it unknown. */
+  checkKernel(refresh = false): Promise<KernelStatus | null> {
+    if (this.kernelChecking && !refresh) return this.kernelChecking
+    const run = (async () => {
+      try {
+        const status = await (await this.ready()).kernelStatus(refresh)
+        this.kernel = status
+      } catch {
+        this.kernel = null
+      }
+      this.kernelChecking = null
+      this.changed()
+      return this.kernel
+    })()
+    this.kernelChecking = run
+    return run
+  }
+
+  /**
+   * Makes a kith agent and returns its bot: the host's answer, or the roster's once it has it (the host syncs the roster
+   * itself, so this waits a few seconds at most). Null when none came (its engine isn't one the host runs). A refusal
+   * throws the host's own words.
+   */
+  async newKithAgent(params: Record<string, string>): Promise<{ agent: string; bot: Bot | null }> {
+    const res = await this.withLink((c) => c.newKithAgent(params))
+    let bot = res.bot ?? (res.botId ? this.bots.get(res.botId) ?? null : null)
+    if (bot && !this.bots.has(bot.id)) this.bots.set(bot.id, bot)
+    if (!bot) bot = await this.waitForAgentBot(res.agent)
+    this.onRosterChanged?.()
+    this.changed()
+    return { agent: res.agent, bot }
+  }
+
+  /** The roster's bot for kith agent `agent`, asking the host to look now and waiting a few seconds for its event. */
+  async waitForAgentBot(agent: string): Promise<Bot | null> {
+    const find = () => [...this.bots.values()].find((b) => b.hqAgent === agent && b.kind !== 'group') ?? null
+    await this.withLink((c) => c.call('syncHqBots', {}, 60_000)).catch(() => {})
+    for (let i = 0; i < 10; i++) {
+      const bot = find()
+      if (bot) return bot
+      await sleep(500)
+    }
+    return find()
   }
 
   /** Folds the room from this message on into a topic card (owner only); a refusal throws the host's own text. */
