@@ -475,11 +475,9 @@ async fn main() -> Result<()> {
             if cfg!(unix)
                 && let Some(home) = dirs::home_dir()
             {
-                // Wrap only from the stable installed binary of the Main build; dev builds and
-                // cargo target paths would leave a dangling wrapper, so they only repair one.
-                let host = service::current_exe().ok().filter(|exe| {
-                    environment::Environment::current() == environment::Environment::Main && update::is_standalone(exe)
-                });
+                // Wrap only from the stable installed binary; cargo target paths would leave a
+                // dangling wrapper, so they only repair one.
+                let host = service::current_exe().ok().filter(|exe| update::is_standalone(exe));
                 match service::ensure_statusline(&home.join(".claude/settings.json"), host.as_deref()) {
                     Ok(true) => {
                         println!("Claude Code's status line settings updated (your own status line still shows).");
@@ -495,7 +493,7 @@ async fn main() -> Result<()> {
         Sub::Compat => {
             println!(
                 "{}",
-                serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "protocol": compat::PROTOCOL, "minProtocol": compat::MIN_PROTOCOL, "environment": environment::Environment::current().name()})
+                serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "protocol": compat::PROTOCOL, "minProtocol": compat::MIN_PROTOCOL})
             );
             Ok(())
         }
@@ -543,8 +541,7 @@ async fn main() -> Result<()> {
         }
         Sub::Uninstall => {
             service::uninstall();
-            if environment::Environment::current() == environment::Environment::Main
-                && let Some(home) = dirs::home_dir()
+            if let Some(home) = dirs::home_dir()
                 && let Err(e) = service::restore_statusline(&home.join(".claude/settings.json"))
             {
                 eprintln!("Couldn't restore Claude Code's status line: {e:#}");

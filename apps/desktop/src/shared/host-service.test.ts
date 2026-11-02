@@ -13,7 +13,7 @@ test("a service running the binary kith serve installs is kith serve's", () => {
 })
 
 test("the app's own bundled service is not", () => {
-  assert.equal(isKithServeService(plist(), '/Applications/Kith Dev.app/Contents/Resources/kith-serve', '/Users/me', '.kith/serve'), false)
+  assert.equal(isKithServeService(plist(), '/Applications/Kith.app/Contents/Resources/kith-serve', '/Users/me', '.kith/serve'), false)
   assert.equal(isKithServeService(plist(), null, '/Users/me', '.kith/serve'), false)
 })
 

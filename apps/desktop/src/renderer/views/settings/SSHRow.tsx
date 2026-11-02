@@ -8,7 +8,6 @@ import { sshStatusDetail } from '@shared/ssh-startup'
 
 export function SSHRow({ profile, status, edit, attached = true }: { profile: SSHProfile; status: SSHStatus; attached?: boolean; edit: () => void }) {
   const bridge = window.kith.ssh
-  const dev = window.kith.appScheme === 'kith-dev'
   const target = `${profile.user ? `${profile.user}@` : ''}${profile.host}${profile.port !== null ? `:${profile.port}` : ''}`
   const line = (() => {
     switch (status.kind) {
@@ -25,7 +24,7 @@ export function SSHRow({ profile, status, edit, attached = true }: { profile: SS
       case 'failed':
         return status.message
       case 'notInstalled':
-        return dev ? `Install Kith Dev on ${profile.host} and open it once. On Linux, run "kith serve start" there.` : `kith-serve isn't installed on ${profile.host}. Install it there:`
+        return `kith-serve isn't installed on ${profile.host}. Install it there:`
     }
   })()
   const problem = status.kind === 'retrying' || status.kind === 'failed' || status.kind === 'notInstalled'
@@ -65,7 +64,7 @@ export function SSHRow({ profile, status, edit, attached = true }: { profile: SS
           </VStack>
         ) : null}
       </Reveal>
-      <Reveal show={status.kind === 'notInstalled' && !dev}>
+      <Reveal show={status.kind === 'notInstalled'}>
         <HStack gap={6} className="settings-row">
           <span className="settings-code selectable">{SSH_INSTALL_COMMAND}</span>
           <IconButton title="Copy install command" icon="doc.on.doc" onClick={() => window.kith.app.copy(SSH_INSTALL_COMMAND)} />

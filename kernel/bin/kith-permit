@@ -581,11 +581,7 @@ def restart_host():
     from pathlib import Path
     if sys.platform != 'darwin':
         return False
-    try:
-        data = endpoint()[0]
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return False
-    label = 'dev.kith.serve.main' if Path(data).name == 'serve-main' else 'dev.kith.serve'
+    label = 'dev.kith.serve'
     domain = 'gui/%d' % os.getuid()
     launchctl = os.environ.get('KITH_LAUNCHCTL') or 'launchctl'
     run = lambda *a: subprocess.run([launchctl, *a], capture_output=True, timeout=10).returncode  # noqa: E731

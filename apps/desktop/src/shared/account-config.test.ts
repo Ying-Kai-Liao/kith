@@ -28,8 +28,7 @@ test('GitHub maps to the oauth_github strategy', () => {
 
 test('Apple maps to oauth_apple and shows only on a main build with a production key', () => {
   assert.equal(providerStrategy('apple'), 'oauth_apple')
-  assert.equal(appleSignInAvailable('main', 'pk_live_x'), true)
-  assert.equal(appleSignInAvailable('dev', 'pk_live_x'), false)
-  assert.equal(appleSignInAvailable('main', 'pk_test_x'), false)
-  assert.equal(appleSignInAvailable('main', null), false)
+  assert.equal(appleSignInAvailable('pk_live_x'), true)
+  assert.equal(appleSignInAvailable('pk_test_x'), false)
+  assert.equal(appleSignInAvailable(null), false)
 })

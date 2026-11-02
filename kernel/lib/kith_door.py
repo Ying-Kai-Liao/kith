@@ -50,7 +50,7 @@ from kith_paths import HOME, guest_sandbox, guest_scrub, paths
 LIB = Path(__file__).resolve().parent
 PRELOAD, WRAPPER = 'door-preload.mjs', 'door-chrome'
 LISTENERS = 4          # hyperframes render starts one file server; spares cost nothing
-SERVE_PORTS = (19224, 19225)
+SERVE_PORTS = (19224,)
 RUN_LIMIT_S = 3600
 SANDBOX_EXEC = '/usr/bin/sandbox-exec'
 

@@ -3,25 +3,20 @@ import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { existsSync, promises as fs, readFileSync, realpathSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { app } from 'electron'
 import type { HostState, LocalHost } from '../shared/ipc'
 import { unregisterScreenAgent } from './screen'
 import { identity } from './environment'
-import { hostEnvironmentError } from '../shared/environment'
 import { isKithServeService, launchdProgram, restartService, systemdProgram } from '../shared/host-service'
 
 /** `KITH_SERVE_PORT` / `KITH_SERVE_HOME` point the app at a dev host started with `kith-serve serve`. */
 export const devPort = process.env.KITH_SERVE_PORT ? Number(process.env.KITH_SERVE_PORT) : null
 export const port = devPort ?? identity.port
 export const dataDir = process.env.KITH_SERVE_HOME ?? join(homedir(), identity.dataFolder)
-if (identity.environment === 'dev' && (port === 19225 || resolve(dataDir) === resolve(homedir(), '.kith/serve-main'))) {
-  throw new Error('Kith Dev requires its own host port and data directory.')
-}
 export const baseURL = `http://127.0.0.1:${port}`
 
 interface Health {
-  environment?: string
   ok?: boolean
   computerId?: string
   binaryPath?: string
@@ -94,8 +89,9 @@ export class HostController extends EventEmitter {
   private preparingForUpdate = false
   /**
    * A service this app didn't write (`kith serve start` installs dev.kith.serve with HQ_BIN in its
-   * environment, running ~/.kith/serve/bin/kith-serve). The app uses it as its host and never
-   * reinstalls it: a reinstall would rewrite the plist for the bundled binary and drop HQ_BIN.
+   * environment, running ~/.kith/serve/bin/kith-serve). There is one host per computer: the app uses
+   * it and never installs, replaces or updates it (a reinstall would rewrite the plist for the
+   * bundled binary and drop HQ_BIN). Only with no service installed does the app install its own.
    * Windows services stay the app's own.
    */
   private adopted = false
@@ -105,18 +101,17 @@ export class HostController extends EventEmitter {
       app.isPackaged && isMac ? join(process.resourcesPath, 'kith-serve') : null,
       app.isPackaged && isWindows ? join(process.resourcesPath, 'kith-serve.exe') : null,
       process.env.KITH_SERVE_BIN ?? null,
-      ...(identity.environment === 'dev' ? [
+      ...(app.isPackaged ? [] : [
         join(__dirname, '../../build/native/kith-serve'),
         join(process.env.CARGO_TARGET_DIR ?? join(__dirname, '../../../../serve/host/target'), 'dev-app/kith-serve'),
-        // What `kith serve start` installs.
-        join(homedir(), '.kith/serve/bin/kith-serve'),
-      ] : [
-        join(homedir(), '.local/bin/kith-serve'),
-        '/opt/homebrew/bin/kith-serve',
-        '/usr/local/bin/kith-serve',
-        '/usr/bin/kith-serve',
-        join(homedir(), '.cargo/bin/kith-serve'),
       ]),
+      // What `kith serve start` installs.
+      join(homedir(), '.kith/serve/bin/kith-serve'),
+      join(homedir(), '.local/bin/kith-serve'),
+      '/opt/homebrew/bin/kith-serve',
+      '/usr/local/bin/kith-serve',
+      '/usr/bin/kith-serve',
+      join(homedir(), '.cargo/bin/kith-serve'),
     ]
     return candidates.find((c): c is string => !!c && existsSync(c)) ?? null
   }
@@ -147,11 +142,13 @@ export class HostController extends EventEmitter {
   private foreignService() {
     if (devPort !== null || isWindows) return false
     const definition = serviceDefinition()
-    const program = definition === null ? null : serviceProgram(definition)
+    if (definition === null) return false
+    const program = serviceProgram(definition)
+    // `kith serve start`'s job is its own even when its launcher has gone missing: the app starts
+    // it, never rewrites it. This also covers the app's own binary being the one it installed.
+    if (isKithServeService(definition, program, homedir(), identity.dataFolder)) return true
     if (!program || !existsSync(program)) return false
     const bin = this.binary
-    // The dev run's own binary can be the one `kith serve start` installed: still not ours to reinstall.
-    if (isKithServeService(definition!, program, homedir(), identity.dataFolder)) return true
     return !bin || (!serviceRuns(bin) && !samePath(resolved(program), resolved(bin)))
   }
 
@@ -172,15 +169,6 @@ export class HostController extends EventEmitter {
     this.connect()
   }
 
-  private async verifyBinary(bin: string) {
-    const result = await run(bin, ['compat'])
-    if (result.status !== 0) throw new Error(result.output || 'Cannot verify the host environment.')
-    const info = JSON.parse(result.output) as { environment?: string }
-    const mismatch = hostEnvironmentError(identity.environment, info.environment)
-    if (mismatch) throw new Error(mismatch)
-  }
-
-  /** A service operation must never invoke the other environment's binary. */
   async install() {
     const bin = this.binary
     if (this.adopted) return this.kickstart()
@@ -190,7 +178,6 @@ export class HostController extends EventEmitter {
     prefs.set('hostUninstalled', false)
     this.setState({ kind: 'starting' })
     try {
-      await this.verifyBinary(bin)
       const result = await run(bin, ['install', '--port', String(port)])
       if (result.status !== 0) {
         this.setState({ kind: 'failed', message: result.output || 'Install failed' })
@@ -253,7 +240,6 @@ export class HostController extends EventEmitter {
     // An adopted service belongs to `kith serve`; stop it there.
     if (!bin || devPort !== null || this.adopted) return false
     try {
-      await this.verifyBinary(bin)
       this.stopLoop()
       const result = await run(bin, ['uninstall'])
       if (result.status !== 0) throw new Error(result.output || 'Uninstall failed')
@@ -281,7 +267,6 @@ export class HostController extends EventEmitter {
     unregisterScreenAgent()
     const bin = this.binary
     if (!bin) throw new Error('The bundled host is missing.')
-    await this.verifyBinary(bin)
     const result = await run(bin, ['stop'])
     if (result.status !== 0) throw new Error(result.output || 'The old host could not be stopped.')
   }
@@ -337,11 +322,6 @@ export class HostController extends EventEmitter {
   private async attachLocal(): Promise<boolean> {
     const health = await fetchHealth()
     if (!health?.computerId) return false
-    const mismatch = hostEnvironmentError(identity.environment, health.environment)
-    if (mismatch) {
-      this.setState({ kind: 'failed', message: mismatch })
-      return false
-    }
     const token = await readToken()
     if (!token) return false
     if (devPort === null && !this.adopted) {

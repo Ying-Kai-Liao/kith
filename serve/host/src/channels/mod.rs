@@ -114,7 +114,7 @@ async fn run(hub: Arc<Hub>) {
         manager::set_off("disabled");
         return;
     }
-    let opt_in = std::env::var_os(OPT_IN_ENV).is_some_and(|v| v == "1");
+    let opt_in = opted_in(std::env::var_os(OPT_IN_ENV).as_deref());
     let home = crate::service::data_dir();
     let paths = match prepare(&home, &crate::service::default_data_dir(), opt_in, hq::Paths::discover).await {
         Ok(Some(paths)) => paths,
@@ -123,7 +123,7 @@ async fn run(hub: Arc<Hub>) {
             return;
         }
         Err(why) => {
-            tracing::info!("channels are off: {why}; set {OPT_IN_ENV}=1 to run them in this home anyway");
+            tracing::info!("channels are off: {why}; set {OPT_IN_ENV}=on to run them in this home anyway");
             manager::set_off(why);
             return;
         }
@@ -140,6 +140,11 @@ async fn run(hub: Arc<Hub>) {
 
 /// Env var that lets a host with a temporary `KITH_SERVE_HOME` run channels anyway.
 const OPT_IN_ENV: &str = "KITH_SERVE_CHANNELS";
+
+/// `KITH_SERVE_CHANNELS=on` (or `1`) opts a temporary home in.
+fn opted_in(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|v| v == "on" || v == "1")
+}
 
 /// Why channels must not start in `home`: hq-auth and `~/.hq` are global, so a throwaway host would otherwise
 /// connect Kai's real bots (second Telegram poller, double Discord answers) and import the bridge's state.
@@ -179,6 +184,13 @@ mod guard_tests {
         assert_eq!(home_guard(&default, &default, false), None);
         assert_eq!(home_guard(&other, &default, false), Some("temporary home"));
         assert_eq!(home_guard(&other, &default, true), None);
+    }
+
+    #[test]
+    fn the_opt_in_is_on_or_1() {
+        let v = |s: &'static str| Some(std::ffi::OsStr::new(s));
+        assert!(opted_in(v("on")) && opted_in(v("1")));
+        assert!(!opted_in(v("off")) && !opted_in(v("")) && !opted_in(None));
     }
 
     #[test]
