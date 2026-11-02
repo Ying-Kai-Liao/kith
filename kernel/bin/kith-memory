@@ -12,6 +12,7 @@
   kith-memory undo <file> [VERSION]         put the file back to a version (default: before the last change); the undo is a version too
   kith-memory tidy <agent> [--json] [-n N]  the tidy-ups of an agent's memory; `tidy undo <agent> <id>` puts one back
   kith-memory index rebuild|update          the local index behind `kith recall` (see kith-recall --help)
+  kith-memory summary show|forget|write --thread <id> [--json]   (owner) a thread's stored summary; forget it; write it now (needs the host)
   kith-memory forget <text>                 keep a fact out of memory for good: no agent or tidy writes it again
 
 Searches the markdown in the state folder: an agent's memory/ (MEMORY.md, topic files, projects/, sessions/) and its
@@ -46,7 +47,7 @@ from kith_paths import guest_sandbox, paths, kith_bin  # noqa: E402  the one pla
 STATE = paths()['KITH_STATE']
 
 
-HOST_VERBS = ('check', 'log', 'diff', 'undo', 'forget', 'tidy')
+HOST_VERBS = ('check', 'log', 'diff', 'undo', 'forget', 'tidy', 'summary')
 
 
 def lives():

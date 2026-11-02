@@ -13,7 +13,6 @@ mod hq_api;
 mod hq_tidy;
 mod import;
 mod notices;
-pub mod summary;
 mod tidy;
 mod tools;
 
