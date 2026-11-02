@@ -18,6 +18,8 @@ struct HqMemoryCard: View {
     @State private var store: HqMemoryStore?
     @State private var target: HqMemoryTarget?
     @State private var undoing: HqTidyUp?
+    @State private var fact = ""
+    @State private var forgotten: String?
 
     var body: some View {
         // One page, as the mock draws it: search, Files, About you, then History.
@@ -41,6 +43,10 @@ struct HqMemoryCard: View {
                             .buttonStyle(.plain)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(Palette.accent)
+                    }
+                    CardSection("Forget a fact", footer: forgotten.map { "No agent will write “\($0)” to memory again. Lines already written stay until you edit them." }
+                                    ?? "Keeps a fact out of every agent's memory from now on.") {
+                        forgetRow(store)
                     }
                     CardSection("About you", footer: "What you've told your agents about you: your profile, people and projects. Every agent reads it.") {
                         fileRows(store, shared: true)
@@ -68,6 +74,25 @@ struct HqMemoryCard: View {
             [DialogAction("Undo this tidy", destructive: true) {
                 if let run = undoing { Task { await store?.undoTidy(run) } }
             }]
+        }
+    }
+
+    // MARK: forget
+
+    @ViewBuilder private func forgetRow(_ store: HqMemoryStore) -> some View {
+        HStack(spacing: 8) {
+            TextField("e.g. lives in Osaka", text: $fact)
+                .textFieldStyle(.plain)
+                .submitLabel(.done)
+                .disabled(store.busy)
+            Button("Forget") {
+                let text = fact
+                Task { if await store.forget(text) { forgotten = text.trimmingCharacters(in: .whitespacesAndNewlines); fact = "" } }
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundStyle(Palette.accent)
+            .disabled(store.busy || fact.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
@@ -177,6 +202,7 @@ struct HqMemoryFileView: View {
     @State private var restoring: (version: HqMemoryVersion, undo: HqMemoryVersion?, later: Int)?
     @State private var confirmDiscard = false
     @State private var moved = false
+    @State private var confirmDelete = false
 
     private var dirty: Bool { editing && draft != (file?.text ?? "") }
     private var canEdit: Bool { file.map { !$0.truncated } ?? false }
@@ -224,6 +250,12 @@ struct HqMemoryFileView: View {
                 }
             }]
         }
+        .kithDialog("Delete \(target.name)?", isPresented: $confirmDelete,
+                      message: "The agent stops seeing it. The deletion is kept as a version, so History can bring it back.") {
+            [DialogAction("Delete", destructive: true) {
+                Task { if await store.delete(shared: target.shared, name: target.name) != nil { dismiss() } }
+            }]
+        }
         .kithDialog("This file changed since you opened it", isPresented: $moved,
                       message: "The agent or a tidy-up wrote a newer version. Reload to see it (your edit is dropped), or save over it; the newer version stays in History.") {
             [DialogAction("Reload") { Task { await reload() } },
@@ -250,10 +282,16 @@ struct HqMemoryFileView: View {
             IconButton("Save", systemImage: "checkmark") { Task { await save(force: false) } }
                 .disabled(!dirty)
         } else if canEdit {
-            IconButton("Edit", systemImage: "pencil") {
-                draft = file?.text ?? ""
-                warnings = []
-                withAnimation(Motion.layout) { editing = true }
+            HStack(spacing: 2) {
+                IconButton("Edit", systemImage: "pencil") {
+                    draft = file?.text ?? ""
+                    warnings = []
+                    withAnimation(Motion.layout) { editing = true }
+                }
+                // MEMORY.md is the agent's index: the host keeps it.
+                if file?.exists == true && !(!target.shared && target.name == "MEMORY.md") {
+                    IconButton("Delete", systemImage: "trash") { withAnimation(Motion.layout) { confirmDelete = true } }
+                }
             }
         }
     }

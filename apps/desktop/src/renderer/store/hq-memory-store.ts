@@ -23,9 +23,33 @@ export class HqMemoryStore extends Observable {
   /** What the last undo did, with the run it was for. */
   undone: { id: number; result: HqUndoResult } | null = null
   undoError: string | null = null
+  /** The fact the last "Forget a fact" kept out of memory; the error when it couldn't. */
+  forgot: string | null = null
+  forgetError: string | null = null
   private request = 0
 
   constructor(readonly botId: string, private readonly client: () => Promise<HostClient>) { super() }
+
+  /** Keeps a fact out of memory for good. Returns whether it worked, so the input can clear. */
+  async forget(text: string): Promise<boolean> {
+    const fact = text.trim()
+    if (this.busy || !fact) return false
+    this.busy = true
+    this.forgot = null
+    this.forgetError = null
+    this.changed()
+    try {
+      await (await this.client()).hqMemoryForget(this.botId, fact)
+      this.forgot = fact
+      return true
+    } catch (error) {
+      this.forgetError = message(error)
+      return false
+    } finally {
+      this.busy = false
+      this.changed()
+    }
+  }
 
   async load() {
     const request = ++this.request
@@ -155,6 +179,18 @@ export class HqFileEditor extends Observable {
       this.warnings = (await c.hqMemoryRestore(this.botId, this.shared, this.name, version)).warnings
       return true
     })
+  }
+
+  /** Deletes the file; it is kept as a version, so the history can bring it back. Returns whether it went. */
+  async delete(): Promise<boolean> {
+    if (this.busy) return false
+    let gone = false
+    await this.run(async (c) => {
+      await c.hqMemoryDelete(this.botId, this.shared, this.name)
+      gone = true
+      return true
+    })
+    return gone
   }
 
   /** The changes a version made, against the next older one; nothing for the oldest. */

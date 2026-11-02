@@ -460,6 +460,16 @@ export class HostClient {
     return parseSave(await this.call('kithMemoryRestore', { botId, shared, name, version }, 30_000))
   }
 
+  /** Owner only. The deletion is a version, so `hqMemoryRestore` brings the file back. */
+  async hqMemoryDelete(botId: string, shared: boolean, name: string): Promise<void> {
+    await this.call('kithMemoryDelete', { botId, shared, name }, 30_000)
+  }
+
+  /** Owner only: keeps a fact out of every agent's memory (`kith memory forget`). */
+  async hqMemoryForget(botId: string, text: string): Promise<void> {
+    await this.call('kithMemoryForget', { botId, text }, 30_000)
+  }
+
   async hqTidyUps(botId: string, limit = 20): Promise<HqTidyUp[]> {
     return parseTidyUps(await this.callRenamed('kithMemoryTidyUps', 'kithMemoryDreams', { botId, limit }, 30_000))
   }

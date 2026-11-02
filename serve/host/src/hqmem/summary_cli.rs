@@ -49,7 +49,7 @@ pub enum SummaryCmd {
 
 /// Whether the run environment is the owner's: at a shell or in their own 1:1 run. Mirrors `thread_command` in
 /// kernel/bin/kith-recall, which stays the check for `summarise` and `forget --thread`.
-fn owner_only(env: impl Fn(&str) -> Option<String>) -> bool {
+pub(super) fn owner_only(env: impl Fn(&str) -> Option<String>) -> bool {
     let set = |k: &str| env(k).is_some_and(|v| !v.is_empty());
     let room = env("KITH_ROOM").unwrap_or_default();
     let via = env("KITH_VIA").unwrap_or_default();

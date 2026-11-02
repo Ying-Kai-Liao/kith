@@ -52,6 +52,7 @@ export function HqMemory({ botId }: { botId: string }) {
         </>}
         {store.list && section === 'agent' && <>
           <p className="memory-muted">What this agent keeps in its own files. Plain files you can edit.</p>
+          <ForgetFact store={store} />
           <AgentMemorySearch botId={botId} target={(hit) => searchTarget(hit.path, store.list?.shared ?? [])} open={setTarget}>
             {rows.map((f) => <FileRow key={f.name} file={f} open={() => setTarget({ shared: false, name: f.name })} />)}
           </AgentMemorySearch>
@@ -71,6 +72,19 @@ function searchTarget(path: string, shared: HqMemoryFile[]): Target | null {
   const user = shared.find((f) => f.path === path)
   if (user) return { shared: true, name: user.name }
   return /\.md$/i.test(path) && !path.startsWith('/') ? { shared: false, name: path } : null
+}
+
+/** "Forget a fact": kith keeps it out of every agent's memory from now on. Lines already written stay until edited. */
+function ForgetFact({ store }: { store: HqMemoryStore }) {
+  const [text, setText] = useState('')
+  const submit = () => { void store.forget(text).then((ok) => { if (ok) setText('') }) }
+  return <div className="memory-forget">
+    <input className="memory-forget-input" aria-label="Forget a fact" placeholder="Forget a fact, e.g. lives in Osaka" spellCheck={false}
+      value={text} disabled={store.busy} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit() }} />
+    <Button kind="secondary" disabled={store.busy || !text.trim()} onClick={submit}>Forget</Button>
+    {store.forgetError && <p role="alert" className="memory-error">{store.forgetError}</p>}
+    {store.forgot && <p className="memory-muted" role="status">No agent will write “{store.forgot}” to memory again. Lines already written stay until you edit them.</p>}
+  </div>
 }
 
 function FileRow({ file, open }: { file: HqMemoryFile; open: () => void }) {
@@ -117,6 +131,7 @@ function FileSheet({ botId, store, target, guard, onClose }: { botId: string; st
   const editor = useModel(useMemo(() => new HqFileEditor(botId, target.shared, target.name, () => host.ready()), [botId, host, target]))
   const [tab, setTab] = useState<'edit' | 'history'>('edit')
   const [discard, setDiscard] = useState(false)
+  const [removing, setRemoving] = useState(false)
   // `undo`: put back the file as it was before this version's change (the next older one).
   const [restore, setRestore] = useState<{ id: number; undo: boolean } | null>(null)
   useEffect(() => { void editor.open() }, [editor])
@@ -148,6 +163,9 @@ function FileSheet({ botId, store, target, guard, onClose }: { botId: string; st
         </div>
       </div>}
       {read && tab === 'edit' && <>
+        {read.exists && !(!target.shared && target.name === 'MEMORY.md') && <div className="memory-header-actions">
+          <Button kind="secondary" disabled={editor.busy} onClick={() => setRemoving(true)}>Delete file</Button>
+        </div>}
         {read.truncated && <p className="memory-muted">Longer than 512 KB: showing the start, read-only here. Edit this file in an editor.</p>}
         {!read.exists && <p className="memory-muted">Not made yet. Saving creates it.</p>}
         <textarea className="memory-file-edit" aria-label={`Contents of ${target.name}`} spellCheck={false} readOnly={editor.readOnly || editor.busy}
@@ -183,6 +201,10 @@ function FileSheet({ botId, store, target, guard, onClose }: { botId: string; st
     </div>
     <Dialog open={discard} title="Discard your changes?" message="You have edits that are not saved."
       actions={[{ title: 'Discard', destructive: true, action: onClose }]} onClose={() => setDiscard(false)} />
+    <Dialog open={removing} title={`Delete ${target.name}?`}
+      message="The agent stops seeing it. The deletion is kept as a version, so History can bring it back."
+      actions={[{ title: 'Delete', destructive: true, action: () => { void editor.delete().then((gone) => { refreshList(); if (gone) onClose() }) } }]}
+      onClose={() => setRemoving(false)} />
     <Dialog open={restore !== null} title={restore?.undo ? 'Undo this change?' : 'Restore this version?'}
       message={`${restore?.undo ? `${target.name} goes back to how it was before this change.` : `${target.name} becomes the file as it was after this change.`} It is kept as a new version.${editor.dirty ? ' Your unsaved edit is lost.' : ''}`}
       actions={[{ title: restore?.undo ? 'Undo this change' : 'Restore this version', action: () => { if (restore) void editor.restore(restore.id).then(refreshList) } }]}

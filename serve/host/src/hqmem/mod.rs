@@ -15,7 +15,7 @@ pub mod summary;
 mod summary_cli;
 pub mod tidy;
 
-pub use browse::{diff, history, list_files, read_file, restore, save};
+pub use browse::{delete, diff, history, list_files, read_file, restore, save};
 pub use cli::{Cmd, run};
 
 use anyhow::{Context, Result};
@@ -466,6 +466,55 @@ pub fn put(path: &Path, content: Option<&str>) -> Result<()> {
     let tmp = path.with_extension(format!("kith-{}-{seq}.tmp", std::process::id()));
     std::fs::write(&tmp, content)?;
     std::fs::rename(&tmp, path).context("replace the file")
+}
+
+/// What deleting a memory file can refuse.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RemoveError {
+    /// MEMORY.md is the agent's index: edit it, don't remove it.
+    Index,
+    /// Nothing there (never made, or already deleted).
+    Missing,
+    /// The path leads out of the memory folders through a link.
+    Escapes,
+}
+
+impl std::fmt::Display for RemoveError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Index => "MEMORY.md is the index of an agent's memory; edit it instead of deleting it",
+            Self::Missing => "no such file",
+            Self::Escapes => "that path leaves the memory folders",
+        })
+    }
+}
+
+impl std::error::Error for RemoveError {}
+
+/// Deletes a memory file as `who` and records the deletion as a version, so `log` shows it and `undo` brings it
+/// back. A file with no history yet is first recorded as it is, so there is something to go back to.
+pub fn remove(conn: &Connection, layout: &Layout, target: &Target, who: Who<'_>) -> Result<Version> {
+    if target.bot.is_some() && target.name == "MEMORY.md" {
+        return Err(RemoveError::Index.into());
+    }
+    let meta = std::fs::symlink_metadata(&target.path).map_err(|_| RemoveError::Missing)?;
+    if meta.file_type().is_symlink() {
+        return Err(RemoveError::Escapes.into());
+    }
+    let real = target.path.canonicalize().map_err(|_| RemoveError::Missing)?;
+    if layout.locate(&real, Path::new("/")).is_none_or(|t| t.bot != target.bot || t.name != target.name) {
+        return Err(RemoveError::Escapes.into());
+    }
+    if !meta.is_file() {
+        return Err(RemoveError::Missing.into());
+    }
+    sync(conn, target)?;
+    put(&target.path, None)?;
+    let (author, author_bot, _) = who.author();
+    let tx = immediate(conn)?;
+    let version = record_disk(&tx, target, (author, author_bot, Cause::Delete), false)?;
+    tx.commit()?;
+    version.context("the deletion left no version")
 }
 
 /// Tells Kith to keep a fact out of memory: no agent or tidy writes it again.
