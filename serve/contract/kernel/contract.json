@@ -21,14 +21,15 @@
   },
   "types": {
     "Agent": {
-      "doc": "One agent in `kith ls --json`. `home` is its folder, where its bot works. A kernel from before `harness` was listed runs every agent on Claude.",
+      "doc": "One agent in `kith ls --json`. `home` is its folder, where its bot works. A kernel from before `harness` was listed runs every agent on Claude. `builtin` is true for an agent that ships with kith (like scratch): never backed up or shared; older kernels leave it out.",
       "fields": {
         "name": "string",
         "description": "string",
         "home": "string",
         "model": "string?",
         "effort": "string?",
-        "harness": "Harness?"
+        "harness": "Harness?",
+        "builtin": "bool?"
       }
     },
     "Projects": {
