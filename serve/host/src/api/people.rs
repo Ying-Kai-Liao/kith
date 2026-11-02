@@ -282,30 +282,30 @@ async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {
     Ok(json!({"revoked": revoked, "cloud": in_cloud}))
 }
 
+/// The owner's people list. Who a person is, their name, whether they are revoked and which agents they hold come
+/// from kith-auth (`kith-auth people --json`, read through the CLI, so a person or member added there shows too); the
+/// store only adds what kith-auth does not know: devices, membership, invites, projects, auto-bots. Read from
+/// kith-auth directly rather than through `kith people ls`: it needs nothing that adds, and costs a second process.
+/// A person only the store knows (kith-auth lost or renamed them) is left out: no access is shown that kith-auth
+/// doesn't give. kith-auth unreadable is an error, never an empty list that reads as "nobody".
 async fn people(hub: &Arc<Hub>) -> Result<Value> {
     let now = now_ms();
-    // Who is revoked (kith-auth's word, so a revoke from another Mac shows too); nobody when kith-auth can't say.
-    let revoked: Vec<String> = match account::bin().await {
-        Some(bin) => crate::remote::members::auth_people(&bin)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|p| p.revoked_at.is_some())
-            .map(|p| p.id)
-            .collect(),
-        None => vec![],
-    };
+    let bin = account::bin().await.ok_or_else(|| anyhow!("can't list people: kith-auth wasn't found"))?;
+    let auth =
+        crate::remote::members::auth_people(&bin).await.context("can't list people: kith-auth wasn't readable")?;
     let connected = hub.connected.locked().clone();
     let memberships = hub.store.memberships()?;
     let invites = hub.store.invites()?;
-    let rows: Vec<Value> = hub
-        .store
-        .people()?
-        .into_iter()
-        .map(|p: PersonRow| {
+    let stored: BTreeMap<String, PersonRow> =
+        hub.store.people()?.into_iter().map(|p| (p.person_id.clone(), p)).collect();
+    let rows: Vec<Value> = auth
+        .iter()
+        .filter(|a| !a.owner && a.bot_of.is_empty())
+        .map(|a| {
+            let host = stored.get(&a.id);
             let devices: Vec<Value> = hub
                 .store
-                .devices_of(&p.person_id)
+                .devices_of(&a.id)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|d| {
@@ -313,14 +313,22 @@ async fn people(hub: &Arc<Hub>) -> Result<Value> {
                     "connected": connected.contains_key(&d.key)})
                 })
                 .collect();
-            let joined = memberships.iter().find(|m| m.person_id == p.person_id);
-            let waiting = invites.iter().filter(|i| i.person_id == p.person_id && i.open(now)).count();
+            let joined = memberships.iter().find(|m| m.person_id == a.id);
+            let waiting = invites.iter().filter(|i| i.person_id == a.id && i.open(now)).count();
+            // `agents` is what they hold by their own row (what setPersonAccess edits); the `*` row is listed apart.
+            let roles = |via: &str| -> BTreeMap<&str, &str> {
+                a.agents.iter().filter(|r| r.via == via).map(|r| (r.agent.as_str(), r.role.as_str())).collect()
+            };
+            let name = if a.name.is_empty() { host.map_or(a.id.as_str(), |p| p.name.as_str()) } else { &a.name };
             json!({
-                "personId": p.person_id, "name": p.name, "agents": p.agents, "projects": p.projects,
+                "personId": a.id, "name": name,
+                "agents": roles("own"), "everyoneAgents": roles("everyone"),
+                "projects": host.map(|p| p.projects.clone()).unwrap_or_default(),
                 "joined": joined.is_some(), "userId": joined.map(|m| m.user_id.clone()),
                 "membershipId": joined.map(|m| m.membership_id.clone()),
-                "openInvites": waiting, "devices": devices, "createdAt": p.created_at, "autoBots": p.auto_bots,
-                "revoked": revoked.contains(&p.person_id),
+                "openInvites": waiting, "devices": devices, "createdAt": host.map(|p| p.created_at),
+                "autoBots": host.is_some_and(|p| p.auto_bots),
+                "revoked": a.revoked_at.is_some(),
             })
         })
         .collect();
