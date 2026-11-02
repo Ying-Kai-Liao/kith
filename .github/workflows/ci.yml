@@ -392,6 +392,7 @@ jobs:
         run: |
           cargo build --manifest-path serve/host/Cargo.toml --bin kith
           kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
+          KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
       - name: Core dependency rules
         run: kernel/tests/kith-core-deps-check
       - uses: actions/upload-artifact@v4
