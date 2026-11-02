@@ -99,6 +99,7 @@ pub(super) fn router_methods() -> BTreeSet<String> {
         include_str!("folders.rs"),
         include_str!("backups.rs"),
         include_str!("kith_info.rs"),
+        include_str!("kith_new.rs"),
         include_str!("marketplace.rs"),
         include_str!("remote.rs"),
         include_str!("people.rs"),
@@ -156,8 +157,18 @@ async fn every_router_method_is_denied_to_members_unless_listed() {
     let sam = r.device("sam-phone", Some("sam"));
     let known = router_methods();
     assert!(known.len() > 100, "the walk found {} methods: did the router's layout change?", known.len());
-    for m in ["createBot", "updateBot", "deleteBot", "listDirs", "registerProject", "memoryCall", "routines", "skills"]
-    {
+    for m in [
+        "createBot",
+        "updateBot",
+        "deleteBot",
+        "newKithAgent",
+        "kernelStatus",
+        "listDirs",
+        "registerProject",
+        "memoryCall",
+        "routines",
+        "skills",
+    ] {
         assert!(known.contains(m), "{m} is a router method");
     }
     for listed in roles::MEMBER_METHODS {
