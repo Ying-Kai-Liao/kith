@@ -2,6 +2,7 @@
 //! two answer the same question the same way. The Python kernel keeps its own copies while it moves; the
 //! differential harness (`kernel/tests/difftest`) fails when they differ.
 
+pub mod accounts;
 pub mod engines;
 pub mod paths;
 
@@ -10,7 +11,7 @@ pub const ABI: u32 = 1;
 
 /// The modules this build has, as `kith kernel version` lists them. A verb in `kernel/lib/core-switched.txt` moves to
 /// the core only when its module is here (`acp`: the `run-once` verb, whose code lives in the kith-acp crate).
-pub const MODULES: &[&str] = &["acp", "engines", "paths"];
+pub const MODULES: &[&str] = &["accounts", "acp", "engines", "paths"];
 
 /// What `kith kernel version` prints.
 pub fn version_json() -> String {
@@ -24,7 +25,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["acp","engines","paths"]}"#
+            r#"{"abi":1,"modules":["accounts","acp","engines","paths"]}"#
         );
     }
 }
