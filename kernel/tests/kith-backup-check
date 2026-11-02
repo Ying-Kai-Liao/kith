@@ -373,5 +373,37 @@ OUT=$(FAKE_LIMIT_FOR=default KITH_BACKUP_CHAIN=on "$KITH" echo "hi" 2>/dev/null)
 check "KITH_BACKUP_CHAIN (schedules, kith ask) turns it on" "echo \"\$OUT\" | grep -q 'ran-on=school'"
 rm -f "$KOUT"; "$KITH" backup remove claude:school >/dev/null 2>&1
 
+# --- backup logins match the main login (prepare_claude_dir) --------------------------------------------------------------------
+# An extra Claude account runs with CLAUDE_CONFIG_DIR, so Claude Code reads nothing of ~/.claude: its settings, plugins and the auto-mode
+# acknowledgements are copied from the main login on every launch, the account's own login and history left alone.
+SY=$M/accounts/claude/synced; MAIN=$HOME/.claude
+mkdir -p "$SY/projects/p" "$MAIN/plugins/cache" "$MAIN/plugins/marketplaces"
+printf '{"enabledPlugins":{"kith@kith":true},"skipDangerousModePermissionPrompt":true,"model":"opus"}' > "$MAIN/settings.json"
+printf '{"version":2,"plugins":{"kith@kith":[{"scope":"user"}]}}' > "$MAIN/plugins/installed_plugins.json"
+printf '{"hasCompletedOnboarding":true,"hasSeenAutoModeEntryWarning":true,"hasSeenAutoModeOutsideReadPrompt":true,"hasSeenAutoDefaultNotice":true,"autoModeEnvSetup":{"dismissed":true},"oauthAccount":{"emailAddress":"main@x"},"machineID":"main-machine"}' > "$HOME/.claude.json"
+printf '{"oauthAccount":{"emailAddress":"school@x"},"machineID":"school-machine","userID":"u-school"}' > "$SY/.claude.json"
+echo hist > "$SY/projects/p/s.jsonl"; touch "$SY/.fake-login"; chmod 755 "$SY"
+"$KITH" echo --launch-json --backup claude:synced >/dev/null 2>&1
+J() { python3 -I -c "import json,sys; d=json.load(open(sys.argv[1])); r=eval(sys.argv[2]); print(*r) if isinstance(r,tuple) else print(r)" "$@"; }
+mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"; }
+check "synced: settings.json mirrors the main login's" "[ \"\$(J $SY/settings.json 'd[\"model\"],d[\"enabledPlugins\"],d[\"skipDangerousModePermissionPrompt\"]')\" = \"opus {'kith@kith': True} True\" ]"
+check "synced: plugin state copied, plugin folders linked to the main login's" "grep -q kith@kith $SY/plugins/installed_plugins.json && [ \"\$(readlink $SY/plugins/cache)\" = $MAIN/plugins/cache ]"
+check "synced: the auto-mode flags are merged into .claude.json" "[ \"\$(J $SY/.claude.json 'd[\"hasSeenAutoModeEntryWarning\"],d[\"hasSeenAutoModeOutsideReadPrompt\"],d[\"hasSeenAutoDefaultNotice\"],d[\"hasCompletedOnboarding\"],d[\"autoModeEnvSetup\"]')\" = \"True True True True {'dismissed': True}\" ]"
+check "synced: the account's own login, machine id and history are untouched, folder is 0700" "[ \"\$(J $SY/.claude.json 'd[\"oauthAccount\"][\"emailAddress\"],d[\"machineID\"],d[\"userID\"]')\" = 'school@x school-machine u-school' ] && [ \"\$(cat $SY/projects/p/s.jsonl)\" = hist ] && [ \"\$(ls -ld $SY | cut -c1-10)\" = drwx------ ]"
+M1=$(mtime "$SY/settings.json"); C1=$(cksum < "$SY/.claude.json")
+sleep 1; "$KITH" echo --launch-json --backup claude:synced >/dev/null 2>&1
+check "synced: a second launch writes nothing (idempotent)" "[ \"\$(mtime $SY/settings.json)\" = $M1 ] && [ \"\$(cksum < $SY/.claude.json)\" = \"$C1\" ]"
+printf '{"enabledPlugins":{"kith@kith":true},"model":"sonnet"}' > "$MAIN/settings.json"
+"$KITH" echo --launch-json --backup claude:synced >/dev/null 2>&1
+check "synced: a changed main settings.json is picked up on the next launch" "[ \"\$(J $SY/settings.json 'd[\"model\"]')\" = sonnet ]"
+printf 'not json' > "$MAIN/settings.json"
+OUT=$("$KITH" echo --backup claude:synced "hi" 2>/dev/null)
+check "synced: a broken main settings.json leaves the account's copy alone and the run goes on" "[ \"\$(J $SY/settings.json 'd[\"model\"]')\" = sonnet ] && echo \"\$OUT\" | grep -q 'config=$SY'"
+rm -f "$MAIN/settings.json"
+check "synced: a missing main settings.json is not an error" "python3 -I -c \"import sys; sys.path.insert(0,'$KERNEL/lib'); import kith_accounts as a; a.prepare_claude_dir('$SY')\""
+"$KITH" account add claude fresh --yes >/dev/null 2>&1
+check "synced: kith account add claude gets the flags after its login" "[ \"\$(J $M/accounts/claude/fresh/.claude.json 'd[\"hasSeenAutoModeEntryWarning\"]')\" = True ]"
+rm -rf "$M/accounts/claude/synced" "$M/accounts/claude/fresh"
+
 echo
 if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
