@@ -8,6 +8,7 @@
     clippy::implicit_hasher
 )]
 
+pub mod assemble;
 pub mod facets;
 pub mod guard;
 pub mod machine;

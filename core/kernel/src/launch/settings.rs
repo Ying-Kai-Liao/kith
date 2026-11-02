@@ -145,6 +145,8 @@ pub struct Output {
     pub settings: Option<Value>,
     /// The launch object's `permission_mode`.
     pub permission_mode: Option<String>,
+    /// The mode the run is told with `--permission-mode` (empty: none; the defaultMode in the settings then rules).
+    pub mode_arg: String,
     pub allowed_tools: Vec<String>,
     pub add_dirs: Vec<String>,
     pub disable_slash_commands: bool,
@@ -712,6 +714,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         return Ok(Output {
             settings: None,
             permission_mode: launch_mode.and_then(|v| v.as_str().map(str::to_owned)),
+            mode_arg: perm.clone(),
             allowed_tools: vec![],
             add_dirs: dirs,
             disable_slash_commands,
@@ -940,6 +943,10 @@ pub fn build(i: &Input<'_>) -> R<Output> {
             }
         }
     }
+    if !owner {
+        // The sandbox key keeps the place the script gives it (before enabledPlugins); guest_sandbox fills it in.
+        sm.entry("sandbox").or_insert(Value::Null);
+    }
     {
         let installed = installed_plugins(i.plugins_json);
         let every = machine::plugins(&p.machine);
@@ -987,6 +994,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     Ok(Output {
         settings: Some(st),
         permission_mode: launch_mode,
+        mode_arg: perm.clone(),
         allowed_tools: allowed,
         add_dirs: dirs,
         disable_slash_commands,

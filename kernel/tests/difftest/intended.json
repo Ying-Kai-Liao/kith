@@ -5,5 +5,10 @@
   {"case": "run-once-*", "facet": "step*.stderr", "why": "A2b-1: ACP sessions have one working directory, so the run says which of the agent's extra directories it goes without (native qwen takes --include-directories)"},
   {"case": "run-once-qwen-cost", "facet": "state:kith/state/cost.db", "why": "A2b-1: the ledger row carries the cost the engine reports over ACP; qwen's own JSON output reports none, so the native row has cost null (the row's shape is the same)"},
   {"case": "launch-settings-*-home-amp", "facet": "step*.pick", "why": "A3-4: bash's sed fill treats & in the replacement as the matched text, so a home folder with & in it puts the placeholder `{{USER_HOME}}` into the rules; Rust writes the path literally"},
-  {"case": "launch-settings-*-home-backslash", "facet": "step*.pick", "why": "A3-4: bash's sed fill drops a backslash in the replacement (a\\b becomes ab); Rust writes the path literally"}
+  {"case": "launch-settings-*-home-backslash", "facet": "step*.pick", "why": "A3-4: bash's sed fill drops a backslash in the replacement (a\\b becomes ab); Rust writes the path literally"},
+  {"case": "launch-whole-*-home-amp", "facet": "step*.json", "why": "A3-4: bash's sed fill treats & in the replacement as the matched text, so a home folder with & in it puts the placeholder `{{USER_HOME}}` into the rules; Rust writes the path literally"},
+  {"case": "launch-whole-*-home-backslash", "facet": "step*.json", "why": "A3-4: bash's sed fill drops a backslash in the replacement (a\\b becomes ab); Rust writes the path literally"},
+  {"case": "launch-whole-owner-allowed-broken", "facet": "step*.stderr", "why": "A3-5: the text of the JSON parse error of a damaged allowed.json is serde's, not Python's (the warning and the skip are the same)"},
+  {"case": "launch-whole-guest-old-claude", "facet": "step*.stderr", "why": "A3-5: bash prints the version twice when Claude Code is too old (`version 2.0.12.0.1`, a quoting slip in the script); Rust prints it once"},
+  {"case": "launch-whole-owner-no-such-agent", "facet": "step*.stderr", "why": "A3-5: after \"no agent named\" bash adds a spelling suggestion (\"Did you mean: ...\") or \"Run kith ls to see your agents.\"; the verb has only the first line, because the router and the host call it only for an agent that exists"}
 ]
