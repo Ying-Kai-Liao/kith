@@ -131,9 +131,10 @@ jobs:
               - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             # What the root crate builds from: the host and the memory and wire crates, not guest or tts, which
-            # nothing in the host depends on. Those two get their own small job (host-crates).
+            # nothing in the host depends on. Those two get their own small job (host-crates). Also the kernel's bin
+            # and lib: host tests run the repo's own kernel commands (kith-allow, kith-auth, kith, ...) and what they import.
             host_core:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/**,kernel/lib/**,.github/workflows/ci.yml}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -181,6 +182,8 @@ jobs:
         run: kernel/tests/kith-serve-check
       - name: Info check
         run: kernel/tests/kith-info-check
+      - name: Harness check (kith <agent> set harness, no Claude model on another harness)
+        run: kernel/tests/kith-harness-check
       - name: Migrate check
         run: kernel/tests/kith-migrate-check
       - name: Unknown agent check
@@ -585,10 +588,12 @@ jobs:
           # SF Symbols masks and the DMG background are generated at build time, never committed.
           npm run icons
           swift ../packaging/dmg/background.swift build/dmg-background.tiff
-      - name: Build the Mac dev app (unsigned)
+      - name: Build the Mac app (unsigned, not notarized)
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
-        run: npm run dist:mac:dev -- --publish never
+          # The runner's toolchain has only its own target; release.yml builds the universal app.
+          KITH_HOST_NATIVE_ONLY: "1"
+        run: npm run dist:mac -- --arm64 --publish never -c.mac.notarize=false
       - name: Show the result
         run: ls -la dist
 

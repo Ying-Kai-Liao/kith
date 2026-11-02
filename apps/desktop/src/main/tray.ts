@@ -5,7 +5,6 @@ import type { HostController } from './host-controller'
 import type { Updates } from './updates'
 import { updateAction } from '../shared/update-action'
 import { setShowInDock, showInDock } from './dock'
-import { identity } from './environment'
 import { islandSupported, type Island } from './island'
 import { islandLabel } from '../shared/island'
 
@@ -82,10 +81,6 @@ export class Tray {
 
     switch (state.kind) {
       case 'missingBinary':
-        if (identity.environment === 'dev') {
-          items.push({ label: 'Rebuild Kith Dev with its development host.', enabled: false })
-          break
-        }
         items.push({ label: 'Reinstall Kith or install the host with Homebrew.', enabled: false })
         items.push({ label: 'Copy host install command', click: () => clipboard.writeText('kith serve start') })
         break

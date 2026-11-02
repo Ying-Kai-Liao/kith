@@ -21,7 +21,7 @@ final class HostLink {
     var onConnect: (@MainActor () -> Void)?
 
     static var socketPath: String {
-        let base = ProcessInfo.processInfo.environment["KITH_SERVE_HOME"] ?? NSHomeDirectory() + "/" + (Bundle.main.object(forInfoDictionaryKey: "KithDataFolder") as? String ?? ".kith/serve-main")
+        let base = ProcessInfo.processInfo.environment["KITH_SERVE_HOME"] ?? NSHomeDirectory() + "/" + (Bundle.main.object(forInfoDictionaryKey: "KithDataFolder") as? String ?? ".kith/serve")
         return base + "/screen.sock"
     }
 

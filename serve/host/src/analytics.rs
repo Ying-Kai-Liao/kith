@@ -328,7 +328,7 @@ fn queue(hub: &Hub, event: &str, distinct_id: &str, mut properties: Map<String, 
     properties.extend([
         ("$lib".into(), "kith-serve".into()),
         ("app_version".into(), env!("CARGO_PKG_VERSION").into()),
-        ("env".into(), (if option_env!("KITH_SERVE_ENV") == Some("main") { "main" } else { "dev" }).into()),
+        ("env".into(), "main".into()),
         ("$os".into(), std::env::consts::OS.into()),
         ("arch".into(), std::env::consts::ARCH.into()),
         // Joins this computer's events across accounts and with its phones' `computer_paired`.

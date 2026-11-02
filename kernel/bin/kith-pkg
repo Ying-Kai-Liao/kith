@@ -6,6 +6,10 @@
   kith-pkg pin <agent> [VERSION]            run this version until unpinned (default: the previous good one)
   kith-pkg unpin <agent>                    back to following the latest edits
   kith-pkg check <agent>                    validate the working copy without snapshotting it
+  kith-pkg set-harness <agent> <harness> [--model M]
+                                          run the agent on another harness (claude, codex, ...): writes harness: in
+                                          agent.md and drops its model (a model of the old harness) unless --model
+                                          gives one; committed like any edit (what kith <agent> set harness runs)
   kith-pkg check --share [agent...]         personal details a package must not carry before it is shared: home paths,
                                           email addresses, words listed in <state>/private-words (reports; never
                                           blocks a run)
@@ -608,6 +612,55 @@ def share_problems(home):
     return out
 
 
+def harness_names():
+    """claude plus the harnesses adapters/harness.py runs, read from its HARNESSES tuple (not imported: it runs on import)."""
+    import ast
+    src = (Path(__file__).resolve().parent.parent / 'adapters' / 'harness.py').read_text()
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Assign) and getattr(node.targets[0], 'id', '') == 'HARNESSES':
+            return ('claude', *ast.literal_eval(node.value))
+    return ('claude',)
+
+
+def cmd_set_harness(agent, harness, model=None):
+    """Write harness: (and model:) in agent.md's frontmatter. A model always names a model of one harness, so changing
+    the harness drops it unless a new one is given; the harness's own default answers then."""
+    harness = 'claude' if harness == 'claude-code' else harness
+    names = harness_names()
+    if harness not in names:
+        die(f"unknown harness '{harness}'; one of: {', '.join(names)}", 2)
+    if model is not None and not re.fullmatch(r'[\w.:\[\]/-]+', model):
+        die(f"not a model name: {model!r}", 2)
+    home = agent_home(agent)
+    f = home / 'agent.md'
+    text = f.read_text()
+    m = re.match(r'^---\n(.*?)\n---\n?', text, re.S)
+    if not m:
+        die(f'{f}: no frontmatter')
+    lines = m.group(1).split('\n')
+    fields = dict(re.findall(r'^([A-Za-z_-]+):\s*(.*)$', m.group(1), re.M))
+    old = fields.get('harness') or 'claude'
+    old = 'claude' if old == 'claude-code' else old
+    old_model = fields.get('model', '')
+    new_model = model if model is not None else (old_model if harness == old else '')
+    keep = [x for x in lines if not re.match(r'^(harness|model):', x)]
+    at = len(keep)   # after the last of name/display_name/description, where agents keep it
+    for i, x in enumerate(keep):
+        if re.match(r'^(description|display_name|name):', x):
+            at = i + 1
+    add = ([f'harness: {harness}'] if harness != 'claude' else []) + ([f'model: {new_model}'] if new_model else [])
+    keep[at:at] = add
+    new = '---\n' + '\n'.join(keep) + '\n---\n' + text[m.end():]
+    if new == text:
+        print(f'{agent}: already on {harness}' + (f' ({new_model})' if new_model else ''))
+        return
+    f.write_text(new)
+    commit(home, f'{agent}: run on {harness}' + (f' ({new_model})' if new_model else ''))
+    dropped = f'; dropped model {old_model} (a {old} model)' if old_model and not new_model else ''
+    print(f'{agent}: runs on {harness}' + (f', model {new_model}' if new_model else f", that harness's default model")
+          + dropped + '. The next run uses it.')
+
+
 def cmd_promote(agent, skill):
     home = agent_home(agent)
     src = life(agent) / 'skills' / 'learned' / skill
@@ -1208,6 +1261,8 @@ def main(argv):
         sys.exit(1 if failed else 0)
     elif cmd == 'deps' and rest:
         cmd_deps(sorted(installed()) if rest[0] == '--all' else rest[:1], '--install' in rest)
+    elif cmd == 'set-harness' and len(rest) in (2, 4) and (len(rest) == 2 or rest[2] == '--model'):
+        cmd_set_harness(rest[0], rest[1], rest[3] if len(rest) == 4 else None)
     elif cmd == 'promote' and len(rest) == 2:
         cmd_promote(*rest)
     elif cmd == 'check' and rest[:1] == ['--share']:

@@ -8,16 +8,14 @@ import { updaterFixture } from './test-support/updater.ts'
 
 const release = { version: '0.1.1' }
 
-for (const options of [{ packaged: false }, { main: false }]) {
-  test(`development builds never check, download or install: ${JSON.stringify(options)}`, async () => {
-    const f = updaterFixture(options)
-    f.updates.check()
-    await f.emit('update-downloaded', release)
-    assert.equal(f.updates.state.supported, false)
-    assert.equal(f.calls.check + f.calls.download + f.calls.install, 0)
-    assert.equal(f.timers.size, 0)
-  })
-}
+test('development runs never check, download or install', async () => {
+  const f = updaterFixture({ packaged: false })
+  f.updates.check()
+  await f.emit('update-downloaded', release)
+  assert.equal(f.updates.state.supported, false)
+  assert.equal(f.calls.check + f.calls.download + f.calls.install, 0)
+  assert.equal(f.timers.size, 0)
+})
 
 test('an idle macOS installer job whose update request is gone is removed, at launch and hourly', async () => {
   assert.equal(updaterFixture({ shipIt: { request: false, job: 'idle' } }).shipIt.removed, 1)

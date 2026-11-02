@@ -190,6 +190,7 @@ fi
 agent=$1; shift
 [[ ${1:-} == --info-json ]] && exec "$KITH/bin/kith-info" "$agent"
 # kith AGENT set permission MODE: this Mac's permission mode for the agent (what kith install asks, what apps change).
+# kith AGENT set harness H [--model M]: the harness agent.md names (kith-pkg set-harness), in the package, every Mac.
 # MODE '' forgets it. Applies to the agent's next run from any entry point.
 # kith AGENT set call-model MODEL: the model its voice-call turns run on ('default' forgets the choice, 'own' keeps the
 # agent's own model).
@@ -200,10 +201,12 @@ if [[ ${1:-} == set ]]; then
   if [[ ${2:-} == call-model && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set call_model "$agent" "$3"; fi
   if [[ ${2:-} == limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set limit "$agent" "$3"; fi
   if [[ ${2:-} == at-limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set at_limit "$agent" "$3"; fi
+  if [[ ${2:-} == harness && ( $# -eq 3 || ( $# -eq 5 && $4 == --model ) ) ]]; then exec "$KITH/bin/kith-pkg" set-harness "$agent" "${@:3}"; fi
   [[ ${2:-} == permission && $# -eq 3 ]] || { echo "usage: kith $agent set permission MODE   (MODE '' forgets this Mac's choice)
        kith $agent set call-model MODEL   (MODEL: sonnet, haiku, opus, own for the agent's own model, default to forget)
        kith $agent set limit N|none       (a monthly limit in dollars at API prices; none forgets it)
-       kith $agent set at-limit MODE      (ask, tell or hold: what your own runs do at the limit; ask by default)" >&2; exit 2; }
+       kith $agent set at-limit MODE      (ask, tell or hold: what your own runs do at the limit; ask by default)
+       kith $agent set harness H [--model M]   (claude, codex, ...: the harness it runs on; drops a model of the old one)" >&2; exit 2; }
   exec python3 "$KITH/lib/kith_settings.py" set permission_mode "$agent" "$3"
 fi
 src_pkg=$(agent_dir "$agent")
@@ -515,13 +518,19 @@ if [[ -n ${r_sid:-} || -n ${KITH_RESUME:-} ]]; then
     fi
   fi
 fi
-[[ -n $backup && $harness != "$own" ]] && KITH_MODEL=""   # agent.md's model names a model of its own harness
+[[ -n $backup && $harness != "$own" ]] && { KITH_MODEL=""; unset HQ_MODEL; }   # agent.md's model names a model of its own harness (HQ_MODEL: kith_env_sync would fill it back)
 if [[ -n $backup_cfg_var ]]; then export "$backup_cfg_var=$backup_cfg_dir" KITH_ACCOUNT_VAR=$backup_cfg_var; fi
 # Which harness and login answer this run, for the cost ledger (kith-cost reads them from the hook and from `record`)
 export KITH_PROVIDER=$harness KITH_ACCOUNT=$acct KITH_ACCOUNT_ID=$account_id
 # agent.md's model names a model of its own harness: on another one (-H), that harness's default unless -m says.
 [[ $harness == "$own" ]] && KITH_MODEL=${KITH_MODEL:-$(field model)}
 [[ -n $p_model ]] && KITH_MODEL=$p_model   # the person's membership picks the model over the agent's and the caller's
+# A Claude model name means nothing to another harness (codex -m sonnet fails): that harness's default answers instead.
+if [[ $harness != claude ]]; then
+  case ${KITH_MODEL:-} in
+    opus*|sonnet*|haiku*|claude-*|best|opusplan) echo "kith: $KITH_MODEL is a Claude model; $agent runs on $harness's default model (kith $agent set harness $harness --model M picks one)" >&2; KITH_MODEL=""; unset HQ_MODEL ;;
+  esac
+fi
 export KITH_MODEL=${KITH_MODEL:-} KITH_EFFORT=${KITH_EFFORT:-$(field effort)} KITH_PROJECT=$project
 # For this run only, like KITH_CLAUDE_ARGS below: a helper this agent starts runs on its own harness, in its own session.
 out_format=${KITH_OUTPUT:-} resume=${KITH_RESUME:-} perm_mode=${KITH_PERMISSION_MODE:-}

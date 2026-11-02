@@ -1,12 +1,11 @@
 import { EventEmitter } from 'node:events'
 import * as crypto from 'node:crypto'
 import * as path from 'node:path'
-import { environmentProfile, hostEnvironmentError } from '../environment.ts'
+import { identity } from '../environment.ts'
 import * as hostService from '../host-service.ts'
 import { loadMainModule, settle } from './main-module.ts'
 
-export function hostUpdateFixture(options: { environment?: 'main' | 'dev'; platform?: string; devPort?: string; installed?: boolean; missingBinary?: boolean; restartMarker?: boolean } = {}) {
-  const identity = environmentProfile(options.environment ?? 'main')
+export function hostUpdateFixture(options: { platform?: string; service?: string; devPort?: string; installed?: boolean; missingBinary?: boolean; restartMarker?: boolean } = {}) {
   const platform = options.platform ?? 'darwin'
   const binary = platform === 'win32' ? '/bundle/kith-serve.exe' : platform === 'linux' ? '/home/test/.local/bin/kith-serve' : '/bundle/kith-serve'
   const binaryBytes = Buffer.from('new signed host fixture')
@@ -22,11 +21,11 @@ export function hostUpdateFixture(options: { environment?: 'main' | 'dev'; platf
     busy: false,
     reachable: true,
     wrongBinary: false,
-    binaryEnvironment: identity.environment as string,
-    runningEnvironment: identity.environment as string,
   }
   const service = () => {
     if (!behavior.installed) throw new Error('No service')
+    // A definition the test wrote (a `kith serve start` job) stands as it is; the app's own is just its binary.
+    if (options.service) return options.service
     return binary.replace(/kith-serve\.exe$/, identity.supervisor)
   }
   const fs = {
@@ -45,10 +44,6 @@ export function hostUpdateFixture(options: { environment?: 'main' | 'dev'; platf
     'node:child_process': {
       execFileSync: () => service(),
       execFile: (_bin: string, args: string[], _options: unknown, callback: (error: { code: number } | null, stdout: string, stderr: string) => void) => {
-        if (args[0] === 'compat') {
-          callback(null, JSON.stringify({ environment: behavior.binaryEnvironment }), '')
-          return
-        }
         calls.push([...args]); order.push(args[0]!)
         const status = args[0] === 'stop' ? behavior.stopStatus : behavior.installStatus
         callback(status ? { code: status } : null, '', status ? 'service command failed' : '')
@@ -56,7 +51,6 @@ export function hostUpdateFixture(options: { environment?: 'main' | 'dev'; platf
     },
     electron: { app: { isPackaged: true, getPath: () => '/prefs' } },
     './environment': { identity },
-    '../shared/environment': { hostEnvironmentError },
     '../shared/host-service': hostService,
     './screen': { unregisterScreenAgent: () => { order.push('unregisterScreen') } },
   }, {
@@ -66,7 +60,7 @@ export function hostUpdateFixture(options: { environment?: 'main' | 'dev'; platf
     clearTimeout: (id: number) => timers.delete(id),
     fetch: async () => {
       if (!behavior.reachable) throw new Error('Host offline')
-      return { ok: true, json: async () => ({ environment: behavior.runningEnvironment, computerId: 'fixture-computer', busy: behavior.busy, binaryPath: binary, binaryHash: behavior.wrongBinary ? 'stale' : crypto.createHash('sha256').update(binaryBytes).digest('hex') }) }
+      return { ok: true, json: async () => ({ computerId: 'fixture-computer', busy: behavior.busy, binaryPath: binary, binaryHash: behavior.wrongBinary ? 'stale' : crypto.createHash('sha256').update(binaryBytes).digest('hex') }) }
     },
   })
   const host = new module.HostController()

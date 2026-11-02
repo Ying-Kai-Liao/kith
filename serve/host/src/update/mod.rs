@@ -36,7 +36,7 @@ pub fn is_standalone(executable: &Path) -> bool {
 /// A release build of a standalone binary that the installed service runs: the hosts that
 /// update themselves (app bundles and Homebrew own their binaries).
 fn self_updating(executable: &Path) -> bool {
-    crate::environment::Environment::current().require_release_updates().is_ok()
+    crate::environment::require_release_updates().is_ok()
         && install::require_standalone(executable).is_ok()
         && service::installed()
         && service::require_executable(executable).is_ok()
@@ -99,7 +99,7 @@ fn status_at(executable: &Path) -> Result<Value> {
 pub fn set_automatic(enabled: bool) -> Result<Value> {
     let executable = service::current_exe()?;
     if enabled {
-        crate::environment::Environment::current().require_release_updates()?;
+        crate::environment::require_release_updates()?;
         install::require_standalone(&executable)?;
         ensure!(service::installed(), "install the background host service before enabling automatic updates");
         service::require_executable(&executable)?;
@@ -109,7 +109,7 @@ pub fn set_automatic(enabled: bool) -> Result<Value> {
 }
 
 pub async fn check() -> Result<Value> {
-    crate::environment::Environment::current().require_release_updates()?;
+    crate::environment::require_release_updates()?;
     let _lock = lock()?;
     let mut state: State = read("update-state.json")?;
     ensure!(!awaiting_worker(&state), "a host update is starting");
@@ -140,7 +140,7 @@ pub async fn check() -> Result<Value> {
 }
 
 pub async fn apply(port: u16, force: bool, skip_app_check: bool, worker: bool) -> Result<Value> {
-    crate::environment::Environment::current().require_release_updates()?;
+    crate::environment::require_release_updates()?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
     let _lock = loop {
         match lock() {
@@ -193,7 +193,7 @@ pub async fn apply(port: u16, force: bool, skip_app_check: bool, worker: bool) -
 /// The updater must live outside the daemon's job/cgroup. Otherwise stopping
 /// the host would also kill the process responsible for starting its replacement.
 pub fn spawn_worker(port: u16, force: bool, skip_app_check: bool) -> Result<()> {
-    crate::environment::Environment::current().require_release_updates()?;
+    crate::environment::require_release_updates()?;
     let _lock = lock()?;
     let previous: State = read("update-state.json")?;
     ensure!(!awaiting_worker(&previous), "a host update is already starting");
@@ -260,7 +260,7 @@ fn spawn_job(executable: &Path, args: &[String]) -> Result<()> {
 
 pub async fn automatic_loop(hub: Arc<Hub>) {
     // No update channel in this build: nothing to poll.
-    if crate::environment::Environment::current().require_release_updates().is_err() {
+    if crate::environment::require_release_updates().is_err() {
         return;
     }
     let mut last_check = None;

@@ -43,11 +43,7 @@ pub(super) fn pair(buf: &mut Buffer, area: Rect, url: Option<&str>) {
         inner.x,
         y,
         inner.width,
-        if url.starts_with("kith-dev:") {
-            "Scan with Kith Dev on your iPhone:"
-        } else {
-            "Scan with the Kith iPhone app, or open on the phone:"
-        },
+        "Scan with the Kith iPhone app, or open on the phone:",
         t.secondary.patch(t.panel),
     );
     put(buf, inner.x, y + 1, inner.width, &truncate(url, usize::from(inner.width)), t.dim.patch(t.panel));
