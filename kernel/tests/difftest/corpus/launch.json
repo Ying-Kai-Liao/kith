@@ -1,0 +1,26 @@
+[
+  {
+    "name": "launch-json-claude",
+    "command": "launch-json",
+    "setup": [
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\n---\nYou are echo.\n"},
+      {"run": ["git", "init", "-q"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "init", "--allow-empty"], "cwd": "kith/agents/echo/role"}
+    ],
+    "run": [["echo", "--launch-json"]],
+    "normalize": [["(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])", "<h>"]],
+    "ignore": ["/state/store/", "/\\.runs/", "/state/run/"], "stderr": false
+  },
+  {
+    "name": "launch-json-codex",
+    "command": "launch-json",
+    "setup": [
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\nharness: codex\n---\nYou are echo.\n"},
+      {"run": ["git", "init", "-q"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-qm", "init", "--allow-empty"], "cwd": "kith/agents/echo/role"}
+    ],
+    "run": [["echo", "--launch-json"]],
+    "normalize": [["(?<![0-9a-zA-Z])[0-9a-f]{10}(?![0-9a-zA-Z])", "<h>"]],
+    "ignore": ["/state/store/", "/\\.runs/", "/state/run/"], "stderr": false
+  }
+]

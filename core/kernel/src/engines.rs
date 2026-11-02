@@ -1060,8 +1060,16 @@ mod tests {
 
     #[test]
     fn only_an_engine_with_every_hook_serves_guests() {
-        let guests: Vec<&str> = ENGINES.iter().filter(|e| e.serves_guests()).map(|e| e.id).collect();
-        assert_eq!(guests, ["claude"], "a guest run's rules are enforced by Claude Code alone");
+        let guests: Vec<&str> = ENGINES
+            .iter()
+            .filter(|e| e.serves_guests())
+            .map(|e| e.id)
+            .collect();
+        assert_eq!(
+            guests,
+            ["claude"],
+            "a guest run's rules are enforced by Claude Code alone"
+        );
     }
 
     #[test]
@@ -1069,13 +1077,19 @@ mod tests {
         let which = |b: &str| (b == "gemini").then(|| PathBuf::from("/x/gemini"));
         let spec = launch_spec(find("gemini").unwrap(), &which);
         assert_eq!(spec["engine"], "gemini");
-        assert_eq!(spec["acp"], json!({"command": "/x/gemini", "args": ["--acp"], "env": {}}));
+        assert_eq!(
+            spec["acp"],
+            json!({"command": "/x/gemini", "args": ["--acp"], "env": {}})
+        );
         assert_eq!(spec["registry"], "gemini");
         assert_eq!(spec["serves_guests"], false);
         // Not installed: the host starts the registry build.
         let spec = launch_spec(find("gemini").unwrap(), &nothing);
         assert!(spec["acp"].is_null() && spec["installed"] == false);
         // An alias names the same row.
-        assert_eq!(launch_spec(find("agy").unwrap(), &nothing)["engine"], find("agy").unwrap().id);
+        assert_eq!(
+            launch_spec(find("agy").unwrap(), &nothing)["engine"],
+            find("agy").unwrap().id
+        );
     }
 }

@@ -48,9 +48,9 @@ for pair in "cl claude" "cx codex"; do
   check "$2 launch-json is the golden one" "[ \"\$out\" = \"\$(cat '$FIX/launch-$2.json')\" ]"
 done
 
-BIN=${KITH_DIFFTEST_BIN:-${KITH_BIN:-}}
+BIN=${KITH_DIFFTEST_BIN:-${KITH_BIN:-$(python3 "$KERNEL/lib/kith_paths.py" --bin 2>/dev/null || true)}}
 [ -n "$BIN" ] && export KITH_BIN=$BIN   # the kernel finds its Rust program here (kith_paths.py --bin)
-if [ -n "$BIN" ] && "$BIN" kernel engines --json >/dev/null 2>&1; then
+if [ -n "$BIN" ] && "$BIN" kernel engines launch gemini --json >/dev/null 2>&1; then
   g=$(launch gm | sed "s#<T>#$T#g")
   py() { printf '%s' "$g" | python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
   check "gemini: engine id" "[ \"\$(py 'd[\"engine\"]')\" = gemini ]"
@@ -62,8 +62,10 @@ if [ -n "$BIN" ] && "$BIN" kernel engines --json >/dev/null 2>&1; then
   check "claude launch lists no engine key" "! launch cl | grep -q '\"engine\"'"
 else
   echo "skip the gemini launch checks (no Rust kith program; KITH_DIFFTEST_BIN names one)"
-  (cd "$T/home" && KITH_CORE=python "$KITH" gm --launch-json >/dev/null 2>"$T/err"); rc=$?
-  check "no Rust program: gemini keeps today's error" "[ $rc = 1 ] && grep -q 'covers claude and codex only' '$T/err'"
+  if [ -z "$BIN" ]; then
+    (cd "$T/home" && "$KITH" gm --launch-json >/dev/null 2>"$T/err"); rc=$?
+    check "no Rust program: gemini keeps today's error" "[ $rc = 1 ] && grep -q 'covers claude and codex only' '$T/err'"
+  fi
 fi
 (cd "$T/home" && "$KITH" nope --launch-json >/dev/null 2>"$T/err"); rc=$?
 check "an unknown engine is an error, never a silent wrong launch" "[ $rc != 0 ]"

@@ -4,8 +4,8 @@
   "fieldCase": "snake",
   "enums": {
     "Harness": {
-      "doc": "The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.",
-      "values": ["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode"],
+      "doc": "The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, codex, and any engine of the core's table with an ACP mode (`kith engines`); `agy` is the kernel's word for antigravity. One this version doesn't know is its own state: the host doesn't start it.",
+      "values": ["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode", "cursor", "omp", "grok", "gemini", "copilot", "goose", "kimi", "droid", "amp", "kilo", "cline", "auggie", "vibe", "kiro", "devin", "qoder", "codebuddy", "minimax", "junie", "antigravity", "cortex", "poolside"],
       "unknown": "unknown"
     },
     "RolePrompt": {

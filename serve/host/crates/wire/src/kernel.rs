@@ -8,9 +8,9 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "693ae62fa5bfc96f0da17a67cb934b2600100260b818d4fc879bd1ede77240c7";
+pub const CONTRACT_SHA256: &str = "682ff33c5ebbe93a709d554120fcbe8fce22ce2f420e758f4b8961491ad95420";
 
-/// The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.
+/// The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, codex, and any engine of the core's table with an ACP mode (`kith engines`); `agy` is the kernel's word for antigravity. One this version doesn't know is its own state: the host doesn't start it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Harness {
     #[serde(rename = "claude")]
@@ -29,6 +29,50 @@ pub enum Harness {
     Dsh,
     #[serde(rename = "opencode")]
     Opencode,
+    #[serde(rename = "cursor")]
+    Cursor,
+    #[serde(rename = "omp")]
+    Omp,
+    #[serde(rename = "grok")]
+    Grok,
+    #[serde(rename = "gemini")]
+    Gemini,
+    #[serde(rename = "copilot")]
+    Copilot,
+    #[serde(rename = "goose")]
+    Goose,
+    #[serde(rename = "kimi")]
+    Kimi,
+    #[serde(rename = "droid")]
+    Droid,
+    #[serde(rename = "amp")]
+    Amp,
+    #[serde(rename = "kilo")]
+    Kilo,
+    #[serde(rename = "cline")]
+    Cline,
+    #[serde(rename = "auggie")]
+    Auggie,
+    #[serde(rename = "vibe")]
+    Vibe,
+    #[serde(rename = "kiro")]
+    Kiro,
+    #[serde(rename = "devin")]
+    Devin,
+    #[serde(rename = "qoder")]
+    Qoder,
+    #[serde(rename = "codebuddy")]
+    Codebuddy,
+    #[serde(rename = "minimax")]
+    Minimax,
+    #[serde(rename = "junie")]
+    Junie,
+    #[serde(rename = "antigravity")]
+    Antigravity,
+    #[serde(rename = "cortex")]
+    Cortex,
+    #[serde(rename = "poolside")]
+    Poolside,
     /// A value this version doesn't know.
     #[default]
     #[serde(rename = "unknown", other)]
@@ -46,6 +90,28 @@ impl Harness {
             Self::Qwen => "qwen",
             Self::Dsh => "dsh",
             Self::Opencode => "opencode",
+            Self::Cursor => "cursor",
+            Self::Omp => "omp",
+            Self::Grok => "grok",
+            Self::Gemini => "gemini",
+            Self::Copilot => "copilot",
+            Self::Goose => "goose",
+            Self::Kimi => "kimi",
+            Self::Droid => "droid",
+            Self::Amp => "amp",
+            Self::Kilo => "kilo",
+            Self::Cline => "cline",
+            Self::Auggie => "auggie",
+            Self::Vibe => "vibe",
+            Self::Kiro => "kiro",
+            Self::Devin => "devin",
+            Self::Qoder => "qoder",
+            Self::Codebuddy => "codebuddy",
+            Self::Minimax => "minimax",
+            Self::Junie => "junie",
+            Self::Antigravity => "antigravity",
+            Self::Cortex => "cortex",
+            Self::Poolside => "poolside",
             Self::Unknown => "unknown",
         }
     }
@@ -350,7 +416,7 @@ pub const COMMANDS: &[(&str, &str)] = &[("ls", "[Agent]"), ("projectLs", "Projec
 /// The contract as data, for `crate::check` (the producer's strict check and the consumer's).
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
     enums: &[
-        crate::check::EnumSchema { name: "Harness", values: &["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode"], unknown: "unknown" },
+        crate::check::EnumSchema { name: "Harness", values: &["claude", "codex", "pi", "agy", "hermes", "qwen", "dsh", "opencode", "cursor", "omp", "grok", "gemini", "copilot", "goose", "kimi", "droid", "amp", "kilo", "cline", "auggie", "vibe", "kiro", "devin", "qoder", "codebuddy", "minimax", "junie", "antigravity", "cortex", "poolside"], unknown: "unknown" },
         crate::check::EnumSchema { name: "RolePrompt", values: &["flag", "env", "first-message", "none"], unknown: "none" },
         crate::check::EnumSchema { name: "PermissionMode", values: &["default", "acceptEdits", "plan", "auto", "bypassPermissions"], unknown: "default" },
         crate::check::EnumSchema { name: "DelegationState", values: &["open", "answered", "capped", "stopped"], unknown: "unknown" },

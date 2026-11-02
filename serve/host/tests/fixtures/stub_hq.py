@@ -254,6 +254,11 @@ elif args[:2] == ["house", "--launch-json"]:
         print(f"{backup} is not logged in", file=sys.stderr)
         sys.exit(4)
     harness = "codex" if backup and backup.split(":")[0] == "codex" else "claude"
+    # An agent on another ACP engine (the file `harness`): the launch also names the engine, as the real kernel does.
+    own = setting("harness")
+    other = own if not backup and own not in (None, "claude", "codex") else None
+    if other:
+        harness = other
     account_id = backup or main_account()
     account = account_id.split(":")[1] if ":" in account_id else None
     model = args[args.index("-m") + 1] if "-m" in args else "haiku"
@@ -276,6 +281,7 @@ elif args[:2] == ["house", "--launch-json"]:
         "cost_tag": {"agent": "house", "version": "v1", "model": model, "effort": None, "via": os.environ.get("KITH_VIA") or "cli",
                      "project": project, "person": os.environ.get("KITH_PERSON") or None},
         "claude_args": [],
+        **({"engine": other, "acp": None, "registry": other, "role_prompt": "none"} if other else {}),
     }))
 else:
     print("unknown agent", file=sys.stderr)
