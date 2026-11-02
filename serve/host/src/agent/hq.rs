@@ -565,13 +565,9 @@ const UPDATE_KITH: &str =
 /// `kith new <name> <description> --json`: makes the agent's folder (a role, a memory) and says where. Kith's own
 /// refusal (a name taken, a bad name) comes back as the error, without the command line around it. An older kith has
 /// no `--json` here and prints nothing useful: that is "update kith", not a made agent.
-pub async fn new_agent(bin: &Path, name: &str, description: &str) -> Result<Value> {
-    let out = run(bin, &["new", name, description, "--json"], None, NEW_TIMEOUT).await.map_err(|e| kernel_said(&e))?;
-    match serde_json::from_str::<Value>(out.trim()) {
-        Ok(made) if made.is_object() && made["ok"] != false => Ok(made),
-        Ok(made) if made["error"].is_string() => Err(anyhow!("{}", made["error"].as_str().unwrap_or_default())),
-        _ => Err(anyhow!(UPDATE_KITH)),
-    }
+pub async fn new_agent(bin: &Path, name: &str, description: &str) -> Result<kernel::NewAgent> {
+    let out = run(bin, &command::new(name, description, None), None, NEW_TIMEOUT).await.map_err(|e| kernel_said(&e))?;
+    serde_json::from_str::<kernel::NewAgent>(out.trim()).map_err(|_| anyhow!(UPDATE_KITH))
 }
 
 /// Kith's own sentence from a failed command: `run` wraps it as "`kith … --json` failed (exit status: 1): <text>".

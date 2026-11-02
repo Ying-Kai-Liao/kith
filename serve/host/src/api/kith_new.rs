@@ -94,7 +94,7 @@ async fn make(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
         .ok_or_else(|| anyhow!("{NO_KITH}; install it, then run `kith doctor` in Terminal"))?;
     let _one = MAKES.lock().await;
     let made = hq::new_agent(&bin, name, description).await?;
-    let agent = made["agent"].as_str().unwrap_or(name).to_owned();
+    let agent = made.agent;
     // The agent exists from here on; a failure after this says so, and leaves it.
     for (setting, value) in &settings {
         hq::set_setting(&agent, setting, value, &[])
