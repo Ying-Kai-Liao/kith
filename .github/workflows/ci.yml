@@ -182,6 +182,8 @@ jobs:
         run: kernel/tests/kith-serve-check
       - name: Info check
         run: kernel/tests/kith-info-check
+      - name: Harness check (kith <agent> set harness, no Claude model on another harness)
+        run: kernel/tests/kith-harness-check
       - name: Migrate check
         run: kernel/tests/kith-migrate-check
       - name: Unknown agent check
