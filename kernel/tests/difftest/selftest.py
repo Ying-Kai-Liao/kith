@@ -1,0 +1,128 @@
+"""Self-test of kith-difftest: the same line twice is the same; a deliberately different NEW side fails, with a diff;
+the same difference listed as intended passes; a listed difference that does not occur is stale.
+Run by kernel/tests/kith-difftest-check."""
+import io
+import os
+import stat
+import sys
+import tempfile
+import unittest
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+D = SourceFileLoader('kith_difftest', str(HERE / 'kith-difftest')).load_module()
+
+CASE = {
+    'name': 'ls-one', 'command': 'ls',
+    'setup': [{'write': 'kith/agents/echo/role/agent.md', 'text': '---\nname: echo\ndescription: d\nmodel: sonnet\n---\nbody\n'},
+              {'mkdir': 'kith/state'}],
+    'run': [['ls'], ['ls', '--json']],
+}
+KITH = [str(D.KERNEL / 'bin' / 'kith')]
+
+
+def prefixes(new):
+    return {'default': {'old': KITH, 'new': KITH}, 'old': None, 'new': new}
+
+
+def go(case, new=None, intended=()):
+    out = io.StringIO()
+    failed, stale, summary = D.run_all([case], prefixes(new), list(intended), jobs=1, out=out)
+    return failed, stale, summary, out.getvalue()
+
+
+class SelfTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        t = Path(cls.tmp.name)
+        # NEW = the real kith, but it also prints a line, and drops a file and a SQLite row into HOME
+        w = t / 'differs'
+        w.write_text('#!/bin/sh\n"%s" "$@"; rc=$?\necho "extra line"\necho x > "$HOME/stray.txt"\n'
+                     'python3 -c "import sqlite3,os;c=sqlite3.connect(os.environ[\'HOME\']+\'/s.db\');'
+                     'c.execute(\'create table if not exists t(a)\');c.execute(\'insert into t values (1)\');c.commit()"\n'
+                     'exit $rc\n' % KITH[0])
+        w.chmod(w.stat().st_mode | stat.S_IXUSR)
+        cls.differs = [str(w)]
+        # NEW = the real kith run from another cwd path form: must still be the same after normalising
+        s = t / 'same'
+        s.write_text('#!/bin/sh\nexec "%s" "$@"\n' % KITH[0])
+        s.chmod(s.stat().st_mode | stat.S_IXUSR)
+        cls.same = [str(s)]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_same_line_twice_is_the_same(self):
+        failed, stale, summary, out = go(CASE, self.same)
+        self.assertEqual((failed, stale), ([], []), out)
+        self.assertTrue(summary['ls']['green'])
+        self.assertIn('ok    ls-one', out)
+
+    def test_different_side_fails_with_a_diff(self):
+        failed, stale, summary, out = go(CASE, self.differs)
+        self.assertEqual(failed, ['ls-one'])
+        self.assertFalse(summary['ls']['green'])
+        self.assertEqual(summary['ls']['cases'], {'ls-one': 'differs'})
+        self.assertIn('+extra line', out)                       # stdout
+        self.assertIn('state:home/stray.txt', out)              # a file only NEW wrote
+        self.assertIn('state:home/s.db', out)                   # a SQLite row only NEW wrote
+        self.assertIn('+{"a": 1}', out)
+
+    def test_listed_difference_passes(self):
+        intended = [{'case': 'ls-*', 'facet': 'step*.stdout', 'why': 'x'},
+                    {'case': 'ls-one', 'facet': 'step*.json', 'why': 'y'},
+                    {'case': 'ls-one', 'facet': 'state:home/*', 'why': 'z'}]
+        failed, stale, summary, out = go(CASE, self.differs, intended)
+        self.assertEqual((failed, stale), ([], []), out)
+        self.assertEqual(summary['ls']['cases'], {'ls-one': 'intended'})
+
+    def test_partly_listed_still_fails_and_unused_entry_is_stale(self):
+        intended = [{'case': 'ls-one', 'facet': 'step*.stdout', 'why': 'x'},
+                    {'case': 'ls-one', 'facet': 'step*.exit', 'why': 'never differs'}]
+        failed, stale, _, out = go(CASE, self.differs, intended)
+        self.assertEqual(failed, ['ls-one'])
+        self.assertEqual([e['facet'] for e in stale], ['step*.exit'])
+        self.assertIn('STALE', out)
+
+    def test_exit_code_and_stderr_are_compared(self):
+        with tempfile.TemporaryDirectory() as t:
+            w = Path(t) / 'fail'
+            w.write_text('#!/bin/sh\necho oops >&2\nexit 7\n')
+            w.chmod(0o755)
+            failed, _, _, out = go(CASE, [str(w)])
+        self.assertEqual(failed, ['ls-one'])
+        self.assertIn('+7', out)
+        self.assertIn('+oops', out)
+
+    def test_throwaway_roots_never_leak(self):
+        # Two different roots and a generated id/time in the output normalise to the same text.
+        with tempfile.TemporaryDirectory() as t:
+            w = Path(t) / 'noisy'
+            w.write_text('#!/bin/sh\necho "$HOME $KITH_HOME $TMPDIR 2026-11-03T10:11:12Z 1762160000 '
+                         '123e4567-e89b-12d3-a456-426614174000"\n')
+            w.chmod(0o755)
+            case = dict(CASE, run=[['x']])
+            both = {'default': {}, 'old': [str(w)], 'new': [str(w)]}
+            out = io.StringIO()
+            failed, _, _ = D.run_all([case], both, [], jobs=1, out=out)
+        self.assertEqual(failed, [], out.getvalue())
+
+    def test_unknown_setup_step_is_an_error_not_a_pass(self):
+        failed, _, summary, out = go(dict(CASE, setup=[{'bogus': 1}]), self.same)
+        self.assertEqual(failed, ['ls-one'])
+        self.assertIn('ERROR', out)
+
+    def test_real_home_is_scrubbed(self):
+        os.environ['KITH_HOME'] = '/nonexistent/real'
+        try:
+            failed, _, _, out = go(CASE, self.same)
+        finally:
+            del os.environ['KITH_HOME']
+        self.assertEqual(failed, [], out)
+
+
+if __name__ == '__main__':
+    unittest.main(argv=[sys.argv[0], '-v'])
