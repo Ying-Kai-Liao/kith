@@ -16,6 +16,7 @@ mod environment;
 mod hqmem;
 mod hub;
 mod kernel;
+mod launch_cmd;
 mod limits;
 mod market;
 mod mcp;
@@ -566,6 +567,79 @@ enum LaunchCmd {
         #[arg(long)]
         json: bool,
     },
+    /// The settings a run is handed (`kith AGENT --launch-json`'s `settings`, with `permission_mode`, `allowed_tools`,
+    /// `add_dirs`, `disable_slash_commands`). Always JSON. Asks `kith-auth resolve` who a person is, as the launch does.
+    Settings {
+        agent: String,
+        /// Whom the run is for (`KITH_PERSON`); the owner when left out.
+        #[arg(long)]
+        person: Option<String>,
+        /// The permission mode the caller asked for (`KITH_PERMISSION_MODE`).
+        #[arg(long)]
+        mode: Option<String>,
+        /// The pinned package folder (default: the agent's live folder).
+        #[arg(long)]
+        pkg: Option<std::path::PathBuf>,
+        /// Pin the package first (`kith-pkg resolve`), as the launch does, and use the snapshot.
+        #[arg(long)]
+        snapshot: bool,
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        /// The project the run is in (`-p`).
+        #[arg(long)]
+        project: Option<String>,
+        /// The working folder (default: `$PWD`).
+        #[arg(long)]
+        cwd: Option<String>,
+        /// The engine (default: agent.md's `harness:`).
+        #[arg(long)]
+        harness: Option<String>,
+        /// The kith program that answers `kith memory hook` (default: `KITH_BIN`, else this program).
+        #[arg(long)]
+        kith_bin: Option<String>,
+        /// A file holding `claude plugin list --json` (default: ask `claude`).
+        #[arg(long)]
+        plugins_json: Option<std::path::PathBuf>,
+        /// The owner at their own terminal: their plugins stay as their settings have them.
+        #[arg(long)]
+        terminal: bool,
+        /// The `apiKeyHelper` of a claude-api backup.
+        #[arg(long)]
+        api_helper: Option<String>,
+        /// The id for the folder of a once-allowed retry (default: a fresh one).
+        #[arg(long)]
+        once_id: Option<String>,
+        /// A file holding the output of `kith-auth resolve` (default: run it).
+        #[arg(long)]
+        resolve: Option<std::path::PathBuf>,
+        /// Print JSON (always).
+        #[arg(long)]
+        json: bool,
+    },
+    /// The MCP servers a run is handed (`kith AGENT --launch-json`'s `mcp_servers`): the granted shared services
+    /// (`kith-auth mcp-config`, run here) plus the agent's own `mcp.json`. Always JSON.
+    Mcp {
+        agent: String,
+        #[arg(long)]
+        person: Option<String>,
+        #[arg(long)]
+        pkg: Option<std::path::PathBuf>,
+        /// Pin the package first (`kith-pkg resolve`), as the launch does, and use the snapshot.
+        #[arg(long)]
+        snapshot: bool,
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        /// A file holding the output of `kith-auth mcp-config` (default: run it).
+        #[arg(long)]
+        granted: Option<std::path::PathBuf>,
+        /// A file holding the output of `kith-auth resolve` (default: run it).
+        #[arg(long)]
+        resolve: Option<std::path::PathBuf>,
+        /// Print JSON (always).
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// What `kith kernel launch prompt` was asked.
@@ -914,6 +988,58 @@ async fn main() -> Result<()> {
                     what: LaunchCmd::Prompt { agent, person, project, pkg, kernel, cwd, date, json },
                 } => {
                     print_launch_prompt(LaunchPromptArgs { agent, person, project, pkg, kernel, cwd, date, json })?;
+                }
+                KernelCmd::Launch {
+                    what:
+                        LaunchCmd::Settings {
+                            agent,
+                            person,
+                            mode,
+                            pkg,
+                            snapshot,
+                            kernel,
+                            project,
+                            cwd,
+                            harness,
+                            kith_bin,
+                            plugins_json,
+                            terminal,
+                            api_helper,
+                            once_id,
+                            resolve,
+                            json: _,
+                        },
+                } => launch_cmd::print_settings(&launch_cmd::Args {
+                    agent,
+                    person,
+                    mode,
+                    pkg,
+                    snapshot,
+                    kernel,
+                    project,
+                    cwd,
+                    harness,
+                    kith_bin,
+                    plugins_json,
+                    terminal,
+                    api_helper,
+                    once_id,
+                    resolve,
+                    granted: None,
+                })?,
+                KernelCmd::Launch {
+                    what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
+                } => {
+                    launch_cmd::print_mcp(&launch_cmd::Args {
+                        agent,
+                        person,
+                        pkg,
+                        snapshot,
+                        kernel,
+                        granted,
+                        resolve,
+                        ..launch_cmd::Args::default()
+                    })?;
                 }
                 KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } => unreachable!("handled above"),
             }

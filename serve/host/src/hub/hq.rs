@@ -231,9 +231,11 @@ mod tests {
             let e = hub.update_bot(&patch).unwrap_err().to_string();
             assert!(e.contains(command), "{patch}: {e}");
         }
-        hub.update_bot(&json!({"id": bot.id, "backend": "claude", "model": null, "modelOptions": {}, "fastMode": false,
-            "connectors": [], "skills": []}))
-            .unwrap();
+        hub.update_bot(
+            &json!({"id": bot.id, "backend": "claude", "model": null, "modelOptions": {}, "fastMode": false,
+            "connectors": [], "skills": []}),
+        )
+        .unwrap();
         let done = hub.apply_hq_agents(&[agent(&dir, "house", "keeps the house tidy")]).unwrap();
         assert!(done.created.is_empty(), "never a second bot: {done:?}");
         let all = bots(&hub);
