@@ -20,6 +20,7 @@ mkdir -p "$HOME/.claude" "$HOME/.codex" "$KITH_HOME/state" "$A" "$T/bin" "$T/wor
 export KITH_STATE=$KITH_HOME/state
 printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$A/agent.md"
 export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+touch "$T/gitconfig" && export GIT_CONFIG_GLOBAL=$T/gitconfig GIT_CONFIG_NOSYSTEM=1
 git -C "$A" init -q && git -C "$A" add -A && git -C "$A" commit -qm init
 git -C "$KITH_STATE" init -q && cp "$KERNEL/lib/dot-kith.gitignore" "$KITH_STATE/.gitignore"
 
@@ -146,7 +147,7 @@ check "backup add text is unchanged" "[ \"\$(\"$KITH\" backup add codex)\" = 'co
 
 # ---- update self --check ----
 G=$T/g; mkdir -p "$G"
-git init -q --bare "$G/origin.git"
+git init -q --bare -b main "$G/origin.git"
 git clone -q "$G/origin.git" "$G/clone" 2>/dev/null
 mkdir -p "$G/clone/kernel/bin" && echo x > "$G/clone/kernel/bin/kith" && git -C "$G/clone" add -A && git -C "$G/clone" commit -qm one && git -C "$G/clone" push -q origin HEAD 2>/dev/null
 git -C "$G/clone" branch -q --set-upstream-to=origin/"$(git -C "$G/clone" branch --show-current)" 2>/dev/null

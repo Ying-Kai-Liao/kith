@@ -1,4 +1,4 @@
-import { emptyBackups, type Backups } from '@shared/backups'
+import { emptyBackups, type AccountAdd, type Backups } from '@shared/backups'
 import { isUnsupportedHost } from '@shared/kith-info'
 import type { HostClient } from '../client/host-client'
 import { Observable } from '../lib/observable'
@@ -97,6 +97,35 @@ export class BackupsStore extends Observable {
       }
     }
     return (this.queue = this.queue.then(send))
+  }
+
+  /** Adds a login: the host makes the folder and starts the login terminal (the view shows `term`). Throws the host's words. */
+  async addAccount(harness: string, name: string, yes: boolean, cols: number, rows: number): Promise<AccountAdd> {
+    this.error = null
+    try {
+      return await (await this.client()).accountAdd(harness, name, yes, cols, rows)
+    } catch (error) {
+      this.error = message(error)
+      this.changed()
+      throw error
+    }
+  }
+
+  /** Removes a login the user confirmed; reads the chain again (an order may still list it). Returns whether it was in one. */
+  async removeAccount(harness: string, name: string): Promise<boolean | null> {
+    this.error = null
+    try {
+      const { inChain } = await (await this.client()).accountRemove(harness, name)
+      await this.load()
+      return inChain
+    } catch (error) {
+      this.error = message(error)
+      // Already gone (removed twice, or from the terminal): show what the host has now.
+      await this.load()
+      this.error = message(error)
+      this.changed()
+      return null
+    }
   }
 
   private async reread() {
