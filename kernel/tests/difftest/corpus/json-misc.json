@@ -225,10 +225,120 @@
     "setup": [
       {
         "mkdir": "kith/state"
+      },
+      {
+        "write": "gitconfig",
+        "text": ""
+      },
+      {
+        "run": [
+          "git",
+          "init",
+          "-q",
+          "--bare",
+          "-b",
+          "main",
+          "{KITH_HOME}/origin.git"
+        ]
+      },
+      {
+        "run": [
+          "git",
+          "init",
+          "-q",
+          "-b",
+          "main",
+          "{KITH_HOME}/work"
+        ]
+      },
+      {
+        "write": "kith/work/kernel/VERSION",
+        "text": "1\n"
+      },
+      {
+        "run": [
+          "git",
+          "add",
+          "-A"
+        ],
+        "cwd": "kith/work"
+      },
+      {
+        "run": [
+          "git",
+          "commit",
+          "-q",
+          "-m",
+          "c1"
+        ],
+        "cwd": "kith/work"
+      },
+      {
+        "run": [
+          "git",
+          "remote",
+          "add",
+          "origin",
+          "{KITH_HOME}/origin.git"
+        ],
+        "cwd": "kith/work"
+      },
+      {
+        "run": [
+          "git",
+          "push",
+          "-q",
+          "-u",
+          "origin",
+          "main"
+        ],
+        "cwd": "kith/work"
+      },
+      {
+        "run": [
+          "git",
+          "clone",
+          "-q",
+          "-b",
+          "main",
+          "{KITH_HOME}/origin.git",
+          "{KITH_HOME}/repo"
+        ]
+      },
+      {
+        "write": "kith/work/kernel/VERSION",
+        "text": "2\n"
+      },
+      {
+        "run": [
+          "git",
+          "commit",
+          "-q",
+          "-am",
+          "c2"
+        ],
+        "cwd": "kith/work"
+      },
+      {
+        "run": [
+          "git",
+          "push",
+          "-q",
+          "origin",
+          "main"
+        ],
+        "cwd": "kith/work"
       }
     ],
     "env": {
-      "KITH_ROOT": "{KITH_HOME}/kernel"
+      "KITH_SELF_ROOT": "{KITH_HOME}/repo/kernel",
+      "GIT_CONFIG_GLOBAL": "{ROOT}/gitconfig",
+      "GIT_CONFIG_NOSYSTEM": "1",
+      "GIT_AUTHOR_NAME": "t",
+      "GIT_AUTHOR_EMAIL": "t@example.com",
+      "GIT_COMMITTER_NAME": "t",
+      "GIT_COMMITTER_EMAIL": "t@example.com",
+      "GIT_SSH_COMMAND": "false"
     },
     "run": [
       [
