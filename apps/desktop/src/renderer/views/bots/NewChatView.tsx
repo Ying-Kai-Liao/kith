@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { draftOf, isGroup, type Bot } from '@shared/models'
+import { isGroup, type Bot } from '@shared/models'
 import { BotAvatar, GroupAvatar } from '../../components/Avatar'
 import { Hairline, IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
@@ -9,7 +9,8 @@ import { QUICK_ENGINES, quickEngine } from '@shared/quick-chat'
 import { HStack, Spacer } from '../../components/Stack'
 import { Text } from '../../components/Text'
 import { useStore } from '../../store/context'
-import { createDefaultBot, errorText } from './drafts'
+import { errorText } from './drafts'
+import { NewAgentSheet } from './NewAgentSheet'
 import { AutoTextArea, BotChip } from './parts'
 import { StartingFolderChip, type StartingPick } from './PlaceFolderPicker'
 import './bots.css'
@@ -30,7 +31,6 @@ export function NewChatView({ group, quick = false, onClose }: { group: boolean;
   // A quick chat's own engine and model; both empty is scratch's own.
   const [engine, setEngine] = useState('')
   const [model, setModel] = useState('')
-  const [creating, setCreating] = useState(false)
   // A new group chat's purpose labels, typed as "launch, q4 plan".
   const [labels, setLabels] = useState('')
   // The folder for the first message; the bot's own default shows until one is picked.
@@ -102,27 +102,15 @@ export function NewChatView({ group, quick = false, onClose }: { group: boolean;
       .catch((e: unknown) => store.setError(errorText(e)))
   }
 
-  const create = () => {
-    if (creating) return
-    setCreating(true)
-    const name = query.trim()
-    const alone = recipients.length === 0 && !group
-    void (async () => {
-      try {
-        let bot = await createDefaultBot(store)
-        if (name) bot = await store.save({ ...draftOf(bot), name })
-        if (alone) {
-          open(bot.id)
-        } else {
-          // `createDefaultBot` selected it; stay here and add it to the others.
-          store.setSelection(null)
-          choose(bot)
-        }
-      } catch (e) {
-        store.setError(errorText(e))
-      }
-      setCreating(false)
-    })()
+  // "New agent" asks for a name and a line first, then makes a kith agent; the sheet reports what kith refuses.
+  const [making, setMaking] = useState(false)
+  const create = () => setMaking(true)
+  const made = (bot: Bot) => {
+    setMaking(false)
+    if (recipients.length === 0 && !group) return open(bot.id)
+    // Stay here and add it to the others.
+    store.setSelection(null)
+    choose(bot)
   }
 
   // Return in To: picks the top match, or with the field empty, starts the chat.
@@ -136,10 +124,12 @@ export function NewChatView({ group, quick = false, onClose }: { group: boolean;
   }
 
   // ⌘1 creates, ⌘2…⌘9 pick the matches; Escape closes.
-  const keys = useRef({ create, choose, matches, onClose })
-  keys.current = { create, choose, matches, onClose }
+  const keys = useRef({ create, choose, matches, onClose, making })
+  keys.current = { create, choose, matches, onClose, making }
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The new-agent sheet has the keys while it is open.
+      if (keys.current.making) return
       if (e.key === 'Escape') {
         e.preventDefault()
         keys.current.onClose()
@@ -193,7 +183,7 @@ export function NewChatView({ group, quick = false, onClose }: { group: boolean;
       <div className="compose-list">
         <PickRow shortcut={1} onClick={create} icon={
           <span className="compose-create-icon">
-            <Icon key={creating ? 'hourglass' : 'plus'} name={creating ? 'hourglass' : 'plus'} size={13} weight="medium" className="fade-in" />
+            <Icon name="plus" size={13} weight="medium" />
           </span>
         }>
           {query ? `New agent “${query}”` : 'New agent'}
@@ -240,6 +230,7 @@ export function NewChatView({ group, quick = false, onClose }: { group: boolean;
           }}
         />
       </div>
+      <NewAgentSheet open={making} initialName={query} onClose={() => setMaking(false)} onMade={made} />
     </SheetPage>
   )
 }
