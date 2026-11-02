@@ -56,6 +56,8 @@
 #   kith allow <agent> [--rm ID]                        what you said "Always allow" to for the agent in auto mode: list, forget one (kith-allow)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
 #   kith group add-bot|remove-bot <room> <bot>  ·  kith bot set <bot> [--wake-profile P] [--turn-timeout S]   a bot guest (Grok) in a group room; its wake settings (kith-group)
+#   kith people [ls|show <id>] [--json]  ·  kith invite add|ls|revoke [--json]   the people you invited, and their app invites (kith-people)
+#   kith bot ls|invite|revoke-invite|revoke|decide|auto-allow [--json]   bot guests and their invites, through the host (kith-group)
 #   kith connector ls|search|info|install|remove [--json]   the MCP connectors installed on this Mac, through the host (kith-connector)
 #   kith keys add <service> --profile <account|service/account> [--for AGENT]   hand Kith a key through a card in the app (default AGENT: serve); never typed here (kith-keys)
 #   kith link [NAME] [--accept [CODE] | --deny] | unlink NAME   pair this Mac with another of your account's (kith-serve)
@@ -102,7 +104,7 @@ set -euo pipefail
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
-[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,73p' "$0" | sed 's/^#   //'; exit 0; }
+[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,75p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
 if [[ $1 == migrate ]]; then
   [[ $# -eq 1 ]] && { echo "usage: kith migrate run [--dry-run|--undo|--force]   move this Mac from ~/.hq to ~/.kith (--dry-run shows the steps first)
@@ -159,6 +161,7 @@ case $1 in
   wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   group|bot)          exec "$KITH/bin/kith-group" "$@" ;;
+  people|invite)      exec "$KITH/bin/kith-people" "$@" ;;
   connector)          shift; exec "$KITH/bin/kith-connector" "${@:---help}" ;;
   keys)               shift; exec "$KITH/bin/kith-keys" "${@:---help}" ;;
   serve)              shift; exec "$KITH/bin/kith-serve" "${@:-help}" ;;
@@ -177,7 +180,7 @@ agent_names() {
   done | sort -u
 }
 # What can follow `kith` besides an agent: a typo of one of these is suggested too.
-SUBCOMMANDS="init doctor backup account ls send-to who versions pin unpin rollback new install update push commit history restore share market search deps auth door cost ask allow remote group bot keys link unlink memory recall summarise forget project schedule wake acp bug migrate serve"
+SUBCOMMANDS="init doctor backup account ls send-to who versions pin unpin rollback new install update push commit history restore share market search deps auth door cost ask allow remote group bot people invite keys link unlink memory recall summarise forget project schedule wake acp bug migrate serve"
 # Names that start with, contain, or sit within edit distance 2 of the typed one, comma-separated.
 agent_suggest() {
   { agent_names; printf '%s\n' $SUBCOMMANDS; } | sort -u | awk -v t="$1" '
