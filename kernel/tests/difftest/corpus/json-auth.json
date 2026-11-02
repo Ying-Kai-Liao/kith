@@ -1,0 +1,159 @@
+[
+ {
+  "name": "auth-json-ls-grant-revoke",
+  "command": "auth",
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/capabilities.yaml",
+    "text": "needs: [notion]\n"
+   }
+  ],
+  "run": [
+   [
+    "auth",
+    "ls",
+    "--json"
+   ],
+   [
+    "auth",
+    "grant",
+    "echo",
+    "notion",
+    "notion/library",
+    "--json"
+   ],
+   [
+    "auth",
+    "grant",
+    "echo",
+    "notion",
+    "notion/library",
+    "--json"
+   ],
+   [
+    "auth",
+    "ls",
+    "--json"
+   ],
+   [
+    "auth",
+    "revoke",
+    "echo",
+    "notion",
+    "--json"
+   ],
+   [
+    "auth",
+    "revoke",
+    "echo",
+    "notion",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "auth-json-granted",
+  "command": "auth",
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/capabilities.yaml",
+    "text": "needs: [notion]\n"
+   }
+  ],
+  "env": {
+   "KITH_AGENT": "echo"
+  },
+  "run": [
+   [
+    "auth",
+    "grant",
+    "echo",
+    "notion",
+    "notion/library"
+   ],
+   [
+    "auth",
+    "granted",
+    "notion",
+    "--json"
+   ],
+   [
+    "auth",
+    "granted",
+    "--for",
+    "echo",
+    "slack",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "auth-json-errors",
+  "command": "auth",
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/echo/role/agent.md",
+    "text": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n"
+   },
+   {
+    "write": "kith/agents/echo/role/capabilities.yaml",
+    "text": "needs: [notion]\n"
+   }
+  ],
+  "run": [
+   [
+    "auth",
+    "grant",
+    "echo",
+    "nosuch",
+    "nosuch/x",
+    "--json"
+   ],
+   [
+    "auth",
+    "grant",
+    "ghost",
+    "notion",
+    "notion/x",
+    "--json"
+   ],
+   [
+    "auth",
+    "grant",
+    "echo",
+    "notion",
+    "slack/x",
+    "--json"
+   ],
+   [
+    "auth",
+    "revoke",
+    "ghost",
+    "notion",
+    "--json"
+   ],
+   [
+    "auth",
+    "granted",
+    "--json"
+   ]
+  ]
+ }
+]

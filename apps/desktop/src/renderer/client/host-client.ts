@@ -18,6 +18,7 @@ import { isAccessRemoved, parseGranted } from '@shared/mac-role'
 import { parseAudit, parseCreatedInvite, parseInvites, parsePeople, type AuditRow, type CreatedInvite, type PendingInvite, type Person, type Role } from '@shared/people'
 import { threadWriterCode, threadWriterMessage, type TakeOverResult, type ThreadWriterCode } from '@shared/thread-writer'
 import type { QuickEngine } from '@shared/quick-chat'
+import { parseKernelStatus, parseNewAgentResult, type KernelStatus, type NewAgentResult } from '@shared/new-agent'
 import type { PlaceFolder, PlaceSelection, ProjectInfo, RecentFolder, StartingFolder } from '@shared/place-folders'
 import { METHODS, receive, type MethodName, type Params, type Received, type Results } from '@shared/host-contract.gen'
 import {
@@ -348,6 +349,16 @@ export class HostClient {
   /** Writes a kith agent's own model, effort or harness (`kith <agent> set …`; `default` forgets it; `model` rides a harness change). Returns kith's info read back. */
   async kithSetSetting(botId: string, setting: 'model' | 'effort' | 'harness', value: string, model?: string): Promise<KithInfoResult> {
     return parseKithInfoResult(await this.call('kithSetSetting', { botId, setting, value, ...(model ? { model } : {}) }, 60_000))
+  }
+
+  /** Makes a kith agent (`kith new --json`; owner only). A refusal throws the host's own words. `bot` is null while the roster lags or its engine isn't one the host runs. */
+  async newKithAgent(params: Record<string, string>): Promise<NewAgentResult<Bot>> {
+    return parseNewAgentResult<Bot>(await this.call('newKithAgent', params, 240_000))
+  }
+
+  /** Whether the kernel can run (`refresh` asks again now instead of taking the host's short-lived answer). A host before this call answers 404. */
+  async kernelStatus(refresh = false): Promise<KernelStatus> {
+    return parseKernelStatus(await this.call('kernelStatus', refresh ? { refresh: true } : {}, 30_000))
   }
 
   /** A Schedule card's button on a kith job (owner only): kith-sched does it, and the answer is the agent's info read back. */
