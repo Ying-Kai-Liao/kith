@@ -14,9 +14,8 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-/// The kernel's depth caps (`MAX_LOCAL_HOPS` / `MAX_CROSS_HOPS` in kernel/bin/kith-ask).
-const HOP_MAX: i64 = 8;
-const CROSS_MAX: i64 = 2;
+/// The kernel's depth caps, from the crate that holds them once.
+use kith_kernel::delegation::{MAX_CROSS_HOPS as CROSS_MAX, MAX_LOCAL_HOPS as HOP_MAX};
 /// An app that polls reads the kernel at most this often (a read may take up to 20 s).
 const FRESH: Duration = Duration::from_secs(3);
 /// The longest live line.
@@ -76,7 +75,7 @@ fn parked(id: &str) -> bool {
 }
 
 fn parked_in(machine: &std::path::Path, id: &str) -> bool {
-    machine.join("live").join("ask").join(format!("{id}.parked")).exists()
+    kith_kernel::delegation::parked(machine, id)
 }
 
 /// Where the handoff stands, in the words the apps show: `sent`, `working`, `needsYou`, `done`, `stopped`, or `unknown`
