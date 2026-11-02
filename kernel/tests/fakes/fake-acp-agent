@@ -1,0 +1,64 @@
+#!/usr/bin/env python3
+"""A fake ACP agent for tests: speaks initialize, session/new, session/set_model, session/prompt over stdio.
+
+FAKE_ACP_MODE   ok (default) | signin (session/new says authentication required) | depleted (the prompt fails with a
+                usage limit) | hang (the prompt is never answered) | crash (exits during the prompt, saying why on stderr)
+FAKE_ACP_ANSWER  the answer, instead of echoing the task
+FAKE_ACP_COST   dollars to report in the prompt result (default: none reported)
+FAKE_ACP_PIDFILE  file to write this process's pid to (a test checks nothing is left running)
+FAKE_ACP_LOG    file to append every request's method and params to, one JSON line each
+"""
+import json, os, sys, time
+
+mode = os.environ.get('FAKE_ACP_MODE', 'ok')
+if os.environ.get('FAKE_ACP_PIDFILE'):
+    open(os.environ['FAKE_ACP_PIDFILE'], 'w').write(str(os.getpid()))
+
+
+def send(msg):
+    sys.stdout.write(json.dumps(msg) + '\n')
+    sys.stdout.flush()
+
+
+def reply(id, result=None, error=None):
+    send({'jsonrpc': '2.0', 'id': id, **({'error': error} if error else {'result': result})})
+
+
+for line in sys.stdin:
+    try:
+        msg = json.loads(line)
+    except ValueError:
+        continue
+    method, id, params = msg.get('method'), msg.get('id'), msg.get('params') or {}
+    if os.environ.get('FAKE_ACP_LOG') and method:
+        with open(os.environ['FAKE_ACP_LOG'], 'a') as f:
+            f.write(json.dumps({'method': method, 'params': params}) + '\n')
+    if method == 'initialize':
+        reply(id, {'protocolVersion': 1, 'agentCapabilities': {}, 'agentInfo': {'name': 'fake-acp-agent'}})
+    elif method == 'session/new':
+        if mode == 'signin':
+            reply(id, error={'code': -32000, 'message': 'Authentication required'})
+        else:
+            reply(id, {'sessionId': 'fake-session-1'})
+    elif method == 'session/set_model':
+        reply(id, {})
+    elif method == 'session/prompt':
+        task = ''.join(b.get('text', '') for b in params.get('prompt', []))
+        if mode == 'hang':
+            time.sleep(300)
+        elif mode == 'crash':
+            sys.stderr.write('fake agent: out of memory\n')
+            sys.stderr.flush()
+            sys.exit(3)
+        elif mode == 'depleted':
+            reply(id, error={'code': -32603, 'message': 'Internal error',
+                             'data': {'errorKind': 'rate_limit', 'resetsAt': 1790000000}})
+        else:
+            for part in (('', os.environ['FAKE_ACP_ANSWER']) if os.environ.get('FAKE_ACP_ANSWER') else ('echo: ', task)):
+                send({'jsonrpc': '2.0', 'method': 'session/update', 'params': {
+                    'sessionId': params.get('sessionId'),
+                    'update': {'sessionUpdate': 'agent_message_chunk', 'content': {'type': 'text', 'text': part}}}})
+            result = {'stopReason': 'end_turn', 'usage': {'inputTokens': 10, 'outputTokens': 5, 'cachedReadTokens': 2}}
+            if os.environ.get('FAKE_ACP_COST'):
+                result['_meta'] = {'costUsd': float(os.environ['FAKE_ACP_COST'])}
+            reply(id, result)

@@ -24,6 +24,7 @@ mod rich_card;
 mod routines;
 mod run_outbox;
 mod runauth;
+mod runonce;
 mod samples;
 mod screen;
 mod service;
@@ -428,6 +429,32 @@ enum KernelCmd {
         #[command(subcommand)]
         action: Option<EnginesAction>,
     },
+    /// One task on one engine over ACP: the answer on stdout (the task after `--`, or on stdin).
+    RunOnce {
+        engine: String,
+        #[arg(long)]
+        model: Option<String>,
+        /// The folder the engine works in (default: here).
+        #[arg(long)]
+        cwd: Option<std::path::PathBuf>,
+        /// MCP servers for the run: `{"mcpServers": {...}}` as JSON or a file holding it.
+        #[arg(long)]
+        mcp_config: Option<String>,
+        /// Print `{text, stop_reason, usage, cost_usd, session_id}`.
+        #[arg(long)]
+        json: bool,
+        /// Allow the tools the engine asks to use (otherwise it is refused).
+        #[arg(long)]
+        approve: bool,
+        /// Seconds the whole run may take.
+        #[arg(long, default_value_t = 600)]
+        timeout: u64,
+        /// Start this ACP command line instead of the engine's own (tests; also `KITH_RUN_ONCE_ACP_COMMAND`).
+        #[arg(long)]
+        acp_command: Option<String>,
+        #[arg(last = true)]
+        task: Vec<String>,
+    },
 }
 
 /// `kith engines <action> <id>`: print the command, never run it.
@@ -484,6 +511,7 @@ async fn main() -> Result<()> {
     // Two crypto backends reach rustls (reqwest pulls aws-lc-rs, the guest crate and ureq pull ring), so rustls can't
     // pick one by itself and every TLS client without an explicit provider panics (the Discord gateway did, 0.1.1).
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    agent::acp::init();
     let args: Vec<_> = std::env::args_os().collect();
     let cli = match kernel::route(&args) {
         kernel::Route::Host(a) => Cli::parse_from(a),
@@ -669,10 +697,17 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Sub::Kernel { cmd } => {
+            if let KernelCmd::RunOnce { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task } =
+                cmd
+            {
+                let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
+                std::process::exit(runonce::run(args).await?);
+            }
             match cmd {
                 KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                 KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
                 KernelCmd::Engines { json, action } => print_engines(json, action)?,
+                KernelCmd::RunOnce { .. } => unreachable!("handled above"),
             }
             Ok(())
         }
