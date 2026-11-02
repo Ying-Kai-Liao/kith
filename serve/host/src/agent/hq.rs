@@ -554,6 +554,49 @@ fn setting_error(setting: &str, e: &anyhow::Error) -> anyhow::Error {
     anyhow!("{}", rest.strip_prefix("kith: ").unwrap_or(rest))
 }
 
+/// How long `kith new` may take: it makes a folder and a git repo, no more.
+const NEW_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long the kernel probe waits: a broken Python or uv usually fails at once, a hung one should not hold the app.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+
+const UPDATE_KITH: &str =
+    "this Mac's kith can't make an agent this way; update kith (`kith update self`) and try again";
+
+/// `kith new <name> <description> --json`: makes the agent's folder (a role, a memory) and says where. Kith's own
+/// refusal (a name taken, a bad name) comes back as the error, without the command line around it. An older kith has
+/// no `--json` here and prints nothing useful: that is "update kith", not a made agent.
+pub async fn new_agent(bin: &Path, name: &str, description: &str) -> Result<kernel::NewAgent> {
+    let out = run(bin, &command::new(name, description, None), None, NEW_TIMEOUT).await.map_err(|e| kernel_said(&e))?;
+    serde_json::from_str::<kernel::NewAgent>(out.trim()).map_err(|_| anyhow!(UPDATE_KITH))
+}
+
+/// Kith's own sentence from a failed command: `run` wraps it as "`kith … --json` failed (exit status: 1): <text>".
+fn kernel_said(e: &anyhow::Error) -> anyhow::Error {
+    let text = format!("{e:#}");
+    let rest = text.strip_prefix('`').and_then(|t| t.split_once("): ")).map_or(text.as_str(), |(_, r)| r.trim());
+    // An older kith has no `new --json`: it prints its usage.
+    if rest.to_lowercase().starts_with("usage") {
+        return anyhow!(UPDATE_KITH);
+    }
+    let rest = ["kith-new: ", "kith: "].iter().find_map(|p| rest.strip_prefix(p)).unwrap_or(rest);
+    anyhow!("{rest}")
+}
+
+/// Whether the kernel at `bin` can list its agents: the roster sync's own call, with a short wait. The error is the
+/// last line of kith's complaint that says something (a Python or uv error ends with it), for the person to read.
+pub async fn probe(bin: &Path) -> std::result::Result<(), String> {
+    let out = run(bin, &command::ls(), None, PROBE_TIMEOUT).await.map_err(|e| {
+        let text = format!("{e:#}");
+        let rest = text.strip_prefix('`').and_then(|t| t.split_once("): ")).map_or(text.as_str(), |(_, r)| r);
+        let line = rest.lines().rev().map(str::trim).find(|l| !l.is_empty()).unwrap_or("kith failed");
+        line.chars().take(300).collect::<String>()
+    })?;
+    match serde_json::from_str::<Value>(out.trim()) {
+        Ok(v) if v.is_array() => Ok(()),
+        _ => Err("`kith ls --json` didn't print a list of agents".to_owned()),
+    }
+}
+
 /// `kith schedule <op> <agent> <id>` (pause, resume, run or rm) as the person the job runs for, so kith-sched stays
 /// the only writer of jobs.json and its own "only they or the owner can run it" rule applies. The person is the job's
 /// as kith-info reads it now, never the caller's word. Returns the info read back from hq.

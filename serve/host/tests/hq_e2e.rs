@@ -648,6 +648,41 @@ async fn model_effort_and_harness_are_written_through_to_kith_and_read_back() {
     }
 }
 
+/// "New bot": `newKithAgent` makes the agent through `kith new … --json` and the settings through `set`, and the answer
+/// carries its bot with the look the app picked; `kernelStatus` says the kernel runs.
+#[tokio::test]
+async fn a_new_bot_is_a_kith_agent_made_through_the_cli() {
+    let s = start().await;
+    let status = s.host.call("kernelStatus", json!({})).await;
+    assert_eq!(status["ok"], true, "{status}");
+    assert!(status["problem"].is_null());
+
+    let made = s
+        .host
+        .call(
+            "newKithAgent",
+            json!({"name": "trip-pal", "description": "Plans trips", "model": "opus", "effort": "high",
+                   "pinned": true, "avatarColor": "#112233"}),
+        )
+        .await;
+    assert_eq!(made["agent"], "trip-pal");
+    let id = made["botId"].as_str().expect("the roster has the new agent's bot");
+    assert_eq!(made["bot"]["hqAgent"], "trip-pal");
+    assert_eq!(made["bot"]["pinned"], true);
+    assert_eq!(made["bot"]["avatarColor"], "#112233");
+    assert!(s.host.roster().await.iter().any(|b| b["id"] == id), "the roster has the new bot");
+
+    let calls: Vec<Value> = s.lines("calls.jsonl").into_iter().map(|c| c["args"].clone()).collect();
+    let pos = |args: Value| calls.iter().position(|c| *c == args).unwrap_or_else(|| panic!("no call {args}"));
+    let new = pos(json!(["new", "trip-pal", "Plans trips", "--json"]));
+    let model = pos(json!(["trip-pal", "set", "model", "opus", "--json"]));
+    let effort = pos(json!(["trip-pal", "set", "effort", "high", "--json"]));
+    assert!(new < model && model < effort);
+
+    let why = s.host.refused("newKithAgent", json!({"name": "trip-pal", "description": "again"})).await;
+    assert!(why.contains("there is already an agent called"), "{why}");
+}
+
 /// A message spoken in a call: its turn gets the voice note and runs on the call model, the chat keeps the spoken
 /// words only, and a typed message after it is back on the agent's own model, in the same session.
 #[tokio::test]

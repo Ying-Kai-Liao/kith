@@ -57,9 +57,34 @@ def permission(default):
     return open(path, encoding="utf-8").read().strip() if os.path.exists(path) else default
 
 
+def made_agents():
+    """Agents `new` made: folders under `made/`, with the settings `set` wrote beside them."""
+    root = os.path.join(home, "made")
+    return sorted(os.listdir(root)) if os.path.isdir(root) else []
+
+
 if args == ["ls", "--json"]:
-    print(json.dumps([{"name": "house", "description": "Keeps the house", "home": home, "model": None,
-                       "effort": None, "harness": "claude"}]))
+    listed = [{"name": "house", "description": "Keeps the house", "home": home, "model": None,
+               "effort": None, "harness": "claude"}]
+    for name in made_agents():
+        folder = os.path.join(home, "made", name)
+        read = lambda key: open(os.path.join(folder, key), encoding="utf-8").read().strip() if os.path.exists(os.path.join(folder, key)) else None
+        listed.append({"name": name, "description": read("description"), "home": folder, "model": read("model"),
+                       "effort": read("effort"), "harness": read("harness") or "claude"})
+    print(json.dumps(listed))
+elif args[:1] == ["new"] and args[-1] == "--json" and len(args) == 4:
+    # kith's `new --json`: {agent, home, dir, description}; a refusal is {ok: false, error} on stdout, exit 1.
+    folder = os.path.join(home, "made", args[1])
+    if os.path.exists(folder) or args[1] == "house":
+        print(json.dumps({"ok": False, "error": f'kith: there is already an agent called "{args[1]}"'}))
+        sys.exit(1)
+    os.makedirs(os.path.join(folder, "role"))
+    open(os.path.join(folder, "description"), "w", encoding="utf-8").write(args[2])
+    print(json.dumps({"ok": True, "agent": args[1], "home": folder, "dir": os.path.join(folder, "role"), "description": args[2]}))
+elif len(args) == 5 and args[0] in made_agents() and args[1] == "set" and args[4] == "--json":
+    # `<made agent> set model|effort|harness VALUE --json`: kept in a file of that name beside the agent.
+    open(os.path.join(home, "made", args[0], args[2]), "w", encoding="utf-8").write(args[3])
+    print(json.dumps({"agent": args[0], "setting": args[2], "value": args[3], "previous": None, "changed": True}))
 elif args[:2] == ["project", "ls"]:
     path = os.path.join(home, "projects.json")
     print(open(path, encoding="utf-8").read() if os.path.exists(path) else '{"projects": []}')
