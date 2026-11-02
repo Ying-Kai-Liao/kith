@@ -41,11 +41,30 @@ ID_RE = re.compile(r'^([a-z][a-z0-9-]*)(?::([A-Za-z0-9][A-Za-z0-9._-]*))?$')
 STATUS_TIMEOUT = 20
 
 
+MODEL_RE = re.compile(r'^[\w.:\[\]/-]+$')
+CLAUDE_MODEL_RE = re.compile(r'^(opus|sonnet|haiku|fable|claude-)|^(best|opusplan)$')
+
+
+def is_claude_model(model):
+    """A Claude model name or alias; it means nothing to another harness (codex -m sonnet fails)."""
+    return bool(CLAUDE_MODEL_RE.match(model or ''))
+
+
+def split(entry):
+    """(id without the model, model or None): a backup entry is <harness>[:<name>][@<model>]."""
+    base, at, model = (entry or '').partition('@')
+    return base, (model if at else None)
+
+
 def parse(entry):
-    """(harness, name or None); ValueError says what is wrong with the id."""
+    """(harness, name or None); ValueError says what is wrong with the id. A trailing @model is checked and left out."""
+    entry, model = split(entry)
+    if model is not None and not MODEL_RE.match(model):
+        raise ValueError(f"'{entry}@{model}': @ needs a model name (claude@sonnet, claude:work@opus)")
     m = ID_RE.match(entry or '')
     if not m:
-        raise ValueError(f"'{entry}' is not a backup id: use <harness> or <harness>:<name> (claude, claude:work, claude-api:main, codex)")
+        raise ValueError(f"'{entry}' is not a backup id: use <harness> or <harness>:<name>, with @<model> for a model of its own "
+                         "(claude, claude:work, claude@sonnet, claude-api:main, codex)")
     harness, name = m.groups()
     if harness == 'claude-api' and not name:
         raise ValueError("claude-api needs a profile: claude-api:<profile>")
@@ -68,8 +87,18 @@ def family(harness):
     return FAMILY.get(harness, (harness,))
 
 
+def check_entry_model(entry):
+    """Raise ValueError when the entry's model can't belong to its harness: a Claude model on another one."""
+    h, _ = parse(entry)
+    model = split(entry)[1]
+    if model and is_claude_model(model) and h not in family('claude'):
+        raise ValueError(f"{model} is a Claude model and {h} is not Claude: use {h}@<a {h} model>, or claude@{model}")
+
+
 def check_main(entry, harness):
     """Raise ValueError unless entry can be the main account of an agent on harness."""
+    if split(entry)[1] is not None:
+        raise ValueError(f"{entry}: a main account takes no @model (the agent's own model applies); @model is for backups")
     h, _ = parse(entry)
     if h not in family(harness):
         raise ValueError(f"{entry} can't be the main account of a {harness} agent: use "
@@ -203,7 +232,7 @@ def entry_json(entry, agent, primary=False):
     # `auth status` can't see them. A named or API-key main account is checked like any entry.
     ready, why = (True, None) if primary and not name else check(entry, agent)
     out = {'id': entry, 'harness': 'claude' if harness == 'claude-api' else harness, 'account': name,
-           'kind': 'primary' if primary else kind(harness, name), 'ready': ready}
+           'model': split(entry)[1], 'kind': 'primary' if primary else kind(harness, name), 'ready': ready}
     if not ready:
         out['why'] = why
     return out
@@ -220,7 +249,7 @@ def chain(agent, agent_md):
         try:
             items.append(entry_json(i, agent))
         except ValueError as e:   # a hand-edited bad id: listed as not ready rather than failing the whole chain
-            items.append({'id': i, 'harness': None, 'account': None, 'kind': 'unknown', 'ready': False, 'why': str(e)})
+            items.append({'id': i, 'harness': None, 'account': None, 'model': None, 'kind': 'unknown', 'ready': False, 'why': str(e)})
     return {'version': 1, 'agent': agent, 'chain': items}
 
 
@@ -247,6 +276,14 @@ def launch_env(agent, entry, light=False):
     harness, name = parse(entry)
     if harness not in ('claude', 'claude-api', 'codex'):
         raise ValueError(f'{entry}: {harness} is not supported in launch-json yet')
+    model = split(entry)[1]
+    if model is None and not light:
+        # --backup claude for a chain entry claude@sonnet: the id without its model finds it, unless the chain lists the
+        # plain id too (the exact entry wins).
+        ids = kith_settings.backups(agent)[0]
+        if entry not in ids:
+            found = [split(i)[1] for i in ids if split(i)[0] == entry and split(i)[1]]
+            model = found[0] if found else None
     ready, why = present(entry, agent) if light else check(entry, agent)
     if not ready:
         hint = fix(entry, agent)
@@ -259,7 +296,7 @@ def launch_env(agent, entry, light=False):
         cfg_dir = str(account_dir(harness, name))
     helper = api_helper(agent, name) if harness == 'claude-api' else ''
     return (f'backup_harness={q(run_harness_name)} backup_account={q(name or "")} backup_cfg_var={q(cfg_var)} '
-            f'backup_cfg_dir={q(cfg_dir)} backup_api_helper={q(helper)}')
+            f'backup_cfg_dir={q(cfg_dir)} backup_api_helper={q(helper)} backup_model={q(model or "")}')
 
 
 def main_json(agent=None):
