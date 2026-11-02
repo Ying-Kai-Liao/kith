@@ -5,7 +5,7 @@ import { Hairline, IconButton } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { SheetPage } from '../../components/Overlay'
 import { parseLabels } from '@shared/room-labels'
-import { QUICK_ENGINES, quickEngine } from '@shared/quick-chat'
+import { parseQuickEngines, QUICK_ENGINES, quickEngine, type QuickEngineOption } from '@shared/quick-chat'
 import { HStack, Spacer } from '../../components/Stack'
 import { Text } from '../../components/Text'
 import { useStore } from '../../store/context'
@@ -31,6 +31,9 @@ export function NewChatView({ group, quick = false, onClose }: { group: boolean;
   // A quick chat's own engine and model; both empty is scratch's own.
   const [engine, setEngine] = useState('')
   const [model, setModel] = useState('')
+  // The picker's engines come from `kith engines --json`; if that fails the two known ones stay, with the reason shown.
+  const [engines, setEngines] = useState<QuickEngineOption[]>(QUICK_ENGINES)
+  const [enginesError, setEnginesError] = useState<string | null>(null)
   // A new group chat's purpose labels, typed as "launch, q4 plan".
   const [labels, setLabels] = useState('')
   // The folder for the first message; the bot's own default shows until one is picked.
@@ -57,6 +60,22 @@ export function NewChatView({ group, quick = false, onClose }: { group: boolean;
   useEffect(() => {
     toField.current?.focus()
   }, [])
+
+  useEffect(() => {
+    let live = true
+    store
+      .ready()
+      .then((client) => client.kithEngines())
+      .then((raw) => {
+        if (live) setEngines(parseQuickEngines(raw))
+      })
+      .catch((e: unknown) => {
+        if (live) setEnginesError(`Couldn't list engines: ${errorText(e)}`)
+      })
+    return () => {
+      live = false
+    }
+  }, [store])
 
   // The field stays in view as chips are added.
   useLayoutEffect(() => {
@@ -206,8 +225,9 @@ export function NewChatView({ group, quick = false, onClose }: { group: boolean;
       {!group && picked.length === 1 && picked[0]!.builtin ? (
         <HStack gap={8} className="compose-engine">
           <select className="field-box" value={engine} aria-label="Engine" onChange={(e) => setEngine(e.target.value)}>
-            {QUICK_ENGINES.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
+            {engines.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
+          {enginesError ? <Text size="footnote" tone="secondary">{enginesError}</Text> : null}
           <input className="field-box" value={model} placeholder="Model (optional)" aria-label="Model" spellCheck={false} onChange={(e) => setModel(e.target.value)} />
         </HStack>
       ) : null}

@@ -84,6 +84,10 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
                 Err(e) => json!({"info": null, "error": e, "fetchedAt": got.fetched_at}),
             }
         }
+        // The engines table as the CLI prints it (`kith engines --json`), passed through: the app's quick-chat picker
+        // and the engine sheet read installed / acp from it. Owner only (not on the member or bot lists). A kith
+        // that can't run, or an old one, answers with its own error text.
+        "kithEngines" => hq::json_cmd(&["engines", "--json"]).await?,
         // The Schedule card's buttons for a kith job: kith-sched does it, as the job's person (`hq::schedule`). Owner
         // only, like every method a member's contract doesn't list. hq's info read back, so the card shows the job now.
         "kithSchedule" => {
