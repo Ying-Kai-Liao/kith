@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# kith-account-check — `kith account add|remove|list --json`. CLI lines in, stdout / exit code / folders out, so the same
+# lines can check another implementation. add --json never runs the login: it returns the argv/env for the caller.
+# Throwaway HOME and KITH_HOME, fake claude/codex that record any call (none is expected from add --json).
+#
+#   kernel/tests/kith-account-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-account-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME
+mkdir -p "$HOME" "$KITH_HOME/state" "$T/bin"
+export KITH_STATE=$KITH_HOME/state
+KITH=$KERNEL/bin/kith
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+export OUT=
+jv() { python3 -c 'import json,os,sys; d=json.loads(os.environ["OUT"]); print(eval(sys.argv[1]))' "$1"; }
+DIR=$KITH_STATE/accounts   # the machine folder (KITH_MACHINE)
+
+# ---- harness missing: PATH has python and the shell tools but no claude / codex ----
+SAFE=$T/safe; mkdir -p "$SAFE"
+for t in python3 env bash sh git; do ln -s "$(command -v $t)" "$SAFE/$t"; done
+OUT=$(PATH=$SAFE "$KERNEL/bin/kith-account" add codex work --json 2>"$T/err"); rc=$?
+check "harness not installed: error object, non-zero, nothing made" "[ $rc != 0 ] && [ \"\$(jv 'd[\"ok\"]')\" = False ] && [ ! -e '$DIR/codex/work' ]"
+
+for h in claude codex; do printf '#!/bin/sh\necho "%s $*" >> "%s/calls"\nexit 1\n' "$h" "$T" > "$T/bin/$h"; chmod +x "$T/bin/$h"; done
+export PATH=$T/bin:$PATH
+
+# ---- add ----
+OUT=$("$KITH" account add claude work --json 2>"$T/err"); rc=$?
+check "claude add --json without --yes: refused with the warning, exit 2, nothing created" "[ $rc = 2 ] && [ \"\$(jv '(d[\"ok\"], \"Anthropic\" in d[\"warning\"], \"error\" in d)')\" = '(False, True, True)' ] && [ ! -e '$DIR/claude/work' ] && [ ! -s '$T/err' ]"
+OUT=$("$KITH" account add claude work --json --yes 2>"$T/err"); rc=$?
+check "claude add --json --yes: ok, created, login argv/env, warning" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"id\"], d[\"harness\"], d[\"name\"], d[\"created\"], d[\"login\"][\"argv\"], list(d[\"login\"][\"env\"]), \"warning\" in d)')\" = \"(True, 'claude:work', 'claude', 'work', True, ['claude', 'auth', 'login'], ['CLAUDE_CONFIG_DIR'], True)\" ] && [ \"\$(jv 'd[\"login\"][\"env\"][\"CLAUDE_CONFIG_DIR\"] == d[\"dir\"] == \"$DIR/claude/work\"')\" = True ]"
+check "the folder is 0700" "[ \"\$(python3 -c 'import os; print(oct(os.stat(\"$DIR/claude/work\").st_mode & 0o777))')\" = 0o700 ]"
+check "add --json did not run the login" "[ ! -e '$T/calls' ]"
+OUT=$("$KITH" account add claude work --json)
+check "claude add --json again: created false, same login, no --yes needed" "[ \"\$(jv '(d[\"ok\"], d[\"created\"], d[\"login\"][\"argv\"])')\" = \"(True, False, ['claude', 'auth', 'login'])\" ]"
+OUT=$("$KITH" account add codex main --json); rc=$?
+check "codex add --json: no --yes, no warning, CODEX_HOME" "[ $rc = 0 ] && [ \"\$(jv '(d[\"id\"], d[\"created\"], d[\"login\"][\"argv\"], list(d[\"login\"][\"env\"]), \"warning\" in d)')\" = \"('codex:main', True, ['codex', 'login', '--device-auth'], ['CODEX_HOME'], False)\" ]"
+OUT=$("$KITH" account add claude 'bad name' --json --yes 2>"$T/err"); rc=$?
+check "bad name: error object, exit 2, nothing on stderr" "[ $rc = 2 ] && [ \"\$(jv '(d[\"ok\"], \"error\" in d)')\" = '(False, True)' ] && [ ! -s '$T/err' ]"
+OUT=$("$KITH" account add gemini x --json); rc=$?
+check "unknown harness: error object, exit 2" "[ $rc = 2 ] && [ \"\$(jv 'd[\"ok\"]')\" = False ]"
+
+# ---- list ----
+OUT=$("$KITH" account list --json)
+check "list --json after add: both accounts, same row shape" "[ \"\$(jv 'sorted(r[\"id\"] for r in d)')\" = \"['claude:work', 'codex:main']\" ] && [ \"\$(jv 'all({\"id\",\"harness\",\"name\",\"dir\",\"logged_in\"} <= set(r) for r in d)')\" = True ]"
+
+# ---- remove ----
+"$KITH" backup add claude:work >/dev/null 2>&1
+OUT=$("$KITH" account remove claude work --json 2>"$T/err"); rc=$?
+check "remove --json without --yes: ok false, exit 2, folder kept" "[ $rc = 2 ] && [ \"\$(jv 'd[\"ok\"]')\" = False ] && [ -d '$DIR/claude/work' ]"
+OUT=$("$KITH" account remove claude work --json --yes 2>"$T/err"); rc=$?
+check "remove --json --yes: changed, in_chain true, folder gone" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"], d[\"id\"], d[\"in_chain\"], d[\"dir\"] == \"$DIR/claude/work\")')\" = \"(True, True, 'claude:work', True, True)\" ] && [ ! -e '$DIR/claude/work' ]"
+OUT=$("$KITH" account remove claude work --json --yes); rc=$?
+check "remove twice: ok false, no account" "[ $rc != 0 ] && [ \"\$(jv '(d[\"ok\"], \"no account\" in d[\"error\"])')\" = '(False, True)' ]"
+OUT=$("$KITH" account remove codex main --json --yes)
+check "remove codex not in a chain: in_chain false" "[ \"\$(jv '(d[\"ok\"], d[\"in_chain\"])')\" = '(True, False)' ]"
+mkdir -p "$T/elsewhere" "$DIR/codex"; ln -s "$T/elsewhere" "$DIR/codex/link"
+OUT=$("$KITH" account remove codex link --json --yes); rc=$?
+check "symlinked folder: refused, target kept" "[ $rc != 0 ] && [ \"\$(jv 'd[\"ok\"]')\" = False ] && [ -d '$T/elsewhere' ]"
+
+# ---- the interactive path still runs the login ----
+"$KITH" account add codex solo >"$T/out" 2>"$T/err"; rc=$?
+check "add without --json runs the login command" "[ $rc = 1 ] && grep -q 'codex login --device-auth' '$T/calls'"
+
+[ $fails = 0 ] && echo "all ok" || { echo "$fails failed"; exit 1; }

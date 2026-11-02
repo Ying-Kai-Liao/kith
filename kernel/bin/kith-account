@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """kith-account — extra logins, the main account each agent uses, and the backup chain on top of it.
 
-  kith account add claude <name> [--yes]   an extra Claude subscription account in ~/.kith/accounts/claude/<name>, then its login
-  kith account add codex <name>            an extra Codex login in ~/.kith/accounts/codex/<name>, then its login
+  kith account add claude <name> [--yes] [--json]   an extra Claude subscription account in ~/.kith/accounts/claude/<name>, then its login
+  kith account add codex <name> [--json]            an extra Codex login in ~/.kith/accounts/codex/<name>, then its login
+                                           --json does not log in: it makes the folder and prints {ok, id, harness, name, dir, created,
+                                           login: {argv, env}, warning} for the caller to run the login in a terminal. A new Claude
+                                           account needs --yes with --json (without it: {ok: false, error, warning}, exit 2)
   kith account list [--json]               each account, its harness and whether it is logged in
-  kith account remove <harness> <name> --yes   delete the account's folder (its login on this Mac)
+  kith account remove <harness> <name> --yes [--json]   delete the account's folder (its login on this Mac)
 
   kith account use <id> [--agent A]        the main account: the login every agent's (or A's) runs use when no backup
                                            answers. claude, claude:<name> or claude-api:<profile> for a Claude agent;
@@ -82,13 +85,34 @@ def harness_name(args, usage):
     return h, n
 
 
+def login_command(h, d):
+    """(argv, env) of the login the harness runs for the account folder d; used by the terminal path and --json alike."""
+    if h == 'claude':
+        return ['claude', 'auth', 'login'], {'CLAUDE_CONFIG_DIR': str(d)}
+    return ['codex', 'login', '--device-auth'], {'CODEX_HOME': str(d)}
+
+
 def cmd_add(args):
+    global JSON_ERRORS
+    JSON_ERRORS = flag(args, '--json')
     yes = flag(args, '--yes')
-    h, n = harness_name(args, 'account add claude|codex <name>')
+    h, n = harness_name(args, 'account add claude|codex <name> [--yes] [--json]')
     d = acc.account_dir(h, n)
     if shutil.which(h) is None:
         die(f'{h} is not installed here; install it first, then run this again')
-    if h == 'claude' and not d.exists():
+    created = not d.exists()
+    if JSON_ERRORS:
+        if h == 'claude' and created and not yes:
+            print(json.dumps({'ok': False, 'error': 'adding a second Claude subscription account needs --yes after the warning is shown',
+                              'warning': WARNING}))
+            sys.exit(2)
+        d.mkdir(parents=True, exist_ok=True)
+        os.chmod(d, 0o700)
+        argv, env = login_command(h, d)
+        print(json.dumps({'ok': True, 'id': f'{h}:{n}', 'harness': h, 'name': n, 'dir': str(d), 'created': created,
+                          'login': {'argv': argv, 'env': env}, **({'warning': WARNING} if h == 'claude' else {})}))
+        return
+    if h == 'claude' and created:
         print(WARNING)
         if not yes:
             try:
@@ -99,11 +123,9 @@ def cmd_add(args):
                 die('not added')
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)
-    if h == 'claude':
-        argv, env = ['claude', 'auth', 'login'], {'CLAUDE_CONFIG_DIR': str(d)}
-    else:
+    argv, env = login_command(h, d)
+    if h == 'codex':
         print('This logs Codex in separately from your usual Codex login (device code; the browser step is yours).')
-        argv, env = ['codex', 'login', '--device-auth'], {'CODEX_HOME': str(d)}
     print(f'Login for {h}:{n} in {d}\n')
     code = subprocess.call(argv, env={**os.environ, **env})
     if code:
@@ -130,8 +152,10 @@ def cmd_list(args):
 
 
 def cmd_remove(args):
+    global JSON_ERRORS
+    JSON_ERRORS = flag(args, '--json')
     yes = flag(args, '--yes')
-    h, n = harness_name(args, 'account remove <claude|codex> <name> --yes')
+    h, n = harness_name(args, 'account remove <claude|codex> <name> --yes [--json]')
     d = acc.account_dir(h, n)
     if not d.is_dir() or d.is_symlink():
         die(f'no account {h}:{n}')
@@ -141,6 +165,9 @@ def cmd_remove(args):
     if not yes:
         die(f'this deletes {d} and the {h} login kept in it (nothing else).{note} Run again with --yes.', 2)
     shutil.rmtree(d)
+    if JSON_ERRORS:
+        print(json.dumps({'ok': True, 'changed': True, 'id': f'{h}:{n}', 'dir': str(d), 'in_chain': used}))
+        return
     print(f'removed {d}.{note}')
     if h == 'claude':
         print('Claude Code may keep a Keychain item for it; `CLAUDE_CONFIG_DIR=<dir> claude auth logout` before removing drops that too.')
