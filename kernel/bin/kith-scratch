@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """kith-scratch — what only the built-in `scratch` agent has: a thread's engine and model, and keeping a thread as an agent.
 
-  kith scratch thread <id> [--json]               the harness, model and effort the thread started with (from the cost ledger,
+  kith scratch thread <id> [--json] [--session SID]
+                                                  the harness, model and effort the thread started with (from the cost ledger,
                                                   which every run is tagged in), and whether it has a summary
-  kith scratch keep <id> <name> [--json] [-H HARNESS] [-m MODEL]
+  kith scratch keep <id> <name> [--json] [-H HARNESS] [-m MODEL] [--session SID]
                                                   make a real agent <name> (kith new) of the thread: the thread's summary becomes
                                                   its description and a first draft of agent.md, and it runs on the harness and
                                                   model the thread did (-H / -m override). Refuses a name that is taken.
 
 `kith scratch` itself (a new thread each time, -H / -m per chat, --resume keeps a thread's engine and model unless they
 are given again) is bin/kith. Called as `kith-scratch AGENT keep|thread ...` by bin/kith, only for the built-in.
+
+A thread id is what the host keys its summary by (an app thread's root entry id); the cost ledger keys a run by the
+harness session. The two differ for a thread started in the app, so --session SID names the session too: the run is
+looked up under either, and a thread is known when either (or the summary) is.
 """
 import json, os, re, subprocess, sys, tempfile
 from pathlib import Path
@@ -41,10 +46,12 @@ def summary_of(thread):
         return ''
 
 
-def thread_info(thread):
+def thread_info(thread, session=None):
     if not THREAD.fullmatch(thread):
         fail(f'"{thread}" is not a thread id', 2)
-    run = kith_accounts.session_run(thread)
+    if session is not None and not THREAD.fullmatch(session):
+        fail(f'"{session}" is not a session id', 2)
+    run = kith_accounts.session_run(thread) or (kith_accounts.session_run(session) if session else None)
     if run and run['agent'] != 'scratch':
         fail(f'that thread belongs to {run["agent"]}, not scratch')
     summary = summary_of(thread)
@@ -77,7 +84,7 @@ def run(cmd, **kw):
 
 
 def keep(argv):
-    flags = {'-H': None, '--harness': None, '-m': None, '--model': None}
+    flags = {'-H': None, '--harness': None, '-m': None, '--model': None, '--session': None}
     pos, as_json, i = [], False, 0
     while i < len(argv):
         a = argv[i]
@@ -98,7 +105,7 @@ def keep(argv):
     listed = json.loads(run(['kith-pkg', 'list', '--json']).stdout or '{}')
     if name in listed or (paths()['KITH_AGENTS'] / name).exists():
         fail(f'there is already an agent called "{name}"')
-    info = thread_info(thread)
+    info = thread_info(thread, flags['--session'])
     harness = flags['-H'] or flags['--harness'] or info['harness'] or 'claude'
     harness = 'claude' if harness == 'claude-code' else harness
     model = flags['-m'] or flags['--model'] or info['model']
@@ -128,10 +135,17 @@ def keep(argv):
 
 
 def thread(argv):
+    session = None
+    if '--session' in argv:
+        i = argv.index('--session')
+        if i + 1 >= len(argv):
+            fail('--session needs a value', 2)
+        session = argv[i + 1]
+        argv = argv[:i] + argv[i + 2:]
     ids = [a for a in argv if a != '--json']
     if len(ids) != 1:
-        fail('usage: kith scratch thread <thread-id> [--json]', 2)
-    info = thread_info(ids[0])
+        fail('usage: kith scratch thread <thread-id> [--json] [--session SID]', 2)
+    info = thread_info(ids[0], session)
     if '--json' in argv:
         print(json.dumps({**info, 'summary': bool(info['summary'])}))
     else:

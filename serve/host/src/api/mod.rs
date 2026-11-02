@@ -35,6 +35,7 @@ mod proof_tests;
 mod remote;
 #[cfg(test)]
 mod revoke_tests;
+mod scratch;
 #[cfg(test)]
 pub(crate) mod rig;
 pub mod roles;
@@ -242,6 +243,10 @@ async fn route(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value) -> Resul
         ControlFlow::Continue(b) => b,
     };
     let b = match bots::call(hub, method, b).await? {
+        ControlFlow::Break(v) => return Ok(v),
+        ControlFlow::Continue(b) => b,
+    };
+    let b = match scratch::call(hub, method, b).await? {
         ControlFlow::Break(v) => return Ok(v),
         ControlFlow::Continue(b) => b,
     };

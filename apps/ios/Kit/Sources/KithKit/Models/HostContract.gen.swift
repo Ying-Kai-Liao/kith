@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "dcc5b25fce70bc9615f4b9e5437113f17e5dd3a6b5476c677bcd71f587804878"
+    public static let sha256 = "3785fb6d494765cbc2e8935acc7d46ee112a8ecdc3c5b7730c9a891a50d9d036"
 }
 
 extension HostContract {
@@ -1263,8 +1263,10 @@ extension HostContract {
         public var folder: String?
         public var clear: Bool?
         public var budget: Int64?
+        public var engine: String?
+        public var engineModel: String?
 
-        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil) {
+        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
             self.botId = botId
             self.text = text
             self.clientNonce = clientNonce
@@ -1277,6 +1279,8 @@ extension HostContract {
             self.folder = folder
             self.clear = clear
             self.budget = budget
+            self.engine = engine
+            self.engineModel = engineModel
         }
     }
 

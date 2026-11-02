@@ -164,6 +164,10 @@ pub struct BotConfig {
     /// with the agent's own prompt, memory, skills and servers, and none of Kith's (see `agent::hq`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hq_agent: Option<String>,
+    /// The bot of an agent that ships with the kernel (scratch): quick chats, one thread each. Only the hq sync sets
+    /// it; the apps keep it off the roster of ordinary bots.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub builtin: bool,
     /// The hq project the bot's places work in unless a place picked its own (see `agent::folder`). Beats `cwd`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,

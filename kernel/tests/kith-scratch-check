@@ -141,6 +141,30 @@ check "keep of a codex thread: codex and its model, no summary needed" "is 'd[\"
 OUT=$("$KITH" scratch keep t-claude opus-pal -H codex -m opus --json 2>/dev/null)
 check "keep -H codex -m opus: the Claude model is dropped (B0)" "is 'd[\"harness\"], d[\"model\"]' 'codex None'"
 
+# --- an app thread: its id is the host's root entry id, the ledger knows only the harness session -----------------------
+# The summary is keyed by the app's thread id, the cost ledger by the session; --session names the second.
+tag s-app-1 sonnet claude ""
+python3 - "$KITH_SERVE_DB" <<'EOF'
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.execute("insert into thread_summaries values ('root-7', 'Sorting out a trip budget. More: one.', '[]', 1, 1)")
+c.commit()
+EOF
+OUT=$("$KITH" scratch thread root-7 --json 2>/dev/null)
+check "app thread: the summary alone knows it, but not its engine" "is 'd[\"harness\"], d[\"summary\"]' 'None True'"
+OUT=$("$KITH" scratch thread root-7 --session s-app-1 --json 2>/dev/null)
+check "app thread: --session finds the engine in the ledger" "is 'd[\"harness\"], d[\"model\"], d[\"summary\"]' 'claude sonnet True'"
+"$KITH" scratch thread root-8 --session s-app-1 >/dev/null 2>&1
+check "app thread: a session alone makes a thread known (a chat with no summary yet)" "[ $? = 0 ]"
+"$KITH" scratch thread root-8 --session nope-1 >/dev/null 2>&1
+check "app thread: neither id known is refused" "[ $? != 0 ]"
+"$KITH" scratch thread root-8 --session s-app-1 --session >/dev/null 2>&1
+check "app thread: --session needs a value" "[ $? = 2 ]"
+OUT=$("$KITH" scratch keep root-7 trip-pal --session s-app-1 --json 2>/dev/null)
+check "keep of an app thread: summary by thread id, engine by session" "is 'd[\"agent\"], d[\"harness\"], d[\"model\"], d[\"from_summary\"]' 'trip-pal claude sonnet True'"
+OUT=$("$KITH" scratch keep root-8 young-pal -H claude -m opus --session s-app-1 --json 2>/dev/null)
+check "keep of an app thread with no summary yet: the session and the host's engine are enough" "is 'd[\"agent\"], d[\"model\"], d[\"from_summary\"]' 'young-pal opus False'"
+
 # --- a user's own agent called scratch is an ordinary agent --------------------------------------------------------------
 mkdir -p "$KITH_HOME/agents/scratch/role"
 printf -- '---\nname: scratch\ndescription: mine\n---\nMine.\n' > "$KITH_HOME/agents/scratch/role/agent.md"

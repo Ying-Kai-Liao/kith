@@ -82,6 +82,10 @@ impl Hub {
         let mut done = Synced::default();
         let rows = self.store.bots()?;
         for agent in agents {
+            // The built-in agent's folder is made when it first runs; its bot is there before that.
+            if agent.is_builtin() && !Path::new(&agent.home).is_dir() {
+                std::fs::create_dir_all(&agent.home)?;
+            }
             if !agent.runnable() {
                 tracing::debug!(agent = %agent.name, harness = ?agent.harness, "hq agent is not a Claude agent; no bot");
                 continue;
@@ -113,6 +117,9 @@ impl Hub {
             }
             if row.config.cwd != agent.home {
                 patch.insert("cwd".into(), agent.home.clone().into());
+            }
+            if row.config.builtin != agent.is_builtin() {
+                patch.insert("builtin".into(), agent.is_builtin().into());
             }
             // Chats with hq bots auto-thread (a task per burst) like any bot's; older bots were created with it off.
             if self.store.kv_get(&tasks_key(&row.config.id)).is_none() {
@@ -157,7 +164,7 @@ impl Hub {
 fn new_bot(agent: &HqAgent) -> BotConfig {
     serde_json::from_value(json!({
         "id": "", "name": agent.name, "description": agent.description, "backend": "claude", "cwd": agent.home,
-        "hqAgent": agent.name, "permission": "default", "connectors": [], "skills": [],
+        "hqAgent": agent.name, "permission": "default", "connectors": [], "skills": [], "builtin": agent.is_builtin(),
     }))
     .expect("a valid bot")
 }

@@ -243,6 +243,7 @@ mod tests {
             auto_name: false,
             tasks: None,
             hq_agent: None,
+            builtin: false,
             project: None,
             person: None,
             created_at: 0,
