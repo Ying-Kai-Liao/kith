@@ -1,0 +1,29 @@
+# Host unit tests that run real kernel files (kernel/bin, kernel/lib). A kernel-only PR runs just these
+# (the host-kernel job); a PR that touches serve/host runs the whole host suite. One test module per line:
+#   <source file under serve/host><TAB><nextest test-name term, matched as a substring of the module path>
+# `scripts/ci/host-kernel-tests.sh check` fails when a host file reads the kernel and is missing here.
+#
+# Read kernel files directly (CARGO_MANIFEST_DIR/../../kernel).
+src/agent/hq_person_tests.rs	agent::hq_person_tests::
+src/cards/access_tests.rs	cards::access_tests::
+src/cards/autoallow_tests.rs	cards::autoallow_tests::
+src/cards/resume_tests.rs	cards::resume_tests::
+src/delegation.rs	delegation::tests::
+src/remote/account.rs	remote::account::tests::
+src/remote/owner.rs	remote::owner::tests::
+# Use api::rig::Rig, which runs the real kernel/bin/kith-auth.
+src/calls/tests.rs	calls::tests::
+src/cards/tests.rs	cards::tests::
+src/cards/room_secret_tests.rs	cards::room_secret_tests::
+src/cards/edge_tests.rs	cards::edge_tests::
+src/cards/secret/tests.rs	cards::secret::tests::
+src/api/bot_guests_tests.rs	api::bot_guests_tests::
+src/api/botguests_props.rs	api::botguests_props::
+src/api/revoke_tests.rs	api::revoke_tests::
+src/api/roles_tests.rs	api::roles_tests::
+src/api/room_points_props.rs	api::room_points_props::
+src/api/peers_tests.rs	api::peers_tests::
+src/api/people_tests.rs	api::people_tests::
+src/api/proof_tests.rs	api::proof_tests::
+src/api/contract_tests.rs	api::contract_tests::
+src/remote/peers.rs	remote::peers::tests::
