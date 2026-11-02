@@ -130,7 +130,7 @@ for who in guest bot-3f9a1c2e; do
   # Not permissions.blockReadsOutsideWorkingDirectories: with it Claude Code asks (a safetyCheck that no hook allow outranks)
   # for a Bash command it cannot trace, such as `cd sub && export X=1; ls`, and every ask was a card to the owner. The file
   # tools are fenced by a PreToolUse hook instead (lib/kith_readfence.py): roots = the working directory and the add-dirs.
-  expect "$who: no blockReadsOutsideWorkingDirectories (its Bash ask outranks the hook allow); a read fence hook on the file tools instead" "$(q "$S" 's["permissions"].get("blockReadsOutsideWorkingDirectories"), any(h.get("matcher") == "Read|Grep|Glob|NotebookRead" and "kith_readfence.py" in h["hooks"][0]["command"] for h in s["hooks"]["PreToolUse"])')" "(None, True)"
+  expect "$who: no blockReadsOutsideWorkingDirectories (its Bash ask outranks the hook allow); a read fence hook on the file tools instead" "$(q "$S" 's["permissions"].get("blockReadsOutsideWorkingDirectories"), any(h.get("matcher") == "Read|Grep|Glob|LS|NotebookRead" and "kith_readfence.py" in h["hooks"][0]["command"] and h["hooks"][0].get("onFailure") == "block" and h["hooks"][0]["timeout"] >= 30 for h in s["hooks"]["PreToolUse"])')" "(None, True)"
   FENCE=$(q "$S" '[h["hooks"][0]["command"] for h in s["hooks"]["PreToolUse"] if "kith_readfence.py" in h["hooks"][0]["command"]][0]')
   WD=$KITH_HOME/agents/echo/files/people/$who
   fence() { printf '{"tool_name":"%s","tool_input":{"%s":"%s"},"cwd":"%s"}' "$1" "$2" "$3" "$WD" | (cd "$T" && sh -c "$FENCE") | python3 -c '
@@ -257,7 +257,7 @@ PY
 EV=$(cd "$KITH_HOME/agents/echo" && KITH_PERSON=evil "$KITH" echo --launch-json 2>"$T/err" | python3 -c 'import json,sys; j=json.load(sys.stdin); e=j["env"]; print(e.get("GOOD_KEY"), e.get("PATH") != "/tmp", e.get("KITH_HOME") != "/tmp", "LD_PRELOAD" in e, "DYLD_INSERT_LIBRARIES" in e, e.get("HOME") != "/tmp", "<" in j["system_prompt"].split("<session")[1].split("/>")[0])')
 expect "membership env: plain keys pass, PATH/HOME/KITH_*/LD_*/DYLD_* are skipped" "$EV" "1 True True False False True False"
 
-# Claude Code older than 2.1.257 (or one that does not say) cannot enforce the read limits: no run for a guest, the owner unaffected
+# Claude Code older than 2.1.295 (or one that does not say) cannot enforce the read limits: no run for a guest, the owner unaffected
 printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.100 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$T/bin/claude"
 KITH_PERSON=guest "$KITH" echo --launch-json >/dev/null 2>&1; rc=$?
 expect "old Claude Code: a guest run is refused" "$rc" 3

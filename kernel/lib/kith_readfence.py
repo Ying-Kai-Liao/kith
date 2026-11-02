@@ -3,7 +3,7 @@
 
   kith_readfence.py --root DIR [--root DIR ...]      the hook JSON on stdin; prints a deny decision, or nothing
 
-Read, Grep and Glob of a path outside the roots (the working directory and the --add-dir folders of the run, by real
+Read, Grep, Glob, LS and NotebookRead of a path outside the roots (the working directory and the --add-dir folders of the run, by real
 path, so a link out of them does not count) are refused. This is what `permissions.blockReadsOutsideWorkingDirectories`
 did, but that setting also makes Claude Code ask, whatever a hook says, for every Bash command it cannot trace
 (`cd sub && export X=1; ls`), and the ask is a card to the owner. Bash itself stays in the OS sandbox (denyRead).
@@ -14,7 +14,7 @@ import os
 import re
 import sys
 
-TOOLS = {"Read": "file_path", "Grep": "path", "Glob": "path", "NotebookRead": "notebook_path"}
+TOOLS = {"Read": "file_path", "Grep": "path", "Glob": "path", "LS": "path", "NotebookRead": "notebook_path"}
 
 
 def deny(why):
