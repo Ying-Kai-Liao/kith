@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+# kith-grants-check — connectors and skills as CLI grants on an agent: `kith <agent> connect|disconnect|connectors`,
+# `kith connectors`, `kith <agent> skill add|remove`, `kith <agent> skills`, `kith skills available`, and that a connected
+# MCP service reaches the agent's session (kith-auth mcp-config / mcp-names). Throwaway HOME and KITH_HOME; GitHub is a
+# folder of fixture files (file:// bases) and a local git repo, so nothing touches the network.
+#
+#   kernel/tests/kith-grants-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-grants-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_HARNESS KITH_PERMISSION_MODE HQ_HOME
+A=$KITH_HOME/agents/echo/role
+M=$KITH_HOME/state   # this Mac's machine folder (KITH_MACHINE)
+mkdir -p "$HOME" "$M/services" "$A" "$KITH_HOME/agents/mute/role" "$T/bin"
+export KITH_STATE=$M
+printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$A/agent.md"
+printf -- '---\nname: mute\ndescription: second agent\n---\nYou stay quiet.\n' > "$KITH_HOME/agents/mute/role/agent.md"
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+git -C "$A" init -q && git -C "$A" commit -qm init --allow-empty
+
+# --- fake GitHub: API and raw bases are folders (file://), the git remote a local repo ------------------------------
+G=$T/gh
+mkdir -p "$T/git/anthropics" "$T/work"
+git -C "$T/work" init -q
+mkdir -p "$T/work/skills/pdf" "$T/work/skills/xlsx"
+printf -- '---\nname: pdf\ndescription: Work with PDF files\nlicense: Proprietary\n---\nPDF.\n' > "$T/work/skills/pdf/SKILL.md"
+printf -- '---\nname: xlsx\ndescription: >\n  Spreadsheets,\n  folded description\n---\nXLSX.\n' > "$T/work/skills/xlsx/SKILL.md"
+git -C "$T/work" add -A && git -C "$T/work" commit -qm skills
+SHA=$(git -C "$T/work" rev-parse HEAD)
+git clone -q --bare "$T/work" "$T/git/anthropics/skills.git" && git -C "$T/git/anthropics/skills.git" config uploadpack.allowFilter true
+git -C "$T/git/anthropics/skills.git" config uploadpack.allowAnySHA1InWant true
+mkdir -p "$G/api/repos/anthropics/skills/commits" "$G/api/repos/anthropics/skills/contents" "$G/raw/anthropics/skills/main/skills/pdf" "$G/raw/anthropics/skills/main/skills/xlsx" "$G/raw/anthropics/skills/$SHA/skills/pdf"
+echo '[{"name":"pdf","type":"dir"},{"name":"xlsx","type":"dir"},{"name":"README.md","type":"file"}]' > "$G/api/repos/anthropics/skills/contents/skills"
+printf '{"sha":"%s"}\n' "$SHA" > "$G/api/repos/anthropics/skills/commits/HEAD"
+cp "$T/work/skills/pdf/SKILL.md" "$G/raw/anthropics/skills/main/skills/pdf/SKILL.md"
+cp "$T/work/skills/xlsx/SKILL.md" "$G/raw/anthropics/skills/main/skills/xlsx/SKILL.md"
+mkdir -p "$G/raw/anthropics/skills/$SHA/skills/xlsx"
+cp "$T/work/skills/pdf/SKILL.md" "$G/raw/anthropics/skills/$SHA/skills/pdf/SKILL.md"
+cp "$T/work/skills/xlsx/SKILL.md" "$G/raw/anthropics/skills/$SHA/skills/xlsx/SKILL.md"
+export KITH_GITHUB_API=file://$G/api KITH_GITHUB_RAW=file://$G/raw KITH_GITHUB_GIT=file://$T/git
+
+KITH=$KERNEL/bin/kith
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+# is EXPR EXPECTED: the python expression EXPR over the JSON in $OUT (as d) prints EXPECTED.
+is() { [ "$(EXPR=$1 OUT=$OUT python3 -c 'import json,os; d=json.loads(os.environ["OUT"]); print(eval(os.environ["EXPR"]))')" = "$2" ]; }
+auth() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eval(sys.argv[2]))' "$KITH_AUTH" "$1"; }
+
+# --- connectors: a host connector (a file in this Mac's services folder) ---------------------------------------------
+cat > "$M/services/gmail.json" <<'EOF'
+{"description": "Gmail", "kind": "mcp",
+ "connector": {"id": "gmail", "name": "Gmail", "kind": "remote", "registryName": null, "auth": "signedIn"},
+ "mcp": {"command": "kith", "args": ["serve", "mcp", "remote", "--connector", "gmail"]}, "secrets": []}
+EOF
+cat > "$M/services/notes.json" <<'EOF'
+{"description": "Notes", "kind": "mcp",
+ "connector": {"id": "notes", "name": "Notes", "kind": "remote", "registryName": null, "auth": "signedOut"},
+ "mcp": {"command": "kith", "args": ["serve", "mcp", "remote", "--connector", "notes"]}, "secrets": []}
+EOF
+
+OUT=$("$KITH" connectors --json); check "connectors: kernel MCP services and the host's, with auth and description" \
+  "is \"sorted((r['name'], r['source']) for r in d)\" \"[('gmail', 'mac'), ('jev-browser', 'kernel'), ('notes', 'mac')]\" && is \"[r['auth'] for r in d if r['name']=='notes'][0]\" signedOut"
+"$KITH" connectors | grep -q '^gmail ' ; check "connectors: text form lists gmail" "[ $? = 0 ]"
+
+OUT=$("$KITH" echo connect gmail --json); rc=$?
+check "connect: granted as gmail/host, changed, will start" "[ $rc = 0 ] && is \"(d['ok'], d['changed'], d['profile'], d['status'])\" \"(True, True, 'gmail/host', 'ok')\""
+check "connect: the profile is marked {store: host}, no vars" "[ \"\$(auth \"d['profiles']['gmail/host']\")\" = \"{'store': 'host'}\" ] && [ \"\$(auth \"d['grants']['echo']['gmail']\")\" = gmail/host ]"
+OUT=$("$KITH" echo connect gmail --json)
+check "connect twice: ok, nothing changes" "is \"(d['ok'], d['changed'])\" \"(True, False)\" && [ \"\$(auth \"len(d['grants']['echo'])\")\" = 1 ]"
+
+OUT=$("$KITH" auth keys --json); check "keys: the host profile lists no vars" "is \"[r for r in d if r['profile']=='gmail/host']\" '[]'"
+OUT=$("$KITH" auth account-state echo gmail --json); check "account-state: no missing secrets for it" "is \"(d['declared'], d['missing'], d['granted'])\" \"(True, [], ['gmail/host'])\""
+"$KITH" auth ls | grep -q 'gmail .*gmail/host .*ok'; check "ls: reports it ok" "[ $? = 0 ]"
+"$KITH" auth ledger --json >/dev/null 2>&1; check "ledger runs with a host grant" "[ $? = 0 ]"
+"$KITH" auth holders gmail | grep -q '^echo$'; check "holders: echo holds gmail" "[ $? = 0 ]"
+
+"$KITH" echo connect notes >/dev/null; OUT=$("$KITH" echo connectors --json)
+check "connectors <agent>: source, kind, profile, status (signed out will not start)" \
+  "is \"[(r['name'], r['source'], r['kind'], r['profile'], r['status']) for r in d]\" \"[('gmail', 'mac', 'mcp', 'gmail/host', 'ok'), ('notes', 'mac', 'mcp', 'notes/host', 'signed out')]\""
+
+# --- the session: mcp-config / mcp-names carry what the agent is granted, not only its needs -----------------------
+OUT=$("$KITH" auth mcp-config echo 2>"$T/err"); check "mcp-config: granted connectors are servers" \
+  "is \"sorted(d['mcpServers'])\" \"['gmail', 'notes']\""
+check "mcp-config: bare 'kith' is this kernel's own bin/kith" "is \"d['mcpServers']['gmail']['args'][5:8]\" \"['$KERNEL/bin/kith', 'serve', 'mcp']\""
+OUT=$("$KITH" auth mcp-names echo); check "mcp-names: the same two" "is \"sorted(d['mcpServers'])\" \"['gmail', 'notes']\" && is \"d['mcpServers']['gmail']['command']\" '$KERNEL/bin/kith'"
+OUT=$("$KITH" auth mcp-config mute); check "an agent without the grant gets none" "is \"d['mcpServers']\" '{}'"
+
+rm "$M/services/notes.json"
+OUT=$("$KITH" auth mcp-config echo 2>"$T/err"); rc=$?
+check "a granted service whose file is gone is skipped with a note, not a failure" \
+  "[ $rc = 0 ] && is \"sorted(d['mcpServers'])\" \"['gmail']\" && grep -q 'notes is granted but its service file is gone' '$T/err'"
+OUT=$("$KITH" echo connectors --json); check "connectors <agent>: the vanished one reads 'unknown service'" \
+  "is \"[r['status'] for r in d if r['name']=='notes'][0]\" 'unknown service'"
+"$KITH" auth ls >/dev/null 2>&1; check "ls survives a granted service with no file" "[ $? = 0 ]"
+
+OUT=$(KITH_PERSON=somebody "$KITH" auth mcp-names echo); check "a guest's run gets the agent's needs only, not the owner's connects" "is \"d['mcpServers']\" '{}'"
+
+# a service whose command resolves through the helper hook: the Mac folder is known to it
+OUT=$(echo '{"tool_name":"mcp__gmail__search"}' | "$KITH" auth helper-mcp mute ask)
+check "helper-mcp: a Mac connector's tool is gated for an agent without the grant" "echo '$OUT' | grep -q permissionDecision"
+OUT=$(echo '{"tool_name":"mcp__gmail__search"}' | "$KITH" auth helper-mcp echo ask)
+check "helper-mcp: ... and passes for the one that has it" "[ -z \"$OUT\" ]"
+
+OUT=$("$KITH" echo disconnect gmail --json); check "disconnect: gone, and the unused host profile with it" \
+  "is \"(d['ok'], d['changed'])\" \"(True, True)\" && [ \"\$(auth \"'gmail/host' in d['profiles'] or 'gmail' in d['grants'].get('echo', {})\")\" = False ]"
+OUT=$("$KITH" echo disconnect gmail --json); rc=$?; check "disconnect again: ok, nothing to do" "[ $rc = 0 ] && is \"(d['ok'], d['changed'])\" \"(True, False)\""
+
+# --- a service that needs a key ---------------------------------------------------------------------------------------
+OUT=$("$KITH" echo connect jev-browser --json); rc=$?
+check "connect: a service that needs a key and has no profile is refused with the hint" "[ $rc != 0 ] && is \"d['ok']\" False && echo '$OUT' | grep -q 'kith-auth set'"
+"$KITH" auth set jev-browser/main TYPESAFE_API_KEY --stdin-json >/dev/null 2>&1 </dev/null
+python3 - <<EOF
+import json
+d = json.load(open("$KITH_AUTH"))
+d["profiles"]["jev-browser/main"] = {"TYPESAFE_API_KEY": "env:KITH_GRANTS_CHECK_KEY"}
+d["profiles"]["jev-browser/other"] = {"TYPESAFE_API_KEY": "env:KITH_GRANTS_CHECK_KEY"}
+json.dump(d, open("$KITH_AUTH", "w"))
+EOF
+OUT=$("$KITH" echo connect jev-browser --json); rc=$?; check "connect: two profiles, none named: refused, asks for --profile" "[ $rc != 0 ] && echo '$OUT' | grep -q -- '--profile'"
+OUT=$("$KITH" echo connect jev-browser --profile jev-browser/main --json)
+check "connect --profile: granted; a key that does not resolve is reported" "is \"(d['profile'], d['status'], d['missing'])\" \"('jev-browser/main', 'missing secrets', ['TYPESAFE_API_KEY'])\""
+OUT=$(KITH_GRANTS_CHECK_KEY=x "$KITH" echo connectors --json); check "...and it is ok once the key resolves" "is \"[r['status'] for r in d if r['name']=='jev-browser'][0]\" ok"
+"$KITH" echo disconnect jev-browser >/dev/null
+check "disconnect keeps a keyed profile (the owner's)" "[ \"\$(auth \"'jev-browser/main' in d['profiles']\")\" = True ]"
+
+OUT=$("$KITH" nobody connect gmail --json 2>&1); check "connect: unknown agent is an error (not a json shell) " "[ \$? != 0 ] || echo '$OUT' | grep -q 'no agent'"
+OUT=$("$KITH" auth connect nobody gmail --json); rc=$?; check "connect: unknown agent, json error + non-zero" "[ $rc != 0 ] && is \"d['ok']\" False"
+OUT=$("$KITH" auth connect echo nothing --json); rc=$?; check "connect: unknown connector, json error + non-zero" "[ $rc != 0 ] && is \"d['ok']\" False"
+OUT=$("$KITH" auth connect echo@somebody gmail --json); rc=$?; check "connect: agent@person is refused (the owner's row only)" "[ $rc != 0 ] && is \"d['ok']\" False"
+
+# --- skills: catalog -------------------------------------------------------------------------------------------------
+OUT=$("$KITH" skills available --json); check "skills available: name and description (folded too) from the anthropics catalog" \
+  "is \"[(r['name'], r['description']) for r in d]\" \"[('pdf', 'Work with PDF files'), ('xlsx', 'Spreadsheets, folded description')]\""
+rm "$G/api/repos/anthropics/skills/contents/skills"
+OUT=$("$KITH" skills available --json); check "skills available: a second call is served from the cache" "is len\(d\) 2"
+OUT=$("$KITH" skills available --refresh --json); rc=$?; check "skills available: offline (no answer) is a clear json error" "[ $rc != 0 ] && is \"d['ok']\" False && printf %s \"\$OUT\" | grep -qi github"
+
+# --- skills: add / list / remove -------------------------------------------------------------------------------------
+OUT=$("$KITH" echo skill add pdf --json); rc=$?
+check "skill add <name>: linked from anthropics/skills at the commit resolved now" \
+  "[ $rc = 0 ] && is \"(d['ok'], d['changed'], d['repo'], d['path'], d['ref'] == '$SHA', d['license'], d['committed'])\" \"(True, True, 'anthropics/skills', 'skills/pdf', True, 'Proprietary', True)\""
+check "skills.json carries the entry (the linked-skills format)" "[ \"\$(python3 -c 'import json; d=json.load(open(\"$A/skills.json\"))[\"skills\"][\"pdf\"]; print(d[\"repo\"], d[\"path\"], d[\"ref\"] == \"$SHA\")')\" = 'anthropics/skills skills/pdf True' ]"
+check "fetched into skills/pdf" "[ -f '$A/skills/pdf/SKILL.md' ] && grep -q 'anthropics/skills@$SHA' '$A/skills/pdf/.source'"
+check "committed in the agent's repo (skills.json, not the fetched folder)" "git -C '$A' log -1 --format=%s | grep -q 'echo: link skill pdf' && git -C '$A' ls-files | grep -q '^skills.json$' && ! git -C '$A' ls-files | grep -q 'skills/pdf/SKILL.md'"
+n=$(git -C "$A" rev-list --count HEAD)
+OUT=$("$KITH" echo skill add pdf --json); check "skill add again: ok, no new commit" "is \"(d['ok'], d['changed'])\" \"(True, False)\" && [ \"\$(git -C '$A' rev-list --count HEAD)\" = $n ]"
+python3 "$KERNEL/bin/kith-pkg" check echo | grep -q '^ok'; check "the package still passes kith-pkg check" "[ $? = 0 ]"
+
+# an own skill, a learned one, and a private learned one
+mkdir -p "$A/skills/mine" "$A/skills/learned/lore" "$KITH_HOME/agents/echo/skills/learned/secretive"
+printf -- '---\nname: mine\ndescription: my own\n---\nx\n' > "$A/skills/mine/SKILL.md"
+printf -- '---\nname: lore\ndescription: learned\n---\nx\n' > "$A/skills/learned/lore/SKILL.md"
+printf -- '---\nname: secretive\ndescription: private\n---\nx\n' > "$KITH_HOME/agents/echo/skills/learned/secretive/SKILL.md"
+OUT=$("$KITH" echo skills --json); check "skills <agent>: own, learned (package, private), linked" \
+  "is \"sorted((r['name'], r['kind'], r.get('scope') or '', r.get('fetched', '')) for r in d)\" \"[('lore', 'learned', 'package', ''), ('mine', 'own', '', ''), ('pdf', 'linked', '', True), ('secretive', 'learned', 'private', '')]\""
+
+OUT=$("$KITH" echo skill remove mine --json); rc=$?; check "skill remove: refuses the agent's own skill" "[ $rc != 0 ] && is \"d['ok']\" False && [ -f '$A/skills/mine/SKILL.md' ]"
+OUT=$("$KITH" echo skill add mine --json); rc=$?; check "skill add: a name the agent has as its own skill is refused" "[ $rc != 0 ] && is \"d['ok']\" False"
+OUT=$("$KITH" echo skill remove pdf --json); check "skill remove: entry and folder go, committed" \
+  "is \"(d['ok'], d['changed'], d['committed'])\" \"(True, True, True)\" && [ ! -e '$A/skills/pdf' ] && [ ! -e '$A/skills.json' ] && git -C '$A' log -1 --format=%s | grep -q 'unlink skill pdf'"
+OUT=$("$KITH" echo skill remove pdf --json); check "skill remove again: ok, nothing to do" "is \"(d['ok'], d['changed'])\" \"(True, False)\""
+
+# owner/repo/path@ref, pinned to a full sha (no API call needed for it)
+OUT=$("$KITH" echo skill add anthropics/skills/skills/xlsx@$SHA --json); rc=$?
+check "skill add owner/repo/path@sha: linked under the folder name xlsx" "[ $rc = 0 ] && is \"(d['skill'], d['repo'], d['path'], d['ref'] == '$SHA')\" \"('xlsx', 'anthropics/skills', 'skills/xlsx', True)\" && [ -f '$A/skills/xlsx/SKILL.md' ]"
+OUT=$("$KITH" echo skill add anthropics/skills/skills/nothing@$SHA --json); rc=$?
+check "skill add: a path with no SKILL.md is an error and leaves skills.json as it was" "[ $rc != 0 ] && is \"d['ok']\" False && [ \"\$(python3 -c 'import json; print(sorted(json.load(open(\"$A/skills.json\"))[\"skills\"]))')\" = \"['xlsx']\" ]"
+OUT=$("$KITH" echo skill add ../evil --json); rc=$?; check "skill add: a bad id is an error" "[ $rc != 0 ] && is \"d['ok']\" False"
+OUT=$("$KITH" echo skill add nope-skill --json); rc=$?; check "skill add: a name the catalog does not have is an error" "[ $rc != 0 ] && is \"d['ok']\" False"
+"$KITH" help >/dev/null 2>&1; "$KITH" --help | grep -q 'skill add'; check "kith --help lists the new verbs" "[ $? = 0 ] && '$KITH' --help | grep -q 'connect|disconnect'"
+
+[ $fails = 0 ] && echo "all grants checks passed" || { echo "$fails check(s) failed"; exit 1; }

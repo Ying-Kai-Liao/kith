@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""kith-skills — the skills an agent has, and linking third-party ones onto it (kith <agent> skill|skills ...).
+
+  kith-skills skills <agent> [--json]            the agent's skills: own (skills/), learned (package and private), linked
+                                                 (skills.json: repo, ref, whether fetched)
+  kith-skills skill <agent> add <id> [--json]    link a skill: <id> is a name in github.com/anthropics/skills, or
+                                                 owner/repo[/path][@ref] for any GitHub skill. Writes it to the package's
+                                                 skills.json pinned to the commit it is at now, fetches it and commits the
+                                                 package edit (like set harness). Already linked: ok, nothing changes
+  kith-skills skill <agent> remove <id> [--json] unlink it: the entry and the fetched folder go, committed. The agent's own
+                                                 skills are not linked ones and are never removed here
+  kith-skills skills available [--json] [--refresh]   the anthropics/skills catalog (name, description); cached for a few
+                                                 minutes in this Mac's cache folder
+
+Every --json answer is one JSON object or array on stdout; an error is {"ok": false, "error": "..."} and a non-zero exit.
+Skills are package edits (skills.json is versioned and shared with the agent); connectors are per-Mac grants (kith-auth).
+GitHub is the unauthenticated API. KITH_GITHUB_API, KITH_GITHUB_RAW and KITH_GITHUB_GIT replace the three bases (tests).
+"""
+import json
+import os
+import re
+import shutil
+import sys
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+from kith_paths import paths  # noqa: E402
+
+API = os.environ.get('KITH_GITHUB_API', 'https://api.github.com').rstrip('/')
+RAW = os.environ.get('KITH_GITHUB_RAW', 'https://raw.githubusercontent.com').rstrip('/')
+CATALOG_REPO = 'anthropics/skills'
+CACHE_TTL = 600   # seconds the catalog is served from the cache folder
+TIMEOUT = 15
+
+
+class Fail(Exception):
+    pass
+
+
+def pkg():
+    """kith-pkg as a module (it has no .py name): its agent lookup, linked-skills reader, fetch and commit."""
+    here = os.path.dirname(os.path.realpath(__file__))
+    return SourceFileLoader('kith_pkg', os.path.join(here, 'kith-pkg')).load_module()
+
+
+def home_of(k, agent):
+    home = k.installed().get(agent)
+    if not home:
+        raise Fail(f"no agent '{agent}' (kith ls)")
+    return home
+
+
+def get(url, what):
+    req = urllib.request.Request(url, headers={'User-Agent': 'kith', 'Accept': 'application/vnd.github+json'})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            return r.read().decode('utf-8', 'replace')
+    except urllib.error.HTTPError as e:
+        raise Fail(f'{what}: GitHub answered {e.code}' + (' (rate limit; try again later)' if e.code in (403, 429) else ''))
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        raise Fail(f"can't reach GitHub for {what} (offline?): {getattr(e, 'reason', e)}")
+
+
+def frontmatter(text):
+    """{key: value} of a SKILL.md's frontmatter: one-line values, quoted ones, and folded (> |) blocks."""
+    m = re.match(r'^---\n(.*?)\n---', text, re.S)
+    out, key = {}, None
+    for line in (m.group(1).split('\n') if m else []):
+        k = re.match(r'^([A-Za-z_-]+):\s*(.*)$', line)
+        if k:
+            key, val = k.group(1), k.group(2).strip()
+            out[key] = '' if val in ('>', '|', '>-', '|-') else val.strip('"\'')
+        elif key and line.startswith((' ', '\t')):
+            out[key] = (out[key] + ' ' + line.strip()).strip()
+    return out
+
+
+# ---- the catalog ----
+
+def catalog(refresh=False):
+    cache = paths()['KITH_CACHE'] / 'skills-catalog.json'
+    try:
+        c = json.loads(cache.read_text())
+        if not refresh and c.get('base') == API and time.time() - c['at'] < CACHE_TTL:
+            return c['skills']
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    try:
+        listing = json.loads(get(f'{API}/repos/{CATALOG_REPO}/contents/skills', 'the skills catalog'))
+    except ValueError:
+        raise Fail('the skills catalog: GitHub sent something that is not JSON')
+    names = sorted(e['name'] for e in listing if isinstance(e, dict) and e.get('type') == 'dir')
+
+    def describe(name):
+        try:
+            text = get(f'{RAW}/{CATALOG_REPO}/main/skills/{name}/SKILL.md', name)
+        except Fail:
+            return {'name': name, 'description': ''}
+        return {'name': name, 'description': frontmatter(text).get('description', '')}
+    with ThreadPoolExecutor(8) as pool:
+        skills = list(pool.map(describe, names))
+    try:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({'base': API, 'at': time.time(), 'skills': skills}))
+    except OSError:
+        pass
+    return skills
+
+
+# ---- linking ----
+
+def parse_id(spec):
+    """(repo, path, ref, folder name) from a catalog name or owner/repo[/path][@ref]."""
+    ref = None
+    if '@' in spec:
+        spec, ref = spec.rsplit('@', 1)
+    parts = [p for p in spec.strip('/').split('/') if p]
+    if not parts or any(p in ('.', '..') for p in parts):
+        raise Fail(f'not a skill id: {spec!r}')
+    if len(parts) == 1:
+        repo, path, name = CATALOG_REPO, f'skills/{parts[0]}', parts[0]
+    else:
+        repo, path = '/'.join(parts[:2]), '/'.join(parts[2:]) or '.'
+        name = parts[-1]
+    if not re.fullmatch(r'[\w.-]+/[\w.-]+', repo):
+        raise Fail(f'not a skill id: {spec!r} (a name in {CATALOG_REPO}, or owner/repo[/path][@ref])')
+    if ref is not None and not re.fullmatch(r'[\w./-]+', ref):
+        raise Fail(f'not a ref: {ref!r}')
+    if not re.fullmatch(r'[a-z0-9][\w.-]*', name):
+        raise Fail(f'{name!r} is not a usable skill folder name (lower case letters, digits, . _ -)')
+    return repo, path, ref, name
+
+
+def read_links(home):
+    f = home / 'skills.json'
+    try:
+        data = json.loads(f.read_text()) if f.exists() else {}
+    except ValueError as e:
+        raise Fail(f'skills.json: invalid JSON ({e})')
+    return data if isinstance(data, dict) else {}
+
+
+def write_links(home, data):
+    f = home / 'skills.json'
+    if data.get('skills'):
+        f.write_text(json.dumps(data, indent=2) + '\n')
+    else:
+        f.unlink(missing_ok=True)
+
+
+def own_skill(home, name):
+    return (home / 'skills' / name / 'SKILL.md').is_file()
+
+
+def skill_add(agent, spec):
+    k = pkg()
+    home = home_of(k, agent)
+    repo, path, ref, name = parse_id(spec)
+    data = read_links(home)
+    links = data.setdefault('skills', {})
+    have = links.get(name)
+    if have and (have.get('repo'), have.get('path')) != (repo, path):
+        raise Fail(f"{name} is already linked from {have.get('repo')}/{have.get('path')}; skill remove {name} first")
+    if not have and own_skill(home, name):
+        raise Fail(f'{agent} has its own skill {name} (skills/{name}); not replacing it with a linked one')
+    if have and ref is None:
+        return {'ok': True, 'agent': agent, 'skill': name, 'changed': False, 'repo': repo, 'path': path,
+                'ref': have['ref'], 'committed': False}
+    sha = ref if ref and re.fullmatch(r'[0-9a-f]{40}', ref) else None
+    if not sha:
+        try:
+            sha = json.loads(get(f'{API}/repos/{repo}/commits/{ref or "HEAD"}', f'{repo}@{ref or "HEAD"}')).get('sha', '')
+        except ValueError:
+            sha = ''
+        if not re.fullmatch(r'[0-9a-f]{40}', sha):
+            raise Fail(f'{repo}: could not resolve {ref or "its default branch"} to a commit')
+    if have and have.get('ref') == sha:
+        return {'ok': True, 'agent': agent, 'skill': name, 'changed': False, 'repo': repo, 'path': path, 'ref': sha,
+                'committed': False}
+    md = get(f'{RAW}/{repo}/{sha}/{path + "/" if path != "." else ""}SKILL.md', f'{repo}/{path}/SKILL.md')
+    lic = frontmatter(md).get('license')
+    if not lic:
+        try:
+            lic = (json.loads(get(f'{API}/repos/{repo}/license', 'its license')).get('license') or {}).get('spdx_id')
+        except (Fail, ValueError):
+            lic = None
+    entry = {'repo': repo, 'path': path, 'ref': sha, **({'license': lic} if lic and lic != 'NOASSERTION' else {})}
+    before = (home / 'skills.json').read_text() if (home / 'skills.json').exists() else None
+    links[name] = entry
+    write_links(home, data)
+    try:
+        k.external_skills(home)
+        k.fetch(home)
+    except (RuntimeError, ValueError, OSError) as e:
+        if before is None:
+            (home / 'skills.json').unlink(missing_ok=True)
+        else:
+            (home / 'skills.json').write_text(before)
+        raise Fail(str(e))
+    committed = k.commit(home, f'{agent}: link skill {name} ({repo}@{sha[:12]})')
+    return {'ok': True, 'agent': agent, 'skill': name, 'changed': True, 'committed': bool(committed), **entry}
+
+
+def skill_remove(agent, spec):
+    k = pkg()
+    home = home_of(k, agent)
+    name = spec if re.fullmatch(r'[a-z0-9][\w.-]*', spec) else parse_id(spec)[3]
+    data = read_links(home)
+    links = data.get('skills', {})
+    if name not in links:
+        if own_skill(home, name) or (home / 'skills' / 'learned' / name / 'SKILL.md').is_file():
+            raise Fail(f"{name} is {agent}'s own skill, not a linked one; kith skills only removes linked skills "
+                       f"(delete skills/{name} in its package by hand)")
+        return {'ok': True, 'agent': agent, 'skill': name, 'changed': False, 'committed': False}
+    del links[name]
+    write_links(home, data)
+    shutil.rmtree(home / 'skills' / name, ignore_errors=True)
+    ignore = home / 'skills' / '.gitignore'
+    if links:
+        ignore.write_text('# third-party skills fetched from skills.json (kith-pkg fetch); not committed\n'
+                          + ''.join(f'/{n}/\n' for n in sorted(links)))
+    else:
+        ignore.unlink(missing_ok=True)
+    committed = k.commit(home, f'{agent}: unlink skill {name}')
+    return {'ok': True, 'agent': agent, 'skill': name, 'changed': True, 'committed': bool(committed)}
+
+
+# ---- listing ----
+
+def skills_of(agent):
+    k = pkg()
+    home = home_of(k, agent)
+    try:
+        links = k.external_skills(home)
+    except ValueError as e:
+        raise Fail(str(e))
+
+    def described(d):
+        try:
+            return frontmatter((d / 'SKILL.md').read_text()).get('description', '')
+        except OSError:
+            return ''
+
+    rows = []
+
+    def scan(folder, kind, scope=None, skip=()):
+        for d in sorted(folder.iterdir()) if folder.is_dir() else []:
+            if (d / 'SKILL.md').is_file() and d.name not in skip and not d.name.startswith('.'):
+                rows.append({'name': d.name, 'kind': kind, **({'scope': scope} if scope else {}),
+                             'description': described(d)})
+    scan(home / 'skills', 'own', skip=set(links) | {'learned'})
+    scan(home / 'skills' / 'learned', 'learned', 'package')
+    scan(k.life(agent) / 'skills' / 'learned', 'learned', 'private')
+    for name, src in sorted(links.items()):
+        fetched = k.read(home / 'skills' / name / '.source') == k.source_line(src)
+        rows.append({'name': name, 'kind': 'linked', 'repo': src['repo'], 'path': src['path'], 'ref': src['ref'],
+                     'license': src.get('license'), 'fetched': fetched,
+                     'description': described(home / 'skills' / name) if fetched else ''})
+    return rows
+
+
+def main(argv):
+    if not argv or argv[0] in ('-h', '--help'):
+        print(__doc__.strip())
+        return 0
+    as_json = '--json' in argv
+    refresh = '--refresh' in argv
+    args = [a for a in argv if a not in ('--json', '--refresh')]
+    try:
+        if args[:2] == ['skills', 'available'] and len(args) == 2:
+            rows = catalog(refresh)
+            if as_json:
+                print(json.dumps(rows))
+            for r in [] if as_json else rows:
+                print(f'{r["name"]:<28} {r["description"][:80]}')
+        elif args[:1] == ['skills'] and len(args) == 2:
+            rows = skills_of(args[1])
+            if as_json:
+                print(json.dumps(rows))
+            for r in [] if as_json else rows:
+                tail = f'{r["repo"]}@{r["ref"][:12]}' + ('' if r['fetched'] else ' (not fetched)') if r['kind'] == 'linked' \
+                    else r.get('scope', '')
+                print(f'{r["name"]:<28} {r["kind"]:<8} {tail}')
+        elif args[:1] == ['skill'] and len(args) == 4 and args[2] in ('add', 'remove'):
+            out = (skill_add if args[2] == 'add' else skill_remove)(args[1], args[3])
+            if as_json:
+                print(json.dumps(out))
+            elif args[2] == 'add':
+                print(f'{args[1]}: {out["skill"]} ' + (f'linked at {out["ref"][:12]} ({out["repo"]}); the next run has it'
+                                                       if out['changed'] else 'was already linked'))
+            else:
+                print(f'{args[1]}: {out["skill"]} ' + ('unlinked; the next run no longer has it' if out['changed']
+                                                       else 'was not linked; nothing to do'))
+        else:
+            raise Fail('usage: kith <agent> skill add|remove <id> | kith <agent> skills | kith skills available', )
+    except Fail as e:
+        if as_json:
+            print(json.dumps({'ok': False, 'error': str(e)}))
+        else:
+            print(f'kith-skills: {e}', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

@@ -32,13 +32,18 @@
 #   kith versions|pin|unpin|rollback <agent> [VERSION]   agent package versions (kith-pkg)
 #   kith new <name> "<description>"                      start a new agent (kith-new)
 #   kith install <github-link> [--as NAME]               add an agent; each agent is its own git repo
+#   kith install <github-link> [--as NAME] --preview [--json]   what it would do here, keeping nothing; --yes --json installs
 #   kith update                                          update kith itself: git pull, brew upgrade or install.sh again, by how it was installed; desktop app: the download link (kith-self-update)
 #   kith update|push|commit <agent>|--all                pull from, push to or commit the agent's repo; update --all: kith first, then every agent
 #   kith history <agent> | kith restore <agent> <commit>   every good version is committed; restore any of them
 #   kith share <agent> [--public [--fresh]]              put it on GitHub; --fresh: a public copy without its history
-#   kith market [words]                                  agents people shared: pick any by number to install
+#   kith market [words] [--new] [--json]                 agents people shared: pick any by number to install (--json: the list)
 #   kith search [words] [--mine]                         find agents on GitHub (repos tagged hq-agent)
 #   kith deps <agent>|--all [--install]                  programs an agent runs that this Mac lacks; --install adds them
+#   kith <agent> connect|disconnect <connector> [--profile P] [--json]   grant the agent a connector of this Mac (kith-auth); kith <agent> connectors [--json]: what it has
+#   kith connectors [--json]                           what this Mac can connect: kernel MCP services and the host's connectors
+#   kith <agent> skill add <id> [--json]               link a skill: a name in github.com/anthropics/skills, or owner/repo[/path][@ref]; skill remove <id> unlinks it (kith-skills)
+#   kith <agent> skills [--json]  ·  kith skills available [--json]   the agent's skills (own, learned, linked); the anthropics/skills catalog
 #   kith auth [ls|grant|revoke|set ...]                  which agent may use which service, as which account (kith-auth)
 #   kith door prepare AGENT DOOR|sweep|ls               a guest's doors: prepare one's cache (owner), stop them, list them (kith-door)
 #   kith cost [agents|agent <name>|...]                  what the agents cost, from the usage ledger (kith-cost)
@@ -46,6 +51,7 @@
 #   kith allow <agent> [--rm ID]                        what you said "Always allow" to for the agent in auto mode: list, forget one (kith-allow)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
 #   kith group add-bot|remove-bot <room> <bot>  ·  kith bot set <bot> [--wake-profile P] [--turn-timeout S]   a bot guest (Grok) in a group room; its wake settings (kith-group)
+#   kith connector ls|search|info|install|remove [--json]   the MCP connectors installed on this Mac, through the host (kith-connector)
 #   kith keys add <service> --profile <account|service/account> [--for AGENT]   hand Kith a key through a card in the app (default AGENT: serve); never typed here (kith-keys)
 #   kith link [NAME] [--accept [CODE] | --deny] | unlink NAME   pair this Mac with another of your account's (kith-serve)
 #   kith memory search <words> [--agent NAME|--all]      search what the agents wrote down (kith-memory)
@@ -85,7 +91,7 @@ set -euo pipefail
 src=$0; while [ -L "$src" ]; do t=$(readlink "$src"); case $t in /*) src=$t ;; *) src=$(dirname "$src")/$t ;; esac; done
 KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
-[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,60p' "$0" | sed 's/^#   //'; exit 0; }
+[[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,66p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
 [[ $1 == migrate ]] && exec "$KITH/bin/kith-migrate" "${@:2}"
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
@@ -103,6 +109,8 @@ case $1 in
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
   rollback)           shift; exec "$KITH/bin/kith-pkg" pin "$@" ;;
   auth)               shift; exec "$KITH/bin/kith-auth" "${@:-ls}" ;;
+  connectors)         exec "$KITH/bin/kith-auth" "$@" ;;
+  skills)             exec "$KITH/bin/kith-skills" "$@" ;;
   door)               shift; exec "$KITH/bin/kith-door" "${@:---help}" ;;
   cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
@@ -125,6 +133,7 @@ case $1 in
   wake)               shift; exec "$KITH/bin/kith-wake" "${@:-ls}" ;;
   acp)                shift; exec "$KITH/bin/kith-acp" "$@" ;;
   group|bot)          exec "$KITH/bin/kith-group" "$@" ;;
+  connector)          shift; exec "$KITH/bin/kith-connector" "${@:---help}" ;;
   keys)               shift; exec "$KITH/bin/kith-keys" "${@:---help}" ;;
   serve)              shift; exec "$KITH/bin/kith-serve" "${@:-help}" ;;
   link|unlink)        exec "$KITH/bin/kith-serve" "$@" ;;
@@ -209,6 +218,13 @@ if [[ ${1:-} == set ]]; then
        kith $agent set harness H [--model M]   (claude, codex, ...: the harness it runs on; drops a model of the old one)" >&2; exit 2; }
   exec python3 "$KITH/lib/kith_settings.py" set permission_mode "$agent" "$3"
 fi
+# kith AGENT connect|disconnect|connectors, skill add|remove, skills: connectors and skills as grants on the agent.
+case ${1:-} in
+  connect|disconnect|connectors|skill|skills)
+    [[ -n $(agent_dir "$agent") ]] || { echo "kith: no agent '$agent' (try: kith ls)" >&2; exit 1; }
+    case $1 in skill|skills) exec "$KITH/bin/kith-skills" "$1" "$agent" "${@:2}" ;; esac
+    exec "$KITH/bin/kith-auth" "$1" "$agent" "${@:2}" ;;
+esac
 src_pkg=$(agent_dir "$agent")
 if [[ -z $src_pkg ]]; then
   echo "kith: no agent named \"$agent\"." >&2

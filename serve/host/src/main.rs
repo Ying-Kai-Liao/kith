@@ -669,6 +669,10 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
     let hub = hub::Hub::new(store, host_id, identity, token, port);
     hub.start()?;
     runauth::attach(&hub);
+    {
+        let hub = hub.clone();
+        tokio::task::spawn_blocking(move || market::mirror::start(&hub.store));
+    }
     cards::start(&hub);
     background::start(&hub);
     watchdog::start();

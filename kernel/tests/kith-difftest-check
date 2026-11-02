@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# kith-difftest-check — the differential harness (kernel/tests/difftest): its self-test, then the seed corpus OLD against
+# OLD (the runner and its normalisation are deterministic). Cases that need the Rust binary are not run here; the
+# host-build job runs them with --rust. Throwaway HOME / KITH_HOME per case; nothing real is touched.
+#
+#   kernel/tests/kith-difftest-check     under a minute; exits 1 on a failure
+set -uo pipefail
+D="$(cd "$(dirname "$0")" && pwd)/difftest"
+python3 -I "$D/selftest.py" || exit 1
+python3 -I "$D/kith-difftest" "$@"
