@@ -339,6 +339,14 @@
     "downloadRedirect": {
       "doc": "A one-click download link (mac, mac/zip, linux/deb, …): a 302 to the latest GitHub release's asset.",
       "method": "GET", "path": "download/{key:rest}", "auth": "none", "kind": "redirect"
+    },
+    "installPage": {
+      "doc": "The CLI installation guide at https://kithbot.app/install.",
+      "method": "GET", "path": "install", "auth": "none", "kind": "page"
+    },
+    "installScript": {
+      "doc": "https://kithbot.app/install.sh: a 302 to scripts/install.sh on GitHub, so `curl -fsSL https://kithbot.app/install.sh | sh` works.",
+      "method": "GET", "path": "install.sh", "auth": "none", "kind": "redirect"
     }
   },
   "errors": {
