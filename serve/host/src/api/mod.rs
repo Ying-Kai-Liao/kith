@@ -36,7 +36,6 @@ mod proof_tests;
 mod remote;
 #[cfg(test)]
 mod revoke_tests;
-mod scratch;
 #[cfg(test)]
 pub(crate) mod rig;
 pub mod roles;
@@ -48,6 +47,7 @@ mod roles_tests;
 mod room_points_props;
 #[cfg(test)]
 mod room_secrets_props;
+mod scratch;
 mod threads;
 
 pub use events::{events_stream, term_events};

@@ -277,7 +277,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             }
             // A quick chat (a new thread of the built-in scratch agent) picks its engine and model for that thread
             // alone. The owner's only, and only where the thread is new: a later message can't change them.
-            let engine = if starts_task && row.config.builtin && row.config.person.is_none() && b["asMember"].is_null() {
+            let engine = if starts_task && row.config.builtin && row.config.person.is_none() && b["asMember"].is_null()
+            {
                 crate::agent::hq::ThreadEngine::ask(b["engine"].as_str(), b["engineModel"].as_str())?
             } else {
                 None

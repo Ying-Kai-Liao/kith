@@ -61,7 +61,8 @@ async fn keep(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     // The draft is made from the chat's summary; one that hasn't been written yet is written now. A chat too short
     // for one becomes an agent with an empty draft.
     if !hub.store.with_db(|c| kith_mem::summary::get(c, &root.id).ok().flatten().is_some()) {
-        match tokio::time::timeout(SUMMARY_WAIT, crate::chat::memory::summary::summarise_now(hub, &root.id, false)).await
+        match tokio::time::timeout(SUMMARY_WAIT, crate::chat::memory::summary::summarise_now(hub, &root.id, false))
+            .await
         {
             Ok(Err(error)) => tracing::info!(error = format!("{error:#}"), "no summary for the kept chat"),
             Err(_) => tracing::info!("the summary of the kept chat took too long"),
@@ -195,9 +196,10 @@ exit 1
         assert_eq!(all.len(), 1, "one scratch bot, not one per sync");
         assert!(all[0].config.builtin && all[0].config.hq_agent.as_deref() == Some("scratch"));
         // A client can't mark or unmark a bot.
-        let patched = super::super::bots::call(&rig.hub, "updateBot", json!({"id": all[0].config.id, "builtin": false}))
-            .await
-            .unwrap();
+        let patched =
+            super::super::bots::call(&rig.hub, "updateBot", json!({"id": all[0].config.id, "builtin": false}))
+                .await
+                .unwrap();
         assert!(matches!(patched, ControlFlow::Break(_)));
         assert!(rig.scratch().builtin);
     }
@@ -255,7 +257,8 @@ exit 1
 
         // Not a quick chat: an ordinary bot's thread.
         let kept = rig.hub.store.bots().unwrap().into_iter().find(|r| r.config.name == "trip-pal").unwrap();
-        let theirs = rig.hub.add_entry(&Lane::main(&kept.config.id), EntryKind::User, 1, &json!({"text": "x"})).unwrap();
+        let theirs =
+            rig.hub.add_entry(&Lane::main(&kept.config.id), EntryKind::User, 1, &json!({"text": "x"})).unwrap();
         let err = keep(&rig.hub, &json!({"botId": kept.config.id, "threadId": theirs.id, "name": "other"}))
             .await
             .unwrap_err();
@@ -265,11 +268,11 @@ exit 1
     #[tokio::test]
     async fn a_threads_launch_carries_its_engine_and_model_and_other_launches_do_not() {
         let rig = Rig::new().await;
-        let bin = hq::bin().unwrap();
         let go = |engine: Option<ThreadEngine>| {
-            let bin = bin.clone();
+            let bin = hq::bin().unwrap();
             async move {
-                hq::launch(&bin, "scratch", "/", None, None, None, "r", &hq::Members::Unknown, None, engine.as_ref()).await
+                hq::launch(&bin, "scratch", "/", None, None, None, "r", &hq::Members::Unknown, None, engine.as_ref())
+                    .await
             }
         };
         let plain = go(None).await.unwrap();
@@ -321,10 +324,10 @@ printf '{"version":1,"agent":"scratch","agent_version":"1","harness":"codex","cw
         assert!(err.to_string().contains("codex"), "{err}");
         assert!(rig.hub.store.history(&bot, i64::MAX, 10).unwrap().is_empty(), "nothing saved");
 
-        let ControlFlow::Break(sent) = send(json!({"engine": "codex", "engineModel": "gpt-5"})).await.unwrap() else {
+        let ControlFlow::Break(first) = send(json!({"engine": "codex", "engineModel": "gpt-5"})).await.unwrap() else {
             panic!("answered")
         };
-        let root = sent["entry"]["id"].as_str().unwrap();
+        let root = first["entry"]["id"].as_str().unwrap();
         let kept = ThreadEngine::of_thread(&rig.hub.store, &bot, root).unwrap();
         assert_eq!((kept.harness.as_str(), kept.model.as_deref()), ("codex", Some("gpt-5")));
         // Two quick chats are two threads, each with its own.

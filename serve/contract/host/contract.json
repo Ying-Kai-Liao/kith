@@ -186,6 +186,7 @@
         "autoName": "bool",
         "tasks": "bool?",
         "hqAgent": "string?",
+        "builtin": "bool?",
         "project": "string?",
         "person": "string?",
         "createdAt": "int",
@@ -207,7 +208,7 @@
         "lastAt": "int",
         "botGuest": "BotGuestRef?"
       },
-      "mayOmit": ["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "project", "person", "botGuest"]
+      "mayOmit": ["labels", "command", "cwd", "folder", "sharedMemory", "memoryRev", "tasks", "hqAgent", "builtin", "project", "person", "botGuest"]
     },
     "BotAnswer": { "fields": { "bot": "Bot" } },
 
