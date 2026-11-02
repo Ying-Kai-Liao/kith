@@ -272,25 +272,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_claude_agents_get_bots() {
-        // What `hq ls --json` prints: an agent from an older hq has no harness, which means Claude; one this version
+    async fn only_agents_the_host_can_start_get_bots() {
+        // What `hq ls --json` prints: an agent from an older hq has no harness, which means Claude; Codex and the engines of
+        // the table with an ACP mode run (hermes and dsh have none); one this version
         // doesn't know is never started.
         let listed: Vec<HqAgent> = serde_json::from_str(
             r#"[{"name":"a","description":"","home":"/x"},{"name":"b","description":"","home":"/x","harness":"claude"},
-               {"name":"c","description":"","home":"/x","harness":"codex"},{"name":"d","description":"","home":"/x","harness":"gemini"}]"#,
+               {"name":"c","description":"","home":"/x","harness":"codex"},{"name":"d","description":"","home":"/x","harness":"frobnicator"}]"#,
         )
         .unwrap();
-        assert_eq!(listed.iter().map(HqAgent::runnable).collect::<Vec<_>>(), [true, true, false, false]);
+        assert_eq!(listed.iter().map(HqAgent::runnable).collect::<Vec<_>>(), [true, true, true, false]);
 
         let (hub, dir) = hub();
         let mut codex = agent(&dir, "coder", "");
-        codex.harness = Some(hq::Harness::Codex);
+        codex.harness = Some(hq::Harness::Hermes);
         let house = agent(&dir, "house", "");
         let done = hub.apply_hq_agents(&[codex.clone(), house.clone()]).unwrap();
         assert_eq!(done.created, ["house"], "no bot that would fail on every message");
         // An agent that switches to another harness is taken off the roster like one that left hq.
         let mut moved = house;
-        moved.harness = Some(hq::Harness::Codex);
+        moved.harness = Some(hq::Harness::Dsh);
         let done = hub.apply_hq_agents(&[codex, moved]).unwrap();
         assert_eq!(done.hidden, ["house"]);
     }

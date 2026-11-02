@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "682ff33c5ebbe93a709d554120fcbe8fce22ce2f420e758f4b8961491ad95420";
+pub const CONTRACT_SHA256: &str = "32d8ce02f2760249cc3aaf4999a787770e53c4f5c51fe21de679a50d14e24b50";
 
 /// The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, codex, and any engine of the core's table with an ACP mode (`kith engines`); `agy` is the kernel's word for antigravity. One this version doesn't know is its own state: the host doesn't start it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -246,7 +246,7 @@ pub struct Project {
     pub exists: bool,
 }
 
-/// `kith <agent> --launch-json`: how to start the agent, for claude and codex and, additively, any other engine the table lists with an ACP mode: `engine` is the table id (null for claude and codex, which print what they always did), `acp` the installed CLI's own ACP program (null when it has none here: the host then starts the `registry` build), `role_prompt` how the engine takes `system_prompt`. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.
+/// `kith <agent> --launch-json`: how to start the agent, for claude and codex and, additively, any other engine the table lists with an ACP mode: `engine` is the table id (left out for claude and codex, which print what they always did), `acp` the installed CLI's own ACP program (null when it has none here: the host then starts the `registry` build), `role_prompt` how the engine takes `system_prompt`. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Launch {
     pub version: i64,
@@ -426,7 +426,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "NewAgent", fields: &[("agent", "string"), ("home", "string"), ("dir", "string"), ("description", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "Projects", fields: &[("projects", "[Project]")], may_omit: &[] },
         crate::check::TypeSchema { name: "Project", fields: &[("id", "string"), ("paths", "[string]"), ("home", "string?"), ("remotes", "[string]"), ("parent", "string?"), ("memory", "string"), ("exists", "bool")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Launch", fields: &[("version", "int"), ("agent", "string"), ("agent_version", "string"), ("harness", "Harness?"), ("cwd", "string"), ("env", "{string}"), ("system_prompt", "string"), ("settings", "json?"), ("mcp_servers", "json"), ("add_dirs", "[string]"), ("allowed_tools", "[string]"), ("disable_slash_commands", "bool"), ("model", "string?"), ("effort", "string?"), ("project", "string?"), ("call_model", "string?"), ("permission_mode", "PermissionMode?"), ("cost_tag", "CostTag"), ("claude_args", "[string]?"), ("backup", "string?"), ("provider", "Harness?"), ("account", "string?"), ("account_id", "string?"), ("engine", "string?"), ("acp", "AcpStart?"), ("registry", "string?"), ("role_prompt", "RolePrompt?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Launch", fields: &[("version", "int"), ("agent", "string"), ("agent_version", "string"), ("harness", "Harness?"), ("cwd", "string"), ("env", "{string}"), ("system_prompt", "string"), ("settings", "json?"), ("mcp_servers", "json"), ("add_dirs", "[string]"), ("allowed_tools", "[string]"), ("disable_slash_commands", "bool"), ("model", "string?"), ("effort", "string?"), ("project", "string?"), ("call_model", "string?"), ("permission_mode", "PermissionMode?"), ("cost_tag", "CostTag"), ("claude_args", "[string]?"), ("backup", "string?"), ("provider", "Harness?"), ("account", "string?"), ("account_id", "string?"), ("engine", "string?"), ("acp", "AcpStart?"), ("registry", "string?"), ("role_prompt", "RolePrompt?")], may_omit: &["engine", "acp", "registry", "role_prompt"] },
         crate::check::TypeSchema { name: "AcpStart", fields: &[("command", "string"), ("args", "[string]"), ("env", "{string}")], may_omit: &[] },
         crate::check::TypeSchema { name: "CostTag", fields: &[("agent", "string"), ("version", "string"), ("model", "string?"), ("effort", "string?"), ("via", "string"), ("project", "string?"), ("person", "string?")], may_omit: &[] },
         crate::check::TypeSchema { name: "Delegations", fields: &[("delegations", "[Delegation]")], may_omit: &[] },

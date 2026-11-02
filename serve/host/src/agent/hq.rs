@@ -67,7 +67,8 @@ pub trait AgentExt {
 impl AgentExt for HqAgent {
     fn runnable(&self) -> bool {
         let harness = self.harness.unwrap_or(Harness::Claude);
-        harness == Harness::Claude || kith_kernel::engines::find(harness.as_str()).is_some_and(|e| e.has_acp())
+        harness == Harness::Claude
+            || kith_kernel::engines::find(harness.as_str()).is_some_and(kith_kernel::engines::Engine::has_acp)
     }
 
     fn is_builtin(&self) -> bool {
@@ -87,7 +88,7 @@ pub struct ThreadEngine {
 
 /// Whether a quick chat can run on `harness`: any engine of the core's table with an ACP mode.
 fn thread_engine(harness: &str) -> bool {
-    kith_kernel::engines::find(harness).is_some_and(|e| e.has_acp())
+    kith_kernel::engines::find(harness).is_some_and(kith_kernel::engines::Engine::has_acp)
 }
 
 impl ThreadEngine {
@@ -168,7 +169,7 @@ impl Launch {
         // Only an engine the table says can hold a guest's rules (hooks, a permission mode, per-run servers) serves
         // them; the kernel refuses the rest at launch, and this is the host's own check on its answer.
         if let Some(other) = self.other_engine()
-            && !kith_kernel::engines::find(other).is_some_and(|e| e.serves_guests())
+            && !kith_kernel::engines::find(other).is_some_and(kith_kernel::engines::Engine::serves_guests)
         {
             bail!("{} runs on {other}; runs for anyone but the owner need Claude Code", self.agent);
         }

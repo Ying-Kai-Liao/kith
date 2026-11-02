@@ -50,7 +50,9 @@ done
 
 BIN=${KITH_DIFFTEST_BIN:-${KITH_BIN:-$(python3 "$KERNEL/lib/kith_paths.py" --bin 2>/dev/null || true)}}
 [ -n "$BIN" ] && export KITH_BIN=$BIN   # the kernel finds its Rust program here (kith_paths.py --bin)
+HAVE=0
 if [ -n "$BIN" ] && "$BIN" kernel engines launch gemini --json >/dev/null 2>&1; then
+  HAVE=1
   g=$(launch gm | sed "s#<T>#$T#g")
   py() { printf '%s' "$g" | python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
   check "gemini: engine id" "[ \"\$(py 'd[\"engine\"]')\" = gemini ]"
@@ -74,7 +76,7 @@ check "an unknown engine is an error, never a silent wrong launch" "[ $rc != 0 ]
 for a in cl cx gm; do "$AUTH" member $a sam mode=default >/dev/null 2>&1; done
 # Guests: an engine without the hooks is refused with 3 (4 with a backup chain).
 (cd "$T/home" && KITH_PERSON=sam "$KITH" gm --launch-json >/dev/null 2>"$T/err"); rc=$?
-check "guest run on gemini is refused, exit 3" "[ $rc = 3 ] && grep -q 'anyone but the owner' '$T/err'"
+[ $HAVE = 1 ] && check "guest run on gemini is refused, exit 3" "[ $rc = 3 ] && grep -q 'anyone but the owner' '$T/err'"
 (cd "$T/home" && KITH_PERSON=sam "$KITH" cx --launch-json >/dev/null 2>"$T/err"); rc=$?
 check "guest run on codex is refused, exit 3" "[ $rc = 3 ] && grep -q 'anyone but the owner' '$T/err'"
 (cd "$T/home" && KITH_PERSON=sam "$KITH" cl --launch-json >/dev/null 2>"$T/err"); rc=$?
