@@ -335,11 +335,14 @@ exit 1
     }
 
     #[tokio::test]
-    async fn a_non_claude_agent_is_made_but_has_no_bot_yet() {
+    async fn a_non_claude_agent_is_made_with_its_bot() {
         let rig = Rig::new().await;
         let got = rig.make(json!({"harness": "codex"})).await.unwrap();
         assert_eq!(got["agent"], "trip-pal");
-        assert!(got["botId"].is_null() && got["bot"].is_null());
+        let row = rig.hub.store.bots().unwrap().into_iter().find(|r| r.config.hq_agent.as_deref() == Some("trip-pal"));
+        let id = row.expect("the roster has the agent's bot").config.id;
+        assert_eq!(got["botId"], id.as_str());
+        assert_eq!(got["bot"]["id"], id.as_str());
     }
 
     #[tokio::test]
