@@ -2,28 +2,28 @@
   "method": "botRoomRead",
   "type": "BotRoom",
   "body": {
-    "room": "9896082e-a76d-46ee-9bb2-e31024e330a5",
+    "room": "7fa5044b-261f-445f-a0b4-b3e733c8c03b",
     "conversation": null,
     "epoch": null,
     "entries": [
       {
-        "id": "b1fd52c5-e084-4bdd-8015-328410a0fa29",
+        "id": "5ac49324-3f3d-4640-8bdc-1a8ffd4d1134",
         "seq": 25,
         "turn": 1,
-        "at": 1793379900800,
+        "at": 1793638703771,
         "conversation": "",
         "kind": "user",
         "text": "hello crew",
-        "room": "9896082e-a76d-46ee-9bb2-e31024e330a5"
+        "room": "7fa5044b-261f-445f-a0b4-b3e733c8c03b"
       }
     ],
     "cursor": 26,
     "secrets": [
       {
-        "id": "rs_0de093a14ffc4087",
+        "id": "rs_0cbd90e83c9f4c3c",
         "from": "the owner",
         "label": "api key",
-        "expiresAt": 1793380500800
+        "expiresAt": 1793639303772
       }
     ]
   }
