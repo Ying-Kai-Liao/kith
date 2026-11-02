@@ -109,7 +109,7 @@ def dumps(v):
 
 def subst(s, side_dir):
     return (s.replace('{HOME}', str(side_dir / 'home')).replace('{KITH_HOME}', str(side_dir / 'kith'))
-             .replace('{TMP}', str(side_dir / 'tmp')).replace('{ROOT}', str(side_dir)))
+             .replace('{TMP}', str(side_dir / 'tmp')).replace('{ROOT}', str(side_dir)).replace('{KERNEL}', str(KERNEL)))
 
 
 def base_env(side, side_dir, case):
@@ -129,7 +129,7 @@ def base_env(side, side_dir, case):
         'GIT_COMMITTER_NAME': 'difftest', 'GIT_COMMITTER_EMAIL': 'd@example.invalid',
         'GIT_AUTHOR_DATE': '2026-01-01T00:00:00Z', 'GIT_COMMITTER_DATE': '2026-01-01T00:00:00Z',
     }
-    if side == 'new' and RUST_BIN:
+    if RUST_BIN and (side == 'new' or case.get('bin_both')):   # bin_both: the OLD side's guest runs need a kith program for the memory check too
         env['KITH_BIN'] = RUST_BIN   # where the router finds the Rust program (kernel/lib/kith-core.sh)
     for k, v in case.get('env', {}).items():
         if v is None:   # null: this variable is not set at all (e.g. no KITH_HOME, to test the folder rules)
@@ -185,7 +185,7 @@ def run_steps(side, side_dir, case, prefix, env, norm):
     """-> {facet: text} for the case's command lines."""
     facets = {}
     cwd = side_dir / case.get('cwd', 'home')
-    for i, line in enumerate(case['run']):
+    for i, line in enumerate(case.get('run_' + side, case['run'])):   # run_old / run_new: a line of one side's own
         args = [subst(a, side_dir) for a in line]
         stdin = case.get('stdin')
         try:
@@ -205,7 +205,12 @@ def run_steps(side, side_dir, case, prefix, env, norm):
                 parsed = json.loads(out)
             except ValueError:
                 parsed = None
-        if parsed is not None:
+        pick = case.get('pick', {}).get(side)
+        if pick and parsed is not None:   # compare one field of the JSON as text (the other side prints it bare or under another key)
+            for key in pick.split('.'):
+                parsed = parsed.get(key) if isinstance(parsed, dict) else None
+            facets[f'{k}.pick'] = norm.text(parsed if isinstance(parsed, str) else json.dumps(parsed, sort_keys=True))
+        elif parsed is not None:
             parsed = norm.data(parsed)
             if case.get('sort_lists'):
                 parsed = sort_lists(parsed)
@@ -293,7 +298,8 @@ def run_side(side, work, case, prefix):
     norm = Normalizer(side_dir, case.get('normalize', []))
     facets = run_steps(side, side_dir, case, prefix, env, norm)
     facets.update(snapshot(side_dir, case, norm))
-    return facets
+    only = case.get('only')   # e.g. ["pick", "exit"]: compare these facets alone (the other side has no state or fakes to match)
+    return {k: v for k, v in facets.items() if k.rsplit('.', 1)[-1] in only} if only else facets
 
 
 # --- comparing -------------------------------------------------------------------------------------------------------
@@ -310,7 +316,15 @@ def compare(case, prefixes, keep=False):
     """-> {facet: (old, new)} of the facets that differ."""
     work = Path(tempfile.mkdtemp(prefix='kith-difftest.', dir=os.environ.get('TMPDIR') or '/tmp')).resolve()
     try:
-        got = {s: run_side(s, work, case, case_prefix(case, s) or prefixes.get(s) or prefixes['default'][s]) for s in SIDES}
+        def prefix(s):
+            if case_prefix(case, s):
+                return case_prefix(case, s)
+            if prefixes.get(s):
+                return prefixes[s]
+            if s == 'new' and case.get('new_prog') == 'rust':   # the Rust program itself, for a verb the router does not reach yet
+                return [RUST_BIN]
+            return prefixes['default'][s]
+        got = {s: run_side(s, work, case, prefix(s)) for s in SIDES}
     finally:
         if keep:
             print(f'  kept: {work}')
