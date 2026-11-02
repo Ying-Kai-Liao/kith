@@ -1192,7 +1192,6 @@ fn json_errors_match_python() {
             "{\"a\":1",
             "Expecting ',' delimiter: line 1 column 7 (char 6)",
         ),
-        ("[1,]", "Expecting value: line 1 column 4 (char 3)"),
         ("nul", "Expecting value: line 1 column 1 (char 0)"),
         (
             "\"a\nb\"",
@@ -1222,6 +1221,25 @@ fn json_errors_match_python() {
 }
 
 #[test]
+fn error_of_names_a_trailing_comma_like_python_313() {
+    let old = |t| pyjson::error_for(t, false).unwrap();
+    let new = |t| pyjson::error_for(t, true).unwrap();
+    assert_eq!(old("[1,]"), "Expecting value: line 1 column 4 (char 3)");
+    assert_eq!(
+        new("[1,]"),
+        "Illegal trailing comma before end of array: line 1 column 3 (char 2)"
+    );
+    assert_eq!(
+        old("{\"a\":1,}"),
+        "Expecting property name enclosed in double quotes: line 1 column 8 (char 7)"
+    );
+    assert_eq!(
+        new("{\"a\":1,}"),
+        "Illegal trailing comma before end of object: line 1 column 7 (char 6)"
+    );
+}
+
+#[test]
 fn dumps_prints_like_python() {
     let v = json!({"a": [1, 2.5, "é\n\u{7f}"], "b": {}, "c": [], "d": null, "e": 1e16, "f": 1e-5, "g": true});
     assert_eq!(
@@ -1245,4 +1263,36 @@ fn domains_follow_the_guard_rule() {
     ] {
         assert!(!jobs::valid_domain(bad), "{bad}");
     }
+}
+
+#[test]
+fn passwd_home_parses_linux_and_bsd_lines() {
+    let getent = "kai:x:1000:1000:Kai,,,:/home/kai:/bin/bash\n";
+    assert_eq!(
+        home_from_passwd(getent, "1000"),
+        Some(PathBuf::from("/home/kai"))
+    );
+    let file = "root:x:0:0:root:/root:/bin/sh\nkai:x:1000:1000::/home/kai:/bin/sh\n";
+    assert_eq!(
+        home_from_passwd(file, "1000"),
+        Some(PathBuf::from("/home/kai"))
+    );
+    assert_eq!(home_from_passwd(file, "0"), Some(PathBuf::from("/root")));
+    // No entry (a container user), a short line, an empty home: nothing, so a guest.
+    assert_eq!(home_from_passwd(file, "1001"), None);
+    assert_eq!(home_from_passwd("kai:x:1000:1000", "1000"), None);
+    assert_eq!(home_from_passwd("kai:x:1000:1000:::/bin/sh", "1000"), None);
+    let bsd = "kai:*:501:20::0:0:Kai:/Users/kai:/bin/zsh\n";
+    assert_eq!(home_from_bsd_id(bsd), Some(PathBuf::from("/Users/kai")));
+    assert_eq!(home_from_bsd_id("garbage"), None);
+}
+
+#[test]
+fn owner_by_the_os_probe_is_not_a_guest() {
+    // The real probe on this machine: the test user's home is readable, so it is no guest sandbox.
+    let t = Tmp::new("os-probe");
+    let mut c = ctx(&t);
+    c.sandbox = Sandbox::Os;
+    assert!(os_home().is_some(), "the passwd home must be found");
+    assert!(!c.in_guest_sandbox());
 }
