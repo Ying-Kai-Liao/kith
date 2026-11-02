@@ -295,8 +295,10 @@ pub async fn finish(hub: &Arc<Hub>, args: &Value) -> Result<Value> {
     super::verify::verify(&hub.store, connector_id, hub.port).await?;
     let bot = text(request, "botId")?;
     let row = hub.store.bot(bot)?.ok_or_else(|| anyhow!("Unknown bot"))?;
-    // A kith agent's connectors are `kith <agent> connect`'s, not host config.
-    if !row.config.is_hq() {
+    // A kith agent's connectors are `kith <agent> connect`'s, not host config; its error goes to the card.
+    if let Some(agent) = row.config.hq_agent.as_deref() {
+        crate::api::kith_tools::connect(agent, connector_id).await?;
+    } else {
         let mut enabled = row.config.connectors;
         if !enabled.iter().any(|s| s == connector_id) {
             enabled.push(connector_id.to_owned());

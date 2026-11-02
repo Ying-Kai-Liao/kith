@@ -24,7 +24,7 @@ mod host;
 mod http;
 mod kith_info;
 mod kith_new;
-mod kith_tools;
+pub(crate) mod kith_tools;
 mod marketplace;
 mod peers;
 #[cfg(test)]
