@@ -44,8 +44,14 @@ Before adding a second Claude subscription account:
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 
 
+JSON_ERRORS = False   # backup ... --json: a failure is one {"ok": false, "error"} object on stdout
+
+
 def die(msg, code=1):
-    print(f'kith: {msg}', file=sys.stderr)
+    if JSON_ERRORS:
+        print(json.dumps({'ok': False, 'error': msg}))
+    else:
+        print(f'kith: {msg}', file=sys.stderr)
     sys.exit(code)
 
 
@@ -222,6 +228,8 @@ def cmd_backup_write(sub, args):
 
 
 def cmd_backup(args):
+    global JSON_ERRORS
+    JSON_ERRORS = '--json' in args
     if not args or args[0] not in ('list', 'add', 'remove', 'set', 'reset'):
         die('backup list|add|remove|set|reset (kith account --help)', 2)
     sub, args = args[0], args[1:]
@@ -263,13 +271,20 @@ def cmd_backup(args):
     scope = f'for {agent}' if agent else 'for every agent'
     if sub == 'add':
         if entry in ids and position is None:
+            if as_json:
+                print(json.dumps({'ok': True, 'changed': False, 'entry': entry, 'agent': agent, 'position': ids.index(entry) + 1, 'backups': ids}))
+                return
             print(f'{entry} is already in the backups {scope} (--at N moves it)')
             return
         new = [i for i in ids if i != entry]
         new.insert(min(position - 1, len(new)) if position else len(new), entry)
         kith_settings.set_backups(agent, new)
-        print(f"{entry} is backup {new.index(entry) + 1} {scope}")
         ready, why = acc.check(entry, agent)
+        if as_json:
+            print(json.dumps({'ok': True, 'changed': True, 'entry': entry, 'agent': agent, 'position': new.index(entry) + 1, 'backups': new,
+                              'ready': ready, **({} if ready else {'why': why})}))
+            return
+        print(f"{entry} is backup {new.index(entry) + 1} {scope}")
         if not ready:
             f = acc.fix(entry, agent)
             print(f"note: not ready yet ({why})" + (f"; to make it ready: {f}" if f else ''), file=sys.stderr)
@@ -278,9 +293,15 @@ def cmd_backup(args):
                   file=sys.stderr)
     else:
         if entry not in ids:
+            if as_json:
+                print(json.dumps({'ok': True, 'changed': False, 'entry': entry, 'agent': agent, 'backups': ids}))
+                return
             print(f'{entry} is not in the backups {scope}')
             return
         kith_settings.set_backups(agent, [i for i in ids if i != entry])
+        if as_json:
+            print(json.dumps({'ok': True, 'changed': True, 'entry': entry, 'agent': agent, 'backups': [i for i in ids if i != entry]}))
+            return
         print(f'removed {entry} {scope}')
 
 

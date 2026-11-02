@@ -16,6 +16,8 @@
   kith-chain close SIG --why TEXT               ends the chain without a PR (devops says it is not a bug). Holds 7 days
   kith-chain fail SIG --why TEXT                ends the chain failed: one note to the person saying which bug and why
   kith-chain seen SIG                           exit 0 when SIG holds (prints its state), 1 when it doesn't
+  kith-chain ls [--json]                        the chains in the ledger, newest first (read-only); seen and sig take --json too:
+                                                  seen: {"sig", "holds", "state"}, sig: {"sig"}; an error is {"ok": false, "error"}
   kith-chain sig SERVICE                        the signature of the error text on stdin
   kith-chain task SERVICE --check "COMMAND"     the task text for a kith-sched job on the origin agent:
                                                   kith-sched add AGENT "*/30 * * * *" "$(kith-chain task S --check CMD)" --id health-S
@@ -24,7 +26,7 @@ The run that finds the bug is the origin: it asks, parks, and when the answer wa
 <machine>/chain/ledger.json (lib/kith_chain.py). Notes go through kith-send, which a scheduled run leaves in the origin's
 chat; the call's missed/declined entry carries the result the same way (kith-call --result).
 """
-import os, re, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 from pathlib import Path
 
 KITH = Path(__file__).resolve().parent.parent
@@ -44,8 +46,14 @@ def redactor():
         return lambda t: t
 
 
+JSON = '--json' in sys.argv[2:]   # seen / sig / ls: one object on stdout, errors as {"ok": false, "error"}
+
+
 def die(msg, code=2):
-    print('kith-chain: ' + msg, file=sys.stderr)
+    if JSON:
+        print(json.dumps({'ok': False, 'error': msg}))
+    else:
+        print('kith-chain: ' + msg, file=sys.stderr)
     sys.exit(code)
 
 
@@ -170,15 +178,38 @@ def cmd_fail(a):
 
 
 def cmd_seen(a):
+    a = [x for x in a if x != '--json']
     e = LEDGER.get(a[0]) if a else None
-    if e and kith_chain.holds(e, kith_chain.now()):
+    held = bool(e and kith_chain.holds(e, kith_chain.now()))
+    if JSON:
+        print(json.dumps({'sig': a[0] if a else None, 'holds': held, 'state': e['state'] if held else None}))
+    elif held:
         print(e['state'])
-        return 0
-    return 1
+    return 0 if held else 1
 
 
 def cmd_sig(a):
-    print(kith_chain.signature(a[0], sys.stdin.read()))
+    a = [x for x in a if x != '--json']
+    if not a:
+        die('usage: kith-chain sig SERVICE (the error text on stdin)')
+    sig = kith_chain.signature(a[0], sys.stdin.read())
+    print(json.dumps({'sig': sig}) if JSON else sig)
+    return 0
+
+
+def cmd_ls(a):
+    try:
+        entries = json.loads(LEDGER.file.read_text())
+    except (OSError, ValueError):
+        entries = {}
+    rows = sorted(({'sig': sig, **e} for sig, e in entries.items()), key=lambda r: r.get('opened', 0), reverse=True)
+    if JSON:
+        print(json.dumps({'chains': rows}))
+        return 0
+    if not rows:
+        print('no chains yet')
+    for r_ in rows:
+        print('%s  %-8s %s' % (r_['sig'], r_.get('state', '?'), r_.get('summary') or r_.get('service', '')))
     return 0
 
 
@@ -200,10 +231,10 @@ def cmd_task(a):
 
 
 CMDS = {'run': cmd_run, 'ask': cmd_ask, 'done': cmd_done, 'close': cmd_close, 'fail': cmd_fail, 'seen': cmd_seen,
-        'sig': cmd_sig, 'task': cmd_task}
+        'sig': cmd_sig, 'task': cmd_task, 'ls': cmd_ls}
 
 if __name__ == '__main__':
     if len(sys.argv) < 2 or sys.argv[1] not in CMDS:
-        print('usage: kith-chain run|ask|done|close|fail|seen|sig|task (see the top of this file)', file=sys.stderr)
+        print('usage: kith-chain run|ask|done|close|fail|seen|sig|ls|task (see the top of this file)', file=sys.stderr)
         sys.exit(2)
     sys.exit(CMDS[sys.argv[1]](sys.argv[2:]))

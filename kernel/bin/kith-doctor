@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """kith-doctor — check this Mac's kith and say what to fix. Changes nothing.
 
-  kith doctor            every check: ✓ fine, ! worth a look, ✗ broken (exit 1 when anything is broken)
+  kith doctor [--json]   every check: ✓ fine, ! worth a look, ✗ broken (exit 1 when anything is broken)
 
 Links and folders, whether `kith migrate` has moved this Mac off the hq names (and what is left on them), the tools kith needs, one backup line (state, memories and each agent: on GitHub,
 behind, or on this Mac only), kith's default permission mode, each agent's checks, services and grants, the people
@@ -22,31 +22,43 @@ import kith_migrate  # noqa: E402
 P = paths()
 HOME = Path.home()
 BAD = []
+JSON = False      # --json: the same checks, collected into one object instead of printed
+CHECKS = []       # [{section, level, name, ok}] in the order the text mode prints them
+SECTION = ['']
 
 
 def run(*args, cwd=None):
     return subprocess.run(args, cwd=cwd, capture_output=True, text=True)
 
 
+def emit(level, mark, text):
+    if JSON:
+        CHECKS.append({'section': SECTION[0], 'level': level, 'name': text, 'ok': level != 'bad'})
+    else:
+        print(f'  {mark} {text}')
+
+
 def ok(text):
-    print(f'  ✓ {text}')
+    emit('ok', '✓', text)
 
 
 def warn(text):
-    print(f'  ! {text}')
+    emit('warn', '!', text)
 
 
 def bad(text):
     BAD.append(text)
-    print(f'  ✗ {text}')
+    emit('bad', '✗', text)
 
 
 def note(text):
-    print(f'  · {text}')
+    emit('note', '·', text)
 
 
 def section(title):
-    print(title)
+    SECTION[0] = title
+    if not JSON:
+        print(title)
 
 
 def folders():
@@ -424,12 +436,17 @@ def main(argv):
     if '-h' in argv or '--help' in argv:
         print(__doc__.strip())
         return
+    global JSON
+    JSON = '--json' in argv
     for check in (folders, kith_version, migration, tools, repos_and_agents, services, people, plugin, jobs, serve):
         try:
             check()
         except Exception as e:   # one broken check never hides the others
             bad(f'{check.__name__}: the check itself failed ({e!r})')
-    print(f'\n{len(BAD)} problem(s)' if BAD else '\nall good')
+    if JSON:
+        print(json.dumps({'ok': not BAD, 'problems': len(BAD), 'checks': CHECKS}))
+    else:
+        print(f'\n{len(BAD)} problem(s)' if BAD else '\nall good')
     sys.exit(1 if BAD else 0)
 
 

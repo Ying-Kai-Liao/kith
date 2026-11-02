@@ -198,6 +198,8 @@ jobs:
         run: kernel/tests/kith-new-check
       - name: "Pkg json check (kith versions, history, pin, unpin, restore, install, share, deps, update, push, commit --json)"
         run: kernel/tests/kith-pkg-json-check
+      - name: "JSON misc check (--json on doctor, remote, ask ls, bug, backup add|remove, update self --check, wake status, lifecycle, chain, project)"
+        run: kernel/tests/kith-json-misc-check
       - name: "Scratch check (the built-in scratch agent: engine per chat, never backed up or shared, keep as an agent)"
         run: kernel/tests/kith-scratch-check
       - name: Grants check (connectors and skills as grants on an agent)
