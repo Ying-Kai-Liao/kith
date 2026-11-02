@@ -600,6 +600,54 @@ async fn permission_is_written_through_to_hq_and_read_back() {
     assert_eq!(std::fs::read_to_string(s.home.join("permission")).unwrap(), "plan");
 }
 
+/// What the editor does for an hq agent's own model, effort and harness: `kithSetSetting` goes through `kith … --json`,
+/// kith's refusal comes back as the error, and the answer is the info read back.
+#[tokio::test]
+async fn model_effort_and_harness_are_written_through_to_kith_and_read_back() {
+    let s = start().await;
+    let id = s.house().await["id"].as_str().unwrap().to_owned();
+    let set = |setting: &str, value: &str| json!({"botId": id, "setting": setting, "value": value});
+    let sets = || -> Vec<Value> {
+        std::fs::read_to_string(s.home.join("calls.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str::<Value>(l).unwrap()["args"].clone())
+            .filter(|a| a[1] == "set")
+            .collect()
+    };
+
+    let got = s.host.call("kithSetSetting", set("model", "opus")).await;
+    assert_eq!(got["info"]["model"], "opus", "the answer is kith's info, read back");
+    let got = s.host.call("kithSetSetting", set("effort", "high")).await;
+    assert_eq!(got["info"]["effort"], "high");
+    assert_eq!(got["info"]["model"], "opus");
+    let again = s.host.call("kithSetSetting", set("effort", "high")).await;
+    assert_eq!(again["info"]["effort"], "high", "the same value again is not an error");
+    assert_eq!(sets()[0], json!(["house", "set", "model", "opus", "--json"]));
+
+    // kith's refusal text, not the command line around it.
+    let why = s.host.refused("kithSetSetting", set("effort", "loud")).await;
+    assert!(why.contains("is not one of low, medium"), "{why}");
+    assert!(!why.contains("failed ("), "{why}");
+    let why = s.host.refused("kithSetSetting", set("harness", "codex")).await;
+    assert!(why.contains("a Claude model needs a Claude harness"), "{why}");
+    let moved = s
+        .host
+        .call("kithSetSetting", json!({"botId": id, "setting": "harness", "value": "codex", "model": "default"}))
+        .await;
+    assert_eq!(moved["info"]["harness"], "codex");
+    assert!(moved["info"]["model"].is_null());
+    assert_eq!(sets().last().unwrap(), &json!(["house", "set", "harness", "codex", "--model", "default", "--json"]));
+
+    s.host.call("kithSetSetting", set("effort", "default")).await;
+    let info = s.host.call("kithInfo", json!({"botId": id, "refresh": true})).await;
+    assert!(info["info"]["effort"].is_null(), "default forgets it");
+
+    for bad in [set("permission", "plan"), set("model", "--bad"), set("model", "two words"), set("model", "")] {
+        s.host.refused("kithSetSetting", bad).await;
+    }
+}
+
 /// A message spoken in a call: its turn gets the voice note and runs on the call model, the chat keeps the spoken
 /// words only, and a typed message after it is back on the agent's own model, in the same session.
 #[tokio::test]
