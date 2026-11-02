@@ -116,7 +116,7 @@ and `--json` first and the app calling it after.
 
 - [x] **C1. Built-in `scratch` agent.** Ships with kith; threads with it are the quick chats. "Keep as agent" makes a
   real agent from a thread. Never backed up or shared.
-- [ ] **C2. "New bot" calls `kith new --json`.** The host keeps only how a bot looks (avatar, pin, order,
+- [x] **C2. "New bot" calls `kith new --json`.** The host keeps only how a bot looks (avatar, pin, order,
   notifications). A "kernel unavailable" state and `kith doctor` checks in the app.
 - [ ] **C3. Engines and tools in the app go through the CLI** (needs A2, B1, B2).
 - [x] **C4. Memory parity.** Thread and row summaries and shared project memory work on kith memory.
@@ -199,3 +199,4 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: B6 footguns done: bare `kith backup|update|migrate` print usage (verbs `backup run`, `update self`, `migrate run`); an unknown word after `kith` never starts a run (PR #596). The rest of B6 (--json list) stays open.
 - 2026-11-03: A2a: engines table in core (PR #615): module `engines` in `kith-kernel`, 29 rows (the host's 27 plus hermes and dsh, the kernel's native engines) with aliases, ACP modes, install/login/sign-in probes as data, `oneshot`, env and `enforces`; the host's `backends.rs` reads it (wire shape pinned by a golden test); `kith engines [--json]|install ID|login ID` (`kith kernel engines`) switched in `core-switched.txt`. A2 stays open for A2b (kith-acp, run_once, guest refusal, harness.py per-engine code).
 - 2026-11-03: C4 done: the row shows the thread summary (PR #606), summaries moved to `hqmem/summary.rs` with `kith memory summary show|forget|write --thread --json` (PR #608), and `kith memory rm <file> [--json]` + `kith memory forget <text> --json` with `kithMemoryDelete` / `kithMemoryForget` and the apps' Delete file and Forget a fact (this PR). Not carried over: pin, archive, clear, add entry, the shared switch, promotions (no CLI); shared project memory is the kith user layer (user.md, people/, projects/).
+- 2026-11-03: C2 done: `kith new --json` (PR #611), host `newKithAgent`/`kernelStatus` (PR #613), the app's New bot makes a kith agent and shows a kernel-unavailable state (this PR). iOS New bot still uses createBot (follow-up after rust-rebuild reaches main).
