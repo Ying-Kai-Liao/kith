@@ -46,6 +46,12 @@ def schedules():
     return json.load(open(path, encoding="utf-8")) if os.path.exists(path) else []
 
 
+def setting(name):
+    """`set model|effort|harness` keeps the choice in the file of that name; none means the agent's default."""
+    path = os.path.join(home, name)
+    return (open(path, encoding="utf-8").read().strip() if os.path.exists(path) else "") or None
+
+
 def permission(default):
     path = os.path.join(home, "permission")
     return open(path, encoding="utf-8").read().strip() if os.path.exists(path) else default
@@ -75,6 +81,29 @@ elif args[:3] == ["house", "set", "permission"] and len(args) == 4:
         open(path, "w", encoding="utf-8").write(args[3])
     elif os.path.exists(path):
         os.remove(path)
+elif args[:2] == ["house", "set"] and args[2] in ("model", "effort", "harness") and args[-1] == "--json":
+    # kith's --json shape: {agent, setting, value, previous, changed}; a refusal is {ok: false, error} on stdout, exit 2.
+    name, value = args[2], args[3]
+    if name == "effort" and value not in ("default", "low", "medium", "high", "xhigh", "max"):
+        print(json.dumps({"ok": False, "error": f"effort {value} is not one of low, medium, high, xhigh, max"}))
+        sys.exit(2)
+    model = args[args.index("--model") + 1] if "--model" in args else setting("model")
+    harness = value if name == "harness" else (setting("harness") or "claude")
+    if model in ("opus", "sonnet", "haiku") and harness != "claude":
+        print(json.dumps({"ok": False, "error": f"a Claude model needs a Claude harness (harness is {harness})"}))
+        sys.exit(2)
+    previous = setting(name)
+    new = None if value == "default" else value
+    writes = [(name, new)]
+    if name == "harness":
+        writes.append(("model", None if model == "default" else model))
+    for key, val in writes:
+        path = os.path.join(home, key)
+        if val:
+            open(path, "w", encoding="utf-8").write(val)
+        elif os.path.exists(path):
+            os.remove(path)
+    print(json.dumps({"agent": "house", "setting": name, "value": new, "previous": previous, "changed": previous != new}))
 elif args[:3] == ["house", "set", "call-model"] and len(args) == 4:
     path = os.path.join(home, "call_model")
     if args[3] == "default":
@@ -149,8 +178,8 @@ elif args == ["house", "--info-json"]:
     names = sorted(n for n in os.listdir(memory) if os.path.isfile(os.path.join(memory, n))) if os.path.isdir(memory) else []
     files = [{"path": n, "bytes": os.path.getsize(os.path.join(memory, n)), "modified": "2026-10-22T00:00:00Z"} for n in names]
     print(json.dumps({
-        "version": 1, "agent": "house", "description": "Keeps the house", "harness": "claude", "model": None,
-        "effort": None, "permission_mode": permission("auto"), "home": home,
+        "version": 1, "agent": "house", "description": "Keeps the house", "harness": setting("harness") or "claude",
+        "model": setting("model"), "effort": setting("effort"), "permission_mode": permission("auto"), "home": home,
         "call_model": call_model()[0], "call_model_effective": call_model()[1],
         "role": {"path": home + "/role", "intro": "Keeps the house.", "sections": [{"title": "Not yours", "text": "Money."}]},
         "package": {"version": None, "remote": None, "dirty": False, "unpushed": 0, "pinned": None},
