@@ -1,5 +1,6 @@
 import type { LinkCode } from '@shared/host-contract.gen'
 import type { HostClient } from '../client/host-client'
+import type { QuickEngine } from '@shared/quick-chat'
 import {
   asEntry,
   isWorking,
@@ -52,18 +53,20 @@ export class BotStore extends BotSync {
   private outgoingPlaces = new Map<string, StartingFolder>()
   /** The turns picked for a group message that has not reached the host yet, so Resend keeps them. */
   private outgoingBudgets = new Map<string, number>()
+  private outgoingEngines = new Map<string, QuickEngine>()
 
   /** Where each thread works, as the host last said (`thread`, `setPlaceFolder`); keyed `bot:root`. */
   private threadFolders = new Map<string, PlaceFolder | null>()
   threadFolder(botId: string, root: string) { return this.threadFolders.get(`${botId}:${root}`) ?? null }
 
   /** `newTask`: in a bot's chat, start a task rather than go on with the current one. */
-  send(text: string, botId: string, thread: string | null = null, files: OutgoingFile[] = [], nonce: string = crypto.randomUUID(), pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null) {
+  send(text: string, botId: string, thread: string | null = null, files: OutgoingFile[] = [], nonce: string = crypto.randomUUID(), pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null, engine: QuickEngine | null = null) {
     const trimmed = text.trim()
     if ((!trimmed && !files.length) || this.retired) return
     const data: Entry['data'] = { text: trimmed, status: 'sending', clientNonce: nonce }
     if (place) this.outgoingPlaces.set(nonce, place)
     if (budget !== null) this.outgoingBudgets.set(nonce, budget)
+    if (engine) this.outgoingEngines.set(nonce, engine)
     if (files.length) {
       data.attachments = files.map((f) => ({ id: f.id, name: f.name, size: f.data.length }))
       this.outgoingFiles.set(nonce, files)
@@ -88,11 +91,12 @@ export class BotStore extends BotSync {
               ids.push(id)
             }
           }
-          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via, budget)
+          return client.send(botId, trimmed, nonce, thread, ids, pasted, newTask, place, via, budget, this.outgoingEngines.get(nonce) ?? null)
         }, true)
         this.outgoingFiles.delete(nonce)
         this.outgoingPlaces.delete(nonce)
         this.outgoingBudgets.delete(nonce)
+        this.outgoingEngines.delete(nonce)
         this.upsert(e)
         this.changed()
       } catch (error) {
@@ -109,7 +113,8 @@ export class BotStore extends BotSync {
     this.entries.set(entry.botId, this.allEntries(entry.botId).filter((e) => e.id !== entry.id))
     const place = (entry.data.clientNonce && this.outgoingPlaces.get(entry.data.clientNonce)) || null
     const budget = (entry.data.clientNonce ? this.outgoingBudgets.get(entry.data.clientNonce) : undefined) ?? null
-    this.send(text, entry.botId, entry.threadId ?? null, files, entry.data.clientNonce ?? crypto.randomUUID(), [], false, place, null, budget)
+    const engine = (entry.data.clientNonce ? this.outgoingEngines.get(entry.data.clientNonce) : undefined) ?? null
+    this.send(text, entry.botId, entry.threadId ?? null, files, entry.data.clientNonce ?? crypto.randomUUID(), [], !!engine, place, null, budget, engine)
   }
 
   discard(entry: Entry) {
@@ -117,6 +122,7 @@ export class BotStore extends BotSync {
       this.outgoingFiles.delete(entry.data.clientNonce)
       this.outgoingPlaces.delete(entry.data.clientNonce)
       this.outgoingBudgets.delete(entry.data.clientNonce)
+      this.outgoingEngines.delete(entry.data.clientNonce)
     }
     this.entries.set(entry.botId, this.allEntries(entry.botId).filter((e) => e.id !== entry.id))
     this.changed()
@@ -422,6 +428,16 @@ export class BotStore extends BotSync {
       this.changed()
       return false
     }
+  }
+
+  /**
+   * Keeps a quick chat as a real agent named `name`. The host makes it with kith and syncs the roster, so its bot is
+   * here when this returns; a refusal (name taken, bad name) throws the host's own words.
+   */
+  async keepAsAgent(root: Entry, name: string) {
+    const res = await this.withLink((c) => c.keepScratchThread(root.botId, root.id, name.trim()))
+    this.onRosterChanged?.()
+    return res
   }
 
   /** Folds the room from this message on into a topic card (owner only); a refusal throws the host's own text. */

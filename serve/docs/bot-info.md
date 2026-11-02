@@ -192,6 +192,9 @@ The thread's prose summary (`docs/memory-context.md`, "Summary") reaches the app
 - **Setting.** `rowShowsSummary` (bool, default `false`; `false` for bots stored without it) is on every bot the host sends.
   Set it with `updateBot` `{ id, rowShowsSummary: true|false }` (owner only, like every bot setting). The host only stores it:
   an app shows `summary.text` as the row when the setting is on and a summary exists, else the first message.
+  A bot's own row in the roster has no thread to read it from, so the bot carries `lastSummary` (the newest thread summary,
+  `null` when none): the owner gets every audience, an invited person only `person:<self>` or `shared` (never on a bot
+  guest's chat). An app shows it in place of `lastMessage` when `rowShowsSummary` is on.
 - **Citation.** `resolveCitation` `{ citation: "kith://thread/<id>#entry=<seq>" }` (`<id>` is a thread's root entry id, or
   `main:<bot id>` for a bot's own chat) returns `{ thread: { id, botId, rootId }, seq, at, entries }` (`at` is the id of the
   entry with that `seq` when it is among `entries`; a thread's newest 500, or 40 around `seq` in a main chat). For anyone

@@ -24,7 +24,7 @@ const KERNEL_SERVE_VERBS: &[&str] = &["start", "stop", "restart", "status", "rel
 /// statusLine): never the kernel's, whatever the binary is called.
 /// `kith memory <verb>` that the host answers (checks and history over the memory files); `ls` and `search` stay with
 /// the kernel's kith-memory, which hands these here.
-const MEMORY_VERBS: &[&str] = &["check", "log", "diff", "undo", "forget", "tidy", "hook"];
+const MEMORY_VERBS: &[&str] = &["check", "log", "diff", "undo", "forget", "tidy", "hook", "summary"];
 const HOST_INTERNAL: &[&str] = &["mcp", "npm", "node", "statusline", "compat"];
 
 #[derive(Debug, PartialEq, Eq)]

@@ -9,7 +9,10 @@
 
 mod browse;
 mod cli;
+pub(crate) mod cost;
 mod hook;
+pub mod summary;
+mod summary_cli;
 pub mod tidy;
 
 pub use browse::{diff, history, list_files, read_file, restore, save};

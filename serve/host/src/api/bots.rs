@@ -69,7 +69,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let before = b["beforeSeq"].as_i64().unwrap_or(i64::MAX);
             let limit = b["limit"].as_i64().unwrap_or(100).clamp(1, 500);
             let mut entries = hub.store.history(bot, before, limit)?;
-            crate::chat::memory::summary::hide_forgotten(&hub.store, &mut entries);
+            crate::hqmem::summary::hide_forgotten(&hub.store, &mut entries);
             let conversation = lane_conversation(hub, &Lane::main(bot));
             json!({"entries": entries, "folder": hub.place_folder(bot, &Lane::main(bot)).await?, "conversation": conversation})
         }
@@ -78,7 +78,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             let (bot, root) = (str_arg(&b, "botId")?, str_arg(&b, "rootId")?);
             let lane = Lane::in_thread(bot, root);
             let mut entries = hub.store.thread(bot, root, 500)?;
-            crate::chat::memory::summary::hide_forgotten(&hub.store, &mut entries);
+            crate::hqmem::summary::hide_forgotten(&hub.store, &mut entries);
             let conversation = lane_conversation(hub, &lane);
             json!({"entries": entries, "folder": hub.place_folder(bot, &lane).await?, "conversation": conversation})
         }
@@ -95,6 +95,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             b["hqAgent"] = Value::Null;
             // Nor can a client make a chat that belongs to an invited person.
             b["person"] = Value::Null;
+            // Nor the built-in agent's bot.
+            b["builtin"] = false.into();
             // Connectors are on for a new bot unless the client picked them.
             // Without a credential store (headless Linux) no connector can run, so the bot starts with none.
             if b["connectors"].is_null() && b["kind"] != "group" {
@@ -123,6 +125,10 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             json!(hub.sync_hq_bots().await?.json())
         }
         "updateBot" => {
+            let mut b = b;
+            if let Some(o) = b.as_object_mut() {
+                o.remove("builtin");
+            }
             let hub = hub.clone();
             json!({"bot": tokio::task::spawn_blocking(move || hub.update_bot(&b)).await??})
         }
@@ -269,9 +275,26 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             if let Some(checked) = start_in.as_ref().filter(|_| !starts_task) {
                 hub.apply_change(bot, &lane, checked)?;
             }
+            // A quick chat (a new thread of the built-in scratch agent) picks its engine and model for that thread
+            // alone. The owner's only, and only where the thread is new: a later message can't change them.
+            let engine = if starts_task && row.config.builtin && row.config.person.is_none() && b["asMember"].is_null()
+            {
+                crate::agent::hq::ThreadEngine::ask(b["engine"].as_str(), b["engineModel"].as_str())?
+            } else {
+                None
+            };
             let e = hub
                 .add_entry(&lane, EntryKind::User, turn, &data)
                 .ok_or_else(|| anyhow!("couldn't save the message"))?;
+            // Before the turn starts, which launches with it.
+            if let Some(engine) = engine
+                && let Err(error) = engine.save(&hub.store, bot, &e.id)
+            {
+                let mut data = e.data.clone();
+                data["status"] = "cancelled".into();
+                let _ = hub.store.update_entry(&e.id, &data);
+                return Err(error.context("couldn't keep the thread's engine"));
+            }
             // A new task's turn runs in its own thread.
             let turn_lane = if starts_task { Lane::in_thread(bot, &e.id) } else { lane.clone() };
             if let Some(checked) = start_in.as_ref().filter(|_| starts_task)

@@ -345,6 +345,8 @@ struct BotSettingsForm: View {
             CardSection("Activity") {
                 SwitchRow("Notifications", detail: "Get notified when this bot finishes or needs you",
                           isOn: Binding(get: { draft.notify ?? true }, set: { draft.notify = $0 }))
+                SwitchRow("Show summary on row", detail: "The list shows the latest thread's summary instead of the last message, once one is written.",
+                          isOn: Binding(get: { draft.rowShowsSummary ?? false }, set: { draft.rowShowsSummary = $0 }))
                 if model.screen != nil, part != .often {
                     SwitchRow("Use the computer", detail: model.screen?.controlReady != true
                         ? "Let this bot use apps. On that computer, open Kith → Settings → Computer access to set up permissions first."

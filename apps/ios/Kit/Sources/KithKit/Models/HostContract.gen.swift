@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "dcc5b25fce70bc9615f4b9e5437113f17e5dd3a6b5476c677bcd71f587804878"
+    public static let sha256 = "37446c9073a15a468781a64fe11d73778e8211b3e8271907d2c5c828f163a4d8"
 }
 
 extension HostContract {
@@ -458,6 +458,7 @@ extension HostContract {
         public var autoName: Bool
         public var tasks: Bool?
         public var hqAgent: String?
+        public var builtin: Bool?
         public var project: String?
         public var person: String?
         public var createdAt: Int64
@@ -476,10 +477,11 @@ extension HostContract {
         public var fastModeIssue: String?
         public var unread: Int64
         public var lastMessage: String?
+        public var lastSummary: String?
         public var lastAt: Int64
         public var botGuest: BotGuestRef?
 
-        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
+        public init(id: String, kind: BotKind, members: [String], labels: [String]? = nil, name: String, description: String, avatarColor: String, avatarShape: String, avatarSource: String, backend: String, command: String? = nil, cwd: String? = nil, permission: Permission, model: String? = nil, modelOptions: [String: String], fastMode: Bool, pinned: Bool, position: Int64, hidden: Bool, notify: Bool? = nil, connectors: [String], skills: [String], computer: Bool, sharedMemory: Bool? = nil, harnessMemory: Bool? = nil, rowShowsSummary: Bool, autoName: Bool, tasks: Bool? = nil, hqAgent: String? = nil, builtin: Bool? = nil, project: String? = nil, person: String? = nil, createdAt: Int64, managedWorkspace: Bool, folder: JSONValue? = nil, memoryRev: Int64? = nil, workingLanes: [WorkingLane], rev: Int64, deleted: Bool, status: BotStatus, activity: String, startedAt: Int64? = nil, workingChat: String? = nil, workingThread: String? = nil, fastModeSupport: String, fastModeIssue: String? = nil, unread: Int64, lastMessage: String? = nil, lastSummary: String? = nil, lastAt: Int64, botGuest: BotGuestRef? = nil) {
             self.id = id
             self.kind = kind
             self.members = members
@@ -509,6 +511,7 @@ extension HostContract {
             self.autoName = autoName
             self.tasks = tasks
             self.hqAgent = hqAgent
+            self.builtin = builtin
             self.project = project
             self.person = person
             self.createdAt = createdAt
@@ -527,6 +530,7 @@ extension HostContract {
             self.fastModeIssue = fastModeIssue
             self.unread = unread
             self.lastMessage = lastMessage
+            self.lastSummary = lastSummary
             self.lastAt = lastAt
             self.botGuest = botGuest
         }
@@ -1263,8 +1267,10 @@ extension HostContract {
         public var folder: String?
         public var clear: Bool?
         public var budget: Int64?
+        public var engine: String?
+        public var engineModel: String?
 
-        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil) {
+        public init(botId: String, text: String, clientNonce: String? = nil, threadId: String? = nil, attachments: [String]? = nil, pasted: [String]? = nil, newTask: Bool? = nil, via: MessageVia? = nil, project: String? = nil, folder: String? = nil, clear: Bool? = nil, budget: Int64? = nil, engine: String? = nil, engineModel: String? = nil) {
             self.botId = botId
             self.text = text
             self.clientNonce = clientNonce
@@ -1277,6 +1283,8 @@ extension HostContract {
             self.folder = folder
             self.clear = clear
             self.budget = budget
+            self.engine = engine
+            self.engineModel = engineModel
         }
     }
 

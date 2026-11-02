@@ -72,6 +72,13 @@ pub enum Cmd {
         #[command(subcommand)]
         undo: Option<TidySub>,
     },
+    /// A thread's summary: `show`, `forget`, `write` (owner only).
+    Summary {
+        #[command(subcommand)]
+        cmd: super::summary_cli::SummaryCmd,
+        #[command(flatten)]
+        folders: super::summary_cli::Folders,
+    },
     /// Claude Code hook on `Write`, `Edit` and `MultiEdit` (stdin: the hook's JSON).
     #[command(hide = true)]
     Hook {
@@ -122,6 +129,7 @@ impl Env {
 pub fn run(cmd: Cmd) -> Result<i32> {
     let mut out = std::io::stdout().lock();
     match cmd {
+        Cmd::Summary { cmd, .. } => super::summary_cli::run(cmd),
         Cmd::Hook { phase, agent, tidy, env } => {
             let mut input = String::new();
             std::io::stdin().read_to_string(&mut input)?;

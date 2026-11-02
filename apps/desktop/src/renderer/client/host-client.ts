@@ -17,6 +17,7 @@ import { isUnsupportedHost, parseAccessLedger, parseKithInfoResult, parseSearchR
 import { isAccessRemoved, parseGranted } from '@shared/mac-role'
 import { parseAudit, parseCreatedInvite, parseInvites, parsePeople, type AuditRow, type CreatedInvite, type PendingInvite, type Person, type Role } from '@shared/people'
 import { threadWriterCode, threadWriterMessage, type TakeOverResult, type ThreadWriterCode } from '@shared/thread-writer'
+import type { QuickEngine } from '@shared/quick-chat'
 import type { PlaceFolder, PlaceSelection, ProjectInfo, RecentFolder, StartingFolder } from '@shared/place-folders'
 import { METHODS, receive, type MethodName, type Params, type Received, type Results } from '@shared/host-contract.gen'
 import {
@@ -297,12 +298,17 @@ export class HostClient {
   }
 
   /** `pasted`: what the user pasted rather than typed, which memory never takes as their own words. */
-  async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null) {
+  async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null, engine: QuickEngine | null = null) {
     try {
-      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}), ...(budget !== null ? { budget: clampTurns(budget) } : {}) })).entry)
+      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}), ...(budget !== null ? { budget: clampTurns(budget) } : {}), ...(engine ?? {}) })).entry)
     } catch (e) {
       throw typedWriterError(e)
     }
+  }
+
+  /** Keeps a quick chat (a thread of the built-in scratch agent) as a real agent. Owner only; a refusal throws the host's own text. */
+  keepScratchThread(botId: string, threadId: string, name: string) {
+    return this.call<{ agent: string; botId: string | null }>('keepScratchThread', { botId, threadId, name }, 240_000)
   }
 
   /** Takes a thread over from the terminal that holds it; the host ends an idle terminal. Owner only. Throws `ThreadWriterError` (`terminalBusy`) while it works. */

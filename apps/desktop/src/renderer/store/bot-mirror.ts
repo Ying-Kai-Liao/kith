@@ -17,6 +17,7 @@ import { Observable } from '../lib/observable'
 import { ComposerDrafts } from '@shared/composer-drafts'
 import { canLoadHistory } from '@shared/mirror-window'
 import type { HeldPhase } from '@shared/held-run'
+import { quickChatBot } from '@shared/quick-chat'
 import { guestPrompts, macRole, visibleBots, type GrantedAgent, type GuestPrompt, type MacRole } from '@shared/mac-role'
 
 export type Connection =
@@ -155,7 +156,12 @@ export class BotMirror extends Observable {
 
   /** Roster order: pinned first, then where the user dragged them, then most recent activity. */
   get roster(): Bot[] {
-    return visibleBots([...this.bots.values()], this.granted).filter((b) => !b.hidden).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.position - b.position || b.lastAt - a.lastAt)
+    return visibleBots([...this.bots.values()], this.granted).filter((b) => !b.hidden).sort((a, b) => Number(!!a.builtin) - Number(!!b.builtin) || Number(b.pinned) - Number(a.pinned) || a.position - b.position || b.lastAt - a.lastAt)
+  }
+
+  /** The built-in scratch bot Quick chat talks to; none on a kernel from before it, or on a computer that isn't yours. */
+  get quickChatBot(): Bot | undefined {
+    return this.isOwner ? quickChatBot([...this.bots.values()]) : undefined
   }
 
   /** Asks the chat view to open this thread when its chat is (or comes) on screen. */

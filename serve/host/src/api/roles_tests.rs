@@ -692,7 +692,7 @@ fn recap(audience: &str) -> kith_mem::summary::Summary {
 fn root_with_summary(r: &Rig, bot: &str, audience: &str) -> crate::store::Entry {
     use crate::store::{EntryKind, Lane};
     let mut data = json!({"text": "hi", "thread": {"count": 1}});
-    crate::chat::memory::summary::set_row_summary(&mut data, &recap(audience));
+    crate::hqmem::summary::set_row_summary(&mut data, &recap(audience));
     r.hub.store.insert_entry(&Lane::main(bot), EntryKind::User, 1, &data).unwrap()
 }
 
@@ -867,5 +867,23 @@ async fn forgetting_a_thread_takes_the_summary_off_its_row() {
         let seen = call(&r, who, "history", json!({"botId": theirs})).await.unwrap();
         let row = seen["entries"].as_array().unwrap().iter().find(|e| e["id"] == older.id.as_str()).unwrap();
         assert!(row["data"]["thread"].get("summary").is_none());
+    }
+}
+
+#[tokio::test]
+async fn a_bots_row_summary_follows_the_same_audience_rule_as_its_thread_rows() {
+    let r = Rig::new().await;
+    let row = |bot: &str| r.hub.bot_json(&r.hub.store.bot(bot).unwrap().unwrap())["lastSummary"].clone();
+    let owner_house = r.owner_bot("house");
+    assert!(row(&owner_house).is_null(), "no summary yet");
+    root_with_summary(&r, &owner_house, "owner");
+    assert_eq!(row(&owner_house), json!("Planned the move."), "the owner sees every audience");
+
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    let theirs = chat_of(&r, &sam).await;
+    // Each root is newer than the last, so the row follows the one just added.
+    for (audience, shown) in [("owner", false), ("person:eve", false), ("room:g1", false), ("person:sam", true)] {
+        root_with_summary(&r, &theirs, audience);
+        assert_eq!(!row(&theirs).is_null(), shown, "{audience}");
     }
 }

@@ -293,6 +293,7 @@ function BotSettingsForm({ draft, onChange, error, plugins, part = 'all', bare =
 
         <CardSection title="Activity">
           <SwitchRow title="Notifications" detail="Get notified when this agent finishes or needs you" on={draft.notify ?? true} onChange={(on) => set('notify', on)} />
+          <SwitchRow title="Show summary on row" detail="The list shows the latest thread's summary instead of the last message, once one is written." on={draft.rowShowsSummary ?? false} onChange={(on) => set('rowShowsSummary', on)} />
           {store.screen ? (
             <SwitchRow
               title="Use the computer"

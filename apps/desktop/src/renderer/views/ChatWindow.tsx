@@ -193,6 +193,7 @@ function ChatSplitView() {
   const [searching, setSearching] = useState(false)
   const [composing, setComposing] = useState(false)
   const [composingGroup, setComposingGroup] = useState(false)
+  const [composingQuick, setComposingQuick] = useState(false)
   const [composeComputer, setComposeComputer] = useState<string | null>(null)
   const previousSelection = useRef<BotRef | null>(null)
   const [contextBot, setContextBot] = useState<{ target: BotTarget; x: number; y: number } | null>(null)
@@ -228,10 +229,13 @@ function ChatSplitView() {
   const roster = useComputerRoster(app, shown)
   const visibleRoster = roster.items
 
-  const compose = (group = false) => {
+  const compose = (group = false, quick = false) => {
     setComposingGroup(group)
+    setComposingQuick(quick)
     // The selected bot's computer if it's online, else this computer, else any online one.
-    const target = [selectedStore, app.local].find((s) => s && onlineStores.includes(s)) ?? onlineStores[0]
+    // A quick chat needs a computer that has the built-in scratch bot.
+    const pool = quick ? onlineStores.filter((s) => s.quickChatBot) : onlineStores
+    const target = [selectedStore, app.local].find((s) => s && pool.includes(s)) ?? pool[0]
     if (!target) return
     if (!composing) previousSelection.current = app.selection
     setComposeComputer(target.computer.id)
@@ -285,6 +289,8 @@ function ChatSplitView() {
     person: () => setSettings('people'),
     bot: () => setSettings('bots'),
     group: () => compose(true),
+    // Where the owner's computer has Kith's built-in scratch bot.
+    quick: onlineStores.some((s) => s.quickChatBot) ? () => compose(false, true) : undefined,
   })
   const filterNeeded = app.computers.length > 1 || ssh.state.profiles.length > 0 || stores.some((s) => s.shownConnection.kind !== 'online')
 
@@ -346,7 +352,7 @@ function ChatSplitView() {
   let detail: ReactNode
   if (composing && composeStore) {
     detail = (
-      <div className="detail-column" key={`${composeStore.computer.id}-${composingGroup}`}>
+      <div className="detail-column" key={`${composeStore.computer.id}-${composingGroup}-${composingQuick}`}>
         {onlineStores.length > 1 ? (
           <ComputerPicker stores={onlineStores} value={composeStore.computer.id} onChange={setComposeComputer} />
         ) : null}
@@ -354,6 +360,7 @@ function ChatSplitView() {
           {composeStore.isOwner ? (
             <NewChatView
               group={composingGroup}
+              quick={composingQuick}
               onClose={() => {
                 setComposing(false)
                 if (!app.selection) app.select(previousSelection.current)

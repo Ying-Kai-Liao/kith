@@ -58,11 +58,70 @@ pub trait AgentExt {
     /// Whether the host can run it: `kith <agent> --launch-json` covers Claude agents only. A kernel from before it
     /// listed a harness ran every agent on Claude; one this version doesn't know is never started.
     fn runnable(&self) -> bool;
+
+    /// Whether it ships with the kernel (scratch). A kernel from before it listed the flag has none.
+    fn is_builtin(&self) -> bool;
 }
 
 impl AgentExt for HqAgent {
     fn runnable(&self) -> bool {
         self.harness.unwrap_or(Harness::Claude) == Harness::Claude
+    }
+
+    fn is_builtin(&self) -> bool {
+        self.builtin == Some(true)
+    }
+}
+
+/// The engine and model one quick chat (a thread of the built-in scratch agent) was started with. The host keeps it
+/// beside the thread and gives it to `kith scratch --launch-json` as `-H` / `-m` on every launch for that thread, so a
+/// later turn, a restart or a reload never falls back to scratch's own.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, Deserialize)]
+pub struct ThreadEngine {
+    pub harness: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
+/// The engines a quick chat can pick: the ones the host starts (Claude, and Codex through its backup path).
+pub const THREAD_ENGINES: [&str; 2] = ["claude", "codex"];
+
+impl ThreadEngine {
+    /// What a client asked for, checked: a known engine and a model that can only be a model name (it becomes an
+    /// argument of `kith`, so nothing that could read as a flag). None when nothing was asked: scratch's own.
+    pub fn ask(harness: Option<&str>, model: Option<&str>) -> Result<Option<Self>> {
+        fn clean(v: Option<&str>) -> Option<&str> {
+            v.map(str::trim).filter(|v| !v.is_empty())
+        }
+        let (harness, model) = (clean(harness), clean(model));
+        if harness.is_none() && model.is_none() {
+            return Ok(None);
+        }
+        let harness = harness.unwrap_or("claude");
+        if !THREAD_ENGINES.contains(&harness) {
+            bail!("a quick chat runs on {}, not {harness}", THREAD_ENGINES.join(" or "));
+        }
+        if let Some(model) = model
+            && (model.len() > 64
+                || !model.starts_with(|c: char| c.is_ascii_alphanumeric())
+                || !model.chars().all(|c| c.is_ascii_alphanumeric() || "._:[]-".contains(c)))
+        {
+            bail!("'{model}' isn't a model name");
+        }
+        Ok(Some(Self { harness: harness.to_owned(), model: model.map(str::to_owned) }))
+    }
+
+    fn key(bot: &str, root: &str) -> String {
+        format!("thread-engine:{bot}:{root}")
+    }
+
+    /// The engine the thread `root` of `bot` was started with; None for scratch's own.
+    pub fn of_thread(store: &crate::store::Store, bot: &str, root: &str) -> Option<Self> {
+        serde_json::from_str(&store.kv_get(&Self::key(bot, root))?).ok()
+    }
+
+    pub fn save(&self, store: &crate::store::Store, bot: &str, root: &str) -> Result<()> {
+        store.kv_set(&Self::key(bot, root), &serde_json::to_string(self)?)
     }
 }
 
@@ -621,6 +680,8 @@ pub async fn project_add(id: &str, path: &str) -> Result<()> {
 /// deny rules, model, budget, memory folder) and fails closed: a refusal comes back as [`Refused`], never as a run of
 /// the owner's. `None` is the owner's run.
 ///
+/// `engine`: the engine and model a quick chat's thread was started with; None for every other launch.
+///
 /// `access`: that person's grant for this launch alone ([`crate::runauth::grant_for`] for the conversation the session
 /// will serve). With it the kernel asks the host for what the conversation was given beyond its box (a yes on an escape
 /// card, an "always") and puts it in the settings. An app chat's session gets them in its `session/new` or
@@ -637,8 +698,14 @@ pub async fn launch(
     room: &str,
     members: &Members,
     access: Option<&(crate::runauth::RunGrant, [(String, String); 2])>,
+    engine: Option<&ThreadEngine>,
 ) -> Result<Launch> {
-    let args = command::launch(agent, backup, project);
+    let mut args = command::launch(agent, backup, project);
+    // A quick chat's own engine and model (`kith scratch -H codex -m ...`): for that thread's launches only.
+    if let Some(engine) = engine {
+        args.extend(["-H", engine.harness.as_str()]);
+        args.extend(engine.model.iter().flat_map(|m| ["-m", m.as_str()]));
+    }
     // The room the run is for: the kernel loads memory for it and `kith recall` from the run applies its rules.
     let mut env = room_env(room, members);
     let access = access.filter(|_| person.is_some());
@@ -671,8 +738,11 @@ pub async fn launch(
     }
     // A backup entry may run on another harness the host knows (Codex); the agent's own login is Claude.
     // A harness this version doesn't know is never started.
-    let runs =
-        if backup.is_some() { [Harness::Claude, Harness::Codex].as_slice() } else { [Harness::Claude].as_slice() };
+    let runs = if backup.is_some() || engine.is_some_and(|e| e.harness == "codex") {
+        [Harness::Claude, Harness::Codex].as_slice()
+    } else {
+        [Harness::Claude].as_slice()
+    };
     if let Some(harness) = launch.harness
         && !runs.contains(&harness)
     {
