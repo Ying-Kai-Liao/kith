@@ -295,11 +295,14 @@ pub async fn finish(hub: &Arc<Hub>, args: &Value) -> Result<Value> {
     super::verify::verify(&hub.store, connector_id, hub.port).await?;
     let bot = text(request, "botId")?;
     let row = hub.store.bot(bot)?.ok_or_else(|| anyhow!("Unknown bot"))?;
-    let mut enabled = row.config.connectors;
-    if !enabled.iter().any(|s| s == connector_id) {
-        enabled.push(connector_id.to_owned());
+    // A kith agent's connectors are `kith <agent> connect`'s, not host config.
+    if !row.config.is_hq() {
+        let mut enabled = row.config.connectors;
+        if !enabled.iter().any(|s| s == connector_id) {
+            enabled.push(connector_id.to_owned());
+        }
+        hub.update_bot(&json!({"id":bot,"connectors":enabled}))?;
     }
-    hub.update_bot(&json!({"id":bot,"connectors":enabled}))?;
     hub.send_cmd(bot, Cmd::RefreshTools)?;
     let note = format!(
         "[Connection setup completed: {}. Credentials were submitted securely and are not in this conversation. Continue the task.]",

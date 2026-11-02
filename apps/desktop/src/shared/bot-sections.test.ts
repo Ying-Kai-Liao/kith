@@ -18,13 +18,13 @@ test('a plain bot keeps every card, whatever Kith says', () => {
 })
 
 test('an hq bot keeps every card until Kith details are on screen, except the harness notes tab', () => {
-  assert.deepEqual(botSections('house', null), { ...ALL_SECTIONS, harnessMemoryTab: false, kithSettings: false })
+  assert.deepEqual(botSections('house', null), { ...ALL_SECTIONS, backendPicker: false, harnessMemoryTab: false, kithSettings: false })
 })
 
 test('a card stays when Kith could not read what it repeats', () => {
   const partial = { ...house, harness: null, errors: { role: 'unreadable' } }
   assert.deepEqual(botSections('house', partial), {
-    instructions: true, backendPicker: true, harnessMemoryTab: false, kithSettings: false,
+    instructions: true, backendPicker: false, harnessMemoryTab: false, kithSettings: false,
   })
 })
 
