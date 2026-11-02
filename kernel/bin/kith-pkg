@@ -2,6 +2,8 @@
 """kith-pkg — versioned agent packages. Every run is pinned to a snapshot; edits become a new version for the next run.
 
   kith-pkg resolve <agent>|--all [--json]   the pinned package dir to run (makes the snapshot if the agent changed)
+  (--json on versions, history, pin, unpin, restore, install --yes, share, deps, update, push, commit: one JSON object
+   on stdout, or {"ok": false, "error": ...} and a non-zero exit; the progress text is silenced)
   kith-pkg versions <agent>                 versions on disk, newest first (marks current, good, pinned)
   kith-pkg pin <agent> [VERSION]            run this version until unpinned (default: the previous good one)
   kith-pkg unpin <agent>                    back to following the latest edits
@@ -70,6 +72,8 @@ writes learned skills), {{AGENT}} name, {{AGENT_DIR}} the pinned package, {{HOME
 """
 import contextlib
 import hashlib
+import datetime
+import io
 import json
 import os
 import re
@@ -109,7 +113,18 @@ GITHUB = os.environ.get('KITH_GITHUB_GIT', 'https://github.com').rstrip('/')   #
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 
 
+QUIET = False   # versions/history/pin/.../update --json: stdout is silenced, the one answer goes through emit()
+QUIET_CMDS = ('versions', 'history', 'pin', 'unpin', 'restore', 'share', 'deps', 'update', 'push', 'commit')
 JSON_ERRORS = False   # market/search/install --json: a failure is one {"ok":false,"error":..} object on stdout
+
+
+def emit(obj):
+    """The one JSON object a --json run answers with (stdout itself is silenced for it: see QUIET)."""
+    print(json.dumps(obj), file=sys.__stdout__)
+
+
+def iso(epoch):
+    return datetime.datetime.fromtimestamp(epoch).astimezone().isoformat(timespec='seconds')
 
 
 def die(msg, code=1):
@@ -302,12 +317,13 @@ def missing(home):
 
 def install_missing(name, miss):
     """Run each missing program's install command, showing its output; True when all are there afterwards."""
+    out = subprocess.DEVNULL if QUIET else None   # --json: the answer is the only thing on stdout
     for prog, cmd, _ in miss:
         if cmd.startswith('brew ') and not shutil.which('brew'):
             print(f'  {prog}: needs Homebrew first (https://brew.sh), then: kith deps {name} --install')
             continue
         print(f'  $ {cmd}')
-        subprocess.run(cmd, shell=True)
+        subprocess.run(cmd, shell=True, stdout=out, stderr=out)
     left = missing(agent_home(name))
     for prog, cmd, _ in left:
         print(f'  ✗ {prog} still missing: {cmd}')
@@ -323,8 +339,17 @@ def show_missing(name, miss):
 
 def cmd_deps(names, install):
     short = False
+    report = []
     for name in names:
         miss = missing(agent_home(name))
+        if QUIET:
+            if install and miss:
+                install_missing(name, miss)
+                miss = missing(agent_home(name))
+            report.append({'agent': name, 'requires': len(requires(agent_home(name))),
+                           'missing': [{'program': p, 'install': c, 'why': w} for p, c, w in miss]})
+            short = short or bool(miss)
+            continue
         if not miss:
             if len(names) == 1:
                 print(f'{name}: has everything it runs' if requires(agent_home(name)) else f'{name}: requires nothing')
@@ -332,6 +357,12 @@ def cmd_deps(names, install):
         print(name)
         show_missing(name, miss)
         short = not install_missing(name, miss) if install else True
+    if QUIET:
+        if short and install:   # asked to install and something is still absent: that is a failure
+            emit({'ok': False, 'error': 'some programs are still missing', 'agents': report})
+            sys.exit(1)
+        emit({'ok': True, 'agents': report})   # without --install it only reports; what is missing is data
+        sys.exit(0)
     sys.exit(1 if short else 0)
 
 
@@ -566,13 +597,18 @@ def cmd_versions(agent):
     agent_home(agent)
     good, pin = pointers(agent)
     current = fingerprint(agent_home(agent))
+    rows = []
     for d in all_versions(agent):
         v = d.name.split('@', 1)[1]
         tags = [t for t, on in (('latest', v == current), ('good', v == read(good)), ('pinned', v == read(pin)),
                                 ('running', running(d))) if on]
         when = time.strftime('%Y-%m-%d %H:%M', time.localtime(made(d)))
         print(f'{v}  {when}  {" ".join(tags)}')
-    if not (STORE / f'{agent}@{current}').is_dir():
+        rows.append({'version': v, 'made': iso(made(d)), 'tags': tags})
+    unreleased = not (STORE / f'{agent}@{current}').is_dir()
+    if QUIET:
+        emit({'agent': agent, 'current': current, 'unreleased': unreleased, 'versions': rows})
+    if unreleased:
         print(f'{current}  (unreleased edits; the next run checks and snapshots them)')
 
 
@@ -589,8 +625,11 @@ def cmd_pin(agent, version):
     if not (STORE / f'{agent}@{version}').is_dir():
         die(f'no version {version} of {agent} here (kith-pkg versions {agent}); older ones are in its history: '
             f'kith-pkg history {agent}, then kith-pkg restore {agent} <commit>')
+    previous = read(pin) or None
     write_atomic(pin, version)
     print(f'{agent} pinned to {version}; new runs use it, running ones keep theirs')
+    if QUIET:
+        emit({'ok': True, 'agent': agent, 'version': version, 'previous': previous, 'changed': previous != version})
 
 
 def private_patterns():
@@ -1073,31 +1112,43 @@ def upstream(home):
 
 
 def cmd_update(agent):
+    """Pulls the agent; returns {agent, changed, remote, head, ...} (--json answers with it)."""
     home = agent_home(agent)
     if not owned(home):
         die(f'{agent} is not in the agents folder ({AGENTS}); nothing to update from')
     remote = upstream(home)
     if not remote:
         print(f'{agent}: no remote, nothing to update')
-        return
+        return {'agent': agent, 'changed': False, 'remote': None, 'note': 'no remote, nothing to update',
+                'head': git(home, 'rev-parse', 'HEAD').stdout.strip() or None}
+    before = git(home, 'rev-parse', 'HEAD').stdout.strip()
     commit(home, f'{agent}: local edits before update')
     r = git(home, 'pull', '-q', '--ff-only', remote, git(home, 'branch', '--show-current').stdout.strip() or 'HEAD')
     if r.returncode:
         die(f'{agent}: could not fast-forward from {remote} (your edits and theirs differ: merge in {repo_root(home)}): '
             f'{r.stderr.strip()}')
     print(f'{agent}: {git(home, "log", "-1", "--format=%h %s").stdout.strip()}')
+    head = git(home, 'rev-parse', 'HEAD').stdout.strip()
+    return {'agent': agent, 'changed': head != before, 'remote': remote, 'head': head or None,
+            'subject': git(home, 'log', '-1', '--format=%s').stdout.strip()}
 
 
-def cmd_push(agent):
+def cmd_push(agent, info=None):
+    """info (a dict) gets {agent, committed, pushed, remote, note/error} for --json."""
+    info = {} if info is None else info
+    info['agent'] = agent
     home = agent_home(agent)
     if not owned(home):
+        info.update(pushed=False, remote=None, note='not in the agents folder')
         return
-    commit(home, f'{agent}: edits')
+    info['committed'] = commit(home, f'{agent}: edits')
     if 'origin' not in git(home, 'remote').stdout.split():
         print(f'{agent}: no remote (kith-pkg share {agent} puts it on GitHub)')
+        info.update(pushed=False, remote=None, note='no remote')
         return
     r = git(home, 'push', '-q', '-u', 'origin', 'HEAD')
     print(f'{agent}: ' + ('pushed' if r.returncode == 0 else f'push failed: {r.stderr.strip()}'))
+    info.update(pushed=r.returncode == 0, remote='origin', error=r.stderr.strip() or 'push failed' if r.returncode else None)
     return r.returncode == 0
 
 
@@ -1106,6 +1157,9 @@ def cmd_history(agent, n=20):
     if not owned(home):
         die(f'{agent} has no history of its own (not a git repo in {AGENTS})')
     print(git(home, 'log', f'-{n}', '--date=format:%Y-%m-%d %H:%M', '--format=%h  %ad  %s', '--', '.').stdout.rstrip())
+    if QUIET:
+        log = git(home, 'log', f'-{n}', '--format=%H%x1f%aI%x1f%s', '--', '.').stdout.splitlines()
+        emit({'agent': agent, 'commits': [dict(zip(('sha', 'date', 'subject'), line.split('\x1f', 2))) for line in log]})
 
 
 def cmd_restore(agent, ref):
@@ -1119,10 +1173,15 @@ def cmd_restore(agent, ref):
     git(home, 'restore', f'--source={full}', '--staged', '--worktree', '--', '.', check=True)
     if not commit(home, f'{agent}: restore to {full[:9]}'):
         print(f'{agent} is already at {full[:9]}')
+        if QUIET:
+            emit({'ok': True, 'agent': agent, 'ref': ref, 'restored_to': full, 'changed': False, 'problems': []})
         return
     bad = problems(home)
     print(f'{agent} restored to {full[:9]} as a new commit; new runs use it, running ones keep theirs'
           + (f'\n  checks fail, so the last good version keeps running: {"; ".join(bad)}' if bad else ''))
+    if QUIET:
+        emit({'ok': True, 'agent': agent, 'ref': ref, 'restored_to': full, 'changed': True,
+              'head': git(home, 'rev-parse', 'HEAD').stdout.strip(), 'problems': bad})
 
 
 def history_problems(home):
@@ -1261,6 +1320,9 @@ def cmd_share(agent, public):
                         '--accept-visibility-change-consequences'], check=True, capture_output=True)
     print(f'{agent}: https://github.com/{repo} ({"public" if public else "private"}); '
           f'others install it with: kith install {repo}')
+    if QUIET:
+        emit({'ok': True, 'agent': agent, 'repo': repo, 'url': f'https://github.com/{repo}',
+              'visibility': 'public' if public else 'private', 'install': f'kith install {repo}'})
 
 
 def cmd_save():
@@ -1461,11 +1523,14 @@ def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
         return
-    global JSON_ERRORS
+    global JSON_ERRORS, QUIET
     cmd, rest = argv[0], argv[1:]
     as_json = '--json' in rest
     rest = [a for a in rest if a != '--json']
-    JSON_ERRORS = as_json and cmd in ('market', 'search', 'install')
+    QUIET = as_json and cmd in QUIET_CMDS
+    if QUIET:
+        sys.stdout = io.StringIO()   # progress lines are not the answer; die() and emit() write to __stdout__
+    JSON_ERRORS = as_json and cmd in ('market', 'search', 'install') or QUIET
     if JSON_ERRORS:   # one {"ok":false,"error":..} object and a non-zero exit, never a traceback
         try:
             return run(cmd, rest, as_json, argv)
@@ -1498,8 +1563,11 @@ def run(cmd, rest, as_json, argv):
         cmd_pin(rest[0], rest[1] if len(rest) > 1 else '')
     elif cmd == 'unpin' and rest:
         agent_home(rest[0])
+        previous = read(pointers(rest[0])[1]) or None
         pointers(rest[0])[1].unlink(missing_ok=True)
         print(f'{rest[0]} follows the latest edits again')
+        if QUIET:
+            emit({'ok': True, 'agent': rest[0], 'previous': previous, 'changed': previous is not None})
     elif cmd == 'fetch' and rest:
         names = sorted(installed()) if rest[0] == '--all' else rest[:1]
         failed = False
@@ -1559,14 +1627,24 @@ def run(cmd, rest, as_json, argv):
     elif cmd in ('update', 'commit', 'push') and rest:
         msg = rest[rest.index('-m') + 1] if '-m' in rest else ''
         names = sorted(installed()) if rest[0] == '--all' else rest[:1]
+        results = []
         for name in names:
             if cmd == 'update':
                 if owned(agent_home(name)) or rest[0] != '--all':
-                    cmd_update(name)
+                    results.append(cmd_update(name))
             elif cmd == 'push':
-                cmd_push(name)
-            elif commit(agent_home(name), msg or f'{name}: edits'):
-                print(f'{name}: committed')
+                info = {}
+                cmd_push(name, info)
+                if QUIET and info.get('error'):
+                    die(f'{name}: push failed: {info["error"]}')
+                results.append(info)
+            else:
+                done = commit(agent_home(name), msg or f'{name}: edits')
+                if done:
+                    print(f'{name}: committed')
+                results.append({'agent': name, 'changed': done})
+        if QUIET:
+            emit({'ok': True, 'agents': results})
     elif cmd == 'market':
         cmd_market([w for w in rest if w != '--new'], '--new' in rest, as_json)
     elif cmd == 'search':
