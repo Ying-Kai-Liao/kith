@@ -58,7 +58,7 @@ def folders():
         bad(f'no kernel in {home} (KITH_HOME, else ~/kith): run install.sh from the kith folder')
     dot = P['KITH_MACHINE']
     if dot == HOME / '.hq':
-        warn('this Mac\'s kith is still ~/.hq: kith migrate moves it to ~/.kith (everything works until then)')
+        warn('this Mac\'s kith is still ~/.hq: kith migrate run moves it to ~/.kith (everything works until then)')
     elif dot.is_dir() and not dot.is_symlink():
         ok(f'this Mac\'s kith: {dot}')
     else:
@@ -127,7 +127,7 @@ def backup():
     if any((HOME / f'Library/LaunchAgents/dev.{n}.backup.plist').exists() for n in ('kith', 'hq')):
         note('every night at 03:00 (dev.kith.backup, or dev.hq.backup before migrate; log logs/backup.log)')
     elif mark in ('✓', '!'):
-        warn('backups run only when you ask: kith backup --nightly runs them every night')
+        warn('backups run only when you ask: kith backup run --nightly runs them every night')
 
 
 def repos_and_agents():
@@ -294,7 +294,7 @@ def plugin():
     if not have:
         bad('the kith plugin is not installed: run install.sh')
     elif 'kith@kith' not in installed:
-        warn('the plugin is still installed as hq@hq (subagents hq:<agent>): kith migrate, or install.sh, moves it to kith@kith')
+        warn('the plugin is still installed as hq@hq (subagents hq:<agent>): kith migrate run, or install.sh, moves it to kith@kith')
     elif have != want:
         warn(f'plugin {have} installed, the kernel has {want}: claude plugin install kith@kith (then restart sessions)')
     else:

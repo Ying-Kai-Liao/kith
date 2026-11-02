@@ -3,7 +3,7 @@
 #
 #   kith init [--from <github-user>]   set kith up on this Mac, or bring yours back on a new one (kith-init)
 #   kith doctor                     check the install: links, repos, agents, services, plugin, background jobs
-#   kith backup [--yes|--check|--nightly [off]]   everything to private GitHub repos, making the missing ones; --check says what isn't; --nightly at 03:00 (kith-state)
+#   kith backup run [--yes|--check|--nightly [off]]   everything to private GitHub repos, making the missing ones; --check says what isn't; --nightly at 03:00 (kith-state)
 #   kith backup list|add|remove ...                      the backup chain kith serve moves to when the agent's own harness runs out of usage (kith-account)
 #   kith account add|list|remove ...                     extra Claude / Codex logins for that chain, one folder each (kith-account)
 #   kith account use <id> [--agent A] | --reset           the main account an agent's runs use; the chain sits on top of it
@@ -38,7 +38,7 @@
 #   kith scratch keep <thread-id> <name> [--json]        make a real agent of a scratch thread: its summary becomes the description and a first draft of agent.md (kith-scratch)
 #   kith install <github-link> [--as NAME]               add an agent; each agent is its own git repo
 #   kith install <github-link> [--as NAME] --preview [--json]   what it would do here, keeping nothing; --yes --json installs
-#   kith update                                          update kith itself: git pull, brew upgrade or install.sh again, by how it was installed; desktop app: the download link (kith-self-update)
+#   kith update self                                     update kith itself: git pull, brew upgrade or install.sh again, by how it was installed; desktop app: the download link (kith-self-update)
 #   kith update|push|commit <agent>|--all                pull from, push to or commit the agent's repo; update --all: kith first, then every agent
 #   kith history <agent> | kith restore <agent> <commit>   every good version is committed; restore any of them
 #   kith share <agent> [--public [--fresh]]              put it on GitHub; --fresh: a public copy without its history
@@ -68,8 +68,12 @@
 #   kith schedule [ls|add|rm|run|log|--install ...]      run agent tasks on a cron schedule (kith-sched)
 #   kith acp <agent> [--keep team,…]                     the agent as an ACP agent, one session per chat (kith-acp)
 #   kith bug "<title>" [--details TEXT|-]|list|show ID|send ID|publish ID   report a bug: the owner's stays on this Mac with the transcript; anyone else's is a redacted GitHub issue after a yes (kith-bug)
-#   kith migrate [--dry-run|--undo|--force]            move this Mac from ~/.hq and the dev.hq.* jobs to ~/.kith and dev.kith.*, reversibly (kith-migrate)
+#   kith migrate run [--dry-run|--undo|--force]        move this Mac from ~/.hq and the dev.hq.* jobs to ~/.kith and dev.kith.*, reversibly (kith-migrate)
 #   kith serve start|stop|restart|status|relay [URL]     Kith's host on this Mac (launchd dev.kith.serve, port 19224); `kith` is the same command (kith-serve)
+#
+# Bare `kith backup`, `kith update` and `kith migrate` print their verbs and exit 2: each acts on real state, so none starts
+# on a missing word. The flagged forms (`kith backup --yes`, `kith migrate --dry-run`, ...) still work for jobs and scripts.
+# `self` is reserved in `kith update self`: it is always kith, never an agent called self.
 #
 # Every run is pinned to a snapshot of the agent's package (bin/kith-pkg): edits, by anyone, become the next run's
 # version once they pass checks; running sessions keep theirs. Shared services and their secrets come from
@@ -98,7 +102,12 @@ KITH="$(cd "$(dirname "$src")/.." && pwd)"
 
 [[ $# -eq 0 || $1 == -h || $1 == --help ]] && { sed -n '4,66p' "$0" | sed 's/^#   //'; exit 0; }
 # migrate runs before the paths below are exported: it moves what they point at, and its children must see the new ones
-[[ $1 == migrate ]] && exec "$KITH/bin/kith-migrate" "${@:2}"
+if [[ $1 == migrate ]]; then
+  [[ $# -eq 1 ]] && { echo "usage: kith migrate run [--dry-run|--undo|--force]   move this Mac from ~/.hq to ~/.kith (--dry-run shows the steps first)
+       kith migrate --status               where it stands" >&2; exit 2; }
+  [[ $2 == run ]] && shift
+  exec "$KITH/bin/kith-migrate" "${@:2}"
+fi
 . "$KITH/lib/kith-env.sh"   # KITH_X and the old HQ_X agree (role repos read HQ_X)
 export KITH_ROOT=$KITH
 # Where things are, from the one place that knows (lib/kith_paths.py): KITH_HOME (~/kith) holding kernel/ and agents/ (each
@@ -108,7 +117,10 @@ eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
 
 case $1 in
   update)             # no agent: kith itself; --all: kith first, then the agents (a failed kith update still lets the agents update, but the exit is non-zero)
-                      [[ $# -eq 1 ]] && exec "$KITH/bin/kith-self-update"
+                      [[ $# -eq 1 ]] && { echo "usage: kith update self           update kith itself
+       kith update <agent>...      pull the agent(s) from upstream
+       kith update --all           kith first, then every agent" >&2; exit 2; }
+                      [[ $2 == self ]] && { shift 2; exec "$KITH/bin/kith-self-update" "$@"; }
                       if [[ $2 == --all ]]; then rc=0; "$KITH/bin/kith-self-update" || rc=$?; "$KITH/bin/kith-pkg" "$@" || rc=$?; exit $rc; fi
                       exec "$KITH/bin/kith-pkg" "$@" ;;
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
@@ -123,6 +135,9 @@ case $1 in
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;
   backup)             case ${2:-} in list|add|remove) shift; exec "$KITH/bin/kith-account" backup "$@" ;; esac
+                      [[ $# -eq 1 ]] && { echo "usage: kith backup run [--yes|--check|--nightly [off]]   everything to private GitHub repos
+       kith backup list|add|remove ...                the backup chain (kith account)" >&2; exit 2; }
+                      [[ $2 == run ]] && shift
                       shift; exec "$KITH/bin/kith-state" backup "$@" ;;
   account)            shift; exec "$KITH/bin/kith-account" "${@:---help}" ;;
   new)                shift; exec "$KITH/bin/kith-new" "$@" ;;
@@ -155,9 +170,11 @@ agent_names() {
     if [[ -f ${d}role/agent.md || -f ${d}agent.md ]]; then basename "$d"; fi
   done | sort -u
 }
+# What can follow `kith` besides an agent: a typo of one of these is suggested too.
+SUBCOMMANDS="init doctor backup account ls send-to who versions pin unpin rollback new install update push commit history restore share market search deps auth door cost ask allow remote group bot keys link unlink memory recall summarise forget project schedule wake acp bug migrate serve"
 # Names that start with, contain, or sit within edit distance 2 of the typed one, comma-separated.
 agent_suggest() {
-  agent_names | awk -v t="$1" '
+  { agent_names; printf '%s\n' $SUBCOMMANDS; } | sort -u | awk -v t="$1" '
     function lev(a, b,  i, j, la, lb, c, m, d) {
       la = length(a); lb = length(b)
       for (i = 0; i <= la; i++) d[i, 0] = i
@@ -194,6 +211,7 @@ print(json.dumps(out))' <<<"$pkgs"
   exit 0
 fi
 if [[ $1 == ls ]]; then
+  [[ $# -eq 1 ]] || { echo "usage: kith ls [--json]" >&2; exit 2; }
   "$KITH/bin/kith-pkg" list --json | python3 -I -c '
 import json, re, sys
 for name, o in json.load(sys.stdin).items():
@@ -202,8 +220,11 @@ for name, o in json.load(sys.stdin).items():
   exit 0
 fi
 
+# Not a word an agent can be called: an option or a path never starts a run.
+if [[ ! $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  echo "kith: \"$1\" is not a command or an agent name (kith -h lists the commands, kith ls the agents)." >&2; exit 2
+fi
 agent=$1; shift
-[[ ${1:-} == --info-json ]] && exec "$KITH/bin/kith-info" "$agent"
 # kith AGENT set permission MODE: this Mac's permission mode for the agent (what kith install asks, what apps change).
 # kith AGENT set harness H [--model M]: the harness agent.md names (kith-pkg set-harness), in the package, every Mac.
 # kith AGENT set model M|default, set effort E|default: agent.md's model and effort (kith-pkg set-field); --json on any set.
@@ -254,6 +275,7 @@ if [[ -z $src_pkg ]]; then
   if [[ -n $guess ]]; then echo "Did you mean: $guess?" >&2; else echo "Run kith ls to see your agents." >&2; fi
   exit 2
 fi
+[[ ${1:-} == --info-json ]] && exec "$KITH/bin/kith-info" "$agent"
 # An agent that ships with kith (scratch): the kernel's own folder, no repo, never backed up or shared. Keyed on where it
 # resolves, so a user's own agent of the same name is an ordinary one.
 builtin=0; [[ $src_pkg == "$KITH"/agents/* ]] && builtin=1

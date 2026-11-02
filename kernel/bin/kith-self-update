@@ -96,7 +96,7 @@ def show_version(label, line):
 
 def update_git():
     if git('status', '--porcelain', '--untracked-files=no').stdout.strip():   # agents/ is ignored; untracked files can't block a fast-forward
-        die(f'{KERNEL.parent} has uncommitted changes to tracked files; commit or discard them, then run kith update again. Nothing changed.')
+        die(f'{KERNEL.parent} has uncommitted changes to tracked files; commit or discard them, then run kith update self again. Nothing changed.')
     if git('symbolic-ref', '-q', 'HEAD').returncode:
         die(f'{KERNEL.parent} is on a detached HEAD, so there is nothing to pull from. Check out a branch. Nothing changed.')
     up = git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
@@ -147,11 +147,11 @@ def check():
         r = git('rev-list', '--count', 'HEAD..@{u}')
         n = int(r.stdout.strip() or 0) if r.returncode == 0 else 0
         if n:
-            print(f'kith is {n} commit{"s" if n != 1 else ""} behind {up.stdout.strip()}: kith update')
+            print(f'kith is {n} commit{"s" if n != 1 else ""} behind {up.stdout.strip()}: kith update self')
     elif m in ('brew', 'release'):
         have, latest = binary_version(), latest_release()
         if have and latest and as_tuple(have) < as_tuple(latest):
-            print(f'kith {have} is older than the latest release {latest}: kith update')
+            print(f'kith {have} is older than the latest release {latest}: kith update self')
 
 
 def main(argv):
@@ -165,7 +165,7 @@ def main(argv):
             pass
         return
     if argv:
-        die('kith update takes an agent (kith update <agent>), --all, or nothing', 2)
+        die('kith update takes an agent (kith update <agent>), --all, or self', 2)
     m = method()
     if m == 'app':
         print(f'kith runs from the desktop app, which updates by download: {APP_LINK}')

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# kith-footguns-check — bare `kith backup`, `kith update` and `kith migrate` print usage (exit 2) and act on nothing; the
+# explicit verbs (backup run, update self, migrate run) and the flagged forms reach the right program with the right args;
+# an unknown word after `kith` never starts a run. The kernel is a throwaway copy whose kith-state, kith-self-update,
+# kith-migrate, kith-pkg, kith-account and kith-info are stubs that only log their arguments, so a wrong dispatch shows
+# up in the log and nothing real is touched. Throwaway HOME and KITH_HOME.
+#
+#   kernel/tests/kith-footguns-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-footguns-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_MODEL KITH_EFFORT KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME
+mkdir -p "$HOME" "$KITH_HOME/state" "$KITH_HOME/agents/echo/role" "$T/bin"
+export KITH_STATE=$KITH_HOME/state
+printf -- '---\nname: echo\ndescription: test agent\n---\nYou echo.\n' > "$KITH_HOME/agents/echo/role/agent.md"
+
+K=$T/kernel
+cp -R "$KERNEL" "$K"
+LOG=$T/calls.log
+for p in kith-state kith-self-update kith-migrate kith-pkg kith-account kith-info; do
+  printf '#!/bin/sh\necho "%s $*" >> "%s"\nexit 0\n' "$p" "$LOG" > "$K/bin/$p"; chmod +x "$K/bin/$p"
+done
+# a claude on PATH that logs: any run an unknown word started would show here
+printf '#!/bin/sh\necho "claude $*" >> "%s"\n' "$LOG" > "$T/bin/claude"; chmod +x "$T/bin/claude"
+export PATH=$T/bin:$PATH
+KITH=$K/bin/kith
+
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+run() { : > "$LOG"; "$KITH" "$@" > "$T/out" 2> "$T/err"; rc=$?; calls=$(sed "s/ *$//" "$LOG"); }
+refused() { run "$@"; [[ $rc == 2 && -z $calls ]]; }
+
+for v in backup update migrate; do
+  run $v
+  check "bare kith $v: usage on stderr, exit 2, nothing called" "[[ \$rc == 2 && -z \$calls && ! -s $T/out ]] && grep -q 'usage: kith $v' $T/err"
+done
+
+run backup run;               check "backup run -> kith-state backup" "[[ \$rc == 0 && \$calls == 'kith-state backup' ]]"
+run backup run --yes;         check "backup run --yes" "[[ \$calls == 'kith-state backup --yes' ]]"
+run backup run --check;       check "backup run --check" "[[ \$calls == 'kith-state backup --check' ]]"
+run backup run --nightly off; check "backup run --nightly off" "[[ \$calls == 'kith-state backup --nightly off' ]]"
+run backup --yes;             check "flagged: backup --yes" "[[ \$calls == 'kith-state backup --yes' ]]"
+run backup --check;           check "flagged: backup --check" "[[ \$calls == 'kith-state backup --check' ]]"
+run backup --nightly;         check "flagged: backup --nightly" "[[ \$calls == 'kith-state backup --nightly' ]]"
+run backup --nightly off;     check "flagged: backup --nightly off" "[[ \$calls == 'kith-state backup --nightly off' ]]"
+run backup list --json;       check "backup list still goes to kith-account" "[[ \$calls == 'kith-account backup list --json' ]]"
+
+run update self;              check "update self -> kith-self-update" "[[ \$calls == 'kith-self-update' ]]"
+run update self --check;      check "update self --check passes the flag" "[[ \$calls == 'kith-self-update --check' ]]"
+run update echo;              check "update <agent> -> kith-pkg" "[[ \$calls == 'kith-pkg update echo' ]]"
+run update --all;             check "update --all: kith first, then the agents" "[[ \$calls == 'kith-self-update
+kith-pkg update --all' ]]"
+
+run migrate run;              check "migrate run -> kith-migrate" "[[ \$calls == 'kith-migrate' ]]"
+run migrate run --dry-run;    check "migrate run --dry-run" "[[ \$calls == 'kith-migrate --dry-run' ]]"
+run migrate --dry-run;        check "flagged: migrate --dry-run" "[[ \$calls == 'kith-migrate --dry-run' ]]"
+run migrate --undo;           check "flagged: migrate --undo" "[[ \$calls == 'kith-migrate --undo' ]]"
+run migrate --force;          check "flagged: migrate --force" "[[ \$calls == 'kith-migrate --force' ]]"
+run migrate run --undo;       check "migrate run --undo" "[[ \$calls == 'kith-migrate --undo' ]]"
+
+# Unknown words: exit 2, no run, no helper called.
+for w in --foo -x '' udpate backpu migrat nosuchagent ../echo 'a b'; do
+  check "unknown word '$w' starts nothing" "refused '$w'"
+done
+check "unknown word with a task starts nothing" "refused udpate 'do a thing'"
+check "unknown agent with set starts nothing" "run nosuchagent set permission auto; [[ \$rc != 0 && -z \$calls ]]"
+check "unknown agent with --info-json fails cleanly" "refused nosuchagent --info-json"
+check "unknown agent with --backups-json fails cleanly" "refused nosuchagent --backups-json"
+check "unknown agent with --launch-json fails cleanly" "refused nosuchagent --launch-json"
+run ls extra;                 check "ls extra: usage, exit 2, nothing called" "[[ \$rc == 2 && -z \$calls ]] && grep -q 'usage: kith ls' $T/err"
+run udpate;                   check "typo suggests the subcommand" "grep -q 'Did you mean: .*update' $T/err"
+run backpu;                   check "typo suggests backup" "grep -q 'Did you mean: .*backup' $T/err"
+run echo --info-json;         check "a real agent's --info-json still reaches kith-info" "[[ \$calls == 'kith-info echo' ]]"
+
+echo
+if [ "$fails" = 0 ]; then echo "all checks passed"; else echo "$fails failed"; exit 1; fi

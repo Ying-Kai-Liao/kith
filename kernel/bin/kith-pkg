@@ -1286,7 +1286,7 @@ def cmd_install_saved():
         if name in have:
             continue
         if not src.get('repo'):
-            print(f'{name}: never backed up, so it stays on the Mac it was made on (kith backup there brings it)', file=sys.stderr)
+            print(f'{name}: never backed up, so it stays on the Mac it was made on (kith backup run there brings it)', file=sys.stderr)
             continue
         repo = src['repo'] if os.path.isdir(src['repo']) else src['repo'].removesuffix('.git')   # a local repo stays a path
         link = repo + (f'/tree/HEAD/{src["path"]}' if src.get('path') else '')

@@ -249,7 +249,7 @@ def backups():
         every_night(ask=True)
         return
     if not shutil.which('gh'):
-        say('-', 'on this Mac only', 'for a GitHub copy too: brew install gh, then kith backup')
+        say('-', 'on this Mac only', 'for a GitHub copy too: brew install gh, then kith backup run')
         return
     if len(local) < len(ps):   # some are on GitHub already: the rest belongs there too
         yes = offer(f'Back up the rest too: {", ".join(local)}?', default=True,
@@ -260,10 +260,10 @@ def backups():
                          'profile, agents and their memories.')
     if not yes:
         say('-', 'on this Mac only' if len(local) == len(ps) else f'only here: {", ".join(local)}',
-            'later: kith backup')
+            'later: kith backup run')
         return
     if not gh_user() and not gh_login():
-        say('!', 'not logged in to GitHub', 'later: kith backup')
+        say('!', 'not logged in to GitHub', 'later: kith backup run')
         return
     r = run(str(KITH / 'bin' / 'kith-state'), 'backup', '--yes')
     for line in r.stdout.splitlines():
@@ -274,21 +274,21 @@ def backups():
         say('✗', line)
     left = [p['name'] for p in backed_up() if p['state'] == 'local']
     if left:
-        say('!', f'still only here: {", ".join(left)}', 'kith backup says why')
+        say('!', f'still only here: {", ".join(left)}', 'kith backup run --check says why')
     every_night(ask=False)
 
 
 def every_night(ask):
     """The nightly backup: on with the backup itself; asked about only for a backup made before it existed."""
     if (Path.home() / 'Library/LaunchAgents/dev.kith.backup.plist').exists():
-        say('✓', 'every night at 03:00', 'kith backup --nightly off stops it')
+        say('✓', 'every night at 03:00', 'kith backup run --nightly off stops it')
         return
     if ask and not offer('Back up every night?', default=True, note='Today it runs only when you ask.'):
-        say('-', 'only when you ask', 'later: kith backup --nightly')
+        say('-', 'only when you ask', 'later: kith backup run --nightly')
         return
     r = run(str(KITH / 'bin' / 'kith-state'), 'backup', '--nightly')
     say('✓' if r.returncode == 0 else '✗', 'every night at 03:00' if r.returncode == 0 else 'nightly backup',
-        'kith backup --nightly off stops it' if r.returncode == 0 else (r.stderr or r.stdout).strip()[-200:])
+        'kith backup run --nightly off stops it' if r.returncode == 0 else (r.stderr or r.stdout).strip()[-200:])
 
 
 # ---- agents on another Mac ------------------------------------------------------------------------------------------

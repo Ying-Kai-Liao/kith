@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """kith-migrate — move this Mac from the hq names to Kith's, and back.
 
-  kith migrate [--dry-run]   print every step; then back up ~/.hq, move it into ~/.kith (~/.hq becomes a link), add
+  kith migrate run [--dry-run]   print every step; then back up ~/.hq, move it into ~/.kith (~/.hq becomes a link), add
                              ~/kith beside ~/hq, repoint the kith/hq commands, replace the dev.hq.* background jobs by
                              dev.kith.*, switch the Claude Code plugin to kith@kith and rewrite ~/.hq paths in settings
-  kith migrate --undo        reverse it from the manifest (~/.kith/migrate-manifest.json) and the backup
-  kith migrate --force       go on although an agent run, a scheduled run or kith ask is active
-  kith migrate --status      where it stands (kith doctor says the same)
+  kith migrate run --undo        reverse it from the manifest (~/.kith/migrate-manifest.json) and the backup
+  kith migrate run --force       go on although an agent run, a scheduled run or kith ask is active
+  kith migrate run --status      where it stands (kith doctor says the same)
 
 Safe to run again: a finished migration is a no-op, a stopped one continues. The backup ~/.kith-migrate-backup-<time>/ is
 never deleted. Details: kernel/lib/kith_migrate.py, docs/moving-from-hq.md.
