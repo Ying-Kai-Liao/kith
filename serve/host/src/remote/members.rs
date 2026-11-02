@@ -29,6 +29,7 @@ pub async fn sync(hub: &Hub, listed: Option<&[Listed]>, owner_uid: Option<&str>)
     if let Some(bin) = bin.as_deref() {
         forget_removed(hub, bin).await;
     }
+    refresh_mirror(hub).await;
     if let Err(e) = hub.store.audit_prune(now_ms()) {
         tracing::warn!(error = format!("{e:#}"), "couldn't prune the audit log");
     }
@@ -187,6 +188,51 @@ pub struct AuthAgent {
 pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {
     let out = account::run(bin, &["people", "--json"]).await?;
     serde_json::from_str(&out).context("reading kith-auth people --json")
+}
+
+/// Makes the store's copy of each person's own agents (`PersonRow.agents`) what kith-auth says, so a membership added or
+/// removed with `kith-auth member` shows in the one sync reader of it, `roles::event_for`. kith-auth wins: a person
+/// kith-auth no longer lists holds nothing. A revoked person's copy is left as it stands (their rows stand for the
+/// undo, and a revoke already cuts them off whatever the copy says). Only called with a list kith-auth really gave.
+pub fn mirror_agents(store: &Store, auth: &[AuthPerson]) {
+    let Ok(stored) = store.people() else { return };
+    for row in stored {
+        let want: std::collections::BTreeMap<String, String> = match auth.iter().find(|a| a.id == row.person_id) {
+            Some(a) if a.revoked_at.is_some() => continue,
+            Some(a) => a.agents.iter().filter(|r| r.via == "own").map(|r| (r.agent.clone(), r.role.clone())).collect(),
+            None => std::collections::BTreeMap::new(),
+        };
+        if want != row.agents
+            && let Err(e) = store.set_person_agents(&row.person_id, &want)
+        {
+            tracing::warn!(error = format!("{e:#}"), person = row.person_id, "couldn't mirror kith-auth's agents");
+        }
+    }
+}
+
+/// Reads kith-auth and mirrors it (see [`mirror_agents`]); a failed read changes nothing.
+pub async fn refresh_mirror(hub: &Hub) {
+    let Some(bin) = account::bin().await else { return };
+    if let Ok(auth) = auth_people(&bin).await {
+        mirror_agents(&hub.store, &auth);
+    }
+}
+
+/// How often the mirror is brought back in step with kith-auth, for a change made with the CLI. A member removed there
+/// can hear events of their own chat for this long at most.
+const MIRROR_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+pub fn start_mirror(hub: &std::sync::Arc<Hub>) {
+    if cfg!(test) {
+        return;
+    }
+    let hub = hub.clone();
+    tokio::spawn(async move {
+        loop {
+            refresh_mirror(&hub).await;
+            tokio::time::sleep(MIRROR_EVERY).await;
+        }
+    });
 }
 
 /// The kith-auth person `id`, or None when there is no such person.
