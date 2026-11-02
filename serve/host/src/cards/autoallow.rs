@@ -83,8 +83,18 @@ pub fn extras(agent: &str, reason: &str, checked: Option<&Checked>, claude_sessi
         && let Some(d) = &c.derived
     {
         let shown = if d.kind == "rule" { d.rule.clone() } else { format!("this exact action, for {agent}") };
-        text = format!("{text}\nThis session allows {shown} until this task ends; Always allow remembers it.");
-        options.push(json!({"optionId": super::session::SESSION, "name": "This session", "kind": "allow_session"}));
+        // A grant ends with the Claude session it was made in; a hook that sent none can't say when that is, so no grant.
+        let session_ok = !claude_session.is_empty();
+        let host_wide = d.kind == "rule" && d.rule.starts_with("WebFetch(domain:");
+        let covers = if host_wide { format!("{shown} (any page on that host)") } else { shown };
+        text = if session_ok {
+            format!("{text}\nThis session allows {covers} until this task ends; Always allow remembers it.")
+        } else {
+            format!("{text}\nAlways allow remembers {covers}.")
+        };
+        if session_ok {
+            options.push(json!({"optionId": super::session::SESSION, "name": "This session", "kind": "allow_session"}));
+        }
         options.push(json!({"optionId": ALWAYS, "name": "Always allow", "kind": "allow_always"}));
         kept["rule"] = d.rule.clone().into();
         kept["ruleKind"] = d.kind.clone().into();

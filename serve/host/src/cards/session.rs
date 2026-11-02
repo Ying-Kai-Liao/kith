@@ -33,11 +33,17 @@ pub fn grant(hub: &Hub, card: &Card, kept: &Value) {
         once_only(hub, card, "this card offered nothing to allow for the session");
         return;
     };
+    // Without a Claude session the grant could never end with the task.
+    let claude_session = kept["claudeSession"].as_str().unwrap_or_default();
+    if claude_session.is_empty() {
+        once_only(hub, card, "this run has no task to end it with");
+        return;
+    }
     let now = now_ms();
     let new = NewSessionGrant {
         agent: &card.agent,
         run_session: &card.session,
-        claude_session: kept["claudeSession"].as_str().unwrap_or_default(),
+        claude_session,
         kind,
         rule,
         settings: kept["settings"].as_str().unwrap_or_default(),
@@ -179,6 +185,8 @@ fn mark(hub: &Hub, g: &SessionGrant) {
 struct Hit {
     grant: String,
     agent: String,
+    /// The conversation the run belongs to: two owner threads of one agent can run the same command.
+    run_session: String,
     key: String,
     at: i64,
 }
@@ -200,13 +208,19 @@ pub fn hit(g: &SessionGrant, _tool: &str, input: &Value) {
     let now = now_ms();
     let mut hits = HITS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     hits.retain(|h| now - h.at < TAG_WINDOW_MS);
-    hits.push(Hit { grant: g.id.clone(), agent: g.agent.clone(), key: call_key(input), at: now });
+    hits.push(Hit {
+        grant: g.id.clone(),
+        agent: g.agent.clone(),
+        run_session: g.run_session.clone(),
+        key: call_key(input),
+        at: now,
+    });
 }
 
 /// A tool entry of `agent`'s chat is being added (`raw` is the call's input as the agent's adapter reports it): when a
 /// grant let that call through a moment ago, the entry's data gets the grant's tag and the grant notes the entry. The
 /// returned grant id is for [`tagged`], once the entry has an id.
-pub fn tag_tool(hub: &Hub, agent: &str, raw: &Value, data: &mut Value) -> Option<String> {
+pub fn tag_tool(hub: &Hub, agent: &str, run_session: &str, raw: &Value, data: &mut Value) -> Option<String> {
     if !raw.is_object() {
         return None;
     }
@@ -215,7 +229,7 @@ pub fn tag_tool(hub: &Hub, agent: &str, raw: &Value, data: &mut Value) -> Option
     let grant = {
         let mut hits = HITS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // The newest: the row follows the call the grant let through last.
-        let at = hits.iter().rposition(|h| h.agent == agent && h.key == key && now - h.at < TAG_WINDOW_MS)?;
+        let at = hits.iter().rposition(|h| h.agent == agent && h.run_session == run_session && h.key == key && now - h.at < TAG_WINDOW_MS)?;
         hits.remove(at).grant
     };
     let g = hub.store.session_grant(&grant)?;

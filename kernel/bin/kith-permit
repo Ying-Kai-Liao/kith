@@ -363,8 +363,11 @@ NO_VERDICT = ('Auto mode could not evaluate', 'Classifier unavailable')
 # A refusal the model is told: the hook asks for a retry, and the PreToolUse hook refuses that retry with the reason (the
 # PermissionDenied hook can't give the model text). The note lives a minute; one call is told at most once in 10 minutes.
 NOTE_S = 60
+# A yes to a no-verdict block: Claude Code never retries those, so the one-shot would sit unused for a day and let a much
+# later identical call through. It is only good for the next few minutes.
+SHORT_ONCE_S = 600
 TOLD_S = 600
-NO_CARD = ('Auto mode blocked this, and no card could be shown: %s. Don\'t retry it or try another way around; tell Kai '
+NO_CARD = ('Auto mode blocked this, and no card could be shown: %s. Don\'t retry it or try another way around; tell the owner '
            'what you needed and why.')
 
 
@@ -386,7 +389,7 @@ def hook_input(raw):
     return d if ok else None
 
 
-def keep_once(once_dir, key, now=None):
+def keep_once(once_dir, key, now=None, short=False):
     """Records the one-shot in the run's own folder (made 0700). Files older than a day, and the folders of other runs that
     are, are cleaned up on the way."""
     now = now or time.time()
@@ -404,7 +407,7 @@ def keep_once(once_dir, key, now=None):
     except OSError:
         pass
     with open(os.path.join(once_dir, key), 'w') as f:
-        f.write('%d\n' % now)
+        f.write('%d short\n' % now if short else '%d\n' % now)
 
 
 RETRY = json.dumps({'hookSpecificOutput': {'hookEventName': 'PermissionDenied', 'retry': True}})
@@ -454,7 +457,7 @@ def denied(raw, once_dir, env=os.environ):
         said = reply.get('message') or reply.get('error')
         return tell(once_dir, key, 'Auto mode blocked this. %s' % (said if isinstance(said, str) and said else 'It was not approved.'))
     try:
-        keep_once(once_dir, key)
+        keep_once(once_dir, key, short=no_verdict)
     except OSError:
         return ''     # nowhere to record it: the retry would be refused again, so don't invite it
     return RETRY
@@ -467,9 +470,14 @@ def once(raw, once_dir):
     if not d or d.get('hook_event_name') != 'PreToolUse':
         return ''
     key = once_key(d['tool_name'], d['tool_input'])
+    path = os.path.join(once_dir, key)
     try:
-        os.unlink(os.path.join(once_dir, key))
-    except OSError:
+        with open(path) as f:
+            body = f.read().split()
+        os.unlink(path)
+        if body[1:] == ['short'] and time.time() - float(body[0]) > SHORT_ONCE_S:
+            return ''
+    except (OSError, ValueError):
         note = os.path.join(once_dir, 'note-' + key)
         try:
             fresh = time.time() - os.stat(note).st_mtime <= NOTE_S

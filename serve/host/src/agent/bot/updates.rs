@@ -107,7 +107,11 @@ impl Actor {
                 let title = data["title"].as_str().unwrap_or("Tool").to_owned();
                 // A call a This session grant let through says so on its row (the owner's own chat only).
                 let grant = match (&self.cfg.hq_agent, &self.cfg.person) {
-                    (Some(agent), None) => crate::cards::session::tag_tool(&self.hub, agent, &u["rawInput"], &mut data),
+                    (Some(agent), None) => {
+                        let conversation =
+                            format!("acp:{}:{}", self.lane.chat, self.lane.thread.as_deref().unwrap_or_default());
+                        crate::cards::session::tag_tool(&self.hub, agent, &conversation, &u["rawInput"], &mut data)
+                    }
                     _ => None,
                 };
                 if let Some(e) = self.add(EntryKind::Tool, turn, data) {

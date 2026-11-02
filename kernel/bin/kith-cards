@@ -25,7 +25,7 @@ def may_read(agent):
     pkg = paths()['KITH_AGENTS'] / agent
     for f in (pkg / 'role' / 'capabilities.yaml', pkg / 'capabilities.yaml'):
         try:
-            return re.search(r'^cards: *read\b', f.read_text(), re.M) is not None
+            return re.search(r'^cards:[ \t]*read[ \t]*$', f.read_text(), re.M) is not None
         except OSError:
             continue
     return False

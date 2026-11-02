@@ -10,7 +10,7 @@ use crate::api::rig::Rig;
 const REASON: &str = "[Data Exfiltration]";
 
 pub(super) fn auto(reason: &'static str) -> AutoDenied<'static> {
-    AutoDenied { reason, claude_session: "" }
+    AutoDenied { reason, claude_session: "c0" }
 }
 
 fn ask_auto(hub: &Arc<Hub>, who: RunIdentity, tool: &'static str, input: Value) -> tokio::task::JoinHandle<Decision> {

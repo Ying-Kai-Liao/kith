@@ -4,7 +4,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use super::tests::{ls, owner_run, shown, window};
+use super::tests::{guest_run, ls, owner_run, shown, window};
 use super::*;
 use crate::api::devices::Caller;
 use crate::api::dispatch;
@@ -143,14 +143,14 @@ async fn the_owner_removes_a_grant_from_the_card_or_a_row_and_a_second_remove_is
     assert!(no_card(&r, &who, "c1", ls()).await.allow);
     // The repeat's tool entry, as the app chat adds it, gets the tag.
     let mut row = json!({"title": "ls /tmp", "status": "pending"});
-    let g = session::tag_tool(&r.hub, "house", &ls(), &mut row).expect("the call the grant let through is tagged");
+    let g = session::tag_tool(&r.hub, "house", "run:o:chat-6", &ls(), &mut row).expect("the call the grant let through is tagged");
     assert_eq!(row["sessionGrant"]["state"], "live");
     let lane = Lane::main("bot-house");
     let entry = r.hub.add_entry(&lane, EntryKind::Tool, 1, &row).unwrap();
     session::tagged(&r.hub, &g, &entry.id);
     // Two calls went through (the retry after the tap, and the repeat): two rows, and no third.
-    assert_eq!(session::tag_tool(&r.hub, "house", &ls(), &mut json!({})).as_deref(), Some(g.as_str()));
-    assert!(session::tag_tool(&r.hub, "house", &ls(), &mut json!({})).is_none(), "one row per call");
+    assert_eq!(session::tag_tool(&r.hub, "house", "run:o:chat-6", &ls(), &mut json!({})).as_deref(), Some(g.as_str()));
+    assert!(session::tag_tool(&r.hub, "house", "run:o:chat-6", &ls(), &mut json!({})).is_none(), "one row per call");
 
     let id = data(&r, &card)["sessionGrant"]["id"].as_str().unwrap().to_owned();
     // Not a member's to remove.
@@ -233,4 +233,49 @@ async fn card_history_answers_an_agent_with_cards_read_and_refuses_one_without()
     assert_eq!(rows[0]["button"], "This session");
     assert_eq!(rows[0]["auto"], true);
     assert!(!ok.to_string().contains("ls /tmp"), "no command in the history: {ok}");
+}
+
+#[tokio::test]
+async fn another_thread_of_the_agent_gets_no_this_session_tag_on_the_same_command() {
+    let r = Rig::new().await;
+    window(&r.hub, 20);
+    let who = owner_run("chat-7");
+    grant_ls(&r, &who, "c1").await;
+    let mut row = json!({"title": "ls /tmp"});
+    assert!(session::tag_tool(&r.hub, "house", "run:o:chat-8", &ls(), &mut row).is_none());
+    assert!(row.get("sessionGrant").is_none());
+    assert!(session::tag_tool(&r.hub, "house", "run:o:chat-7", &ls(), &mut row).is_some());
+}
+
+#[tokio::test]
+async fn a_hook_without_a_claude_session_is_not_offered_this_session_and_cannot_grant_it() {
+    let r = Rig::new().await;
+    window(&r.hub, 20);
+    let who = owner_run("chat-11");
+    let call = block(&r.hub, &who, "", ls());
+    let card = shown(&r.hub).await;
+    assert_eq!(ids(&data(&r, &card)), ["allow", autoallow::ALWAYS, "deny"]);
+    // A tap on the option anyway (an old app, a forged answer) keeps nothing.
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(session::SESSION), None).unwrap();
+    assert!(!call.await.unwrap().allow, "an option the card never offered is no yes");
+    assert!(r.hub.store.session_grants_live("house", "run:o:chat-11").is_empty());
+}
+
+#[tokio::test]
+async fn the_card_history_lists_the_owners_cards_only() {
+    let r = Rig::new().await;
+    window(&r.hub, 20);
+    grant_ls(&r, &owner_run("chat-12"), "c1").await;
+    let call = super::tests::ask(
+        &r.hub,
+        guest_run("sam", "1:1:house:sam"),
+        "SandboxNetworkAccess",
+        json!({"host": "github.com"}),
+    );
+    let guest = shown(&r.hub).await;
+    assert_eq!(guest.person, "sam");
+    let seen = r.hub.store.cards_recent(10);
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert!(seen[0].person.is_empty() && seen[0].approver == "owner");
+    call.abort();
 }
