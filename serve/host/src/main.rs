@@ -1036,8 +1036,8 @@ async fn main() -> Result<()> {
                         pkg,
                         snapshot,
                         kernel,
-                        granted,
                         resolve,
+                        granted,
                         ..launch_cmd::Args::default()
                     })?;
                 }

@@ -52,13 +52,12 @@ pub fn read(machine: &Path) -> Map<String, Value> {
             }
         }
     }
-    if let Some(agents) = s.get("agents") {
-        if !agents
+    if let Some(agents) = s.get("agents")
+        && !agents
             .as_object()
             .is_some_and(|a| a.values().all(Value::is_object))
-        {
-            return Map::new();
-        }
+    {
+        return Map::new();
     }
     let plugins_ok = match s.get("plugins") {
         None => true,
@@ -78,19 +77,19 @@ pub fn read(machine: &Path) -> Map<String, Value> {
             Some(Value::Array(b)) if b.iter().all(Value::is_string) => {}
             Some(_) => return Map::new(),
         }
-        if let Some(a) = d.get("account") {
-            if !a.as_str().is_some_and(|a| !a.is_empty()) {
-                return Map::new();
-            }
+        if let Some(a) = d.get("account")
+            && a.as_str().is_none_or(str::is_empty)
+        {
+            return Map::new();
         }
         for (k, choices) in [
             ("permission_mode", &PERMISSION_MODES[..]),
             ("at_limit", &AT_LIMITS[..]),
         ] {
-            if let Some(v) = d.get(k) {
-                if !v.as_str().is_some_and(|v| choices.contains(&v)) {
-                    return Map::new();
-                }
+            if let Some(v) = d.get(k)
+                && !v.as_str().is_some_and(|v| choices.contains(&v))
+            {
+                return Map::new();
             }
         }
         if d.get("limit").is_some_and(|l| !valid_limit(l)) {

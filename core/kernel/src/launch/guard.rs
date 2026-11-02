@@ -290,10 +290,10 @@ impl Places {
         let agents = dedup(roots.iter().flat_map(|r| both(r)));
         let kernel_real = realpath(kernel);
         let mut repos = vec![kith_home.to_owned()];
-        if kernel_real.file_name().is_some_and(|n| n == "kernel") {
-            if let Some(p) = kernel_real.parent() {
-                repos.push(s(p));
-            }
+        if kernel_real.file_name().is_some_and(|n| n == "kernel")
+            && let Some(p) = kernel_real.parent()
+        {
+            repos.push(s(p));
         }
         let repos = dedup(
             repos

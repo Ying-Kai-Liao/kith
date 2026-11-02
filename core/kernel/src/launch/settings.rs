@@ -8,6 +8,9 @@
 //! version of Claude Code, and for a guest launched with a run token `kith-permit apply` (the grants of an escape card,
 //! applied to what this returns).
 
+// A port of one long script: its short names are kept, so the two read line by line.
+#![allow(clippy::many_single_char_names)]
+
 use std::fs;
 use std::path::Path;
 
@@ -252,7 +255,7 @@ fn bash_q(x: &str) -> String {
     if x.is_empty() {
         return "''".to_owned();
     }
-    if x.chars().any(|c| c.is_control()) {
+    if x.chars().any(char::is_control) {
         let mut out = String::from("$'");
         for c in x.chars() {
             match c {
@@ -556,19 +559,18 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     };
     // The run's outbox: anyone but the owner writes that one folder of <machine>/outbox and nothing else in it.
     let mut run_outbox = String::new();
-    if !owner {
-        if let Some(ob) = env("KITH_RUN_OUTBOX").filter(|o| is_dir(o)) {
-            if is_dir(&format!("{machine}/outbox")) {
-                let ob = realpath(Path::new(&ob));
-                let outbox = realpath(&p.machine.join("outbox"));
-                if ob.parent() == Some(outbox.as_path())
-                    && !ob
-                        .file_name()
-                        .is_some_and(|n| n.to_string_lossy().starts_with('.'))
-                {
-                    run_outbox = s(&ob);
-                }
-            }
+    if !owner
+        && let Some(ob) = env("KITH_RUN_OUTBOX").filter(|o| is_dir(o))
+        && is_dir(&format!("{machine}/outbox"))
+    {
+        let ob = realpath(Path::new(&ob));
+        let outbox = realpath(&p.machine.join("outbox"));
+        if ob.parent() == Some(outbox.as_path())
+            && !ob
+                .file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with('.'))
+        {
+            run_outbox = s(&ob);
         }
     }
     if !run_outbox.is_empty() {
@@ -918,12 +920,10 @@ pub fn build(i: &Input<'_>) -> R<Output> {
         }
         extend_new(list(perms, "allow")?, rules);
         if !notes.is_empty() {
-            let listed = list(obj(sm, "autoMode")?, "allow").and_then(|l| {
-                if l.is_empty() {
-                    l.push(Value::String("$defaults".to_owned()));
-                }
-                Ok(l)
-            })?;
+            let listed = list(obj(sm, "autoMode")?, "allow")?;
+            if listed.is_empty() {
+                listed.push(Value::String("$defaults".to_owned()));
+            }
             extend_new(listed, notes);
         }
         // Auto mode has no prompt: a PermissionDenied hook turns a refusal into a card, a PreToolUse hook lets one retry through.

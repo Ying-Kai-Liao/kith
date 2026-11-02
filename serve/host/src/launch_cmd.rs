@@ -75,9 +75,10 @@ fn context(a: &Args) -> Result<Ctx> {
         settings::Member::owner()
     } else {
         // Who the run is for is `kith-auth resolve`'s to say (it moves into the core with the secrets).
-        let text = match &a.resolve {
-            Some(f) => std::fs::read_to_string(f)?,
-            None => {
+        let text = if let Some(f) = &a.resolve {
+            std::fs::read_to_string(f)?
+        } else {
+            {
                 let o = Command::new(kernel_dir.join("bin/kith-auth"))
                     .args(["resolve", &a.agent])
                     .env("KITH_PERSON", &person)
@@ -117,7 +118,7 @@ fn harness_of(a: &Args, pkg: &Path) -> String {
                 break;
             }
             if let Some(v) = l.strip_prefix("harness:") {
-                own = v.trim().to_owned();
+                v.trim().clone_into(&mut own);
                 break;
             }
         }
@@ -245,9 +246,10 @@ pub fn print_settings(a: &Args) -> Result<()> {
 pub fn print_mcp(a: &Args) -> Result<()> {
     let c = context(a)?;
     let granted: Option<Value> = if c.member.owner {
-        match &a.granted {
-            Some(f) => Some(serde_json::from_str(&std::fs::read_to_string(f)?)?),
-            None => {
+        if let Some(f) = &a.granted {
+            Some(serde_json::from_str(&std::fs::read_to_string(f)?)?)
+        } else {
+            {
                 // The shared services this agent is granted (secrets resolve in kith-auth, not here).
                 let o = Command::new(c.kernel.join("bin/kith-auth")).args(["mcp-config", &a.agent]).output()?;
                 if o.status.success() {

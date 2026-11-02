@@ -123,6 +123,7 @@ impl Tree {
         settings::build(&input)
     }
 
+    #[allow(clippy::unused_self)] // called like its siblings, on the tree
     fn guest(&self, id: &str, mode: &str) -> Member {
         Member {
             owner: false,
