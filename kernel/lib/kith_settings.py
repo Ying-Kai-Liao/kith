@@ -25,6 +25,11 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
                     Codex); `kith account add|remove|order|move` edit it
   account_policy    how a run picks among the set: "fill" (default: the set's order, each account until it is out of
                     usage) or "spread" (the ready account with the most room left, ties by least recently started)
+  account_cross_harness  true: the set's accounts of another harness also serve as fallbacks (a Claude agent falls over to a
+                    Codex account in the set, and the other way round). Default false: the global set serves each agent with
+                    the accounts of its own harness family only. agents.<a>.account_cross_harness overrides it for one agent
+                    (kith account cross-harness on|off [--agent A]). An agent's own list (agents.<a>.accounts) is allowed to name
+                    other harnesses whatever this says
   agents            per agent, what this Mac chose over the agent's own settings: {"<agent>": {"permission_mode": MODE,
                     "accounts": [...], "pin": {...}}}. An agent's defaultMode is its author's suggestion; the mode chosen
                     here (kith install asks) wins over it, and only the caller's wins over this
@@ -34,7 +39,9 @@ unattended Mac may do is decided per Mac. Without the file, or for a key it leav
                     Preferred (only: false) falls back to the set when the pinned account is out; only: true never leaves it
   Old files (account, backups, agents.<a>.account, agents.<a>.backups) are read as the keys above and rewritten in the new
   shape by the next write: account + backups -> accounts (main first); an agent's account -> its pin and the head of its
-  accounts; an agent's backups -> its accounts (an explicit [] stays "no fallback")
+  accounts; an agent's backups -> its accounts (an explicit [] stays "no fallback"). account_cross_harness is turned on only
+  when the old global backups listed an account of another harness than the old global main's (the default login of
+  Claude when there was none): that chain said so; an old global account of another family never does
   call_model        the model a turn spoken in a voice call runs on (same session, only the model differs): a model name
                     Claude Code takes ("sonnet", "haiku", "opus"), or "own" for the agent's own model. Default "sonnet":
                     a call wants a quick reply. agents.<agent>.call_model replaces it for that agent. Schedules, channels
@@ -168,6 +175,8 @@ def read():
                 return {}, f'{FILE}: {where}{key} is not a list of account ids'
         if 'account' in d and not (isinstance(d['account'], str) and d['account']):
             return {}, f'{FILE}: {where}account is not an account id'
+        if 'account_cross_harness' in d and not isinstance(d['account_cross_harness'], bool):
+            return {}, f'{FILE}: {where}account_cross_harness is not true or false'
         pin = d.get('pin')
         if 'pin' in d and not (where and isinstance(pin, dict) and isinstance(pin.get('id'), str) and pin['id']
                                and isinstance(pin.get('only', False), bool)):
@@ -403,6 +412,10 @@ def migrate_accounts(s):
     old = 'account' in s or 'backups' in s or any('account' in a or 'backups' in a for a in agents.values())
     if not old:
         return False
+    main_family = (old_main.split(':')[0] if old_main else 'claude').replace('claude-api', 'claude')
+    mixed = any(i.split(':')[0].replace('claude-api', 'claude') != main_family for i in old_backups)
+    if mixed and 'account_cross_harness' not in s:
+        s['account_cross_harness'] = True   # the old chain named accounts of another harness: those fallbacks stay
     if 'accounts' not in s and (old_main or old_backups):
         head = [old_main] if old_main else ['claude']
         if old_main.startswith('codex'):   # claude agents ran on their default login then: keep it in the set
@@ -414,7 +427,7 @@ def migrate_accounts(s):
         if own_main or own_backups is not None:
             h = _harness_of(name)
             main = next((m for m in (own_main, old_main) if m and _family_of(m, h)), h)
-            chain = own_backups if own_backups is not None else old_backups
+            chain = own_backups if own_backups is not None else [i for i in old_backups if mixed or _family_of(i, h)]
             a.setdefault('accounts', _dedup([main] + chain))
         if own_main:
             a.setdefault('pin', {'id': own_main, 'only': False})
@@ -482,6 +495,27 @@ def set_accounts(agent, ids):
             s.pop('accounts', None)
         else:
             s['accounts'] = _dedup(ids)
+    edit(change)
+
+
+def cross_harness(agent=None):
+    """Whether accounts of another harness serve as fallbacks for the agent: its own switch, else the global one."""
+    s = read()[0]
+    own = s.get('agents', {}).get(agent, {}) if agent else {}
+    return bool(own['account_cross_harness'] if 'account_cross_harness' in own else s.get('account_cross_harness', False))
+
+
+def set_cross_harness(agent, value):
+    """On/off for one agent (None forgets it: the global switch applies) or, with agent None, for all."""
+    def change(s):
+        if agent:
+            if value is None:
+                s.get('agents', {}).get(agent, {}).pop('account_cross_harness', None)
+                _tidy(s, agent)
+            else:
+                _agent_entry(s, agent)['account_cross_harness'] = bool(value)
+        else:
+            s['account_cross_harness'] = bool(value)
     edit(change)
 
 

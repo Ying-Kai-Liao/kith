@@ -308,7 +308,7 @@ check "ledger: account_id per session; an older row reads as provider:account" "
 OUT=$(KITH_RESUME=sess-work "$KITH" echo "hi" 2>/dev/null)
 check "KITH_RESUME of a session made under the main account: resumed" "echo \"\$OUT\" | grep -q 'resume=sess-work id=claude:work'"
 OUT=$(KITH_RESUME=sess-def "$KITH" echo "hi" 2>"$T/err")
-check "KITH_RESUME of a session made under another account: a new session, and it says so" "echo \"\$OUT\" | grep -q 'resume=none id=claude:work' && grep -q 'made under claude, not claude:work; starting a new one' $T/err"
+check "KITH_RESUME of a session made under another account that is ready: continued on that account" "echo \"\$OUT\" | grep -q 'resume=sess-def id=claude' && ! grep -q 'starting a new one' $T/err"
 OUT=$(KITH_RESUME=sess-unknown "$KITH" echo "hi" 2>/dev/null)
 check "KITH_RESUME of a session the ledger doesn't know: taken as it is" "echo \"\$OUT\" | grep -q 'resume=sess-unknown'"
 OUT=$(KITH_RESUME=sess-def "$KITH" echo --backup claude "hi" 2>/dev/null)

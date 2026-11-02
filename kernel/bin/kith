@@ -518,19 +518,31 @@ use_account() {   # use_account ID: the entry's env, or exit 4 with one line
   eval "$be"
   harness=$backup_harness acct=$backup_account account_id=$1
 }
+# The account a session was made under (the cost ledger's account_id; one it doesn't know is taken as it is): --resume runs
+# under it, a handed-on session (KITH_RESUME) is continued on it when it is a ready candidate.
+made=""
+if [[ -n ${r_sid:-} || -n ${KITH_RESUME:-} ]]; then
+  made=$(python3 "$KITH/lib/kith_accounts.py" session-account "${r_sid:-$KITH_RESUME}" 2>/dev/null || true)
+fi
 if [[ -n $backup ]]; then
   use_account "$backup"
+elif [[ -n ${r_sid:-} && -n $made ]]; then
+  # Straight to the session's account: no pick (it would note a start on an account this run never uses).
+  main_now=$(python3 "$KITH/lib/kith_accounts.py" main-id "$agent" "$pkg/agent.md" 2>/dev/null || true)
+  [[ $made == "$main_now" ]] || echo "kith: that session was made under $made, so it runs under $made (main account for $agent: ${main_now:-$account_id})" >&2
+  use_account "$made"   # not runnable: exit 4 with what makes it ready
 elif [[ $harness == "$own" ]]; then
   by_state=(); [[ $launch -eq 0 && $p_owner == 1 ]] && by_state=(--state)
-  be=$(python3 "$KITH/lib/kith_accounts.py" main-env "$agent" "$pkg/agent.md" ${by_state[@]+"${by_state[@]}"} ${record[@]+"${record[@]}"}) || exit 4
+  prefer=(); [[ -n $made && ${#by_state[@]} -gt 0 ]] && prefer=(--prefer "$made")
+  be=$(python3 "$KITH/lib/kith_accounts.py" main-env "$agent" "$pkg/agent.md" ${by_state[@]+"${by_state[@]}"} ${prefer[@]+"${prefer[@]}"} ${record[@]+"${record[@]}"}) || exit 4
   eval "$be"
   acct=$backup_account account_id=$main_id
+  # The pick can be an account of another harness (a Claude agent's Codex fallback): it runs there, as --account would.
+  if [[ -n $backup_harness && $backup_harness != "$harness" ]]; then harness=$backup_harness; KITH_MODEL=""; unset HQ_MODEL; fi
 fi
-# A session is resumed only under the account it was made under (the cost ledger's account_id; one it doesn't know is
-# taken as it is). --resume runs under that account; a session handed on (KITH_RESUME: a channel, kith ask -c) starts anew.
+# A session is resumed only under the account it was made under. A session handed on (KITH_RESUME: a channel, kith ask -c)
+# whose account is not the one this run is on starts anew.
 if [[ -n ${r_sid:-} || -n ${KITH_RESUME:-} ]]; then
-  r_check=${r_sid:-$KITH_RESUME}
-  made=$(python3 "$KITH/lib/kith_accounts.py" session-account "$r_check" 2>/dev/null || true)
   if [[ -n $made && $made != "$account_id" ]]; then
     if [[ -n ${r_sid:-} && -z $backup ]]; then
       echo "kith: that session was made under $made, so it runs under $made (main account for $agent: $account_id)" >&2

@@ -76,13 +76,26 @@ printf '{"account":"claude:a","backups":["claude:b"],"agents":{"echo":{"account"
 "$KITH" account migrate >/dev/null 2>&1; "$KITH" account list >/dev/null
 check "per agent: an account becomes its pin and the head of its list; its backups follow" "[ \"\$(st \"d['agents']['echo']['pin'], d['agents']['echo']['accounts']\")\" = \"({'id': 'claude:c', 'only': False}, ['claude:c', 'claude:b', 'codex'])\" ]"
 check "per agent: an explicit backups [] stays 'no fallback' (the agent's main alone)" "[ \"\$(st \"d['agents']['other']['accounts']\")\" = \"['claude:a']\" ]"
-check "per agent: an account alone keeps the global backups behind it; a codex agent's main is its harness's" "[ \"\$(st \"d['agents']['cx']['accounts'], d['accounts']\")\" = \"(['codex:x', 'claude:b'], ['claude:a', 'claude:b'])\" ]"
+check "per agent: an account alone keeps the global backups behind it; a codex agent's main is its harness's" "[ \"\$(st \"d['agents']['cx']['accounts'], d['accounts']\")\" = \"(['codex:x'], ['claude:a', 'claude:b'])\" ]"
 printf '{"accounts":["claude","claude:b"],"backups":["claude:a"],"account":"codex"}\n' > "$SET"
 OUT=$("$KITH" account list --json)
 check "new keys beside old ones: the new ones win" "is \"[r['id'] for r in d if r['in_set']]\" \"['claude', 'claude:b']\""
 printf '{"backups":["claude:a"]}\n' > "$SET"
 OUT=$("$KITH" echo --backups-json)
 check "an old file nothing has rewritten still works (backups-json)" "is \"[c['id'] for c in d['chain']]\" \"['claude', 'claude:a']\""
+
+# the old chain's cross-harness meaning: only an explicit one turns the switch on
+cx_of() { python3 -I -c "import sys; sys.path.insert(0,'$KERNEL/lib'); import kith_settings as k; print(k.cross_harness())"; }
+printf '{"account":"codex"}\n' > "$SET"
+check "migration A: an old global account of another family does not give Claude agents a Codex fallback" "[ \"\$(cx_of)\" = False ] && [ \"\$(P echo)\" = claude ] && [ \"\$(P cx)\" = codex ]"
+printf '{"account":"claude:a"}\n' > "$SET"
+check "migration B: an old global claude:<name> main does not give Codex agents claude accounts" "[ \"\$(cx_of)\" = False ] && [ \"\$(P cx)\" = codex ] && [ \"\$(P echo)\" = claude:a ]"
+printf '{"backups":["claude:b"]}\n' > "$SET"
+check "migration C: old global backups of the default family do not give Codex agents the default claude" "[ \"\$(cx_of)\" = False ] && [ \"\$(P cx)\" = codex ] && [ \"\$(P echo)\" = claude,claude:b ]"
+printf '{"backups":["claude:b","codex"]}\n' > "$SET"
+check "migration D: old global backups that name another harness keep that fallback (switch on)" "[ \"\$(cx_of)\" = True ] && [ \"\$(P echo)\" = claude,claude:b,codex ] && [ \"\$(P cx)\" = codex,claude,claude:b ]"
+printf '{"agents":{"echo":{"backups":["codex"]}}}\n' > "$SET"
+check "migration: an agent's own backups naming Codex stay (its own list)" "[ \"\$(cx_of)\" = False ] && [ \"\$(P echo)\" = claude,codex ]"
 
 # --- pick: fill ------------------------------------------------------------------------------------------------------------------
 fresh
@@ -158,14 +171,29 @@ check "a subset replaces the set for that agent, in its order" "[ \"\$(P)\" = cl
 check "cross-harness: a Claude agent falls over to Codex when its list has it" "[ \"\$(P)\" = claude:c,codex ]"
 "$KITH" account set --reset --agent echo >/dev/null
 "$KITH" account set claude claude:a codex codex:x >/dev/null
-check "a Claude agent takes its family first, then the other harness in set order" "[ \"\$(P)\" = claude,claude:a,codex,codex:x ]"
+check "cross-harness is off by default: the set serves each agent with its own harness's accounts" "[ \"\$(P)\" = claude,claude:a ] && [ \"\$(P cx)\" = codex,codex:x ] && [ \"\$(\"$KITH\" account cross-harness)\" = off ]"
+fresh; "$KITH" account set claude >/dev/null; "$KITH" account add codex deep >/dev/null 2>&1
+check "add codex x does not change a Claude agent's candidates" "[ \"\$(P)\" = claude ] && [ \"\$(P cx)\" = codex,codex:deep ]"
+"$KITH" account remove codex:deep --yes >/dev/null 2>&1
+"$KITH" account set claude claude:a codex codex:x >/dev/null
+"$KITH" account cross-harness on >/dev/null
+check "cross-harness on: a Claude agent takes its family first, then the other harness in set order" "[ \"\$(P)\" = claude,claude:a,codex,codex:x ]"
 check "a Codex agent takes codex accounts first" "[ \"\$(P cx)\" = codex,codex:x,claude,claude:a ]"
 "$KITH" account set claude claude:a --agent echo >/dev/null
 check "a subset without Codex never reaches Codex" "[ \"\$(P)\" = claude,claude:a ]"
+"$KITH" account cross-harness off --agent echo >/dev/null; "$KITH" account set --reset --agent echo >/dev/null
+check "cross-harness off for one agent: its candidates are its own family; the Codex agent still follows the global switch" "[ \"\$(P)\" = claude,claude:a ] && [ \"\$(P cx)\" = codex,codex:x,claude,claude:a ]"
+OUT=$("$KITH" account list --agent echo); check "list shows the cross-harness switch" "echo \"\$OUT\" | grep -q 'cross-harness fallback: off (for echo)'"
+OUT=$("$KITH" echo --accounts-json); check "--accounts-json carries cross_harness" "is \"d['cross_harness']\" False"
+"$KITH" account cross-harness reset --agent echo >/dev/null
+"$KITH" account set --agent echo >/dev/null; "$KITH" account pin echo claude:a >/dev/null
+check "an explicit empty list with a pin: the pin alone, nothing to fall back to" "[ \"\$(P)\" = claude:a ]"
+"$KITH" account unpin echo >/dev/null; "$KITH" account set --reset --agent echo >/dev/null
 printf '{"accounts":["claude","Bad id!","pi","claude:nobody","claude-api:main","codex"]}\n' > "$SET"
 OUT=$("$KITH" account list --json); rc=$?
 check "bad ids, unknown harnesses, missing folders and ungranted keys are listed, not ready, never a crash" "[ $rc = 0 ] && is \"[(r['id'], r['status']) for r in d if r['in_set']]\" \"[('claude', 'ready'), ('Bad id!', 'invalid'), ('pi', 'unsupported'), ('claude:nobody', 'signed_out'), ('claude-api:main', 'signed_out'), ('codex', 'ready')]\""
 check "a not-ready account carries the command that fixes it" "is \"[r['fix'] for r in d if r['id'] in ('claude:nobody', 'claude-api:main')]\" \"['kith account add claude nobody', 'kith auth set anthropic/main ANTHROPIC_API_KEY && kith auth grant <agent> anthropic anthropic/main']\""
+"$KITH" account cross-harness on >/dev/null
 check "pick over those: only the usable ones, and the cross-harness codex last" "[ \"\$(P)\" = claude,codex ]"
 
 # --- the commands ------------------------------------------------------------------------------------------------------------------
@@ -245,6 +273,11 @@ sleep 1; printf '{"claude":{"out_until":%s,"reason":"usage_95","since":%s}}' $((
 check "the host's file marks an account out while the host keeps one" "[ \"\$(P)\" = claude:a ]"
 sleep 1; "$KITH" account clear claude >/dev/null
 check "clear is also heard against a mark the host made before it" "[ \"\$(P)\" = claude,claude:a ]"
+HU=$((NOW + 3600)); printf '{"claude":{"out_until":%s,"reason":"usage_95","since":%s}}' $HU "$(date +%s)" > "$M/serve/backups.json"
+"$KITH" account clear claude >/dev/null
+printf '{"claude":{"out_until":%s,"reason":"usage_95","since":%s}}' $((HU + 600)) "$(date +%s)" > "$M/serve/backups.json"
+sed -i.bak 's/"since":[0-9]*/"since":1/' "$M/serve/backups.json"; rm -f "$M/serve/backups.json.bak"
+check "a host mark extended after the clear (same since, later out_until) counts again" "[ \"\$(P)\" = claude:a ]"
 printf 'garbage' > "$M/serve/backups.json"
 check "a corrupt host file marks nothing" "[ \"\$(P)\" = claude,claude:a ]"
 rm -f "$M/serve/backups.json"
@@ -278,6 +311,30 @@ OUT=$("$KITH" echo --launch-json 2>/dev/null)
 "$KITH" account out claude --until 1h >/dev/null
 OUT=$("$KITH" echo --launch-json 2>/dev/null); check "--launch-json (the host picks per turn): the static main, whatever is out" "is \"d['account_id']\" claude"
 "$KITH" account clear claude >/dev/null
+
+# a plain run whose pick is an account of another harness runs on that harness (and says so in the ledger env)
+login "$M/accounts/codex/x"; "$KITH" account set claude codex:x --agent echo >/dev/null; "$KITH" account out claude --until 1h >/dev/null
+OUT=$("$KITH" echo "hi" 2>"$T/err"); check "a plain run picked on a Codex account runs Codex there (provider, account id, CODEX_HOME)" "echo \"\$OUT\" | grep -q \"codex-run home=$M/accounts/codex/x id=codex:x\""
+"$KITH" account clear claude >/dev/null; "$KITH" account set --reset --agent echo >/dev/null
+
+# resume: no start noted on an account the run doesn't use; a handed-on session stays on its account when it is ready
+"$KITH" account policy fill >/dev/null
+printf '{"session_id":"sess-b"}' | KITH_AGENT=echo KITH_PROVIDER=claude KITH_ACCOUNT=b KITH_ACCOUNT_ID=claude:b KITH_STATE=$M "$KERNEL/bin/kith-cost" tag
+mkdir -p "$HOME/.claude/projects/p" "$T/work"
+printf '{"type":"user","cwd":"%s","message":{"content":"hi"}}\n' "$T/work" > "$HOME/.claude/projects/p/sess-b.jsonl"
+mkdir -p "$M/accounts/claude/b/projects/p"; cp "$HOME/.claude/projects/p/sess-b.jsonl" "$M/accounts/claude/b/projects/p/"
+python3 -c "
+import json
+d=json.load(open('$STATE')); [d['accounts'].get(k,{}).pop('last_started',None) for k in list(d['accounts'])]
+json.dump(d, open('$STATE','w'))"
+OUT=$(cd "$T" && "$KITH" echo --resume sess-b "go on" 2>"$T/err"); rc=$?
+check "--resume runs under the session's account, notes only that start, and says why" "[ $rc = 0 ] && echo \"\$OUT\" | grep -q 'ran-on=b id=claude:b' && [ \"\$(ss \"sorted(k for k, v in d['accounts'].items() if v.get('last_started'))\")\" = \"['claude:b']\" ] && grep -q 'made under claude:b, so it runs under claude:b' $T/err && ! grep -q 'starting on' $T/err"
+"$KITH" account policy spread >/dev/null
+"$KITH" account usage claude:b --json '{"windows":[{"name":"five_hour","percent":90}]}' >/dev/null
+OUT=$(KITH_RESUME=sess-b "$KITH" echo "hi" 2>"$T/err"); check "a handed-on session stays on its account while it is ready, though spread would rotate" "echo \"\$OUT\" | grep -q 'ran-on=b id=claude:b' && ! grep -q 'starting a new one' $T/err"
+"$KITH" account out claude:b --until 1h >/dev/null
+OUT=$(KITH_RESUME=sess-b "$KITH" echo "hi" 2>"$T/err"); check "a handed-on session whose account is out starts a new one elsewhere" "! echo \"\$OUT\" | grep -q 'ran-on=b' && grep -q 'starting a new one' $T/err"
+"$KITH" account clear claude:b >/dev/null; "$KITH" account policy fill >/dev/null
 
 # every launch on a named Claude account syncs it with the main login
 printf '{"enabledPlugins":{"kith@kith":true},"model":"opus"}' > "$HOME/.claude/settings.json"

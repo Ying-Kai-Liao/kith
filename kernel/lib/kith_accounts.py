@@ -29,10 +29,11 @@ SessionStart): it is resumed only under that account.
   kith_accounts.py backups-json AGENT AGENT.MD   the older chain view for `kith AGENT --backups-json` (static order, no state)
   kith_accounts.py accounts-json AGENT AGENT.MD  `kith AGENT --accounts-json`: set, status, usage, candidates (docs/accounts.md)
   kith_accounts.py launch-env AGENT ID [--record]  shell assignments for bin/kith; exit 4 + one line on stderr when not runnable
-  kith_accounts.py main-env AGENT AGENT.MD [--state] [--record]
+  kith_accounts.py main-id AGENT AGENT.MD        the static main account's id
+  kith_accounts.py main-env AGENT AGENT.MD [--state] [--prefer ID] [--record]
                                                  the account a plain run starts on for bin/kith: main_id=ID plus launch-env's
-                                                 assignments (empty for the default login); --state: pick()'s first candidate,
-                                                 else the static main. Exit 4 + one line when it can't run
+                                                 assignments (empty for the default login); --state: pick()'s first candidate
+                                                 (--prefer ID first when it is one), else the static main. Exit 4 + one line when it can't run
   kith_accounts.py run-chain AGENT AGENT.MD KITH -- ARGS...   a non-interactive one-shot over pick()'s candidates (see run_chain)
   kith_accounts.py session-account SID           the account id a session was made under ('' when the ledger doesn't know it)
   --record notes last_started in the state file (the launch is real)
@@ -514,7 +515,11 @@ def out_marks(state=None, now=None):
     state = read_state() if state is None else state
     marks = {}
     for k, v in _legacy_marks(legacy_files()[0]).items():
-        if float(v['out_until']) > now and float(v.get('since', 0)) > float((state.get(k) or {}).get('cleared_at', 0)):
+        cleared = state.get(k) or {}
+        # A mark the host made before our `clear` is ignored; one it made or extended after it (a later since, or an
+        # out_until past the one that was cleared: the host keeps `since` when it extends) counts.
+        if float(v['out_until']) > now and (float(v.get('since', 0)) > float(cleared.get('cleared_at', 0))
+                                            or float(v['out_until']) > float(cleared.get('cleared_host_until', 0))):
             marks[k] = {'out_until': int(float(v['out_until'])), 'reason': str(v.get('reason') or 'rate_limit')}
     for k, v in state.items():
         try:
@@ -543,12 +548,14 @@ def mark_out(entry, until=None, reason='rate_limit', now=None, extend_only=True)
 
 def clear_out(entry, now=None):
     now = int(now or time.time())
+    host = _legacy_marks(legacy_files()[0]).get(entry)
 
     def change(accts):
         e = accts.setdefault(entry, {})
         for k in ('out_until', 'reason', 'since'):
             e.pop(k, None)
         e['cleared_at'] = now
+        e['cleared_host_until'] = int(float(host['out_until'])) if host else 0
     update_state(change)
 
 
@@ -650,17 +657,22 @@ def in_family(entry, harness):
 
 def layout(agent, harness):
     """(pin, own, foreign): the agent's pin (None when it has none or the harness can't use it), then the accounts of its
-    own harness family in set order, then those of other harnesses in set order. The agent's own set when it has one, else
-    the global set. Without any account of the family: the harness's default login."""
-    ids = kith_settings.accounts(agent)[0] or []
+    own harness family in set order, then those of other harnesses in set order. Accounts of another harness count only
+    when the agent's own list names them, or cross-harness fallback is on for it (kith account cross-harness). The
+    agent's own list when it has one, else the global set. Without any account of the family: the harness's default login,
+    unless the agent's own list is explicitly empty (then the pin, if any, is all there is)."""
+    ids, where = kith_settings.accounts(agent)
+    ids = ids or []
     pin = kith_settings.pin(agent) if agent else None
     if pin:
         try:
             check_main(pin['id'], harness)
         except ValueError:
             pin = None   # a hand-edited pin the agent's harness can't use
-    own = [i for i in ids if in_family(i, harness)] or [harness]
-    foreign = [i for i in ids if not in_family(i, harness)]
+    own = [i for i in ids if in_family(i, harness)]
+    foreign = [i for i in ids if not in_family(i, harness)] if where == 'agent' or kith_settings.cross_harness(agent) else []
+    if not own and not (where == 'agent' and not ids and pin):
+        own = [harness]
     if pin:
         own, foreign = [i for i in own if i != pin['id']], [i for i in foreign if i != pin['id']]
     return pin, own, foreign
@@ -722,7 +734,7 @@ def _statuses(ids, agent, out, deep, assume_default):
 def pick(agent, agent_md=None, deep=True, now=None, state=None):
     """The ordered candidate list for a run of the agent (`kith account pick AGENT --json`):
 
-      {"version": 1, "agent", "harness", "policy", "pin": {"id","only"} | null,
+      {"version": 1, "agent", "harness", "policy", "pin": {"id","only"} | null, "cross_harness": bool,
        "candidates": [ids to try in order], "skipped": [{"id","status","why", "out_until"?, "reason"?}], "all_out": bool}
 
     The pin (preferred, or only) first, then the agent's set in policy order; accounts that are out or signed out are
@@ -744,6 +756,7 @@ def pick(agent, agent_md=None, deep=True, now=None, state=None):
                for i in ordered if status[i]['status'] != 'ready']
     all_out = not cands
     return {'version': 1, 'agent': agent, 'harness': harness, 'policy': policy, 'pin': pin,
+            'cross_harness': kith_settings.cross_harness(agent),
             'candidates': cands or order[:1], 'skipped': skipped, 'all_out': all_out}
 
 
@@ -833,13 +846,15 @@ def rows(agent=None, deep=True, now=None, ids=None):
 def accounts_json(agent, agent_md):
     """`kith AGENT --accounts-json`, the host's view of the agent's accounts (docs/accounts.md):
 
-      {"version": 1, "agent", "harness", "policy", "pin": {"id","only"} | null, "main": id, "order": [ids, pin first],
+      {"version": 1, "agent", "harness", "policy", "pin": {"id","only"} | null, "cross_harness": bool, "main": id,
+       "order": [ids, pin first],
        "candidates": [ids pick() would try], "all_out": bool, "accounts": [rows() for each id in order]}"""
     harness = agent_harness(agent_md)
     order, pin = static_order(agent, harness)
     state = read_state()
     p = pick(agent, agent_md, deep=True, state=state)
     return {'version': 1, 'agent': agent, 'harness': harness, 'policy': p['policy'], 'pin': pin, 'main': order[0],
+            'cross_harness': p['cross_harness'],
             'order': order, 'candidates': p['candidates'], 'all_out': p['all_out'], 'skipped': p['skipped'],
             'accounts': rows(agent, deep=True, ids=order)}
 
@@ -888,19 +903,23 @@ def env_for(agent, entry, record=False):
     return f'main_id={shlex.quote(entry)} {env}'
 
 
-def main_env(agent, agent_md, use_state=False, record=False):
+def main_env(agent, agent_md, use_state=False, record=False, prefer=None):
     """The account a plain run starts on, for bin/kith. By default the static main (pin, else the set's first): what a
-    host launch and a guest's run use. use_state: pick()'s first candidate, so a run skips accounts that are out."""
+    host launch and a guest's run use. use_state: pick()'s first candidate, so a run skips accounts that are out; prefer
+    (the account a handed-on session was made under) goes first when it is one of the candidates."""
     entry = main_id(agent, agent_md)
     if use_state:
         picked = pick(agent, agent_md, deep=False)
-        if picked['candidates'][0] != entry:
-            why = next((s for s in picked['skipped'] if s['id'] == entry), None)
+        cands = picked['candidates']
+        if prefer and prefer in cands and not picked['all_out']:
+            cands = [prefer] + [i for i in cands if i != prefer]
+        elif cands[0] != entry:
+            why = next((x for x in picked['skipped'] if x['id'] == entry), None)
             if why:
                 print(f"kith: {entry} is {why['status'].replace('_', ' ')}"
                       + (f" until {time.strftime('%H:%M', time.localtime(why['out_until']))}" if why.get('out_until') else '')
-                      + f"; starting on {picked['candidates'][0]}", file=sys.stderr)
-        entry = picked['candidates'][0]
+                      + f"; starting on {cands[0]}", file=sys.stderr)
+        entry = cands[0]
     return env_for(agent, entry, record)
 
 
@@ -947,7 +966,10 @@ def run_chain(agent, agent_md, kith, args):
 if __name__ == '__main__':
     a = sys.argv[1:]
     record = '--record' in a
-    a = [x for x in a if x != '--record']
+    use_state = '--state' in a
+    prefer = a[a.index('--prefer') + 1] if '--prefer' in a and a.index('--prefer') + 1 < len(a) else None
+    skip = {'--record', '--state', '--prefer', prefer} if prefer else {'--record', '--state'}
+    a = [x for x in a if x not in skip]
     try:
         if len(a) >= 5 and a[0] == 'run-chain' and a[4] == '--':
             sys.exit(run_chain(a[1], a[2], a[3], a[5:]))
@@ -957,8 +979,10 @@ if __name__ == '__main__':
             print(json.dumps(accounts_json(a[1], a[2])))
         elif len(a) == 3 and a[0] == 'launch-env':
             print(launch_env(a[1], a[2], record=record))
-        elif len(a) in (3, 4) and a[0] == 'main-env' and (len(a) == 3 or a[3] == '--state'):
-            print(main_env(a[1], a[2], use_state=len(a) == 4, record=record))
+        elif len(a) == 3 and a[0] == 'main-env':
+            print(main_env(a[1], a[2], use_state=use_state, record=record, prefer=prefer))
+        elif len(a) == 3 and a[0] == 'main-id':
+            print(main_id(a[1], a[2]))
         elif len(a) == 2 and a[0] == 'session-account':
             print(session_account(a[1]) or '')
         else:

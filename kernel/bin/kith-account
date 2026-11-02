@@ -20,6 +20,9 @@
   kith account pin <agent> <id> [--only]   the account the agent's runs start on. Preferred (default): when it is out the agent
                                            uses the rest of the set; --only: never anything else
   kith account unpin <agent>               the agent follows the set again
+  kith account cross-harness [on|off|reset] [--agent A]   whether accounts of another harness in the set also serve as fallbacks
+                                           (a Claude agent falling over to Codex). Off by default: the set serves each agent with its
+                                           own harness's accounts; an agent's own list (set --agent A) may name any. Shown by list
   kith account set <id>... [--agent A]     the whole set (or A's own subset and order) in one write; no ids: empty.
                                            `set --reset --agent A` drops A's own list, so A follows the global set (what the host calls)
   kith account out <id> [--until T] [--reason R]   mark an account out of usage until T (a Unix time, 90m, 2h, 1d, or
@@ -275,7 +278,9 @@ def cmd_list(args):
     for r in rows:
         if r['status'] == 'signed_out' and r.get('fix'):
             print(f"  {r['id']}: {r['why']}; to sign it in: {r['fix']}")
-    print(f'policy: {kith_settings.account_policy()}')
+    cross = kith_settings.cross_harness(agent)
+    print(f'policy: {kith_settings.account_policy()}; cross-harness fallback: {"on" if cross else "off"}'
+          + (f' (for {agent})' if agent else ''))
 
 
 def cmd_pick(args):
@@ -413,6 +418,17 @@ def cmd_migrate(args):
     print('settings.json is now in the new shape' if kith_settings.migrate_file() else 'settings.json needs no change')
 
 
+def cmd_cross_harness(args):
+    agent = agent_arg(option(args, '--agent'))
+    if not args:
+        print('on' if kith_settings.cross_harness(agent) else 'off')
+        return
+    if len(args) != 1 or args[0] not in ('on', 'off', 'reset') or (args[0] == 'reset' and not agent):
+        die('account cross-harness [on|off] [--agent A] | account cross-harness reset --agent A', 2)
+    kith_settings.set_cross_harness(agent, None if args[0] == 'reset' else args[0] == 'on')
+    print(f"cross-harness fallback for {agent or 'every agent'}: {kith_settings.cross_harness(agent) and 'on' or 'off'}")
+
+
 def cmd_pin(args):
     only = flag(args, '--only')
     if len(args) != 2:
@@ -542,6 +558,8 @@ def chain_target(agent):
 
 def write_backups(agent, ids):
     main = chain_target(agent)[0]
+    if not agent and any(not acc.in_family(i, acc.parse(main)[0] if acc.parse(main)[0] != 'claude-api' else 'claude') for i in ids):
+        kith_settings.set_cross_harness(None, True)   # the old chain meant it: a fallback of another harness
     write_set(agent, [main] + list(ids))
 
 
@@ -631,7 +649,7 @@ def main(argv):
         return
     cmd, rest = argv[0], argv[1:]
     commands = {'add': cmd_add, 'login': cmd_login, 'list': cmd_list, 'ls': cmd_list, 'remove': cmd_remove, 'rm': cmd_remove,
-                'order': cmd_order, 'move': cmd_move, 'set': cmd_set, 'policy': cmd_policy, 'pin': cmd_pin, 'unpin': cmd_unpin,
+                'order': cmd_order, 'move': cmd_move, 'set': cmd_set, 'policy': cmd_policy, 'pin': cmd_pin, 'cross-harness': cmd_cross_harness, 'unpin': cmd_unpin,
                 'migrate': cmd_migrate, 'out': cmd_out, 'clear': cmd_clear, 'usage': cmd_usage, 'pick': cmd_pick, 'backup': cmd_backup, 'use': cmd_use}
     if cmd not in commands:
         die(f'unknown command: {cmd} (kith account --help)', 2)
