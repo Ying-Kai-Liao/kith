@@ -48,24 +48,13 @@ impl Layout {
     /// From the environment, the way `lib/kith_paths.py` reads it; the commands the kernel starts pass the answer
     /// explicitly, so this is the fallback for a bare `kith memory log` in a terminal.
     pub fn from_env() -> Self {
-        let env = |name: &str| {
-            std::env::var(format!("KITH_{name}"))
-                .or_else(|_| std::env::var(format!("HQ_{name}")))
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .map(PathBuf::from)
-        };
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-        let state = env("STATE").unwrap_or_else(|| {
-            let dot = home.join(".kith");
-            if dot.exists() { dot } else { home.join(".hq") }
-        });
-        let kith_home = env("HOME").unwrap_or_else(|| {
-            let kith = home.join("kith");
-            if kith.exists() { kith } else { home.join("hq") }
-        });
-        let agents = env("AGENTS").unwrap_or_else(|| kith_home.join("agents"));
-        Self::new(state, agents)
+        Self::for_home(&kith_kernel::paths::process_home())
+    }
+
+    /// `from_env` for a given home folder: the state and agents folders `kith paths` says.
+    pub(crate) fn for_home(home: &Path) -> Self {
+        let p = crate::kernel::folders(home);
+        Self::new(p.state, p.agents)
     }
 
     pub fn new(state: PathBuf, agents: PathBuf) -> Self {

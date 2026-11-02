@@ -128,13 +128,13 @@ jobs:
           predicate-quantifier: every
           filters: |
             host:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
               - '!**/*.md'
             # What the root crate builds from: the host and the memory and wire crates, not guest or tts, which
             # nothing in the host depends on. Those two get their own small job (host-crates). Also the kernel's bin
             # and lib: host tests run the repo's own kernel commands (kith-allow, kith-auth, kith, ...) and what they import.
             host_core:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/**,kernel/lib/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/**,kernel/lib/**,.github/workflows/ci.yml}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
@@ -372,6 +372,14 @@ jobs:
       - name: Build the test archive
         working-directory: serve/host
         run: cargo nextest archive --workspace --exclude kith-guest --exclude kith-tts --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
+      # The Rust core against the Python kernel, the same CLI line both ways (kernel/tests/difftest): the test binaries above
+      # already built the host's dependencies, so this adds the one kith program. Its router finds it through KITH_BIN.
+      - name: Core parity (difftest --rust)
+        run: |
+          cargo build --manifest-path serve/host/Cargo.toml --bin kith
+          kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
+      - name: Core dependency rules
+        run: kernel/tests/kith-core-deps-check
       - uses: actions/upload-artifact@v4
         with:
           name: host-tests
@@ -466,9 +474,9 @@ jobs:
         with:
           tool: cargo-nextest@0.9.100
       - name: Tests
-        run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem
+        run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel
       - name: Doctests
-        run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem
+        run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel
 
   cloud:
     needs: changes
