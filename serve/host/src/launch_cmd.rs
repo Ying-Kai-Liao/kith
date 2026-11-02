@@ -267,3 +267,37 @@ pub fn print_mcp(a: &Args) -> Result<()> {
     println!("{}", json!({ "mcp_servers": merged["mcpServers"] }));
     Ok(())
 }
+
+/// `kith kernel launch AGENT --launch-json [flags]`: the whole launch object (`kith_kernel::launch::assemble`), with the
+/// exit code `kith AGENT --launch-json` gives. `--kernel DIR` names the kernel folder (the router passes it).
+pub fn print_whole(args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let mut rest: Vec<String> = args.to_vec();
+    let mut kernel_dir: Option<PathBuf> = None;
+    if let Some(i) = rest.iter().position(|a| a == "--kernel")
+        && i + 1 < rest.len()
+    {
+        kernel_dir = Some(PathBuf::from(rest[i + 1].clone()));
+        rest.drain(i..i + 2);
+    }
+    let Some((agent, flags)) = rest.split_first() else {
+        eprintln!("usage: kith kernel launch AGENT --launch-json [flags]");
+        return 2;
+    };
+    let Some(kernel_dir) = kernel_dir.or_else(kernel::current_kernel) else {
+        eprintln!("kith: can't find the kernel folder (--kernel)");
+        return 1;
+    };
+    let env: kith_kernel::launch::assemble::Env = std::env::vars_os()
+        .map(|(k, v)| (k.to_string_lossy().into_owned(), v.to_string_lossy().into_owned()))
+        .collect();
+    match kith_kernel::launch::assemble::launch(agent, flags, &kernel_dir, env) {
+        Ok(json) => {
+            let mut out = std::io::stdout().lock();
+            let _ = writeln!(out, "{json}");
+            let _ = out.flush();
+            0
+        }
+        Err(code) => code,
+    }
+}

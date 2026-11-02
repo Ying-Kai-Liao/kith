@@ -664,6 +664,10 @@ enum LaunchCmd {
         #[arg(long)]
         json: bool,
     },
+    /// `kith kernel launch AGENT --launch-json [flags]`: the whole launch object, as `kith AGENT --launch-json` prints it
+    /// (`--kernel DIR` may stand among the flags).
+    #[command(external_subcommand)]
+    Whole(Vec<String>),
 }
 
 /// What `kith kernel launch prompt` was asked.
@@ -1067,6 +1071,9 @@ async fn main() -> Result<()> {
                         granted,
                         ..launch_cmd::Args::default()
                     })?;
+                }
+                KernelCmd::Launch { what: LaunchCmd::Whole(args) } => {
+                    std::process::exit(launch_cmd::print_whole(&args));
                 }
                 KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } | KernelCmd::Secrets { .. } => {
                     unreachable!("handled above")
