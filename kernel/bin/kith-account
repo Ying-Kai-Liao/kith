@@ -27,6 +27,7 @@
   kith account clear <id>                  back to ready
   kith account usage <id> [--json READING]  record a usage reading ('{"windows": [{"name": "five_hour", "percent": 71.5,
                                            "resets_at": 1900000000}]}', or - for stdin); without --json print the stored one
+  kith account migrate                     write settings.json in the account-set shape now (reading migrates in memory; every write persists it)
   kith account pick <agent> [--json]       the ordered candidates a run of the agent would try now: the pin, then the set by
                                            policy; accounts that are out or signed out are skipped (and listed). All out: the first
 
@@ -127,11 +128,13 @@ def write_set(agent, ids):
 
 
 def join_set(entry):
-    """The account joins the global set at the end. A Mac without a set yet starts it with the account's harness's default
-    login, so adding a second login doesn't take the first out of use."""
-    ids = kith_settings.accounts(None)[0]
-    if ids is None:
-        ids = [acc.parse(entry)[0] if acc.parse(entry)[0] != 'claude-api' else 'claude']
+    """The account joins the global set at the end. When the set has no account of its harness's family yet, that harness's
+    default login goes in first: adding a second login must not take the first out of use."""
+    h = acc.parse(entry)[0]
+    own = 'claude' if h == 'claude-api' else h
+    ids = kith_settings.accounts(None)[0] or []
+    if not any(acc.in_family(i, own) for i in ids):
+        ids = ids + [own]
     if entry in ids:
         return ids.index(entry) + 1
     kith_settings.set_accounts(None, ids + [entry])
@@ -406,6 +409,10 @@ def cmd_policy(args):
     print(f'policy: {args[0]}')
 
 
+def cmd_migrate(args):
+    print('settings.json is now in the new shape' if kith_settings.migrate_file() else 'settings.json needs no change')
+
+
 def cmd_pin(args):
     only = flag(args, '--only')
     if len(args) != 2:
@@ -625,7 +632,7 @@ def main(argv):
     cmd, rest = argv[0], argv[1:]
     commands = {'add': cmd_add, 'login': cmd_login, 'list': cmd_list, 'ls': cmd_list, 'remove': cmd_remove, 'rm': cmd_remove,
                 'order': cmd_order, 'move': cmd_move, 'set': cmd_set, 'policy': cmd_policy, 'pin': cmd_pin, 'unpin': cmd_unpin,
-                'out': cmd_out, 'clear': cmd_clear, 'usage': cmd_usage, 'pick': cmd_pick, 'backup': cmd_backup, 'use': cmd_use}
+                'migrate': cmd_migrate, 'out': cmd_out, 'clear': cmd_clear, 'usage': cmd_usage, 'pick': cmd_pick, 'backup': cmd_backup, 'use': cmd_use}
     if cmd not in commands:
         die(f'unknown command: {cmd} (kith account --help)', 2)
     try:
