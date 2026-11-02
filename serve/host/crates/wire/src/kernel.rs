@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "685a997958583cf5dd7e1290acd688c03c74ca39960db7738b982e11232cf0c1";
+pub const CONTRACT_SHA256: &str = "b7375e445dfc570e4853ac755ff68ef3f2bd343ed2c0720cd6ff89f8bafdcf25";
 
 /// The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -123,6 +123,15 @@ pub struct Agent {
     pub harness: Option<Harness>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub builtin: Option<bool>,
+}
+
+/// `kith new <name> <description> --json`: the agent just made. `home` is its folder (memory, data and files beside the role), `dir` its role folder (its own repo: agent.md, settings.json, skills). A failure prints `{"ok": false, "error": "..."}` and exits non-zero instead, and leaves no folder behind.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+pub struct NewAgent {
+    pub agent: String,
+    pub home: String,
+    pub dir: String,
+    pub description: String,
 }
 
 /// `kith project ls --json`: every registered project, sorted by id.
@@ -279,6 +288,14 @@ pub mod command {
         }
         args
     }
+    /// Make an agent: `name` (lowercase letters, digits, dashes) and a one-line `description` (no ': '). `instructions` is a file holding the first draft of agent.md's opening paragraph. `instructions` adds `--instructions <instructions>`.
+    pub fn new<'a>(name: &'a str, description: &'a str, instructions: Option<&'a str>) -> Vec<&'a str> {
+        let mut args = vec!["new", name, description, "--json"];
+        if let Some(v) = instructions {
+            args.extend(["--instructions", v]);
+        }
+        args
+    }
     /// The delegation records on this Mac.
     pub fn delegations() -> Vec<&'static str> {
         vec!["ask", "delegations", "--json"]
@@ -286,7 +303,7 @@ pub mod command {
 }
 
 /// Each command's name and the spec of what it prints (a type, or `[T]` for a list of one). For the fixtures' tests.
-pub const COMMANDS: &[(&str, &str)] = &[("ls", "[Agent]"), ("projectLs", "Projects"), ("launch", "Launch"), ("delegations", "Delegations")];
+pub const COMMANDS: &[(&str, &str)] = &[("ls", "[Agent]"), ("projectLs", "Projects"), ("launch", "Launch"), ("new", "NewAgent"), ("delegations", "Delegations")];
 
 /// The contract as data, for `crate::check` (the producer's strict check and the consumer's).
 pub static SCHEMA: crate::check::Schema = crate::check::Schema {
@@ -297,6 +314,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
     ],
     types: &[
         crate::check::TypeSchema { name: "Agent", fields: &[("name", "string"), ("description", "string"), ("home", "string"), ("model", "string?"), ("effort", "string?"), ("harness", "Harness?"), ("builtin", "bool?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "NewAgent", fields: &[("agent", "string"), ("home", "string"), ("dir", "string"), ("description", "string")], may_omit: &[] },
         crate::check::TypeSchema { name: "Projects", fields: &[("projects", "[Project]")], may_omit: &[] },
         crate::check::TypeSchema { name: "Project", fields: &[("id", "string"), ("paths", "[string]"), ("home", "string?"), ("remotes", "[string]"), ("parent", "string?"), ("memory", "string"), ("exists", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "Launch", fields: &[("version", "int"), ("agent", "string"), ("agent_version", "string"), ("harness", "Harness?"), ("cwd", "string"), ("env", "{string}"), ("system_prompt", "string"), ("settings", "json?"), ("mcp_servers", "json"), ("add_dirs", "[string]"), ("allowed_tools", "[string]"), ("disable_slash_commands", "bool"), ("model", "string?"), ("effort", "string?"), ("project", "string?"), ("call_model", "string?"), ("permission_mode", "PermissionMode?"), ("cost_tag", "CostTag"), ("claude_args", "[string]?"), ("backup", "string?"), ("provider", "Harness?"), ("account", "string?"), ("account_id", "string?")], may_omit: &[] },
@@ -313,6 +331,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
 pub fn decode(name: &str, value: serde_json::Value) -> Option<Result<(), serde_json::Error>> {
     Some(match name {
         "Agent" => serde_json::from_value::<Agent>(value).map(drop),
+        "NewAgent" => serde_json::from_value::<NewAgent>(value).map(drop),
         "Projects" => serde_json::from_value::<Projects>(value).map(drop),
         "Project" => serde_json::from_value::<Project>(value).map(drop),
         "Launch" => serde_json::from_value::<Launch>(value).map(drop),

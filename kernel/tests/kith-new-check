@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# kith-new-check — `kith new <name> "<desc>" [--instructions FILE|-] [--json]`: the JSON object on success, the error object
+# on every failure (stdout only, stderr silent, exit 1/2), --json anywhere, plain output unchanged. CLI lines in, stdout /
+# stderr / exit code / files out, so the same lines can check another implementation. Throwaway HOME and KITH_HOME.
+#
+#   kernel/tests/kith-new-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-new-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
+unset KITH_STATE HQ_STATE KITH_AGENTS KITH_PROJECT KITH_PERSON KITH_AGENT HQ_HOME
+mkdir -p "$HOME" "$KITH_HOME/state" "$T/bin"
+export KITH_STATE=$KITH_HOME/state
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com
+# kith-new asks `claude plugin list` which plugins to switch off; a stand-in with none installed.
+printf '#!/bin/sh\necho "[]"\n' > "$T/bin/claude"; chmod +x "$T/bin/claude"
+export PATH=$T/bin:$PATH
+
+KITH=$KERNEL/bin/kith
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+export OUT=
+jv() { python3 -c 'import json,os,sys; d=json.loads(os.environ["OUT"]); print(eval(sys.argv[1]))' "$1"; }
+A=$KITH_HOME/agents
+
+# ---- success ----
+OUT=$("$KITH" new alpha "the alpha agent" --json 2>"$T/err"); rc=$?
+check "success: exit 0, silent stderr" "[ $rc = 0 ] && [ ! -s '$T/err' ]"
+check "success: exactly one object with agent, home, dir, description" "[ \"\$(jv '(sorted(d), d[\"agent\"], d[\"description\"])')\" = \"(['agent', 'description', 'dir', 'home'], 'alpha', 'the alpha agent')\" ]"
+check "success: home and dir are the agent's folders, and exist" "[ \"\$(jv 'd[\"home\"]')\" = '$A/alpha' ] && [ \"\$(jv 'd[\"dir\"]')\" = '$A/alpha/role' ] && [ -f '$A/alpha/role/agent.md' ] && [ -d '$A/alpha/memory' ]"
+check "success: description is in agent.md" "grep -q '^description: the alpha agent\$' '$A/alpha/role/agent.md'"
+
+# ---- --json anywhere, --instructions ----
+printf 'You are beta, a careful one.\n' > "$T/intro.md"
+OUT=$("$KITH" new --json beta "the beta agent" --instructions "$T/intro.md" 2>"$T/err"); rc=$?
+check "--json first, with --instructions: ok, intro used" "[ $rc = 0 ] && [ \"\$(jv 'd[\"agent\"]')\" = beta ] && grep -q 'You are beta, a careful one.' '$A/beta/role/agent.md'"
+OUT=$(printf 'From stdin.\n' | "$KITH" new gamma --json "the gamma agent" --instructions - 2>"$T/err"); rc=$?
+check "--json in the middle, instructions from stdin" "[ $rc = 0 ] && grep -q 'From stdin.' '$A/gamma/role/agent.md'"
+
+# ---- failures under --json ----
+bad() { # what, expected exit, expected message fragment, then the arguments to kith new
+  local what=$1 want=$2 frag=$3; shift 3
+  OUT=$("$KITH" new "$@" 2>"$T/err"); local rc=$?
+  check "$what: exit $want, error object, silent stderr" "[ $rc = $want ] && [ \"\$(jv '(d[\"ok\"], len(d))')\" = '(False, 2)' ] && jv 'd[\"error\"]' | grep -qF -- \"$frag\" && ! jv 'd[\"error\"]' | grep -q '^kith-new: ' && [ ! -s '$T/err' ]"
+}
+bad "bad name" 2 "name must be lowercase" Bad "x" --json
+bad "no name" 2 "name must be lowercase" --json
+bad "name kith" 2 "can't be called 'kith'" kith "x" --json
+bad "no description" 2 "one-line description" delta --json
+bad "description with ': '" 2 "one-line description" delta "a: b" --json
+bad "exists" 1 "already exists" alpha "again" --json
+bad "unreadable instructions" 2 "can't read" delta "x" --instructions "$T/nope" --json
+bad "--instructions without a value" 2 "--instructions needs" delta "x" --json --instructions
+check "failures made no folder" "[ ! -e '$A/delta' ]"
+# A step after the folder exists failing still answers with the object: a stand-in that always fails.
+mkdir -p "$T/failbin"
+printf '#!/bin/sh\nexit 1\n' > "$T/failbin/git"; chmod +x "$T/failbin/git"
+OUT=$(PATH=$T/failbin:$PATH "$KITH" new epsilon "x" --json 2>"$T/err"); rc=$?
+check "later step failing: error object, silent stderr, exit 1" "[ $rc = 1 ] && [ \"\$(jv 'd[\"ok\"]')\" = False ] && [ ! -s '$T/err' ]"
+check "later step failing: the folder this run made is gone" "[ ! -e '$A/epsilon' ]"
+OUT=$("$KITH" new epsilon "x" --json 2>"$T/err"); rc=$?
+check "retry after the failure succeeds" "[ $rc = 0 ] && [ -f '$A/epsilon/role/agent.md' ]"
+mkdir -p "$A/theta/keep"; echo 1 > "$A/theta/keep/f"
+OUT=$(PATH=$T/failbin:$PATH "$KITH" new theta "x" --json 2>"$T/err")
+check "a folder that existed before the run is never removed" "[ -f '$A/theta/keep/f' ]"
+
+# ---- no --json: unchanged ----
+"$KITH" new zeta "the zeta agent" >"$T/out" 2>"$T/err"; rc=$?
+check "plain success: one 'created' line, no JSON" "[ $rc = 0 ] && grep -q '^created $A/zeta/role (its own git repo)' '$T/out' && [ \$(wc -l < '$T/out') = 1 ] && [ ! -s '$T/err' ]"
+"$KITH" new zeta "again" >"$T/out" 2>"$T/err"; rc=$?
+check "plain failure: message on stderr with the prefix, nothing on stdout" "[ $rc = 1 ] && [ ! -s '$T/out' ] && grep -qx \"kith-new: agent 'zeta' already exists\" '$T/err'"
+"$KITH" new Bad x >"$T/out" 2>"$T/err"; rc=$?
+check "plain bad name: exit 2" "[ $rc = 2 ] && [ ! -s '$T/out' ] && grep -q '^kith-new: name must be' '$T/err'"
+check "kith new --help mentions --json" "\"$KITH\" new --help | grep -q -- '--json'"
+
+exit $((fails > 0))

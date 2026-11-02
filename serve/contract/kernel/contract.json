@@ -32,6 +32,15 @@
         "builtin": "bool?"
       }
     },
+    "NewAgent": {
+      "doc": "`kith new <name> <description> --json`: the agent just made. `home` is its folder (memory, data and files beside the role), `dir` its role folder (its own repo: agent.md, settings.json, skills). A failure prints `{\"ok\": false, \"error\": \"...\"}` and exits non-zero instead, and leaves no folder behind.",
+      "fields": {
+        "agent": "string",
+        "home": "string",
+        "dir": "string",
+        "description": "string"
+      }
+    },
     "Projects": {
       "doc": "`kith project ls --json`: every registered project, sorted by id.",
       "fields": {
@@ -154,6 +163,14 @@
         "project": "-p"
       },
       "result": "Launch"
+    },
+    "new": {
+      "doc": "Make an agent: `name` (lowercase letters, digits, dashes) and a one-line `description` (no ': '). `instructions` is a file holding the first draft of agent.md's opening paragraph.",
+      "args": ["new", "{name}", "{description}", "--json"],
+      "options": {
+        "instructions": "--instructions"
+      },
+      "result": "NewAgent"
     },
     "delegations": {
       "doc": "The delegation records on this Mac.",

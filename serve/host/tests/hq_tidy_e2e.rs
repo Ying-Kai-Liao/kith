@@ -169,6 +169,40 @@ async fn an_hq_bot_is_tidied_into_its_files_without_launching_the_agent_and_it_c
 }
 
 #[tokio::test]
+async fn kai_deletes_a_memory_file_and_forgets_a_fact_from_the_apps() {
+    let s = start().await;
+    let bot = s.house_bot().await;
+    let notes = s.house.join("memory/notes.md");
+    std::fs::create_dir_all(notes.parent().unwrap()).unwrap();
+    std::fs::write(&notes, "- likes zebras\n").unwrap();
+
+    let gone = s.host.call("kithMemoryDelete", json!({"botId": bot, "name": "notes.md"})).await;
+    assert_eq!((gone["version"]["cause"].as_str(), gone["version"]["deleted"].as_bool()), (Some("delete"), Some(true)));
+    assert!(!notes.exists());
+    let history = s.host.call("kithMemoryHistory", json!({"botId": bot, "name": "notes.md"})).await;
+    let versions = history["versions"].as_array().unwrap();
+    assert_eq!(versions[0]["deleted"], true);
+    assert_eq!(versions[1]["cause"], "baseline");
+    s.host.call("kithMemoryRestore", json!({"botId": bot, "name": "notes.md", "version": versions[1]["id"]})).await;
+    assert!(std::fs::read_to_string(&notes).unwrap().contains("zebras"));
+
+    let missing = s.host.refused("kithMemoryDelete", json!({"botId": bot, "name": "nope.md"})).await;
+    assert!(missing.contains("no such file"), "{missing}");
+    std::fs::write(s.memory_file(), "# Memory\n").unwrap();
+    let index = s.host.refused("kithMemoryDelete", json!({"botId": bot, "name": "MEMORY.md"})).await;
+    assert!(index.contains("index"), "{index}");
+    assert!(s.memory_file().exists());
+    let outside = s.host.refused("kithMemoryDelete", json!({"botId": bot, "name": "../role/agent.md"})).await;
+    assert!(outside.contains("isn't a memory file"), "{outside}");
+
+    let forgot = s.host.call("kithMemoryForget", json!({"botId": bot, "text": "Likes zebras"})).await;
+    assert_eq!((forgot["forgotten"].as_bool(), forgot["text"].as_str()), (Some(true), Some("Likes zebras")));
+    assert_eq!(s.host.call("kithMemoryForget", json!({"botId": bot, "text": "Likes zebras"})).await["forgotten"], true);
+    let empty = s.host.refused("kithMemoryForget", json!({"botId": bot, "text": "  "})).await;
+    assert!(empty.contains("text required"), "{empty}");
+}
+
+#[tokio::test]
 async fn a_plan_the_user_never_said_changes_nothing_and_is_not_retried() {
     let s = start().await;
     let bot = s.house_bot().await;

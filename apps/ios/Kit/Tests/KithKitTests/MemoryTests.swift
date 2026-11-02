@@ -103,6 +103,12 @@ import Testing
     let unchanged = try decoder.decode(HqMemoryWrite.self, from: Data(#"{"version": null, "warnings": []}"#.utf8))
     #expect(unchanged.version == nil)
 
+    // A delete answers with the version it made, deleted.
+    let deleted = try decoder.decode(HqMemoryWrite.self, from: Data("""
+    {"version": {"id": 5, "at": 9, "author": "kai", "authorBot": null, "cause": "delete", "deleted": true, "bytes": 0, "lines": 0}}
+    """.utf8))
+    #expect(deleted.version?.deleted == true && deleted.warnings.isEmpty)
+
     let runs = try decoder.decode([HqTidyUp].self, from: Data("""
     [{"id": 2, "at": 7, "undone": false, "files": [],
       "changes": [{"kind": "reviewed", "file": "MEMORY.md", "shared": false, "text": "new", "was": "old"}]}]

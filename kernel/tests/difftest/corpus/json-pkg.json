@@ -1,0 +1,80 @@
+[
+  {
+    "name": "pkg-versions-history-json",
+    "command": "history",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"},
+      {"run": ["git", "init", "-q", "-b", "main"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "add", "-A"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "commit", "-qm", "first"], "cwd": "kith/agents/echo/role"},
+      {"write": "kith/agents/echo/role/notes.md", "text": "more\n"},
+      {"run": ["git", "add", "-A"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "commit", "-qm", "second"], "cwd": "kith/agents/echo/role"}
+    ],
+    "normalize": [["\\b[0-9a-f]{10}\\b", "<fingerprint>"]],
+    "run": [["versions", "echo", "--json"], ["history", "echo", "--json"], ["history", "echo", "1", "--json"],
+            ["history", "ghost", "--json"], ["versions", "ghost", "--json"]]
+  },
+  {
+    "name": "pkg-pin-unpin-json",
+    "command": "pin",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"}
+    ],
+    "run": [["pin", "echo", "nosuchversion", "--json"], ["rollback", "echo", "--json"], ["unpin", "echo", "--json"],
+            ["pin", "ghost", "abc", "--json"], ["unpin", "ghost", "--json"]]
+  },
+  {
+    "name": "pkg-restore-commit-json",
+    "command": "restore",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"},
+      {"run": ["git", "init", "-q", "-b", "main"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "add", "-A"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "commit", "-qm", "first"], "cwd": "kith/agents/echo/role"},
+      {"write": "kith/agents/echo/role/notes.md", "text": "more\n"}
+    ],
+    "run": [["commit", "echo", "-m", "notes", "--json"], ["commit", "echo", "--json"], ["restore", "echo", "HEAD~1", "--json"],
+            ["restore", "echo", "HEAD", "--json"], ["restore", "echo", "nosuchref", "--json"], ["commit", "ghost", "--json"]]
+  },
+  {
+    "name": "pkg-push-update-json",
+    "command": "push",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"},
+      {"run": ["git", "init", "-q", "-b", "main"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "add", "-A"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "commit", "-qm", "first"], "cwd": "kith/agents/echo/role"},
+      {"run": ["git", "init", "-q", "--bare", "{TMP}/up.git"]},
+      {"run": ["git", "remote", "add", "origin", "{TMP}/up.git"], "cwd": "kith/agents/echo/role"}
+    ],
+    "run": [["push", "echo", "--json"], ["update", "echo", "--json"], ["update", "ghost", "--json"], ["push", "ghost", "--json"]]
+  },
+  {
+    "name": "pkg-deps-json",
+    "command": "deps",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "kith/agents/echo/role/agent.md", "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"},
+      {"write": "kith/agents/echo/role/capabilities.yaml", "text": "requires:\n  nosuchprog-xyz: echo install-it  # for tests\n  sh: true\n"},
+      {"write": "kith/agents/zed/role/agent.md", "text": "---\nname: zed\ndescription: second\n---\nYou zed.\n"}
+    ],
+    "run": [["deps", "echo", "--json"], ["deps", "zed", "--json"], ["deps", "ghost", "--json"]]
+  },
+  {
+    "name": "pkg-install-share-json",
+    "command": "install",
+    "setup": [
+      {"mkdir": "kith/state"},
+      {"write": "tmp/src/agent.md", "text": "---\nname: shared\ndescription: a shared one\n---\nHi.\n"},
+      {"run": ["git", "init", "-q", "-b", "main"], "cwd": "tmp/src"},
+      {"run": ["git", "add", "-A"], "cwd": "tmp/src"},
+      {"run": ["git", "commit", "-qm", "init"], "cwd": "tmp/src"}
+    ],
+    "run": [["install", "{TMP}/src", "--json"], ["install", "{TMP}/src", "--yes", "--json"], ["install", "{TMP}/src", "--json"], ["share", "shared", "--json"], ["share", "ghost", "--json"]]
+  }
+]
