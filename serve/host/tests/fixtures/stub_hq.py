@@ -150,6 +150,34 @@ elif args[:1] == ["schedule"] and len(args) == 4 and args[1] in ("pause", "resum
     else:
         job["paused"] = args[1] == "pause"
     json.dump(jobs, open(os.path.join(home, "schedules.json"), "w", encoding="utf-8"))
+elif args[:2] in (["account", "add"], ["account", "remove"]):
+    # `account add|remove H N [--yes] --json`: folders under `acc/`; the login is a command that records its env in
+    # `login_ran` (so a test sees the host ran exactly this argv with this env). A new claude account needs --yes.
+    h, n = args[2], args[3]
+    d = os.path.join(home, "acc", h + "-" + n)
+    if args[1] == "add":
+        created = not os.path.isdir(d)
+        if h == "claude" and created and "--yes" not in args:
+            print(json.dumps({"ok": False, "error": "needs --yes after the warning is shown", "warning": "WARN"}))
+            sys.exit(2)
+        if h == "codex" and os.path.exists(os.path.join(home, "no_codex")):
+            print(json.dumps({"ok": False, "error": "codex is not installed here"}))
+            sys.exit(1)
+        os.makedirs(d, exist_ok=True)
+        ran = os.path.join(home, "login_ran")
+        print(json.dumps({"ok": True, "id": h + ":" + n, "harness": h, "name": n, "dir": d, "created": created,
+                          "login": {"argv": ["sh", "-c", 'echo "$STUB_LOGIN_ENV $1" > "$2"', "sh", "a b", ran],
+                                    "env": {"STUB_LOGIN_ENV": "from the cli"}},
+                          **({"warning": "WARN"} if h == "claude" else {})}))
+    elif "--yes" not in args:
+        print(json.dumps({"ok": False, "error": "run again with --yes"}))
+        sys.exit(2)
+    elif not os.path.isdir(d):
+        print(json.dumps({"ok": False, "error": "no account " + h + ":" + n}))
+        sys.exit(1)
+    else:
+        os.rmdir(d)
+        print(json.dumps({"ok": True, "changed": True, "id": h + ":" + n, "dir": d, "in_chain": True}))
 elif args[:2] == ["account", "use"]:
     # `account use ID --agent house` / `account use --reset --agent house`: the main account, in `main`.
     path = os.path.join(home, "main")

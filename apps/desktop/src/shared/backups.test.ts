@@ -2,8 +2,30 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   addable, backAt, familyOf, hasClaudeAccount, isOut, loginCommand, mainChoices, mainEntry, mainSourceText, move, parseBackups,
-  stateText, viaLabel, entryFor,
+  stateText, viaLabel, entryFor, parseAccountAdd, parseAccountRemove, removable,
 } from './backups.ts'
+
+test('accountAdd answers a warning to confirm, or the started login', () => {
+  assert.deepEqual(parseAccountAdd({ ok: false, error: 'needs yes', warning: 'W' }), { kind: 'warning', warning: 'W', error: 'needs yes' })
+  assert.deepEqual(
+    parseAccountAdd({ account: { id: 'codex:deep', created: false }, term: 't1' }),
+    { kind: 'started', id: 'codex:deep', created: false, term: 't1' },
+  )
+  assert.throws(() => parseAccountAdd({ account: { id: 'codex:deep' } }))
+})
+
+test('accountRemove says whether the login was in an order; only named subscription accounts can be removed', () => {
+  assert.deepEqual(parseAccountRemove({ ok: true, changed: true, in_chain: true }), { inChain: true })
+  assert.deepEqual(parseAccountRemove({ ok: true }), { inChain: false })
+  const got = parseBackups({
+    entries: [
+      { id: 'codex', harness: 'codex', ready: true },
+      { id: 'claude:work', harness: 'claude', account: 'work', kind: 'subscription', ready: true },
+      { id: 'claude-api:main', harness: 'claude', account: 'main', kind: 'api-key', ready: true },
+    ],
+  })
+  assert.deepEqual(removable(got).map((e) => e.id), ['claude:work'])
+})
 
 const sample = {
   global: ['codex', 'claude:work'],
