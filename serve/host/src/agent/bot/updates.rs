@@ -66,6 +66,8 @@ impl Actor {
                     _ => String::new(),
                 };
                 self.conn = None;
+                // Nothing more comes from a process that is gone.
+                self.end_off_turn();
                 // The in-flight prompt request resolves with an error; finish_turn reports it with this output.
                 self.exit_tail = Some(tail);
                 // Questions this process still had open can't be answered through it any more: their cards park, and
@@ -81,11 +83,19 @@ impl Actor {
                     && let Some(sid) = params["sessionId"].as_str()
                 {
                     self.note_options(sid, &params["update"], Listing::Update);
-                } else if method == "session/update"
-                    && params["sessionId"].as_str() == self.turn_session.as_deref()
-                    && self.turn.is_some()
-                {
-                    self.on_update(&params["update"]);
+                } else if method == "session/update" && params["sessionId"].as_str() == self.turn_session.as_deref() {
+                    if self.turn.is_none() && super::offturn::wakes(self, &params["update"]) {
+                        // The agent woke itself (a background task finished): its work goes where the last turn was.
+                        if let Err(error) = self.adopt_off_turn().await {
+                            tracing::warn!(bot = %self.cfg.id, error = format!("{error:#}"), "dropped an update from a woken agent");
+                        }
+                    }
+                    if self.turn.is_some() {
+                        if self.off_turn.is_some() {
+                            self.off_turn = Some(Instant::now());
+                        }
+                        self.on_update(&params["update"]);
+                    }
                 }
             }
             Some(Incoming::Request { id, method, params }) => {

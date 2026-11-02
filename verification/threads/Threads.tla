@@ -38,6 +38,8 @@ CONSTANTS
                            \* session id before claude starts (`kith-sessions terminal` / `claim`), PR #324
     StartGateChecks,       \* S start_gate (from Q turn.rs start_turn_inner): refuse a turn while a terminal holds
     HostStartCAS,          \* Q turn.rs claim_for_turn: refuse the turn when another holds the session's claim
+    OffTurnWakes,          \* Q offturn.rs adopt_off_turn: an agent that woke itself (a background task) gets a host turn
+                           \* in its lane with no queue entry: the same start_gate and claim_for_turn as any turn
     TakeoverRefusesBusy,   \* S take_over_inner: Live::Busy -> TerminalBusy
     TakeoverRechecks,      \* S take_over_inner: liveness again just before the signal
     ProcStartCheck,        \* R liveness/started_as: a reused pid is not the session
@@ -207,6 +209,22 @@ HostStart ==
             /\ IF forgotten \/ (SyncLaneAtStart /\ ForgetOnImport /\ Forgets /\ regPid /= "none" /\ dirty)
                THEN forgotten' = FALSE /\ dirty' = FALSE ELSE UNCHANGED <<forgotten, dirty>>
     /\ UNCHANGED <<TS, sidOf, cl, regPid, regSid, hooked, ghost, cur, gs, taking, to, lw, sig, n, staleKv>>
+
+\* Q offturn.rs adopt_off_turn (the agent's own session/update with no turn running, or its send_file / send_message):
+\* the same start_gate() as HostStart under the thread lock, then claim_for_turn (HostClaim) and HostEnd; only the
+\* queue is skipped. Refused (the update is dropped, a send gets an error and a notice) while a terminal holds the
+\* thread: nothing changes, so the refusal is a stutter here. It never skips the gate, which keeps the new path from
+\* being a way to write next to a terminal.
+HostWake ==
+    /\ OffTurnWakes /\ hr = "none" /\ hp = "none"
+    /\ ~(StartGateChecks /\ (IF SyncLaneAtStart THEN SyncedWriter ELSE Writer) = "terminal")
+    /\ hr' = "app" /\ hp' = "gated" /\ UNCHANGED hcl
+    /\ IF SyncLaneAtStart
+       THEN lane' = SyncLane /\ infoPid' = SyncInfoPid /\ infoSid' = SyncInfoSid
+       ELSE UNCHANGED <<lane, infoPid, infoSid>>
+    /\ IF forgotten \/ (SyncLaneAtStart /\ ForgetOnImport /\ Forgets /\ regPid /= "none" /\ dirty)
+       THEN forgotten' = FALSE /\ dirty' = FALSE ELSE UNCHANGED <<forgotten, dirty>>
+    /\ UNCHANGED <<TS, sidOf, cl, regPid, regSid, hooked, ghost, cur, gs, hq, taking, to, lw, sig, n, staleKv>>
 
 \* Q turn.rs claim_for_turn (after the session is loaded, before session/prompt): take_as(kind App, or Bot for a bot's
 \* conversation) for the agent process. Held by another (a terminal, a one-shot) -> HeldByWriter, the turn fails.
@@ -388,7 +406,7 @@ Scan ==
     /\ UNCHANGED <<TS, sidOf, cl, regPid, regSid, hooked, ghost, cur, gs, hq, H, taking, to, sig, n, dirty>>
 
 Next ==
-    \/ AppGate \/ BotGate_ \/ Enqueue \/ HostStart \/ HostClaim \/ HostEnd \/ HostRestart
+    \/ AppGate \/ BotGate_ \/ Enqueue \/ HostStart \/ HostWake \/ HostClaim \/ HostEnd \/ HostRestart
     \/ \E t \in Terminals :
           TermClaim(t) \/ TermResolve(t) \/ TermLaunch(t) \/ TermUp(t) \/ TermHook(t) \/ TermPrompt(t) \/ TermDone(t)
           \/ TermExit(t)

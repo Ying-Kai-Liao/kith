@@ -23,13 +23,15 @@ pub(super) struct FileShares {
     epoch: u64,
     pub summary: Option<String>,
     pending: Vec<Arc<AtomicBool>>,
+    /// What each pending share was, by its cancel flag: told to the person when an off-turn share fails.
+    labels: Vec<(Arc<AtomicBool>, String)>,
     pub tx: mpsc::UnboundedSender<Completed>,
     pub rx: mpsc::UnboundedReceiver<Completed>,
 }
 impl Default for FileShares {
     fn default() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        Self { epoch: 0, summary: None, pending: Vec::new(), tx, rx }
+        Self { epoch: 0, summary: None, pending: Vec::new(), labels: Vec::new(), tx, rx }
     }
 }
 impl FileShares {
@@ -59,16 +61,21 @@ impl Actor {
         cancelled: Arc<AtomicBool>,
         reply: Reply,
     ) {
+        let label = super::offturn::file_label(&sources, name.as_deref());
         if let Err(error) = self.can_send_file() {
+            self.share_failed(&label, &error);
             let _ = reply.send(Err(error));
             return;
         }
         self.files.pending.retain(|flag| !flag.load(Ordering::Acquire));
         if self.files.pending.len() >= 4 {
-            let _ = reply.send(Err(anyhow!("too many pending file shares")));
+            let error = anyhow!("too many pending file shares");
+            self.share_failed(&label, &error);
+            let _ = reply.send(Err(error));
             return;
         }
         self.files.pending.push(cancelled.clone());
+        self.files.labels.push((cancelled.clone(), label));
         let epoch = self.files.epoch;
         let root = files::root(&self.cfg.id);
         // Relative paths are the agent's own: it works in the launch's folder (a project-pinned place), not the bot's.
@@ -84,6 +91,14 @@ impl Actor {
         });
     }
 
+    /// A share that didn't happen. Out of a turn the person started nobody reads the agent's tool result, so the
+    /// chat says so (see `offturn`).
+    fn share_failed(&self, label: &str, error: &anyhow::Error) {
+        if self.off_turn.is_some() {
+            self.off_turn_failed(label, error);
+        }
+    }
+
     fn can_send_file(&self) -> Result<i64> {
         ensure!(!self.stop_requested, "turn is stopping");
         ensure!(
@@ -95,6 +110,13 @@ impl Actor {
 
     pub(super) fn finish_file(&mut self, completed: Completed) {
         self.files.pending.retain(|flag| !Arc::ptr_eq(flag, &completed.cancelled));
+        let label = self
+            .files
+            .labels
+            .iter()
+            .position(|(flag, _)| Arc::ptr_eq(flag, &completed.cancelled))
+            .map(|i| self.files.labels.swap_remove(i).1);
+        let withdrawn = completed.epoch != self.files.epoch || completed.cancelled.load(Ordering::Acquire);
         let result = (|| {
             ensure!(
                 completed.epoch == self.files.epoch
@@ -125,6 +147,9 @@ impl Actor {
             self.set_activity("Working…");
             Ok(())
         })();
+        if let (Err(error), Some(label), false, true) = (&result, label, withdrawn, self.off_turn_context()) {
+            self.off_turn_failed(&label, error);
+        }
         let _ = completed.reply.send(result);
     }
 }
