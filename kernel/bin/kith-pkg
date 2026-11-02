@@ -1459,6 +1459,7 @@ def main(argv):
 
 
 def run(cmd, rest, as_json, argv):
+    global JSON_ERRORS
     if cmd == 'resolve':
         names = sorted(installed()) if rest == ['--all'] else rest[:1]
         if not names:
@@ -1496,7 +1497,6 @@ def run(cmd, rest, as_json, argv):
     elif cmd == 'deps' and rest:
         cmd_deps(sorted(installed()) if rest[0] == '--all' else rest[:1], '--install' in rest)
     elif cmd == 'set-harness' and len(rest) in (2, 4) and (len(rest) == 2 or rest[2] == '--model'):
-        global JSON_ERRORS
         JSON_ERRORS = as_json
         cmd_set_harness(rest[0], rest[1], rest[3] if len(rest) == 4 else None, as_json)
     elif cmd == 'set-field' and len(rest) == 3 and rest[1] in ('model', 'effort'):
