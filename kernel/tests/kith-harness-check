@@ -48,8 +48,10 @@ check "same harness again keeps its model" "[ \"\$(fm)\" = 'harness: codex model
 "$KITH" echo set harness claude --model sonnet >/dev/null 2>&1
 check "back to claude: no harness line, model sonnet" "[ \"\$(fm)\" = 'model: sonnet effort: medium ' ] && [ \"\$(launch)\" = 'claude sonnet' ]"
 
-# A hand-edited agent.md with a Claude model on codex: the launch drops it and says so.
-printf -- '---\nname: echo\ndescription: test agent\nharness: codex\nmodel: sonnet\n---\nYou echo.\n' > "$A/agent.md"
+# A hand-edited agent.md with a Claude model on codex: the launch drops it and says so. (Its size differs from the last
+# version on purpose: the package fingerprint is size + mtime, and a filesystem with 1 s timestamps would miss a
+# same-size edit made in the same second.)
+printf -- '---\nname: echo\ndescription: test agent, edited by hand\nharness: codex\nmodel: sonnet\n---\nYou echo.\n' > "$A/agent.md"
 check "guard: a Claude model never reaches codex" "[ \"\$(launch)\" = 'codex None' ] && grep -q 'sonnet is a Claude model' '$T/err'"
 OUT=$(KITH_MODEL=opus "$KITH" echo --launch-json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["model"])')
 check "guard: -m/KITH_MODEL with a Claude model on codex is dropped too" "[ '$OUT' = None ]"
