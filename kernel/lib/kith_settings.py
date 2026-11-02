@@ -434,8 +434,33 @@ def clear_account(agent):
             write(s)
 
 
+def stored(agent, key):
+    """What this Mac has recorded for one agent's setting, None when nothing (the default applies)."""
+    v = read()[0].get('agents', {}).get(agent, {}).get(key)
+    return v if v not in ('', None) else None
+
+
+def set_with_json(key, agent, value, setter):
+    """`kith A set ... --json`: run the setter, print {agent, setting, value, previous, changed}; an error is
+    {"error": ...} on stdout, exit 1 as without --json, nothing on stderr."""
+    name = {'permission_mode': 'permission', 'call_model': 'call-model', 'at_limit': 'at-limit', 'limit': 'limit'}[key]
+    try:
+        before = stored(agent, key)
+        setter()
+        after = stored(agent, key)
+    except ValueError as e:
+        print(json.dumps({'error': f'kith: {e}'}))
+        sys.exit(1)
+    print(json.dumps({'agent': agent, 'setting': name, 'value': after, 'previous': before, 'changed': before != after}))
+    sys.exit(0)
+
+
 if __name__ == '__main__':
+    as_json = '--json' in sys.argv
+    sys.argv = [a for a in sys.argv if a != '--json']
     if len(sys.argv) == 5 and sys.argv[1] == 'set' and sys.argv[2] == 'limit':   # set limit AGENT N|none
+        if as_json:
+            set_with_json('limit', sys.argv[3], sys.argv[4], lambda: set_limit(sys.argv[3], sys.argv[4]))
         try:
             set_limit(sys.argv[3], sys.argv[4])
         except ValueError as e:
@@ -466,6 +491,8 @@ if __name__ == '__main__':
     if len(sys.argv) in (4, 5) and sys.argv[1] == 'set':   # set KEY [AGENT] VALUE
         if sys.argv[2] not in ('permission_mode', 'call_model', 'at_limit') or (len(sys.argv) == 4 and sys.argv[2] != 'call_model'):
             sys.exit(f'kith: {sys.argv[2]} is not a setting kith can set per agent')
+        if as_json and len(sys.argv) == 5:
+            set_with_json(sys.argv[2], sys.argv[3], sys.argv[4], lambda: choose(sys.argv[3], sys.argv[2], sys.argv[4]))
         try:
             if len(sys.argv) == 4:
                 choose_global(sys.argv[2], sys.argv[3])

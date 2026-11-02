@@ -17,6 +17,8 @@
 #   kith <agent> --info-json        for a program (the bot detail page): one JSON object, the agent's role, package, skills, tools,
 #                                 MCP servers, projects, schedules, cost and memory; read-only, local, each part fails soft (kith-info)
 #   kith <agent> set permission MODE   this Mac's permission mode for the agent (MODE '' forgets it); its next run uses it
+#   kith <agent> set harness H [--model M] | model M|default | effort E|default | call-model M | limit N|none | at-limit MODE   [--json]
+#                                 agent settings; --json: one object {agent,setting,value,previous,changed}; an error is {"error":".."} on stdout, same exit code
 #   kith <agent> --launch-json [--hold PID] [...]   for a program that starts the run itself (kith serve): one JSON object on stdout
 #                                 with everything the run needs (env, cwd, system_prompt, settings, MCP servers, directories,
 #                                 claude_args to give claude as-is). Claude and Codex (Codex: settings and claude_args null); ignores
@@ -200,23 +202,35 @@ agent=$1; shift
 [[ ${1:-} == --info-json ]] && exec "$KITH/bin/kith-info" "$agent"
 # kith AGENT set permission MODE: this Mac's permission mode for the agent (what kith install asks, what apps change).
 # kith AGENT set harness H [--model M]: the harness agent.md names (kith-pkg set-harness), in the package, every Mac.
+# kith AGENT set model M|default, set effort E|default: agent.md's model and effort (kith-pkg set-field); --json on any set.
 # MODE '' forgets it. Applies to the agent's next run from any entry point.
 # kith AGENT set call-model MODEL: the model its voice-call turns run on ('default' forgets the choice, 'own' keeps the
 # agent's own model).
 # kith AGENT set limit N|none: the agent's monthly limit in dollars at API prices; kith AGENT set at-limit ask|tell|hold:
 # what an owner's run does once the agent is at it (see kith_settings.py; kith-cost limit AGENT shows where it stands).
 if [[ ${1:-} == set ]]; then
-  [[ -n $(agent_dir "$agent") ]] || { echo "kith: no agent '$agent' (try: kith ls)" >&2; exit 1; }
-  if [[ ${2:-} == call-model && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set call_model "$agent" "$3"; fi
-  if [[ ${2:-} == limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set limit "$agent" "$3"; fi
-  if [[ ${2:-} == at-limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set at_limit "$agent" "$3"; fi
-  if [[ ${2:-} == harness && ( $# -eq 3 || ( $# -eq 5 && $4 == --model ) ) ]]; then exec "$KITH/bin/kith-pkg" set-harness "$agent" "${@:3}"; fi
-  [[ ${2:-} == permission && $# -eq 3 ]] || { echo "usage: kith $agent set permission MODE   (MODE '' forgets this Mac's choice)
+  # --json anywhere after `set`: one JSON object on stdout, {"agent","setting","value","previous","changed"} (+ what the setting
+  # needs); an error is {"error": "..."} on stdout with the same non-zero exit and nothing on stderr.
+  set_json=0 set_args=()
+  for a in "${@:2}"; do if [[ $a == --json ]]; then set_json=1; else set_args+=("$a"); fi; done
+  set -- set "${set_args[@]+"${set_args[@]}"}"
+  set_fail() { if [[ $set_json == 1 ]]; then python3 -c 'import json,sys; print(json.dumps({"error": sys.argv[1]}))' "$1"; else echo "$1" >&2; fi; exit "${2:-2}"; }
+  [[ -n $(agent_dir "$agent") ]] || set_fail "kith: no agent '$agent' (try: kith ls)" 1
+  jflag=(); [[ $set_json == 1 ]] && jflag=(--json)
+  if [[ ${2:-} == call-model && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set call_model "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
+  if [[ ${2:-} == limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set limit "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
+  if [[ ${2:-} == at-limit && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set at_limit "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
+  if [[ ${2:-} == permission && $# -eq 3 ]]; then exec python3 "$KITH/lib/kith_settings.py" set permission_mode "$agent" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
+  if [[ ${2:-} == harness && ( $# -eq 3 || ( $# -eq 5 && $4 == --model ) ) ]]; then exec "$KITH/bin/kith-pkg" set-harness "$agent" "${@:3}" "${jflag[@]+"${jflag[@]}"}"; fi
+  if [[ ( ${2:-} == model || ${2:-} == effort ) && $# -eq 3 ]]; then exec "$KITH/bin/kith-pkg" set-field "$agent" "$2" "$3" "${jflag[@]+"${jflag[@]}"}"; fi
+  set_fail "usage: kith $agent set permission MODE   (MODE '' forgets this Mac's choice)
        kith $agent set call-model MODEL   (MODEL: sonnet, haiku, opus, own for the agent's own model, default to forget)
        kith $agent set limit N|none       (a monthly limit in dollars at API prices; none forgets it)
        kith $agent set at-limit MODE      (ask, tell or hold: what your own runs do at the limit; ask by default)
-       kith $agent set harness H [--model M]   (claude, codex, ...: the harness it runs on; drops a model of the old one)" >&2; exit 2; }
-  exec python3 "$KITH/lib/kith_settings.py" set permission_mode "$agent" "$3"
+       kith $agent set harness H [--model M]   (claude, codex, ...: the harness it runs on; drops a model of the old one)
+       kith $agent set model M|default    (agent.md's model; a Claude model needs a Claude harness; default removes the line)
+       kith $agent set effort E|default   (low, medium, high, xhigh or max; default removes the line)
+       add --json to any of them: one JSON object on stdout; an error is {\"error\": \"...\"} on stdout, same exit code" 2
 fi
 # kith AGENT connect|disconnect|connectors, skill add|remove, skills: connectors and skills as grants on the agent.
 case ${1:-} in
@@ -376,7 +390,7 @@ sys.exit("kith: MCP servers not connected: %s" % bad if bad else 0)'
   exit $?
 fi
 
-print=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper=""
+print=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper="" backup_model=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --print)      print=1; shift ;;
@@ -508,7 +522,7 @@ use_account() {   # use_account ID: the entry's env, or exit 4 with one line
   local be
   be=$(python3 "$KITH/lib/kith_accounts.py" launch-env "$agent" "$1") || exit 4
   eval "$be"
-  harness=$backup_harness acct=$backup_account account_id=$1
+  harness=$backup_harness acct=$backup_account account_id=${1%%@*}   # the ledger and sessions know the login, not the entry's model
 }
 if [[ -n $backup ]]; then
   use_account "$backup"
@@ -535,6 +549,7 @@ if [[ -n ${r_sid:-} || -n ${KITH_RESUME:-} ]]; then
   fi
 fi
 [[ -n $backup && $harness != "$own" ]] && { KITH_MODEL=""; unset HQ_MODEL; }   # agent.md's model names a model of its own harness (HQ_MODEL: kith_env_sync would fill it back)
+[[ -n $backup && -n $backup_model ]] && { KITH_MODEL=$backup_model; unset HQ_MODEL; }   # an entry claude@sonnet names its own model (the guard below drops a Claude one on another harness)
 if [[ -n $backup_cfg_var ]]; then export "$backup_cfg_var=$backup_cfg_dir" KITH_ACCOUNT_VAR=$backup_cfg_var; fi
 # Which harness and login answer this run, for the cost ledger (kith-cost reads them from the hook and from `record`)
 export KITH_PROVIDER=$harness KITH_ACCOUNT=$acct KITH_ACCOUNT_ID=$account_id
@@ -544,7 +559,7 @@ export KITH_PROVIDER=$harness KITH_ACCOUNT=$acct KITH_ACCOUNT_ID=$account_id
 # A Claude model name means nothing to another harness (codex -m sonnet fails): that harness's default answers instead.
 if [[ $harness != claude ]]; then
   case ${KITH_MODEL:-} in
-    opus*|sonnet*|haiku*|claude-*|best|opusplan) echo "kith: $KITH_MODEL is a Claude model; $agent runs on $harness's default model (kith $agent set harness $harness --model M picks one)" >&2; KITH_MODEL=""; unset HQ_MODEL ;;
+    opus*|sonnet*|haiku*|fable*|claude-*|best|opusplan) echo "kith: $KITH_MODEL is a Claude model; $agent runs on $harness's default model (kith $agent set harness $harness --model M picks one)" >&2; KITH_MODEL=""; unset HQ_MODEL ;;
   esac
 fi
 export KITH_MODEL=${KITH_MODEL:-} KITH_EFFORT=${KITH_EFFORT:-$(field effort)} KITH_PROJECT=$project

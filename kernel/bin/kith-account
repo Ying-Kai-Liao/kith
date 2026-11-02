@@ -13,7 +13,7 @@
   kith account use [--agent A] [--json]    which main account applies, and whether it is ready
 
   kith backup list [--agent A] [--json]    the backup chain (global, or what agent A uses); JSON carries the main account too
-  kith backup add <id> [--agent A] [--at N]    add an entry; --at N moves one already there to place N (1 = first backup)
+  kith backup add <id> [--agent A] [--at N]    add an entry (<id>@<model> runs it on that model: claude@sonnet, claude:work@opus); --at N moves one already there to place N (1 = first backup)
   kith backup remove <id> [--agent A]      take an entry out
   kith account backup set [id ...] [--agent A]   replace the whole chain in one write (no ids: empty); what the apps use
   kith account backup reset --agent A     drop A's own chain, so A follows the global one again
@@ -213,6 +213,7 @@ def cmd_backup_write(sub, args):
     try:
         for i in args:
             acc.parse(i)
+            acc.check_entry_model(i)
     except ValueError as e:
         die(str(e), 2)
     ids = list(dict.fromkeys(args))
@@ -234,7 +235,7 @@ def cmd_backup(args):
             except ValueError as e:
                 ready, why = False, str(e)
             fix = None if ready else _fix(i, agent)
-            rows.append({'id': i, 'ready': ready, **({} if ready else {'why': why}), **({'fix': fix} if fix else {})})
+            rows.append({'id': i, 'model': acc.split(i)[1], 'ready': ready, **({} if ready else {'why': why}), **({'fix': fix} if fix else {})})
         if as_json:
             print(json.dumps({'agent': agent, 'source': where, 'backups': rows, 'main': acc.main_json(agent)}))
         else:
@@ -252,6 +253,8 @@ def cmd_backup(args):
     entry = args[0]
     try:
         acc.parse(entry)
+        if sub == 'add':
+            acc.check_entry_model(entry)
         position = int(at) if at is not None else None
         if position is not None and position < 1:
             raise ValueError('--at counts from 1')
