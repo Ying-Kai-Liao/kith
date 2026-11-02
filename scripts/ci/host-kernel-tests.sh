@@ -22,7 +22,7 @@ check)
   # Test code that reaches the kernel folder by path, or builds the api Rig (which runs the real kith-auth).
   # The Rig itself, tests/ (host-e2e) and the wire crate (host_core covers serve/contract/kernel) are not unit-test users.
   cd "$root/serve/host"
-  for f in $(grep -rlE 'CARGO_MANIFEST_DIR.*kernel|rig::Rig' src --include='*.rs' | sort); do
+  for f in $(grep -rlE 'CARGO_MANIFEST_DIR.*kernel|rig::Rig|room_secret_tests::' src --include='*.rs' | sort); do
     # wake.rs only holds the helpers the listed resume and revoke tests call.
     case "$f" in src/api/rig.rs|src/wake.rs) continue ;; esac
     rows | cut -f1 | grep -qxF "$f" || { echo "serve/host/$f reads the kernel but is not in scripts/ci/host-kernel-tests.txt"; bad=1; }

@@ -388,31 +388,6 @@ jobs:
         with:
           name: host-tests
           path: ${{ runner.temp }}
-      # TRACE (temporary): log which unit tests run a kernel/bin command.
-      - name: Trace kernel/bin
-        run: |
-          shadow="$RUNNER_TEMP/kernel-real"; log="$RUNNER_TEMP/ktrace.log"; : > "$log"
-          cp -a kernel "$shadow"
-          for f in kernel/bin/*; do
-            [ -f "$f" ] || continue
-            n=${f##*/}
-            rm -f "$f"
-            cat > "$f" <<EOF
-          #!/bin/sh
-          t=\${NEXTEST_TEST_NAME:-}
-          if [ -z "\$t" ]; then
-            p=\$\$
-            while [ -n "\$p" ] && [ "\$p" -gt 1 ]; do
-              c=\$(tr '\\0' ' ' </proc/\$p/cmdline 2>/dev/null)
-              case "\$c" in *" --exact "*) t=\${c#* --exact }; t=\${t%% *}; break ;; esac
-              p=\$(awk '/^PPid:/{print \$2}' /proc/\$p/status 2>/dev/null)
-            done
-          fi
-          echo "\$t $n" >> "$log"
-          exec "$shadow/bin/$n" "\$@"
-          EOF
-            chmod +x "$f"
-          done
       - name: Run
         working-directory: serve/host
         run: >-
@@ -421,10 +396,6 @@ jobs:
           --extract-to . --extract-overwrite
           --workspace-remap .
           -E 'not kind(test)'
-      - name: Trace result
-        if: always()
-        run: |
-          echo "TRACE-BEGIN"; sort -u "$RUNNER_TEMP/ktrace.log"; echo "TRACE-END"
 
   # A kernel-only change (kernel/bin, kernel/lib) runs just the host unit tests that run real kernel files, listed in
   # scripts/ci/host-kernel-tests.txt, instead of the whole host suite. Builds and runs in one job on the same cache as
