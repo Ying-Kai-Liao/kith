@@ -3,6 +3,7 @@
 //! differential harness (`kernel/tests/difftest`) fails when they differ.
 
 pub mod engines;
+pub mod launch;
 pub mod paths;
 
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
