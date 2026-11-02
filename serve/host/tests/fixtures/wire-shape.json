@@ -30,6 +30,7 @@
     "event:bot.bot.kind": "string",
     "event:bot.bot.lastAt": "number",
     "event:bot.bot.lastMessage": "string",
+    "event:bot.bot.lastSummary": "null",
     "event:bot.bot.managedWorkspace": "bool",
     "event:bot.bot.members": "array",
     "event:bot.bot.memoryRev": "number",
