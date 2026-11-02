@@ -279,7 +279,8 @@ async fn run_bound(
         .map_err(|_| anyhow!("`{shown}` took longer than {}s", budget.as_secs()))??;
     if !status.success() {
         // A `--json` command reports its refusal as {"ok": false, "error"} on stdout and leaves stderr empty.
-        let said = serde_json::from_str::<Value>(stdout.trim()).ok().and_then(|v| v["error"].as_str().map(str::to_owned));
+        let said =
+            serde_json::from_str::<Value>(stdout.trim()).ok().and_then(|v| v["error"].as_str().map(str::to_owned));
         let why = if stderr.trim().is_empty() { said.as_deref().unwrap_or("") } else { stderr.trim() };
         if person.is_some() && status.code() == Some(3) {
             // The kernel's text ends with the owner's command to raise a budget; the person gets the sentence only.

@@ -19,26 +19,40 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
         "kithTools" => {
             let name = kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?;
             // Two reads; one failing must not hide the other.
+            // `only: "skills"` or `"connectors"` reads half of it (the Marketplace asks every bot for its skills).
+            let (want_c, want_s) = (b["only"] != "skills", b["only"] != "connectors");
             let (c, s) = ([name.as_str(), "connectors", "--json"], [name.as_str(), "skills", "--json"]);
-            let (connectors, skills) = tokio::join!(hq::json_cmd(&c), hq::json_cmd(&s));
+            let read = |want: bool, args: &[&str]| {
+                let args = args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>();
+                async move {
+                    if !want {
+                        return None;
+                    }
+                    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+                    Some(hq::json_cmd(&args).await)
+                }
+            };
+            let (connectors, skills) = tokio::join!(read(want_c, &c), read(want_s, &s));
             let mut out = json!({"connectors": [], "skills": []});
-            match connectors {
-                Ok(v) => out["connectors"] = v,
-                Err(e) => out["connectorsError"] = format!("{e:#}").into(),
-            }
-            match skills {
-                Ok(v) => out["skills"] = v,
-                Err(e) => out["skillsError"] = format!("{e:#}").into(),
+            for (key, got) in [("connectors", connectors), ("skills", skills)] {
+                match got {
+                    Some(Ok(v)) => out[key] = v,
+                    Some(Err(e)) => out[format!("{key}Error")] = format!("{e:#}").into(),
+                    None => {}
+                }
             }
             out
         }
-        "kithConnect" | "kithDisconnect" | "kithSkillAdd" | "kithSkillRemove" | "kithConnectorsAvailable"
-        | "kithSkillsAvailable" | "kithMarket" | "kithInstallPreview" | "kithInstall" => {
-            let agent = if needs_bot(method) {
-                Some(kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?)
-            } else {
-                None
-            };
+        "kithConnect"
+        | "kithDisconnect"
+        | "kithSkillAdd"
+        | "kithSkillRemove"
+        | "kithConnectorsAvailable"
+        | "kithSkillsAvailable"
+        | "kithMarket"
+        | "kithInstallPreview"
+        | "kithInstall" => {
+            let agent = if needs_bot(method) { Some(kith_only(bot_agent(hub, str_arg(&b, "botId")?)?)?) } else { None };
             let args = args_for(method, agent.as_deref(), &b)?;
             let args: Vec<&str> = args.iter().map(String::as_str).collect();
             hq::json_cmd(&args).await?
@@ -128,6 +142,7 @@ fn args_for(method: &str, agent: Option<&str>, b: &Value) -> Result<Vec<String>>
 mod tests {
     use super::*;
 
+    #[allow(clippy::needless_pass_by_value)] // the cases read better with the json! inline
     fn line(method: &str, agent: Option<&str>, b: Value) -> String {
         args_for(method, agent, &b).unwrap().join(" ")
     }
