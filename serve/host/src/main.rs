@@ -438,6 +438,16 @@ enum KernelCmd {
         #[command(subcommand)]
         action: AccountsAction,
     },
+    /// Who may use which agent, and with what settings: the read half of `kith-auth` (`resolve`, `may`; a "just this once"
+    /// helper grant is used up by `resolve --take-once`). Prints what `kith-auth` prints, with its exit codes.
+    Secrets {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
+        /// `resolve <agent> [--person ID] [--via CALLER] [--take-once] [--json]` or `may <id> <agent> [--via CALLER] [--once]`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
     /// What a launch assembles, one piece at a time (not routed from `kith AGENT` yet).
     Launch {
         #[command(subcommand)]
@@ -535,6 +545,20 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
             4
         }
     }
+}
+
+/// `kith kernel secrets <verb> ...`: the answers of `kith-auth may` and `kith-auth resolve`, with its exit codes.
+fn print_secrets(kernel: Option<std::path::PathBuf>, args: &[String]) -> i32 {
+    use std::io::Write as _;
+    let home = kith_kernel::paths::process_home();
+    let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
+    let ctx = kith_kernel::secrets::Ctx::from_process(&kernel);
+    let (verb, rest) = args.split_first().map_or(("", &[][..]), |(v, r)| (v.as_str(), r));
+    let out = kith_kernel::secrets::run(&ctx, verb, rest);
+    print!("{}", out.stdout);
+    eprint!("{}", out.stderr);
+    let _ = std::io::stdout().flush();
+    out.code
 }
 
 /// `kith kernel launch <piece>`.
@@ -903,6 +927,9 @@ async fn main() -> Result<()> {
                 let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
+            if let KernelCmd::Secrets { kernel, args } = cmd {
+                std::process::exit(print_secrets(kernel, &args));
+            }
             if let KernelCmd::Accounts { kernel, action } = cmd {
                 std::process::exit(print_accounts(kernel, action));
             }
@@ -915,7 +942,9 @@ async fn main() -> Result<()> {
                 } => {
                     print_launch_prompt(LaunchPromptArgs { agent, person, project, pkg, kernel, cwd, date, json })?;
                 }
-                KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } => unreachable!("handled above"),
+                KernelCmd::RunOnce { .. } | KernelCmd::Accounts { .. } | KernelCmd::Secrets { .. } => {
+                    unreachable!("handled above")
+                }
             }
             Ok(())
         }

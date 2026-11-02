@@ -2146,8 +2146,10 @@ dependencies = [
 name = "kith-kernel"
 version = "0.1.0"
 dependencies = [
+ "fs2",
  "rusqlite",
  "serde_json",
+ "sha2 0.11.0",
 ]
 
 [[package]]
