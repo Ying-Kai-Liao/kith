@@ -64,7 +64,7 @@ and `--json` first and the app calling it after.
 
 ### A. The core (Rust crate, designed fresh)
 
-- [ ] **A0. Core design.** A short design doc (`docs/plans/core-design.md`): the agent model, secrets, scheduler,
+- [x] **A0. Core design.** A short design doc (`docs/plans/core-design.md`): the agent model, secrets, scheduler,
   folders, engines, how the host and the CLI sit on the crate, the `core/` layout, and how `kith`'s dispatcher routes a
   command to the core. Reviewed by the architect agent before A1's code.
 - [x] **A0b. Differential harness.** The verification below, as a test runner, before the first module moves.
@@ -170,6 +170,17 @@ for those, and run against the new core.
 - A change that touches people, invites, secrets, threads or tokens runs the matching property checks (see the skills
   `invitee-access`, `revoke-access`, `secret-cards`, `thread-writers`, `run-tokens`).
 
+## The `rust-rebuild` branch
+
+Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode). Other managers merge into it too.
+
+- Track A PRs branch from `rust-rebuild` and target it.
+- `ci.yml` runs only for `main`, so these PRs get no automatic CI. The manager runs the kernel and core tests locally
+  before merging, and runs CI by hand (`gh workflow run ci.yml --ref rust-rebuild`) at milestones (after A0b and A1
+  land) and fixes what it finds.
+- `origin/main` is merged into `rust-rebuild` at least once a day. No iOS changes on it.
+- `rust-rebuild` goes to `main` later through one normal PR with full CI.
+
 ## Log
 
 - 2026-11-03: plan written; decisions recorded. B0 done in PR #582. Issue #578 opened for a model per backup entry.
@@ -179,3 +190,4 @@ for those, and run against the new core.
   under `serve/`), and switched over one command at a time when its comparison stays green.
 - 2026-11-03: A0b done: `kernel/tests/difftest/kith-difftest` runs corpus cases on an OLD and a NEW side and reports
   green/red per command (`--summary`); seed corpus passes OLD against OLD. `kernel/bin/kith` does not read KITH_CORE yet.
+- 2026-11-03: A0 done: [core-design.md](core-design.md) (crate `kith-kernel` in `core/kernel`, per-command switching through `kernel/lib/core-switched.txt`, `KITH_CORE=python|rust` for the harness), reviewed by the architect agent (12 points, each adopted or answered in its section 13).
