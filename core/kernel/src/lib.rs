@@ -5,6 +5,7 @@
 pub mod accounts;
 pub mod engines;
 pub mod paths;
+pub mod secrets;
 
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
 pub const ABI: u32 = 1;

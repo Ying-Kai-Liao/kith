@@ -15,7 +15,11 @@ path = "src/lib.rs"
 
 # Std and serde_json: the CLI and the host both link this, so it stays light as more kernel modules move in.
 [dependencies]
-serde_json = "1.0.151"
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+# auth.json is locked with flock, as the Python kernel and the host do.
+fs2 = "0.4.3"
+# A door in a job is named by the digest of its declaration and lockfile.
+sha2 = "0.11.0"
 # The cost ledger (`cost.db`) is SQLite; the host links the same bundled copy.
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
