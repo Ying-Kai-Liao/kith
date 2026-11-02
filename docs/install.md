@@ -1,9 +1,9 @@
 # Installing Kith
 
-Kith has three parts:
+Kith is CLI first. The `kith` command is the product; the apps are clients of it.
 
 - the `kith` command and the host that runs your agents on a Mac;
-- the Mac app, which carries its own copy of both;
+- the Mac app, a client that needs a `kith` version and installs or updates one itself when the app updates;
 - the iPhone app, which pairs with a Mac.
 
 Someone who was invited to another person's Mac needs none of this: see [Joining someone's Kith](invited.md).
@@ -13,7 +13,7 @@ What works today:
 | Part | Status |
 |---|---|
 | `kith` command | Released for macOS (Apple silicon and Intel). Checksums are signed with minisign. |
-| Mac app | No download yet: the release workflow builds it but publishes only a signed, notarized app. Build it yourself for now. |
+| Mac app | No download yet: the release workflow publishes only a signed, notarized app, and that signing is not set up. Build it yourself for now. |
 | iPhone app | In internal TestFlight testing only, not public yet. Build it from Xcode onto your own phone. |
 
 ## The `kith` command
@@ -22,23 +22,37 @@ You need macOS, curl and tar. Kith runs agents with [Claude Code](https://claude
 checks for git and gh.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install.sh | sh
+curl -fsSL https://kithbot.app/install.sh | sh
 kith doctor
 ```
+
+`https://kithbot.app/install.sh` redirects to `scripts/install.sh` on GitHub
+(`https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install.sh`); the guide is at
+<https://kithbot.app/install>.
 
 The script:
 
 1. Downloads the release for your Mac.
 2. Checks it against the release's `SHA256SUMS`.
-3. Installs it under `~/.kith`.
-4. Runs `install.sh`, which links `kith`, adds the Claude Code plugin and runs `kith init`.
+3. Installs it in `~/.kith/cli/<version>/`.
+4. Points `~/.kith/cli/current` at it and links `~/.local/bin/kith` through `current`.
+5. Runs `install.sh`, which adds the Claude Code plugin and runs `kith init`.
 
-Run it again to upgrade. `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` are described at the top of
-`scripts/install.sh`.
+Each release keeps its own folder, and the last few versions stay so you can go back. `kith --version` prints the
+version; `kith doctor` also shows the CLI version and the kernel path it runs from.
+
+To update, run `kith update`, or run the script again. `KITH_VERSION`, `KITH_PREFIX` and `KITH_INSTALL_TARBALL` are
+described at the top of `scripts/install.sh`; for example `curl -fsSL https://kithbot.app/install.sh | KITH_VERSION=1.2.3 sh`.
+
+**Developers.** Set `KITH_KERNEL=<checkout>/kernel` to run `kith` from a checkout; `kith doctor` shows it. In a checkout,
+`./install.sh --dev` links it for you.
+
+**Uninstall.** Remove `~/.local/bin/kith` and `~/.kith/cli`. Your agents (in `~/kith`) and your state (in `~/.kith`)
+stay.
 
 Other ways to install it:
 
-- **Homebrew:** `brew install Ying-Kai-Liao/kith/kith`, then run the script above once to set up your folder and the
+- **Homebrew:** `brew install Ying-Kai-Liao/kith/kith`, then run `kith doctor`, and the script above once to set up your folder and the
   plugin. The release workflow keeps the tap current (`packaging/homebrew/README.md`).
 - **From source:** `git clone https://github.com/Ying-Kai-Liao/kith ~/kith && ~/kith/install.sh`.
 - **A Linux VM that only joins a computer** (a cloud bot): `scripts/install-guest.sh`. This client-only build checks
@@ -77,10 +91,10 @@ Or remove the quarantine flag yourself:
 xattr -dr com.apple.quarantine "/Applications/Kith Dev.app"
 ```
 
-**What's inside the app.** You don't need to install the command first. The app carries:
+**The app and the command.** The app is a client of the `kith` command and needs a CLI version. If none is installed, the
+app installs one into `~/.kith/cli/` (the same layout as above), and it updates the CLI when the app updates. The app also has:
 
 - the host, `kith-serve`, which it runs as a launchd service;
-- the `kith` command and its kernel, in `Contents/Resources/kith/`;
 - local speech and voice helpers;
 - Kith Screen, which lets agents use the screen when you allow it.
 
@@ -90,8 +104,8 @@ If `kith serve start` already set up the host, the app uses that one. Details ar
 
 - **Claude Code.** Install it separately (`curl -fsSL https://claude.ai/install.sh | bash`) and sign in. The host finds
   `claude` on your login shell's PATH and in the usual places (Homebrew, `~/.local/bin`, nvm, bun, volta).
-- **`kith` on your PATH.** The app doesn't add it. To run it from a terminal, install the command as above or call
-  `"…/Contents/Resources/kith/bin/kith"`.
+- **A terminal-ready `kith`.** To run it from a terminal, install the command as above; `~/.local/bin/kith` goes
+  through the same `~/.kith/cli/current`.
 
 ## The iPhone app
 
