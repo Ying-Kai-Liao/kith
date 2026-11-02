@@ -9,9 +9,9 @@
 set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below. It is one commit of origin/main:
-# every change to the files below up to it re-read (the wakes, kith-wake, compaction, guest rooms): no writer step the
+# every change to the files below up to it re-read (the wakes, kith-wake, compaction, guest rooms, set harness, must-ask settings, one-host collapse): no writer step the
 # model lacks; every Claude start still claims its session (#324) and a host turn takes the claim or is refused.
-SYNC=bd5de975518173ed94ffc1664ff97e23da4a6739
+SYNC=6fc1ae0d527a4960227609f7413fa76f3ecade9e
 
 FILES=(
   kernel/bin/kith-sessions            # record, resolve (claim, hostBusy, live_pid), take_claim, claim/terminal, run

@@ -32,8 +32,8 @@ used. First run downloads about 60 MB.
 
 ## Sync commit
 
-**Last confirmed to describe the code: `bd5de975518173ed94ffc1664ff97e23da4a6739`** (origin/main, every change to the covered
-files since the writer claims re-read: the wakes and `kernel/bin/kith-wake`, compaction, guest rooms. Every Claude start
+**Last confirmed to describe the code: `6fc1ae0d527a4960227609f7413fa76f3ecade9e`** (origin/main, every change to the covered
+files since the writer claims re-read: the wakes and `kernel/bin/kith-wake`, compaction, guest rooms, `set harness`, the must-ask settings, the one-host collapse. Every Claude start
 through `kernel/bin/kith` still claims its session before claude starts, and a host turn takes the claim or is refused). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
 confirmed that the model describes the code at the new commit (steps below), and change both places.
 
