@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""kith-people — the people you invited, and the app invites that bring them in.
+
+  kith people [ls] [--json]                  everyone invited (not you, not a bot): id, name, access removed or not, the
+                                             agents they have and as what, and their bots. Read from kith-auth, the one
+                                             place that says who a person is.
+  kith people show <id> [--json]             one person in full
+  kith invite add <name> --agent A[=member|guest] ... [--person ID] [--json]
+                                             invite someone to the app: prints the link to send them. --agent is repeated,
+                                             one per agent, the role after = (default guest, the narrower one). With
+                                             --person ID the invite is for someone kith already knows (name optional).
+                                             The running host makes the invite (kith serve); nothing is done without it.
+  kith invite ls [--json]                    the invites this computer made (never a token or hash)
+  kith invite revoke <inviteId> [--json]     take one back before it is used (already gone: changed false)
+
+Not this: `kith auth invite <id>` makes a one-time /link code for a chat channel. A bot's invite: `kith bot invite`.
+Exit: 0 done, 1 refused / host unreachable / not found, 2 usage. --json: one object {"ok": true, ...} on stdout, or
+{"ok": false, "error": "..."} with the same exit codes."""
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+from kith_host import host_call  # noqa: E402
+
+ROLES = ('member', 'guest')
+SECRET_KEYS = {'tokenHash', 'token_hash', 'token', 'proof'}
+
+
+class Fail(Exception):
+    def __init__(self, msg, code=1):
+        super().__init__(msg)
+        self.code = code
+
+
+def out(as_json, obj, text):
+    print(json.dumps(obj) if as_json else text)
+
+
+def scrub(v):
+    """Whatever the host sends, a hash or token field never goes further."""
+    if isinstance(v, dict):
+        return {k: scrub(x) for k, x in v.items() if k not in SECRET_KEYS}
+    if isinstance(v, list):
+        return [scrub(x) for x in v]
+    return v
+
+
+def split_flags(args, valued=(), repeated=()):
+    """(positionals, {flag: value}, {flag: [values]}, json?). A flag in neither list is a usage error."""
+    pos, one, many, js, i = [], {}, {k: [] for k in repeated}, False, 0
+    while i < len(args):
+        a = args[i]
+        if a == '--json':
+            js = True
+        elif a in valued or a in repeated:
+            if i + 1 >= len(args) or args[i + 1].startswith('--'):
+                raise Fail(f'{a} needs a value', 2)
+            i += 1
+            if a in valued:
+                one[a] = args[i]
+            else:
+                many[a].append(args[i])
+        elif a.startswith('--'):
+            raise Fail(f'unknown option {a}', 2)
+        else:
+            pos.append(a)
+        i += 1
+    return pos, one, many, js
+
+
+def auth_people():
+    """kith-auth people --json: the one reader of auth.json."""
+    r = subprocess.run([str(Path(__file__).resolve().parent / 'kith-auth'), 'people', '--json'], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Fail((r.stderr.strip() or 'kith-auth could not list people').removeprefix('kith-auth: '))
+    try:
+        return json.loads(r.stdout)
+    except ValueError:
+        raise Fail('kith-auth people gave something that is not JSON') from None
+
+
+def view(p, bots):
+    """An invitee as the host and apps read them. Bots are nested under their owner, with their own agents."""
+    return {'id': p['id'], 'name': p.get('name', ''), 'revoked': bool(p.get('revoked')), 'revoked_at': p.get('revoked_at'),
+            'agents': [{'agent': a['agent'], 'role': a['role']} for a in p.get('agents', []) if a['via'] == 'own'],
+            'everyone_agents': [{'agent': a['agent'], 'role': a['role']} for a in p.get('agents', []) if a['via'] == 'everyone'],
+            'bots': [{'id': b['id'], 'name': b.get('name', ''), 'revoked': bool(b.get('revoked')),
+                      'agents': [a['agent'] for a in b.get('agents', [])]} for b in bots]}
+
+
+def invitees():
+    rows = auth_people()
+    return [view(p, [b for b in rows if b.get('bot_of') == p['id']]) for p in rows if not p.get('owner') and not p.get('bot_of')]
+
+
+def describe(v):
+    state = ' (access removed)' if v['revoked'] else ''
+    ag = ', '.join(f"{a['agent']}={a['role']}" for a in v['agents']) or 'no agents'
+    line = f"{v['id']}{state}  {v['name']}  ·  {ag}"
+    if v['bots']:
+        line += '  ·  bots: ' + ', '.join(b['id'] + (' (removed)' if b['revoked'] else '') for b in v['bots'])
+    return line
+
+
+def cmd_people(args):
+    verb = args[0] if args and not args[0].startswith('--') else 'ls'
+    rest = args[1:] if args and not args[0].startswith('--') else args
+    pos, _, _, js = split_flags(rest)
+    if verb == 'ls' and not pos:
+        people = invitees()
+        out(js, {'ok': True, 'people': people}, '\n'.join(describe(v) for v in people) or 'nobody invited yet (kith invite add)')
+    elif verb == 'show' and len(pos) == 1:
+        found = [v for v in invitees() if v['id'] == pos[0]]
+        if not found:
+            raise Fail(f"no invited person '{pos[0]}' (kith people ls)")
+        out(js, {'ok': True, 'person': found[0]}, describe(found[0]))
+    else:
+        raise Fail('usage: kith people [ls] [--json] | kith people show <id> [--json]', 2)
+
+
+def cmd_invite(args):
+    verb, rest = (args[0], args[1:]) if args else ('', [])
+    if verb == 'add':
+        pos, one, many, js = split_flags(rest, valued=('--person',), repeated=('--agent',))
+        name = pos[0] if pos else ''
+        if len(pos) > 1 or not (name or one.get('--person')):
+            raise Fail('usage: kith invite add <name> --agent A[=member|guest] ... [--person ID] [--json]', 2)
+        agents = {}
+        for spec in many['--agent']:
+            agent, _, role = spec.partition('=')
+            if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', agent) or (role or 'guest') not in ROLES:
+                raise Fail(f"--agent {spec}: an agent name, then = member or guest", 2)
+            agents[agent] = role or 'guest'
+        if not agents:
+            raise Fail('say what they get with --agent <agent>[=member|guest] (repeat for more)', 2)
+        body = {'personId': one['--person']} if one.get('--person') else {'name': name}
+        ans, why = host_call('createInvite', {**body, 'agents': agents})
+        if why:
+            raise Fail(why)
+        ans = ans or {}
+        # The app's own fields, no more. The link is the one thing that carries the token, for the owner's terminal only.
+        res = {'ok': True, 'inviteId': ans.get('inviteId'), 'personId': ans.get('personId'), 'link': ans.get('link'),
+               'expiresAt': ans.get('expiresAt')}
+        out(js, res, f"invited {res['personId']}. Send them this link (it works once):\n{res['link']}")
+    elif verb == 'ls':
+        pos, _, _, js = split_flags(rest)
+        if pos:
+            raise Fail('usage: kith invite ls [--json]', 2)
+        ans, why = host_call('invites', {})
+        if why:
+            raise Fail(why)
+        invs = scrub((ans or {}).get('invites') or [])
+
+        def state(i):
+            return 'used' if i.get('usedAt') else 'revoked' if i.get('revokedAt') else 'open'
+        out(js, {'ok': True, 'invites': invs},
+            '\n'.join(f"{i.get('inviteId')}  {i.get('personId')}  {state(i)}  " + ', '.join(
+                f'{a}={r}' for a, r in (i.get('agents') or {}).items()) for i in invs) or 'no invites')
+    elif verb == 'revoke':
+        pos, _, _, js = split_flags(rest)
+        if len(pos) != 1:
+            raise Fail('usage: kith invite revoke <inviteId> [--json]', 2)
+        ans, why = host_call('revokeInvite', {'inviteId': pos[0]})
+        if why:
+            raise Fail(why)
+        changed = bool((ans or {}).get('revoked'))
+        out(js, {'ok': True, 'inviteId': pos[0], 'changed': changed},
+            f'{pos[0]} revoked' if changed else f'{pos[0]} was already used, revoked or gone')
+    else:
+        raise Fail('usage: kith invite add|ls|revoke (kith invite --help)', 2)
+
+
+def main():
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ('-h', '--help') or (len(argv) > 1 and argv[1] in ('-h', '--help')):
+        print(__doc__)
+        return 0 if argv else 2
+    js = '--json' in argv
+    try:
+        {'people': cmd_people, 'invite': cmd_invite}[argv[0]](argv[1:])
+    except Fail as e:
+        if js:
+            print(json.dumps({'ok': False, 'error': str(e)}))
+        else:
+            print(f'kith: {e}', file=sys.stderr)
+        return e.code
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

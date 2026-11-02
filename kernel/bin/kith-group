@@ -9,6 +9,14 @@
                                                 It lapses in MIN minutes (default 10, 1..60) and can be taken once.
   kith group secrets <room> [--json]            the open ones: id, to, label, when it lapses (never a value)
   kith group secret <room> --withdraw <id>      take one back before it is used
+  kith bot ls [--json]                          the bot guests: id, name, state, whose, agents
+  kith bot invite <name> [--agent A ...] [--bot-id ID] [--provider P] [--json]
+                                                a link for a bot to join (a new bot, or --bot-id: a fresh link for one of
+                                                yours); the link is the only token-bearing output, for your terminal only
+  kith bot revoke-invite <inviteId> [--json]    take back an unused bot invite
+  kith bot revoke <bot> [--json]                remove a bot guest (twice: fine, changed false)
+  kith bot decide <bot> allow|deny [--always] [--json]   answer a bot waiting at the door (--always: allow every bot of its owner)
+  kith bot auto-allow <person> on|off [--json]  let that invited person's bots in without asking
   kith bot set <bot> [--wake-profile P] [--turn-timeout S] [--json]
                                                 a bot guest's wake settings: P is a kith-auth profile of the `grok`
                                                 service (what `kith send-to grok --profile P` uses; '' clears it); S is how
@@ -25,40 +33,8 @@ import sys
 import time
 from pathlib import Path
 
-
-def host_endpoint():
-    """(data dir, port) of this install's kith serve. kith-serve owns the rule (~/.kith/serve on 19224); the
-    env overrides win. Same as kith-auth."""
-    data, port = os.environ.get('KITH_SERVE_DIR'), os.environ.get('KITH_SERVE_PORT')
-    if not (data and port):
-        try:
-            d, p = subprocess.run([str(Path(__file__).resolve().parent / 'kith-serve'), 'endpoint'], capture_output=True,
-                                  text=True, timeout=4, check=True).stdout.split()
-        except Exception:  # noqa: BLE001 — fall back to the defaults
-            d, p = str(Path.home() / '.kith' / 'serve'), '19224'
-        data, port = data or d, port or p
-    return Path(data), port
-
-
-def host_call(method, body):
-    """The host's local API (owner token over loopback). (answer, None), or (None, why it couldn't be reached)."""
-    import urllib.error
-    import urllib.request
-    try:
-        data, port = host_endpoint()
-        token = (data / 'token').read_text().strip()
-        req = urllib.request.Request(f'http://127.0.0.1:{port}/api/{method}', json.dumps(body).encode(),
-                                     {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return json.load(r), None
-    except urllib.error.HTTPError as e:
-        try:
-            why = json.load(e).get('error')
-            return None, why if isinstance(why, str) and why else f'kith serve answered {e.code}'
-        except (ValueError, AttributeError):
-            return None, f'kith serve answered {e.code}'
-    except Exception as e:  # noqa: BLE001
-        return None, f'kith serve is not reachable ({e.__class__.__name__})'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+from kith_host import host_call, host_endpoint  # noqa: E402
 
 
 IDLE_S, CAP_S = float(os.environ.get('KITH_GROUP_IDLE_S') or 1.0), 10.0
@@ -103,8 +79,14 @@ def read_bots():
         return None, f'kith serve is not reachable ({e.__class__.__name__})'
 
 
+JSON_ERRORS = False   # set for the bot verbs that report as {"ok": ...}: a refusal is an object on stdout, same exit code
+
+
 def die(msg, code=1):
-    print(f'kith: {msg}', file=sys.stderr)
+    if JSON_ERRORS:
+        print(json.dumps({'ok': False, 'error': msg}))
+    else:
+        print(f'kith: {msg}', file=sys.stderr)
     sys.exit(code)
 
 
@@ -128,6 +110,100 @@ def guest_bots():
     if why:
         die(why)
     return [b for b in (ans or {}).get('bots') or [] if isinstance(b, dict) and b.get('botId')]
+
+
+NEW_BOT_VERBS = ('ls', 'invite', 'revoke-invite', 'revoke', 'decide', 'auto-allow')
+
+
+def bot_args(args):
+    """(positionals, options) of the bot verbs that report as {"ok": ...}."""
+    obj, pos, i = {}, [], 0
+    valued = {'--bot-id': 'botId', '--provider': 'provider'}
+    while i < len(args):
+        a = args[i]
+        if a in ('--json', '--always'):
+            obj[a] = True
+        elif a == '--agent' or a in valued:
+            if i + 1 >= len(args) or args[i + 1].startswith('--'):
+                die(f'{a} needs a value', 2)
+            i += 1
+            if a == '--agent':
+                obj.setdefault('agents', []).append(args[i])
+            else:
+                obj[valued[a]] = args[i]
+        elif a.startswith('--'):
+            die(f'unknown option {a}. See: kith bot --help', 2)
+        else:
+            pos.append(a)
+        i += 1
+    return pos, obj
+
+
+def say(js, obj, text):
+    print(json.dumps(obj) if js else text)
+
+
+def ask_host(method, body):
+    ans, why = host_call(method, body)
+    if why:
+        die(why)
+    return ans or {}
+
+
+def bot_target(want):
+    """A bot guest's id as given (bg_..), else resolved by name; a removed bot stays addressable by its id."""
+    return want if want.startswith('bg_') else pick_guest(want)['id']
+
+
+def cmd_bot_verb(verb, args):
+    pos, o = bot_args(args)
+    js = bool(o.get('--json'))
+    usage = {'ls': 'kith bot ls [--json]', 'invite': 'kith bot invite <name> [--agent A ...] [--bot-id ID] [--json]',
+             'revoke-invite': 'kith bot revoke-invite <inviteId> [--json]', 'revoke': 'kith bot revoke <bot> [--json]',
+             'decide': 'kith bot decide <bot> allow|deny [--always] [--json]',
+             'auto-allow': 'kith bot auto-allow <person> on|off [--json]'}[verb]
+    want = {'ls': 0, 'invite': 1, 'revoke-invite': 1, 'revoke': 1, 'decide': 2, 'auto-allow': 2}[verb]
+    if len(pos) != want or (verb == 'decide' and pos[1] not in ('allow', 'deny')) or (
+            verb == 'auto-allow' and pos[1] not in ('on', 'off')):
+        die(f'usage: {usage}', 2)
+    if verb == 'ls':
+        bots = [b for b in ask_host('bots', {}).get('bots') or [] if isinstance(b, dict)]
+        say(js, {'ok': True, 'bots': bots}, '\n'.join(
+            f"{b.get('botId')}  {b.get('name')}  {b.get('state')}  "
+            + (f"of {b['ownerPerson']}" if b.get('ownerPerson') else 'yours')
+            + '  ' + (', '.join(b.get('agents') or []) or 'no agents') for b in bots) or 'no bot guests')
+    elif verb == 'invite':
+        body = {'name': pos[0], 'agents': o.get('agents', [])}
+        for k in ('botId', 'provider'):
+            if o.get(k):
+                body[k] = o[k]
+        a = ask_host('createBotInvite', body)
+        res = {'ok': True, **{k: a.get(k) for k in ('botId', 'inviteId', 'expiresAt', 'link', 'kithLink', 'share')}}
+        say(js, res, res['share'] or res['link'])
+    elif verb == 'revoke-invite':
+        changed = bool(ask_host('revokeBotInvite', {'inviteId': pos[0]}).get('revoked'))
+        say(js, {'ok': True, 'inviteId': pos[0], 'changed': changed},
+            f'{pos[0]} revoked' if changed else f'{pos[0]} was already used, revoked or gone')
+    elif verb == 'revoke':
+        bot = bot_target(pos[0])
+        changed = bool(ask_host('revokeBot', {'botId': bot}).get('revoked'))
+        say(js, {'ok': True, 'botId': bot, 'changed': changed}, f'{bot} removed' if changed else f'{bot} was already removed')
+    elif verb == 'decide':
+        bot = bot_target(pos[0])
+        body = {'botId': bot, 'decision': pos[1]}
+        if o.get('--always'):
+            if pos[1] != 'allow':
+                die('--always goes with allow', 2)
+            body['alwaysForOwner'] = True
+        b = ask_host('decideBot', body).get('bot') or {}
+        say(js, {'ok': True, 'botId': bot, 'decision': pos[1], 'state': b.get('state')},
+            f"{b.get('name') or bot}: {b.get('state') or pos[1]}")
+    else:
+        on = pos[1] == 'on'
+        ask_host('setAutoAllowBots', {'personId': pos[0], 'on': on})
+        say(js, {'ok': True, 'person': pos[0], 'autoAllow': on},
+            f"{pos[0]}'s bots {'come in without asking' if on else 'wait for your answer'}")
+    return 0
 
 
 def pick_guest(want, members=()):
@@ -298,6 +374,10 @@ def main():
     if len(sys.argv) < 3 or sys.argv[1] in ('-h', '--help') or sys.argv[2] in ('-h', '--help'):
         print(__doc__)
         sys.exit(0 if len(sys.argv) > 1 and {'-h', '--help'} & set(sys.argv[1:3]) else 2)
+    global JSON_ERRORS
+    if sys.argv[1] == 'bot' and sys.argv[2] in NEW_BOT_VERBS:
+        JSON_ERRORS = '--json' in sys.argv
+        sys.exit(cmd_bot_verb(sys.argv[2], sys.argv[3:]))
     ap = Parser(prog='kith')
     sub = ap.add_subparsers(dest='group', required=True)
     for g, verbs in (('group', ('add-bot', 'remove-bot', 'secret', 'secrets')), ('bot', ('set',))):

@@ -66,8 +66,9 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           service would really use in their runs; ID for one person in full (the
                                           owner's agents too); --matrix: agents × people at a glance; --json:
                                           [{id, name, owner, bot_of, provider, root, revoked (they or their bot's
-                                          owner), revoked_at (their own), kith (account id or '')}], each bot after
-                                          its parent; bots are listed under their owner
+                                          owner), revoked_at (their own), kith (account id or ''), handles, agents [{agent,
+                                          role (the row's preset), via own|everyone}]}], each bot after its parent;
+                                          bots are listed under their owner (kith people ls --json: the invitees)
   kith-auth person <id> [name=.. lang=.. tz=.. owner] [--rm]   a person; `owner` marks you (one owner); --rm forgets
                                           them (rows, grants and bots go; their memory stays to delete by hand) and
                                           retires the id: no new person or bot gets it, so nobody else ever reads
@@ -92,7 +93,7 @@ People (who may use which agent, and how; the run's person is KITH_PERSON, unset
                                           other owners' bots spend from that owner's own budget= (--json: the cap
                                           and the owner's bot ids, for kith-cost bots)
   kith-auth handle <id> <platform> <user-id> | --rm   the person's account on a platform (numeric id, not a username)
-  kith-auth invite <id> [minutes]           a one-time code (default 15 minutes); they send /link CODE to kith serve's bot
+  kith-auth invite <id> [minutes]           a CHANNEL /link code (not an app invite: that is kith invite add); one-time, default 15 minutes; they send /link CODE to kith serve's bot
   kith-auth link <platform> <user-id> <code>   bind that account to the code's person (kith serve's channels call it)
   kith-auth whois <platform> <user-id>      the person behind an account, or exit 1
   kith-auth who <platform> <user-id>        the same as JSON for kith serve's channels: {person, owner, was, owner_id,
@@ -2127,10 +2128,28 @@ def account_line(auth, agent, svc, person):
                       else f'  ({whose}\'s)' if whose else '  (shared)')
 
 
+def agent_rows(auth, person):
+    """[{agent, role, via}] from the person's membership rows as they stand (a removed person's too: --unrevoke brings
+    them back as they were). role is the row's preset; via is own, or everyone for the `*` row (never a bot's). The
+    owner reaches every agent without rows: []."""
+    if is_owner(auth, person):
+        return []
+    bot = bool(auth['people'][person].get('bot_of'))
+    out = []
+    for agent in sorted(auth['members']):
+        rows = auth['members'][agent]
+        row, via = (rows[person], 'own') if person in rows else (rows.get(EVERYONE), 'everyone')
+        if row is None or (bot and via == 'everyone'):
+            continue
+        out.append({'agent': agent, 'role': row.get('preset', 'guest'), 'via': via})
+    return out
+
+
 def cmd_people(args):
     auth = load_auth()
     if not auth['people']:
-        print('no people yet: kith-auth person <you> name=.. owner, then kith-auth person <id> for each other person')
+        print('[]' if '--json' in args else
+              'no people yet: kith-auth person <you> name=.. owner, then kith-auth person <id> for each other person')
         return
     if '--matrix' in args:
         return matrix(auth)
@@ -2141,6 +2160,7 @@ def cmd_people(args):
                                   'root': root_of(auth, pid), 'revoked': cut_off(auth, pid),
                                   'revoked_at': (auth['people'][pid].get('revoked') or {}).get('at'),
                                   'kith': auth['people'][pid].get('handles', {}).get('kith', ''),
+                                  'agents': agent_rows(auth, pid),
                                   'handles': {k: v for k, v in auth['people'][pid].get('handles', {}).items() if k != 'kith'}}
                                  for pid in ordered(auth)]))
     full = bool(args)
