@@ -111,7 +111,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
     }))
 }
 
-enum Agent {
+pub(super) enum Agent {
     /// A bot that is not a kith agent (or a group).
     None,
     /// A kith bot whose agent kith no longer lists.
@@ -119,7 +119,7 @@ enum Agent {
     Kith(String),
 }
 
-fn bot_agent(hub: &Hub, id: &str) -> Result<Agent> {
+pub(super) fn bot_agent(hub: &Hub, id: &str) -> Result<Agent> {
     let row = hub.store.bot(id)?.filter(|r| !r.deleted).ok_or_else(|| anyhow!("no such bot"))?;
     let cfg = row.config;
     let Some(name) = cfg.hq_agent.clone().filter(|_| !cfg.is_group()) else {
@@ -129,7 +129,7 @@ fn bot_agent(hub: &Hub, id: &str) -> Result<Agent> {
     Ok(if gone { Agent::Gone(name) } else { Agent::Kith(name) })
 }
 
-fn kith_only(agent: Agent) -> Result<String> {
+pub(super) fn kith_only(agent: Agent) -> Result<String> {
     match agent {
         Agent::Kith(name) => Ok(name),
         Agent::None => bail!("this bot isn't a kith agent"),
