@@ -155,6 +155,8 @@ pub async fn end_access(hub: &Hub, bin: Option<&Path>, person: &str) -> Result<(
 pub struct AuthPerson {
     pub id: String,
     #[serde(default)]
+    pub name: String,
+    #[serde(default)]
     pub owner: bool,
     #[serde(default)]
     pub bot_of: String,
@@ -167,6 +169,19 @@ pub struct AuthPerson {
     /// When they themselves were revoked (not merely the owner of a revoked bot's).
     #[serde(default)]
     pub revoked_at: Option<i64>,
+    /// The agents they hold a membership row for, as the rows stand (a revoked person's too).
+    #[serde(default)]
+    pub agents: Vec<AuthAgent>,
+}
+
+/// One membership row of a person in `kith-auth people --json`: `via` is `own`, or `everyone` for the `*` row.
+#[derive(Deserialize, Debug)]
+pub struct AuthAgent {
+    pub agent: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub via: String,
 }
 
 pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {

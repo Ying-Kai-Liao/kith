@@ -341,8 +341,49 @@ async fn create_invite_makes_the_person_the_grants_and_the_cloud_record() {
     assert_eq!(bob["personId"], "bob-2");
     let people = call(&r, &Caller::Local, "people", json!({})).await.unwrap();
     let ids: Vec<&str> = people["people"].as_array().unwrap().iter().map(|p| p["personId"].as_str().unwrap()).collect();
-    assert_eq!(ids, ["sam-lee", "bob-2"]);
-    assert_eq!(people["people"][0]["agents"], json!({"house": "member", "money": "guest"}));
+    // `bob` was made in kith-auth by hand and shows too: kith-auth is who a person is.
+    assert_eq!(ids, ["bob", "bob-2", "sam-lee"]);
+    assert_eq!(people["people"][2]["agents"], json!({"house": "member", "money": "guest"}));
+}
+
+/// `people` reads kith-auth: a person and a member row made there show with the agent and role; the host's own
+/// facts join in by id; revoked shows; the owner never; a store-only person is left out; kith-auth unreadable is an
+/// error, not an empty list.
+#[tokio::test]
+async fn people_come_from_kith_auth() {
+    let r = Rig::new().await;
+    r.auth(&["person", "ann", "name=Ann Lee"]);
+    r.auth(&["member", "house", "ann", "preset=member"]);
+    let list = || async {
+        let v = call(&r, &Caller::Local, "people", json!({})).await.unwrap();
+        v["people"].as_array().unwrap().clone()
+    };
+    let ann = list().await.into_iter().find(|p| p["personId"] == "ann").expect("made only in kith-auth, it shows");
+    assert_eq!(ann["name"], "Ann Lee");
+    assert_eq!(ann["agents"], json!({"house": "member"}));
+    assert_eq!((&ann["joined"], &ann["devices"], &ann["revoked"]), (&json!(false), &json!([]), &json!(false)));
+    assert!(list().await.iter().all(|p| p["personId"] != "kai"), "the owner is not a row");
+
+    // The host's mirror says something else: kith-auth wins. A person only the store knows isn't listed.
+    r.hub.store.put_person("ann", "Ann Lee").unwrap();
+    r.hub
+        .store
+        .set_person_agents("ann", &std::collections::BTreeMap::from([("money".to_owned(), "member".to_owned())]))
+        .unwrap();
+    r.hub.store.put_person("ghost", "Ghost").unwrap();
+    let rows = list().await;
+    assert_eq!(rows.iter().find(|p| p["personId"] == "ann").unwrap()["agents"], json!({"house": "member"}));
+    assert!(rows.iter().all(|p| p["personId"] != "ghost"));
+
+    r.auth(&["person", "ann", "--revoke", "--local"]);
+    let ann = list().await.into_iter().find(|p| p["personId"] == "ann").unwrap();
+    assert_eq!(ann["revoked"], true);
+    assert_eq!(ann["agents"], json!({"house": "member"}), "rows as they stand, for the undo");
+
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.dir.join("no-such-kith-auth"));
+    let broken = call(&r, &Caller::Local, "people", json!({})).await;
+    *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.bin.clone());
+    assert!(broken.is_err(), "unreadable kith-auth is an error, not nobody");
 }
 
 #[tokio::test]
