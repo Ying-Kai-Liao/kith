@@ -1192,6 +1192,7 @@ fn json_errors_match_python() {
             "{\"a\":1",
             "Expecting ',' delimiter: line 1 column 7 (char 6)",
         ),
+        ("[1,]", "Expecting value: line 1 column 4 (char 3)"),
         ("nul", "Expecting value: line 1 column 1 (char 0)"),
         (
             "\"a\nb\"",
@@ -1221,25 +1222,6 @@ fn json_errors_match_python() {
 }
 
 #[test]
-fn error_of_names_a_trailing_comma_like_python_313() {
-    let old = |t| pyjson::error_for(t, false).unwrap();
-    let new = |t| pyjson::error_for(t, true).unwrap();
-    assert_eq!(old("[1,]"), "Expecting value: line 1 column 4 (char 3)");
-    assert_eq!(
-        new("[1,]"),
-        "Illegal trailing comma before end of array: line 1 column 3 (char 2)"
-    );
-    assert_eq!(
-        old("{\"a\":1,}"),
-        "Expecting property name enclosed in double quotes: line 1 column 8 (char 7)"
-    );
-    assert_eq!(
-        new("{\"a\":1,}"),
-        "Illegal trailing comma before end of object: line 1 column 7 (char 6)"
-    );
-}
-
-#[test]
 fn dumps_prints_like_python() {
     let v = json!({"a": [1, 2.5, "é\n\u{7f}"], "b": {}, "c": [], "d": null, "e": 1e16, "f": 1e-5, "g": true});
     assert_eq!(
@@ -1263,6 +1245,22 @@ fn domains_follow_the_guard_rule() {
     ] {
         assert!(!jobs::valid_domain(bad), "{bad}");
     }
+}
+
+#[test]
+fn a_lone_dash_is_a_person_not_a_flag() {
+    let t = Tmp::new("dash");
+    let c = ctx(&t);
+    write_auth(&c, &people());
+    // `-` is the "no one" kith-auth prints for the owner in a guest's sandbox; it stays a name, not usage (exit 2)
+    let v = json_of(&run(&c, "resolve", &args(&["house", "--person", "-"])));
+    assert_eq!(v["person"], "-");
+    assert_eq!(v["allowed"], json!(false));
+    assert_ne!(run(&c, "may", &args(&["-", "house"])).code, 2);
+    // any other dash word is still usage, and auth.json stays as written
+    let before = std::fs::read(&c.auth).unwrap();
+    assert_eq!(run(&c, "resolve", &args(&["house", "--bogus"])).code, 2);
+    assert_eq!(std::fs::read(&c.auth).unwrap(), before);
 }
 
 #[test]

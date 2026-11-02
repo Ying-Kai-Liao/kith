@@ -1,0 +1,4 @@
+# file: /Volumes/Macos 1TB/hq/.claude/worktrees/agent-a2032b46ffa795d37/kernel/bin/../lib/kith_jobs.py
+# hypothesis_version: 6.141.1
+
+[b'\x00', '"\'', '#', '#%d', '$chrome', '%s@%s', '([a-z_]+):\\s*(.*)$', ',', ', ', '.', '..', '/', '=', '@', '[', '\\s*-\\s+(.*)$', '\\s+#.*$', ']', '^\\d+\\.\\d+\\.\\d+\\.\\d+$', '__main__', 'args', 'bin', 'chrome', 'digest', 'domains', 'door %s: %s', 'doors', 'env', 'ffmpeg', 'ffprobe', 'helpers', 'job %s: %s', 'jobs', 'label', 'lock', 'lockfile', 'name', 'node', 'none', 'npm', 'problems', 'rb', 'replace', 'snapshot', 'tools', 'writes']

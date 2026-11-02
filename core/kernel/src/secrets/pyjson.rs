@@ -137,21 +137,8 @@ fn quote(s: &str, out: &mut String) {
 /// What `json.loads(text)` says about a text that is not JSON: `Expecting value: line 1 column 1 (char 0)`. `None` when
 /// Python reads it (including the `NaN` and `Infinity` it accepts and serde does not).
 pub fn error_of(text: &str) -> Option<String> {
-    // Python 3.13 names a trailing comma; older ones say what they expected. Which one is the machine's `python3`, asked
-    // only for the two messages it changes.
-    let plain = error_for(text, false)?;
-    if (plain.starts_with("Expecting property name") || plain.starts_with("Expecting value"))
-        && python_names_trailing_comma()
-    {
-        return error_for(text, true);
-    }
-    Some(plain)
-}
-
-/// `error_of` for a Python that does (`trailing`) or does not name a trailing comma.
-pub fn error_for(text: &str, trailing: bool) -> Option<String> {
     let s: Vec<char> = text.chars().collect();
-    let Err((msg, pos)) = top(&s, trailing) else {
+    let Err((msg, pos)) = top(&s) else {
         return None;
     };
     let line = s[..pos].iter().filter(|c| **c == '\n').count() + 1;
@@ -160,14 +147,6 @@ pub fn error_for(text: &str, trailing: bool) -> Option<String> {
         None => pos + 1,
     };
     Some(format!("{msg}: line {line} column {col} (char {pos})"))
-}
-
-/// Whether `python3` (the one that runs `kith-auth`) is 3.13 or later. Only asked once a file is damaged.
-fn python_names_trailing_comma() -> bool {
-    std::process::Command::new("python3")
-        .args(["-c", "import sys;print(int(sys.version_info>=(3,13)))"])
-        .output()
-        .is_ok_and(|o| o.stdout.starts_with(b"1"))
 }
 
 type E = (&'static str, usize);
@@ -179,8 +158,8 @@ fn ws(s: &[char], mut i: usize) -> usize {
     i
 }
 
-fn top(s: &[char], trailing: bool) -> Result<(), E> {
-    let end = value(s, ws(s, 0), trailing)?;
+fn top(s: &[char]) -> Result<(), E> {
+    let end = value(s, ws(s, 0))?;
     let end = ws(s, end);
     if end == s.len() {
         Ok(())
@@ -200,12 +179,11 @@ fn digits(s: &[char], mut i: usize) -> usize {
     i
 }
 
-#[allow(clippy::many_single_char_names)]
-fn value(s: &[char], i: usize, t: bool) -> Result<usize, E> {
+fn value(s: &[char], i: usize) -> Result<usize, E> {
     match s.get(i) {
         Some('"') => string(s, i + 1),
-        Some('{') => object(s, i + 1, t),
-        Some('[') => array(s, i + 1, t),
+        Some('{') => object(s, i + 1),
+        Some('[') => array(s, i + 1),
         Some('n') if word(s, i, "null") => Ok(i + 4),
         Some('t') if word(s, i, "true") => Ok(i + 4),
         Some('f') if word(s, i, "false") => Ok(i + 5),
@@ -258,7 +236,7 @@ fn string(s: &[char], begin: usize) -> Result<usize, E> {
     }
 }
 
-fn object(s: &[char], i: usize, t: bool) -> Result<usize, E> {
+fn object(s: &[char], i: usize) -> Result<usize, E> {
     let mut i = ws(s, i);
     if s.get(i) == Some(&'}') {
         return Ok(i + 1);
@@ -271,37 +249,25 @@ fn object(s: &[char], i: usize, t: bool) -> Result<usize, E> {
         if s.get(i) != Some(&':') {
             return Err(("Expecting ':' delimiter", i));
         }
-        i = ws(s, value(s, ws(s, i + 1), t)?);
+        i = ws(s, value(s, ws(s, i + 1))?);
         match s.get(i) {
             Some('}') => return Ok(i + 1),
-            Some(',') => {
-                let comma = i;
-                i = ws(s, i + 1);
-                if t && s.get(i) == Some(&'}') {
-                    return Err(("Illegal trailing comma before end of object", comma));
-                }
-            }
+            Some(',') => i = ws(s, i + 1),
             _ => return Err(("Expecting ',' delimiter", i)),
         }
     }
 }
 
-fn array(s: &[char], i: usize, t: bool) -> Result<usize, E> {
+fn array(s: &[char], i: usize) -> Result<usize, E> {
     let mut i = ws(s, i);
     if s.get(i) == Some(&']') {
         return Ok(i + 1);
     }
     loop {
-        i = ws(s, value(s, i, t)?);
+        i = ws(s, value(s, i)?);
         match s.get(i) {
             Some(']') => return Ok(i + 1),
-            Some(',') => {
-                let comma = i;
-                i = ws(s, i + 1);
-                if t && s.get(i) == Some(&']') {
-                    return Err(("Illegal trailing comma before end of array", comma));
-                }
-            }
+            Some(',') => i = ws(s, i + 1),
             _ => return Err(("Expecting ',' delimiter", i)),
         }
     }
