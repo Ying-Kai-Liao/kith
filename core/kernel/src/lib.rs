@@ -14,7 +14,14 @@ pub const ABI: u32 = 1;
 
 /// The modules this build has, as `kith kernel version` lists them. A verb in `kernel/lib/core-switched.txt` moves to
 /// the core only when its module is here (`acp`: the `run-once` verb, whose code lives in the kith-acp crate; `launch`: `kith AGENT --launch-json`).
-pub const MODULES: &[&str] = &["accounts", "acp", "delegation", "engines", "launch", "paths"];
+pub const MODULES: &[&str] = &[
+    "accounts",
+    "acp",
+    "delegation",
+    "engines",
+    "launch",
+    "paths",
+];
 
 /// What `kith kernel version` prints.
 pub fn version_json() -> String {
