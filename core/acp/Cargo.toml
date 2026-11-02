@@ -1,0 +1,25 @@
+[package]
+name = "kith-acp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The ACP client (JSON-RPC over an agent's stdio) and one-shot runs over it, shared by the kith program and the host"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like core/kernel.
+workspace = "../../serve/host"
+
+[lib]
+name = "kith_acp"
+path = "src/lib.rs"
+
+# The one async crate of the core (docs/plans/core-design.md section 2): tokio, no web server, no host types.
+[dependencies]
+anyhow = "1.0.104"
+libc = "0.2"
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["process", "io-util", "sync", "time", "macros", "rt"] }
+tracing = "0.1.44"
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["rt-multi-thread"] }

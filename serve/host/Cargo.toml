@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 # The memory crate builds here and is mirrored to its own repository (docs/design/bot-memory.md#packaging).
 [workspace]
-members = ["crates/memory", "crates/tts", "crates/wire", "crates/guest", "../../core/kernel"]
+members = ["crates/memory", "crates/tts", "crates/wire", "crates/guest", "../../core/kernel", "../../core/acp"]
 
 [dependencies]
 anyhow = "1.0.104"
@@ -30,6 +30,7 @@ base64 = "0.23.1"
 chacha20poly1305 = "0.11.0"
 chrono = "0.4.45"
 chrono-tz = "0.10.4"
+kith-acp = { path = "../../core/acp" }
 kith-kernel = { path = "../../core/kernel" }
 kith-mem = { path = "crates/memory" }
 kith-guest = { path = "crates/guest" }
