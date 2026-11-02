@@ -339,6 +339,11 @@ export class HostClient {
     return parseKithInfoResult(await this.call('kithSetCallModel', { botId, model }, 60_000))
   }
 
+  /** Writes a kith agent's own model, effort or harness (`kith <agent> set …`; `default` forgets it; `model` rides a harness change). Returns kith's info read back. */
+  async kithSetSetting(botId: string, setting: 'model' | 'effort' | 'harness', value: string, model?: string): Promise<KithInfoResult> {
+    return parseKithInfoResult(await this.call('kithSetSetting', { botId, setting, value, ...(model ? { model } : {}) }, 60_000))
+  }
+
   /** A Schedule card's button on a kith job (owner only): kith-sched does it, and the answer is the agent's info read back. */
   async kithSchedule(botId: string, id: string, op: 'pause' | 'resume' | 'run' | 'remove'): Promise<KithInfoResult> {
     return parseKithInfoResult(await this.call('kithSchedule', { botId, id, op }, 60_000))
