@@ -61,7 +61,7 @@ async fn keep(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     // The draft is made from the chat's summary; one that hasn't been written yet is written now. A chat too short
     // for one becomes an agent with an empty draft.
     if !hub.store.with_db(|c| kith_mem::summary::get(c, &root.id).ok().flatten().is_some()) {
-        match tokio::time::timeout(SUMMARY_WAIT, crate::chat::memory::summary::summarise_now(hub, &root.id, false))
+        match tokio::time::timeout(SUMMARY_WAIT, crate::hqmem::summary::summarise_now(hub, &root.id, false))
             .await
         {
             Ok(Err(error)) => tracing::info!(error = format!("{error:#}"), "no summary for the kept chat"),
