@@ -27,6 +27,14 @@
                                           granted profile lacks, all of them when it has none)
   kith-auth keys --json                     read-only, never values: [{profile, service, account, owner, vars, agents,
                                           last_used}]; last_used is the latest hand-out in auth.log
+  kith-auth connect <agent> <connector> [--profile P] [--json]   (kith <agent> connect) grant the agent a connector on this
+                                          Mac: a host connector (a file in this Mac's services folder) as <id>/host, a profile
+                                          marked {"store": "host"} (its secrets stay in the host); a service that needs keys takes
+                                          --profile, or its one existing profile. Twice is fine. Reaches the owner's runs
+  kith-auth disconnect <agent> <connector> [--json]   take it away again (nothing connected: ok, changed false)
+  kith-auth connectors [available] [--json] what this Mac can connect: kernel MCP services and the host's connectors
+  kith-auth connectors <agent> [--json]     what the agent has: name, source (kernel|mac|agent), kind, profile, and whether a run
+                                          starts it (ok, missing secrets, signed out, no such profile, unknown service)
   kith-auth mcp-config <agent>              the --mcp-config JSON for an agent's granted MCP services (bin/kith uses it)
   kith-auth mcp-names <agent>               the same servers by name and real command only: reads auth.json, no secrets, no keychain,
                                           no browser profile (what kith <agent> --info-json lists)
@@ -270,12 +278,18 @@ def save_auth(data):
         os.close(dfd)
 
 
+def mac_services():
+    """This Mac's services folder: one file per connector the host installed (same shape as kernel/services/)."""
+    return paths()['KITH_MACHINE'] / 'services'
+
+
 def service_file(name, agent=None):
-    """kernel/services/<name>.json, else one the agent brings in its own role's services/ (an agent shared by
-    someone else can carry the definition of a service the kernel doesn't have). Other agents' folders are not read."""
-    f = SERVICES / f'{name}.json'
-    if f.is_file():
-        return f
+    """kernel/services/<name>.json, else this Mac's services folder (the host's connectors), else one the agent brings
+    in its own role's services/ (an agent shared by someone else can carry the definition of a service the kernel
+    doesn't have). Other agents' folders are not read."""
+    for d in (SERVICES, mac_services()):
+        if (d / f'{name}.json').is_file():
+            return d / f'{name}.json'
     pkg = agent_dirs().get(agent) if agent else None
     if pkg and (pkg / 'services' / f'{name}.json').is_file():
         return pkg / 'services' / f'{name}.json'
@@ -676,12 +690,48 @@ def cmd_ls():
             print(f'  {"browser":<14} {name:<24} {browser or "not set"}, ~/{folder.relative_to(Path.home())}{own}')
 
 
+def mcp_wanted(auth, agent):
+    """[(service, declared)]: what a run may start as MCP servers. The package's `needs:` (declared), then, for the
+    owner's own runs, whatever else the agent's own row grants (connected here with `kith <agent> connect`). A guest's
+    run gets the agent's needs only: a connect is the owner's choice for the owner's runs."""
+    wanted = [(s, True) for s in needs(agent)]
+    if is_owner(auth, acting(auth)):
+        row = auth['grants'].get(agent)
+        wanted += [(s, False) for s in sorted(row if isinstance(row, dict) else {})
+                   if s not in needs(agent) and SERVICE_RE.match(s)]
+    return wanted
+
+
+def mcp_spec(agent, svc, declared):
+    """The service's spec when it is an MCP server, else None. A declared service with no file is an error as ever; a
+    granted one whose file is gone (a connector the host removed) is skipped with a note, never a failure."""
+    if declared:
+        spec = service(svc, agent)
+    else:
+        f = service_file(svc, agent)
+        try:
+            spec = json.loads(f.read_text()) if f else None
+        except ValueError:
+            spec = None
+        if spec is None:
+            print(f'kith: {agent}: {svc} is granted but its service file is gone; skipped '
+                  f'(kith {agent} connectors)', file=sys.stderr)
+            return None
+    return spec if spec.get('kind') == 'mcp' else None
+
+
+def mcp_command(spec):
+    """A bare `kith` is this kernel's own bin/kith, so the proxy starts without kith being on PATH."""
+    cmd = spec['mcp']['command']
+    return str(KITH / 'bin' / 'kith') if cmd == 'kith' else cmd
+
+
 def cmd_mcp_config(agent):
     auth = load_auth()
     servers = {}
-    for svc in needs(agent):
-        spec = service(svc, agent)
-        if spec.get('kind') != 'mcp':
+    for svc, declared in mcp_wanted(auth, agent):
+        spec = mcp_spec(agent, svc, declared)
+        if not spec:
             continue
         profile, why, refused = granted(auth, agent, svc)
         if not profile:
@@ -706,7 +756,7 @@ def cmd_mcp_config(agent):
         # or in the agent's own environment.
         servers[svc] = {
             'command': str(KITH / 'bin' / 'kith-auth'),
-            'args': ['exec', '--for', agent, svc, '--', mcp['command'], *[expand(a) for a in mcp.get('args', [])]],
+            'args': ['exec', '--for', agent, svc, '--', mcp_command(spec), *[expand(a) for a in mcp.get('args', [])]],
             'env': env,
         }
     print(json.dumps({'mcpServers': servers}))
@@ -716,10 +766,10 @@ def cmd_mcp_names(agent):
     """The servers cmd_mcp_config would start, without resolving anything: read-only, safe to call often."""
     auth = load_auth()
     servers = {}
-    for svc in needs(agent):
-        spec = service(svc, agent)
-        if spec.get('kind') == 'mcp' and granted(auth, agent, svc)[0]:
-            servers[svc] = {'command': spec['mcp']['command']}
+    for svc, declared in mcp_wanted(auth, agent):
+        spec = mcp_spec(agent, svc, declared)
+        if spec and granted(auth, agent, svc)[0]:
+            servers[svc] = {'command': mcp_command(spec)}
     print(json.dumps({'mcpServers': servers}))
 
 
@@ -735,7 +785,7 @@ def cmd_helper_mcp(agent, decision):
             return
         server = name[len('mcp__'):].split('__', 1)[0]
         files = {}
-        for d in [SERVICES, *(p / 'services' for p in agent_dirs().values())]:
+        for d in [SERVICES, mac_services(), *(p / 'services' for p in agent_dirs().values())]:
             for f in sorted(d.glob('*.json')) if d.is_dir() else []:
                 files.setdefault(re.sub(r'[^A-Za-z0-9_-]', '_', f.stem), f)   # how Claude Code names the server
         f = files.get(server)
@@ -749,6 +799,200 @@ def cmd_helper_mcp(agent, decision):
     print(json.dumps({'hookSpecificOutput': {
         'hookEventName': 'PreToolUse', 'permissionDecision': decision,
         'permissionDecisionReason': f'kith: {why}; the tool is its caller\'s, not the helper\'s'}}))
+
+
+HOST_STORE = {'store': 'host'}   # a profile whose secrets (if any) the host keeps: nothing here to resolve or list
+
+
+def ensure_profile(auth, svc, profile, agent=None):
+    """The profile's entry in auth.json. A host connector (a file in this Mac's services folder that declares no secrets)
+    is granted `<id>/host`, marked {"store": "host"}: its OAuth tokens and keys stay in the host's vault, so the entry
+    has no vars for `keys`, `account-state` or `ls` to list or call broken."""
+    prof = auth['profiles'].setdefault(profile, {})
+    f = service_file(svc, agent)
+    if not prof and profile == f'{svc}/host' and f and f.parent == mac_services():
+        if not json.loads(f.read_text()).get('secrets'):
+            prof.update(HOST_STORE)
+    return prof
+
+
+def jfail(msg, as_json, code=1):
+    """An error as the command's own output: {"ok": false, "error"} on stdout with --json, else a line on stderr."""
+    if as_json:
+        print(json.dumps({'ok': False, 'error': msg}))
+        sys.exit(code)
+    die(msg, code)
+
+
+def source_of(f):
+    return 'kernel' if f.parent == SERVICES else 'mac' if f.parent == mac_services() else 'agent'
+
+
+def connector_row(auth, agent, svc, declared=False):
+    """One service as the agent has it: where its file is, what it is, which profile, and whether a run starts it."""
+    f = service_file(svc, agent)
+    try:
+        spec = json.loads(f.read_text()) if f else None
+    except ValueError:
+        spec = None
+    grants = auth['grants'].get(agent)
+    held = grant_list((grants if isinstance(grants, dict) else {}).get(svc))
+    profile = held[0] if held else None
+    conn = spec.get('connector') if spec and isinstance(spec.get('connector'), dict) else {}
+    row = {'name': svc, 'source': source_of(f) if spec is not None else None, 'kind': spec.get('kind') if spec else None,
+           'description': spec.get('description', '') if spec else '', 'profile': profile, 'declared': declared,
+           'auth': conn.get('auth'), 'missing': []}
+    if spec is None:
+        row['status'] = 'unknown service'
+    elif not profile:
+        row['status'] = 'not granted'
+    else:
+        refs = auth['profiles'].get(profile)
+        if refs is not None:
+            row['missing'] = [v for v in spec.get('secrets', []) if not (refs.get(v) and resolve_ref(refs[v]))]
+        row['status'] = ('no such profile' if refs is None else 'missing secrets' if row['missing']
+                         else 'signed out' if conn.get('auth') == 'signedOut' else 'ok')
+    return row
+
+
+def connect_args(args):
+    as_json = '--json' in args
+    opts, rest = take_opts([a for a in args if a != '--json'], {'--profile'})
+    return as_json, opts, rest
+
+
+def known_agent(agent, as_json):
+    if '@' in agent:
+        jfail("a connect is the agent's own row, for the owner's runs (no agent@person)", as_json)
+    if agent not in agents():
+        jfail(f"no agent '{agent}' (kith ls)", as_json)
+
+
+def cmd_connect(args):
+    as_json, opts, rest = connect_args(args)
+    if len(rest) != 2:
+        jfail('connect <agent> <connector> [--profile P] [--json]', as_json, 2)
+    agent, svc = rest
+    known_agent(agent, as_json)
+    f = service_file(svc, agent) if SERVICE_RE.match(svc) else None
+    if not f:
+        jfail(f"no connector '{svc}' on this Mac (kith connectors)", as_json)
+    spec = json.loads(f.read_text())
+    if spec.get('kind') in ('login', 'browser'):
+        jfail(f"{svc} is not a connector (kind {spec.get('kind')}); kith-auth grant {agent} {svc} <profile>", as_json)
+    auth = load_auth(write=True)
+    have = grant_list(auth['grants'].get(agent, {}).get(svc))
+    profile = opts.get('--profile')
+    if profile is None and not have:
+        if not spec.get('secrets'):
+            profile = f'{svc}/host' if f.parent == mac_services() else f'{svc}/default'
+        else:
+            mine = sorted(p for p in auth['profiles'] if p.startswith(svc + '/') and profile_vars(auth['profiles'][p]))
+            if len(mine) != 1:
+                jfail(f'{svc} needs a key: '
+                      + ('pick one of ' + ', '.join(mine) if mine else 'no profile of it exists yet')
+                      + f' (kith {agent} connect {svc} --profile {svc}/<account>; kith-auth set {svc}/<account> '
+                      f'{spec["secrets"][0]} adds one)', as_json)
+            profile = mine[0]
+    changed = False
+    if profile is not None:   # none: already connected, keep the profile it has
+        if not profile.startswith(svc + '/') or not ACCOUNT_RE.match(profile.partition('/')[2]):
+            jfail(f'a {svc} grant takes {svc}/<account> profiles', as_json, 2)
+        ensure_profile(auth, svc, profile, agent)
+        if have != [profile]:
+            auth['grants'].setdefault(agent, {})[svc] = profile
+            changed = True
+        if changed or profile not in auth['profiles']:
+            save_auth(auth)
+    row = connector_row(auth, agent, svc, svc in needs(agent))
+    if as_json:
+        print(json.dumps({'ok': True, 'agent': agent, 'connector': svc, 'changed': changed, 'profile': row['profile'],
+                          'status': row['status'], 'missing': row['missing']}))
+        return
+    print(f'{agent} {"may now use" if changed else "already had"} {svc} as {row["profile"]}')
+    if row['status'] != 'ok':
+        hint = {'missing secrets': 'missing ' + ', '.join(row['missing']) + f' (kith-auth set {row["profile"]} VAR)',
+                'signed out': 'signed out; it starts once the connector is signed in on the host'}
+        print(f'  will not start yet: {hint.get(row["status"], row["status"])}')
+
+
+def cmd_disconnect(args):
+    as_json, opts, rest = connect_args(args)
+    if len(rest) != 2 or opts:
+        jfail('disconnect <agent> <connector> [--json]', as_json, 2)
+    agent, svc = rest
+    known_agent(agent, as_json)
+    auth = load_auth(write=True)
+    grants = auth['grants'].get(agent)
+    held = grant_list(grants.get(svc)) if isinstance(grants, dict) else []
+    if held:
+        grants.pop(svc)
+        if not grants:
+            auth['grants'].pop(agent)
+        for p in held:   # a host profile nobody else holds goes with its last grant; keyed profiles are the owner's to keep
+            if auth['profiles'].get(p) == HOST_STORE and not agents_granted(auth, p):
+                auth['profiles'].pop(p)
+        save_auth(auth)
+    msg = f'{agent} may no longer use {svc}' if held else f'{agent} had no {svc} connected; nothing to do'
+    if as_json:
+        print(json.dumps({'ok': True, 'agent': agent, 'connector': svc, 'changed': bool(held), 'message': msg}))
+    else:
+        print(msg)
+
+
+def available_connectors(auth):
+    """What this Mac can connect: kernel MCP services and every file in this Mac's services folder."""
+    out = []
+    names = agents()
+    for d, only_mcp in ((SERVICES, True), (mac_services(), False)):
+        for f in sorted(d.glob('*.json')) if d.is_dir() else []:
+            try:
+                spec = json.loads(f.read_text())
+            except ValueError:
+                continue
+            if not isinstance(spec, dict) or (only_mcp and spec.get('kind') != 'mcp') or \
+                    (not only_mcp and (SERVICES / f.name).is_file()):   # a kernel service wins a clash
+                continue
+            conn = spec.get('connector') if isinstance(spec.get('connector'), dict) else {}
+            out.append({'name': f.stem, 'source': source_of(f), 'kind': spec.get('kind'), 'display': conn.get('name'),
+                        'description': spec.get('description', ''), 'auth': conn.get('auth'),
+                        'secrets': spec.get('secrets', []),
+                        'connected': sorted(a for a, g in auth['grants'].items()
+                                            if a in names and isinstance(g, dict) and f.stem in g)})
+    return out
+
+
+def cmd_connectors(args):
+    as_json = '--json' in args
+    rest = [a for a in args if a != '--json']
+    if rest[:1] == ['available']:
+        rest = rest[1:]
+    if len(rest) > 1:
+        jfail('connectors [available] [--json]  |  connectors <agent> [--json]', as_json, 2)
+    auth = load_auth()
+    if not rest:
+        rows = available_connectors(auth)
+        if as_json:
+            print(json.dumps(rows))
+            return
+        for r in rows:
+            tail = f' [{r["auth"]}]' if r['auth'] else ''
+            print(f'{r["name"]:<20} {r["source"]:<7} {r["description"][:70]}{tail}')
+        return
+    agent = rest[0]
+    known_agent(agent, as_json)
+    grants = auth['grants'].get(agent)
+    declared = needs(agent)
+    names = [(s, True) for s in declared] + [(s, False) for s in sorted(grants if isinstance(grants, dict) else {})
+                                              if s not in declared and s != 'browser']
+    rows = [r for r in (connector_row(auth, agent, s, d) for s, d in names)
+            if r['kind'] in ('mcp', None) or r['profile']]   # connectors, and anything granted or unreadable
+    if as_json:
+        print(json.dumps(rows))
+        return
+    for r in rows:
+        extra = ' (' + ', '.join(r['missing']) + ')' if r['missing'] else ''
+        print(f'{r["name"]:<20} {r["source"] or "-":<7} {r["profile"] or "-":<22} {r["status"]}{extra}')
 
 
 def cmd_exec(args):
@@ -2478,7 +2722,7 @@ def main(argv):
         if any(not p.startswith(svc + '/') for p in profiles):
             die(f'a {svc} grant takes {svc}/<account> profiles', 2)
         for p in profiles:
-            auth['profiles'].setdefault(p, {})
+            ensure_profile(auth, svc, p, names[0].split('@')[0])
         for agent in names:
             auth['grants'].setdefault(agent, {})[svc] = profiles if len(profiles) > 1 else profiles[0]
         save_auth(auth)
@@ -2605,6 +2849,12 @@ def main(argv):
         cmd_helper(rest)
     elif cmd == 'door':
         cmd_door(rest)
+    elif cmd == 'connect':
+        cmd_connect(rest)
+    elif cmd == 'disconnect':
+        cmd_disconnect(rest)
+    elif cmd == 'connectors':
+        cmd_connectors(rest)
     elif cmd == 'mcp-config' and len(rest) == 1:
         cmd_mcp_config(rest[0])
     elif cmd == 'mcp-names' and len(rest) == 1:
