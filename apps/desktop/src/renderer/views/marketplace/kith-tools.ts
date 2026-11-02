@@ -18,6 +18,8 @@ export class KithToolsModel extends Observable {
   private skills = new Map<string, AgentTools>()
   /** Why the connector list could not be read (kith missing or broken); shown instead of a blank list. */
   error: string | null = null
+  /** Why an agent's skills could not be read (the CLI's sentence), by agent name; cleared when a read works. */
+  private skillErrors = new Map<string, string>()
   /** `agent:kind:name` of the changes in flight, so a double click does nothing. */
   private pending = new Set<string>()
   private generation = 0
@@ -39,6 +41,11 @@ export class KithToolsModel extends Observable {
     return this.available.find((c) => c.name === id)?.connected ?? []
   }
 
+  /** The skill reads that failed, one line each (`agent: why`), or null; the holders list is missing those agents until a retry works. */
+  get skillReadError(): string | null {
+    return this.skillErrors.size ? [...this.skillErrors].map(([agent, why]) => `${agent}: ${why}`).join('; ') : null
+  }
+
   skillHolders(): Map<string, string[]> {
     return skillHolders(this.skills)
   }
@@ -58,18 +65,14 @@ export class KithToolsModel extends Observable {
     this.changed()
   }
 
-  /** Reads every kith agent's skills, a few at a time; a bot that fails is skipped (its detail page says why). */
+  /** Reads every kith agent's skills, a few at a time; a bot that fails is left out of the holders and named in `skillReadError`. */
   async refreshSkills() {
     const run = ++this.generation
     const queue = [...this.bots]
-    const client = await this.store.ready()
     const worker = async () => {
       for (let bot = queue.shift(); bot; bot = queue.shift()) {
-        try {
-          const t = await client.kithTools(bot.id, 'skills')
-          if (run !== this.generation) return
-          if (!t.skillsError) this.skills.set(bot.hqAgent!, t)
-        } catch {}
+        await this.readSkills(bot, run)
+        if (run !== this.generation) return
         this.changed()
       }
     }
@@ -96,11 +99,20 @@ export class KithToolsModel extends Observable {
     }
   }
 
-  private async readSkills(bot: Bot) {
+  /** Reads one agent's skills; a failure is kept (`skillReadError`), never swallowed. `run` drops an answer to an older refresh. */
+  private async readSkills(bot: Bot, run = this.generation) {
+    const agent = bot.hqAgent!
     try {
       const t = await (await this.store.ready()).kithTools(bot.id, 'skills')
-      if (!t.skillsError) this.skills.set(bot.hqAgent!, t)
-    } catch {}
+      if (run !== this.generation) return
+      if (t.skillsError) this.skillErrors.set(agent, t.skillsError)
+      else {
+        this.skills.set(agent, t)
+        this.skillErrors.delete(agent)
+      }
+    } catch (e) {
+      if (run === this.generation) this.skillErrors.set(agent, errorText(e))
+    }
   }
 
   connect(bot: Bot, connector: string) {

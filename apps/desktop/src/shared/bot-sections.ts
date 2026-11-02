@@ -9,7 +9,7 @@ import type { KithInfo } from './kith-info.ts'
 export interface BotSections {
   /** "Standing instructions": Kith's About shows the agent's role. */
   instructions: boolean
-  /** The agent (backend) picker: Kith's Model & permissions shows the harness. */
+  /** The host-native agent (backend) picker. Never for an hq bot: the harness is `kith <agent> set harness`, a row of `HqSettings`. */
   backendPicker: boolean
   /**
    * The harness's own notes tab in Memory. For an hq bot it is Claude Code's MEMORY.md of the bot's working
@@ -34,10 +34,10 @@ export function botSections(
 ): BotSections {
   if (!hqAgent) return ALL_SECTIONS
   const kithSettings = unsupportedHost
-  if (!info) return { ...ALL_SECTIONS, harnessMemoryTab: false, kithSettings }
+  if (!info) return { ...ALL_SECTIONS, backendPicker: false, harnessMemoryTab: false, kithSettings }
   return {
     instructions: !(info.role || info.description) || info.errors.role !== undefined,
-    backendPicker: !info.harness,
+    backendPicker: false,
     harnessMemoryTab: false,
     kithSettings,
   }

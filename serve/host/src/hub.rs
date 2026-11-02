@@ -275,6 +275,7 @@ impl Hub {
         // Whose chat it is can't be edited either.
         cfg.person.clone_from(&row.config.person);
         if cfg.is_hq() {
+            refuse_cli_owned(&row.config, &cfg)?;
             cfg.backend.clone_from(&row.config.backend);
             cfg.command = None;
             // Model, effort, Fast mode and permission are hq's; an app's (stale) copy doesn't get stored over them.
@@ -852,6 +853,29 @@ fn validate(cfg: &BotConfig) -> Result<()> {
         bail!("unknown backend {}", cfg.backend);
     }
     Ok(())
+}
+
+/// A kith agent's harness, model, effort and tools are the CLI's (`kith <agent> set …`, `connect`, `skill add`), not
+/// host config: an update that would CHANGE one says which command to use, instead of being dropped. A value equal to the
+/// stored one is an echo (a full-row save) and passes.
+fn refuse_cli_owned(old: &BotConfig, new: &BotConfig) -> Result<()> {
+    let agent = old.hq_agent.as_deref().unwrap_or_default();
+    let how = if new.backend != old.backend {
+        format!("set it with `kith {agent} set harness <name>`")
+    } else if new.model != old.model {
+        format!("set it with `kith {agent} set model <name>`")
+    } else if new.model_options != old.model_options {
+        format!("set it with `kith {agent} set effort <level>`")
+    } else if new.fast_mode != old.fast_mode {
+        "kith has no Fast mode setting".to_owned()
+    } else if new.connectors != old.connectors {
+        format!("use `kith {agent} connect <connector>` or `kith {agent} disconnect <connector>`")
+    } else if new.skills != old.skills {
+        format!("use `kith {agent} skill add <skill>` or `kith {agent} skill remove <skill>`")
+    } else {
+        return Ok(());
+    };
+    bail!("{agent} is a kith agent: its engine, model, effort and tools are kith's, not the host's; {how}")
 }
 
 #[cfg(test)]
