@@ -815,7 +815,7 @@ fn auth_stamp() -> Vec<Option<std::time::SystemTime>> {
     let files = match std::env::var_os("KITH_AUTH").filter(|v| !v.is_empty()) {
         Some(given) => vec![std::path::PathBuf::from(given)],
         None => vec![
-            crate::kernel::machine_dir(&home).join("secrets/auth.json"),
+            crate::kernel::folders(&home).secrets.join("auth.json"),
             home.join(".config/kith/auth.json"),
             home.join(".config/hq/auth.json"),
         ],

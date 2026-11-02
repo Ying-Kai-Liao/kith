@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# kith-paths-parity-check — `kith_paths.py --json` and the Rust `kith paths --json` (crate kith-kernel) must print the same
+# folders in every layout. The Python stays the source of truth and keeps working without the binary; this fails the moment the
+# two drift. Each case is a throwaway HOME with the environment cleared of KITH_*/HQ_* except what the case sets: the real
+# ~/.kith is never read.
+#
+#   kernel/tests/kith-paths-parity-check     needs the kith program: $KITH_PARITY_BIN, else a build under $CARGO_TARGET_DIR or
+#                                            serve/host/target (debug or release), else it builds one with cargo
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd -P)"
+REPO="$(cd "$KERNEL/.." && pwd -P)"
+
+BIN=${KITH_PARITY_BIN:-}
+if [[ -z $BIN ]]; then
+  for t in "${CARGO_TARGET_DIR:-}" "$REPO/serve/host/target"; do
+    for p in debug release; do [[ -n $t && -x $t/$p/kith ]] && { BIN=$t/$p/kith; break 2; }; done
+  done
+fi
+if [[ -z $BIN ]]; then
+  cargo build --quiet --manifest-path "$REPO/serve/host/Cargo.toml" --bin kith || { echo "cannot build the kith program"; exit 1; }
+  BIN=${CARGO_TARGET_DIR:-$REPO/serve/host/target}/debug/kith
+fi
+[[ -x $BIN ]] || { echo "no kith program at $BIN"; exit 1; }
+"$BIN" paths --json >/dev/null 2>&1 || { echo "$BIN has no 'paths' verb (stale build?)"; exit 1; }
+
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-paths-parity.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+
+fail=0 n=0
+# case NAME 'setup commands (run with $H = the throwaway home)' [VAR=value ...; $H expands in the values]
+case_() {
+  local name=$1 setup=$2; shift 2
+  n=$((n + 1))
+  local H=$T/c$n; mkdir -p "$H"
+  (cd "$H" && eval "$setup")
+  local vars=(KITH_PARITY=1) v
+  for v in "$@"; do vars+=("$(eval "echo \"$v\"")"); done
+  local py rs
+  py=$(env -i HOME="$H" PATH="$PATH" "${vars[@]}" python3 "$KERNEL/lib/kith_paths.py" --json 2>&1)
+  rs=$(env -i HOME="$H" PATH="$PATH" "${vars[@]}" "$BIN" paths --json --kernel "$KERNEL" 2>&1)
+  local diff
+  diff=$(python3 - "$py" "$rs" "$H" <<'EOF'
+import json, sys
+try:
+    a, b = json.loads(sys.argv[1]), json.loads(sys.argv[2])
+except ValueError:
+    print('not JSON:\n  python: %s\n  rust:   %s' % (sys.argv[1], sys.argv[2])); sys.exit()
+h = sys.argv[3]
+for k in sorted(set(a) | set(b)):
+    if a.get(k) != b.get(k):
+        print('  %-18s python %s\n  %-18s rust   %s' % (k, str(a.get(k)).replace(h, '$H'), '', str(b.get(k)).replace(h, '$H')))
+if len(a) != 22:
+    print('  python printed %d keys, not 22' % len(a))
+EOF
+)
+  if [[ -z $diff ]]; then echo "ok   $name"; else echo "FAIL $name"; echo "$diff"; fail=1; fi
+}
+
+case_ 'migrated marker with a real ~/.hq also present' 'mkdir -p .kith .hq && touch .kith/.migrated'
+case_ 'real ~/.hq only' 'mkdir -p .hq'
+case_ 'real ~/.hq and ~/.kith/serve, no marker' 'mkdir -p .hq .kith/serve'
+case_ '~/.hq linked to ~/.kith' 'mkdir -p .kith && ln -s .kith .hq'
+case_ '~/.hq linked elsewhere (old link layout)' 'mkdir -p disk/kernel && ln -s disk .hq && ln -s disk kith'
+case_ 'old link layout with hq-named config, logs, caches' 'mkdir -p disk/kernel .config/hq Library/Logs/hq Library/Caches/hq && ln -s disk .hq && ln -s disk hq'
+case_ 'old link layout with kith-named config, logs, caches' 'mkdir -p disk/kernel .config/kith .config/hq Library/Logs/kith Library/Caches/kith && ln -s disk .hq && ln -s disk kith'
+case_ 'only ~/.kith' 'mkdir -p .kith'
+case_ 'only ~/.kith as a link, no ~/kith' 'mkdir -p disk && ln -s disk .kith'
+case_ 'nothing at all' 'true'
+case_ 'KITH_STATE set' 'mkdir -p .hq' 'KITH_STATE=$H/chosen/s'
+case_ 'KITH_STATE set with ~ and padding' 'true' 'KITH_STATE=  ~/chosen/'
+case_ 'KITH_STATE blank falls back' 'mkdir -p .hq' 'KITH_STATE=   '
+case_ 'HQ_STATE set' 'mkdir -p .kith' 'HQ_STATE=$H/old/s'
+case_ 'KITH_STATE beats HQ_STATE' 'true' 'KITH_STATE=$H/new' 'HQ_STATE=$H/old'
+case_ 'empty KITH_STATE, HQ_STATE set' 'true' 'KITH_STATE=' 'HQ_STATE=$H/old'
+case_ 'KITH_HOME set' 'mkdir -p .kith kith' 'KITH_HOME=$H/elsewhere'
+case_ 'KITH_HOME with ~, missing folder' 'mkdir -p .kith' 'KITH_HOME=~/nope/../there'
+case_ 'HQ_HOME set' 'mkdir -p .hq' 'HQ_HOME=$H/old-home'
+case_ 'KITH_STATE=<home>/state with <home>/kernel' 'mkdir -p disk/kernel && ln -s disk kith' 'KITH_STATE=$H/disk/state'
+case_ 'KITH_STATE=<home>/state through the ~/kith link' 'mkdir -p disk/kernel && ln -s disk kith' 'KITH_STATE=$H/kith/state'
+case_ 'KITH_STATE=<home>/state without a kernel' 'mkdir -p disk kith' 'KITH_STATE=$H/disk/state'
+case_ '~/kith link variant' 'mkdir -p disk .kith && ln -s disk kith'
+case_ '~/hq link variant' 'mkdir -p disk .kith && ln -s disk hq'
+case_ '~/kith and ~/hq both present' 'mkdir -p kith hq .kith'
+case_ '~/kith a real folder, ~/.hq linked to ~/.kith' 'mkdir -p kith .kith && ln -s .kith .hq'
+case_ 'dangling ~/.hq link' 'ln -s nowhere .hq'
+case_ 'marker only, no other folders' 'mkdir -p .kith && touch .kith/.migrated' 'KITH_HOME=$H/x'
+
+echo "$n layouts"
+exit $fail

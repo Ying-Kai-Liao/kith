@@ -244,6 +244,18 @@ enum Sub {
         #[command(subcommand)]
         cmd: hqmem::Cmd,
     },
+    /// Where Kith's folders are (the same answer as the kernel's `lib/kith_paths.py`): one `NAME  folder` per line.
+    Paths {
+        /// Print JSON, with the old HQ_ names too.
+        #[arg(long, conflicts_with = "sh")]
+        json: bool,
+        /// Print `export NAME=folder` lines for bash.
+        #[arg(long)]
+        sh: bool,
+        /// The kernel folder, for the fallback when neither ~/kith nor ~/hq exists (default: the one this program finds).
+        #[arg(long, hide = true)]
+        kernel: Option<std::path::PathBuf>,
+    },
     /// Built-in MCP servers that bots are started with (stdio).
     #[command(hide = true)]
     Mcp {
@@ -572,6 +584,24 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Sub::Memory { cmd } => std::process::exit(hqmem::run(cmd)?),
+        Sub::Paths { json, sh, kernel } => {
+            let home = kith_kernel::paths::process_home();
+            let p = match kernel {
+                Some(k) => kith_kernel::paths::paths(&home, &k, &kith_kernel::paths::process_env),
+                None => kernel::folders(&home),
+            };
+            print!(
+                "{}",
+                if json {
+                    format!("{}\n", p.json())
+                } else if sh {
+                    p.sh()
+                } else {
+                    p.text()
+                }
+            );
+            Ok(())
+        }
         Sub::Node => agent::node::add().await,
         Sub::Npm { args } => std::process::exit(agent::node::npm(&args).await?),
         Sub::Statusline { port, wrapped } => {

@@ -2132,6 +2132,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-kernel"
+version = "0.1.0"
+
+[[package]]
 name = "kith-mem"
 version = "0.1.1"
 dependencies = [
@@ -2166,6 +2170,7 @@ dependencies = [
  "if-addrs",
  "keyring",
  "kith-guest",
+ "kith-kernel",
  "kith-mem",
  "kith-wire",
  "libc",

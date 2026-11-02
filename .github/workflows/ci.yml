@@ -356,6 +356,12 @@ jobs:
       - name: Build the test archive
         working-directory: serve/host
         run: cargo nextest archive --workspace --exclude kith-guest --exclude kith-tts --archive-file "$RUNNER_TEMP/host-tests.tar.zst"
+      # kith_paths.py and the kith-kernel crate must say the same about every layout of the folders. The test binaries
+      # above already built the host's dependencies, so this adds the one kith program.
+      - name: Folder rules parity (kith_paths.py vs kith paths)
+        run: |
+          cargo build --manifest-path serve/host/Cargo.toml --bin kith
+          KITH_PARITY_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-paths-parity-check
       - uses: actions/upload-artifact@v4
         with:
           name: host-tests
@@ -450,9 +456,9 @@ jobs:
         with:
           tool: cargo-nextest@0.9.100
       - name: Tests
-        run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem
+        run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel
       - name: Doctests
-        run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem
+        run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel
 
   cloud:
     needs: changes
