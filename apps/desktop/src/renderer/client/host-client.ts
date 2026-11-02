@@ -3,7 +3,7 @@ import { parseCall, type IncomingCall } from '@shared/incoming-call'
 import { parseAgentPeople, parseAgentUsage, parseBotsCap, parseUsageReport, type AgentPeople, type AgentUsage, type AtLimit, type BotsCap, type Period, type UsageReport } from '@shared/usage-limits'
 import type { CallError } from '@shared/ipc'
 import type { RelayCallError } from '@shared/relay'
-import { parseBackups, type Backups } from '@shared/backups'
+import { parseAccountAdd, parseAccountRemove, parseBackups, type AccountAdd, type Backups } from '@shared/backups'
 import { parseBotGuest, parseBotGuests, parseBotRequest, parseCreatedBotInvite, type BotGuest, type BotProvider, type CreatedBotInvite } from '@shared/bot-guests'
 import { parseKeys, type KeyRow } from '@shared/secret-card'
 import { parseAllowed, type AllowedList } from '@shared/kith-access'
@@ -430,6 +430,16 @@ export class HostClient {
   /** Chooses the main account (`kith account use`): `agent` null is the computer's; `account` null goes back to the default (the computer's for an agent, each harness's login for the computer). Answers like `backups`. */
   async accountSet(agent: string | null, account: string | null): Promise<Backups> {
     return parseBackups(await this.call('accountSet', { agent, account }, 90_000))
+  }
+
+  /** Makes a login folder and starts its login in a terminal on the computer. A new Claude account answers with the warning until `yes`. Owner only. */
+  async accountAdd(harness: string, name: string, yes: boolean, cols: number, rows: number): Promise<AccountAdd> {
+    return parseAccountAdd(await this.call('accountAdd', { harness, name, yes, cols, rows }, 90_000))
+  }
+
+  /** Deletes an extra login (the app has confirmed). Owner only. */
+  async accountRemove(harness: string, name: string): Promise<{ inChain: boolean }> {
+    return parseAccountRemove(await this.call('accountRemove', { harness, name }, 90_000))
   }
 
   /** The grants ledger: every lasting grant for anyone but the owner, of one agent and/or one person. Owner only: a member gets 403; a host before it 404. */

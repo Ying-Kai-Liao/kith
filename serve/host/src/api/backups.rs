@@ -1,8 +1,9 @@
 //! The backup chain for the apps: which entries kith will move a bot's turns to when its own account runs out, whether
 //! each can run, and when one that ran out is back. `backups` reads it (a paired phone may too); `backupsSet` writes
 //! it, one call that replaces a whole list. Above the chain is each agent's main account, the one its turns start on
-//! (`kith account use`); `accountSet` chooses it. Logins stay in the terminal: an entry that isn't ready carries the one
-//! command to run (`fix`), and no token or environment value is ever read here (kith's JSON has none).
+//! (`kith account use`); `accountSet` chooses it. An entry that isn't ready carries the one command that fixes it
+//! (`fix`). `accountAdd` / `accountRemove` call `kith account add|remove --json` (owner only): the host runs the login
+//! command the CLI returns in a terminal, never builds it, and no token is ever read here (kith's JSON has none).
 //! Not the bot's own harness (`BotConfig.backend`) and not usage bars (`usage.rs`).
 
 use crate::agent::hq;
@@ -33,6 +34,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
             set_main(hub, &b).await?;
             read(hub).await?
         }
+        "accountAdd" => add_account(hub, &b).await?,
+        "accountRemove" => remove_account(&b).await?,
         _ => return Ok(ControlFlow::Continue(b)),
     }))
 }
@@ -245,4 +248,111 @@ async fn set(hub: &Hub, b: &Value) -> Result<()> {
     // Turns started from now on use the new order, not the chain kith gave up to minutes ago.
     hub.backups.forget_chains();
     Ok(())
+}
+
+/// An account's harness and name as `kith account add` takes them; kith is the authority, this only keeps odd
+/// arguments from reaching it.
+fn account_args(b: &Value) -> Result<(&str, &str)> {
+    let harness = b["harness"].as_str().filter(|h| matches!(*h, "claude" | "codex"));
+    let name = b["name"].as_str().filter(|n| {
+        n.chars().next().is_some_and(|c| c.is_ascii_alphanumeric())
+            && n.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    });
+    match (harness, name) {
+        (Some(h), Some(n)) => Ok((h, n)),
+        (None, _) => bail!("`harness` must be claude or codex"),
+        _ => bail!("`name` can have letters, digits, . _ - and must start with a letter or digit"),
+    }
+}
+
+/// Runs a `--json` kith command and returns what it printed even when it exited non-zero: the CLI says why it
+/// refused (`ok: false`, a warning to show) on stdout, and `hq::run` keeps only the error text.
+async fn run_json(bin: &Path, args: &[&str]) -> Result<Value> {
+    let shown = format!("kith {}", args.join(" "));
+    let mut command = tokio::process::Command::new(bin);
+    command
+        .args(args)
+        .envs(crate::kernel::both("VIA", "serve"))
+        .stdin(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .env_remove(crate::runauth::TOKEN_ENV)
+        .env_remove(crate::runauth::SOCKET_ENV);
+    let out = tokio::time::timeout(WRITE_TIMEOUT, command.output())
+        .await
+        .map_err(|_| anyhow!("`{shown}` took longer than {}s", WRITE_TIMEOUT.as_secs()))?
+        .with_context(|| format!("starting {}", bin.display()))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    match serde_json::from_str::<Value>(stdout.trim()) {
+        Ok(doc) if doc.is_object() => Ok(doc),
+        _ => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let why = stderr.trim();
+            bail!(
+                "`{shown}` failed ({}){}",
+                out.status,
+                if why.is_empty() { String::new() } else { format!(": {why}") }
+            )
+        }
+    }
+}
+
+/// `accountAdd {harness, name, yes?, cols?, rows?}`: makes the account folder with `kith account add --json` and
+/// opens a terminal that runs the login command kith returned. A new Claude account first answers
+/// `{ok: false, warning, error}` (nothing made) so the app can show the warning; the app asks again with `yes`. A
+/// second call while that login runs gets the same terminal.
+async fn add_account(hub: &Hub, b: &Value) -> Result<Value> {
+    let (harness, name) = account_args(b)?;
+    let bin = kith().await?;
+    let mut args = vec!["account", "add", harness, name, "--json"];
+    if b["yes"].as_bool() == Some(true) {
+        args.push("--yes");
+    }
+    let doc = {
+        let _one_at_a_time = WRITES.lock().await;
+        run_json(&bin, &args).await?
+    };
+    if doc["ok"] != true {
+        // A warning is a question for the person; anything else (harness not installed, ...) is an error.
+        if doc["warning"].is_string() {
+            return Ok(json!({"ok": false, "error": doc["error"], "warning": doc["warning"]}));
+        }
+        bail!("{}", doc["error"].as_str().unwrap_or("kith couldn't add the account"));
+    }
+    let login = &doc["login"];
+    let command: Vec<String> = login["argv"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .filter(|a: &Vec<String>| !a.is_empty())
+        .ok_or_else(|| anyhow!("`kith account add --json` printed no login command"))?;
+    let env: Vec<(String, String)> = login["env"]
+        .as_object()
+        .map(|o| o.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_owned()))).collect())
+        .unwrap_or_default();
+    let id = doc["id"].as_str().unwrap_or_default();
+    let dim = |k: &str, default: u16| b[k].as_u64().and_then(|v| u16::try_from(v).ok()).unwrap_or(default);
+    let term = hub.terms.start_argv(&format!("account:{id}"), &command, &env, dim("cols", 80), dim("rows", 24))?;
+    // The folder and the login command stay on the computer: the app gets the account's name and the terminal.
+    Ok(json!({
+        "account": {
+            "ok": true, "id": id, "harness": doc["harness"], "name": doc["name"], "created": doc["created"],
+            "warning": doc["warning"],
+        },
+        "term": term,
+    }))
+}
+
+/// `accountRemove {harness, name}`: `kith account remove --yes --json`; the app confirms first. Answers kith's JSON
+/// (`changed`, `in_chain`) without the folder's path.
+async fn remove_account(b: &Value) -> Result<Value> {
+    let (harness, name) = account_args(b)?;
+    let bin = kith().await?;
+    let _one_at_a_time = WRITES.lock().await;
+    let mut doc = run_json(&bin, &["account", "remove", harness, name, "--yes", "--json"]).await?;
+    if doc["ok"] != true {
+        bail!("{}", doc["error"].as_str().unwrap_or("kith couldn't remove the account"));
+    }
+    if let Some(o) = doc.as_object_mut() {
+        o.remove("dir");
+    }
+    Ok(doc)
 }

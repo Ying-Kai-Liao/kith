@@ -11,6 +11,7 @@ import { useApp } from '../../store/context'
 import { BackupsStore } from '../../store/backups-store'
 import type { BotStore } from '../../store/bot-store'
 import { ComputerBadge } from '../ComputerBadge'
+import { AccountLogins } from './AccountLogins'
 import './backup-chain.css'
 
 // One store per computer, so Settings and a bot's details share one answer.
@@ -51,10 +52,11 @@ function ComputerBackups({ host, labeled }: { host: BotStore; labeled: boolean }
       </HStack>
       <Text size="callout" tone="secondary">
         Turns start on the main account. When it runs out of usage, Kith moves them down this list until the limit lifts.
-        Logging in stays in the terminal; the app only shows the command.
+        Add a login below, or run `kith account add` in a terminal.
       </Text>
       <MainAccountRow store={store} agent={null} />
       <ChainEditor store={store} agent={null} chain={store.backups.global} main={store.backups.main.global} />
+      <AccountLogins store={store} host={host} />
     </section>
   )
 }
