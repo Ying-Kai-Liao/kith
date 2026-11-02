@@ -12,7 +12,7 @@ rows() { grep -v '^[[:space:]]*#' "$list" | grep -v '^[[:space:]]*$'; }
 
 case "${1:-}" in
 filter)
-  rows | awk -F"$tab" '{ printf "%stest(~%s)", (n++ ? " + " : ""), $2 } END { print "" }'
+  rows | awk -F"$tab" '{ printf "%stest(/^%s/)", (n++ ? " + " : ""), $2 } END { print "" }'
   ;;
 check)
   bad=0

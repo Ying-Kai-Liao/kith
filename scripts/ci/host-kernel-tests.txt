@@ -1,6 +1,6 @@
 # Host unit tests that run real kernel files (kernel/bin, kernel/lib). A kernel-only PR runs just these
 # (the host-kernel job); a PR that touches serve/host runs the whole host suite. One test module per line:
-#   <source file under serve/host><TAB><nextest test-name term, matched as a substring of the module path>
+#   <source file under serve/host><TAB><module path the test names start with, as a regex prefix>
 # `scripts/ci/host-kernel-tests.sh check` fails when a host file reads the kernel and is missing here.
 #
 # Read kernel files directly (CARGO_MANIFEST_DIR/../../kernel).

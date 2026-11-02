@@ -399,11 +399,17 @@ jobs:
   # A kernel-only change (kernel/bin, kernel/lib) runs just the host unit tests that run real kernel files, listed in
   # scripts/ci/host-kernel-tests.txt, instead of the whole host suite. Builds and runs in one job on the same cache as
   # host-build. When host_core is also set, host-test already runs them.
+  # Three shards: the tests themselves are the cost (each starts the real kith-auth), the build is a warm-cache 2-3 minutes.
   host-kernel:
+    name: host-kernel (${{ matrix.shard }}/3)
     needs: changes
     if: needs.changes.outputs.kernel_host == 'true' && needs.changes.outputs.host_core != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - name: Install pinned toolchain
@@ -423,6 +429,7 @@ jobs:
         working-directory: serve/host
         run: >-
           cargo nextest run --profile ci --workspace --exclude kith-guest --exclude kith-tts
+          --partition count:${{ matrix.shard }}/3
           -E "($(sh ../../scripts/ci/host-kernel-tests.sh filter)) & not kind(test)"
 
   # Fails when a host unit test reads the kernel (a path into kernel/, or the api Rig that runs the real kith-auth) and
