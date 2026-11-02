@@ -801,6 +801,10 @@ mod tests {
         set_signed_in("codex", None);
         let root = dir.to_string_lossy().into_owned();
         for v in &mut listed {
+            // Whether this machine has Kith's Node is not the table's business.
+            if v.get("node").is_some_and(|n| !n.is_null()) {
+                v["node"] = json!("<state>");
+            }
             if let Some(p) = v["path"].as_str() {
                 v["path"] = json!(p.replace(&root, "<DIR>"));
             }

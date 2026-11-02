@@ -10,7 +10,7 @@
       "installHint": "Install Claude Code and run `claude auth login`.",
       "signedIn": true,
       "canInstall": true,
-      "node": "missing",
+      "node": "<state>",
       "command": "",
       "registry": "claude-acp",
       "curated": true
@@ -250,7 +250,7 @@
       "installHint": "Install Kilo CLI (npm install -g @kilocode/cli) and run `kilo auth login`.",
       "signedIn": null,
       "canInstall": true,
-      "node": "missing",
+      "node": "<state>",
       "command": "{bin} acp",
       "registry": "kilo",
       "curated": true
