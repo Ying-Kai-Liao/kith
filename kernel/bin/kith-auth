@@ -186,6 +186,7 @@ Non-owner Claude runs (a person or a bot) are different: bin/kith starts them wi
 """
 import fcntl
 import getpass
+import io
 import json
 import os
 import re
@@ -659,18 +660,26 @@ def take_for(args):
     return agent, args
 
 
-def cmd_ls():
+def cmd_ls(as_json=False):
     auth = load_auth()
+    rows = []
     for agent in agents():
         wanted = needs(agent)
         granted = auth['grants'].get(agent, {})
         if not wanted and not granted:
             continue
-        print(agent)
+        row = {'agent': agent, 'services': []}
+        rows.append(row)
+        if not as_json:
+            print(agent)
         for svc, profile in sorted((s, p) for s in (set(wanted) | set(granted)) - {'browser'}   # browser: own line
                                    for p in (granted.get(s) if isinstance(granted.get(s), list) else [granted.get(s)])):
             if not profile:
-                print(f'  {svc:<14} NOT GRANTED')
+                if as_json:
+                    row['services'].append({'service': svc, 'profile': None, 'status': 'not granted', 'declared': True,
+                                            'env': []})
+                else:
+                    print(f'  {svc:<14} NOT GRANTED')
                 continue
             note = '' if svc in wanted else '  (granted, not in needs)'
             refs = auth['profiles'].get(profile)
@@ -681,13 +690,22 @@ def cmd_ls():
                 missing = ['unknown service']
             status = 'ok' if refs is not None and not missing else \
                 'no such profile' if refs is None else 'missing ' + ', '.join(missing)
+            if as_json:   # env var names only: a value may be a secret someone put there
+                row['services'].append({'service': svc, 'profile': profile, 'status': status, 'declared': svc in wanted,
+                                        'env': sorted(auth['env'].get(agent, {}).get(svc, {}))})
+                continue
             print(f'  {svc:<14} {profile:<24} {status}{note}')
             for var, value in auth['env'].get(agent, {}).get(svc, {}).items():
                 print(f'  {"":<14} {var}={value}')
         if uses_browser(agent) or 'browser' in granted:
             name, browser, folder = browser_profile(auth, agent)
             own = '' if 'browser' in granted else '  (its own; no browser grant)'
+            if as_json:
+                row['browser'] = {'profile': name, 'browser': browser or None, 'granted': 'browser' in granted}
+                continue
             print(f'  {"browser":<14} {name:<24} {browser or "not set"}, ~/{folder.relative_to(Path.home())}{own}')
+    if as_json:
+        print(json.dumps({'agents': rows}))
 
 
 def mcp_wanted(auth, agent):
@@ -822,6 +840,23 @@ def jfail(msg, as_json, code=1):
         print(json.dumps({'ok': False, 'error': msg}))
         sys.exit(code)
     die(msg, code)
+
+
+def json_run(fn):
+    """Run a verb in --json mode: whatever it refuses with (die, a usage error) becomes {"ok": false, "error"} on stdout
+    with the same exit code, and nothing goes to stderr."""
+    err, real = io.StringIO(), sys.stderr
+    sys.stderr = err
+    try:
+        fn()
+    except SystemExit as e:
+        if e.code in (None, 0):
+            raise
+        sys.stderr = real
+        print(json.dumps({'ok': False, 'error': err.getvalue().strip().removeprefix('kith-auth: ') or 'failed'}))
+        sys.exit(e.code if isinstance(e.code, int) else 1)
+    finally:
+        sys.stderr = real
 
 
 def source_of(f):
@@ -1391,10 +1426,14 @@ def cmd_keys(args):
     print(json.dumps(rows))
 
 
-def cmd_revoke(args):
+def cmd_revoke(args, as_json=False):
+    if as_json and len(args) in (2, 4):   # a retired agent's row can still be revoked; one that never existed can't
+        if args[0] not in agents() and args[0] not in load_auth()['grants']:
+            die(f"no agent '{args[0]}' (kith ls)")
     if len(args) == 4 and args[2] == '--profile':
         agent, svc, profile = args[0], args[1], args[3]
         auth = load_auth(write=True)
+        before = json.dumps(auth, sort_keys=True)
         grants = auth['grants'].get(agent, {})
         left = [p for p in grant_list(grants.get(svc)) if p != profile]
         if left:
@@ -1403,14 +1442,22 @@ def cmd_revoke(args):
             grants.pop(svc, None)
         if not grants:
             auth['grants'].pop(agent, None)
+        changed = json.dumps(auth, sort_keys=True) != before
         save_auth(auth)
+        if as_json:
+            print(json.dumps({'ok': True, 'agent': agent, 'service': svc, 'profile': profile, 'changed': changed}))
+            return
         print(f'{agent} may no longer use {svc} as {profile}')
         return
     if len(args) != 2:
         die('revoke <agent> <service> [--profile P]', 2)
     auth = load_auth(write=True)
+    held = args[1] in auth['grants'].get(args[0], {})
     auth['grants'].get(args[0], {}).pop(args[1], None)
     save_auth(auth)
+    if as_json:
+        print(json.dumps({'ok': True, 'agent': args[0], 'service': args[1], 'profile': None, 'changed': held}))
+        return
     print(f'{args[0]} may no longer use {args[1]}')
 
 
@@ -2698,11 +2745,58 @@ def take_opts(args, names):
     return opts, rest
 
 
+def main_json(cmd, rest):
+    if cmd == 'ls':
+        if rest:
+            die('ls [--json]', 2)
+        cmd_ls(True)
+    elif cmd == 'revoke':
+        cmd_revoke(rest, True)
+    elif cmd == 'granted':
+        agent, rest = take_for(rest)
+        if len(rest) != 1:
+            die('granted [--for AGENT] <service> [--json]', 2)
+        g = load_auth()['grants'].get(agent, {}).get(rest[0])
+        print(json.dumps({'service': rest[0], 'grants': g if isinstance(g, list) else [g] if g else []}))
+    elif cmd == 'grant':
+        if len(rest) != 3:
+            die('grant <agent[,agent]|--all> <service> <profile[,profile]> [--json]', 2)
+        who, svc, profile = rest
+        service(svc, None if who == '--all' else who.split(',')[0].split('@')[0])
+        names = [a for a in agents() if (uses_browser(a) if svc == 'browser' else svc in needs(a))] if who == '--all' \
+            else [a for a in who.split(',') if a]
+        if not names:
+            die(f'no agent lists {svc} in its needs' if who == '--all' else 'no agent named', 2)
+        for a in names:
+            if a.split('@', 1)[0] not in agents() and a not in ('bridge', 'serve'):
+                die(f"no agent '{a}' (kith ls)")
+        auth = load_auth(write=True)
+        before = json.dumps(auth, sort_keys=True)
+        for a in names:
+            if '@' in a:
+                need_person(auth, a.split('@', 1)[1])
+        profiles = [p for p in profile.split(',') if p]
+        if any(not p.startswith(svc + '/') for p in profiles):
+            die(f'a {svc} grant takes {svc}/<account> profiles', 2)
+        for p in profiles:
+            ensure_profile(auth, svc, p, names[0].split('@')[0])
+        for a in names:
+            auth['grants'].setdefault(a, {})[svc] = profiles if len(profiles) > 1 else profiles[0]
+        changed = json.dumps(auth, sort_keys=True) != before
+        save_auth(auth)
+        print(json.dumps({'ok': True, 'agent': who, 'agents': names, 'service': svc, 'profile': profile,
+                          'changed': changed}))
+
+
 def main(argv):
     if not argv or argv[0] in ('-h', '--help'):
         print(__doc__.strip())
         return
     cmd, rest = argv[0], argv[1:]
+    if cmd in ('ls', 'grant', 'revoke', 'granted') and '--json' in rest:
+        rest = [a for a in rest if a != '--json']
+        json_run(lambda: main_json(cmd, rest))
+        return
     if cmd == 'ls':
         cmd_ls()
     elif cmd == 'grant' and len(rest) == 3:
