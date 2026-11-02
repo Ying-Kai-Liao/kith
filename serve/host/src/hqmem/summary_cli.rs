@@ -1,6 +1,7 @@
 //! `kith memory summary show | forget | write --thread <id> [--json]`: the stored summary of a thread, from the host
-//! store (`serve.db`) without the host running. `write` needs the host (it runs the agent's harness), so it hands the
-//! request to `kith summarise`, which asks the running host and says when it can't be reached.
+//! store (`serve.db`) without the host running. `forget` and `write` change things the host also holds (its rows, the
+//! apps, the agent's harness), so they hand the request to `kith forget` / `kith summarise`, which ask the running host
+//! and say when it can't be reached.
 
 use anyhow::{Context, Result};
 use clap::Subcommand;
@@ -69,13 +70,13 @@ fn db_path() -> PathBuf {
     std::env::var_os("KITH_SERVE_DB").map_or_else(|| crate::service::data_dir().join("serve.db"), PathBuf::from)
 }
 
-fn open(write: bool) -> Result<Option<Connection>> {
+fn open() -> Result<Option<Connection>> {
     let path = db_path();
     if !path.is_file() {
         return Ok(None);
     }
-    let flags = if write { OpenFlags::SQLITE_OPEN_READ_WRITE } else { OpenFlags::SQLITE_OPEN_READ_ONLY };
-    let conn = Connection::open_with_flags(&path, flags).with_context(|| format!("open {}", path.display()))?;
+    let conn = Connection::open_with_flags(&path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .with_context(|| format!("open {}", path.display()))?;
     conn.busy_timeout(Duration::from_secs(10))?;
     Ok(Some(conn))
 }
@@ -103,7 +104,7 @@ pub fn run(cmd: SummaryCmd) -> Result<i32> {
 
 fn show(thread: &str, as_json: bool) -> Result<i32> {
     let mut out = std::io::stdout().lock();
-    let (summary, forgotten) = match open(false)? {
+    let (summary, forgotten) = match open()? {
         Some(conn) => (
             if has_table(&conn, "thread_summaries") { rules::get(&conn, thread)? } else { None },
             has_table(&conn, "thread_forgotten") && rules::forgotten(&conn, thread)?,
@@ -135,48 +136,25 @@ fn show(thread: &str, as_json: bool) -> Result<i32> {
     }
 }
 
+/// Forgetting goes the way `kith forget --thread` does: through the running host (its row and the apps hear of it),
+/// else the store alone, and the recall index rows either way.
 fn forget(thread: &str, as_json: bool) -> Result<i32> {
-    let Some(conn) = open(true)? else {
-        eprintln!("kith memory summary forget: no Kith host store on this Mac");
-        return Ok(1);
-    };
-    // The tables the host's migration makes (crates/memory/src/schema.rs): a host that never ran it has none yet.
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS thread_summaries (thread_id TEXT PRIMARY KEY, room TEXT, agent TEXT NOT NULL,
-            audience TEXT NOT NULL, projects TEXT NOT NULL DEFAULT '[]', text TEXT NOT NULL,
-            links TEXT NOT NULL DEFAULT '[]', covered_seq INTEGER NOT NULL DEFAULT 0, reason TEXT NOT NULL DEFAULT 'end',
-            written_at INTEGER NOT NULL DEFAULT 0, cost_via TEXT NOT NULL DEFAULT 'summary');
-         CREATE TABLE IF NOT EXISTS thread_forgotten (thread_id TEXT PRIMARY KEY, at INTEGER NOT NULL);",
-    )?;
-    let at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0));
-    rules::forget(&conn, thread, at)?;
-    // The row's copy goes too, so the apps stop showing it; the host also strips it when it next serves the row.
-    if has_table(&conn, "entries") {
-        conn.execute(
-            "UPDATE entries SET data = json_remove(data, '$.thread.summary', '$.thread.summaryAudience')
-             WHERE id = ?1 AND json_extract(data, '$.thread.summary') IS NOT NULL",
-            [thread],
-        )?;
-    }
-    let mut out = std::io::stdout().lock();
-    if as_json {
-        writeln!(out, "{}", json!({"forgotten": true, "thread": thread}))?;
-    } else {
-        writeln!(out, "forgotten: {thread} (its entries are kept; nothing about it is indexed again)")?;
-    }
-    Ok(0)
+    delegate("forget", thread, as_json)
 }
 
+/// `write` needs the running host: `kith summarise` asks it and says when it can't be reached.
 fn write(thread: &str, as_json: bool) -> Result<i32> {
+    delegate("summarise", thread, as_json)
+}
+
+fn delegate(verb: &str, thread: &str, as_json: bool) -> Result<i32> {
     let exe = std::env::current_exe().context("find kith")?;
     let mut cmd = std::process::Command::new(exe);
-    cmd.args(["summarise", "--thread", thread]);
+    cmd.args([verb, "--thread", thread]);
     if as_json {
         cmd.arg("--json");
     }
-    Ok(cmd.status().context("run kith summarise")?.code().unwrap_or(1))
+    Ok(cmd.status().with_context(|| format!("run kith {verb}"))?.code().unwrap_or(1))
 }
 
 #[cfg(test)]
