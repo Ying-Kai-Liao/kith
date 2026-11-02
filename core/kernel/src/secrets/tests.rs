@@ -1246,3 +1246,51 @@ fn domains_follow_the_guard_rule() {
         assert!(!jobs::valid_domain(bad), "{bad}");
     }
 }
+
+#[test]
+fn a_lone_dash_is_a_person_not_a_flag() {
+    let t = Tmp::new("dash");
+    let c = ctx(&t);
+    write_auth(&c, &people());
+    // `-` is the "no one" kith-auth prints for the owner in a guest's sandbox; it stays a name, not usage (exit 2)
+    let v = json_of(&run(&c, "resolve", &args(&["house", "--person", "-"])));
+    assert_eq!(v["person"], "-");
+    assert_eq!(v["allowed"], json!(false));
+    assert_ne!(run(&c, "may", &args(&["-", "house"])).code, 2);
+    // any other dash word is still usage, and auth.json stays as written
+    let before = std::fs::read(&c.auth).unwrap();
+    assert_eq!(run(&c, "resolve", &args(&["house", "--bogus"])).code, 2);
+    assert_eq!(std::fs::read(&c.auth).unwrap(), before);
+}
+
+#[test]
+fn passwd_home_parses_linux_and_bsd_lines() {
+    let getent = "kai:x:1000:1000:Kai,,,:/home/kai:/bin/bash\n";
+    assert_eq!(
+        home_from_passwd(getent, "1000"),
+        Some(PathBuf::from("/home/kai"))
+    );
+    let file = "root:x:0:0:root:/root:/bin/sh\nkai:x:1000:1000::/home/kai:/bin/sh\n";
+    assert_eq!(
+        home_from_passwd(file, "1000"),
+        Some(PathBuf::from("/home/kai"))
+    );
+    assert_eq!(home_from_passwd(file, "0"), Some(PathBuf::from("/root")));
+    // No entry (a container user), a short line, an empty home: nothing, so a guest.
+    assert_eq!(home_from_passwd(file, "1001"), None);
+    assert_eq!(home_from_passwd("kai:x:1000:1000", "1000"), None);
+    assert_eq!(home_from_passwd("kai:x:1000:1000:::/bin/sh", "1000"), None);
+    let bsd = "kai:*:501:20::0:0:Kai:/Users/kai:/bin/zsh\n";
+    assert_eq!(home_from_bsd_id(bsd), Some(PathBuf::from("/Users/kai")));
+    assert_eq!(home_from_bsd_id("garbage"), None);
+}
+
+#[test]
+fn owner_by_the_os_probe_is_not_a_guest() {
+    // The real probe on this machine: the test user's home is readable, so it is no guest sandbox.
+    let t = Tmp::new("os-probe");
+    let mut c = ctx(&t);
+    c.sandbox = Sandbox::Os;
+    assert!(os_home().is_some(), "the passwd home must be found");
+    assert!(!c.in_guest_sandbox());
+}
