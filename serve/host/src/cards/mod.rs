@@ -550,7 +550,7 @@ pub fn answer(
                 if allow && door {
                     allow = false;
                     access::not_kept(&hub, &card, &why);
-                } else if allow && matches!(option.as_deref(), Some(edge::ALWAYS | edge::JOB)) {
+                } else if allow && matches!(option.as_deref(), Some(edge::ALWAYS | edge::ALL | edge::JOB)) {
                     if helper {
                         let _ = edge::once_instead(&card).await;
                     }

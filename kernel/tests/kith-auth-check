@@ -237,4 +237,26 @@ A grant house notion notion/kai >/dev/null 2>&1
 check "holders: granted again, it is a holder again" "[ \"\$(A holders notion)\" = house ]"
 A person hal --revoke >/dev/null 2>&1
 check "holders: a revoked guest sees none, and undo brings back what it saw" "[ \"\$(KITH_PERSON=hal A holders notion)\" = '' ] && A person hal --unrevoke >/dev/null 2>&1 && [ \"\$(KITH_PERSON=hal A holders notion)\" = house ]"
+
+# --- agent-level domains: "always, for everyone" on an edge card, and a package's guest_domains
+printf 'guest_domains: [pypi.org, "*.bad.org"]\n' > "$KITH_HOME/agents/garden/role/capabilities.yaml"
+check "agent-access: a wildcard, an address or a bad agent name is refused" "! A agent-access house domain '*.org' && ! A agent-access house domain 1.2.3.4 && ! A agent-access 'a b' domain x.org"
+check "agent-access: needs no membership (the owner keeps a host for everyone)" "A agent-access house domain registry.npmjs.org"
+check "agent-access: the same host twice is one entry" "A agent-access house domain registry.npmjs.org && [ \"\$(A agent-access house --json | J 'len(d)')\" = 1 ]"
+A person dee >/dev/null 2>&1
+A member house dee >/dev/null 2>&1
+A bot bot-d --of dee >/dev/null 2>&1
+A member house bot-d >/dev/null 2>&1
+A access house dee domain pypi.org >/dev/null 2>&1
+check "agent-access: a member with a row gets it in resolve, beside their own" "[ \"\$(R dee 'd[\"access\"][\"domains\"]')\" = \"['pypi.org', 'registry.npmjs.org']\" ]"
+check "agent-access: so does a bot of the owner, and a bot of an invitee (cut to what the invitee holds)" "[ \"\$(R bot-k2 'd[\"access\"][\"domains\"]')\" = \"['registry.npmjs.org']\" ] && [ \"\$(R bot-d 'd[\"access\"][\"domains\"]')\" = \"['registry.npmjs.org']\" ]"
+check "agent-access: not the owner (nothing is boxed for them), not another agent's guests" "[ \"\$(R kai '\"access\" in d')\" = False ] && [ \"\$(A resolve garden --person dee | J 'd[\"allowed\"]')\" = False ]"
+check "agent-access: someone with no access to the agent gets none (not allowed)" "[ \"\$(R carl 'd[\"allowed\"], \"access\" in d')\" = '(False, False)' ]"
+check "agent-access: a revoked person gets none, and undo brings theirs back" "A member house hal >/dev/null && A person hal --revoke >/dev/null && [ \"\$(R hal 'd[\"allowed\"], \"access\" in d')\" = '(False, False)' ] && A person hal --unrevoke >/dev/null && [ \"\$(R hal 'd[\"access\"][\"domains\"]')\" = \"['registry.npmjs.org']\" ]"
+check "agent-access: the package's guest_domains reach garden's guests (the wildcard is dropped)" "[ \"\$(A agent-access garden --json | J '[(r[\"domain\"], r[\"by\"]) for r in d]')\" = \"[('pypi.org', 'package')]\" ]"
+check "agent-access: removing one person leaves it on the agent" "A person dee --rm >/dev/null && [ \"\$(A agent-access house --json | J 'len(d)')\" = 1 ]"
+check "agent-access: the ledger lists it under person *, with a key that removes it" "A ledger --json | J \"[(g['kind'], g['agent'], g['person'], g['target'], g['approved_by']) for g in d if g['person'] == '*' and g['agent'] == 'house'] == [('domain', 'house', '*', 'registry.npmjs.org', 'owner')]\" | grep -qx True && A ledger --rm 'domain:house:*:registry.npmjs.org' && [ \"\$(A agent-access house --json)\" = '[]' ]"
+check "agent-access: --rm of a host not there is quiet; a package host can't be removed by ledger" "A agent-access house domain nowhere.org --rm && ! A ledger --rm 'domain:garden:*:pypi.org'"
+check "old data: an auth.json with no agent_access reads as none" "A agent-access house --json | grep -qx '\[\]'"
+rm -f "$KITH_HOME/agents/garden/role/capabilities.yaml"
 exit $fail
