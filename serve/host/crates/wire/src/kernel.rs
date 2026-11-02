@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "4233332e6534aa8c92ea8d7621fd691f70ea94e6d6cb7363df97f05709e1a543";
+pub const CONTRACT_SHA256: &str = "685a997958583cf5dd7e1290acd688c03c74ca39960db7738b982e11232cf0c1";
 
 /// The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, and codex for a backup entry. One this version doesn't know is its own state: the host doesn't start it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -109,7 +109,7 @@ impl DelegationState {
     }
 }
 
-/// One agent in `kith ls --json`. `home` is its folder, where its bot works. A kernel from before `harness` was listed runs every agent on Claude.
+/// One agent in `kith ls --json`. `home` is its folder, where its bot works. A kernel from before `harness` was listed runs every agent on Claude. `builtin` is true for an agent that ships with kith (like scratch): never backed up or shared; older kernels leave it out.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct Agent {
     pub name: String,
@@ -121,6 +121,8 @@ pub struct Agent {
     pub effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<Harness>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub builtin: Option<bool>,
 }
 
 /// `kith project ls --json`: every registered project, sorted by id.
@@ -294,7 +296,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::EnumSchema { name: "DelegationState", values: &["open", "answered", "capped", "stopped"], unknown: "unknown" },
     ],
     types: &[
-        crate::check::TypeSchema { name: "Agent", fields: &[("name", "string"), ("description", "string"), ("home", "string"), ("model", "string?"), ("effort", "string?"), ("harness", "Harness?")], may_omit: &[] },
+        crate::check::TypeSchema { name: "Agent", fields: &[("name", "string"), ("description", "string"), ("home", "string"), ("model", "string?"), ("effort", "string?"), ("harness", "Harness?"), ("builtin", "bool?")], may_omit: &[] },
         crate::check::TypeSchema { name: "Projects", fields: &[("projects", "[Project]")], may_omit: &[] },
         crate::check::TypeSchema { name: "Project", fields: &[("id", "string"), ("paths", "[string]"), ("home", "string?"), ("remotes", "[string]"), ("parent", "string?"), ("memory", "string"), ("exists", "bool")], may_omit: &[] },
         crate::check::TypeSchema { name: "Launch", fields: &[("version", "int"), ("agent", "string"), ("agent_version", "string"), ("harness", "Harness?"), ("cwd", "string"), ("env", "{string}"), ("system_prompt", "string"), ("settings", "json?"), ("mcp_servers", "json"), ("add_dirs", "[string]"), ("allowed_tools", "[string]"), ("disable_slash_commands", "bool"), ("model", "string?"), ("effort", "string?"), ("project", "string?"), ("call_model", "string?"), ("permission_mode", "PermissionMode?"), ("cost_tag", "CostTag"), ("claude_args", "[string]?"), ("backup", "string?"), ("provider", "Harness?"), ("account", "string?"), ("account_id", "string?")], may_omit: &[] },

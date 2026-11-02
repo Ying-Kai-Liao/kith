@@ -337,7 +337,10 @@ async fn run_bound(
         .await
         .map_err(|_| anyhow!("`{shown}` took longer than {}s", budget.as_secs()))??;
     if !status.success() {
-        let why = stderr.trim();
+        // A `--json` command reports its refusal as {"ok": false, "error"} on stdout and leaves stderr empty.
+        let said =
+            serde_json::from_str::<Value>(stdout.trim()).ok().and_then(|v| v["error"].as_str().map(str::to_owned));
+        let why = if stderr.trim().is_empty() { said.as_deref().unwrap_or("") } else { stderr.trim() };
         if person.is_some() && status.code() == Some(3) {
             // The kernel's text ends with the owner's command to raise a budget; the person gets the sentence only.
             let why = why.strip_prefix("kith: ").unwrap_or(why);
@@ -480,6 +483,19 @@ impl InfoRun {
     fn fresh(&self) -> bool {
         self.at.elapsed() < if self.info.is_ok() { INFO_FRESH } else { INFO_FAILED_FRESH }
     }
+}
+
+/// How long the connector, skill and market commands may take (a skill add or an install fetches from GitHub).
+const TOOLS_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// A `kith … --json` command that grants, lists or installs (connect, skill add, market, install…): its JSON answer,
+/// passed through as the CLI printed it. `args` must already end in `--json`; the caller builds them from checked parts.
+pub async fn json_cmd(args: &[&str]) -> Result<Value> {
+    let Some(bin) = tokio::task::spawn_blocking(bin).await? else {
+        bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+    };
+    let out = run(&bin, args, None, TOOLS_TIMEOUT).await?;
+    serde_json::from_str(out.trim()).with_context(|| format!("`kith {}` didn't print JSON", args.join(" ")))
 }
 
 /// `kith <agent> set permission <mode>`: this Mac's permission mode for the agent, used by its next run from any

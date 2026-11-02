@@ -6,7 +6,8 @@
   kith-pkg pin <agent> [VERSION]            run this version until unpinned (default: the previous good one)
   kith-pkg unpin <agent>                    back to following the latest edits
   kith-pkg check <agent>                    validate the working copy without snapshotting it
-  kith-pkg set-harness <agent> <harness> [--model M]
+  kith-pkg set-harness <agent> <harness> [--model M] [--json]
+  kith-pkg set-field <agent> model|effort <value|default> [--json]
                                           run the agent on another harness (claude, codex, ...): writes harness: in
                                           agent.md and drops its model (a model of the old harness) unless --model
                                           gives one; committed like any edit (what kith <agent> set harness runs)
@@ -86,6 +87,7 @@ KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 from kith_paths import paths  # noqa: E402  the one place that knows where kith's folders are
 import kith_settings  # noqa: E402
+import kith_accounts  # noqa: E402
 # The state folder and the agents folder, <home>/state and <home>/agents (lib/kith_paths.py). Each agent's role/ is a git
 # checkout (or a symlink into one, for an agent that lives in a folder of a bigger repo).
 STATE_ROOT, AGENTS = paths()['KITH_STATE'], paths()['KITH_AGENTS']
@@ -638,7 +640,52 @@ def harness_names():
     return ('claude',)
 
 
-def cmd_set_harness(agent, harness, model=None):
+def set_result(agent, setting, value, previous, changed, as_json, text, **extra):
+    if as_json:
+        print(json.dumps({'agent': agent, 'setting': setting, 'value': value, 'previous': previous, 'changed': changed,
+                          **extra}))
+    else:
+        print(text)
+
+
+def cmd_set_field(agent, field, value, as_json=False):
+    """Write model: or effort: in agent.md's frontmatter ('default' or '' removes the line). No empty commit when it
+    already says that."""
+    value = '' if value == 'default' else value
+    if field == 'effort' and value and value not in EFFORTS:
+        die(f"effort {value!r} is not one of {', '.join(EFFORTS)} (default removes the line)", 2)
+    if field == 'model' and value and not re.fullmatch(r'[\w.:\[\]/-]+', value):
+        die(f'not a model name: {value!r}', 2)
+    home = agent_home(agent)
+    f = home / 'agent.md'
+    text = f.read_text()
+    m = re.match(r'^---\n(.*?)\n---\n?', text, re.S)
+    if not m:
+        die(f'{f}: no frontmatter')
+    fields = dict(re.findall(r'^([A-Za-z_-]+):\s*(.*)$', m.group(1), re.M))
+    harness = fields.get('harness') or 'claude'
+    harness = 'claude' if harness == 'claude-code' else harness
+    if field == 'model' and value and harness != 'claude' and kith_accounts.is_claude_model(value):
+        die(f"{value} is a Claude model and {agent} runs on {harness}; pick one of {harness}'s, or change the harness "
+            f'first: kith {agent} set harness claude --model {value}', 2)
+    old = fields.get(field, '')
+    keep = [x for x in m.group(1).split('\n') if not re.match(rf'^{field}:', x)]
+    if value:
+        at = len(keep)   # after the last of name/description/harness (and model, for effort), where agents keep it
+        for i, x in enumerate(keep):
+            if re.match(r'^(description|display_name|name|harness' + ('|model' if field == 'effort' else '') + '):', x):
+                at = i + 1
+        keep.insert(at, f'{field}: {value}')
+    new = '---\n' + '\n'.join(keep) + '\n---\n' + text[m.end():]
+    if new != text:
+        f.write_text(new)
+        commit(home, f'{agent}: {field} ' + (value or 'default'))
+    set_result(agent, field, value or None, old or None, new != text, as_json,
+               f'{agent}: {field} ' + (f'is {value}' if value else 'back to the default')
+               + (' (unchanged)' if new == text else '. The next run uses it.'))
+
+
+def cmd_set_harness(agent, harness, model=None, as_json=False):
     """Write harness: (and model:) in agent.md's frontmatter. A model always names a model of one harness, so changing
     the harness drops it unless a new one is given; the harness's own default answers then."""
     harness = 'claude' if harness == 'claude-code' else harness
@@ -647,6 +694,8 @@ def cmd_set_harness(agent, harness, model=None):
         die(f"unknown harness '{harness}'; one of: {', '.join(names)}", 2)
     if model is not None and not re.fullmatch(r'[\w.:\[\]/-]+', model):
         die(f"not a model name: {model!r}", 2)
+    if model and harness != 'claude' and kith_accounts.is_claude_model(model):
+        die(f"{model} is a Claude model and {harness} is not Claude: pick one of {harness}'s", 2)
     home = agent_home(agent)
     if builtin(home):
         die(f'{agent} is built in: its engine and model are picked per chat (kith {agent} -H HARNESS -m MODEL)')
@@ -669,14 +718,17 @@ def cmd_set_harness(agent, harness, model=None):
     add = ([f'harness: {harness}'] if harness != 'claude' else []) + ([f'model: {new_model}'] if new_model else [])
     keep[at:at] = add
     new = '---\n' + '\n'.join(keep) + '\n---\n' + text[m.end():]
+    extra = {'model': new_model or None, 'previous_model': old_model or None}
     if new == text:
-        print(f'{agent}: already on {harness}' + (f' ({new_model})' if new_model else ''))
+        set_result(agent, 'harness', harness, old, False, as_json,
+                   f'{agent}: already on {harness}' + (f' ({new_model})' if new_model else ''), **extra)
         return
     f.write_text(new)
     commit(home, f'{agent}: run on {harness}' + (f' ({new_model})' if new_model else ''))
     dropped = f'; dropped model {old_model} (a {old} model)' if old_model and not new_model else ''
-    print(f'{agent}: runs on {harness}' + (f', model {new_model}' if new_model else f", that harness's default model")
-          + dropped + '. The next run uses it.')
+    set_result(agent, 'harness', harness, old, True, as_json,
+               f'{agent}: runs on {harness}' + (f', model {new_model}' if new_model else f", that harness's default model")
+               + dropped + '. The next run uses it.', **extra)
 
 
 def cmd_promote(agent, skill):
@@ -1234,7 +1286,7 @@ def cmd_install_saved():
         if name in have:
             continue
         if not src.get('repo'):
-            print(f'{name}: never backed up, so it stays on the Mac it was made on (kith backup there brings it)', file=sys.stderr)
+            print(f'{name}: never backed up, so it stays on the Mac it was made on (kith backup run there brings it)', file=sys.stderr)
             continue
         repo = src['repo'] if os.path.isdir(src['repo']) else src['repo'].removesuffix('.git')   # a local repo stays a path
         link = repo + (f'/tree/HEAD/{src["path"]}' if src.get('path') else '')
@@ -1424,6 +1476,7 @@ def main(argv):
 
 
 def run(cmd, rest, as_json, argv):
+    global JSON_ERRORS
     if cmd == 'resolve':
         names = sorted(installed()) if rest == ['--all'] else rest[:1]
         if not names:
@@ -1461,7 +1514,11 @@ def run(cmd, rest, as_json, argv):
     elif cmd == 'deps' and rest:
         cmd_deps(sorted(installed()) if rest[0] == '--all' else rest[:1], '--install' in rest)
     elif cmd == 'set-harness' and len(rest) in (2, 4) and (len(rest) == 2 or rest[2] == '--model'):
-        cmd_set_harness(rest[0], rest[1], rest[3] if len(rest) == 4 else None)
+        JSON_ERRORS = as_json
+        cmd_set_harness(rest[0], rest[1], rest[3] if len(rest) == 4 else None, as_json)
+    elif cmd == 'set-field' and len(rest) == 3 and rest[1] in ('model', 'effort'):
+        JSON_ERRORS = as_json
+        cmd_set_field(rest[0], rest[1], rest[2], as_json)
     elif cmd == 'promote' and len(rest) == 2:
         cmd_promote(*rest)
     elif cmd == 'check' and rest[:1] == ['--share']:
