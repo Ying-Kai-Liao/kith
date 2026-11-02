@@ -324,5 +324,54 @@ printf '{"type":"user","cwd":"%s","message":{"content":"hi"}}\n' "$T/work" > "$M
 OUT=$(cd "$T" && "$KITH" echo --resume sess-work "go on" 2>/dev/null); rc=$?
 check "--resume finds a transcript in an extra account's folder and runs it there" "[ $rc = 0 ] && echo \"\$OUT\" | grep -q 'config=$M/accounts/claude/work .*resume=sess-work id=claude:work'"
 
+# --- a one-shot started by another run or a schedule walks the chain ------------------------------------------------------
+# Fake claude (FAKE_LIMIT_FOR=<config dir names>): a run on a listed account prints the weekly-limit line and exits 1.
+cat > "$T/bin/claude" <<'EOF2'
+#!/bin/sh
+case "$1 $2" in
+  "--version "*) echo "2.1.309 (Claude Code)" ;;
+  "plugin list") echo '[]' ;;
+  "auth status") [ -f "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.fake-login" ] && { echo '{"loggedIn":true}'; exit 0; }; echo '{"loggedIn":false}'; exit 1 ;;
+  *) who=$(basename "${CLAUDE_CONFIG_DIR:-default}")
+     case " ${FAKE_LIMIT_FOR:-} " in *" $who "*) echo "You've hit your weekly limit · resets 9pm"; exit 1 ;; esac
+     echo "ran-on=$who id=${KITH_ACCOUNT_ID:-}" ;;
+esac
+EOF2
+chmod +x "$T/bin/claude"
+"$KITH" account use --reset >/dev/null 2>&1; "$KITH" account use --reset --agent echo >/dev/null 2>&1
+mkdir -p "$HOME/.claude" "$M/accounts/claude/work" "$M/accounts/claude/school" "$M/serve"
+touch "$HOME/.claude/.fake-login" "$M/accounts/claude/work/.fake-login" "$M/accounts/claude/school/.fake-login"
+"$KITH" backup remove claude:work >/dev/null 2>&1; "$KITH" backup remove codex >/dev/null 2>&1; "$KITH" backup add claude:school >/dev/null 2>&1
+KOUT=$M/serve/kernel-backups-out.json; HOUT=$M/serve/backups.json
+chainrun() { KITH_AGENT=boss "$KITH" echo "hi" 2>"$T/err"; }
+rm -f "$KOUT" "$HOUT"
+OUT=$(chainrun); check "chain: nested one-shot, main ready: runs on main" "echo \"\$OUT\" | grep -q 'ran-on=default id=claude'"
+printf '{"claude":{"out_until":%s,"reason":"usage_95","since":1}}' $(( $(date +%s) + 3600 )) > "$HOUT"
+OUT=$(chainrun); check "chain: main out in the host's file: runs on the first ready entry" "echo \"\$OUT\" | grep -q 'ran-on=school id=claude:school'"
+printf '{"claude":{"out_until":%s,"reason":"usage_95","since":1}}' $(( $(date +%s) - 10 )) > "$HOUT"
+OUT=$(chainrun); check "chain: out_until passed: main is ready again" "echo \"\$OUT\" | grep -q 'ran-on=default'"
+printf 'not json' > "$HOUT"
+OUT=$(chainrun); check "chain: corrupt backups.json marks nothing out" "echo \"\$OUT\" | grep -q 'ran-on=default'"
+rm -f "$HOUT"
+OUT=$(FAKE_LIMIT_FOR=default chainrun); rc=$?
+check "chain: limit on main retries on the next entry; only the last attempt's stdout; stderr says so" "[ $rc = 0 ] && [ \"\$OUT\" = 'ran-on=school id=claude:school' ] && grep -q 'claude is out of usage; moving to claude:school' $T/err"
+check "chain: the exhausted entry is marked in the kernel's file, the host's untouched" "grep -q '\"claude\"' $KOUT && [ ! -e $HOUT ]"
+OUT=$(chainrun); check "chain: the next nested run skips the marked entry at once" "echo \"\$OUT\" | grep -q 'ran-on=school'"
+rm -f "$KOUT"
+OUT=$(FAKE_LIMIT_FOR="default school" chainrun); rc=$?
+check "chain: used up: exit 1 with the last attempt's failure" "[ $rc = 1 ] && echo \"\$OUT\" | grep -q 'hit your weekly limit'"
+rm -f "$KOUT"; "$KITH" backup add claude:gone >/dev/null 2>&1
+OUT=$(FAKE_LIMIT_FOR=default chainrun); rc=$?
+check "chain: an entry that can't run (no login) is skipped" "[ $rc = 0 ] && echo \"\$OUT\" | grep -q 'ran-on=school'"
+"$KITH" backup remove claude:gone >/dev/null 2>&1
+rm -f "$KOUT"
+OUT=$(FAKE_LIMIT_FOR=default KITH_AGENT=boss "$KITH" echo --backup claude "hi" 2>/dev/null); rc=$?
+check "explicit --backup is untouched: no retry" "[ $rc = 1 ] && echo \"\$OUT\" | grep -q 'hit your weekly limit' && [ ! -e $KOUT ]"
+OUT=$(FAKE_LIMIT_FOR=default "$KITH" echo "hi" 2>/dev/null); rc=$?
+check "owner run from a terminal (no KITH_AGENT): untouched" "[ $rc = 1 ] && [ ! -e $KOUT ]"
+OUT=$(FAKE_LIMIT_FOR=default KITH_BACKUP_CHAIN=on "$KITH" echo "hi" 2>/dev/null)
+check "KITH_BACKUP_CHAIN (schedules, kith ask) turns it on" "echo \"\$OUT\" | grep -q 'ran-on=school'"
+rm -f "$KOUT"; "$KITH" backup remove claude:school >/dev/null 2>&1
+
 echo
 if [ $fails = 0 ]; then echo "all passed"; else echo "$fails failed"; exit 1; fi
