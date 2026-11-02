@@ -193,6 +193,7 @@ jobs:
               Contract check (what the host reads, serve/contract/kernel)|kernel/tests/kith-contract-check
               Serve check|kernel/tests/kith-serve-check
               Info check|kernel/tests/kith-info-check
+              Harness check (kith <agent> set harness, no Claude model on another harness)|kernel/tests/kith-harness-check
               Unknown agent check|kernel/tests/kith-unknown-agent-check
               Self-update check|kernel/tests/kith-self-update-check
               Pkg EINTR check|kernel/tests/kith-pkg-eintr-check
