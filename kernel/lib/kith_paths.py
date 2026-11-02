@@ -296,3 +296,4 @@ if __name__ == '__main__':
         print(json.dumps(p))
     else:
         print('\n'.join('%-15s %s' % kv for kv in p.items()))
+# throwaway: CI timing probe

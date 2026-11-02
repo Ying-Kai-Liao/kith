@@ -67,14 +67,12 @@ jobs:
               - 'kernel/**'
               - 'serve/contract/kernel/**'
               - 'scripts/ci/**'
-              - '.github/workflows/ci.yml'
             # The kernel files the host's own unit tests run for real (the list: scripts/ci/host-kernel-tests.txt). A
             # change here runs only those tests (host-kernel), not the whole host suite.
             kernel_host:
               - 'kernel/bin/**'
               - 'kernel/lib/**'
               - 'scripts/ci/**'
-              - '.github/workflows/ci.yml'
             licenses:
               - '**/Cargo.lock'
               - '**/package-lock.json'
@@ -87,7 +85,6 @@ jobs:
               - 'apps/packaging/cua-driver/LICENSE'
               - 'apps/ios/Kit/Sources/KithKit/Resources/ThirdPartyNotices/**'
               - 'apps/ios/Kit/Sources/KithUI/Resources/Mermaid/**'
-              - '.github/workflows/ci.yml'
             # The TLA+ model of one writer per thread and the code it covers (the list in the thread-writers skill).
             threads:
               - 'verification/threads/**'
@@ -101,7 +98,6 @@ jobs:
               - 'serve/host/src/api/botguests.rs'
               - 'serve/host/src/agent/bot/**'
               - 'serve/host/src/hub/actors.rs'
-              - '.github/workflows/ci.yml'
             # The TLA+ model of revoking a person and the code it covers (the list in the revoke-access skill).
             revoke:
               - 'verification/revoke/**'
@@ -114,7 +110,6 @@ jobs:
               - 'serve/host/src/remote/**'
               - 'serve/cloud/src/routes/invites.ts'
               - 'serve/cloud/src/routes/host.ts'
-              - '.github/workflows/ci.yml'
             # The TLA+ model of one secret card's steps and the code it covers (the list in the secret-cards skill).
             secrets:
               - 'verification/secrets/**'
@@ -127,7 +122,6 @@ jobs:
               - 'serve/host/src/api/bots.rs'
               - 'serve/host/src/api/roles.rs'
               - 'kernel/bin/kith-auth'
-              - '.github/workflows/ci.yml'
       # 'every': a file must match the whole list, so each filter is one brace pattern plus a markdown
       # exclusion. A docs-only change then runs no heavy job. The only markdown that ships is
       # apps/ios/WhatsNew.md (an iOS resource), so ios excludes just READMEs.
@@ -137,39 +131,39 @@ jobs:
           predicate-quantifier: every
           filters: |
             host:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**}'
               - '!**/*.md'
             # What the root crate builds from: the host and the memory and wire crates, not guest or tts, which
             # nothing in the host depends on. Those two get their own small job (host-crates). The kernel's bin and lib
             # are not here: the host tests that run them are the host-kernel job (filter kernel_host above).
             host_core:
-              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
               - '!**/*.md'
             cloud:
-              - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
+              - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**}'
               - '!**/*.md'
             relay:
-              - '{serve/relay/**,.github/workflows/ci.yml}'
+              - '{serve/relay/**}'
               - '!**/*.md'
             ios:
-              - '{apps/ios/**,apps/shared/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/contract/**,.github/workflows/ci.yml}'
+              - '{apps/ios/**,apps/shared/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/contract/**}'
               - '!**/README.md'
             desktop:
-              - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,.github/workflows/ci.yml}'
+              - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**}'
               - '!**/*.md'
             # The static Linux client (kith-guest) and the scripts and workflow that package and install it.
             guest_linux:
-              - '{serve/host/crates/guest/**,serve/host/crates/wire/**,serve/contract/**,serve/host/Cargo.lock,serve/rust-toolchain.toml,scripts/package-guest.sh,scripts/install-guest.sh,scripts/smoke-guest.sh,.github/workflows/release.yml,.github/workflows/ci.yml}'
+              - '{serve/host/crates/guest/**,serve/host/crates/wire/**,serve/contract/**,serve/host/Cargo.lock,serve/rust-toolchain.toml,scripts/package-guest.sh,scripts/install-guest.sh,scripts/smoke-guest.sh,.github/workflows/release.yml}'
               - '!**/*.md'
             # The real kith-guest against a real kith-serve and wrangler dev (apps/desktop/tools/relay-e2e-bot.ts).
             bot_e2e:
-              - '{serve/host/**,serve/cloud/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/kith-auth,apps/desktop/tools/relay-e2e-host.ts,apps/desktop/tools/relay-e2e-bot.ts,.github/workflows/ci.yml}'
+              - '{serve/host/**,serve/cloud/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/kith-auth,apps/desktop/tools/relay-e2e-host.ts,apps/desktop/tools/relay-e2e-bot.ts}'
               - '!**/*.md'
             # The e2e also runs serve/cloud's wrangler dev, so cloud changes trigger it (not the macOS desktop job).
             e2e:
-              - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,serve/cloud/**,.github/workflows/ci.yml}'
+              - '{apps/desktop/**,apps/packaging/**,apps/shared/**,apps/screen-macos/**,apps/Kith.xcodeproj/**,apps/project.yml,serve/host/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,serve/cloud/**}'
               - '!**/*.md'
   # The kernel's own checks in three parallel shards, balanced by measured time (about 2.5 minutes each). Every check
   # runs exactly once; a shard runs all its checks even after one fails, then fails naming each failed check.
