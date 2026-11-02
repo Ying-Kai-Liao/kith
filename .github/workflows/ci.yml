@@ -194,6 +194,8 @@ jobs:
         run: kernel/tests/kith-harness-check
       - name: Agent set check (kith <agent> set model|effort, --json, a model per backup entry)
         run: kernel/tests/kith-agent-set-check
+      - name: Schedule json check (kith schedule ls|add|rm|pause|resume|run|log --json, the error object)
+        run: kernel/tests/kith-sched-json-check
       - name: New check (kith new --json - the agent made, or the error object and no folder left)
         run: kernel/tests/kith-new-check
       - name: "Pkg json check (kith versions, history, pin, unpin, restore, install, share, deps, update, push, commit --json)"
