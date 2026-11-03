@@ -613,10 +613,10 @@ if [[ $p_owner == 0 ]]; then
   [[ $harness == claude ]] \
     || { echo "kith: $agent for ${KITH_PERSON}: runs for anyone but the owner need Claude Code (path rules), not $harness" >&2; exit $([[ -n $backup ]] && echo 4 || echo 3); }
   # Their reads are an allowlist (permissions.blockReadsOutsideWorkingDirectories for the file tools, sandbox denyRead of
-  # the home folder for Bash), which Claude Code enforces from 2.1.257: an older or unreadable version is no run at all.
+  # the home folder for Bash, and onFailure: block on the read hook, which Claude Code has from 2.1.295: an older or unreadable version is no run at all.
   cv=$(claude --version 2>/dev/null | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
-  [[ -n $cv && $(printf '%s\n2.1.257\n' "$cv" | sort -V | head -1) == 2.1.257 ]] \
-    || { echo "kith: runs for anyone but the owner need Claude Code 2.1.257 or newer (read limits); Claude Code is ${cv:+version $cv}${cv:-missing or gives no version}" >&2; exit $([[ -n $backup ]] && echo 4 || echo 3); }
+  [[ -n $cv && $(printf '%s\n2.1.295\n' "$cv" | sort -V | head -1) == 2.1.295 ]] \
+    || { echo "kith: runs for anyone but the owner need Claude Code 2.1.295 or newer (read limits); Claude Code is ${cv:+version $cv}${cv:-missing or gives no version}" >&2; exit $([[ -n $backup ]] && echo 4 || echo 3); }
   # They see this agent's own life only: every other agent's folder and the owner's user.md are denied by path
   # (logical and resolved), on top of the narrower directories below.
   for d in "$KITH_AGENTS"/*/; do
@@ -1018,7 +1018,17 @@ for d in os.environ["READ_DIRS"].split("\n"):
             r = "Edit(/%s/**)" % x
             if r not in deny:
                 deny.append(r)
-s["permissions"]["blockReadsOutsideWorkingDirectories"] = True
+# The file tools stay inside the same folders through a PreToolUse hook (lib/kith_readfence.py), not through
+# permissions.blockReadsOutsideWorkingDirectories: that setting makes Claude Code ask for every Bash command it cannot
+# trace (a cd followed by an export), whatever a hook says, and each ask was a card to the owner. Bash is fenced by the
+# sandbox above.
+import shlex
+fence_roots = [x for d in os.environ["READ_DIRS"].split("\n") + [os.environ.get("WORK", ""), os.environ.get("CTMP", "")] if d for x in both(os.path.abspath(d))]
+fence = "out=$(python3 -I %s/lib/kith_readfence.py %s) || out=%s; printf %%s \"$out\"" % (
+    shlex.quote(os.environ["KITH_ROOT"]), " ".join("--root " + shlex.quote(r) for r in dict.fromkeys(fence_roots)),
+    shlex.quote(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                   "permissionDecisionReason": "the read check could not run, so this read is refused"}})))
+s["hooks"].setdefault("PreToolUse", []).append({"matcher": "Read|Grep|Glob|LS|NotebookRead", "hooks": [{"type": "command", "command": fence, "timeout": 30, "onFailure": "block"}]})
 # The tool reads the owner global config (name, email, credential helpers), which sits in the closed home folder and
 # makes it fail outright when it cannot be read: point it at nothing instead.
 s.setdefault("env", {})["GIT_CONFIG_GLOBAL"] = "/dev/null"
