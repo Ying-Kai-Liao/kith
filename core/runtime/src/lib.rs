@@ -77,6 +77,12 @@ pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
     embedded_with(&Layout::new(&paths.machine), MIGRATIONS)
 }
 
+/// Points the kernel's notes (a lock or write it could not do and carried on) at the core log for the rest of this
+/// process: a kernel verb that does not go through the core (`kernel accounts`) calls this itself.
+pub fn route_kernel_notes(paths: &Paths) {
+    log::route_kernel_notes(&paths.logs);
+}
+
 /// Runs a verb that touches NO core state (paths, engines, launch today) inside an embedded core, so the verbs already
 /// switched to Rust go through the core's lock and checks. A verb that reads or writes core state must use
 /// [`open_embedded`], which refuses instead of falling back. This helper goes when M0b/M0c give those verbs the

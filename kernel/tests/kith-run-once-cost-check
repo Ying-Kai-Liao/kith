@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# kith-run-once-cost-check — a one-shot over ACP that crashes or times out still reports what the engine had spent:
+# `kith kernel run-once --json` puts cost_usd in its error, harness.py takes it into the result (total_cost_usd), so
+# kith ask settles it and a delegation's cap counts it. An older host binary sends none: no cost, no crash.
+# Also: `kith kernel accounts` notes reach core.log.
+# Needs the Rust kith program (KITH_BIN, else a build under CARGO_TARGET_DIR / serve/host/target, before any installed one); skips without one.
+#
+#   kernel/tests/kith-run-once-cost-check     a few seconds; exits 1 when a check fails
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+BIN=$(KITH_DEV_BIN=1 KITH_CORE=rust python3 "$KERNEL/lib/kith_paths.py" --bin)
+if [ -z "$BIN" ]; then echo "skip: no Rust kith program (build serve/host or set KITH_BIN)"; exit 0; fi
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-run-once-cost-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_BIN=$BIN KITH_CORE=rust
+unset KITH_PERSON KITH_AGENT KITH_HARNESS KITH_MODEL KITH_EFFORT HQ_HOME HQ_STATE CODEX_HOME
+mkdir -p "$HOME" "$KITH_HOME" "$KITH_STATE" "$T/bin"
+cp "$KERNEL/tests/difftest/fakes/qwen" "$T/bin/qwen"   # `qwen --acp` is the fake ACP agent
+mkdir -p "$T/fakes" && cp "$KERNEL/tests/fakes/fake-acp-agent" "$T/fakes/"
+sed -i.bak "s#/../../fakes/fake-acp-agent#/../fakes/fake-acp-agent#" "$T/bin/qwen"
+export PATH=$T/bin:$PATH
+echo "You echo." > "$T/prompt.md"; export KITH_RUN_PROMPT=$T/prompt.md
+
+fails=0
+check() { if eval "$2"; then echo "ok   $1"; else echo "FAIL $1"; fails=$((fails + 1)); fi; }
+# prints "<is_error> <total_cost_usd>" of the run's last JSON line
+run() {
+  python3 "$KERNEL/adapters/harness.py" qwen --output json -- hello 2>"$T/err" |
+    python3 -c 'import json,sys; d=json.loads(sys.stdin.read().splitlines()[-1]); print(d["is_error"], d["total_cost_usd"])'
+}
+
+check "a crash after 0.25 spent: an error that carries the cost (kith ask settles it)" "[ \"\$(FAKE_ACP_MODE=crash FAKE_ACP_COST=0.25 run)\" = 'True 0.25' ]"
+check "a crash with nothing spent: an error, no cost, no traceback" "[ \"\$(FAKE_ACP_MODE=crash run)\" = 'True None' ]"
+check "a good run still reports its cost" "[ \"\$(FAKE_ACP_COST=0.25 run)\" = 'False 0.25' ]"
+
+# `kith kernel accounts` exits before the verbs that run through the core, yet its notes (a state write or a settings
+# migration it could not do) still go to core.log: the hook is set once for every kernel verb.
+if [ "$(id -u)" != 0 ]; then
+  mkdir -p "$KITH_STATE/logs"
+  chmod 500 "$KITH_STATE"   # the verb can't make its lock file
+  "$BIN" kernel accounts list >/dev/null 2>&1
+  chmod 700 "$KITH_STATE"
+  check "kernel accounts: a note the verb could not write reaches core.log" "grep -q 'settings migration' '$KITH_STATE/logs/core.log'"
+fi
+
+[ "$fails" = 0 ]
