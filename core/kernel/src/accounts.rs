@@ -1,7 +1,9 @@
-//! Accounts: what a backup-chain entry or a main account means, whether it is ready, and the environment it launches
-//! with. A port of the read side of `kernel/lib/kith_accounts.py` (named logins, the backup chain, per-account env),
-//! which stays the source of truth while the Python path is the default; `kernel/tests/difftest` fails when the two
-//! differ. Reads only: `kith account add|use|remove` and `kith backup add|remove|set|reset` stay Python.
+//! Accounts: the managed set (policy, pins, the state file), what an account id means, whether it is ready, which one a
+//! run starts on (`pick`), and the environment it launches with. A port of the read side of `kernel/lib/kith_accounts.py`
+//! and the account part of `kernel/lib/kith_settings.py`, which stay the source of truth; `kernel/tests/difftest` fails
+//! when the two differ. What it writes is what a run writes: `last_started` in the state file (and a legacy file's marks
+//! imported into it), a Claude account's folder made to mirror the main login, and `kith account list` migrating an old
+//! settings file. `kith account add|use|remove|pin|out|clear|usage ...` and `kith backup ...` stay Python.
 //!
 //! Everything outside the file system goes through [`Outside`] (a harness's status command, the `kith-auth granted`
 //! lookup, a program on PATH), so each rule is tested in a tempdir with fakes. No token, credential file or Keychain
@@ -14,6 +16,19 @@ use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+
+mod clock;
+mod listing;
+mod mirror;
+mod pick;
+mod pyjson;
+pub mod settings;
+mod state;
+
+pub use pick::Pick;
+pub use settings::read_settings;
+
+type Map = serde_json::Map<String, Value>;
 
 /// How long a harness status command or the grants lookup may take (`STATUS_TIMEOUT`).
 const STATUS_TIMEOUT: Duration = Duration::from_secs(20);
@@ -39,6 +54,10 @@ pub struct Ctx<'a> {
     pub agents: PathBuf,
     /// The kernel folder (`bin/kith-auth` is named in an API-key entry's helper command).
     pub kernel: PathBuf,
+    /// The user's home folder (`~`): the main Claude login's folder is `~/.claude`.
+    pub home: PathBuf,
+    /// `CLAUDE_CONFIG_DIR` as the run sees it: the main login's folder when it is set and is not one of the accounts' own.
+    pub claude_config_dir: Option<String>,
     pub out: &'a dyn Outside,
 }
 
@@ -124,6 +143,8 @@ pub enum J {
     Str(String),
     Arr(Vec<J>),
     Obj(Vec<(&'static str, J)>),
+    /// A value read from a file or built as JSON, printed as it is.
+    Val(Value),
 }
 
 impl J {
@@ -149,7 +170,8 @@ impl J {
             J::Int(n) => {
                 let _ = write!(out, "{n}");
             }
-            J::Str(s) => quote(s, out),
+            J::Str(s) => pyjson::quote(s, out),
+            J::Val(v) => out.push_str(&pyjson::dumps(v)),
             J::Arr(items) => {
                 out.push('[');
                 for (i, v) in items.iter().enumerate() {
@@ -166,7 +188,7 @@ impl J {
                     if i > 0 {
                         out.push_str(", ");
                     }
-                    quote(k, out);
+                    pyjson::quote(k, out);
                     out.push_str(": ");
                     v.write(out);
                 }
@@ -174,29 +196,6 @@ impl J {
             }
         }
     }
-}
-
-fn quote(s: &str, out: &mut String) {
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            '\u{8}' => out.push_str("\\b"),
-            '\u{c}' => out.push_str("\\f"),
-            c if (' '..='~').contains(&c) => out.push(c),
-            c => {
-                let mut units = [0u16; 2];
-                for u in c.encode_utf16(&mut units) {
-                    let _ = write!(out, "\\u{u:04x}");
-                }
-            }
-        }
-    }
-    out.push('"');
 }
 
 /// `shlex.quote`.
@@ -267,7 +266,7 @@ pub fn parse(entry: &str) -> Result<(String, Option<String>), String> {
     });
     if !harness_ok || !name_ok {
         return Err(format!(
-            "'{base}' is not a backup id: use <harness> or <harness>:<name>, with @<model> for a model of its own \
+            "'{base}' is not an account id: use <harness> or <harness>:<name>, with @<model> for a model of its own \
              (claude, claude:work, claude@sonnet, claude-api:main, codex)"
         ));
     }
@@ -299,11 +298,11 @@ pub fn check_entry_model(entry: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// An error unless `entry` can be the main account of an agent on `harness`.
+/// An error unless `entry` can be the pinned account of an agent on `harness`.
 pub fn check_main(entry: &str, harness: &str) -> Result<(), String> {
     if split(entry).1.is_some() {
         return Err(format!(
-            "{entry}: a main account takes no @model (the agent's own model applies); @model is for backups"
+            "{entry}: a pinned account takes no @model (the agent's own model applies); @model is for backups"
         ));
     }
     let (h, _) = parse(entry)?;
@@ -319,121 +318,11 @@ pub fn check_main(entry: &str, harness: &str) -> Result<(), String> {
             })
             .collect();
         return Err(format!(
-            "{entry} can't be the main account of a {harness} agent: use {} or <harness>:<name> of those (a backup can be of another harness)",
+            "{entry} can't be the account of a {harness} agent: use {} or <harness>:<name> of those",
             ok.join(", ")
         ));
     }
     Ok(())
-}
-
-// --- settings ---------------------------------------------------------------------------------------------------------
-
-type Map = serde_json::Map<String, Value>;
-
-fn valid_limit(v: &Value) -> bool {
-    v.is_number() && v.as_f64().is_some_and(|n| n > 0.0 && n < 1e7)
-}
-
-/// Whether one level of `settings.json` (the file, or one agent) is usable, as `kith_settings.read` checks it.
-fn level_ok(d: &Map) -> bool {
-    match d.get("backups") {
-        None => {}
-        Some(Value::Array(b)) if b.iter().all(Value::is_string) => {}
-        Some(_) => return false,
-    }
-    if d.get("account")
-        .is_some_and(|a| a.as_str().is_none_or(str::is_empty))
-    {
-        return false;
-    }
-    if let Some(m) = d.get("permission_mode") {
-        // a retired mode reads as the mode that replaced it
-        let current = m.as_str().map(|m| match m {
-            "manual" => "default",
-            "dontAsk" => "auto",
-            m => m,
-        });
-        if !current.is_some_and(|m| {
-            [
-                "default",
-                "acceptEdits",
-                "plan",
-                "auto",
-                "bypassPermissions",
-            ]
-            .contains(&m)
-        }) {
-            return false;
-        }
-    }
-    if d.get("at_limit").is_some_and(|a| {
-        a.as_str()
-            .is_none_or(|a| !["ask", "tell", "hold"].contains(&a))
-    }) {
-        return false;
-    }
-    d.get("limit").is_none_or(valid_limit)
-}
-
-/// What `settings.json` sets (`kith_settings.read`): nothing when the file is missing or can't be used.
-pub fn read_settings(machine: &Path) -> Map {
-    let Ok(text) = std::fs::read_to_string(machine.join("settings.json")) else {
-        return Map::new();
-    };
-    let Ok(Value::Object(s)) = serde_json::from_str::<Value>(&text) else {
-        return Map::new();
-    };
-    let no_agents = Map::new();
-    let agents = match s.get("agents") {
-        None => &no_agents,
-        Some(Value::Object(a)) if a.values().all(Value::is_object) => a,
-        Some(_) => return Map::new(),
-    };
-    if s.get("plugins")
-        .is_some_and(|p| !p.as_array().is_some_and(|p| p.iter().all(Value::is_string)))
-    {
-        return Map::new();
-    }
-    if !level_ok(&s) || !agents.values().all(|a| a.as_object().is_some_and(level_ok)) {
-        return Map::new();
-    }
-    match s.get("delegation") {
-        None => {}
-        Some(Value::Object(d)) => {
-            if d.get("chain_cost_cap_usd")
-                .is_some_and(|c| c.as_str() != Some("none") && !valid_limit(c))
-            {
-                return Map::new();
-            }
-        }
-        Some(_) => return Map::new(),
-    }
-    s
-}
-
-fn agent_settings<'a>(s: &'a Map, agent: &str) -> Option<&'a Map> {
-    if agent.is_empty() {
-        return None;
-    }
-    s.get("agents")?.get(agent)?.as_object()
-}
-
-/// The backup chain that applies to the agent: its own list, else the global one (`kith_settings.backups`).
-pub fn backups(machine: &Path, agent: &str) -> Vec<String> {
-    let s = read_settings(machine);
-    let list = |v: &Value| {
-        v.as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|i| i.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    match agent_settings(&s, agent).and_then(|a| a.get("backups")) {
-        Some(own) => list(own),
-        None => s.get("backups").map(list).unwrap_or_default(),
-    }
 }
 
 // --- the agent ----------------------------------------------------------------------------------------------------------
@@ -471,34 +360,98 @@ pub fn agent_harness(agent_md: Option<&Path>) -> String {
     }
 }
 
-/// The agent's main account id: its own setting, else the global one, when of the agent's harness family; else the
-/// harness itself (its default login).
+// --- the managed set ------------------------------------------------------------------------------------------------------
+
+/// Whether account id `entry` is of `harness`'s family (the model is not part of it: `claude@sonnet` is a Claude account).
+fn in_family(entry: &str, harness: &str) -> bool {
+    family(harness).contains(&split(entry).0.split(':').next().unwrap_or_default())
+}
+
+/// The agent's pin, then the accounts of its own harness family in set order, then those of other harnesses in set order.
+/// Accounts of another harness count only when the agent's own list names them, or cross-harness fallback is on for it.
+/// The agent's own list when it has one, else the global set. Without any account of the family: the harness's default
+/// login, unless the agent's own list is explicitly empty (then the pin, if any, is all there is).
+pub struct Layout {
+    pub pin: Option<settings::Pin>,
+    pub own: Vec<String>,
+    pub foreign: Vec<String>,
+}
+
+pub fn layout(s: &Map, agent: &str, harness: &str) -> Layout {
+    let (ids, wher) = settings::accounts(s, agent);
+    let ids = ids.unwrap_or_default();
+    // a hand-edited pin the agent's harness can't use is none
+    let pin = settings::pin(s, agent).filter(|p| check_main(&p.id, harness).is_ok());
+    let mut own: Vec<String> = ids
+        .iter()
+        .filter(|i| in_family(i, harness))
+        .cloned()
+        .collect();
+    let mut foreign: Vec<String> = if wher == "agent" || settings::cross_harness(s, agent) {
+        ids.iter()
+            .filter(|i| !in_family(i, harness))
+            .cloned()
+            .collect()
+    } else {
+        vec![]
+    };
+    if own.is_empty() && !(wher == "agent" && ids.is_empty() && pin.is_some()) {
+        own = vec![harness.to_owned()];
+    }
+    if let Some(p) = &pin {
+        own.retain(|i| *i != p.id);
+        foreign.retain(|i| *i != p.id);
+    }
+    Layout { pin, own, foreign }
+}
+
+/// The agent's accounts as the settings say, the same on every call: the pin first (alone when it is "only"), then its own
+/// harness family, then other harnesses.
+pub fn static_order(
+    s: &Map,
+    agent: &str,
+    harness: &str,
+) -> (Vec<String>, Option<settings::Pin>) {
+    let l = layout(s, agent, harness);
+    match l.pin {
+        Some(p) if p.only => (vec![p.id.clone()], Some(p)),
+        Some(p) => {
+            let order = std::iter::once(p.id.clone())
+                .chain(l.own)
+                .chain(l.foreign)
+                .collect();
+            (order, Some(p))
+        }
+        None => (l.own.into_iter().chain(l.foreign).collect(), None),
+    }
+}
+
+/// The harness the agent runs on: `harness` when given, else what `agent_md` (or the agent's own `agent.md`) names.
+fn harness_for(
+    ctx: &Ctx<'_>,
+    agent: &str,
+    agent_md: Option<&Path>,
+    harness: Option<&str>,
+) -> String {
+    match harness {
+        Some(h) if !h.is_empty() => h.to_owned(),
+        _ => match agent_md {
+            Some(p) if !p.as_os_str().is_empty() => agent_harness(Some(p)),
+            _ => agent_harness(agent_md_of(ctx, agent).as_deref()),
+        },
+    }
+}
+
+/// The account the agent's runs start on when nothing is out: the first of its static order.
 pub fn main_id(
     ctx: &Ctx<'_>,
     agent: &str,
     agent_md: Option<&Path>,
     harness: Option<&str>,
 ) -> String {
-    let own = match harness {
-        Some(h) if !h.is_empty() => h.to_owned(),
-        _ => match agent_md {
-            Some(p) if !p.as_os_str().is_empty() => agent_harness(Some(p)),
-            _ => agent_harness(agent_md_of(ctx, agent).as_deref()),
-        },
-    };
-    let s = read_settings(&ctx.machine);
-    let candidates = [
-        agent_settings(&s, agent).and_then(|a| a.get("account")),
-        s.get("account"),
-    ];
-    for entry in candidates.into_iter().flatten() {
-        if let Some(e) = entry.as_str().filter(|e| !e.is_empty())
-            && check_main(e, &own).is_ok()
-        {
-            return e.to_owned();
-        }
-    }
-    own
+    let own = harness_for(ctx, agent, agent_md, harness);
+    let s = settings::read(ctx);
+    static_order(&s, agent, &own).0.swap_remove(0)
 }
 
 // --- readiness ----------------------------------------------------------------------------------------------------------
@@ -647,30 +600,30 @@ fn entry_json(ctx: &Ctx<'_>, entry: &str, agent: &str, primary: bool) -> Result<
     Ok(J::Obj(f))
 }
 
-/// `backups-json`: the chain for `kith AGENT --backups-json`, the main account first.
+/// `backups-json`: the agent's accounts as a chain for `kith AGENT --backups-json`, the older view the host still reads:
+/// its static order (pin first, then its set), entry 0 the primary. No state in it.
 pub fn chain(ctx: &Ctx<'_>, agent: &str, agent_md: &Path) -> J {
-    let ids = backups(&ctx.machine, agent);
-    let main = main_id(ctx, agent, Some(agent_md), None);
-    let mut items = vec![entry_json(ctx, &main, agent, true).unwrap_or(J::Null)];
-    let mut seen = vec![main];
-    for i in ids {
-        if seen.contains(&i) {
-            continue; // the main account, or an id listed twice: an account is in the chain once
-        }
-        seen.push(i.clone());
-        // a hand-edited bad id: listed as not ready rather than failing the whole chain
-        items.push(entry_json(ctx, &i, agent, false).unwrap_or_else(|e| {
-            J::Obj(vec![
-                ("id", J::Str(i.clone())),
-                ("harness", J::Null),
-                ("account", J::Null),
-                ("model", J::Null),
-                ("kind", J::s("unknown")),
-                ("ready", J::Bool(false)),
-                ("why", J::Str(e)),
-            ])
-        }));
-    }
+    let harness = agent_harness(Some(agent_md));
+    let s = settings::read(ctx);
+    let (ids, _) = static_order(&s, agent, &harness);
+    let items = ids
+        .iter()
+        .enumerate()
+        .map(|(n, i)| {
+            // a hand-edited bad id: listed as not ready rather than failing the whole chain
+            entry_json(ctx, i, agent, n == 0).unwrap_or_else(|e| {
+                J::Obj(vec![
+                    ("id", J::Str(i.clone())),
+                    ("harness", J::Null),
+                    ("account", J::Null),
+                    ("model", J::Null),
+                    ("kind", J::s("unknown")),
+                    ("ready", J::Bool(false)),
+                    ("why", J::Str(e)),
+                ])
+            })
+        })
+        .collect();
     J::Obj(vec![
         ("version", J::Int(1)),
         ("agent", J::s(agent)),
@@ -678,25 +631,20 @@ pub fn chain(ctx: &Ctx<'_>, agent: &str, agent_md: &Path) -> J {
     ])
 }
 
-/// The main account for the apps and `kith account use --json`: with an agent, the one its runs use and where that comes
-/// from (`agent`, `global`, or `default` for the harness's login); without, the global setting (id null when none).
+/// The main account for the apps and `kith account use --json`: with an agent, the first of its static order and where that
+/// comes from (`agent`: its pin, `global`: the set, `default`: the harness's login); without, the first of the global set
+/// (id null when there is none).
 pub fn main_json(ctx: &Ctx<'_>, agent: &str) -> J {
-    let s = read_settings(&ctx.machine);
+    let s = settings::read(ctx);
     let (entry, harness, source): (Option<String>, Option<String>, &str) = if agent.is_empty() {
-        let e = s
-            .get("account")
-            .and_then(Value::as_str)
-            .filter(|e| !e.is_empty())
-            .map(str::to_owned);
-        (e, None, "global")
+        let first = settings::accounts(&s, "").0.unwrap_or_default().into_iter().next();
+        (first, None, "global")
     } else {
         let md = agent_md_of(ctx, agent);
         let harness = agent_harness(md.as_deref());
-        let entry = main_id(ctx, agent, md.as_deref(), Some(&harness));
-        let own = agent_settings(&s, agent)
-            .and_then(|a| a.get("account"))
-            .and_then(Value::as_str);
-        let source = if Some(entry.as_str()) == own {
+        let (order, pin) = static_order(&s, agent, &harness);
+        let entry = order.into_iter().next().unwrap_or_default();
+        let source = if pin.as_ref().is_some_and(|p| p.id == entry) {
             "agent"
         } else if entry == harness {
             "default"
@@ -759,8 +707,14 @@ fn api_helper(ctx: &Ctx<'_>, agent: &str, name: &str) -> String {
 }
 
 /// `launch-env`: shell assignments for `bin/kith`; the error (exit 4) says why the entry can't run. `light`: the main
-/// account's check (`present`), not the harness's status command.
-pub fn launch_env(ctx: &Ctx<'_>, agent: &str, entry: &str, light: bool) -> Result<String, String> {
+/// account's check (`present`), not the harness's status command. `record`: the launch is real, note `last_started`.
+pub fn launch_env(
+    ctx: &Ctx<'_>,
+    agent: &str,
+    entry: &str,
+    light: bool,
+    record: bool,
+) -> Result<String, String> {
     let (harness, name) = parse(entry)?;
     if !["claude", "claude-api", "codex"].contains(&harness.as_str()) {
         return Err(format!(
@@ -769,9 +723,15 @@ pub fn launch_env(ctx: &Ctx<'_>, agent: &str, entry: &str, light: bool) -> Resul
     }
     let mut model = split(entry).1.map(str::to_owned);
     if model.is_none() && !light {
-        // --backup claude for a chain entry claude@sonnet: the id without its model finds it, unless the chain lists the
-        // plain id too (the exact entry wins).
-        let ids = backups(&ctx.machine, agent);
+        // --account claude for a set entry claude@sonnet: the id without its model finds it, unless the set lists the plain
+        // id too (the exact entry wins). The set's first entry is the main account (it takes no model), so only the rest
+        // are backups.
+        let ids: Vec<String> = settings::accounts(&settings::read(ctx), agent)
+            .0
+            .unwrap_or_default()
+            .into_iter()
+            .skip(1)
+            .collect();
         if !ids.iter().any(|i| i == entry) {
             model = ids.iter().find_map(|i| match split(i) {
                 (b, Some(m)) if b == entry && !m.is_empty() => Some(m.to_owned()),
@@ -803,13 +763,20 @@ pub fn launch_env(ctx: &Ctx<'_>, agent: &str, entry: &str, light: bool) -> Resul
         } else {
             "CODEX_HOME"
         };
-        cfg_dir = account_dir(ctx, &harness, n).to_string_lossy().into_owned();
+        let dir = account_dir(ctx, &harness, n);
+        cfg_dir = dir.to_string_lossy().into_owned();
+        if harness == "claude" {
+            mirror::prepare_claude_dir(ctx, &dir);
+        }
     }
     let helper = if harness == "claude-api" {
         api_helper(ctx, agent, name.as_deref().unwrap_or_default())
     } else {
         String::new()
     };
+    if record {
+        state::record_started(&ctx.machine, entry, now_secs());
+    }
     Ok(format!(
         "backup_harness={} backup_account={} backup_cfg_var={} backup_cfg_dir={} backup_api_helper={} backup_model={}",
         sh_quote(run_harness),
@@ -821,17 +788,78 @@ pub fn launch_env(ctx: &Ctx<'_>, agent: &str, entry: &str, light: bool) -> Resul
     ))
 }
 
-/// `main-env`: `bin/kith`'s assignments for a run on the main account: `main_id` plus `launch-env`'s (empty for the
-/// default login).
-pub fn main_env(ctx: &Ctx<'_>, agent: &str, agent_md: &Path) -> Result<String, String> {
-    let entry = main_id(ctx, agent, Some(agent_md), None);
-    let env = if parse(&entry)?.1.is_none() {
+#[allow(clippy::cast_possible_truncation)]
+fn now_secs() -> i64 {
+    clock::now() as i64
+}
+
+/// `bin/kith`'s assignments for a run on `entry` (`main_id` plus `launch-env`'s; empty for a default login). A named account
+/// the run can't use is the error (exit 4), with what fixes it.
+pub fn env_for(ctx: &Ctx<'_>, agent: &str, entry: &str, record: bool) -> Result<String, String> {
+    let env = if parse(entry)?.1.is_none() {
         "backup_harness='' backup_account='' backup_cfg_var='' backup_cfg_dir='' backup_api_helper=''".to_owned()
     } else {
-        launch_env(ctx, agent, &entry, true)
-            .map_err(|e| format!("{agent}'s main account {e}; or run on the default login: kith account use --reset --agent {agent}"))?
+        launch_env(ctx, agent, entry, true, false)
+            .map_err(|e| format!("{agent}'s main account {e}; or run on the default login: kith account unpin {agent}"))?
     };
-    Ok(format!("main_id={} {env}", sh_quote(&entry)))
+    if record {
+        state::record_started(&ctx.machine, entry, now_secs());
+    }
+    Ok(format!("main_id={} {env}", sh_quote(entry)))
+}
+
+/// What `main-env` is asked for besides the agent.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MainOpts<'a> {
+    /// Start on `pick`'s first candidate, so a run skips accounts that are out, not on the static main.
+    pub state: bool,
+    /// The launch is real: note `last_started`.
+    pub record: bool,
+    /// The account a handed-on session was made under: goes first when it is one of the candidates.
+    pub prefer: Option<&'a str>,
+}
+
+/// `main-env`: the account a plain run starts on, for `bin/kith`. By default the static main (the pin, else the set's first):
+/// what a host launch and a guest's run use.
+pub fn main_env(
+    ctx: &Ctx<'_>,
+    agent: &str,
+    agent_md: &Path,
+    opts: MainOpts<'_>,
+) -> Result<String, String> {
+    let mut entry = main_id(ctx, agent, Some(agent_md), None);
+    if opts.state {
+        let s = settings::read(ctx);
+        let now = clock::now();
+        let state = state::read(&ctx.machine);
+        let picked = pick::pick(ctx, &s, agent, Some(agent_md), false, now, &state);
+        let mut cands = picked.candidates.clone();
+        match opts.prefer {
+            Some(p) if cands.iter().any(|c| c == p) && !picked.all_out => {
+                cands.retain(|c| c != p);
+                cands.insert(0, p.to_owned());
+            }
+            _ => {
+                if cands.first() != Some(&entry)
+                    && let Some(why) = picked.skipped.iter().find(|x| x.id == entry)
+                {
+                    let until = why
+                        .status
+                        .out_until
+                        .filter(|u| *u != 0)
+                        .map(|u| format!(" until {}", clock::hhmm(u)))
+                        .unwrap_or_default();
+                    eprintln!(
+                        "kith: {entry} is {}{until}; starting on {}",
+                        why.status.status.replace('_', " "),
+                        cands.first().cloned().unwrap_or_default()
+                    );
+                }
+            }
+        }
+        entry = cands.into_iter().next().unwrap_or(entry);
+    }
+    env_for(ctx, agent, &entry, opts.record)
 }
 
 // --- the cost ledger ----------------------------------------------------------------------------------------------------
@@ -974,74 +1002,41 @@ pub fn sh_line(harness: &str, model: Option<&str>, effort: Option<&str>) -> Stri
 
 // --- `kith account list` --------------------------------------------------------------------------------------------------
 
-struct Row {
-    id: String,
-    harness: &'static str,
-    name: String,
-    dir: String,
-    ok: bool,
-    why: Option<String>,
+/// `kith account list [--agent A] [--json]` as `kernel/bin/kith-account` runs it: a settings file still in the older shape
+/// is rewritten in the new one first, then every account is listed. The error is a usage error (exit 2).
+pub fn list(ctx: &Ctx<'_>, json: bool, agent: &str) -> Result<String, String> {
+    let _ = settings::migrate_file(ctx);
+    if !agent.is_empty() && agent_md_of(ctx, agent).is_none() {
+        return Err(format!("no agent '{agent}' (kith ls)"));
+    }
+    Ok(listing::list(ctx, json, agent))
 }
 
-/// `kith account list [--json]`: each extra account, its harness and whether it is logged in.
-pub fn list(ctx: &Ctx<'_>, json: bool) -> String {
-    let mut rows = Vec::new();
-    for harness in ["claude", "codex"] {
-        let root = ctx.machine.join("accounts").join(harness);
-        let mut dirs: Vec<PathBuf> = std::fs::read_dir(&root)
-            .map(|rd| rd.filter_map(Result::ok).map(|e| e.path()).collect())
-            .unwrap_or_default();
-        dirs.sort();
-        for d in dirs {
-            let name = d
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            if d.is_dir() && !name.starts_with('.') {
-                let (ok, why) = logged_in(ctx, harness, Some(&d));
-                rows.push(Row {
-                    id: format!("{harness}:{name}"),
-                    harness,
-                    name,
-                    dir: d.to_string_lossy().into_owned(),
-                    ok,
-                    why,
-                });
-            }
-        }
+// --- files ---------------------------------------------------------------------------------------------------------------
+
+/// A name for a temp file in `dir` that no other process or call is using (`mkstemp`'s job).
+fn temp_in(dir: &Path, prefix: &str, suffix: &str) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.subsec_nanos());
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    dir.join(format!("{prefix}{}-{nanos:x}-{n}{suffix}", std::process::id()))
+}
+
+/// A new file for writing, with `mode` (less the umask) on Unix; fails when the name is taken.
+fn create_new(path: &Path, mode: u32) -> std::io::Result<std::fs::File> {
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        o.mode(mode);
     }
-    if json {
-        let items = rows
-            .iter()
-            .map(|r| {
-                let mut f = vec![
-                    ("id", J::s(&r.id)),
-                    ("harness", J::s(r.harness)),
-                    ("name", J::s(&r.name)),
-                    ("dir", J::s(&r.dir)),
-                    ("logged_in", J::Bool(r.ok)),
-                ];
-                if !r.ok {
-                    f.push(("why", J::opt(r.why.as_deref())));
-                }
-                J::Obj(f)
-            })
-            .collect();
-        return J::Arr(items).dumps() + "\n";
-    }
-    if rows.is_empty() {
-        return "no extra accounts (kith account add claude|codex <name>)\n".to_owned();
-    }
-    let mut out = String::new();
-    for r in &rows {
-        let state = if r.ok {
-            "logged in"
-        } else {
-            r.why.as_deref().unwrap_or_default()
-        };
-        let _ = writeln!(out, "{:<20} {:<7} {state}", r.id, r.harness);
-    }
-    out
+    #[cfg(not(unix))]
+    let _ = mode;
+    o.open(path)
 }
 
 #[cfg(test)]

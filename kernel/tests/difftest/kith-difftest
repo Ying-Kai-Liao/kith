@@ -86,6 +86,9 @@ class Normalizer:
     def data(self, v):
         if isinstance(v, str):
             return self.text(v)
+        # A number that reads as a time (last_started in a state file): two sides run a second apart.
+        if isinstance(v, int) and not isinstance(v, bool) and (1_500_000_000 <= v < 2_000_000_000 or 1_500_000_000_000 <= v < 2_000_000_000_000):
+            return "<EPOCH>"
         if isinstance(v, list):
             return [self.data(x) for x in v]
         if isinstance(v, dict):

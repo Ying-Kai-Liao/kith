@@ -82,6 +82,25 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// A plain host name (no wildcard, no address, no port): `kith_guard.valid_domain`.
+pub fn valid_domain(d: &str) -> bool {
+    let d = d.strip_suffix('\n').unwrap_or(d);
+    let label = |l: &str, first_alpha: bool| {
+        let b = l.as_bytes();
+        let ok = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
+        !b.is_empty()
+            && b.len() <= 63
+            && if first_alpha { b[0].is_ascii_lowercase() } else { ok(b[0]) }
+            && ok(b[b.len() - 1])
+            && b.iter().all(|c| ok(*c) || *c == b'-')
+    };
+    let parts: Vec<&str> = d.split('.').collect();
+    (1..=253).contains(&d.len())
+        && parts.len() >= 2
+        && parts[..parts.len() - 1].iter().all(|l| label(l, false))
+        && label(parts[parts.len() - 1], true)
+}
+
 /// `both`: the path and its resolved spelling.
 pub fn both(p: &str) -> Vec<String> {
     dedup([p.to_owned(), s(&realpath(Path::new(p)))])

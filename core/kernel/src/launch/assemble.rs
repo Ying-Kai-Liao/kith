@@ -70,8 +70,8 @@ pub fn parse_args(args: &[String]) -> Args {
                 a.launch = true;
                 1
             }
-            "--hold" | "--resume" | "--backup" | "-p" | "--project" | "-m" | "--model" | "-e"
-            | "--effort" | "-H" | "--harness" | "--permission-mode" => {
+            "--hold" | "--resume" | "--account" | "--backup" | "-p" | "--project" | "-m" | "--model"
+            | "-e" | "--effort" | "-H" | "--harness" | "--permission-mode" => {
                 let v = match need(i, x) {
                     Ok(v) => v,
                     Err(e) => {
@@ -82,7 +82,7 @@ pub fn parse_args(args: &[String]) -> Args {
                 match x {
                     "--hold" => a.hold = Some(v),
                     "--resume" => a.resume = true,
-                    "--backup" => a.backup = v,
+                    "--account" | "--backup" => a.backup = v, // --backup: the old name
                     "-p" | "--project" => a.project = v,
                     "-m" | "--model" => a.model = Some(v),
                     "-e" | "--effort" => a.effort = Some(v),
@@ -852,11 +852,15 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         machine: p.machine.clone(),
         agents: p.agents.clone(),
         kernel: kernel.to_path_buf(),
+        home: PathBuf::from(get(&env, "HOME")),
+        claude_config_dir: env.get("CLAUDE_CONFIG_DIR").cloned(),
         out: &system,
     };
+    // Every launch notes last_started for its account (not --print, which starts nothing).
+    let record = !a.print;
     let mut be: HashMap<String, String> = HashMap::new();
     let use_account = |id: &str, be: &mut HashMap<String, String>| -> Result<(), i32> {
-        match accounts::launch_env(&actx, agent, id, false) {
+        match accounts::launch_env(&actx, agent, id, false, record) {
             Ok(t) => {
                 *be = assignments(&t);
                 Ok(())
@@ -874,7 +878,11 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         acct = bget(&be, "backup_account");
         account_id = a.backup.split('@').next().unwrap_or_default().to_owned();
     } else if harness == own {
-        match accounts::main_env(&actx, agent, &agent_md) {
+        let opts = accounts::MainOpts {
+            record,
+            ..accounts::MainOpts::default()
+        };
+        match accounts::main_env(&actx, agent, &agent_md, opts) {
             Ok(t) => be = assignments(&t),
             Err(e) => {
                 say(&format!("kith: {e}"));
@@ -883,6 +891,13 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         }
         acct = bget(&be, "backup_account");
         account_id = bget(&be, "main_id");
+        // The pick can be an account of another harness: it runs there, as --account would.
+        let on = bget(&be, "backup_harness");
+        if !on.is_empty() && on != harness {
+            harness = on;
+            kith_model.clear();
+            env.remove("HQ_MODEL");
+        }
     }
     let mut resume = get(&env, "KITH_RESUME").to_owned();
     if !resume.is_empty() {
@@ -1055,6 +1070,20 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         sys.out("xcode-select", &["-p"], false).unwrap_or_default()
     };
     let cver = if p_owner { None } else { claude_version(&sys) };
+    // The hosts every guest of this agent reaches without a card, asked of kith-auth here (not of the host), so a launch with
+    // no run socket has them too. No answer is none.
+    let guest_domains: Result<Vec<String>, String> = if p_owner || !claude {
+        Ok(vec![])
+    } else {
+        settings::guest_domains(
+            sys.out(
+                kernel.join("bin/kith-auth"),
+                &["agent-access", agent, "--json"],
+                false,
+            )
+            .as_deref(),
+        )
+    };
     let kith_bin = Some(get(&env, "KITH_BIN"))
         .filter(|b| !b.is_empty())
         .map(str::to_owned)
@@ -1089,6 +1118,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             developer_dir: &developer_dir,
             ctmp: &ctmp,
             claude_version: cver.as_deref(),
+            guest_domains: guest_domains.as_deref().map_err(String::as_str),
             env: &envf,
         })
     };

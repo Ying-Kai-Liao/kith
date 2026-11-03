@@ -16,7 +16,9 @@ use std::path::Path;
 
 use serde_json::{Map, Value, json};
 
-use super::guard::{self, SECRET_RULES, SOFT_DENY, both, dedup, edit_rules, rule_w, secret_paths};
+use super::guard::{
+    self, SECRET_RULES, SOFT_DENY, both, dedup, edit_rules, rule_w, secret_paths, valid_domain,
+};
 use super::machine;
 use super::prompt::Registry;
 use crate::paths::{Paths, realpath};
@@ -37,8 +39,22 @@ fn refuse<T>(code: i32, message: impl Into<String>) -> Result<T, Refusal> {
 
 type R<T> = Result<T, Refusal>;
 
-/// The Claude Code version that holds a guest to its read limits.
-pub const MIN_GUEST_CLAUDE: &str = "2.1.257";
+/// The Claude Code version that holds a guest to its read limits (the sandbox's, and the read hook's `onFailure: block`).
+pub const MIN_GUEST_CLAUDE: &str = "2.1.295";
+
+/// The hosts `kith-auth agent-access AGENT --json` names (`None`: the program failed): the rows that carry a `domain`. The
+/// error says why there is no list, and the run goes on without one.
+pub fn guest_domains(answer: Option<&str>) -> Result<Vec<String>, String> {
+    let text = answer.ok_or_else(|| "kith-auth agent-access failed".to_owned())?;
+    match serde_json::from_str::<Value>(text).map_err(|e| e.to_string())? {
+        Value::Array(rows) => Ok(rows
+            .iter()
+            .filter_map(|r| r.get("domain").and_then(Value::as_str).map(str::to_owned))
+            .collect()),
+        Value::Object(_) => Ok(vec![]),
+        other => Err(format!("agent-access gave {other}")),
+    }
+}
 
 /// Who the run is for, as `kith-auth resolve` answers (the fields the settings use).
 #[derive(Clone, Debug, Default)]
@@ -136,6 +152,9 @@ pub struct Input<'a> {
     pub ctmp: &'a str,
     /// The version `claude --version` printed, for a guest's run (`None`: missing or no version).
     pub claude_version: Option<&'a str>,
+    /// The hosts every guest of this agent reaches without a card (`kith-auth agent-access AGENT --json`), or why they could
+    /// not be read: the run goes on without them.
+    pub guest_domains: Result<&'a [String], &'a str>,
     pub env: &'a dyn Fn(&str) -> Option<String>,
 }
 
@@ -453,7 +472,8 @@ pub fn build(i: &Input<'_>) -> R<Output> {
     }
     if !owner {
         perm.clone_from(&m.mode);
-        // Their reads are an allowlist, which Claude Code enforces from 2.1.257: an older or unreadable version is no run.
+        // Their reads are an allowlist (the sandbox's denyRead, and a read hook that blocks when it fails), which Claude Code
+        // has from 2.1.295: an older or unreadable version is no run.
         let ok = i
             .claude_version
             .is_some_and(|v| version_at_least(v, MIN_GUEST_CLAUDE));
@@ -658,8 +678,12 @@ pub fn build(i: &Input<'_>) -> R<Output> {
 
     // The read-only kernel commands PROTOCOL tells agents to run, allowed without a prompt.
     let mut allowed: Vec<String> = vec![];
-    let kernel_home = format!("{}/kernel", s(&p.home));
-    for b in dedup([kernel.clone(), kith_real.clone(), kernel_home]) {
+    // ... under every path the kernel has (logical, resolved, the installed CLI's stable one)
+    let kernel_stable = match env("KITH_KERNEL").filter(|k| !k.is_empty()) {
+        Some(k) => k,
+        None => format!("{}/cli/current/share/kith/kernel", s(&p.machine)),
+    };
+    for b in dedup([kernel.clone(), kith_real.clone(), kernel_stable]) {
         if b.is_empty() || !is_dir(&format!("{b}/bin")) {
             continue;
         }
@@ -980,6 +1004,7 @@ pub fn build(i: &Input<'_>) -> R<Output> {
                 src_pkg: &src_pkg,
                 pkg: &pkg,
             },
+            &mut warnings,
         )?;
     }
 
@@ -1145,6 +1170,7 @@ fn guest_sandbox(
     sm: &mut Map<String, Value>,
     f: &Folders,
     g: &GuestCtx<'_>,
+    warnings: &mut Vec<String>,
 ) -> R<()> {
     let p = i.paths;
     let env = |k: &str| (i.env)(k).filter(|v| !v.is_empty());
@@ -1338,10 +1364,46 @@ fn guest_sandbox(
             }
         }
     }
-    perms.insert(
-        "blockReadsOutsideWorkingDirectories".to_owned(),
-        Value::Bool(true),
+    // The file tools stay inside the same folders through a PreToolUse hook (lib/kith_readfence.py), not through
+    // permissions.blockReadsOutsideWorkingDirectories: that setting makes Claude Code ask for every Bash command it cannot
+    // trace (a cd followed by an export), whatever a hook says, and each ask was a card to the owner. Bash is fenced by the
+    // sandbox below.
+    let fence_roots = dedup(
+        read_dirs
+            .iter()
+            .cloned()
+            .chain([f.work.clone(), i.ctmp.to_owned()])
+            .filter(|d| !d.is_empty())
+            .flat_map(|d| both(&abspath(&d))),
     );
+    let refused = r#"{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "the read check could not run, so this read is refused"}}"#;
+    let fence = format!(
+        "out=$(python3 -I {}/lib/kith_readfence.py {}) || out={}; printf %s \"$out\"",
+        shquote(&g.kernel),
+        fence_roots
+            .iter()
+            .map(|r| format!("--root {}", shquote(r)))
+            .collect::<Vec<_>>()
+            .join(" "),
+        shquote(refused)
+    );
+    list(obj(sm, "hooks")?, "PreToolUse")?.push(json!({
+        "matcher": "Read|Grep|Glob|LS|NotebookRead",
+        "hooks": [{"type": "command", "command": fence, "timeout": 30, "onFailure": "block"}],
+    }));
+    // The hosts every guest of this agent reaches without a card; no answer is none.
+    let mut network = json!({"allowUnixSockets": socks});
+    match i.guest_domains {
+        Ok(hosts) => {
+            let hosts = dedup(hosts.iter().filter(|h| valid_domain(h)).cloned());
+            if !hosts.is_empty() {
+                network["allowedDomains"] = json!(hosts);
+            }
+        }
+        Err(why) => warnings.push(format!(
+            "kith: could not read the guest domains of the agent ({why}); the run goes on without them"
+        )),
+    }
     // The sandbox: fails closed, no escape hatch, no network but the host socket. Inherited by children.
     sm.insert(
         "sandbox".to_owned(),
@@ -1350,7 +1412,7 @@ fn guest_sandbox(
             "filesystem": {
                 "denyRead": deny_read, "allowWrite": allow_write, "allowRead": allow_read, "denyWrite": deny_write,
             },
-            "network": {"allowUnixSockets": socks},
+            "network": network,
         }),
     );
     // The tool reads the owner global config, which sits in the closed home folder: point it at nothing instead.

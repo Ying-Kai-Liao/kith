@@ -16,100 +16,12 @@ pub fn current(mode: &str) -> &str {
     }
 }
 
-const PERMISSION_MODES: [&str; 5] = [
-    "default",
-    "acceptEdits",
-    "plan",
-    "auto",
-    "bypassPermissions",
-];
-const AT_LIMITS: [&str; 3] = ["ask", "tell", "hold"];
-
-fn valid_limit(v: &Value) -> bool {
-    v.as_f64().is_some_and(|f| 0.0 < f && f < 1e7)
-}
-
-/// `kith_settings.read()`: what the file sets (an empty object when there is no file or it can't be used).
+/// `kith_settings.read()`: what the file sets (an empty object when there is no file or it can't be used). The accounts
+/// module reads it: its rules for a file that can be used are one list, shared with the account commands.
 pub fn read(machine: &Path) -> Map<String, Value> {
-    let Ok(text) = fs::read_to_string(machine.join("settings.json")) else {
-        return Map::new();
-    };
-    let Ok(Value::Object(mut s)) = serde_json::from_str::<Value>(&text) else {
-        return Map::new();
-    };
-    // Old files still read back: a retired mode as the mode that replaced it.
-    let retire = |d: &mut Map<String, Value>| {
-        if let Some(Value::String(m)) = d.get("permission_mode") {
-            let now = current(m).to_owned();
-            d.insert("permission_mode".to_owned(), Value::String(now));
-        }
-    };
-    retire(&mut s);
-    if let Some(Value::Object(agents)) = s.get_mut("agents") {
-        for a in agents.values_mut() {
-            if let Value::Object(a) = a {
-                retire(a);
-            }
-        }
-    }
-    if let Some(agents) = s.get("agents")
-        && !agents
-            .as_object()
-            .is_some_and(|a| a.values().all(Value::is_object))
-    {
-        return Map::new();
-    }
-    let plugins_ok = match s.get("plugins") {
-        None => true,
-        Some(Value::Array(p)) => p.iter().all(Value::is_string),
-        Some(_) => false,
-    };
-    if !plugins_ok {
-        return Map::new();
-    }
-    let mut places: Vec<&Map<String, Value>> = vec![&s];
-    if let Some(Value::Object(agents)) = s.get("agents") {
-        places.extend(agents.values().filter_map(Value::as_object));
-    }
-    for d in places {
-        match d.get("backups") {
-            None => {}
-            Some(Value::Array(b)) if b.iter().all(Value::is_string) => {}
-            Some(_) => return Map::new(),
-        }
-        if let Some(a) = d.get("account")
-            && a.as_str().is_none_or(str::is_empty)
-        {
-            return Map::new();
-        }
-        for (k, choices) in [
-            ("permission_mode", &PERMISSION_MODES[..]),
-            ("at_limit", &AT_LIMITS[..]),
-        ] {
-            if let Some(v) = d.get(k)
-                && !v.as_str().is_some_and(|v| choices.contains(&v))
-            {
-                return Map::new();
-            }
-        }
-        if d.get("limit").is_some_and(|l| !valid_limit(l)) {
-            return Map::new();
-        }
-    }
-    let cap_ok = match s.get("delegation") {
-        None => true,
-        Some(Value::Object(d)) => d
-            .get("chain_cost_cap_usd")
-            .is_none_or(|v| v == "none" || valid_limit(v)),
-        Some(_) => false,
-    };
-    if !cap_ok {
-        return Map::new();
-    }
-    s
+    crate::accounts::read_settings(machine)
 }
 
-/// `get('permission_mode', agent)`: this Mac's choice for the agent, `""` when there is none.
 pub fn agent_permission_mode(machine: &Path, agent: &str) -> String {
     read(machine)
         .get("agents")
