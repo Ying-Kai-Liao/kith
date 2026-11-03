@@ -127,19 +127,19 @@ pub(crate) const STUB_BUSY: i32 = 75;
 /// The frame kinds of an attach connection (see the module docs).
 #[allow(dead_code)] // the relay (M1-5) and the client (M1-6) use them
 pub(crate) mod attach {
-    pub const ATTACH: u8 = 1;
-    pub const INPUT: u8 = 2;
-    pub const RESIZE: u8 = 3;
-    pub const DETACH: u8 = 4;
-    pub const ATTACHED: u8 = 101;
-    pub const OUTPUT: u8 = 102;
-    pub const EXIT: u8 = 103;
-    pub const DETACHED: u8 = 104;
-    pub const ERROR: u8 = 105;
+    pub(crate) const ATTACH: u8 = 1;
+    pub(crate) const INPUT: u8 = 2;
+    pub(crate) const RESIZE: u8 = 3;
+    pub(crate) const DETACH: u8 = 4;
+    pub(crate) const ATTACHED: u8 = 101;
+    pub(crate) const OUTPUT: u8 = 102;
+    pub(crate) const EXIT: u8 = 103;
+    pub(crate) const DETACHED: u8 = 104;
+    pub(crate) const ERROR: u8 = 105;
     /// The largest payload the relay sends in one frame; OUTPUT and the replay are cut to fit.
-    pub const MAX_PAYLOAD: usize = 64 * 1024;
+    pub(crate) const MAX_PAYLOAD: usize = 64 * 1024;
     /// What the relay buffers for one attached client before it cuts the client with DETACHED `slow`.
-    pub const CLIENT_BUFFER: usize = 1024 * 1024;
+    pub(crate) const CLIENT_BUFFER: usize = 1024 * 1024;
 }
 
 // --- the filter ----------------------------------------------------------------------------------------------------
