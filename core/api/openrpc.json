@@ -4350,7 +4350,7 @@
     },
     {
       "name": "cards.list",
-      "summary": "The cards waiting, and recent ones.",
+      "summary": "The cards waiting (oldest first) and the owner's recent closed ones (newest first), as `{open, recent}`.",
       "params": [],
       "result": {
         "name": "result",
@@ -4360,7 +4360,7 @@
         "owner"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "cards",
@@ -4376,7 +4376,7 @@
     },
     {
       "name": "cards.show",
-      "summary": "One card.",
+      "summary": "One card in full, with its options and who holds its claim. Refuses an id that is no card.",
       "params": [
         {
           "name": "id",
@@ -4395,7 +4395,7 @@
         "owner"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "cards",
@@ -4415,7 +4415,7 @@
     },
     {
       "name": "cards.answer",
-      "summary": "Answer a card.",
+      "summary": "Answers a card. Answers `{result: answered}` (with the card's new state), `closed` (it was already answered, withdrawn or expired), `expired` (its time ran out first) or `claimed` (another answerer holds it). Refuses a secret card (a key or access ask: answer it in the Kith app), an unknown card and an answer the card does not offer.",
       "params": [
         {
           "name": "id",
@@ -4427,7 +4427,7 @@
         },
         {
           "name": "answer",
-          "summary": "The answer (the button's value, or the text asked for).",
+          "summary": "The answer: one of the card's option ids, or allow, deny or cancel when it lists none.",
           "required": true,
           "schema": {
             "type": "string"
@@ -4442,7 +4442,7 @@
         "owner"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "cards",

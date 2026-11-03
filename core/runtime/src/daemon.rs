@@ -119,6 +119,14 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        // So do the cards: raise, claim and close are claim transactions.
+        if method.starts_with("cards.") {
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let answer =
+                self.with_core(|c| crate::cards::call(c, method, params, &crate::gate::System))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         // Counts answers only: a refused or failed call was not served.
         let answer = self.with_core(|c| c.call(kith_api::Principal::Owner, method, params))?;
         self.served.fetch_add(1, Ordering::SeqCst);
