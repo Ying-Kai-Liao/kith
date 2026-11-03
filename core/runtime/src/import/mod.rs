@@ -175,10 +175,10 @@ pub(crate) fn run(
     }
     rep.lines.extend(authority::left_behind(&auth));
     if opts.dry_run {
-        dry(layout, &opts, &desired, &scratch, &refs, sink, &mut rep)?;
+        dry(layout, opts, &desired, &scratch, &refs, sink, &mut rep)?;
     } else {
         real(
-            layout, ctx, &opts, &auth, &sha, &desired, &scratch, &refs, source, sink, &mut rep,
+            layout, ctx, opts, &auth, &sha, &desired, &scratch, &refs, source, sink, &mut rep,
         )?;
     }
     Ok(rep)
@@ -186,7 +186,7 @@ pub(crate) fn run(
 
 fn dry(
     layout: &Layout,
-    opts: &AuthorityOptions,
+    opts: AuthorityOptions,
     desired: &Value,
     scratch: &Connection,
     refs: &[Reference],
@@ -261,7 +261,7 @@ fn dry(
 fn real(
     layout: &Layout,
     ctx: &Ctx,
-    opts: &AuthorityOptions,
+    opts: AuthorityOptions,
     auth: &Value,
     sha: &str,
     desired: &Value,
@@ -297,7 +297,10 @@ fn real(
     rep.backup = Some(backup.clone());
 
     let tx = core.claim_tx()?;
-    if state != Rows::Same {
+    if state == Rows::Same {
+        rep.lines
+            .push("authority: already imported; unchanged".into());
+    } else {
         if state == Rows::Differs {
             authority::clear(&tx)?;
         }
@@ -321,9 +324,6 @@ fn real(
             }
             _ => format!("authority: imported {counts}"),
         });
-    } else {
-        rep.lines
-            .push("authority: already imported; unchanged".into());
     }
     let (sealed, mut seal_lines) = items::seal(&tx, fetched, sink);
     rep.lines.append(&mut lines);

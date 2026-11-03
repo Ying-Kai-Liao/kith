@@ -27,10 +27,10 @@ fn got<T>(r: Result<T>) -> std::result::Result<T, String> {
 /// Folder names under `root` (agents live in `<root>/<name>`).
 fn dirs(root: &std::path::Path, out: &mut BTreeSet<String>) {
     for e in std::fs::read_dir(root).into_iter().flatten().flatten() {
-        if e.path().is_dir() {
-            if let Some(n) = e.file_name().to_str() {
-                out.insert(n.to_owned());
-            }
+        if e.path().is_dir()
+            && let Some(n) = e.file_name().to_str()
+        {
+            out.insert(n.to_owned());
         }
     }
 }
