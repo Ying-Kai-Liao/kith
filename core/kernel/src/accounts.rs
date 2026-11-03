@@ -94,9 +94,16 @@ impl Outside for System {
     }
 }
 
+#[cfg(unix)]
 fn is_executable(p: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt as _;
     std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
+
+/// Windows has no execute bit; `which` there also tries the extensions in PATHEXT, which this port leaves to the host.
+#[cfg(not(unix))]
+fn is_executable(p: &Path) -> bool {
+    std::fs::metadata(p).is_ok_and(|m| m.is_file())
 }
 
 /// `subprocess.run(..., capture_output, timeout=20, stdin=DEVNULL)`: stdout only; stderr is dropped.

@@ -1,0 +1,46 @@
+[package]
+name = "kith-core"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The sealed core: the only writer of core.db, the lifetime lock, the generation, and embedded mode"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like kith-kernel.
+workspace = "../../serve/host"
+
+[lib]
+name = "kith_core"
+path = "src/lib.rs"
+
+[dependencies]
+# kith-core depends on the kernel's pure rules, never the other way round (docs/plans/runtime-design.md section 1).
+kith-kernel = { path = "../kernel" }
+# core.db is SQLite; the host and kith-kernel link the same bundled copy.
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+# The lifetime lock on core.lock: flock on Unix, LockFileEx on Windows.
+fs2 = "0.4.3"
+getrandom = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+too_many_lines = "allow"
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
