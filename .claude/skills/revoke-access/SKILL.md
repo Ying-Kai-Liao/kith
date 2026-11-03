@@ -223,3 +223,5 @@ On the code (dry run at the sync commit, edits dropped after):
 | `verification/revoke/variants/*.set` | each variant's overrides |
 | `verification/revoke/checks.tsv` | variant, kind, property, expected verdict |
 | `verification/revoke/run.sh`, `drift.sh` | run every row; what changed since the sync commit |
+
+Re-run 2026-11-03 (review cleanup PR, rust-rebuild): `run.sh` 80 rows, every row as expected. SYNC stays at fb5f140f: the ~940 changed lines in the covered files were not read; only the F8 change to `remote/members.rs` (mirror takes AUTH_WRITES, mirrors `*` rows; a revoked person is still skipped) was read, and it adds no revoke step.
