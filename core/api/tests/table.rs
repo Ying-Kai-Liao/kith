@@ -464,12 +464,12 @@ fn the_cards_rows_are_experimental_owner_only_unreleased_and_served_by_the_core(
     // A key is never typed on a command line: the values come from the client (an app), and nothing else takes them.
     let provide = method("cards.provide").unwrap();
     let values = provide.params.iter().find(|p| p.name == "values").unwrap();
-    assert!(matches!(values.arg, kith_api::Arg::Caller));
+    assert!(matches!(values.arg, Arg::Caller));
     assert!(
         provide
             .params
             .iter()
-            .filter(|p| matches!(p.arg, kith_api::Arg::Flag(_)))
+            .filter(|p| matches!(p.arg, Arg::Flag(_)))
             .all(|p| p.name == "account")
     );
     assert!(parse_argv(&["cards", "provide", "c1", "--values", "x"]).is_err());
