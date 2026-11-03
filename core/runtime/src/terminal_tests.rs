@@ -518,14 +518,12 @@ echo $$ > "$lock/$key.pid"
         let stub = fake_stub(t.path(), RUNNING);
         let mut cfg = config(Some(stub));
         cfg.holder.exe = None;
-        cfg.holder.command = Some(vec![
-            holder_bin().to_string_lossy().into_owned(),
-            "--stdio".into(),
-        ]);
+        // A command link, whether or not it connects: the holder it reaches is on another computer.
+        cfg.holder.command = Some(vec!["/usr/bin/false".into()]);
         let d = serving(&m, cfg);
         let p = crate::tests::paths(&m);
-        until("the command link", || {
-            crate::status(&p)["holder"]["state"] == "connected"
+        until("the supervisor to try the link", || {
+            crate::status(&p)["holder"]["state"] != "starting"
         });
         let a = answered(open(&m, "sess-c", &["cat"], &json!({})));
         assert_eq!(a["status"], "direct", "{a}");
