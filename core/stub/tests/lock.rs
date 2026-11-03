@@ -172,9 +172,10 @@ fn lock_file_stays_after_drop_and_is_reused() {
 fn file_id(p: &Path) -> u64 {
     std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(p).unwrap())
 }
-#[cfg(not(unix))]
+// The file is never recreated, so its creation time is stable (std exposes no file index on stable).
+#[cfg(windows)]
 fn file_id(p: &Path) -> u64 {
-    std::fs::metadata(p).unwrap().len()
+    std::os::windows::fs::MetadataExt::creation_time(&std::fs::metadata(p).unwrap())
 }
 
 /// The library never deletes: no removal call appears in its source.
@@ -221,17 +222,29 @@ fn folder_is_0700_and_a_loose_own_folder_is_tightened() {
     std::fs::remove_dir_all(nested.parent().unwrap()).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn symlinked_folder_is_refused() {
+    let real = scratch("real");
+    std::fs::create_dir_all(&real).unwrap();
+    let link = scratch("link");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    assert!(matches!(take(&link, "s1"), Err(Error::Folder(_))));
+    std::fs::remove_file(&link).unwrap();
+    std::fs::remove_dir_all(&real).unwrap();
+}
+
 #[test]
 fn keys_are_checked_not_rewritten() {
     for bad in [
-        "", ".", "..", "a/b", "a\\b", "../x", "a..b", "a\0b", "a\nb", "C:x", "a*b", "a?b", "a|b",
-        "a<b", "a>b", "a\"b",
+        "", "..", "a/b", "a\\b", "../x", "a..b", "a\0b", "a\nb", "C:x", "a*b", "a?b", "a|b",
+        "a<b", "a>b", "a\"b", "A", "Abc", "a b", "caf\u{e9}", "a\u{301}", "\u{ff21}",
     ] {
         assert!(matches!(file_name(bad), Err(Error::Key(_))), "{bad:?}");
     }
     assert!(file_name(&"a".repeat(201)).is_err());
     assert_eq!(file_name("0a1b-2c.3d_4").unwrap(), "w-0a1b-2c.3d_4.lock");
-    assert_eq!(file_name("CON").unwrap(), "w-CON.lock");
+    assert_eq!(file_name("con").unwrap(), "w-con.lock");
     let dir = scratch("keys");
     assert!(matches!(take(&dir, "../escape"), Err(Error::Key(_))));
     assert!(!dir.exists(), "a bad key must not create anything");

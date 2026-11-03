@@ -83,5 +83,11 @@ pub fn private_folder(path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// Nothing to add: the folder's access list is inherited, and std opens files non-inheritable.
-pub fn file_private(_open: &mut OpenOptions) {}
+/// The folder's access list is inherited and std opens files non-inheritable. Sharing excludes DELETE (std's default
+/// allows it): a same-user process could otherwise delete a held lock file, and the next taker would lock a fresh one.
+pub fn file_private(open: &mut OpenOptions) {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 1;
+    const FILE_SHARE_WRITE: u32 = 2;
+    open.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
+}

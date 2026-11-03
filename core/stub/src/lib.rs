@@ -15,13 +15,14 @@
 //! - The folder is created owner-only (0700 on Unix; an access list naming this account and SYSTEM on Windows)
 //!   by whoever comes first. Nothing here needs `core.db`.
 //!
-//! Keys: a key is a session id or similar. It is rejected, not rewritten, when it is empty, longer than 200 bytes,
-//! is `.` or contains `..`, or contains `/`, `\`, NUL, any control character or any of `<>:"|?*` (a name that is
-//! unsafe on any platform is unsafe everywhere, so a key behaves the same on every machine). The file is named
-//! `w-<key>.lock`: the prefix keeps a key like `CON` from being a Windows device name.
+//! Keys: a key is a session id or similar. Only ASCII `a-z 0-9 . _ -` is accepted, at most 200 bytes, and never
+//! `..`; anything else is rejected, not rewritten. APFS and NTFS fold case and Unicode forms but ext4 does not,
+//! so a wider alphabet would let one key name two files on Linux and one file on a Mac. The file is named
+//! `w-<key>.lock`: the prefix keeps a key like `con` from being a Windows device name.
 //!
 //! An existing folder on Unix that belongs to this user but has a wider mode is tightened to 0700; one that
-//! belongs to someone else is refused (`Error::Folder`). On Windows an existing folder is used as found.
+//! belongs to someone else, or is a symlink, is refused (`Error::Folder`). On Windows an existing folder is used
+//! as found, and lock files are opened without FILE_SHARE_DELETE so a held file cannot be deleted under us.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io;
@@ -66,7 +67,9 @@ impl From<io::Error> for Error {
 /// A held lock. Dropping it releases the lock (the file stays).
 #[derive(Debug)]
 pub struct Lock {
-    // Closing the file releases the lock; the explicit unlock in Drop only makes the order plain.
+    // Dropping closes the file, which releases the lock. No explicit unlock: a flock lock belongs to the open file
+    // description, which a stub handed the fd over a socket shares, so unlocking here would free the stub's lock.
+    #[allow(dead_code)]
     file: File,
     path: PathBuf,
 }
@@ -75,12 +78,6 @@ impl Lock {
     /// The lock file's path (it exists for as long as the folder does).
     pub fn path(&self) -> &Path {
         &self.path
-    }
-}
-
-impl Drop for Lock {
-    fn drop(&mut self) {
-        let _ = self.file.unlock();
     }
 }
 
@@ -100,14 +97,14 @@ pub fn file_name(key: &str) -> Result<String, Error> {
     if key.len() > 200 {
         return bad("longer than 200 bytes");
     }
-    if key == "." || key.contains("..") {
+    if key.contains("..") {
         return bad("contains ..");
     }
     if let Some(c) = key
         .chars()
-        .find(|c| c.is_control() || "/\\<>:\"|?*".contains(*c))
+        .find(|c| !matches!(c, 'a'..='z' | '0'..='9' | '.' | '_' | '-'))
     {
-        return bad(&format!("contains {c:?}"));
+        return bad(&format!("contains {c:?}, only a-z 0-9 . _ - are allowed"));
     }
     Ok(format!("w-{key}.lock"))
 }

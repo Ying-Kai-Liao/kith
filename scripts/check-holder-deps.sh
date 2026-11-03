@@ -12,11 +12,13 @@ fail=0
 for crate in holder stub; do
   pkg="kith-$crate"
   manifest="$root/core/$crate/Cargo.toml"
+  crate_fail=0
 
   # 1. The manifest names no path dependency and no kith-* crate.
   if grep -nE '^\s*(kith[-_a-z]*)\s*=|path\s*=' "$manifest" | grep -vE '^\S*\s*(path = "src/(lib|main)\.rs"|name =)' ; then
     echo "core/$crate/Cargo.toml depends on a kith crate or a path (see lines above)" >&2
     fail=1
+    crate_fail=1
   fi
 
   # 2. The resolved tree, for the host platform and for Windows, holds no kith-* crate but the crate itself.
@@ -28,8 +30,10 @@ for crate in holder stub; do
       echo "$pkg links other kith crates ${target:+($target)}:" >&2
       echo "$bad" >&2
       fail=1
+      crate_fail=1
     fi
   done
-  [ "$fail" = 0 ] && echo "$pkg links no kith crate"
+  # Printed per crate; a failure in the first must not hide the second's line.
+  if [ "$crate_fail" = 0 ]; then echo "$pkg links no kith crate"; fi
 done
 exit "$fail"
