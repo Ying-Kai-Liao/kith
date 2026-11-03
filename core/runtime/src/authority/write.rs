@@ -280,6 +280,9 @@ fn drop_self_approved(auth: &mut Value, agent: &str, pid: &str) -> usize {
     gone
 }
 
+// TODO(M2-18): Python's `forget` also drops the `agent@<id>` grants and removes the id from profiles' `with` (lane B
+// tables). Until the same transaction clears those, `addBot`/`removeBot` must not be switched: a bot handed over by
+// remove-and-re-add would get its old logins back. See the ignored test `forget_also_clears_grants_and_profiles`.
 /// `forget`: everything that gives these ids access in the tables the core keeps: memberships and open invites. (A
 /// removed person's grants and shared profiles are lane B's.)
 fn forget(auth: &mut Value, ids: &[&str]) {
@@ -692,8 +695,11 @@ pub(crate) fn invite_create(
         ));
     }
     let minutes = minutes.unwrap_or(15);
+    let Some(seconds) = minutes.checked_mul(60).filter(|s| s.abs() <= (1 << 52)) else {
+        return usage("minutes is a number of minutes, e.g. invite sam 30");
+    };
     #[allow(clippy::cast_precision_loss)]
-    let expires = c.now_ms / 1000.0 + (minutes * 60) as f64;
+    let expires = c.now_ms / 1000.0 + seconds as f64;
     table(auth, "invites").insert(
         code.to_owned(),
         json!({"person": person, "expires": expires}),

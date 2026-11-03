@@ -1231,3 +1231,23 @@ fn a_helper_once_grant_and_the_far_future_survive_a_write_beside_them() {
     );
     assert_eq!(row["model"], "opus");
 }
+
+#[test]
+#[ignore = "lane B: grants and profiles are not core.db tables yet; M2-18 must not switch addBot/removeBot before this passes"]
+fn forget_also_clears_grants_and_profiles() {
+    // Python's `forget` drops the `agent@<id>` grants of a removed bot and its id from profiles' `with`.
+    panic!("not implemented: the tables of lane B");
+}
+
+#[test]
+fn an_invite_with_minutes_out_of_range_is_a_usage_refusal() {
+    let mut rig = Rig::new(&base());
+    let e = call_with(
+        &mut rig.core,
+        &rig.c,
+        "people.invite",
+        &json!({"person": "sam", "minutes": i64::MAX}),
+    )
+    .unwrap_err();
+    assert!(matches!(e, Error::BadParams(_)), "{e}");
+}

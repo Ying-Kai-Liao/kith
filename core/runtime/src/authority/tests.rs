@@ -184,8 +184,12 @@ fn invariants(
             ) else {
                 return Ok(());
             };
+            // `may` allowed this bot (with `once`) and its owner, so `resolve` must too
             if mine["allowed"] != Value::Bool(true) || theirs["allowed"] != Value::Bool(true) {
-                return Ok(());
+                return Err(format!(
+                    "may/resolve disagree for {p:?} on {agent}: {:?} / {:?}",
+                    mine["allowed"], theirs["allowed"]
+                ));
             }
             let sub = |k: &str| {
                 let have = mine[k].as_array().cloned().unwrap_or_default();
