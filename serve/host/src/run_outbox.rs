@@ -255,7 +255,7 @@ fn post(
             let ok = valid(&f.file) && regular(&taken.join(&f.file));
             let shot = files::name(&f.name)
                 .and_then(|name| ok.then_some(name).context("not a plain file"))
-                .and_then(|name| files::snapshot(&root, taken, &f.file, Some(&name), &AtomicBool::new(false)));
+                .and_then(|name| files::snapshot(&root, taken, &f.file, Some(&name), None, &AtomicBool::new(false)));
             match shot {
                 Ok(s) => snapshots.push(s),
                 Err(error) => tracing::warn!(run, file = f.name, error = format!("{error:#}"), "outbox file skipped"),

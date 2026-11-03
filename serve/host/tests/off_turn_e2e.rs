@@ -12,6 +12,8 @@ use std::time::Duration;
 struct Host {
     child: Child,
     home: PathBuf,
+    /// The agent's folders, beside the host's data folder (a run folder inside it is the host's secrets, N1).
+    work: PathBuf,
     base: String,
     token: String,
 }
@@ -20,6 +22,7 @@ impl Drop for Host {
     fn drop(&mut self) {
         common::stop(&mut self.child);
         let _ = std::fs::remove_dir_all(&self.home);
+        let _ = std::fs::remove_dir_all(&self.work);
     }
 }
 
@@ -27,10 +30,12 @@ impl Host {
     async fn start() -> Self {
         let home = std::env::temp_dir().join(format!("kith-offturn-e2e-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
+        let work = std::env::temp_dir().join(format!("kith-offturn-e2e-work-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&work).unwrap();
         // A short quiet period so the off-turn turn ends within the test.
         let (child, base) = common::serve_env(&home, &[("KITH_SERVE_OFF_TURN_QUIET_MS", "800")]).await;
         let token = common::read_token(&home).trim().to_owned();
-        Self { child, home, base, token }
+        Self { child, home, work, base, token }
     }
 
     async fn call(&self, method: &str, body: Value) -> Value {
@@ -49,7 +54,7 @@ impl Host {
     }
 
     async fn bot(&self) -> String {
-        let cwd = self.home.join("workspace");
+        let cwd = self.work.join("workspace");
         std::fs::create_dir_all(&cwd).unwrap();
         std::fs::write(cwd.join("report.pdf"), b"%PDF-example").unwrap();
         let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/background_agent.py");
@@ -95,7 +100,7 @@ async fn a_woken_agent_posts_and_sends_in_the_chat_and_the_turn_ends_after_a_qui
     );
     assert!(entries.iter().any(|e| e["kind"] == "agent" && e["data"]["text"] == "The render is done."));
     assert_eq!(kinds("notice"), 0, "nothing failed: {entries:?}");
-    let path = host.home.join("workspace/offturn-results.json");
+    let path = host.work.join("workspace/offturn-results.json");
     until("the agent's results", || async {
         std::fs::read(&path).ok().and_then(|d| serde_json::from_slice::<Value>(&d).ok()).is_some()
     })
@@ -139,7 +144,7 @@ async fn a_routine_is_not_adopted() {
         )
         .await;
     host.call("runRoutine", json!({"botId": bot, "id": routine["routine"]["id"]})).await;
-    let path = host.home.join("workspace/offturn-results.json");
+    let path = host.work.join("workspace/offturn-results.json");
     until("the agent's attempt", || async {
         std::fs::read(&path).ok().and_then(|d| serde_json::from_slice::<Value>(&d).ok()).is_some()
     })
