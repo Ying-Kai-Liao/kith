@@ -74,7 +74,7 @@ flowchart TB
 
 core.db and the binaries live on the internal disk (Sonnet 4); a spawn whose folder is on an unmounted volume returns
 "agent folder not mounted" as a status, never a crash. A core that finds core.db missing where its marker says one
-existed refuses to start empty (an empty db would read as "no grants"). On start: integrity check; before any
+existed refuses to start empty (an empty db would read as "no grants"). On start: `quick_check` (the full `integrity_check` runs before a migration); before any
 migration, a `VACUUM INTO` snapshot; `kith backup` includes a dump.
 
 ## 3. Principals
@@ -272,6 +272,44 @@ ciphertext-only cloud; offer it as a choice or run it in the user's own cloud ma
 - Memory notes edited by parallel sessions: stay files, or writes go through the core.
 - Whether a launchd-started holder can reach the external disk (TCC, Full Disk Access): test at M1; `--direct` is
   the fallback either way.
+
+## Execution additions (main, 2026-11-03)
+Kai: "you are welcome to make it finer to execute and check", then "when we are finishing and testing, we'll find those problems eventually". So these are short.
+
+**Data import per milestone.** Each M that moves state into `core.db` ships `kith migrate` steps that are idempotent, take `--dry-run`, and take a `VACUUM INTO` snapshot first. They import from `auth.json`, `live/terminal/*`, `serve.db` people/grants/routines/vault, `kith-sched` jobs and the cost ledger. The check is a "same answer" run: every may, grant and claim question is asked of the old store and of `core.db` over a snapshot of real-shaped data, with zero differences before the tombstone. Restoring the snapshot undoes only a migration that failed or just finished. Once the core has answered anything after it, rollback is `kith rollback`, never a snapshot restore.
+
+**The oracle after Python.** Difftest (Python vs Rust per CLI line) stops working once state lives only in `core.db` (M2+). Before each switch, freeze its cases as a golden corpus (inputs plus expected outputs) and keep running them against Rust. Trace checking: in a test mode the core emits claim, redeem, ack, reconcile and revoke events, and a checker replays them against `Runtime.tla`'s actions, so the model checks code, not only the design. `Runtime.tla` lives in the architect's design folder, not the repo; the architect drafts it as a verify skill and coder commits it, as with the other verify skills. The checked events (claim, redeem, ack, reconcile) exist only from M3. Each traced event is one committed transaction at the model's action grain, sent after the commit: a trace of steps the model treats as one but the code does in two would pass while the code is wrong (the revoke rows in #493).
+
+**A delete list per milestone.** Name the host code each M removes, with a CI check that it is gone. M2: the decision parts of `api/roles.rs`, `runauth.rs`, `market/vault.rs`, the host people mirror and its 10-second `kith-auth` refresh, the host's copy of `person.agents`, the host's `setPersonAccess` and `decideAccessRequest`. M3: `terminal/claim.rs` and `registry.rs`, `agent/bot/turn` and `queue`, the threads claim files (and `kith-kernel`'s `threads` module, which M3 replaces).
+
+**Branch sync and the way to main.** Merge `origin/main` into `rust-rebuild` before each M-step starts. Kai, 2026-11-03: `rust-rebuild` goes to main "after M0c is fine". When M0c is merged and `rust-rebuild` CI is green, the manager tells main, and Kai merges; managers never merge into main.
+
+### M0 build rules
+- **M0a:**
+  - The lock is a separate `core.lock` file, which nothing ever deletes. It records the holder's pid and start time, so `kith doctor` can end a holder that holds the lock but doesn't answer.
+  - Every lock holder bumps the generation, embedded mode included.
+  - Embedded mode never says hello to a holder and runs no claim transactions.
+  - One function opens every transaction that touches claims and checks the generation.
+  - Embedded mode may create a fresh core.db but never migrates an existing one. A binary that knows an older schema refuses to write.
+  - Use WAL, and `BEGIN IMMEDIATE` for writes.
+  - On Windows, the 0700/0600 check means an owner-only access list.
+  - `quick_check` at daemon start, the full `integrity_check` before a migration (section 2).
+  - Embedded calls skip `quick_check`; hooks will call embedded mode, so each call stays cheap.
+- **M0c (check, added):** until M1, a missing or crashing holder stops neither `kith serve` nor the CLI, and the release bundles `kith-holder` or the daemon runs without it. (Once `rust-rebuild` reaches main, Kai's live `kith serve` will try to start `kith-holder` and nothing uses it until M1.)
+- **M0d:**
+  - Kill is idempotent, and a kill for an unknown id answers "gone".
+  - Kill takes the whole process tree: one job object per spawn on Windows; own session plus `killpg` on Unix, reporting "gone" only once the group is empty.
+  - The daemon starts the holder detached (own session on Unix, `CREATE_BREAKAWAY_FROM_JOB` on Windows).
+  - The switch to "the holder restarts the core" lands at M1, together with the launchd change.
+  - The survival test runs under the real launchd job and the real Windows supervisor.
+- **M0f:** the core tags each process at spawn with "kill on lease loss". On expiry the holder kills the tagged processes in the same step and leaves owner processes alone.
+
+### Architect's M0 answers (2026-11-03)
+**Crates and binaries.** `core/runtime` is `kith-core`; it depends on `kith-kernel`, never the other way, and `kith-kernel` never learns where `core.db` is. `core/api` is `kith-api`: the method table in Rust (serde request and result types plus one row per method: name, params, result, allowed principals, CLI shape, stability), with OpenRPC, TS and Swift generated, checked in and diffed by CI; `released.json` is the OpenRPC snapshot cut at each release and the break test allows additions only. Product modules call the core in-process through this table with a principal; `kith-core` has no other public functions. `core/holder` is `kith-holder`, a separate binary that links neither crate (CI checks it), because Windows cannot overwrite a running exe. M0f runs SSH over stdio (`ssh host kith-holder --stdio`); the pairing key is checked inside the stream, and the local holder secret is the local hand's pairing key. No relay in M0.
+
+**Access verbs after M2.** No per-verb Python rollback: the dispatcher refuses `KITH_CORE=python` for access verbs and points to `kith rollback`. With the daemon stopped and `core.lock` held, `kith rollback` exports `auth.json` from `core.db` once (revoked and suspended rows included) and marks `core.db` non-authoritative; it also writes every secret record back as its own OS-store item, in the shape kith-auth reads (at M2 the keys move into the envelope and kith-auth stops writing them, so an auth.json-only export would lose every key added or changed since); the new core refuses to start until `kith migrate` imports `auth.json` and those OS-store items back. Grants move as one block (I14). `revoke-access` gains the property "a rollback keeps every revoke and every key".
+
+**The core-down list.** When the daemon is down the owner falls back to embedded mode (a full core), so there is no second rule set. This list applies only when no core can run at all (a silent lock holder, `core.db` missing or refused, a pending migration). Owner runs keep exactly five things: (1) the run's `settings.json` as last written, enforced by the engine; (2) the must-ask classes (I13), fixed in the kernel and compiled in, answered by the engine's own prompt, not a kith card; (3) the `--direct` file writer claim, owner only; (4) environment already given to a running run; (5) the recovery verbs: `doctor`, `update`, `rollback`, `backup`, `restore`, `migrate`. Everything else refuses with a status naming the recovery verb; nothing reads `core.db` outside a running core. Tests: one case per item, plus one showing a grant, card or secret call refuses.
 
 ## Verified
 model: designs/2026-11-03-runtime-shapes/model/Runtime.tla · TLC v1.7.4 via tools/tlc.sh · bounds: 1 conversation,
