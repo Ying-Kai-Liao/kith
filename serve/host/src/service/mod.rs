@@ -130,7 +130,7 @@ fn holder_words() -> Result<Option<Vec<String>>> {
         );
     }
     let folders = crate::kernel::folders(&kith_kernel::paths::process_home());
-    let (dir, secret) = kith_core::holder_files(&folders).context("preparing the holder's folder")?;
+    let (dir, secret) = crate::core_front::holder_files(&folders).context("preparing the holder's folder")?;
     if cfg!(target_os = "macos") && !holder_forced() {
         let paths = [resolved(&dir), resolved(&secret), resolved(&data_dir())];
         if let Some((path, mount)) = off_boot_volume(&paths, mount_of) {
