@@ -13,6 +13,7 @@ use crate::wire;
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -45,6 +46,9 @@ struct Entry {
     tail: VecDeque<u8>,
     /// Output streams still being read.
     readers: u8,
+    /// A kill has seen the tree empty. Sticks: the group id may be handed to an unrelated group afterwards (the blind
+    /// spot of `Proc::tree_empty`), and a later kill must neither say "killing" nor signal that group.
+    gone: AtomicBool,
 }
 
 /// The connected core. Frames go out through its own writer thread: a core that stops reading must never block
@@ -88,6 +92,8 @@ impl Backlog {
 
 struct State {
     procs: HashMap<u32, Entry>,
+    /// The highest claim seen per conversation, kept after the process is acked: a spawn at or below it is stale.
+    claims: HashMap<String, u64>,
     next_id: u32,
     /// The newest generation any core has said hello with. Never goes down.
     newest: u64,
@@ -223,6 +229,7 @@ impl Holder {
         Holder {
             state: Mutex::new(State {
                 procs: HashMap::new(),
+                claims: HashMap::new(),
                 next_id: 1,
                 newest: 0,
                 conns: 0,
@@ -440,16 +447,21 @@ impl Holder {
                     self.spawn(st, spec);
                 }
                 p::INPUT => {
-                    if let Some(e) = st.procs.get_mut(&id) {
+                    let body = self.body_for(&payload);
+                    if let Some(e) = body.and_then(|_| st.procs.get_mut(&id)) {
+                        let payload = body.unwrap_or_default();
                         if payload.is_empty() {
                             e.input = None;
                         } else if let Some(tx) = &e.input {
-                            let _ = tx.send(payload);
+                            let _ = tx.send(payload.to_vec());
                         }
                     }
                 }
                 p::RESIZE => {
-                    let size: p::Size = wire::parse(&payload)?;
+                    let Some(body) = self.body_for(&payload) else {
+                        continue;
+                    };
+                    let size: p::Size = wire::parse(body)?;
                     if let Some(e) = st.procs.get_mut(&id).filter(|e| e.held.exit.is_none()) {
                         e.held.cols = size.cols;
                         e.held.rows = size.rows;
@@ -457,11 +469,18 @@ impl Holder {
                     }
                 }
                 p::KILL => {
-                    let state = self.kill(&st, id);
+                    let state = if self.body_for(&payload).is_some() {
+                        self.kill(&st, id)
+                    } else {
+                        KillState::NotHere
+                    };
                     self.to_core(&st, wire::json_frame(p::KILLED, id, &p::Killed { state }));
                 }
                 p::ACK => {
-                    let state = match st.procs.get(&id).map(|e| e.held.exit.is_some()) {
+                    let here = self.body_for(&payload).is_some();
+                    let known = st.procs.get(&id).map(|e| e.held.exit.is_some());
+                    let state = match known.filter(|_| here) {
+                        None if !here => p::AckState::NotHere,
                         None => p::AckState::Gone,
                         Some(false) => p::AckState::Running,
                         Some(true) => {
@@ -481,9 +500,9 @@ impl Holder {
                     self.to_core(&st, wire::json_frame(p::LISTING, 0, &listing));
                 }
                 p::TAIL => {
-                    let tail = st
-                        .procs
-                        .get(&id)
+                    let tail = self
+                        .body_for(&payload)
+                        .and_then(|_| st.procs.get(&id))
                         .map(|e| e.tail.iter().copied().collect::<Vec<u8>>())
                         .unwrap_or_default();
                     self.to_core(&st, wire::frame(p::TAILED, id, &tail));
@@ -499,6 +518,12 @@ impl Holder {
         Ok(())
     }
 
+    /// What follows the instance at the start of a payload, or None when the payload names another holder (or none):
+    /// then the frame id means nothing here.
+    fn body_for<'a>(&self, payload: &'a [u8]) -> Option<&'a [u8]> {
+        payload.strip_prefix(self.instance.as_bytes())
+    }
+
     /// Idempotent: kills the whole tree and says "gone" only once nothing of it is left. A kill for an id never
     /// held (or already acked) says "gone" too, so a core can resend until it hears that.
     fn kill(&self, st: &State, id: u32) -> KillState {
@@ -508,8 +533,12 @@ impl Holder {
         // An ended process had its tree swept before its exit was recorded, but "gone" still means the group or job
         // is empty: a member that is slow to die keeps the answer at "killing". (After the leader is reaped, Unix
         // sends no more signals, since its group id could be recycled; the sweep's SIGKILL is already on its way.)
+        if e.gone.load(Ordering::Relaxed) {
+            return KillState::Gone;
+        }
         e.proc.kill_tree();
         if e.proc.tree_empty() {
+            e.gone.store(true, Ordering::Relaxed);
             KillState::Gone
         } else {
             KillState::Killing
@@ -530,9 +559,26 @@ impl Holder {
                     conv: spec.conv,
                     claim: spec.claim,
                     pid: e.held.pid,
+                    instance: self.instance.clone(),
+                    id: e.held.id,
                 },
             );
             return self.to_core(&st, frame);
+        }
+        // A claim at or below the highest started for this conversation was decided before (or is) one whose job
+        // already ran: refuse it, whether or not that process is still held or was acked.
+        if let Some(highest) = st
+            .claims
+            .get(&spec.conv)
+            .copied()
+            .filter(|h| spec.claim <= *h)
+        {
+            let stale = p::StaleClaim {
+                conv: spec.conv,
+                claim: spec.claim,
+                highest,
+            };
+            return self.to_core(&st, wire::json_frame(p::STALE_CLAIM, 0, &stale));
         }
         let started = platform::spawn(&Spec {
             argv: &spec.argv,
@@ -558,6 +604,8 @@ impl Holder {
                 return self.to_core(&st, wire::json_frame(p::SPAWN_FAILED, 0, &failed));
             }
         };
+        // Recorded only now: a start that failed can be tried again with the same claim.
+        st.claims.insert(spec.conv.clone(), spec.claim);
         let id = st.next_id;
         st.next_id += 1;
         let pid = started.proc.pid();
@@ -579,6 +627,7 @@ impl Holder {
             id,
             Entry {
                 held: Held {
+                    instance: self.instance.clone(),
                     id,
                     conv: spec.conv.clone(),
                     claim: spec.claim,
@@ -593,6 +642,7 @@ impl Holder {
                 input: Some(input),
                 tail: VecDeque::new(),
                 readers: 1 + u8::from(started.err.is_some()),
+                gone: AtomicBool::new(false),
             },
         );
         let reader = |stream: Box<dyn std::io::Read + Send>, kind: u8| {
@@ -614,6 +664,8 @@ impl Holder {
                     conv: spec.conv,
                     claim: spec.claim,
                     pid,
+                    instance: self.instance.clone(),
+                    id,
                 },
             ),
         );
@@ -665,8 +717,13 @@ impl Holder {
         let exit = match proc.reap() {
             Ok(exit) => exit,
             Err(e) => {
+                // Dropping the exit would leave the process "running" for ever: record that it ended unreadably.
                 eprintln!("holder: wait for process {id}: {e}");
-                return;
+                p::Exit {
+                    code: None,
+                    signal: None,
+                    error: Some(e.to_string()),
+                }
             }
         };
         let deadline = Instant::now() + EXIT_DRAIN;
@@ -682,9 +739,11 @@ impl Holder {
                 .unwrap_or_else(|p| p.into_inner())
                 .0;
         }
-        if let Some(e) = st.procs.get_mut(&id) {
-            e.held.exit = Some(exit);
+        if st.procs.get(&id).is_some_and(|e| e.held.exit.is_none()) {
             self.to_core(&st, wire::json_frame(p::EXITED, id, &exit));
+            if let Some(e) = st.procs.get_mut(&id) {
+                e.held.exit = Some(exit);
+            }
         }
     }
 }
@@ -694,6 +753,53 @@ mod tests {
     use super::*;
     use crate::client::Client;
     use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn a_failed_reap_is_recorded_as_an_error_exit_and_kept() {
+        let holder = test_holder();
+        let argv = ["true".to_string()];
+        let env = std::env::vars().collect();
+        let started = platform::spawn(&Spec {
+            argv: &argv,
+            env: &env,
+            cwd: "/",
+            mode: p::Mode::Pipes,
+            cols: 80,
+            rows: 24,
+        })
+        .unwrap();
+        let proc = Arc::new(started.proc);
+        // Reaped behind the holder's back: the holder's own wait will then fail.
+        proc.wait_exit();
+        proc.reap().unwrap();
+        holder.lock().procs.insert(
+            1,
+            Entry {
+                held: Held {
+                    instance: String::new(),
+                    id: 1,
+                    conv: "c".into(),
+                    claim: 1,
+                    generation: 1,
+                    pid: proc.pid(),
+                    mode: p::Mode::Pipes,
+                    cols: 80,
+                    rows: 24,
+                    exit: None,
+                },
+                proc: proc.clone(),
+                input: None,
+                tail: VecDeque::new(),
+                readers: 0,
+                gone: AtomicBool::new(false),
+            },
+        );
+        holder.reap(1, proc);
+        let st = holder.lock();
+        let exit = st.procs[&1].held.exit.clone().expect("an exit is kept");
+        assert_eq!((exit.code, exit.signal), (None, None));
+        assert!(exit.error.is_some());
+    }
 
     #[test]
     fn once_closing_is_set_a_hello_is_refused() {
@@ -767,6 +873,54 @@ mod tests {
             .expect(p::SPAWNED, 0, Duration::from_secs(10))
             .expect("spawned");
         assert_eq!(client.list().unwrap().len(), 1);
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
+    fn gone_sticks_once_a_kill_has_seen_the_tree_empty() {
+        let holder = test_holder();
+        let (core, theirs) = UnixStream::pair().unwrap();
+        let mut offered = vec![Ok(theirs)];
+        let looping = holder.clone();
+        std::thread::spawn(move || {
+            looping.accept_loop(
+                || {
+                    if offered.is_empty() {
+                        std::thread::sleep(Duration::from_secs(60));
+                    }
+                    offered.remove(0)
+                },
+                5,
+                Duration::from_millis(1),
+            )
+        });
+        let mut client = Client::over(core, "0123456789abcdef", 1).expect("served");
+        client
+            .spawn(&p::Spawn {
+                conv: "c".into(),
+                claim: 1,
+                generation: 1,
+                argv: vec!["sleep".into(), "30".into()],
+                env: std::env::vars().collect(),
+                cwd: "/".into(),
+                mode: p::Mode::Pipes,
+                cols: 80,
+                rows: 24,
+            })
+            .unwrap();
+        client
+            .expect(p::SPAWNED, 0, Duration::from_secs(10))
+            .expect("spawned");
+        let id = client.list().unwrap()[0].held_id();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while client.kill(&id).unwrap() != KillState::Gone {
+            assert!(Instant::now() < deadline, "kill never reached gone");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Seen once: the entry remembers it, so a later kill says gone without signalling a group id that may by now
+        // belong to someone else (the blind spot of `tree_empty`).
+        assert!(holder.lock().procs[&id.id].gone.load(Ordering::Relaxed));
+        assert_eq!(client.kill(&id).unwrap(), KillState::Gone);
         drop(holder.close_down(holder.lock()));
     }
 

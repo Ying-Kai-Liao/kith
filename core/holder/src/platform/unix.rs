@@ -229,6 +229,7 @@ impl Proc {
                     return Ok(Exit {
                         code: status.code(),
                         signal: status.signal(),
+                        error: None,
                     });
                 }
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,

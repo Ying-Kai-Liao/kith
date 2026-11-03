@@ -199,13 +199,11 @@ pub fn print_settings(a: &Args) -> Result<()> {
     let guest_domains = if owner || !claude {
         Ok(vec![])
     } else {
-        let answer = Command::new(c.kernel.join("bin/kith-auth"))
-            .args(["agent-access", &a.agent, "--json"])
-            .stdin(std::process::Stdio::null())
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim_end_matches('\n').to_owned());
+        // A hung kith-auth must not hang the launch: a timeout is no answer, so the guest gets no extra domains (+ warning).
+        let mut cmd = Command::new(c.kernel.join("bin/kith-auth"));
+        cmd.args(["agent-access", &a.agent, "--json"]);
+        let answer = kith_kernel::secrets::run_command_with_timeout(cmd, std::time::Duration::from_secs(20))
+            .map(|o| o.trim_end_matches('\n').to_owned());
         settings::guest_domains(answer.as_deref())
     };
     let once_id = a.once_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());

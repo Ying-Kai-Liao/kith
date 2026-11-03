@@ -2,7 +2,7 @@
 //! holds it is the one writer of that session, even before the registry file (written by the session's own hook seconds
 //! later) exists and even while the host is down. The kernel (`kernel/bin/kith-sessions`) writes and reads the same file.
 //!
-//! `{"pid": <claimer>, "procStart": "<ps lstart>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot", "takeover": bool}`
+//! `{"pid": <claimer>, "procStart": "<ps lstart>", "at": "<rfc3339>", "kind": "terminal" | "app" | "bot" | "oneshot" | <any other string>, "takeover": bool}`
 //!
 //! A claim whose pid is gone, or whose pid now started at another time, is stale and is replaced under a lock file
 //! (`<sid>.claim.lock`, flock). A claimer is a long-lived process: `kith <agent> --resume` claims for the shell
@@ -28,6 +28,10 @@ pub enum Kind {
     Bot,
     /// A `claude -p --resume` one-shot (`kith ask -c`, `kith <agent> -c "task"`, the bridge): keeps the host out like a terminal.
     Oneshot,
+    /// A kind this build does not know (a newer binary wrote it, e.g. M1's holder kind). Read as a live holder judged by
+    /// pid + start alone, like `kith-sessions` and the crate do, and never removed as garbage by `take_as`.
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]

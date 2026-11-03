@@ -94,6 +94,14 @@ fn sleep_line() -> &'static str {
     }
 }
 
+/// An id of the holder `c` is connected to, as a core that stored it from that holder would have it.
+fn h(c: &Client, id: u32) -> p::HeldId {
+    p::HeldId {
+        instance: c.welcome.instance.clone(),
+        id,
+    }
+}
+
 fn spawn(c: &mut Client, s: &p::Spawn) -> u32 {
     c.spawn(s).unwrap();
     let (_, id, payload) = c.expect(p::SPAWNED, 0, WAIT).expect("spawned");
@@ -126,7 +134,7 @@ fn read_until(c: &mut Client, id: u32, needle: &str) -> String {
 fn kill_until_gone(c: &mut Client, id: u32) {
     let deadline = Instant::now() + WAIT;
     while Instant::now() < deadline {
-        if c.kill(id).unwrap() == KillState::Gone {
+        if c.kill(&h(c, id)).unwrap() == KillState::Gone {
             return;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -159,12 +167,12 @@ fn spawn_list_kill_and_ack() {
             held[0].conv.as_str(),
             held[0].claim,
             held[0].generation,
-            held[0].exit
+            held[0].exit.clone()
         ),
         ("conv-a", 7, 1, None)
     );
     // Nothing to ack while it runs.
-    assert_eq!(c.ack(id).unwrap(), AckState::Running);
+    assert_eq!(c.ack(&h(&c, id)).unwrap(), AckState::Running);
     // Spawning the same claim again answers the running process; it does not start a second one.
     assert_eq!(
         spawn(&mut c, &spec("conv-a", 7, 1, Mode::Pipes, &shell(line))),
@@ -177,14 +185,14 @@ fn spawn_list_kill_and_ack() {
         assert_eq!(exit.signal, Some(9));
     }
     // Killing again, and killing something unknown, both say gone.
-    assert_eq!(c.kill(id).unwrap(), KillState::Gone);
-    assert_eq!(c.kill(9999).unwrap(), KillState::Gone);
+    assert_eq!(c.kill(&h(&c, id)).unwrap(), KillState::Gone);
+    assert_eq!(c.kill(&h(&c, 9999)).unwrap(), KillState::Gone);
     // The exit stays listed until acked, then it is gone.
     assert_eq!(c.list().unwrap()[0].exit, Some(exit));
-    assert_eq!(c.ack(id).unwrap(), AckState::Acked);
-    assert_eq!(c.ack(id).unwrap(), AckState::Gone);
+    assert_eq!(c.ack(&h(&c, id)).unwrap(), AckState::Acked);
+    assert_eq!(c.ack(&h(&c, id)).unwrap(), AckState::Gone);
     assert!(c.list().unwrap().is_empty());
-    assert_eq!(c.kill(id).unwrap(), KillState::Gone);
+    assert_eq!(c.kill(&h(&c, id)).unwrap(), KillState::Gone);
 }
 
 #[test]
@@ -206,10 +214,10 @@ fn a_terminal_takes_input_and_keeps_a_tail() {
         shell("read x; echo got:$x; exec sleep 300")
     };
     let id = spawn(&mut c, &spec("conv-t", 1, 1, Mode::Pty, &argv));
-    c.send(p::RESIZE, id, br#"{"cols":100,"rows":30}"#).unwrap();
-    c.send(p::INPUT, id, b"ping\r").unwrap();
+    c.resize(&h(&c, id), 100, 30).unwrap();
+    c.input(&h(&c, id), b"ping\r").unwrap();
     read_until(&mut c, id, "got:ping");
-    assert!(String::from_utf8_lossy(&c.tail(id).unwrap()).contains("got:ping"));
+    assert!(String::from_utf8_lossy(&c.tail(&h(&c, id)).unwrap()).contains("got:ping"));
     assert_eq!(c.list().unwrap()[0].cols, 100);
     kill_until_gone(&mut c, id);
 }
@@ -262,7 +270,8 @@ fn a_stale_generation_is_refused_and_a_newer_core_takes_over() {
     let mut new = fx.client(6);
     // The old core is cut off: its connection is closed, and nothing it still sends counts.
     assert!(old.closed(WAIT));
-    let _ = old.send(p::KILL, id, &[]);
+    let instance = old.welcome.instance.clone();
+    let _ = old.send_for(p::KILL, &instance, id, &[]);
     // The new core sees the old core's process and can control it.
     assert_eq!(new.welcome.procs.len(), 1);
     assert_eq!(new.welcome.procs[0].id, id);
@@ -275,7 +284,7 @@ fn a_stale_generation_is_refused_and_a_newer_core_takes_over() {
     // And the old core's kill did nothing.
     std::thread::sleep(Duration::from_millis(300));
     let held = new.list().unwrap();
-    assert_eq!((held.len(), held[0].exit), (1, None));
+    assert_eq!((held.len(), held[0].exit.clone()), (1, None));
     kill_until_gone(&mut new, id);
 }
 
@@ -296,11 +305,11 @@ fn an_exit_is_kept_until_it_is_acked_across_cores() {
             held.len(),
             held[0].conv.as_str(),
             held[0].claim,
-            held[0].exit
+            held[0].exit.clone()
         ),
         (1, "conv-e", 3, Some(exit))
     );
-    assert_eq!(next.ack(id).unwrap(), AckState::Acked);
+    assert_eq!(next.ack(&h(&next, id)).unwrap(), AckState::Acked);
     assert!(next.list().unwrap().is_empty());
 }
 
@@ -408,14 +417,14 @@ fn the_holder_and_its_process_outlive_the_process_that_started_it() {
     assert_eq!(second.welcome.pid, holder_pid, "the same holder answers");
     let held = second.list().unwrap();
     assert_eq!(
-        (held.len(), held[0].id, held[0].pid, held[0].exit),
+        (held.len(), held[0].id, held[0].pid, held[0].exit.clone()),
         (1, id, child_pid, None)
     );
     #[cfg(unix)]
     assert!(alive(child_pid as i32));
     kill_until_gone(&mut second, id);
     exit_of(&mut second, id);
-    assert_eq!(second.ack(id).unwrap(), AckState::Acked);
+    assert_eq!(second.ack(&h(&second, id)).unwrap(), AckState::Acked);
 }
 
 #[test]
@@ -624,11 +633,11 @@ fn a_dropped_stdio_link_keeps_the_process_and_a_reconnect_resumes_from_the_tail(
     let mut back = fx.over_stdio(1);
     let held = back.welcome.procs.clone();
     assert_eq!(
-        (held.len(), held[0].id, held[0].claim, held[0].exit),
+        (held.len(), held[0].id, held[0].claim, held[0].exit.clone()),
         (1, id, 7, None)
     );
     assert!(
-        String::from_utf8_lossy(&back.tail(id).unwrap()).contains("before-the-drop"),
+        String::from_utf8_lossy(&back.tail(&h(&back, id)).unwrap()).contains("before-the-drop"),
         "the tail resumes what the link missed"
     );
     // The same spawn again (the link dropped mid-spawn) answers with the process already running.
@@ -655,8 +664,8 @@ fn an_exit_during_a_stdio_drop_is_kept_until_acked_over_the_next_link() {
     let mut next = fx.over_stdio(1);
     let held = &next.welcome.procs;
     assert_eq!(held.len(), 1);
-    assert_eq!(held[0].exit.map(|e| e.code), Some(Some(4)));
-    assert_eq!(next.ack(id).unwrap(), AckState::Acked);
+    assert_eq!(held[0].exit.as_ref().map(|e| e.code), Some(Some(4)));
+    assert_eq!(next.ack(&h(&next, id)).unwrap(), AckState::Acked);
     assert!(next.list().unwrap().is_empty());
 }
 
@@ -712,4 +721,93 @@ fn a_command_that_never_answers_is_ended_at_the_deadline_and_its_stderr_is_kept(
         }
         other => panic!("expected a timeout, got {other}"),
     }
+}
+
+#[test]
+fn a_spawn_at_or_below_the_highest_claim_is_refused() {
+    let fx = Fixture::new("stale");
+    fx.start();
+    let mut c = fx.client(1);
+    let id = spawn(
+        &mut c,
+        &spec("conv-s", 5, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    // Even after the claim-5 process is killed and acked, claim 4 is still behind what the holder saw.
+    kill_until_gone(&mut c, id);
+    exit_of(&mut c, id);
+    assert_eq!(c.ack(&h(&c, id)).unwrap(), AckState::Acked);
+    c.spawn(&spec("conv-s", 4, 1, Mode::Pipes, &shell(sleep_line())))
+        .unwrap();
+    let (_, _, payload) = c.expect(p::STALE_CLAIM, 0, WAIT).expect("stale claim");
+    let stale: p::StaleClaim = wire::parse(&payload).unwrap();
+    assert_eq!(
+        (stale.conv.as_str(), stale.claim, stale.highest),
+        ("conv-s", 4, 5)
+    );
+    assert!(c.list().unwrap().is_empty());
+    // The same claim again, its job having run and been acked, is refused too.
+    c.spawn(&spec("conv-s", 5, 1, Mode::Pipes, &shell(sleep_line())))
+        .unwrap();
+    let (_, _, payload) = c.expect(p::STALE_CLAIM, 0, WAIT).expect("stale claim");
+    let stale: p::StaleClaim = wire::parse(&payload).unwrap();
+    assert_eq!((stale.claim, stale.highest), (5, 5));
+    // A start that failed did not run the job: the same claim may try again.
+    c.spawn(&spec("conv-r", 2, 1, Mode::Pipes, &["/no/such/program"]))
+        .unwrap();
+    c.expect(p::SPAWN_FAILED, 0, WAIT).expect("spawn failed");
+    let r = spawn(
+        &mut c,
+        &spec("conv-r", 2, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    kill_until_gone(&mut c, r);
+    // A higher claim, and another conversation at a low one, still start.
+    let a = spawn(
+        &mut c,
+        &spec("conv-s", 6, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    let b = spawn(
+        &mut c,
+        &spec("conv-o", 1, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    kill_until_gone(&mut c, a);
+    kill_until_gone(&mut c, b);
+}
+
+#[test]
+fn an_id_from_another_holder_instance_touches_nothing() {
+    let fx = Fixture::new("foreign");
+    fx.start();
+    let mut c = fx.client(1);
+    let line = if cfg!(windows) {
+        "echo hello && ping -n 300 127.0.0.1 > nul"
+    } else {
+        "echo hello; exec sleep 300"
+    };
+    let id = spawn(&mut c, &spec("conv-i", 1, 1, Mode::Pipes, &shell(line)));
+    read_until(&mut c, id, "hello");
+    assert_eq!(c.list().unwrap()[0].held_id(), h(&c, id));
+    let other = "0".repeat(32);
+    assert_ne!(other, c.welcome.instance);
+    c.send_for(p::KILL, &other, id, &[]).unwrap();
+    let (_, _, payload) = c.expect(p::KILLED, id, WAIT).expect("killed");
+    let killed: p::Killed = wire::parse(&payload).unwrap();
+    assert_eq!(killed.state, KillState::NotHere);
+    c.send_for(p::ACK, &other, id, &[]).unwrap();
+    let (_, _, payload) = c.expect(p::ACKED, id, WAIT).expect("acked");
+    let acked: p::Acked = wire::parse(&payload).unwrap();
+    assert_eq!(acked.state, AckState::NotHere);
+    c.send_for(p::TAIL, &other, id, &[]).unwrap();
+    let (_, _, tail) = c.expect(p::TAILED, id, WAIT).expect("tailed");
+    assert!(tail.is_empty());
+    c.send_for(p::RESIZE, &other, id, br#"{"cols":120,"rows":40}"#)
+        .unwrap();
+    c.send_for(p::INPUT, &other, id, b"").unwrap();
+    // The process is still running, unresized, and its tail is still there.
+    let held = c.list().unwrap();
+    assert_eq!(
+        (held.len(), held[0].exit.clone(), held[0].cols),
+        (1, None, 80)
+    );
+    assert!(String::from_utf8_lossy(&c.tail(&h(&c, id)).unwrap()).contains("hello"));
+    kill_until_gone(&mut c, id);
 }

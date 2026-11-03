@@ -7,6 +7,7 @@
 use super::state::write_atomic;
 use super::{Ctx, Map, pyjson};
 use crate::paths::realpath;
+use fs2::FileExt as _;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
@@ -160,7 +161,15 @@ fn sync(
             }
         };
         if current().is_some_and(|cfg| want.iter().any(|(k, v)| cfg.get(*k) != Some(*v))) {
-            // Read again just before the swap: Claude Code may have written in between.
+            // Two launches on the same account mirror at once: one at a time (`.claude.json.lock`, flock; kith_accounts
+            // takes the same). Made only when a write is due, so a launch with nothing to mirror leaves the folder as it is.
+            let lock = std::fs::OpenOptions::new()
+                .write(true)
+                .truncate(false)
+                .create(true)
+                .open(directory.join(".claude.json.lock"))?;
+            lock.lock_exclusive()?;
+            // Read again under the lock, just before the swap: Claude Code may have written in between.
             if let Some(mut cfg) = current() {
                 for (k, v) in want {
                     cfg.insert(k.to_owned(), v.clone());

@@ -398,6 +398,7 @@ class Run:
             r['error'] = ' '.join(p.stderr.split())[-500:] or 'exited %d' % p.returncode
         elif d.get('error'):
             r['error'] = d['error']
+            r['cost'] = d.get('cost_usd')   # a crash or timeout still spent it; older host binaries send none
             if d.get('kind') == 'depleted':
                 r['usage_limit'] = {'resets_at': d.get('resets_at')}
         else:

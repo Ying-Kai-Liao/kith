@@ -60,6 +60,18 @@ pub(super) fn owner_only(env: impl Fn(&str) -> Option<String>) -> bool {
         || ["telegram", "slack", "discord", "group"].contains(&via.as_str()))
 }
 
+/// Inside the OS sandbox put around a guest's run (the home folder can't be listed), whatever its shell left in the
+/// environment. Windows has no such sandbox: the environment check above is all there is.
+#[cfg(unix)]
+fn guest_sandbox() -> bool {
+    kith_kernel::secrets::guest_sandbox()
+}
+
+#[cfg(not(unix))]
+fn guest_sandbox() -> bool {
+    false
+}
+
 fn thread_ok(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
@@ -87,7 +99,8 @@ fn has_table(conn: &Connection, name: &str) -> bool {
 
 pub fn run(cmd: SummaryCmd) -> Result<i32> {
     let (SummaryCmd::Show { thread, .. } | SummaryCmd::Forget { thread, .. } | SummaryCmd::Write { thread, .. }) = &cmd;
-    if !owner_only(|k| std::env::var(k).ok()) {
+    // Never inside a guest's sandbox either, whatever its shell left in the environment (kith-recall does the same).
+    if !owner_only(|k| std::env::var(k).ok()) || guest_sandbox() {
         eprintln!("kith memory summary: only the owner may do that");
         return Ok(1);
     }

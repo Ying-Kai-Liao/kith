@@ -46,6 +46,20 @@ def summary_of(thread):
         return ''
 
 
+def host_agent_of(thread):
+    """The hq agent whose chat the host keeps `thread` in (its root entry's chat, or `main:<chat>`), '' when the host store
+    does not say. A thread known only by its summary has no ledger row, so this is the only proof whose it is."""
+    try:
+        host = kith_trajectory.host_open()
+        if host is None:
+            return ''
+        chat = thread[5:] if thread.startswith('main:') else (host.execute('SELECT bot_id FROM entries WHERE id = ?', (thread,)).fetchone() or [''])[0]
+        row = host.execute('SELECT config FROM bots WHERE id = ?', (chat,)).fetchone() if chat else None
+        return (json.loads(row[0]) or {}).get('hqAgent') or '' if row else ''
+    except Exception:  # noqa: BLE001 — no proof is a refusal below, never a crash
+        return ''
+
+
 def thread_info(thread, session=None):
     if not THREAD.fullmatch(thread):
         fail(f'"{thread}" is not a thread id', 2)
@@ -57,6 +71,10 @@ def thread_info(thread, session=None):
     summary = summary_of(thread)
     if not run and not summary:
         fail(f'unknown thread "{thread}" (no run of scratch is recorded under it)')
+    # No ledger row: a summary alone is not proof the thread is scratch's (any agent's thread has one), so the host's own
+    # record of whose chat it is must say scratch.
+    if not run and host_agent_of(thread) != 'scratch':
+        fail(f'that thread is not known to be scratch\'s (no run of scratch is recorded under "{thread}")')
     run = run or {}
     return {'thread': thread, 'agent': 'scratch', 'harness': run.get('harness'), 'model': run.get('model'),
             'effort': run.get('effort'), 'summary': summary}

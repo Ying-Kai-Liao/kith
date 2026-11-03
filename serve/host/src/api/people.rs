@@ -291,9 +291,14 @@ async fn revoke_invite(hub: &Arc<Hub>, id: &str) -> Result<Value> {
 async fn people(hub: &Arc<Hub>) -> Result<Value> {
     let now = now_ms();
     let bin = account::bin().await.ok_or_else(|| anyhow!("can't list people: kith-auth wasn't found"))?;
-    let auth =
-        crate::remote::members::auth_people(&bin).await.context("can't list people: kith-auth wasn't readable")?;
-    crate::remote::members::mirror_agents(&hub.store, &auth);
+    // Read and mirror under the lock `setPersonAccess` takes, so an older list never overwrites a newer copy.
+    let auth = {
+        let _w = AUTH_WRITES.lock().await;
+        let auth =
+            crate::remote::members::auth_people(&bin).await.context("can't list people: kith-auth wasn't readable")?;
+        crate::remote::members::mirror_agents(&hub.store, &auth);
+        auth
+    };
     let connected = hub.connected.locked().clone();
     let memberships = hub.store.memberships()?;
     let invites = hub.store.invites()?;

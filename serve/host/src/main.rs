@@ -1147,6 +1147,9 @@ async fn main() -> Result<()> {
                 let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
+            // Every kernel verb's notes (the accounts state, the settings migration) reach core.log, also the ones that
+            // exit before `through_core`.
+            kith_core::route_kernel_notes(&kernel::folders(&kith_kernel::paths::process_home()));
             if matches!(cmd, KernelCmd::CoreMigrate) {
                 let p = kernel::folders(&kith_kernel::paths::process_home());
                 match kith_core::migrate(&p) {

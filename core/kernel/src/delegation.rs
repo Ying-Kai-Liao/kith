@@ -340,19 +340,33 @@ pub fn decide(
 }
 
 /// What `open_record` decides for ask `id` before it writes the record: the chain, hop and cross hops the record would
-/// get, or the refusal.
+/// get, or the refusal. A reading only: the lock is gone when this returns, so a caller that goes on to WRITE the record
+/// must use [`check_and_write`], or another ask could be admitted between the two.
 pub fn check(
     machine: &Path,
     env: &dyn Fn(&str) -> Option<String>,
     id: &str,
     crossing: bool,
 ) -> Result<Value, Refusal> {
+    check_and_write(machine, env, id, crossing, |_| Ok(()))
+}
+
+/// [`check`] and the write of the record as one step under the box lock (kith-ask's `box_locked`: check, then append):
+/// `write` gets the decision and runs only when the ask is admitted; the lock is held until it returns. A box lock that
+/// cannot be taken refuses the ask (the Python raises): an answer the writer could not have seen is no answer.
+pub fn check_and_write(
+    machine: &Path,
+    env: &dyn Fn(&str) -> Option<String>,
+    id: &str,
+    crossing: bool,
+    write: impl FnOnce(&Value) -> std::io::Result<()>,
+) -> Result<Value, Refusal> {
     let dir = box_dir(machine);
     // Reading the records, as one step with whoever appends them (kith-ask's box_locked). Held until the end.
     let _lock = std::fs::create_dir_all(&dir)
         .and_then(|()| File::create(dir.join(".lock")))
         .and_then(|f| f.lock_exclusive().map(|()| f))
-        .ok();
+        .map_err(|e| Refusal::new(format!("can't lock the ask box ({}): {e}", dir.display())))?;
     let place = lineage(&dir, env, crossing)?;
     let costs = if place.chain.is_some() {
         chain_costs(&records(&dir))
@@ -360,14 +374,16 @@ pub fn check(
         HashMap::new()
     };
     decide(&place, &costs, chain_cost_cap(machine))?;
-    Ok(json!({
+    let decision = json!({
         "chain": place.chain.as_deref().unwrap_or(id),
         "hop": place.hop,
         "cross_hops": place.cross_hops,
         "crossed": place.crossed,
         "ask": place.ask,
         "cost_base": place.cost_base,
-    }))
+    });
+    write(&decision).map_err(|e| Refusal::new(format!("can't write the ask's record: {e}")))?;
+    Ok(decision)
 }
 
 /// What `kith kernel delegation limits` prints.

@@ -102,6 +102,21 @@ fn on_disk(t: &Tmp, sid: &str) -> Claim {
     read_claim(&claim_path(&t.reg(), sid, false)).unwrap()
 }
 
+/// The native start time is the text `ps` prints, for the processes this user owns: this one and its parent. (Another
+/// user's, init's say, is refused by the OS: None, and the caller asks `ps`.)
+#[cfg(target_os = "macos")]
+#[test]
+fn the_native_start_time_is_the_text_ps_prints() {
+    for pid in [std::process::id(), std::os::unix::process::parent_id()] {
+        assert_eq!(
+            native_proc_start(pid),
+            os::proc_start(i64::from(pid)),
+            "pid {pid}"
+        );
+    }
+    assert_eq!(native_proc_start(0x7fff_fff0), None, "a pid nobody has");
+}
+
 // --- the claim ---------------------------------------------------------------------------------------------------------
 
 #[test]

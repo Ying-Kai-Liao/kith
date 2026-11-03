@@ -1160,9 +1160,13 @@ for d in os.environ["READ_DIRS"].split("\n"):
 # trace (a cd followed by an export), whatever a hook says, and each ask was a card to the owner. Bash is fenced by the
 # sandbox above.
 import shlex
+# python3 by absolute path (the first in an absolute directory of the launching PATH, else /usr/bin/python3): a bare name
+# would be looked up on the PATH of the hook run itself, which a guest shell can change.
+py3 = next((c for c in (os.path.join(d, "python3") for d in os.environ.get("PATH", "").split(os.pathsep) if os.path.isabs(d))
+            if os.path.isfile(c) and os.access(c, os.X_OK)), "/usr/bin/python3")
 fence_roots = [x for d in os.environ["READ_DIRS"].split("\n") + [os.environ.get("WORK", ""), os.environ.get("CTMP", "")] if d for x in both(os.path.abspath(d))]
-fence = "out=$(python3 -I %s/lib/kith_readfence.py %s) || out=%s; printf %%s \"$out\"" % (
-    shlex.quote(os.environ["KITH_ROOT"]), " ".join("--root " + shlex.quote(r) for r in dict.fromkeys(fence_roots)),
+fence = "out=$(%s -I %s/lib/kith_readfence.py %s) || out=%s; printf %%s \"$out\"" % (
+    shlex.quote(py3), shlex.quote(os.environ["KITH_ROOT"]), " ".join("--root " + shlex.quote(r) for r in dict.fromkeys(fence_roots)),
     shlex.quote(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
                                                    "permissionDecisionReason": "the read check could not run, so this read is refused"}})))
 s["hooks"].setdefault("PreToolUse", []).append({"matcher": "Read|Grep|Glob|LS|NotebookRead", "hooks": [{"type": "command", "command": fence, "timeout": 30, "onFailure": "block"}]})

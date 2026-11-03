@@ -5,6 +5,23 @@
 //! What a core and the holder say to each other. The holder never interprets `conv` or `claim`: it stores them so
 //! the core can match its records against `list` after a restart.
 //!
+//! The claims map is only a filter. The holder remembers the highest claim per conversation to refuse an old
+//! decision cheaply, but the map dies with the holder; the real "is this still the current claim" check is the start
+//! stub redeeming at the core. Once a claim's job has started (not when it failed to start, so a retry after
+//! `SPAWN_FAILED` works) any spawn at or below the highest claim is refused, even after the process was acked.
+//!
+//! An error exit (`Exit::error`) says the holder could not read how the process ended. It does not say the group is
+//! empty: the core still waits for KILL `Gone` before it releases the claim.
+//!
+//! Process ids. A frame id names a process only together with the holder instance (`Welcome::instance`): the
+//! payload of KILL, ACK, TAIL, RESIZE and INPUT begins with the 32 character instance, then the body (INPUT: the raw
+//! bytes, RESIZE: the JSON, the others: nothing). An id from another instance (a holder that was replaced and
+//! whose ids restart at 1) never touches a local process: KILL answers `NotHere`, ACK `NotHere`, TAIL is empty,
+//! INPUT and RESIZE are ignored. `NotHere` is not `Gone`: this holder cannot see the groups of an older instance
+//! (they outlive a holder crash), so the core kills those itself by pid and start time. The core names a process
+//! with a `HeldId` (instance and id), made from a spawn's answer or a listing entry, never from the holder it
+//! happens to be connected to.
+//!
 //! What "gone" means. A held process is the leader of its own process group on Unix (its own job on Windows), and
 //! `Killed::Gone` says that group or job is empty. Unix limit: a descendant that starts its own session (`setsid`)
 //! or double-forks into another group leaves the group, so "gone" means the group, not everything the program ever
@@ -16,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Checked in hello and welcome. Bumped for a change an older peer cannot read.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 // core to holder
 pub const HELLO: u8 = 1;
@@ -49,6 +66,9 @@ pub const TAILED: u8 = 110;
 pub const ACKED: u8 = 111;
 /// The holder's nonce and its proof that it knows the secret, sent after a hello.
 pub const CHALLENGE: u8 = 112;
+/// A spawn whose claim is below the highest claim the holder has seen for that conversation: the core that sent it
+/// is working from an old decision. Payload `StaleClaim`; nothing was started.
+pub const STALE_CLAIM: u8 = 113;
 
 /// The first frame on every connection. The secret is an opaque key the holder was started with; it will be the
 /// local hand's pairing key (docs/plans/runtime-design.md section 10), and it never crosses the wire: the holder
@@ -115,14 +135,28 @@ pub struct Size {
     pub rows: u16,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Exit {
     pub code: Option<i32>,
     pub signal: Option<i32>,
+    /// Set when the holder could not read how the process ended (code and signal are then both None): an error
+    /// exit, kept until acked like any other so the core still learns the process is over.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A process as the core must remember it: the holder instance that owns it, and its id there.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct HeldId {
+    pub instance: String,
+    pub id: u32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Held {
+    /// The holder instance this entry came from.
+    #[serde(default)]
+    pub instance: String,
     pub id: u32,
     pub conv: String,
     pub claim: u64,
@@ -176,6 +210,29 @@ pub struct Spawned {
     pub conv: String,
     pub claim: u64,
     pub pid: u32,
+    /// The holder instance and the process id there: the only way, with a listing, to get a `HeldId`.
+    #[serde(default)]
+    pub instance: String,
+    #[serde(default)]
+    pub id: u32,
+}
+
+impl Spawned {
+    pub fn held_id(&self) -> HeldId {
+        HeldId {
+            instance: self.instance.clone(),
+            id: self.id,
+        }
+    }
+}
+
+impl Held {
+    pub fn held_id(&self) -> HeldId {
+        HeldId {
+            instance: self.instance.clone(),
+            id: self.id,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -185,6 +242,14 @@ pub struct SpawnFailed {
     pub error: String,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct StaleClaim {
+    pub conv: String,
+    pub claim: u64,
+    /// The highest claim the holder has seen for this conversation.
+    pub highest: u64,
+}
+
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum KillState {
@@ -192,6 +257,8 @@ pub enum KillState {
     Killing,
     /// Nothing of the tree is left, or the id was never known (or already acked).
     Gone,
+    /// The id belongs to another holder instance. Not "gone": that instance's groups may still be alive.
+    NotHere,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -207,6 +274,8 @@ pub enum AckState {
     Running,
     /// Unknown, or acked before.
     Gone,
+    /// The id belongs to another holder instance.
+    NotHere,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

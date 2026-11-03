@@ -727,5 +727,9 @@ fn a_holder_linked_through_a_command_never_makes_the_core_end_local_processes() 
     assert_eq!(now.instance.as_deref(), Some("local-instance"));
     assert_eq!(now.procs.len(), 1);
     let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
+    // Only now end the group this test started (a failed assert above leaks it, as the other leader() tests do).
+    let _ = std::process::Command::new("/bin/kill")
+        .args(["-s", "KILL", &format!("-{pid}")])
+        .status();
     assert!(log.contains("nothing is recorded or ended here"), "{log}");
 }

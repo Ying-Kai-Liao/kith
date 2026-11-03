@@ -53,6 +53,12 @@ fn with(tail: &str) -> String {
 /// Ends the link when the client goes: shuts a socket down, or kills the child that carries a stdio link.
 type Closer = Box<dyn FnMut() + Send>;
 
+/// The doctor's line for a holder that is tied to its starter (Windows only).
+pub const TIED_TO_STARTER_NOTE: &str = "The program that keeps your agents running was started inside a Windows job that \
+won't let it leave, so stopping or restarting Kith also stops every agent that is running. Nothing is broken now. \
+To fix it, quit Kith and Start Kith from the Start menu or a normal terminal (not from a tool that runs it inside a \
+job, such as some IDEs, CI runners or service wrappers).";
+
 pub struct Client {
     writer: Box<dyn Write + Send>,
     close: Closer,
@@ -272,9 +278,32 @@ impl Client {
         self.welcome.tied_to_starter
     }
 
+    /// What `kith doctor` says when [`Self::tied_to_starter`]: what it means and what to do, in plain words. None when
+    /// the holder is free of its starter.
+    pub fn tied_to_starter_note(&self) -> Option<&'static str> {
+        self.tied_to_starter().then_some(TIED_TO_STARTER_NOTE)
+    }
+
     pub fn send(&mut self, kind: u8, id: u32, payload: &[u8]) -> io::Result<()> {
         wire::write_frame(&mut self.writer, kind, id, payload)?;
         self.writer.flush()
+    }
+
+    /// A command for process `id` of holder `instance`: the instance goes first in the payload (see proto.rs).
+    pub fn send_for(&mut self, kind: u8, instance: &str, id: u32, body: &[u8]) -> io::Result<()> {
+        let mut payload = instance.as_bytes().to_vec();
+        payload.extend_from_slice(body);
+        self.send(kind, id, &payload)
+    }
+
+    /// Raw bytes to a process; one held by another instance than this holder ignores them.
+    pub fn input(&mut self, h: &p::HeldId, bytes: &[u8]) -> io::Result<()> {
+        self.send_for(p::INPUT, &h.instance, h.id, bytes)
+    }
+
+    pub fn resize(&mut self, h: &p::HeldId, cols: u16, rows: u16) -> io::Result<()> {
+        let body = serde_json::to_vec(&p::Size { cols, rows }).expect("serializable");
+        self.send_for(p::RESIZE, &h.instance, h.id, &body)
     }
 
     pub fn send_json(&mut self, kind: u8, id: u32, msg: &impl serde::Serialize) -> io::Result<()> {
@@ -331,27 +360,27 @@ impl Client {
         Ok(wire::parse::<p::Listing>(&payload)?.procs)
     }
 
-    pub fn kill(&mut self, id: u32) -> io::Result<p::KillState> {
-        self.send(p::KILL, id, &[])?;
+    pub fn kill(&mut self, h: &p::HeldId) -> io::Result<p::KillState> {
+        self.send_for(p::KILL, &h.instance, h.id, &[])?;
         let (_, _, payload) = self
-            .expect(p::KILLED, id, Duration::from_secs(10))
+            .expect(p::KILLED, h.id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
         Ok(wire::parse::<p::Killed>(&payload)?.state)
     }
 
-    pub fn ack(&mut self, id: u32) -> io::Result<p::AckState> {
-        self.send(p::ACK, id, &[])?;
+    pub fn ack(&mut self, h: &p::HeldId) -> io::Result<p::AckState> {
+        self.send_for(p::ACK, &h.instance, h.id, &[])?;
         let (_, _, payload) = self
-            .expect(p::ACKED, id, Duration::from_secs(10))
+            .expect(p::ACKED, h.id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
         Ok(wire::parse::<p::Acked>(&payload)?.state)
     }
 
     /// Everything the process printed so far that is still in the holder's tail.
-    pub fn tail(&mut self, id: u32) -> io::Result<Vec<u8>> {
-        self.send(p::TAIL, id, &[])?;
+    pub fn tail(&mut self, h: &p::HeldId) -> io::Result<Vec<u8>> {
+        self.send_for(p::TAIL, &h.instance, h.id, &[])?;
         let (_, _, payload) = self
-            .expect(p::TAILED, id, Duration::from_secs(10))
+            .expect(p::TAILED, h.id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
         Ok(payload)
     }
@@ -361,6 +390,16 @@ impl Client {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn the_tied_note_says_what_it_means_and_what_to_do() {
+        assert!(TIED_TO_STARTER_NOTE.contains("also stops"));
+        assert!(TIED_TO_STARTER_NOTE.contains("Start Kith from"));
+        assert!(
+            !TIED_TO_STARTER_NOTE.contains("starter"),
+            "no field names in a user's words"
+        );
+    }
 
     #[test]
     fn a_welcome_that_skips_the_challenge_is_an_impostor() {
