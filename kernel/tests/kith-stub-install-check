@@ -74,7 +74,8 @@ check "kith serve: no built stub leaves the old one" 'cmp -s "$T/new-stub" "$T/s
 mkdir -p "$T/pack"
 printf '#!/bin/sh\necho kith\n' > "$T/pack/kith"; chmod 755 "$T/pack/kith"
 KITH_STUB_BIN=$d/bin/kith-stub sh "$ROOT/scripts/package-release.sh" 0.1.0 arm64 "$T/pack/kith" "$T/pack/out" >"$T/pack.log" 2>&1
-tar -tzf "$T/pack/out/kith-0.1.0-darwin-arm64.tar.gz" 2>/dev/null | grep -q '/bin/kith-stub$' && packed=1 || packed=0
+listing=$(tar -tzf "$T/pack/out/kith-0.1.0-darwin-arm64.tar.gz" 2>/dev/null)   # (not piped into grep -q: pipefail + SIGPIPE)
+case $'\n'$listing$'\n' in *$'/bin/kith-stub\n'*) packed=1 ;; *) packed=0 ;; esac
 check "package-release.sh: the tarball holds bin/kith-stub" '[ $packed = 1 ]'
 [ $packed = 1 ] || tail -n 5 "$T/pack.log"
 check "release.yml builds the stub for both CPUs and packs it" \
