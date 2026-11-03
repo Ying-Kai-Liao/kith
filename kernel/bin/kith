@@ -26,6 +26,8 @@
 #                                 unless one is chosen; a session is resumed only under the account it was made under.
 #   kith <agent> --backup ID [task]  a normal run (interactive or one-shot) on that backup chain entry: claude:<name> and claude-api:<profile>
 #                                 on Claude Code, codex[:<name>] on Codex; exit 4 when it can't run. KITH_PROVIDER/KITH_ACCOUNT say which.
+#                                 A one-shot another run started (kith ask) or a schedule started, with no --backup, skips chain entries
+#                                 marked out and moves to the next on a usage-limit failure (marks kept in serve/kernel-backups-out.json).
 #   kith <agent> --backups-json     for a program: the agent's backup chain as one JSON object, each entry with whether it is ready
 #                                 Nothing in it points at a temp file. The pinned snapshot (KITH_AGENT_DIR) is kept while --hold's
 #                                 pid (default: the caller) lives; pass the long-lived process's pid. KITH_VIA=<name> tags the cost ledger.
@@ -44,6 +46,7 @@
 #   kith cost [agents|agent <name>|...]                  what the agents cost, from the usage ledger (kith-cost)
 #   kith ask <agent> [-c] [--as NAME] "task"            ask an agent, get its answer back; -c continues (kith-ask)
 #   kith allow <agent> [--rm ID]                        what you said "Always allow" to for the agent in auto mode: list, forget one (kith-allow)
+#   kith cards history [-n N] [--json]                  your agents' approval cards, no inputs (an agent with cards: read only; kith-cards)
 #   kith remote add|ls|rm ...  ·  kith ask <agent>@<machine>   agents on your other machines, over ssh (kith-remote)
 #   kith group add-bot|remove-bot <room> <bot>  ·  kith bot set <bot> [--wake-profile P] [--turn-timeout S]   a bot guest (Grok) in a group room; its wake settings (kith-group)
 #   kith keys add <service> --profile <account|service/account> [--for AGENT]   hand Kith a key through a card in the app (default AGENT: serve); never typed here (kith-keys)
@@ -97,7 +100,7 @@ eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
 
 case $1 in
   update)             # no agent: kith itself; --all: kith first, then the agents (a failed kith update still lets the agents update, but the exit is non-zero)
-                      [[ $# -eq 1 ]] && exec "$KITH/bin/kith-self-update"
+                      [[ $# -eq 1 || ( $# -eq 2 && $2 == --dev ) ]] && exec "$KITH/bin/kith-self-update" "${@:2}"
                       if [[ $2 == --all ]]; then rc=0; "$KITH/bin/kith-self-update" || rc=$?; "$KITH/bin/kith-pkg" "$@" || rc=$?; exit $rc; fi
                       exec "$KITH/bin/kith-pkg" "$@" ;;
   versions|pin|unpin|install|push|commit|history|restore|share|search|market|deps) exec "$KITH/bin/kith-pkg" "$@" ;;
@@ -107,6 +110,7 @@ case $1 in
   cost)               shift; exec "$KITH/bin/kith-cost" "${@:-agents}" ;;
   ask)                shift; exec "$KITH/bin/kith-ask" "${@:---help}" ;;
   allow)              shift; exec "$KITH/bin/kith-allow" "${@:---help}" ;;
+  cards)              shift; exec "$KITH/bin/kith-cards" "${@:---help}" ;;
   init)               shift; exec "$KITH/bin/kith-init" "$@" ;;
   doctor)             shift; exec "$KITH/bin/kith-doctor" "$@" ;;
   backup)             case ${2:-} in list|add|remove) shift; exec "$KITH/bin/kith-account" backup "$@" ;; esac
@@ -228,6 +232,7 @@ if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/
 # checked as one (--via the agent that called it; --take-once uses up a "just this once" from the helper card). Fails
 # closed: no answer from kith-auth, no run.
 nested=0; [[ -n ${KITH_AGENT:-} ]] && nested=1   # started by another run (KITH_AGENT is exported further down)
+caller_env=${KITH_AGENT:-}   # the caller's name as it came in (exported over with this agent's a little below)
 caller=${KITH_AGENT:-}; [[ $caller == "$agent" ]] && caller=""; p_owner=1 p_trusted=0 p_mode="" p_model="" p_deny="" p_line="" p_env_names="" p_rooms=""
 if [[ -n ${KITH_PERSON:-} ]]; then
   # Anyone but the owner is resolved while this Mac is in sync with the Kith cloud (revoke-person R5c, R8): while
@@ -360,6 +365,7 @@ sys.exit("kith: MCP servers not connected: %s" % bad if bad else 0)'
   exit $?
 fi
 
+chain_args=("$@")   # for the chain walk below
 print=0 project="" launch=0 hold="" resume_thread="" resume_pick="" backup="" acct="" backup_cfg_var="" backup_cfg_dir="" backup_api_helper=""
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -400,6 +406,14 @@ if [[ -n $resume_thread || -n $resume_pick ]]; then
   resolved=$(python3 "$KITH/bin/kith-sessions" resolve "$agent" "$resume_thread" "$$" ${1:+oneshot}) || exit 1
   eval "$resolved"
   [[ -z $r_cwd ]] || cd "$r_cwd" || exit 1
+fi
+# A one-shot that no host is picking the account for (another run's `kith ask`, a schedule: KITH_AGENT or
+# KITH_BACKUP_CHAIN) walks the backup chain: entries marked out are skipped, and a usage-limit failure moves to the next
+# one (lib/kith_accounts.py run-chain, each attempt a whole `kith AGENT --backup ID` run). Not for an explicit --backup,
+# --launch-json (the host picks), --print, a terminal's --resume/-r/-c, or an attempt of the walk itself.
+if [[ $# -gt 0 && -z $backup && $launch -eq 0 && $print -eq 0 && -z $resume_thread && -z $resume_pick && -z ${KITH_CHAIN_CHILD:-} ]] \
+   && [[ $p_owner == 1 ]] && [[ $nested -eq 1 || -n ${KITH_BACKUP_CHAIN:-} ]]; then
+  exec env -u KITH_AGENT_DIR -u KITH_AGENT_HOME -u KITH_AGENT_VERSION -u KITH_AGENT ${caller_env:+KITH_AGENT=$caller_env} python3 "$KITH/lib/kith_accounts.py" run-chain "$agent" "$src_pkg/agent.md" "$KITH/bin/kith" -- "${chain_args[@]}"
 fi
 # A program reads stdout as the JSON alone: whatever a helper prints on the way goes to stderr; fd 3 is the real stdout.
 [[ $print -eq 1 ]] && launch=0
@@ -599,10 +613,10 @@ if [[ $p_owner == 0 ]]; then
   [[ $harness == claude ]] \
     || { echo "kith: $agent for ${KITH_PERSON}: runs for anyone but the owner need Claude Code (path rules), not $harness" >&2; exit $([[ -n $backup ]] && echo 4 || echo 3); }
   # Their reads are an allowlist (permissions.blockReadsOutsideWorkingDirectories for the file tools, sandbox denyRead of
-  # the home folder for Bash), which Claude Code enforces from 2.1.257: an older or unreadable version is no run at all.
+  # the home folder for Bash, and onFailure: block on the read hook, which Claude Code has from 2.1.295: an older or unreadable version is no run at all.
   cv=$(claude --version 2>/dev/null | sed -n 's/^\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1)
-  [[ -n $cv && $(printf '%s\n2.1.257\n' "$cv" | sort -V | head -1) == 2.1.257 ]] \
-    || { echo "kith: runs for anyone but the owner need Claude Code 2.1.257 or newer (read limits); Claude Code is ${cv:+version $cv}${cv:-missing or gives no version}" >&2; exit $([[ -n $backup ]] && echo 4 || echo 3); }
+  [[ -n $cv && $(printf '%s\n2.1.295\n' "$cv" | sort -V | head -1) == 2.1.295 ]] \
+    || { echo "kith: runs for anyone but the owner need Claude Code 2.1.295 or newer (read limits); Claude Code is ${cv:+version $cv}${cv:-missing or gives no version}" >&2; exit $([[ -n $backup ]] && echo 4 || echo 3); }
   # They see this agent's own life only: every other agent's folder and the owner's user.md are denied by path
   # (logical and resolved), on top of the narrower directories below.
   for d in "$KITH_AGENTS"/*/; do
@@ -796,6 +810,19 @@ if os.environ["P_OWNER"] == "0":
         # No local servers (allowLocalBinding): with the host down, one left running could take its loopback port and be
         # sent the serve token by kith-permit, kith-recall or kith-call. A render preview runs in the render door instead.
         "network": {"allowUnixSockets": list(dict.fromkeys(socks))}}
+    # The hosts every guest of this agent reaches without a card: the guest_domains of its package and the ones the owner kept
+    # "for everyone". Asked of kith-auth here, not of the host, so a launch with no run socket (hq -p, a run of a channel) has
+    # them too; no answer is none. A bot is cut to what its owner holds in `resolve`, and both are given the same list.
+    try:
+        import subprocess
+        out = subprocess.run([os.environ["KITH_ROOT"] + "/bin/kith-auth", "agent-access", os.path.basename(os.environ["AGENT_HOME"]), "--json"],
+                             capture_output=True, text=True, timeout=20, check=True).stdout
+        hosts = [r["domain"] for r in json.loads(out) if isinstance(r, dict) and kith_guard.valid_domain(r.get("domain"))]
+    except Exception as e:  # noqa: BLE001
+        hosts = []
+        print("kith: could not read the guest domains of the agent (%s); the run goes on without them" % e, file=sys.stderr)
+    if hosts:
+        s["sandbox"]["network"]["allowedDomains"] = list(dict.fromkeys(hosts))
 allow = s["permissions"].setdefault("allow", [])
 if os.environ["P_OWNER"] == "0":   # no broad Bash rule for the run of an invited person unless the membership is trusted (F11)
     sys.path.insert(0, os.environ["KITH_ROOT"] + "/lib")
@@ -991,7 +1018,17 @@ for d in os.environ["READ_DIRS"].split("\n"):
             r = "Edit(/%s/**)" % x
             if r not in deny:
                 deny.append(r)
-s["permissions"]["blockReadsOutsideWorkingDirectories"] = True
+# The file tools stay inside the same folders through a PreToolUse hook (lib/kith_readfence.py), not through
+# permissions.blockReadsOutsideWorkingDirectories: that setting makes Claude Code ask for every Bash command it cannot
+# trace (a cd followed by an export), whatever a hook says, and each ask was a card to the owner. Bash is fenced by the
+# sandbox above.
+import shlex
+fence_roots = [x for d in os.environ["READ_DIRS"].split("\n") + [os.environ.get("WORK", ""), os.environ.get("CTMP", "")] if d for x in both(os.path.abspath(d))]
+fence = "out=$(python3 -I %s/lib/kith_readfence.py %s) || out=%s; printf %%s \"$out\"" % (
+    shlex.quote(os.environ["KITH_ROOT"]), " ".join("--root " + shlex.quote(r) for r in dict.fromkeys(fence_roots)),
+    shlex.quote(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                   "permissionDecisionReason": "the read check could not run, so this read is refused"}})))
+s["hooks"].setdefault("PreToolUse", []).append({"matcher": "Read|Grep|Glob|LS|NotebookRead", "hooks": [{"type": "command", "command": fence, "timeout": 30, "onFailure": "block"}]})
 # The tool reads the owner global config (name, email, credential helpers), which sits in the closed home folder and
 # makes it fail outright when it cannot be read: point it at nothing instead.
 s.setdefault("env", {})["GIT_CONFIG_GLOBAL"] = "/dev/null"
@@ -1001,7 +1038,7 @@ for k in ("KITH_WORK", "CLAUDE_ENV_FILE"):
 json.dump(s, open(f, "w"), indent=1)' "$runs/$$.settings.json"
 fi
 # The read-only kernel commands PROTOCOL tells agents to run, allowed without a prompt. Under every path the kernel
-# has (logical, resolved, ~/kith/kernel) and, since a path with a space gets quoted, with the program in quotes too.
+# has (logical, resolved, cli/current) and, since a path with a space gets quoted, with the program in quotes too.
 readonly_cmds=("project-id" "project-id --list" "project-id --info:*" "project-id --children:*" "kith-memory search:*" "kith-who:*" "hq-who:*")
 allowed=()
 while IFS= read -r base; do
@@ -1010,7 +1047,7 @@ while IFS= read -r base; do
     name=${c%%[ :]*}; rest=${c#"$name"}
     allowed+=("Bash($base/bin/$c)" "Bash(\"$base/bin/$name\"$rest)")
   done
-done < <(printf '%s\n' "$KITH" "$kith_real" "$KITH_HOME/kernel" | awk '!seen[$0]++')
+done < <(printf '%s\n' "$KITH" "$kith_real" "${KITH_KERNEL:-$KITH_MACHINE/cli/current/share/kith/kernel}" | awk '!seen[$0]++')
 # The way out of the guest sandbox is a request, not a prompt: asking is always allowed (the host makes the card, F11 2b).
 [[ $p_owner == 0 ]] && allowed+=("mcp__kithpermit__request_access" "mcp__kithpermit__report_bug" "mcp__kithpermit__ask_helper")
 # Each agent carries only its own tools: the shared services it needs and is granted (kith-auth), its own mcp.json

@@ -494,6 +494,9 @@ pub enum AccessCall {
     Consume,
     /// An owner run asks for a service's key (`{"service", "purpose"}`): a card in the owner's chat, `cards::secret`.
     Secret(Value),
+    /// An owner run asks for the card history (`kith cards history`): answered only for an agent whose package says
+    /// `cards: read`, `cards::history`.
+    History(usize),
 }
 
 /// What a run asks to do: a tool name and its input, as Claude Code's permission prompt tool is given them.
@@ -504,6 +507,9 @@ pub struct Ask {
     /// Set by kith-permit's `denied` hook: the auto-mode classifier's reason for blocking this call in the owner's run.
     /// Only an owner token may send it (`authorize`).
     pub auto_denied: Option<String>,
+    /// With `auto_denied`: the Claude session id the hook was given ('' when it had none). A "This session" grant
+    /// belongs to it, inside the token's conversation.
+    pub claude_session: String,
 }
 
 /// Checks a request line without running anything. Every token failure reads the same to the caller, so a probe
@@ -553,19 +559,28 @@ pub fn authorize(table: &TokenTable, line: &[u8], peer: PeerInfo) -> Result<Auth
                 return Err(Response::refused("bad request"));
             }
             // A card for a call the auto-mode classifier blocked is the owner's own run's: a guest's token never opens one.
-            let auto_denied = match &req["autoMode"] {
-                Value::Null => None,
+            let (auto_denied, claude_session) = match &req["autoMode"] {
+                Value::Null => (None, String::new()),
                 _ if identity.scope != TokenScope::OwnerAsk => return Err(Response::refused("not authorized")),
-                mode => match mode["reason"].as_str().filter(|r| r.len() <= MAX_ARG_LEN) {
-                    Some(reason) => Some(reason.to_owned()),
-                    None => return Err(Response::refused("bad request")),
-                },
+                mode => {
+                    let session = match &mode["session"] {
+                        Value::Null => "",
+                        v => match v.as_str().filter(|s| s.len() <= MAX_ARG_LEN) {
+                            Some(s) => s,
+                            None => return Err(Response::refused("bad request")),
+                        },
+                    };
+                    match mode["reason"].as_str().filter(|r| r.len() <= MAX_ARG_LEN) {
+                        Some(reason) => (Some(reason.to_owned()), session.to_owned()),
+                        None => return Err(Response::refused("bad request")),
+                    }
+                }
             };
             Ok(Authorized {
                 identity,
                 run: Run::None,
                 args: Vec::new(),
-                ask: Some(Ask { tool: tool.to_owned(), input: input.clone(), auto_denied }),
+                ask: Some(Ask { tool: tool.to_owned(), input: input.clone(), auto_denied, claude_session }),
                 access: None,
             })
         }
@@ -601,6 +616,20 @@ pub fn authorize(table: &TokenTable, line: &[u8], peer: PeerInfo) -> Result<Auth
             }
             let call = AccessCall::Secret(json!({"service": service, "purpose": purpose}));
             Ok(Authorized { identity, run: Run::None, args: Vec::new(), ask: None, access: Some(call) })
+        }
+        "cardsHistory" => {
+            // The owner's run only; whether its agent may read the history is the host's check (`cards::history`).
+            if identity.scope != TokenScope::OwnerAsk {
+                return Err(Response::refused("not authorized"));
+            }
+            let limit = req["limit"].as_u64().unwrap_or(50).clamp(1, 500) as usize;
+            Ok(Authorized {
+                identity,
+                run: Run::None,
+                args: Vec::new(),
+                ask: None,
+                access: Some(AccessCall::History(limit)),
+            })
         }
         _ => Err(Response::refused("unknown method")),
     }
@@ -718,7 +747,8 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
             Some(hub) => {
                 let d = match &ask.auto_denied {
                     Some(reason) => {
-                        crate::cards::request_auto_denied(&hub, &identity, &ask.tool, &ask.input, reason).await
+                        let auto = crate::cards::AutoDenied { reason, claude_session: &ask.claude_session };
+                        crate::cards::request_auto_denied(&hub, &identity, &ask.tool, &ask.input, auto).await
                     }
                     None => crate::cards::request_permission(&hub, &identity, &ask.tool, &ask.input).await,
                 };
@@ -726,7 +756,7 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
             }
             None => Response::Decision {
                 allow: false,
-                message: "Approvals aren't available right now.".into(),
+                message: "Approvals aren't available right now, so no card could be shown.".into(),
                 waiting: false,
             },
         },
@@ -740,6 +770,9 @@ pub async fn handle_request(table: &TokenTable, line: &[u8], peer: PeerInfo) -> 
                 let service = req["service"].as_str().unwrap_or_default();
                 let purpose = req["purpose"].as_str().unwrap_or_default();
                 Response::Line(crate::cards::secret::request(&hub, &origin, service, purpose).await)
+            }
+            (Some(hub), AccessCall::History(limit)) => {
+                Response::Line(crate::cards::history::list(&hub, &identity, limit).await)
             }
             (None, _) => Response::refused("Approvals aren't available right now."),
         },
@@ -1205,7 +1238,15 @@ mod tests {
         let line = json!({"token": token, "method": "requestPermission", "tool": "Bash", "input": {"command": "ls"}});
         let job = authorize(&t, line.to_string().as_bytes(), peer(5)).unwrap();
         assert_eq!(job.identity, owner);
-        assert_eq!(job.ask, Some(Ask { tool: "Bash".into(), input: json!({"command": "ls"}), auto_denied: None }));
+        assert_eq!(
+            job.ask,
+            Some(Ask {
+                tool: "Bash".into(),
+                input: json!({"command": "ls"}),
+                auto_denied: None,
+                claude_session: String::new()
+            })
+        );
         assert!(authorize(&t, &req(&token, "requestPermission", &json!([])), peer(5)).is_err(), "no tool, no ask");
         // Recall is a guest's: an owner token is refused it, whatever it asks for (the audience is not widened).
         assert_eq!(
@@ -1223,6 +1264,20 @@ mod tests {
     }
 
     #[test]
+    fn only_an_owner_token_asks_for_the_card_history() {
+        let t = open_table();
+        let token = t.insert_ask(ask_identity("echo", "s1", None), 5, Duration::from_secs(60)).unwrap();
+        let line = json!({"token": token, "method": "cardsHistory", "limit": 9000});
+        let job = authorize(&t, line.to_string().as_bytes(), peer(5)).unwrap();
+        assert_eq!(job.access, Some(AccessCall::History(500)), "the limit is capped");
+        assert_eq!(job.identity.agent, "echo", "the agent is the token's");
+        let g = RunGrant::issue(&t, id("sam")).unwrap();
+        g.bind_pid(6);
+        let guest = json!({"token": g.token, "method": "cardsHistory"});
+        assert_eq!(authorize(&t, guest.to_string().as_bytes(), peer(6)), Err(Response::refused("not authorized")));
+    }
+
+    #[test]
     fn only_an_owner_token_can_ask_about_a_call_auto_mode_blocked() {
         let t = open_table();
         let owner = ask_identity("echo", "s1", None);
@@ -1235,7 +1290,16 @@ mod tests {
         };
         let job = authorize(&t, line(json!({"reason": "[Data Exfiltration]"})).as_bytes(), peer(5)).unwrap();
         assert_eq!(job.ask.unwrap().auto_denied.as_deref(), Some("[Data Exfiltration]"));
-        for bad in [json!({}), json!({"reason": 1}), json!("x"), json!({"reason": "x".repeat(MAX_ARG_LEN + 1)})] {
+        let job = authorize(&t, line(json!({"reason": "[Data Exfiltration]", "session": "c-1"})).as_bytes(), peer(5))
+            .unwrap();
+        assert_eq!(job.ask.unwrap().claude_session, "c-1");
+        for bad in [
+            json!({}),
+            json!({"reason": 1}),
+            json!("x"),
+            json!({"reason": "x".repeat(MAX_ARG_LEN + 1)}),
+            json!({"reason": "x", "session": 1}),
+        ] {
             assert_eq!(authorize(&t, line(bad).as_bytes(), peer(5)), Err(Response::refused("bad request")));
         }
         // A guest's token (an invited person's or a bot guest's) never opens one, and gets the same refusal as any other

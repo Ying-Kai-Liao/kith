@@ -277,18 +277,26 @@ impl Actor {
     /// mode its transcript ended in) and ignores the `defaultMode` the launch carries as a setting, so the host asks
     /// for the mode once the session exists. An invited person's launch has already been confined, so this is never
     /// bypass for them. Left as it is when the adapter doesn't offer the mode, or when the call fails.
-    pub(super) async fn set_claude_mode(&mut self, sid: &str, res: &Value, permission: Option<&str>) {
-        let Some(mode) = permission.filter(|m| !m.is_empty()) else { return };
-        if res["modes"]["currentModeId"] == mode {
-            return;
+    ///
+    /// Returns the mode the session is in as far as the host can tell: the adapter's current mode when it already was the
+    /// asked one, or when the mode was not offered or not set; the asked mode when `session/set_mode` accepted it.
+    pub(super) async fn set_claude_mode(&mut self, sid: &str, res: &Value, permission: Option<&str>) -> Option<String> {
+        let current = res["modes"]["currentModeId"].as_str().map(str::to_owned);
+        let mode = permission.filter(|m| !m.is_empty())?;
+        if current.as_deref() == Some(mode) {
+            return current;
         }
         let offered = res["modes"]["availableModes"].as_array().is_some_and(|ms| ms.iter().any(|m| m["id"] == mode));
         if !offered {
             tracing::warn!(mode, "the agent doesn't offer the permission mode kith launched it with");
-            return;
+            return current;
         }
-        if let Err(error) = self.session_request("session/set_mode", json!({"sessionId": sid, "modeId": mode})).await {
-            tracing::warn!(mode, error = format!("{error:#}"), "couldn't set the session's permission mode");
+        match self.session_request("session/set_mode", json!({"sessionId": sid, "modeId": mode})).await {
+            Ok(_) => Some(mode.to_owned()),
+            Err(error) => {
+                tracing::warn!(mode, error = format!("{error:#}"), "couldn't set the session's permission mode");
+                current
+            }
         }
     }
 
@@ -391,7 +399,7 @@ impl Actor {
                 }
                 self.hub.set_runtime(&self.rt, |r| r.activity = "Starting agent…".into());
                 let Some(bin) = tokio::task::spawn_blocking(hq::bin).await? else {
-                    bail!("kith isn't installed on this computer (set KITH_KERNEL_BIN, or put `kith` on PATH)");
+                    bail!("{}", hq::missing());
                 };
                 // The place's own folder or project, else the bot's default; hq runs in it so the kernel finds the project.
                 let target = folder::resolve(&self.hub.store, &self.cfg, &self.lane_of(slot)).await;
@@ -649,7 +657,17 @@ impl Actor {
         if launch.is_codex() {
             self.set_codex_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
         } else {
-            self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
+            let mode = self.set_claude_mode(&sid, &res, launch.permission_mode.map(hq::PermissionMode::as_str)).await;
+            if let Some(entry) = &backup {
+                // What the session reports back (the adapter's current mode, or the one its set_mode accepted), so a
+                // backup that runs in the wrong mode shows in host.log, not only as approval cards.
+                tracing::info!(
+                    "failover {}: now {entry}, permission mode {} (session {sid}, requested {})",
+                    self.cfg.hq_agent.as_deref().unwrap_or_default(),
+                    mode.as_deref().unwrap_or("unknown"),
+                    launch.permission_mode.map_or("none", hq::PermissionMode::as_str),
+                );
+            }
         }
         self.session_fresh = true;
         self.turn_session = Some(sid);

@@ -124,9 +124,10 @@
         "backends": "json?",
         "screen": "json?",
         "analytics": "json?",
-        "urls": "json?"
+        "urls": "json?",
+        "cli": "json?"
       },
-      "mayOmit": ["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls"]
+      "mayOmit": ["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls", "cli"]
     },
 
     "KithCard": {

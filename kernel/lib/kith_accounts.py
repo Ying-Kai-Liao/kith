@@ -26,9 +26,10 @@ SessionStart): it is resumed only under that account.
   kith_accounts.py launch-env AGENT ID           shell assignments for bin/kith; exit 4 + one line on stderr when not runnable
   kith_accounts.py main-env AGENT AGENT.MD       the main account for bin/kith: main_id=ID plus launch-env's assignments
                                                  (empty for the default login); exit 4 + one line when it can't run
+  kith_accounts.py run-chain AGENT AGENT.MD KITH -- ARGS...   a non-interactive one-shot over the chain (see run_chain)
   kith_accounts.py session-account SID           the account id a session was made under ('' when the ledger doesn't know it)
 """
-import json, os, re, shlex, subprocess, sys
+import json, os, re, shlex, subprocess, sys, tempfile, time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
@@ -240,6 +241,110 @@ def present(entry, agent):
     return True, None
 
 
+# The acknowledgements a login makes once (onboarding, the auto-mode warnings): without them auto mode is not entered
+# silently, and Claude Code asks instead. Copied from the main login into an account's .claude.json, nothing else of it.
+MIRRORED_FLAGS = ('hasCompletedOnboarding', 'lastOnboardingVersion', 'hasSeenAutoModeEntryWarning',
+                  'hasSeenAutoModeOutsideReadPrompt', 'hasSeenAutoDefaultNotice', 'autoModeEnvSetup')
+# Plugin state: the JSON files are copied (Claude Code rewrites them in place, so a link would not survive), the folders
+# are linked (their paths in installed_plugins.json are absolute, into the main login's).
+PLUGIN_FILES = ('installed_plugins.json', 'known_marketplaces.json', 'blocklist.json')
+PLUGIN_DIRS = ('marketplaces', 'cache', 'data')
+
+
+def _write_atomic(path, data, mode=0o600):
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=f'.{path.name}.')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _read_json(path):
+    try:
+        d = json.loads(path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _copy_if_changed(src, dst):
+    """Copy src to dst (atomically) when the bytes differ; whether it wrote."""
+    data = src.read_bytes()
+    try:
+        if dst.read_bytes() == data:
+            return False
+    except OSError:
+        pass
+    _write_atomic(dst, data)
+    return True
+
+
+def main_claude_paths():
+    """(config dir, .claude.json) of the main Claude login. CLAUDE_CONFIG_DIR is the main login's only when it is not
+    one of the accounts' own folders (a run on an account has it set, and must not take itself for the main login)."""
+    home = Path(os.path.expanduser('~'))
+    env = os.environ.get('CLAUDE_CONFIG_DIR')
+    if env and Path(env).parent.resolve() != (machine() / 'accounts' / 'claude').resolve():
+        return Path(env), Path(env) / '.claude.json'
+    return home / '.claude', home / '.claude.json'
+
+
+def prepare_claude_dir(directory, main_dir=None, main_json=None):
+    """Makes an extra Claude account's folder behave like the main login: its settings (hooks, plugins on, model), the
+    plugins themselves, and the auto-mode/onboarding acknowledgements. With CLAUDE_CONFIG_DIR set Claude Code reads
+    nothing of ~/.claude, so a backup otherwise ran with no settings, no kith plugin and auto mode never entered.
+    Never touches the account's login, machine id, projects or history. Runs on every launch: it writes only what
+    differs, atomically, and any failure is left for the next launch. The names of what it changed."""
+    directory = Path(directory)
+    if main_dir is None:
+        main_dir, main_json = main_claude_paths()
+    main_dir, main_json = Path(main_dir), Path(main_json or Path(main_dir) / '.claude.json')
+    changed = []
+    try:
+        if not directory.is_dir() or directory.resolve() == main_dir.resolve():
+            return changed
+        os.chmod(directory, 0o700)
+        # settings.json: a copy, taken again whenever the main one changed. A missing or broken main file changes nothing.
+        src = main_dir / 'settings.json'
+        if _read_json(src) is not None and _copy_if_changed(src, directory / 'settings.json'):
+            changed.append('settings.json')
+        # plugins
+        plugins_src, plugins_dst = main_dir / 'plugins', directory / 'plugins'
+        if plugins_src.is_dir():
+            plugins_dst.mkdir(mode=0o700, exist_ok=True)
+            for name in PLUGIN_FILES:
+                if (plugins_src / name).is_file() and _read_json(plugins_src / name) is not None \
+                        and _copy_if_changed(plugins_src / name, plugins_dst / name):
+                    changed.append(f'plugins/{name}')
+            for name in PLUGIN_DIRS:
+                link = plugins_dst / name
+                if (plugins_src / name).is_dir() and not os.path.lexists(link):
+                    os.symlink(plugins_src / name, link)
+                    changed.append(f'plugins/{name}')
+        # .claude.json: only the acknowledgement flags, into the file Claude Code keeps rewriting
+        main_cfg, cfg_path = _read_json(main_json), directory / '.claude.json'
+        if main_cfg is not None:
+            want = {k: main_cfg[k] for k in MIRRORED_FLAGS if k in main_cfg}
+            cfg = _read_json(cfg_path) if cfg_path.exists() else {}
+            if cfg is not None and any(cfg.get(k) != v for k, v in want.items()):
+                # Read again just before the swap: Claude Code may have written in between.
+                cfg = _read_json(cfg_path) if cfg_path.exists() else {}
+                if cfg is not None:
+                    cfg.update(want)
+                    _write_atomic(cfg_path, json.dumps(cfg, indent=2).encode())
+                    changed.append('.claude.json')
+    except OSError as e:
+        print(f'kith: could not sync {directory} with the main Claude login: {e}', file=sys.stderr)
+    return changed
+
+
 def launch_env(agent, entry, light=False):
     """Shell assignments for bin/kith. Raises ValueError (exit 4) when the entry can't run. light: the main account's
     check (present), not the harness's status command."""
@@ -256,6 +361,8 @@ def launch_env(agent, entry, light=False):
     if name and harness in ('claude', 'codex'):
         cfg_var = 'CLAUDE_CONFIG_DIR' if harness == 'claude' else 'CODEX_HOME'
         cfg_dir = str(account_dir(harness, name))
+        if harness == 'claude':
+            prepare_claude_dir(cfg_dir)
     helper = api_helper(agent, name) if harness == 'claude-api' else ''
     return (f'backup_harness={q(run_harness_name)} backup_account={q(name or "")} backup_cfg_var={q(cfg_var)} '
             f'backup_cfg_dir={q(cfg_dir)} backup_api_helper={q(helper)}')
@@ -332,9 +439,91 @@ def session_account(sid):
     return ledger_id(*row) if row else None
 
 
+# --- a one-shot over the chain (bin/kith, when another run or a schedule started it) -------------------------------------
+# The host picks an account per turn itself and passes --backup. A run kith starts on its own (an agent asking another,
+# a schedule) has no host in between, so this is the same walk in the kernel: skip entries marked out, run on the first
+# ready one, and on a usage-limit message mark it out and move to the next. Each attempt is a whole `kith AGENT --backup
+# ID ...` child, so it claims its session and execs claude as any run does.
+LIMIT_RE = re.compile(r"you've hit your .{0,30}limit|usage limit|weekly limit|rate.?limit", re.I)
+OUT_FOR = 3600   # as the host: how long an entry stays out when the provider didn't say when its limit lifts
+
+
+def out_files():
+    """The host's backups.json (read only: the host holds it in memory and rewrites it) and our own mark file beside it."""
+    d = machine() / 'serve'
+    return [d / 'backups.json', d / 'kernel-backups-out.json']
+
+
+def out_ids(now=None):
+    """Ids marked out until a time in the future, by either file. A missing or corrupt file marks nothing."""
+    now = now or time.time()
+    out = set()
+    for f in out_files():
+        try:
+            d = json.loads(f.read_text())
+            out |= {k for k, v in d.items() if isinstance(v, dict) and float(v.get('out_until', 0)) > now}
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+    return out
+
+
+def mark_out(entry, now=None):
+    """Mark an entry out in our own file, atomically; the host's file is never written."""
+    now = int(now or time.time())
+    f = out_files()[1]
+    try:
+        d = json.loads(f.read_text())
+        d = {k: v for k, v in d.items() if isinstance(v, dict) and float(v.get('out_until', 0)) > now}
+    except (OSError, ValueError, TypeError, AttributeError):
+        d = {}
+    d[entry] = {'out_until': now + OUT_FOR, 'reason': 'rate_limit', 'since': now}
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=f.parent, prefix='.kernel-out.')
+        with os.fdopen(fd, 'w') as fh:
+            json.dump(d, fh)
+        os.replace(tmp, f)
+    except OSError:
+        pass
+
+
+def limited(code, text):
+    """A failed run whose short output says the account is out of usage (a long output that mentions limits is a task)."""
+    return code != 0 and len(text) < 4000 and bool(LIMIT_RE.search(text))
+
+
+def run_chain(agent, agent_md, kith, args):
+    main = main_id(agent, agent_md)
+    ids = [main] + [i for i in kith_settings.backups(agent)[0] if i != main]
+    out = out_ids()
+    todo = [i for i in ids if i not in out] or [main]   # all out: the main account as always, it says what's wrong
+    code, final, errs = 4, '', []
+    for n, entry in enumerate(todo):
+        argv = [str(kith), agent] + ([] if n == 0 and entry == main else ['--backup', entry]) + args
+        with tempfile.TemporaryFile('w+') as so, tempfile.TemporaryFile('w+') as se:
+            code = subprocess.run(argv, stdout=so, stderr=se, env={**os.environ, 'KITH_CHAIN_CHILD': '1'}).returncode
+            so.seek(0); se.seek(0)
+            final, err = so.read(), se.read()
+        sys.stderr.write(err)
+        if code == 4 and n + 1 < len(todo):   # this entry can't run (not logged in): the next one
+            print(f'kith: {entry} can\'t run; trying {todo[n + 1]}', file=sys.stderr)
+            continue
+        if limited(code, final + err):
+            mark_out(entry)
+            if n + 1 < len(todo):
+                print(f'kith: {entry} is out of usage; moving to {todo[n + 1]}', file=sys.stderr)
+                continue
+        break
+    sys.stdout.write(final)
+    sys.stdout.flush()
+    return code
+
+
 if __name__ == '__main__':
     a = sys.argv[1:]
     try:
+        if len(a) >= 5 and a[0] == 'run-chain' and a[4] == '--':
+            sys.exit(run_chain(a[1], a[2], a[3], a[5:]))
         if len(a) == 3 and a[0] == 'backups-json':
             print(json.dumps(chain(a[1], a[2])))
         elif len(a) == 3 and a[0] == 'launch-env':

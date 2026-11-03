@@ -355,8 +355,7 @@
           "Edit(//tmp/kith/kith/agents/echo/memory/people/sam/**)",
           "Edit(//tmp/kith/kith/agents/echo/memory/shared/**)",
           "Edit(//tmp/kith/kith/agents/echo/files/people/sam/**)"
-        ],
-        "blockReadsOutsideWorkingDirectories": true
+        ]
       },
       "sandbox": {
         "enabled": true,

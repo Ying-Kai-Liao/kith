@@ -38,7 +38,7 @@ KITH = Path(__file__).resolve().parent.parent
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
 import kith_launchd  # noqa: E402
 import kith_runenv  # noqa: E402
-from kith_paths import paths, launcher, job_installed, retire_old_job  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import paths, launcher, job_installed, retire_old_job, stable_kernel  # noqa: E402  the one place that knows where kith's folders are
 STATE = paths()['KITH_STATE']
 MACHINE = paths()['KITH_MACHINE'] / 'sched'  # last tick, last run per job
 LOGS = paths()['KITH_LOGS'] / 'sched'  # tick.log, one log per run
@@ -266,6 +266,7 @@ def start(agent, job, now, why):
               'KITH_BRIDGE_OUTBOX', 'KITH_RUN_OUTBOX', 'KITH_CALL_CHAT', 'KITH_CALL_KEY'):   # and the HQ_ twins that sync_env made
         env.pop('HQ_' + k[5:], None)
         env.pop(k, None)
+    env['KITH_BACKUP_CHAIN'] = 'on'   # no host picks the account: bin/kith walks the backup chain
     if job.get('person'):   # none: whoever started this (launchd's tick: the owner; a run by hand: that run's person)
         env['KITH_PERSON'] = env['HQ_PERSON'] = job['person']
     person = env.get('KITH_PERSON') or None
@@ -422,7 +423,7 @@ def tick():
 
 def install():
     LOGS.mkdir(parents=True, exist_ok=True)
-    me = paths()['KITH_HOME'] / 'kernel/bin/kith-sched'   # the address, not the disk path: the kith folder can move
+    me = stable_kernel() / 'bin/kith-sched'   # cli/current: an update moves the link, the plist stays
     argv = [str(LAUNCHER), 'run', '--quiet', '--script', str(me), 'tick'] if LAUNCHER.exists() else [str(me), 'tick']
     PLIST.write_bytes(plistlib.dumps({
         'Label': LABEL, 'ProgramArguments': argv, 'StartInterval': 60, 'RunAtLoad': True,

@@ -999,6 +999,7 @@ def main(argv):
     for k in ('KITH_ASK_CHAIN', 'KITH_ASK_HOP', 'KITH_ASK_CROSS', 'KITH_ASK_FROM', 'KITH_ASK_COST'):
         env.pop(k, None)
     env['KITH_LAUNCH_ASK_ID'] = mid
+    env['KITH_BACKUP_CHAIN'] = 'on'   # no host picks the account: bin/kith walks the backup chain
     proc = subprocess.run([str(KITH / 'bin/kith'), agent, *kith_opts, '--', task], env=env, stdin=subprocess.DEVNULL,
                           capture_output=True, text=True)
     if bg_id:

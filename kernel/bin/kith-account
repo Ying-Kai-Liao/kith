@@ -102,6 +102,9 @@ def cmd_add(args):
     code = subprocess.call(argv, env={**os.environ, **env})
     if code:
         die(f'the login ended with exit {code}; run kith account add {h} {n} again to retry', code)
+    if h == 'claude':
+        # The same settings, plugins and auto mode as the main login (launch does it again every time).
+        acc.prepare_claude_dir(d)
     print(f'\nAdd it to the chain with: kith backup add {h}:{n}')
 
 

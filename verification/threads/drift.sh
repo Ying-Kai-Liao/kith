@@ -25,6 +25,7 @@ FILES=(
   serve/host/src/api/bots.rs          # send: terminal::before_send
   serve/host/src/agent/bot/queue.rs   # on_cmd: Cmd::Send, Cmd::WakeBatch, Cmd::ForgetLoaded; next_in_queue
   serve/host/src/agent/bot/turn.rs    # start_turn_inner: start_gate, claim_for_turn (the CAS), release_turn_claim
+  serve/host/src/agent/bot/offturn.rs # adopt_off_turn: an agent that woke itself gets a turn behind start_gate + claim_for_turn
   serve/host/src/agent/bot/session.rs # forget_loaded
   serve/host/src/api/botguests.rs     # ask: terminal::bot_gate (the bot's writer gate)
   serve/host/src/cards/resume.rs      # handle: a waiting message's wake re-runs the send gate (terminal_holds); bot_door: Cmd::WakeBatch; run_door: kith --resume

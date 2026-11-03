@@ -109,7 +109,7 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: sandbox on, fail closed, no escape hatch" "$(q "$S" '(sb.get("enabled"), sb.get("failIfUnavailable"), sb.get("allowUnsandboxedCommands"))')" "(True, True, False)"
   expect "$who: no excluded commands" "$(q "$S" '"excludedCommands" in sb')" False
   expect "$who: no network but the fixed host socket (both spellings), even with no KITH_RUN_SOCKET" "$(q "$S" "sb['network']['allowUnixSockets'] == ['$T/linked state/run/host.sock', '$T/real state/run/host.sock']")" True
-  expect "$who: no local servers (a stray one could take the host's port), no domains beyond the allowlist" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(None, False)"
+  expect "$who: no local servers (a stray one could take the host's port), no domains unless the package or the owner grants some" "$(q "$S" '(sb["network"].get("allowLocalBinding"), "allowedDomains" in sb["network"])')" "(None, False)"
   W=$KITH_HOME/agents/echo/files/people/$who/.work
   expect "$who: the workspace is writable, given to the shell only" "$(q "$S" "'$W' in aw and s['env'].get('KITH_WORK') == '$W' and s['env'].get('CLAUDE_ENV_FILE','').endswith('/lib/guest-env.sh')")" True
   expect "$who: the settings env (Claude Code, hooks, MCP servers) holds no workspace var and no path inside their folder but KITH_WORK" "$(q "$S" "[k for k in $WORKVARS if k in s['env']], sorted(k for k, v in s['env'].items() if '/people/$who' in str(v))")" "([], ['KITH_WORK'])"
@@ -127,7 +127,21 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: reads are deny-by-default (denyRead /), with a narrow allowlist; never the home folder or ~/Library" "$(q "$S" "'/' in dr and len(fs['allowRead']) > 0 and '/' not in fs['allowRead'] and not any(a == '$HOME' or a == '$HOME/Library' or 'Keychains' in a for a in fs['allowRead'])")" True
   expect "$who: allowRead has the system folders and nothing of the owner's home but the dev tools" "$(q "$S" "all(x in fs['allowRead'] for x in ['/usr', '/bin', '/System', '/Library', '/private/etc', '/dev', '/opt/homebrew'])")" True
   expect "$who: allowRead has the kernel, the run's own memory and the working directory" "$(q "$S" "all(any(a == x for a in fs['allowRead']) for x in ['$KERNEL', '$KITH_HOME/agents/echo/memory/shared'])")" True
-  expect "$who: the file tools are limited to the working directories" "$(q "$S" 's["permissions"].get("blockReadsOutsideWorkingDirectories")')" True
+  # Not permissions.blockReadsOutsideWorkingDirectories: with it Claude Code asks (a safetyCheck that no hook allow outranks)
+  # for a Bash command it cannot trace, such as `cd sub && export X=1; ls`, and every ask was a card to the owner. The file
+  # tools are fenced by a PreToolUse hook instead (lib/kith_readfence.py): roots = the working directory and the add-dirs.
+  expect "$who: no blockReadsOutsideWorkingDirectories (its Bash ask outranks the hook allow); a read fence hook on the file tools instead" "$(q "$S" 's["permissions"].get("blockReadsOutsideWorkingDirectories"), any(h.get("matcher") == "Read|Grep|Glob|LS|NotebookRead" and "kith_readfence.py" in h["hooks"][0]["command"] and h["hooks"][0].get("onFailure") == "block" and h["hooks"][0]["timeout"] >= 30 for h in s["hooks"]["PreToolUse"])')" "(None, True)"
+  FENCE=$(q "$S" '[h["hooks"][0]["command"] for h in s["hooks"]["PreToolUse"] if "kith_readfence.py" in h["hooks"][0]["command"]][0]')
+  WD=$KITH_HOME/agents/echo/files/people/$who
+  fence() { printf '{"tool_name":"%s","tool_input":{"%s":"%s"},"cwd":"%s"}' "$1" "$2" "$3" "$WD" | (cd "$T" && sh -c "$FENCE") | python3 -c '
+import json,sys
+t=sys.stdin.read().strip()
+print(json.loads(t)["hookSpecificOutput"]["permissionDecision"] if t else "allow")'; }
+  mkdir -p "$WD/sub"; echo x > "$WD/sub/f.txt"; ln -sfn "$HOME" "$WD/outlink"
+  expect "$who: read fence: Read inside the working directory (absolute, relative) is not refused" "$(fence Read file_path "$WD/sub/f.txt") $(fence Read file_path sub/f.txt)" "allow allow"
+  expect "$who: read fence: Read/Grep/Glob outside it, and a link out of it, are refused" "$(fence Read file_path "$HOME/.ssh/id_rsa") $(fence Grep path "$HOME") $(fence Glob path /etc) $(fence Read file_path ../../../../../../etc/hosts) $(fence Read file_path outlink/x)" "deny deny deny deny deny"
+  expect "$who: read fence: a Grep with no path searches the working directory" "$(printf '{"tool_name":"Grep","tool_input":{"pattern":"x"},"cwd":"%s"}' "$WD" | (cd "$T" && sh -c "$FENCE") | wc -c | tr -d ' ')" 0
+  expect "$who: read fence: a hook that cannot run (no python) denies" "$(printf '{}' | (cd "$T" && PATH=/nonexistent /bin/sh -c "$FENCE") | grep -c 'permissionDecision')" 1
   expect "$who: the denies stay on top of the allowlist (index not allowed)" "$(q "$S" "not any(a == '$T/real state/index' or a == '$T/real state' for a in fs['allowRead'])")" True
   expect "$who: global config of the owner is not read" "$(q "$S" 's["env"]["GIT_CONFIG_GLOBAL"]')" /dev/null
   expect "$who: the link to the state folder is itself readable" "$(q "$S" "'$T/linked state' in fs['allowRead']")" True
@@ -243,7 +257,7 @@ PY
 EV=$(cd "$KITH_HOME/agents/echo" && KITH_PERSON=evil "$KITH" echo --launch-json 2>"$T/err" | python3 -c 'import json,sys; j=json.load(sys.stdin); e=j["env"]; print(e.get("GOOD_KEY"), e.get("PATH") != "/tmp", e.get("KITH_HOME") != "/tmp", "LD_PRELOAD" in e, "DYLD_INSERT_LIBRARIES" in e, e.get("HOME") != "/tmp", "<" in j["system_prompt"].split("<session")[1].split("/>")[0])')
 expect "membership env: plain keys pass, PATH/HOME/KITH_*/LD_*/DYLD_* are skipped" "$EV" "1 True True False False True False"
 
-# Claude Code older than 2.1.257 (or one that does not say) cannot enforce the read limits: no run for a guest, the owner unaffected
+# Claude Code older than 2.1.295 (or one that does not say) cannot enforce the read limits: no run for a guest, the owner unaffected
 printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.100 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$T/bin/claude"
 KITH_PERSON=guest "$KITH" echo --launch-json >/dev/null 2>&1; rc=$?
 expect "old Claude Code: a guest run is refused" "$rc" 3
@@ -330,6 +344,33 @@ KITH_STATE=$ST KITH_PERSON=gone lj 1 >/dev/null; KITH_STATE=$ST "$AUTH" person g
 expect "person --rm removes it" "$([ -e "$ST/run/t/gone" ] && echo kept || echo gone)" gone
 rm -rf "$ST"
 
+# --- Guest domains: the hosts every guest of an agent reaches without a card ------------------------------------------------
+doms() { q "$(KITH_PERSON=$1 settings)" 'sb.get("network", {}).get("allowedDomains")'; }
+printf 'guest_domains: [pypi.org, files.pythonhosted.org, "*.evil.com", 10.0.0.1, pypi.org]\n' > "$KITH_HOME/agents/echo/role/capabilities.yaml"
+for who in guest bot-3f9a1c2e; do
+  expect "$who: the package's guest_domains are allowed (deduped; a wildcard and an address are dropped)" "$(doms $who)" "['pypi.org', 'files.pythonhosted.org']"
+done
+expect "owner: no sandbox, so no domains" "$(q "$(settings)" '"sandbox" in s')" False
+expect "kith-pkg check reports the dropped hosts and still passes" "$("$KERNEL/bin/kith-pkg" check echo 2>&1 | grep -c 'note: guest_domains: .* is not a plain host name')" 2
+"$AUTH" agent-access echo domain github.com >/dev/null 2>&1
+expect "an owner-kept host joins the package's" "$(doms guest)" "['pypi.org', 'files.pythonhosted.org', 'github.com']"
+expect "a bot guest gets it too" "$(doms bot-3f9a1c2e)" "['pypi.org', 'files.pythonhosted.org', 'github.com']"
+expect "a second save of the same host is one entry" "$("$AUTH" agent-access echo domain github.com >/dev/null 2>&1; "$AUTH" agent-access echo --json | python3 -c 'import json,sys; print([r["domain"] for r in json.load(sys.stdin)])')" "['pypi.org', 'files.pythonhosted.org', 'github.com']"
+expect "agent-access refuses a wildcard" "$("$AUTH" agent-access echo domain '*.x.com' >/dev/null 2>&1; echo $?)" 2
+expect "another agent's guests get none of it" "$("$AUTH" agent-access other --json)" "[]"
+expect "the ledger lists them under person *, the package's marked" "$("$AUTH" ledger --json | python3 -c 'import json,sys; print(sorted((e["target"], e["approved_by"]) for e in json.load(sys.stdin) if e["person"] == "*"))')" "[('files.pythonhosted.org', 'package'), ('github.com', 'owner'), ('pypi.org', 'package')]"
+"$AUTH" person nobody name=Nobody >/dev/null 2>&1
+expect "a person with no access to the agent gets no run, so none of it" "$(cd "$KITH_HOME/agents/echo" && KITH_PERSON=nobody "$KITH" echo --launch-json >/dev/null 2>&1; echo $?)" 3
+"$AUTH" person temp name=Temp >/dev/null 2>&1; "$AUTH" member echo temp mode=default >/dev/null 2>&1
+expect "a member has them" "$(doms temp)" "['pypi.org', 'files.pythonhosted.org', 'github.com']"
+"$AUTH" person temp --rm >/dev/null 2>&1
+expect "removing a person leaves the owner's agent-level host alone" "$("$AUTH" agent-access echo --json | grep -c github.com)" 1
+expect "ledger --rm takes a kept host away" "$("$AUTH" ledger --rm domain:echo:\*:github.com >/dev/null 2>&1; doms guest)" "['pypi.org', 'files.pythonhosted.org']"
+expect "ledger --rm refuses a package-declared host" "$("$AUTH" ledger --rm domain:echo:\*:pypi.org >/dev/null 2>&1; echo $?)" 1
+expect "agent-access --rm of a missing host is quiet" "$("$AUTH" agent-access echo domain nowhere.com --rm >/dev/null 2>&1; echo $?)" 0
+rm -f "$KITH_HOME/agents/echo/role/capabilities.yaml"
+expect "no capabilities and nothing kept: no allowedDomains again" "$(doms guest)" "None"
+
 # --- The real thing (KITH_REAL_SANDBOX=1, macOS, a logged-in claude): a guest run under Claude Code's own sandbox ------------
 # Everything above reads the generated JSON; this runs a real `claude -p` as the guest (the model is told to run one probe
 # script) and checks what the OS let the shell do. Throwaway KITH_HOME / KITH_STATE; the real home folder is only the
@@ -393,6 +434,13 @@ if [ "${KITH_REAL_SANDBOX:-}" = 1 ] && [ "$(uname)" = Darwin ]; then
            write-hooks write-claude-dir write-claude-md write-envrc write-project write-project-hooks write-project-claude-md write-project-claude-dir write-zshrc net-curl sock-other read-owner-uv-cache; do rexpect $n denied; done
   for n in read-package read-own-slice read-project read-project-git read-kernel guest-sandbox write-own-slice sock-host sock-run uv-run uv-own-cache shell-workspace; do rexpect $n ok; done
   rm -f "$REAL_HOME/.zshrc-probe-should-not-exist"
+
+  # A compound with a cd and an export (what a guest's agent runs for uv) must not ask: Claude Code's own ask for a command it
+  # cannot trace (permissions.blockReadsOutsideWorkingDirectories) outranks the Bash hook, and in -p mode an ask is a refusal.
+  rm -f "$SLICE/sub/cd-export-ok"; mkdir -p "$SLICE/sub"
+  (cd "$T/proj" && KITH_MODEL=${KITH_REAL_MODEL:-haiku} KITH_PERSON=guest KITH_RUN_SOCKET="$T/run s.sock" KITH_RUN_TOKEN=probe HOME=$REAL_HOME PATH=${PATH#"$T/bin:"} \
+     perl -e 'alarm 240; exec @ARGV' "$KITH" echo "Run exactly this one Bash command and then reply done: cd '$SLICE' && cd sub && export X=1; unset VIRTUAL_ENV; touch cd-export-ok" < /dev/null > "$T/real3.out" 2> "$T/real3.err")
+  expect "real: a compound with cd, export and unset runs without an ask" "$([ -e "$SLICE/sub/cd-export-ok" ] && echo ran || echo refused)" ran
 
   # --- escape cards (F11 step 2b): a denied folder is readable after a yes-once grant, in the next launch only ----------------
   # The run socket now answers: a stand-in for the host that hands out the grant in $T/grants.json once (it deletes the file

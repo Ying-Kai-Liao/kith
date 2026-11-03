@@ -1250,6 +1250,7 @@ fn a_bot_guest_may_call_only_its_short_list() {
         "revokeKey",
         "allowedRules",
         "removeAllowedRule",
+        "removeSessionGrant",
         "createBot",
         "updateBot",
         "deleteBot",
@@ -1362,6 +1363,7 @@ fn the_key_methods_are_on_no_guest_list() {
         "roomSecrets",
         "allowedRules",
         "removeAllowedRule",
+        "removeSessionGrant",
     ] {
         assert!(routed.iter().any(|r| r == m), "{m} is not found by the router walk");
         assert!(!MEMBER_METHODS.contains(&m), "{m} on MEMBER_METHODS");

@@ -36,7 +36,7 @@ export const permissionHeadline = (toolKind?: string) => {
  * Approval card (the kith DecisionCard): what the agent wants, where it runs, the answers, tinted in the agent's pair.
  * `waiting`: the owner's name when this card is for them to answer (a guest's run); the buttons are theirs, not this person's.
  */
-export function PermissionCard({ entry, hostName, answering, respond, waiting = null, pair = FALLBACK_PAIR, held = null }: { entry: Entry; hostName: string; answering: string | null; respond: (option: string | null) => void; waiting?: string | null; pair?: Pair; held?: HeldCardProps | null }) {
+export function PermissionCard({ entry, hostName, answering, respond, waiting = null, pair = FALLBACK_PAIR, held = null, removeGrant }: { entry: Entry; hostName: string; answering: string | null; respond: (option: string | null) => void; waiting?: string | null; pair?: Pair; held?: HeldCardProps | null; /** The owner's Remove on a live This session grant (absent for anyone else). */ removeGrant?: (id: string) => void }) {
   const [expanded, setExpanded] = useState(false)
   const [confirming, setConfirming] = useState(false)
   // The old run ended by itself (or another device stopped it): the open confirm has nothing left to ask.
@@ -51,7 +51,9 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
   const cwd = d.cwd ? ` · ${d.cwd.split('/').filter(Boolean).pop() ?? d.cwd}` : ''
   const byKind = (kind: string) => options.find((o) => o.kind === kind)
   const choices = permissionChoices(d)
+  const grant = d.sessionGrant
   const common = {
+    outcomeAction: !pending && grant?.state === 'live' && removeGrant ? { label: 'Remove', run: () => removeGrant(grant.id) } : undefined,
     pair,
     title: permissionHeadline(d.toolKind),
     subject: d.title ?? '',
@@ -80,6 +82,7 @@ export function PermissionCard({ entry, hostName, answering, respond, waiting = 
           pending={answering !== null ? true : null}
           onAllow={() => respond(byKind('allow_once')!.optionId)}
           onDeny={() => respond(byKind('reject_once')!.optionId)}
+          onSession={byKind('allow_session') ? () => respond(byKind('allow_session')!.optionId) : undefined}
           allowLabel="Allow once"
           alwaysLabel={alwaysAllowLabel(d.cwd)}
           onAlways={byKind('allow_always') ? () => respond(byKind('allow_always')!.optionId) : undefined}
