@@ -306,8 +306,10 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
     if parent_of(claim.pid) == Some(std::process::id()) {
         return Stopped::OwnTurn(claim);
     }
+    // Descendants first, the claimer last (as the revoke `sweep` does): for a one-shot the claimer is kith-stub, which
+    // holds the conversation's lock, and the lock must not be free while claude still runs.
     let mut victims = children_of(claim.pid, 4);
-    victims.insert(0, claim.pid);
+    victims.push(claim.pid);
     // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
     super::intent::write(state, sid, "stopped from the app", claim.pid);
     signal(&victims, libc::SIGTERM);
@@ -318,8 +320,28 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
     // Still the claimer we judged? (The pid can only have gone, but a rest of the tree is signalled by pid alone.)
     let left: Vec<u32> = victims.iter().copied().filter(|p| pid_runs(*p)).collect();
     signal(&left, libc::SIGKILL);
+    // Wait (bounded) for them to be gone before the claim is given back: a take-over started at once would otherwise
+    // find the stub's lock still held and come back busy (75).
+    let reaped = std::time::Instant::now() + STOP_REAP;
+    while std::time::Instant::now() < reaped && victims.iter().any(|p| still_there(*p)) {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
     release(state, sid, claim.pid, claim.takeover);
     Stopped::Ended(claim)
+}
+
+/// How long [`stop_holder`] waits, after SIGKILL, for the processes to leave the table.
+const STOP_REAP: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Whether `pid` still holds anything: running, and not a zombie waiting for its parent (a zombie has released its
+/// descriptors, so its flock is gone).
+fn still_there(pid: u32) -> bool {
+    pid_runs(pid)
+        && std::process::Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .is_none_or(|o| !String::from_utf8_lossy(&o.stdout).trim_start().starts_with('Z'))
 }
 
 fn ps_pids(args: &[&str]) -> Vec<u32> {

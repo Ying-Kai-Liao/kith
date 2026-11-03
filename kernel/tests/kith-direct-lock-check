@@ -8,6 +8,7 @@
 #   - two direct runs on one session: the second is refused, whichever of the claim file or the lock answers first;
 #   - an app turn (the host's claim, kith-sessions take_claim) on a session a direct run holds is still blocked by the claim file;
 #   - the claim file names the shell pid, and claude descends from the stub which is that same pid (exec kept it);
+#   - an interactive run on a busy lock: exit 75, claude never started, its claim released, no resume note;
 #   - no session id (-c) or no kith-stub: unlocked, as before (the missing stub says so on stderr; KITH_REQUIRE_STUB=1 refuses).
 #
 #   kernel/tests/kith-direct-lock-check    a few seconds; prints each check, exits 1 when one fails
@@ -160,6 +161,21 @@ print(v('busy\n', 0), v('locked\n', 75), v('locked\n', 127), v('', 70))
 PY
 )
 is "stub status pipe: busy wins; the engine's own 75/127 stay; a lock error stays 70" "$verdict" "75 75 127 70"
+
+# an interactive run that finds the lock busy (another holder has the conversation): the wrapper exits 75, claude never starts,
+# the terminal claim it took is given back, and no resume note reaches Kai
+SID5=55555555-5555-4555-8555-555555555555
+rm -f "$T/go" "$T/started"
+"$STUB" --lock-dir "$LOCKS" --key "$SID5" -- bash -c 'while [ ! -e "$0" ]; do sleep 0.1; done' "$T/go" & HELD5=$!
+waitfor '! "$STUB" --lock-dir "$LOCKS" --key "$SID5" -- true >/dev/null 2>&1' || bad "interactive busy: held stub did not take the lock"
+( cd "$T/work" && KERNEL_SK=$SK STUB_SID=$SID5 exec bash -c 'python3 "$0" terminal "$1" $$ && exec python3 "$0" run designer -- "$2" --lock-dir "$3" --key "$1" -- "$4"' \
+  "$SK" "$SID5" "$STUB" "$LOCKS" "$T/bin/claude-reg" ) > "$T/r5.out" 2>&1
+rc=$?
+is "interactive busy: the run exits 75" "$rc" 75
+[[ ! -s $T/started && ! -f $REG/$SID5.json ]] && ok "interactive busy: claude never started" || bad "interactive busy: claude started"
+unheld $SID5 && ok "interactive busy: the claim was released" || bad "interactive busy: claim still held"
+grep -qE 'Resume it as|continued in Kith' "$T/r5.out" && bad "interactive busy: a resume note was printed" "$(cat "$T/r5.out")" || ok "interactive busy: no resume note"
+touch "$T/go"; wait $HELD5
 
 [[ $fail == 0 ]] && echo "all checks passed"
 exit $fail
