@@ -70,7 +70,7 @@ mod tests {
     fn keeps_unquoted_words() {
         assert_eq!(split_words("a bb  ccc"), ["a", "bb", "ccc"]);
         assert_eq!(split_words("\"a b\" c\"d e\" \"\" f"), ["a b", "cd e", "", "f"]);
-        assert!(split_words("   ").is_empty());
+        assert_eq!(split_words("   "), Vec::<String>::new());
     }
 
     #[test]

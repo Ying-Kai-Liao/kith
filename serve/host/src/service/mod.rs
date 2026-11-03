@@ -177,10 +177,13 @@ fn resolved(path: &Path) -> PathBuf {
 fn mount_of(path: &Path) -> Option<PathBuf> {
     use std::os::unix::ffi::OsStrExt as _;
     let c = std::ffi::CString::new(path.as_os_str().as_bytes()).ok()?;
+    // SAFETY: `statfs` is plain integers and byte arrays, for which all-zero is a valid value.
     let mut st: libc::statfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statfs(c.as_ptr(), &mut st) } != 0 {
+    // SAFETY: `c` is a NUL-terminated path and `st` a live, writable `statfs`.
+    if unsafe { libc::statfs(c.as_ptr(), &raw mut st) } != 0 {
         return None;
     }
+    // SAFETY: on success the kernel filled `f_mntonname` with a NUL-terminated path inside the struct.
     let name = unsafe { std::ffi::CStr::from_ptr(st.f_mntonname.as_ptr()) };
     Some(PathBuf::from(std::ffi::OsStr::from_bytes(name.to_bytes())))
 }
