@@ -130,10 +130,7 @@ pub(super) fn retired(auth: &Value, life: &Life, pid: &str, left: bool) -> Optio
         .collect();
     owned.sort_unstable();
     if !owned.is_empty() {
-        return Some(format!(
-            "a removed '{pid}' still owns {}",
-            owned.join(", ")
-        ));
+        return Some(format!("a removed '{pid}' still owns {}", owned.join(", ")));
     }
     None
 }
@@ -169,10 +166,7 @@ fn py_str(v: &Value) -> String {
 fn py_repr(v: &Value) -> String {
     match v {
         Value::String(s) => format!("'{s}'"),
-        Value::Array(a) => format!(
-            "[{}]",
-            a.iter().map(py_repr).collect::<Vec<_>>().join(", ")
-        ),
+        Value::Array(a) => format!("[{}]", a.iter().map(py_repr).collect::<Vec<_>>().join(", ")),
         Value::Object(o) => format!(
             "{{{}}}",
             o.iter()
@@ -263,12 +257,7 @@ pub(crate) fn person_set(
 /// `rename`: a person's new id, carried through every table that names them. The old id stays in `was`, so what
 /// outside the tables still says old (a chat thread they started, the cost ledger) keeps meaning them. The folders
 /// follow after the commit (`move_life`).
-pub(crate) fn person_rename(
-    auth: &mut Value,
-    life: &Life,
-    old: &str,
-    new: &str,
-) -> R<Vec<String>> {
+pub(crate) fn person_rename(auth: &mut Value, life: &Life, old: &str, new: &str) -> R<Vec<String>> {
     check_id(old)?;
     tables(auth);
     need_person(auth, old)?;
@@ -396,9 +385,7 @@ pub(crate) fn person_remove(
     if gone.len() > 1 {
         line = format!("{line} and bots ({})", gone[1..].join(", "));
     }
-    line.push_str(
-        " (profiles they own are kept); the id is retired, a new person gets another",
-    );
+    line.push_str(" (profiles they own are kept); the id is retired, a new person gets another");
     if !kept.is_empty() {
         line = format!(
             "{line}; their memory and files in {} are kept (delete them by hand)",
@@ -411,11 +398,7 @@ pub(crate) fn person_remove(
 /// `person <id> --rm --unused`: only kith serve knows that no invite link went out, so it says so; this is the
 /// backstop, under the same transaction as the removal. Anything the person has (or a bot, an old id, memory, a
 /// `/link` code) refuses, and the id is not retired.
-pub(crate) fn person_remove_unused(
-    auth: &mut Value,
-    life: &Life,
-    pid: &str,
-) -> R<Vec<String>> {
+pub(crate) fn person_remove_unused(auth: &mut Value, life: &Life, pid: &str) -> R<Vec<String>> {
     check_id(pid)?;
     tables(auth);
     need_person(auth, pid)?;
@@ -450,7 +433,9 @@ pub(crate) fn person_remove_unused(
         ));
     }
     table(auth, "people").shift_remove(pid);
-    Ok(vec![format!("{pid} removed (unused: the id is free again)")])
+    Ok(vec![format!(
+        "{pid} removed (unused: the id is free again)"
+    )])
 }
 
 /// `root_of`: follow `bot_of` to the person at the top; a loop stops at the repeat.
@@ -481,9 +466,7 @@ pub(crate) fn person_suspend(
     let pid = secrets::canonical(auth, pid);
     need_person(auth, &pid)?;
     if secrets::is_owner(auth, &pid) {
-        return die(format!(
-            "{pid} is the owner: the owner can not be revoked"
-        ));
+        return die(format!("{pid} is the owner: the owner can not be revoked"));
     }
     if is_bot(auth, &pid) {
         return die(format!(

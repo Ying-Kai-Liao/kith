@@ -135,15 +135,13 @@ pub(crate) fn call_in(
         }
         "people.retired" => store::read(core, |a| {
             revoke::retired_line(a, life, word(params, "id").unwrap_or_default())
-                .map(|said| {
-                    json!({ "retired": !said.is_empty(), "lines": said })
-                })
+                .map(|said| json!({ "retired": !said.is_empty(), "lines": said }))
         })?
         .map_err(|d| store::refusal(&d)),
         "people.clearTemp" => {
             let pid = need(params, "id").map_err(|d| store::refusal(&d))?;
-            let ids = store::read(core, |a| revoke::temp_ids(a, pid))?
-                .map_err(|d| store::refusal(&d))?;
+            let ids =
+                store::read(core, |a| revoke::temp_ids(a, pid))?.map_err(|d| store::refusal(&d))?;
             // their runs are stopped by whoever asks; what is left is a folder, no table
             for x in &ids {
                 revoke::guest_tmp_remove(life, x);

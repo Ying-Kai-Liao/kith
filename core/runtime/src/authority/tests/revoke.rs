@@ -75,7 +75,9 @@ fn a_suspension_is_one_fact_and_the_person_and_their_bots_reach_nothing() {
     let before = rig.tables();
     assert_eq!(
         rig.lines("people.suspend", &id("sam")).unwrap(),
-        ["sam: access removed; their rows, accounts and bots (bot-a, dormant) are kept (undo: kith-auth person sam --unrevoke)"]
+        [
+            "sam: access removed; their rows, accounts and bots (bot-a, dormant) are kept (undo: kith-auth person sam --unrevoke)"
+        ]
     );
     let t = rig.tables();
     assert_eq!(t["people"]["sam"]["revoked"], json!({"at": 1_800_000_000}));
@@ -93,8 +95,14 @@ fn a_suspension_is_one_fact_and_the_person_and_their_bots_reach_nothing() {
     }
     let core = Authority::new(rig.core.conn(), &rig.c);
     assert!(core.cut_off("sam").unwrap() && core.cut_off("bot-a").unwrap());
-    assert!(core.resolve("house", "sam", None, false).is_ok_and(|r| r["allowed"] != json!(true)));
-    assert!(core.resolve_bot("house", "bot-a", None, false).is_ok_and(|r| r.is_some_and(|r| r["allowed"] != json!(true))));
+    assert!(
+        core.resolve("house", "sam", None, false)
+            .is_ok_and(|r| r["allowed"] != json!(true))
+    );
+    assert!(
+        core.resolve_bot("house", "bot-a", None, false)
+            .is_ok_and(|r| r.is_some_and(|r| r["allowed"] != json!(true)))
+    );
     // the others are not touched
     assert!(may(&rig, "amy", "house") && may(&rig, "bot-b", "house"));
     assert!(!core.cut_off("amy").unwrap() && !core.cut_off("bot-b").unwrap());
@@ -207,8 +215,11 @@ fn while_suspended_the_owner_can_take_a_row_away_but_not_give_one_and_undo_keeps
     assert!(said[0].contains("may not use it now"), "{said:?}");
     assert!(!may(&rig, "sam", "sound"));
     // and taking one away works
-    rig.lines("people.revoke", &json!({"person": "sam", "agent": "garden"}))
-        .unwrap();
+    rig.lines(
+        "people.revoke",
+        &json!({"person": "sam", "agent": "garden"}),
+    )
+    .unwrap();
     rig.lines("people.undo", &id("sam")).unwrap();
     // undo restores what the rows say now: house as it was, garden gone, the waiting row live
     assert!(may(&rig, "sam", "house"));
@@ -226,7 +237,8 @@ fn a_preset_deleted_while_suspended_is_the_same_wait_it_would_have_been() {
     let mut twin = Rig::new(&world());
     sus.lines("people.suspend", &id("sam")).unwrap();
     for rig in [&mut sus, &mut twin] {
-        rig.lines("people.removePreset", &json!({"name": "pro"})).unwrap();
+        rig.lines("people.removePreset", &json!({"name": "pro"}))
+            .unwrap();
     }
     sus.lines("people.undo", &id("sam")).unwrap();
     assert_eq!(sus.tables(), twin.tables());
@@ -288,7 +300,11 @@ fn a_person_is_added_changed_and_made_the_owner() {
     assert_eq!(t["people"]["zed"]["owner"], json!(true));
     // a bot cannot be the owner; a mistyped id is a usage error
     assert_eq!(
-        refused(&mut rig, "people.addPerson", &json!({"id": "bot-a", "owner": true})),
+        refused(
+            &mut rig,
+            "people.addPerson",
+            &json!({"id": "bot-a", "owner": true})
+        ),
         "bot-a is a bot: it can not be the owner"
     );
     assert!(refused(&mut rig, "people.addPerson", &id("Zed")).contains("lowercase letters"));
@@ -327,7 +343,9 @@ fn a_rename_carries_every_table_and_the_folders_follow() {
         .unwrap();
     assert_eq!(
         said,
-        ["sam is now anna; moved their memory and files in house, people (profile names stay as they are: they name accounts, not people)"]
+        [
+            "sam is now anna; moved their memory and files in house, people (profile names stay as they are: they name accounts, not people)"
+        ]
     );
     let t = rig.tables();
     assert!(t["people"].get("sam").is_none());
@@ -336,9 +354,15 @@ fn a_rename_carries_every_table_and_the_folders_follow() {
     assert!(t["members"]["house"].get("sam").is_none());
     assert_eq!(t["members"]["house"]["anna"]["preset"], "pro");
     assert_eq!(t["members"]["garden"]["anna"]["preset"], "member");
-    assert_eq!(t["members"]["house"]["amy"]["access_by"], json!({"domain:a.example": "anna"}));
+    assert_eq!(
+        t["members"]["house"]["amy"]["access_by"],
+        json!({"domain:a.example": "anna"})
+    );
     assert_eq!(t["invites"]["ABCDEF"]["person"], "anna");
-    assert!(home.join("agents/house/memory/people/anna/note.md").exists());
+    assert!(
+        home.join("agents/house/memory/people/anna/note.md")
+            .exists()
+    );
     assert!(home.join("state/people/anna.md").exists());
     assert!(!mem.exists());
     // the old id still means them, to a reader and to a suspension
@@ -363,14 +387,28 @@ fn a_rename_is_refused_for_the_ids_kith_auth_refuses() {
     let mut a = world();
     a["retired"] = json!({"old": {"at": 3}});
     let mut rig = Rig::new(&a);
-    std::fs::create_dir_all(rig.machine_dir.path().join("agents/house/files/people/left")).unwrap();
+    std::fs::create_dir_all(
+        rig.machine_dir
+            .path()
+            .join("agents/house/files/people/left"),
+    )
+    .unwrap();
     let before = rig.tables();
     let rename = |rig: &mut Rig, from: &str, to: &str| {
         refused(rig, "people.renamePerson", &json!({"id": from, "to": to}))
     };
-    assert_eq!(rename(&mut rig, "ghost", "zed"), "no person 'ghost' (kith-auth person ghost name=..)");
-    assert_eq!(rename(&mut rig, "sam", "amy"), "'amy' is already a person (or one's old id)");
-    assert_eq!(rename(&mut rig, "amy", "samuel"), "'samuel' is already a person (or one's old id)");
+    assert_eq!(
+        rename(&mut rig, "ghost", "zed"),
+        "no person 'ghost' (kith-auth person ghost name=..)"
+    );
+    assert_eq!(
+        rename(&mut rig, "sam", "amy"),
+        "'amy' is already a person (or one's old id)"
+    );
+    assert_eq!(
+        rename(&mut rig, "amy", "samuel"),
+        "'samuel' is already a person (or one's old id)"
+    );
     assert_eq!(
         rename(&mut rig, "sam", "old"),
         "'old' was a person who was removed: give the new person another id (e.g. old-2)"
@@ -391,13 +429,18 @@ fn a_removal_takes_the_bots_rows_and_codes_and_retires_the_ids() {
     let said = rig.lines("people.removePerson", &id("sam")).unwrap();
     assert_eq!(
         said,
-        ["sam removed, with their memberships and grants and bots (bot-a) (profiles they own are kept); the id is retired, a new person gets another; their memory and files in garden are kept (delete them by hand)"]
+        [
+            "sam removed, with their memberships and grants and bots (bot-a) (profiles they own are kept); the id is retired, a new person gets another; their memory and files in garden are kept (delete them by hand)"
+        ]
     );
     let t = rig.tables();
     assert!(t["people"].get("sam").is_none() && t["people"].get("bot-a").is_none());
     assert!(t["members"]["house"].get("sam").is_none());
     assert!(t["members"]["house"].get("bot-a").is_none());
-    assert!(t["members"].get("garden").is_none(), "an agent without rows leaves the table");
+    assert!(
+        t["members"].get("garden").is_none(),
+        "an agent without rows leaves the table"
+    );
     assert!(t["invites"].as_object().unwrap().is_empty());
     // the person's ids are retired (their old one too), the bot's is not: the same bot may join again
     assert_eq!(t["retired"]["sam"], json!({"at": 1_800_000_000}));
@@ -435,17 +478,32 @@ fn an_unused_person_is_removed_and_the_id_stays_free() {
     assert!(t["people"].get("zed").is_none() && t["retired"].get("zed").is_none());
     rig.lines("people.addPerson", &id("zed")).unwrap();
     // anything they have refuses it
-    let e = refused(&mut rig, "people.removePerson", &json!({"id": "sam", "unused": true}));
+    let e = refused(
+        &mut rig,
+        "people.removePerson",
+        &json!({"id": "sam", "unused": true}),
+    );
     assert_eq!(
         e,
         "sam is not unused (was, bots, memberships, invites): kith-auth person sam --rm removes them and retires the id"
     );
     rig.lines("people.suspend", &id("amy")).unwrap();
-    let e = refused(&mut rig, "people.removePerson", &json!({"id": "amy", "unused": true}));
-    assert!(e.starts_with("amy is not unused (revoked, bots, memberships)"), "{e}");
+    let e = refused(
+        &mut rig,
+        "people.removePerson",
+        &json!({"id": "amy", "unused": true}),
+    );
     assert!(
-        refused(&mut rig, "people.removePerson", &json!({"id": "ghost", "unused": true}))
-            .starts_with("no person 'ghost'")
+        e.starts_with("amy is not unused (revoked, bots, memberships)"),
+        "{e}"
+    );
+    assert!(
+        refused(
+            &mut rig,
+            "people.removePerson",
+            &json!({"id": "ghost", "unused": true})
+        )
+        .starts_with("no person 'ghost'")
     );
 }
 
@@ -484,7 +542,10 @@ fn a_suspension_and_a_removal_clear_the_temp_folders_of_the_person_and_their_bot
         temp_of(&rig, "amy", Some("amy")),
     );
     rig.lines("people.suspend", &id("sam")).unwrap();
-    assert!(!sam.exists() && !bot.exists(), "their runs' temp folders go");
+    assert!(
+        !sam.exists() && !bot.exists(),
+        "their runs' temp folders go"
+    );
     assert!(amy.exists());
     rig.lines("people.removePerson", &id("amy")).unwrap();
     assert!(!amy.exists());
@@ -498,11 +559,7 @@ fn a_temp_folder_recorded_as_someone_elses_stays_and_clear_temp_is_a_verb() {
     assert_eq!(said["cleared"], json!(["sam", "bot-a"]));
     assert!(theirs.exists());
     // a record that names them, or none at all for the plain name, and it goes
-    std::fs::write(
-        rig.machine_dir.path().join("machine/run/t-who/sam"),
-        "sam",
-    )
-    .unwrap();
+    std::fs::write(rig.machine_dir.path().join("machine/run/t-who/sam"), "sam").unwrap();
     rig.call("people.clearTemp", &id("sam")).unwrap();
     assert!(!theirs.exists());
     // the temp folder of someone who is not a person is cleared too: kith-auth asks nothing of the tables
@@ -539,7 +596,11 @@ fn a_revoke_racing_a_grant_leaves_the_person_cut_off_either_way() {
             });
         }
         // whichever won: the row may be there, and they reach nothing
-        assert!(!may(&rig, "sam", "sound") && !may(&rig, "sam", "house") && !may(&rig, "bot-a", "house"));
+        assert!(
+            !may(&rig, "sam", "sound")
+                && !may(&rig, "sam", "house")
+                && !may(&rig, "bot-a", "house")
+        );
         rig.lines("people.undo", &id("sam")).unwrap();
         assert!(may(&rig, "sam", "house"));
         let has_row = rig.tables()["members"]["sound"].get("sam").is_some();
@@ -554,14 +615,26 @@ fn answers(rig: &Rig, ids: &[String]) -> BTreeMap<String, String> {
     let core = Authority::new(rig.core.conn(), &rig.c);
     let mut out = BTreeMap::new();
     for p in ids {
-        out.insert(format!("cut_off {p}"), format!("{:?}", got(core.cut_off(p))));
+        out.insert(
+            format!("cut_off {p}"),
+            format!("{:?}", got(core.cut_off(p))),
+        );
         for agent in AGENTS {
             for via in [None, Some("house")] {
                 for once in [false, true] {
                     let k = format!("{p} {agent} {via:?} {once}");
-                    out.insert(format!("may {k}"), format!("{:?}", got(core.may(p, agent, via, once))));
-                    out.insert(format!("resolve {k}"), format!("{:?}", got(core.resolve(agent, p, via, once))));
-                    out.insert(format!("bot {k}"), format!("{:?}", got(core.resolve_bot(agent, p, via, once))));
+                    out.insert(
+                        format!("may {k}"),
+                        format!("{:?}", got(core.may(p, agent, via, once))),
+                    );
+                    out.insert(
+                        format!("resolve {k}"),
+                        format!("{:?}", got(core.resolve(agent, p, via, once))),
+                    );
+                    out.insert(
+                        format!("bot {k}"),
+                        format!("{:?}", got(core.resolve_bot(agent, p, via, once))),
+                    );
                 }
             }
         }
@@ -577,7 +650,11 @@ fn who(auth: &Value, id: &str) -> String {
     }
     people
         .iter()
-        .find(|(_, v)| v["was"].as_array().is_some_and(|w| w.iter().any(|x| x == id)))
+        .find(|(_, v)| {
+            v["was"]
+                .as_array()
+                .is_some_and(|w| w.iter().any(|x| x == id))
+        })
         .map_or_else(|| id.to_owned(), |(k, _)| k.clone())
 }
 
@@ -588,7 +665,10 @@ fn under(auth: &Value, id: &str, top: &str) -> bool {
         if at == top {
             return true;
         }
-        match auth["people"][&at]["bot_of"].as_str().filter(|b| !b.is_empty()) {
+        match auth["people"][&at]["bot_of"]
+            .as_str()
+            .filter(|b| !b.is_empty())
+        {
             Some(parent) => at = who(auth, parent),
             None => return false,
         }
@@ -597,7 +677,12 @@ fn under(auth: &Value, id: &str, top: &str) -> bool {
 }
 
 fn ids_of(auth: &Value) -> Vec<String> {
-    let mut v: Vec<String> = auth["people"].as_object().unwrap().keys().cloned().collect();
+    let mut v: Vec<String> = auth["people"]
+        .as_object()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
     v.extend(["ghost", "*", "", "old-sam"].map(str::to_owned));
     v
 }
@@ -614,50 +699,57 @@ fn a_suspension_cuts_off_the_person_and_their_bots_and_undo_gives_back_exactly_w
     }
     let mut runner = TestRunner::new(config);
     runner
-        .run(&(auth_strategy(), 0usize..2, any::<bool>()), |(auth, which, twice)| {
-            let mut rig = rig.borrow_mut();
-            rig.reset(&auth);
-            // a person who has nothing revoked yet (undo clears the fact, so a person revoked before is a different story)
-            let target = ["sam", "amy"][which];
-            let Some(p) = auth["people"].get(target) else {
-                return Ok(());
-            };
-            if p.get("revoked").is_some() {
-                return Ok(());
-            }
-            let ids = ids_of(&auth);
-            let (tables, before) = (rig.tables(), answers(&rig, &ids));
-
-            rig.call("people.suspend", &id(target)).map_err(TestCaseError::fail)?;
-            if twice {
-                rig.call("people.suspend", &id(target)).map_err(TestCaseError::fail)?;
-            }
-            let during = answers(&rig, &ids);
-            for (k, v) in &during {
-                let mut it = k.split(' ');
-                let (kind, who_id) = (it.next().unwrap(), it.next().unwrap_or(""));
-                if under(&auth, who_id, target) && !who_id.is_empty() {
-                    // reaches nothing: not allowed, not resolved as allowed, cut off
-                    let denied = match kind {
-                        "may" => v.contains("Ok((false,") || v.starts_with("Err("),
-                        "resolve" | "bot" => !v.contains("\"allowed\": Bool(true)"),
-                        "cut_off" => v == "Ok(true)",
-                        _ => true,
-                    };
-                    prop_assert!(denied, "{k} after a suspension: {v}");
-                } else {
-                    // everyone else answers as they did
-                    prop_assert_eq!(v, &before[k], "{} (not theirs)", k);
+        .run(
+            &(auth_strategy(), 0usize..2, any::<bool>()),
+            |(auth, which, twice)| {
+                let mut rig = rig.borrow_mut();
+                rig.reset(&auth);
+                // a person who has nothing revoked yet (undo clears the fact, so a person revoked before is a different story)
+                let target = ["sam", "amy"][which];
+                let Some(p) = auth["people"].get(target) else {
+                    return Ok(());
+                };
+                if p.get("revoked").is_some() {
+                    return Ok(());
                 }
-            }
+                let ids = ids_of(&auth);
+                let (tables, before) = (rig.tables(), answers(&rig, &ids));
 
-            rig.call("people.undo", &id(target)).map_err(TestCaseError::fail)?;
-            if twice {
-                rig.call("people.undo", &id(target)).map_err(TestCaseError::fail)?;
-            }
-            prop_assert_eq!(rig.tables(), tables);
-            prop_assert_eq!(answers(&rig, &ids), before);
-            Ok(())
-        })
+                rig.call("people.suspend", &id(target))
+                    .map_err(TestCaseError::fail)?;
+                if twice {
+                    rig.call("people.suspend", &id(target))
+                        .map_err(TestCaseError::fail)?;
+                }
+                let during = answers(&rig, &ids);
+                for (k, v) in &during {
+                    let mut it = k.split(' ');
+                    let (kind, who_id) = (it.next().unwrap(), it.next().unwrap_or(""));
+                    if under(&auth, who_id, target) && !who_id.is_empty() {
+                        // reaches nothing: not allowed, not resolved as allowed, cut off
+                        let denied = match kind {
+                            "may" => v.contains("Ok((false,") || v.starts_with("Err("),
+                            "resolve" | "bot" => !v.contains("\"allowed\": Bool(true)"),
+                            "cut_off" => v == "Ok(true)",
+                            _ => true,
+                        };
+                        prop_assert!(denied, "{k} after a suspension: {v}");
+                    } else {
+                        // everyone else answers as they did
+                        prop_assert_eq!(v, &before[k], "{} (not theirs)", k);
+                    }
+                }
+
+                rig.call("people.undo", &id(target))
+                    .map_err(TestCaseError::fail)?;
+                if twice {
+                    rig.call("people.undo", &id(target))
+                        .map_err(TestCaseError::fail)?;
+                }
+                prop_assert_eq!(rig.tables(), tables);
+                prop_assert_eq!(answers(&rig, &ids), before);
+                Ok(())
+            },
+        )
         .unwrap_or_else(|e| panic!("{e}"));
 }
