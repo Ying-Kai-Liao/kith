@@ -80,9 +80,13 @@ impl Holding {
         let (cfg, tx) = (self.cfg.clone(), self.sender.clone());
         std::thread::spawn(move || {
             let ready = tx.clone();
-            let result = holder::run_with(cfg, move || {
-                let _ = ready.send(Event::Serving);
-            });
+            // A panic must still come back as an event, or the supervisor waits forever (it holds a sender itself).
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                holder::run_with(cfg, move || {
+                    let _ = ready.send(Event::Serving);
+                })
+            }))
+            .unwrap_or_else(|_| Err(io::Error::other("the holder thread panicked")));
             let _ = tx.send(Event::Ended(result));
         });
     }

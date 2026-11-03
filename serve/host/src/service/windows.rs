@@ -31,7 +31,7 @@ pub fn stop() -> Result<()> {
         && program.file_name().is_some_and(|n| n.eq_ignore_ascii_case(HOLDER))
         && let Some(dir) = holder_dir(&args)
     {
-        stop_supervising_holder(dir);
+        stop_supervising_holder(dir)?;
     }
     // Not running is fine; `/T` takes the host and its agents with the supervisor.
     let _ = Command::new("taskkill")
@@ -42,19 +42,34 @@ pub fn stop() -> Result<()> {
     wait_for_host_exit()
 }
 
-/// Ends the `kith-holder supervise` process whose command line names `dir`, with its tree (the host and the core it
-/// supervises). The folder goes in through the environment so it needs no quoting.
-fn stop_supervising_holder(dir: &str) {
-    let script = "Get-CimInstance Win32_Process -Filter \"Name='kith-holder.exe'\" \
-        | Where-Object { $_.CommandLine -like '*supervise*' -and $_.CommandLine.Contains($env:KITH_HOLDER_DIR) } \
-        | ForEach-Object { taskkill /F /T /PID $_.ProcessId }";
-    let _ = Command::new("powershell")
+/// Ends the `kith-holder supervise` process whose command line names `dir` as a whole quoted word (install quotes every
+/// word, so `...\holder` never matches `...\holder-dev`), with its tree (the host and the core it supervises). The
+/// folder goes in through the environment so it needs no quoting. A failure is an error: a supervisor left running
+/// would start the host again under the new one.
+fn stop_supervising_holder(dir: &str) -> Result<()> {
+    // Contains("") matches every process.
+    ensure!(!dir.trim().is_empty(), "the installed holder service names no folder");
+    let script = "$m = @(Get-CimInstance Win32_Process -Filter \"Name='kith-holder.exe'\" \
+        | Where-Object { $_.CommandLine.Contains('\"supervise\"') -and $_.CommandLine.Contains('\"' + $env:KITH_HOLDER_DIR + '\"') }); \
+        $m | ForEach-Object { taskkill /F /T /PID $_.ProcessId | Out-Null }; \
+        Start-Sleep -Milliseconds 500; \
+        $left = @($m | Where-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue }); \
+        if ($left.Count -gt 0) { exit 1 }";
+    let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+    let powershell = Path::new(&root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
+    let status = Command::new(&powershell)
         .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("KITH_HOLDER_DIR", dir)
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .status();
+        .status()
+        .with_context(|| format!("running {}", powershell.display()))?;
+    ensure!(
+        status.success(),
+        "could not stop the running holder service ({status}); end kith-holder.exe for {dir} by hand"
+    );
+    Ok(())
 }
 
 pub fn start() -> Result<()> {
@@ -81,7 +96,7 @@ pub fn start() -> Result<()> {
 pub fn require_executable(expected: &Path) -> Result<()> {
     let (program, args) = configured()?;
     // Under the holder the Run key starts `kith-holder supervise ... -- kith-servew serve ...`: the host is what follows `--`.
-    let supervisor = if program.file_name().is_some_and(|n| n == HOLDER) {
+    let supervisor = if program.file_name().is_some_and(|n| n.eq_ignore_ascii_case(HOLDER)) {
         PathBuf::from(host_program(&args).context("cannot read the installed host service")?)
     } else {
         program

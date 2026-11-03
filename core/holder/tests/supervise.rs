@@ -39,7 +39,7 @@ fn the_holder_answers_and_starts_its_child_again_when_it_exits() {
         .arg(dir.join("h"))
         .arg("--secret-file")
         .arg(&secret)
-        .args(["--backoff-ms", "20:40", "--", "/bin/sh", "-c"])
+        .args(["--backoff-ms", "50:100", "--", "/bin/sh", "-c"])
         // The child dies at once, every time.
         .arg(format!("echo run >> '{}'", log.display()))
         .stdin(Stdio::null())

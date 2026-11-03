@@ -40,7 +40,7 @@ pub(super) fn split_words(text: &str) -> Vec<String> {
 
 /// The host program in a job's command line: the word after `--` when the holder runs it, else the first word.
 pub(super) fn host_program(words: &[String]) -> Option<&String> {
-    match words.iter().position(|w| w == "--") {
+    match words.iter().rposition(|w| w == "--") {
         Some(i) => words.get(i + 1),
         None => words.first(),
     }

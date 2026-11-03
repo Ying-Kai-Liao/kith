@@ -108,7 +108,7 @@ fn supervise_command(mut args: impl Iterator<Item = String>) -> ExitCode {
                         let parsed = v.split_once(':').and_then(|(a, b)| {
                             Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
                         });
-                        let Some((min, max)) = parsed.filter(|(a, b)| a <= b) else {
+                        let Some((min, max)) = parsed.filter(|(a, b)| a <= b && *a >= 50) else {
                             return usage();
                         };
                         policy.min = Duration::from_millis(min);
