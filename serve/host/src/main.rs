@@ -10,6 +10,7 @@ mod cards;
 mod channels;
 mod chat;
 mod compat;
+mod core_front;
 mod delegation;
 mod doors;
 mod environment;
@@ -427,6 +428,16 @@ enum KernelCmd {
     /// to run the same corpus through an embedded core.
     #[command(hide = true)]
     CoreMigrate,
+    /// Runs the daemon front alone, in the foreground (what `kith serve` starts inside itself); ends when stdin closes.
+    #[command(hide = true)]
+    CoreDaemon,
+    /// The daemon, its owner socket and the holder, or why there is no daemon and the verb that recovers it.
+    #[command(hide = true)]
+    CoreStatus {
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// The coding engines an agent can run on: installed or not, and how to install or sign in.
     Engines {
         /// Print JSON.
@@ -940,7 +951,14 @@ async fn main() -> Result<()> {
     agent::acp::init();
     let args: Vec<_> = std::env::args_os().collect();
     let cli = match kernel::route(&args) {
-        kernel::Route::Host(a) => Cli::parse_from(a),
+        kernel::Route::Host(a) => {
+            // The daemon answers first when one runs and the table says the core serves the verb; otherwise clap and the
+            // embedded verbs below do exactly what they did before.
+            if let Some(code) = core_front::try_cli(&a) {
+                std::process::exit(code);
+            }
+            Cli::parse_from(a)
+        }
         kernel::Route::Kernel(a) => return Err(kernel::exec_kernel(&a)),
         kernel::Route::Version => {
             println!("kith {}", env!("CARGO_PKG_VERSION"));
@@ -1140,6 +1158,13 @@ async fn main() -> Result<()> {
                 }
                 return Ok(());
             }
+            if matches!(cmd, KernelCmd::CoreDaemon) {
+                std::process::exit(core_front::run_foreground());
+            }
+            if let KernelCmd::CoreStatus { json } = cmd {
+                core_front::print_status(json);
+                return Ok(());
+            }
             if let KernelCmd::Secrets { kernel, args } = cmd {
                 std::process::exit(print_secrets(kernel, &args));
             }
@@ -1222,7 +1247,9 @@ async fn main() -> Result<()> {
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
                     | KernelCmd::Secrets { .. }
-                    | KernelCmd::CoreMigrate => {
+                    | KernelCmd::CoreMigrate
+                    | KernelCmd::CoreDaemon
+                    | KernelCmd::CoreStatus { .. } => {
                         unreachable!("handled above")
                     }
                 }
@@ -1303,6 +1330,9 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
     cards::start(&hub);
     background::start(&hub);
     watchdog::start();
+    // The core's daemon front: the owner socket for the CLI and the link to the holder. It starts on its own thread,
+    // never delays this startup, and a core that will not start is a line in the core log, not an error here.
+    let core_front = core_front::start_beside_host();
     tracing::info!(version = env!("CARGO_PKG_VERSION"), bind, port, "kith-serve listening");
     // Peer addresses: some settings may only be changed from this computer.
     let app = api::router(hub.clone()).into_make_service_with_connect_info::<std::net::SocketAddr>();
@@ -1318,6 +1348,7 @@ async fn serve(bind: &str, port: u16) -> Result<()> {
     hub.shutdown().await;
     agent::acp::stopped().await;
     analytics::flush_before_exit(&hub).await;
+    drop(core_front);
     tracing::info!("kith-serve stopped");
     Ok(())
 }

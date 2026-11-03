@@ -5,7 +5,8 @@ Fails when:
   1. kith-core's public surface grows past its entry points: a `pub` item or a field of a `pub` struct in
      core/runtime/src that is not on the list below (a crude source scan, on purpose: it needs no nightly rustdoc).
   2. a crate other than the daemon's wiring and the CLI entry point (one crate today: serve/host) lists kith-core
-     as a dependency, or Rust code outside serve/host/src/main.rs (and its end-to-end test) names `kith_core`.
+     as a dependency, or Rust code outside serve/host/src/main.rs, core_front.rs (the daemon wiring and the CLI's
+     way to it) and the two end-to-end tests names `kith_core`.
   3. kith-api (core/api, the method table) depends on no other crate of this repo and names none of them: kith-core
      may depend on it, never the reverse.
   4. "core.db" (or its sibling file names) appears outside core/runtime: Rust, the Python kernel, the apps. Docs and the
@@ -24,20 +25,28 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
-# (file, item) of every `pub` thing kith-core exports. `call` is the method table's entry point (M0b).
+# (file, item) of every `pub` thing kith-core exports. `Core::call` is the method table's one door (M0b; a method of
+# Core, so no handler runs without the lock and the generation); the daemon front is M0c: `Daemon` (spawn, ready, served,
+# stop), `status` for `kith doctor`, and `reach`, the CLI's way to the owner socket.
 PUBLIC = {
     ("lib.rs", "Embedded"), ("lib.rs", "Migrated"), ("lib.rs", "Via"),
     ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "stateless_through_core"),
-    ("lib.rs", "call"),
-    ("lib.rs", "use:db::Core"), ("lib.rs", "use:error::Error"),
+    ("lib.rs", "reach"),
+    ("lib.rs", "use:db::Core"), ("lib.rs", "use:error::Error"), ("lib.rs", "use:daemon::Daemon"),
+    ("lib.rs", "use:daemon::status"), ("lib.rs", "use:owner::Reached"),
     ("lib.rs", "field:from"), ("lib.rs", "field:to"),
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
-    ("error.rs", "Error"),
+    ("call.rs", "call"),
+    ("daemon.rs", "Daemon"), ("daemon.rs", "spawn"), ("daemon.rs", "ready"), ("daemon.rs", "served"), ("daemon.rs", "stop"),
+    ("daemon.rs", "status"),
+    ("owner.rs", "Reached"),
+    ("error.rs", "Error"), ("error.rs", "recovery"),
 }
 # The crates that may depend on kith-core: the daemon's wiring and the CLI entry point are the one host crate.
 DEPENDENTS = {"serve/host/Cargo.toml"}
 # Rust files outside core/runtime that may name kith_core.
-RUST_USERS = {"serve/host/src/main.rs", "serve/host/tests/core_embedded_e2e.rs"}
+RUST_USERS = {"serve/host/src/main.rs", "serve/host/src/core_front.rs", "serve/host/tests/core_embedded_e2e.rs",
+              "serve/host/tests/core_daemon_e2e.rs"}
 # Files that may say "core.db": docs, this check, and the protected-paths list (runtime-design 9b rules 1 and 2).
 EXEMPT_NAME = ("kernel/tests/kith-core-boundary-check", "kernel/lib/kith_guard.py")
 NAMES = re.compile(r"core\.db|core\.lock|core\.marker")

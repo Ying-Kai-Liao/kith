@@ -21,13 +21,13 @@ const V2: Migration = Migration {
 };
 const BOTH: &[Migration] = &[MIGRATIONS[0], V2];
 
-fn machine() -> (TempDir, PathBuf) {
+pub(crate) fn machine() -> (TempDir, PathBuf) {
     let t = tempfile::tempdir().expect("tempdir");
     let m = t.path().join("machine");
     (t, m)
 }
 
-fn paths(machine: &Path) -> Paths {
+pub(crate) fn paths(machine: &Path) -> Paths {
     let p = machine.to_path_buf();
     Paths {
         home: p.clone(),
@@ -44,7 +44,7 @@ fn paths(machine: &Path) -> Paths {
     }
 }
 
-fn open(l: &Layout) -> crate::Core {
+pub(crate) fn open(l: &Layout) -> crate::Core {
     match embedded_with(l, MIGRATIONS).expect("embedded") {
         Embedded::Open(c) => *c,
         Embedded::DaemonRunning { .. } => panic!("lock held"),
@@ -556,34 +556,52 @@ fn calls_go_through_the_table() {
     let (_t, m) = machine();
     let p = paths(&m);
     let who = Principal::Owner;
+    let core = open(&Layout::new(&m)).with_folders(&p);
 
     // A method the core answers without state.
-    let v = crate::call(&p, who, "kernel.version", &json!({})).expect("version");
+    let v = core.call(who, "kernel.version", &json!({})).expect("version");
     assert_eq!(v["abi"], 1);
-    let v = crate::call(&p, who, "paths", &json!({})).expect("paths");
+    let v = core.call(who, "paths", &json!({})).expect("paths");
     assert_eq!(v["KITH_MACHINE"], m.to_string_lossy().as_ref());
+
+    // A caller that gives its view gets the paths of that view, not the core's: the daemon's environment is not the
+    // environment of the CLI that asked.
+    let seen = core
+        .call(
+            who,
+            "paths",
+            &json!({"home": "/nowhere/home", "env": {"KITH_HOME": "/caller/kith", "KITH_STATE": "/caller/state"}, "kernel": "/k/kernel"}),
+        )
+        .expect("caller view");
+    assert_eq!(seen["KITH_HOME"], "/caller/kith");
+    assert_eq!(seen["KITH_STATE"], "/caller/state");
+    assert_ne!(seen["KITH_MACHINE"], m.to_string_lossy().as_ref());
+    assert!(
+        core.call(who, "paths", &json!({"env": {"KITH_HOME": 3}})).is_err(),
+        "env is a map of strings"
+    );
 
     // Refused before anything runs.
     assert!(matches!(
-        crate::call(&p, who, "no.such", &json!({})),
+        core.call(who, "no.such", &json!({})),
         Err(Error::NoSuchMethod(_))
     ));
     assert!(matches!(
-        crate::call(&p, Principal::Member, "kernel.version", &json!({})),
+        core.call(Principal::Member, "kernel.version", &json!({})),
         Err(Error::NotAllowed(_))
     ));
     assert!(matches!(
-        crate::call(&p, who, "kernel.version", &json!({"x": 1})),
+        core.call(who, "kernel.version", &json!({"x": 1})),
         Err(Error::BadParams(_))
     ));
     assert!(matches!(
-        crate::call(&p, who, "kernel.delegation.record", &json!({})),
+        core.call(who, "kernel.delegation.record", &json!({})),
         Err(Error::BadParams(_))
     ));
 
     // In the table but not answered here: the caller falls back.
     assert!(matches!(
-        crate::call(&p, who, "agents.list", &json!({})),
+        core.call(who, "agents.list", &json!({})),
         Err(Error::NotServed(_))
     ));
 }

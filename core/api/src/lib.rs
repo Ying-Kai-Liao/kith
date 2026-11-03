@@ -33,6 +33,21 @@ mod types;
 
 pub use table::{METHODS, method};
 
+/// A short fingerprint of the method table (FNV-1a over the generated OpenRPC document). The owner socket's hello
+/// compares it, so a CLI and a daemon built from different tables notice before one runs a call the other reads
+/// differently. Not a security check.
+pub fn schema_hash() -> &'static str {
+    static HASH: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    HASH.get_or_init(|| {
+        let text = openrpc::render(&openrpc::generate());
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in text.bytes() {
+            h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+        }
+        format!("{h:016x}")
+    })
+}
+
 /// Who is calling. Until M2 only the owner may call anything; the others exist so the rows can say who is next.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Principal {
@@ -98,6 +113,9 @@ pub enum Arg {
     Rest,
     /// Everything after a bare `--` (`[string]`).
     After,
+    /// Not typed on a command line: the client fills it from where it runs (its home folder, its environment) and a
+    /// daemon, which has an environment of its own, reads the caller's view from here instead.
+    Caller,
 }
 
 /// One param of a method. `name` is camelCase.
