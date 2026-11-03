@@ -5,6 +5,7 @@
 //! - `proto`: the messages a core and the holder exchange.
 //! - `platform`: sockets and pipes, terminals, process trees, detaching, per OS.
 //! - `holder`: the process itself. `client`: a blocking client (the core's side, and the tests').
+//! - `supervise`: the holder as the supervised root, restarting the core (M1).
 //! - `launch`: starting a holder detached when none answers. `stdio`: the byte relay behind `kith-holder --stdio`.
 
 pub mod auth;
@@ -14,6 +15,7 @@ pub mod launch;
 pub mod platform;
 pub mod proto;
 pub mod stdio;
+pub mod supervise;
 pub mod wire;
 
 /// Reported in `--version`; the wire's own version is `proto::VERSION`.
