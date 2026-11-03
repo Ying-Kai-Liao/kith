@@ -400,7 +400,10 @@ fn sweep_expires_the_open_and_the_unused_grants_past_their_deadline() {
     assert_eq!(state(&mut c, &granted.id), State::Expired);
     // A no stays a no.
     assert_eq!(state(&mut c, &denied.id), State::Denied);
-    assert!(sweep(&mut c, DEADLINE + 2, &Nobody).unwrap().is_empty());
+    assert!(
+        sweep(&mut c, DEADLINE + 2, &Nobody).unwrap().is_empty(),
+        "nothing swept"
+    );
 }
 
 #[test]
@@ -414,7 +417,10 @@ fn sweep_keeps_an_approved_card_whose_wake_is_queued() {
             .unwrap();
         tx.commit().unwrap();
     }
-    assert!(sweep(&mut c, DEADLINE + 1, &Nobody).unwrap().is_empty());
+    assert!(
+        sweep(&mut c, DEADLINE + 1, &Nobody).unwrap().is_empty(),
+        "nothing swept"
+    );
     assert_eq!(state(&mut c, &a.id), State::Approved);
 }
 
@@ -539,7 +545,10 @@ fn a_claim_that_ran_out_lets_the_sweep_close_the_card_and_then_nothing_is_saved(
         .unwrap()
         .unwrap();
     // Held: the card's own deadline passed but the claim keeps it.
-    assert!(sweep(&mut c, DEADLINE + 50, &Nobody).unwrap().is_empty());
+    assert!(
+        sweep(&mut c, DEADLINE + 50, &Nobody).unwrap().is_empty(),
+        "nothing swept"
+    );
     assert_eq!(state(&mut c, &a.id), State::Pending);
     // Ran out.
     assert_eq!(sweep(&mut c, DEADLINE + 101, &Nobody).unwrap().len(), 1);
@@ -1004,51 +1013,63 @@ fn cards_answer_says_closed_expired_or_claimed_and_changes_nothing() {
     );
     assert_eq!(stored(&mut c, &a.id), before);
 
-    let w = raised(&mut c, &with_options("s1", "w"));
-    withdraw(&mut c, &w.id).unwrap();
+    let withdrawn_card = raised(&mut c, &with_options("s1", "w"));
+    withdraw(&mut c, &withdrawn_card.id).unwrap();
     let got = row(
         &mut c,
         "cards.answer",
-        &json!({"id": w.id, "answer": "once"}),
+        &json!({"id": withdrawn_card.id, "answer": "once"}),
     )
     .unwrap();
     assert_eq!(
         got,
-        json!({"result": "closed", "id": w.id, "state": "withdrawn"})
+        json!({"result": "closed", "id": withdrawn_card.id, "state": "withdrawn"})
     );
 
     // The deadline is the real clock's here: one in the past is refused at raise, so age a card by its row.
-    let e = raised(&mut c, &with_options("s1", "e"));
+    let aged_card = raised(&mut c, &with_options("s1", "e"));
     {
         let tx = c.claim_tx().unwrap();
-        tx.execute("UPDATE cards SET deadline = 1 WHERE id = ?1", [&e.id])
-            .unwrap();
+        tx.execute(
+            "UPDATE cards SET deadline = 1 WHERE id = ?1",
+            [&aged_card.id],
+        )
+        .unwrap();
         tx.commit().unwrap();
     }
     let got = row(
         &mut c,
         "cards.answer",
-        &json!({"id": e.id, "answer": "once"}),
+        &json!({"id": aged_card.id, "answer": "once"}),
     )
     .unwrap();
     assert_eq!(
         got,
-        json!({"result": "expired", "id": e.id, "state": "expired"})
+        json!({"result": "expired", "id": aged_card.id, "state": "expired"})
     );
-    assert_eq!(stored(&mut c, &e.id).answer, None);
+    assert_eq!(stored(&mut c, &aged_card.id).answer, None);
 
-    let k = raised(&mut c, &with_options("s1", "k"));
-    claim(&mut c, &k.id, &hold("app", i64::MAX / 2), T0, &Nobody)
-        .unwrap()
-        .unwrap();
+    let claimed_card = raised(&mut c, &with_options("s1", "k"));
+    claim(
+        &mut c,
+        &claimed_card.id,
+        &hold("app", i64::MAX / 2),
+        T0,
+        &Nobody,
+    )
+    .unwrap()
+    .unwrap();
     let got = row(
         &mut c,
         "cards.answer",
-        &json!({"id": k.id, "answer": "once"}),
+        &json!({"id": claimed_card.id, "answer": "once"}),
     )
     .unwrap();
-    assert_eq!(got, json!({"result": "claimed", "id": k.id, "by": "app"}));
-    assert_eq!(state(&mut c, &k.id), State::Pending);
+    assert_eq!(
+        got,
+        json!({"result": "claimed", "id": claimed_card.id, "by": "app"})
+    );
+    assert_eq!(state(&mut c, &claimed_card.id), State::Pending);
 }
 
 #[test]
