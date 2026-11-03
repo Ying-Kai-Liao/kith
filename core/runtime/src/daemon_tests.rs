@@ -380,6 +380,7 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
     }
 }
 
+#[cfg(unix)]
 /// A daemon whose holder link is a command's stdio (the `ssh host kith-holder --stdio` of M0f).
 fn command_cfg(argv: &[&str]) -> Config {
     let mut cfg = holder_cfg(std::path::PathBuf::new());
@@ -800,7 +801,7 @@ fn a_holder_linked_through_a_command_never_makes_the_core_end_local_processes() 
     // recorded group. It did not, and the local record is untouched.
     assert!(
         std::process::Command::new("/bin/kill")
-            .args(["-s", "0", &format!("-{pid}")])
+            .args(["-s", "0", "--", &format!("-{pid}")])
             .status()
             .expect("kill")
             .success(),
@@ -812,7 +813,7 @@ fn a_holder_linked_through_a_command_never_makes_the_core_end_local_processes() 
     let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
     // Only now end the group this test started (a failed assert above leaks it, as the other leader() tests do).
     let _ = std::process::Command::new("/bin/kill")
-        .args(["-s", "KILL", &format!("-{pid}")])
+        .args(["-s", "KILL", "--", &format!("-{pid}")])
         .status();
     assert!(log.contains("nothing is recorded or ended here"), "{log}");
 }

@@ -627,7 +627,8 @@ fn a_dropped_stdio_link_keeps_the_process_and_a_reconnect_resumes_from_the_tail(
     let fx = Fixture::new("sdrop");
     fx.start();
     let mut c = fx.over_stdio(1);
-    let line = format!("echo before-the-drop; {}", sleep_line());
+    let sep = if cfg!(windows) { "&" } else { ";" };
+    let line = format!("echo before-the-drop {sep} {}", sleep_line());
     let id = spawn(&mut c, &spec("conv-d", 7, 1, Mode::Pipes, &shell(&line)));
     read_until(&mut c, id, "before-the-drop");
     drop(c);
