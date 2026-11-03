@@ -119,6 +119,7 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+<<<<<<< HEAD
         // The owner's authority writes are claim transactions too (M2-2).
         #[cfg(unix)]
         {
@@ -128,6 +129,16 @@ impl Shared {
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }
+=======
+        // Same for the sync lease: a change is a claim transaction.
+        if method.starts_with("syncLease.") {
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let answer = self.with_core(|c| {
+                crate::sync_lease::call(c, method, params, &crate::sync_lease::System)
+            })?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+>>>>>>> origin/rust-rebuild
         }
         // Counts answers only: a refused or failed call was not served.
         let answer = self.with_core(|c| c.call(kith_api::Principal::Owner, method, params))?;
@@ -299,6 +310,14 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         Ok(core) => core.with_folders(paths),
         Err(e) => return failed(shared, e),
     };
+    let mut core = core;
+    // The relay connection of the last run is gone, so a lease row it left held must not be read as held.
+    if let Err(e) = crate::sync_lease::restart(&mut core, &crate::sync_lease::System) {
+        log::note(
+            &shared.logs,
+            &format!("daemon: could not end the sync lease of the last run: {e}"),
+        );
+    }
     let generation = core.generation();
     {
         // Checked under the lock `stop` takes the core with: a stop that came first leaves nothing held here.

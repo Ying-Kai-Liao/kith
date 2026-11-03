@@ -39,7 +39,7 @@ fn plain(e: &Error) -> String {
 impl Rig {
     fn new(auth: &Value) -> Rig {
         let (core_dir, m) = crate::tests::machine();
-        let core = crate::tests::open(&Layout::new(&m));
+        let core = crate::tests::open_all(&Layout::new(&m));
         load(core.conn(), auth);
         let (machine_dir, c) = machine();
         Rig {

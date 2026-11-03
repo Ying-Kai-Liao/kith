@@ -11,7 +11,7 @@ use super::{Config, Daemon, Reached};
 use crate::Error;
 use crate::holder_link::HolderConfig;
 use crate::layout::Layout;
-use crate::tests::{machine, open, paths};
+use crate::tests::{machine, open, open_all, paths};
 
 fn quiet() -> Config {
     Config {
@@ -860,4 +860,28 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
         .query_row("SELECT count(*) FROM memberships", [], |r| r.get(0))
         .expect("count");
     assert_eq!(rows, 1);
+}
+
+#[test]
+fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
+    let (_t, root) = machine();
+    let pp = paths(&root);
+    let layout = Layout::new(&root);
+    {
+        let mut core = open_all(&layout);
+        let clk = crate::sync_lease::System;
+        crate::sync_lease::link(&mut core, &clk).expect("link");
+        let mark = crate::sync_lease::mark(&mut core).expect("mark");
+        assert!(crate::sync_lease::pulled(&mut core, &clk, mark, 600_000).expect("pulled"));
+        assert!(crate::sync_lease::lease_held_for_non_owner(&mut core, &clk));
+    }
+    let daemon = serving(&pp, quiet());
+    match read(&pp, "syncLease.status", &json!({})) {
+        Reached::Answered(v) => {
+            assert_eq!(v["held"], false, "{v}");
+            assert_eq!(v["cloud"], "linked");
+        }
+        other => panic!("{other:?}"),
+    }
+    drop(daemon);
 }

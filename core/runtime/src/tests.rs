@@ -56,6 +56,14 @@ pub(crate) fn open(l: &Layout) -> crate::Core {
     }
 }
 
+/// A core on the real list, every lane's tables (`open` is the M0 step alone). For the lanes' own tests.
+pub(crate) fn open_all(l: &Layout) -> crate::Core {
+    match embedded_with(l, ALL_STEPS).expect("embedded") {
+        Embedded::Open(c) => *c,
+        Embedded::DaemonRunning { .. } => panic!("lock held"),
+    }
+}
+
 #[cfg(unix)]
 fn chmod(p: &Path, mode: u32) {
     use std::os::unix::fs::PermissionsExt as _;
