@@ -294,6 +294,11 @@ pub enum Stopped {
     OwnTurn(Claim),
     /// The claimer and its children were ended.
     Ended(Claim),
+    /// SIGKILL was sent but something of the tree is still in the process table after the wait: the claim is kept, so a
+    /// take-over is refused until it is really gone (Stop again).
+    StillEnding(Claim),
+    /// This platform cannot signal a process tree: nothing was done and the claim is kept.
+    CantStop(Claim),
 }
 
 /// Ends the live holder of `sid` (the owner's Stop for a session held by an old run): SIGTERM to the claimer and its
@@ -305,6 +310,9 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
     let Some(claim) = holder(state, sid) else { return Stopped::Nobody };
     if parent_of(claim.pid) == Some(std::process::id()) {
         return Stopped::OwnTurn(claim);
+    }
+    if cfg!(not(unix)) {
+        return Stopped::CantStop(claim);
     }
     // Descendants first, the claimer last (as the revoke `sweep` does): for a one-shot the claimer is kith-stub, which
     // holds the conversation's lock, and the lock must not be free while claude still runs.
@@ -325,6 +333,10 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
     let reaped = std::time::Instant::now() + STOP_REAP;
     while std::time::Instant::now() < reaped && victims.iter().any(|p| still_there(*p)) {
         std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // A process that outlived SIGKILL (stuck in the kernel) may still hold the stub's lock: the claim stays with it.
+    if victims.iter().any(|p| still_there(*p)) {
+        return Stopped::StillEnding(claim);
     }
     release(state, sid, claim.pid, claim.takeover);
     Stopped::Ended(claim)

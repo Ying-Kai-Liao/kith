@@ -1130,6 +1130,42 @@ async fn stopping_a_holder_writes_its_intent_first() {
 }
 
 #[tokio::test]
+async fn stopping_a_holder_that_ignores_term_ends_it_and_its_child_before_the_claim_goes() {
+    let r = Rig::new();
+    // outer sh -> claimer (ignores TERM) -> child (ignores TERM): the claimer is a one-shot's stub, the child its claude.
+    let mut sh = std::process::Command::new("sh")
+        .args(["-c", r#"sh -c 'trap "" TERM; sleep 300 & echo $!; wait' & echo $!; wait"#])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = std::io::BufReader::new(sh.stdout.take().unwrap());
+    let (mut a, mut b) = (String::new(), String::new());
+    std::io::BufRead::read_line(&mut lines, &mut a).unwrap();
+    std::io::BufRead::read_line(&mut lines, &mut b).unwrap();
+    // The two lines come in either order: the claimer is the one whose parent is the outer shell.
+    let (x, y): (u32, u32) = (a.trim().parse().unwrap(), b.trim().parse().unwrap());
+    let (claimer, kid) = if parent_pid(x) == sh.id() { (x, y) } else { (y, x) };
+    claim::take(&r.state(), "h2", Kind::Terminal, claimer, false).unwrap().unwrap();
+    assert!(matches!(claim::stop_holder(&r.state(), "h2", GRACE), claim::Stopped::Ended(_)));
+    // The claim goes only once they were gone: with the claim file removed, nothing of the tree is in the table.
+    assert!(claim::read(&claim::path(&r.state(), "h2", false)).is_none());
+    assert!(!alive(claimer) && !alive(kid), "the tree is gone (or a zombie) when the claim is");
+    sh.wait().unwrap();
+}
+
+/// Running and not a zombie, from one `ps` (no retry: the point is the state right now).
+fn alive(pid: u32) -> bool {
+    let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
+    let stat = String::from_utf8_lossy(&out.stdout);
+    !stat.trim().is_empty() && !stat.trim_start().starts_with('Z')
+}
+
+fn parent_pid(pid: u32) -> u32 {
+    let out = std::process::Command::new("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
+}
+
+#[tokio::test]
 async fn the_sweep_leaves_a_reused_pid_alone() {
     let r = Rig::new();
     let stranger = r.sleeper();

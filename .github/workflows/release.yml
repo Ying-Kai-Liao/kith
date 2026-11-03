@@ -75,9 +75,9 @@ jobs:
           smoke/kith-*/bin/kith --version
           smoke/kith-*/bin/kith serve install --help >/dev/null
           test -x smoke/kith-*/bin/kith-stub
-          # The packed stub must lock and launch: a trivial command through it, with a missing stub made an error.
+          # The packed stub must lock and launch a trivial command (KITH_REQUIRE_STUB is read by kernel/bin/kith, not by the stub).
           mkdir smoke/locks
-          KITH_REQUIRE_STUB=1 smoke/kith-*/bin/kith-stub --lock-dir "$PWD/smoke/locks" --key smoke -- true
+          smoke/kith-*/bin/kith-stub --lock-dir "$PWD/smoke/locks" --key smoke -- true
       - uses: actions/upload-artifact@v4
         with:
           name: kith-darwin-${{ matrix.arch }}

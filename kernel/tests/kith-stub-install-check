@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# kith-stub-install-check — an installed kith finds its kith-stub (the conversation lock's launcher), so a run is locked and
+# KITH_REQUIRE_STUB=1 does not refuse:
+#   - scripts/install.sh files the release under <machine>/cli/<version>/ and links only `kith` into ~/.local/bin; kernel/bin/kith
+#     resolves that link and finds the stub beside the real program;
+#   - `kith serve start` puts kith-stub beside kith-serve (install_helper), where a run started by the host with no KITH_BIN
+#     finds it.
+# A fake release (a kith that answers `memory hook --help`, a stub that notes its argv and runs what follows `--`), a fake
+# claude, a throwaway HOME.
+#
+#   kernel/tests/kith-stub-install-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$KERNEL/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-stub-install.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home KITH_INSTALL_YES=1 KITH_INSTALL_CLI_ONLY=1
+unset KITH_HOME HQ_HOME KITH_STATE HQ_STATE KITH_PREFIX KITH_VERSION KITH_INSTALL_DIR KITH_KEEP_VERSIONS KITH_AUTH KITH_KERNEL KITH_BIN \
+  KITH_STUB_BIN KITH_REQUIRE_STUB KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE KITH_VIA KITH_RESUME KITH_CLAUDE_ARGS CARGO_TARGET_DIR
+M=$HOME/.kith
+mkdir -p "$HOME/.local/bin" "$T/bin" "$T/work"
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+
+d=$T/rel/kith-0.1.0-darwin-arm64
+mkdir -p "$d/bin" "$d/share/kith/kernel/bin" "$d/share/kith/.claude-plugin"
+cat > "$d/bin/kith" <<'K'
+#!/bin/sh
+[ "$1 $2" = "memory hook" ] && { echo "phase"; exit 0; }
+echo "kith 0.1.0"
+K
+cat > "$d/bin/kith-stub" <<'S'
+#!/bin/sh
+echo "$@" >> "$STUB_NOTE"
+while [ "$1" != -- ]; do shift; done; shift
+exec "$@"
+S
+chmod 755 "$d/bin/kith" "$d/bin/kith-stub"
+echo 0.1.0 > "$d/share/kith/kernel/VERSION"
+cp "$ROOT/install.sh" "$d/share/kith/install.sh"
+tar -C "$T/rel" -czf "$T/rel/kith-0.1.0-darwin-arm64.tar.gz" kith-0.1.0-darwin-arm64
+KITH_INSTALL_TARBALL=$T/rel/kith-0.1.0-darwin-arm64.tar.gz sh "$ROOT/scripts/install.sh" >/dev/null 2>&1
+check "install.sh: the stub is in the version folder, only kith is linked into ~/.local/bin" \
+  '[ -x "$M/cli/0.1.0/bin/kith-stub" ] && [ -L "$HOME/.local/bin/kith" ] && [ ! -e "$HOME/.local/bin/kith-stub" ]'
+
+# a locked run from that install: kernel/bin/kith resolves the link, and REQUIRE_STUB would refuse if the stub was not found
+mkdir -p "$HOME/kith/agents/designer/role" "$M" "$T/claude"
+printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$HOME/kith/agents/designer/role/agent.md"
+printf '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.300 (Claude Code)"; exit 0; }\n[ "$1" = plugin ] && exit 0\necho ran >> "$STUB_RAN"\n' > "$T/bin/claude"
+chmod 755 "$T/bin/claude"
+export STUB_NOTE=$T/note STUB_RAN=$T/ran
+SID=66666666-6666-4666-8666-666666666666
+( cd "$T/work" && PATH="$HOME/.local/bin:$T/bin:$PATH" KITH_HOME=$HOME/kith KITH_STATE=$M KITH_MACHINE=$M CLAUDE_CONFIG_DIR=$T/claude \
+  KITH_REQUIRE_STUB=1 KITH_CLAUDE_ARGS="--session-id $SID" "$KERNEL/bin/kith" designer task ) > "$T/out" 2>&1
+check "a run from the install is locked: the stub got it, with the conversation's key" 'grep -q -- "--key $SID" "$T/note" && [ -s "$T/ran" ]'
+check "no 'no kith-stub' line, no refusal" '! grep -qi "kith-stub program\|cannot be locked" "$T/out"'
+
+# kith serve start: install_helper copies the stub beside the host, replaces it when it changed
+eval "$(sed -n '/^install_helper()/,/^}/p; /^install_stub()/p' "$KERNEL/bin/kith-serve")"
+BIN=$T/serve/bin/kith-serve
+install_stub "$d/bin/kith-stub" >/dev/null 2>&1
+check "kith serve: kith-stub lands beside kith-serve" '[ -x "$T/serve/bin/kith-stub" ] && cmp -s "$d/bin/kith-stub" "$T/serve/bin/kith-stub"'
+echo '#!/bin/sh' > "$T/new-stub"; chmod 755 "$T/new-stub"
+install_stub "$T/new-stub" >/dev/null 2>&1
+check "kith serve: a changed stub replaces it" 'cmp -s "$T/new-stub" "$T/serve/bin/kith-stub"'
+install_stub "$T/none" >/dev/null 2>&1
+check "kith serve: no built stub leaves the old one" 'cmp -s "$T/new-stub" "$T/serve/bin/kith-stub"'
+
+[[ $fail == 0 ]] && echo "all checks passed"
+exit $fail

@@ -1394,7 +1394,13 @@ if [[ -n $csid ]]; then
   stub_bin=${KITH_STUB_BIN:-}
   if [[ -z $stub_bin ]]; then
     kbin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || kbin=""
-    [[ -z $kbin || ! -x $(dirname "$kbin")/kith-stub ]] || stub_bin=$(dirname "$kbin")/kith-stub
+    # Beside the program where it really lives first: install.sh links only `kith` into ~/.local/bin, so the stub sits next to
+    # the link's target (cli/<version>/bin); then beside the path as given.
+    if [[ -n $kbin ]]; then
+      for d in "$(python3 -I -c 'import os, sys; print(os.path.dirname(os.path.realpath(sys.argv[1])))' "$kbin" 2>/dev/null)" "$(dirname "$kbin")"; do
+        [[ -n $d && -x $d/kith-stub ]] && { stub_bin=$d/kith-stub; break; }
+      done
+    fi
   fi
   # The stub takes keys of a-z 0-9 . _ - only (exit 70 otherwise, which after exec could not be told from a lock error):
   # an id outside that starts unlocked with the same one line as a missing stub.
