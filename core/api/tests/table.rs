@@ -394,6 +394,13 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people invite-remove ABC234", "people.removeInvite"),
         ("people preset pro --mode acceptEdits", "people.preset"),
         ("people preset-remove pro", "people.removePreset"),
+        ("people person add ann --name Ann --owner", "people.addPerson"),
+        ("people person rename ann anna", "people.renamePerson"),
+        ("people person remove ann --unused", "people.removePerson"),
+        ("people suspend ann", "people.suspend"),
+        ("people undo ann", "people.undo"),
+        ("people person clear-temp ann", "people.clearTemp"),
+        ("people retired ann", "people.retired"),
     ] {
         let argv: Vec<&str> = line.split(' ').collect();
         let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
