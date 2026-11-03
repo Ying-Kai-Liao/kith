@@ -84,6 +84,8 @@ const LEN: usize = {
     n
 };
 
+// The table outgrew clippy's 16 KiB for a local array; it is built at compile time, never on a stack.
+#[allow(clippy::large_stack_arrays)]
 const fn flatten() -> [Method; LEN] {
     // Any row will do to fill the array; every slot is overwritten below.
     let mut out = [PARTS[0][0]; LEN];
