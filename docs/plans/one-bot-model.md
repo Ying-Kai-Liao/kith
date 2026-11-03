@@ -57,6 +57,12 @@ bots moves no user data. The work is giving kith agents what host bots could do,
 | Host memory has features the app shows (thread and row summaries, shared project memory) | Parity reached (C4): summaries, delete a file, forget a fact work on kith memory; pin, archive, clear, add entry, the per-bot shared switch and promotions are deliberately not carried over (shared project memory is the kith user layer) |
 | Settings edited in the app become package commits, so they apply on every Mac | Per-Mac choices go in kith settings, like permission mode already does (B1) |
 
+- **The core runtime design is agreed** (Kai, 2026-11-03: "The core runtime design is agreed. It changes the order of the
+  plan you're following."). [runtime-design.md](runtime-design.md): one daemon with the core inside and a holder below;
+  kith owns terminals but no session depends on one; the core holds conversations; Windows matters now. A4-A7 are
+  replaced by M0-M5. The pure rules already in the crate (paths, engines, launch, delegation limits, claim resolve)
+  become functions inside the core module, not separate switched verbs.
+
 ## Tracks
 
 Three tracks. A and B can run in parallel; C needs pieces of both. Each step is one PR (or a few), with a CLI command
@@ -83,16 +89,29 @@ and `--json` first and the app calling it after.
   `harness: gemini` (or any listed engine) runs in the app and the terminal.
 - [x] **A3. The launch path.** `kith <agent> --launch-json` (prompt assembly, settings, MCP config, accounts) in Rust.
   Target: under 50 ms.
-- [ ] **A4. Writer claims and delegation limits.** One implementation of the thread writer claim (`kith-sessions` vs
-  `serve/host/src/terminal/claim.rs`) and the hop caps (3 copies: `kernel/bin/kith-ask`, `api/delegations.rs`,
-  `chat/team/requests.rs`). Model-checked properties exist (`thread-writers` skill); keep them passing.
-- [ ] **A5. One secret store** in the core: kith-auth's model plus everything in the host vault (connector logins,
-  Composio, 1Password, voice and router keys); the Jev key stops being read from both (`chat/router.rs` vs
-  `rich_card/jev.rs`). Gap map #2. The `secret-cards`, `revoke-access` and `invitee-access` checks must keep passing.
-- [ ] **A6. One scheduler** in the core: `kith-sched`'s jobs and the host's routines as one thing, `kith schedule
-  ... --json`. Decide the cron dialect (kith-sched: local time, `@daily`; routines: IANA timezone, intervals, once,
-  webhook and event triggers).
-- [ ] **A7. Onward, as they settle:** packages, agent settings, people and invites.
+- [ ] **A4. Writer claims and delegation limits.** **Stopped 2026-11-03** (replaced by M0-M5 below). Done: delegation
+  limits in the crate (A4-1, #650) and the thread claim resolve logic in the crate (A4-2, #652), neither switched. Per
+  Kai, `threads` is not switched and the host is not moved onto file-based claim verbs, because claims move into
+  `core.db` in M3.
+- [ ] **M0. Daemon front for the core.** Holder skeleton, platform interface, method table, principals, embedded mode,
+  fencing; a Windows CI job from day one. Gets: the switched verbs through one API, and a restart that keeps a test
+  process. ([runtime-design.md](runtime-design.md) section 7)
+- [ ] **M1. Holder for terminals, opt-in.** `kith <agent> --held`, still on today's claim files (no `core.db` claims
+  yet). Gets: terminals that survive closing the window, attach from anywhere, detach and come back. Test whether a
+  launchd-started holder reaches the external disk here.
+- [ ] **M2. Authority into the core** (absorbs A5, one secret store). People, grants, run tokens on the run socket
+  (ancestry kept), cards, revoke and suspended rows, the sync lease, doors and their sweep, the resource gate; the
+  secret store as in A5 (kith-auth's model plus the host vault; the Jev key read once); `auth.json` replaced by a
+  tombstone that makes old readers fail closed. Gets: one place that decides. `revoke-access`, `invitee-access`,
+  `run-tokens` and `secret-cards` re-run against it.
+- [ ] **M3. Conversations.** Claims and turns in `core.db`, transcripts held, wake queue and waiters, delegation and
+  children, account choice and failover, per-turn claims on warm ACP processes; the host's turn runner and terminal
+  claims deleted. Gets: the core holds every conversation, any account resumes. `thread-writers` re-runs.
+- [ ] **M4. Schedules** (was A6). One dialect (cron dialect decision Q1 in core-design.md), routines exported: `kith-sched`
+  and the host's routines as one scheduler, `kith schedule ... --json`.
+- [ ] **M5. The rest of the kernel in Rust** (was A7: packages, agent settings, people and invites, and the Python
+  programs the launch still asks). Python removed module by module; per-verb `KITH_CORE=python` rollback kept until
+  here. Gets: no Python in the run path; Windows owner use once the hook commands are Rust.
 
 ### B. CLI surface (Python for now, ported later)
 
@@ -106,7 +125,7 @@ and `--json` first and the app calling it after.
   an agent. Includes the Marketplace layout from 2026-11-03: a **Bots** section for shared kith agents (GitHub topic
   `kith-agent`, needs `kith market --json` and a non-interactive `kith install` preview), and today's "Agents" renamed
   **Engines**.
-- B3, B4 (secrets, scheduler): moved to the core as A5 and A6, built once there instead of merged in Python first.
+- B3, B4 (secrets, scheduler): moved to the core as A5 and A6 (now M2 and M4), built once there instead of merged in Python first.
 - [x] **B5. Accounts and people.** `kith account add/remove` get app methods; app and bot invites get CLI commands
   (gap map #7, #8).
 - [x] **B6. `--json` everywhere a client needs it** (list in the gap map), and the footguns: bare `kith backup`,
@@ -126,9 +145,9 @@ and `--json` first and the app calling it after.
 ## Order
 
 ```
-A0 ─► A0b ─► A1 ─► A2 ─► A3 ─► A4 ─► A5 ─► A6 ─► A7
+A0 ─► A0b ─► A1 ─► A2 ─► A3 ─► A4 (stopped) ─► M0 ─► M1 ─► M2 ─► M3 ─► M4 ─► M5
 B1 ─► B2                  (B5, B6 any time)
-C1 any time;  C2 after B1;  C3 after A2+B1+B2;  C4 before C5;  C5 last (after A5, A6)
+C1 any time;  C2 after B1;  C3 after A2+B1+B2;  C4 before C5;  C5 last (after M2, M4)
 ```
 
 First up: **A0** (core design, then A0b and A1) and **B2** (connector and skill grants in the CLI), in parallel.
@@ -213,3 +232,6 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: A3 switched: `launch` is listed in `kernel/lib/core-switched.txt` (module `launch` in `kith kernel version`), and `kith AGENT --launch-json [flags]` goes to `kith kernel launch AGENT --launch-json ... --kernel DIR` before anything is asked of kith-auth (so a once-grant is taken by one side only). The folders come from what the caller gave, not from the router's own export, and the program is found as for `paths` and `engines`. No program, an older one without `launch`, `KITH_CORE=python` or removing the line: the script runs, unchanged. Interactive `kith AGENT`, `--print`, `--resume` and an unknown agent stay in the script. New `kernel/tests/kith-launch-once-race-check` (two launches at once on one helper once-grant: exactly one takes it, auth.json stays valid, both paths; run in CI after the difftest). Full difftest 371/371 with the switch on (after merging #650; 302/302 before) and kith-difftest-check 34/34. The launch still asks `kith-pkg resolve`, `kith-cost`, `project-id` and `kith-auth mcp-config` (A5) as programs, so the 50 ms target is not met yet: measured on a debug build, `--launch-json` takes ~275 ms through the Rust verb against ~810 ms in Python (a bare agent, on a loaded Mac); what is left is those Python programs' start-up, and the target waits until they move (`kith-pkg`, `kith-cost`, `project-id`: A7; `kith-auth mcp-config`: A5). New `kernel/tests/kith-auth-mixed-race-check` (10 rounds of 4 Rust launches taking one once-grant while 8 Python `kith-auth` writes run on the same auth.json: valid JSON, no write lost, the grant used exactly once; it fails 9 of 10 rounds with the lock removed from `secrets`), run in CI next to the once race check.
 - 2026-11-03: A4-1 delegation limits (this PR): module `delegation` in `kith-kernel` holds the hop caps (8 on one Mac, 2 across), the REFUSED exit 4, the chain cost cap (default US$5, `delegation.chain_cost_cap_usd`), how a record is read (old registrations read as a root ask at hop 0, cost unknown; damaged ones are skipped), the refusal decision with its stderr words, and `parked`; `kith kernel delegation limits|cap|record ID|check [--id ID] [--crossing]|parked ID` (read/decide only, the check takes `live/ask/.lock` as `open_record` does; a bare record read takes none, as Python). The host's `HOP_MAX`, `CROSS_MAX`, `MAX_REQUEST_HOPS` and `parked_in` now come from the crate (data only; the host still writes nothing new). 69 difftest cases (`delegation-*`; OLD runs `kernel/tests/difftest/delegation-old.py`, which calls kith-ask's own `open_record`, `read_reg` and `cap_cmd`) are the same with no intended differences: root, hop 6 to 10, cross hops 1 to 4, cost under/at/over the cap, cap unset/number/none/broken file, old, damaged and missing records, a chain handed over in `KITH_ASK_*` with bad numbers. Not switched: `kith-ask` still decides and writes; no line in `core-switched.txt`. Left for A4: the thread writer claim (`threads`). A4 stays open.
 - 2026-11-03: A4-2 threads (this PR): module `threads` in `kith-kernel` ports the claim half of `kernel/bin/kith-sessions` (`resolve`, `claim`, `terminal`, `proc`, `sweep`, `record`, the registry reading `resolve` needs) and the file protocol of `serve/host/src/terminal/{claim,registry,intent}.rs` (`live/terminal/<sid>.{json,claim,takeover.claim}` and their flock lock files, `sessions/intent|decisions`), byte-compatible with the Python writer, as `kith kernel threads VERB` (module `threads` in `kith kernel version`; plus `release PID` and `holder SID` for tests). The only `unsafe` in the crate is `threads/os.rs` (kill(2), `libc`; the crate lint went from forbid to deny). 55 difftest cases (`threads-*`; OLD runs `kernel/tests/difftest/threads-old.py`, kith-sessions itself): free thread, claimed by a live oneshot/app/bot/unknown-kind writer, stale claim (dead pid, reused pid), old pid-only file, damaged files, two sessions, take-over in progress, intent and decision ended by a taker, prune of stale neighbours, proc claim, resolve (free, held, stale, take-over, unknown thread, folder gone, registry agent/cwd, other login, CLAUDE_CONFIG_DIR) and record (terminal, one-shots, not listed, worktree, compact) are the same, two intended (kith-sessions dies with a traceback on a claim whose pid is no number; it resolves the thread `*` by glob). `kernel/tests/kith-threads-race` runs `kith-sessions` and the Rust verb against one thread at once (fresh, dead, reused-pid, damaged and live claims, three rounds with hand-over): never more than one winner; with the lock taken out of the Rust side it fails within ten iterations, so it can see the bug; CI runs it. thread-writers (TLC) passes: every row as expected. The differences between `kith-sessions`, `claim.rs` and the crate are in the PR text. Not switched: no line in `core-switched.txt`, `kernel/bin/kith` untouched, the host still uses `claim.rs`. A4 stays open: the host's own paths (`stop_holder`, the revoke `sweep` with `keep` and its intents, `holder`'s App rule, `registry::read_all`/`liveness`) and the wrapper (`kith-sessions run|pick|latest`) are not in the crate, so there are still two implementations until the host moves onto it with the verbs.
+- 2026-11-03: runtime design agreed (Kai); copied to `docs/plans/runtime-design.md`. A4 stopped (A4-1 and A4-2 stay as
+  written; `threads` not switched, host not moved onto claim verbs: claims go into `core.db` in M3). A5, A6, A7 replaced
+  by M0-M5 (M2 absorbs A5, M4 is A6, M5 is A7); `core-design.md` marked superseded from A4 onward. Docs only.
