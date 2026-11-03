@@ -235,6 +235,8 @@ impl Core {
             }
         };
         set(&mut env, "VIA", ad.platform());
+        // The run's own tools come from the kernel this entry belongs to, not one the host's environment names.
+        set(&mut env, "BIN", &self.paths.hq_bin.to_string_lossy());
         let (private, chat) = self.with(|i| {
             let th = i.st.threads.get(key);
             (
@@ -378,6 +380,11 @@ impl Core {
         } else {
             ""
         };
+        // The CLI may have been removed or replaced by one that is too old since the channels started.
+        if let Some(why) = crate::agent::hq::refusal() {
+            self.say(ad, conv, agent, &format!("⚠️ {agent} didn't start: {why}"), None).await;
+            return Ok(Attempt::NotStarted);
+        }
         let mut cmd = tokio::process::Command::new(&self.paths.hq_bin);
         cmd.args(run_args(agent, backup, &format!("{preface}{task}{}", ad.footer())))
             .env_clear()
