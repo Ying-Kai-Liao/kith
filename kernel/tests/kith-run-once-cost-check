@@ -10,7 +10,11 @@ set -uo pipefail
 
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 BIN=$(KITH_DEV_BIN=1 KITH_CORE=rust python3 "$KERNEL/lib/kith_paths.py" --bin)
-if [ -z "$BIN" ]; then echo "skip: no Rust kith program (build serve/host or set KITH_BIN)"; exit 0; fi
+if [ -z "$BIN" ]; then
+  # Under CI a missing binary means the build step moved: fail, never pass by skipping.
+  if [ -n "${CI:-}" ]; then echo "FAIL no Rust kith program under CI (build serve/host or set KITH_BIN)"; exit 1; fi
+  echo "skip: no Rust kith program (build serve/host or set KITH_BIN)"; exit 0
+fi
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-run-once-cost-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
