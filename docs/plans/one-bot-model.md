@@ -105,8 +105,9 @@ and `--json` first and the app calling it after.
   - M0d: `kith-holder` from herdr b63ecbd. Check: spawn/kill/reap, fencing + secret, restart keeps a test process.
     Writer lock ([runtime-design.md](runtime-design.md) section 4): one lock file per conversation in the lock
     folder (internal disk next to `core.db`, 0700), never deleted, separate from today's short-held
-    `<sid>.claim.lock`; flock on Unix, LockFileEx on the same path on Windows. The holder takes it for every engine
-    it spawns, before exec, held by the resident stub with CLOEXEC so the engine's children never inherit it. Check:
+    `<sid>.claim.lock`; flock on Unix, LockFileEx on the same path on Windows. For every engine the holder spawns,
+    kith's start stub takes it (fd CLOEXEC, so the engine's children never inherit it) before the engine starts,
+    starts the engine as its child (never exec) and holds the lock to the engine's exit. Check:
     a second taker gets busy; the holder keeps it across a core kill. #663 merged without it: #669 or a follow-up
     takes it.
   - M0e: run socket and token table, `host.sock` not switched. Check: `run-tokens` re-run.

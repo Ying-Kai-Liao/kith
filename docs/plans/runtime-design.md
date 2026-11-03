@@ -108,8 +108,9 @@ live turn:
 - **The writer lock** (added 2026-11-03 after the final review; TLC in designs/2026-11-03-writer-lock/): each
   conversation has one OS lock on the machine where its engine runs (flock / LockFileEx; released when the holding
   process dies; the lock file is never deleted, since a lock on an unlinked inode is a second writer). Whoever runs
-  the engine holds it for as long as the engine writes: the holder for a terminal engine it spawns (taken before
-  exec, kept to exit, not dropped when its core dies), the holder per turn for a warm headless process (taken at
+  the engine holds it for as long as the engine writes: for a terminal engine the holder spawns, its start stub
+  (taken before the engine starts, kept to the engine's exit, not dropped when the core dies; start step 3), the
+  holder per turn for a warm headless process (taken at
   `claimed -> running`, released at turn end), and a `--direct` run for its own life. A holder that can't take it
   answers `busy`; the core ends that claim and requeues the turn. Why: without it, a `--direct` run that found no
   core writes a mark a later core never sees, and a startup scan doesn't help (the run's check and its write are two
@@ -158,9 +159,11 @@ live turn:
    claim (conversation, claim id, core generation), keep the turn queued. One transaction.
 2. Then send `spawn(conv, claim, gen)` to the holder (record first, then start).
 3. The holder spawns only for the newest generation it accepted; the first thing it runs is kith's start stub, which
-   redeems the run token: a transaction that re-checks may and the lease again and moves the claim `claimed ->
-   running`; only then the stub execs the engine. A revoke, stop or narrowing moves the same row to `ended` and asks
-   the holder to kill.
+   takes the conversation's writer lock (fd CLOEXEC; busy = the claim ends and the turn parks, see the writer lock),
+   then redeems the run token: a transaction that re-checks may and the lease again and moves the claim `claimed ->
+   running`. Only then the stub starts the engine as its child (never exec) and stays as its parent, holding the
+   lock, until the engine exits. A revoke, stop or narrowing moves the same row to `ended` and asks the holder to
+   kill the whole group, stub included.
 4. Exits stay in the holder until a core acks them; the ack releases the claim and marks the turn done or requeues
    it in one transaction.
 5. A new core (crash, update) takes the core lock, bumps the generation in core.db, says hello to the holder with
