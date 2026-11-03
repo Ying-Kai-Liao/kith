@@ -727,6 +727,10 @@ fn a_suspension_cuts_off_the_person_and_their_bots_and_undo_gives_back_exactly_w
                 for (k, v) in &during {
                     let mut it = k.split(' ');
                     let (kind, who_id) = (it.next().unwrap(), it.next().unwrap_or(""));
+                    // `cut_off` takes a current id (its callers canonicalise first, as kith-auth's do): an old id is no key
+                    if kind == "cut_off" && auth["people"].get(who_id).is_none() {
+                        continue;
+                    }
                     if under(&auth, who_id, target) && !who_id.is_empty() {
                         // reaches nothing: not allowed, not resolved as allowed, cut off
                         let denied = match kind {
