@@ -40,8 +40,9 @@ fn line(reader: &mut impl BufRead, want: &str) -> String {
     loop {
         let mut s = String::new();
         assert!(reader.read_line(&mut s).unwrap() > 0, "child ended early");
-        if let Some(rest) = s.trim().strip_prefix(want) {
-            return rest.trim().to_string();
+        // The test harness prints "test role ... " before our first line, so match anywhere in the line.
+        if let Some(at) = s.find(want) {
+            return s[at + want.len()..].trim().to_string();
         }
     }
 }
@@ -103,9 +104,11 @@ fn second_take_in_the_same_process_is_busy() {
     });
     assert!(t.join().unwrap(), "a second thread must see Busy too");
     // A different key is independent.
-    let _b = held(take(&dir, "s2").unwrap());
+    let b = held(take(&dir, "s2").unwrap());
     drop(a);
-    let _again = held(take(&dir, "s1").unwrap());
+    let again = held(take(&dir, "s1").unwrap());
+    // Windows cannot delete files that are still open.
+    drop((b, again));
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
