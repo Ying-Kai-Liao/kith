@@ -37,7 +37,7 @@ label=dev.kith.m1test.holder
 plist="$HOME/Library/LaunchAgents/$label.plist"
 old_label=dev.kith.holder-survive-test
 logs=$(mktemp -d "${TMPDIR:-/tmp}/khs-logs.XXXXXX") # the job's own output: on the boot disk, so it is readable whatever the disk says
-data=$(mktemp -d "$root/.m1test.XXXXXX")            # the holder's folder: beside the checkout
+data=$(mktemp -d "${M1_DATA_ROOT:-$root}/.m1test.XXXXXX") # the holder's folder: beside the checkout (M1_DATA_ROOT=/some/internal/dir for the control run)
 failed=0
 
 cleanup() {
@@ -60,6 +60,8 @@ wait_for() { # wait_for SECONDS COMMAND...: true when COMMAND succeeds within th
 }
 holder_pid() { pgrep -f "kith-holder supervise --dir $1/holder" | head -1; }
 core_pid() { cat "$1/core.pid" 2>/dev/null; }
+# differs OLD NEW-COMMAND...: true when the command's output is non-empty and not OLD (re-run on every try by wait_for)
+differs() { old=$1; shift; new=$("$@"); [ -n "$new" ] && [ "$new" != "$old" ]; }
 alive() { [ -n "${1:-}" ] && kill -0 "$1" 2>/dev/null; }
 
 # ---- Part 1: the detached holder outlives the job that started it ----------------------------------------------------
@@ -117,9 +119,11 @@ launchctl bootstrap "gui/$uid" "$plist" || { bad "launchctl bootstrap failed"; e
 if wait_for 20 test -S "$data/holder/holder.sock" && wait_for 5 test -s "$data/core.starts"; then
   ok "DISK: works: the launchd-started holder made its folder, socket and log under $data, and its core read and wrote it"
 else
-  echo "DISK: blocked or failed: the job did not come up on $data. Its stderr:"
+  echo "DISK: blocked or failed: the job did not come up on $data within 20 s. Its stderr:"
   sed 's/^/        /' "$logs/job.err" 2>/dev/null | tail -8
-  echo "      If that says 'Operation not permitted' (EPERM), macOS blocks the binary $exe from this volume (TCC, 'Files and"
+  echo "      Empty stderr and a holder process with 0 s of CPU and no open files means the job is BLOCKED in its first open of the"
+  echo "      folder, with no error (seen on macOS 26: the access waits on a consent no one can give a background job)."
+  echo "      'Operation not permitted' (EPERM) means the same refusal, answered. Either way macOS blocks $exe from this volume (TCC, 'Files and"
   echo "      Folders > Removable Volumes' / 'Full Disk Access'). The grant that fixes it: System Settings > Privacy & Security >"
   echo "      Full Disk Access, add THIS binary (grants are per binary; a rebuilt or moved binary needs it again), or run the job"
   echo "      behind a launcher that already has it (the 'launcher' setting of the service, hq-uv today). Not changed here."
@@ -132,7 +136,7 @@ h1=$(holder_pid "$data"); c1=$(core_pid "$data")
 
 # b. kill the core: the holder keeps its pid and the core comes back
 kill -9 "$c1" 2>/dev/null
-if wait_for 20 test "$(core_pid "$data")" != "$c1" && alive "$(core_pid "$data")" && [ "$(holder_pid "$data")" = "$h1" ]; then
+if wait_for 20 differs "$c1" core_pid "$data" && alive "$(core_pid "$data")" && [ "$(holder_pid "$data")" = "$h1" ]; then
   ok "killed the core ($c1): the holder kept pid $h1 and started the core again as $(core_pid "$data")"
 else
   bad "after killing the core: holder '$(holder_pid "$data")' (was $h1), core '$(core_pid "$data")' (was $c1)"
@@ -141,7 +145,7 @@ fi
 # c. kill the holder: launchd starts the job again; the old core must not linger
 c2=$(core_pid "$data")
 kill -9 "$h1" 2>/dev/null
-if wait_for 30 test "$(holder_pid "$data")" != "$h1" && wait_for 10 test "$(core_pid "$data")" != "$c2"; then
+if wait_for 30 differs "$h1" holder_pid "$data" && wait_for 10 differs "$c2" core_pid "$data"; then
   h2=$(holder_pid "$data")
   sleep 1
   if alive "$c2"; then bad "the old core $c2 outlived its killed holder"; else ok "killed the holder ($h1): launchd started the job again (holder $h2); the old core $c2 did not outlive it"; fi
@@ -151,7 +155,7 @@ fi
 
 # d. a folder on a disk that is not mounted
 launchctl bootout "gui/$uid/$label" 2>/dev/null
-wait_for 10 test -z "$(holder_pid "$data")"
+wait_for 10 sh -c "! pgrep -f \"kith-holder supervise --dir $data/holder\" >/dev/null"
 gone="/Volumes/m1test-not-mounted-$$"
 write_plist "$gone"
 : > "$logs/job.err"
@@ -165,7 +169,7 @@ fi
 # launchd keeps retrying (KeepAlive): a job that comes up once the folder exists is what a login before the disk mounts needs.
 mkdir -p "$gone" 2>/dev/null && { printf '%s' "$secret" > "$gone/secret"; chmod 600 "$gone/secret"; echo probe > "$gone/probe"; }
 if [ -d "$gone" ]; then
-  if wait_for 30 test -n "$(holder_pid "$gone")"; then ok "the job came up once the folder existed (launchd retried)"; else bad "the job did not come up after the folder appeared"; fi
+  if wait_for 30 differs "" holder_pid "$gone"; then ok "the job came up once the folder existed (launchd retried)"; else bad "the job did not come up after the folder appeared"; fi
   launchctl bootout "gui/$uid/$label" 2>/dev/null
   rm -rf "$gone"
 else
