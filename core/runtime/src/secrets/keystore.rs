@@ -2,7 +2,8 @@
 //!
 //! The backends here drive the OS's own command line tool, and the key goes to it on its stdin, never on an argv or in
 //! an environment (a process list shows both). The signed daemon reads the key through Security.framework instead
-//! (M2-6); this macOS backend is the development one and keeps the same item name, so the two read each other's key.
+//! (M2-6); this macOS backend is the development one. It shares the item name with the signed daemon for now (M2-6 gives
+//! the dev backend its own name or re-creates the item, since a key item is bound to the app that made it).
 //! There is no file fallback and no in-memory backend a running binary can select: [`MemoryKeyStore`] exists for tests.
 
 use std::io::{Read as _, Write as _};
@@ -21,6 +22,10 @@ const SERVICE: &str = "dev.kith.core.secrets";
 const ACCOUNT: &str = "master-key";
 
 /// A locked Keychain can sit on an access prompt nobody sees; a call that long is a refusal, not a hang.
+/// Absolute program paths only: a PATH lookup would let a planted binary read or forge the master key.
+const SECURITY: &str = "/usr/bin/security";
+const SECRET_TOOL: &str = "/usr/bin/secret-tool";
+
 const WAIT: Duration = Duration::from_secs(30);
 
 /// The OS store holding the master key. Both calls are all-or-nothing: `get` answers `Ok(None)` only when the store
@@ -28,8 +33,9 @@ const WAIT: Duration = Duration::from_secs(30);
 /// caller can never mistake "could not read" for "no key".
 pub(crate) trait KeyStore: Send {
     fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>>;
-    /// Writes (or replaces) the key. The caller reads it back before trusting it.
-    fn set(&self, key: &[u8]) -> Result<()>;
+    /// Writes the key. macOS adds only (an existing item is kept); Linux's `secret-tool store` always replaces, so two
+    /// cores minting at once can still race there. The caller reads back and adopts whatever key the store holds.
+    fn add(&self, key: &[u8]) -> Result<()>;
 }
 
 /// The store of this operating system, or a refusal where there is none. Never an in-memory or file fallback.
@@ -77,7 +83,7 @@ impl SecurityCli {
     #[cfg(test)]
     pub(crate) fn remove(&self) {
         let _ = run(
-            "/usr/bin/security",
+            SECURITY,
             &[
                 "delete-generic-password",
                 "-s",
@@ -93,7 +99,7 @@ impl SecurityCli {
 impl KeyStore for SecurityCli {
     fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>> {
         let out = run(
-            "/usr/bin/security",
+            SECURITY,
             &[
                 "find-generic-password",
                 "-s",
@@ -115,17 +121,18 @@ impl KeyStore for SecurityCli {
         }
     }
 
-    fn set(&self, key: &[u8]) -> Result<()> {
+    fn add(&self, key: &[u8]) -> Result<()> {
         // The stored text is the key as hex; `-X` takes the bytes of that text as hex again.
         let text = hex_encode(key);
         let line = Zeroizing::new(format!(
-            "add-generic-password -U -s {} -a {} -X {}\n",
+            "add-generic-password -s {} -a {} -X {}\n",
             self.service,
             self.account,
             hex_encode(text.as_bytes()).as_str()
         ));
+        // No `-U`: an item that already exists is kept, so the loser of a mint race does not overwrite the winner's key.
         // `-i` exits 0 whatever happened; the caller's read-back is the proof.
-        run("/usr/bin/security", &["-i"], Some(line.as_bytes()))?;
+        run(SECURITY, &["-i"], Some(line.as_bytes()))?;
         Ok(())
     }
 }
@@ -147,7 +154,7 @@ impl SecretTool {
     #[cfg(test)]
     pub(crate) fn remove(&self) {
         let _ = run(
-            "secret-tool",
+            SECRET_TOOL,
             &["clear", "service", &self.service, "account", &self.account],
             None,
         );
@@ -157,7 +164,7 @@ impl SecretTool {
 impl KeyStore for SecretTool {
     fn get(&self) -> Result<Option<Zeroizing<Vec<u8>>>> {
         let out = run(
-            "secret-tool",
+            SECRET_TOOL,
             &["lookup", "service", &self.service, "account", &self.account],
             None,
         )?;
@@ -173,10 +180,10 @@ impl KeyStore for SecretTool {
         }
     }
 
-    fn set(&self, key: &[u8]) -> Result<()> {
+    fn add(&self, key: &[u8]) -> Result<()> {
         let text = hex_encode(key);
         let out = run(
-            "secret-tool",
+            SECRET_TOOL,
             &[
                 "store",
                 "--label=Kith secrets master key",
@@ -233,7 +240,7 @@ impl KeyStore for MemoryKeyStore {
         Ok(self.slot.lock().expect("slot").clone().map(Zeroizing::new))
     }
 
-    fn set(&self, key: &[u8]) -> Result<()> {
+    fn add(&self, key: &[u8]) -> Result<()> {
         *self.slot.lock().expect("slot") = Some(key.to_vec());
         Ok(())
     }
@@ -320,37 +327,52 @@ fn run(program: &str, args: &[&str], stdin: Option<&[u8]>) -> Result<Ran> {
     }
     let mut out_pipe = child.stdout.take();
     let mut err_pipe = child.stderr.take();
-    let out_reader = std::thread::spawn(move || {
+    // The readers hand their bytes over a channel, so a pipe a grandchild keeps open (libsecret's D-Bus autolaunch) can
+    // not hold this call past the deadline.
+    let (out_tx, out_rx) = std::sync::mpsc::channel();
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
         let mut v = Zeroizing::new(Vec::new());
         if let Some(p) = out_pipe.as_mut() {
             let _ = p.read_to_end(&mut v);
         }
-        v
+        let _ = out_tx.send(v);
     });
-    let err_reader = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut v = Vec::new();
         if let Some(p) = err_pipe.as_mut() {
             let _ = p.read_to_end(&mut v);
         }
-        v
+        let _ = err_tx.send(v);
     });
     let deadline = Instant::now() + WAIT;
+    let too_slow = || {
+        Error::Io(format!(
+            "kith-core: {program} did not answer in {}s (a locked key store waiting for an unlock?)",
+            WAIT.as_secs()
+        ))
+    };
     let status = loop {
         match child.try_wait()? {
             Some(s) => break s,
             None if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(Error::Io(format!(
-                    "kith-core: {program} did not answer in {}s (a locked key store waiting for an unlock?)",
-                    WAIT.as_secs()
-                )));
+                return Err(too_slow());
             }
             None => std::thread::sleep(Duration::from_millis(20)),
         }
     };
-    let stdout = out_reader.join().unwrap_or_default();
-    let stderr = String::from_utf8_lossy(&err_reader.join().unwrap_or_default()).into_owned();
+    let left = |d: Instant| d.saturating_duration_since(Instant::now());
+    let stdout = out_rx
+        .recv_timeout(left(deadline))
+        .map_err(|_| too_slow())?;
+    let stderr = String::from_utf8_lossy(
+        &err_rx
+            .recv_timeout(left(deadline))
+            .map_err(|_| too_slow())?,
+    )
+    .into_owned();
     Ok(Ran {
         code: status.code(),
         stdout,

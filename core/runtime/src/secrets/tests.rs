@@ -181,7 +181,7 @@ fn a_key_from_another_machine_refuses_clearly() {
 fn a_malformed_stored_key_refuses() {
     let c = db();
     let store = MemoryKeyStore::default();
-    store.set(&[1, 2, 3]).expect("set");
+    store.add(&[1, 2, 3]).expect("set");
     let err = envelope(&store).put(&c, "a", b"x").expect_err("short key");
     assert!(err.to_string().contains("wrong length"), "{err}");
     assert_eq!(store.peek(), Some(vec![1, 2, 3]), "left untouched");
@@ -228,10 +228,10 @@ fn os_tests_enabled() -> bool {
 fn exercise(store: &dyn KeyStore) {
     assert!(store.get().expect("get empty").is_none());
     let key: Vec<u8> = (0u8..32).collect();
-    store.set(&key).expect("set");
+    store.add(&key).expect("set");
     assert_eq!(&store.get().expect("get").expect("there")[..], &key[..]);
     let other: Vec<u8> = (32u8..64).collect();
-    store.set(&other).expect("replace");
+    store.add(&other).expect("replace");
     assert_eq!(&store.get().expect("get").expect("there")[..], &other[..]);
 }
 

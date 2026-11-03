@@ -10,6 +10,9 @@
 //! - Records sealed under a different key than the one in the store (a database moved from another machine) refuse
 //!   with that said, and a put never mixes two keys in one table.
 //!
+//! Record names are stored in plaintext (they are the associated data and `list` needs them); only values are secret.
+//! Zeroizing is best effort: stack copies and formatted buffers are not tracked.
+//!
 //! Nothing calls this yet: the host vault and kith-auth's Keychain writes move onto it at M2-7 / M2-18, and the
 //! signed daemon reads the key through Security.framework at M2-6.
 
@@ -178,16 +181,22 @@ impl Envelope {
                     let mut fresh = Zeroizing::new([0u8; KEY_LEN]);
                     getrandom::fill(fresh.as_mut_slice())
                         .map_err(|_| Error::Io("kith-core: random bytes unavailable".into()))?;
-                    self.store.set(fresh.as_slice())?;
-                    // Trust the key only once the store gives the same bytes back.
-                    let back = self.store.get()?;
-                    if back.as_ref().map(|b| b.as_slice()) != Some(fresh.as_slice()) {
+                    self.store.add(fresh.as_slice())?;
+                    // Adopt whatever well-formed key the store now holds: if another core won a mint race, its key
+                    // is the one (this table is empty, so nothing was sealed under ours). On Linux `secret-tool store`
+                    // replaces, so there the race stays open: the last minter wins and the other core's first
+                    // records would not open.
+                    let adopted = self
+                        .store
+                        .get()?
+                        .and_then(|b| <[u8; KEY_LEN]>::try_from(b.as_slice()).ok());
+                    let Some(adopted) = adopted else {
                         return Err(Error::Io(
                             "kith-core: the key store did not keep the new secrets master key; no secret was stored"
                                 .into(),
                         ));
-                    }
-                    self.key = Some(fresh);
+                    };
+                    self.key = Some(Zeroizing::new(adopted));
                 }
             }
         }
