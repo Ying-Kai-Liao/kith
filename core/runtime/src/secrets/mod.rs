@@ -26,8 +26,8 @@ use chacha20poly1305::{
 };
 use rusqlite::{Connection, OptionalExtension as _, params};
 use serde_json::{Value, json};
-use std::sync::Mutex;
 use sha2::{Digest as _, Sha256};
+use std::sync::Mutex;
 use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};

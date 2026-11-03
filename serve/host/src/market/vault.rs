@@ -103,7 +103,10 @@ impl Link for CoreLink {
         if answer["found"] != true {
             return Ok(None);
         }
-        answer["value"].as_str().map(|s| Some(s.to_owned())).ok_or_else(|| anyhow!("The credential store answered without a value"))
+        answer["value"]
+            .as_str()
+            .map(|s| Some(s.to_owned()))
+            .ok_or_else(|| anyhow!("The credential store answered without a value"))
     }
 
     fn put(&self, name: &str, value: &str) -> Result<()> {
@@ -119,12 +122,16 @@ impl Link for CoreLink {
         let key = match entry.get_secret() {
             Ok(key) => key,
             Err(keyring::Error::NoEntry) => {
-                bail!("The old credential key is missing from this computer's keychain. Restore it; the old records were left as they are.")
+                bail!(
+                    "The old credential key is missing from this computer's keychain. Restore it; the old records were left as they are."
+                )
             }
             Err(_) => return Err(unavailable()),
         };
         if key.len() != 32 {
-            bail!("The old credential key is not usable; restore this computer's keychain. The old records were left as they are.");
+            bail!(
+                "The old credential key is not usable; restore this computer's keychain. The old records were left as they are."
+            );
         }
         Ok(Some(Zeroizing::new(key)))
     }
@@ -223,7 +230,8 @@ fn move_slot(store: &Store, slot: &str, key: Option<&Zeroizing<Vec<u8>>>) -> Res
         bail!("There is no record to move");
     };
     let value = if raw.starts_with(PREFIX) {
-        let key = key.ok_or_else(|| anyhow!("The old credential key is not available; the stored record was preserved"))?;
+        let key =
+            key.ok_or_else(|| anyhow!("The old credential key is not available; the stored record was preserved"))?;
         open_old(key, slot, &raw)?
     } else {
         raw
@@ -305,7 +313,9 @@ pub(crate) mod memory {
     impl MemoryLink {
         fn check(&self) -> Result<()> {
             match &*self.refuse.locked() {
-                Some(why) => bail!("Secure credential storage refused: {why}. Credentials are never saved as plain text, and nothing was changed."),
+                Some(why) => bail!(
+                    "Secure credential storage refused: {why}. Credentials are never saved as plain text, and nothing was changed."
+                ),
                 None => Ok(()),
             }
         }
@@ -353,9 +363,7 @@ mod tests {
         let cipher = XChaCha20Poly1305::new_from_slice(key).unwrap();
         let mut nonce = [0; 24];
         getrandom::fill(&mut nonce).unwrap();
-        let sealed = cipher
-            .encrypt(&nonce.into(), Payload { msg: value.as_bytes(), aad: slot.as_bytes() })
-            .unwrap();
+        let sealed = cipher.encrypt(&nonce.into(), Payload { msg: value.as_bytes(), aad: slot.as_bytes() }).unwrap();
         let bytes: Vec<u8> = nonce.into_iter().chain(sealed).collect();
         format!("{PREFIX}{}", STANDARD.encode(bytes))
     }
@@ -381,7 +389,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let mut store = Store::open(&dir.join("kith.db")).unwrap();
         store.vault = Vault::with_link(Arc::new(MemoryLink::default()), false);
-        let hub = crate::hub::Hub::new(store, "vault-test".into(), Identity::load_or_create(&dir).unwrap(), "t".into(), 0);
+        let hub =
+            crate::hub::Hub::new(store, "vault-test".into(), Identity::load_or_create(&dir).unwrap(), "t".into(), 0);
         let (release, stuck) = std::sync::mpsc::channel::<()>();
         let unlocking = tokio::spawn(unlock_with(
             hub.clone(),
