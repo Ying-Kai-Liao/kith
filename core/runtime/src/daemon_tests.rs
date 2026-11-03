@@ -539,7 +539,11 @@ static SECRET_FILE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mu
 fn a_connected_core_keeps_renewing_the_holders_lease() {
     use kith_holder::{auth, proto, wire};
     fn proving(mut s: kith_holder::platform::Stream) {
-        let file = SECRET_FILE.lock().unwrap().clone().expect("secret file");
+        let file = SECRET_FILE
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("secret file");
         let secret = std::fs::read_to_string(file)
             .expect("secret")
             .trim()
@@ -579,7 +583,7 @@ fn a_connected_core_keeps_renewing_the_holders_lease() {
             match kind {
                 proto::RENEW => {
                     let r: proto::Renew = wire::parse(&payload).expect("renew");
-                    RENEWALS.lock().unwrap().push(r.ms);
+                    RENEWALS.lock().expect("lock").push(r.ms);
                 }
                 proto::LIST => {
                     let _ = wire::write_json(
@@ -595,12 +599,14 @@ fn a_connected_core_keeps_renewing_the_holders_lease() {
     }
     let (_t, m) = machine();
     let p = paths(&m);
-    *SECRET_FILE.lock().unwrap() = Some(Layout::new(&m).holder_secret);
+    *SECRET_FILE.lock().expect("lock") = Some(Layout::new(&m).holder_secret);
     let exe = fake_holder(&m, proving);
     let _d = serving(&p, holder_cfg(exe));
     // The lease is 600 ms: a renewal on connect and then one about every 200 ms, each for the full period.
-    until("three renewals", || RENEWALS.lock().unwrap().len() >= 3);
-    assert!(RENEWALS.lock().unwrap().iter().all(|ms| *ms == 600));
+    until("three renewals", || {
+        RENEWALS.lock().expect("lock").len() >= 3
+    });
+    assert!(RENEWALS.lock().expect("lock").iter().all(|ms| *ms == 600));
     assert_eq!(holder_state(&p), "connected");
 }
 
