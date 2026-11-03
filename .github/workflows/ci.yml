@@ -182,7 +182,7 @@ jobs:
               - '!**/*.md'
             # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on.
             windows:
-              - '{core/holder/**,core/runtime/**,core/api/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
+              - '{core/holder/**,core/stub/**,core/runtime/**,core/api/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
               - '!**/*.md'
             cloud:
               - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
@@ -436,6 +436,13 @@ jobs:
           cargo clippy --manifest-path host/Cargo.toml -p kith-api --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-api --locked
           cargo test --manifest-path host/Cargo.toml -p kith-kernel --locked --no-fail-fast
+      # kith-stub (core/stub) joins the same proof once it exists on the branch.
+      - name: Stub tests
+        run: |
+          if [ -d ../core/stub ]; then
+            cargo clippy --manifest-path host/Cargo.toml -p kith-stub --all-targets --locked -- -D warnings
+            cargo test --manifest-path host/Cargo.toml -p kith-stub --locked
+          fi
 
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.
   host-build:
