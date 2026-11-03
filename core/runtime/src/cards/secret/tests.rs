@@ -579,7 +579,11 @@ fn a_writer_that_lost_its_claim_writes_nothing() {
         .unwrap()
         .expect("claims");
     // Its process is gone (crashed): the claim is dropped and a second writer takes the card and saves it.
-    let (done, _) = saved(prov(&mut c, &mut e, &k.id, &two(), T0 + 2, &Gone));
+    let second = begin(&mut c, &k.id, T0 + 2, &Gone)
+        .unwrap()
+        .expect("takes over");
+    assert_ne!(second.holder, zombie.holder);
+    let done = commit(&mut c, &mut e, &second, &plan, &two(), T0 + 2, &Nobody).unwrap();
     assert_eq!(done.state, State::Used);
     assert_eq!(writes(&c, "github"), 2);
     // The first writer wakes up after all: its commit finds the claim gone and the card spent, and changes nothing.
