@@ -1,34 +1,56 @@
 #!/usr/bin/env python3
-"""kith-account — extra logins, the main account each agent uses, and the backup chain on top of it.
+"""kith-account — the accounts kith runs on: a managed set, any number per provider, all equal.
 
-  kith account add claude <name> [--yes] [--json]   an extra Claude subscription account in ~/.kith/accounts/claude/<name>, then its login
-  kith account add codex <name> [--json]            an extra Codex login in ~/.kith/accounts/codex/<name>, then its login
+  kith account list [--agent A] [--json]   every account: id, whether it is in the set (and its place), ready / out until <time>
+                                           / signed out (and the command that fixes it), last usage, pins. --json: an array of rows
+                                           (docs/accounts.md). With --agent: that agent's order and where pick would start
+  kith account add claude <name> [--yes] [--json]   an extra Claude subscription account in ~/.kith/accounts/claude/<name>, its login, and
+                                           it joins the set at the end (an account already there is signed in again, no copy)
+  kith account add codex <name> [--json]   an extra Codex login in ~/.kith/accounts/codex/<name>, the same
                                            --json does not log in: it makes the folder and prints {ok, id, harness, name, dir, created,
                                            login: {argv, env}, warning} for the caller to run the login in a terminal. A new Claude
                                            account needs --yes with --json (without it: {ok: false, error, warning}, exit 2)
-  kith account list [--json]               each account, its harness and whether it is logged in
-  kith account remove <harness> <name> --yes [--json]   delete the account's folder (its login on this Mac)
+  kith account add claude-api:<profile>    an Anthropic API key entry (kith auth set anthropic/<profile> ANTHROPIC_API_KEY, then
+                                           kith auth grant AGENT anthropic anthropic/<profile>); joins the set
+  kith account login <id>                  sign an existing account in again, in its own folder (claude, codex, claude:<name>, codex:<name>)
+  kith account remove <id> [--yes] [--json]       leaves the set (and every agent's list and pin); a folder account also loses its
+                                           folder and the login kept in it (asks, or --yes). The default login's credentials are never
+                                           touched. `remove <harness> <name>` is the same
+  kith account order <id>...               these first, in this order; the rest of the set after them
+  kith account move <id> --to N            put the account at place N of the set (1 = first)
+  kith account policy [fill|spread]        how a run picks among the set: fill (the set's order, each until it is out; the default)
+                                           or spread (the ready account with the most room, ties by least recently started)
+  kith account pin <agent> <id> [--only]   the account the agent's runs start on. Preferred (default): when it is out the agent
+                                           uses the rest of the set; --only: never anything else
+  kith account unpin <agent>               the agent follows the set again
+  kith account cross-harness [on|off|reset] [--agent A]   whether accounts of another harness in the set also serve as fallbacks
+                                           (a Claude agent falling over to Codex). Off by default: the set serves each agent with its
+                                           own harness's accounts; an agent's own list (set --agent A) may name any. Shown by list
+  kith account set <id>... [--agent A]     the whole set (or A's own subset and order) in one write; no ids: empty.
+                                           `set --reset --agent A` drops A's own list, so A follows the global set (what the host calls)
+  kith account out <id> [--until T] [--reason R]   mark an account out of usage until T (a Unix time, 90m, 2h, 1d, or
+                                           "2026-11-04 09:30" local; default an hour) so runs skip it
+  kith account clear <id>                  back to ready
+  kith account usage <id> [--json READING]  record a usage reading ('{"windows": [{"name": "five_hour", "percent": 71.5,
+                                           "resets_at": 1900000000}]}', or - for stdin); without --json print the stored one
+  kith account migrate                     write settings.json in the account-set shape now (reading migrates in memory; every write persists it)
+  kith account pick <agent> [--json]       the ordered candidates a run of the agent would try now: the pin, then the set by
+                                           policy; accounts that are out or signed out are skipped (and listed). All out: the first
 
-  kith account use <id> [--agent A]        the main account: the login every agent's (or A's) runs use when no backup
-                                           answers. claude, claude:<name> or claude-api:<profile> for a Claude agent;
-                                           codex or codex:<name> for a Codex one. The backup chain sits on top of it
-  kith account use --reset [--agent A]     back to the default login (with --agent: A follows the global choice again)
-  kith account use [--agent A] [--json]    which main account applies, and whether it is ready
-
-  kith backup list [--agent A] [--json]    the backup chain (global, or what agent A uses); JSON carries the main account too
-  kith backup add <id> [--agent A] [--at N]    add an entry (<id>@<model> runs it on that model: claude@sonnet, claude:work@opus); --at N moves one already there to place N (1 = first backup)
-  kith backup remove <id> [--agent A]      take an entry out
-  kith account backup set [id ...] [--agent A]   replace the whole chain in one write (no ids: empty); what the apps use
-  kith account backup reset --agent A     drop A's own chain, so A follows the global one again
-
-An entry id is claude, claude:<name>, claude-api:<profile>, codex or codex:<name> (lib/kith_accounts.py). The chain is the
-backups kith serve moves to, in order, when the agent's main account runs out of usage; it is empty until you add entries.
-An entry equal to the main account is skipped (no account is in a chain twice). A session is continued only under the
-account it was made under: after a change of main account the next turn starts a new session.
-Each login is made by the harness itself, in the account's folder (CLAUDE_CONFIG_DIR / CODEX_HOME), as you at the
+An account id is claude (the default login), claude:<name>, claude-api:<profile>, codex or codex:<name> (lib/kith_accounts.py).
+The set and the policy are in settings.json (lib/kith_settings.py); what each account is doing right now (out until, usage, last
+start) is one state file, <state>/accounts/state.json, which this command and every run write. An agent runs on the accounts of
+its own harness first (a Claude agent: claude, claude:<name>, claude-api:<profile>), then on those of another harness the set
+lists (Codex). A session is continued only under the account it was made under: after a change of account the next turn starts a
+new session. Each login is made by the harness itself, in the account's folder (CLAUDE_CONFIG_DIR / CODEX_HOME), as you at the
 terminal; kith never reads, copies or prints a token.
+
+Older commands, deprecated but working (the same effect on the set):
+  kith account use [<id>] [--agent A] [--reset] [--json]   = pin A <id> / the global first account; --reset = unpin / the default login first
+  kith backup list|add|remove ...          the accounts after the first one, as a list (add --at N places one)
+  kith account backup set [id ...] [--agent A] | reset --agent A    the accounts after the first, whole / forget A's own list
 """
-import json, os, re, shutil, subprocess, sys
+import json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
@@ -41,8 +63,8 @@ Before adding a second Claude subscription account:
   Anthropic's usage policy does not allow using several accounts to get past usage limits. Accounts used that
   way can be suspended without notice. Whether to do this is your decision; kith only keeps the logins apart.
 
-  Allowed ways to get more room: a Claude API key (kith backup add claude-api:<profile>) or another provider
-  (kith backup add codex).
+  Allowed ways to get more room: a Claude API key (kith account add claude-api:<profile>) or another provider
+  (kith account add codex <name>).
 """
 NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]*$')
 
@@ -76,6 +98,61 @@ def option(args, name):
     return None
 
 
+def no_more(args, usage):
+    if args:
+        die(usage, 2)
+
+
+def valid_id(entry):
+    try:
+        acc.parse(entry)
+    except ValueError as e:
+        die(str(e), 2)
+    return entry
+
+
+def agent_arg(agent):
+    if agent and acc.agent_md_of(agent) is None:
+        die(f"no agent '{agent}' (kith ls)", 2)
+    return agent
+
+
+def when(ts):
+    return time.strftime('%a %d %b %H:%M', time.localtime(ts))
+
+
+def ago(seconds):
+    for unit, size in (('d', 86400), ('h', 3600), ('m', 60)):
+        if seconds >= size:
+            return f'{int(seconds // size)}{unit}'
+    return 'now' if seconds < 5 else f'{int(seconds)}s'
+
+
+# --- the set ------------------------------------------------------------------------------------------------------------------
+
+def current(agent):
+    """The ids a command edits: the agent's own list or the one it follows (the global set), [] when there is none yet."""
+    return kith_settings.accounts(agent)[0] or []
+
+
+def write_set(agent, ids):
+    kith_settings.set_accounts(agent, list(dict.fromkeys(ids)))
+
+
+def join_set(entry):
+    """The account joins the global set at the end. When the set has no account of its harness's family yet, that harness's
+    default login goes in first: adding a second login must not take the first out of use."""
+    h = acc.parse(entry)[0]
+    own = 'claude' if h == 'claude-api' else h
+    ids = kith_settings.accounts(None)[0] or []
+    if not any(acc.in_family(i, own) for i in ids):
+        ids = ids + [own]
+    if entry in ids:
+        return ids.index(entry) + 1
+    kith_settings.set_accounts(None, ids + [entry])
+    return len(ids) + 1
+
+
 def harness_name(args, usage):
     if len(args) != 2 or args[0] not in ('claude', 'codex'):
         die(usage, 2)
@@ -92,11 +169,39 @@ def login_command(h, d):
     return ['codex', 'login', '--device-auth'], {'CODEX_HOME': str(d)}
 
 
+def not_ready_note(entry, agent=None):
+    ready, why = acc.check(entry, agent)
+    if not ready:
+        f = acc.fix(entry, agent)
+        print(f"note: not ready yet ({why})" + (f"; to make it ready: {f}" if f else ''), file=sys.stderr)
+
+
+def risk_note(entry):
+    h, name = acc.parse(entry)
+    if h == 'claude' and name:
+        print('note: extra Claude subscription accounts are used at your own risk; see the warning in kith account add claude.',
+              file=sys.stderr)
+
+
+def harness_login(h, d):
+    """Run the harness's own login in its folder (d None: the default login). The login is the harness's, as you at the terminal."""
+    if d and h == 'codex':
+        print('This logs Codex in separately from your usual Codex login (device code; the browser step is yours).')
+    argv, env = login_command(h, d) if d else ([h, 'auth', 'login'] if h == 'claude' else ['codex', 'login'], {})
+    return subprocess.call(argv, env={**os.environ, **env})
+
+
 def cmd_add(args):
     global JSON_ERRORS
     JSON_ERRORS = flag(args, '--json')
     yes = flag(args, '--yes')
-    h, n = harness_name(args, 'account add claude|codex <name> [--yes] [--json]')
+    if len(args) == 1 and args[0].startswith('claude-api:'):
+        entry = valid_id(args[0])
+        place = join_set(entry)
+        print(f'{entry} is account {place} in the set')
+        not_ready_note(entry)
+        return
+    h, n = harness_name(args, 'account add claude|codex <name> [--yes] [--json] | account add claude-api:<profile>')
     d = acc.account_dir(h, n)
     if shutil.which(h) is None:
         die(f'{h} is not installed here; install it first, then run this again')
@@ -123,67 +228,325 @@ def cmd_add(args):
                 die('not added')
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o700)
-    argv, env = login_command(h, d)
-    if h == 'codex':
-        print('This logs Codex in separately from your usual Codex login (device code; the browser step is yours).')
     print(f'Login for {h}:{n} in {d}\n')
-    code = subprocess.call(argv, env={**os.environ, **env})
+    code = harness_login(h, d)
     if code:
         die(f'the login ended with exit {code}; run kith account add {h} {n} again to retry', code)
-    print(f'\nAdd it to the chain with: kith backup add {h}:{n}')
+    if h == 'claude':
+        # The same settings, plugins and auto mode as the main login (launch does it again every time).
+        acc.prepare_claude_dir(d)
+    place = join_set(f'{h}:{n}')
+    print(f'\n{h}:{n} is account {place} in the set (kith account order|move changes the order)')
+
+
+def cmd_login(args):
+    if len(args) != 1:
+        die('account login <id>', 2)
+    entry = valid_id(args[0])
+    h, n = acc.parse(entry)
+    if h == 'claude-api':
+        die(f'{entry} is an API key, not a login: {acc.fix(entry)}')
+    if h not in ('claude', 'codex'):
+        die(f'{h} is not supported yet', 2)
+    d = acc.account_dir(h, n) if n else None
+    if d is not None and not d.is_dir():
+        die(f'no account {entry}; add it first: kith account add {h} {n}')
+    if shutil.which(h) is None:
+        die(f'{h} is not installed here')
+    code = harness_login(h, d)
+    if code:
+        die(f'the login ended with exit {code}; run kith account login {entry} again to retry', code)
+    if h == 'claude' and d:
+        acc.prepare_claude_dir(d)
+    print(f'{entry} is signed in')
+
+
+# --- list / pick ------------------------------------------------------------------------------------------------------------------
+
+def status_text(r):
+    if r['status'] == 'out':
+        return f"out until {when(r['out_until'])} ({r['reason']})"
+    if r['status'] == 'ready':
+        return 'ready'
+    word = {'signed_out': 'signed out', 'unsupported': 'not supported yet', 'invalid': 'invalid id'}[r['status']]
+    return word + (f" ({r['why']})" if r['status'] != 'signed_out' and r.get('why') else '')
+
+
+def usage_text(r):
+    u = r.get('usage')
+    if not u:
+        return ''
+    short = {'five_hour': '5h', 'seven_day': 'week', 'weekly': 'week'}
+    wins = ' '.join(f"{short.get(w['name'], w['name'])} {w['percent']:g}%" for w in u['windows'])
+    return f"{wins} ({ago(u['age_s'])} ago)"
 
 
 def cmd_list(args):
     as_json = flag(args, '--json')
-    rows = []
-    for h in ('claude', 'codex'):
-        root = acc.machine() / 'accounts' / h
-        for d in sorted(root.iterdir()) if root.is_dir() else []:
-            if d.is_dir() and not d.name.startswith('.'):
-                ok, why = acc.logged_in(h, d)
-                rows.append({'id': f'{h}:{d.name}', 'harness': h, 'name': d.name, 'dir': str(d), 'logged_in': ok,
-                             **({} if ok else {'why': why})})
+    agent = agent_arg(option(args, '--agent'))
+    no_more(args, 'account list [--agent A] [--json]')
+    rows = acc.rows(agent)
     if as_json:
         print(json.dumps(rows))
-    elif not rows:
-        print('no extra accounts (kith account add claude|codex <name>)')
-    for r in rows if not as_json else []:
-        print(f"{r['id']:<20} {r['harness']:<7} {'logged in' if r['logged_in'] else r['why']}")
+        return
+    if not rows:
+        print('no accounts (kith account add claude|codex <name>)')
+        return
+    table = [['ID', 'SET', 'STATUS', 'USAGE', 'PINNED']]
+    for r in rows:
+        place = r['order'] if r['in_set'] else '-'
+        if agent and r.get('candidate'):
+            place = f"{place}  starts #{r['candidate']}"
+        pins = ', '.join(f"{p['agent']}{' (only)' if p['only'] else ''}" for p in r['pins'])
+        table.append([r['id'], str(place), status_text(r), usage_text(r), pins])
+    widths = [max(len(t[i]) for t in table) for i in range(4)]
+    for t in table:
+        print('  '.join(f'{c:<{w}}' for c, w in zip(t, widths + [0])).rstrip())
+    for r in rows:
+        if r['status'] == 'signed_out' and r.get('fix'):
+            print(f"  {r['id']}: {r['why']}; to sign it in: {r['fix']}")
+    cross = kith_settings.cross_harness(agent)
+    print(f'policy: {kith_settings.account_policy()}; cross-harness fallback: {"on" if cross else "off"}'
+          + (f' (for {agent})' if agent else ''))
 
+
+def cmd_pick(args):
+    as_json = flag(args, '--json')
+    if len(args) != 1:
+        die('account pick <agent> [--json]', 2)
+    agent = agent_arg(args[0])
+    p = acc.pick(agent)
+    if as_json:
+        print(json.dumps(p))
+        return
+    pin = p['pin']
+    print(f"{agent} ({p['harness']}, policy {p['policy']}" + (f", pinned to {pin['id']}{' only' if pin['only'] else ''}" if pin else '') + '):')
+    for n, i in enumerate(p['candidates'], 1):
+        print(f"  {n}. {i}" + ('   (all are out or signed out; this one runs and says what is wrong)' if p['all_out'] else ''))
+    for s in p['skipped']:
+        extra = f" until {when(s['out_until'])}" if s.get('out_until') else ''
+        print(f"  -  {s['id']}  skipped: {s['status'].replace('_', ' ')}{extra}" + (f" ({s['why']})" if s.get('why') and s['status'] != 'out' else ''))
+
+
+# --- remove / order / move / set ------------------------------------------------------------------------------------------------------
 
 def cmd_remove(args):
     global JSON_ERRORS
     JSON_ERRORS = flag(args, '--json')
     yes = flag(args, '--yes')
-    h, n = harness_name(args, 'account remove <claude|codex> <name> --yes [--json]')
-    d = acc.account_dir(h, n)
-    if not d.is_dir() or d.is_symlink():
-        die(f'no account {h}:{n}')
-    agents = [None, *kith_settings.read()[0].get('agents', {})]
-    used = any(f'{h}:{n}' in kith_settings.backups(a)[0] for a in agents)
-    note = f' It is in a backup chain; take it out with kith backup remove {h}:{n}.' if used else ''
-    if not yes:
-        die(f'this deletes {d} and the {h} login kept in it (nothing else).{note} Run again with --yes.', 2)
-    shutil.rmtree(d)
-    if JSON_ERRORS:
-        print(json.dumps({'ok': True, 'changed': True, 'id': f'{h}:{n}', 'dir': str(d), 'in_chain': used}))
+    if len(args) == 2:
+        h, n = harness_name(args, 'account remove <id> [--yes] [--json]')
+        entry = f'{h}:{n}'
+    elif len(args) == 1:
+        entry = valid_id(args[0])
+    else:
+        die('account remove <id> [--yes] [--json]', 2)
+    h, n = acc.parse(entry)
+    d = acc.account_dir(h, n) if n and h in ('claude', 'codex') else None
+    if d is not None and d.is_symlink():
+        die(f'{d} is a link; kith will not delete through it', 1)
+    folder = d is not None and d.is_dir()
+    s = kith_settings.read()[0]
+    in_use = entry in (s.get('accounts') or []) or any(entry in a.get('accounts', []) or (a.get('pin') or {}).get('id') == entry
+                                                       for a in s.get('agents', {}).values())
+    if not in_use and not folder:
+        if JSON_ERRORS:
+            print(json.dumps({'ok': True, 'changed': False, 'id': entry}))
+            return
+        print(f'{entry} is not in the set' + ('' if n else ' (the default login is not deleted by kith)'))
         return
-    print(f'removed {d}.{note}')
-    if h == 'claude':
-        print('Claude Code may keep a Keychain item for it; `CLAUDE_CONFIG_DIR=<dir> claude auth logout` before removing drops that too.')
+    if folder and not yes:
+        msg = f'this deletes {d} and the {h} login kept in it (nothing else). Run again with --yes.'
+        if sys.stdin.isatty():
+            if input(f'This deletes {d} and the {h} login kept in it. Type y to continue: ').strip().lower() not in ('y', 'yes'):
+                die('not removed')
+        else:
+            die(msg, 2)
+    if in_use:
+        def change(st):
+            if entry in st.get('accounts', []):
+                st['accounts'] = [i for i in st['accounts'] if i != entry]
+            for name, a in list(st.get('agents', {}).items()):
+                if entry in a.get('accounts', []):
+                    a['accounts'] = [i for i in a['accounts'] if i != entry]
+                if (a.get('pin') or {}).get('id') == entry:
+                    del a['pin']
+                if not a:
+                    del st['agents'][name]
+        kith_settings.edit(change)
+    if folder:
+        shutil.rmtree(d)
+        if JSON_ERRORS:
+            print(json.dumps({'ok': True, 'changed': True, 'id': entry, 'dir': str(d), 'in_chain': in_use}))
+            return
+        print(f'removed {entry} from the set and deleted {d}.')
+        if h == 'claude':
+            print('Claude Code may keep a Keychain item for it; `CLAUDE_CONFIG_DIR=<dir> claude auth logout` before removing drops that too.')
+    elif JSON_ERRORS:
+        print(json.dumps({'ok': True, 'changed': True, 'id': entry, 'in_chain': in_use}))
+    else:
+        print(f'removed {entry} from the set' + ('' if n or h == 'claude-api' else ' (its login on this Mac is not touched)'))
 
+
+def cmd_order(args):
+    agent = agent_arg(option(args, '--agent'))
+    if not args:
+        die('account order <id>... [--agent A]', 2)
+    cur = current(agent)
+    for i in args:
+        valid_id(i)
+        if i not in cur:
+            die(f'{i} is not in the set (kith account add)', 2)
+    ids = list(dict.fromkeys(args))
+    write_set(agent, ids + [i for i in cur if i not in ids])
+    print(f"order for {agent or 'every agent'}: {', '.join(current(agent))}")
+
+
+def cmd_move(args):
+    agent = agent_arg(option(args, '--agent'))
+    to = option(args, '--to')
+    if len(args) != 1 or to is None:
+        die('account move <id> --to N [--agent A]', 2)
+    entry = valid_id(args[0])
+    try:
+        place = int(to)
+        if place < 1:
+            raise ValueError
+    except ValueError:
+        die('--to counts from 1', 2)
+    cur = current(agent)
+    if entry not in cur:
+        die(f'{entry} is not in the set (kith account add)', 2)
+    ids = [i for i in cur if i != entry]
+    ids.insert(min(place - 1, len(ids)), entry)
+    write_set(agent, ids)
+    print(f'{entry} is account {ids.index(entry) + 1} for {agent or "every agent"}')
+
+
+def cmd_set(args):
+    reset = flag(args, '--reset')
+    agent = agent_arg(option(args, '--agent'))
+    if reset:
+        if not agent or args:
+            die('account set --reset --agent A', 2)
+        kith_settings.set_accounts(agent, None)
+        print(f'{agent} follows the global set')
+        return
+    for i in args:
+        valid_id(i)
+    write_set(agent, args)
+    print(f"accounts for {agent or 'every agent'}: {', '.join(dict.fromkeys(args)) or 'none'}")
+
+
+def cmd_policy(args):
+    if not args:
+        print(kith_settings.account_policy())
+        return
+    if len(args) != 1:
+        die('account policy [fill|spread]', 2)
+    try:
+        kith_settings.set_account_policy(args[0])
+    except ValueError as e:
+        die(str(e), 2)
+    print(f'policy: {args[0]}')
+
+
+def cmd_migrate(args):
+    print('settings.json is now in the new shape' if kith_settings.migrate_file() else 'settings.json needs no change')
+
+
+def cmd_cross_harness(args):
+    agent = agent_arg(option(args, '--agent'))
+    if not args:
+        print('on' if kith_settings.cross_harness(agent) else 'off')
+        return
+    if len(args) != 1 or args[0] not in ('on', 'off', 'reset') or (args[0] == 'reset' and not agent):
+        die('account cross-harness [on|off] [--agent A] | account cross-harness reset --agent A', 2)
+    kith_settings.set_cross_harness(agent, None if args[0] == 'reset' else args[0] == 'on')
+    print(f"cross-harness fallback for {agent or 'every agent'}: {kith_settings.cross_harness(agent) and 'on' or 'off'}")
+
+
+def cmd_pin(args):
+    only = flag(args, '--only')
+    if len(args) != 2:
+        die('account pin <agent> <id> [--only]', 2)
+    agent, entry = agent_arg(args[0]), valid_id(args[1])
+    try:
+        acc.check_main(entry, acc.agent_harness(acc.agent_md_of(agent)))
+    except ValueError as e:
+        die(str(e), 2)
+    kith_settings.set_pin(agent, entry, only)
+    print(f"{agent} starts on {entry}" + (' and never uses another account' if only else '; when it is out, the rest of the set'))
+    not_ready_note(entry, agent)
+    risk_note(entry)
+
+
+def cmd_unpin(args):
+    if len(args) != 1:
+        die('account unpin <agent>', 2)
+    kith_settings.clear_pin(agent_arg(args[0]))
+    print(f'{args[0]} follows the set')
+
+
+# --- state: out / clear / usage ---------------------------------------------------------------------------------------------------------------------
+
+def cmd_out(args):
+    until = option(args, '--until')
+    reason = option(args, '--reason') or 'manual'
+    if len(args) != 1:
+        die('account out <id> [--until T] [--reason R]', 2)
+    entry = valid_id(args[0])
+    if not acc.REASON_RE.match(reason):
+        die('--reason is a short word (letters, digits, space . _ -)', 2)
+    try:
+        t = acc.parse_until(until) if until else int(time.time()) + acc.OUT_FOR
+    except ValueError as e:
+        die(str(e), 2)
+    if t <= time.time():
+        die('--until is in the past', 2)
+    acc.mark_out(entry, t, reason, extend_only=False)
+    print(f'{entry} is out until {when(t)} ({reason})')
+
+
+def cmd_clear(args):
+    if len(args) != 1:
+        die('account clear <id>', 2)
+    entry = valid_id(args[0])
+    acc.clear_out(entry)
+    print(f'{entry} is ready again')
+
+
+def cmd_usage(args):
+    reading = option(args, '--json')
+    if len(args) != 1:
+        die('account usage <id> [--json READING]', 2)
+    entry = valid_id(args[0])
+    if reading is None:
+        print(json.dumps(acc.usage_json(acc.read_state().get(entry), time.time())))
+        return
+    try:
+        usage = acc.record_usage(entry, json.loads(sys.stdin.read() if reading == '-' else reading))
+    except ValueError as e:   # not JSON, or not a reading
+        die(str(e), 2)
+    print(json.dumps(usage))
+
+
+# --- the older commands ---------------------------------------------------------------------------------------------------------------------------
 
 def cmd_use(args):
     as_json = flag(args, '--json')
     reset = flag(args, '--reset')
-    agent = option(args, '--agent')
-    if agent and acc.agent_md_of(agent) is None:
-        die(f"no agent '{agent}' (kith ls)", 2)
+    agent = agent_arg(option(args, '--agent'))
     if reset or not args:
         if args:
             die('account use --reset [--agent A]', 2)
         if reset:
-            kith_settings.clear_account(agent)
+            if agent:
+                kith_settings.clear_pin(agent)
+            else:
+                ids = kith_settings.accounts(None)[0]
+                if ids:   # the default login first again
+                    write_set(None, ['claude'] + ids)
         m = acc.main_json(agent)
         if as_json:
             print(json.dumps(m))
@@ -208,24 +571,33 @@ def cmd_use(args):
             raise ValueError(f'{entry}: a main account is claude, claude:<name>, claude-api:<profile>, codex or codex:<name>')
     except ValueError as e:
         die(str(e), 2)
-    kith_settings.set_account(agent, entry)
+    if agent:
+        kith_settings.set_pin(agent, entry, False)
+    else:
+        write_set(None, [entry] + [i for i in current(None) if i != entry])
     scope = agent or 'every agent'
     print(f'main account for {scope}: {entry}' + ('' if agent else
           f" (agents on {'Codex' if h == 'codex' else 'Claude'} only; the others keep their default login)"))
     print('the next turn uses it; a conversation made under another account continues as a new session', file=sys.stderr)
-    ready, why = acc.check(entry, agent)
-    if not ready:
-        f = acc.fix(entry, agent)
-        print(f"note: not ready yet ({why})" + (f"; to make it ready: {f}" if f else ''), file=sys.stderr)
-    if h == 'claude' and name:
-        print('note: extra Claude subscription accounts are used at your own risk; see the warning in kith account add claude.',
-              file=sys.stderr)
+    not_ready_note(entry, agent)
+    risk_note(entry)
 
 
-def target(args):
-    agent = option(args, '--agent')
-    ids, where = kith_settings.backups(agent)
-    return agent, ids, where
+def chain_target(agent):
+    """(main, backups, where): the accounts as the older commands see them: the first, and the ones after it."""
+    if agent:
+        order, _ = acc.static_order(agent, acc.agent_harness(acc.agent_md_of(agent)))
+        where = 'agent' if kith_settings.accounts(agent)[1] == 'agent' else 'global'
+    else:
+        order, where = current(None) or ['claude'], 'global'
+    return order[0], order[1:], where
+
+
+def write_backups(agent, ids):
+    main = chain_target(agent)[0]
+    if not agent and any(not acc.in_family(i, acc.parse(main)[0] if acc.parse(main)[0] != 'claude-api' else 'claude') for i in ids):
+        kith_settings.set_cross_harness(None, True)   # the old chain meant it: a fallback of another harness
+    write_set(agent, [main] + list(ids))
 
 
 def _fix(entry, agent):
@@ -236,21 +608,21 @@ def _fix(entry, agent):
 
 
 def cmd_backup_write(sub, args):
-    agent = option(args, '--agent')
+    agent = agent_arg(option(args, '--agent'))
     if sub == 'reset':
         if not agent or args:
             die('backup reset --agent A', 2)
-        kith_settings.clear_backups(agent)
-        print(f'{agent} follows the global backups')
+        kith_settings.set_accounts(agent, None)
+        print(f'{agent} follows the global accounts')
         return
     try:
         for i in args:
-            acc.parse(i)
+            valid_id(i)
             acc.check_entry_model(i)
     except ValueError as e:
         die(str(e), 2)
     ids = list(dict.fromkeys(args))
-    kith_settings.set_backups(agent, ids)
+    write_backups(agent, ids)
     print(f"backups for {agent or 'every agent'}: {', '.join(ids) or 'none'}")
 
 
@@ -262,7 +634,8 @@ def cmd_backup(args):
     sub, args = args[0], args[1:]
     as_json = flag(args, '--json')
     if sub == 'list':
-        agent, ids, where = target(args)
+        agent = agent_arg(option(args, '--agent'))
+        main, ids, where = chain_target(agent)
         rows = []
         for i in ids:
             try:
@@ -275,14 +648,15 @@ def cmd_backup(args):
             print(json.dumps({'agent': agent, 'source': where, 'backups': rows, 'main': acc.main_json(agent)}))
         else:
             print(f"backups for {agent or 'every agent'} ({'its own list' if where == 'agent' else 'the global list'}):" if rows else
-                  f"no backups for {agent or 'any agent'} (kith backup add <id>)")
+                  f"no backups for {agent or 'any agent'} (kith account add)")
             for n, r in enumerate(rows, 1):
                 print(f"  {n}. {r['id']:<22} {'ready' if r['ready'] else 'not ready: ' + r['why']}")
         return
     if sub in ('set', 'reset'):
         return cmd_backup_write(sub, args)
     at = option(args, '--at')
-    agent, ids, where = target(args)
+    agent = agent_arg(option(args, '--agent'))
+    main, ids, where = chain_target(agent)
     if len(args) != 1:
         die(f'backup {sub} <id> [--agent A]' + (' [--at N]' if sub == 'add' else ''), 2)
     entry = args[0]
@@ -305,19 +679,15 @@ def cmd_backup(args):
             return
         new = [i for i in ids if i != entry]
         new.insert(min(position - 1, len(new)) if position else len(new), entry)
-        kith_settings.set_backups(agent, new)
+        write_backups(agent, new)
         ready, why = acc.check(entry, agent)
         if as_json:
             print(json.dumps({'ok': True, 'changed': True, 'entry': entry, 'agent': agent, 'position': new.index(entry) + 1, 'backups': new,
                               'ready': ready, **({} if ready else {'why': why})}))
             return
         print(f"{entry} is backup {new.index(entry) + 1} {scope}")
-        if not ready:
-            f = acc.fix(entry, agent)
-            print(f"note: not ready yet ({why})" + (f"; to make it ready: {f}" if f else ''), file=sys.stderr)
-        if acc.parse(entry)[0] == 'claude' and acc.parse(entry)[1]:
-            print('note: extra Claude subscription accounts are used at your own risk; see the warning in kith account add claude.',
-                  file=sys.stderr)
+        not_ready_note(entry, agent)
+        risk_note(entry)
     else:
         if entry not in ids:
             if as_json:
@@ -325,7 +695,7 @@ def cmd_backup(args):
                 return
             print(f'{entry} is not in the backups {scope}')
             return
-        kith_settings.set_backups(agent, [i for i in ids if i != entry])
+        write_backups(agent, [i for i in ids if i != entry])
         if as_json:
             print(json.dumps({'ok': True, 'changed': True, 'entry': entry, 'agent': agent, 'backups': [i for i in ids if i != entry]}))
             return
@@ -337,10 +707,17 @@ def main(argv):
         print(__doc__.strip())
         return
     cmd, rest = argv[0], argv[1:]
+    commands = {'add': cmd_add, 'login': cmd_login, 'list': cmd_list, 'ls': cmd_list, 'remove': cmd_remove, 'rm': cmd_remove,
+                'order': cmd_order, 'move': cmd_move, 'set': cmd_set, 'policy': cmd_policy, 'pin': cmd_pin, 'cross-harness': cmd_cross_harness, 'unpin': cmd_unpin,
+                'migrate': cmd_migrate, 'out': cmd_out, 'clear': cmd_clear, 'usage': cmd_usage, 'pick': cmd_pick, 'backup': cmd_backup, 'use': cmd_use}
+    if cmd not in commands:
+        die(f'unknown command: {cmd} (kith account --help)', 2)
     try:
-        {'add': cmd_add, 'list': cmd_list, 'ls': cmd_list, 'remove': cmd_remove, 'rm': cmd_remove, 'backup': cmd_backup,
-         'use': cmd_use}.get(
-            cmd, lambda _: die(f'unknown command: {cmd} (kith account --help)', 2))(rest)
+        try:
+            kith_settings.migrate_file()   # a settings file still in the older shape is rewritten in the new one
+        except OSError:
+            pass
+        commands[cmd](rest)
     except ValueError as e:   # settings the file can't be written back to
         die(str(e))
 

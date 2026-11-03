@@ -61,13 +61,35 @@ def section(title):
         print(title)
 
 
+def cli():
+    """Which kith this is: its version, the kernel in use, and whether ~/.local/bin/kith is the installed release."""
+    try:
+        version = (KITH / 'VERSION').read_text().strip()
+    except OSError:
+        version = ''   # a checkout has no VERSION file: that is how dev is told apart
+    override = os.environ.get('KITH_KERNEL', '').strip()
+    if version:
+        ok(f'kith {version}, kernel {KITH}')
+    else:
+        warn(f'DEV: kith runs from a checkout ({KITH}), not an installed release' + (' (KITH_KERNEL)' if override else ''))
+    if override and not version:
+        warn(f'DEV: KITH_KERNEL={override} points at a checkout: unset it to use the installed CLI ({P["KITH_MACHINE"]}/cli/current)')
+    current = P['KITH_MACHINE'] / 'cli' / 'current'
+    link = HOME / '.local/bin/kith'
+    if link.exists() and current.exists() and os.path.realpath(link) == os.path.join(os.path.realpath(current), 'bin/kith'):
+        ok(f'kith command: ~/.local/bin/kith -> {current}/bin/kith')
+    else:
+        warn(f'~/.local/bin/kith does not lead into {current}: the kith you type is not the installed release. Install it with scripts/install.sh '
+             '(curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install.sh | sh)')
+
+
 def folders():
     section('folders')
     home, state = P['KITH_HOME'], P['KITH_STATE']
-    if (home / 'kernel' / 'bin' / 'kith').exists():
+    if home.is_dir():
         ok(f'kith folder: {home}' + (f' -> {P["KITH_HOME_REAL"]}' if P['KITH_HOME_REAL'] != home else ''))
     else:
-        bad(f'no kernel in {home} (KITH_HOME, else ~/kith): run install.sh from the kith folder')
+        bad(f'no kith folder {home} (KITH_HOME, else ~/kith): run kith init')
     dot = P['KITH_MACHINE']
     if dot == HOME / '.hq':
         warn('this Mac\'s kith is still ~/.hq: kith migrate run moves it to ~/.kith (everything works until then)')
@@ -78,14 +100,7 @@ def folders():
     sec = P['KITH_SECRETS']
     if sec != P['KITH_MACHINE'] and sec.is_dir() and (sec.stat().st_mode & 0o077):
         bad(f'{sec} can be read by others: chmod 700 {sec}')
-    here = Path(os.path.realpath(KITH / 'bin' / 'kith'))
-    link, old_link = HOME / '.local/bin/kith', HOME / '.local/bin/hq'
-    if link.exists() and Path(os.path.realpath(link)) == here:
-        ok('kith command: ~/.local/bin/kith')
-    elif old_link.exists() and Path(os.path.realpath(old_link)) == here:
-        warn('only the old command ~/.local/bin/hq leads to this kernel (it works the same): run install.sh to add kith')
-    else:
-        bad('~/.local/bin/kith does not lead to this kernel: run install.sh')
+    cli()
     if str(HOME / '.local/bin') not in os.environ.get('PATH', '').split(':'):
         warn('~/.local/bin is not on PATH: add it in ~/.zshrc to type kith')
     for old in (HOME / '.config/hq', HOME / 'Library/Logs/hq', HOME / 'Library/Caches/hq', HOME / '.config/kith', HOME / 'Library/Logs/kith', HOME / 'Library/Caches/kith'):

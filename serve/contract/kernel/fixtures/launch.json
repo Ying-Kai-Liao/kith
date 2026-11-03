@@ -141,7 +141,9 @@
           "Read(//tmp/kith/kith/state/index/**)",
           "Edit(//tmp/kith/kith/state/index/**)",
           "Read(//tmp/kith/kith/state/memory.db*)",
-          "Edit(//tmp/kith/kith/state/memory.db*)"
+          "Edit(//tmp/kith/kith/state/memory.db*)",
+          "Read(//tmp/kith/kith/state/core/**)",
+          "Edit(//tmp/kith/kith/state/core/**)"
         ],
         "allow": [
           "Edit(//tmp/kith/kith/agents/echo/memory/**)",

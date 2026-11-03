@@ -15,7 +15,7 @@ type Handler = (...args: any[]) => any
 import { statSync } from 'node:fs'
 const await_stat = (p: string) => statSync(p).mtimeMs
 
-function setup(env: Record<string, string> = {}, extra?: (argv: string[]) => { exitCode: number; stdout: string; stderr: string } | undefined) {
+function setup(env: Record<string, string> = {}, extra?: (argv: string[]) => { exitCode: number; stdout: string; stderr: string } | undefined, options?: (kernel: string) => Record<string, unknown>, before?: (root: string) => void) {
   const root = mkdtempSync(join(tmpdir(), 'kith-hooks-'))
   const kernel = join(root, 'kernel')
   const agents = join(root, 'agents')
@@ -26,6 +26,7 @@ function setup(env: Record<string, string> = {}, extra?: (argv: string[]) => { e
   writeFileSync(join(kernel, 'bin/kith-pkg'), '')
   writeFileSync(join(kernel, 'PROTOCOL.md'), 'protocol')
   writeFileSync(join(agents, 'builder/role/agent.md'), '---\nname: builder\ndescription: builds\n---\nYou build.\n')
+  before?.(root)
   const handlers: Record<string, Handler[]> = {}
   const on = (name: string, ...rest: any[]) => {
     const fn = rest[rest.length - 1] as Handler
@@ -70,7 +71,7 @@ function setup(env: Record<string, string> = {}, extra?: (argv: string[]) => { e
     ui: { toast: () => {} },
     session: { cwd: async () => root },
   }
-  register(on as any, { kith_path: kernel } as any)
+  register(on as any, (options ? options(kernel) : { kith_path: kernel }) as any)
   const fire = async (name: string, e: any) => {
     const list = handlers[name] ?? []
     const next = async (x: any) => x
@@ -295,4 +296,27 @@ test('the memory placeholders are filled for the owner and for a person', async 
   const prompt = p.registered[p.registered.length - 1].prompt as string
   expect(prompt).toContain(`mem=${pl}/memory/people/mia shared=${pl}/memory/shared files=${pl}/files/people/mia who=${p.state}/people/mia.md`)
   expect(prompt).not.toContain('{{')
+})
+
+// Which kernel the plugin runs when kith_path is empty: KITH_KERNEL, else the installed CLI's stable path; the old
+// addresses only on a Mac with no installed CLI at all.
+const pkgCalls = (t: { calls: string[][] }) => new Set(t.calls.flat().filter((c) => c?.endsWith('/lib/kith_paths.py')).map((c) => c.replace('/lib/kith_paths.py', '/bin/kith-pkg')))
+const touchPkg = (dir: string) => { mkdirSync(join(dir, 'bin'), { recursive: true }); writeFileSync(join(dir, 'bin/kith-pkg'), ''); writeFileSync(join(dir, 'PROTOCOL.md'), 'protocol') }
+
+test('kith_path empty, no installed CLI: the old ~/kith/kernel is the kernel', async () => {
+  const t = setup({}, undefined, () => ({}), (root) => touchPkg(join(root, 'kith/kernel')))
+  await spawnHelper(t)
+  expect(pkgCalls(t)).toEqual(new Set([join(t.root, 'kith/kernel/bin/kith-pkg')]))
+})
+
+test('kith_path empty, a CLI installed: cli/current wins over a checkout at ~/kith/kernel', async () => {
+  const t = setup({}, undefined, () => ({}), (root) => { touchPkg(join(root, 'kith/kernel')); touchPkg(join(root, '.kith/cli/current/share/kith/kernel')) })
+  await spawnHelper(t)
+  expect(pkgCalls(t)).toEqual(new Set([join(t.root, '.kith/cli/current/share/kith/kernel/bin/kith-pkg')]))
+})
+
+test('KITH_KERNEL beats everything', async () => {
+  const t = setup({ KITH_KERNEL: '/dev/checkout/kernel' }, undefined, () => ({}), (root) => touchPkg(join(root, '.kith/cli/current/share/kith/kernel')))
+  await spawnHelper(t)
+  expect(pkgCalls(t)).toEqual(new Set(['/dev/checkout/kernel/bin/kith-pkg']))
 })

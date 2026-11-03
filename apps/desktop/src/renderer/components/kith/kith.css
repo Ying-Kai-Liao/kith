@@ -420,8 +420,27 @@
   color: var(--kith-muted);
 }
 .kc-decision-outcome {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--kith-muted);
   font-weight: 500;
+}
+/* Remove on a live This session grant (the outcome line), and over a ToolRow's tag. */
+.kc-decision-outcome-action,
+.kc-tool-remove {
+  flex: none;
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: var(--kith-radius-chip);
+  background: var(--kith-ground);
+  box-shadow: inset 0 0 0 1px var(--kith-line);
+  color: var(--kith-ink);
+  font: 600 12px / 1.25 var(--font-ui);
+}
+.kc-decision-outcome-action:hover,
+.kc-tool-remove:hover {
+  background: color-mix(in srgb, var(--kith-ground) 85%, var(--kith-line));
 }
 .kc-decision-buttons {
   display: flex;
@@ -655,6 +674,34 @@
 }
 .kc-tool-chevron {
   color: var(--kith-muted);
+}
+.kc-tool-tag {
+  flex: none;
+  color: var(--kith-muted);
+  font-size: 12px;
+}
+.kc-tool-line {
+  position: relative;
+}
+.kc-tool-line .kc-tool-remove {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  opacity: 0;
+  pointer-events: none;
+}
+.kc-tool-line .kc-tool-remove.openable {
+  right: 27px;
+}
+.kc-tool-line:hover .kc-tool-remove,
+.kc-tool-line:focus-within .kc-tool-remove {
+  opacity: 1;
+  pointer-events: auto;
+}
+.kc-tool-line:hover .kc-tool-tag.removable,
+.kc-tool-line:focus-within .kc-tool-tag.removable {
+  visibility: hidden;
 }
 .kc-tool-sheet {
   padding: 4px var(--kith-gutter) var(--kith-gutter);

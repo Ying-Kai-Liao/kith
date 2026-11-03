@@ -98,7 +98,9 @@ fn program_arguments(launcher: &[String], exe: &str, port: u16) -> String {
     out
 }
 
-/// The launchd job file. `hq_bin` pins the `hq` checkout the host runs agents from.
+/// The launchd job file. `hq_bin` pins the `hq` checkout the host runs agents from; `kernel` is a developer's
+/// `KITH_KERNEL` (a host built from a checkout runs agents on it), kept so the job starts with what installed it.
+#[allow(clippy::too_many_arguments)] // one value per key of the job file
 fn plist_text(
     launcher: &[String],
     exe: &str,
@@ -106,6 +108,7 @@ fn plist_text(
     path: &str,
     data: &str,
     hq_bin: Option<&str>,
+    kernel: Option<&str>,
     log: &str,
 ) -> String {
     format!(
@@ -133,13 +136,14 @@ fn plist_text(
                 let b = xml_escape(b);
                 format!("<key>KITH_KERNEL_BIN</key><string>{b}</string><key>HQ_BIN</key><string>{b}</string>")
             })
-            .unwrap_or_default(),
+            .unwrap_or_default()
+            + &kernel.map(|k| format!("<key>KITH_KERNEL</key><string>{}</string>", xml_escape(k))).unwrap_or_default(),
         log = xml_escape(log),
     )
 }
 
 /// The systemd user unit, with the same environment as the launchd job.
-fn unit_text(exe: &str, port: u16, path: &str, data: &str, hq_bin: Option<&str>) -> String {
+fn unit_text(exe: &str, port: u16, path: &str, data: &str, hq_bin: Option<&str>, kernel: Option<&str>) -> String {
     format!(
         "[Unit]\nDescription=Kith host\nAfter=network-online.target\n\n[Service]\nExecStart={exe} serve --port {port}\nEnvironment={path}\nEnvironment={data}\n{hq}Restart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n",
         exe = systemd_quote(exe, true),
@@ -153,7 +157,10 @@ fn unit_text(exe: &str, port: u16, path: &str, data: &str, hq_bin: Option<&str>)
                     out
                 })
             })
-            .unwrap_or_default(),
+            .unwrap_or_default()
+            + &kernel
+                .map(|k| format!("Environment={}\n", systemd_quote(&format!("KITH_KERNEL={k}"), false)))
+                .unwrap_or_default(),
     )
 }
 
@@ -165,6 +172,7 @@ pub fn install(port: u16) -> Result<()> {
     let path = std::env::var("PATH").unwrap_or_default();
     // The login-shell PATH lookup would otherwise pick another kith than the one that installed the job.
     let hq_bin = ["KITH_KERNEL_BIN", "HQ_BIN"].iter().find_map(|k| std::env::var(k).ok()).filter(|s| !s.is_empty());
+    let kernel = std::env::var(crate::kernel::KERNEL_ENV).ok().filter(|s| !s.is_empty());
     let log = data_dir().join("host.log");
     std::fs::create_dir_all(data_dir()).context("creating the data directory")?;
     if cfg!(target_os = "macos") {
@@ -175,6 +183,7 @@ pub fn install(port: u16) -> Result<()> {
             &path,
             &data_dir().to_string_lossy(),
             hq_bin.as_deref(),
+            kernel.as_deref(),
             &log.to_string_lossy(),
         );
         let file = launchd_plist();
@@ -185,7 +194,7 @@ pub fn install(port: u16) -> Result<()> {
         std::fs::write(&file, plist).with_context(|| format!("writing {}", file.display()))?;
         launchd::reload(&mut launchctl, &domain(), &target(), &file)?;
     } else {
-        let unit = unit_text(&exe, port, &path, &data_dir().to_string_lossy(), hq_bin.as_deref());
+        let unit = unit_text(&exe, port, &path, &data_dir().to_string_lossy(), hq_bin.as_deref(), kernel.as_deref());
         let file = systemd_unit();
         create_parent(&file)?;
         std::fs::write(&file, unit).with_context(|| format!("writing {}", file.display()))?;
@@ -434,20 +443,33 @@ mod tests {
 
     #[test]
     fn the_job_files_keep_hq_bin_when_it_is_set() {
-        let plist =
-            plist_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", Some("/my hq/kernel/bin/hq&"), "/d/host.log");
+        let plist = plist_text(
+            &[],
+            "/h/kith-serve",
+            19224,
+            "/usr/bin",
+            "/d",
+            Some("/my hq/kernel/bin/hq&"),
+            Some("/co&/kernel"),
+            "/d/host.log",
+        );
         assert!(plist.contains("<key>HQ_BIN</key><string>/my hq/kernel/bin/hq&amp;</string>"), "{plist}");
         assert!(plist.contains("<key>KITH_KERNEL_BIN</key><string>/my hq/kernel/bin/hq&amp;</string>"), "{plist}");
         assert!(plist.contains("<key>KITH_SERVE_HOME</key><string>/d</string>"));
-        let unit = unit_text("/h/kith-serve", 19224, "/usr/bin", "/d", Some("/my hq/kernel/bin/hq"));
+        assert!(plist.contains("<key>KITH_KERNEL</key><string>/co&amp;/kernel</string>"), "{plist}");
+        let unit =
+            unit_text("/h/kith-serve", 19224, "/usr/bin", "/d", Some("/my hq/kernel/bin/hq"), Some("/co/kernel"));
         assert!(unit.contains("Environment=\"HQ_BIN=/my hq/kernel/bin/hq\"\n"), "{unit}");
         assert!(unit.contains("Environment=\"KITH_KERNEL_BIN=/my hq/kernel/bin/hq\"\n"), "{unit}");
         assert!(unit.contains("Environment=\"KITH_SERVE_HOME=/d\"\n"));
+        assert!(unit.contains("Environment=\"KITH_KERNEL=/co/kernel\"\n"), "{unit}");
     }
 
     #[test]
     fn the_job_files_have_no_hq_bin_when_it_is_not_set() {
-        assert!(!plist_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", None, "/d/host.log").contains("HQ_BIN"));
-        assert!(!unit_text("/h/kith-serve", 19224, "/usr/bin", "/d", None).contains("HQ_BIN"));
+        assert!(
+            !plist_text(&[], "/h/kith-serve", 19224, "/usr/bin", "/d", None, None, "/d/host.log").contains("HQ_BIN")
+        );
+        assert!(!unit_text("/h/kith-serve", 19224, "/usr/bin", "/d", None, None).contains("HQ_BIN"));
     }
 }

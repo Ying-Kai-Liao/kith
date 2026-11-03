@@ -192,8 +192,18 @@ export interface FileDiff {
 export interface PermissionOption {
   optionId: string
   name: string
-  /** allow_once | allow_always | reject_once | reject_always */
+  /** allow_once | allow_session | allow_always | reject_once | reject_always */
   kind: string
+}
+
+/** What "This session" on an auto-mode card granted (host `cards/autoallow.rs`): live until removed or ended by the host. */
+export interface SessionGrant {
+  id: string
+  state: 'live' | 'removed' | 'ended'
+  /** removed or ended: when, in ms. */
+  endedAt?: number
+  /** ended: with the task (a new session), after 24 h, or the agent's permission settings changed. */
+  endReason?: 'task' | 'expired' | 'settings'
 }
 
 export interface PlanItem {
@@ -322,6 +332,8 @@ export interface EntryData {
   edge?: { kind: string; value: string; job?: string }
   /** permission, answered: an old run still holds the session this approval resumes in (null/absent otherwise; an older host never sends it). */
   held?: HeldRun | null
+  /** permission, answered with This session; or tool, a call that grant let through. */
+  sessionGrant?: SessionGrant
   /** permission: an Access or Key card for a service key (shared/secret-card.ts). Never a value. */
   card?: 'account' | 'key'
   /** A card drawn over the entry, its `text` being the twin (shared/rich-card.ts). Not the permission `card` above. */

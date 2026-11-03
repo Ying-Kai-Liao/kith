@@ -11,6 +11,7 @@ ResumeClaims = TRUE
 FreshClaims = TRUE
 StartGateChecks = TRUE
 HostStartCAS = TRUE
+OffTurnWakes = TRUE
 TakeoverRefusesBusy = TRUE
 TakeoverRechecks = TRUE
 ProcStartCheck = TRUE

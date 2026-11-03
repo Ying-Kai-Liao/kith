@@ -14,6 +14,7 @@ import { StoreContext, useApp } from '../store/context'
 import { BotRow } from './BotRow'
 import { ComputerRosterSection } from './ComputerRosterSection'
 import { GuestPromptList } from './GuestPromptList'
+import { CliNoticeCard } from './CliNoticeCard'
 import { KernelNotice } from './KernelNotice'
 import { UpdateNeededCard } from './UpdateNeededCard'
 
@@ -168,6 +169,7 @@ export function BotRoster({ roster, compact, onContext }: {
     const notice = !compact ? (
       <>
         {store.mismatch ? <StoreContext.Provider value={store}><UpdateNeededCard /></StoreContext.Provider> : null}
+        {store === app.local ? <CliNoticeCard /> : null}
         {store.isOwner ? <KernelNotice store={store} /> : null}
       </>
     ) : null

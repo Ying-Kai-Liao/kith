@@ -1,5 +1,6 @@
 import { endLine, type Conversation } from '../../../shared/conversation.ts'
 import { isChat, type Entry } from '../../../shared/models.ts'
+import { isTask } from '../../../shared/tasks.ts'
 import { isDeliveryTool } from '../../../shared/thread-feed.ts'
 import { foldTopics } from '../../../shared/topics.ts'
 import type { Topic } from '../../../shared/topics.ts'
@@ -13,6 +14,8 @@ export type ChatItem =
   | { id: string; kind: 'steps'; entries: Entry[] }
   /** A run the owner folded into one card; `entries` are its rows (the root first) and `inner` how they read when it is open. */
   | { id: string; kind: 'topic'; topic: Topic; root: Entry; entries: Entry[]; inner: ChatItem[] }
+  /** A task (its first message, `root`) with its thread as one card at the root's place; `inner` is the thread as chat rows. */
+  | { id: string; kind: 'task'; root: Entry; thread: Entry[]; inner: ChatItem[] }
   /** Where a room run ended: "Used all 10 turns", "Worked it out · 6 of 10 turns", "You stopped it · 4 of 10 turns used". */
   | { id: string; kind: 'ending'; conversation: Conversation; text: string; more: boolean }
 
@@ -50,7 +53,19 @@ export function buildChat(entries: Entry[], endings: Conversation[] = [], fold =
     if (entries.length) out.push({ id: `steps-${run[0]!.id}`, kind: 'steps', entries })
     run = []
   }
-  const flat = flatEntries(entries)
+  let flat = flatEntries(entries)
+  // A task's thread leaves the list for its card. Only at the top: inside a card or a topic the rows are plain.
+  const tasks = new Map<string, Entry[]>()
+  if (fold) {
+    for (const e of flat) if (isTask(e)) tasks.set(e.id, [])
+    if (tasks.size) {
+      flat = flat.filter((e) => {
+        const thread = e.threadId ? tasks.get(e.threadId) : undefined
+        thread?.push(e)
+        return !thread
+      })
+    }
+  }
   // A topic's rows leave the room's list for its card (and read as a flat chat again inside it, with no topics of its own).
   const { folds, hidden } = fold ? foldTopics(flat) : { folds: new Map<string, Entry[]>(), hidden: new Set<Entry>() }
   for (const { entry: e, exchanges } of groupExchanges(hidden.size ? flat.filter((x) => !hidden.has(x)) : flat, true)) {
@@ -62,6 +77,15 @@ export function buildChat(entries: Entry[], endings: Conversation[] = [], fold =
       out.push({ id: `topic-${stableId(e)}`, kind: 'topic', topic: e.data.topic!, root: e, entries: members, inner: buildChat(members, [], false).filter((i) => i.kind !== 'separator') })
       lastAuthor = null
       lastDate = newest
+      continue
+    }
+    const thread = tasks.get(e.id)
+    if (thread) {
+      flush()
+      if (lastDate === null || e.createdAt - lastDate > 3_600_000) out.push({ id: `sep-${e.id}`, kind: 'separator', date: e.createdAt })
+      out.push({ id: `task-${stableId(e)}`, kind: 'task', root: e, thread, inner: buildChat(thread, [], false).filter((i) => i.kind !== 'separator') })
+      lastAuthor = null
+      lastDate = thread.reduce((m, x) => Math.max(m, x.createdAt), e.createdAt)
       continue
     }
     if (e.kind === 'tool') {

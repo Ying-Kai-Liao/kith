@@ -144,6 +144,8 @@
           "Edit(//tmp/kith/kith/state/index/**)",
           "Read(//tmp/kith/kith/state/memory.db*)",
           "Edit(//tmp/kith/kith/state/memory.db*)",
+          "Read(//tmp/kith/kith/state/core/**)",
+          "Edit(//tmp/kith/kith/state/core/**)",
           "Read(//tmp/kith/kith/agents/relay/**)",
           "Edit(//tmp/kith/kith/agents/relay/**)",
           "Read(//tmp/kith/kith/agents/relay/**)",
@@ -355,8 +357,7 @@
           "Edit(//tmp/kith/kith/agents/echo/memory/people/sam/**)",
           "Edit(//tmp/kith/kith/agents/echo/memory/shared/**)",
           "Edit(//tmp/kith/kith/agents/echo/files/people/sam/**)"
-        ],
-        "blockReadsOutsideWorkingDirectories": true
+        ]
       },
       "sandbox": {
         "enabled": true,

@@ -28,6 +28,7 @@ import {
   type CrewBoard,
   type CrewFace,
 } from '../components/kith'
+import { sessionOutcome } from '../views/thread/permission-outcome.ts'
 
 const face = (name: string, color: string): CrewFace => ({ face: { kind: 'crew', name }, color: `kith:${color}`, id: name })
 const coder = face('coder', 'sky')
@@ -135,6 +136,8 @@ function Gallery() {
         </Row>
       </Section>
 
+      <GrantCardStates />
+
       <Section title="DecisionCard" note="Tinted in the agent's pair while it waits, grey once answered; 1 to 4 options; permission (Allow once / Always allow in folder / red Deny); guest prompt; answered.">
         <Row gap={24}>
           <div style={col(340)}><DecisionCard kind="question" pair={designerPair} title="Which direction for the app?" options={[{ id: 'a', label: 'Sky and glass' }, { id: 'b', label: 'Flat panels' }]} onChoose={() => {}} /></div>
@@ -232,4 +235,43 @@ function Gallery() {
   )
 }
 
-createRoot(document.getElementById('root')!).render(<Gallery />)
+/** The auto-mode card's This session grant, its four states (designer's grant-card drawing). `?grant` shows only these. */
+function GrantCardStates() {
+  const card = { kind: 'permission' as const, pair: coderPair, title: 'Wants to run a command', subject: 'git push origin flow/grant-card', onAllow: () => {}, onDeny: () => {} }
+  const removedAt = new Date(2026, 10, 2, 19, 5).getTime()
+  return (
+    <Section title="Grant card · This session" note="1 asking · 2 allowed this session, Remove on the card and on the rows it let through (third row hovered) · 3 removed · 4 ended by the host.">
+      {/* Holds the third row's hover so the still image shows Remove. */}
+      <style>{'.force-hover .kc-tool-remove{opacity:1;pointer-events:auto}.force-hover .kc-tool-tag.removable{visibility:hidden}'}</style>
+      <div id="grant-states">
+        <Row gap={24}>
+          <div style={col(560)}>
+            <div className="kith-text-label" style={h}>1 · ASKING</div>
+            <DecisionCard {...card} place="Runs on Mac mini · kith" allowLabel="Allow once" onSession={() => {}} alwaysLabel="Always allow in kith" onAlways={() => {}} />
+          </div>
+          <div style={{ ...col(400), display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="kith-text-label" style={{ ...h, marginBottom: 4 }}>2 · ALLOWED THIS SESSION</div>
+            <DecisionCard {...card} outcome={sessionOutcome({ id: 'g', state: 'live' })} outcomeAction={{ label: 'Remove', run: () => {} }} />
+            <ToolRow verb="Ran" object="git push origin flow/grant-card" tag={{ label: 'this session', remove: () => {} }} />
+            <div className="force-hover"><ToolRow verb="Ran" object="git push origin flow/grant-card" tag={{ label: 'this session', remove: () => {} }} /></div>
+            <ToolRow verb="Ran" object="gh pr create --fill" result="#566" />
+          </div>
+          <div style={col(400)}>
+            <div className="kith-text-label" style={h}>3 · REMOVED</div>
+            <DecisionCard {...card} outcome={sessionOutcome({ id: 'g', state: 'removed', endedAt: removedAt })} />
+          </div>
+          <div style={{ ...col(400), display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="kith-text-label" style={{ ...h, marginBottom: 4 }}>4 · ENDED</div>
+            <DecisionCard {...card} subject="npm run typecheck" outcome={sessionOutcome({ id: 'g', state: 'ended', endReason: 'task' })} />
+            <DecisionCard {...card} outcome={sessionOutcome({ id: 'g', state: 'ended', endReason: 'expired' })} />
+            <DecisionCard {...card} subject="curl -s https://api.example.org" outcome={sessionOutcome({ id: 'g', state: 'ended', endReason: 'settings' })} />
+            <ToolRow verb="Ran" object="git push origin flow/grant-card" tag={{ label: 'this session' }} />
+          </div>
+        </Row>
+      </div>
+    </Section>
+  )
+}
+
+const only = new URLSearchParams(location.search).has('grant')
+createRoot(document.getElementById('root')!).render(only ? <div style={{ background: 'var(--kith-ground)', color: 'var(--kith-ink)', padding: '24px 0 1px' }}><GrantCardStates /></div> : <Gallery />)

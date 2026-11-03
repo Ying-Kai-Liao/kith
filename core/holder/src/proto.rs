@@ -53,7 +53,7 @@ pub const CHALLENGE: u8 = 112;
 /// The first frame on every connection. The secret is an opaque key the holder was started with; it will be the
 /// local hand's pairing key (docs/plans/runtime-design.md section 10), and it never crosses the wire: the holder
 /// answers with a challenge and the core with an `Auth` (see `auth`). `generation` is the core's generation from
-/// core.db; `nonce` is random hex, fresh per connection.
+/// the core's database; `nonce` is random hex, fresh per connection.
 #[derive(Serialize, Deserialize)]
 pub struct Hello {
     pub version: u32,

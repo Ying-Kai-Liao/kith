@@ -32,6 +32,7 @@ test("an agent's own allow / always / deny card stays the plain card, and any ot
     { optionId: 'c', name: 'Reject', kind: 'reject_once' },
   ]
   assert.equal(permissionChoices({ options }), null)
+  assert.equal(permissionChoices({ options: [...options, { optionId: 'kith-auto-session', name: 'This session', kind: 'allow_session' }] }), null)
   const never = [...options, { optionId: 'd', name: 'Reject always', kind: 'reject_always' }]
   assert.deepEqual(permissionChoices({ options: never })?.map((c) => c.label), ['Allow once', 'Always allow', 'Deny', 'Never'])
 })

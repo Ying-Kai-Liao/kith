@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """kith-self-update — update kith itself (`kith update` with no agent), by however this Mac installed it.
 
-  kith-self-update            update kith: git checkout -> git pull --ff-only; Homebrew -> brew upgrade kith;
-                              install.sh layout (~/.kith) -> run scripts/install.sh again; the desktop app -> print the download link
+  kith-self-update            update kith, by how this kernel got here: an install.sh release (~/.kith/cli/<version>) -> run
+                              scripts/install.sh, which installs the latest (or KITH_VERSION) as a new version folder and moves
+                              cli/current to it; Homebrew -> brew upgrade kith; the desktop app -> print the download link;
+                              a git checkout (only reachable with KITH_KERNEL) -> says so and changes nothing
+  kith-self-update --dev      a git checkout: git pull --ff-only that checkout (never the installed CLI)
   kith-self-update --check    one line on stdout when kith is behind (for kith doctor), nothing otherwise; offline,
                               no remote or a slow one all end in nothing, within a few seconds; always exit 0
   kith-self-update --check --json   the same, as one object: {"ok", "method", "behind", "message"} (message null when kith is current or the check could not tell)
 
-A git checkout that is dirty, has no upstream or can't fast-forward is left as it is and the exit code is 1:
+With --dev, a git checkout that is dirty, has no upstream or can't fast-forward is left as it is and the exit code is 1:
 never a force, a stash or a reset.
 
 KITH_SELF_ROOT=<kernel folder> points it at another checkout (tests); it is read before KITH_ROOT, which `kith` sets for itself.
@@ -54,7 +57,7 @@ def method():
     prefix = brew_prefix()
     if any('/Cellar/' in p or (prefix and p.startswith(prefix + '/')) for p in paths()):
         return 'brew'
-    if KERNEL.parent.name == 'kith' and KERNEL.parent.parent.name == 'share':   # bin/kith beside share/kith/kernel
+    if layout()[1]:   # an install.sh release: cli/<version>/{bin/kith,share/kith/kernel}, or the flat one before it
         return 'release'
     top = git('rev-parse', '--show-toplevel')
     if top.returncode == 0 and os.path.realpath(top.stdout.strip()) == os.path.realpath(KERNEL.parent):
@@ -62,13 +65,26 @@ def method():
     return ''
 
 
+def layout():
+    """(machine folder, 'cli' | 'flat') for an install.sh release; ('', '') when the kernel is not one. 'cli' is
+    <machine>/cli/<version>|current/share/kith/kernel, 'flat' the older <prefix>/share/kith/kernel (which, once the
+    installer has moved it over, is a link into cli/: that is the cli layout too)."""
+    for k in (KERNEL, Path(os.path.realpath(KERNEL))):
+        if k.parent.name == 'kith' and k.parent.parent.name == 'share' and k.parent.parent.parent.parent.name == 'cli':
+            return k.parent.parent.parent.parent.parent, 'cli'
+    if KERNEL.parent.name == 'kith' and KERNEL.parent.parent.name == 'share':
+        return KERNEL.parent.parent.parent, 'flat'
+    return Path(''), ''
+
+
 def release_prefix():
-    return KERNEL.parent.parent.parent
+    return layout()[0]
 
 
 def binary_version():
     """The version a kith binary reports (the installed release's, else one on PATH); '' when none answers."""
-    for exe in (release_prefix() / 'bin' / 'kith', shutil.which('kith')):
+    prefix = release_prefix()
+    for exe in (prefix / 'cli/current/bin/kith', prefix / 'bin/kith', shutil.which('kith')):
         if exe and os.access(exe, os.X_OK):
             r = run(str(exe), '--version', timeout=5)
             m = re.search(r'\d+\.\d+\.\d+\S*', r.stdout) if r.returncode == 0 else None
@@ -134,6 +150,7 @@ def update_release():
     print(f'before: kith {before or "(version unknown)"} ({release_prefix()})')
     env = {**os.environ}
     env.setdefault('KITH_PREFIX', str(release_prefix()))   # upgrade the install this is, not a second one in ~/.kith
+    # The installer files the release under <prefix>/cli/<version>, flips cli/current and keeps the older versions.
     url = f'https://raw.githubusercontent.com/{REPO}/main/scripts/install.sh'
     if subprocess.call(['bash', '-c', 'set -o pipefail; curl -fsSL "$1" | sh', 'kith-update', url], env=env):
         die('re-running scripts/install.sh failed')
@@ -160,6 +177,11 @@ def check():
     return None
 
 
+def say_dev_checkout():
+    print(f'kith is running from a dev checkout ({KERNEL.parent}, picked with KITH_KERNEL). The installed CLI is a separate '
+          'release copy and updates with `kith update self` run from it (unset KITH_KERNEL); to pull this checkout instead: kith update --dev')
+
+
 def main(argv):
     if argv and argv[0] in ('-h', '--help'):
         print(__doc__.strip())
@@ -174,6 +196,11 @@ def main(argv):
         elif line:
             print(line)
         return
+    if argv == ['--dev']:
+        if method() != 'git':
+            die('--dev is for a checkout picked with KITH_KERNEL=<checkout>/kernel; the installed CLI updates with kith update self')
+        update_git()
+        return
     if '--json' in argv:
         print(json.dumps({'ok': False, 'error': 'kith update self --json is only for --check'}))
         sys.exit(2)
@@ -183,13 +210,13 @@ def main(argv):
     if m == 'app':
         print(f'kith runs from the desktop app, which updates by download: {APP_LINK}')
     elif m == 'git':
-        update_git()
+        say_dev_checkout()
     elif m == 'brew':
         update_brew()
     elif m == 'release':
         update_release()
     else:
-        die(f"can't tell how kith was installed ({KERNEL}); reinstall with scripts/install.sh, or git pull in your checkout")
+        die(f"can't tell how kith was installed ({KERNEL}); reinstall with scripts/install.sh")
 
 
 if __name__ == '__main__':

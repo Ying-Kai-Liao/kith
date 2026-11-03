@@ -15,6 +15,24 @@ use tokio::sync::mpsc;
 
 impl Actor {
     pub(super) async fn on_cmd(&mut self, cmd: Cmd, done_tx: &mpsc::UnboundedSender<Done>) -> bool {
+        // Anyone else's word ends a turn the agent started by itself, and theirs runs next: a message doesn't wait
+        // behind background work. Only what the agent itself sends, and answers to its questions, go on inside it.
+        if self.off_turn.is_some() {
+            match &cmd {
+                Cmd::SendToUser { .. }
+                | Cmd::SendFile { .. }
+                | Cmd::Permission { .. }
+                | Cmd::IdleFor(_)
+                | Cmd::StopIdle(_)
+                | Cmd::RefreshTools => {}
+                Cmd::Stop => {
+                    self.stop().await;
+                    self.end_off_turn();
+                    return true;
+                }
+                _ => self.end_off_turn(),
+            }
+        }
         match cmd {
             Cmd::RefreshTools => {
                 self.tools_changed = true;
@@ -84,9 +102,26 @@ impl Actor {
                 if reply.is_closed() {
                     return true;
                 }
-                let _ = reply.send(self.send_to_user(text));
+                // The agent may be talking out of a turn (a background task woke it).
+                let off = self.off_turn_context();
+                let result = match self.ensure_turn().await {
+                    Ok(()) => self.send_to_user(text),
+                    Err(error) => Err(error),
+                };
+                if let (true, Err(error)) = (off, &result) {
+                    self.off_turn_failed("send a message", error);
+                }
+                let _ = reply.send(result);
             }
-            Cmd::SendFile { paths, name, cancelled, reply } => self.begin_file(paths, name, cancelled, reply),
+            Cmd::SendFile { paths, name, cancelled, reply } => match self.ensure_turn().await {
+                Ok(()) => self.begin_file(paths, name, cancelled, reply),
+                Err(error) => {
+                    if self.off_turn_context() {
+                        self.off_turn_failed(&super::offturn::file_label(&paths, name.as_deref()), &error);
+                    }
+                    let _ = reply.send(Err(error));
+                }
+            },
             Cmd::Stop => self.stop().await,
             Cmd::IdleFor(reply) => {
                 let _ = reply.send(self.idle_for());

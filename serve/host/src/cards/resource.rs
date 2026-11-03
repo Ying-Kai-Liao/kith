@@ -30,11 +30,12 @@ pub const SENSITIVE: &[&str] = &[
     "bridge/**",
     "index/**",
     "memory.db*",
+    "core/**",
 ];
 
 /// The folders below a Kith state or machine folder that a guest's sandbox denies whole (`kith_guard.SECRET_DIRS`). `SENSITIVE`
 /// names the files among them a card for a *tool call* never touches; a grant of *access* is judged by the whole folders.
-pub const SECRET_DIRS: &[&str] = &["secrets", "serve", "browsers", "bridge", "index", "room-ledger"];
+pub const SECRET_DIRS: &[&str] = &["secrets", "serve", "browsers", "bridge", "index", "room-ledger", "core"];
 
 /// Whether `path` is, is below, or holds one of the [`SECRET_DIRS`] of the Kith folders.
 pub fn touches_secret_dirs(path: &Path, roots: &Roots) -> bool {
@@ -212,7 +213,7 @@ fn sensitive_rel(rel: &str) -> bool {
 }
 
 /// macOS volumes ignore case, so `Secrets/ENV` is the same file: compare folded there.
-fn fold(p: &Path) -> PathBuf {
+pub fn fold(p: &Path) -> PathBuf {
     if cfg!(target_os = "macos") { PathBuf::from(p.to_string_lossy().to_lowercase()) } else { p.to_path_buf() }
 }
 

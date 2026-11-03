@@ -28,6 +28,8 @@ export function foldOf(entry: Entry): Fold | null {
     switch (chosen?.kind) {
       case 'allow_once':
         return { ok: true, text: `Allowed ${what}`.trim() }
+      case 'allow_session':
+        return { ok: true, text: what ? `${permissionOutcome(entry)} · ${what}` : permissionOutcome(entry) }
       case 'allow_always':
         return { ok: true, text: `Always allowed ${what}`.trim() }
       case 'reject_once':

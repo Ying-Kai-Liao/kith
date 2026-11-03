@@ -78,6 +78,7 @@ ${link("linux/tar.gz", "Archive (.tar.gz)")}
 </ul>
 <h2>Command line</h2>
 <code>${INSTALL}</code>
+<p><a href="/install">CLI installation guide</a></p>
 <p><a href="${ALL_RELEASES}">All releases</a></p>
 </main><script>${DOWNLOAD_SCRIPT}</script></body></html>`;
 
