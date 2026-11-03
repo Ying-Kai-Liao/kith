@@ -64,6 +64,8 @@ fn role() {
         // Take the lock, start a long-lived child (it must not inherit the lock), report both, wait to be killed.
         "holder" => {
             let _lock = held(take(&folder, &key).unwrap());
+            // Never waited on on purpose: this process is killed while the sleeper lives on.
+            #[allow(clippy::zombie_processes)]
             let sleeper = child("sleep", &folder, &key)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
@@ -185,7 +187,13 @@ fn source_never_removes_anything() {
     for entry in std::fs::read_dir(src).unwrap() {
         let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
         for code in text.lines().filter(|l| !l.trim_start().starts_with("//")) {
-            for banned in ["remove_file", "remove_dir", "unlink", "DeleteFile", "rename("] {
+            for banned in [
+                "remove_file",
+                "remove_dir",
+                "unlink",
+                "DeleteFile",
+                "rename(",
+            ] {
                 assert!(!code.contains(banned), "{banned} in: {code}");
             }
         }
@@ -237,8 +245,27 @@ fn symlinked_folder_is_refused() {
 #[test]
 fn keys_are_checked_not_rewritten() {
     for bad in [
-        "", "..", "a/b", "a\\b", "../x", "a..b", "a\0b", "a\nb", "C:x", "a*b", "a?b", "a|b",
-        "a<b", "a>b", "a\"b", "A", "Abc", "a b", "caf\u{e9}", "a\u{301}", "\u{ff21}",
+        "",
+        "..",
+        "a/b",
+        "a\\b",
+        "../x",
+        "a..b",
+        "a\0b",
+        "a\nb",
+        "C:x",
+        "a*b",
+        "a?b",
+        "a|b",
+        "a<b",
+        "a>b",
+        "a\"b",
+        "A",
+        "Abc",
+        "a b",
+        "caf\u{e9}",
+        "a\u{301}",
+        "\u{ff21}",
     ] {
         assert!(matches!(file_name(bad), Err(Error::Key(_))), "{bad:?}");
     }
