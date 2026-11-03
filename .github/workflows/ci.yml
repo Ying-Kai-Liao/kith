@@ -942,7 +942,7 @@ jobs:
   #   gh run list --repo Ying-Kai-Liao/kith --workflow ci.yml --branch <branch> --limit 1   # the run id
   #   gh run watch <run-id> --repo Ying-Kai-Liao/kith --exit-status
   # Add -f artifact=true to also get the built `kith` binary (from each runner that was asked for):
-  #   gh run download <run-id> --repo Ying-Kai-Liao/kith -n kith-linux -D /tmp/kith-bin   # or kith-macos, kith-windows
+  #   gh run download <run-id> --repo Ying-Kai-Liao/kith -n kith-linux -D /tmp/kith-bin   # or -n kith-macos (no Windows binary)
   #   chmod +x /tmp/kith-bin/kith && kernel/tests/difftest/kith-difftest --rust --bin /tmp/kith-bin/kith
   # packages: names as in `cargo -p`. Every Rust crate here is in the serve/host workspace (core/* are out-of-tree
   # members of it), so one manifest serves all. Empty fails fast. os: all | linux | windows | macos.
@@ -992,14 +992,15 @@ jobs:
         run: cargo clippy $SEL --all-targets --locked -- -D warnings
       - name: test
         run: cargo test $SEL --locked --no-fail-fast
+      # The host program is Unix-only (the windows job builds just the holder and core crates), so no Windows binary.
       - name: Build kith
-        if: inputs.artifact
+        if: inputs.artifact && runner.os != 'Windows'
         run: cargo build --locked -p kith-serve --bin kith
       - name: Upload kith
-        if: inputs.artifact
+        if: inputs.artifact && runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: kith-${{ runner.os == 'Linux' && 'linux' || runner.os == 'Windows' && 'windows' || 'macos' }}
-          path: serve/host/target/debug/kith${{ runner.os == 'Windows' && '.exe' || '' }}
+          name: kith-${{ runner.os == 'Linux' && 'linux' || 'macos' }}
+          path: serve/host/target/debug/kith
           if-no-files-found: error
           retention-days: 3
