@@ -16,6 +16,8 @@ use serde_json::{Value, json};
 use super::{Authority, snapshot};
 use crate::authority::load::{empty, load};
 
+mod writes;
+
 const NOW: f64 = 1_800_000_000_000.0;
 const FUTURE: i64 = 4_102_444_800_000;
 

@@ -6,8 +6,11 @@
 //! So the answers can differ from the file's only where the tables differ; `tests.rs` loads generated auth.json data
 //! into core.db and checks that.
 //!
-//! Nothing is switched. `kith-auth` and the host still decide from auth.json; no production code calls this module and
-//! nothing writes its tables yet (M2-2 writes them, M2-8 imports auth.json). The `people.*` rows stay `NotServed`.
+//! The write half (M2-2) is `write.rs` (the verbs of `kith-auth`, over the auth.json shape), `store.rs` (one claim
+//! transaction each, the difference stored row by row) and `call.rs` (the `people.*` rows the daemon routes here).
+//!
+//! Nothing is switched. `kith-auth` and the host still decide from auth.json; only the daemon's `people.*` rows call this
+//! module, and no caller sends them yet (the CLI switch is M2-18, the import of auth.json M2-8).
 
 use kith_kernel::secrets::{self, Ctx, Rules};
 use rusqlite::{Connection, Row};
@@ -15,10 +18,13 @@ use serde_json::{Map, Value};
 
 use crate::error::{Error, Result};
 
+pub(crate) mod call;
 #[cfg(test)]
 mod load;
+mod store;
 #[cfg(test)]
 mod tests;
+mod write;
 
 /// The decision over one core.db. `ctx` says where agents live and what time it is, as it does for `kith-auth`.
 pub(crate) struct Authority<'a> {
@@ -131,10 +137,15 @@ pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
 /// from the same snapshot.
 fn snapshot_with(conn: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
     let tx = conn.unchecked_transaction()?;
+    read_tables(&tx, between)
+}
+
+/// [`snapshot_with`] inside a transaction the caller holds (a write reads what it changes in its own transaction).
+fn read_tables(tx: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
     let mut people = Map::new();
     {
         let mut q = tx.prepare(
-            "SELECT id, name, lang, tz, owner, bot_of, revoked, revoked_at, was FROM people ORDER BY seq",
+            "SELECT id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider FROM people ORDER BY seq",
         )?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -154,6 +165,7 @@ fn snapshot_with(conn: &Connection, between: &mut dyn FnMut()) -> Result<Value> 
                 );
             }
             set(&mut p, "was", json(r, 8, "people.was")?);
+            set(&mut p, "provider", text(r, 9)?.map(Value::String));
             people.insert(r.get::<_, String>(0)?, Value::Object(p));
         }
     }
@@ -161,8 +173,8 @@ fn snapshot_with(conn: &Connection, between: &mut dyn FnMut()) -> Result<Value> 
     let mut members: Map<String, Value> = Map::new();
     {
         let mut q = tx.prepare(
-            "SELECT agent, person, preset, mode, trusted, deny, model, env, helpers, budget, access, jobs, helper_once \
-             FROM memberships ORDER BY agent, person",
+            "SELECT agent, person, preset, mode, trusted, deny, model, env, helpers, budget, access, jobs, helper_once, \
+             access_by, access_since FROM memberships ORDER BY agent, person",
         )?;
         let mut rows = q.query([])?;
         while let Some(r) = rows.next()? {
@@ -181,6 +193,12 @@ fn snapshot_with(conn: &Connection, between: &mut dyn FnMut()) -> Result<Value> 
                 &mut row,
                 "helper_once",
                 json(r, 12, "memberships.helper_once")?,
+            );
+            set(&mut row, "access_by", json(r, 13, "memberships.access_by")?);
+            set(
+                &mut row,
+                "access_since",
+                json(r, 14, "memberships.access_since")?,
             );
             let agent: String = r.get(0)?;
             let rows = members
@@ -205,7 +223,35 @@ fn snapshot_with(conn: &Connection, between: &mut dyn FnMut()) -> Result<Value> 
         }
     }
     between();
+    let mut invites = Map::new();
+    {
+        let mut q = tx.prepare("SELECT code, person, expires FROM invites ORDER BY code")?;
+        let mut rows = q.query([])?;
+        while let Some(r) = rows.next()? {
+            invites.insert(
+                r.get::<_, String>(0)?,
+                serde_json::json!({ "person": r.get::<_, String>(1)?, "expires": r.get::<_, f64>(2)? }),
+            );
+        }
+    }
+    let mut retired = Map::new();
+    {
+        let mut q = tx.prepare("SELECT id, at FROM retired ORDER BY id")?;
+        let mut rows = q.query([])?;
+        while let Some(r) = rows.next()? {
+            let at = r.get::<_, Option<i64>>(1)?;
+            retired.insert(
+                r.get::<_, String>(0)?,
+                at.map_or_else(
+                    || Value::Object(Map::new()),
+                    |at| serde_json::json!({ "at": at }),
+                ),
+            );
+        }
+    }
     let mut auth = Map::new();
+    auth.insert("invites".to_owned(), Value::Object(invites));
+    auth.insert("retired".to_owned(), Value::Object(retired));
     auth.insert("people".to_owned(), Value::Object(people));
     auth.insert("members".to_owned(), Value::Object(members));
     auth.insert("presets".to_owned(), Value::Object(presets));
