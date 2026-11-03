@@ -449,6 +449,8 @@ impl Terminals {
             mode: proto::Mode::Pty,
             cols: req.cols,
             rows: req.rows,
+            // A terminal outlives its core by design; the lease would end it.
+            kill_on_lease_loss: false,
         };
         let (reply, answer) = mpsc::channel();
         let sent = self.queue.send(SpawnReq {

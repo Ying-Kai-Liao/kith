@@ -2616,6 +2616,309 @@
       }
     },
     {
+      "name": "run.mint",
+      "summary": "A run token for one run of an agent, for a person in a conversation (and the claim it holds, when it holds one). The token is shown once; it works on the run socket only for a peer that descends from the process bound with run.bind. Tokens live in the daemon's memory and are gone when it restarts.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent the run is of.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The invited person or bot guest the run is for.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "The conversation the run continues.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "claim",
+          "summary": "The writer claim the run holds (kept in the identity; claims themselves are M3).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "room",
+          "summary": "The room, when the run is in one.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "summary": "The project the run was launched in.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-run",
+          "mint"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "caller"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "conversation": {
+            "kind": "caller"
+          },
+          "claim": {
+            "kind": "caller"
+          },
+          "room": {
+            "kind": "caller"
+          },
+          "project": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "run.bind",
+      "summary": "Binds a run's token to the process the run was started as; until then no request resolves. The process's start time is kept, so a reused pid does not revive the token.",
+      "params": [
+        {
+          "name": "runId",
+          "summary": "The run.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The process id.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-run",
+          "bind"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "runId": {
+            "kind": "caller"
+          },
+          "pid": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "run.end",
+      "summary": "Ends a run's token (the run's process is gone, or it was revoked). A call already running finishes as the run it was.",
+      "params": [
+        {
+          "name": "runId",
+          "summary": "The run.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-run",
+          "end"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "runId": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "run.recall",
+      "summary": "`kith recall` as the run's own identity (query words and the narrowing flags only).",
+      "params": [
+        {
+          "name": "args",
+          "summary": "The arguments, already narrowed by the run socket.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "run-token"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-run",
+          "recall"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "args": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "run.memorySearch",
+      "summary": "`kith-memory search` as the run's own person and agent.",
+      "params": [
+        {
+          "name": "args",
+          "summary": "The arguments, already narrowed by the run socket.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "run-token"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-run",
+          "memory-search"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "args": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "run.projectId",
+      "summary": "The project the run was launched in (from its token), or `--info` of that one.",
+      "params": [
+        {
+          "name": "args",
+          "summary": "Nothing, or `--info` and the run's own project.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "run-token"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-run",
+          "project-id"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "args": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "backup.list",
       "summary": "The backup chain.",
       "params": [],
@@ -3792,6 +4095,479 @@
         "args": {
           "args": {
             "kind": "words"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.grant",
+      "summary": "Let a person use an agent, with their own settings on top of the agent's.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person (`*` is everyone kith knows).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent, or agents separated by commas.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "preset",
+          "summary": "A named bundle of permissions.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "mode",
+          "summary": "The permission mode.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "budget",
+          "summary": "At most this many dollars a calendar month of their runs of the agent (as `budget=` in `kith-auth member`).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "deny",
+          "summary": "Tools to refuse, separated by commas.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "model",
+          "summary": "The model their runs use.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "helpers",
+          "summary": "The helpers their runs may call, separated by commas.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "trusted",
+          "summary": "Allow a mode that is a free shell on this Mac.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "grant"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "agent": {
+            "kind": "positional"
+          },
+          "preset": {
+            "kind": "flag",
+            "spellings": [
+              "--preset"
+            ]
+          },
+          "mode": {
+            "kind": "flag",
+            "spellings": [
+              "--mode"
+            ]
+          },
+          "budget": {
+            "kind": "flag",
+            "spellings": [
+              "--budget"
+            ]
+          },
+          "deny": {
+            "kind": "flag",
+            "spellings": [
+              "--deny"
+            ]
+          },
+          "model": {
+            "kind": "flag",
+            "spellings": [
+              "--model"
+            ]
+          },
+          "helpers": {
+            "kind": "flag",
+            "spellings": [
+              "--helpers"
+            ]
+          },
+          "trusted": {
+            "kind": "switch",
+            "spellings": [
+              "--trusted"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "people.revoke",
+      "summary": "Take a person's use of an agent away.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent, or agents separated by commas.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "revoke"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.list",
+      "summary": "Who may use which agent, with their preset, mode and budget.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "Only this agent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Only this person.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "access"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "people.requests",
+      "summary": "The access requests waiting for the owner.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "requests"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "people.approve",
+      "summary": "Approve an access request.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "approve"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.deny",
+      "summary": "Deny an access request.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "deny"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "cards.list",
+      "summary": "The cards waiting, and recent ones.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "cards",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "cards.show",
+      "summary": "One card.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The card.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "cards",
+          "show"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "cards.answer",
+      "summary": "Answer a card.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The card.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "answer",
+          "summary": "The answer (the button's value, or the text asked for).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "cards",
+          "answer"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "answer": {
+            "kind": "positional"
           }
         }
       }

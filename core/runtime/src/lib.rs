@@ -25,12 +25,19 @@ mod layout;
 mod lock;
 mod log;
 mod marker;
+mod migrations;
 mod owner;
 mod perms;
+mod runs;
+mod runsock;
 // Held terminals start on Unix only for now; elsewhere `terminal.open` answers `direct` and most of it is unused.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod terminal;
 
+#[cfg(test)]
+mod runs_props;
+#[cfg(all(test, unix))]
+mod runsock_tests;
 #[cfg(test)]
 mod tests;
 

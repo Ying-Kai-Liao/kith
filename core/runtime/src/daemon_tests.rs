@@ -376,6 +376,7 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
             command: None,
             handshake: Duration::from_secs(5),
             stub: None,
+            lease: Duration::from_millis(600),
         },
     }
 }
@@ -527,6 +528,88 @@ fn a_holder_that_answers_garbage_or_a_refusal_stops_nothing_and_proves_nothing()
         let claims_still_open = d.shared.with_core(|c| c.claim_tx().map(|_| ()));
         assert!(claims_still_open.is_ok(), "{claims_still_open:?}");
     }
+}
+
+/// What the fake holder of the renewal test saw: the lease periods of the RENEW frames it received.
+#[cfg(unix)]
+static RENEWALS: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
+#[cfg(unix)]
+static SECRET_FILE: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+#[cfg(unix)]
+#[test]
+fn a_connected_core_keeps_renewing_the_holders_lease() {
+    use kith_holder::{auth, proto, wire};
+    fn proving(mut s: kith_holder::platform::Stream) {
+        let file = SECRET_FILE
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("secret file");
+        let secret = std::fs::read_to_string(file)
+            .expect("secret")
+            .trim()
+            .to_owned();
+        let Ok(Some((proto::HELLO, _, payload))) = wire::read(&mut s) else {
+            return;
+        };
+        let hello: proto::Hello = wire::parse(&payload).expect("hello");
+        let nonce = "ab".repeat(16);
+        let proof = auth::proof(
+            secret.as_bytes(),
+            auth::HOLDER,
+            &hello.nonce,
+            &nonce,
+            hello.generation,
+        );
+        wire::write_json(
+            &mut s,
+            proto::CHALLENGE,
+            0,
+            &proto::Challenge { nonce, proof },
+        )
+        .expect("challenge");
+        let Ok(Some((proto::AUTH, _, _))) = wire::read(&mut s) else {
+            return;
+        };
+        let welcome = proto::Welcome {
+            version: proto::VERSION,
+            instance: "i".repeat(32),
+            pid: std::process::id(),
+            tied_to_starter: false,
+            generation: hello.generation,
+            procs: Vec::new(),
+        };
+        wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
+        while let Ok(Some((kind, _, payload))) = wire::read(&mut s) {
+            match kind {
+                proto::RENEW => {
+                    let r: proto::Renew = wire::parse(&payload).expect("renew");
+                    RENEWALS.lock().expect("lock").push(r.ms);
+                }
+                proto::LIST => {
+                    let _ = wire::write_json(
+                        &mut s,
+                        proto::LISTING,
+                        0,
+                        &proto::Listing { procs: Vec::new() },
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+    let (_t, m) = machine();
+    let p = paths(&m);
+    *SECRET_FILE.lock().expect("lock") = Some(Layout::new(&m).holder_secret);
+    let exe = fake_holder(&m, proving);
+    let _d = serving(&p, holder_cfg(exe));
+    // The lease is 600 ms: a renewal on connect and then one about every 200 ms, each for the full period.
+    until("three renewals", || {
+        RENEWALS.lock().expect("lock").len() >= 3
+    });
+    assert!(RENEWALS.lock().expect("lock").iter().all(|ms| *ms == 600));
+    assert_eq!(holder_state(&p), "connected");
 }
 
 // --- step 7: a holder that is not the one the core last knew --------------------------------------------------------

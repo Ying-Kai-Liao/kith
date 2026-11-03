@@ -73,6 +73,7 @@ fn spec(conv: &str, claim: u64, generation: u64, mode: Mode, script: &[&str]) ->
         mode,
         cols: 80,
         rows: 24,
+        kill_on_lease_loss: false,
     }
 }
 
@@ -811,4 +812,157 @@ fn an_id_from_another_holder_instance_touches_nothing() {
     );
     assert!(String::from_utf8_lossy(&c.tail(&h(&c, id)).unwrap()).contains("hello"));
     kill_until_gone(&mut c, id);
+}
+
+fn tagged(mut s: p::Spawn) -> p::Spawn {
+    s.kill_on_lease_loss = true;
+    s
+}
+
+/// The listing entry of `id`.
+fn entry(c: &mut Client, id: u32) -> p::Held {
+    c.list().unwrap().into_iter().find(|e| e.id == id).unwrap()
+}
+
+fn ended(c: &mut Client, id: u32) -> bool {
+    let deadline = Instant::now() + WAIT;
+    while Instant::now() < deadline {
+        if entry(c, id).exit.is_some() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    false
+}
+
+#[test]
+fn at_expiry_the_tagged_run_is_killed_and_the_owner_run_is_kept() {
+    let fx = Fixture::new("lease1");
+    fx.start();
+    let mut c = fx.client(1);
+    let owner = spawn(
+        &mut c,
+        &spec("conv-owner", 1, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    // No renewal yet: no lease is armed, nothing expires, and a tagged run may not start without one.
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(entry(&mut c, owner).exit.is_none());
+    let guest = tagged(spec("conv-guest", 1, 1, Mode::Pipes, &shell(sleep_line())));
+    c.spawn(&guest).unwrap();
+    c.expect(p::LEASE_LOST, 0, WAIT).expect("refused unarmed");
+    assert_eq!(c.list().unwrap().len(), 1);
+    c.renew(Duration::from_millis(1500)).unwrap();
+    let guest = spawn(&mut c, &guest);
+    assert!(ended(&mut c, guest), "the tagged run outlived its lease");
+    // Its exit is kept until acked, like any exit; the owner run is untouched.
+    let exit = entry(&mut c, guest).exit.expect("exit kept");
+    assert!(exit.signal.is_some() || exit.code != Some(0), "{exit:?}");
+    assert!(entry(&mut c, owner).exit.is_none());
+    assert_eq!(c.ack(&h(&c, guest)).unwrap(), AckState::Acked);
+    kill_until_gone(&mut c, owner);
+}
+
+#[test]
+fn a_link_that_drops_and_never_returns_runs_out_the_lease() {
+    let fx = Fixture::new("lease5");
+    fx.start();
+    let mut c = fx.client(1);
+    c.renew(Duration::from_millis(1500)).unwrap();
+    let guest = spawn(
+        &mut c,
+        &tagged(spec("conv-guest", 1, 1, Mode::Pipes, &shell(sleep_line()))),
+    );
+    let owner = spawn(
+        &mut c,
+        &spec("conv-owner", 1, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    drop(c);
+    // The same core (same generation) comes back after the lease ran out: the tagged run is dead, the owner's kept.
+    std::thread::sleep(Duration::from_millis(2500));
+    let mut c = fx.client(1);
+    assert!(entry(&mut c, guest).exit.is_some());
+    assert!(entry(&mut c, owner).exit.is_none());
+    kill_until_gone(&mut c, owner);
+}
+
+#[test]
+fn a_huge_renewal_is_capped_and_does_not_panic_the_connection() {
+    let fx = Fixture::new("lease6");
+    fx.start();
+    let mut c = fx.client(1);
+    c.renew(Duration::from_millis(u64::MAX)).unwrap();
+    let guest = spawn(
+        &mut c,
+        &tagged(spec("conv-guest", 1, 1, Mode::Pipes, &shell(sleep_line()))),
+    );
+    // Still answering, and the tagged run holds a (capped) lease.
+    assert!(entry(&mut c, guest).exit.is_none());
+    kill_until_gone(&mut c, guest);
+}
+
+#[test]
+fn renewals_keep_a_tagged_run_alive() {
+    let fx = Fixture::new("lease2");
+    fx.start();
+    let mut c = fx.client(1);
+    c.renew(Duration::from_secs(3)).unwrap();
+    let guest = spawn(
+        &mut c,
+        &tagged(spec("conv-guest", 1, 1, Mode::Pipes, &shell(sleep_line()))),
+    );
+    let until = Instant::now() + Duration::from_millis(1500);
+    while Instant::now() < until {
+        c.renew(Duration::from_secs(3)).unwrap();
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(entry(&mut c, guest).exit.is_none());
+    }
+    kill_until_gone(&mut c, guest);
+}
+
+#[test]
+fn while_the_lease_is_lost_a_tagged_spawn_is_refused_and_a_renewal_restores_it() {
+    let fx = Fixture::new("lease3");
+    fx.start();
+    let mut c = fx.client(1);
+    c.renew(Duration::from_millis(200)).unwrap();
+    std::thread::sleep(Duration::from_millis(600));
+    let guest = tagged(spec("conv-guest", 1, 1, Mode::Pipes, &shell(sleep_line())));
+    c.spawn(&guest).unwrap();
+    let (_, _, payload) = c.expect(p::LEASE_LOST, 0, WAIT).expect("lease lost answer");
+    let lost: p::LeaseLost = wire::parse(&payload).unwrap();
+    assert_eq!((lost.conv.as_str(), lost.claim), ("conv-guest", 1));
+    assert!(c.list().unwrap().is_empty());
+    // An owner run still starts.
+    let owner = spawn(
+        &mut c,
+        &spec("conv-owner", 1, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    // A renewal restores the lease, and the refused claim was not used up.
+    c.renew(Duration::from_secs(60)).unwrap();
+    let guest_id = spawn(&mut c, &guest);
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(entry(&mut c, guest_id).exit.is_none());
+    kill_until_gone(&mut c, guest_id);
+    kill_until_gone(&mut c, owner);
+}
+
+#[test]
+fn an_older_cores_renewals_do_not_keep_the_lease() {
+    let fx = Fixture::new("lease4");
+    fx.start();
+    let mut old = fx.client(1);
+    old.renew(Duration::from_secs(600)).unwrap();
+    let guest = spawn(
+        &mut old,
+        &tagged(spec("conv-guest", 1, 1, Mode::Pipes, &shell(sleep_line()))),
+    );
+    let mut new = fx.client(2);
+    assert!(old.closed(WAIT));
+    new.renew(Duration::from_millis(400)).unwrap();
+    // The superseded core keeps sending long renewals; none counts.
+    let _ = old.renew(Duration::from_secs(600));
+    assert!(
+        ended(&mut new, guest),
+        "an old core's renewal kept the lease"
+    );
 }

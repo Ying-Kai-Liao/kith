@@ -18,6 +18,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+/// The longest lease one renewal can grant (ten minutes).
+const MAX_LEASE_MS: u64 = 10 * 60 * 1000;
 const TAIL_BYTES: usize = 1 << 20;
 /// How long an exit waits for the last output of the process before it is reported anyway.
 const EXIT_DRAIN: Duration = Duration::from_millis(500);
@@ -49,6 +51,17 @@ struct Entry {
     /// A kill has seen the tree empty. Sticks: the group id may be handed to an unrelated group afterwards (the blind
     /// spot of `Proc::tree_empty`), and a later kill must neither say "killing" nor signal that group.
     gone: AtomicBool,
+    /// Killed by the holder itself when the lease lapses.
+    kill_on_lease_loss: bool,
+}
+
+/// The lease the newest core keeps alive. See `proto` for the rules.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Lease {
+    /// No renewal has ever arrived: nothing expires.
+    Unarmed,
+    Until(Instant),
+    Lost,
 }
 
 /// The connected core. Frames go out through its own writer thread: a core that stops reading must never block
@@ -103,6 +116,7 @@ struct State {
     /// can start between that decision and the exit.
     closing: bool,
     idle_since: Option<Instant>,
+    lease: Lease,
 }
 
 struct Holder {
@@ -152,6 +166,8 @@ pub fn run(cfg: Config) -> io::Result<()> {
     let holder = Arc::new(Holder::new(cfg.secret.into_bytes(), endpoint, cfg.idle));
     let watcher = holder.clone();
     std::thread::spawn(move || watcher.watch_idle());
+    let watcher = holder.clone();
+    std::thread::spawn(move || watcher.watch_lease());
     let gave_up = holder.accept_loop(
         || platform::accept(&listener),
         ACCEPT_RETRIES,
@@ -236,6 +252,7 @@ impl Holder {
                 core: None,
                 closing: false,
                 idle_since: Some(Instant::now()),
+                lease: Lease::Unarmed,
             }),
             changed: Condvar::new(),
             instance: platform::random_hex(),
@@ -267,6 +284,37 @@ impl Holder {
                 st.closing = true;
                 self.exit();
             }
+        }
+    }
+
+    /// Expiry and the kill are one step under the state lock: a later kill would be a window in which a cut-off
+    /// hand still runs a revoked guest. Callers hold the lock and call this before acting on anything, so a
+    /// renewal or spawn that arrives as the lease lapses sees the lapse first. While lost it keeps killing, since
+    /// a tree that was slow to die must not be left alone.
+    fn expire_lease(&self, st: &mut State) {
+        if let Lease::Until(t) = st.lease
+            && Instant::now() >= t
+        {
+            st.lease = Lease::Lost;
+        }
+        if st.lease == Lease::Lost {
+            for e in st.procs.values() {
+                if e.kill_on_lease_loss && e.held.exit.is_none() && !e.gone.load(Ordering::Relaxed)
+                {
+                    e.proc.kill_tree();
+                }
+            }
+        }
+    }
+
+    fn watch_lease(&self) {
+        loop {
+            std::thread::sleep(Duration::from_millis(10));
+            let mut st = self.lock();
+            if st.closing {
+                return;
+            }
+            self.expire_lease(&mut st);
         }
     }
 
@@ -417,7 +465,19 @@ impl Holder {
                 drop(st);
                 return Self::refuse(stream, Why::Superseded, current);
             }
+            self.expire_lease(&mut st);
             match kind {
+                p::RENEW => {
+                    let renew: p::Renew = wire::parse(&payload)?;
+                    // A zero period would lapse at once; it is not a way to end a lease.
+                    // A huge period must neither panic this thread nor switch the kill off: it is capped.
+                    let period = Duration::from_millis(renew.ms.min(MAX_LEASE_MS));
+                    if let Some(deadline) =
+                        Instant::now().checked_add(period).filter(|_| renew.ms > 0)
+                    {
+                        st.lease = Lease::Until(deadline);
+                    }
+                }
                 p::SPAWN => {
                     let spec: p::Spawn = wire::parse(&payload)?;
                     if st.closing {
@@ -565,6 +625,14 @@ impl Holder {
             );
             return self.to_core(&st, frame);
         }
+        // Unarmed counts as lost here: a tagged run must never start without a lease that will end it.
+        if spec.kill_on_lease_loss && !matches!(st.lease, Lease::Until(_)) {
+            let lost = p::LeaseLost {
+                conv: spec.conv,
+                claim: spec.claim,
+            };
+            return self.to_core(&st, wire::json_frame(p::LEASE_LOST, 0, &lost));
+        }
         // A claim at or below the highest started for this conversation was decided before (or is) one whose job
         // already ran: refuse it, whether or not that process is still held or was acked.
         if let Some(highest) = st
@@ -643,6 +711,7 @@ impl Holder {
                 tail: VecDeque::new(),
                 readers: 1 + u8::from(started.err.is_some()),
                 gone: AtomicBool::new(false),
+                kill_on_lease_loss: spec.kill_on_lease_loss,
             },
         );
         let reader = |stream: Box<dyn std::io::Read + Send>, kind: u8| {
@@ -792,6 +861,7 @@ mod tests {
                 tail: VecDeque::new(),
                 readers: 0,
                 gone: AtomicBool::new(false),
+                kill_on_lease_loss: false,
             },
         );
         holder.reap(1, proc);
@@ -822,6 +892,18 @@ mod tests {
         assert_eq!(kind, p::REFUSED);
         assert_eq!(wire::parse::<Refused>(&payload).unwrap().why, Why::Closing);
         t.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn a_renewal_from_a_connection_that_is_not_the_newest_is_refused_and_does_not_count() {
+        let holder = test_holder();
+        let (mut theirs, mut mine) = UnixStream::pair().unwrap();
+        wire::write_json(&mut theirs, p::RENEW, 0, &p::Renew { ms: 60_000 }).unwrap();
+        // No core is registered, so this connection is not the newest one.
+        holder.commands(&mut mine, 7, 1).unwrap();
+        assert_eq!(holder.lock().lease, Lease::Unarmed);
+        let (kind, _, _) = wire::read(&mut theirs).unwrap().unwrap();
+        assert_eq!(kind, p::REFUSED);
     }
 
     fn test_holder() -> Arc<Holder> {
@@ -867,6 +949,7 @@ mod tests {
                 mode: p::Mode::Pipes,
                 cols: 80,
                 rows: 24,
+                kill_on_lease_loss: false,
             })
             .unwrap();
         client
@@ -906,6 +989,7 @@ mod tests {
                 mode: p::Mode::Pipes,
                 cols: 80,
                 rows: 24,
+                kill_on_lease_loss: false,
             })
             .unwrap();
         client
@@ -955,6 +1039,7 @@ mod tests {
                 mode: p::Mode::Pipes,
                 cols: 80,
                 rows: 24,
+                kill_on_lease_loss: false,
             })
             .unwrap();
         client

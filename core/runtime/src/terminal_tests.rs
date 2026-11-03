@@ -233,6 +233,7 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
                 command: None,
                 handshake: Duration::from_secs(5),
                 stub,
+                lease: Duration::from_secs(30),
             },
         }
     }

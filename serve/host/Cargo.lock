@@ -2133,6 +2133,7 @@ dependencies = [
  "kith-api",
  "kith-holder",
  "kith-kernel",
+ "proptest",
  "rusqlite",
  "serde_json",
  "sha2 0.10.9",
@@ -2251,6 +2252,14 @@ dependencies = [
  "uuid",
  "x25519-dalek",
  "zeroize",
+]
+
+[[package]]
+name = "kith-stub"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

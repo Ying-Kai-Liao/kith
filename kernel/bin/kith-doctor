@@ -455,6 +455,11 @@ def core():
     if not binary:
         note('no kith program on this Mac yet: the Python kernel answers everything')
         return
+    stub = os.environ.get('KITH_STUB_BIN') or str(Path(binary).parent / 'kith-stub')
+    if os.access(stub, os.X_OK):
+        ok('conversation lock: kith-stub found, so each run holds its session\'s lock')
+    else:
+        warn('conversation lock: no kith-stub beside kith, so runs start unlocked (kith update self; KITH_REQUIRE_STUB=1 refuses instead)')
     try:
         # Reaching a daemon that is busy can take a minute; doctor asks for a few seconds (TimeoutExpired is a SubprocessError).
         r = run(binary, 'kernel', 'core-status', '--json', timeout=5)

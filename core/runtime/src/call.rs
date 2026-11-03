@@ -3,10 +3,11 @@
 
 use std::path::Path;
 
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::db::Core;
 use crate::error::{Error, Result};
+use crate::runs::RunIdentity;
 
 impl Core {
     /// Calls a method of the table as `who`: the method must exist, be open to the principal and take these params.
@@ -17,19 +18,34 @@ impl Core {
     /// A method that depends on the caller's environment takes the caller's view in its params, never the process's own:
     /// the daemon's environment is not the environment of the CLI that asked (`paths` takes `home` and `env`).
     pub fn call(&self, who: kith_api::Principal, method: &str, params: &Value) -> Result<Value> {
-        let row = kith_api::method(method)
-            .ok_or_else(|| Error::NoSuchMethod(format!("kith-core: no method {method}")))?;
-        if !row.allows(who) {
-            return Err(Error::NotAllowed(format!(
-                "kith-core: {method} is not open to {}",
-                who.name()
-            )));
-        }
-        kith_api::params::validate(row, params)
-            .map_err(|e| Error::BadParams(format!("kith-core: {e}")))?;
+        let row = check(who, method, params)?;
         match row.name {
             "paths" => self.paths(params),
             "kernel.version" => parse(&kith_kernel::version_json()),
+            _ => Err(Error::NotServed(format!(
+                "kith-core: {method} is not answered in the core yet"
+            ))),
+        }
+    }
+
+    /// A method of the run socket, as the run its token names. The identity comes from the token table, never from the
+    /// params. Only `run.projectId` is answered here (it needs nothing but the identity); the kernel tools stay with
+    /// the host's host.sock until a later step switches them.
+    // A method of Core on purpose, though it reads nothing of it yet: no handler runs without the lock and generation.
+    #[allow(clippy::unused_self)]
+    pub(crate) fn call_run(
+        &self,
+        who: &RunIdentity,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value> {
+        let row = check(kith_api::Principal::RunToken, method, params)?;
+        let args = params.get("args").and_then(Value::as_array);
+        match (row.name, args.map(Vec::as_slice)) {
+            ("run.projectId", None | Some([])) => Ok(match &who.project {
+                Some(id) => json!({"stdout": format!("{id}\n"), "stderr": "", "code": 0}),
+                None => json!({"stdout": "", "stderr": "", "code": 1}),
+            }),
             _ => Err(Error::NotServed(format!(
                 "kith-core: {method} is not answered in the core yet"
             ))),
@@ -65,6 +81,25 @@ impl Core {
         };
         parse(&folders.json())
     }
+}
+
+/// The shared door check: the method exists, is open to `who` and takes these params.
+pub(crate) fn check(
+    who: kith_api::Principal,
+    method: &str,
+    params: &Value,
+) -> Result<&'static kith_api::Method> {
+    let row = kith_api::method(method)
+        .ok_or_else(|| Error::NoSuchMethod(format!("kith-core: no method {method}")))?;
+    if !row.allows(who) {
+        return Err(Error::NotAllowed(format!(
+            "kith-core: {method} is not open to {}",
+            who.name()
+        )));
+    }
+    kith_api::params::validate(row, params)
+        .map_err(|e| Error::BadParams(format!("kith-core: {e}")))?;
+    Ok(row)
 }
 
 fn parse(text: &str) -> Result<Value> {

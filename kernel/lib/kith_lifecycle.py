@@ -111,12 +111,16 @@ def clear_intent(sid):
         (d / f'{sid}.json').unlink(missing_ok=True)
 
 
-def how_it_ended(sid, had_process=True, pid=None, start=None):
+def how_it_ended(sid, had_process=True, pid=None, start=None, launcher=None, launcher_start=None):
     """Why a session with no process stopped: the intent's reason ('idle', 'quit', 'revoked', ...), or 'crash' when a process
     ran and ended with none (SessionEnd always says "other", so only the intent tells). The intent must be for the process
-    that ended (its pid, and its start time when both sides know it): an older one is not this process' reason. A session we
+    that ended (its pid, and its start time when both sides know it): an older one is not this process' reason. A run under
+    kith-stub is also known by the stub's pid and start (launcher): the host writes the intent for the claim's pid. A session we
     never saw run (old data, from before intents) is None: nothing is claimed about it."""
     i = read_intent(sid)
+    if i and launcher and i.get('pid') == launcher \
+            and not (launcher_start and i.get('procStart') and ' '.join(launcher_start.split()) != i['procStart']):
+        return i.get('why')
     if i and (pid is None or i.get('pid') is None or i['pid'] == pid) \
             and not (start and i.get('procStart') and ' '.join(start.split()) != i['procStart']):
         return i.get('why')
