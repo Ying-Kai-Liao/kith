@@ -956,6 +956,7 @@ jobs:
       PACKAGES: ${{ inputs.packages }}
     steps:
       - name: Require packages
+        working-directory: ${{ github.workspace }}
         run: |
           if [ -z "$(echo "$PACKAGES" | tr -d '[:space:]')" ]; then
             echo "::error::mode=check needs -f packages=\"<cargo package names>\" (for example kith-holder)"
