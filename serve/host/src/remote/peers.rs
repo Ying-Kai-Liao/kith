@@ -771,7 +771,7 @@ mod tests {
     #[tokio::test]
     async fn the_asking_side_pins_the_key_it_computed_the_code_with() {
         let r = Rig::new().await;
-        *r.hub.store.secret_key.locked() = Some(zeroize::Zeroizing::new(vec![7; 32]));
+        r.hub.store.vault.mark_open();
         let answer = |path: &str, v: Value| {
             r.fake.answers.lock().unwrap().insert(path.to_owned(), v);
         };

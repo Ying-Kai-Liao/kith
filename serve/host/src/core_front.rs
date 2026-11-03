@@ -104,6 +104,29 @@ fn folders_from(answer: &Value) -> Option<Paths> {
     })
 }
 
+/// A `secrets.*` row on the owner socket, for the host's vault (M2-7): the host may not name the core elsewhere, so
+/// this is its one door to the envelope. Waits up to `wait` for a daemon that is still starting; every other outcome
+/// (no daemon, a daemon of another version, a lost connection, a refusal such as a locked key store) is an error whose
+/// text says why. The rows are idempotent, so a lost connection is retried once inside `reach`.
+pub fn secrets_call(method: &str, params: &Value, wait: std::time::Duration) -> anyhow::Result<Value> {
+    let folders = kernel::folders(&kith_kernel::paths::process_home());
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match kith_core::reach(&folders, method, params, true) {
+            kith_core::Reached::Answered(answer) => return Ok(answer),
+            kith_core::Reached::Refused(e) => anyhow::bail!("{e}"),
+            kith_core::Reached::NoDaemon if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            kith_core::Reached::NoDaemon => {
+                anyhow::bail!("the core is not running (kith doctor says why; secrets need it)")
+            }
+            kith_core::Reached::Mismatch(note) => anyhow::bail!("the running core does not fit this host: {note}"),
+            kith_core::Reached::Lost(why) => anyhow::bail!("the connection to the core ended: {why}"),
+        }
+    }
+}
+
 /// `kith serve` has the daemon front start beside the host. It never waits for it and never fails on it: a core that
 /// will not start is a line in the core log and a status for `kith doctor`, and the host goes on.
 pub fn start_beside_host() -> kith_core::Daemon {

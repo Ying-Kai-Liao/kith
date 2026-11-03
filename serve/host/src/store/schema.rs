@@ -395,14 +395,16 @@ impl Store {
         )?;
         migrate(&c)?;
         kith_mem::schema::migrate(&c)?;
-        let secret_key = if path == Path::new(":memory:") {
-            let mut key = vec![0; 32];
-            getrandom::fill(&mut key).map_err(|_| anyhow::anyhow!("random key unavailable"))?;
-            Some(zeroize::Zeroizing::new(key))
+        // A memory store is a test's: its vault is an open in-memory stand-in for the core's envelope.
+        #[cfg(test)]
+        let vault = if path == Path::new(":memory:") {
+            crate::market::vault::memory::open_vault().0
         } else {
-            None
+            crate::market::vault::Vault::new()
         };
-        Ok(Self { db: Mutex::new(c), connector_lock: Mutex::new(()), secret_key: Mutex::new(secret_key) })
+        #[cfg(not(test))]
+        let vault = crate::market::vault::Vault::new();
+        Ok(Self { db: Mutex::new(c), connector_lock: Mutex::new(()), vault })
     }
 }
 
