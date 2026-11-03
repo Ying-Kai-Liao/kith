@@ -7,6 +7,27 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      # mode=check is the cheap by-hand Rust check for workers (the rust-check job at the bottom). Push, PR and
+      # a dispatch with no inputs are all mode=full: exactly the jobs below, as before.
+      mode:
+        description: "full = the whole pipeline (batch runs); check = only the rust-check job"
+        type: choice
+        options: [full, check]
+        default: full
+      packages:
+        description: "check mode: cargo package names (-p), space separated"
+        type: string
+        default: ""
+      os:
+        description: "check mode: which runners"
+        type: choice
+        options: [all, linux, windows, macos]
+        default: all
+      artifact:
+        description: "check mode: also build the kith binary and upload it as an artifact"
+        type: boolean
+        default: false
 
 # Label events don't start this workflow (ci-label.yml dispatches it for ci:full), so a label never
 # creates a run, and never a skipped `ci` check.
@@ -28,6 +49,8 @@ jobs:
   # Path filtering happens here, not in `on.paths`, so the `ci` job below always
   # reports and can be the one required check.
   changes:
+    # Check mode skips this job, and with it (needs) every job below that depends on it.
+    if: ${{ inputs.mode != 'check' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # dorny/paths-filter lists a pull request's files through the API.
@@ -888,7 +911,7 @@ jobs:
   # skipped by the filter, fails on any failure or cancellation.
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && inputs.mode != 'check' }}
     needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -901,3 +924,74 @@ jobs:
           case " $RESULTS " in
             *" failure "*|*" cancelled "*) exit 1 ;;
           esac
+
+  # Light Rust check, by hand only (never on push or pull_request): fmt, clippy -D warnings and tests of chosen
+  # packages on Linux, Windows and macOS, instead of building on your Mac. Every other job is skipped in this mode.
+  #
+  # How to use (GitHub only dispatches workflow files that exist on main, so this lives in ci.yml, and --ref makes
+  # the run use the branch's copy of the file, inputs included):
+  #   push your branch to origin
+  #   gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=check -f packages="kith-holder kith-core" -f os=all
+  #   gh run list --repo Ying-Kai-Liao/kith --workflow ci.yml --branch <branch> --limit 1   # the run id
+  #   gh run watch <run-id> --repo Ying-Kai-Liao/kith --exit-status
+  # Add -f artifact=true to also get the built `kith` binary (from each runner that was asked for):
+  #   gh run download <run-id> --repo Ying-Kai-Liao/kith -n kith-linux -D /tmp/kith-bin   # or kith-macos, kith-windows
+  #   chmod +x /tmp/kith-bin/kith && kernel/tests/difftest/kith-difftest --rust --bin /tmp/kith-bin/kith
+  # packages: names as in `cargo -p`. Every Rust crate here is in the serve/host workspace (core/* are out-of-tree
+  # members of it), so one manifest serves all. Empty fails fast. os: all | linux | windows | macos.
+  rust-check:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' }}
+    name: rust-check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os == 'linux' && '["ubuntu-latest"]' || inputs.os == 'windows' && '["windows-latest"]' || inputs.os == 'macos' && '["macos-latest"]' || '["ubuntu-latest","windows-latest","macos-latest"]') }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: serve/host
+    env:
+      PACKAGES: ${{ inputs.packages }}
+    steps:
+      - name: Require packages
+        run: |
+          if [ -z "$(echo "$PACKAGES" | tr -d '[:space:]')" ]; then
+            echo "::error::mode=check needs -f packages=\"<cargo package names>\" (for example kith-holder)"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: rust-check-${{ matrix.os }}
+      - name: Select packages
+        run: |
+          sel=""
+          for p in $PACKAGES; do
+            sel="$sel -p $p"
+          done
+          echo "SEL=$sel" >> "$GITHUB_ENV"
+      - name: fmt
+        run: cargo fmt --check $SEL
+      - name: clippy
+        run: cargo clippy $SEL --all-targets --locked -- -D warnings
+      - name: test
+        run: cargo test $SEL --locked --no-fail-fast
+      - name: Build kith
+        if: inputs.artifact
+        run: cargo build --locked -p kith-serve --bin kith
+      - name: Upload kith
+        if: inputs.artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kith-${{ runner.os == 'Linux' && 'linux' || runner.os == 'Windows' && 'windows' || 'macos' }}
+          path: serve/host/target/debug/kith${{ runner.os == 'Windows' && '.exe' || '' }}
+          if-no-files-found: error
+          retention-days: 3
