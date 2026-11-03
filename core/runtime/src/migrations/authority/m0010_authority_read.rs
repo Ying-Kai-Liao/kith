@@ -10,11 +10,16 @@
 //! No SQL foreign keys: auth.json holds a bot whose owner is gone, a row for an id that is no person, a revoked
 //! person's rows. All of that must read back as it was.
 //!
-//! Left out on purpose, because the access decision never reads them: auth.json `profiles`, `grants`, `env` (secrets,
-//! lane B), `invites` (access requests, M2-3), `retired` (ids never handed out again, a write rule: M2-2), `once`
-//! (used up by a launch, M2-2), and a person's `handles`, `root`, `provider`, `kith`, `agents` (channel and cloud
-//! links that `kith-people` lists and the host keeps). `revoked` is kept as a flag and its time (`revoked.at`); any
-//! other key inside a `revoked` object is not read by anything.
+//! Left out of this step, with who needs them:
+//! - Read by the access decision in `kith-auth` but NOT yet here: top-level `agent_access` (the domains the owner kept
+//!   for every guest of an agent; Python `resolve` -> `with_jobs` -> `agent_domains` adds them, plus the package's
+//!   `guest_domains`, to `access.domains`). A later lane A step adds that table. `kith_kernel::secrets::with_jobs`
+//!   does not add either yet, so `Rules::resolve` already differs from Python there: a follow-up for the rules, not
+//!   for these tables.
+//! - Not read by the decision: `profiles`, `grants`, `env` (secrets, lane B), `invites` (access requests, M2-3),
+//!   `retired` and `once` (written by M2-2), and a person's `handles`, `root`, `provider`, `kith`, `agents` (channel
+//!   and cloud links that `kith-people` lists and the host keeps). `revoked` is kept as a flag and its time
+//!   (`revoked.at`); other keys inside a `revoked` object are read by nothing.
 
 use super::Migration;
 

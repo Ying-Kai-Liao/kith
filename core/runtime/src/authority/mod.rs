@@ -88,14 +88,15 @@ impl<'a> Authority<'a> {
     }
 }
 
-/// A rule that stopped with a refusal `kith-auth` would `die` with (a membership naming a preset nobody defined): the
-/// tables are not in a state the rules can answer from, so the caller gets no answer, which it must read as "no".
+/// A rule that stopped with a refusal `kith-auth` would `die` with (a membership naming a preset nobody defined, which
+/// `kith-auth preset X --rm` leaves behind): the rules have no answer, which the caller must read as "no". It is not a
+/// damaged database, so it is never `Corrupt` (whose recovery is `kith restore`).
 fn refused(d: &secrets::Die) -> Error {
-    Error::Corrupt(format!("authority: {}", d.msg))
+    Error::Refused(format!("authority: {}", d.msg))
 }
 
 fn bad(what: &str, e: impl std::fmt::Display) -> Error {
-    Error::Corrupt(format!("core.db: authority {what}: {e}"))
+    Error::Refused(format!("core.db: authority {what}: {e}"))
 }
 
 fn text(r: &Row<'_>, i: usize) -> Result<Option<String>> {
@@ -123,6 +124,12 @@ fn flag(r: &Row<'_>, i: usize) -> Result<Option<Value>> {
 /// that commits halfway through cannot show this call a person revoked in one table and not yet in the next).
 /// A NULL column is a missing key.
 pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
+    snapshot_with(conn, &mut || {})
+}
+
+/// [`snapshot`], calling `between` after each table is read: a test writes there to prove the later tables are read
+/// from the same snapshot.
+fn snapshot_with(conn: &Connection, between: &mut dyn FnMut()) -> Result<Value> {
     let tx = conn.unchecked_transaction()?;
     let mut people = Map::new();
     {
@@ -150,6 +157,7 @@ pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
             people.insert(r.get::<_, String>(0)?, Value::Object(p));
         }
     }
+    between();
     let mut members: Map<String, Value> = Map::new();
     {
         let mut q = tx.prepare(
@@ -183,6 +191,7 @@ pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
             }
         }
     }
+    between();
     let mut presets = Map::new();
     {
         let mut q = tx.prepare("SELECT name, mode, trusted, deny FROM presets ORDER BY name")?;
@@ -195,6 +204,7 @@ pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
             presets.insert(r.get::<_, String>(0)?, Value::Object(p));
         }
     }
+    between();
     let mut auth = Map::new();
     auth.insert("people".to_owned(), Value::Object(people));
     auth.insert("members".to_owned(), Value::Object(members));

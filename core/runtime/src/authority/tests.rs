@@ -644,3 +644,64 @@ fn generated_tables_answer_the_same_from_core_db() {
         })
         .unwrap_or_else(|e| panic!("{e}"));
 }
+
+#[test]
+fn a_rule_refusal_is_not_a_reason_to_restore_a_backup() {
+    // `kith-auth preset X --rm` leaves the rows that name X behind: the rules cannot answer, but nothing is damaged
+    let (_t, c) = machine();
+    let auth = json!({"people": {"kai": {"owner": true}, "sam": {}},
+                      "members": {"house": {"sam": {"preset": "gone"}}}});
+    let conn = db_of(&auth);
+    let e = Authority::new(&conn, &c)
+        .resolve("house", "sam", None, false)
+        .unwrap_err();
+    assert!(matches!(e, crate::error::Error::Refused(_)), "{e}");
+    assert_eq!(e.recovery(), "kith doctor");
+    // text in a JSON column that is not JSON is the same kind of refusal
+    conn.execute("UPDATE memberships SET deny = 'not json'", [])
+        .unwrap();
+    let e = Authority::new(&conn, &c)
+        .may("sam", "house", None, false)
+        .unwrap_err();
+    assert!(matches!(e, crate::error::Error::Refused(_)), "{e}");
+}
+
+#[test]
+fn every_table_is_read_from_one_snapshot() {
+    // A writer commits between the reads of two tables: the later read must not see it.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("core.db");
+    let mut w = Connection::open(&path).unwrap();
+    w.pragma_update(None, "journal_mode", "WAL").unwrap();
+    crate::db::apply(&mut w, crate::db::MIGRATIONS, Some("t")).unwrap();
+    load(
+        &w,
+        &json!({"people": {"kai": {"owner": true}, "sam": {}},
+                "members": {"house": {"sam": {}}}, "presets": {"pro": {"mode": "auto"}}}),
+    );
+    let r = Connection::open(&path).unwrap();
+    let mut stage = 0;
+    let seen = super::snapshot_with(&r, &mut || {
+        stage += 1;
+        match stage {
+            1 => {
+                w.execute("DELETE FROM memberships", []).unwrap();
+            }
+            2 => {
+                w.execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", [])
+                    .unwrap();
+                w.execute("DELETE FROM presets", []).unwrap();
+            }
+            _ => {}
+        }
+    })
+    .unwrap();
+    assert_eq!(stage, 3);
+    assert!(seen["members"]["house"].get("sam").is_some(), "{seen}");
+    assert!(seen["presets"].get("pro").is_some(), "{seen}");
+    assert!(seen["people"]["sam"].get("revoked").is_none(), "{seen}");
+    // the next call sees all of it
+    let after = snapshot(&r).unwrap();
+    assert!(after["members"].get("house").is_none());
+    assert!(after["people"]["sam"].get("revoked").is_some());
+}

@@ -67,6 +67,12 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
     if let Some(members) = auth.get("members").and_then(Value::as_object) {
         for (agent, rows) in members {
             for (person, r) in rows.as_object().expect("rows") {
+                // A null row means "no row" to kith-auth (the `*` row is not consulted either); the real import
+                // (M2-8) decides what to do with one. This loader refuses it rather than guess.
+                assert!(
+                    r.is_object(),
+                    "loader: membership row {agent}/{person} is not an object"
+                );
                 conn.execute(
                     "INSERT INTO memberships (agent, person, preset, mode, trusted, deny, model, env, helpers, budget, \
                      access, jobs, helper_once) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
