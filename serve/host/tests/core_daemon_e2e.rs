@@ -38,6 +38,7 @@ fn machine(home: &Path) -> PathBuf {
     PathBuf::from(v["KITH_MACHINE"].as_str().expect("machine"))
 }
 
+#[derive(Debug)]
 struct Daemon {
     child: Child,
     home: PathBuf,
