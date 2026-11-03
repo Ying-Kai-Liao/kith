@@ -110,8 +110,8 @@ impl Shared {
         // The gate needs `&mut Core` (its state changes are claim transactions), which `Core::call` does not hold.
         if method.starts_with("gate.") {
             crate::call::check(kith_api::Principal::Owner, method, params)?;
-            let answer = self
-                .with_core(|c| crate::gate::call(c, method, params, &crate::lock::process_start))?;
+            let answer =
+                self.with_core(|c| crate::gate::call(c, method, params, &lock::process_start))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
