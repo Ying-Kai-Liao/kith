@@ -92,6 +92,53 @@ pub(crate) fn default_data_dir() -> PathBuf {
     std::env::temp_dir().join(format!("kith-unit-{}", std::process::id()))
 }
 
+/// Opt-in (M1): the service starts `kith-holder supervise` and the holder starts and restarts the host (and with it the
+/// core daemon), instead of the service starting the host and the host starting a holder. Off unless
+/// `KITH_SERVE_HOLDER=1` is set when `install` runs, or `"holder": true` is in `<data dir>/config.json`; an install
+/// that finds neither writes the job exactly as before. The job file records the choice, so `start`, `stop` and
+/// `restart` follow what `install` wrote; switching needs a new `install`.
+fn holder_wanted() -> bool {
+    if let Some(v) = std::env::var_os("KITH_SERVE_HOLDER") {
+        return matches!(v.to_string_lossy().trim(), "1" | "true" | "yes" | "on");
+    }
+    std::fs::read_to_string(data_dir().join("config.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .is_some_and(|v| v["holder"] == true)
+}
+
+/// The words in front of the host in a job that runs it under the holder: `kith-holder supervise ... --`. The holder
+/// program is `$KITH_HOLDER_BIN` or `kith-holder` beside this program (where the daemon looks too); the folder and the
+/// secret file are the core's own, so the holder this starts is the one the daemon says hello to. `None`: not opted in.
+fn holder_words() -> Result<Option<Vec<String>>> {
+    if !holder_wanted() {
+        return Ok(None);
+    }
+    let name = if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" };
+    let exe = match std::env::var_os("KITH_HOLDER_BIN").filter(|v| !v.is_empty()) {
+        Some(e) => PathBuf::from(e),
+        None => current_exe().context("locating the kith-serve binary")?.with_file_name(name),
+    };
+    if !exe.is_file() {
+        bail!(
+            "the holder is switched on but {} is missing (set KITH_HOLDER_BIN, or install it beside kith)",
+            exe.display()
+        );
+    }
+    let folders = crate::kernel::folders(&kith_kernel::paths::process_home());
+    let (dir, secret) = kith_core::holder_files(&folders).context("preparing the holder's folder")?;
+    let words = [exe, PathBuf::from("supervise"), PathBuf::from("--dir"), dir, PathBuf::from("--secret-file"), secret];
+    Ok(Some(words.iter().map(|w| w.to_string_lossy().into_owned()).chain(["--".to_owned()]).collect()))
+}
+
+/// The host program in a job's command line: the word after `--` when the holder runs it, else the first word.
+fn host_program(words: &[String]) -> Option<&String> {
+    match words.iter().position(|w| w == "--") {
+        Some(i) => words.get(i + 1),
+        None => words.first(),
+    }
+}
+
 fn create_parent(file: &Path) -> Result<()> {
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
@@ -426,6 +473,15 @@ fn unwrap_statusline(cmd: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_host_program_is_the_one_the_holder_runs_or_the_first_word() {
+        let words = |w: &[&str]| w.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(host_program(&words(&["/h/kith-serve", "serve", "--port", "1"])).unwrap(), "/h/kith-serve");
+        let held = words(&["/h/kith-holder", "supervise", "--dir", "/d", "--", "/h/kith-serve", "serve"]);
+        assert_eq!(host_program(&held).unwrap(), "/h/kith-serve");
+        assert!(host_program(&[]).is_none());
+    }
 
     // One test: both cases use the process-wide host.lock, so they cannot run in parallel.
     #[test]
