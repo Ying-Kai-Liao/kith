@@ -378,7 +378,8 @@ def launch_env(agent, entry, light=False, record=False):
     if model is None and not light:
         # --backup claude for a chain entry claude@sonnet: the id without its model finds it, unless the chain lists the
         # plain id too (the exact entry wins).
-        ids = kith_settings.accounts(agent)[0] or []
+        # The set's first entry is the main account (it takes no model), so only the rest are backups.
+        ids = (kith_settings.accounts(agent)[0] or [])[1:]
         if entry not in ids:
             found = [split(i)[1] for i in ids if split(i)[0] == entry and split(i)[1]]
             model = found[0] if found else None
@@ -710,7 +711,7 @@ POLICIES = {'fill': fill_policy, 'spread': spread_policy}
 
 
 def in_family(entry, harness):
-    return entry.split(':')[0] in family(harness)
+    return split(entry)[0].split(':')[0] in family(harness)   # claude@sonnet is a Claude account (the model is not part of it)
 
 
 def layout(agent, harness):

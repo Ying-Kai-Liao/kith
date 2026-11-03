@@ -389,7 +389,7 @@ def write(s):
 def _family_of(entry, own):
     """Whether account id `entry` is of harness `own`'s family (claude-api is a Claude one)."""
     import kith_accounts
-    return entry.split(':')[0] in kith_accounts.family(own)
+    return kith_accounts.split(entry)[0].split(':')[0] in kith_accounts.family(own)
 
 
 def _harness_of(agent):
