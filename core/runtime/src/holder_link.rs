@@ -366,7 +366,7 @@ fn signal_group(pid: u32, signal: &str) -> bool {
     // (unsafe code is forbidden here, so no killpg.)
     let kill = ["/bin/kill", "/usr/bin/kill"]
         .into_iter()
-        .find(|p| std::path::Path::new(p).is_file())
+        .find(|p| Path::new(p).is_file())
         .unwrap_or("/bin/kill");
     std::process::Command::new(kill)
         .args(["-s", signal, "--"])

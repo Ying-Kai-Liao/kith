@@ -82,7 +82,7 @@ fn print_answer(method: &str, answer: &Value, format: Option<&str>) -> Option<i3
     };
     // A failed write is the end of it (exit 1): running the embedded verb after a partial print would print twice.
     let mut stdout = std::io::stdout().lock();
-    Some(if stdout.write_all(out.as_bytes()).is_ok() && stdout.flush().is_ok() { 0 } else { 1 })
+    Some(i32::from(!(stdout.write_all(out.as_bytes()).is_ok() && stdout.flush().is_ok())))
 }
 
 fn folders_from(answer: &Value) -> Option<Paths> {
@@ -208,6 +208,7 @@ mod tests {
         unsafe { std::env::set_var("KITH_TEST_NOT_UTF8", OsString::from_vec(vec![0xff, 0xfe])) };
         let v = caller_view("paths", json!({}), &PathBuf::from("/h"));
         assert!(v["env"].is_object());
+        // SAFETY: as above.
         unsafe { std::env::remove_var("KITH_TEST_NOT_UTF8") };
     }
 

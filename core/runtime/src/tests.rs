@@ -576,9 +576,9 @@ fn calls_go_through_the_table() {
         )
         .expect("caller view");
     // Compared as paths: Windows spells them with backslashes.
-    let path = |k: &str| std::path::PathBuf::from(seen[k].as_str().expect(k));
-    assert_eq!(path("KITH_HOME"), std::path::Path::new("/caller/kith"));
-    assert_eq!(path("KITH_STATE"), std::path::Path::new("/caller/state"));
+    let path = |k: &str| PathBuf::from(seen[k].as_str().expect(k));
+    assert_eq!(path("KITH_HOME"), Path::new("/caller/kith"));
+    assert_eq!(path("KITH_STATE"), Path::new("/caller/state"));
     assert_ne!(seen["KITH_MACHINE"], m.to_string_lossy().as_ref());
     assert!(
         core.call(who, "paths", &json!({"env": {"KITH_HOME": 3}}))
@@ -622,5 +622,8 @@ fn a_front_note_that_stays_the_same_is_one_line_in_the_core_log() {
     crate::note_once(&p, "the daemon has another method table");
     let log = std::fs::read_to_string(p.logs.join("core.log")).expect("core.log");
     assert_eq!(log.lines().count(), 2, "{log}");
-    assert!(log.lines().all(|l| l.contains(" front: the daemon ")), "{log}");
+    assert!(
+        log.lines().all(|l| l.contains(" front: the daemon ")),
+        "{log}"
+    );
 }

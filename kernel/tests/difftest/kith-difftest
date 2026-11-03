@@ -343,9 +343,7 @@ def make_core(side_dir, env, name):
     got = subprocess.run([RUST_BIN, 'kernel', 'paths', '--json'], cwd=side_dir / 'home', env=env, capture_output=True,
                          text=True, timeout=TIMEOUT)
     try:
-        found = json.loads(got.stdout)
-        machine = found['KITH_MACHINE']
-        logs = Path(found['KITH_LOGS'])
+        machine = json.loads(got.stdout)['KITH_MACHINE']
     except (ValueError, KeyError):
         CORE_BARE.append(name)
         return
@@ -368,7 +366,9 @@ def start_daemon(side_dir, env, case):
     got = subprocess.run([RUST_BIN, 'kernel', 'paths', '--json'], cwd=side_dir / 'home', env=env, capture_output=True,
                          text=True, timeout=TIMEOUT)
     try:
-        machine = json.loads(got.stdout)['KITH_MACHINE']
+        found = json.loads(got.stdout)
+        machine = found['KITH_MACHINE']
+        logs = Path(found['KITH_LOGS'])
     except (ValueError, KeyError):
         DAEMON_BARE.append(case['name'])
         return None
@@ -377,7 +377,7 @@ def start_daemon(side_dir, env, case):
         return None
     if not logs.is_dir():
         try:
-            DAEMON_LOGS[str(side_dir)] = logs.relative_to(side_dir).as_posix()
+            DAEMON_LOGS[str(side_dir)] = Path(os.path.realpath(logs)).relative_to(side_dir).as_posix()   # the walk sees the real folder, not a link to it
         except ValueError:
             pass
     denv = dict(env)
