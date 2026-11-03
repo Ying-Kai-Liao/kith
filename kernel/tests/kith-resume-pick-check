@@ -13,6 +13,7 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/kith-resume-pick-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state CLAUDE_CONFIG_DIR=$T/claude
+export KITH_ALLOW_UNLOCKED=1   # no kith-stub in this check: its runs are unlocked on purpose (a missing stub is otherwise refused)
 export KITH_SERVE_DIR=$T/serve KITH_SERVE_PORT=1   # no host: ids resolve from the transcripts on disk
 unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE KITH_VIA KITH_RESUME KITH_CLAUDE_ARGS
 # where the cost ledger is for this HOME (lib/kith_paths.py decides; bin/kith exports it)

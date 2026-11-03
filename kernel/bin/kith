@@ -1386,9 +1386,9 @@ fi
 # takes <machine>/core/locks/<id> and keeps it until claude exits, whether or not a core answers. It runs claude as its child
 # (exec keeps this shell's pid, so the claim file and the run token's pid binding still name it, and claude descends from it).
 # Busy (75): another run holds the lock, and this one ends with the stub's one line. A run with no id (-c) or another harness
-# starts as before, unlocked. No kith-stub program (KITH_STUB_BIN, else beside the kith program) is not yet a refusal: no
-# release bundles it before M1 ships, and an install without it must keep launching; one stderr line, and KITH_REQUIRE_STUB=1
-# turns it into a refusal for installs that do bundle it (an unlocked run breaks I11).
+# starts as before, unlocked. No kith-stub program (KITH_STUB_BIN, else beside the kith program, symlinks resolved) is a
+# refusal: an unlocked run breaks I11, and every release bundles the stub. A dev checkout without a built stub sets
+# KITH_ALLOW_UNLOCKED=1 on purpose (one stderr line, the run goes on); KITH_REQUIRE_STUB=1 refuses even then.
 stub=()
 if [[ -n $csid ]]; then
   stub_bin=${KITH_STUB_BIN:-}
@@ -1405,15 +1405,19 @@ if [[ -n $csid ]]; then
   # The stub takes keys of a-z 0-9 . _ - only (exit 70 otherwise, which after exec could not be told from a lock error):
   # an id outside that starts unlocked with the same one line as a missing stub.
   if [[ ! $csid =~ ^[a-z0-9._-]+$ ]]; then
-    [[ ${KITH_REQUIRE_STUB:-} != 1 ]] || { echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed)" >&2; exit 1; }
-    echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed); this run is not locked" >&2
+    if [[ ${KITH_ALLOW_UNLOCKED:-} == 1 && ${KITH_REQUIRE_STUB:-} != 1 ]]; then
+      echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed); this run is not locked (KITH_ALLOW_UNLOCKED=1)" >&2
+    else
+      echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed)" >&2
+      exit 1
+    fi
   elif [[ -n $stub_bin && -x $stub_bin ]]; then
     stub=("$stub_bin" --lock-dir "$KITH_MACHINE/core/locks" --key "$csid" --)
-  elif [[ ${KITH_REQUIRE_STUB:-} == 1 ]]; then
-    echo "kith: no kith-stub program beside kith, so this conversation cannot be locked; install the current kith (kith update self)" >&2
-    exit 1
+  elif [[ ${KITH_ALLOW_UNLOCKED:-} == 1 && ${KITH_REQUIRE_STUB:-} != 1 ]]; then
+    echo "kith: no kith-stub program beside kith; this run is not locked against another run of the same conversation (KITH_ALLOW_UNLOCKED=1)" >&2
   else
-    echo "kith: no kith-stub program beside kith; this run is not locked against another run of the same conversation" >&2
+    echo "kith: no kith-stub program beside kith, so this conversation cannot be locked; install the current kith (kith update self), or set KITH_ALLOW_UNLOCKED=1 for a dev checkout" >&2
+    exit 1
   fi
 fi
 # The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.

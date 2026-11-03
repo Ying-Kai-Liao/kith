@@ -13,6 +13,7 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/kith-guest-helper-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME="$T/kith" KITH_STATE=$T/state KITH_AUTH=$T/auth.json
+export KITH_ALLOW_UNLOCKED=1   # no kith-stub in this check: its runs are unlocked on purpose (a missing stub is otherwise refused)
 unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE KITH_RESUME CLAUDE_CONFIG_DIR HQ_HOME HQ_STATE \
   KITH_SERVE_HOME KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_ASK_TOKEN KITH_ASK_SOCKET KITH_VIA
 mkdir -p "$HOME" "$T/bin" "$KITH_STATE/projects" "$KITH_STATE/logs"

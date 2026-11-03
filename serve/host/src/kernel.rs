@@ -228,6 +228,63 @@ pub fn current_cli() -> Cli {
     cli_status(std::env::var_os(KERNEL_ENV), exe.as_deref(), machine.as_deref())
 }
 
+/// The conversation lock's launcher the kernel's `kith <agent>` starts claude under (`kernel/bin/kith`, `KITH_STUB_BIN`).
+/// A run the host starts has an empty environment, so the host names it: beside this program (a service copy in
+/// `~/.kith/serve/bin`, a checkout's target folder), in the Mac app's bundle (`Resources/kith-serve` with
+/// `Resources/kith/bin/kith-stub`), or beside the real path of the `kith` on PATH (`install.sh` links only `kith`).
+pub const STUB_ENV: &str = "KITH_STUB_BIN";
+
+fn executable(p: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        p.metadata().is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        p.is_file()
+    }
+}
+
+/// [`STUB_ENV`]'s program for a host at `exe` with `kith` first on PATH, symlinks resolved before looking beside either.
+pub fn find_stub(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
+    let name = if cfg!(windows) { "kith-stub.exe" } else { "kith-stub" };
+    let beside = exe.and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent().map(Path::to_path_buf));
+    let from_kith = kith.and_then(|k| k.canonicalize().ok()).and_then(|k| k.parent().map(Path::to_path_buf));
+    let mut places: Vec<PathBuf> = Vec::new();
+    if let Some(dir) = beside {
+        places.push(dir.join(name));
+        places.push(dir.join("kith/bin").join(name)); // the Mac app: Resources/kith-serve, Resources/kith/bin/kith-stub
+    }
+    places.extend(from_kith.map(|d| d.join(name)));
+    places.into_iter().find(|p| executable(p))
+}
+
+/// `(KITH_STUB_BIN, program)` for a process the host starts, resolved once: an explicit `KITH_STUB_BIN` that runs wins.
+/// None when there is no stub (the kernel then refuses the run, unless KITH_ALLOW_UNLOCKED=1 is set, which is inherited
+/// only where the process environment is).
+pub fn stub_env() -> Option<(String, String)> {
+    // Unit tests compare the environments of the runs they see; `find_stub` has its own test.
+    #[cfg(test)]
+    {
+        None
+    }
+    #[cfg(not(test))]
+    stub_env_found()
+}
+
+#[cfg(not(test))]
+fn stub_env_found() -> Option<(String, String)> {
+    static STUB: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let found = STUB.get_or_init(|| {
+        if let Some(given) = std::env::var_os(STUB_ENV).map(PathBuf::from).filter(|p| executable(p)) {
+            return Some(given);
+        }
+        find_stub(std::env::current_exe().ok().as_deref(), crate::agent::backends::which("kith").as_deref())
+    });
+    found.as_ref().map(|p| (STUB_ENV.to_owned(), p.to_string_lossy().into_owned()))
+}
+
 /// Replaces this process with the kernel's entry point. Only returns on failure.
 #[cfg(unix)]
 pub fn exec_kernel(args: &[OsString]) -> anyhow::Error {
@@ -259,6 +316,53 @@ mod tests {
 
     fn v(a: &[&str]) -> Vec<OsString> {
         a.iter().map(OsString::from).collect()
+    }
+
+    fn stub_at(path: &Path) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "#!/bin/sh\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_stub_is_found_beside_the_host_in_the_app_bundle_and_through_the_kith_link() {
+        let t = std::env::temp_dir().join(format!("kith-stub-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        // The app: Resources/kith-serve (the service runs it), Resources/kith/bin/{kith,kith-stub}.
+        let res = t.join("Kith.app/Contents/Resources");
+        std::fs::create_dir_all(&res).unwrap();
+        std::fs::write(res.join("kith-serve"), "").unwrap();
+        stub_at(&res.join("kith/bin/kith-stub"));
+        assert_eq!(find_stub(Some(&res.join("kith-serve")), None), Some(res.join("kith/bin/kith-stub").canonicalize().unwrap()));
+        // A service copy with the stub beside it wins over the bundle layout.
+        let svc = t.join("serve/bin");
+        std::fs::create_dir_all(&svc).unwrap();
+        std::fs::write(svc.join("kith-serve"), "").unwrap();
+        assert_eq!(find_stub(Some(&svc.join("kith-serve")), None), None, "nothing beside it, nothing on PATH");
+        stub_at(&svc.join("kith-stub"));
+        assert_eq!(find_stub(Some(&svc.join("kith-serve")), None), Some(svc.join("kith-stub").canonicalize().unwrap()));
+        // install.sh links only `kith` into ~/.local/bin; the stub is beside the link's target.
+        #[cfg(unix)]
+        {
+            let (cli, local) = (t.join("cli/0.1.0/bin"), t.join(".local/bin"));
+            std::fs::create_dir_all(&local).unwrap();
+            std::fs::write(t.join("lone-serve"), "").unwrap();
+            stub_at(&cli.join("kith-stub"));
+            std::fs::write(cli.join("kith"), "").unwrap();
+            std::os::unix::fs::symlink(cli.join("kith"), local.join("kith")).unwrap();
+            assert_eq!(
+                find_stub(Some(&t.join("lone-serve")), Some(&local.join("kith"))),
+                Some(cli.join("kith-stub").canonicalize().unwrap())
+            );
+            // A stub that is not executable is not a stub.
+            std::fs::set_permissions(cli.join("kith-stub"), <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o644)).unwrap();
+            assert_eq!(find_stub(Some(&t.join("lone-serve")), Some(&local.join("kith"))), None);
+        }
+        let _ = std::fs::remove_dir_all(&t);
     }
 
     #[test]

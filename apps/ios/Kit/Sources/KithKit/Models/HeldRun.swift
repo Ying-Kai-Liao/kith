@@ -68,6 +68,10 @@ public struct StopHolderResult: Codable, Hashable, Sendable {
     }
     public var stopped: Who?
     public var ownTurn: Who?
+    /// Signalled, but something of the run is still in the process table: its claim is kept. Stop again.
+    public var stillEnding: Who?
+    /// This computer can't stop a run (no process signals): nothing was done.
+    public var cantStop: Who?
 }
 
 /// The card's held row, per state: copy by kind, who sees Stop, and the confirm text (designer's spec `held-run`).
@@ -175,6 +179,8 @@ public struct HeldRunModel: Equatable, Sendable {
     }
 
     public static let ownTurnPhase = Phase.failed("That's Kith's own turn. It ends by itself.", retry: false)
+    public static let stillEndingPhase = Phase.failed("Still ending — press Stop again", retry: true)
+    public static let cantStopPhase = Phase.failed("This computer can't stop that run", retry: false)
 }
 
 public extension HostClient {

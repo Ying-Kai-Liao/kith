@@ -330,6 +330,8 @@ async fn run_bound(
     command
         .args(args)
         .envs(crate::kernel::both("VIA", "serve"))
+        // The kernel's own commands that start a run (a wake, an ask) lock it under the stub the host found.
+        .envs(crate::kernel::stub_env())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

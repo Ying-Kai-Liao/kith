@@ -9,6 +9,7 @@ KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
 T=$(mktemp -d "${TMPDIR:-/tmp}/kith-limit-check.XXXXXX"); T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/root KITH_AUTH=$T/auth.json KITH_STATE=$T/state
+export KITH_ALLOW_UNLOCKED=1   # no kith-stub in this check: its runs are unlocked on purpose (a missing stub is otherwise refused)
 unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR HQ_HOME \
   KITH_RUN_TOKEN KITH_RUN_SOCKET KITH_PERSON_WAS KITH_MACHINE HQ_MACHINE KITH_VIA KITH_TERMINAL_SESSION
 mkdir -p "$HOME" "$T/bin" "$KITH_HOME/agents/house/role" "$KITH_STATE/projects" "$KITH_STATE/logs"
