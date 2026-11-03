@@ -63,7 +63,7 @@ fn the_holder_answers_and_starts_its_child_again_when_it_exits() {
     drop(fixture);
 }
 
-fn supervise(dir: &PathBuf, child_script: &str) -> Child {
+fn supervise(dir: &std::path::Path,child_script: &str) -> Child {
     Command::new(EXE)
         .args(["supervise", "--dir"])
         .arg(dir.join("h"))
