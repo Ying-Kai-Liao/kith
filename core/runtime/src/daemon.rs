@@ -216,7 +216,7 @@ impl Daemon {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(crate) fn shared(&self) -> &Arc<Shared> {
         &self.shared
     }
