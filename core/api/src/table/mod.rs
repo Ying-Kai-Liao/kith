@@ -84,7 +84,7 @@ const LEN: usize = {
     n
 };
 
-// The table outgrew clippy's 16 KiB for a local array; it is built at compile time, never on a stack.
+// The table is a const in the binary; clippy counts the const fn's local as a big stack array.
 #[allow(clippy::large_stack_arrays)]
 const fn flatten() -> [Method; LEN] {
     // Any row will do to fill the array; every slot is overwritten below.

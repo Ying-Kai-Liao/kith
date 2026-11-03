@@ -1119,6 +1119,32 @@ async fn the_sweep_ends_a_left_over_guest_holder_and_its_child_and_keeps_the_own
 }
 
 #[tokio::test]
+async fn stopping_a_session_the_core_is_still_starting_signals_nothing() {
+    let r = Rig::new();
+    // The claim names the core's own pid (`kith serve`) until the terminal's is known: a Stop must not touch it.
+    let (mut shell, held) = shell_with_child();
+    claim::take(&r.state(), "s1", Kind::Starting, held, false).unwrap().unwrap();
+    assert!(matches!(claim::stop_holder(&r.state(), "s1", GRACE), claim::Stopped::Busy(_)));
+    assert!(shell.try_wait().unwrap().is_none(), "nothing was signalled");
+    assert_eq!(super::intent::read(&r.state(), "s1"), None);
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+}
+
+#[tokio::test]
+async fn stopping_a_claim_that_names_the_core_pid_signals_nothing_whatever_its_kind() {
+    let r = Rig::new();
+    // Version skew: an older kernel wrote the core's pid under a kind this build would otherwise end.
+    let (mut shell, held) = shell_with_child();
+    claim::take(&r.state(), "c1", Kind::Terminal, held, false).unwrap().unwrap();
+    let got = claim::stop_holder_unless(&r.state(), "c1", GRACE, Some(held));
+    assert!(matches!(got, claim::Stopped::Busy(_)), "{got:?}");
+    assert!(shell.try_wait().unwrap().is_none(), "nothing was signalled");
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+}
+
+#[tokio::test]
 async fn stopping_a_holder_writes_its_intent_first() {
     let r = Rig::new();
     // The holder is the shell's child, so it is not this process' own turn (`OwnTurn`).
@@ -1127,6 +1153,44 @@ async fn stopping_a_holder_writes_its_intent_first() {
     assert!(matches!(claim::stop_holder(&r.state(), "h1", GRACE), claim::Stopped::Ended(_)));
     shell.wait().unwrap();
     assert_eq!(super::intent::read(&r.state(), "h1").as_deref(), Some("stopped from the app"));
+}
+
+#[tokio::test]
+async fn stopping_a_holder_that_ignores_term_ends_it_and_its_child_before_the_claim_goes() {
+    // outer sh -> claimer (ignores TERM) -> child (ignores TERM): the claimer is a one-shot's stub, the child its claude.
+    let mut sh = std::process::Command::new("sh")
+        .args(["-c", r#"sh -c 'trap "" TERM; sleep 300 & echo $!; wait' & echo $!; wait"#])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut lines = std::io::BufReader::new(sh.stdout.take().unwrap());
+    let mut pids: Vec<u32> = Vec::new();
+    for _ in 0..2 {
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut lines, &mut line).unwrap();
+        pids.push(line.trim().parse().unwrap());
+    }
+    // The two lines come in either order: the claimer is the one whose parent is the outer shell.
+    let (claimer, kid) = if parent_pid(pids[0]) == sh.id() { (pids[0], pids[1]) } else { (pids[1], pids[0]) };
+    let rig = Rig::new();
+    claim::take(&rig.state(), "h2", Kind::Terminal, claimer, false).unwrap().unwrap();
+    assert!(matches!(claim::stop_holder(&rig.state(), "h2", GRACE), claim::Stopped::Ended(_)));
+    // The claim goes only once they were gone: with the claim file removed, nothing of the tree is in the table.
+    assert!(claim::read(&claim::path(&rig.state(), "h2", false)).is_none());
+    assert!(!alive(claimer) && !alive(kid), "the tree is gone (or a zombie) when the claim is");
+    sh.wait().unwrap();
+}
+
+/// Running and not a zombie, from one `ps` (no retry: the point is the state right now).
+fn alive(pid: u32) -> bool {
+    let out = std::process::Command::new("ps").args(["-o", "stat=", "-p", &pid.to_string()]).output().unwrap();
+    let stat = String::from_utf8_lossy(&out.stdout);
+    !stat.trim().is_empty() && !stat.trim_start().starts_with('Z')
+}
+
+fn parent_pid(pid: u32) -> u32 {
+    let out = std::process::Command::new("ps").args(["-o", "ppid=", "-p", &pid.to_string()]).output().unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().parse().unwrap_or(0)
 }
 
 #[tokio::test]

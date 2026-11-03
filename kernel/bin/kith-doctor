@@ -455,8 +455,10 @@ def core():
     if not binary:
         note('no kith program on this Mac yet: the Python kernel answers everything')
         return
-    stub = os.environ.get('KITH_STUB_BIN') or str(Path(binary).parent / 'kith-stub')
-    if os.access(stub, os.X_OK):
+    # Where kernel/bin/kith looks: beside the program's real path (install.sh links only `kith`), then beside the path as given.
+    stubs = [os.environ.get('KITH_STUB_BIN')] if os.environ.get('KITH_STUB_BIN') else \
+        [str(Path(os.path.realpath(binary)).parent / 'kith-stub'), str(Path(binary).parent / 'kith-stub')]
+    if any(os.access(s, os.X_OK) for s in stubs):
         ok('conversation lock: kith-stub found, so each run holds its session\'s lock')
     else:
         warn('conversation lock: no kith-stub beside kith, so runs start unlocked (kith update self; KITH_REQUIRE_STUB=1 refuses instead)')
