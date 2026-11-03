@@ -352,6 +352,45 @@ pub fn lock_instance(dir: &Path) -> io::Result<Option<InstanceLock>> {
     }
 }
 
+/// The process on the other end of a connection, as the kernel reports it (Linux `SO_PEERCRED`, macOS
+/// `LOCAL_PEERPID`); `None` where it can't be asked. A caller that relies on it treats `None` as "nobody".
+#[cfg(target_os = "linux")]
+pub fn peer_pid(stream: &Stream) -> Option<u32> {
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = size_of::<libc::ucred>() as libc::socklen_t;
+    let ok = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut cred).cast(),
+            &mut len,
+        )
+    };
+    (ok == 0).then(|| u32::try_from(cred.pid).ok()).flatten()
+}
+
+#[cfg(target_os = "macos")]
+pub fn peer_pid(stream: &Stream) -> Option<u32> {
+    let mut pid: libc::pid_t = 0;
+    let mut len = size_of::<libc::pid_t>() as libc::socklen_t;
+    let ok = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_LOCAL,
+            libc::LOCAL_PEERPID,
+            (&raw mut pid).cast(),
+            &mut len,
+        )
+    };
+    (ok == 0).then(|| u32::try_from(pid).ok()).flatten()
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub fn peer_pid(_: &Stream) -> Option<u32> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

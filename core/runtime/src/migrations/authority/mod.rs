@@ -1,0 +1,6 @@
+//! M2 lane A: authority (people, grants, access requests, revoke). Versions 10-19, one file per step (`m0010_<what>.rs` holding a `pub(super) const MIGRATION`),
+//! listed in `STEPS` below in version order, first step 10, no gaps (`migrations::check`).
+
+use super::Migration;
+
+pub(super) const STEPS: &[Migration] = &[];

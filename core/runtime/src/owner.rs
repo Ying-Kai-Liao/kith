@@ -55,11 +55,17 @@ pub(crate) fn endpoint(layout: &Layout) -> PathBuf {
 /// Where the daemon of this layout listens: pipe names are global, so the core folder is hashed into it.
 #[cfg(not(unix))]
 pub(crate) fn endpoint(layout: &Layout) -> PathBuf {
+    pipe_name(layout, "owner")
+}
+
+/// A pipe of this core folder: `kind` is `owner` or `run`.
+#[cfg(not(unix))]
+pub(crate) fn pipe_name(layout: &Layout, kind: &str) -> PathBuf {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for b in layout.dir.to_string_lossy().to_lowercase().bytes() {
         hash = (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
     }
-    PathBuf::from(format!(r"\\.\pipe\kith-owner-{hash:016x}"))
+    PathBuf::from(format!(r"\\.\pipe\kith-{kind}-{hash:016x}"))
 }
 
 /// 64 random hex digits: the owner token, the holder secret.

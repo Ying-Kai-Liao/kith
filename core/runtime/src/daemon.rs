@@ -24,6 +24,8 @@ use crate::holder_link::{self, HolderConfig, HolderState};
 use crate::layout::Layout;
 use crate::lock::{self, Role};
 use crate::owner::{self, Handler, Reached, Server};
+use crate::runs::RunTokens;
+use crate::runsock::{self, RunHandler};
 use crate::{busy, log};
 
 pub(crate) struct Config {
@@ -60,6 +62,10 @@ pub(crate) struct Shared {
     outcome: Mutex<Outcome>,
     changed: Condvar,
     server: Mutex<Option<Server>>,
+    /// The run socket (M0e) and its token table. The table is memory: a restart ends every token, and the runs that
+    /// still want one are minted a new token later.
+    run_server: Mutex<Option<runsock::Server>>,
+    runs: Arc<RunTokens>,
     socket: PathBuf,
     started: Instant,
 }
@@ -99,6 +105,11 @@ impl Shared {
     fn dispatch(&self, method: &str, params: &Value) -> Result<Value> {
         if method == "kernel.coreStatus" {
             return self.running_status();
+        }
+        if let Some(answer) = self.runs.owner_call(method, params) {
+            let answer = answer?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
         }
         // Counts answers only: a refused or failed call was not served.
         let answer = self.with_core(|c| c.call(kith_api::Principal::Owner, method, params))?;
@@ -170,6 +181,8 @@ impl Daemon {
             outcome: Mutex::new(Outcome::Pending),
             changed: Condvar::new(),
             server: Mutex::new(None),
+            run_server: Mutex::new(None),
+            runs: Arc::new(RunTokens::new()),
             socket: owner::endpoint(&layout),
             started: Instant::now(),
         });
@@ -227,6 +240,14 @@ impl Daemon {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         if let Some(server) = server {
+            server.stop();
+        }
+        let run_server = shared
+            .run_server
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(server) = run_server {
             server.stop();
         }
         let core = shared
@@ -297,6 +318,19 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
                 .take();
             return failed(shared, e);
         }
+    }
+    // The run socket is not the owner's way in: a daemon that cannot open it still serves the owner, and says so.
+    let for_runs = shared.clone();
+    let run_handler: Arc<RunHandler> =
+        Arc::new(move |who, row, params| for_runs.with_core(|c| c.call_run(who, row, params)));
+    match runsock::Server::bind(layout, shared.runs.clone(), run_handler) {
+        Ok(server) => {
+            *shared
+                .run_server
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(server);
+        }
+        Err(e) => log::note(&shared.logs, &format!("daemon: no run socket: {e}")),
     }
     log::note(
         &shared.logs,
