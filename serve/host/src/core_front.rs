@@ -136,6 +136,12 @@ pub fn run_foreground() -> i32 {
 
 /// `kith kernel core-status [--json]`: the daemon, its socket, the holder, and when there is no core the verb that
 /// recovers it. Reads no database and changes nothing.
+/// The running core daemon's pid, from its status (no database read). None when there is no core.
+pub fn daemon_pid() -> Option<u32> {
+    let status = kith_core::status(&kernel::folders(&kith_kernel::paths::process_home()));
+    status["daemon"]["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
+}
+
 pub fn print_status(json: bool) {
     let status = kith_core::status(&kernel::folders(&kith_kernel::paths::process_home()));
     if json {

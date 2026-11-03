@@ -312,8 +312,7 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
 
 /// The running core daemon's pid, from its status (no database read). None when there is no core.
 fn core_pid() -> Option<u32> {
-    let status = kith_core::status(&crate::kernel::folders(&kith_kernel::paths::process_home()));
-    status["daemon"]["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
+    crate::core_front::daemon_pid()
 }
 
 /// [`stop_holder`] with the core's pid given. A claim naming the core's own pid is never signalled, whatever its kind:
