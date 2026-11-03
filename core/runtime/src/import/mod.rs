@@ -109,7 +109,11 @@ fn copy_out(src: &Connection) -> Result<Connection> {
         let list = cols.join(", ");
         let marks = vec!["?"; cols.len()].join(", ");
         // `people` keeps file order in `seq`; the other tables are WITHOUT ROWID and read in key order.
-        let order = if table == "people" { "ORDER BY seq" } else { "" };
+        let order = if table == "people" {
+            "ORDER BY seq"
+        } else {
+            ""
+        };
         let mut read = src.prepare(&format!("SELECT {list} FROM {table} {order}"))?;
         let mut rows = read.query([])?;
         let mut write = dst.prepare(&format!("INSERT INTO {table} ({list}) VALUES ({marks})"))?;
