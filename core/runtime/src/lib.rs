@@ -36,6 +36,10 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+// The claim path's read (`lease_held_for_non_owner`, `held_in`) and `restart` have no caller until M3 and the daemon start
+// wire them; the rows reach the rest.
+#[allow(dead_code)]
+mod sync_lease;
 // Nothing calls the envelope yet: the host vault and kith-auth move onto it at M2-7 and M2-18.
 #[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
 mod secrets;
