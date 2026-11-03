@@ -342,10 +342,10 @@ pub(crate) fn release(core: &mut Core, holder: &str, live: &dyn Liveness) -> Res
     let tx = core.claim_tx()?;
     prune(&tx, live)?;
     let slots = tx.execute("DELETE FROM gate_slots WHERE holder = ?1", [holder])?;
-    let line = tx.execute("DELETE FROM gate_waiters WHERE holder = ?1", [holder])?;
+    let queued = tx.execute("DELETE FROM gate_waiters WHERE holder = ?1", [holder])?;
     pump(&tx)?;
     tx.commit()?;
-    Ok(slots + line > 0)
+    Ok(slots + queued > 0)
 }
 
 /// The turn waits on another bot's reply: its slot is given up. Nested asks share one parking. False when the holder
@@ -437,7 +437,7 @@ pub(crate) fn list(core: &mut Core, live: &dyn Liveness) -> Result<Value> {
             slots.push(row?);
         }
     }
-    let line: Vec<Value> = waiters(&tx)?
+    let queue: Vec<Value> = waiters(&tx)?
         .iter()
         .enumerate()
         .map(|(i, w)| {
@@ -452,7 +452,7 @@ pub(crate) fn list(core: &mut Core, live: &dyn Liveness) -> Result<Value> {
         "SELECT COUNT(*) FROM gate_slots WHERE state = 'active'",
     )?;
     tx.commit()?;
-    Ok(json!({"max": max, "running": running, "slots": slots, "waiting": line}))
+    Ok(json!({"max": max, "running": running, "slots": slots, "waiting": queue}))
 }
 
 fn text<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
