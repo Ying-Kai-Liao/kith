@@ -56,7 +56,7 @@ describe("GET /download", () => {
     expect(html).toContain("curl -fsSL https://raw.githubusercontent.com/Ying-Kai-Liao/kith/main/scripts/install.sh | sh");
     const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
     for (const h of hrefs) {
-      if (h.startsWith("/download/")) continue;
+      if (h.startsWith("/download/") || h === "/install") continue;
       expect(h).toBe("https://github.com/Ying-Kai-Liao/kith/releases/latest");
     }
     expect(html).not.toMatch(/(?:src|href)="https?:\/\/(?!github\.com|raw\.githubusercontent\.com)/);
