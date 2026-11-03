@@ -956,7 +956,8 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' }}
     name: rust-check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # kith-serve's test suite plus the artifact build runs past 40 minutes on a cold cache.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
