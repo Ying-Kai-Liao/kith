@@ -226,12 +226,7 @@ impl KeyStore for MemoryKeyStore {
         if self.unreadable.load(std::sync::atomic::Ordering::SeqCst) {
             return Err(Error::Io("kith-core: the key store is locked".into()));
         }
-        Ok(self
-            .slot
-            .lock()
-            .expect("slot")
-            .clone()
-            .map(Zeroizing::new))
+        Ok(self.slot.lock().expect("slot").clone().map(Zeroizing::new))
     }
 
     fn set(&self, key: &[u8]) -> Result<()> {
@@ -303,14 +298,20 @@ fn run(program: &str, args: &[&str], stdin: Option<&[u8]>) -> Result<Ran> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| Error::Io(format!("kith-core: cannot run {program} for the key store: {e}")))?;
+        .map_err(|e| {
+            Error::Io(format!(
+                "kith-core: cannot run {program} for the key store: {e}"
+            ))
+        })?;
     if let (Some(data), Some(mut pipe)) = (stdin, child.stdin.take()) {
         let sent = pipe.write_all(data);
         drop(pipe); // EOF, so the tool stops reading
         if let Err(e) = sent {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(Error::Io(format!("kith-core: {program} did not take its input: {e}")));
+            return Err(Error::Io(format!(
+                "kith-core: {program} did not take its input: {e}"
+            )));
         }
     }
     let mut out_pipe = child.stdout.take();

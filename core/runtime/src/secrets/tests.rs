@@ -159,7 +159,9 @@ fn a_key_from_another_machine_refuses_clearly() {
     envelope(&mine).put(&c, "a", b"x").expect("put");
     let theirs = MemoryKeyStore::default();
     let other = db();
-    envelope(&theirs).put(&other, "z", b"z").expect("their record");
+    envelope(&theirs)
+        .put(&other, "z", b"z")
+        .expect("their record");
 
     // My database with their key.
     let mut e = envelope(&theirs);
@@ -239,7 +241,10 @@ fn os_store_macos_security_cli() {
     if !os_tests_enabled() {
         return;
     }
-    let s = super::keystore::SecurityCli::new(&format!("dev.kith.test.{}", std::process::id()), "master-key");
+    let s = super::keystore::SecurityCli::new(
+        &format!("dev.kith.test.{}", std::process::id()),
+        "master-key",
+    );
     s.remove();
     exercise(&s);
     s.remove();
@@ -251,7 +256,10 @@ fn os_store_linux_secret_tool() {
     if !os_tests_enabled() {
         return;
     }
-    let s = super::keystore::SecretTool::new(&format!("dev.kith.test.{}", std::process::id()), "master-key");
+    let s = super::keystore::SecretTool::new(
+        &format!("dev.kith.test.{}", std::process::id()),
+        "master-key",
+    );
     s.remove();
     exercise(&s);
     s.remove();

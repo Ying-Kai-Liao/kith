@@ -86,7 +86,11 @@ impl Envelope {
     }
 
     /// The secret under `name`, or `None` if there is no such record.
-    pub(crate) fn get(&mut self, conn: &Connection, name: &str) -> Result<Option<Zeroizing<Vec<u8>>>> {
+    pub(crate) fn get(
+        &mut self,
+        conn: &Connection,
+        name: &str,
+    ) -> Result<Option<Zeroizing<Vec<u8>>>> {
         check_name(name)?;
         let row: Option<(String, Vec<u8>, Vec<u8>)> = conn
             .query_row(
@@ -107,9 +111,11 @@ impl Envelope {
                  (a database from another machine?). Restore the key store it came from"
             )));
         }
-        let nonce: [u8; 24] = nonce
-            .try_into()
-            .map_err(|_| Error::Corrupt(format!("kith-core: the secret {name:?} has a malformed nonce")))?;
+        let nonce: [u8; 24] = nonce.try_into().map_err(|_| {
+            Error::Corrupt(format!(
+                "kith-core: the secret {name:?} has a malformed nonce"
+            ))
+        })?;
         let plain = cipher(&key)?
             .decrypt(
                 &XNonce::from(nonce),
