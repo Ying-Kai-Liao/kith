@@ -49,7 +49,7 @@ Add an object to a file in `corpus/` (a list per file). Fields:
 | `cwd` | folder to run in, relative to the root (default `home`) |
 | `normalize` | extra `[regex, replacement]` pairs, applied to every text of both sides |
 | `ignore` | regexes of state paths to leave out (e.g. `"/logs/"`) |
-| `sort_lists` / `sort_lines` | order means nothing: sort JSON lists / stdout lines |
+| `sort_lists` / `sort_lines` | order means nothing: sort JSON lists / stdout lines (and the log of fake calls) |
 | `stderr` | `false` to leave stderr out |
 | `json` | `false` to compare stdout as text even when it parses |
 | `program` | `{"old": [argv...], "new": [argv...]}`: the program a side runs instead of `kith` (the case's lines are appended), for a verb the router does not reach yet, e.g. `python3 {KERNEL}/lib/kith_accounts.py` against `{BIN} kernel accounts`; `{KERNEL}` is the kernel folder, `{BIN}` the Rust program |

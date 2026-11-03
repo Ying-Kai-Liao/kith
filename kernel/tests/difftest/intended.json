@@ -21,7 +21,6 @@
   {"case": "accounts-list-none", "facet": "*", "why": "not yet ported: main #599/#577 accounts"},
   {"case": "accounts-list", "facet": "*", "why": "not yet ported: main #599/#577 accounts"},
   {"case": "accounts-list-not-installed", "facet": "*", "why": "not yet ported: main #599/#577 accounts"},
-  {"case": "account-add-remove-json", "facet": "*", "why": "not yet ported: main #599/#577 accounts"},
   {"case": "launch-settings-guest-member", "facet": "*", "why": "not yet ported: main #599/#577 accounts"},
   {"case": "launch-settings-guest-trusted", "facet": "*", "why": "not yet ported: main #599/#577 accounts"},
   {"case": "launch-settings-guest-bot", "facet": "*", "why": "not yet ported: main #599/#577 accounts"},
