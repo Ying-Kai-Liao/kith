@@ -36,8 +36,8 @@ fn truthy(v: Option<&Value>) -> bool {
     }
 }
 
-/// Loads the tables the access decision reads. Fields of auth.json it does not read (profiles, grants, env, invites,
-/// retired, once; a person's handles, root, provider, kith, agents) are not loaded.
+/// Loads the tables of authority. Fields of auth.json it does not keep (profiles, grants, env, once; a person's handles,
+/// root, kith, agents) are not loaded.
 pub(super) fn load(conn: &Connection, auth: &Value) {
     if let Some(people) = auth.get("people").and_then(Value::as_object) {
         for (id, p) in people {
@@ -47,8 +47,8 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                 .and_then(|r| r.get("at"))
                 .and_then(Value::as_i64);
             conn.execute(
-                "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                "INSERT INTO people (id, name, lang, tz, owner, bot_of, revoked, revoked_at, was, provider) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                 params![
                     id,
                     s(p, "name"),
@@ -59,6 +59,7 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                     i64::from(revoked),
                     at,
                     j(p, "was"),
+                    s(p, "provider"),
                 ],
             )
             .expect("insert person");
@@ -75,7 +76,8 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                 );
                 conn.execute(
                     "INSERT INTO memberships (agent, person, preset, mode, trusted, deny, model, env, helpers, budget, \
-                     access, jobs, helper_once) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                     access, jobs, helper_once, access_by, access_since) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                     params![
                         agent,
                         person,
@@ -90,6 +92,8 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                         j(r, "access"),
                         j(r, "jobs"),
                         j(r, "helper_once"),
+                        j(r, "access_by"),
+                        j(r, "access_since"),
                     ],
                 )
                 .expect("insert membership");
@@ -103,6 +107,28 @@ pub(super) fn load(conn: &Connection, auth: &Value) {
                 params![name, s(p, "mode"), b(p, "trusted"), j(p, "deny")],
             )
             .expect("insert preset");
+        }
+    }
+    if let Some(invites) = auth.get("invites").and_then(Value::as_object) {
+        for (code, i) in invites {
+            conn.execute(
+                "INSERT INTO invites (code, person, expires) VALUES (?1, ?2, ?3)",
+                params![
+                    code,
+                    s(i, "person"),
+                    i.get("expires").and_then(Value::as_f64)
+                ],
+            )
+            .expect("insert invite");
+        }
+    }
+    if let Some(retired) = auth.get("retired").and_then(Value::as_object) {
+        for (id, r) in retired {
+            conn.execute(
+                "INSERT INTO retired (id, at) VALUES (?1, ?2)",
+                params![id, r.get("at").and_then(Value::as_i64)],
+            )
+            .expect("insert retired");
         }
     }
     if let Some(cap) = auth.get("owner_bots_budget") {

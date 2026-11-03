@@ -16,6 +16,8 @@ use serde_json::{Value, json};
 use super::{Authority, snapshot};
 use crate::authority::load::{empty, load};
 
+mod writes;
+
 const NOW: f64 = 1_800_000_000_000.0;
 const FUTURE: i64 = 4_102_444_800_000;
 
@@ -126,7 +128,7 @@ fn same(auth: &Value, c: &Ctx) -> Result<(), String> {
                     }
                     let (allowed, _) =
                         got(core.may(p, agent, via, once)).unwrap_or((false, String::new()));
-                    invariants(auth, &core, p, agent, via, allowed)?;
+                    invariants(auth, &core, p, agent, via, once, allowed)?;
                 }
             }
         }
@@ -141,6 +143,7 @@ fn invariants(
     p: &str,
     agent: &str,
     via: Option<&str>,
+    once: bool,
     allowed: bool,
 ) -> Result<(), String> {
     let id = secrets::canonical(auth, p);
@@ -173,12 +176,21 @@ fn invariants(
             ));
         }
         if !secrets::is_owner(auth, &parent) {
+            // `allowed` was asked with `once`, so the bot is asked with it too; a refused answer has no helpers, deny or
+            // budget to compare (a bot let in by a "just this once" is not let in without it)
             let (Ok(mine), Ok(theirs)) = (
-                core.resolve(agent, &id, via, false),
+                core.resolve(agent, &id, via, once),
                 core.resolve(agent, &parent, via, false),
             ) else {
                 return Ok(());
             };
+            // `may` allowed this bot (with `once`) and its owner, so `resolve` must too
+            if mine["allowed"] != Value::Bool(true) || theirs["allowed"] != Value::Bool(true) {
+                return Err(format!(
+                    "may/resolve disagree for {p:?} on {agent}: {:?} / {:?}",
+                    mine["allowed"], theirs["allowed"]
+                ));
+            }
             let sub = |k: &str| {
                 let have = mine[k].as_array().cloned().unwrap_or_default();
                 let cap = theirs[k].as_array().cloned().unwrap_or_default();
@@ -643,6 +655,17 @@ fn generated_tables_answer_the_same_from_core_db() {
             same(&auth, &c).map_err(TestCaseError::fail)
         })
         .unwrap_or_else(|e| panic!("{e}"));
+}
+
+#[test]
+fn a_bot_let_in_by_a_just_this_once_is_checked_with_the_once() {
+    // The flaky case of the generated test (CI run 41696953934, attempt 1): the invariants asked `may` with `once`
+    // and then `resolve` without it, which answers "not allowed" and has no `helpers` key to index.
+    let (_t, c) = machine();
+    let auth = json!({"people": {"kai": {"owner": true}, "sam": {}, "bot-a": {"bot_of": "sam"}},
+                      "members": {"house": {"sam": {"helpers": ["garden"]},
+                                            "bot-a": {"helper_once": {"garden": FUTURE}}}}});
+    assert_eq!(same(&auth, &c), Ok(()));
 }
 
 #[test]

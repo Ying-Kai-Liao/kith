@@ -22,6 +22,10 @@
 #[allow(dead_code)]
 mod authority;
 mod call;
+// Nothing calls the store but the daemon's cards rows and the tests: the host's callers switch in lane H, and the raise,
+// claim and close verbs get theirs there and in M2-12.
+#[allow(dead_code, reason = "first callers are M2-12 and lane H")]
+mod cards;
 mod daemon;
 mod db;
 mod error;
@@ -116,6 +120,16 @@ pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
 /// process: a kernel verb that does not go through the core (`kernel accounts`) calls this itself.
 pub fn route_kernel_notes(paths: &Paths) {
     log::route_kernel_notes(&paths.logs);
+}
+
+/// The holder's folder and its secret file for this machine, the secret made if it is missing. The service layer names
+/// them in the job that makes the holder the supervised root (`kith-holder supervise`), so the holder that job starts is
+/// the one the daemon says hello to.
+pub fn holder_files(paths: &Paths) -> Result<(std::path::PathBuf, std::path::PathBuf), Error> {
+    let layout = Layout::new(&paths.machine);
+    perms::ensure_dir(&layout.dir)?;
+    holder_link::secret(&layout)?;
+    Ok((layout.holder_dir, layout.holder_secret))
 }
 
 /// Runs a verb that touches NO core state (paths, engines, launch today) inside an embedded core, so the verbs already

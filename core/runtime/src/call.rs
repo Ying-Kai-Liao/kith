@@ -1,7 +1,9 @@
 //! Calling a method of the table (`kith-api`) on an open core. The door is a method of [`Core`], so no handler runs
 //! without the lifetime lock and the generation that come with having one (M0b follow-up (a)).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+use kith_kernel::paths::Paths;
 
 use serde_json::{Value, json};
 
@@ -53,33 +55,43 @@ impl Core {
     }
 
     fn paths(&self, params: &Value) -> Result<Value> {
+        parse(&self.folders_for(params)?.0.json())
+    }
+
+    /// The folders of the caller's view (see [`Self::call`]) and its kernel folder: the params' `kernel`, `home` and
+    /// `env`, else the folders this core was opened with.
+    pub(crate) fn folders_for(&self, params: &Value) -> Result<(Paths, PathBuf)> {
         let kernel = params.get("kernel").and_then(Value::as_str);
         let home = params.get("home").and_then(Value::as_str);
         let env = params.get("env").and_then(Value::as_object);
-        let folders = if home.is_some() || env.is_some() {
+        if home.is_some() || env.is_some() {
             // The caller's view: its home and its variables, and nothing from this process's environment.
             let home = home
                 .map(Path::new)
                 .map_or_else(kith_kernel::paths::process_home, Path::to_path_buf);
-            let kernel = kernel.map_or_else(|| home.join("kith/kernel"), Into::into);
+            let kernel: PathBuf = kernel.map_or_else(|| home.join("kith/kernel"), Into::into);
             let lookup = |name: &str| {
                 env.and_then(|e| e.get(name))
                     .and_then(Value::as_str)
                     .map(str::to_owned)
             };
-            kith_kernel::paths::paths(&home, &kernel, &lookup)
+            Ok((kith_kernel::paths::paths(&home, &kernel, &lookup), kernel))
         } else if let Some(k) = kernel {
-            kith_kernel::paths::paths(
-                &kith_kernel::paths::process_home(),
-                Path::new(k),
-                &kith_kernel::paths::process_env,
-            )
+            Ok((
+                kith_kernel::paths::paths(
+                    &kith_kernel::paths::process_home(),
+                    Path::new(k),
+                    &kith_kernel::paths::process_env,
+                ),
+                PathBuf::from(k),
+            ))
         } else {
-            self.folders().cloned().ok_or_else(|| {
+            let folders = self.folders().cloned().ok_or_else(|| {
                 Error::NotServed("kith-core: this core was opened without its folders".into())
-            })?
-        };
-        parse(&folders.json())
+            })?;
+            let kernel = folders.home.join("kernel");
+            Ok((folders, kernel))
+        }
     }
 }
 

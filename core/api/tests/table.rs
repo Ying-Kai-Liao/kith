@@ -338,8 +338,8 @@ fn lookup_by_name() {
     assert!(method("nope").is_none());
 }
 
-/// The M2 rows (M2-0b): experimental, owner only, still answered by the Python kernel, and not in `released.json` until
-/// M2 cuts them.
+/// The M2 rows (M2-0b): experimental, owner only, and not in `released.json` until M2 cuts them. Answered by the Python
+/// kernel unless the core serves them (the people rows of M2-2, which the daemon answers).
 const M2_STUBS: &[&str] = &[
     "people.grant",
     "people.revoke",
@@ -347,9 +347,6 @@ const M2_STUBS: &[&str] = &[
     "people.requests",
     "people.approve",
     "people.deny",
-    "cards.list",
-    "cards.show",
-    "cards.answer",
 ];
 
 #[test]
@@ -364,11 +361,46 @@ fn the_m2_stubs_are_experimental_owner_only_and_unreleased() {
     for name in M2_STUBS {
         let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
         assert_eq!(m.stability, Stability::Experimental, "{name}");
+        let core = ["people.grant", "people.revoke", "people.list"].contains(name);
         assert_eq!(
             m.served,
-            Served::Kernel,
-            "{name}: nobody in the core serves it yet"
+            if core { Served::Core } else { Served::Kernel },
+            "{name}: who serves it"
         );
+        assert_eq!(m.principals, &[Principal::Owner], "{name}");
+        assert!(!released.contains(name), "{name} is in released.json");
+    }
+}
+
+#[test]
+fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_parse() {
+    let released = read_json(openrpc::RELEASED_PATH);
+    let released: BTreeSet<&str> = released["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    for (line, name) in [
+        (
+            "people bot add bot-a --of ann --name Scout",
+            "people.addBot",
+        ),
+        ("people bot remove bot-a", "people.removeBot"),
+        ("people bots-cap 50", "people.botsCap"),
+        ("people bots-cap", "people.botsCap"),
+        ("people invite ann --minutes 30", "people.invite"),
+        ("people invites", "people.invites"),
+        ("people invite-remove ABC234", "people.removeInvite"),
+        ("people preset pro --mode acceptEdits", "people.preset"),
+        ("people preset-remove pro", "people.removePreset"),
+    ] {
+        let argv: Vec<&str> = line.split(' ').collect();
+        let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
+        assert_eq!(parsed.method.name, name, "{line}");
+        let m = method(name).unwrap();
+        assert_eq!(m.served, Served::Core, "{name}");
+        assert_eq!(m.stability, Stability::Experimental, "{name}");
         assert_eq!(m.principals, &[Principal::Owner], "{name}");
         assert!(!released.contains(name), "{name} is in released.json");
     }
@@ -386,9 +418,6 @@ fn the_m2_stubs_parse_from_their_command_lines() {
         ("people requests --json", "people.requests"),
         ("people approve r1", "people.approve"),
         ("people deny r1", "people.deny"),
-        ("cards ls --json", "cards.list"),
-        ("cards show c1", "cards.show"),
-        ("cards answer c1 yes", "cards.answer"),
     ] {
         let argv: Vec<&str> = line.split(' ').collect();
         let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
@@ -402,6 +431,35 @@ fn the_m2_stubs_parse_from_their_command_lines() {
         grant.params,
         json!({"person": "ann", "agent": "echo", "preset": "member", "budget": "20"})
     );
+}
+
+#[test]
+fn the_cards_rows_are_experimental_owner_only_unreleased_and_served_by_the_core() {
+    let released = read_json(openrpc::RELEASED_PATH);
+    let released: BTreeSet<&str> = released["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    for (line, name) in [
+        ("cards ls --json", "cards.list"),
+        ("cards show c1", "cards.show"),
+        ("cards answer c1 yes", "cards.answer"),
+    ] {
+        let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
+        assert_eq!(m.stability, Stability::Experimental, "{name}");
+        assert_eq!(m.served, Served::Core, "{name}: the daemon serves it");
+        assert_eq!(m.principals, &[Principal::Owner], "{name}");
+        assert!(!released.contains(name), "{name} is in released.json");
+        let argv: Vec<&str> = line.split(' ').collect();
+        let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
+        assert_eq!(parsed.method.name, name, "{line}");
+    }
+    // Every param is required in the row, as the call insists on.
+    for name in ["cards.show", "cards.answer"] {
+        assert!(method(name).unwrap().params.iter().all(|p| p.required));
+    }
 }
 
 #[test]

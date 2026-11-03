@@ -126,12 +126,30 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        // The owner's authority writes are claim transactions too (M2-2).
+        #[cfg(unix)]
+        {
+            if crate::authority::call::serves(method) {
+                crate::call::check(kith_api::Principal::Owner, method, params)?;
+                let answer = self.with_core(|c| crate::authority::call::call(c, method, params))?;
+                self.served.fetch_add(1, Ordering::SeqCst);
+                return Ok(answer);
+            }
+        }
         // Same for the sync lease: a change is a claim transaction.
         if method.starts_with("syncLease.") {
             crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer = self.with_core(|c| {
                 crate::sync_lease::call(c, method, params, &crate::sync_lease::System)
             })?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
+        // So do the cards: raise, claim and close are claim transactions.
+        if method.starts_with("cards.") {
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let answer =
+                self.with_core(|c| crate::cards::call(c, method, params, &crate::gate::System))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
