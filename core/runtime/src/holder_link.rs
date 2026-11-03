@@ -14,6 +14,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use kith_holder::client::{Client, ConnectError};
@@ -458,7 +459,11 @@ fn serve_spawn(client: &mut Client, req: &SpawnReq) -> std::result::Result<(), S
         ),
         _ => Placed::Stale,
     };
-    let _ = req.reply.send(placed);
+    // A caller that gave up (its receiver is gone) must not leave the terminal it asked for running with no claim and
+    // no ticket: it is ended here.
+    if let Err(mpsc::SendError(Placed::Started { held, .. })) = req.reply.send(placed) {
+        end_held(client, &held);
+    }
     Ok(())
 }
 

@@ -447,6 +447,38 @@ pub fn release_one(c: &Ctx, sid: &str, pid: i64, takeover: bool) {
     }
 }
 
+/// Hands the claim `from` holds on `sid` to `to` with `kind` (the core, which took it for its own pid while a terminal
+/// started, gives it to the terminal's): under the claim's lock, made whole in a temp file and renamed over. `Ok(false)`:
+/// the claim is no longer `from`'s (a taker replaced it) and nothing was changed.
+pub fn retarget(c: &Ctx, sid: &str, from: i64, to: i64, kind: &str) -> std::io::Result<bool> {
+    let Some(dir) = c.reg_dir() else {
+        return Err(std::io::Error::other(
+            "KITH_STATE is not set, so the session cannot be claimed",
+        ));
+    };
+    if !safe_id(sid) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "not a session id",
+        ));
+    }
+    let dest = claim_path(&dir, sid, false);
+    let _lock = Lock::exclusive(&lock_path(&dest))?;
+    let Some(mut mine) = read_claim(&dest).filter(|c| c.pid == Some(from)) else {
+        return Ok(false);
+    };
+    mine.pid = Some(to);
+    mine.proc_start = os::proc_start(to);
+    mine.at = iso_utc();
+    mine.kind = kind.to_owned();
+    let tmp = dir.join(tmp_name(&format!("{sid}.claim")));
+    create_new_private(&tmp, &pyjson::dumps(&mine.to_value()))?;
+    std::fs::rename(&tmp, &dest).inspect_err(|_| {
+        let _ = std::fs::remove_file(&tmp);
+    })?;
+    Ok(true)
+}
+
 /// How long a one-shot waits for a held session (seconds; `KITH_CLAIM_WAIT`, default 5).
 pub fn claim_wait(env: Env) -> Duration {
     let secs = env("KITH_CLAIM_WAIT")

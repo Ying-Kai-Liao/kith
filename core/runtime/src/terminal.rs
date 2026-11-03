@@ -6,9 +6,9 @@
 //! 2. answers `direct` when there is no stub, the holder link is down, or the link is a command link (`ssh host
 //!    kith-holder --stdio`): the stub path, the lock dir and the claim file are all on the core's machine, and a remote
 //!    holder runs on another one. The caller runs the engine itself (`--direct`), as before, and nothing has been taken;
-//! 3. takes the session's writer claim, today's claim file (`<state>/live/terminal/<sid>.claim`, a port of
-//!    `kith-sessions take_claim`: same file, same lock file, same record, and the same bookkeeping: the session's
-//!    pending intent and 54-minute decision end). Until the stub's pid is known the record is `kind: "starting"` and
+//! 3. takes the session's writer claim, today's claim file (`<state>/live/terminal/<sid>.claim`) through
+//!    `kith_kernel::threads`, the kernel's port of `kith-sessions take_claim`: same file, lock file, record, liveness
+//!    rule and bookkeeping (the session's pending intent and 54-minute decision end). Until the stub's pid is known the record is `kind: "starting"` and
 //!    names this daemon's pid. That pid is `kith serve`, so nothing may signal it: the host's `stop_holder` answers a
 //!    `starting` claim as busy, and the sweeps only touch claims that name a person. A live claim held by anyone else
 //!    answers `busy` and spawns nothing;
@@ -113,8 +113,12 @@ pub(crate) const TICKET_TTL: Duration = Duration::from_secs(60);
 /// The most tickets waiting at once; an older unredeemed one is dropped to make room (a client that asks and never
 /// attaches must not grow the table).
 const MAX_TICKETS: usize = 256;
-/// How long the supervisor may take to answer a spawn before the call gives up and says `direct`.
+/// How long a spawn may wait in the queue: the supervisor drops a request that is older than this when it comes to it.
 const SPAWN_WAIT: Duration = Duration::from_secs(20);
+/// How long the caller waits for the answer: past the supervisor's worst case once it has started on the request (10 s
+/// for the holder's answer, 0.6 s watching the stub), so a caller that gives up is a supervisor that is gone. If the
+/// supervisor does answer late anyway, it ends the terminal it started (`serve_spawn`).
+const ANSWER_WAIT: Duration = Duration::from_secs(SPAWN_WAIT.as_secs() + 15);
 /// How long the core watches a new process for the stub's "busy" exit (code 75) before it calls the terminal open.
 const BUSY_WAIT: Duration = Duration::from_millis(600);
 /// The stub's exit code for "a writer already holds this key" (core/stub).
@@ -346,6 +350,9 @@ pub(crate) struct Terminals {
     /// Tests: make handing the claim to the stub's pid fail.
     #[cfg(test)]
     pub(crate) fail_retarget: AtomicBool,
+    /// Tests: how long a call waits for the supervisor's answer.
+    #[cfg(test)]
+    pub(crate) answer_wait: Mutex<Option<Duration>>,
 }
 
 impl Terminals {
@@ -361,6 +368,8 @@ impl Terminals {
             tickets: Tickets::default(),
             #[cfg(test)]
             fail_retarget: AtomicBool::new(false),
+            #[cfg(test)]
+            answer_wait: Mutex::new(None),
         }
     }
 
@@ -368,12 +377,21 @@ impl Terminals {
     pub(crate) fn set_link(&self, up: bool) {
         self.link_up.store(up, Ordering::SeqCst);
         if !up {
+            // Spawns are answered (their callers are waiting); an `End` is kept for the next connection: the process it
+            // names is still in the holder, and dropping the request would leave it running with no claim.
+            let mut keep = Vec::new();
             while let Some(req) = self.next(Duration::ZERO) {
-                if let Req::Spawn(req) = req {
-                    let _ = req
-                        .reply
-                        .send(Placed::Failed("the holder link went down".into()));
+                match req {
+                    Req::Spawn(req) => {
+                        let _ = req
+                            .reply
+                            .send(Placed::Failed("the holder link went down".into()));
+                    }
+                    end @ Req::End(_) => keep.push(end),
                 }
+            }
+            for end in keep {
+                let _ = self.queue.send(end);
             }
         }
     }
@@ -424,6 +442,18 @@ impl Terminals {
                 Err(seen) => last = seen,
             }
         }
+    }
+
+    fn answer_wait(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(d) = *self
+            .answer_wait
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        {
+            return d;
+        }
+        ANSWER_WAIT
     }
 
     fn stub_path(&self) -> Option<PathBuf> {
@@ -544,9 +574,7 @@ impl Terminals {
             reply,
         }));
         let placed = match sent {
-            Ok(()) => answer
-                .recv_timeout(SPAWN_WAIT + Duration::from_secs(2))
-                .ok(),
+            Ok(()) => answer.recv_timeout(self.answer_wait()).ok(),
             Err(_) => None,
         };
         match placed {
@@ -689,255 +717,56 @@ impl OpenParams {
     }
 }
 
-// --- today's claim file (a port of kith-sessions take_claim) --------------------------------------------------------
+// --- today's claim file --------------------------------------------------------------------------------------------
 
 #[cfg(unix)]
 mod claim {
-    //! `<state>/live/terminal/<sid>.claim`: `{"pid","procStart","at","kind"}`, made whole in a temp file and linked into
-    //! place (exclusive) under `<sid>.claim.lock` (flock), a stale one removed under that lock. The same file, lock and
-    //! record as `kernel/bin/kith-sessions` and the host's `terminal/claim.rs`, so a `--direct` run, the host and a
-    //! held terminal all see one writer. Not ported: ending the session's intent and pending decision (the taker's
-    //! bookkeeping in `take_claim`); a held terminal's start does not touch them yet.
+    //! `<state>/live/terminal/<sid>.claim`, through the kernel's port of `kith-sessions` (`kith_kernel::threads`): the same
+    //! file, lock file, record, liveness rule (only ESRCH means a claimer is gone) and bookkeeping (a taker ends the
+    //! session's pending intent and 54-minute decision), so a `--direct` run, the host and a held terminal all see one
+    //! writer. This is only the core's view of it.
 
-    use std::fs::{self, OpenOptions};
-    use std::io::{self, Write as _};
-    use std::os::unix::fs::OpenOptionsExt as _;
-    use std::path::{Path, PathBuf};
+    use std::io;
+    use std::path::Path;
 
-    use fs2::FileExt as _;
-    use serde_json::{Value, json};
-
-    use crate::lock::process_start;
+    use kith_kernel::threads::{self, Ctx, Held as Holding, Take};
 
     pub(super) struct Held {
         pub pid: u32,
         pub kind: String,
     }
 
-    fn dir(state: &Path) -> PathBuf {
-        state.join("live").join("terminal")
-    }
-
-    fn squeeze(s: &str) -> String {
-        s.split_whitespace().collect::<Vec<_>>().join(" ")
-    }
-
-    fn read(path: &Path) -> Option<Value> {
-        let v: Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-        v.is_object().then_some(v)
-    }
-
-    /// `kill(pid, 0)`: it succeeds, or fails with EPERM (a process of another user), for a pid that exists. (No unsafe
-    /// code here, so the signal is sent by the system's `kill`, whose message tells ESRCH from EPERM.)
-    fn pid_alive(pid: u32) -> bool {
-        let kill = ["/bin/kill", "/usr/bin/kill"]
-            .into_iter()
-            .find(|p| Path::new(p).is_file())
-            .unwrap_or("/bin/kill");
-        std::process::Command::new(kill)
-            .args(["-s", "0", "--"])
-            .arg(pid.to_string())
-            .output()
-            .is_ok_and(|o| {
-                o.status.success()
-                    || String::from_utf8_lossy(&o.stderr)
-                        .to_lowercase()
-                        .contains("not permitted")
-            })
-    }
-
-    /// The claimer runs and started when the record says (a reused pid started at another time is not it).
-    fn live(c: &Value) -> bool {
-        let Some(pid) = c
-            .get("pid")
-            .and_then(Value::as_u64)
-            .and_then(|p| u32::try_from(p).ok())
-        else {
-            return false;
-        };
-        if !pid_alive(pid) {
-            return false;
-        }
-        // Alive but its start time can't be read (no `ps` for it, another user's process): it counts as live, as
-        // `claim_live` in kith-sessions does, and its claim is never deleted.
-        let Some(actual) = process_start(pid) else {
-            return true;
-        };
-        match c
-            .get("procStart")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-        {
-            Some(claimed) => squeeze(claimed) == squeeze(&actual),
-            None => true,
+    fn ctx(state: &Path) -> Ctx<'static> {
+        Ctx {
+            state: Some(state.to_path_buf()),
+            machine: None,
+            home: std::path::PathBuf::new(),
+            env: &|_| None,
         }
     }
 
-    fn held_by(c: &Value) -> Held {
-        Held {
-            pid: c
-                .get("pid")
-                .and_then(Value::as_u64)
-                .and_then(|p| u32::try_from(p).ok())
-                .unwrap_or(0),
-            kind: c
-                .get("kind")
-                .and_then(Value::as_str)
-                .unwrap_or("terminal")
-                .to_owned(),
-        }
-    }
-
-    /// `YYYY-MM-DDTHH:MM:SSZ`, as `kith-sessions now()` writes it.
-    fn stamp() -> String {
-        let secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let (days, rest) = (i64::try_from(secs / 86400).unwrap_or(0), secs % 86400);
-        // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
-        let z = days + 719_468;
-        let era = z.div_euclid(146_097);
-        let doe = z.rem_euclid(146_097);
-        let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let day = doy - (153 * mp + 2) / 5 + 1;
-        let month = if mp < 10 { mp + 3 } else { mp - 9 };
-        let year = yoe + era * 400 + i64::from(month <= 2);
-        format!(
-            "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
-            rest / 3600,
-            rest % 3600 / 60,
-            rest % 60
-        )
-    }
-
-    fn record(pid: u32, kind: &str) -> String {
-        json!({
-            "pid": pid,
-            "procStart": process_start(pid).unwrap_or_default(),
-            "at": stamp(),
-            "kind": kind,
-        })
-        .to_string()
-    }
-
-    fn unique() -> u64 {
-        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn lock(parent: &Path, sid: &str) -> io::Result<fs::File> {
-        let file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .open(parent.join(format!("{sid}.claim.lock")))?;
-        file.lock_exclusive()?;
-        Ok(file)
-    }
-
-    fn write_new(path: &Path, text: &str) -> io::Result<()> {
-        let _ = fs::remove_file(path);
-        let mut f = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)?;
-        f.write_all(text.as_bytes())
-    }
-
-    fn make_dir(parent: &Path) -> io::Result<()> {
-        use std::os::unix::fs::DirBuilderExt as _;
-        fs::DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(parent)
-    }
-
-    /// Takes the claim for `pid`, recorded as `kind`. `Ok(Err(held))`: a live claim is there. A taker ends the
-    /// session's pending intent and its 54-minute decision (`kith-lifecycle taken`), as `take_claim` does.
+    /// Takes the claim for `pid`, recorded as `kind`. `Ok(Err(held))`: a live claim is there.
     pub(super) fn take(
         state: &Path,
         sid: &str,
         pid: u32,
         kind: &str,
     ) -> io::Result<Result<(), Held>> {
-        let parent = dir(state);
-        make_dir(&parent)?;
-        let dest = parent.join(format!("{sid}.claim"));
-        // Unique per call: two takers in this process at once must not share a temp file.
-        let tmp = parent.join(format!(
-            ".{sid}.claim.{}.{}.tmp",
-            std::process::id(),
-            unique()
-        ));
-        write_new(&tmp, &record(pid, kind))?;
-        let result = (|| {
-            let _lock = lock(&parent, sid)?;
-            for _ in 0..3 {
-                match fs::hard_link(&tmp, &dest) {
-                    Ok(()) => return Ok(Ok(())),
-                    Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
-                    Err(e) => return Err(e),
-                }
-                if let Some(seen) = read(&dest).filter(live) {
-                    return Ok(Err(held_by(&seen)));
-                }
-                // Stale or garbage: nobody else judges it while we hold the lock.
-                let _ = fs::remove_file(&dest);
-            }
-            Ok(Err(read(&dest).map_or(
-                Held {
-                    pid,
-                    kind: "terminal".into(),
-                },
-                |c| held_by(&c),
-            )))
-        })();
-        let _ = fs::remove_file(&tmp);
-        if matches!(result, Ok(Ok(()))) {
-            taken(state, sid);
-        }
-        result
+        let taken = threads::take_claim(&ctx(state), sid, i64::from(pid), &Take::new(kind))?;
+        Ok(taken.map_err(|Holding(c)| Held {
+            pid: c.pid.and_then(|p| u32::try_from(p).ok()).unwrap_or(0),
+            kind: c.kind,
+        }))
     }
 
-    /// `kith_lifecycle.taken`: best effort, the claim never fails on bookkeeping.
-    fn taken(state: &Path, sid: &str) {
-        let _ = fs::remove_file(state.join("sessions/intent").join(format!("{sid}.json")));
-        let _ = fs::remove_file(state.join("sessions/decisions").join(format!("{sid}.json")));
-    }
-
-    /// Hands a claim this daemon took for itself to the stub's pid, if it is still ours.
-    /// `Ok(false)`: the claim is no longer `from`'s, and nothing was changed.
+    /// Hands a claim this daemon took for itself to the stub's pid. `Ok(false)`: it is no longer ours.
     pub(super) fn retarget(state: &Path, sid: &str, from: u32, to: u32) -> io::Result<bool> {
-        let parent = dir(state);
-        let dest = parent.join(format!("{sid}.claim"));
-        let _lock = lock(&parent, sid)?;
-        if read(&dest).is_some_and(|c| held_by(&c).pid == from) {
-            let tmp = parent.join(format!(
-                ".{sid}.claim.{}.{}.retarget",
-                std::process::id(),
-                unique()
-            ));
-            write_new(&tmp, &record(to, "terminal"))?;
-            fs::rename(&tmp, &dest)?;
-            return Ok(true);
-        }
-        Ok(false)
+        threads::retarget(&ctx(state), sid, i64::from(from), i64::from(to), "terminal")
     }
 
     /// Gives the claim back if `pid` still holds it.
     pub(super) fn release(state: &Path, sid: &str, pid: u32) {
-        let parent = dir(state);
-        let Ok(_lock) = lock(&parent, sid) else {
-            return;
-        };
-        let dest = parent.join(format!("{sid}.claim"));
-        if read(&dest).is_some_and(|c| held_by(&c).pid == pid) {
-            let _ = fs::remove_file(&dest);
-        }
+        threads::release_one(&ctx(state), sid, i64::from(pid), false);
     }
 }
 

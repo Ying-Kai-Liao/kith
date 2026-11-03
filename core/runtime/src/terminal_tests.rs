@@ -512,6 +512,35 @@ echo $$ > "$lock/$key.pid"
     }
 
     #[test]
+    fn a_terminal_started_after_its_caller_gave_up_is_ended() {
+        let rig = Rig::new(
+            r#"lock="$2"; key="$4"; shift 5
+echo $$ > "$lock/$key.pid"
+"$@""#,
+        );
+        // The supervisor watches a new stub for 600 ms before it answers: this caller stops waiting after 100.
+        *rig.d.shared().terminals.answer_wait.lock().unwrap() = Some(Duration::from_millis(100));
+        let a = answered(open(&rig.m, "sess-l", &["sh", "-c", "cat"], &plain()));
+        assert_eq!(a["status"], "direct", "{a}");
+        assert!(!rig.claim_file("sess-l").exists(), "claim given back");
+        let pid_file = Layout::new(&rig.m).dir.join("locks/sess-l.pid");
+        until("the stub to have started", || pid_file.is_file());
+        let pid: u32 = std::fs::read_to_string(pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        until("the late terminal to be ended", || {
+            !std::process::Command::new("kill")
+                .args(["-s", "0", &pid.to_string()])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        });
+    }
+
+    #[test]
     fn a_holder_reached_through_a_command_answers_direct() {
         let t = sandbox();
         let m = t.path().join("m");
