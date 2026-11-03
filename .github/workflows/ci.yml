@@ -478,6 +478,9 @@ jobs:
           kernel/tests/difftest/kith-difftest --rust --core --bin "$PWD/serve/host/target/debug/kith"
           # And once more with a daemon running in each NEW sandbox, so the verbs the daemon answers go through its owner socket.
           kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
+          # The frozen access-verb cases (recorded from Python, never re-recorded): the Rust program alone against the record.
+          # --golden takes its cases from its DIR, so it does not combine with --core or --daemon.
+          kernel/tests/difftest/kith-difftest --golden kernel/tests/difftest/golden --rust --bin "$PWD/serve/host/target/debug/kith"
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
       - name: Run-once cost and kernel notes
