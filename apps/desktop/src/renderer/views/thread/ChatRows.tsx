@@ -35,8 +35,10 @@ import { BotGuestAvatar, ToolRow, pairOf } from '../../components/kith'
 import { toolRowOf, VISIBLE_STEPS } from '@shared/thread-feed'
 import { askIdOf } from '@shared/handoff-peek'
 import { botGuestSender } from '@shared/bot-guest-chat'
+import { taskOf } from '@shared/tasks'
 import { queuedLine } from '@shared/thread-writer'
 import { quoteOf, quotesOf } from './reply-quote'
+import { targetsOf } from './task-target'
 import { richCardOf, type RichCard } from '@shared/rich-card'
 import { resultView } from '@shared/result-card'
 import { NewsCard, PlanCard, ResultCard, ScheduleCard } from './RichCards'
@@ -68,7 +70,8 @@ export const ChatRow = memo(function ChatRow({ entry, groupStart, chat, openTrac
   const store = useStore()
   // Reply is a quote above the composer; the host has no reply link.
   const quote = quoteOf(entry.data.text)
-  const reply = quote && !chat?.botGuest ? () => quotesOf(store).set(entry.botId, quote) : undefined
+  // A reply to a task's message goes in that task.
+  const reply = quote && !chat?.botGuest ? () => { quotesOf(store).set(entry.botId, quote); targetsOf(store).set(entry.botId, taskOf(entry)) } : undefined
   const guestSender = botGuestSender(chat, entry)
   const botPost = entry.kind === 'user' ? botPostOf(chat, entry, guestSender?.name) : null
   switch (entry.kind) {
@@ -187,8 +190,9 @@ function LivePermission({ entry }: { entry: Entry }) {
   const store = useLiveStore()
   const [open, setOpen] = useState(false)
   const fold = foldOf(entry)
-  // An approved card that still holds its old run keeps its Stop row, so it stays a card.
-  const folded = fold && !(entry.data.held || store.stoppedRuns.get(entry.id))
+  // An approved card that still holds its old run keeps its Stop row, so it stays a card; so does a This session grant,
+  // whose outcome line says while it lives (with Remove) and how it stopped.
+  const folded = fold && !(entry.data.held || store.stoppedRuns.get(entry.id) || entry.data.sessionGrant)
   if (folded) {
     return (
       <div className="agent-inset">
@@ -227,7 +231,7 @@ export function OpenCard({ entry }: { entry: Entry }) {
       </div>
     )
   }
-  return <PermissionCard entry={entry} hostName={store.hostName} answering={store.answering.get(entry.id) ?? null} respond={(o) => store.respond(entry, o)} waiting={waitingFor(entry, ownerName, store.isOwner)} pair={pairOf(store.bots.get(entry.data.author ?? entry.botId)?.avatarColor)} held={heldFor(entry, store, ownerName)} />
+  return <PermissionCard entry={entry} hostName={store.hostName} answering={store.answering.get(entry.id) ?? null} respond={(o) => store.respond(entry, o)} waiting={waitingFor(entry, ownerName, store.isOwner)} pair={pairOf(store.bots.get(entry.data.author ?? entry.botId)?.avatarColor)} held={heldFor(entry, store, ownerName)} removeGrant={store.isOwner ? (id) => store.removeSessionGrant(id) : undefined} />
 }
 
 /** An approved card's held row (an old run holds its session): Stop is the owner's, others read who can stop it. */
@@ -535,9 +539,12 @@ export function ToolRowItem({ entry }: { entry: Entry }) {
   const [peeking, setPeeking] = useState(false)
   // Only the owner sees a handoff's peek; a row without an ask id (a plain ask, one from before the records) is an ordinary row.
   const ask = store.isOwner ? askIdOf(m.command, m.output) : null
+  // A call a This session grant let through says so; while the grant lives the owner can remove it from here.
+  const grant = entry.data.sessionGrant
+  const tag = grant ? { label: 'this session', remove: grant.state === 'live' && store.isOwner ? () => store.removeSessionGrant(grant.id) : undefined } : undefined
   return (
     <div className="chat-tool">
-      <ToolRow verb={m.verb} object={m.object} result={m.result} state={m.state} detail={m.command || m.output ? { command: m.command, output: m.output } : undefined} onPeek={ask ? () => setPeeking(true) : undefined} />
+      <ToolRow verb={m.verb} object={m.object} result={m.result} state={m.state} detail={m.command || m.output ? { command: m.command, output: m.output } : undefined} onPeek={ask ? () => setPeeking(true) : undefined} tag={tag} />
       {ask ? <HandoffSheet store={store} id={peeking ? ask : null} onClose={() => setPeeking(false)} /> : null}
     </div>
   )

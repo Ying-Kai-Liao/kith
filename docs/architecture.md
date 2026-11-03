@@ -245,6 +245,11 @@ that lasts lives in kith-auth, where the owner can see and remove it.
   service grants `<agent>@<person>`, profile shares, aliases. `kith-auth ledger [--person ID] [--agent AGENT]` lists
   them and `ledger --rm <key>` removes one; the apps' Access lists use the host's `accessLedger` / `removeGrant`
   (`serve/host/src/api/people.rs`), which call it.
+- Guest domains: hosts every guest of an agent (invited person or bot guest, never the owner) reaches with no card.
+  A package declares them (`guest_domains: [host, ...]` in capabilities.yaml, `kith_jobs.guest_domains`); the owner's
+  edge card adds "Always, for everyone <agent> is shared with" (`kith-always-all`, `kith-auth agent-access <agent>
+  domain <host> [--rm]`, kept in auth.json `agent_access`). Both join `access.domains` in `kith-auth resolve` and the
+  ledger (person `*`), and `bin/kith` puts them in the guest sandbox's allowedDomains at every launch, run socket or not.
 - Host card store (`serve/host/src/store/cards.rs`): requests (cards) and once grants, bound to the session that
   asked. Producers: app-chat prompts (`agent/bot/updates.rs`), `claude -p` prompts through kith-permit
   (`cards/mod.rs`), escape cards `request_access` (`cards/access.rs`), secret cards (`cards/secret.rs`).

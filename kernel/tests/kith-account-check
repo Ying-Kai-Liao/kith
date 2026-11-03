@@ -48,7 +48,7 @@ check "unknown harness: error object, exit 2" "[ $rc = 2 ] && [ \"\$(jv 'd[\"ok\
 
 # ---- list ----
 OUT=$("$KITH" account list --json)
-check "list --json after add: both accounts, same row shape" "[ \"\$(jv 'sorted(r[\"id\"] for r in d)')\" = \"['claude:work', 'codex:main']\" ] && [ \"\$(jv 'all({\"id\",\"harness\",\"name\",\"dir\",\"logged_in\"} <= set(r) for r in d)')\" = True ]"
+check "list --json after add: both accounts, same row shape" "[ \"\$(jv 'sorted(r[\"id\"] for r in d if r.get(\"dir\"))')\" = \"['claude:work', 'codex:main']\" ] && [ \"\$(jv 'all({\"id\",\"harness\",\"name\",\"dir\",\"logged_in\"} <= set(r) for r in d if r.get(\"dir\"))')\" = True ]"
 
 # ---- remove ----
 "$KITH" backup add claude:work >/dev/null 2>&1
@@ -57,7 +57,7 @@ check "remove --json without --yes: ok false, exit 2, folder kept" "[ $rc = 2 ] 
 OUT=$("$KITH" account remove claude work --json --yes 2>"$T/err"); rc=$?
 check "remove --json --yes: changed, in_chain true, folder gone" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"], d[\"id\"], d[\"in_chain\"], d[\"dir\"] == \"$DIR/claude/work\")')\" = \"(True, True, 'claude:work', True, True)\" ] && [ ! -e '$DIR/claude/work' ]"
 OUT=$("$KITH" account remove claude work --json --yes); rc=$?
-check "remove twice: ok false, no account" "[ $rc != 0 ] && [ \"\$(jv '(d[\"ok\"], \"no account\" in d[\"error\"])')\" = '(False, True)' ]"
+check "remove twice: ok true, changed false (not in the set, no folder)" "[ $rc = 0 ] && [ \"\$(jv '(d[\"ok\"], d[\"changed\"])')\" = '(True, False)' ]"
 OUT=$("$KITH" account remove codex main --json --yes)
 check "remove codex not in a chain: in_chain false" "[ \"\$(jv '(d[\"ok\"], d[\"in_chain\"])')\" = '(True, False)' ]"
 mkdir -p "$T/elsewhere" "$DIR/codex"; ln -s "$T/elsewhere" "$DIR/codex/link"

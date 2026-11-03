@@ -6,7 +6,7 @@
 // build/native/kith-serve.exe and kith-servew.exe (runs it at sign-in), plus the computer-use
 // driver the host starts from beside itself. Linux apps use the installed host, so there's
 // nothing to do there.
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -53,6 +53,10 @@ if (process.platform === 'win32') {
   rmSync(kith, { recursive: true, force: true })
   mkdirSync(join(kith, 'bin'), { recursive: true })
   run('lipo', ['-create', '-output', join(kith, 'bin/kith'), ...targets.map((t) => built(t, 'kith'))])
-  run('sh', [join(root, '../../scripts/stage-kernel.sh'), join(kith, 'share/kith')])
+  // The kernel's VERSION is the app's version: the app installs this copy as its CLI (Resources/kith-install.sh).
+  // A release build names it in KITH_APP_VERSION (the tag; electron-builder gets the same through extraMetadata).
+  const version = process.env.KITH_APP_VERSION || JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version
+  run('sh', [join(root, '../../scripts/stage-kernel.sh'), join(kith, 'share/kith'), version])
+  copyFileSync(join(root, '../../scripts/install.sh'), join(out, 'kith-install.sh'))
 }
 console.log('host: built')

@@ -1,4 +1,5 @@
 //! Immutable snapshots explicitly published by a bot, independent of its workspace.
+use crate::cards::resource::{self, Roots};
 use crate::chat::uploads::MAX_FILE;
 use anyhow::{Context as _, Result, ensure};
 use serde::{Deserialize, Serialize};
@@ -77,16 +78,52 @@ fn open_regular(path: &Path) -> Result<File> {
     Ok(file)
 }
 
-/// Blocking, bounded-memory copy. Call on a blocking worker, never the bot actor.
+/// What a run's `send_file` may read (I8): a file below one of the run's folders, never one on the secrets list. An MCP
+/// tool is outside the Read deny rules that keep a run off the secrets, so the host checks the same list itself.
+pub struct Reach {
+    folders: Vec<PathBuf>,
+    secrets: Roots,
+}
+
+impl Reach {
+    /// `folders`: the run's working folder and the folders its launch added. `secrets`: [`crate::cards::resource::roots`].
+    pub fn new(folders: impl IntoIterator<Item = PathBuf>, secrets: Roots) -> Self {
+        let folders = folders.into_iter().filter(|f| f.is_absolute()).filter_map(|f| f.canonicalize().ok()).collect();
+        Self { folders, secrets }
+    }
+
+    /// `real`: the source with every link and `..` resolved.
+    fn check(&self, real: &Path) -> Result<()> {
+        ensure!(
+            !resource::is_sensitive(real, &self.secrets) && !resource::touches_secret_dirs(real, &self.secrets),
+            "{} is on Kith's secrets list and can't be shared",
+            real.display()
+        );
+        let at = resource::fold(real);
+        ensure!(
+            self.folders.iter().any(|f| at.starts_with(resource::fold(f))),
+            "{} is outside this run's folders; copy it into your working folder or files folder first",
+            real.display()
+        );
+        Ok(())
+    }
+}
+
+/// Blocking, bounded-memory copy. Call on a blocking worker, never the bot actor. `reach`: where an agent's own
+/// `send_file` may read; `None` for the host's own folders (the run outbox).
 pub fn snapshot(
     root: &Path,
     cwd: &Path,
     source: &str,
     display: Option<&str>,
+    reach: Option<&Reach>,
     cancelled: &AtomicBool,
 ) -> Result<Snapshot> {
     let original = cwd.join(source);
     let source = original.canonicalize().context("finding the file")?;
+    if let Some(reach) = reach {
+        reach.check(&source)?;
+    }
     let display = match display {
         Some(value) => name(value)?,
         None => name(original.file_name().and_then(|v| v.to_str()).context("file name is not UTF-8; provide name")?)?,
@@ -130,11 +167,15 @@ pub fn snapshot_all(
     cwd: &Path,
     sources: &[String],
     display: Option<&str>,
+    reach: &Reach,
     cancelled: &AtomicBool,
 ) -> Result<Vec<Snapshot>> {
     let mut saved = Vec::with_capacity(sources.len());
     for source in sources {
-        saved.push(snapshot(root, cwd, source, display, cancelled).with_context(|| format!("sharing {source}"))?);
+        saved.push(
+            snapshot(root, cwd, source, display, Some(reach), cancelled)
+                .with_context(|| format!("sharing {source}"))?,
+        );
     }
     Ok(saved)
 }

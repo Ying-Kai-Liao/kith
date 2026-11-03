@@ -1001,7 +1001,7 @@ async fn main() -> Result<()> {
         Sub::Compat => {
             println!(
                 "{}",
-                serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "protocol": compat::PROTOCOL, "minProtocol": compat::MIN_PROTOCOL})
+                serde_json::json!({"version": env!("CARGO_PKG_VERSION"), "protocol": compat::PROTOCOL, "minProtocol": compat::MIN_PROTOCOL, "cli": kernel::current_cli().json()})
             );
             Ok(())
         }

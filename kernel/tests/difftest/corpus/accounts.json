@@ -16,6 +16,7 @@
       ["account", "remove", "claude", "work", "--json", "--yes"],
       ["account", "remove", "claude", "work", "--json", "--yes"]
     ],
+    "sort_lines": true,
     "stderr": false
   }
 ]

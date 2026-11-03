@@ -113,3 +113,35 @@ async fn a_new_task_runs_beside_the_last_in_a_session_of_its_own_and_stops_alone
         "stopping task B left task A running"
     );
 }
+
+/// A card's Reply points the box at its task: the message carries the task's root as its thread, and lands there
+/// (in that task's session) even while a newer task is the one the box would go on with.
+#[tokio::test]
+async fn a_reply_aimed_at_an_older_task_lands_in_its_thread() {
+    if python_missing() {
+        return;
+    }
+    let host = Host::start().await;
+    let bot = slow_bot(&host).await;
+    let a = send(&host, &bot, "task A: the long build", false).await;
+    let a = a["id"].as_str().unwrap().to_owned();
+    let a_reply = answer(&host, &bot, &a, "task A", "step 1.").await;
+    let b = send(&host, &bot, "task B: a quick question", true).await;
+    let b = b["id"].as_str().unwrap().to_owned();
+    answer(&host, &bot, &b, "task B", "step 1.").await;
+
+    let body = json!({"botId": bot, "text": "for A: use the cache", "threadId": a,
+        "clientNonce": uuid::Uuid::new_v4().to_string()});
+    let reply = host.call("send", body).await["entry"].clone();
+    assert_eq!(reply["threadId"], a.as_str(), "the reply joins task A, not the newer B: {reply}");
+    assert_ne!(reply["data"]["task"], true, "a reply starts no task: {reply}");
+    let got = answer(&host, &bot, &a, "use the cache", "step").await;
+    assert_eq!(session(&got), session(&a_reply), "task A's own session answers: {got}");
+    assert!(
+        !thread(&host, &bot, &b)
+            .await
+            .iter()
+            .any(|e| e["data"]["text"].as_str().unwrap_or_default().contains("use the cache")),
+        "nothing of it reaches task B"
+    );
+}

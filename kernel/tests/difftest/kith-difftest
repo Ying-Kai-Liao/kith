@@ -295,6 +295,8 @@ def snapshot(side_dir, case, norm):
                 facets[f'state:{rel}'] = norm.text(text)
     log = side_dir / 'fakelog'
     facets['fakes'] = norm.text(log.read_text()) if log.exists() else ''
+    if case.get('sort_lines'):   # parallel status checks (kith account list) make the order of fake calls mean nothing
+        facets['fakes'] = '\n'.join(sorted(facets['fakes'].split('\n')))
     return facets
 
 

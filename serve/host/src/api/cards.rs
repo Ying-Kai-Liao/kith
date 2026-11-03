@@ -128,6 +128,8 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, mut b: Value) -> Result<C
         // neither the member nor the bot list.
         "allowedRules" => crate::cards::autoallow::list(str_arg(&b, "agent")?).await?,
         "removeAllowedRule" => crate::cards::autoallow::remove(str_arg(&b, "agent")?, str_arg(&b, "id")?).await?,
+        // Remove on a "This session" grant (cards/session.rs): owner only, like the two above.
+        "removeSessionGrant" => crate::cards::session::remove(hub, str_arg(&b, "id")?)?,
         "revokeAskToken" => json!({"revoked": crate::runauth::table().revoke_token(str_arg(&b, "token")?)}),
         _ => return Ok(ControlFlow::Continue(b)),
     }))

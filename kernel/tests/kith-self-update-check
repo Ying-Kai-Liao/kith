@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kith-self-update-check — `kith update` with no agent updates kith itself, by how it was installed:
-#   a git checkout fast-forwards (and refuses when dirty, diverged, detached or without an upstream, changing nothing),
+#   a git checkout is a dev copy: `kith update self` says so and changes nothing, `kith update --dev` fast-forwards it (and refuses when dirty, diverged, detached or without an upstream, changing nothing),
 #   Homebrew runs `brew upgrade kith`, the install.sh layout pipes scripts/install.sh from KITH_REPO into sh,
 #   the desktop app prints the download link. `kith update --all` is kith first, then the agents; `kith update <agent>`
 #   is as before. `kith new kith` and `kith install ... --as kith` refuse (exit 2). The doctor's line (kith-self-update
@@ -37,35 +37,35 @@ mkdir -p "$KITH_HOME/agents/dev/role" "$KITH_HOME/state"
 upstream_commit() { echo "$1" > "$T/seed/marker"; git -C "$T/seed" commit -q -am "$1" && git -C "$T/seed" push -q origin HEAD:main; }
 head_of() { git -C "$KITH_HOME" rev-parse HEAD; }
 
-out=$("$KITH_BIN" update self 2>&1); rc=$?
+out=$("$KITH_BIN" update --dev 2>&1); rc=$?
 check "up to date: says so, exit 0" '[[ $rc == 0 && $out == *"up to date"* ]]'
 check "untracked agents/ is not dirty" '[[ $out != *uncommitted* ]]'
 
 upstream_commit two
 before=$(head_of)
 echo local > "$KITH_HOME/marker"
-out=$("$KITH_BIN" update self 2>&1); rc=$?
+out=$("$KITH_BIN" update --dev 2>&1); rc=$?
 check "dirty tree: refuses, non-zero, nothing changed" '[[ $rc != 0 && $out == *uncommitted* && $(head_of) == "$before" && $(cat "$KITH_HOME/marker") == local ]]'
 git -C "$KITH_HOME" checkout -q marker
 
-out=$("$KITH_BIN" update self 2>&1); rc=$?
+out=$("$KITH_BIN" update --dev 2>&1); rc=$?
 check "behind: fast-forwards and prints before/after" '[[ $rc == 0 && $out == *"before: "* && $out == *"after: "*two* && $(cat "$KITH_HOME/marker") == two ]]'
-out=$("$KITH_BIN" update self 2>&1); rc=$?
+out=$("$KITH_BIN" update --dev 2>&1); rc=$?
 check "second run: up to date" '[[ $rc == 0 && $out == *"up to date"* ]]'
 
 echo mine > "$KITH_HOME/mine"; git -C "$KITH_HOME" add mine && git -C "$KITH_HOME" commit -q -m mine
 upstream_commit three
 before=$(head_of)
-out=$("$KITH_BIN" update self 2>&1); rc=$?
+out=$("$KITH_BIN" update --dev 2>&1); rc=$?
 check "diverged: refuses, non-zero, nothing changed" '[[ $rc != 0 && $out == *"cannot fast-forward"* && $(head_of) == "$before" && $(cat "$KITH_HOME/marker") == two ]]'
 git -C "$KITH_HOME" reset -q --hard origin/main
 
 git -C "$KITH_HOME" checkout -q --detach
-out=$("$KITH_BIN" update self 2>&1); rc=$?
+out=$("$KITH_BIN" update --dev 2>&1); rc=$?
 check "detached HEAD: nothing to pull from, non-zero" '[[ $rc != 0 && $out == *"detached"* ]]'
 git -C "$KITH_HOME" checkout -q main
 git -C "$KITH_HOME" checkout -q -b lonely
-out=$("$KITH_BIN" update self 2>&1); rc=$?
+out=$("$KITH_BIN" update --dev 2>&1); rc=$?
 check "no upstream: says so, non-zero" '[[ $rc != 0 && $out == *"no upstream"* ]]'
 git -C "$KITH_HOME" checkout -q main
 
@@ -78,7 +78,12 @@ out=$(KITH_ROOT="$KITH_HOME/kernel" "$KITH_HOME/kernel/bin/kith-self-update" --c
 check "doctor line: offline is silent, exit 0" '[[ $rc == 0 && -z $out ]]'
 git -C "$KITH_HOME" remote set-url origin "$T/remote.git"
 
-# --- --all: kith first, then the agents; a failing kith still lets the agents update ---------------------------------
+# A checkout reached without --dev is a dev copy: it says so and changes nothing (the installed CLI updates from its own copy)
+before=$(head_of)
+out=$("$KITH_BIN" update self 2>&1); rc=$?
+check "checkout without --dev: says dev checkout, exit 0, nothing pulled" '[[ $rc == 0 && $out == *"dev checkout"* && $out == *"kith update --dev"* && $(head_of) == "$before" ]]'
+
+# --- --all: kith first, then the agents; a dev checkout does not stop the agents ---------------------------------
 git init -q --bare -b main "$T/dev.git"
 git clone -q "$T/dev.git" "$T/devseed" 2>/dev/null
 printf -- '---\nname: dev\ndescription: d\n---\nbody\n' > "$T/devseed/agent.md"
@@ -87,16 +92,16 @@ rm -rf "$KITH_HOME/agents/dev"; mkdir -p "$KITH_HOME/agents/dev"
 git clone -q "$T/dev.git" "$KITH_HOME/agents/dev/role"
 echo d2 > "$T/devseed/note"; git -C "$T/devseed" add -A && git -C "$T/devseed" commit -q -m d2 && git -C "$T/devseed" push -q origin HEAD:main
 out=$("$KITH_BIN" update --all 2>&1); rc=$?
-check "--all: kith, then the agent" '[[ $rc == 0 && $out == *"after: "*four* && -f "$KITH_HOME/agents/dev/role/note" ]]'
+check "--all: kith (a dev checkout, left alone), then the agent" '[[ $rc == 0 && $out == *"dev checkout"* && -f "$KITH_HOME/agents/dev/role/note" ]]'
 echo d3 > "$T/devseed/note3"; git -C "$T/devseed" add -A && git -C "$T/devseed" commit -q -m d3 && git -C "$T/devseed" push -q origin HEAD:main
 upstream_commit five
 echo local > "$KITH_HOME/marker"
 out=$("$KITH_BIN" update --all 2>&1); rc=$?
-check "--all with kith failing: says so, still updates the agent, non-zero" '[[ $rc != 0 && $out == *uncommitted* && -f "$KITH_HOME/agents/dev/role/note3" ]]'
+check "--all still updates the agent when the checkout is dirty" '[[ $rc == 0 && -f "$KITH_HOME/agents/dev/role/note3" ]]'
 git -C "$KITH_HOME" checkout -q marker
 echo d4 > "$T/devseed/note4"; git -C "$T/devseed" add -A && git -C "$T/devseed" commit -q -m d4 && git -C "$T/devseed" push -q origin HEAD:main
 out=$("$KITH_BIN" update dev 2>&1); rc=$?
-check "update <agent> as before: the agent only" '[[ $rc == 0 && $out == "dev: "*d4* && -f "$KITH_HOME/agents/dev/role/note4" && $(cat "$KITH_HOME/marker") == four ]]'
+check "update <agent> as before: the agent only" '[[ $rc == 0 && $out == "dev: "*d4* && -f "$KITH_HOME/agents/dev/role/note4"  ]]'
 
 # --- the other install layouts: the kernel reached through a path that tells how it was installed ---------------------
 cat > "$T/stub/brew" <<EOF
@@ -125,6 +130,16 @@ check "install.sh layout: pipes install.sh from KITH_REPO into sh, for this pref
 : > "$T/calls"
 out=$(PATH="$T/stub:$PATH" "$T/rel/share/kith/kernel/bin/kith" update self 2>&1)
 check "install.sh layout: default repo" '[[ $(cat "$T/calls") == *"Ying-Kai-Liao/kith/main/scripts/install.sh"* ]]'
+
+link_kernel "$T/mach/cli/0.1.0/share/kith/kernel"
+: > "$T/calls"
+out=$(PATH="$T/stub:$PATH" "$T/mach/cli/0.1.0/share/kith/kernel/bin/kith" update self 2>&1); rc=$?
+check "cli layout (cli/<version>): pipes install.sh into sh for the machine folder, not the version folder" \
+  '[[ $rc == 0 && $(cat "$T/calls") == *"KITH_PREFIX=$T/mach "* && $(cat "$T/calls") == *ran-install-sh* ]]'
+ln -s 0.1.0 "$T/mach/cli/current"
+: > "$T/calls"
+out=$(PATH="$T/stub:$PATH" "$T/mach/cli/current/share/kith/kernel/bin/kith" update self 2>&1); rc=$?
+check "cli layout (via cli/current): same machine folder" '[[ $rc == 0 && $(cat "$T/calls") == *"KITH_PREFIX=$T/mach "* ]]'
 
 link_kernel "$T/Kith.app/Contents/Resources/kith/kernel"
 : > "$T/calls"

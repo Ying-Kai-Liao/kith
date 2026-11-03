@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# kith-install-layout-check — the CLI is one versioned release copy: scripts/install.sh files each release under
+# <machine>/cli/<version>/ and flips cli/current; a second version sits beside the first; re-installing is safe;
+# old versions are pruned (never the current one); an older flat install (bin/kith, share/kith/kernel) becomes links
+# into current with agents/ left alone; KITH_INSTALL_CLI_ONLY=1 installs the command and stops; a partial folder from
+# an interrupted install is cleaned; the packaged install.sh links ~/.local/bin/kith to cli/current and makes ~/kith a
+# real folder; a checkout's install.sh links nothing unless --dev. Fake tarballs, a throwaway HOME.
+#
+#   kernel/tests/kith-install-layout-check     a few seconds; prints each check, exits 1 when one fails
+set -uo pipefail
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$KERNEL/.." && pwd)"
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-layout.XXXXXX"); T=$(cd "$T" && pwd -P)
+trap 'rm -rf "$T"' EXIT
+export HOME=$T/home
+unset KITH_HOME HQ_HOME KITH_STATE HQ_STATE KITH_PREFIX KITH_VERSION KITH_INSTALL_DIR KITH_INSTALL_CLI_ONLY KITH_KEEP_VERSIONS KITH_AUTH KITH_KERNEL
+export KITH_INSTALL_YES=1
+M=$HOME/.kith
+mkdir -p "$HOME/.local/bin" "$T/stub"
+fail=0
+check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
+INSTALL="$ROOT/scripts/install.sh"
+
+# release <version> [stamp]: a fake release tarball kith-<version>-darwin-<arch>.tar.gz; stamp=no leaves out kernel/VERSION
+release() {
+  local v=$1 d=$T/rel/kith-$1-darwin-arm64
+  rm -rf "$d"; mkdir -p "$d/bin" "$d/share/kith/kernel/bin" "$d/share/kith/.claude-plugin"
+  printf '#!/bin/sh\necho "kith %s"\n' "$v" > "$d/bin/kith"; chmod 755 "$d/bin/kith"
+  printf '#!/bin/sh\necho init "$@"\n' > "$d/share/kith/kernel/bin/kith-init"; chmod 755 "$d/share/kith/kernel/bin/kith-init"
+  echo "marker $v" > "$d/share/kith/kernel/marker"
+  cp "$ROOT/install.sh" "$d/share/kith/install.sh"
+  [ "${2:-}" = no ] || echo "$v" > "$d/share/kith/kernel/VERSION"
+  tar -C "$T/rel" -czf "$T/rel/kith-$v-darwin-arm64.tar.gz" "kith-$v-darwin-arm64"
+}
+cli_only() { KITH_INSTALL_CLI_ONLY=1 KITH_INSTALL_TARBALL=$T/rel/kith-$1-darwin-arm64.tar.gz sh "$INSTALL" 2>&1; }
+
+# --- a fresh install ---------------------------------------------------------------------------------------------
+release 0.1.0
+out=$(cli_only 0.1.0); rc=$?
+check "CLI-only fresh install: exit 0, no questions" '[[ $rc == 0 ]]'
+check "version folder holds bin/kith and share/kith/kernel" '[ -x "$M/cli/0.1.0/bin/kith" ] && [ -f "$M/cli/0.1.0/share/kith/kernel/marker" ]'
+check "kernel/VERSION is one line, the version" '[[ $(cat "$M/cli/0.1.0/share/kith/kernel/VERSION") == 0.1.0 ]]'
+check "current is a relative link to the version" '[[ $(readlink "$M/cli/current") == 0.1.0 ]]'
+check "~/.local/bin/kith and hq lead to cli/current" '[[ $(readlink "$HOME/.local/bin/kith") == "$M/cli/current/bin/kith" && $(readlink "$HOME/.local/bin/hq") == "$M/cli/current/bin/kith" ]]'
+check "CLI-only: no kith init, no ~/kith made" '[ ! -e "$HOME/kith" ] && [[ $out != *init* ]]'
+check "the command runs through the link" '[[ $("$HOME/.local/bin/kith") == "kith 0.1.0" ]]'
+check "the stable kernel path exists" '[ -f "$M/cli/current/share/kith/kernel/marker" ]'
+
+# --- a second version beside the first, then flip, reinstall -----------------------------------------------------------
+release 0.1.1
+out=$(cli_only 0.1.1); rc=$?
+check "second version: both folders stay, current moves" '[[ $rc == 0 && -d $M/cli/0.1.0 && -d $M/cli/0.1.1 && $(readlink "$M/cli/current") == 0.1.1 ]]'
+check "the command now answers as 0.1.1" '[[ $("$HOME/.local/bin/kith") == "kith 0.1.1" ]]'
+echo changed > "$M/cli/0.1.1/share/kith/kernel/marker"
+out=$(cli_only 0.1.1); rc=$?
+check "same version again: safe, exit 0, the folder is kept as it is" '[[ $rc == 0 && $(cat "$M/cli/0.1.1/share/kith/kernel/marker") == changed && $(readlink "$M/cli/current") == 0.1.1 ]]'
+out=$(cli_only 0.1.0)
+check "an older version installed again moves current back, the newer stays" '[[ $(readlink "$M/cli/current") == 0.1.0 && -d $M/cli/0.1.1 ]]'
+
+# --- tarball unpacked as a folder; a release without VERSION takes it from the folder name ----------------------------
+release 0.1.2 no
+out=$(KITH_INSTALL_CLI_ONLY=1 KITH_INSTALL_DIR=$T/rel/kith-0.1.2-darwin-arm64 sh "$INSTALL" 2>&1); rc=$?
+check "KITH_INSTALL_DIR: installs the unpacked folder, version from its name, VERSION stamped" '[[ $rc == 0 && $(cat "$M/cli/0.1.2/share/kith/kernel/VERSION") == 0.1.2 && $(readlink "$M/cli/current") == 0.1.2 ]]'
+out=$(KITH_INSTALL_CLI_ONLY=1 KITH_INSTALL_TARBALL=$T/none.tar.gz sh "$INSTALL" 2>&1); rc=$?
+check "failure: one line, non-zero" '[[ $rc != 0 && $(printf "%s\n" "$out" | wc -l) -eq 1 && $out == install:* ]]'
+printf 'bad' > "$T/bad.tar.gz"; echo 0000 > "$T/bad.tar.gz.sha256"
+out=$(KITH_INSTALL_CLI_ONLY=1 KITH_INSTALL_TARBALL=$T/bad.tar.gz sh "$INSTALL" 2>&1); rc=$?
+check "checksum mismatch: refused, current untouched" '[[ $rc != 0 && $out == *checksum* && $(readlink "$M/cli/current") == 0.1.2 ]]'
+
+# --- prune: the last 3 besides current; the current one never ----------------------------------------------------------
+for v in 0.1.3 0.1.4 0.1.5; do release $v; cli_only $v >/dev/null; touch -t 2601010000 "$M/cli/$v"; done
+release 0.1.6; cli_only 0.1.6 >/dev/null
+n=$(ls -1 "$M/cli" | grep -c '^0\.')
+check "prune keeps current plus 3 older (default)" '[[ $n == 4 && $(readlink "$M/cli/current") == 0.1.6 ]]'
+release 0.1.7
+KITH_KEEP_VERSIONS=1 cli_only 0.1.7 >/dev/null
+n=$(ls -1 "$M/cli" | grep -c '^0\.')
+check "KITH_KEEP_VERSIONS=1: current plus 1" '[[ $n == 2 && -d $M/cli/0.1.7 ]]'
+KITH_KEEP_VERSIONS=0 cli_only 0.1.7 >/dev/null
+check "KITH_KEEP_VERSIONS=0: only current, and never the one current names" '[[ $(ls -1 "$M/cli" | grep -c "^0\.") == 1 && -d $M/cli/0.1.7 && -f $M/cli/current/bin/kith ]]'
+
+# --- an interrupted install leaves a .partial that is never current and is cleaned next time -------------------------
+mkdir -p "$M/cli/0.9.9.partial/bin"
+release 0.2.0; cli_only 0.2.0 >/dev/null
+check "a stale .partial is removed, current is the new version" '[ ! -e "$M/cli/0.9.9.partial" ] && [[ $(readlink "$M/cli/current") == 0.2.0 ]]'
+
+# --- an older flat install moves over; agents/ beside it stays ------------------------------------------------------------
+rm -rf "$M"; rm -f "$HOME/.local/bin/kith" "$HOME/.local/bin/hq"
+mkdir -p "$M/bin" "$M/share/kith/kernel/lib" "$M/share/kith/agents/dev" "$M/secrets" "$M/share/kith/.claude-plugin"
+printf '#!/bin/sh\necho flat\n' > "$M/bin/kith"; chmod 755 "$M/bin/kith"
+echo old > "$M/share/kith/kernel/old-file"; echo mine > "$M/share/kith/agents/dev/keep"
+echo oldinstall > "$M/share/kith/install.sh"
+ln -s "$M/share/kith" "$HOME/kith"          # ~/kith led into the prefix
+ln -s "$M/share/kith/kernel" "$T/plist-kernel"
+cli_only 0.2.0 >/dev/null; rc=$?
+check "flat install: exit 0" '[[ $rc == 0 ]]'
+check "bin/kith is a link to cli/current/bin/kith" '[[ $(readlink "$M/bin/kith") == ../cli/current/bin/kith && $("$M/bin/kith") == "kith 0.2.0" ]]'
+check "share/kith/kernel is a link to the current kernel, the old files are gone" '[[ $(readlink "$M/share/kith/kernel") == ../../cli/current/share/kith/kernel && -f $M/share/kith/kernel/marker && ! -e $M/share/kith/kernel/old-file ]]'
+check "agents/ in share/kith is left in place" '[[ $(cat "$M/share/kith/agents/dev/keep") == mine && -f $HOME/kith/agents/dev/keep ]]'
+check "a path written before (via ~/kith/kernel) still reaches the kernel" '[ -f "$HOME/kith/kernel/marker" ] && [ -f "$T/plist-kernel/marker" ]'
+check "the flat install.sh is a link into current too" '[ -L "$M/share/kith/install.sh" ] && [ -f "$M/share/kith/install.sh" ]'
+release 0.2.1; cli_only 0.2.1 >/dev/null
+check "the next update only moves current; the flat links follow" '[[ $("$M/bin/kith") == "kith 0.2.1" && $(cat "$M/share/kith/kernel/VERSION") == 0.2.1 ]]'
+
+# --- the packaged install.sh: command -> cli/current, ~/kith a real folder, no ~/hq link -------------------------------
+rm -rf "$M" "$HOME/kith" "$HOME/.local/bin"/* ; mkdir -p "$HOME/.local/bin"
+out=$(KITH_INSTALL_TARBALL=$T/rel/kith-0.2.0-darwin-arm64.tar.gz sh "$INSTALL" --from someone 2>&1); rc=$?
+check "full install runs the packaged install.sh and kith init with the arguments" '[[ $rc == 0 && $out == *"init --from someone"* ]]'
+check "~/.local/bin/kith -> <machine>/cli/current/bin/kith (not a versioned folder)" '[[ $(readlink "$HOME/.local/bin/kith") == "$M/cli/current/bin/kith" && $(readlink "$HOME/.local/bin/hq") == "$M/cli/current/bin/kith" ]]'
+check "fresh install: ~/kith is a real folder with agents/, no ~/hq" '[ -d "$HOME/kith/agents" ] && [ ! -L "$HOME/kith" ] && [ ! -e "$HOME/hq" ]'
+check "the machine folder is marked migrated" '[ -f "$M/.migrated" ]'
+rm -rf "$HOME/kith"; ln -s "$T/elsewhere" "$HOME/kith"; mkdir -p "$T/elsewhere"
+out=$(KITH_INSTALL_TARBALL=$T/rel/kith-0.2.0-darwin-arm64.tar.gz sh "$INSTALL" 2>&1)
+check "an existing ~/kith (a link) is left as it is" '[[ $(readlink "$HOME/kith") == "$T/elsewhere" ]]'
+
+# --- a checkout's install.sh links nothing unless --dev ------------------------------------------------------------------
+rm -rf "$HOME/.local/bin"/* "$HOME/kith" "$HOME/hq" "$M"
+mkdir -p "$T/checkout/kernel/bin" "$T/checkout/kernel/lib" "$T/checkout/serve/host"
+cp "$ROOT/install.sh" "$T/checkout/install.sh"
+printf '#!/bin/sh\necho init "$@"\n' > "$T/checkout/kernel/bin/kith-init"; chmod 755 "$T/checkout/kernel/bin/kith-init"
+touch "$T/checkout/kernel/lib/kith_paths.py"
+out=$(bash "$T/checkout/install.sh" 2>&1); rc=$?
+check "checkout: exit 0, says to install the CLI and use KITH_KERNEL, links nothing" '[[ $rc == 0 && $out == *scripts/install.sh* && $out == *KITH_KERNEL=* && $out == *--dev* && ! -e $HOME/.local/bin/kith && ! -e $HOME/kith ]]'
+out=$(bash "$T/checkout/install.sh" --dev 2>&1); rc=$?
+check "checkout --dev: the old linking, --dev not passed on to kith init" '[[ $rc == 0 && $(readlink "$HOME/.local/bin/kith") == "$HOME/kith/kernel/bin/kith" && -L $HOME/kith && $out == *init* && $out != *"init --dev"* ]]'
+
+# --- the default prefix follows the host's rule: a real ~/.hq that is not migrated yet keeps the CLI under ~/.hq ----------
+rm -rf "$M" "$HOME/.hq" "$HOME/kith" "$HOME/.local/bin"/*; mkdir -p "$HOME/.local/bin" "$HOME/.hq"
+release 0.3.0; cli_only 0.3.0 >/dev/null
+check "(a) real ~/.hq, not migrated: the CLI lands in ~/.hq/cli/<v> and ~/.hq/cli/current" '[[ $(readlink "$HOME/.hq/cli/current") == 0.3.0 && -f $HOME/.hq/cli/0.3.0/bin/kith && ! -e $M/cli ]]'
+rm -rf "$HOME/.hq"; mkdir -p "$M"; touch "$M/.migrated"; mkdir -p "$HOME/.hq"
+release 0.3.1; cli_only 0.3.1 >/dev/null
+check "(b) ~/.kith/.migrated beside a real ~/.hq: the CLI goes to ~/.kith/cli" '[[ $(readlink "$M/cli/current") == 0.3.1 && ! -e $HOME/.hq/cli ]]'
+release 0.3.2; KITH_PREFIX=$T/px cli_only 0.3.2 >/dev/null
+check "(c) KITH_PREFIX still wins over the machine folder" '[[ $(readlink "$T/px/cli/current") == 0.3.2 && $(readlink "$M/cli/current") == 0.3.1 ]]'
+rm -rf "$M" "$HOME/.hq" "$HOME/kith" "$HOME/.local/bin"/*; mkdir -p "$HOME/.local/bin"
+release 0.3.3; cli_only 0.3.3 >/dev/null
+check "(d) neither folder exists: the CLI goes to ~/.kith/cli" '[[ $(readlink "$M/cli/current") == 0.3.3 && ! -e $HOME/.hq ]]'
+rm -rf "$M" "$HOME/.hq"; mkdir -p "$T/hqreal" "$M"; ln -s "$T/hqreal" "$HOME/.hq"
+release 0.3.4; cli_only 0.3.4 >/dev/null
+check "(e) ~/.hq links to a different folder, unmigrated: the CLI goes to the linked ~/.hq" '[[ $(readlink "$T/hqreal/cli/current") == 0.3.4 ]]'
+rm -rf "$M" "$HOME/.hq" "$T/hqreal" "$T/px"; mkdir -p "$M"; ln -s "$M" "$HOME/.hq"
+release 0.3.5; cli_only 0.3.5 >/dev/null
+check "(f) ~/.hq links to ~/.kith: the CLI goes to ~/.kith/cli" '[[ $(readlink "$M/cli/current") == 0.3.5 ]]'
+rm -rf "$M" "$HOME/.hq" "$HOME/kith" "$HOME/.local/bin"/*
+
+exit $fail

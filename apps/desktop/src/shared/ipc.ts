@@ -34,6 +34,8 @@ export interface HostSnapshot {
   /** Started against a manually run host (`KITH_SERVE_PORT`). */
   dev: boolean
   logPath: string
+  /** The kith CLI the host needs is missing, too old or failed to install: what to tell the user. */
+  cliNotice?: string | null
 }
 
 export interface CallError {
@@ -158,6 +160,8 @@ export interface KithBridge {
     onChange(cb: (s: HostSnapshot) => void): () => void
     install(): void
     restart(): void
+    /** Runs the bundled kith CLI installer again (the notice's retry button). */
+    installCli(): void
     /** POST /api/<method> on a loopback host. Rejects with a `CallError`. */
     call(baseURL: string, token: string, method: string, body: unknown, timeoutMs: number): Promise<unknown>
     /** SSE on a loopback host: each `data:` line, then `onEnd` (with an error when it failed). */
