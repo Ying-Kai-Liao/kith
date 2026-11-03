@@ -163,6 +163,7 @@ const bridge: KithBridge = {
     onChange: none,
     install() {},
     restart() {},
+    installCli() {},
     call: () => Promise.reject({ status: 0, message: NOT_HERE } satisfies CallError),
     stream: (_url, _token, _onData, onEnd) => {
       queueMicrotask(() => onEnd({ status: 0, message: NOT_HERE }))
