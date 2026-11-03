@@ -18,6 +18,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
+/// The longest lease one renewal can grant (ten minutes).
+const MAX_LEASE_MS: u64 = 10 * 60 * 1000;
 const TAIL_BYTES: usize = 1 << 20;
 /// How long an exit waits for the last output of the process before it is reported anyway.
 const EXIT_DRAIN: Duration = Duration::from_millis(500);
@@ -468,8 +470,12 @@ impl Holder {
                 p::RENEW => {
                     let renew: p::Renew = wire::parse(&payload)?;
                     // A zero period would lapse at once; it is not a way to end a lease.
-                    if renew.ms > 0 {
-                        st.lease = Lease::Until(Instant::now() + Duration::from_millis(renew.ms));
+                    // A huge period must neither panic this thread nor switch the kill off: it is capped.
+                    let period = Duration::from_millis(renew.ms.min(MAX_LEASE_MS));
+                    if let Some(deadline) =
+                        Instant::now().checked_add(period).filter(|_| renew.ms > 0)
+                    {
+                        st.lease = Lease::Until(deadline);
                     }
                 }
                 p::SPAWN => {
@@ -619,7 +625,8 @@ impl Holder {
             );
             return self.to_core(&st, frame);
         }
-        if spec.kill_on_lease_loss && st.lease == Lease::Lost {
+        // Unarmed counts as lost here: a tagged run must never start without a lease that will end it.
+        if spec.kill_on_lease_loss && !matches!(st.lease, Lease::Until(_)) {
             let lost = p::LeaseLost {
                 conv: spec.conv,
                 claim: spec.claim,
@@ -885,6 +892,18 @@ mod tests {
         assert_eq!(kind, p::REFUSED);
         assert_eq!(wire::parse::<Refused>(&payload).unwrap().why, Why::Closing);
         t.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn a_renewal_from_a_connection_that_is_not_the_newest_is_refused_and_does_not_count() {
+        let holder = test_holder();
+        let (mut theirs, mut mine) = UnixStream::pair().unwrap();
+        wire::write_json(&mut theirs, p::RENEW, 0, &p::Renew { ms: 60_000 }).unwrap();
+        // No core is registered, so this connection is not the newest one.
+        holder.commands(&mut mine, 7, 1).unwrap();
+        assert_eq!(holder.lock().lease, Lease::Unarmed);
+        let (kind, _, _) = wire::read(&mut theirs).unwrap().unwrap();
+        assert_eq!(kind, p::REFUSED);
     }
 
     fn test_holder() -> Arc<Holder> {

@@ -18,11 +18,12 @@
 //! those are when it spawns them (`Spawn::kill_on_lease_loss`; the default, false, is an owner run and is never
 //! touched) and keeps the lease alive with `RENEW` frames, each carrying the period (`Renew::ms`) from now. The
 //! holder tracks one deadline, renewed only by the newest generation's connection (an older one is refused as
-//! `Superseded` before its frame counts). No renewal has ever arrived: no lease is armed and nothing expires, so a
-//! local holder no core ever leased never kills anything. The deadline outlives a dropped connection: a core that
+//! `Superseded` before its frame counts). A period is capped at ten minutes. No renewal has ever arrived: no lease
+//! is armed and nothing expires, but a tagged spawn is refused (as when lost), so a tagged run never starts
+//! without a lease that will end it, and a local holder no core ever leased never kills anything. The deadline outlives a dropped connection: a core that
 //! drops and does not come back is exactly the cut-off case. When the deadline passes, in one step under the
 //! holder's state lock, the lease is marked lost and every tagged process still running has its whole tree killed;
-//! their exits are kept until acked like any exit. While lost, a tagged spawn is answered `LEASE_LOST`; any
+//! their exits are kept until acked like any exit. While lost or unarmed, a tagged spawn is answered `LEASE_LOST`; any
 //! renewal from the newest core restores the lease.
 //!
 //! Process ids. A frame id names a process only together with the holder instance (`Welcome::instance`): the

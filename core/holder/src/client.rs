@@ -59,8 +59,32 @@ won't let it leave, so stopping or restarting Kith also stops every agent that i
 To fix it, quit Kith and Start Kith from the Start menu or a normal terminal (not from a tool that runs it inside a \
 job, such as some IDEs, CI runners or service wrappers).";
 
+fn send_on(
+    writer: &Mutex<Box<dyn Write + Send>>,
+    kind: u8,
+    id: u32,
+    payload: &[u8],
+) -> io::Result<()> {
+    let mut w = writer.lock().unwrap_or_else(|p| p.into_inner());
+    wire::write_frame(&mut *w, kind, id, payload)?;
+    w.flush()
+}
+
+/// Sends lease renewals on a client's connection from a thread of its own.
+#[derive(Clone)]
+pub struct Renewer(Arc<Mutex<Box<dyn Write + Send>>>);
+
+impl Renewer {
+    pub fn renew(&self, period: Duration) -> io::Result<()> {
+        let ms = u64::try_from(period.as_millis()).unwrap_or(u64::MAX);
+        let payload = serde_json::to_vec(&p::Renew { ms }).map_err(io::Error::other)?;
+        send_on(&self.0, p::RENEW, 0, &payload)
+    }
+}
+
 pub struct Client {
-    writer: Box<dyn Write + Send>,
+    /// Shared with a [`Renewer`]: a frame is written whole under the lock.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     close: Closer,
     frames: Receiver<Frame>,
     /// Frames read but not yet asked for, in order.
@@ -203,7 +227,7 @@ impl Client {
     ) -> Result<Client, ConnectError> {
         match Self::handshake(reader, writer, secret, generation) {
             Ok((frames, welcome, writer)) => Ok(Client {
-                writer,
+                writer: Arc::new(Mutex::new(writer)),
                 close,
                 frames,
                 pending: VecDeque::new(),
@@ -285,8 +309,12 @@ impl Client {
     }
 
     pub fn send(&mut self, kind: u8, id: u32, payload: &[u8]) -> io::Result<()> {
-        wire::write_frame(&mut self.writer, kind, id, payload)?;
-        self.writer.flush()
+        send_on(&self.writer, kind, id, payload)
+    }
+
+    /// A handle that renews the lease from another thread, so renewals never wait behind a listing.
+    pub fn renewer(&self) -> Renewer {
+        Renewer(self.writer.clone())
     }
 
     /// A command for process `id` of holder `instance`: the instance goes first in the payload (see proto.rs).
@@ -354,8 +382,7 @@ impl Client {
 
     /// Keeps the lease alive for `period` from now; the holder answers nothing.
     pub fn renew(&mut self, period: Duration) -> io::Result<()> {
-        let ms = u64::try_from(period.as_millis()).unwrap_or(u64::MAX);
-        self.send_json(p::RENEW, 0, &p::Renew { ms })
+        self.renewer().renew(period)
     }
 
     pub fn list(&mut self) -> io::Result<Vec<p::Held>> {
