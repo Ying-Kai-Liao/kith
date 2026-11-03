@@ -483,7 +483,7 @@ echo $$ > "$lock/$key.pid"
             .shared()
             .terminals
             .fail_retarget
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+            .store(true, Ordering::SeqCst);
         let params = json!({"agent": "kai", "session": "sess-r", "argv": ["sh", "-c", "cat"], "cwd": "/tmp", "env": plain()});
         match reach(
             &crate::tests::paths(&rig.m),
@@ -558,7 +558,7 @@ echo $$ > "$lock/$key.pid"
                     claim: 1,
                     generation: 1,
                     argv: vec!["cat".into()],
-                    env: Default::default(),
+                    env: std::collections::BTreeMap::default(),
                     cwd: String::new(),
                     mode: kith_holder::proto::Mode::Pty,
                     cols: 80,
