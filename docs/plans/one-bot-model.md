@@ -96,12 +96,12 @@ and `--json` first and the app calling it after.
 - [ ] **M0. Daemon front for the core.** Holder skeleton, platform interface, method table, principals, embedded mode,
   fencing; a Windows CI job from day one. Gets: the switched verbs through one API, and a restart that keeps a test
   process. ([runtime-design.md](runtime-design.md) section 7)
-  Steps, each with its check (crates and decisions: "Execution additions" in runtime-design.md):
+  Steps, each with its check (crates and decisions: "Execution additions" in runtime-design.md; per-step rules: [M0 build rules](runtime-design.md#m0-build-rules)):
   - M0a: `core.db`, lock, generation, claim-tx gate, embedded mode, perms and missing-db refusals, 9b rules 1-2,
     boundary check, Windows CI job. Check: switched verbs via embedded core, difftest 100%.
   - M0b: method table, CLI args + OpenRPC first, types follow-up, seeded from `contract.json` and the B6 `--json`
     shapes; `released.json` + break test.
-  - M0c: daemon front, owner socket, version hello. Check: a difftest mode via daemon and via embedded.
+  - M0c: daemon front, owner socket, version hello. Check: a difftest mode via daemon and via embedded; and until M1 a missing or crashing holder stops neither `kith serve` nor the CLI, and the release bundles `kith-holder` or the daemon runs without it.
   - M0d: `kith-holder` from herdr b63ecbd. Check: spawn/kill/reap, fencing + secret, restart keeps a test process.
   - M0e: run socket and token table, `host.sock` not switched. Check: `run-tokens` re-run.
   - M0f: networked holder over SSH stdio, pairing key, reconnect/resume, generation across, lease.
@@ -111,12 +111,12 @@ and `--json` first and the app calling it after.
   launchd-started holder reaches the external disk here.
 - [ ] **M2. Authority into the core** (absorbs A5, one secret store). People, grants, run tokens on the run socket
   (ancestry kept), cards, revoke and suspended rows, the sync lease, doors and their sweep, the resource gate; the
-  secret store as in A5 (kith-auth's model plus the host vault; the Jev key read once); `auth.json` replaced by a
+  secrets in the envelope (design 9b): one master key per machine readable only by the signed daemon, XChaCha20-Poly1305 records in core.db; the host vault and kith-auth's per-item writes move into it (the Jev key read once); `auth.json` replaced by a
   tombstone that makes old readers fail closed. Gets: one place that decides. `revoke-access`, `invitee-access`,
   `run-tokens` and `secret-cards` re-run against it.
   Also: the data import (`kith migrate` from `auth.json`, `serve.db` people/grants/vault) with the "same answer" check,
   the delete list (decision parts of `api/roles.rs`, `runauth.rs`, `market/vault.rs`, the people mirror), the
-  access-verb rollback rule (`kith rollback`, no per-verb Python rollback) and the core-down list, all in
+  access-verb rollback rule (`kith rollback`, no per-verb Python rollback; it keeps every revoke and every key, secrets written back as OS-store items) and the core-down list, all in
   [runtime-design.md](runtime-design.md) "Execution additions". Freeze the difftest cases as golden first.
 - [ ] **M3. Conversations.** Claims and turns in `core.db`, transcripts held, wake queue and waiters, delegation and
   children, account choice and failover, per-turn claims on warm ACP processes; the host's turn runner and terminal
@@ -257,3 +257,4 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
   milestone, oracle after Python, delete lists, branch sync; crates `kith-core`/`kith-api`/`kith-holder`, access-verb
   rollback, core-down list); M0a-M0f steps with checks, and the per-M additions, listed here. Kai: `rust-rebuild` goes
   to main after M0c is fine; managers never merge into main. Docs only.
+- 2026-11-03: architect's six review fixes to #658 applied to `runtime-design.md` and here: snapshot-restore wording, `kith rollback` also writes secrets back (property: keeps every revoke and every key), M2 envelope wording, "M0 build rules" block (M0a, M0d, M0f) and the line-77 `quick_check` edit, M0c no-holder rule, trace-checking notes (`Runtime.tla` as a verify skill, events from M3, one committed transaction per event). Docs only.
