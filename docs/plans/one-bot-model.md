@@ -116,7 +116,7 @@ and `--json` first and the app calling it after.
   `run-tokens` and `secret-cards` re-run against it.
   Also: the data import (`kith migrate` from `auth.json`, `serve.db` people/grants/vault) with the "same answer" check,
   the delete list (decision parts of `api/roles.rs`, `runauth.rs`, `market/vault.rs`, the people mirror), the
-  access-verb rollback rule (`kith rollback`, no per-verb Python rollback; it keeps every revoke and every key, secrets written back as OS-store items) and the core-down list, all in
+  access-verb rollback rule (`kith rollback`, no per-verb Python rollback; it keeps every revoke and every key, secrets written back as OS-store items; `kith migrate` imports `auth.json` and those items back) and the core-down list, all in
   [runtime-design.md](runtime-design.md) "Execution additions". Freeze the difftest cases as golden first.
 - [ ] **M3. Conversations.** Claims and turns in `core.db`, transcripts held, wake queue and waiters, delegation and
   children, account choice and failover, per-turn claims on warm ACP processes; the host's turn runner and terminal
@@ -258,3 +258,4 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
   rollback, core-down list); M0a-M0f steps with checks, and the per-M additions, listed here. Kai: `rust-rebuild` goes
   to main after M0c is fine; managers never merge into main. Docs only.
 - 2026-11-03: architect's six review fixes to #658 applied to `runtime-design.md` and here: snapshot-restore wording, `kith rollback` also writes secrets back (property: keeps every revoke and every key), M2 envelope wording, "M0 build rules" block (M0a, M0d, M0f) and the line-77 `quick_check` edit, M0c no-holder rule, trace-checking notes (`Runtime.tla` as a verify skill, events from M3, one committed transaction per event). Docs only.
+- 2026-11-03: architect's two fixes to #659 applied: `runtime-design.md` M0a now says embedded calls skip `quick_check` (hooks call embedded mode, so each call stays cheap), and the access-verb rollback in `runtime-design.md` and here says `kith migrate` imports `auth.json` and those OS-store items back. Docs only.
