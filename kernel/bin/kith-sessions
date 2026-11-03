@@ -151,6 +151,17 @@ def write_atomic(path, data):
     os.replace(tmp, path)
 
 
+def launcher_of(pid):
+    """When claude runs under kith-stub (the conversation lock), the stub is what a claim and the host's intents name, not
+    claude: its pid and start time, so an intent written for the stub still reads as this run's reason."""
+    try:
+        ppid = ps_row(pid)[0] if pid else 0
+        comm = ps_row(ppid)[1] if ppid > 1 else ''
+    except Exception:  # noqa: BLE001
+        return {}
+    return {'launcher': ppid, 'launcherStart': proc_start(ppid)} if os.path.basename(comm) == 'kith-stub' else {}
+
+
 def record():
     try:
         hook, env = json.load(sys.stdin), os.environ
@@ -170,7 +181,8 @@ def record():
             'v': 1, 'sessionId': sid, 'agent': env['KITH_AGENT'], 'cwd': cwd, 'transcriptPath': hook.get('transcript_path'),
             'pid': pid, 'project': env.get('KITH_PROJECT') or None, 'source': hook.get('source') or 'startup',
             'resumedFrom': resumed, 'startedAt': started, 'account': env.get('KITH_ACCOUNT_ID') or None,
-            'kind': kind, 'label': run_label(kind), 'procStart': proc_start(pid) if pid and kind != 'terminal' else None})
+            'kind': kind, 'label': run_label(kind), 'procStart': proc_start(pid) if pid and kind != 'terminal' else None,
+            **launcher_of(pid)})
     except Exception as e:  # noqa: BLE001 — listing must never block a session
         print(f'kith-sessions record: {e}', file=sys.stderr)
 
@@ -653,21 +665,38 @@ def entry_of(pid):
     return last
 
 
-def idle_stop(child, born):
+def engine_pid(child, cmd):
+    """The pid the registry names for the run: the child itself, or, when the child is kith-stub (the conversation lock's
+    launcher, which keeps claude as its own child), that child. None while the stub has not started claude yet."""
+    if os.path.basename(cmd[0]) != 'kith-stub':
+        return child
+    try:
+        table = subprocess.run(['ps', '-A', '-o', 'pid=,ppid='], capture_output=True, text=True, timeout=3).stdout.split('\n')
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for row in table:
+        got = row.split()
+        if len(got) == 2 and got[1] == str(child) and got[0].isdigit():
+            return int(got[0])
+    return None
+
+
+def idle_stop(child, born, eng=None):
     """Rule 3: the one place a human session sleeps. The idle clock is the latest of the last turn, the process start and
     the last keystroke (the terminal's access time); after `sleep_after` of it, with nothing outstanding (rule 7), the
     wrapper writes its intent and ends its own child. Nothing outside the terminal's own process tree ever signals a
     terminal session on a timer. True once the signal is sent."""
     try:
         lc, e = lifecycle(), None
-        e = entry_of(child)
+        eng = eng or child
+        e = entry_of(eng)
         if not e or not e.get('transcriptPath'):
             return False   # not a session we can judge (not listed, or it has not written yet): never slept
         key = os.fstat(0).st_atime if os.isatty(0) else None
         since = lc.idle_since(e['transcriptPath'], born, key)
-        if time.time() - since < lc.sleep_after() or lc.outstanding(e['transcriptPath'], child):
+        if time.time() - since < lc.sleep_after() or lc.outstanding(e['transcriptPath'], eng):
             return False
-        lc.write_intent(e['sessionId'], 'idle', child)
+        lc.write_intent(e['sessionId'], 'idle', eng)
         # Kai may have typed since the check above: looked at again just before the signal (S2).
         if os.isatty(0) and os.fstat(0).st_atime > (key or 0):
             lc.clear_intent(e['sessionId'])
@@ -711,7 +740,7 @@ def run(agent, cmd):
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     for s in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(s, lambda n, _f: os.kill(child, n))
-    st, born, stopped = 0, time.time(), False
+    st, born, stopped, eng = 0, time.time(), False, None
     next_check = born + idle_poll()
     while True:
         try:
@@ -719,21 +748,22 @@ def run(agent, cmd):
             if done:
                 break
             time.sleep(0.25)
+            eng = eng or engine_pid(child, cmd)   # kept: the stub is gone by the time the notes below are written
             if not stopped and time.time() >= next_check:
                 next_check = time.time() + idle_poll()
-                stopped = idle_stop(child, born)
+                stopped = idle_stop(child, born, eng)
         except InterruptedError:
             continue
         except ChildProcessError:
             break
     try:
         if not stopped and os.WIFEXITED(st) and os.WEXITSTATUS(st) == 0:
-            record_quit(child)   # Kai's own /exit: not a crash (rule 8)
+            record_quit(eng or child)   # Kai's own /exit: not a crash (rule 8)
         release_claims(os.getpid())
         if stopped:
-            asleep(child)
-        if not taken_note(agent, child):
-            resume_note(agent, child)
+            asleep(eng or child)
+        if not taken_note(agent, eng or child):
+            resume_note(agent, eng or child)
         wake_owed()
     except Exception as e:  # noqa: BLE001
         print(f'kith-sessions: {e}', file=sys.stderr)

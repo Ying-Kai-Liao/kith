@@ -63,7 +63,7 @@ SID=11111111-1111-4111-8111-111111111111
 rm -f "$T/go" "$T/started"
 run $SID "$T/r1.out"; R1=$RUNPID
 waitfor '[[ -s $T/started ]]' && ok "direct run: claude started under the stub" || bad "direct run: claude never started" "$(cat "$T/r1.out")"
-[[ -e $LOCKS/$SID* || -n $(ls "$LOCKS" 2>/dev/null) ]] && ok "lock folder <machine>/core/locks holds the key" || bad "no lock under $LOCKS"
+[[ -e $LOCKS/w-$SID.lock ]] && ok "lock folder <machine>/core/locks holds the key" || bad "no lock under $LOCKS"
 
 # the claim names the shell's pid, which the stub kept (exec); claude is the stub's child
 claimpid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/$SID.claim" 2>/dev/null)
@@ -115,6 +115,30 @@ err=$(cd "$T/work" && KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="-
 [[ $rc == 0 && $err == *"no kith-stub program"* ]] && ok "no stub: runs unlocked with one line" || bad "no stub" "$rc $err"
 err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
 [[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
+
+# an interactive run: kith-sessions run keeps claude's registry entry and its /exit intent even though the child is the stub
+SID4=44444444-4444-4444-8444-444444444444
+cat > "$T/bin/claude-reg" <<'REG'
+#!/usr/bin/env bash
+mkdir -p "$CLAUDE_CONFIG_DIR/sessions" "$CLAUDE_CONFIG_DIR/projects/p"
+printf '{"pid":%s,"sessionId":"%s"}' "$$" "$STUB_SID" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
+printf '{"session_id":"%s","transcript_path":"%s/projects/p/%s.jsonl","cwd":"%s","source":"startup"}' "$STUB_SID" "$CLAUDE_CONFIG_DIR" "$STUB_SID" "$PWD" |
+  KITH_AGENT=designer KITH_TERMINAL_SESSION=1 python3 "$KERNEL_SK" record
+echo "$$" > "$STUB_STARTED"
+while [[ ! -e $STUB_GO ]]; do sleep 0.1; done
+REG
+chmod +x "$T/bin/claude-reg"
+rm -f "$T/go" "$T/started"
+( cd "$T/work" && KERNEL_SK=$SK STUB_SID=$SID4 python3 "$SK" run designer -- "$STUB" --lock-dir "$LOCKS" --key "$SID4" -- "$T/bin/claude-reg" ) >/dev/null 2>&1 &
+RP=$!
+waitfor '[[ -s $T/started && -f $REG/$SID4.json ]]' || bad "interactive: claude never registered"
+cpid=$(cat "$T/started")
+is "interactive: registry names claude's own pid" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/$SID4.json")" "$cpid"
+is "interactive: registry notes the stub as launcher" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("launcher"))' "$REG/$SID4.json")" "$(ps -o ppid= -p "$cpid" | tr -d ' ')"
+touch "$T/go"; wait $RP
+intent=$(find "$KITH_STATE" -path '*intent*' -name "$SID4.json" 2>/dev/null | head -1)
+[[ -n $intent ]] && is "interactive: Kai's /exit leaves a quit intent for claude's pid" "$(python3 -c 'import json,sys; i=json.load(open(sys.argv[1])); print(i["why"], i["pid"])' "$intent")" "quit $cpid" \
+  || bad "interactive: no quit intent (the wrapper lost claude behind the stub)"
 
 [[ $fail == 0 ]] && echo "all checks passed"
 exit $fail

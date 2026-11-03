@@ -1396,7 +1396,12 @@ if [[ -n $csid ]]; then
     kbin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || kbin=""
     [[ -z $kbin || ! -x $(dirname "$kbin")/kith-stub ]] || stub_bin=$(dirname "$kbin")/kith-stub
   fi
-  if [[ -n $stub_bin && -x $stub_bin ]]; then
+  # The stub takes keys of a-z 0-9 . _ - only (exit 70 otherwise, which after exec could not be told from a lock error):
+  # an id outside that starts unlocked with the same one line as a missing stub.
+  if [[ ! $csid =~ ^[a-z0-9._-]+$ ]]; then
+    [[ ${KITH_REQUIRE_STUB:-} != 1 ]] || { echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed)" >&2; exit 1; }
+    echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed); this run is not locked" >&2
+  elif [[ -n $stub_bin && -x $stub_bin ]]; then
     stub=("$stub_bin" --lock-dir "$KITH_MACHINE/core/locks" --key "$csid" --)
   elif [[ ${KITH_REQUIRE_STUB:-} == 1 ]]; then
     echo "kith: no kith-stub program beside kith, so this conversation cannot be locked; install the current kith (kith update self)" >&2
