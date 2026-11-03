@@ -998,12 +998,14 @@ jobs:
       # The host program is Unix-only (the windows job builds just the holder and core crates), so no Windows binary.
       - name: Build kith
         if: inputs.artifact && runner.os != 'Windows'
-        run: cargo build --locked -p kith-serve --bin kith
+        run: cargo build --locked -p kith-serve --bin kith && cargo build --locked -p kith-stub
       - name: Upload kith
         if: inputs.artifact && runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: kith-${{ runner.os == 'Linux' && 'linux' || 'macos' }}
-          path: serve/host/target/debug/kith
+          path: |
+            serve/host/target/debug/kith
+            serve/host/target/debug/kith-stub
           if-no-files-found: error
           retention-days: 3
