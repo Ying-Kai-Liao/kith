@@ -897,20 +897,15 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
     }
 }
 
-/// Whether this process lives in a job that ends it when the job closes: the holder was started inside its
-/// starter's job because breakaway was denied (see `spawn_detached`), so it dies with the daemon.
+/// Whether this process lives in any job: the holder was started inside its starter's job because breakaway
+/// was denied (see `spawn_detached`). A supervisor can `TerminateJobObject` a job even without kill-on-close, so
+/// any job ties the holder to its starter. After a successful breakaway it is in none.
 pub fn tied_to_starter() -> bool {
     unsafe {
-        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = zeroed();
-        // A null job asks about the job of the calling process; the call fails when there is none.
-        let ok = QueryInformationJobObject(
-            null_mut(),
-            JobObjectExtendedLimitInformation,
-            (&raw mut info).cast(),
-            size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-            null_mut(),
-        );
-        ok != 0 && info.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0
+        let mut in_job: BOOL = 0;
+        // A null job asks whether the process is in any job.
+        let ok = IsProcessInJob(GetCurrentProcess(), null_mut(), &mut in_job);
+        ok != 0 && in_job != 0
     }
 }
 

@@ -479,11 +479,22 @@ fn environment_of(pid: u32) -> String {
         let raw = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
         return String::from_utf8_lossy(&raw).replace('\0', " ");
     }
-    let out = Command::new("ps")
-        .args(["-Eww", "-o", "command=", "-p", &pid.to_string()])
-        .output()
-        .unwrap();
-    String::from_utf8_lossy(&out.stdout).into_owned()
+    // macOS: the same call `ps -E` makes. The buffer holds argc, the program, the arguments and the environment.
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
+    let mut buf = vec![0u8; 1 << 20];
+    let mut len = buf.len();
+    let ok = unsafe {
+        libc::sysctl(
+            mib.as_mut_ptr(),
+            3,
+            buf.as_mut_ptr().cast(),
+            &mut len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    assert_eq!(ok, 0, "{}", std::io::Error::last_os_error());
+    String::from_utf8_lossy(&buf[..len]).replace('\0', " ")
 }
 
 /// The secret reaches the holder over stdin: it is in neither the environment it was started with (readable by any
@@ -492,20 +503,22 @@ fn environment_of(pid: u32) -> String {
 #[test]
 fn the_holders_environment_and_command_line_hold_no_secret() {
     // A control, so a reader that sees nothing at all cannot make this pass.
-    let mut control = Command::new("sleep")
-        .arg("30")
+    // (Not a system program: macOS hides the environment of those. A holder waiting for its secret is one that
+    // is not.)
+    let mut control = Command::new(EXE)
+        .args(["serve", "--dir"])
+        .arg(std::env::temp_dir().join(format!("kh-{}-control", std::process::id())))
         .env("KITH_CONTROL_VAR", "control-value")
+        .stdin(Stdio::piped())
         .spawn()
         .unwrap();
-    std::thread::sleep(Duration::from_millis(200));
-    let readable = environment_of(control.id()).contains("control-value");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        environment_of(control.id()).contains("control-value"),
+        "this system's process listing shows environments"
+    );
     let _ = control.kill();
     let _ = control.wait();
-    if !readable {
-        // macOS hides other processes' environments from ps; Linux (CI) reads /proc and runs this for real.
-        eprintln!("skipped: this system's process listing shows no environments");
-        return;
-    }
 
     let fx = Fixture::new("env");
     fx.start();

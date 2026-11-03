@@ -141,8 +141,8 @@ pub struct Welcome {
     /// Random per holder process: a different one means the old holder is gone.
     pub instance: String,
     pub pid: u32,
-    /// Windows only: the starter's job would not let the holder leave it, so it dies when the starter's job closes
-    /// (the daemon ending), which is the one thing it exists to survive. The core reports it (`kith doctor`).
+    /// Windows only: the holder is in any job (the starter's job would not let it break away), so the starter's
+    /// supervisor can end it by ending the job (the daemon ending), which is the one thing it exists to survive. The core reports it (`kith doctor`).
     /// Always false on Unix, where the holder has its own session.
     #[serde(default)]
     pub tied_to_starter: bool,
