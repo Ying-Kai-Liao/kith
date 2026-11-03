@@ -4,6 +4,8 @@ Kith: Copyright 2026 Ying-Kai Liao, Apache-2.0 (see the LICENSE file).
 
 Portions derived from Codync, Copyright 2026 Po Kai Lee and the Codync contributors (https://github.com/leepokai/Codync), Apache-2.0.
 
+The process holder (core/holder, kith-holder) is adapted from herdr-core (https://github.com/herdrdev/herdr-core, commit b63ecbd), Copyright herdrdev and the herdr-core contributors, Apache-2.0: the framed wire, the platform layer (PTY and ConPTY, sockets and named pipes with owner-only access, detaching, command lines) and the holder's process ownership. The adapted files keep their upstream copyright headers. Nothing about who may do what comes from herdr-core.
+
 Local voice (kith-tts) uses Phonon, Gradium's on-device text to speech: the ptts runtime
 (https://github.com/gradium-ai/xn-ptts, MIT OR Apache-2.0, used under Apache-2.0) and the Phonon 31M English
 model and voices (https://huggingface.co/gradium/phonon-31m-en and /gradium/phonon-voices, Apache-2.0,
