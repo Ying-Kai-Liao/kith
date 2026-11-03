@@ -69,6 +69,7 @@ jobs:
               - 'serve/contract/kernel/**'
               # The core boundary check reads kith-core's sources and every Cargo.toml.
               - 'core/runtime/**'
+              - 'core/api/**'
               - '**/Cargo.toml'
               - 'scripts/ci/**'
               - '.github/workflows/ci.yml'
@@ -158,7 +159,7 @@ jobs:
               - '!**/*.md'
             # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on.
             windows:
-              - '{core/holder/**,core/runtime/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
+              - '{core/holder/**,core/runtime/**,core/api/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
               - '!**/*.md'
             cloud:
               - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
@@ -373,6 +374,10 @@ jobs:
       # The holder owns processes and decides nothing: it must not link kith-core, kith-kernel or any other kith crate.
       - name: The holder links no kith crate
         run: sh ../scripts/check-holder-deps.sh
+      # The method table: its OpenRPC file is current, nothing released is broken, and every contract and corpus verb
+      # parses to its row (core/api/tests/table.rs). Regenerate with the command the failure message prints.
+      - name: Method table (kith-api)
+        run: cargo test --manifest-path host/Cargo.toml -p kith-api --locked
 
   # Windows from day one (docs/plans/runtime-design.md section 8): the holder's ConPTY, named pipes, job objects and
   # detaching only prove themselves here, including that the holder and its process survive the process that
@@ -405,6 +410,8 @@ jobs:
         run: |
           cargo clippy --manifest-path host/Cargo.toml -p kith-core --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-core --locked
+          cargo clippy --manifest-path host/Cargo.toml -p kith-api --all-targets --locked -- -D warnings
+          cargo test --manifest-path host/Cargo.toml -p kith-api --locked
           cargo test --manifest-path host/Cargo.toml -p kith-kernel --locked --no-fail-fast
 
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.

@@ -1,0 +1,48 @@
+[package]
+name = "kith-api"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The core's method table: one row per method (params, result, who may call it, CLI shape, stability), and the OpenRPC document and CLI parser it produces"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like core/kernel and core/holder.
+workspace = "../../serve/host"
+
+# Depends on serde_json only, on purpose: kith-core depends on this crate, never the reverse, and the holder links
+# neither (docs/plans/runtime-design.md section 1; kernel/tests/kith-core-boundary-check).
+[lib]
+name = "kith_api"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kith-api-gen"
+path = "src/bin/gen.rs"
+
+[dependencies]
+# preserve_order pinned here: the generated documents must read the same whether this crate builds alone or in the
+# host workspace (which turns it on for everyone).
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+unused_qualifications = "warn"
+
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+style = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+module_name_repetitions = "allow"
+doc_markdown = "allow"
+match_same_arms = "allow"
+single_match_else = "allow"
+too_many_lines = "allow"
+unwrap_used = "warn"
+dbg_macro = "warn"
+todo = "warn"

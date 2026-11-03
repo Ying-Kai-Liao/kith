@@ -2118,13 +2118,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-api"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "kith-core"
 version = "0.1.0"
 dependencies = [
  "fs2",
  "getrandom 0.4.3",
+ "kith-api",
  "kith-kernel",
  "rusqlite",
+ "serde_json",
  "tempfile",
 ]
 

@@ -4,7 +4,7 @@
 //! `kernel/tests/kith-core-boundary-check` fails when that stops being true.
 //!
 //! This step (M0a) is the foundation: core.db with its lifetime lock and generation, owner-only permissions, the
-//! marker that refuses an empty start, and embedded mode. The method table comes next (M0b).
+//! marker that refuses an empty start, and embedded mode. Calls go through the method table of `kith-api` ([`call`]).
 //!
 //! Three ways in, each of which takes the lifetime lock and bumps the generation under it:
 //! - [`start`]: the daemon. Checks the file, migrates an older one.
@@ -103,6 +103,49 @@ pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T,
             (verb(), Via::BareAfterError(line))
         }
     }
+}
+
+/// Calls a method of the table (`kith-api`) as `who`: the method must exist, be open to the principal and take these
+/// params. The core answers the methods that need no core state itself (`paths`, `kernel.version`); every other row
+/// answers [`Error::NotServed`] until the daemon's wiring registers its handler (M0c), and the caller falls back to
+/// what it did before the table. The caller holds the core ([`open_embedded`] or the daemon's own) while it calls.
+pub fn call(
+    paths: &Paths,
+    who: kith_api::Principal,
+    method: &str,
+    params: &serde_json::Value,
+) -> Result<serde_json::Value, Error> {
+    let row = kith_api::method(method)
+        .ok_or_else(|| Error::NoSuchMethod(format!("kith-core: no method {method}")))?;
+    if !row.allows(who) {
+        return Err(Error::NotAllowed(format!(
+            "kith-core: {method} is not open to {}",
+            who.name()
+        )));
+    }
+    kith_api::params::validate(row, params)
+        .map_err(|e| Error::BadParams(format!("kith-core: {e}")))?;
+    match row.name {
+        "paths" => {
+            let folders = match params.get("kernel").and_then(serde_json::Value::as_str) {
+                Some(k) => kith_kernel::paths::paths(
+                    &kith_kernel::paths::process_home(),
+                    std::path::Path::new(k),
+                    &kith_kernel::paths::process_env,
+                ),
+                None => paths.clone(),
+            };
+            parse(&folders.json())
+        }
+        "kernel.version" => parse(&kith_kernel::version_json()),
+        _ => Err(Error::NotServed(format!(
+            "kith-core: {method} is not answered in the core yet"
+        ))),
+    }
+}
+
+fn parse(text: &str) -> Result<serde_json::Value, Error> {
+    serde_json::from_str(text).map_err(|e| Error::Io(format!("kith-core: unreadable answer: {e}")))
 }
 
 pub(crate) fn start_with(layout: &Layout, migrations: &[Migration]) -> Result<Core, Error> {
