@@ -136,9 +136,16 @@ impl Ctx {
         self.agents.join(agent)
     }
 
+    /// Whether `agent` is in `kith-auth`'s `agent_dirs()`: a package with an `agent.md`, in the user's agents or the
+    /// kernel's. The owner's writes (M2-2) refuse an agent that is not.
+    pub fn agent_exists(&self, agent: &str) -> bool {
+        let plain = !agent.is_empty() && !agent.contains('/') && !agent.starts_with('.');
+        plain && self.package_dir(agent).join("agent.md").is_file()
+    }
+
     /// `builtin()` in `kith-auth`: one of the kernel's own agents (scratch ...): found under `<kernel>/agents` and not in
     /// the user's agents folder. Its life folder is one for everyone who runs it, so only the owner does.
-    fn is_builtin(&self, agent: &str) -> bool {
+    pub fn is_builtin(&self, agent: &str) -> bool {
         let has = |root: &Path| {
             let d = root.join(agent);
             !agent.is_empty()

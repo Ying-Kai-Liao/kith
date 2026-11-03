@@ -95,7 +95,7 @@ fn find_exe(cfg: &HolderConfig) -> Option<PathBuf> {
 }
 
 /// The holder secret: made once, owner-only, in the core folder.
-fn secret(layout: &Layout) -> Result<String> {
+pub(crate) fn secret(layout: &Layout) -> Result<String> {
     if let Ok(text) = std::fs::read_to_string(&layout.holder_secret) {
         let t = text.trim();
         if !t.is_empty() {

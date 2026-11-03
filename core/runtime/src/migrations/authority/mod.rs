@@ -4,5 +4,9 @@
 use super::Migration;
 
 mod m0010_authority_read;
+mod m0011_authority_write;
 
-pub(super) const STEPS: &[Migration] = &[m0010_authority_read::MIGRATION];
+pub(super) const STEPS: &[Migration] = &[
+    m0010_authority_read::MIGRATION,
+    m0011_authority_write::MIGRATION,
+];

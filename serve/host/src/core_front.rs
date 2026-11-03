@@ -24,6 +24,12 @@ const DAEMON_ROWS: &[&str] = &["paths"];
 /// and nothing else, so no token or other secret in its environment reaches the daemon.
 const PATHS_VARS: &[&str] = &["KITH_STATE", "HQ_STATE", "KITH_HOME", "HQ_HOME", "KITH_AGENTS", "HQ_AGENTS"];
 
+/// The holder's folder and secret file for this machine (made if missing), for the service job that makes the holder the
+/// supervised root. The service layer asks here so `kith_core` is named only in this file and `main.rs`.
+pub fn holder_files(folders: &Paths) -> anyhow::Result<(PathBuf, PathBuf)> {
+    Ok(kith_core::holder_files(folders)?)
+}
+
 /// Reads a command line against the table and, if the daemon serves it and answers, prints its answer.
 /// `Some(exit code)` when the command was handled; `None` when the caller carries on as before. `args[0]` is the
 /// program label the router put in front.
