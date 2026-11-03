@@ -69,6 +69,7 @@ flowchart TB
 | people, members, bots, grants, connectors, run tokens, cards, revoke and suspended rows, the cloud sync lease, doors, access ledger, once-secrets metadata | core | core.db (+ OS secret store for values) |
 | schedules and their run state, the cost ledger, the memory index, the resource gate (slots, parking) | core | core.db |
 | account choice per run and failover (backup chain) | core, at start (bug 404e fix: the record names its account) | core.db |
+| accounts state (what each account is doing: out until, usage readings, `last_started`; today `<machine>/accounts/state.json`, written by `kith-kernel`'s `record_started` and the Python account commands) | core, moves in at M2-M4 with the account choice | core.db |
 | chat rows as shown, rooms, channel bindings, devices, relay keys, push tickets, Mac link transport | product modules | serve.db |
 | role repos, agent.md, skills, memory notes | people and agents (files); the core indexes them | agents/ |
 

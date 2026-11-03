@@ -196,6 +196,18 @@ pub fn print_settings(a: &Args) -> Result<()> {
             .map(|d| d.to_string_lossy().into_owned())
             .unwrap_or_default()
     };
+    let guest_domains = if owner || !claude {
+        Ok(vec![])
+    } else {
+        let answer = Command::new(c.kernel.join("bin/kith-auth"))
+            .args(["agent-access", &a.agent, "--json"])
+            .stdin(std::process::Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim_end_matches('\n').to_owned());
+        settings::guest_domains(answer.as_deref())
+    };
     let once_id = a.once_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());
     let mode = a.mode.clone().or_else(|| kith_kernel::paths::process_env("KITH_PERMISSION_MODE")).unwrap_or_default();
     let input = settings::Input {
@@ -219,6 +231,7 @@ pub fn print_settings(a: &Args) -> Result<()> {
         developer_dir: &developer_dir,
         ctmp: &ctmp,
         claude_version: claude_version.as_deref(),
+        guest_domains: guest_domains.as_deref().map_err(String::as_str),
         env: &kith_kernel::paths::process_env,
     };
     match settings::build(&input) {

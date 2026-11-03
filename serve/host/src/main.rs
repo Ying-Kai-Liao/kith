@@ -535,9 +535,27 @@ enum AccountsAction {
     /// The chain for `kith AGENT --backups-json`.
     BackupsJson { agent: String, agent_md: String },
     /// Shell assignments for a backup chain entry; exit 4 and one line on stderr when it can't run.
-    LaunchEnv { agent: String, entry: String },
+    LaunchEnv {
+        agent: String,
+        entry: String,
+        /// The launch is real: note `last_started` for the account.
+        #[arg(long)]
+        record: bool,
+    },
     /// `main_id=ID` plus the assignments of the agent's main account; exit 4 when it can't run.
-    MainEnv { agent: String, agent_md: String },
+    MainEnv {
+        agent: String,
+        agent_md: String,
+        /// Start on `pick`'s first candidate (accounts that are out are skipped), not on the static main.
+        #[arg(long)]
+        state: bool,
+        /// The launch is real: note `last_started` for the account.
+        #[arg(long)]
+        record: bool,
+        /// The account a handed-on session was made under: goes first when it is one of the candidates.
+        #[arg(long)]
+        prefer: Option<String>,
+    },
     /// The harness, model and effort a session started with (`{}` when the cost ledger doesn't know it).
     SessionRun {
         sid: String,
@@ -552,6 +570,9 @@ enum AccountsAction {
     List {
         #[arg(long)]
         json: bool,
+        /// That agent's order, and where `pick` would start.
+        #[arg(long, default_value = "")]
+        agent: String,
     },
 }
 
@@ -562,15 +583,25 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
     let kernel = kernel.or_else(kernel::current_kernel).unwrap_or_else(|| home.join("kith/kernel"));
     let p = kith_kernel::paths::paths(&home, &kernel, &kith_kernel::paths::process_env);
     let system = System { kernel: kernel.clone() };
-    let ctx = Ctx { machine: p.machine.clone(), agents: p.agents.clone(), kernel, out: &system };
+    let ctx = Ctx {
+        machine: p.machine.clone(),
+        agents: p.agents.clone(),
+        kernel,
+        home: home.clone(),
+        claude_config_dir: std::env::var("CLAUDE_CONFIG_DIR").ok(),
+        out: &system,
+    };
     let result: Result<String, String> = match action {
         AccountsAction::BackupsJson { agent, agent_md } => {
             Ok(accounts::chain(&ctx, &agent, std::path::Path::new(&agent_md)).dumps())
         }
-        AccountsAction::LaunchEnv { agent, entry } => accounts::launch_env(&ctx, &agent, &entry, false),
-        AccountsAction::MainEnv { agent, agent_md } => {
-            accounts::main_env(&ctx, &agent, std::path::Path::new(&agent_md))
-        }
+        AccountsAction::LaunchEnv { agent, entry, record } => accounts::launch_env(&ctx, &agent, &entry, false, record),
+        AccountsAction::MainEnv { agent, agent_md, state, record, prefer } => accounts::main_env(
+            &ctx,
+            &agent,
+            std::path::Path::new(&agent_md),
+            accounts::MainOpts { state, record, prefer: prefer.as_deref() },
+        ),
         AccountsAction::SessionRun { sid, sh } => Ok(match (accounts::session_run(&ctx.machine, &sid), sh) {
             (Some(r), true) => r.sh(),
             (Some(r), false) => r.json().dumps(),
@@ -578,10 +609,17 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
             (None, false) => "{}".to_owned(),
         }),
         AccountsAction::SessionAccount { sid } => Ok(accounts::session_account(&ctx.machine, &sid).unwrap_or_default()),
-        AccountsAction::List { json } => {
-            print!("{}", accounts::list(&ctx, json));
-            return 0;
-        }
+        AccountsAction::List { json, agent } => match accounts::list(&ctx, json, &agent) {
+            Ok(text) => {
+                print!("{text}");
+                return 0;
+            }
+            Err(e) => {
+                // a usage error, as `kith account list` dies with
+                eprintln!("kith: {e}");
+                return 2;
+            }
+        },
     };
     match result {
         Ok(out) => {

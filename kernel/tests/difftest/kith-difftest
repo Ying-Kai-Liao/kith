@@ -94,7 +94,10 @@ class Normalizer:
         if isinstance(v, list):
             return [self.data(x) for x in v]
         if isinstance(v, dict):
-            return {self.text(k): self.data(x) for k, x in v.items()}
+            # last_started in a state file is the clock at the launch: two sides run a second apart. Only that key is
+            # masked, so fixture times (out_until, since, cleared_at) are still compared exactly.
+            return {self.text(k): ('<EPOCH>' if k == 'last_started' and isinstance(x, (int, float)) and not isinstance(x, bool) else self.data(x))
+                    for k, x in v.items()}
         return v
 
 

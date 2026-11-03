@@ -29,7 +29,7 @@ kith_launch_json_flag() {
   while [[ $# -gt 0 ]]; do
     case $1 in
       --launch-json) return 0 ;;
-      --hold|--resume|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
+      --hold|--resume|--account|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
       --print|-r|-c|--continue|--bypass) shift ;;
       *) return 1 ;;
     esac
