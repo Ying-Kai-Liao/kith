@@ -473,13 +473,16 @@ fn two_concurrent_starts_on_a_stale_socket_leave_one_holder() {
 }
 
 /// The environment a process was started with, as another process of this user can read it.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn environment_of(pid: u32) -> String {
-    if cfg!(target_os = "linux") {
-        let raw = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
-        return String::from_utf8_lossy(&raw).replace('\0', " ");
-    }
-    // macOS: the same call `ps -E` makes. The buffer holds argc, the program, the arguments and the environment.
+    let raw = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
+    String::from_utf8_lossy(&raw).replace('\0', " ")
+}
+
+/// The environment a process was started with, as another process of this user can read it.
+#[cfg(target_os = "macos")]
+fn environment_of(pid: u32) -> String {
+    // The same call `ps -E` makes. The buffer holds argc, the program, the arguments and the environment.
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
     let mut buf = vec![0u8; 1 << 20];
     let mut len = buf.len();
