@@ -1308,6 +1308,7 @@
   },
   {
     "name": "accounts-list-none",
+    "sort_lines": true,
     "command": "accounts",
     "needs": "rust",
     "program": {
@@ -1352,6 +1353,7 @@
   },
   {
     "name": "accounts-list",
+    "sort_lines": true,
     "command": "accounts",
     "needs": "rust",
     "program": {
@@ -1411,6 +1413,7 @@
   },
   {
     "name": "accounts-list-not-installed",
+    "sort_lines": true,
     "command": "accounts",
     "needs": "rust",
     "program": {
