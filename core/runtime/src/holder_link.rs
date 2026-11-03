@@ -40,6 +40,8 @@ pub(crate) struct HolderConfig {
     /// (program first, then its arguments). The command carries bytes to the holder of the machine it runs on and
     /// starts one there if none answers, so this core starts nothing itself. Tests put `kith-holder --stdio` here.
     pub command: Option<Vec<String>>,
+    /// How long a command link may take to answer its hello before it is ended and tried again later.
+    pub handshake: Duration,
 }
 
 impl Default for HolderConfig {
@@ -52,6 +54,7 @@ impl Default for HolderConfig {
             retry_max: Duration::from_secs(60),
             kill_wait: Duration::from_secs(10),
             command: None,
+            handshake: Duration::from_secs(15),
         }
     }
 }
@@ -163,7 +166,7 @@ fn connect(
 ) -> std::result::Result<Client, (&'static str, String)> {
     let unreachable = |why: String| ("unreachable", why);
     if let Some(argv) = cfg.command.as_deref().filter(|a| !a.is_empty()) {
-        return connect_command(shared, layout, argv);
+        return connect_command(shared, layout, argv, cfg.handshake);
     }
     let Some(exe) = find_exe(cfg) else {
         shared.set_holder(|h| h.binary = None);
@@ -198,6 +201,7 @@ fn connect_command(
     shared: &Arc<Shared>,
     layout: &Layout,
     argv: &[String],
+    handshake: Duration,
 ) -> std::result::Result<Client, (&'static str, String)> {
     let unreachable = |why: String| ("unreachable", why);
     shared.set_holder(|h| h.binary = Some(PathBuf::from(&argv[0])));
@@ -208,7 +212,7 @@ fn connect_command(
     let generation = u64::try_from(generation).unwrap_or(0);
     let mut cmd = std::process::Command::new(&argv[0]);
     cmd.args(&argv[1..]);
-    Client::over_command(cmd, &secret, generation)
+    Client::over_command(cmd, &secret, generation, handshake)
         .map_err(|e| link_error(e, &format!("through `{}`", argv.join(" "))))
 }
 
@@ -238,24 +242,41 @@ fn connected(
     mut client: Client,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), String> {
-    let procs = record_procs(&client.welcome.procs);
+    // A holder reached through a command runs on another machine: its pids mean nothing here, so no start time is
+    // read and no process group is ended on this machine's account, and the local holder's record is left alone.
+    let remote = cfg.command.is_some();
+    let procs = if remote {
+        Vec::new()
+    } else {
+        record_procs(&client.welcome.procs)
+    };
     let instance = client.welcome.instance.clone();
     let (pid, tied) = (client.welcome.pid, client.welcome.tied_to_starter);
-    reconcile(shared, &instance, &procs, cfg)?;
+    let count = client
+        .welcome
+        .procs
+        .iter()
+        .filter(|h| h.exit.is_none())
+        .count();
+    if remote {
+        log::note(
+            &shared.logs,
+            "holder: linked through a command; its pids are not this machine's, so nothing is recorded or ended here",
+        );
+    } else {
+        reconcile(shared, &instance, &procs, cfg)?;
+    }
     shared.set_holder(|h| {
         h.state = "connected";
         h.instance = Some(instance.clone());
         h.pid = Some(pid);
         h.tied_to_starter = tied;
         h.error = None;
-        h.procs = procs.len();
+        h.procs = count;
     });
     log::note(
         &shared.logs,
-        &format!(
-            "holder: connected (instance {instance}, pid {pid}, {} process(es))",
-            procs.len()
-        ),
+        &format!("holder: connected (instance {instance}, pid {pid}, {count} process(es))"),
     );
     let mut known = procs;
     while !shared.stopping() {
@@ -266,6 +287,11 @@ fn connected(
         let held = client
             .list()
             .map_err(|e| format!("the holder stopped answering: {e}"))?;
+        if remote {
+            let live = held.iter().filter(|h| h.exit.is_none()).count();
+            shared.set_holder(|h| h.procs = live);
+            continue;
+        }
         let now = record_procs(&held);
         if now != known {
             reconcile(shared, &instance, &now, cfg)?;

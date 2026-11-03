@@ -1,7 +1,7 @@
 //! `kith-holder serve --dir D [--idle-secs N]`: run a holder in the foreground (what `start` launches).
 //! `kith-holder start --dir D [--idle-secs N]`: start one detached if none answers, then exit.
 //! `kith-holder --stdio --dir D [--idle-secs N]`: relay stdin/stdout to the holder of D (what a remote core runs
-//! over ssh); starts the holder if none answers. `--dir` defaults to `~/.kith/holder`.
+//! over ssh); starts the holder if none answers. `--dir` is required: a default outside the core folder would make a second holder.
 //! The secret is the first line of stdin, never the command line or the environment (both stay readable by this
 //! user's other processes for the holder's whole life).
 
@@ -35,7 +35,7 @@ fn main() -> ExitCode {
             _ => return usage(),
         }
     }
-    let Some(dir) = dir.or_else(|| stdio.then(default_dir).flatten()) else {
+    let Some(dir) = dir else {
         return usage();
     };
     if stdio {
@@ -80,12 +80,6 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-
-/// Where a remote shell finds the holder without being told: the user's own Kith folder.
-fn default_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
-    Some(PathBuf::from(home).join(".kith").join("holder"))
 }
 
 fn usage() -> ExitCode {

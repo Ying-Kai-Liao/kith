@@ -6,10 +6,12 @@ use crate::platform::{self, Stream};
 use crate::proto as p;
 use crate::wire::{self, Frame};
 use std::collections::VecDeque;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
@@ -37,6 +39,14 @@ impl std::fmt::Display for ConnectError {
                 r.why, r.current
             ),
         }
+    }
+}
+
+fn with(tail: &str) -> String {
+    if tail.is_empty() {
+        String::new()
+    } else {
+        format!(" (it said: {tail})")
     }
 }
 
@@ -93,6 +103,7 @@ impl Client {
         mut cmd: Command,
         secret: &str,
         generation: u64,
+        handshake: Duration,
     ) -> Result<Client, ConnectError> {
         if secret.contains(['\r', '\n']) {
             return Err(io::Error::new(
@@ -104,25 +115,77 @@ impl Client {
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()?;
         let mut writer = child.stdin.take().expect("piped");
         let reader = child.stdout.take().expect("piped");
-        let mut close: Closer = Box::new(move || {
-            let _ = child.kill();
-            let _ = child.wait();
-        });
-        if let Err(e) = writeln!(writer, "{secret}").and_then(|()| writer.flush()) {
-            close();
-            return Err(e.into());
+        // The command's last few stderr lines (ssh says why it could not connect there), for the error.
+        let said: Arc<Mutex<VecDeque<String>>> = Arc::default();
+        if let Some(err) = child.stderr.take() {
+            let said = said.clone();
+            std::thread::spawn(move || {
+                for line in BufReader::new(err).lines().map_while(Result::ok) {
+                    let mut said = said.lock().unwrap_or_else(|e| e.into_inner());
+                    said.push_back(line);
+                    if said.len() > 5 {
+                        said.pop_front();
+                    }
+                }
+            });
         }
-        Self::over_parts(
-            Box::new(reader),
-            Box::new(writer),
-            close,
-            secret,
-            generation,
-        )
+        let child = Arc::new(Mutex::new(child));
+        let kill = {
+            let child = child.clone();
+            move || {
+                let mut child = child.lock().unwrap_or_else(|e| e.into_inner());
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        };
+        // Pipes have no read timeout: a command that connects and then says nothing would hold the caller for good.
+        // The watchdog ends the child, which ends the read; it stands down the moment the handshake is over.
+        let (done, waiting) = std::sync::mpsc::channel::<()>();
+        let timed_out = Arc::new(AtomicBool::new(false));
+        {
+            let (kill, timed_out) = (kill.clone(), timed_out.clone());
+            std::thread::spawn(move || {
+                if waiting.recv_timeout(handshake) == Err(RecvTimeoutError::Timeout) {
+                    timed_out.store(true, Ordering::SeqCst);
+                    kill();
+                }
+            });
+        }
+        let close: Closer = Box::new(kill);
+        let result = match writeln!(writer, "{secret}").and_then(|()| writer.flush()) {
+            Ok(()) => Self::over_parts(
+                Box::new(reader),
+                Box::new(writer),
+                close,
+                secret,
+                generation,
+            ),
+            Err(e) => {
+                let mut close = close;
+                close();
+                Err(e.into())
+            }
+        };
+        drop(done);
+        result.map_err(|e| {
+            let tail = said.lock().unwrap_or_else(|e| e.into_inner());
+            let tail = tail.iter().cloned().collect::<Vec<_>>().join(" / ");
+            match e {
+                ConnectError::Io(_) if timed_out.load(Ordering::SeqCst) => io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("no welcome within {handshake:?}{}", with(&tail)),
+                )
+                .into(),
+                ConnectError::Io(e) => {
+                    io::Error::new(e.kind(), format!("{e}{}", with(&tail))).into()
+                }
+                other => other,
+            }
+        })
     }
 
     fn over_parts(

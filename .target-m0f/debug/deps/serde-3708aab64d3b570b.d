@@ -1,0 +1,14 @@
+/Volumes/Macos 1TB/kith/.claude/worktrees/agent-a9f31649a76c45c4a/.target-m0f/debug/deps/serde-3708aab64d3b570b.d: /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Volumes/Macos\ 1TB/kith/.claude/worktrees/agent-a9f31649a76c45c4a/.target-m0f/debug/build/serde-9cb0bae4de57e334/out/private.rs
+
+/Volumes/Macos 1TB/kith/.claude/worktrees/agent-a9f31649a76c45c4a/.target-m0f/debug/deps/libserde-3708aab64d3b570b.rlib: /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Volumes/Macos\ 1TB/kith/.claude/worktrees/agent-a9f31649a76c45c4a/.target-m0f/debug/build/serde-9cb0bae4de57e334/out/private.rs
+
+/Volumes/Macos 1TB/kith/.claude/worktrees/agent-a9f31649a76c45c4a/.target-m0f/debug/deps/libserde-3708aab64d3b570b.rmeta: /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /Volumes/Macos\ 1TB/kith/.claude/worktrees/agent-a9f31649a76c45c4a/.target-m0f/debug/build/serde-9cb0bae4de57e334/out/private.rs
+
+/Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs:
+/Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs:
+/Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs:
+/Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs:
+/Users/Kath/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs:
+/Volumes/Macos\ 1TB/kith/.claude/worktrees/agent-a9f31649a76c45c4a/.target-m0f/debug/build/serde-9cb0bae4de57e334/out/private.rs:
+
+# env-dep:OUT_DIR=/Volumes/Macos 1TB/kith/.claude/worktrees/agent-a9f31649a76c45c4a/.target-m0f/debug/build/serde-9cb0bae4de57e334/out

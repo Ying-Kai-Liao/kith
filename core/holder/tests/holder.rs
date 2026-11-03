@@ -591,7 +591,8 @@ impl Fixture {
     }
 
     fn over_stdio(&self, generation: u64) -> Client {
-        Client::over_command(self.relay(), SECRET, generation).expect("hello over stdio accepted")
+        Client::over_command(self.relay(), SECRET, generation, WAIT)
+            .expect("hello over stdio accepted")
     }
 }
 
@@ -663,7 +664,7 @@ fn an_exit_during_a_stdio_drop_is_kept_until_acked_over_the_next_link() {
 fn a_stdio_link_with_the_wrong_pairing_key_is_refused() {
     let fx = Fixture::new("skey");
     fx.start();
-    match Client::over_command(fx.relay(), "not-the-secret-not-the-secret-00", 1) {
+    match Client::over_command(fx.relay(), "not-the-secret-not-the-secret-00", 1, WAIT) {
         Err(ConnectError::Impostor) => {}
         other => panic!(
             "expected the holder to be distrusted, got {:?}",
@@ -679,7 +680,7 @@ fn an_older_generation_over_stdio_is_refused_after_a_newer_core_connected() {
     let fx = Fixture::new("sgen");
     fx.start();
     let mut first = fx.over_stdio(5);
-    match Client::over_command(fx.relay(), SECRET, 4) {
+    match Client::over_command(fx.relay(), SECRET, 4, WAIT) {
         Err(ConnectError::Refused(r)) => assert_eq!((r.why, r.current), (Why::StaleGeneration, 5)),
         other => panic!("expected a refusal, got {:?}", other.err()),
     }
@@ -692,4 +693,23 @@ fn an_older_generation_over_stdio_is_refused_after_a_newer_core_connected() {
         Client::connect(&fx.dir, SECRET, 5),
         Err(ConnectError::Refused(_))
     ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_command_that_never_answers_is_ended_at_the_deadline_and_its_stderr_is_kept() {
+    let mut cmd = Command::new("/bin/sh");
+    cmd.args(["-c", "echo connection stuck >&2; exec sleep 300"]);
+    let began = Instant::now();
+    let err = Client::over_command(cmd, SECRET, 1, Duration::from_millis(600))
+        .err()
+        .expect("no welcome");
+    assert!(began.elapsed() < Duration::from_secs(10));
+    match err {
+        ConnectError::Io(e) => {
+            assert_eq!(e.kind(), std::io::ErrorKind::TimedOut);
+            assert!(e.to_string().contains("connection stuck"), "{e}");
+        }
+        other => panic!("expected a timeout, got {other}"),
+    }
 }
