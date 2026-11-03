@@ -137,9 +137,9 @@ impl Server {
         // Polled, not blocked in: `stop` then only sets a flag, and nothing it does can hang (a wake-up connection to a
         // socket with a full backlog could). Windows pipes have no such mode; `stop` wakes those with a connection.
         #[cfg(unix)]
-        listener.set_nonblocking(true).map_err(|e| {
-            Error::Io(format!("kith-core: can't poll the owner socket: {e}"))
-        })?;
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| Error::Io(format!("kith-core: can't poll the owner socket: {e}")))?;
         let stop = Arc::new(AtomicBool::new(false));
         let ctx = Arc::new(Ctx {
             token,
@@ -179,7 +179,10 @@ impl Server {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         // Nothing is ever sent: this returns when the thread has dropped its end, or after the wait.
-        let done = !matches!(ended.recv_timeout(STOP_WAIT), Err(RecvTimeoutError::Timeout));
+        let done = !matches!(
+            ended.recv_timeout(STOP_WAIT),
+            Err(RecvTimeoutError::Timeout)
+        );
         drop(ended);
         let handle = self.accept.lock().ok().and_then(|mut a| a.take());
         if let Some(handle) = handle {
@@ -594,12 +597,12 @@ fn attempt(
         return before("can't read from the socket");
     };
     let nonce = platform::random_hex();
-    let mut hello = json!({"protocol": protocol, "version": VERSION, "schema": schema, "nonce": nonce});
+    let mut hello =
+        json!({"protocol": protocol, "version": VERSION, "schema": schema, "nonce": nonce});
     if let Some(rows) = rows {
         hello["rows"] = json!(rows);
     }
-    if conn.send(1, "hello", &hello).is_err()
-    {
+    if conn.send(1, "hello", &hello).is_err() {
         return before("can't write to the socket");
     }
     let hello = match conn.recv(STEP_TIMEOUT) {

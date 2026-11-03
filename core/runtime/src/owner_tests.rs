@@ -22,7 +22,12 @@ fn echo() -> Arc<Handler> {
 }
 
 fn rows(pairs: &[(&str, &str)]) -> Option<Map<String, Value>> {
-    Some(pairs.iter().map(|(k, v)| ((*k).to_owned(), json!(v))).collect())
+    Some(
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), json!(v)))
+            .collect(),
+    )
 }
 
 #[test]
@@ -112,11 +117,18 @@ fn stop_does_not_wait_for_a_client_in_the_middle_of_a_call() {
     entered
         .recv_timeout(Duration::from_secs(10))
         .expect("the call is in the handler");
-    within("a stop with a call in flight", Duration::from_secs(5), || {
-        server.stop();
-    });
+    within(
+        "a stop with a call in flight",
+        Duration::from_secs(5),
+        || {
+            server.stop();
+        },
+    );
     // The call in flight finishes with its answer or a lost connection; either way it ends.
     let _ = release.send(());
     let r = client.join().expect("client");
-    assert!(matches!(r, Reached::Answered(_) | Reached::Lost(_)), "{r:?}");
+    assert!(
+        matches!(r, Reached::Answered(_) | Reached::Lost(_)),
+        "{r:?}"
+    );
 }

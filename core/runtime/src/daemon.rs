@@ -338,7 +338,9 @@ fn acquire(shared: &Shared, layout: &Layout, cfg: &Config) -> Result<Core> {
             Opened::Busy(holder) => {
                 let role = holder.as_ref().and_then(|h| h.role);
                 let patient = role == Some(Role::Embedded);
-                if role == Some(Role::Daemon) || (!patient && begun.elapsed() >= cfg.wait_for_embedded) {
+                if role == Some(Role::Daemon)
+                    || (!patient && begun.elapsed() >= cfg.wait_for_embedded)
+                {
                     return Err(busy(holder));
                 }
                 if !told {
