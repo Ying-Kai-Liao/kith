@@ -26,11 +26,7 @@ pub fn run(engine: &[OsString]) -> i32 {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
             eprintln!("kith-stub: cannot start {:?}: {e}", engine[0]);
-            if e.kind() == ErrorKind::NotFound {
-                127
-            } else {
-                126
-            }
+            if e.kind() == ErrorKind::NotFound { 127 } else { 126 }
         }
     }
 }
