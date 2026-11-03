@@ -83,31 +83,6 @@ export function parseBackups(raw: unknown): Backups {
   return { global: ids(r.global), agents, entries, main: { global: str(m.global), agents: mains } }
 }
 
-/** What `accountAdd` answered: the warning to confirm first, or the account made with its login terminal running. */
-export type AccountAdd =
-  | { kind: 'warning'; warning: string; error: string | null }
-  | { kind: 'started'; id: string; created: boolean; term: string }
-
-export function parseAccountAdd(raw: unknown): AccountAdd {
-  const r = isObject(raw) ? raw : {}
-  const warning = str(r.warning)
-  if (r.ok === false && warning) return { kind: 'warning', warning, error: str(r.error) }
-  const account = isObject(r.account) ? r.account : {}
-  const id = str(account.id)
-  const term = str(r.term)
-  if (!id || !term) throw new Error('The computer answered without a login terminal.')
-  return { kind: 'started', id, created: account.created !== false, term }
-}
-
-/** What `accountRemove` answered: `inChain` when the account was in a backup order (the order still lists it). */
-export function parseAccountRemove(raw: unknown): { inChain: boolean } {
-  return { inChain: isObject(raw) && raw.in_chain === true }
-}
-
-/** The extra accounts (`claude:work`, `codex:deep`) the user can remove: entries that name an account of a subscription. */
-export const removable = (backups: Backups): BackupEntry[] =>
-  backups.entries.filter((e) => e.account !== null && e.kind === 'subscription' && (e.harness === 'claude' || e.harness === 'codex'))
-
 /** Entries always offered for adding: a provider's own login, and the other kinds when the user has made one. */
 export const QUICK_ADD = ['codex', 'claude'] as const
 

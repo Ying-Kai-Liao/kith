@@ -441,10 +441,13 @@ fn launch_env_asks_the_harness_and_names_the_login() {
         )
     );
     // not logged in: the harness's word, and the one command that fixes it
+    h.account("codex", "c");
     assert_eq!(
-        launch_env(&ctx, "echo", "codex", false, false).unwrap_err(),
-        "codex: not logged in (make it ready: codex login)"
+        launch_env(&ctx, "echo", "codex:c", false, false).unwrap_err(),
+        "codex:c: not logged in (make it ready: kith account add codex c)"
     );
+    // the default login is checked the light way: a logged-out one is the harness's to say on the run, not here
+    assert!(launch_env(&ctx, "echo", "codex", false, false).is_ok());
     assert_eq!(
         launch_env(&ctx, "echo", "claude:none", false, false).unwrap_err(),
         "claude:none: no account none (make it ready: kith account add claude none)"
@@ -461,9 +464,10 @@ fn a_harness_that_is_not_installed_says_so() {
     let mut fake = Fake::new();
     fake.installed = vec![];
     let ctx = h.ctx(&fake);
+    h.account("codex", "c");
     assert_eq!(
-        launch_env(&ctx, "echo", "codex", false, false).unwrap_err(),
-        "codex: codex is not installed (make it ready: codex login)"
+        launch_env(&ctx, "echo", "codex:c", false, false).unwrap_err(),
+        "codex:c: codex is not installed (make it ready: kith account add codex c)"
     );
 }
 

@@ -28,8 +28,9 @@
                                            own harness's accounts; an agent's own list (set --agent A) may name any. Shown by list
   kith account set <id>... [--agent A]     the whole set (or A's own subset and order) in one write; no ids: empty.
                                            `set --reset --agent A` drops A's own list, so A follows the global set (what the host calls)
-  kith account out <id> [--until T] [--reason R]   mark an account out of usage until T (a Unix time, 90m, 2h, 1d, or
-                                           "2026-11-04 09:30" local; default an hour) so runs skip it
+  kith account out <id> [--until T] [--reason R] [--extend]   mark an account out of usage until T (a Unix time, 90m, 2h, 1d, or
+                                           "2026-11-04 09:30" local; default an hour) so runs skip it. --extend never shortens a
+                                           mark that is already later (what the host sends: it only knows its own limit)
   kith account clear <id>                  back to ready
   kith account usage <id> [--json READING]  record a usage reading ('{"windows": [{"name": "five_hour", "percent": 71.5,
                                            "resets_at": 1900000000}]}', or - for stdin); without --json print the stored one
@@ -493,8 +494,9 @@ def cmd_unpin(args):
 def cmd_out(args):
     until = option(args, '--until')
     reason = option(args, '--reason') or 'manual'
+    extend = flag(args, '--extend')
     if len(args) != 1:
-        die('account out <id> [--until T] [--reason R]', 2)
+        die('account out <id> [--until T] [--reason R] [--extend]', 2)
     entry = valid_id(args[0])
     if not acc.REASON_RE.match(reason):
         die('--reason is a short word (letters, digits, space . _ -)', 2)
@@ -504,7 +506,7 @@ def cmd_out(args):
         die(str(e), 2)
     if t <= time.time():
         die('--until is in the past', 2)
-    acc.mark_out(entry, t, reason, extend_only=False)
+    acc.mark_out(entry, t, reason, extend_only=extend)
     print(f'{entry} is out until {when(t)} ({reason})')
 
 

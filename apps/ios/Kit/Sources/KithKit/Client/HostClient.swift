@@ -522,6 +522,56 @@ public extension HostClient {
         try await call("backups", timeout: 90)
     }
 
+    // MARK: managed accounts (serve/host/src/api/accounts.rs; owner only). Every write answers with the fresh read.
+    // Adding an account is not here: its login runs in a terminal on the computer.
+
+    func accounts() async throws -> HarnessAccounts {
+        try await call("accounts", timeout: 90)
+    }
+
+    /// The whole list: the global set (`agent` nil), or an agent's own list; `reset` drops the agent's own list.
+    func accountsSet(agent: String? = nil, ids: [String]) async throws -> HarnessAccounts {
+        struct Body: Encodable { var agent: String?; var ids: [String] }
+        return try await call("accountsSet", Body(agent: agent, ids: ids), timeout: 90)
+    }
+
+    func accountsReset(agent: String) async throws -> HarnessAccounts {
+        struct Body: Encodable { var agent: String; var reset = true }
+        return try await call("accountsSet", Body(agent: agent), timeout: 90)
+    }
+
+    func accountPolicy(_ policy: String) async throws -> HarnessAccounts {
+        struct Body: Encodable { var policy: String }
+        return try await call("accountPolicy", Body(policy: policy), timeout: 90)
+    }
+
+    func accountPin(agent: String, id: String, only: Bool) async throws -> HarnessAccounts {
+        struct Body: Encodable { var agent: String; var id: String; var only: Bool }
+        return try await call("accountPin", Body(agent: agent, id: id, only: only), timeout: 90)
+    }
+
+    func accountUnpin(agent: String) async throws -> HarnessAccounts {
+        struct Body: Encodable { var agent: String }
+        return try await call("accountUnpin", Body(agent: agent), timeout: 90)
+    }
+
+    /// `value`: `on`, `off`, or `reset` (an agent only: follow the computer's setting).
+    func accountCrossHarness(agent: String? = nil, value: String) async throws -> HarnessAccounts {
+        struct Body: Encodable { var agent: String?; var value: String }
+        return try await call("accountCrossHarness", Body(agent: agent, value: value), timeout: 90)
+    }
+
+    /// "It's back": drops the out mark.
+    func accountClear(id: String) async throws -> HarnessAccounts {
+        struct Body: Encodable { var id: String }
+        return try await call("accountClear", Body(id: id), timeout: 90)
+    }
+
+    func accountRemove(id: String) async throws -> HarnessAccounts {
+        struct Body: Encodable { var id: String }
+        return try await call("accountRemove", Body(id: id), timeout: 120)
+    }
+
     func kithMemoryFile(botId: String, path: String) async throws -> KithMemoryFile {
         struct Body: Encodable { var botId: String; var path: String }
         return try await call("kithMemoryFile", Body(botId: botId, path: path), timeout: 30)
