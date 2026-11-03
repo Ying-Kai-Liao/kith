@@ -10,7 +10,8 @@ use tempfile::TempDir;
 use crate::db::{MIGRATIONS, Migration};
 use crate::layout::Layout;
 use crate::{
-    Embedded, Error, Via, embedded_with, lock, migrate_with, perms, start_with, through_core,
+    Embedded, Error, Via, embedded_with, lock, migrate_with, perms, start_with,
+    stateless_through_core,
 };
 
 const V2: Migration = Migration {
@@ -417,21 +418,21 @@ fn a_damaged_database_is_not_started() {
 }
 
 #[test]
-fn through_core_runs_the_verb_inside_an_embedded_core_or_bare() {
+fn stateless_through_core_runs_the_verb_inside_an_embedded_core_or_bare() {
     let (_t, m) = machine();
     let p = paths(&m);
     // No machine folder yet (first setup): bare, and nothing is created.
-    let (v, via) = through_core(&p, || 7);
+    let (v, via) = stateless_through_core(&p, || 7);
     assert_eq!((v, via), (7, Via::Bare));
     assert!(!m.exists());
     // A machine folder with no core.db: still bare, and the verb creates nothing.
     std::fs::create_dir_all(&m).expect("machine");
-    let (v, via) = through_core(&p, || 8);
+    let (v, via) = stateless_through_core(&p, || 8);
     assert_eq!((v, via), (8, Via::Bare));
     assert_eq!(std::fs::read_dir(&m).expect("ls").count(), 0);
     let l = Layout::new(&m);
     drop(open(&l));
-    let ((), via) = through_core(&p, || {
+    let ((), via) = stateless_through_core(&p, || {
         // The lock is held while the verb runs.
         assert!(matches!(
             embedded_with(&l, MIGRATIONS),
@@ -441,7 +442,7 @@ fn through_core_runs_the_verb_inside_an_embedded_core_or_bare() {
     assert_eq!(via, Via::Embedded);
     // A daemon holds the lock: the verb still runs.
     let daemon = start_with(&l, MIGRATIONS).expect("daemon");
-    let (v, via) = through_core(&p, || "ran");
+    let (v, via) = stateless_through_core(&p, || "ran");
     assert_eq!((v, via), ("ran", Via::Bare));
     drop(daemon);
 }
@@ -493,4 +494,61 @@ fn an_owner_only_access_list_is_told_from_an_open_one() {
         "an unreadable list is not owner-only"
     );
     let _ = std::io::stdout().flush();
+}
+
+#[test]
+fn a_fallback_caused_by_an_error_is_one_line_in_the_core_log_and_a_free_run_is_not() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    drop(open(&l));
+    let log = m.join(crate::log::FILE);
+
+    // A daemon holds the lock: bare, nothing wrong, nothing logged.
+    let daemon = start_with(&l, MIGRATIONS).expect("daemon");
+    let ((), via) = stateless_through_core(&p, || ());
+    assert_eq!(via, Via::Bare);
+    assert!(!log.exists());
+    drop(daemon);
+
+    // The marker names another database: the verb still runs, and the reason is on record.
+    crate::marker::write(&l, "00000000000000000000000000000000").expect("marker");
+    let (v, via) = stateless_through_core(&p, || 5);
+    assert_eq!(v, 5);
+    assert!(
+        matches!(&via, Via::BareAfterError(why) if why.contains("another file")),
+        "{via:?}"
+    );
+    let text = std::fs::read_to_string(&log).expect("core.log");
+    assert_eq!(text.lines().count(), 1, "{text}");
+    assert!(text.contains("verb ran without the core") && text.contains("another file"));
+}
+
+#[test]
+fn the_database_id_is_written_in_the_first_migrations_transaction() {
+    const BROKEN: &[Migration] = &[Migration {
+        version: 1,
+        name: "broken",
+        sql: "CREATE TABLE migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at INTEGER NOT NULL);
+              CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+              INSERT INTO nowhere VALUES (1);",
+    }];
+    let mut conn = rusqlite::Connection::open_in_memory().expect("memory");
+    crate::db::apply(&mut conn, MIGRATIONS, 0, Some("abc")).expect("apply");
+    let id: String = conn
+        .query_row(
+            "SELECT value FROM meta WHERE key = 'database_id'",
+            [],
+            |r| r.get(0),
+        )
+        .expect("id");
+    assert_eq!(id, "abc");
+
+    // A first step that fails after its schema leaves nothing: no tables, hence no database without an id.
+    let mut conn = rusqlite::Connection::open_in_memory().expect("memory");
+    assert!(crate::db::apply(&mut conn, BROKEN, 0, Some("abc")).is_err());
+    let tables: i64 = conn
+        .query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(tables, 0);
 }

@@ -92,7 +92,7 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
     };
 
     perms::create_private_file(&layout.db)?;
-    let mut conn = Connection::open(&layout.db)?;
+    let mut conn = open_connection(&layout.db)?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "FULL")?;
@@ -102,10 +102,11 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
     let mut migrated_from = None;
     let schema;
     if fresh {
-        apply(&mut conn, migrations, 0)?;
-        schema = latest;
+        // The database id goes in with the first migration, one transaction: a crash leaves no database, or a whole
+        // one, never a schema without an id (which every later open would refuse as corrupt).
         let id = new_database_id()?;
-        set_meta(&mut conn, "database_id", &id)?;
+        apply(&mut conn, migrations, 0, Some(&id))?;
+        schema = latest;
         marker::write(layout, &id)?;
     } else {
         if mode == Mode::Daemon {
@@ -143,7 +144,7 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
             }
             integrity_check(&conn)?;
             snapshot(layout, &conn, have)?;
-            apply(&mut conn, migrations, have)?;
+            apply(&mut conn, migrations, have, None)?;
             migrated_from = Some(have);
         }
         schema = latest;
@@ -216,6 +217,28 @@ impl Core {
     }
 }
 
+/// Opens core.db. When SQLite cannot, the message carries its extended result code and what the operating system says
+/// to a plain open of the same file, since "unable to open database file" alone does not say which of permissions,
+/// sharing or the path it was.
+fn open_connection(path: &Path) -> Result<Connection> {
+    Connection::open(path).map_err(|e| {
+        let code = match &e {
+            rusqlite::Error::SqliteFailure(f, _) => format!(" (sqlite code {})", f.extended_code),
+            _ => String::new(),
+        };
+        let os = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .err()
+            .map_or_else(
+                || "a plain open works".to_owned(),
+                |o| format!("a plain open says: {o}"),
+            );
+        Error::Io(format!("core.db: {e}{code}; {os}"))
+    })
+}
+
 fn read_counter(c: &Connection, name: &str) -> Result<i64> {
     Ok(
         c.query_row("SELECT value FROM counters WHERE name = ?1", [name], |r| {
@@ -233,16 +256,6 @@ fn bump_generation(conn: &mut Connection) -> Result<i64> {
     let g = read_counter(&tx, "generation")?;
     tx.commit()?;
     Ok(g)
-}
-
-fn set_meta(conn: &mut Connection, key: &str, value: &str) -> Result<()> {
-    let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    tx.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
-        [key, value],
-    )?;
-    tx.commit()?;
-    Ok(())
 }
 
 fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>> {
@@ -268,11 +281,23 @@ fn schema_version(conn: &Connection) -> Result<i64> {
     })
 }
 
-/// Runs the steps above `from`, each in its own immediate transaction with its row in the migrations table.
-fn apply(conn: &mut Connection, migrations: &[Migration], from: i64) -> Result<()> {
-    for m in migrations.iter().filter(|m| m.version > from) {
+/// Runs the steps above `from`, each in its own immediate transaction with its row in the migrations table. A new
+/// database's `id` is written inside the first step's transaction.
+pub(crate) fn apply(
+    conn: &mut Connection,
+    migrations: &[Migration],
+    from: i64,
+    id: Option<&str>,
+) -> Result<()> {
+    for (i, m) in migrations.iter().filter(|m| m.version > from).enumerate() {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(m.sql)?;
+        if let (0, Some(id)) = (i, id) {
+            tx.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('database_id', ?1)",
+                [id],
+            )?;
+        }
         tx.execute(
             "INSERT INTO migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
             rusqlite::params![m.version, m.name, now_secs()],

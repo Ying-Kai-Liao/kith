@@ -18,6 +18,7 @@ mod db;
 mod error;
 mod layout;
 mod lock;
+mod log;
 mod marker;
 mod perms;
 
@@ -48,13 +49,16 @@ pub struct Migrated {
     pub to: i64,
 }
 
-/// How [`through_core`] ran a verb.
+/// How [`stateless_through_core`] ran a verb.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Via {
     /// Inside an embedded core: lock held, core.db checked, generation bumped.
     Embedded,
-    /// Without a core: a daemon holds the lock, there is no core.db yet, or the core would not open here.
+    /// Without a core, for a reason that is no fault: a daemon holds the lock, or there is no core.db yet.
     Bare,
+    /// Without a core because it would not open here (permissions, missing, swapped, corrupt, needs migration, binary
+    /// older, I/O). The reason is one line in the core log; it is never silent.
+    BareAfterError(String),
 }
 
 /// Starts the daemon's core: takes the lifetime lock for good, checks the file (`quick_check`), migrates an older
@@ -73,11 +77,14 @@ pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
     embedded_with(&Layout::new(&paths.machine), MIGRATIONS)
 }
 
-/// Runs a verb that reads no core state yet (paths, engines, launch) inside an embedded core, so the verbs already
-/// switched to Rust go through the core's lock and checks. When no core can open here (a daemon has the lock; no
-/// core.db yet; a guest's sandbox hides it) the verb runs bare: these verbs own no state of the core's, and the
-/// method table of M0b replaces this with a call to the daemon.
-pub fn through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T, Via) {
+/// Runs a verb that touches NO core state (paths, engines, launch today) inside an embedded core, so the verbs already
+/// switched to Rust go through the core's lock and checks. A verb that reads or writes core state must use
+/// [`open_embedded`], which refuses instead of falling back. This helper goes when M0b/M0c give those verbs the
+/// method table; until then it runs the verb bare when no core can open here:
+/// - quietly, when a daemon holds the lock or there is no core.db yet (nothing is wrong);
+/// - with one line in `core.log` (in the logs folder, never stdout) when the open failed, so a damaged or swapped
+///   core.db does not go unnoticed until the daemon refuses to start.
+pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T, Via) {
     // A read-only verb never creates the core as a side effect (a sandbox's state folder stays as it was): the daemon,
     // `kith migrate` or a first embedded open that needs it makes core.db, and only then do verbs pass through it.
     if !Layout::new(&paths.machine).db.is_file() {
@@ -89,7 +96,12 @@ pub fn through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T, Via) {
             drop(core);
             (out, Via::Embedded)
         }
-        _ => (verb(), Via::Bare),
+        Ok(Embedded::DaemonRunning { .. }) => (verb(), Via::Bare),
+        Err(e) => {
+            log::fell_back(&paths.logs, &e);
+            let line = e.to_string();
+            (verb(), Via::BareAfterError(line))
+        }
     }
 }
 

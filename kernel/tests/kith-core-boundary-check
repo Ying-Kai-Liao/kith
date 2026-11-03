@@ -25,7 +25,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 # (file, item) of every `pub` thing kith-core exports. M0b adds the method table's entry point here, in review.
 PUBLIC = {
     ("lib.rs", "Embedded"), ("lib.rs", "Migrated"), ("lib.rs", "Via"),
-    ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "through_core"),
+    ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "stateless_through_core"),
     ("lib.rs", "use:db::Core"), ("lib.rs", "use:error::Error"),
     ("lib.rs", "field:from"), ("lib.rs", "field:to"),
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),

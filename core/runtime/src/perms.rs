@@ -90,11 +90,16 @@ pub(crate) fn check_files(layout: &Layout) -> Result<()> {
 }
 
 /// Makes an owner-only empty file when none exists (so SQLite, which copies the main file's mode to its -wal and -shm,
-/// never creates core.db with the process umask).
+/// never creates core.db with the process umask). On Windows files take their access list from the core folder (set
+/// with `(OI)(CI)` in `ensure_dir`), so nothing is pre-made: SQLite creates core.db itself and `check_files` reads the
+/// result. (Pre-making it and rewriting its list with `icacls` first is what SQLite then could not open there.)
 pub(crate) fn create_private_file(path: &Path) -> Result<()> {
+    #[cfg(unix)]
     if !path.exists() {
         open_private(path)?;
     }
+    #[cfg(not(unix))]
+    let _ = path;
     Ok(())
 }
 
@@ -107,13 +112,11 @@ pub(crate) fn open_private(path: &Path) -> Result<fs::File> {
         use std::os::unix::fs::OpenOptionsExt as _;
         o.mode(0o600);
     }
-    let f = o.open(path)?;
-    #[cfg(not(unix))]
-    restrict(path)?;
-    Ok(f)
+    Ok(o.open(path)?)
 }
 
-/// Sets owner-only on a file the core did not create itself (a `VACUUM INTO` snapshot).
+/// Sets owner-only on a file the core did not create itself (a `VACUUM INTO` snapshot). On Windows it already has the
+/// folder's list; this checks it.
 pub(crate) fn make_private(path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
@@ -121,7 +124,7 @@ pub(crate) fn make_private(path: &Path) -> Result<()> {
         fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
     }
     #[cfg(not(unix))]
-    restrict(path)?;
+    check_file(path)?;
     Ok(())
 }
 
@@ -186,7 +189,7 @@ fn check_acl(path: &Path) -> Result<()> {
     )))
 }
 
-/// Removes inherited entries and grants the owner alone.
+/// Removes inherited entries and grants the owner alone, passed on to every file made inside.
 #[cfg(not(unix))]
 fn restrict(path: &Path) -> Result<()> {
     let st = std::process::Command::new("icacls")

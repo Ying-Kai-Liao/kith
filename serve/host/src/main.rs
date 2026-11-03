@@ -423,6 +423,10 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
     },
+    /// Makes (or migrates) this Mac's core database, as the daemon's first start would, and releases it. The difftest uses it
+    /// to run the same corpus through an embedded core.
+    #[command(hide = true)]
+    CoreMigrate,
     /// The coding engines an agent can run on: installed or not, and how to install or sign in.
     Engines {
         /// Print JSON.
@@ -868,7 +872,7 @@ fn print_engines(json: bool, action: Option<EnginesAction>) -> Result<()> {
 /// a call through the method table.
 fn through_core<T>(verb: impl FnOnce() -> T) -> T {
     let p = kernel::folders(&kith_kernel::paths::process_home());
-    kith_core::through_core(&p, verb).0
+    kith_core::stateless_through_core(&p, verb).0
 }
 
 /// `kith paths`: the folders by the `kith-kernel` crate's rules, in the form `kith_paths.py` prints.
@@ -1087,6 +1091,17 @@ async fn main() -> Result<()> {
                 let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
+            if matches!(cmd, KernelCmd::CoreMigrate) {
+                let p = kernel::folders(&kith_kernel::paths::process_home());
+                match kith_core::migrate(&p) {
+                    Ok(m) => println!("the core is at schema {}", m.to),
+                    Err(e) => {
+                        eprintln!("{e}");
+                        std::process::exit(1);
+                    }
+                }
+                return Ok(());
+            }
             if let KernelCmd::Secrets { kernel, args } = cmd {
                 std::process::exit(print_secrets(kernel, &args));
             }
@@ -1168,7 +1183,8 @@ async fn main() -> Result<()> {
                     | KernelCmd::Accounts { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }
-                    | KernelCmd::Secrets { .. } => {
+                    | KernelCmd::Secrets { .. }
+                    | KernelCmd::CoreMigrate => {
                         unreachable!("handled above")
                     }
                 }
