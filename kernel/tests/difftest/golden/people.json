@@ -1,0 +1,267 @@
+[
+ {
+  "name": "people-ls-show",
+  "command": "people",
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "people",
+    "ls",
+    "--json"
+   ],
+   [
+    "auth",
+    "person",
+    "kai",
+    "name=Kai",
+    "owner"
+   ],
+   [
+    "auth",
+    "person",
+    "sam",
+    "name=Sam"
+   ],
+   [
+    "auth",
+    "person",
+    "ola",
+    "name=Ola"
+   ],
+   [
+    "auth",
+    "member",
+    "house",
+    "sam",
+    "preset=member"
+   ],
+   [
+    "auth",
+    "member",
+    "garden",
+    "sam"
+   ],
+   [
+    "auth",
+    "member",
+    "house",
+    "ola"
+   ],
+   [
+    "auth",
+    "bot",
+    "bot-s",
+    "--of",
+    "sam",
+    "name=Scout"
+   ],
+   [
+    "auth",
+    "member",
+    "house",
+    "bot-s"
+   ],
+   [
+    "people",
+    "--json"
+   ],
+   [
+    "people"
+   ],
+   [
+    "people",
+    "show",
+    "sam",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "kai",
+    "--json"
+   ],
+   [
+    "people",
+    "show",
+    "bot-s"
+   ]
+  ]
+ },
+ {
+  "name": "people-usage",
+  "command": "people",
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "people",
+    "bogus"
+   ],
+   [
+    "people",
+    "ls",
+    "extra",
+    "--json"
+   ],
+   [
+    "people",
+    "show"
+   ],
+   [
+    "invite"
+   ],
+   [
+    "invite",
+    "bogus"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam"
+   ],
+   [
+    "invite",
+    "add",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house=admin",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke"
+   ],
+   [
+    "bot",
+    "decide",
+    "bg_x",
+    "maybe",
+    "--json"
+   ],
+   [
+    "bot",
+    "auto-allow",
+    "sam",
+    "sideways"
+   ]
+  ]
+ },
+ {
+  "name": "people-host-down",
+  "command": "people",
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/agents/garden/role/agent.md",
+    "text": "---\nname: garden\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house=member",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--agent",
+    "house"
+   ],
+   [
+    "invite",
+    "ls",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke",
+    "inv_1",
+    "--json"
+   ],
+   [
+    "bot",
+    "ls",
+    "--json"
+   ],
+   [
+    "bot",
+    "invite",
+    "Rex",
+    "--agent",
+    "house",
+    "--json"
+   ],
+   [
+    "bot",
+    "revoke-invite",
+    "bi_1",
+    "--json"
+   ],
+   [
+    "bot",
+    "revoke",
+    "bg_x",
+    "--json"
+   ],
+   [
+    "bot",
+    "decide",
+    "bg_x",
+    "allow",
+    "--json"
+   ],
+   [
+    "bot",
+    "auto-allow",
+    "sam",
+    "on",
+    "--json"
+   ],
+   [
+    "auth",
+    "people",
+    "--json"
+   ]
+  ]
+ }
+]
