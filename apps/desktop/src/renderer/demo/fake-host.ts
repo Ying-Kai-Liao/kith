@@ -356,6 +356,8 @@ export class FakeHost {
         this.allowed = this.allowed.filter((r) => r.id !== str('id'))
         return { ok: true }
       }
+      case 'removeSessionGrant':
+        return { ok: true }
       case 'accessLedger':
         return { grants: this.grants.filter((g) => !b.agent || g.agent === b.agent) }
       case 'removeGrant':

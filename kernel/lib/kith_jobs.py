@@ -114,6 +114,22 @@ def read(caps):
     return jobs, problems
 
 
+def guest_domains(caps):
+    """(domains, problems) of the package's `guest_domains: [host, ...]` line: hosts every guest run of the agent may reach
+    without a card (installing the package is the owner's consent). Only plain host names count; a wildcard, an address or
+    a port is left out with a problem line, and a line that is not a one-line list is left out whole."""
+    text = Path(caps).read_text(errors='replace') if Path(caps).is_file() else ''
+    m = re.search(r'^guest_domains:[ \t]*(.*)$', text, re.M)
+    if not m:
+        return [], []
+    raw = _value(m.group(1))
+    if not isinstance(raw, list):
+        return [], ['guest_domains: write it as a one-line list, guest_domains: [a.example, b.example]']
+    good = [d for d in dict.fromkeys(raw) if kith_guard.valid_domain(d)]
+    return good, ['guest_domains: %s is not a plain host name (no wildcard, address or port)' % d
+                  for d in dict.fromkeys(raw) if not kith_guard.valid_domain(d)]
+
+
 DOOR_KEYS = {'name', 'label', 'npm', 'lockfile', 'chrome', 'tools', 'bin', 'args', 'writes', 'env'}
 NPM_SPEC = re.compile(r'^((@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*)@(\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$')
 CHROME = re.compile(r'^\d+\.\d+\.\d+\.\d+$')

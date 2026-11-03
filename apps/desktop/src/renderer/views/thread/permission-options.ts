@@ -1,8 +1,8 @@
 import type { EntryData, PermissionOption } from '../../../shared/models.ts'
 
-const rank: Record<string, number> = { allow_once: 0, allow_always: 1, reject_once: 2, reject_always: 3 }
+const rank: Record<string, number> = { allow_once: 0, allow_session: 0.5, allow_always: 1, reject_once: 2, reject_always: 3 }
 
-/** Allow before deny, once before always. */
+/** Allow before deny, narrowest grant first (once, this session, always). The plain card lays out its own buttons. */
 export const sortedOptions = (options: PermissionOption[]) => [...options].sort((a, b) => (rank[a.kind] ?? 9) - (rank[b.kind] ?? 9))
 
 /**
@@ -15,6 +15,8 @@ export function optionLabel(o: PermissionOption, edge?: EntryData['edge']) {
   switch (o.kind) {
     case 'allow_once':
       return 'Allow once'
+    case 'allow_session':
+      return 'This session'
     case 'allow_always':
       return 'Always allow'
     case 'reject_once':
@@ -27,12 +29,12 @@ export function optionLabel(o: PermissionOption, edge?: EntryData['edge']) {
 }
 
 /**
- * The card's answers as their own buttons, or null for the plain Allow / Deny / Always card: when the host offers
- * exactly those and the card is not an edge card.
+ * The card's answers as their own buttons, or null for the plain Allow / Deny / This session / Always card: when the
+ * host offers only those (Allow once and Deny always) and the card is not an edge card.
  */
 export function permissionChoices(d: Pick<EntryData, 'options' | 'edge'>): { id: string; label: string }[] | null {
   const options = sortedOptions(d.options ?? [])
   const has = (kind: string) => options.some((o) => o.kind === kind)
-  const plain = !d.edge && options.length > 0 && options.every((o) => ['allow_once', 'allow_always', 'reject_once'].includes(o.kind)) && has('allow_once') && has('reject_once')
+  const plain = !d.edge && options.length > 0 && options.every((o) => ['allow_once', 'allow_session', 'allow_always', 'reject_once'].includes(o.kind)) && has('allow_once') && has('reject_once')
   return plain ? null : options.map((o) => ({ id: o.optionId, label: optionLabel(o, d.edge) }))
 }

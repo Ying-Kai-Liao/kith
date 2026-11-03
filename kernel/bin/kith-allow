@@ -4,7 +4,9 @@
   kith allow AGENT [--json]            list what is remembered: id, rule, kind, why it was blocked, when it was added
   kith allow AGENT --rm ID             forget one (the next run of the agent no longer has it)
   kith allow AGENT --derive            stdin {"tool", "input", "reason"}: what "Always allow" would remember for that call, or why it
-                                       can't ({"ok": true, "kind", "rule"} / {"ok": false, "why"})
+                                       can't ({"ok": true, "kind", "rule"} / {"ok": false, "why"}); either way with "input" (the input
+                                       with key-shaped text redacted: what a card may show) and "settings" (a digest of the agent's
+                                       permission settings: a "This session" grant made under one digest ends when it changes)
   kith allow AGENT --add-json          stdin {"tool", "input", "reason", "rule", "kind"}: remember that call, derived here (never a rule the
                                        caller wrote; with "rule" and "kind" it writes only if they are what it derives). Prints {"ok", "id", "rule", "kind", "added"}; the same rule twice is one entry
 
@@ -14,6 +16,7 @@ your own runs of that agent (bin/kith): a permission rule for an exact command, 
 classifier when a rule can't hold it. Runs for other people never read them, and an agent's file tools may not write the file.
 Rules: lib/kith_allowed.py.
 """
+import hashlib
 import json
 import os
 import sys
@@ -26,6 +29,37 @@ from kith_paths import paths  # noqa: E402
 def exists(agent):
     pkgs = paths()['KITH_AGENTS']
     return ka.AGENT.match(agent) is not None and any((pkgs / agent / x).is_file() for x in ('agent.md', 'role/agent.md'))
+
+
+def settings_digest(agent):
+    """A digest of the agent's package files that set what its runs may do: a "This session" grant ends when it changes."""
+    pkg = paths()['KITH_AGENTS'] / agent
+    h = hashlib.sha256()
+    for f in ('role/settings.json', 'role/capabilities.yaml', 'settings.json', 'capabilities.yaml'):
+        try:
+            h.update(f.encode() + b'\0' + (pkg / f).read_bytes() + b'\0')
+        except OSError:
+            pass
+    return h.hexdigest()[:16]
+
+
+def redacted(tool_input):
+    """The input with key-shaped text redacted (kith_trajectory.redact on each string), and whether anything was."""
+    from kith_trajectory import redact
+    changed = False
+
+    def walk(v):
+        nonlocal changed
+        if isinstance(v, str):
+            r = redact(v)
+            changed = changed or r != v
+            return r
+        if isinstance(v, dict):
+            return {k: walk(x) for k, x in v.items()}
+        if isinstance(v, list):
+            return [walk(x) for x in v]
+        return v
+    return walk(tool_input), changed
 
 
 def stdin_json():
@@ -55,11 +89,17 @@ def main(argv):
             return 0
         if rest == ['--derive']:
             doc = stdin_json()
-            print(json.dumps(ka.derive(agent, doc['tool'], doc.get('input'), doc.get('reason') or '')))
+            shown, changed = redacted(doc.get('input'))
+            # A call that carries a key is never remembered: the rule would write the key into a file.
+            d = {'ok': False, 'why': 'it carries a key'} if changed else \
+                ka.derive(agent, doc['tool'], doc.get('input'), doc.get('reason') or '')
+            print(json.dumps(dict(d, input=shown, settings=settings_digest(agent))))
             return 0
         if rest == ['--add-json']:
             doc = stdin_json()
             d = ka.derive(agent, doc['tool'], doc.get('input'), doc.get('reason') or '')
+            if d['ok'] and redacted(doc.get('input'))[1]:
+                d = {'ok': False, 'why': 'it carries a key'}
             if not d['ok']:
                 print(json.dumps(d))
                 return 1

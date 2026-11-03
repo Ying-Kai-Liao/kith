@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 /// The sha256 of the contract these types were made from.
-pub const CONTRACT_SHA256: &str = "37446c9073a15a468781a64fe11d73778e8211b3e8271907d2c5c828f163a4d8";
+pub const CONTRACT_SHA256: &str = "dcf2c9f6f7731c0787e76c2f7f47923ef67acab12089707b2eb1e34b1fdb6c6e";
 
 /// What a transcript entry is. One this version doesn't know is its own kind: an app skips it.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -550,6 +550,8 @@ pub struct Hello {
     pub analytics: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub urls: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli: Option<serde_json::Value>,
 }
 
 /// An agent's card as a member sees it: only what it says about itself.
@@ -1785,7 +1787,7 @@ pub static SCHEMA: crate::check::Schema = crate::check::Schema {
         crate::check::TypeSchema { name: "Empty", fields: &[], may_omit: &[] },
         crate::check::TypeSchema { name: "StoreHealth", fields: &[("writable", "bool"), ("unsaved", "int"), ("dropped", "int"), ("error", "string?")], may_omit: &["error"] },
         crate::check::TypeSchema { name: "GrantedAgent", fields: &[("agent", "string"), ("name", "string?"), ("role", "AgentRole")], may_omit: &[] },
-        crate::check::TypeSchema { name: "Hello", fields: &[("hostId", "string"), ("computerId", "string"), ("signKey", "string"), ("boxKey", "string"), ("name", "string"), ("version", "string"), ("protocol", "int"), ("minProtocol", "int"), ("os", "string"), ("rev", "int"), ("store", "StoreHealth"), ("grantedAgents", "[GrantedAgent]?"), ("cloud", "string?"), ("device", "Device?"), ("home", "string?"), ("backends", "json?"), ("screen", "json?"), ("analytics", "json?"), ("urls", "json?")], may_omit: &["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls"] },
+        crate::check::TypeSchema { name: "Hello", fields: &[("hostId", "string"), ("computerId", "string"), ("signKey", "string"), ("boxKey", "string"), ("name", "string"), ("version", "string"), ("protocol", "int"), ("minProtocol", "int"), ("os", "string"), ("rev", "int"), ("store", "StoreHealth"), ("grantedAgents", "[GrantedAgent]?"), ("cloud", "string?"), ("device", "Device?"), ("home", "string?"), ("backends", "json?"), ("screen", "json?"), ("analytics", "json?"), ("urls", "json?"), ("cli", "json?")], may_omit: &["grantedAgents", "cloud", "device", "home", "backends", "screen", "analytics", "urls", "cli"] },
         crate::check::TypeSchema { name: "KithCard", fields: &[("name", "string?"), ("description", "string?"), ("avatar", "json?")], may_omit: &["name", "description", "avatar"] },
         crate::check::TypeSchema { name: "KithInfo", fields: &[("info", "KithCard?"), ("fetchedAt", "int"), ("error", "string?")], may_omit: &["error"] },
         crate::check::TypeSchema { name: "WorkingLane", fields: &[("chat", "string"), ("thread", "string?")], may_omit: &[] },

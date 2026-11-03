@@ -5,7 +5,7 @@ import Foundation
 
 /// The cloud contract these types were made from.
 public enum CloudContract {
-    public static let sha256 = "0fa1c666e2858bc639027cbedcfe942f9e7f3e78450f3506d53ce4bc48d30d2f"
+    public static let sha256 = "472ee374cf6f5186e5c54ac59cac9ddeccaa63a3a648388a24c5bed684bc5e33"
 }
 
 /// What this account is on a computer. Absent (a cloud from before invites) means owner.
@@ -758,6 +758,8 @@ public enum CloudPath {
     public static let homePage = ""
     public static let downloadPage = "download"
     public static func downloadRedirect(_ key: String) -> String { "download/\(key)" }
+    public static let installPage = "install"
+    public static let installScript = "install.sh"
 }
 
 /// The code in an error answer, {error:{code,message},requestId}, and its HTTP status. unauthorized (a bad hook key), paused (a paused hook), badDeliveryId and full (its queue) come from the computer's relay, on /v1/hooks only.

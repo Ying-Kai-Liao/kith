@@ -322,6 +322,10 @@ impl Actor {
             self.ensure_session(slot.as_deref()).await?;
         }
         let session = self.turn_session.clone();
+        // What the agent does on this session after the turn, by itself, belongs to this lane: unless the turn was
+        // a room's, an ask's or a routine's.
+        self.off_lane = (self.active_group.is_none() && self.active_request.is_none() && self.active_routine.is_none())
+            .then(|| lane.clone());
         self.hub.set_runtime(&self.rt, |r| r.session.clone_from(&session));
         if let Some(sid) = session {
             self.sync_fast_mode(&sid).await;

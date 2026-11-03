@@ -119,8 +119,10 @@ async fn run(hub: Arc<Hub>) {
     let paths = match prepare(&home, &crate::service::default_data_dir(), opt_in, hq::Paths::discover).await {
         Ok(Some(paths)) => paths,
         Ok(None) => {
-            tracing::info!("channels: no hq found; chat channels are off");
-            return;
+            // The Mac app installs its CLI after the host starts, and `kith update` may install the first one later:
+            // keep looking, and start the channels once a kernel passes the gate.
+            tracing::info!("channels: no kith CLI yet; looking again every {}s", DISCOVER_EVERY.as_secs());
+            until_found(DISCOVER_EVERY, hq::Paths::discover).await
         }
         Err(why) => {
             tracing::info!("channels are off: {why}; set {OPT_IN_ENV}=on to run them in this home anyway");
@@ -136,6 +138,24 @@ async fn run(hub: Arc<Hub>) {
     tokio::spawn(attachments::prune_daily(core.attachments_root()));
     let _ = CORE.set(core.clone());
     manager::Manager::new(core, Registry::builtin(), manager::Backoff::default()).run().await;
+}
+
+/// How often channels look for a kernel while there is none.
+const DISCOVER_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Runs `find` (blocking) every `every` until it gives something.
+async fn until_found<T: Send + 'static>(
+    every: std::time::Duration,
+    find: impl Fn() -> Option<T> + Send + Sync + 'static,
+) -> T {
+    let find = Arc::new(find);
+    loop {
+        tokio::time::sleep(every).await;
+        let find = find.clone();
+        if let Ok(Some(found)) = tokio::task::spawn_blocking(move || find()).await {
+            return found;
+        }
+    }
 }
 
 /// Env var that lets a host with a temporary `KITH_SERVE_HOME` run channels anyway.
@@ -164,6 +184,27 @@ async fn prepare(
         return Err(why);
     }
     Ok(tokio::task::spawn_blocking(discover).await.ok().flatten())
+}
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::until_found;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn a_kernel_that_turns_up_after_startup_starts_the_channels() {
+        let tries = Arc::new(AtomicUsize::new(0));
+        let seen = tries.clone();
+        // Startup found none; the third look finds one.
+        let got = until_found(Duration::from_millis(5), move || {
+            (seen.fetch_add(1, Ordering::SeqCst) >= 2).then_some("kernel")
+        })
+        .await;
+        assert_eq!(got, "kernel");
+        assert_eq!(tries.load(Ordering::SeqCst), 3);
+    }
 }
 
 #[cfg(test)]

@@ -1660,7 +1660,9 @@ def run(cmd, rest, as_json, argv):
             cmd_share(rest[0], '--public' in rest)
     elif cmd == 'check' and rest:
         bad = problems(agent_home(rest[0]))
-        print('\n'.join(bad) or 'ok')
+        import kith_jobs
+        noted = kith_jobs.guest_domains(agent_home(rest[0]) / 'capabilities.yaml')[1]   # left out of the run, never a failed check
+        print('\n'.join(bad + [f'note: {x}' for x in noted]) or 'ok')
         sys.exit(1 if bad else 0)
     else:
         die(f'unknown command: {" ".join(argv)} (kith-pkg --help)', 2)

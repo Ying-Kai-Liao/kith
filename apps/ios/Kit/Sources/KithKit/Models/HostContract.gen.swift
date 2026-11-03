@@ -5,7 +5,7 @@ import Foundation
 
 /// The host contract these types were made from.
 public enum HostContract {
-    public static let sha256 = "37446c9073a15a468781a64fe11d73778e8211b3e8271907d2c5c828f163a4d8"
+    public static let sha256 = "dcf2c9f6f7731c0787e76c2f7f47923ef67acab12089707b2eb1e34b1fdb6c6e"
 }
 
 extension HostContract {
@@ -349,8 +349,9 @@ extension HostContract {
         public var screen: JSONValue?
         public var analytics: JSONValue?
         public var urls: JSONValue?
+        public var cli: JSONValue?
 
-        public init(hostId: String, computerId: String, signKey: String, boxKey: String, name: String, version: String, `protocol`: Int64, minProtocol: Int64, os: String, rev: Int64, store: StoreHealth, grantedAgents: [GrantedAgent]? = nil, cloud: String? = nil, device: Device? = nil, home: String? = nil, backends: JSONValue? = nil, screen: JSONValue? = nil, analytics: JSONValue? = nil, urls: JSONValue? = nil) {
+        public init(hostId: String, computerId: String, signKey: String, boxKey: String, name: String, version: String, `protocol`: Int64, minProtocol: Int64, os: String, rev: Int64, store: StoreHealth, grantedAgents: [GrantedAgent]? = nil, cloud: String? = nil, device: Device? = nil, home: String? = nil, backends: JSONValue? = nil, screen: JSONValue? = nil, analytics: JSONValue? = nil, urls: JSONValue? = nil, cli: JSONValue? = nil) {
             self.hostId = hostId
             self.computerId = computerId
             self.signKey = signKey
@@ -370,6 +371,7 @@ extension HostContract {
             self.screen = screen
             self.analytics = analytics
             self.urls = urls
+            self.cli = cli
         }
     }
 

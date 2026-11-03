@@ -139,35 +139,90 @@ pub fn home_dir(home: &Path) -> PathBuf {
     folders(home).home
 }
 
-/// Where the kernel is, in order: `$KITH_KERNEL`, a kernel shipped next to the (real, symlinks resolved)
-/// binary (`<prefix>/share/kith/kernel`, or `<prefix>/kernel`; for the Mac app's `Resources/kith-serve`, the
-/// release layout bundled beside it: `Resources/kith/share/kith/kernel`), then `~/kith/kernel` or `~/hq/kernel` (a checkout of the repo).
-pub fn find_kernel(env: Option<OsString>, exe: Option<&Path>, home: Option<&Path>) -> Option<PathBuf> {
+/// Where the kernel is, in order: `$KITH_KERNEL` (a developer's checkout; the only way to run one), the installed CLI
+/// (`<machine>/cli/current/share/kith/kernel`, the release the installer links), the old flat install
+/// (`<machine>/share/kith/kernel`), then a kernel shipped next to the (real, symlinks resolved) binary
+/// (`<prefix>/share/kith/kernel`: Homebrew and other packaged installs). No checkout is ever found by itself, and
+/// the Mac app's own copy is not looked at: the app installs the CLI.
+pub fn find_kernel(env: Option<OsString>, exe: Option<&Path>, machine: Option<&Path>) -> Option<PathBuf> {
     if let Some(dir) = env.filter(|e| !e.is_empty()).map(PathBuf::from) {
         return is_kernel(&dir).then_some(dir);
     }
-    let real = exe.and_then(|e| e.canonicalize().ok());
-    // The Mac app keeps the host binary and the bundled release layout side by side.
-    let bundled = real.as_deref().and_then(Path::parent).map(|d| d.join("kith").join(SHIPPED_KERNEL));
-    if let Some(c) = bundled.filter(|c| is_kernel(c)) {
-        return Some(c);
-    }
-    let prefix = real.and_then(|e| e.parent()?.parent().map(Path::to_path_buf));
-    if let Some(prefix) = prefix {
-        for c in [prefix.join(SHIPPED_KERNEL), prefix.join("kernel")] {
-            if is_kernel(&c) {
-                return Some(c);
-            }
-        }
-    }
-    let home = home?;
-    ["kith/kernel", "hq/kernel"].iter().map(|c| home.join(c)).find(|c| is_kernel(c))
+    let installed =
+        machine.into_iter().flat_map(|m| [m.join("cli/current").join(SHIPPED_KERNEL), m.join(SHIPPED_KERNEL)]);
+    let prefix =
+        exe.and_then(|e| e.canonicalize().ok()).and_then(|e| e.parent()?.parent().map(|p| p.join(SHIPPED_KERNEL)));
+    installed.chain(prefix).find(|c| is_kernel(c))
 }
 
-/// The kernel this process would run, by `find_kernel`'s rules for this binary and this machine.
+/// The kernel this process would run, by `find_kernel`'s rules for this binary and this machine. Looked up on every
+/// call: `kith update` flips `cli/current` while the host runs, and the next run must use the new release.
 pub fn current_kernel() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok();
-    find_kernel(std::env::var_os(KERNEL_ENV), exe.as_deref(), dirs::home_dir().as_deref())
+    let machine = dirs::home_dir().map(|h| machine_dir(&h));
+    find_kernel(std::env::var_os(KERNEL_ENV), exe.as_deref(), machine.as_deref())
+}
+
+/// The oldest kith CLI this host runs agents on: this host's own major.minor. The one place that names it.
+pub const MIN_CLI: &str = concat!(env!("CARGO_PKG_VERSION_MAJOR"), ".", env!("CARGO_PKG_VERSION_MINOR"), ".0");
+
+/// Which kith CLI the host runs agents on, and whether it may (`cli` in `compat` and `hello`).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Cli {
+    /// The kernel's `VERSION`; none for a checkout or a kernel from before the file.
+    pub version: Option<String>,
+    pub kernel: Option<PathBuf>,
+    /// `$KITH_KERNEL` is set: a developer's kernel, never gated.
+    pub dev: bool,
+    pub ok: bool,
+}
+
+fn triple(v: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = v.trim().split(['-', '+']).next()?.split('.').map(|n| n.parse::<u64>().ok());
+    Some((parts.next()??, parts.next()??, parts.next()??))
+}
+
+/// Judges the kernel `find_kernel` gives against `MIN_CLI`.
+pub fn cli_status(env: Option<OsString>, exe: Option<&Path>, machine: Option<&Path>) -> Cli {
+    let dev = env.as_ref().is_some_and(|e| !e.is_empty());
+    let kernel = find_kernel(env, exe, machine);
+    let version = kernel
+        .as_ref()
+        .and_then(|k| std::fs::read_to_string(k.join("VERSION")).ok())
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty());
+    let new_enough = version.as_deref().and_then(triple).zip(triple(MIN_CLI)).is_some_and(|(v, min)| v >= min);
+    Cli { ok: kernel.is_some() && (dev || new_enough), version, kernel, dev }
+}
+
+impl Cli {
+    /// What the host tells apps: `{version, kernel, dev, min, ok}`.
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "version": self.version,
+            "kernel": self.kernel.as_ref().map(|k| k.to_string_lossy()),
+            "dev": self.dev,
+            "min": MIN_CLI,
+            "ok": self.ok,
+        })
+    }
+
+    /// Why agent runs are refused, when they are.
+    pub fn refusal(&self) -> Option<String> {
+        let found = if self.kernel.is_none() { "none" } else { self.version.as_deref().unwrap_or("none") };
+        (!self.ok).then(|| {
+            format!(
+                "Kith needs the kith CLI {MIN_CLI} or newer (found {found}). Run `kith update`, or update the Mac app."
+            )
+        })
+    }
+}
+
+/// [`cli_status`] for this process and this machine.
+pub fn current_cli() -> Cli {
+    let exe = std::env::current_exe().ok();
+    let machine = dirs::home_dir().map(|h| machine_dir(&h));
+    cli_status(std::env::var_os(KERNEL_ENV), exe.as_deref(), machine.as_deref())
 }
 
 /// Replaces this process with the kernel's entry point. Only returns on failure.
@@ -177,7 +232,7 @@ pub fn exec_kernel(args: &[OsString]) -> anyhow::Error {
     let exe = std::env::current_exe().ok();
     let Some(kernel) = current_kernel() else {
         return anyhow::anyhow!(
-            "kith: no kernel found. Set {KERNEL_ENV}, install a packaged kith (it ships share/kith/kernel), or clone kith to ~/kith"
+            "kith: no kernel found. Install the CLI (curl -fsSL https://kithbot.app/install.sh | sh), or set {KERNEL_ENV} to a checkout's kernel folder"
         );
     };
     let entry = entry_in(&kernel).unwrap_or_else(|| kernel.join(KERNEL_ENTRY));
@@ -322,60 +377,91 @@ mod tests {
     }
 
     #[test]
-    fn finds_the_kernel_in_each_layout() {
-        let t = std::env::temp_dir().join(format!("kith-find-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&t);
-        std::fs::create_dir_all(&t).unwrap();
-        let t = t.canonicalize().unwrap();
-        // Release install: bin/kith with share/kith/kernel beside it.
-        let rel = t.join("rel");
-        fake_exe(&rel.join("bin/kith"));
-        fake_kernel(&rel.join(SHIPPED_KERNEL));
-        assert_eq!(find_kernel(None, Some(&rel.join("bin/kith")), None), Some(rel.join(SHIPPED_KERNEL)));
-        // Mac app: Resources/kith-serve with the release layout in Resources/kith.
-        let res = t.join("App.app/Contents/Resources");
-        fake_exe(&res.join("kith-serve"));
-        fake_kernel(&res.join("kith").join(SHIPPED_KERNEL));
-        assert_eq!(find_kernel(None, Some(&res.join("kith-serve")), None), Some(res.join("kith").join(SHIPPED_KERNEL)));
-        // A checkout under the home folder, migrated or not.
-        fake_kernel(&t.join("home/hq/kernel"));
-        assert_eq!(find_kernel(None, None, Some(&t.join("home"))), Some(t.join("home/hq/kernel")));
-        fake_kernel(&t.join("home/kith/kernel"));
-        assert_eq!(find_kernel(None, None, Some(&t.join("home"))), Some(t.join("home/kith/kernel")));
-        // $KITH_KERNEL wins over everything.
-        let given = t.join("given");
-        fake_kernel(&given);
-        assert_eq!(find_kernel(Some(given.clone().into()), Some(&rel.join("bin/kith")), None), Some(given));
-        std::fs::remove_dir_all(&t).unwrap();
-    }
-
-    #[test]
     fn kith_serve_is_the_host() {
         assert_eq!(route(&v(&["/h/kith-serve", "install"])), Route::Host(v(&["/h/kith-serve", "install"])));
     }
 
+    fn temp(name: &str) -> PathBuf {
+        let t = std::env::temp_dir().join(format!("kith-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&t);
+        std::fs::create_dir_all(&t).unwrap();
+        t.canonicalize().unwrap()
+    }
+
     #[test]
     fn finds_kernel_in_order() {
-        let t = std::env::temp_dir().join(format!("kith-kernel-test-{}", std::process::id()));
-        let mk = |p: &Path| {
-            std::fs::create_dir_all(p.join("bin")).unwrap();
-            std::fs::write(p.join(KERNEL_ENTRY), "").unwrap();
-        };
-        let (shipped, checkout, envk) = (t.join("p/share/kith/kernel"), t.join("home/kith/kernel"), t.join("e"));
-        mk(&checkout);
-        std::fs::create_dir_all(t.join("p/bin")).unwrap();
-        std::fs::write(t.join("p/bin/kith"), "").unwrap();
-        let exe = t.join("p/bin/kith");
-        let home = t.join("home");
-        assert_eq!(find_kernel(None, Some(&exe), Some(&home)), Some(checkout));
-        mk(&shipped);
-        assert_eq!(
-            find_kernel(None, Some(&exe), Some(&home)).map(|p| p.canonicalize().unwrap()),
-            Some(shipped.canonicalize().unwrap())
-        );
-        mk(&envk);
-        assert_eq!(find_kernel(Some(envk.clone().into()), Some(&exe), Some(&home)), Some(envk));
-        assert_eq!(find_kernel(Some(t.join("nope").into()), Some(&exe), Some(&home)), None);
+        let t = temp("kernel-order");
+        let (m, exe) = (t.join("m"), t.join("p/bin/kith"));
+        fake_exe(&exe);
+        // A checkout under the home folder is never found by itself.
+        fake_kernel(&t.join("home/kith/kernel"));
+        assert_eq!(find_kernel(None, Some(&exe), Some(&m)), None);
+        // Beside the binary (Homebrew), not `<prefix>/kernel`.
+        fake_kernel(&t.join("p/kernel"));
+        assert_eq!(find_kernel(None, Some(&exe), Some(&m)), None);
+        let shipped = t.join("p").join(SHIPPED_KERNEL);
+        fake_kernel(&shipped);
+        assert_eq!(find_kernel(None, Some(&exe), Some(&m)), Some(shipped));
+        // Old flat install wins over the packaged one, the installed CLI over both.
+        let flat = m.join(SHIPPED_KERNEL);
+        fake_kernel(&flat);
+        assert_eq!(find_kernel(None, Some(&exe), Some(&m)), Some(flat));
+        let cli = m.join("cli/current").join(SHIPPED_KERNEL);
+        fake_kernel(&cli);
+        assert_eq!(find_kernel(None, Some(&exe), Some(&m)), Some(cli));
+        // $KITH_KERNEL wins over everything; a dir that is no kernel finds nothing.
+        let envk = t.join("e");
+        fake_kernel(&envk);
+        assert_eq!(find_kernel(Some(envk.clone().into()), Some(&exe), Some(&m)), Some(envk));
+        assert_eq!(find_kernel(Some(t.join("nope").into()), Some(&exe), Some(&m)), None);
+        // The Mac app's own copy is not looked at.
+        let app = t.join("App.app/Contents/Resources");
+        fake_exe(&app.join("kith-serve"));
+        fake_kernel(&app.join("kith").join(SHIPPED_KERNEL));
+        assert_eq!(find_kernel(None, Some(&app.join("kith-serve")), None), None);
         std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    #[test]
+    fn the_gate_judges_the_found_kernel() {
+        let t = temp("gate");
+        let m = t.join("m");
+        let kernel = m.join("cli/current").join(SHIPPED_KERNEL);
+        // No CLI at all.
+        let none = cli_status(None, None, Some(&m));
+        assert!(!none.ok && none.version.is_none() && !none.dev);
+        assert!(none.refusal().unwrap().contains("found none"));
+        // An old install without VERSION is too old.
+        fake_kernel(&kernel);
+        let old = cli_status(None, None, Some(&m));
+        assert!(!old.ok && old.kernel.is_some());
+        assert!(old.refusal().unwrap().contains(&format!("CLI {MIN_CLI} or newer (found none)")));
+        // Below, at, and above the minimum.
+        let version = |v: &str| {
+            std::fs::write(kernel.join("VERSION"), format!("{v}\n")).unwrap();
+            cli_status(None, None, Some(&m))
+        };
+        assert!(!version("0.0.9").ok);
+        assert!(version(MIN_CLI).ok);
+        assert!(version("99.0.0").ok && version("99.0.0").refusal().is_none());
+        assert!(!version("garbage").ok);
+        assert_eq!(version("99.1.2-rc1").version.as_deref(), Some("99.1.2-rc1"));
+        // A developer's kernel is not gated, and says so.
+        let checkout = t.join("checkout/kernel");
+        fake_kernel(&checkout);
+        let dev = cli_status(Some(checkout.clone().into()), None, Some(&m));
+        assert!(dev.ok && dev.dev && dev.version.is_none());
+        assert_eq!(dev.json()["dev"], true);
+        // KITH_KERNEL naming no kernel reports none, and refuses.
+        let bad = cli_status(Some(t.join("nope").into()), None, Some(&m));
+        assert!(bad.dev && !bad.ok && bad.kernel.is_none());
+        std::fs::remove_dir_all(&t).unwrap();
+    }
+
+    #[test]
+    fn versions_compare_numerically() {
+        assert!(triple("0.10.0") > triple("0.9.9"));
+        assert_eq!(triple("1.2.3-rc.1"), Some((1, 2, 3)));
+        assert_eq!(triple("1.2"), None);
     }
 }

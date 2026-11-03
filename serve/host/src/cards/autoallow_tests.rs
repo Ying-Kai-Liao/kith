@@ -9,6 +9,10 @@ use crate::api::rig::Rig;
 
 const REASON: &str = "[Data Exfiltration]";
 
+pub(super) fn auto(reason: &'static str) -> AutoDenied<'static> {
+    AutoDenied { reason, claude_session: "c0" }
+}
+
 fn ask_auto(hub: &Arc<Hub>, who: RunIdentity, tool: &'static str, input: Value) -> tokio::task::JoinHandle<Decision> {
     ask_auto_for(hub, who, tool, input, REASON)
 }
@@ -21,7 +25,7 @@ fn ask_auto_for(
     reason: &'static str,
 ) -> tokio::task::JoinHandle<Decision> {
     let hub = hub.clone();
-    tokio::spawn(async move { request_auto_denied(&hub, &who, tool, &input, reason).await })
+    tokio::spawn(async move { request_auto_denied(&hub, &who, tool, &input, auto(reason)).await })
 }
 
 fn data(r: &Rig, card: &Card) -> Value {
@@ -65,16 +69,19 @@ async fn a_blocked_call_gets_an_owner_card_with_the_reason_and_three_options() {
     assert_eq!(card.approver, "owner");
     assert!(autoallow::is_auto(&card), "{}", card.resource);
     let d = data(&r, &card);
-    assert_eq!(ids(&d), ["allow", autoallow::ALWAYS, "deny"]);
+    assert_eq!(ids(&d), ["allow", session::SESSION, autoallow::ALWAYS, "deny"]);
     let names: Vec<_> = d["options"].as_array().unwrap().iter().map(|o| o["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["Allow once", "Always allow", "Deny"]);
+    assert_eq!(names, ["Allow once", "This session", "Always allow", "Deny"]);
     let kinds: Vec<_> = d["options"].as_array().unwrap().iter().map(|o| o["kind"].as_str().unwrap()).collect();
-    assert_eq!(kinds, ["allow_once", "allow_always", "reject_once"]);
+    assert_eq!(kinds, ["allow_once", "allow_session", "allow_always", "reject_once"]);
     assert_eq!(d["title"], "Run ls /tmp");
     assert_eq!(d["agent"], "house");
     let detail = d["detail"].as_str().unwrap();
     assert!(detail.contains("Auto mode blocked this: [Data Exfiltration]"), "{detail}");
-    assert!(detail.contains("Always allow remembers Bash(ls /tmp)."), "{detail}");
+    assert!(
+        detail.contains("This session allows Bash(ls /tmp) until this task ends; Always allow remembers it."),
+        "{detail}"
+    );
     assert_eq!(d["autoAllow"]["rule"], "Bash(ls /tmp)", "what was offered is kept on the entry");
     assert!(d.get("edge").is_none_or(Value::is_null));
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
@@ -131,7 +138,7 @@ async fn a_late_always_still_saves_and_a_late_once_does_nothing() {
     r.hub.store.kv_set("cards.resume", "on").unwrap();
     window(&r.hub, 0);
     let who = owner_run("auto-d");
-    let waiting = request_auto_denied(&r.hub, &who, "Bash", &ls(), REASON).await;
+    let waiting = request_auto_denied(&r.hub, &who, "Bash", &ls(), auto(REASON)).await;
     assert!(!waiting.allow && waiting.waiting, "no answer in the live window leaves the denial");
     let card = shown(&r.hub).await;
     run_exited(&r.hub, &who.run_id);
@@ -143,7 +150,7 @@ async fn a_late_always_still_saves_and_a_late_once_does_nothing() {
     assert_eq!(saved(&r).len(), 0);
 
     let who = owner_run("auto-e");
-    assert!(!request_auto_denied(&r.hub, &who, "Bash", &ls(), REASON).await.allow);
+    assert!(!request_auto_denied(&r.hub, &who, "Bash", &ls(), auto(REASON)).await.allow);
     let card = shown(&r.hub).await;
     run_exited(&r.hub, &who.run_id);
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(autoallow::ALWAYS), None).unwrap();
@@ -186,7 +193,7 @@ async fn a_rule_a_permission_rule_cannot_hold_is_kept_as_a_sentence_naming_the_a
     );
     let card = shown(&r.hub).await;
     let d = data(&r, &card);
-    assert_eq!(ids(&d), ["allow", autoallow::ALWAYS, "deny"]);
+    assert_eq!(ids(&d), ["allow", session::SESSION, autoallow::ALWAYS, "deny"]);
     assert!(d["detail"].as_str().unwrap().contains("this exact action, for house"), "{d}");
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(autoallow::ALWAYS), None).unwrap();
     assert!(call.await.unwrap().allow);
@@ -236,7 +243,7 @@ async fn a_sentence_is_not_offered_when_the_block_is_a_hard_deny() {
     assert!(!call.await.unwrap().allow);
     let call = ask_auto(&r.hub, owner_run("auto-j"), "Bash", ls());
     let card = shown(&r.hub).await;
-    assert_eq!(ids(&data(&r, &card)), ["allow", autoallow::ALWAYS, "deny"]);
+    assert_eq!(ids(&data(&r, &card)), ["allow", session::SESSION, autoallow::ALWAYS, "deny"]);
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     assert!(!call.await.unwrap().allow);
 }

@@ -24,7 +24,7 @@ const EVERY: Duration = Duration::from_secs(30);
 const READ: Duration = Duration::from_secs(20);
 
 async fn kernel() -> Result<std::path::PathBuf> {
-    tokio::task::spawn_blocking(hq::bin).await?.ok_or_else(|| anyhow!("kith isn't installed on this computer"))
+    tokio::task::spawn_blocking(hq::bin).await?.ok_or_else(|| anyhow!("{}", hq::missing()))
 }
 
 /// A kernel command that changes the cap or marks a card raised. The kernel refuses those from inside an agent's run

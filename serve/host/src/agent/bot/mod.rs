@@ -26,6 +26,7 @@ mod files;
 mod hq;
 mod launch;
 mod lifecycle;
+mod offturn;
 mod place;
 mod queue;
 mod room;
@@ -206,6 +207,8 @@ pub fn spawn(hub: Arc<Hub>, cfg: BotConfig, home: Lane, tidier: mpsc::UnboundedS
         turn_memory_revision: String::new(),
         announce: None,
         turn: None,
+        off_lane: None,
+        off_turn: None,
         queue: VecDeque::new(),
         active_request: None,
         seg: Seg::None,
@@ -424,6 +427,11 @@ struct Actor {
     /// A profile update this turn carried, recorded once the agent got it.
     announce: Option<(Snapshot, Identity)>,
     turn: Option<i64>,
+    /// Where the agent may start a turn of its own (see `offturn`): the lane of the last turn on `turn_session`, none
+    /// when that was a room, an ask or a routine.
+    off_lane: Option<Lane>,
+    /// The running turn is one the agent started by itself, and when it last did anything.
+    off_turn: Option<Instant>,
     queue: VecDeque<Queued>,
     active_request: Option<crate::chat::team::BotRequest>,
     seg: Seg,
@@ -595,6 +603,10 @@ impl Actor {
                     if self.turn.is_some() && self.cancel_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                         self.cancel_deadline = None;
                         if let Some(c) = self.conn.take() { c.acp.kill().await; }
+                    }
+                    if self.off_turn_quiet() {
+                        self.end_off_turn();
+                        self.next_in_queue(&done_tx).await;
                     }
                     self.release_idle().await;
                     if self.retire_if_unused() { break }

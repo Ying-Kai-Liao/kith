@@ -52,10 +52,10 @@ async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only
     let card = shown(&r.hub).await;
     assert_eq!(card.approver, "owner");
     let data = options(&r, &card);
-    assert_eq!(ids(&data), ["allow", edge::ALWAYS, edge::JOB, "deny"]);
+    assert_eq!(ids(&data), ["allow", edge::ALWAYS, edge::ALL, edge::JOB, "deny"]);
     assert_eq!(data["options"][0]["name"], "Just this once", "a host's yes is this one request");
     assert_eq!(data["options"][1]["name"], "Always for Sam");
-    assert_eq!(data["options"][2]["name"], "Turn on Make videos: registry.npmjs.org, github.com");
+    assert_eq!(data["options"][3]["name"], "Turn on Make videos: registry.npmjs.org, github.com");
     assert!(data["detail"].as_str().unwrap().ends_with("Part of Make videos, not on for Sam."), "{data}");
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::ALWAYS), None).unwrap();
     assert!(call.await.unwrap().allow);
@@ -81,9 +81,44 @@ async fn a_host_in_an_unticked_job_offers_always_and_the_job_and_each_keeps_only
     // A host no job holds: once, always and no.
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "SandboxNetworkAccess", net("pypi.org"));
     let card = shown(&r.hub).await;
-    assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, "deny"]);
+    assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, edge::ALL, "deny"]);
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("allow"), None).unwrap();
     assert!(call.await.unwrap().allow);
+}
+
+#[tokio::test]
+async fn always_for_everyone_keeps_one_host_on_the_agent_for_every_guest_and_nothing_else() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    let _sam = joined(&r, "guest").await;
+    caps(&r, CAPS);
+    window(&r.hub, 20);
+    let kept = |agent: &str| r.auth(&["agent-access", agent, "--json"]);
+
+    let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "SandboxNetworkAccess", net("pypi.org"));
+    let card = shown(&r.hub).await;
+    let data = options(&r, &card);
+    assert_eq!(data["options"][2]["name"], "Always, for everyone house is shared with");
+    assert_eq!(edge::adapter_option(&data["options"], edge::ALL), Some("allow"), "the agent hears its own allow_once");
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some(edge::ALL), None).unwrap();
+    assert!(call.await.unwrap().allow);
+    until(|| kept("house").contains("pypi.org")).await;
+    let v: Value = serde_json::from_str(&kept("house")).unwrap();
+    assert_eq!(v, json!([{"domain": "pypi.org", "by": "owner"}]));
+    assert_eq!(kept("garden").trim(), "[]", "another agent's guests get none of it");
+    let sam: Value = serde_json::from_str(&r.auth(&["resolve", "house", "--person", "sam"])).unwrap();
+    assert_eq!(sam["access"]["domains"], json!(["pypi.org"]), "the guest's next run has it");
+    let row = r.auth(&["ledger", "--agent", "house", "--json"]);
+    assert!(row.contains("domain:house:*:pypi.org"), "{row}");
+    assert_eq!(job(&r)["ticked"], false, "no job turned on");
+
+    // A helper is never agent-level.
+    let call =
+        ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::HELPER_TOOL, json!({"agent": "money", "task": "x"}));
+    let card = shown(&r.hub).await;
+    assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, "deny"]);
+    answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
+    assert!(!call.await.unwrap().allow);
 }
 
 #[tokio::test]
@@ -99,7 +134,7 @@ async fn a_package_update_that_widens_a_ticked_job_asks_once_and_a_no_declines_t
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "SandboxNetworkAccess", net("example.com"));
     let card = shown(&r.hub).await;
     let data = options(&r, &card);
-    assert_eq!(data["options"][2]["name"], "Keep Make videos on, with example.com");
+    assert_eq!(data["options"][3]["name"], "Keep Make videos on, with example.com");
     assert!(data["detail"].as_str().unwrap().contains("A package update added example.com"), "{data}");
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     assert!(!call.await.unwrap().allow);
@@ -110,7 +145,7 @@ async fn a_package_update_that_widens_a_ticked_job_asks_once_and_a_no_declines_t
     // Declined: the host still asks, piece by piece, with no job button.
     let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), "SandboxNetworkAccess", net("example.com"));
     let card = shown(&r.hub).await;
-    assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, "deny"]);
+    assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, edge::ALL, "deny"]);
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
     assert!(!call.await.unwrap().allow);
 }
@@ -250,7 +285,7 @@ async fn a_members_app_chat_ask_keeps_what_the_owner_picked_and_its_agent_hears_
     };
 
     let (card, data) = app_card(&r, &chat, "github.com").await;
-    assert_eq!(ids(&data), ["allow", edge::ALWAYS, edge::JOB, "reject"]);
+    assert_eq!(ids(&data), ["allow", edge::ALWAYS, edge::ALL, edge::JOB, "reject"]);
     assert_eq!(data["edge"]["job"], "make-videos");
     let entry = card.entry_id.as_ref().unwrap();
     assert_eq!(answer(&r.hub, entry, Some(edge::ALWAYS), None).unwrap(), Outcome::Recorded { forward: true });

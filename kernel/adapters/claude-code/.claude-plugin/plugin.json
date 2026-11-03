@@ -9,7 +9,7 @@
     "kith_path": {
       "type": "string",
       "title": "kith folder",
-      "description": "Where the kith kernel lives. Empty: ~/kith/kernel (else ~/hq/kernel, ~/.kith/kernel, ~/Workspace/kith). Agents come from KITH_HOME (default ~/kith), state from ~/.kith.",
+      "description": "Where the kith kernel lives. Empty: the installed CLI's kernel, ~/.kith/cli/current/share/kith/kernel (a developer sets KITH_KERNEL or this to a checkout's kernel/). Agents come from KITH_HOME (default ~/kith), state from ~/.kith.",
       "default": ""
     }
   }

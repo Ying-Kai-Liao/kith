@@ -394,6 +394,14 @@ export class BotStore extends BotSync {
     return this.withLink((c) => c.removeAllowedRule(agent, id))
   }
 
+  /** Remove on a live This session grant: no confirm. The card and tool rows change when the host's update arrives. */
+  removeSessionGrant(id: string) {
+    void this.withLink((c) => c.removeSessionGrant(id)).catch((error: unknown) => {
+      this.lastError = error instanceof Error ? error.message : String(error)
+      this.changed()
+    })
+  }
+
   /**
    * The owner's Stop on a card's held row: ends the old run holding the card's session. One at a time per session (a second
    * click, or the same session's other card, does nothing while it runs). The rows close when the host clears `held` on

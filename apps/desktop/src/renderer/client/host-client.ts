@@ -605,6 +605,11 @@ export class HostClient {
     return this.call<{ ok: boolean }>('removeAllowedRule', { agent, id })
   }
 
+  // Ends a This session grant from an auto-mode card (Remove on the card or a tool row). Owner only; the next repeat asks again.
+  removeSessionGrant(id: string) {
+    return this.call<{ ok: boolean }>('removeSessionGrant', { id })
+  }
+
   // Bots from outside (serve/host/src/api/botguests.rs). A host before them answers "unknown method".
   /** Makes a bot and its invite; `botId` makes a fresh invite for a bot you already have. `share` is secret: show it, never keep it. */
   async createBotInvite(input: { name: string; provider: BotProvider; agents: string[]; botId?: string }): Promise<CreatedBotInvite> {

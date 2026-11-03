@@ -91,6 +91,36 @@ printf '{"tool":"Bash","input":{"command":"git status"},"rule":"Bash(git status 
 is "a save that is not what was offered writes nothing" "$([[ -e $FILE ]] && echo written || echo none)" "none"
 printf '{"tool":"Bash","input":{"command":"git push origin topic"},"reason":"[Data Exfiltration]","rule":"x","kind":"prose"}' | "$ALLOW" echo --add-json >/dev/null 2>&1
 is "...nor under a hard_deny block" "$([[ -e $FILE ]] && echo written || echo none)" "none"
+# What a card may show, and the settings a This session grant is made under.
+r=$(printf '{"tool":"Bash","input":{"command":"git status"}}' | "$ALLOW" echo --derive)
+is "derive gives back the input" "$(js "d['input']['command']" <<< "$r")" "git status"
+digest=$(js "d['settings']" <<< "$r")
+is "...and a settings digest" "${#digest}" "16"
+echo '{"permissions": {"allow": []}}' > "$KITH_HOME/agents/echo/role/settings.json"
+r=$(printf '{"tool":"Bash","input":{"command":"git status"}}' | "$ALLOW" echo --derive)
+is "...that changes with the agent's settings" "$([[ $(js "d['settings']" <<< "$r") != "$digest" ]] && echo changed)" "changed"
+rm "$KITH_HOME/agents/echo/role/settings.json"
+# The fake key is built here, not written out, so a secret scanner has nothing to match in this file.
+tok=$(printf 'abcd%.0s' 1 2 3 4)
+auth="Bear""er $tok"
+sk="sk""-${tok}1234"
+r=$(printf '{"tool":"Bash","input":{"command":"curl -H \\"Authorization: %s\\" https://x.example"}}' "$auth" | "$ALLOW" echo --derive)
+has "a call that carries a key is shown redacted" "$(js "d['input']['command']" <<< "$r")" '[redacted]'
+hasnt "...with no key left in it" "$r" "$tok"
+is "...and never remembered" "$(js "d['ok'], d['why']" <<< "$r")" "(False, 'it carries a key')"
+printf '{"tool":"Bash","input":{"command":"echo %s"}}' "$sk" | "$ALLOW" echo --add-json >/dev/null 2>&1
+is "...not even when asked to add it" "$([[ -e $FILE ]] && echo written || echo none)" "none"
+# kith cards: who may read the card history (the host asks this, with the agent of the run's token).
+CARDS=$KERNEL/bin/kith-cards
+is "an agent without cards: read may not read the history" "$("$CARDS" --may-read echo; echo $?)" "1"
+printf 'needs: []\ncards: read\n' > "$KITH_HOME/agents/echo/role/capabilities.yaml"
+is "...one with it may" "$("$CARDS" --may-read echo; echo $?)" "0"
+is "...and a name that is a path is no agent" "$("$CARDS" --may-read ../echo; echo $?)" "1"
+is "history with no ask token says why" "$("$CARDS" history 2>&1; echo $?)" "kith cards: this run has no way to ask the Kith host (only an owner run the host or kith started has one)
+1"
+printf 'needs: []\ncards: read-write\n' > "$KITH_HOME/agents/echo/role/capabilities.yaml"
+is "...and cards: read-write is not cards: read" "$("$CARDS" --may-read echo; echo $?)" "1"
+rm "$KITH_HOME/agents/echo/role/capabilities.yaml"
 
 # --- kith allow: the list ------------------------------------------------------------------------------------------------
 is "nothing remembered at first" "$("$ALLOW" echo)" "nothing remembered for echo"
@@ -209,20 +239,45 @@ out=$(once 'git push origin main' 'worded differently')
 is "the same call is allowed, whatever the description" "$(js "d['hookSpecificOutput']['permissionDecision']" <<< "$out")" "allow"
 is "...once" "$(once 'git push origin main')" ""
 is "...and the folder is empty again" "$(ls "$ONCE" | wc -l | tr -d ' ')" "0"
+reason_of() { js "d['hookSpecificOutput']['permissionDecision'] + ': ' + d['hookSpecificOutput']['permissionDecisionReason']"; }
 echo '{"ok":true,"behavior":"deny","message":"The approver said no."}' > "$T/reply"
-is "a no prints nothing and records nothing" "$(hook PermissionDenied '[Data Exfiltration]' 'ls' | "$PERMIT" denied --dir "$ONCE")$(ls "$ONCE" | wc -l | tr -d ' ')" "0"
-echo '{"ok":true,"behavior":"deny","waiting":true,"message":"waiting"}' > "$T/reply"
-is "no answer in the live window prints nothing" "$(hook PermissionDenied '[Data Exfiltration]' 'ls' | "$PERMIT" denied --dir "$ONCE")" ""
+out=$(hook PermissionDenied '[Data Exfiltration]' 'ls a' | "$PERMIT" denied --dir "$ONCE")
+is "a no invites the retry, to tell the model" "$(js "d['hookSpecificOutput']['retry']" <<< "$out")" "True"
+is "...which is refused with the host's words" "$(once 'ls a' | reason_of)" "deny: Auto mode blocked this. The approver said no."
+is "...once" "$(once 'ls a')" ""
+is "...and a model that tries again is not invited again" "$(hook PermissionDenied '[Data Exfiltration]' 'ls a' | "$PERMIT" denied --dir "$ONCE")" ""
+echo '{"ok":true,"behavior":"deny","waiting":true,"message":"This is waiting on Kai to approve (ls b). End your turn now."}' > "$T/reply"
+hook PermissionDenied '[Data Exfiltration]' 'ls b' | "$PERMIT" denied --dir "$ONCE" > /dev/null
+has "no answer in the live window: the model is told it waits" "$(once 'ls b' | reason_of)" "waiting on Kai"
 echo '{"ok":true,"behavior":"allow","message":"Approved."}' > "$T/reply"; : > "$T/seen"
-is "no verdict: no card" "$(hook PermissionDenied 'Auto mode could not evaluate this action and is blocking it for safety' 'ls' | "$PERMIT" denied --dir "$ONCE")" ""
-is "classifier unavailable: no card" "$(hook PermissionDenied 'Classifier unavailable' 'ls' | "$PERMIT" denied --dir "$ONCE")" ""
-is "...and the host was not asked" "$(wc -c < "$T/seen" | tr -d ' ')" "0"
+hook PermissionDenied 'Auto mode could not evaluate this action and is blocking it for safety' 'ls c' | "$PERMIT" denied --dir "$ONCE" > /dev/null
+is "no verdict: a card too" "$(js "d['autoMode']['reason'][:27]" < "$T/seen")" "Auto mode could not evaluat"
+is "...whose yes lets the next try of that call through" "$(once 'ls c' | js "d['hookSpecificOutput']['permissionDecision']")" "allow"
+hook PermissionDenied 'Classifier unavailable' 'ls g' | "$PERMIT" denied --dir "$ONCE" > /dev/null
+shot=$(ls "$ONCE" | grep -v '^told-\|^note-')
+shots() { ls "$ONCE" | grep -cE '^[0-9a-f]{64}$'; }
+is "no verdict: a yes is a short-lived one-shot" "$(shots)" "1"
+echo "$(( $(date +%s) - 700 )) short" > "$ONCE/$shot"
+is "...which a much later identical call doesn't get" "$(once 'ls g')" ""
+is "...and is used up all the same" "$(shots)" "0"
+echo '{"ok":true,"behavior":"deny","message":"The approver said no."}' > "$T/reply"
+is "...and a no is not told (Claude Code ignores the retry)" "$(hook PermissionDenied 'Classifier unavailable' 'ls d' | "$PERMIT" denied --dir "$ONCE")$(once 'ls d')" ""
+echo '{"ok":true,"behavior":"allow","message":"Approved."}' > "$T/reply"; : > "$T/seen"
+python3 -c 'import json; print(json.dumps({"hook_event_name": "PermissionDenied", "tool_name": "Bash", "tool_input": {"command": "ls e"}, "reason": "[x]", "session_id": "sess-1"}))' \
+  | "$PERMIT" denied --dir "$ONCE" > /dev/null
+is "the Claude session goes to the host (a This session grant is kept per session)" "$(js "d['autoMode']['session']" < "$T/seen")" "sess-1"
+: > "$T/seen"
 is "another event is not a denial" "$(hook PreToolUse '[x]' 'ls' | "$PERMIT" denied --dir "$ONCE")" ""
 is "garbage on stdin is no opinion" "$(echo nope | "$PERMIT" denied --dir "$ONCE"; echo nope | "$PERMIT" once --dir "$ONCE")" ""
-is "no ask token: nothing, and no waiting" "$(hook PermissionDenied '[x]' 'ls' | env -u KITH_ASK_TOKEN "$PERMIT" denied --dir "$ONCE")" ""
+hook PermissionDenied '[x]' 'ls f' | env -u KITH_ASK_TOKEN "$PERMIT" denied --dir "$ONCE" > /dev/null
+has "no ask token: the model is told no card could be shown" "$(once 'ls f' | reason_of)" "no card could be shown: this run has no way to reach the Kith app"
 is "a guest's token is never used for this" "$(hook PermissionDenied '[x]' 'ls' | env KITH_RUN_TOKEN=g KITH_RUN_SOCKET="$SOCK" "$PERMIT" denied --dir "$ONCE")" ""
-is "...and the host was still not asked" "$(wc -c < "$T/seen" | tr -d ' ')" "0"
-is "a host that is down leaves the denial" "$(hook PermissionDenied '[x]' 'ls' | env KITH_ASK_SOCKET=$T/nowhere "$PERMIT" denied --dir "$ONCE")" ""
+is "...and the host was not asked" "$(wc -c < "$T/seen" | tr -d ' ')" "0"
+hook PermissionDenied '[x]' 'ls g' | env KITH_ASK_SOCKET=$T/nowhere "$PERMIT" denied --dir "$ONCE" > /dev/null
+has "a host that is down: the model is told no card could be shown" "$(once 'ls g' | reason_of)" "no card could be shown: the Kith host didn't answer"
+hook PermissionDenied '[x]' 'ls h' | env KITH_ASK_SOCKET=$T/nowhere "$PERMIT" denied --dir "$ONCE" > /dev/null
+touch -t 200001010000 "$ONCE"/note-*
+is "a note nobody retried within a minute refuses nothing" "$(once 'ls h')" ""
 rm -rf "$T/once"; mkdir -p "$T/once/old"; touch -t 200001010000 "$T/once/old"
 hook PermissionDenied '[x]' 'ls' | "$PERMIT" denied --dir "$ONCE" >/dev/null
 is "a day-old run folder is cleaned up" "$([[ -d $T/once/old ]] && echo kept || echo gone)" "gone"
