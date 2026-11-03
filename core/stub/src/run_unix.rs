@@ -80,7 +80,11 @@ pub fn run(engine: &[OsString]) -> i32 {
         Ok(c) => c,
         Err(e) => {
             eprintln!("kith-stub: cannot start {:?}: {e}", engine[0]);
-            return if e.kind() == ErrorKind::NotFound { 127 } else { 126 };
+            return if e.kind() == ErrorKind::NotFound {
+                127
+            } else {
+                126
+            };
         }
     };
     let pid = child.id() as libc::pid_t;
@@ -94,7 +98,10 @@ pub fn run(engine: &[OsString]) -> i32 {
             if std::io::Error::last_os_error().kind() == ErrorKind::Interrupted {
                 continue;
             }
-            eprintln!("kith-stub: wait failed: {}", std::io::Error::last_os_error());
+            eprintln!(
+                "kith-stub: wait failed: {}",
+                std::io::Error::last_os_error()
+            );
             break 1;
         }
         if libc::WIFSTOPPED(status) {

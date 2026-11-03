@@ -26,7 +26,10 @@ fn scratch(tag: &str) -> PathBuf {
 
 fn stub(dir: &Path, key: &str, engine: &[&str]) -> Command {
     let mut c = Command::new(STUB);
-    c.arg("--lock-dir").arg(dir).args(["--key", key, "--"]).args(engine);
+    c.arg("--lock-dir")
+        .arg(dir)
+        .args(["--key", key, "--"])
+        .args(engine);
     c
 }
 
@@ -48,7 +51,9 @@ fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
 
 fn first_line(child: &mut Child) -> String {
     let mut s = String::new();
-    BufReader::new(child.stdout.as_mut().unwrap()).read_line(&mut s).unwrap();
+    BufReader::new(child.stdout.as_mut().unwrap())
+        .read_line(&mut s)
+        .unwrap();
     s.trim().to_string()
 }
 
@@ -62,13 +67,19 @@ const SLEEPER: &str = "echo $$; exec sleep 30";
 #[test]
 fn second_stub_on_same_key_is_busy() {
     let dir = scratch("busy");
-    let mut a = stub(&dir, "k1", &["sh", "-c", SLEEPER]).stdout(Stdio::piped()).spawn().unwrap();
+    let mut a = stub(&dir, "k1", &["sh", "-c", SLEEPER])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
     let engine: i32 = first_line(&mut a).parse().unwrap();
     let b = stub(&dir, "k1", &["true"]).output().unwrap();
     assert_eq!(b.status.code(), Some(75));
     assert!(String::from_utf8_lossy(&b.stderr).starts_with("kith-stub: busy"));
     // Another key is free.
-    assert_eq!(stub(&dir, "k2", &["true"]).status().unwrap().code(), Some(0));
+    assert_eq!(
+        stub(&dir, "k2", &["true"]).status().unwrap().code(),
+        Some(0)
+    );
     kill(engine, libc::SIGKILL);
     assert_eq!(a.wait().unwrap().code(), Some(128 + libc::SIGKILL));
     assert!(!is_busy(&dir, "k1"));
@@ -77,16 +88,28 @@ fn second_stub_on_same_key_is_busy() {
 #[test]
 fn exit_codes_pass_through_and_release_the_lock() {
     let dir = scratch("codes");
-    assert_eq!(stub(&dir, "k", &["sh", "-c", "exit 7"]).status().unwrap().code(), Some(7));
     assert_eq!(
-        stub(&dir, "k", &["sh", "-c", "kill -TERM $$"]).status().unwrap().code(),
+        stub(&dir, "k", &["sh", "-c", "exit 7"])
+            .status()
+            .unwrap()
+            .code(),
+        Some(7)
+    );
+    assert_eq!(
+        stub(&dir, "k", &["sh", "-c", "kill -TERM $$"])
+            .status()
+            .unwrap()
+            .code(),
         Some(128 + libc::SIGTERM)
     );
     let missing = stub(&dir, "k", &["/nonexistent/engine"]).output().unwrap();
     assert_eq!(missing.status.code(), Some(127));
     assert!(!is_busy(&dir, "k"));
     assert_eq!(stub(&dir, "k", &[]).status().unwrap().code(), Some(64));
-    assert_eq!(stub(&dir, "a/b", &["true"]).status().unwrap().code(), Some(70));
+    assert_eq!(
+        stub(&dir, "a/b", &["true"]).status().unwrap().code(),
+        Some(70)
+    );
 }
 
 #[test]
@@ -96,7 +119,11 @@ fn killing_the_starter_keeps_stub_engine_and_lock() {
     let script = format!(
         "{STUB:?} --lock-dir {dir:?} --key k -- sh -c 'echo $$; exec sleep 30' & echo $!; wait"
     );
-    let mut starter = Command::new("sh").args(["-c", &script]).stdout(Stdio::piped()).spawn().unwrap();
+    let mut starter = Command::new("sh")
+        .args(["-c", &script])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
     let stub_pid: i32 = first_line(&mut starter).parse().unwrap();
     let engine: i32 = first_line(&mut starter).parse().unwrap();
     wait_until("lock held", || is_busy(&dir, "k"));
@@ -105,7 +132,10 @@ fn killing_the_starter_keeps_stub_engine_and_lock() {
     starter.wait().unwrap();
     std::thread::sleep(Duration::from_millis(300));
     assert!(alive(stub_pid) && alive(engine));
-    assert!(is_busy(&dir, "k"), "the lock must outlive the process that started the stub");
+    assert!(
+        is_busy(&dir, "k"),
+        "the lock must outlive the process that started the stub"
+    );
 
     kill(engine, libc::SIGKILL);
     wait_until("lock released after engine exit", || !is_busy(&dir, "k"));
@@ -114,25 +144,38 @@ fn killing_the_starter_keeps_stub_engine_and_lock() {
 #[test]
 fn engines_background_child_does_not_keep_the_lock() {
     let dir = scratch("nohup");
-    let mut s = stub(&dir, "k", &["sh", "-c", "nohup sleep 30 >/dev/null 2>&1 & echo $!"])
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
+    let mut s = stub(
+        &dir,
+        "k",
+        &["sh", "-c", "nohup sleep 30 >/dev/null 2>&1 & echo $!"],
+    )
+    .stdout(Stdio::piped())
+    .spawn()
+    .unwrap();
     let sleeper: i32 = first_line(&mut s).parse().unwrap();
     assert_eq!(s.wait().unwrap().code(), Some(0));
     assert!(alive(sleeper));
-    assert!(!is_busy(&dir, "k"), "a surviving grandchild must not hold the lock");
+    assert!(
+        !is_busy(&dir, "k"),
+        "a surviving grandchild must not hold the lock"
+    );
     kill(sleeper, libc::SIGKILL);
 }
 
 #[test]
 fn holder_record_names_the_stub() {
     let dir = scratch("holder");
-    let mut s = stub(&dir, "k", &["sh", "-c", SLEEPER]).stdout(Stdio::piped()).spawn().unwrap();
+    let mut s = stub(&dir, "k", &["sh", "-c", SLEEPER])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
     let engine: i32 = first_line(&mut s).parse().unwrap();
     let path = dir.join("w-k.holder");
     let text = std::fs::read_to_string(&path).unwrap();
-    assert!(text.starts_with(&format!("pid {}\nstarted ", s.id())), "{text:?}");
+    assert!(
+        text.starts_with(&format!("pid {}\nstarted ", s.id())),
+        "{text:?}"
+    );
     let mode = std::os::unix::fs::MetadataExt::mode(&std::fs::metadata(&path).unwrap());
     assert_eq!(mode & 0o777, 0o600);
     kill(engine, libc::SIGKILL);
@@ -140,7 +183,11 @@ fn holder_record_names_the_stub() {
     // A stale record is overwritten by the next stub.
     std::fs::write(&path, "pid 1\nstarted 0\n").unwrap();
     assert_eq!(stub(&dir, "k", &["true"]).status().unwrap().code(), Some(0));
-    assert!(!std::fs::read_to_string(&path).unwrap().starts_with("pid 1\n"));
+    assert!(
+        !std::fs::read_to_string(&path)
+            .unwrap()
+            .starts_with("pid 1\n")
+    );
 }
 
 #[test]
@@ -149,7 +196,13 @@ fn ctrl_c_on_a_terminal_reaches_the_engine_not_the_stub() {
     let (mut master, slave) = unsafe {
         let (mut m, mut s) = (0, 0);
         assert_eq!(
-            libc::openpty(&mut m, &mut s, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null_mut()),
+            libc::openpty(
+                &mut m,
+                &mut s,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut()
+            ),
             0
         );
         // Not inherited by the stub beyond the dup'd stdio.
@@ -179,8 +232,15 @@ fn ctrl_c_on_a_terminal_reaches_the_engine_not_the_stub() {
     let read_until = |master: &mut std::fs::File, seen: &mut String, want: &str| {
         let end = Instant::now() + Duration::from_secs(20);
         while !seen.contains(want) {
-            assert!(Instant::now() < end, "timed out waiting for {want:?}; saw {seen:?}");
-            let mut fds = libc::pollfd { fd: std::os::unix::io::AsRawFd::as_raw_fd(&*master), events: libc::POLLIN, revents: 0 };
+            assert!(
+                Instant::now() < end,
+                "timed out waiting for {want:?}; saw {seen:?}"
+            );
+            let mut fds = libc::pollfd {
+                fd: std::os::unix::io::AsRawFd::as_raw_fd(&*master),
+                events: libc::POLLIN,
+                revents: 0,
+            };
             if unsafe { libc::poll(&mut fds, 1, 100) } > 0 {
                 let mut buf = [0u8; 256];
                 match master.read(&mut buf) {
@@ -194,6 +254,10 @@ fn ctrl_c_on_a_terminal_reaches_the_engine_not_the_stub() {
     master.write_all(&[0x03]).unwrap();
     read_until(&mut master, &mut seen, "got-int");
     let status = stub.wait().unwrap();
-    assert_eq!(status.code(), Some(3), "the stub passes the engine's code; it did not die of the interrupt");
+    assert_eq!(
+        status.code(),
+        Some(3),
+        "the stub passes the engine's code; it did not die of the interrupt"
+    );
     assert!(!is_busy(&dir, "k"));
 }

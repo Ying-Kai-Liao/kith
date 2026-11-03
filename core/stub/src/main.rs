@@ -114,7 +114,10 @@ fn main() -> ExitCode {
     let lock = match take(Path::new(&args.lock_dir), &args.key) {
         Ok(Taken::Held(l)) => l,
         Ok(Taken::Busy) => {
-            eprintln!("kith-stub: busy: another session holds the lock for {:?}", args.key);
+            eprintln!(
+                "kith-stub: busy: another session holds the lock for {:?}",
+                args.key
+            );
             return ExitCode::from(BUSY);
         }
         Err(e) => {
