@@ -1,0 +1,16 @@
+{
+  "fakes": "",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
+  "state:kith/agents/echo/role/capabilities.yaml": "needs: [notion]\n",
+  "state:kith/state/secrets/auth.json": "{\n  \"env\": {},\n  \"grants\": {\n    \"echo\": {\n      \"notion\": \"notion/library\"\n    }\n  },\n  \"profiles\": {\n    \"notion/library\": {}\n  }\n}\n",
+  "state:kith/state/secrets/auth.json.lock": "",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "echo may use notion as notion/library\n",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"grants\": [\n    \"notion/library\"\n  ],\n  \"service\": \"notion\"\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"grants\": [],\n  \"service\": \"slack\"\n}\n",
+  "step2.stderr": ""
+}

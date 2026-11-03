@@ -11,6 +11,8 @@ is not in intended.json fails the run; an intended difference that no longer occ
     kith-difftest --old 'CMD' --new 'CMD'   two arbitrary command prefixes (the case's arguments follow each)
     kith-difftest --case NAME --keep    one case (glob), leave the work folders for a look
     kith-difftest --list
+    kith-difftest --golden golden --record      freeze: run the OLD side alone, store its facets per case (golden/facets/)
+    kith-difftest --golden golden               replay on the Python kernel against the store; add --rust --bin PATH for the Rust program
 
 See README.md for the case format. Standard library only.
 """
@@ -52,6 +54,9 @@ DAEMON_INTENDED = [
      'why': 'the --daemon pass: the NEW side runs a daemon (kith kernel core-daemon), so its core/ folder (the core database, the owner token) '
             'exists there and not on the OLD side; everything else must be the same'},
 ]
+GOLDEN = None   # --golden DIR: DIR/*.json are frozen cases, DIR/facets/NAME.json what the OLD (Python) side printed and did for each
+RECORD = False  # --golden --record: run the OLD side alone and store its facets; without it, run the NEW side alone and compare to the store
+REPLAY_SIDE = 'old'   # which side a golden replay runs: 'old' (KITH_CORE=python), or 'new' (the Rust program) with --rust / --new
 RUST_BIN = ''   # the kith program the NEW side's router uses; main() sets it for a run with the Rust cases
 
 
@@ -83,6 +88,7 @@ def roots(side_dir):
         p = side_dir / sub if sub else side_dir
         for form in {str(p), os.path.realpath(p)}:
             pairs.append((form, ph))
+    pairs.append((str(KERNEL), '<KERNEL>'))   # the checkout the program runs from: a golden record must not hold one machine's path
     return sorted(pairs, key=lambda x: -len(x[0]))
 
 
@@ -454,12 +460,25 @@ def compare(case, prefixes, keep=False):
             if s == 'new' and case.get('new_prog') == 'rust':   # the Rust program itself, for a verb the router does not reach yet
                 return [RUST_BIN]
             return prefixes['default'][s]
-        got = {s: run_side(s, work, case, prefix(s)) for s in SIDES}
+        if GOLDEN and RECORD:
+            got = {'old': run_side('old', work, case, prefix('old')), 'new': {}}
+        elif GOLDEN:
+            stored = GOLDEN / 'facets' / (case['name'] + '.json')
+            if not stored.exists():
+                raise RuntimeError(f'no recorded facets for this case: run with --golden {GOLDEN} --record ({stored})')
+            got = {'old': json.loads(stored.read_text()), 'new': run_side(REPLAY_SIDE, work, case, prefix(REPLAY_SIDE))}
+        else:
+            got = {s: run_side(s, work, case, prefix(s)) for s in SIDES}
     finally:
         if keep:
             print(f'  kept: {work}')
         else:
             shutil.rmtree(work, ignore_errors=True)
+    if GOLDEN and RECORD:
+        out = GOLDEN / 'facets' / (case['name'] + '.json')
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(dumps(got['old']))
+        return {}
     diffs = {}
     for facet in sorted(set(got['old']) | set(got['new'])):
         a, b = got['old'].get(facet, ABSENT), got['new'].get(facet, ABSENT)
@@ -565,22 +584,32 @@ def main(argv=None):
     ap.add_argument('--bin', help='the kith program for the Rust cases (default: $KITH_DIFFTEST_BIN, else a cargo build in serve/host/target)')
     ap.add_argument('--core', action='store_true', help='second pass: make the core database on the NEW side first (kith kernel core-migrate), so the Rust verbs run inside an embedded core; its files (core/) are an intended difference. Needs --rust or --new')
     ap.add_argument('--daemon', action='store_true', help='second pass: the NEW side runs a daemon (kith kernel core-daemon) in its sandbox, so the Rust verbs the daemon answers go through its owner socket; its files (core/) are an intended difference. Needs --rust or --new; not with --core')
+    ap.add_argument('--golden', metavar='DIR', help='golden mode: DIR holds frozen cases (*.json) and their recorded facets (facets/NAME.json). Replay (default) runs one side only and compares it to the record: the Python kernel, or with --rust / --new the Rust program. The same masks and intended.json as the two-sided run apply')
+    ap.add_argument('--record', action='store_true', help='with --golden: run the OLD (Python) side alone and (re)write the recorded facets of the selected cases; compares nothing')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--keep', action='store_true', help='keep the throwaway folders')
     ap.add_argument('--summary', metavar='FILE', help='write a JSON summary per command (green/red) to FILE; "-" for stdout')
     ap.add_argument('--list', action='store_true')
     a = ap.parse_args(argv)
 
-    cases = load_corpus(a.corpus or [HERE / 'corpus'])
+    global GOLDEN, RECORD, REPLAY_SIDE
+    if a.record and not a.golden:
+        raise SystemExit('--record needs --golden DIR')
+    if a.golden and (a.corpus or a.core or a.daemon):
+        raise SystemExit('--golden takes its cases from DIR: not with --corpus, --core or --daemon')
+    GOLDEN = Path(a.golden).resolve() if a.golden else None
+    RECORD = a.record
+    REPLAY_SIDE = 'new' if (a.rust or a.new) else 'old'
+    cases = load_corpus([GOLDEN] if GOLDEN else a.corpus or [HERE / 'corpus'])
     if a.case:
         cases = [c for c in cases if any(fnmatch.fnmatchcase(c['name'], g) for g in a.case)]
     global RUST_BIN, WITH_CORE, WITH_DAEMON
     WITH_CORE = a.core
     WITH_DAEMON = a.daemon
     RUST_BIN = a.bin or os.environ.get('KITH_DIFFTEST_BIN') or (find_rust_bin() if (a.rust or a.new) else '')
-    if (a.rust or a.new) and not RUST_BIN and any(c.get('needs') == 'rust' for c in cases):
+    if (a.rust or a.new) and not RUST_BIN and not RECORD and any(c.get('needs') == 'rust' for c in cases):
         raise SystemExit('no kith program for the Rust cases: build one (cargo build --bin kith in serve/host) or pass --bin')
-    if not (a.rust or a.new):
+    if not (a.rust or a.new) and not GOLDEN:
         skipped = [c['name'] for c in cases if c.get('needs') == 'rust']
         cases = [c for c in cases if c.get('needs') != 'rust']
         if skipped:
@@ -592,7 +621,7 @@ def main(argv=None):
     default = [str(KERNEL / 'bin' / 'kith')]
     prefixes = {'default': {'old': default, 'new': default},
                 'old': shlex.split(a.old) if a.old else None, 'new': shlex.split(a.new) if a.new else None}
-    intended = load_intended(a.intended)
+    intended = [] if GOLDEN else load_intended(a.intended)   # a frozen record has no two sides to differ: any difference fails
     if WITH_CORE:
         if not RUST_BIN:
             raise SystemExit('--core needs the Rust program: pass --rust (and --bin)')
