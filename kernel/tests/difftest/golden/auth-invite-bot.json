@@ -1,0 +1,168 @@
+[
+ {
+  "name": "golden-auth-who",
+  "command": "auth",
+  "env": {
+   "KITH_AUTH": "{KITH_HOME}/auth.json"
+  },
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   },
+   {
+    "write": "kith/auth.json",
+    "text": "{\n  \"people\": {\n    \"kai\": {\n      \"owner\": true,\n      \"name\": \"Kai\",\n      \"handles\": {\n        \"telegram\": \"1001\",\n        \"slack\": \"U1\"\n      }\n    },\n    \"sam\": {\n      \"name\": \"Sam\",\n      \"handles\": {\n        \"telegram\": \"2002\"\n      },\n      \"was\": [\n        \"samuel\"\n      ]\n    },\n    \"ola\": {\n      \"name\": \"Ola\",\n      \"revoked\": {\n        \"at\": 5\n      },\n      \"handles\": {\n        \"telegram\": \"3003\"\n      }\n    },\n    \"bot-a1\": {\n      \"bot_of\": \"sam\",\n      \"name\": \"Scout\"\n    }\n  },\n  \"members\": {\n    \"house\": {\n      \"sam\": {\n        \"model\": \"haiku\"\n      }\n    }\n  },\n  \"grants\": {},\n  \"env\": {},\n  \"profiles\": {},\n  \"presets\": {},\n  \"invites\": {}\n}\n"
+   }
+  ],
+  "run": [
+   [
+    "auth",
+    "who",
+    "telegram",
+    "1001"
+   ],
+   [
+    "auth",
+    "who",
+    "telegram",
+    "2002"
+   ],
+   [
+    "auth",
+    "who",
+    "telegram",
+    "3003"
+   ],
+   [
+    "auth",
+    "who",
+    "telegram",
+    "nobody"
+   ],
+   [
+    "auth",
+    "who",
+    "telegram"
+   ],
+   [
+    "auth",
+    "whois",
+    "telegram",
+    "2002"
+   ],
+   [
+    "auth",
+    "whois",
+    "telegram",
+    "nobody"
+   ],
+   [
+    "auth",
+    "whois",
+    "slack"
+   ],
+   [
+    "auth",
+    "retired",
+    "samuel"
+   ],
+   [
+    "auth",
+    "retired",
+    "sam"
+   ],
+   [
+    "auth",
+    "people",
+    "--json"
+   ]
+  ]
+ },
+ {
+  "name": "golden-invite-bot-usage",
+  "command": "invite",
+  "setup": [
+   {
+    "mkdir": "kith/state"
+   },
+   {
+    "write": "kith/agents/house/role/agent.md",
+    "text": "---\nname: house\ndescription: test agent\nmodel: sonnet\n---\nbody\n"
+   }
+  ],
+  "run": [
+   [
+    "invite"
+   ],
+   [
+    "invite",
+    "bogus",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "--json"
+   ],
+   [
+    "invite",
+    "add",
+    "Sam",
+    "--json"
+   ],
+   [
+    "invite",
+    "ls",
+    "extra",
+    "--json"
+   ],
+   [
+    "invite",
+    "revoke",
+    "--json"
+   ],
+   [
+    "bot"
+   ],
+   [
+    "bot",
+    "bogus",
+    "--json"
+   ],
+   [
+    "bot",
+    "invite",
+    "--json"
+   ],
+   [
+    "bot",
+    "revoke",
+    "--json"
+   ],
+   [
+    "bot",
+    "decide",
+    "bg_x",
+    "maybe",
+    "--json"
+   ],
+   [
+    "bot",
+    "auto-allow",
+    "sam",
+    "sideways",
+    "--json"
+   ],
+   [
+    "bot",
+    "ls",
+    "extra",
+    "--json"
+   ]
+  ]
+ }
+]
