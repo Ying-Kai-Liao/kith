@@ -301,7 +301,7 @@ fn which_in(env: &Env, program: &str) -> Option<PathBuf> {
 /// Whether this process is inside the guest sandbox: the account's home folder (by the OS, not `$HOME`, and by absolute
 /// programs, not the caller's `PATH`) can't be listed. No answer is a guest, as in `kith_paths.guest_sandbox`.
 fn in_guest_sandbox() -> bool {
-    home_closed(crate::secrets::os_home())
+    home_closed(secrets::os_home())
 }
 
 fn home_closed(home: Option<PathBuf>) -> bool {
@@ -320,7 +320,7 @@ pub(crate) fn usable_kith_bin(bin: &Path) -> bool {
     if tail.len() == 3 && tail[0] == "kith" && tail[1] == "bin" && tail[2] == "kernel" {
         return false;
     }
-    crate::secrets::run_with_timeout(
+    secrets::run_with_timeout(
         bin,
         &["memory", "hook", "--help"],
         std::time::Duration::from_secs(10),

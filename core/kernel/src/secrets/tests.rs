@@ -1330,7 +1330,11 @@ fn a_builtin_agent_is_the_owners_alone_whatever_the_rows_say() {
         r.may("sam", "scratch", Some("house"), false).unwrap(),
         (false, why.into())
     );
-    assert!(!r.resolve("scratch", "sam", None, false).unwrap()["allowed"].as_bool().unwrap());
+    assert!(
+        !r.resolve("scratch", "sam", None, false).unwrap()["allowed"]
+            .as_bool()
+            .unwrap()
+    );
     // the user's own agent of the same name is theirs to grant
     assert_eq!(
         r.may("sam", "both", None, false).unwrap(),
