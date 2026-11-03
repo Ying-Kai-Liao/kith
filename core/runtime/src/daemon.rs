@@ -111,6 +111,14 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        // The gate needs `&mut Core` (its state changes are claim transactions), which `Core::call` does not hold.
+        if method.starts_with("gate.") {
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let answer =
+                self.with_core(|c| crate::gate::call(c, method, params, &crate::gate::System))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         // Counts answers only: a refused or failed call was not served.
         let answer = self.with_core(|c| c.call(kith_api::Principal::Owner, method, params))?;
         self.served.fetch_add(1, Ordering::SeqCst);

@@ -4462,6 +4462,234 @@
           }
         }
       }
+    },
+    {
+      "name": "gate.list",
+      "summary": "The gate's slots and the line, in the order the line is kept. Frees holders whose process is gone first.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "list"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "gate.take",
+      "summary": "Asks for a slot. Answers `granted`, `waiting` (with a position), `parked` (gave its slot up, not in line) or `gone` (holds nothing). Asking again for the same holder changes nothing.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The run or claim that wants the slot.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "rt",
+          "summary": "The actor it belongs to (display only; the holder when absent).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "max",
+          "summary": "How many slots there are (1 or more). Remembered; later takes may leave it out.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "invitee",
+          "summary": "An invited person's turn: behind the owner's, and few at once.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The holder's process (2 or more), so a crash frees the slot.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "take"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "positional"
+          },
+          "rt": {
+            "kind": "flag",
+            "spellings": [
+              "--rt"
+            ]
+          },
+          "max": {
+            "kind": "flag",
+            "spellings": [
+              "--max"
+            ]
+          },
+          "invitee": {
+            "kind": "switch",
+            "spellings": [
+              "--invitee"
+            ]
+          },
+          "pid": {
+            "kind": "flag",
+            "spellings": [
+              "--pid"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gate.release",
+      "summary": "Gives a slot or a place in line back. Releasing a holder that holds nothing does nothing.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The run or claim.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "release"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "gate.park",
+      "summary": "The holder waits on another bot's reply: its slot is given up. Nested asks share one parking.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The run or claim.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "park"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "gate.unpark",
+      "summary": "One ask is back; the last one puts the holder in line again, ahead of turns that have not started.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The run or claim.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "unpark"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "positional"
+          }
+        }
+      }
     }
   ],
   "components": {
