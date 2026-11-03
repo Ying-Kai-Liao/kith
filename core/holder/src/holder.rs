@@ -31,6 +31,7 @@ const ACCEPT_RETRIES: u32 = 70;
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(10);
 const ACCEPT_PAUSE_CAP: Duration = Duration::from_secs(1);
 
+#[derive(Clone)]
 pub struct Config {
     /// The holder's folder (private): its socket and log.
     pub dir: PathBuf,
@@ -131,6 +132,12 @@ struct Holder {
 
 /// Runs a holder in `cfg.dir` until it is idle or told to shut down.
 pub fn run(cfg: Config) -> io::Result<()> {
+    run_with(cfg, || {})
+}
+
+/// Like `run`, and calls `serving` once, when this holder owns the folder and its socket is listening (so a hello
+/// would be answered). A supervisor starts its child from there.
+pub fn run_with(cfg: Config, serving: impl FnOnce()) -> io::Result<()> {
     if cfg.secret.len() < 16 {
         return Err(io::Error::other(
             "the holder secret must be at least 16 characters",
@@ -164,6 +171,7 @@ pub fn run(cfg: Config) -> io::Result<()> {
         Err(e) => return Err(e),
     };
     let holder = Arc::new(Holder::new(cfg.secret.into_bytes(), endpoint, cfg.idle));
+    serving();
     let watcher = holder.clone();
     std::thread::spawn(move || watcher.watch_idle());
     let watcher = holder.clone();

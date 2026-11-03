@@ -36,6 +36,13 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+// The claim path's read (`lease_held_for_non_owner`, `held_in`) and `restart` have no caller until M3 and the daemon start
+// wire them; the rows reach the rest.
+#[allow(dead_code)]
+mod sync_lease;
+// Nothing calls the envelope yet: the host vault and kith-auth move onto it at M2-7 and M2-18.
+#[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
+mod secrets;
 
 #[cfg(test)]
 mod runs_props;
@@ -106,6 +113,16 @@ pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
 /// process: a kernel verb that does not go through the core (`kernel accounts`) calls this itself.
 pub fn route_kernel_notes(paths: &Paths) {
     log::route_kernel_notes(&paths.logs);
+}
+
+/// The holder's folder and its secret file for this machine, the secret made if it is missing. The service layer names
+/// them in the job that makes the holder the supervised root (`kith-holder supervise`), so the holder that job starts is
+/// the one the daemon says hello to.
+pub fn holder_files(paths: &Paths) -> Result<(std::path::PathBuf, std::path::PathBuf), Error> {
+    let layout = Layout::new(&paths.machine);
+    perms::ensure_dir(&layout.dir)?;
+    holder_link::secret(&layout)?;
+    Ok((layout.holder_dir, layout.holder_secret))
 }
 
 /// Runs a verb that touches NO core state (paths, engines, launch today) inside an embedded core, so the verbs already

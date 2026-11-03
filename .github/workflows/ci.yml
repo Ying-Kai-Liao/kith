@@ -958,7 +958,8 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' }}
     name: rust-check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    # kith-serve's test suite plus the artifact build runs past 40 minutes on a cold cache.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -1003,7 +1004,10 @@ jobs:
       # The host program is Unix-only (the windows job builds just the holder and core crates), so no Windows binary.
       - name: Build kith
         if: inputs.artifact && runner.os != 'Windows'
-        run: cargo build --locked -p kith-serve --bin kith && cargo build --locked -p kith-stub
+        run: |
+          cargo build --locked -p kith-serve --bin kith
+          cargo build --locked -p kith-holder --bin kith-holder
+          cargo build --locked -p kith-stub
       - name: Upload kith
         if: inputs.artifact && runner.os != 'Windows'
         uses: actions/upload-artifact@v4
@@ -1011,6 +1015,7 @@ jobs:
           name: kith-${{ runner.os == 'Linux' && 'linux' || 'macos' }}
           path: |
             serve/host/target/debug/kith
+            serve/host/target/debug/kith-holder
             serve/host/target/debug/kith-stub
           if-no-files-found: error
           retention-days: 3

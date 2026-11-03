@@ -11,7 +11,7 @@ use super::{Config, Daemon, Reached};
 use crate::Error;
 use crate::holder_link::HolderConfig;
 use crate::layout::Layout;
-use crate::tests::{machine, open, paths};
+use crate::tests::{machine, open, open_all, paths};
 
 fn quiet() -> Config {
     Config {
@@ -798,4 +798,90 @@ fn a_holder_linked_through_a_command_never_makes_the_core_end_local_processes() 
         .args(["-s", "KILL", "--", &format!("-{pid}")])
         .status();
     assert!(log.contains("nothing is recorded or ended here"), "{log}");
+}
+
+/// The owner's authority writes (M2-2) go through the daemon like the gate's: they need `&mut Core`, so `Core::call`
+/// alone would answer `NotServed`.
+#[cfg(unix)]
+#[test]
+fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let _d = serving(&p, quiet());
+    // two people, put in the way `kith migrate` will (M2-8)
+    let conn = rusqlite::Connection::open(&Layout::new(&m).db).expect("core.db");
+    conn.busy_timeout(Duration::from_secs(5)).expect("timeout");
+    conn.execute_batch("INSERT INTO people (id, owner) VALUES ('kai', 1), ('sam', 0)")
+        .expect("people");
+    // the caller's agents, as its own environment names them
+    let home = tempfile::tempdir().expect("home");
+    let agent = home.path().join("agents/house/role");
+    std::fs::create_dir_all(&agent).expect("agent folder");
+    std::fs::write(agent.join("agent.md"), "---\nname: house\n---\n").expect("agent.md");
+    let view = |mut params: Value| {
+        params["home"] = home.path().to_string_lossy().as_ref().into();
+        params["kernel"] = home.path().join("kernel").to_string_lossy().as_ref().into();
+        params["env"] = json!({"KITH_AGENTS": home.path().join("agents").to_string_lossy()});
+        params
+    };
+    match read(
+        &p,
+        "people.grant",
+        &view(json!({"person": "sam", "agent": "house", "preset": "member"})),
+    ) {
+        Reached::Answered(v) => assert_eq!(
+            v["lines"],
+            json!(["sam may use house: preset member, mode acceptEdits"])
+        ),
+        other => panic!("{other:?}"),
+    }
+    match read(&p, "people.list", &view(json!({"person": "sam"}))) {
+        Reached::Answered(v) => {
+            assert_eq!(v["rows"][0]["agent"], "house");
+            assert_eq!(v["rows"][0]["allowed"], true);
+        }
+        other => panic!("{other:?}"),
+    }
+    // a refusal of the rules is an answer about the call, and nothing was written for it
+    assert!(matches!(
+        read(
+            &p,
+            "people.grant",
+            &view(json!({"person": "zed", "agent": "house"}))
+        ),
+        Reached::Refused(_)
+    ));
+    // the access requests are M2-3's: still not answered here
+    assert!(matches!(
+        read(&p, "people.approve", &json!({"id": "r1"})),
+        Reached::Refused(Error::NotServed(_))
+    ));
+    let rows: i64 = conn
+        .query_row("SELECT count(*) FROM memberships", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(rows, 1);
+}
+
+#[test]
+fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
+    let (_t, root) = machine();
+    let pp = paths(&root);
+    let layout = Layout::new(&root);
+    {
+        let mut core = open_all(&layout);
+        let clk = crate::sync_lease::System;
+        crate::sync_lease::link(&mut core, &clk).expect("link");
+        let mark = crate::sync_lease::mark(&mut core).expect("mark");
+        assert!(crate::sync_lease::pulled(&mut core, &clk, mark, 600_000).expect("pulled"));
+        assert!(crate::sync_lease::lease_held_for_non_owner(&mut core, &clk));
+    }
+    let daemon = serving(&pp, quiet());
+    match read(&pp, "syncLease.status", &json!({})) {
+        Reached::Answered(v) => {
+            assert_eq!(v["held"], false, "{v}");
+            assert_eq!(v["cloud"], "linked");
+        }
+        other => panic!("{other:?}"),
+    }
+    drop(daemon);
 }
