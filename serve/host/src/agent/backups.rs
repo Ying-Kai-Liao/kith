@@ -1,16 +1,23 @@
 //! Backup subscriptions: when the account an hq agent runs on has no usage left, its turns move to the next entry of
-//! the user's chain (`kith <agent> --backups-json`: more Claude accounts, an API key, Codex…) until the limit lifts.
+//! the agent's accounts (more Claude accounts, an API key, Codex…) until the limit lifts.
 //!
-//! This file is the memory of it: which entries are out until when (`backups.json` in the host's data folder, so a
-//! restart keeps it), the chain as hq last said it, and the per-account usage readings the early switch reads. The
-//! turn lifecycle that uses it is in `bot::hq` and `bot::failover`. Nothing here knows Claude from Codex: an entry is
-//! an id, and a limit is a number of seconds.
+//! The kernel owns the account set and which accounts are out (`docs/accounts.md`); this file is the host's cache of it
+//! and the memory of what the host learned in between. The chain is `kith <agent> --accounts-json` (pick order first,
+//! then the rest of the agent's order; an older kith without it gives `--backups-json`, the static order). Each read of
+//! it also brings the kernel's out marks, which replace the host's own (a `kith account clear` in a terminal frees the
+//! account here too). A limit the host meets is marked here at once and pushed to the kernel (`kith account out`), so a
+//! terminal run agrees. While the kernel keeps the marks, `backups.json` is not written any more (the kernel still
+//! reads an old one); with an older kith it is, as before, so a restart keeps the marks. The turn lifecycle that uses
+//! all this is in `bot::hq` and `bot::failover`. Nothing here knows Claude from Codex: an entry is an id, and a limit
+//! is a number of seconds.
 
 use crate::LockExt;
 use crate::usage::Window;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Why an entry is out: its provider refused a turn, or its usage reached [`EARLY_PERCENT`] before that.
@@ -31,6 +38,7 @@ const CHAIN_FRESH_EMPTY: Duration = Duration::from_secs(15 * 60);
 const UNAVAILABLE_FOR: Duration = Duration::from_secs(120);
 /// A usage reading older than this says nothing about now.
 const READING_STALE_SECS: i64 = 30 * 60;
+const PUSH_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// One line of `kith <agent> --backups-json`'s chain.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
@@ -73,6 +81,52 @@ impl ChainDoc {
                     .ok()
             })
             .collect()
+    }
+}
+
+/// `kith <agent> --accounts-json` as the host uses it: the chain (pick order first, then the rest of the agent's
+/// order), and the kernel's out marks for the ids in it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct KernelAccounts {
+    pub chain: Vec<ChainEntry>,
+    pub out: BTreeMap<String, Out>,
+}
+
+impl KernelAccounts {
+    /// `None` for a document that isn't `--accounts-json`'s (an older kith printed something else): the caller falls
+    /// back to `--backups-json`. An account that is out is still a runnable entry; one signed out is not ready.
+    pub fn parse(doc: &serde_json::Value, now: i64) -> Option<Self> {
+        let strings = |v: &serde_json::Value| -> Option<Vec<String>> {
+            Some(v.as_array()?.iter().filter_map(|i| i.as_str().map(str::to_owned)).collect())
+        };
+        let order = strings(&doc["order"])?;
+        let rows = doc["accounts"].as_array()?;
+        let main = doc["main"].as_str().or(order.first().map(String::as_str))?.to_owned();
+        let candidates = strings(&doc["candidates"]).unwrap_or_default();
+        let mut ids = candidates.clone();
+        ids.extend(order.into_iter().filter(|i| !candidates.contains(i)));
+        let mut seen = HashSet::new();
+        let mut result = Self::default();
+        for id in ids.into_iter().filter(|i| seen.insert(i.clone())) {
+            let Some(row) = rows.iter().find(|r| r["id"] == id.as_str()) else { continue };
+            let status = row["status"].as_str().unwrap_or("invalid");
+            let text = |k: &str| row[k].as_str().map(str::to_owned);
+            result.chain.push(ChainEntry {
+                kind: if id == main { "primary".into() } else { text("kind").unwrap_or_default() },
+                harness: text("harness"),
+                account: text("account"),
+                ready: matches!(status, "ready" | "out"),
+                why: text("why"),
+                id: id.clone(),
+            });
+            if status == "out"
+                && let Some(out_until) = row["out_until"].as_i64()
+            {
+                let reason = text("reason").unwrap_or_else(|| RATE_LIMIT.into());
+                result.out.insert(id, Out { out_until, reason, since: now });
+            }
+        }
+        Some(result)
     }
 }
 
@@ -125,6 +179,8 @@ struct Inner {
     refreshing: HashSet<String>,
     /// Counts changes of `out`, so the file is never overwritten by an older copy.
     seq: u64,
+    /// When this host last marked an entry out for a limit it met: a kernel read that began before can't clear it.
+    marked_at: Option<Instant>,
 }
 
 type Clock = Box<dyn Fn() -> i64 + Send + Sync>;
@@ -135,6 +191,9 @@ pub struct Backups {
     /// The `seq` last written to the file; held while writing.
     written: std::sync::Mutex<u64>,
     now: Clock,
+    /// The kernel keeps the out marks (`--accounts-json` was read): `backups.json` is no longer written and a mark
+    /// is pushed with `kith account out`.
+    kernel: Arc<AtomicBool>,
 }
 
 fn clock() -> i64 {
@@ -147,7 +206,18 @@ impl Backups {
     }
 
     pub fn with_clock(path: PathBuf, now: Clock) -> Self {
-        Self { path, inner: std::sync::Mutex::default(), written: std::sync::Mutex::default(), now }
+        Self {
+            path,
+            inner: std::sync::Mutex::default(),
+            written: std::sync::Mutex::default(),
+            now,
+            kernel: Arc::default(),
+        }
+    }
+
+    /// Whether the kernel keeps the out marks (the last chain came from `--accounts-json`).
+    pub fn kernel_keeps_marks(&self) -> bool {
+        self.kernel.load(Ordering::SeqCst)
     }
 
     pub fn now(&self) -> i64 {
@@ -170,7 +240,7 @@ impl Backups {
             let before = inner.out.clone();
             inner.out.retain(|_, o| o.out_until > now);
             let result = f(&mut inner, now);
-            let write = (inner.out != before).then(|| {
+            let write = (inner.out != before && !self.kernel_keeps_marks()).then(|| {
                 inner.seq += 1;
                 (inner.seq, serde_json::to_vec_pretty(&inner.out))
             });
@@ -207,6 +277,32 @@ impl Backups {
     /// now). Idempotent: two turns hitting the same limit mark it once. A real refusal replaces an early mark, and a
     /// later reset replaces an earlier one. Whether anything changed.
     pub fn mark_out(&self, id: &str, until: Option<i64>, reason: &str) -> bool {
+        let changed = self.mark_here(id, until, reason);
+        if changed && self.kernel_keeps_marks() && reason != USAGE_95 {
+            // The mark as it stands (a later reset may have kept the longer one), for the terminal's runs to see.
+            if let Some(out) = self.out().get(id) {
+                Self::push_out(id, out);
+            }
+        }
+        changed
+    }
+
+    /// `kith account out ID --until T --reason R` in the background; a failure is logged and the next read of the
+    /// kernel's state decides what stays.
+    fn push_out(id: &str, out: &Out) {
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+        let (id, out) = (id.to_owned(), out.clone());
+        runtime.spawn(async move {
+            let Ok(Some(bin)) = tokio::task::spawn_blocking(crate::agent::hq::bin).await else { return };
+            let until = out.out_until.to_string();
+            let args = ["account", "out", id.as_str(), "--until", until.as_str(), "--reason", out.reason.as_str()];
+            if let Err(error) = crate::agent::hq::run(&bin, &args, None, PUSH_TIMEOUT).await {
+                tracing::warn!(entry = %id, error = format!("{error:#}"), "couldn't tell the kernel an account is out");
+            }
+        });
+    }
+
+    fn mark_here(&self, id: &str, until: Option<i64>, reason: &str) -> bool {
         self.with(|inner, now| {
             let until = until.filter(|u| *u > now).unwrap_or(now + UNKNOWN_RESET_SECS);
             let since = inner.out.get(id).map_or(now, |o| o.since);
@@ -222,6 +318,9 @@ impl Backups {
                 reason
             };
             inner.out.insert(id.to_owned(), Out { out_until: until, reason: reason.to_owned(), since });
+            if reason != USAGE_95 {
+                inner.marked_at = Some(Instant::now());
+            }
             tracing::info!(entry = id, reason, until, "backup entry marked out");
             true
         })
@@ -229,6 +328,39 @@ impl Backups {
 
     pub fn out(&self) -> BTreeMap<String, Out> {
         self.with(|inner, _| inner.out.clone())
+    }
+
+    /// "It is back" (`kith account clear`): the host forgets its own mark and usage reading for `id` too.
+    pub fn clear_local(&self, id: &str) {
+        self.with(|inner, _| {
+            inner.out.remove(id);
+            inner.readings.remove(id);
+        });
+    }
+
+    /// Takes the kernel's view of `view.chain`, read by a call that began at `started`: its out marks replace the
+    /// host's for those ids, and an id it says is ready is freed (`kith account clear`). The host's own early marks
+    /// (usage readings) stay, and a limit this host met after the call began is kept: the kernel may not have heard
+    /// of it yet.
+    pub fn apply_kernel(&self, view: &KernelAccounts, started: Instant) {
+        self.kernel.store(true, Ordering::SeqCst);
+        self.with(|inner, _| {
+            if inner.marked_at.is_some_and(|at| at > started) {
+                return;
+            }
+            for entry in &view.chain {
+                match view.out.get(&entry.id) {
+                    Some(out) => {
+                        let since = inner.out.get(&entry.id).map_or(out.since, |o| o.since);
+                        inner.out.insert(entry.id.clone(), Out { since, ..out.clone() });
+                    }
+                    None if inner.out.get(&entry.id).is_some_and(|o| o.reason != USAGE_95) => {
+                        inner.out.remove(&entry.id);
+                    }
+                    None => {}
+                }
+            }
+        });
     }
 
     #[cfg(test)]
@@ -274,11 +406,6 @@ impl Backups {
         inner.refreshing.remove(agent);
         let chain = chain.or_else(|| inner.chains.get(agent).map(|(_, c)| c.clone())).unwrap_or_default();
         inner.chains.insert(agent.to_owned(), (Instant::now(), chain));
-    }
-
-    /// Whether anything is out now (the feature is in use).
-    pub fn any_out(&self) -> bool {
-        !self.out().is_empty()
     }
 
     /// Every account entry any agent's chain named, for the usage poll: `(id, harness, account)`.
@@ -395,8 +522,18 @@ impl Backups {
         }
     }
 
+    /// The entry the agent's plain launch starts on (`kith <agent> --launch-json` without an account): the one marked
+    /// `primary`, else the first.
+    pub fn primary(chain: &[ChainEntry]) -> Option<&ChainEntry> {
+        chain.iter().find(|e| e.kind == "primary").or(chain.first())
+    }
+
     fn chosen(chain: &[ChainEntry], i: usize) -> Pick {
-        if i == 0 { Pick::Primary } else { Pick::Backup(chain[i].clone()) }
+        if Self::primary(chain).is_some_and(|p| p.id == chain[i].id) {
+            Pick::Primary
+        } else {
+            Pick::Backup(chain[i].clone())
+        }
     }
 
     /// The notice for a turn with nothing to run on: who is out and when the first is back.
@@ -717,5 +854,102 @@ mod tests {
         b.end_refresh("a", None);
         assert_eq!(b.known_chain("a").map(|c| c.len()), Some(3), "a failed fetch keeps what was known");
         assert_eq!(b.accounts(), vec![("claude:work".to_owned(), "claude".to_owned(), "work".to_owned())]);
+    }
+
+    /// What `kith house --accounts-json` prints for a pinned, partly spent set (docs/accounts.md): `claude:b` is the
+    /// pin and out, `claude` and `claude:a` are ready, `codex` is signed out.
+    fn accounts_doc(now: i64) -> serde_json::Value {
+        let row = |id: &str, status: &str, extra: serde_json::Value| {
+            let (harness, account) = id.split_once(':').map_or((id, None), |(h, a)| (h, Some(a)));
+            let mut row = serde_json::json!({"id": id, "harness": harness, "account": account, "kind": "subscription",
+                "status": status, "ready": status == "ready", "why": null});
+            row.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            row
+        };
+        serde_json::json!({"version": 1, "agent": "house", "harness": "claude", "policy": "fill",
+        "pin": {"id": "claude:b", "only": false}, "cross_harness": false, "main": "claude:b",
+        "order": ["claude:b", "claude", "claude:a", "codex"], "candidates": ["claude", "claude:a"], "all_out": false,
+        "skipped": [],
+        "accounts": [
+            row("claude:b", "out", serde_json::json!({"out_until": now + 600, "reason": "usage_95"})),
+            row("claude", "ready", serde_json::json!({})),
+            row("claude:a", "ready", serde_json::json!({})),
+            row("codex", "signed_out", serde_json::json!({"why": "not logged in"})),
+        ]})
+    }
+
+    #[test]
+    fn the_kernels_accounts_become_a_chain_in_pick_order_with_the_main_account_marked() {
+        let view = KernelAccounts::parse(&accounts_doc(1_000), 10).unwrap();
+        let ids: Vec<_> = view.chain.iter().map(|e| (e.id.as_str(), e.kind.as_str(), e.ready)).collect();
+        assert_eq!(
+            ids,
+            [
+                ("claude", "subscription", true),
+                ("claude:a", "subscription", true),
+                ("claude:b", "primary", true),
+                ("codex", "subscription", false)
+            ],
+            "what pick would try first, then the rest of the order; an account that is out is still runnable"
+        );
+        assert_eq!(view.out["claude:b"], Out { out_until: 1_600, reason: USAGE_95.into(), since: 10 });
+        assert_eq!(view.out.len(), 1);
+        assert!(KernelAccounts::parse(&serde_json::json!({"version": 1, "agent": "house", "chain": []}), 0).is_none());
+    }
+
+    #[test]
+    fn the_first_pick_is_not_the_agents_main_account_when_the_main_one_is_out() {
+        let rig = Rig::new();
+        let b = rig.backups();
+        let view = KernelAccounts::parse(&accounts_doc(rig.now()), rig.now()).unwrap();
+        b.apply_kernel(&view, Instant::now());
+        // `claude:b` (the main one, a pin) is out: the turn starts on `claude` by name, not on the plain launch.
+        let picked = |b: &Backups| match b.pick("house", &view.chain, &HashSet::new()) {
+            Pick::Backup(entry) => entry.id,
+            other => format!("{other:?}"),
+        };
+        assert_eq!(picked(&b), "claude");
+        assert_eq!(Backups::primary(&view.chain).map(|e| e.id.as_str()), Some("claude:b"));
+        b.mark_out("claude", Some(rig.now() + 600), RATE_LIMIT);
+        assert_eq!(picked(&b), "claude:a");
+    }
+
+    #[test]
+    fn the_kernels_marks_replace_the_hosts_and_a_clear_in_a_terminal_frees_the_account() {
+        let rig = Rig::new();
+        let b = rig.backups();
+        b.mark_out("claude:work", Some(rig.now() + 600), RATE_LIMIT);
+        b.mark_out("codex", Some(rig.now() + 600), USAGE_95);
+        let manual = Out { out_until: rig.now() + 900, reason: "manual".into(), since: 0 };
+        let view = KernelAccounts { chain: chain(), out: BTreeMap::from([("claude".to_owned(), manual)]) };
+        b.apply_kernel(&view, Instant::now());
+        assert!(b.kernel_keeps_marks());
+        assert_eq!(b.out()["claude"].reason, "manual", "marked in a terminal");
+        assert!(!b.is_out("claude:work"), "cleared in a terminal");
+        assert!(b.is_out("codex"), "the host's own early mark is its own reading, not the kernel's");
+    }
+
+    #[test]
+    fn a_limit_met_while_the_kernel_was_being_asked_is_not_cleared_by_its_older_answer() {
+        let rig = Rig::new();
+        let b = rig.backups();
+        let started = Instant::now();
+        b.mark_out("claude", Some(rig.now() + 600), RATE_LIMIT);
+        b.apply_kernel(&KernelAccounts { chain: chain(), out: BTreeMap::new() }, started);
+        assert!(b.is_out("claude"), "the kernel read began before the mark");
+        b.apply_kernel(&KernelAccounts { chain: chain(), out: BTreeMap::new() }, Instant::now());
+        assert!(!b.is_out("claude"), "a later read is the truth");
+    }
+
+    #[test]
+    fn with_the_kernel_keeping_the_marks_backups_json_is_not_written() {
+        let rig = Rig::new();
+        let b = rig.backups();
+        b.apply_kernel(&KernelAccounts { chain: chain(), out: BTreeMap::new() }, Instant::now());
+        b.mark_out("claude", Some(rig.now() + 600), RATE_LIMIT);
+        assert!(b.is_out("claude"));
+        assert!(!rig.dir.join("backups.json").exists());
+        b.clear_local("claude");
+        assert!(!b.is_out("claude"));
     }
 }

@@ -16,11 +16,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 /// Each entry's login is asked of its harness, which can take a few seconds.
-const READ_TIMEOUT: Duration = Duration::from_secs(60);
-const WRITE_TIMEOUT: Duration = Duration::from_secs(20);
+pub(super) const READ_TIMEOUT: Duration = Duration::from_secs(60);
+pub(super) const WRITE_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// Two quick reorders: one `kith` write at a time, the last one to arrive wins.
-static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(super) static WRITES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<ControlFlow<Value, Value>> {
     Ok(ControlFlow::Break(match method {
@@ -37,7 +37,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
     }))
 }
 
-async fn kith() -> Result<std::path::PathBuf> {
+pub(super) async fn kith() -> Result<std::path::PathBuf> {
     tokio::task::spawn_blocking(hq::bin).await?.ok_or_else(|| anyhow!("{}", hq::missing()))
 }
 
@@ -125,8 +125,15 @@ async fn read(hub: &Hub) -> Result<Value> {
             per_agent.insert(name, Value::Array(ids(&list)));
         }
     }
-    // Extra accounts that exist but aren't in any chain: what the app offers to add.
+    // Extra accounts that exist but aren't in any chain: what the app offers to add. The kernel's rows also say which
+    // are out (a terminal run may have marked one the host hasn't met).
+    let mut kernel_out: BTreeMap<String, (i64, String)> = BTreeMap::new();
     if let Ok(Value::Array(accounts)) = accounts {
+        for a in &accounts {
+            if let (Some(id), Some(until)) = (a["id"].as_str(), a["out_until"].as_i64()) {
+                kernel_out.insert(id.to_owned(), (until, a["reason"].as_str().unwrap_or("rate_limit").to_owned()));
+            }
+        }
         for a in accounts {
             let Some(id) = a["id"].as_str() else { continue };
             rows.entry(id.to_owned()).or_insert_with(|| {
@@ -147,15 +154,18 @@ async fn read(hub: &Hub) -> Result<Value> {
         .into_iter()
         .map(|(id, row)| {
             let (harness, account, kind) = parts(&id);
-            let gone = out.get(&id);
+            let gone = out
+                .get(&id)
+                .map(|o| (o.out_until, o.reason.as_str()))
+                .or_else(|| kernel_out.get(&id).map(|(until, reason)| (*until, reason.as_str())));
             json!({
                 "id": id, "harness": harness, "account": account, "kind": kind,
                 "ready": row["ready"] == true,
                 "why": row["why"].as_str(),
                 "fix": row["fix"].as_str(),
                 // Milliseconds, like the rest of the API's times; the state file keeps seconds.
-                "outUntil": gone.map(|o| o.out_until.saturating_mul(1000)),
-                "reason": gone.map(|o| o.reason.as_str()),
+                "outUntil": gone.map(|(until, _)| until.saturating_mul(1000)),
+                "reason": gone.map(|(_, reason)| reason),
             })
         })
         .collect();
@@ -163,7 +173,7 @@ async fn read(hub: &Hub) -> Result<Value> {
     Ok(json!({"global": ids(&global), "agents": per_agent, "entries": entries, "main": main}))
 }
 
-fn valid_id(id: &str) -> bool {
+pub(super) fn valid_id(id: &str) -> bool {
     let (harness, name) = id.split_once(':').map_or((id, None), |(h, n)| (h, Some(n)));
     let word = |s: &str, first: fn(char) -> bool| {
         s.chars().next().is_some_and(first)
@@ -201,7 +211,7 @@ async fn set_main(hub: &Hub, b: &Value) -> Result<()> {
     futures::future::join_all(agents.iter().map(|agent| {
         let bin = &bin;
         async move {
-            if let Ok(chain) = hq::backups(bin, agent).await {
+            if let Ok(chain) = hq::chain(bin, agent, &hub.backups).await {
                 hub.backups.end_refresh(agent, Some(chain));
             }
         }

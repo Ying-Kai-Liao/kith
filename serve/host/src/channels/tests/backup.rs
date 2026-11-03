@@ -135,14 +135,15 @@ async fn an_agent_with_no_chain_runs_as_it_always_did() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_first_message_never_waits_for_the_chain() {
+async fn a_first_message_reads_the_chain_before_the_run() {
+    // The kernel may already have the account out (a terminal run, another agent), so the first run asks.
     let r = Rig::new();
     r.put("chain", &json!({"chain": [entry("claude"), entry("codex")]}));
     r.send(&Rig::msg("1", "@house hello")).await;
     answered(&r, 1).await;
-    // Nothing is out: the run is on the agent's own account, and the chain is read in the background.
+    // Nothing is out: the run is on the agent's own account.
     assert_eq!(r.fake.posts()[0].1, super::echo("hello"));
-    until("the chain", || r.backups.known_chain("house").is_some_and(|c| c.len() == 2)).await;
+    assert!(r.backups.known_chain("house").is_some_and(|c| c.len() == 2));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -17,10 +17,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Asks hq for `agent`'s chain now and remembers the answer; a failure is logged and leaves what was known.
+/// Asks the kernel for `agent`'s account chain now and remembers the answer; a failure is logged and leaves what was known.
 pub(super) async fn fetch_chain(hub: &Hub, agent: &str) -> Vec<ChainEntry> {
     let got = match tokio::task::spawn_blocking(hq::bin).await {
-        Ok(Some(bin)) => hq::backups(&bin, agent)
+        Ok(Some(bin)) => hq::chain(&bin, agent, &hub.backups)
             .await
             .inspect_err(|error| tracing::warn!(agent, error = format!("{error:#}"), "couldn't read the backup chain"))
             .ok(),
@@ -229,7 +229,7 @@ impl Actor {
     /// backup entry's process is its entry's. A chain not yet known, or a kernel that doesn't say, changes nothing.
     fn conn_on_main(&self, chain: &[ChainEntry]) -> bool {
         self.serving.is_some()
-            || chain.first().is_none_or(|main| self.conn_account.as_ref().is_none_or(|a| *a == main.id))
+            || Backups::primary(chain).is_none_or(|main| self.conn_account.as_ref().is_none_or(|a| *a == main.id))
     }
 
     fn hq_set_session(&mut self, slot: Option<&str>, sid: &str) {
@@ -241,9 +241,10 @@ impl Actor {
         }
     }
 
-    /// The agent's backup chain as last known. Never makes a turn wait for hq: a chain gone stale is fetched again in
-    /// the background, and one never fetched is too, unless backups are in use (something is out), when this turn
-    /// needs it to pick. No chain, or any failure, is an empty chain.
+    /// The agent's account chain as last known. A chain gone stale is fetched again in the background; one never
+    /// fetched is waited for, once per agent per host run: the kernel may already have the agent's account out (a
+    /// terminal run, another agent that asked it), and a first turn that doesn't know starts on that account. No chain,
+    /// or any failure, is an empty chain.
     async fn hq_chain(&self, agent: &str) -> Vec<ChainEntry> {
         match self.hub.backups.chain_state(agent) {
             Some((age, chain)) => {
@@ -252,11 +253,7 @@ impl Actor {
                 }
                 chain
             }
-            None if self.hub.backups.any_out() => fetch_chain(&self.hub, agent).await,
-            None => {
-                refresh_chain_later(&self.hub, agent);
-                Vec::new()
-            }
+            None => fetch_chain(&self.hub, agent).await,
         }
     }
 

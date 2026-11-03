@@ -110,7 +110,7 @@ impl Recheck {
 
 /// `kith <agent> --backups-json` now, remembered in `backups` (a failure keeps what was known before).
 async fn fetch_chain(backups: &Backups, bin: &Path, agent: &str) -> Vec<ChainEntry> {
-    let got = crate::agent::hq::backups(bin, agent)
+    let got = crate::agent::hq::chain(bin, agent, backups)
         .await
         .inspect_err(|error| tracing::warn!(agent, error = format!("{error:#}"), "couldn't read the backup chain"))
         .ok();
@@ -271,7 +271,7 @@ impl Core {
         loop {
             // None: the agent's own account. A chain of one entry (or none) never changes anything.
             let (backup, serving) = match self.backups.pick(agent, &chain, &tried) {
-                Pick::Primary => (None, chain.first().map(|e| e.id.clone()).unwrap_or_default()),
+                Pick::Primary => (None, Backups::primary(&chain).map(|e| e.id.clone()).unwrap_or_default()),
                 Pick::Backup(entry) => (Some(entry.id.clone()), entry.id),
                 Pick::AllOut(outs) => {
                     let text = format!("⚠️ {}", self.backups.all_out_text(&outs));
@@ -554,9 +554,9 @@ impl Core {
         ad.note_line(&line)
     }
 
-    /// The agent's backup chain as last known. A run never waits for hq: a chain gone stale is fetched again in the
-    /// background, and one never fetched is too, unless backups are in use (something is out), when this run needs it
-    /// to pick. No chain, or any failure, is an empty chain: nothing changes.
+    /// The agent's account chain as last known. A chain gone stale is fetched again in the background; one never
+    /// fetched is waited for (the kernel may already have the agent's account out, and a first run that doesn't know
+    /// starts on it). No chain, or any failure, is an empty chain: nothing changes.
     async fn chain(&self, agent: &str) -> Vec<ChainEntry> {
         let later = || {
             if self.backups.begin_refresh(agent) {
@@ -571,11 +571,7 @@ impl Core {
                 }
                 chain
             }
-            None if self.backups.any_out() => fetch_chain(&self.backups, &self.paths.hq_bin, agent).await,
-            None => {
-                later();
-                Vec::new()
-            }
+            None => fetch_chain(&self.backups, &self.paths.hq_bin, agent).await,
         }
     }
 

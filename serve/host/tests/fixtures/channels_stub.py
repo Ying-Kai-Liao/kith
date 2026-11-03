@@ -96,6 +96,10 @@ if me == "kith-auth":
         fail("kith-auth: unknown command")
 elif me == "kith":
     agent = args[0]
+    if args[1] == "--accounts-json":
+        # A kith from before the account set: the host falls back to `--backups-json`.
+        print("kith: unknown option --accounts-json", file=sys.stderr)
+        sys.exit(2)
     if args[1] == "--backups-json":
         log({"tool": "kith-chain", "agent": agent})
         default = {"chain": [{"id": "claude", "harness": "claude", "account": None, "kind": "primary", "ready": True}]}

@@ -51,6 +51,148 @@ def permission(default):
     return open(path, encoding="utf-8").read().strip() if os.path.exists(path) else default
 
 
+# --- a small kernel for the managed account set -----------------------------------------------------------------------
+# With a file `kernel.json` in the agent's folder the stub answers `--accounts-json`, `account list|set|pin|unpin|policy|
+# cross-harness|out|clear|add|remove|pick` and `backup list` the way kernel/lib/kith_accounts.py does (docs/accounts.md),
+# for the one agent `house` (a Claude agent): {"set": [ids], "agents": {"house": {"accounts"?: [ids], "pin"?: {id, only}}},
+# "policy", "cross", "out": {id: {out_until, reason}}, "signed_out": {id: why}, "usage": {id: reading}}. Without the file
+# the older stub answers (`--backups-json`, `chain_settings.json`), as a kith from before the account set does.
+import time as _time
+
+
+def kernel_path():
+    return os.path.join(home, "kernel.json")
+
+
+def kernel_on():
+    return os.path.exists(kernel_path())
+
+
+def kernel():
+    st = {"set": [], "agents": {}, "policy": "fill", "cross": False, "out": {}, "signed_out": {}, "usage": {}}
+    st.update(json.load(open(kernel_path(), encoding="utf-8")))
+    return st
+
+
+def kernel_save(st):
+    json.dump(st, open(kernel_path(), "w", encoding="utf-8"))
+
+
+def family(i):
+    return "claude" if i.split(":")[0] in ("claude", "claude-api") else i.split(":")[0]
+
+
+def layout(st):
+    a = st["agents"].get("house", {})
+    ids = a.get("accounts", st["set"])
+    own = [i for i in ids if family(i) == "claude"]
+    foreign = [i for i in ids if family(i) != "claude"] if "accounts" in a or st["cross"] else []
+    pin = a.get("pin")
+    if not own and not ("accounts" in a and not ids and pin):
+        own = ["claude"]
+    if pin:
+        own, foreign = [i for i in own if i != pin["id"]], [i for i in foreign if i != pin["id"]]
+    return pin, own, foreign
+
+
+def static_order(st):
+    pin, own, foreign = layout(st)
+    if pin:
+        return ([pin["id"]] if pin["only"] else [pin["id"]] + own + foreign), pin
+    return own + foreign, None
+
+
+def status_of(st, i, now):
+    o = st["out"].get(i)
+    if o and o["out_until"] > now:
+        return {"status": "out", "why": "out of usage", "out_until": o["out_until"], "reason": o["reason"]}
+    if i in st["signed_out"]:
+        return {"status": "signed_out", "why": st["signed_out"][i], "fix": "kith account login " + i}
+    return {"status": "ready", "why": None}
+
+
+def row_of(st, i, now, order):
+    h, _, n = i.partition(":")
+    stt = status_of(st, i, now)
+    pins = [{"agent": k, "only": bool(v["pin"]["only"])} for k, v in st["agents"].items() if v.get("pin", {}).get("id") == i]
+    row = {"id": i, "harness": family(i), "account": n or None, "kind": "api-key" if h == "claude-api" else "subscription",
+           "in_set": i in order, "order": order.index(i) + 1 if i in order else None, "status": stt["status"],
+           "ready": stt["status"] == "ready", "why": stt.get("why"), "fix": stt.get("fix"),
+           "usage": st["usage"].get(i), "last_started": None, "pins": pins, "logged_in": stt["status"] != "signed_out"}
+    if n:
+        row.update(name=n, dir="/secret/dir/" + i)
+    if stt["status"] == "out":
+        row["out_until"], row["reason"] = stt["out_until"], stt["reason"]
+    return row
+
+
+def kernel_pick(st, now):
+    order, pin = static_order(st)
+    cands = [i for i in order if status_of(st, i, now)["status"] == "ready"]
+    skipped = [{"id": i, **{k: v for k, v in status_of(st, i, now).items() if k != "fix" and v is not None}}
+               for i in order if status_of(st, i, now)["status"] != "ready"]
+    return {"version": 1, "agent": "house", "harness": "claude", "policy": st["policy"], "pin": pin,
+            "cross_harness": st["cross"], "candidates": cands or order[:1], "skipped": skipped, "all_out": not cands}
+
+
+def kernel_accounts_json(st, now):
+    order, pin = static_order(st)
+    p = kernel_pick(st, now)
+    return {"version": 1, "agent": "house", "harness": "claude", "policy": st["policy"], "pin": pin, "main": order[0],
+            "cross_harness": st["cross"], "order": order, "candidates": p["candidates"], "all_out": p["all_out"],
+            "skipped": p["skipped"], "accounts": [row_of(st, i, now, order) for i in order]}
+
+
+def kernel_command():
+    st, now = kernel(), _time.time()
+    sub, rest = args[1], args[2:]
+    agent = rest[rest.index("--agent") + 1] if "--agent" in rest else None
+    ids = [a for a in rest if not a.startswith("--") and a != agent]
+    if sub == "list":
+        every = list(dict.fromkeys(st["set"] + [i for a in st["agents"].values() for i in a.get("accounts", [])]
+                                   + [a["pin"]["id"] for a in st["agents"].values() if a.get("pin")] + ["claude"]
+                                   + list(st["out"]) + list(st["signed_out"])))
+        print(json.dumps([row_of(st, i, now, st["set"]) for i in every]))
+        return
+    if sub == "policy":
+        if ids:
+            st["policy"] = ids[0]
+        print(st["policy"])
+    elif sub == "cross-harness":
+        if ids:
+            st["cross"] = ids[0] == "on"
+        print("on" if st["cross"] else "off")
+    elif sub == "set":
+        if "--reset" in rest:
+            st["agents"].get(agent, {}).pop("accounts", None)
+        elif agent:
+            st["agents"].setdefault(agent, {})["accounts"] = ids
+        else:
+            st["set"] = ids
+    elif sub == "pin":
+        st["agents"].setdefault(ids[0], {})["pin"] = {"id": ids[1], "only": "--only" in rest}
+    elif sub == "unpin":
+        st["agents"].setdefault(ids[0], {}).pop("pin", None)
+    elif sub == "out":
+        until = int(rest[rest.index("--until") + 1]) if "--until" in rest else int(now) + 3600
+        reason = rest[rest.index("--reason") + 1] if "--reason" in rest else "manual"
+        st["out"][ids[0]] = {"out_until": until, "reason": reason}
+    elif sub == "clear":
+        st["out"].pop(ids[0], None)
+    elif sub == "remove":
+        st["set"] = [i for i in st["set"] if i != ids[0]]
+    elif sub == "add":
+        i = ids[0] + ":" + ids[1]
+        if "--yes" not in rest and ids[0] == "claude":
+            print("WARNING: use several Claude accounts at your own risk.")
+            sys.exit(1)
+        st["set"] = list(dict.fromkeys(st["set"] + [i]))
+        open(os.path.join(home, "login_ran"), "w", encoding="utf-8").write("login " + i)
+    elif sub == "pick":
+        print(json.dumps(kernel_pick(st, now)))
+    kernel_save(st)
+
+
 if args == ["ls", "--json"]:
     print(json.dumps([{"name": "house", "description": "Keeps the house", "home": home, "model": None,
                        "effort": None, "harness": "claude"}]))
@@ -96,6 +238,16 @@ elif args[:1] == ["schedule"] and len(args) == 4 and args[1] in ("pause", "resum
     else:
         job["paused"] = args[1] == "pause"
     json.dump(jobs, open(os.path.join(home, "schedules.json"), "w", encoding="utf-8"))
+elif kernel_on() and args[:1] == ["account"] and len(args) > 1:
+    kernel_command()
+elif kernel_on() and args == ["house", "--accounts-json"]:
+    print(json.dumps(kernel_accounts_json(kernel(), _time.time())))
+elif kernel_on() and args[:2] == ["backup", "list"]:
+    st = kernel()
+    order, _ = static_order(st)
+    print(json.dumps({"agent": "house", "source": "agent" if "accounts" in st["agents"].get("house", {}) else "global",
+                      "backups": [{"id": i, "ready": status_of(st, i, _time.time())["status"] == "ready"} for i in order[1:]],
+                      "main": {"id": order[0], "source": "global", "harness": "claude", "ready": True}}))
 elif args[:2] == ["account", "use"]:
     # `account use ID --agent house` / `account use --reset --agent house`: the main account, in `main`.
     path = os.path.join(home, "main")
@@ -195,12 +347,13 @@ elif args[:2] == ["house", "--launch-json"]:
         print(open(fail, encoding="utf-8").read(), file=sys.stderr)
         sys.exit(1)
     backup = args[args.index("--backup") + 1] if "--backup" in args else None
+    backup = backup or (args[args.index("--account") + 1] if "--account" in args else None)
     # A file named `launch_fail_<entry>` (":" as "_") makes hq refuse that entry, as it does one it can't run.
     if backup and os.path.exists(os.path.join(home, "launch_fail_" + backup.replace(":", "_"))):
         print(f"{backup} is not logged in", file=sys.stderr)
         sys.exit(4)
     harness = "codex" if backup and backup.split(":")[0] == "codex" else "claude"
-    account_id = backup or main_account()
+    account_id = backup or (static_order(kernel())[0][0] if kernel_on() else main_account())
     account = account_id.split(":")[1] if ":" in account_id else None
     model = args[args.index("-m") + 1] if "-m" in args else "haiku"
     project = args[args.index("-p") + 1] if "-p" in args else None

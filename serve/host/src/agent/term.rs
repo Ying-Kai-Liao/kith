@@ -121,6 +121,25 @@ impl Terms {
         self.spawn((backend.to_owned(), step), &command, cols, rows)
     }
 
+    /// Runs `argv` with `env` added, as given (a login command the CLI chose), or returns the one already running
+    /// under `label`. Nothing here builds or changes the command.
+    pub fn start_argv(
+        self: &Arc<Self>,
+        label: &str,
+        argv: &[String],
+        env: &[(String, String)],
+        cols: u16,
+        rows: u16,
+    ) -> Result<String> {
+        if argv.is_empty() {
+            bail!("there is no command to run");
+        }
+        let program = argv.iter().map(|a| crate::shell::quote(a)).collect::<Vec<_>>().join(" ");
+        let pairs = env.iter().map(|(k, v)| (k.as_str(), v.as_str()));
+        let command = format!("{}{program}", crate::shell::env_prefix(pairs));
+        self.spawn((label.to_owned(), Step::Login), &command, cols, rows)
+    }
+
     fn spawn(self: &Arc<Self>, key: (String, Step), command: &str, cols: u16, rows: u16) -> Result<String> {
         let mut map = self.0.locked();
         if let Some((id, _)) = map.iter().find(|(_, t)| t.key == key && t.output.locked().exit.is_none()) {
@@ -272,6 +291,26 @@ mod tests {
     fn takes_out_the_cursor_query() {
         assert_eq!(without_cursor_query(b"a\x1b[6nb").as_deref(), Some(&b"ab"[..]));
         assert_eq!(without_cursor_query(b"plain"), None);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn runs_the_given_argv_with_its_env_and_dedups() {
+        let terms = Arc::new(Terms::default());
+        let argv: Vec<String> = ["sh", "-c", "read x; echo \"$A_VAR-$1\"", "sh", "a b"].map(String::from).into();
+        let env = [("A_VAR".to_owned(), "v 1".to_owned())];
+        let id = terms.start_argv("account:test", &argv, &env, 80, 24).unwrap();
+        assert_eq!(terms.start_argv("account:test", &argv, &env, 80, 24).unwrap(), id, "one terminal per label");
+        let term = terms.get(&id).unwrap();
+        let (_, mut rx) = term.attach();
+        terms.write(&id, &B64.encode("\n")).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), async { while rx.recv().await.unwrap()["type"] != "exit" {} })
+            .await
+            .unwrap();
+        let (head, _) = term.attach();
+        let text = String::from_utf8(B64.decode(head[0]["data"].as_str().unwrap()).unwrap()).unwrap();
+        assert!(text.contains("v 1-a b"), "{text}");
+        assert!(terms.start_argv("x", &[], &[], 80, 24).is_err());
     }
 
     #[tokio::test]

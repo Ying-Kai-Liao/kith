@@ -1,10 +1,10 @@
-//! A turn whose account ran out of usage goes on with the next account of the agent's backup chain (see
-//! `agent::backups`). Only an hq agent has a chain; a turn is never moved while it runs, only started again from the
-//! top when it ended on a usage limit, and at most once per entry.
+//! A turn whose account ran out of usage goes on with the next account of the agent's chain (see `agent::backups`:
+//! the kernel's accounts for it, `kith <agent> --accounts-json`). Only an hq agent has a chain; a turn is never moved
+//! while it runs, only started again from the top when it ended on a usage limit, and at most once per entry.
 
 use super::{Actor, Done, Seg};
 use crate::agent::acp::{self, Depleted};
-use crate::agent::backups::{MAX_MOVES, Pick, RATE_LIMIT};
+use crate::agent::backups::{Backups, MAX_MOVES, Pick, RATE_LIMIT};
 use crate::store::{Entry, EntryKind};
 use tokio::sync::mpsc;
 
@@ -45,7 +45,8 @@ impl Actor {
         if chain.len() < 2 {
             return false;
         }
-        let failed = self.serving.clone().unwrap_or_else(|| chain[0].id.clone());
+        let failed =
+            self.serving.clone().unwrap_or_else(|| Backups::primary(&chain).map_or_else(String::new, |e| e.id.clone()));
         self.hub.backups.mark_out(&failed, resets_at, RATE_LIMIT);
         self.turn_tried.insert(failed.clone());
         // What the attempt already did can't be done twice: the entry is out for the next turn, this one ends here.
