@@ -42,6 +42,24 @@ pub(crate) fn call(
     method: &str,
     params: &Value,
 ) -> Result<Value> {
+    let text = |field: &str| {
+        params
+            .get(field)
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::BadParams(format!("kith-core: {method} needs {field}")))
+    };
+    // Whether a record exists needs no key and no key store, so a caller that has not opened the vault can still tell
+    // "nothing there" from "locked" without a prompt.
+    if method == "secrets.has" {
+        let found: Option<i64> = conn
+            .query_row(
+                "SELECT 1 FROM secret_records WHERE name = ?1",
+                [text("name")?],
+                |r| r.get(0),
+            )
+            .optional()?;
+        return Ok(json!({"has": found.is_some()}));
+    }
     let mut guard = slot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -49,12 +67,6 @@ pub(crate) fn call(
         *guard = Some(Envelope::os()?);
     }
     let envelope = guard.as_mut().ok_or_else(unreachable_key)?;
-    let text = |field: &str| {
-        params
-            .get(field)
-            .and_then(Value::as_str)
-            .ok_or_else(|| Error::BadParams(format!("kith-core: {method} needs {field}")))
-    };
     match method {
         "secrets.open" => {
             envelope.key(conn, true)?;

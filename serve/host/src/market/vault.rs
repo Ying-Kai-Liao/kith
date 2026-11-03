@@ -46,6 +46,8 @@ static KEYCHAIN_BUSY: AtomicBool = AtomicBool::new(false);
 pub trait Link: Send + Sync {
     /// Loads the machine's key (making it on a first use) so later calls do not wait on the key store.
     fn open(&self) -> Result<()>;
+    /// Whether the envelope holds `name`. Needs no key, so it never prompts.
+    fn has(&self, name: &str) -> Result<bool>;
     fn get(&self, name: &str) -> Result<Option<String>>;
     fn put(&self, name: &str, value: &str) -> Result<()>;
     /// The old vault's master key, or `None` when this computer never made one. Never makes one.
@@ -96,6 +98,10 @@ impl CoreLink {
 impl Link for CoreLink {
     fn open(&self) -> Result<()> {
         Self::call("secrets.open", &json!({}), DAEMON_WAIT).map(drop)
+    }
+
+    fn has(&self, name: &str) -> Result<bool> {
+        Ok(Self::call("secrets.has", &json!({"name": name}), Duration::from_secs(2))?["has"] == true)
     }
 
     fn get(&self, name: &str) -> Result<Option<String>> {
@@ -274,7 +280,12 @@ fn unavailable() -> anyhow::Error {
 
 pub fn read(store: &Store, slot: &str) -> Result<Option<String>> {
     if !store.vault.is_open() {
-        return Err(unavailable());
+        // Before `unlock` a slot with nothing behind it is simply empty (callers ask without unlocking to find out
+        // whether a feature is set up); one that has a value needs the key store, which only `unlock` may wake.
+        if store.vault.link.has(slot)? || store.kv_read(slot)?.is_some() {
+            return Err(unavailable());
+        }
+        return Ok(None);
     }
     if let Some(value) = store.vault.link.get(slot)? {
         return Ok(Some(value));
@@ -324,6 +335,10 @@ pub(crate) mod memory {
     impl Link for MemoryLink {
         fn open(&self) -> Result<()> {
             self.check()
+        }
+        fn has(&self, name: &str) -> Result<bool> {
+            self.check()?;
+            Ok(self.values.locked().contains_key(name))
         }
         fn get(&self, name: &str) -> Result<Option<String>> {
             self.check()?;
@@ -546,6 +561,7 @@ mod tests {
         store.kv_set("record", "existing secret").unwrap();
         store.vault.open.store(false, Ordering::Release);
         assert!(read(&store, "record").is_err());
+        assert_eq!(read(&store, "nothing-here").unwrap(), None);
         assert!(write(&store, "record", "replacement").is_err());
         assert_eq!(store.kv_read("record").unwrap().as_deref(), Some("existing secret"));
         assert_eq!(link.values.locked().len(), 0);

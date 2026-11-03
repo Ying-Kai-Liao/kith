@@ -17,6 +17,16 @@ pub(super) const ROWS: &[Method] = &[
     )
     .formats(J),
     row(
+        "secrets.has",
+        "Whether a secret of that name is stored. Needs no key, so it never waits on the OS key store.",
+        &[pos("name", "string", true, "The secret's name.")],
+        "json",
+        &["secrets", "has"],
+        Served::Core,
+        Stability::Experimental,
+    )
+    .formats(J),
+    row(
         "secrets.get",
         "A secret's value, or that there is none.",
         &[pos("name", "string", true, "The secret's name.")],

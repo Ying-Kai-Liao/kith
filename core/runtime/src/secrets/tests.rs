@@ -310,6 +310,14 @@ fn the_rows_open_put_and_get() {
         json!({"found": true, "value": ""})
     );
     assert_eq!(count(&c), 2);
+    assert_eq!(
+        call("secrets.has", json!({"name": "a"})).expect("has"),
+        json!({"has": true})
+    );
+    assert_eq!(
+        call("secrets.has", json!({"name": "zz"})).expect("has"),
+        json!({"has": false})
+    );
     assert!(matches!(
         call("secrets.put", json!({"name": "a"})),
         Err(crate::Error::BadParams(_))
