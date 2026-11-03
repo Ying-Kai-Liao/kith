@@ -16,6 +16,9 @@
 //!   (the caller then asks the daemon). Two embedded commands at once behave the same way: the second one finds the
 //!   lock held.
 
+// Nothing outside the tests calls it until the host and the CLI are switched to core.db (M2-9 onward).
+#[allow(dead_code)]
+mod authority;
 mod call;
 mod daemon;
 mod db;
