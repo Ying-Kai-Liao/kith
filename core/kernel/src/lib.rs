@@ -8,13 +8,21 @@ pub mod engines;
 pub mod launch;
 pub mod paths;
 pub mod secrets;
+pub mod threads;
 
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
 pub const ABI: u32 = 1;
 
 /// The modules this build has, as `kith kernel version` lists them. A verb in `kernel/lib/core-switched.txt` moves to
 /// the core only when its module is here (`acp`: the `run-once` verb, whose code lives in the kith-acp crate).
-pub const MODULES: &[&str] = &["accounts", "acp", "delegation", "engines", "paths"];
+pub const MODULES: &[&str] = &[
+    "accounts",
+    "acp",
+    "delegation",
+    "engines",
+    "paths",
+    "threads",
+];
 
 /// What `kith kernel version` prints.
 pub fn version_json() -> String {
@@ -28,7 +36,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","paths"]}"#
+            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","paths","threads"]}"#
         );
     }
 }
