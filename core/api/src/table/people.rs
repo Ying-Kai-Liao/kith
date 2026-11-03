@@ -6,6 +6,7 @@
 
 use super::build::*;
 
+// TODO: a decimal string is a stand-in; `budget` needs a real type (whole cents) before people.grant goes stable.
 const BUDGET: Param = flag(
     "budget",
     "string",

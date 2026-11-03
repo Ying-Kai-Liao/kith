@@ -108,7 +108,7 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
         // The database id goes in with the first migration, one transaction: a crash leaves no database, or a whole
         // one, never a schema without an id (which every later open would refuse as corrupt).
         let id = new_database_id()?;
-        apply(&mut conn, migrations, 0, Some(&id))?;
+        apply(&mut conn, migrations, Some(&id))?;
         schema = latest;
         marker::write(layout, &id)?;
     } else {
@@ -133,21 +133,22 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
             }
             _ => {}
         }
-        if have > latest {
-            return Err(Error::BinaryOlder(format!(
-                "kith-core: core.db is schema {have}, this kith knows up to {latest}; it won't write. Update kith."
-            )));
-        }
-        if have < latest {
+        // What decides is the set of steps, never the highest number: version order is not merge order (reserved
+        // lanes), so a step can be missing below a version the database already has.
+        let applied = applied_steps(&conn)?;
+        let missing = missing_steps(&applied, migrations)?;
+        if !missing.is_empty() {
             if mode == Mode::Embedded {
+                let list: Vec<String> = missing.iter().map(|m| m.version.to_string()).collect();
                 return Err(Error::NeedsMigration(format!(
-                    "kith-core: core.db is schema {have}, this kith is {latest}; a single command doesn't migrate. \
-                     Run `kith migrate`, or start the daemon (kith serve start)."
+                    "kith-core: core.db is missing schema step {}, this kith is at {latest}; a single command doesn't migrate. \
+                     Run `kith migrate`, or start the daemon (kith serve start).",
+                    list.join(", ")
                 )));
             }
             integrity_check(&conn)?;
             snapshot(layout, &conn, have)?;
-            apply(&mut conn, migrations, have, None)?;
+            apply(&mut conn, &missing, None)?;
             migrated_from = Some(have);
         }
         schema = latest;
@@ -348,15 +349,54 @@ fn schema_version(conn: &Connection) -> Result<i64> {
     })
 }
 
-/// Runs the steps above `from`, each in its own immediate transaction with its row in the migrations table. A new
+/// The `(version, name)` pairs the migrations table holds.
+fn applied_steps(conn: &Connection) -> Result<Vec<(i64, String)>> {
+    let corrupt = |e: rusqlite::Error| {
+        Error::Corrupt(format!(
+            "kith-core: core.db is not a kith core database ({e})"
+        ))
+    };
+    let mut q = conn
+        .prepare("SELECT version, name FROM migrations ORDER BY version")
+        .map_err(corrupt)?;
+    q.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .map_err(corrupt)?
+        .collect::<std::result::Result<_, _>>()
+        .map_err(corrupt)
+}
+
+/// The known steps the database lacks, in version order. A version this binary does not know, or a known version
+/// stored under another name, refuses: the database was written by a different history than this binary's.
+fn missing_steps(applied: &[(i64, String)], migrations: &[Migration]) -> Result<Vec<Migration>> {
+    for (version, name) in applied {
+        match migrations.iter().find(|m| m.version == *version) {
+            None => {
+                return Err(Error::BinaryOlder(format!(
+                    "kith-core: core.db has schema step {version} ({name}), which this kith does not know; it won't write. Update kith."
+                )));
+            }
+            Some(m) if m.name != name => {
+                return Err(Error::Corrupt(format!(
+                    "kith-core: core.db has schema step {version} as {name:?}, this kith has it as {:?}; not starting.",
+                    m.name
+                )));
+            }
+            Some(_) => {}
+        }
+    }
+    let mut missing: Vec<Migration> = migrations
+        .iter()
+        .filter(|m| !applied.iter().any(|(v, _)| *v == m.version))
+        .copied()
+        .collect();
+    missing.sort_by_key(|m| m.version);
+    Ok(missing)
+}
+
+/// Runs `steps` in order, each in its own immediate transaction with its row in the migrations table. A new
 /// database's `id` is written inside the first step's transaction.
-pub(crate) fn apply(
-    conn: &mut Connection,
-    migrations: &[Migration],
-    from: i64,
-    id: Option<&str>,
-) -> Result<()> {
-    for (i, m) in migrations.iter().filter(|m| m.version > from).enumerate() {
+pub(crate) fn apply(conn: &mut Connection, steps: &[Migration], id: Option<&str>) -> Result<()> {
+    for (i, m) in steps.iter().enumerate() {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(m.sql)?;
         if let (0, Some(id)) = (i, id) {

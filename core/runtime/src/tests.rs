@@ -530,7 +530,7 @@ fn the_database_id_is_written_in_the_first_migrations_transaction() {
               INSERT INTO nowhere VALUES (1);",
     }];
     let mut conn = rusqlite::Connection::open_in_memory().expect("memory");
-    crate::db::apply(&mut conn, MIGRATIONS, 0, Some("abc")).expect("apply");
+    crate::db::apply(&mut conn, MIGRATIONS, Some("abc")).expect("apply");
     let id: String = conn
         .query_row(
             "SELECT value FROM meta WHERE key = 'database_id'",
@@ -542,7 +542,7 @@ fn the_database_id_is_written_in_the_first_migrations_transaction() {
 
     // A first step that fails after its schema leaves nothing: no tables, hence no database without an id.
     let mut conn = rusqlite::Connection::open_in_memory().expect("memory");
-    assert!(crate::db::apply(&mut conn, BROKEN, 0, Some("abc")).is_err());
+    assert!(crate::db::apply(&mut conn, BROKEN, Some("abc")).is_err());
     let tables: i64 = conn
         .query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0))
         .expect("count");
@@ -743,5 +743,91 @@ fn the_m2_stub_rows_answer_not_served_so_the_caller_falls_back() {
                 other.name()
             );
         }
+    }
+}
+
+const MID: Migration = Migration {
+    version: 11,
+    name: "mid",
+    sql: "CREATE TABLE mid (x INTEGER);",
+};
+const LATE: Migration = Migration {
+    version: 20,
+    name: "late",
+    sql: "CREATE TABLE late (x INTEGER);",
+};
+const LATE_RENAMED: Migration = Migration {
+    version: 20,
+    name: "other",
+    sql: "CREATE TABLE late (x INTEGER);",
+};
+
+#[test]
+fn a_step_below_the_highest_applied_one_is_applied_and_ends_like_a_fresh_database() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    // A binary that shipped step 20 before step 11 was merged.
+    drop(start_with(&l, &[MIGRATIONS[0], LATE]).expect("{1, 20}"));
+    let all = [MIGRATIONS[0], MID, LATE];
+    // One command does not migrate, and says which step is missing.
+    let e = embedded_with(&l, &all).err().expect("missing 11");
+    assert!(
+        matches!(&e, Error::NeedsMigration(t) if t.contains("11")),
+        "{e}"
+    );
+    let c = start_with(&l, &all).expect("daemon applies 11");
+    assert_eq!(c.schema_version(), 20);
+    drop(c);
+
+    let (_t2, fresh) = machine();
+    let lf = Layout::new(&fresh);
+    drop(start_with(&lf, &all).expect("fresh"));
+    assert_eq!(schema_of(&l), schema_of(&lf));
+    let c = rusqlite::Connection::open(&l.db).expect("open");
+    let rows: i64 = c
+        .query_row("SELECT COUNT(*) FROM migrations", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(rows, 3);
+    // Now nothing is missing, so one command opens it.
+    assert!(matches!(
+        embedded_with(&l, &all).expect("embedded"),
+        Embedded::Open(_)
+    ));
+}
+
+#[test]
+fn an_unknown_applied_step_is_refused_by_the_daemon_and_by_embedded_mode() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    drop(start_with(&l, &[MIGRATIONS[0], LATE]).expect("{1, 20}"));
+    // This binary knows 1 and 11 only: 20 is somebody else's.
+    let known = [MIGRATIONS[0], MID];
+    for e in [
+        start_with(&l, &known).err().expect("daemon"),
+        embedded_with(&l, &known).err().expect("embedded"),
+    ] {
+        assert!(
+            matches!(&e, Error::BinaryOlder(t) if t.contains("Update kith")),
+            "{e}"
+        );
+    }
+    let c = rusqlite::Connection::open(&l.db).expect("open");
+    let rows: i64 = c
+        .query_row("SELECT COUNT(*) FROM migrations", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(rows, 2, "nothing was applied");
+}
+
+#[test]
+fn a_known_version_under_another_name_is_refused() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    drop(start_with(&l, &[MIGRATIONS[0], LATE]).expect("{1, 20}"));
+    let other = [MIGRATIONS[0], LATE_RENAMED];
+    for e in [
+        start_with(&l, &other).err().expect("daemon"),
+        embedded_with(&l, &other).err().expect("embedded"),
+    ] {
+        assert!(matches!(&e, Error::Corrupt(t) if t.contains("20")), "{e}");
     }
 }

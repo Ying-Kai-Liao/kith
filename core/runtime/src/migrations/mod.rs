@@ -18,9 +18,15 @@
 //! A lane's versions start at its first number and run without a gap; the list is strictly increasing and no number
 //! appears twice ([`check`], run by a test on the real list and on bad ones). A step that has shipped is never edited.
 //!
-//! A database that applied a later lane's step before an earlier lane's step was merged would skip the earlier one
-//! (`db::apply` runs the steps above the highest version it has). That cannot happen inside one release, because every
-//! lane is merged before the release migrates anything; a machine running a build in between rebuilds its core.db.
+//! Which steps a database has is decided by the set of `(version, name)` rows in its migrations table, never by its
+//! highest number: version order is not merge or ship order (lane B's 20 may ship before lane A's 13), so `db.rs`
+//! applies every known step the database lacks, in version order, and refuses a database that holds a version this
+//! binary does not know or a known version under another name.
+//!
+//! Rules for a step's author:
+//! - Its SQL may depend only on lower-numbered steps, and it changes only its own lane's tables. So no SQL foreign key
+//!   across lanes (it could be created before the table it points to); that link lives in code.
+//! - A step that has shipped is never edited or renamed.
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Migration {
@@ -174,6 +180,29 @@ pub(crate) fn check(steps: &[Migration]) -> Result<(), String> {
             return Err(format!(
                 "lane {}: version {} where {want} is next (a gap, or a lane's first step not at its first number)",
                 lane.name, m.version
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Each file's steps against the lane it sits in, so a step whose version is outside its own file's lane fails.
+#[cfg(test)]
+pub(crate) fn check_files() -> Result<(), String> {
+    // PARTS is in LANES order.
+    for (lane, steps) in LANES.iter().zip(PARTS) {
+        check_lane(lane, steps)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn check_lane(lane: &Lane, steps: &[Migration]) -> Result<(), String> {
+    for m in steps {
+        if !(lane.first..=lane.last).contains(&m.version) {
+            return Err(format!(
+                "version {} ({}) is in the {} files but outside its lane {}-{}",
+                m.version, m.name, lane.name, lane.first, lane.last
             ));
         }
     }

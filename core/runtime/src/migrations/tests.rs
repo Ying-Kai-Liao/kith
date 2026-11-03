@@ -1,4 +1,4 @@
-use super::{LANES, MIGRATIONS, Migration, check};
+use super::{LANES, Lane, MIGRATIONS, Migration, check, check_files, check_lane};
 
 const fn step(version: i64, name: &'static str) -> Migration {
     Migration {
@@ -11,6 +11,7 @@ const fn step(version: i64, name: &'static str) -> Migration {
 #[test]
 fn the_real_list_is_a_valid_history() {
     check(MIGRATIONS).expect("MIGRATIONS");
+    check_files().expect("each file in its lane");
     assert_eq!(MIGRATIONS[0].version, 1);
     assert_eq!(MIGRATIONS[0].name, "core");
 }
@@ -71,4 +72,16 @@ fn an_out_of_order_version_is_refused() {
 #[test]
 fn a_version_outside_every_lane_is_refused() {
     assert!(check(&[step(0, "zero")]).is_err());
+}
+
+#[test]
+fn a_step_outside_its_files_lane_is_refused() {
+    let lane = Lane {
+        name: "authority",
+        first: 10,
+        last: 19,
+    };
+    check_lane(&lane, &[step(10, "a"), step(11, "b")]).expect("inside");
+    let e = check_lane(&lane, &[step(10, "a"), step(20, "b")]).expect_err("outside");
+    assert!(e.contains("outside its lane"), "{e}");
 }
