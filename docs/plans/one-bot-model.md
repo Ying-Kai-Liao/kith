@@ -115,9 +115,11 @@ and `--json` first and the app calling it after.
 - [ ] **M1. Holder for terminals, opt-in.** `kith <agent> --held`, still on today's claim files (no `core.db` claims
   yet). Gets: terminals that survive closing the window, attach from anywhere, detach and come back. Test whether a
   launchd-started holder reaches the external disk here.
-  Also: `--held` and `--direct` take the conversation's writer lock (section 4 of runtime-design.md); `--direct`
-  holds it for its whole life, whether or not a core answers. Check: a `--direct` run and a `--held` run on one
-  conversation, the second gets busy.
+  Also: `--held` and `--direct` take the conversation's writer lock (section 4 of runtime-design.md) in addition to
+  today's claim file, because the host's headless turns still guard only by claim files until M3; `--direct` drops
+  the claim file only at M3, once headless turns take the lock. `--direct` holds the lock for its whole life,
+  whether or not a core answers. Check: a `--direct` run and a `--held` run on one conversation, the second gets
+  busy; an app turn on a conversation a `--direct` run holds is still blocked by the claim file.
 - [ ] **M2. Authority into the core** (absorbs A5, one secret store). People, grants, run tokens on the run socket
   (ancestry kept), cards, revoke and suspended rows, the sync lease, doors and their sweep, the resource gate; the
   secrets in the envelope (design 9b): one master key per machine readable only by the signed daemon, XChaCha20-Poly1305 records in core.db; the host vault and kith-auth's per-item writes move into it (the Jev key read once); `auth.json` replaced by a
@@ -137,8 +139,11 @@ and `--json` first and the app calling it after.
   claims deleted. Gets: the core holds every conversation, any account resumes. `thread-writers` re-runs.
   Also: import from `live/terminal/*`, and the delete list (`terminal/claim.rs`, `registry.rs`, `agent/bot/turn` and
   `queue`, the claim files, `kith-kernel`'s `threads`). The writer lock stays (the claim files go, the lock files
-  never do); the writer-lock model's round 4 (holder crash ± stub, leaked fd, revoke kill, park and wake,
-  take-over) runs first. Freeze the difftest cases as golden first.
+  never do): warm ACP turns take the writer lock per turn (the holder takes it at `claimed -> running`, the stub
+  holds it, released at turn end), built before the claim files are deleted. Check: a turn on a conversation held
+  by `--direct` parks as busy and runs after the `--direct` run exits. The writer-lock model's round 4 (holder
+  crash ± stub, leaked fd, revoke kill, park and wake, take-over) runs first. Freeze the difftest cases as golden
+  first.
 - [ ] **M4. Schedules** (was A6). One dialect (cron dialect decision Q1 in core-design.md), routines exported: `kith-sched`
   and the host's routines as one scheduler, `kith schedule ... --json`.
   Also: import of `kith-sched` jobs and the host's routines (idempotent, `--dry-run`, snapshot first); freeze the
