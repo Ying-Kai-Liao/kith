@@ -322,5 +322,6 @@ pub fn from_process(kernel: &Path) -> Paths {
     paths(&process_home(), kernel, &process_env)
 }
 
-#[cfg(test)]
+// The tests build POSIX layouts and symlinks; the Windows job runs the rest of the crate.
+#[cfg(all(test, unix))]
 mod tests;

@@ -116,7 +116,7 @@ for who in guest bot-3f9a1c2e; do
   expect "$who: nothing of <machine>/run is readable or writable but its socket" "$(q "$S" "not any('/run/t' in a or a.rstrip('/').endswith('/run') for a in aw + fs['allowRead'])")" True
   expect "$who: shell commands in the sandbox run without asking (a PreToolUse Bash hook allows)" "$(q "$S" "any(h.get('matcher') == 'Bash' and 'allow' in h['hooks'][0]['command'] for h in s['hooks']['PreToolUse'])")" True
   for root in "$T/linked state" "$T/real state"; do
-    for f in index serve secrets browsers bridge room-ledger; do
+    for f in index serve secrets browsers bridge room-ledger core; do
       expect "$who: denyRead $root/$f" "$(q "$S" "'$root/$f' in dr")" True
     done
     expect "$who: the memory approval key is unreadable ($root)" "$(q "$S" "any('$root/secrets/memory-approvals.key'.startswith(d.rstrip('/') + '/') for d in dr if d != '/') and any(r.startswith('Read(') and r.endswith('secrets/**)') for r in s['permissions']['deny'])")" True

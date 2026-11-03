@@ -65,6 +65,9 @@ jobs:
             kernel:
               - 'kernel/**'
               - 'serve/contract/kernel/**'
+              # The core boundary check reads kith-core's sources and every Cargo.toml.
+              - 'core/runtime/**'
+              - '**/Cargo.toml'
               - '.github/workflows/ci.yml'
             licenses:
               - '**/Cargo.lock'
@@ -278,6 +281,10 @@ jobs:
         run: kernel/tests/kith-guest-door-check
       - name: Load check
         run: kernel/tests/kith-load-check
+      - name: Core boundary check (kith-core stays sealed)
+        run: kernel/tests/kith-core-boundary-check
+      - name: Core boundary self-test (each rule fails on a deliberate violation)
+        run: kernel/tests/kith-core-boundary-check --selftest
 
   # Exits 0 when every row of verification/threads/checks.tsv matches its expected pass/fail, so green means no
   # change from the recorded baseline (some rows are known findings on purpose).
@@ -496,9 +503,33 @@ jobs:
         with:
           tool: cargo-nextest@0.9.100
       - name: Tests
-        run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel
+        run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel -p kith-core
       - name: Doctests
-        run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel
+        run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel -p kith-core
+
+  # The crates that must also work on Windows: kith-kernel (its Unix-only modules are cfg-gated: threads) and kith-core
+  # (core.lock via LockFileEx, owner-only access lists via icacls). Extended for kith-holder when that lands.
+  windows:
+    needs: changes
+    if: needs.changes.outputs.host_core == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+        working-directory: serve/host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: host-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Tests
+        run: cargo test --locked -p kith-kernel -p kith-core
 
   cloud:
     needs: changes
@@ -787,7 +818,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() }}
-    needs: [changes, kernel, host, host-build, host-test, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, host-build, host-test, host-e2e, host-crates, windows, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

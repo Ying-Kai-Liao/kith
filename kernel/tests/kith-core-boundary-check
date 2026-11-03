@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""kith-core-boundary-check — the core stays sealed (docs/plans/runtime-design.md section 9b rule 6, I14).
+
+Fails when:
+  1. kith-core's public surface grows past its entry points: a `pub` item or a field of a `pub` struct in
+     core/runtime/src that is not on the list below (a crude source scan, on purpose: it needs no nightly rustdoc).
+  2. a crate other than the daemon's wiring and the CLI entry point (one crate today: serve/host) lists kith-core
+     as a dependency, or Rust code outside serve/host/src/main.rs names `kith_core`.
+  3. "core.db" (or its sibling file names) appears outside core/runtime: Rust, the Python kernel, the apps. Docs and the
+     guard/sandbox lists (which name the folder `core`, not the file) are exempt.
+
+  kernel/tests/kith-core-boundary-check              checks this repo; exit 1 on a violation
+  kernel/tests/kith-core-boundary-check --selftest   proves each rule can fail, on a copy with a deliberate violation
+"""
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(HERE))
+
+# (file, item) of every `pub` thing kith-core exports. M0b adds the method table's entry point here, in review.
+PUBLIC = {
+    ("lib.rs", "Embedded"), ("lib.rs", "Migrated"), ("lib.rs", "Via"),
+    ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "through_core"),
+    ("lib.rs", "use:db::Core"), ("lib.rs", "use:error::Error"),
+    ("lib.rs", "field:from"), ("lib.rs", "field:to"),
+    ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
+    ("error.rs", "Error"),
+}
+# The crates that may depend on kith-core: the daemon's wiring and the CLI entry point are the one host crate.
+DEPENDENTS = {"serve/host/Cargo.toml"}
+# Rust files outside core/runtime that may name kith_core.
+RUST_USERS = {"serve/host/src/main.rs"}
+# Files that may say "core.db": docs, this check, and the protected-paths list (runtime-design 9b rules 1 and 2).
+EXEMPT_NAME = ("kernel/tests/kith-core-boundary-check", "kernel/lib/kith_guard.py")
+NAMES = re.compile(r"core\.db|core\.lock|core\.marker")
+SKIP_DIRS = {".git", "target", "node_modules", ".target-core", "worktrees", "build", ".build", "DerivedData"}
+
+ITEM = re.compile(r"^\s*pub\s+(?:unsafe\s+|async\s+|const\s+)*(fn|struct|enum|trait|const|static|type|mod|use|union)\s+([A-Za-z0-9_:]+)")
+FIELD = re.compile(r"^    pub\s+([a-z_][a-z0-9_]*)\s*:")
+STRUCT = re.compile(r"^\s*(pub(?:\([a-z]+\))?)\s+struct\s")
+
+
+def public_items(root):
+    """{(file, item)} for the non-test sources of core/runtime."""
+    src = os.path.join(root, "core/runtime/src")
+    found = set()
+    for name in sorted(os.listdir(src)):
+        if not name.endswith(".rs") or name == "tests.rs":
+            continue
+        pub_struct = False
+        for line in open(os.path.join(src, name), encoding="utf-8"):
+            s = STRUCT.match(line)
+            if s:
+                pub_struct = s.group(1) == "pub"
+            m = ITEM.match(line)
+            if m:
+                kind, item = m.groups()
+                found.add((name, "use:" + item if kind == "use" else item))
+                continue
+            f = FIELD.match(line)
+            if f and pub_struct:
+                found.add((name, "field:" + f.group(1)))
+    return found
+
+
+def check_surface(root):
+    extra = sorted(public_items(root) - PUBLIC)
+    return ["kith-core exposes %s in %s: seal it (pub(crate)) or list it in PUBLIC after review" % (i, f) for f, i in extra]
+
+
+def files(root, suffixes=None):
+    for d, dirs, names in os.walk(root):
+        dirs[:] = [x for x in dirs if x not in SKIP_DIRS]
+        for n in names:
+            if suffixes is None or n.endswith(suffixes):
+                yield os.path.relpath(os.path.join(d, n), root)
+
+
+def check_dependents(root):
+    bad = []
+    dep = re.compile(r"^\s*kith-core\s*=|package\s*=\s*\"kith-core\"")
+    for rel in files(root, "Cargo.toml"):
+        if rel == "core/runtime/Cargo.toml":
+            continue
+        for line in open(os.path.join(root, rel), encoding="utf-8"):
+            if dep.search(line) and rel not in DEPENDENTS:
+                bad.append("%s depends on kith-core; only %s may" % (rel, ", ".join(sorted(DEPENDENTS))))
+                break
+    for rel in files(root, ".rs"):
+        if rel.startswith("core/runtime/") or rel in RUST_USERS:
+            continue
+        if re.search(r"\bkith_core\b", open(os.path.join(root, rel), encoding="utf-8", errors="replace").read()):
+            bad.append("%s names kith_core; only %s may" % (rel, ", ".join(sorted(RUST_USERS))))
+    return bad
+
+
+def check_names(root):
+    bad = []
+    for rel in files(root):
+        if rel.startswith("core/runtime/") or rel in EXEMPT_NAME or rel.startswith("docs/") or rel.endswith(".md"):
+            continue
+        path = os.path.join(root, rel)
+        try:
+            if os.path.getsize(path) > 2_000_000 or os.path.islink(path):
+                continue
+            text = open(path, encoding="utf-8").read()
+        except (UnicodeDecodeError, OSError):
+            continue
+        m = NAMES.search(text)
+        if m:
+            bad.append("%s mentions %s; only core/runtime may know where core.db is" % (rel, m.group(0)))
+    return bad
+
+
+def check(root):
+    return check_surface(root) + check_dependents(root) + check_names(root)
+
+
+def selftest():
+    """Each rule must fail on a deliberate violation, and the clean copy must pass."""
+    ok = True
+    tmp = tempfile.mkdtemp(prefix="kith-core-boundary.")
+    try:
+        copy = os.path.join(tmp, "repo")
+        for rel in list(files(ROOT, ("Cargo.toml", ".rs", ".py"))):
+            if rel.startswith(("apps/", "serve/cloud/", "serve/host/target/")):
+                continue
+            dest = os.path.join(copy, rel)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copy(os.path.join(ROOT, rel), dest)
+        clean = check(copy)
+        print("%s  clean copy passes" % ("ok  " if not clean else "FAIL"))
+        ok &= not clean
+
+        def violate(label, edit, want):
+            nonlocal ok
+            work = os.path.join(tmp, label)
+            shutil.copytree(copy, work)
+            edit(work)
+            got = check(work)
+            hit = any(want in g for g in got)
+            print("%s  %s fails: %s" % ("ok  " if hit else "FAIL", label, got[:1]))
+            ok &= hit
+
+        def append(rel, text):
+            def f(work):
+                os.makedirs(os.path.dirname(os.path.join(work, rel)), exist_ok=True)
+                with open(os.path.join(work, rel), "a", encoding="utf-8") as fh:
+                    fh.write(text)
+            return f
+
+        violate("a pub fn", append("core/runtime/src/db.rs", "\npub fn open_database_directly() {}\n"), "open_database_directly")
+        violate("a pub struct field", append("core/runtime/src/lib.rs", "\npub struct Leak {\n    pub conn: u8,\n}\n"), "Leak")
+        violate("another crate depends on it", append("serve/host/crates/wire/Cargo.toml", "\nkith-core = { path = \"../../../../core/runtime\" }\n"),
+                "crates/wire/Cargo.toml depends on kith-core")
+        violate("rust names kith_core", append("serve/host/src/api/mod.rs", "\nuse kith_core::Core;\n"), "names kith_core")
+        violate("core.db in rust", append("serve/host/src/hub.rs", "\n// opens core.db directly\n"), "hub.rs mentions core.db")
+        violate("core.db in python", append("kernel/lib/kith_paths.py", "\nDB = 'core.db'\n"), "kith_paths.py mentions core.db")
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return ok
+
+
+def main():
+    if "--selftest" in sys.argv:
+        sys.exit(0 if selftest() else 1)
+    problems = check(ROOT)
+    for p in problems:
+        print("FAIL " + p)
+    if not problems:
+        print("ok   kith-core is sealed: %d public items, one dependent crate, core.db named only inside core/runtime"
+              % len(public_items(ROOT)))
+    sys.exit(1 if problems else 0)
+
+
+if __name__ == "__main__":
+    main()

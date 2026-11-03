@@ -863,6 +863,14 @@ fn print_engines(json: bool, action: Option<EnginesAction>) -> Result<()> {
     Ok(())
 }
 
+/// Runs a verb the Rust core already answers inside an embedded kith-core (its lock, its checks, a new generation); the
+/// verb runs bare when no core opens here (a daemon holds the lock, or this is a first setup). M0b replaces this with
+/// a call through the method table.
+fn through_core<T>(verb: impl FnOnce() -> T) -> T {
+    let p = kernel::folders(&kith_kernel::paths::process_home());
+    kith_core::through_core(&p, verb).0
+}
+
 /// `kith paths`: the folders by the `kith-kernel` crate's rules, in the form `kith_paths.py` prints.
 fn print_paths(json: bool, sh: bool, kernel: Option<&std::path::Path>) {
     let home = kith_kernel::paths::process_home();
@@ -1069,7 +1077,7 @@ async fn main() -> Result<()> {
         }
         Sub::Memory { cmd } => std::process::exit(hqmem::run(cmd)?),
         Sub::Paths { json, sh, kernel } => {
-            print_paths(json, sh, kernel.as_deref());
+            through_core(|| print_paths(json, sh, kernel.as_deref()));
             Ok(())
         }
         Sub::Kernel { cmd } => {
@@ -1091,79 +1099,81 @@ async fn main() -> Result<()> {
             if let KernelCmd::Threads { kernel, args } = cmd {
                 std::process::exit(threads_cmd::run(kernel, &args));
             }
-            match cmd {
-                KernelCmd::Version => println!("{}", kith_kernel::version_json()),
-                KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
-                KernelCmd::Engines { json, action } => print_engines(json, action)?,
-                KernelCmd::Launch {
-                    what: LaunchCmd::Prompt { agent, person, project, pkg, kernel, cwd, date, json },
-                } => {
-                    print_launch_prompt(LaunchPromptArgs { agent, person, project, pkg, kernel, cwd, date, json })?;
-                }
-                KernelCmd::Launch {
-                    what:
-                        LaunchCmd::Settings {
-                            agent,
-                            person,
-                            mode,
-                            pkg,
-                            snapshot,
-                            kernel,
-                            project,
-                            cwd,
-                            harness,
-                            kith_bin,
-                            plugins_json,
-                            terminal,
-                            api_helper,
-                            once_id,
-                            resolve,
-                            json: _,
-                        },
-                } => launch_cmd::print_settings(&launch_cmd::Args {
-                    agent,
-                    person,
-                    mode,
-                    pkg,
-                    snapshot,
-                    kernel,
-                    project,
-                    cwd,
-                    harness,
-                    kith_bin,
-                    plugins_json,
-                    terminal,
-                    api_helper,
-                    once_id,
-                    resolve,
-                    granted: None,
-                })?,
-                KernelCmd::Launch {
-                    what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
-                } => {
-                    launch_cmd::print_mcp(&launch_cmd::Args {
+            through_core(|| -> Result<()> {
+                match cmd {
+                    KernelCmd::Version => println!("{}", kith_kernel::version_json()),
+                    KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
+                    KernelCmd::Engines { json, action } => print_engines(json, action)?,
+                    KernelCmd::Launch {
+                        what: LaunchCmd::Prompt { agent, person, project, pkg, kernel, cwd, date, json },
+                    } => {
+                        print_launch_prompt(LaunchPromptArgs { agent, person, project, pkg, kernel, cwd, date, json })?;
+                    }
+                    KernelCmd::Launch {
+                        what:
+                            LaunchCmd::Settings {
+                                agent,
+                                person,
+                                mode,
+                                pkg,
+                                snapshot,
+                                kernel,
+                                project,
+                                cwd,
+                                harness,
+                                kith_bin,
+                                plugins_json,
+                                terminal,
+                                api_helper,
+                                once_id,
+                                resolve,
+                                json: _,
+                            },
+                    } => launch_cmd::print_settings(&launch_cmd::Args {
                         agent,
                         person,
+                        mode,
                         pkg,
                         snapshot,
                         kernel,
+                        project,
+                        cwd,
+                        harness,
+                        kith_bin,
+                        plugins_json,
+                        terminal,
+                        api_helper,
+                        once_id,
                         resolve,
-                        granted,
-                        ..launch_cmd::Args::default()
-                    })?;
+                        granted: None,
+                    })?,
+                    KernelCmd::Launch {
+                        what: LaunchCmd::Mcp { agent, person, pkg, snapshot, kernel, granted, resolve, json: _ },
+                    } => {
+                        launch_cmd::print_mcp(&launch_cmd::Args {
+                            agent,
+                            person,
+                            pkg,
+                            snapshot,
+                            kernel,
+                            resolve,
+                            granted,
+                            ..launch_cmd::Args::default()
+                        })?;
+                    }
+                    KernelCmd::Launch { what: LaunchCmd::Whole(args) } => {
+                        std::process::exit(launch_cmd::print_whole(&args));
+                    }
+                    KernelCmd::RunOnce { .. }
+                    | KernelCmd::Accounts { .. }
+                    | KernelCmd::Delegation { .. }
+                    | KernelCmd::Threads { .. }
+                    | KernelCmd::Secrets { .. } => {
+                        unreachable!("handled above")
+                    }
                 }
-                KernelCmd::Launch { what: LaunchCmd::Whole(args) } => {
-                    std::process::exit(launch_cmd::print_whole(&args));
-                }
-                KernelCmd::RunOnce { .. }
-                | KernelCmd::Accounts { .. }
-                | KernelCmd::Delegation { .. }
-                | KernelCmd::Threads { .. }
-                | KernelCmd::Secrets { .. } => {
-                    unreachable!("handled above")
-                }
-            }
-            Ok(())
+                Ok(())
+            })
         }
         Sub::Node => agent::node::add().await,
         Sub::Npm { args } => std::process::exit(agent::node::npm(&args).await?),

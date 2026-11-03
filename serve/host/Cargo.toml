@@ -32,6 +32,8 @@ chrono = "0.4.45"
 chrono-tz = "0.10.4"
 kith-acp = { path = "../../core/acp" }
 kith-kernel = { path = "../../core/kernel" }
+# The sealed core: only the daemon wiring and this entry point may depend on it (kernel/tests/kith-core-boundary-check).
+kith-core = { path = "../../core/runtime" }
 kith-mem = { path = "crates/memory" }
 kith-guest = { path = "crates/guest" }
 kith-wire = { path = "crates/wire" }

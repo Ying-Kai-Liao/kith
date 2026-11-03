@@ -27,6 +27,8 @@ check() { # CRATE BANNED-REGEX WHAT
 }
 
 check kith-kernel "$BANNED"
+# kith-core (the sealed core runtime) links the kernel, so it keeps the kernel's rules: sync, no server stack.
+check kith-core "$BANNED"
 # kith-acp is the one async crate (tokio is its job), but no server stack, HTTP client, UI or host-only crate.
 check kith-acp 'axum|tower|tower-http|reqwest|ratatui|crossterm|kith-wire|kith-mem|kith-guest|kith-serve'
 exit $fail

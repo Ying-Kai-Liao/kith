@@ -8,16 +8,17 @@ use std::path::Path;
 use crate::paths::realpath;
 
 /// Under the Kith state folder and the machine folder: whole folders that hold logins, tokens and every audience's index.
-const SECRET_DIRS: [&str; 6] = [
+const SECRET_DIRS: [&str; 7] = [
     "secrets",
     "serve",
     "browsers",
     "bridge",
     "index",
     "room-ledger",
+    "core",
 ];
 /// The same places as permission-rule patterns (Read/Edit), plus the database files that sit among them.
-pub const SECRET_RULES: [&str; 9] = [
+pub const SECRET_RULES: [&str; 10] = [
     "secrets/**",
     "serve/token",
     "serve/identity.json",
@@ -27,6 +28,7 @@ pub const SECRET_RULES: [&str; 9] = [
     "bridge/**",
     "index/**",
     "memory.db*",
+    "core/**",
 ];
 const IN_FOLDER_TREES: [&str; 4] = [".claude", ".vscode", ".idea", ".git/hooks"];
 const IN_FOLDER_FILES: [&str; 6] = [
@@ -353,6 +355,7 @@ impl Places {
         }
         for m in &self.machine {
             trees.push(format!("{m}/run/once"));
+            trees.push(format!("{m}/core"));
         }
         for a in ABS_TREES {
             trees.extend(both(a));
