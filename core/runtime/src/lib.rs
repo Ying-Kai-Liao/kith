@@ -25,6 +25,7 @@ mod call;
 mod daemon;
 mod db;
 mod error;
+mod gate;
 mod holder_link;
 mod layout;
 mod lock;
@@ -38,6 +39,9 @@ mod runsock;
 // Held terminals start on Unix only for now; elsewhere `terminal.open` answers `direct` and most of it is unused.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod terminal;
+// Nothing calls the envelope yet: the host vault and kith-auth move onto it at M2-7 and M2-18.
+#[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
+mod secrets;
 
 #[cfg(test)]
 mod runs_props;

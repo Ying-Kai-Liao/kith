@@ -526,6 +526,7 @@ dependencies = [
  "cipher 0.5.2",
  "cpufeatures 0.3.1",
  "rand_core 0.10.1",
+ "zeroize",
 ]
 
 [[package]]
@@ -538,6 +539,7 @@ dependencies = [
  "chacha20",
  "cipher 0.5.2",
  "poly1305",
+ "zeroize",
 ]
 
 [[package]]
@@ -2128,6 +2130,7 @@ dependencies = [
 name = "kith-core"
 version = "0.1.0"
 dependencies = [
+ "chacha20poly1305",
  "fs2",
  "getrandom 0.4.3",
  "kith-api",
@@ -2138,6 +2141,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "zeroize",
 ]
 
 [[package]]

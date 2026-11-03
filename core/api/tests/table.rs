@@ -427,6 +427,41 @@ fn the_m2_stubs_claim_no_command_line_python_serves_today() {
 }
 
 #[test]
+fn the_gate_rows_are_experimental_owner_only_unreleased_and_parse() {
+    let released = read_json(openrpc::RELEASED_PATH);
+    let released: BTreeSet<&str> = released["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    for name in [
+        "gate.list",
+        "gate.take",
+        "gate.release",
+        "gate.park",
+        "gate.unpark",
+    ] {
+        let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
+        assert_eq!(m.stability, Stability::Experimental, "{name}");
+        assert_eq!(m.principals, &[Principal::Owner], "{name}");
+        assert!(!released.contains(name), "{name} is in released.json");
+    }
+    let take = parse_argv(&[
+        "gate",
+        "take",
+        "run1",
+        "--max",
+        "2",
+        "--invitee",
+        "--pid",
+        "42",
+    ])
+    .unwrap();
+    assert_eq!(take.method.name, "gate.take");
+}
+
+#[test]
 fn the_row_order_is_the_order_of_the_families() {
     // The generated document follows this order; the split into area files must not move a row.
     let names: Vec<&str> = METHODS.iter().map(|m| m.name).collect();
