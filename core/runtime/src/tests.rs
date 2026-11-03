@@ -69,7 +69,10 @@ fn a_first_setup_creates_the_folder_the_db_and_the_marker_owner_only() {
     let l = Layout::new(&m);
     let c = open(&l);
     assert!(l.db.is_file() && l.lock.is_file() && l.marker.is_file());
-    assert_eq!(c.schema_version(), MIGRATIONS.last().expect("steps").version);
+    assert_eq!(
+        c.schema_version(),
+        MIGRATIONS.last().expect("steps").version
+    );
     assert_eq!(
         l.dir,
         m.join("core"),
