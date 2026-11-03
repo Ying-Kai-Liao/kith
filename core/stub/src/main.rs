@@ -63,11 +63,17 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
             Some("--lock-dir") => lock_dir = Some(args.next().ok_or("--lock-dir needs a value")?),
             Some("--key") => {
                 key = Some(
-                    args.next().ok_or("--key needs a value")?.into_string().map_err(|_| "--key is not valid UTF-8")?,
+                    args.next()
+                        .ok_or("--key needs a value")?
+                        .into_string()
+                        .map_err(|_| "--key is not valid UTF-8")?,
                 )
             }
             Some("--status-fd") => {
-                let fd: i32 = args.next().and_then(|v| v.to_str()?.parse().ok()).ok_or("--status-fd needs a number")?;
+                let fd: i32 = args
+                    .next()
+                    .and_then(|v| v.to_str()?.parse().ok())
+                    .ok_or("--status-fd needs a number")?;
                 if fd < 3 || cfg!(windows) {
                     return Err("--status-fd needs an fd of 3 or more (Unix only)".into());
                 }
@@ -94,9 +100,17 @@ fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Args, String> {
 /// Same source as core/runtime's `process_start` (this crate links no kith crate): `ps`, squeezed to single spaces.
 /// Empty where there is no `ps` (Windows has no start time there yet either).
 fn process_start(pid: u32) -> String {
-    let out =
-        std::process::Command::new("ps").env("LC_ALL", "C").args(["-o", "lstart=", "-p", &pid.to_string()]).output();
-    out.map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default()
+    let out = std::process::Command::new("ps")
+        .env("LC_ALL", "C")
+        .args(["-o", "lstart=", "-p", &pid.to_string()])
+        .output();
+    out.map(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    })
+    .unwrap_or_default()
 }
 
 /// Tells the starter, on the status fd, whether the lock is ours; the fd is closed here so the engine never has it.
@@ -128,7 +142,8 @@ fn write_holder(lock: &Lock) -> std::io::Result<()> {
     open.write(true).create(true).truncate(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut open, 0o600);
-    open.open(&tmp)?.write_all(format!("pid={}\nstarted={started}\n", std::process::id()).as_bytes())?;
+    open.open(&tmp)?
+        .write_all(format!("pid={}\nstarted={started}\n", std::process::id()).as_bytes())?;
     // Rename, so a reader never sees half a record.
     std::fs::rename(&tmp, &path)
 }
@@ -137,7 +152,9 @@ fn main() -> ExitCode {
     let args = match parse(std::env::args_os().skip(1)) {
         Ok(a) => a,
         Err(why) => {
-            eprintln!("kith-stub: {why}\nusage: kith-stub --lock-dir <folder> --key <key> -- <engine argv...>");
+            eprintln!(
+                "kith-stub: {why}\nusage: kith-stub --lock-dir <folder> --key <key> -- <engine argv...>"
+            );
             return ExitCode::from(USAGE);
         }
     };
@@ -145,7 +162,10 @@ fn main() -> ExitCode {
         Ok(Taken::Held(l)) => l,
         Ok(Taken::Busy) => {
             report(args.status_fd, "busy");
-            eprintln!("kith-stub: busy: another session holds the lock for {:?}", args.key);
+            eprintln!(
+                "kith-stub: busy: another session holds the lock for {:?}",
+                args.key
+            );
             return ExitCode::from(BUSY);
         }
         Err(e) => {
