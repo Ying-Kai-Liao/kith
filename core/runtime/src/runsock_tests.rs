@@ -17,7 +17,7 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Barrier, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
@@ -457,6 +457,7 @@ fn the_run_socket_is_owner_only_and_leaves_with_the_server() {
 #[test]
 fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
     use crate::daemon::{Config, Daemon};
+    use std::sync::atomic::{AtomicU64, Ordering};
     let (_t, m) = machine();
     let p = paths(&m);
     let d = Daemon::spawn_with(
@@ -488,9 +489,12 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
     ));
 
     let ask = |tree: &Tree, request: Value| {
+        // One file per ask: `Instant::now().elapsed()` is a few nanoseconds every time, so it named the same file twice
+        // and a client could find the go signal of the ask before and run before its shell was bound.
+        static ASKS: AtomicU64 = AtomicU64::new(0);
         let go = _t
             .path()
-            .join(format!("go-{}", Instant::now().elapsed().as_nanos()));
+            .join(format!("go-{}", ASKS.fetch_add(1, Ordering::SeqCst)));
         let mut sh = shell(&sock, tree, &request, &go);
         let bound = owner("run.bind", &json!({"runId": run_id, "pid": sh.id()}));
         assert_eq!(bound["bound"], true);
