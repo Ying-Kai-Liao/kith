@@ -851,10 +851,10 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
         ),
         Reached::Refused(_)
     ));
-    // the access requests are M2-3's: still not answered here
+    // the access requests (M2-3) are answered here too: no such request is a refusal of the rules, not "not served"
     assert!(matches!(
-        read(&p, "people.approve", &json!({"id": "r1"})),
-        Reached::Refused(Error::NotServed(_))
+        read(&p, "people.approve", &view(json!({"id": "r1"}))),
+        Reached::Refused(Error::Refused(_))
     ));
     let rows: i64 = conn
         .query_row("SELECT count(*) FROM memberships", [], |r| r.get(0))

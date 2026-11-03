@@ -364,7 +364,15 @@ fn the_m2_stubs_are_experimental_owner_only_and_unreleased() {
     for name in M2_STUBS {
         let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
         assert_eq!(m.stability, Stability::Experimental, "{name}");
-        let core = ["people.grant", "people.revoke", "people.list"].contains(name);
+        let core = [
+            "people.grant",
+            "people.revoke",
+            "people.list",
+            "people.requests",
+            "people.approve",
+            "people.deny",
+        ]
+        .contains(name);
         assert_eq!(
             m.served,
             if core { Served::Core } else { Served::Kernel },
@@ -418,8 +426,8 @@ fn the_m2_stubs_parse_from_their_command_lines() {
         ),
         ("people revoke ann echo", "people.revoke"),
         ("people access --agent echo --json", "people.list"),
-        ("people requests --json", "people.requests"),
-        ("people approve r1", "people.approve"),
+        ("people requests --all --json", "people.requests"),
+        ("people approve r1 --trusted", "people.approve"),
         ("people deny r1", "people.deny"),
         ("cards ls --json", "cards.list"),
         ("cards show c1", "cards.show"),

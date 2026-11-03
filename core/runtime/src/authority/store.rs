@@ -17,15 +17,49 @@ pub(super) fn run<T>(
     c: &Ctx,
     f: impl FnOnce(&mut Value) -> std::result::Result<T, Die>,
 ) -> Result<T> {
+    run_tx(core, c, |_, a| f(a).map_err(|d| refusal(&d)))
+}
+
+/// [`run`] for a change that also writes a table of its own (the access requests, M2-3): `f` gets the open transaction
+/// as well, so its rows and the tables of auth.json commit together or not at all. An `Err` drops the transaction.
+pub(super) fn run_tx<T>(
+    core: &mut Core,
+    c: &Ctx,
+    f: impl FnOnce(&Connection, &mut Value) -> Result<T>,
+) -> Result<T> {
     let tx = core.claim_tx()?;
-    let before = read_tables(&tx, &mut || {})?;
+    let said = change(&tx, c, f)?;
+    tx.commit()?;
+    Ok(said)
+}
+
+/// The body of [`run_tx`], over a transaction somebody else began (a test begins one on a second connection).
+fn change<T>(
+    tx: &Connection,
+    c: &Ctx,
+    f: impl FnOnce(&Connection, &mut Value) -> Result<T>,
+) -> Result<T> {
+    let before = read_tables(tx, &mut || {})?;
     let mut after = before.clone();
     write::tables(&mut after);
-    let said = f(&mut after).map_err(|d| refusal(&d))?;
+    let said = f(tx, &mut after)?;
     write::prune_invites(&mut after, c);
     let mut before = before;
     write::tables(&mut before);
-    store(&tx, &before, &after)?;
+    store(tx, &before, &after)?;
+    Ok(said)
+}
+
+/// [`run_tx`] on a connection of its own: what two owner devices approving at once look like to SQLite, which
+/// serialises them with `BEGIN IMMEDIATE`.
+#[cfg(test)]
+pub(super) fn run_conn<T>(
+    conn: &mut Connection,
+    c: &Ctx,
+    f: impl FnOnce(&Connection, &mut Value) -> Result<T>,
+) -> Result<T> {
+    let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    let said = change(&tx, c, f)?;
     tx.commit()?;
     Ok(said)
 }

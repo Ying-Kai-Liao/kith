@@ -5076,40 +5076,41 @@
     },
     {
       "name": "people.requests",
-      "summary": "The access requests waiting for the owner.",
-      "params": [],
-      "result": {
-        "name": "result",
-        "schema": {}
-      },
-      "x-kith-principals": [
-        "owner"
-      ],
-      "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
-      "x-kith-cli": {
-        "path": [
-          "people",
-          "requests"
-        ],
-        "aliases": [],
-        "formats": [
-          "--json"
-        ],
-        "requires": [],
-        "args": {}
-      }
-    },
-    {
-      "name": "people.approve",
-      "summary": "Approve an access request.",
+      "summary": "The access requests waiting for the owner: a person asking for agents, with the preset and mode they asked for.",
       "params": [
         {
-          "name": "id",
-          "summary": "The request.",
-          "required": true,
+          "name": "all",
+          "summary": "Also the ones decided or expired.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
           "schema": {
             "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         }
       ],
@@ -5121,7 +5122,96 @@
         "owner"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "requests"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "all": {
+            "kind": "switch",
+            "spellings": [
+              "--all"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.approve",
+      "summary": "Approve an access request: the person gets the agents, preset and mode they asked for, and no more.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "trusted",
+          "summary": "Allow a mode that is a free shell on this Mac.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "people",
@@ -5135,6 +5225,24 @@
         "args": {
           "id": {
             "kind": "positional"
+          },
+          "trusted": {
+            "kind": "switch",
+            "spellings": [
+              "--trusted"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
           }
         }
       }
@@ -5150,6 +5258,33 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
         }
       ],
       "result": {
@@ -5160,7 +5295,7 @@
         "owner"
       ],
       "x-kith-stability": "experimental",
-      "x-kith-served": "kernel",
+      "x-kith-served": "core",
       "x-kith-cli": {
         "path": [
           "people",
@@ -5174,6 +5309,18 @@
         "args": {
           "id": {
             "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
           }
         }
       }

@@ -9,6 +9,9 @@
 //! The write half (M2-2) is `write.rs` (the verbs of `kith-auth`, over the auth.json shape), `store.rs` (one claim
 //! transaction each, the difference stored row by row) and `call.rs` (the `people.*` rows the daemon routes here).
 //!
+//! The access requests (M2-3) are `requests.rs`: a person asking for agents, and the owner's approve (a `people.grant`
+//! of what was asked, in the same transaction) or deny.
+//!
 //! Nothing is switched. `kith-auth` and the host still decide from auth.json; only the daemon's `people.*` rows call this
 //! module, and no caller sends them yet (the CLI switch is M2-18, the import of auth.json M2-8).
 
@@ -21,6 +24,7 @@ use crate::error::{Error, Result};
 pub(crate) mod call;
 #[cfg(test)]
 mod load;
+mod requests;
 mod store;
 #[cfg(test)]
 mod tests;

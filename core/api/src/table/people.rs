@@ -1,8 +1,8 @@
 //! M2 lane A (authority): the owner's access to people, as `kith-auth member`, `bot`, `bots-cap`, `preset` and `invite`
 //! have it today. Experimental, owner principal only, not in `released.json`; the result is `json` until the lane types
-//! it. The rows the core serves (M2-2: grant, revoke, list, the bots, the invites and the presets) are answered by the
-//! daemon, because a write needs `&mut Core` (`Core::call` itself answers NotServed). The access requests
-//! (`requests`, `approve`, `deny`) are M2-3's and still stubs: the caller falls back to `kith-auth`/`kith-people`.
+//! it. The rows the core serves (M2-2: grant, revoke, list, the bots, the invites and the presets; M2-3: the access
+//! requests, `requests`, `approve` and `deny`) are answered by the daemon, because a write needs `&mut Core`
+//! (`Core::call` itself answers NotServed).
 //!
 //! `people.list` is spelled `kith people access` because `kith people ls` is the people list of `kith-people` today.
 //!
@@ -217,22 +217,37 @@ pub(super) const ROWS: &[Method] = &[
         ],
         &["people", "preset-remove"],
     ),
-    stub(
+    people(
         "people.requests",
-        "The access requests waiting for the owner.",
-        &[],
+        "The access requests waiting for the owner: a person asking for agents, with the preset and mode they asked for.",
+        &[
+            sw("all", &["--all"], "Also the ones decided or expired."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
         &["people", "requests"],
     ),
-    stub(
+    people(
         "people.approve",
-        "Approve an access request.",
-        &[pos("id", "string", true, "The request.")],
+        "Approve an access request: the person gets the agents, preset and mode they asked for, and no more.",
+        &[
+            pos("id", "string", true, "The request."),
+            sw(
+                "trusted",
+                &["--trusted"],
+                "Allow a mode that is a free shell on this Mac.",
+            ),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
         &["people", "approve"],
     ),
-    stub(
+    people(
         "people.deny",
         "Deny an access request.",
-        &[pos("id", "string", true, "The request.")],
+        &[pos("id", "string", true, "The request."), KERNEL, HOME, ENV],
         &["people", "deny"],
     ),
 ];
@@ -251,25 +266,6 @@ const fn people(
         "json",
         path,
         Served::Core,
-        Stability::Experimental,
-    )
-    .formats(J)
-}
-
-/// An M2 stub: owner only, `--json` form, experimental, still answered by the Python kernel.
-const fn stub(
-    name: &'static str,
-    summary: &'static str,
-    params: &'static [Param],
-    path: &'static [&'static str],
-) -> Method {
-    row(
-        name,
-        summary,
-        params,
-        "json",
-        path,
-        Served::Kernel,
         Stability::Experimental,
     )
     .formats(J)

@@ -1,4 +1,5 @@
-//! The `people.*` rows the core answers (M2-2): the owner's writes to authority. The daemon routes them here (they need
+//! The `people.*` rows the core answers (M2-2: the owner's writes to authority; M2-3: the access requests). The
+//! daemon routes them here (they need
 //! `&mut Core`: a write is a claim transaction, as the gate's are). The params were checked against the row already.
 //!
 //! Answers are `{"lines": [...]}`, the lines `kith-auth` prints, so a CLI that switches to this prints them as they were;
@@ -9,8 +10,8 @@ use std::io::Read as _;
 use kith_kernel::secrets::{self, Ctx, Die, Sandbox, ServeDir};
 use serde_json::{Value, json};
 
-use super::store;
 use super::write::{self, Settings};
+use super::{requests, store};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -29,6 +30,9 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.removeInvite"
             | "people.preset"
             | "people.removePreset"
+            | "people.requests"
+            | "people.approve"
+            | "people.deny"
     )
 }
 
@@ -99,6 +103,15 @@ pub(crate) fn call_with(core: &mut Core, c: &Ctx, method: &str, params: &Value) 
             core,
             |a| json!({ "rows": write::list(a, c, word(params, "agent"), word(params, "person")) }),
         ),
+        "people.requests" => requests::list(core, c, switch(params, "all")),
+        "people.approve" => {
+            let id = need(params, "id").map_err(|d| store::refusal(&d))?;
+            requests::approve(core, c, id, switch(params, "trusted"))
+        }
+        "people.deny" => {
+            let id = need(params, "id").map_err(|d| store::refusal(&d))?;
+            requests::deny(core, c, id)
+        }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         "people.botsCap" if word(params, "amount").is_none() => {
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))
