@@ -14,6 +14,8 @@
 use crate::{Arg, Cli, Method, Param, Principal, Served, Stability, TypeDef};
 
 const OWNER: &[Principal] = &[Principal::Owner];
+/// A running agent holding a run token, on the run socket (M0e). It reaches nothing but the `run.*` rows marked so.
+const RUN: &[Principal] = &[Principal::RunToken];
 
 const fn pos(name: &'static str, ty: &'static str, required: bool, summary: &'static str) -> Param {
     Param {
@@ -126,6 +128,10 @@ impl Method {
     }
     const fn requires(mut self, r: &'static [&'static str]) -> Self {
         self.cli.requires = r;
+        self
+    }
+    const fn principals(mut self, p: &'static [Principal]) -> Self {
+        self.principals = p;
         self
     }
 }
@@ -557,6 +563,65 @@ pub static METHODS: &[Method] = &[
         &[words("title", "The title."), flag("details", "string", &["--details"], "What happened.")],
         &["bug"],
     ),
+    plumbing(
+        "run.mint",
+        "A run token for one run of an agent, for a person in a conversation (and the claim it holds, when it holds one). The token is shown once; it works on the run socket only for a peer that descends from the process bound with run.bind. Tokens live in the daemon's memory and are gone when it restarts.",
+        &[
+            caller("agent", "string", "The agent the run is of."),
+            caller("person", "string", "The invited person or bot guest the run is for."),
+            caller("conversation", "string", "The conversation the run continues."),
+            caller("claim", "string", "The writer claim the run holds (kept in the identity; claims themselves are M3)."),
+            caller("room", "string", "The room, when the run is in one."),
+            caller("project", "string", "The project the run was launched in."),
+        ],
+        "json",
+        &["kernel", "core-run", "mint"],
+    ),
+    plumbing(
+        "run.bind",
+        "Binds a run's token to the process the run was started as; until then no request resolves. The process's start time is kept, so a reused pid does not revive the token.",
+        &[caller("runId", "string", "The run."), caller("pid", "int", "The process id.")],
+        "json",
+        &["kernel", "core-run", "bind"],
+    ),
+    plumbing(
+        "run.end",
+        "Ends a run's token (the run's process is gone, or it was revoked). A call already running finishes as the run it was.",
+        &[caller("runId", "string", "The run.")],
+        "json",
+        &["kernel", "core-run", "end"],
+    ),
+    // The run socket's rows. The command line is the owner's way to try one by hand; a run reaches them on the socket.
+    row(
+        "run.recall",
+        "`kith recall` as the run's own identity (query words and the narrowing flags only).",
+        &[caller("args", "[string]", "The arguments, already narrowed by the run socket.")],
+        "json",
+        &["kernel", "core-run", "recall"],
+        Served::Kernel,
+        Stability::Experimental,
+    )
+    .principals(RUN),
+    row(
+        "run.memorySearch",
+        "`kith-memory search` as the run's own person and agent.",
+        &[caller("args", "[string]", "The arguments, already narrowed by the run socket.")],
+        "json",
+        &["kernel", "core-run", "memory-search"],
+        Served::Kernel,
+        Stability::Experimental,
+    )
+    .principals(RUN),
+    row(
+        "run.projectId",
+        "The project the run was launched in (from its token), or `--info` of that one.",
+        &[caller("args", "[string]", "Nothing, or `--info` and the run's own project.")],
+        "json",
+        &["kernel", "core-run", "project-id"],
+        Served::Core,
+        Stability::Experimental,
+    )
+    .principals(RUN),
     b6("backup.list", "The backup chain.", &[], &["backup", "list"]),
     b6(
         "backup.add",

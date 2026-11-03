@@ -27,7 +27,13 @@ mod log;
 mod marker;
 mod owner;
 mod perms;
+mod runs;
+mod runsock;
 
+#[cfg(test)]
+mod runs_props;
+#[cfg(all(test, unix))]
+mod runsock_tests;
 #[cfg(test)]
 mod tests;
 

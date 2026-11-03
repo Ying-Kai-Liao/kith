@@ -54,8 +54,15 @@ fn every_row_is_well_formed() {
             m.name
         );
         assert!(!m.summary.is_empty(), "{} has no summary", m.name);
-        // Until M2 only the owner may call anything.
-        assert_eq!(m.principals, &[Principal::Owner], "{}", m.name);
+        // Until M2 only the owner may call anything, except the run socket's three rows (M0e): a run token reaches those
+        // and nothing else, and no other principal reaches them.
+        let on_the_run_socket = ["run.recall", "run.memorySearch", "run.projectId"];
+        let want: &[Principal] = if on_the_run_socket.contains(&m.name) {
+            &[Principal::RunToken]
+        } else {
+            &[Principal::Owner]
+        };
+        assert_eq!(m.principals, want, "{}", m.name);
         in_known(m.result, m.name);
         let mut pnames = BTreeSet::new();
         for p in m.params {
