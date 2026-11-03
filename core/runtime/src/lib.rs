@@ -20,6 +20,7 @@ mod call;
 mod daemon;
 mod db;
 mod error;
+mod gate;
 mod holder_link;
 mod layout;
 mod lock;
