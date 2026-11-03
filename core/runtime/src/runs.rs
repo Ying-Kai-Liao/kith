@@ -46,13 +46,14 @@ pub(crate) struct RunIdentity {
 
 struct Entry {
     identity: RunIdentity,
-    /// The process the run was started as, with its start time when it could be read (Unix `ps`).
+    /// The process the run was started as, with the start time read at bind. A process whose start time cannot be
+    /// read is never bound (Windows until `GetProcessTimes` lands): without it a reused pid would revive the token.
     bound: Option<Bound>,
 }
 
 struct Bound {
     pid: u32,
-    started: Option<String>,
+    started: String,
 }
 
 /// `(peer, ancestor)`: whether `peer` is `ancestor` or one of its descendants.
@@ -111,9 +112,13 @@ impl RunTokens {
         Ok((token, who))
     }
 
-    /// Binds the run to the process it was started as, with that process's start time. False for an unknown run.
+    /// Binds the run to the process it was started as, with that process's start time. False for an unknown run,
+    /// and for a process whose
+    /// start time cannot be read (the token stays unbound, so no request resolves).
     pub(crate) fn bind(&self, run_id: &str, pid: u32) -> bool {
-        let started = (self.start_time)(pid);
+        let Some(started) = (self.start_time)(pid) else {
+            return false;
+        };
         let mut entries = self.locked();
         let Some(e) = entries.values_mut().find(|e| e.identity.run_id == run_id) else {
             return false;
@@ -196,8 +201,9 @@ impl RunTokens {
         if !(self.ancestry)(peer?, pid) {
             return None;
         }
-        if started.is_some() && (self.start_time)(pid) != started {
-            // The run's process is gone (or its pid is another process's now): the token is dead, drop it.
+        if (self.start_time)(pid).as_deref() != Some(started.as_str()) {
+            // The run's process is gone, its pid is another process's now, or its start time cannot be read: the token
+            // is dead, drop it.
             self.locked().remove(&key);
             return None;
         }

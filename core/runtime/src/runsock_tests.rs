@@ -553,3 +553,21 @@ fn the_daemon_mints_on_the_owner_socket_and_serves_the_run_on_the_run_socket() {
     drop(d);
     assert!(!sock.exists(), "the run socket leaves with the daemon");
 }
+
+#[test]
+fn a_process_without_a_readable_start_time_is_never_bound() {
+    // Windows until `GetProcessTimes` lands, or `ps` failing: without a start time a reused pid could not be told
+    // from the run, so the token is refused at bind and stays unbound.
+    fn yes(_: u32, _: u32) -> bool {
+        true
+    }
+    fn blind(_: u32) -> Option<String> {
+        None
+    }
+    let t = RunTokens::with(yes, blind);
+    let (token, who) = t.mint(id("sam", None)).unwrap();
+    assert!(!t.bind(&who.run_id, 4242), "bind says no");
+    assert!(t.resolve(&token, Some(4242)).is_none());
+    assert_eq!(t.len(), 1, "the token is still the owner's to end");
+    assert!(t.end(&who.run_id));
+}

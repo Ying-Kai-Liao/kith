@@ -65,8 +65,18 @@ fn refused() -> String {
     "not authorized".to_owned()
 }
 
-/// No process facts: made-up pids have no start time, so only the ancestry window decides.
-fn no_start(_: u32) -> Option<String> {
+thread_local! {
+    /// Which "boot" of the made-up machine it is: a pid handed to another process has another start time.
+    static EPOCH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Made-up processes: every pid has a start time, fixed until `EPOCH` moves (the pid is then another process's).
+fn start_of(pid: u32) -> Option<String> {
+    Some(format!("{pid}@{}", EPOCH.with(std::cell::Cell::get)))
+}
+
+/// A machine where start times cannot be read (Windows today, or `ps` failing).
+fn unreadable(_: u32) -> Option<String> {
     None
 }
 
@@ -81,7 +91,7 @@ struct Live {
 
 /// One run per spec `(person, agent, room)`, all issued on one table; bound to their pids unless `bind` is false.
 fn build(specs: &[(usize, usize, usize)], bind: bool) -> (Arc<RunTokens>, Vec<Live>) {
-    let table = Arc::new(RunTokens::with(descends_window, no_start));
+    let table = Arc::new(RunTokens::with(descends_window, start_of));
     let runs = specs
         .iter()
         .enumerate()
@@ -875,4 +885,58 @@ fn p6_malformed_lines_are_denied() {
 #[test]
 fn p7_pid_reuse_and_sibling_runs() {
     assert_eq!(prop_pid_reuse_and_sibling_runs(), Ok(()));
+}
+
+/// P8: a token whose process is gone and whose pid another process now has is dead for good, on every run of the
+/// table; and a process whose start time cannot be read is never bound, so its token resolves for nobody.
+pub(crate) fn prop_reused_pid_and_unreadable_start() -> Result<(), String> {
+    check(
+        (specs(), extras(), valid_args(), 0u32..WINDOW, 1u32..5),
+        |(specs, extras, items, off, bump)| {
+            EPOCH.with(|e| e.set(0));
+            let (t, runs) = build(&specs, true);
+            for r in &runs {
+                let line = recall_line(&r.token, render(&items), &extras);
+                prop_assert!(authorize(&t, &line, peer_in(r, off)).is_ok());
+            }
+            // Every run's pid is handed to another process.
+            EPOCH.with(|e| e.set(bump));
+            for r in &runs {
+                let line = recall_line(&r.token, render(&items), &extras);
+                prop_assert_eq!(authorize(&t, &line, peer_in(r, off)), Err(refused()));
+            }
+            prop_assert_eq!(t.len(), 0, "the dead tokens are dropped");
+            // Not even the old start time brings them back.
+            EPOCH.with(|e| e.set(0));
+            for r in &runs {
+                let line = recall_line(&r.token, render(&items), &extras);
+                prop_assert_eq!(authorize(&t, &line, peer_in(r, off)), Err(refused()));
+            }
+            // No readable start time: bind refuses and the token never resolves.
+            let blind = RunTokens::with(descends_window, unreadable);
+            for (i, &(p, a, r)) in specs.iter().enumerate() {
+                let (token, who) = blind
+                    .mint(RunIdentity {
+                        run_id: String::new(),
+                        agent: AGENTS[a].into(),
+                        person: PEOPLE[p].into(),
+                        conversation: format!("c{i}"),
+                        claim: None,
+                        room: ROOMS[r].map(Into::into),
+                        project: None,
+                    })
+                    .unwrap();
+                let pid = BASE + u32::try_from(i).unwrap() * SPACING;
+                prop_assert!(!blind.bind(&who.run_id, pid));
+                let line = recall_line(&token, render(&items), &extras);
+                prop_assert_eq!(authorize(&blind, &line, Some(pid)), Err(refused()));
+            }
+            Ok(())
+        },
+    )
+}
+
+#[test]
+fn p8_reused_pid_and_unreadable_start() {
+    assert_eq!(prop_reused_pid_and_unreadable_start(), Ok(()));
 }
