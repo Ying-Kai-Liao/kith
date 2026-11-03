@@ -556,7 +556,7 @@ fn a_second_device_is_refused_while_the_first_holds_the_claim() {
         no(&mut c, &k.id, T0 + 2),
         Answered::Claimed(first.holder.clone())
     );
-    assert!(sweep(&mut c, DEADLINE + 1, &Nobody).unwrap().is_empty());
+    assert_eq!(sweep(&mut c, DEADLINE + 1, &Nobody).unwrap().len(), 0);
     assert!(!withdraw(&mut c, &k.id, DEADLINE + 1, &Nobody).unwrap());
     // The first writes and saves; the second then finds the card spent.
     commit(&mut c, &mut e, &first, &plan, &two(), T0 + 3, &Nobody).unwrap();
@@ -653,7 +653,7 @@ fn a_claim_that_ran_out_by_time_is_not_taken_over_while_its_writer_lives() {
         Answered::Claimed(first.holder.clone())
     );
     assert!(!withdraw(&mut c, &k.id, late, &live).unwrap());
-    assert!(sweep(&mut c, late, &live).unwrap().is_empty());
+    assert_eq!(sweep(&mut c, late, &live).unwrap().len(), 0);
     assert!(matches!(
         raise_again(&mut c, "github", late, &live),
         Raised::Joined(_)
@@ -672,7 +672,7 @@ fn a_claim_that_ran_out_by_time_is_not_taken_over_while_its_writer_lives() {
     begin(&mut c, &k2.id, T0 + 1, &Started("t1"))
         .unwrap()
         .expect("claims");
-    assert!(sweep(&mut c, late, &Started("t1")).unwrap().is_empty());
+    assert_eq!(sweep(&mut c, late, &Started("t1")).unwrap().len(), 0);
     assert_eq!(sweep(&mut c, late, &Started("t2")).unwrap().len(), 1);
     assert_eq!(stored(&mut c, &k2.id).state, State::Expired);
     let k3 = key_card_with(&mut c, "teams", T0 + 100, "r1");
