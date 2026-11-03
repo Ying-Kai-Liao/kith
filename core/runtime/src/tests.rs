@@ -430,17 +430,18 @@ fn stateless_through_core_runs_the_verb_inside_an_embedded_core_or_bare() {
     assert_eq!((v, via), (8, Via::Bare));
     assert_eq!(std::fs::read_dir(&m).expect("ls").count(), 0);
     let l = Layout::new(&m);
-    drop(open(&l));
+    // The verb opens the real list, so the database must hold it.
+    drop(start_with(&l, ALL_STEPS).expect("daemon creates"));
     let ((), via) = stateless_through_core(&p, || {
         // The lock is held while the verb runs.
         assert!(matches!(
-            embedded_with(&l, MIGRATIONS),
+            embedded_with(&l, ALL_STEPS),
             Ok(Embedded::DaemonRunning { .. })
         ));
     });
     assert_eq!(via, Via::Embedded);
     // A daemon holds the lock: the verb still runs.
-    let daemon = start_with(&l, MIGRATIONS).expect("daemon");
+    let daemon = start_with(&l, ALL_STEPS).expect("daemon");
     let (v, via) = stateless_through_core(&p, || "ran");
     assert_eq!((v, via), ("ran", Via::Bare));
     drop(daemon);
