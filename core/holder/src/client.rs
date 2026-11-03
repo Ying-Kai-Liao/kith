@@ -78,7 +78,8 @@ impl Client {
         wire::write_json(&mut writer, p::HELLO, 0, &hello)?;
         let mut first = wire::read(&mut reader)?
             .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
-        if first.0 == p::CHALLENGE {
+        let proved = first.0 == p::CHALLENGE;
+        if proved {
             // The holder goes first: nothing is answered to a peer that cannot prove the key.
             let challenge: p::Challenge = wire::parse(&first.2)?;
             let expect = auth::proof(key, auth::HOLDER, &nonce, &challenge.nonce, generation);
@@ -89,6 +90,10 @@ impl Client {
             wire::write_json(&mut writer, p::AUTH, 0, &p::Auth { proof: mine })?;
             first = wire::read(&mut reader)?
                 .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+        }
+        if !proved && first.0 != p::REFUSED {
+            // A welcome that skipped the challenge could carry a made-up listing.
+            return Err(ConnectError::Impostor);
         }
         match first {
             (p::WELCOME, _, payload) => {
@@ -197,5 +202,30 @@ impl Client {
             .expect(p::TAILED, id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
         Ok(payload)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn a_welcome_that_skips_the_challenge_is_an_impostor() {
+        let (ours, mut fake) = UnixStream::pair().unwrap();
+        let t = std::thread::spawn(move || {
+            wire::read(&mut fake).unwrap().expect("hello");
+            let welcome = p::Welcome {
+                version: p::VERSION,
+                instance: "fake".into(),
+                pid: 1,
+                generation: 1,
+                procs: vec![],
+            };
+            wire::write_json(&mut fake, p::WELCOME, 0, &welcome).unwrap();
+        });
+        let result = Client::over(ours, "0123456789abcdef", 1);
+        t.join().unwrap();
+        assert!(matches!(result, Err(ConnectError::Impostor)));
     }
 }

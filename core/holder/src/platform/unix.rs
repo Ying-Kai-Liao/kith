@@ -46,6 +46,17 @@ pub fn accept(listener: &Listener) -> io::Result<Stream> {
     }
 }
 
+/// Whether an accept failure is worth retrying: out of descriptors or buffers, a signal, a connection that
+/// vanished before it was taken.
+pub fn accept_error_is_temporary(e: &io::Error) -> bool {
+    use io::ErrorKind::{ConnectionAborted, Interrupted, WouldBlock};
+    matches!(e.kind(), Interrupted | ConnectionAborted | WouldBlock)
+        || matches!(
+            e.raw_os_error(),
+            Some(libc::EMFILE | libc::ENFILE | libc::ENOBUFS | libc::ENOMEM | libc::ECONNABORTED)
+        )
+}
+
 #[cfg(target_os = "linux")]
 fn peer_is_me(stream: &Stream) -> bool {
     let mut cred: libc::ucred = unsafe { std::mem::zeroed() };

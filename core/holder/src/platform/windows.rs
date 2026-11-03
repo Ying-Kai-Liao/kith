@@ -325,9 +325,29 @@ pub fn accept(listener: &Listener) -> io::Result<Stream> {
         Err(e) if e.raw_os_error() == Some(ERROR_PIPE_CONNECTED as i32) => {}
         Err(e) => return Err(e),
     }
-    *listener.next.lock().unwrap_or_else(|p| p.into_inner()) =
-        Some(new_instance(&listener.name, false)?);
+    // This client is connected already: a failure to make the next instance must not lose it. The slot stays
+    // empty and the next accept tries again (and is retried like any temporary failure).
+    if let Ok(next) = new_instance(&listener.name, false) {
+        *listener.next.lock().unwrap_or_else(|p| p.into_inner()) = Some(next);
+    }
     Ok(Stream(Arc::new(pipe)))
+}
+
+/// Whether an accept failure is worth retrying: out of memory or handles, a client that vanished mid-connect.
+pub fn accept_error_is_temporary(e: &io::Error) -> bool {
+    e.kind() == io::ErrorKind::Interrupted
+        || matches!(
+            e.raw_os_error().map(|c| c as u32),
+            Some(
+                ERROR_NOT_ENOUGH_MEMORY
+                    | ERROR_TOO_MANY_OPEN_FILES
+                    | ERROR_NO_SYSTEM_RESOURCES
+                    | ERROR_PIPE_BUSY
+                    | ERROR_NO_DATA
+                    | ERROR_BROKEN_PIPE
+                    | ERROR_OPERATION_ABORTED
+            )
+        )
 }
 
 /// Pipe names vanish with their last handle.

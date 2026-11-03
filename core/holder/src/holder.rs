@@ -22,6 +22,11 @@ const TAIL_BYTES: usize = 1 << 20;
 const EXIT_DRAIN: Duration = Duration::from_millis(500);
 /// Output queued for a core that reads slowly before programs have to wait for it.
 const BACKLOG_BYTES: usize = 8 << 20;
+/// Temporary accept failures in a row before the holder gives up, and its first and longest pause between tries
+/// (about a minute in all).
+const ACCEPT_RETRIES: u32 = 70;
+const ACCEPT_BACKOFF: Duration = Duration::from_millis(10);
+const ACCEPT_PAUSE_CAP: Duration = Duration::from_secs(1);
 
 pub struct Config {
     /// The holder's folder (private): its socket and log.
@@ -141,26 +146,79 @@ pub fn run(cfg: Config) -> io::Result<()> {
     let holder = Arc::new(Holder::new(cfg.secret.into_bytes(), endpoint, cfg.idle));
     let watcher = holder.clone();
     std::thread::spawn(move || watcher.watch_idle());
-    loop {
-        let stream = platform::accept(&listener)?;
-        let holder = holder.clone();
-        std::thread::spawn(move || {
-            // A caller that hangs up (a liveness probe, a core that died) is not worth a log line.
-            let quiet = [
-                io::ErrorKind::BrokenPipe,
-                io::ErrorKind::UnexpectedEof,
-                io::ErrorKind::ConnectionReset,
-            ];
-            if let Err(e) = holder.serve(stream)
-                && !quiet.contains(&e.kind())
-            {
-                eprintln!("holder: connection: {e}");
-            }
-        });
-    }
+    let gave_up = holder.accept_loop(
+        || platform::accept(&listener),
+        ACCEPT_RETRIES,
+        ACCEPT_BACKOFF,
+    );
+    // Giving up must not orphan what is held: close down like a SHUTDOWN does, then leave.
+    let st = holder.close_down(holder.lock());
+    drop(st);
+    eprintln!("holder: no longer accepting connections: {gave_up}");
+    holder.exit()
 }
 
 impl Holder {
+    /// Serves each accepted connection on its own thread. A temporary accept failure (out of file descriptors, a
+    /// connection that vanished) is retried with a doubling, capped pause; only `retries` failures in a row, or one
+    /// that is not temporary, end the loop, returning the last error.
+    fn accept_loop(
+        self: &Arc<Self>,
+        mut accept: impl FnMut() -> io::Result<platform::Stream>,
+        retries: u32,
+        first_pause: Duration,
+    ) -> io::Error {
+        let mut failures = 0u32;
+        let mut pause = first_pause;
+        loop {
+            let stream = match accept() {
+                Ok(stream) => {
+                    failures = 0;
+                    pause = first_pause;
+                    stream
+                }
+                Err(e) if platform::accept_error_is_temporary(&e) && failures < retries => {
+                    failures += 1;
+                    eprintln!("holder: accept: {e} (retrying)");
+                    std::thread::sleep(pause);
+                    pause = (pause * 2).min(ACCEPT_PAUSE_CAP);
+                    continue;
+                }
+                Err(e) => return e,
+            };
+            let holder = self.clone();
+            std::thread::spawn(move || {
+                // A caller that hangs up (a liveness probe, a core that died) is not worth a log line.
+                let quiet = [
+                    io::ErrorKind::BrokenPipe,
+                    io::ErrorKind::UnexpectedEof,
+                    io::ErrorKind::ConnectionReset,
+                ];
+                if let Err(e) = holder.serve(stream)
+                    && !quiet.contains(&e.kind())
+                {
+                    eprintln!("holder: connection: {e}");
+                }
+            });
+        }
+    }
+
+    /// Refuses new work, kills every held tree and waits (briefly) for them to empty. The caller leaves while
+    /// still holding the returned guard, so nothing starts in between.
+    fn close_down<'a>(&'a self, mut st: MutexGuard<'a, State>) -> MutexGuard<'a, State> {
+        st.closing = true;
+        for e in st.procs.values() {
+            e.proc.kill_tree();
+        }
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while st.procs.values().any(|e| !e.proc.tree_empty()) && Instant::now() < deadline {
+            drop(st);
+            std::thread::sleep(Duration::from_millis(20));
+            st = self.lock();
+        }
+        st
+    }
+
     fn new(secret: Vec<u8>, endpoint: PathBuf, idle: Duration) -> Holder {
         Holder {
             state: Mutex::new(State {
@@ -430,18 +488,7 @@ impl Holder {
                     self.to_core(&st, wire::frame(p::TAILED, id, &tail));
                 }
                 p::SHUTDOWN => {
-                    st.closing = true;
-                    for e in st.procs.values() {
-                        e.proc.kill_tree();
-                    }
-                    let deadline = Instant::now() + Duration::from_secs(3);
-                    while st.procs.values().any(|e| !e.proc.tree_empty())
-                        && Instant::now() < deadline
-                    {
-                        drop(st);
-                        std::thread::sleep(Duration::from_millis(20));
-                        st = self.lock();
-                    }
+                    let _st = self.close_down(st);
                     // Still holding the lock: nothing can start between the wait and the exit.
                     self.exit();
                 }
@@ -645,6 +692,7 @@ impl Holder {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use crate::client::Client;
     use std::os::unix::net::UnixStream;
 
     #[test]
@@ -668,5 +716,100 @@ mod tests {
         assert_eq!(kind, p::REFUSED);
         assert_eq!(wire::parse::<Refused>(&payload).unwrap().why, Why::Closing);
         t.join().unwrap().unwrap();
+    }
+
+    fn test_holder() -> Arc<Holder> {
+        Arc::new(Holder::new(
+            b"0123456789abcdef".to_vec(),
+            PathBuf::from("unused"),
+            Duration::ZERO,
+        ))
+    }
+
+    #[test]
+    fn a_temporary_accept_failure_does_not_end_the_holder() {
+        let holder = test_holder();
+        let (core, theirs) = UnixStream::pair().unwrap();
+        let mut offered = vec![
+            Err(io::Error::from_raw_os_error(libc::EMFILE)),
+            Err(io::Error::from(io::ErrorKind::ConnectionAborted)),
+            Ok(theirs),
+        ];
+        let looping = holder.clone();
+        std::thread::spawn(move || {
+            looping.accept_loop(
+                || {
+                    if offered.is_empty() {
+                        std::thread::sleep(Duration::from_secs(60));
+                    }
+                    offered.remove(0)
+                },
+                5,
+                Duration::from_millis(1),
+            )
+        });
+        // The connection that came after the failures is served, and the process it spawns stays listed.
+        let mut client = Client::over(core, "0123456789abcdef", 1).expect("served");
+        client
+            .spawn(&p::Spawn {
+                conv: "c".into(),
+                claim: 1,
+                generation: 1,
+                argv: vec!["sleep".into(), "30".into()],
+                env: std::env::vars().collect(),
+                cwd: "/".into(),
+                mode: p::Mode::Pipes,
+                cols: 80,
+                rows: 24,
+            })
+            .unwrap();
+        client
+            .expect(p::SPAWNED, 0, Duration::from_secs(10))
+            .expect("spawned");
+        assert_eq!(client.list().unwrap().len(), 1);
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
+    fn giving_up_on_accept_kills_what_is_held() {
+        let holder = test_holder();
+        let (core, theirs) = UnixStream::pair().unwrap();
+        let mut offered = vec![Ok(theirs)];
+        let looping = holder.clone();
+        let ended = std::thread::spawn(move || {
+            looping.accept_loop(
+                || {
+                    if offered.is_empty() {
+                        Err(io::Error::from_raw_os_error(libc::EMFILE))
+                    } else {
+                        offered.remove(0)
+                    }
+                },
+                3,
+                Duration::from_millis(1),
+            )
+        });
+        let mut client = Client::over(core, "0123456789abcdef", 1).expect("served");
+        client
+            .spawn(&p::Spawn {
+                conv: "c".into(),
+                claim: 1,
+                generation: 1,
+                argv: vec!["sleep".into(), "30".into()],
+                env: std::env::vars().collect(),
+                cwd: "/".into(),
+                mode: p::Mode::Pipes,
+                cols: 80,
+                rows: 24,
+            })
+            .unwrap();
+        client
+            .expect(p::SPAWNED, 0, Duration::from_secs(10))
+            .expect("spawned");
+        let err = ended.join().unwrap();
+        assert_eq!(err.raw_os_error(), Some(libc::EMFILE));
+        let st = holder.close_down(holder.lock());
+        assert!(st.closing);
+        assert!(st.procs.values().all(|e| e.proc.tree_empty()));
     }
 }
