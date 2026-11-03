@@ -64,6 +64,8 @@ fn role() {
         // Take the lock, start a long-lived child (it must not inherit the lock), report both, wait to be killed.
         "holder" => {
             let _lock = held(take(&folder, &key).unwrap());
+            // Never waited on on purpose: this process is killed while the sleeper lives on.
+            #[allow(clippy::zombie_processes)]
             let sleeper = child("sleep", &folder, &key)
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
