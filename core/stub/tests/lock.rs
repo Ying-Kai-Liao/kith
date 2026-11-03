@@ -215,7 +215,9 @@ fn file_id(p: &Path) -> u64 {
 fn source_never_removes_anything() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     for entry in std::fs::read_dir(src).unwrap() {
-        let text = std::fs::read_to_string(entry.unwrap().path()).unwrap();
+        let path = entry.unwrap().path();
+        let name = path.file_name().unwrap().to_string_lossy().into_owned();
+        let text = std::fs::read_to_string(path).unwrap();
         for code in text.lines().filter(|l| !l.trim_start().starts_with("//")) {
             for banned in [
                 "remove_file",
@@ -224,7 +226,12 @@ fn source_never_removes_anything() {
                 "DeleteFile",
                 "rename(",
             ] {
-                assert!(!code.contains(banned), "{banned} in: {code}");
+                // The binary's one allowed removal-like call: the holder record's temp file renamed onto
+                // `w-<key>.holder`. Anything else fails.
+                if name == "main.rs" && code.trim() == "std::fs::rename(&tmp, &path)" {
+                    continue;
+                }
+                assert!(!code.contains(banned), "{banned} in {name}: {code}");
             }
         }
     }

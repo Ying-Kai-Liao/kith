@@ -15,6 +15,10 @@ workspace = "../../serve/host"
 name = "kith_stub"
 path = "src/lib.rs"
 
+[[bin]]
+name = "kith-stub"
+path = "src/main.rs"
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
@@ -24,5 +28,6 @@ windows-sys = { version = "0.61", features = [
     "Win32_Security",
     "Win32_Security_Authorization",
     "Win32_Storage_FileSystem",
+    "Win32_System_Console",
     "Win32_System_Threading",
 ] }
