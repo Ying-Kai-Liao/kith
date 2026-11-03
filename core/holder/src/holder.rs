@@ -381,6 +381,7 @@ impl Holder {
                 version: p::VERSION,
                 instance: self.instance.clone(),
                 pid: std::process::id(),
+                tied_to_starter: platform::tied_to_starter(),
                 generation: st.newest,
                 procs: Self::held_list(&st),
             };
@@ -504,10 +505,9 @@ impl Holder {
         let Some(e) = st.procs.get(&id) else {
             return KillState::Gone;
         };
-        // An ended process had its tree swept before its exit was recorded.
-        if e.held.exit.is_some() {
-            return KillState::Gone;
-        }
+        // An ended process had its tree swept before its exit was recorded, but "gone" still means the group or job
+        // is empty: a member that is slow to die keeps the answer at "killing". (After the leader is reaped, Unix
+        // sends no more signals, since its group id could be recycled; the sweep's SIGKILL is already on its way.)
         e.proc.kill_tree();
         if e.proc.tree_empty() {
             KillState::Gone

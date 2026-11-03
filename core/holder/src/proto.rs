@@ -4,6 +4,13 @@
 //
 //! What a core and the holder say to each other. The holder never interprets `conv` or `claim`: it stores them so
 //! the core can match its records against `list` after a restart.
+//!
+//! What "gone" means. A held process is the leader of its own process group on Unix (its own job on Windows), and
+//! `Killed::Gone` says that group or job is empty. Unix limit: a descendant that starts its own session (`setsid`)
+//! or double-forks into another group leaves the group, so "gone" means the group, not everything the program ever
+//! started (the hyperframes door showed this: a detached ffmpeg and Chrome outlived it). Linux could later claim
+//! such strays with `PR_SET_CHILD_SUBREAPER`; macOS has no equivalent. Windows has no such escape: the job holds
+//! every descendant and ends them when it closes.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -134,6 +141,11 @@ pub struct Welcome {
     /// Random per holder process: a different one means the old holder is gone.
     pub instance: String,
     pub pid: u32,
+    /// Windows only: the holder is in any job (the starter's job would not let it break away), so the starter's
+    /// supervisor can end it by ending the job (the daemon ending), which is the one thing it exists to survive. The core reports it (`kith doctor`).
+    /// Always false on Unix, where the holder has its own session.
+    #[serde(default)]
+    pub tied_to_starter: bool,
     pub generation: u64,
     pub procs: Vec<Held>,
 }

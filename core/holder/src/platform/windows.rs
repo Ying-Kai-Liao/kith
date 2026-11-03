@@ -517,10 +517,11 @@ fn env_block(env: &BTreeMap<String, String>) -> Vec<u16> {
 // --- Detaching -------------------------------------------------------------
 
 /// Starts `cmd` with no console (no new process group: that would turn off Ctrl+C for every program it starts), out
-/// of the job of the process it was started from (that process ending, or its job closing, won't end it), stdin and
-/// stdout to NUL and stderr to `log`. It inherits only those two handles: std's spawn hands down every inheritable
-/// one, and a pipe of an ssh session living on in the holder keeps that session from ending.
-pub fn spawn_detached(cmd: Command, log: File) -> io::Result<()> {
+/// of the job of the process it was started from (that process ending, or its job closing, won't end it), `input`
+/// on its stdin (a pipe, closed after; it is how the secret travels), stdout to NUL and stderr to `log`. It inherits
+/// only those three handles: std's spawn hands down every inheritable one, and a pipe of an ssh session living on
+/// in the holder keeps that session from ending.
+pub fn spawn_detached(cmd: Command, log: File, input: &[u8]) -> io::Result<()> {
     let mut env: BTreeMap<String, String> = std::env::vars().collect();
     for (k, v) in cmd.get_envs() {
         let k = k.to_string_lossy().into_owned();
@@ -539,8 +540,16 @@ pub fn spawn_detached(cmd: Command, log: File) -> io::Result<()> {
         .read(true)
         .write(true)
         .open("NUL")?;
+    // The pipe holds the secret until the holder reads it, so nothing here waits on the holder.
+    let (stdin, mut sender) = anon_pipe()?;
+    sender.write_all(input)?;
+    drop(sender);
     unsafe {
-        let handles = [nul.as_raw_handle() as HANDLE, log.as_raw_handle() as HANDLE];
+        let handles = [
+            stdin.as_raw_handle() as HANDLE,
+            nul.as_raw_handle() as HANDLE,
+            log.as_raw_handle() as HANDLE,
+        ];
         for h in handles {
             check(SetHandleInformation(
                 h,
@@ -567,8 +576,8 @@ pub fn spawn_detached(cmd: Command, log: File) -> io::Result<()> {
         si.lpAttributeList = list;
         si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
         si.StartupInfo.hStdInput = handles[0];
-        si.StartupInfo.hStdOutput = handles[0];
-        si.StartupInfo.hStdError = handles[1];
+        si.StartupInfo.hStdOutput = handles[1];
+        si.StartupInfo.hStdError = handles[2];
         let mut pi: PROCESS_INFORMATION = zeroed();
         let flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | DETACHED_PROCESS;
         let mut start = |flags| {
@@ -888,9 +897,50 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
     }
 }
 
-/// Nothing to hold: the first-instance flag on the pipe already allows one holder per folder.
-pub struct InstanceLock;
+/// Whether this process lives in any job: the holder was started inside its starter's job because breakaway
+/// was denied (see `spawn_detached`). A supervisor can `TerminateJobObject` a job even without kill-on-close, so
+/// any job ties the holder to its starter. After a successful breakaway it is in none.
+pub fn tied_to_starter() -> bool {
+    unsafe {
+        let mut in_job: BOOL = 0;
+        // A null job asks whether the process is in any job.
+        let ok = IsProcessInJob(GetCurrentProcess(), null_mut(), &mut in_job);
+        ok != 0 && in_job != 0
+    }
+}
 
-pub fn lock_instance(_dir: &Path) -> io::Result<Option<InstanceLock>> {
-    Ok(Some(InstanceLock))
+/// Held for the holder's life; the lock goes when the process does.
+pub struct InstanceLock(#[allow(dead_code)] File);
+
+/// One holder per folder: an exclusive `LockFileEx` on `holder.lock`, taken before the pipe is made and never
+/// released or deleted, the same as the Unix flock. The first-instance flag on the pipe is not enough alone: the
+/// name vanishes whenever no instance is open (a failed `new_instance` while the last client disconnects), and a
+/// second holder could then be the "first". `Ok(None)`: another holder has the lock.
+pub fn lock_instance(dir: &Path) -> io::Result<Option<InstanceLock>> {
+    // Opened without inheritance (Rust's default), so the holder's programs do not get the lock.
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("holder.lock"))?;
+    let mut overlapped: OVERLAPPED = unsafe { zeroed() };
+    let locked = unsafe {
+        LockFileEx(
+            file.as_raw_handle() as HANDLE,
+            LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+            0,
+            1,
+            0,
+            &mut overlapped,
+        )
+    };
+    if locked != 0 {
+        return Ok(Some(InstanceLock(file)));
+    }
+    let err = io::Error::last_os_error();
+    if err.raw_os_error() == Some(ERROR_LOCK_VIOLATION as i32) {
+        Ok(None)
+    } else {
+        Err(err)
+    }
 }

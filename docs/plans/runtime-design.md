@@ -142,6 +142,12 @@ live turn:
    one. A revoke drops the person's queued turns. Between a revoke committing and its kill landing, the engine may
    still run tool calls that local rules allow without asking the core; the core refuses every ask from it, and any
    running core re-sends the kill until the holder reports the process gone (level-triggered, not once).
+7. **A holder that is not the one the core last knew.** When a core's hello meets a holder whose `instance` (random per
+   holder start, in the welcome) differs from the one it last recorded, the old holder is gone, and on Unix nothing
+   killed its processes (a pty hangup or end of input usually ends them, not always). The core kills every process
+   group the old instance reported, matching by pid and start time so a reused pid is never hit, and confirms they are
+   gone before it releases their claims. Windows needs no extra step: each spawn's job kills on close. This belongs to
+   M0c (the core's side of hello) and M3 (claims); the model gains "holder crash" at M3.
 
 ## 5. One API
 One method table produces the CLI, the OpenRPC schema, the TS/Swift/Rust types, the docs; `released.json` frozen per
@@ -299,6 +305,12 @@ Kai: "you are welcome to make it finer to execute and check", then "when we are 
 - **M0d:**
   - Kill is idempotent, and a kill for an unknown id answers "gone".
   - Kill takes the whole process tree: one job object per spawn on Windows; own session plus `killpg` on Unix, reporting "gone" only once the group is empty.
+  - "Gone" is asked again for an exited entry too (Unix: `killpg(pgid, 0)` gives ESRCH; Windows: the job has no active process). On Unix it means the group: a descendant that starts its own session or double-forks has left it (`proto.rs`).
+  - The holder secret reaches the holder over an inherited stdin pipe, never its environment or command line. The welcome carries `instance` (step 7 of the start protocol) and, on Windows, `tied_to_starter` when the starter's job forbade breakaway; the client exposes it for `kith doctor`. One holder per folder on both platforms: `holder.lock` (flock on Unix, `LockFileEx` on Windows).
+  - The holder's folder is `<machine>/core/holder`, so the guard's secret folders, the guest deny list and the protected paths that cover `<machine>/core/` cover the holder's folder, socket and lock too. Whatever holds the secret can drive every process.
+  - A Unix socket path over the limit (104 bytes on macOS, 108 on Linux) is a clear error at bind and connect, not a bind failure.
+  - **M0c, for the core's side of hello:** a refusal that arrives before the handshake has proved anything (a `refused` frame is all a fake holder needs to send first) is a failed connection only, never evidence that a newer core exists. Generation authority stays in core.db, so a fake holder cannot make a core step down.
+  - **Relay, later:** the local socket and SSH need no extra encryption, but a relay would. When it comes, derive session keys from this handshake (both nonces and the secret) rather than adding a second one.
   - The daemon starts the holder detached (own session on Unix, `CREATE_BREAKAWAY_FROM_JOB` on Windows).
   - The switch to "the holder restarts the core" lands at M1, together with the launchd change.
   - The survival test runs under the real launchd job and the real Windows supervisor.

@@ -1,6 +1,7 @@
 //! `kith-holder serve --dir D [--idle-secs N]`: run a holder in the foreground (what `start` launches).
 //! `kith-holder start --dir D [--idle-secs N]`: start one detached if none answers, then exit.
-//! The secret comes in the KITH_HOLDER_SECRET environment variable, never on the command line.
+//! The secret is the first line of stdin, never the command line or the environment (both stay readable by this
+//! user's other processes for the holder's whole life).
 
 use kith_holder::{holder, launch};
 use std::path::PathBuf;
@@ -31,11 +32,16 @@ fn main() -> ExitCode {
             _ => return usage(),
         }
     }
-    let (Some(dir), Ok(secret)) = (dir, std::env::var(launch::SECRET_VAR)) else {
+    let Some(dir) = dir else {
         return usage();
     };
-    // Nothing else runs yet, so no thread can race the removal; the holder's own programs never see it.
-    unsafe { std::env::remove_var(launch::SECRET_VAR) };
+    let secret = match launch::read_secret(std::io::stdin().lock()) {
+        Ok(secret) => secret,
+        Err(e) => {
+            eprintln!("kith-holder: {e}");
+            return usage();
+        }
+    };
     let idle = Duration::from_secs(idle);
     let result = match command.as_str() {
         "serve" => holder::run(holder::Config { dir, secret, idle }),
@@ -55,6 +61,6 @@ fn main() -> ExitCode {
 }
 
 fn usage() -> ExitCode {
-    eprintln!("usage: KITH_HOLDER_SECRET=... kith-holder (serve|start) --dir DIR [--idle-secs N]");
+    eprintln!("usage: echo SECRET | kith-holder (serve|start) --dir DIR [--idle-secs N]");
     ExitCode::from(2)
 }
