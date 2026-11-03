@@ -471,7 +471,10 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
             json!({"agent": "kai", "session": "ok", "argv": ["cat"]}),
         ] {
             assert!(
-                matches!(reach(&p, "terminal.open", &params, false), Reached::Refused(_)),
+                matches!(
+                    reach(&p, "terminal.open", &params, false),
+                    Reached::Refused(_)
+                ),
                 "{params}"
             );
         }

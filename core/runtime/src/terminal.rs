@@ -218,7 +218,11 @@ impl Tickets {
         self.redeem_at(Instant::now(), ticket)
     }
 
-    fn redeem_at(&self, now: Instant, ticket: &str) -> std::result::Result<Redeemed, TicketRefused> {
+    fn redeem_at(
+        &self,
+        now: Instant,
+        ticket: &str,
+    ) -> std::result::Result<Redeemed, TicketRefused> {
         let entry = self
             .by_hash
             .lock()
@@ -240,7 +244,10 @@ impl Tickets {
 
 /// What the supervisor found when it put a spawn to the holder.
 pub(crate) enum Placed {
-    Started { held: HeldId, pid: u32 },
+    Started {
+        held: HeldId,
+        pid: u32,
+    },
     /// The stub ran and exited 75: a writer already holds the stub's lock for this key.
     Busy,
     /// The holder would not start it (`SPAWN_FAILED`), or it ended at once; the text says why.
@@ -286,7 +293,9 @@ impl Terminals {
         self.link_up.store(up, Ordering::SeqCst);
         if !up {
             while let Some(req) = self.next(Duration::ZERO) {
-                let _ = req.reply.send(Placed::Failed("the holder link went down".into()));
+                let _ = req
+                    .reply
+                    .send(Placed::Failed("the holder link went down".into()));
             }
         }
     }
@@ -374,7 +383,13 @@ impl Terminals {
         }
         #[cfg(unix)]
         {
-            self.open_held(shared, &req, &stub, &paths.state, &Layout::new(&paths.machine))
+            self.open_held(
+                shared,
+                &req,
+                &stub,
+                &paths.state,
+                &Layout::new(&paths.machine),
+            )
         }
     }
 
@@ -440,7 +455,9 @@ impl Terminals {
             reply,
         });
         let placed = match sent {
-            Ok(()) => answer.recv_timeout(SPAWN_WAIT + Duration::from_secs(2)).ok(),
+            Ok(()) => answer
+                .recv_timeout(SPAWN_WAIT + Duration::from_secs(2))
+                .ok(),
             Err(_) => None,
         };
         match placed {
@@ -449,7 +466,10 @@ impl Terminals {
                     // The claim stays with this daemon's pid: still live, still ours, only not tied to the stub.
                     crate::log::note(
                         &shared.logs,
-                        &format!("terminal: could not hand the claim of {} to pid {pid}: {e}", req.session),
+                        &format!(
+                            "terminal: could not hand the claim of {} to pid {pid}: {e}",
+                            req.session
+                        ),
                     );
                 }
                 let ticket = self.tickets.issue(held.clone(), &req.session, &req.agent)?;
@@ -475,12 +495,15 @@ impl Terminals {
             Some(Placed::Stale) => {
                 give_back(me);
                 Err(Error::StaleGeneration(
-                    "kith-core: the holder has seen a newer claim for this session; try again".into(),
+                    "kith-core: the holder has seen a newer claim for this session; try again"
+                        .into(),
                 ))
             }
             Some(Placed::Failed(why)) => {
                 give_back(me);
-                Err(Error::Io(format!("kith-core: the holder could not start the terminal: {why}")))
+                Err(Error::Io(format!(
+                    "kith-core: the holder could not start the terminal: {why}"
+                )))
             }
             None => {
                 give_back(me);
@@ -524,7 +547,11 @@ impl OpenParams {
         let argv: Vec<String> = p
             .get("argv")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            })
             .unwrap_or_default();
         if argv.is_empty() || argv.iter().any(|a| a.contains('\0')) {
             return Err(bad("argv needs the engine's command"));
@@ -602,7 +629,11 @@ mod claim {
         let Some(actual) = process_start(pid) else {
             return false;
         };
-        match c.get("procStart").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        match c
+            .get("procStart")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
             Some(claimed) => squeeze(claimed) == squeeze(&actual),
             None => true,
         }
@@ -680,7 +711,10 @@ mod claim {
 
     fn make_dir(parent: &Path) -> io::Result<()> {
         use std::os::unix::fs::DirBuilderExt as _;
-        fs::DirBuilder::new().recursive(true).mode(0o700).create(parent)
+        fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(parent)
     }
 
     /// Takes the claim for `pid`. `Ok(Err(held))`: a live claim is there.
@@ -704,7 +738,13 @@ mod claim {
                 // Stale or garbage: nobody else judges it while we hold the lock.
                 let _ = fs::remove_file(&dest);
             }
-            Ok(Err(read(&dest).map_or(Held { pid, kind: "terminal".into() }, |c| held_by(&c))))
+            Ok(Err(read(&dest).map_or(
+                Held {
+                    pid,
+                    kind: "terminal".into(),
+                },
+                |c| held_by(&c),
+            )))
         })();
         let _ = fs::remove_file(&tmp);
         result
@@ -726,7 +766,9 @@ mod claim {
     /// Gives the claim back if `pid` still holds it.
     pub(super) fn release(state: &Path, sid: &str, pid: u32) {
         let parent = dir(state);
-        let Ok(_lock) = lock(&parent, sid) else { return };
+        let Ok(_lock) = lock(&parent, sid) else {
+            return;
+        };
         let dest = parent.join(format!("{sid}.claim"));
         if read(&dest).is_some_and(|c| held_by(&c).pid == pid) {
             let _ = fs::remove_file(&dest);

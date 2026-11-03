@@ -313,7 +313,10 @@ fn connected(
     let mut next_list = Instant::now() + cfg.poll;
     while !shared.stopping() {
         // A terminal to start is served at once; the listing keeps its own pace.
-        if let Some(req) = shared.terminals.next(cfg.poll.min(Duration::from_millis(100))) {
+        if let Some(req) = shared
+            .terminals
+            .next(cfg.poll.min(Duration::from_millis(100)))
+        {
             serve_spawn(&mut client, req)?;
         }
         discard_output(&mut client);
@@ -346,7 +349,9 @@ fn connected(
 /// in this process. The holder keeps its own tail for the first replay.
 fn discard_output(client: &mut Client) {
     while client
-        .take(Duration::ZERO, |f| f.0 == proto::OUTPUT || f.0 == proto::STDERR)
+        .take(Duration::ZERO, |f| {
+            f.0 == proto::OUTPUT || f.0 == proto::STDERR
+        })
         .is_some()
     {}
 }
@@ -354,23 +359,30 @@ fn discard_output(client: &mut Client) {
 /// Puts one spawn to the holder and tells the caller what came of it. `Err` is a broken link (the caller was told).
 fn serve_spawn(client: &mut Client, req: SpawnReq) -> std::result::Result<(), String> {
     if Instant::now() >= req.deadline {
-        let _ = req.reply.send(Placed::Failed("the holder link was down".into()));
+        let _ = req
+            .reply
+            .send(Placed::Failed("the holder link was down".into()));
         return Ok(());
     }
     let spec = &req.spec;
     if let Err(e) = client.spawn(spec) {
-        let _ = req.reply.send(Placed::Failed(format!("the holder link broke: {e}")));
+        let _ = req
+            .reply
+            .send(Placed::Failed(format!("the holder link broke: {e}")));
         return Err(format!("the holder stopped answering: {e}"));
     }
     let (conv, claim) = (spec.conv.clone(), spec.claim);
     let mine = |f: &kith_holder::wire::Frame| {
-        matches!(f.0, proto::SPAWNED | proto::SPAWN_FAILED | proto::STALE_CLAIM)
-            && serde_json::from_slice::<serde_json::Value>(&f.2).is_ok_and(|v| {
-                v["conv"] == conv.as_str() && v["claim"].as_u64() == Some(claim)
-            })
+        matches!(
+            f.0,
+            proto::SPAWNED | proto::SPAWN_FAILED | proto::STALE_CLAIM
+        ) && serde_json::from_slice::<serde_json::Value>(&f.2)
+            .is_ok_and(|v| v["conv"] == conv.as_str() && v["claim"].as_u64() == Some(claim))
     };
     let Some((kind, _, payload)) = client.take(Duration::from_secs(10), mine) else {
-        let _ = req.reply.send(Placed::Failed("the holder did not answer the spawn".into()));
+        let _ = req
+            .reply
+            .send(Placed::Failed("the holder did not answer the spawn".into()));
         return Err("the holder did not answer the spawn".into());
     };
     let placed = match kind {
