@@ -156,7 +156,7 @@ struct ComputerPage: View {
                             .buttonStyle(.plain)
                     }
                 }
-                if owned { BackupsComputerSection(store: store, labeled: false) }
+                if owned { HarnessAccountsSection(store: store, labeled: false) }
             }
 
             CardSection {
