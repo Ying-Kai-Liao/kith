@@ -2253,6 +2253,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-stub"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "kith-tts"
 version = "0.1.0"
 dependencies = [
