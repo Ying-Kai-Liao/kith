@@ -36,6 +36,7 @@ const bridge: KithBridge = {
     onChange: none,
     install() {},
     restart() {},
+    installCli() {},
     async call(_baseURL, _token, method, body) {
       await new Promise((r) => setTimeout(r, 30))
       try {

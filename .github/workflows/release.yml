@@ -236,7 +236,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           export APPLE_API_KEY="$RUNNER_TEMP/AuthKey.p8"
-          npm run dist:mac -- --publish never -c.extraMetadata.version=${{ steps.v.outputs.version }}
+          KITH_APP_VERSION=${{ steps.v.outputs.version }} npm run dist:mac -- --publish never -c.extraMetadata.version=${{ steps.v.outputs.version }}
       - name: Build the Mac app (unsigned dry run)
         if: ${{ steps.sign.outputs.skip != 'true' && (steps.sign.outputs.signed != 'true') }}
         env:

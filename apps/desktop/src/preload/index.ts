@@ -41,6 +41,7 @@ const bridge: KithBridge = {
     onChange: (cb) => listen('host:change', cb),
     install: () => ipcRenderer.send('host:install'),
     restart: () => ipcRenderer.send('host:restart'),
+    installCli: () => ipcRenderer.send('host:installCli'),
     async call(baseURL, token, method, body, timeoutMs) {
       const result = (await ipcRenderer.invoke('host:call', baseURL, token, method, body, timeoutMs)) as
         | { ok: true; value: unknown }
