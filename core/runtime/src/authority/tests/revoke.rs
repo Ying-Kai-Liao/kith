@@ -58,8 +58,7 @@ fn id(person: &str) -> Value {
 fn may(rig: &Rig, person: &str, agent: &str) -> bool {
     Authority::new(rig.core.conn(), &rig.c)
         .may(person, agent, None, false)
-        .map(|(ok, _)| ok)
-        .unwrap_or(false)
+        .is_ok_and(|(ok, _)| ok)
 }
 
 fn refused(rig: &mut Rig, method: &str, params: &Value) -> String {
@@ -456,7 +455,10 @@ fn a_removal_takes_the_bots_rows_and_codes_and_retires_the_ids() {
         rig.lines("people.retired", &id("samuel")).unwrap(),
         ["'samuel' was a person who was removed"]
     );
-    assert!(rig.lines("people.retired", &id("amy")).unwrap().is_empty());
+    assert_eq!(
+        rig.lines("people.retired", &id("amy")).unwrap(),
+        Vec::<String>::new()
+    );
     assert!(
         rig.lines("people.addBot", &json!({"id": "bot-a", "of": "amy"}))
             .is_ok()
@@ -580,11 +582,11 @@ fn a_revoke_racing_a_grant_leaves_the_person_cut_off_either_way() {
                 let grant = s.spawn(|| {
                     let mut guard = core.lock().unwrap();
                     let params = json!({"person": "sam", "agent": "sound", "preset": "member"});
-                    call_with(&mut **guard, &c, "people.grant", &params)
+                    call_with(&mut guard, &c, "people.grant", &params)
                 });
                 let suspend = s.spawn(|| {
                     let mut guard = core.lock().unwrap();
-                    call_with(&mut **guard, &c, "people.suspend", &id("sam")).unwrap();
+                    call_with(&mut guard, &c, "people.suspend", &id("sam")).unwrap();
                 });
                 if suspend_first {
                     suspend.join().unwrap();

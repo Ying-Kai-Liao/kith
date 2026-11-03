@@ -19,7 +19,8 @@
 //! `kith-auth`, are lane B's tables and are not in core.db.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::fmt::Write as _;
+use std::path::PathBuf;
 
 use kith_kernel::secrets::{self, Ctx};
 use serde_json::{Value, json};
@@ -46,7 +47,7 @@ impl Life {
         let home = c
             .agents
             .parent()
-            .map_or_else(|| c.agents.clone(), Path::to_path_buf);
+            .map_or_else(|| c.agents.clone(), std::path::Path::to_path_buf);
         Life {
             agents: c.agents.clone(),
             state: home.join("state"),
@@ -381,18 +382,18 @@ pub(crate) fn person_remove(
     let ids: Vec<&str> = gone.iter().map(String::as_str).collect();
     forget(auth, &ids);
     let kept = kept_labels(life, pid);
-    let mut line = format!("{pid} removed, with their memberships and grants");
+    let mut msg = format!("{pid} removed, with their memberships and grants");
     if gone.len() > 1 {
-        line = format!("{line} and bots ({})", gone[1..].join(", "));
+        msg = format!("{msg} and bots ({})", gone[1..].join(", "));
     }
-    line.push_str(" (profiles they own are kept); the id is retired, a new person gets another");
+    msg.push_str(" (profiles they own are kept); the id is retired, a new person gets another");
     if !kept.is_empty() {
-        line = format!(
-            "{line}; their memory and files in {} are kept (delete them by hand)",
+        msg = format!(
+            "{msg}; their memory and files in {} are kept (delete them by hand)",
             kept.join(", ")
         );
     }
-    Ok((vec![line], gone))
+    Ok((vec![msg], gone))
 }
 
 /// `person <id> --rm --unused`: only kith serve knows that no invite link went out, so it says so; this is the
@@ -528,7 +529,10 @@ pub(crate) fn temp_ids(auth: &Value, pid: &str) -> R<Vec<String>> {
 pub(super) fn guest_tmp_remove(life: &Life, pid: &str) {
     let run = life.machine.join("run");
     let digest = Sha256::digest(pid.as_bytes());
-    let hash: String = digest.iter().take(4).map(|b| format!("{b:02x}")).collect();
+    let mut hash = String::new();
+    for b in digest.iter().take(4) {
+        let _ = write!(hash, "{b:02x}");
+    }
     for (name, needs_record) in [(pid.to_owned(), false), (hash, true)] {
         let rec = run.join("t-who").join(&name);
         let theirs = match std::fs::read_to_string(&rec) {
