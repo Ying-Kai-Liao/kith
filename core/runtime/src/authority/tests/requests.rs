@@ -573,11 +573,13 @@ proptest! {
                 prop_assert!(got.is_err(), "{c:?}: {got:?}");
                 prop_assert_eq!(&after, &before, "{:?}: a refusal changes nothing", c);
                 prop_assert_eq!(rig.tables(), tables_before);
-                prop_assert_eq!(rig.status("r").as_deref(), Some("pending"));
+                let st = rig.status("r");
+                prop_assert_eq!(st.as_deref(), Some("pending"));
                 return Ok(());
             }
             prop_assert!(got.is_ok(), "{c:?}: {got:?}");
-            prop_assert_eq!(rig.status("r").as_deref(), Some("approved"));
+            let st = rig.status("r");
+            prop_assert_eq!(st.as_deref(), Some("approved"));
             let preset = c.preset.unwrap_or("guest");
             let (preset_mode, preset_deny) = preset_means(preset);
             for key in before.as_object().unwrap().keys() {
