@@ -103,12 +103,21 @@ and `--json` first and the app calling it after.
     shapes; `released.json` + break test.
   - M0c: daemon front, owner socket, version hello. Check: a difftest mode via daemon and via embedded; and until M1 a missing or crashing holder stops neither `kith serve` nor the CLI, and the release bundles `kith-holder` or the daemon runs without it.
   - M0d: `kith-holder` from herdr b63ecbd. Check: spawn/kill/reap, fencing + secret, restart keeps a test process.
+    Writer lock ([runtime-design.md](runtime-design.md) section 4): one lock file per conversation in the lock
+    folder (internal disk next to `core.db`, 0700), never deleted, separate from today's short-held
+    `<sid>.claim.lock`; flock on Unix, LockFileEx on the same path on Windows. The holder takes it for every engine
+    it spawns, before exec, held by the resident stub with CLOEXEC so the engine's children never inherit it. Check:
+    a second taker gets busy; the holder keeps it across a core kill. #663 merged without it: #669 or a follow-up
+    takes it.
   - M0e: run socket and token table, `host.sock` not switched. Check: `run-tokens` re-run.
   - M0f: networked holder over SSH stdio, pairing key, reconnect/resume, generation across, lease.
   Before each switch, freeze its difftest cases as golden before Python goes (oracle rule in runtime-design.md).
 - [ ] **M1. Holder for terminals, opt-in.** `kith <agent> --held`, still on today's claim files (no `core.db` claims
   yet). Gets: terminals that survive closing the window, attach from anywhere, detach and come back. Test whether a
   launchd-started holder reaches the external disk here.
+  Also: `--held` and `--direct` take the conversation's writer lock (section 4 of runtime-design.md); `--direct`
+  holds it for its whole life, whether or not a core answers. Check: a `--direct` run and a `--held` run on one
+  conversation, the second gets busy.
 - [ ] **M2. Authority into the core** (absorbs A5, one secret store). People, grants, run tokens on the run socket
   (ancestry kept), cards, revoke and suspended rows, the sync lease, doors and their sweep, the resource gate; the
   secrets in the envelope (design 9b): one master key per machine readable only by the signed daemon, XChaCha20-Poly1305 records in core.db; the host vault and kith-auth's per-item writes move into it (the Jev key read once); `auth.json` replaced by a
@@ -127,7 +136,9 @@ and `--json` first and the app calling it after.
   children, account choice and failover, per-turn claims on warm ACP processes; the host's turn runner and terminal
   claims deleted. Gets: the core holds every conversation, any account resumes. `thread-writers` re-runs.
   Also: import from `live/terminal/*`, and the delete list (`terminal/claim.rs`, `registry.rs`, `agent/bot/turn` and
-  `queue`, the claim files, `kith-kernel`'s `threads`). Freeze the difftest cases as golden first.
+  `queue`, the claim files, `kith-kernel`'s `threads`). The writer lock stays (the claim files go, the lock files
+  never do); the writer-lock model's round 4 (holder crash ± stub, leaked fd, revoke kill, park and wake,
+  take-over) runs first. Freeze the difftest cases as golden first.
 - [ ] **M4. Schedules** (was A6). One dialect (cron dialect decision Q1 in core-design.md), routines exported: `kith-sched`
   and the host's routines as one scheduler, `kith schedule ... --json`.
   Also: import of `kith-sched` jobs and the host's routines (idempotent, `--dry-run`, snapshot first); freeze the
@@ -266,3 +277,4 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-03: architect's two fixes to #659 applied: `runtime-design.md` M0a now says embedded calls skip `quick_check` (hooks call embedded mode, so each call stays cheap), and the access-verb rollback in `runtime-design.md` and here says `kith migrate` imports `auth.json` and those OS-store items back. Docs only.
 - 2026-11-03: M0d `kith-holder` (this PR, base `rust-rebuild`): crate `core/holder` (out-of-tree member of the host workspace; deps serde, serde_json, libc / windows-sys; `scripts/check-holder-deps.sh` in the `host` job fails if it links any other kith crate). Adapted from herdr-core b63ecbd (NOTICE, headers kept): the frame layout, the platform layer (Unix PTY, ConPTY, sockets and overlapped named pipes with owner-only access, detaching, Windows command lines), the pump/reap/tail/backlog shape of the holder. Kith's own: hello with version + opaque secret (the local hand's pairing key, M0f) + core generation; spawn(conv, claim, gen, argv, env, cwd, pty|pipes) accepted only for the newest generation and the secret (same conv+claim answers the running one); input, resize, tail, list; kill idempotent over the whole tree (Unix: own session + killpg, "gone" only once the group is empty; Windows: one job object per spawn), unknown id answers "gone"; exits kept until acked. `kith-holder start` launches one detached (own session; CREATE_BREAKAWAY_FROM_JOB) and exits. 7 integration tests on a real holder process (spawn/list/kill/ack, terminal input and tail, wrong secret, stale generation and takeover, exit kept across cores, tree kill, holder and process outlive the process that started it) plus `windows` job in `ci.yml` (also on workflow_dispatch; adds kith-core when `core/runtime` is on the branch). Not done: ConPTY and named pipes only compile-checked here (CI runs them); no real launchd or Windows supervisor run (`core/holder/tests/manual/survive-supervisor.sh` is by hand); daemon wiring is M0c, networking/lease M0f, the method table M0b.
 - 2026-11-03: owner access in M2 (Kai): the owner grant and revoke of a person's access to an agent, its listing, and approve or deny of access requests are core API methods with a CLI (`kith people grant|revoke|requests|approve|deny`) and the app calls the same methods; owner principal only, invitee-access and revoke-access re-run. The host's `setPersonAccess` and `decideAccessRequest` go on M2's delete list (both docs). Docs only.
+- 2026-11-03: F0 of the architect's final review (writer lock, TLC round 3 green): section 4's writer-lock bullet and its refinements copied into `runtime-design.md`, the `--direct` fallback takes the lock instead of a file claim, core-down item 3 is the `--direct` writer lock, Verified round 3 added; the build order is in M0d (the holder takes it per engine; #669 or a follow-up), M1 (`--held`, `--direct`) and M3 (claim files go, the lock stays; model round 4 first). Docs only.

@@ -1,5 +1,5 @@
 > **Source and links.** Copied unchanged from the architect's `designs/2026-11-03-runtime-shapes/design.md`
-> (below the line). Page: <https://claude.ai/artifact/J7HAXmxMBD3pK9qDmRLWAT>. The TLA+ model (`Runtime.tla`,
+> (below the line); section 4's writer lock and Verified round 3 copied again on 2026-11-03. Page: <https://claude.ai/artifact/J7HAXmxMBD3pK9qDmRLWAT>. The TLA+ model (`Runtime.tla`,
 > `results.md`) lives in the architect's `model/` folder next to `design.md`, not in this repo. This design
 > supersedes [core-design.md](core-design.md) from A4 onward; the order of work is its section 7 (M0-M5), which
 > replaced A4-A7 in [one-bot-model.md](one-bot-model.md).
@@ -100,10 +100,41 @@ live turn:
   cwd and environment; the core filters the env (drops tokens and secrets), claims, asks the holder to spawn the
   engine's TUI with that env, and gives the CLI an attach ticket. Detach (default Ctrl+\, configurable) leaves it
   running. Size follows the last active viewer; observers never resize. A non-tty `kith <agent> | tee` runs headless.
-- **Direct fallback**: `kith <agent> --direct` runs the engine in your terminal's own process tree, as today, with
-  the writer claim taken from the core as an external writer (pid + start time) when the core answers, and a file
-  claim when it doesn't (owner only). Used automatically when the holder can't be reached. It keeps TCC grants and
-  IDE integrations that a launchd-started holder may not have (to test at M1 on this Mac's external disk).
+- **Direct fallback**: `kith <agent> --direct` runs the engine in your terminal's own process tree, as today. It
+  always takes the conversation's writer lock first (below), whether or not a core answers; when a core answers it
+  also registers as an external writer (pid + start time). No file claim. Owner only. Used automatically when the
+  holder can't be reached. It keeps TCC grants and IDE integrations that a launchd-started holder may not have (to
+  test at M1 on this Mac's external disk).
+- **The writer lock** (added 2026-11-03 after the final review; TLC in designs/2026-11-03-writer-lock/): each
+  conversation has one OS lock on the machine where its engine runs (flock / LockFileEx; released when the holding
+  process dies; the lock file is never deleted, since a lock on an unlinked inode is a second writer). Whoever runs
+  the engine holds it for as long as the engine writes: the holder for a terminal engine it spawns (taken before
+  exec, kept to exit, not dropped when its core dies), the holder per turn for a warm headless process (taken at
+  `claimed -> running`, released at turn end), and a `--direct` run for its own life. A holder that can't take it
+  answers `busy`; the core ends that claim and requeues the turn. Why: without it, a `--direct` run that found no
+  core writes a mark a later core never sees, and a startup scan doesn't help (the run's check and its write are two
+  steps). The core.db claim stays the queue and the record; the lock is what keeps two engines apart.
+  Refined after a second, independent architect's review (2026-11-03):
+  - **The engine never sees the lock fd.** A resident stub (the start stub no longer execs the engine; it stays as
+    its parent) holds the fd with CLOEXEC set; `--direct`'s CLI does the same. Else anything the agent starts
+    (a dev server, `nohup`) inherits the lock, outlives the engine and wedges the conversation. The stub also
+    holds each warm turn's lock (passed over the socket), so a holder crash mid-turn doesn't free it. Cost: one
+    small process per engine; the CLI must hand the engine the terminal's foreground group (Ctrl-C, Ctrl-Z).
+  - **Busy parks the turn with no claim**: claim, try-lock, busy, end the claim, park as waiting for the lock (no
+    claim, no run token, so revoke has nothing to chase). The wake is level-triggered: reconcile and a slow timer
+    re-probe parked conversations; a lost release only delays. The app shows "waiting for your terminal session"
+    with cancel and take over; a scheduled run with a deadline expires instead.
+  - **A stale idle warm process** is caught at turn start, not by an event: the core compares the transcript hash
+    with the one it last read; on a change it kills the process (reload only for engines whose session/load
+    re-reads from disk).
+  - **Lock folder**: on the internal disk next to core.db, made 0700 by whoever comes first (works with core.db
+    missing); the guest sandbox denies it (a guest could otherwise lock others' conversations).
+  - **A hand cut off from its brain**: `--direct` there starts an announced offline branch ("brain unreachable:
+    starting an offline branch of X") that takes no wakes, waiters, children or schedules, and is imported later as
+    a separate thread, never merged on its own. `--no-fork` refuses instead.
+  Model owed before M3 (round 4): holder crash with and without the stub, a lock held by an escaped child (Leak),
+  revoke killing a lock holder ("gone" only once the group is empty), the park and level-triggered wake under
+  NoLostTurn, take-over.
 - **Headless turns** (app, schedule, ask, wake): the core speaks ACP to the engine (it links kith-acp) over pipes the
   holder owns. One warm process may serve several sessions (today's turn.rs), so the claim is per conversation per
   turn: the core claims before each `session/prompt` and releases at turn end, not at process exit (Opus 7).
@@ -309,7 +340,7 @@ Kai: "you are welcome to make it finer to execute and check", then "when we are 
 
 **Access verbs after M2.** No per-verb Python rollback: the dispatcher refuses `KITH_CORE=python` for access verbs and points to `kith rollback`. With the daemon stopped and `core.lock` held, `kith rollback` exports `auth.json` from `core.db` once (revoked and suspended rows included) and marks `core.db` non-authoritative; it also writes every secret record back as its own OS-store item, in the shape kith-auth reads (at M2 the keys move into the envelope and kith-auth stops writing them, so an auth.json-only export would lose every key added or changed since); the new core refuses to start until `kith migrate` imports `auth.json` and those OS-store items back. Grants move as one block (I14). `revoke-access` gains the property "a rollback keeps every revoke and every key".
 
-**The core-down list.** When the daemon is down the owner falls back to embedded mode (a full core), so there is no second rule set. This list applies only when no core can run at all (a silent lock holder, `core.db` missing or refused, a pending migration). Owner runs keep exactly five things: (1) the run's `settings.json` as last written, enforced by the engine; (2) the must-ask classes (I13), fixed in the kernel and compiled in, answered by the engine's own prompt, not a kith card; (3) the `--direct` file writer claim, owner only; (4) environment already given to a running run; (5) the recovery verbs: `doctor`, `update`, `rollback`, `backup`, `restore`, `migrate`. Everything else refuses with a status naming the recovery verb; nothing reads `core.db` outside a running core. Tests: one case per item, plus one showing a grant, card or secret call refuses.
+**The core-down list.** When the daemon is down the owner falls back to embedded mode (a full core), so there is no second rule set. This list applies only when no core can run at all (a silent lock holder, `core.db` missing or refused, a pending migration). Owner runs keep exactly five things: (1) the run's `settings.json` as last written, enforced by the engine; (2) the must-ask classes (I13), fixed in the kernel and compiled in, answered by the engine's own prompt, not a kith card; (3) the `--direct` writer lock, owner only; (4) environment already given to a running run; (5) the recovery verbs: `doctor`, `update`, `rollback`, `backup`, `restore`, `migrate`. Everything else refuses with a status naming the recovery verb; nothing reads `core.db` outside a running core. Tests: one case per item, plus one showing a grant, card or secret call refuses.
 
 ## Verified
 model: designs/2026-11-03-runtime-shapes/model/Runtime.tla · TLC v1.7.4 via tools/tlc.sh · bounds: 1 conversation,
@@ -337,6 +368,18 @@ Round 2 (v2 rules; each behind a flag, round-1 configs reproduce their exact cou
 | Hand cut off from its brain: guest stops after revoke + lease; owner never killed by the lease (I18) (v2-lease) | pass, 30,330 states (re-run by architect, same) | yes: hand keeps guest runs while cut off (1,871, re-run by architect) |
 | KillsLand: engines may run forever, only kills end them (v2-kill-liveness) | pass, 102,229 states | yes: kill sent once by the revoking core (re-run by architect: fails, 2,998 states at the violation; modeler's run reported 49,725) |
 | TurnsGetDone with revoke on (dropped turns count as settled) (v2-liveness) | pass, 102,229 states | |
+
+Round 3, the writer lock (model: designs/2026-11-03-writer-lock/model/WriterLock.tla, 1 conversation, 2 turns,
+1 core crash, 2 direct runs, 2 lock-file inodes; 2026-11-03):
+
+| Property | Result | Broken variant fails? |
+|---|---|---|
+| NoTwoWriters with `--direct` and core restarts | pass, 27,161 states (re-run by architect, same); 171,603 with 3 turns, 2 crashes | yes: file claim (469); startup scan (489, re-run by architect); core-side check only (470); holder drops the lock when its core dies (1,019); `--direct` skips the lock when a core answers, two direct runs (3,230, re-run by architect); lock file unlinked on exit (2,567) |
+| NoLostTurn (busy refusal requeues) | pass | yes: refusal drops the turn (723) |
+| Turns get done (weak fairness) | pass | yes: busy refusal not reported (1,988) |
+| Lock file never deleted | pass | yes: unlink variant (71) |
+
+Not modelled in round 3: more than one machine or conversation, revoke inside it, a holder crash, the start stub.
 
 Not modelled in round 2: two conversations together with crashes in the warm and fencing runs, brain failover, more
 than one hand, reordering beyond FIFO per sender, the cloud sync lease inside the claim transaction, bots.
