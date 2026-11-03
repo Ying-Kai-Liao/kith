@@ -285,7 +285,8 @@ def sweep(only=None, at_sleep=False):
 def status(sid):
     ks = sessions_mod()
     e = next((x for x in entries(ks) if x['sessionId'] == sid), None)
-    why = lc.how_it_ended(sid, bool(e) and not ks.live_pid(e), e and e.get('pid'), e and e.get('procStart'))
+    why = lc.how_it_ended(sid, bool(e) and not ks.live_pid(e), e and e.get('pid'), e and e.get('procStart'),
+                         e and e.get('launcher'), e and e.get('launcherStart'))
     print(json.dumps({'session': sid, 'ended': why, 'decision': lc.read_decision(sid),
                       'outstanding': lc.outstanding(e['transcriptPath']) if e else []}))
 

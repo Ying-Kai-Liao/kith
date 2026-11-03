@@ -1382,6 +1382,34 @@ if [[ $harness == claude ]]; then
   elif [[ $cont == 0 || $fork == 1 ]]; then csid=$(python3 -I -c 'import uuid; print(uuid.uuid4())'); args+=(--session-id "$csid")
   fi
 fi
+# The conversation's writer lock (runtime-design section 4): a claude run with a known session id starts under kith-stub, which
+# takes <machine>/core/locks/<id> and keeps it until claude exits, whether or not a core answers. It runs claude as its child
+# (exec keeps this shell's pid, so the claim file and the run token's pid binding still name it, and claude descends from it).
+# Busy (75): another run holds the lock, and this one ends with the stub's one line. A run with no id (-c) or another harness
+# starts as before, unlocked. No kith-stub program (KITH_STUB_BIN, else beside the kith program) is not yet a refusal: no
+# release bundles it before M1 ships, and an install without it must keep launching; one stderr line, and KITH_REQUIRE_STUB=1
+# turns it into a refusal for installs that do bundle it (an unlocked run breaks I11).
+stub=()
+if [[ -n $csid ]]; then
+  stub_bin=${KITH_STUB_BIN:-}
+  if [[ -z $stub_bin ]]; then
+    kbin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) || kbin=""
+    [[ -z $kbin || ! -x $(dirname "$kbin")/kith-stub ]] || stub_bin=$(dirname "$kbin")/kith-stub
+  fi
+  # The stub takes keys of a-z 0-9 . _ - only (exit 70 otherwise, which after exec could not be told from a lock error):
+  # an id outside that starts unlocked with the same one line as a missing stub.
+  if [[ ! $csid =~ ^[a-z0-9._-]+$ ]]; then
+    [[ ${KITH_REQUIRE_STUB:-} != 1 ]] || { echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed)" >&2; exit 1; }
+    echo "kith: session id \"$csid\" cannot be locked (only a-z 0-9 . _ - are allowed); this run is not locked" >&2
+  elif [[ -n $stub_bin && -x $stub_bin ]]; then
+    stub=("$stub_bin" --lock-dir "$KITH_MACHINE/core/locks" --key "$csid" --)
+  elif [[ ${KITH_REQUIRE_STUB:-} == 1 ]]; then
+    echo "kith: no kith-stub program beside kith, so this conversation cannot be locked; install the current kith (kith update self)" >&2
+    exit 1
+  else
+    echo "kith: no kith-stub program beside kith; this run is not locked against another run of the same conversation" >&2
+  fi
+fi
 # The claim names the person kith-auth resolved (never anything the run can change), so revoking them ends this run.
 claim_person=""; [[ $p_owner == 1 ]] || claim_person=$p_id
 if [[ $# -gt 0 ]]; then
@@ -1409,7 +1437,7 @@ if [[ $# -gt 0 ]]; then
       python3 "$KITH/bin/kith-permit" apply "$runs/$$.settings.json" || true
     fi
   fi
-  exec claude "${args[@]}" -p "$*"
+  exec ${stub[@]+"${stub[@]}"} claude "${args[@]}" -p "$*"
 fi
 [[ -t 0 && -t 1 ]] || { echo "kith: no terminal for an interactive session; give a task (kith $agent \"...\") or run it in a terminal" >&2; exit 1; }
 # An interactive owner run gets an ask token too, for the PermissionDenied hook alone (its card in the apps): no prompt tool
@@ -1430,4 +1458,4 @@ fi
 # pass through). One-shots above stay exec.
 [[ $p_owner == 1 && $harness == claude ]] && export KITH_TERMINAL_SESSION=1
 [[ -n $r_sid ]] && export KITH_RESUMED_FROM=$r_from
-exec python3 "$KITH/bin/kith-sessions" run "$agent" -- claude "${args[@]}"
+exec python3 "$KITH/bin/kith-sessions" run "$agent" -- ${stub[@]+"${stub[@]}"} claude "${args[@]}"

@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# kith-direct-lock-check — a --direct run (every `kith <agent>` run on this Mac today) starts claude under kith-stub, keyed by
+# its session id (runtime-design section 4; one-bot-model M1-3). Proved with a fake claude and a real kith-stub:
+#   - the run holds the conversation's lock for as long as claude lives (a second kith-stub on the key is busy, 75), and the
+#     lock is free again after it exits;
+#   - a run on a conversation whose lock another holder has (a --held run, here a bare kith-stub) is busy: exit non-zero, the
+#     busy line, claude never started, no claim file left behind;
+#   - two direct runs on one session: the second is refused, whichever of the claim file or the lock answers first;
+#   - an app turn (the host's claim, kith-sessions take_claim) on a session a direct run holds is still blocked by the claim file;
+#   - the claim file names the shell pid, and claude descends from the stub which is that same pid (exec kept it);
+#   - no session id (-c) or no kith-stub: unlocked, as before (the missing stub says so on stderr; KITH_REQUIRE_STUB=1 refuses).
+#
+#   kernel/tests/kith-direct-lock-check    a few seconds; prints each check, exits 1 when one fails
+#   KITH_STUB_BIN=/path/to/kith-stub       else a build under $CARGO_TARGET_DIR / serve/host/target (no stub: the check skips)
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+STUB=${KITH_STUB_BIN:-}
+if [[ -z $STUB ]]; then
+  for t in "${CARGO_TARGET_DIR:-}" "$KERNEL/../serve/host/target" "$KERNEL/../target"; do
+    for k in debug release; do [[ -n $t && -x $t/$k/kith-stub ]] && { STUB=$t/$k/kith-stub; break 2; }; done
+  done
+fi
+[[ -n $STUB && -x $STUB ]] || { echo "skip: no kith-stub program (set KITH_STUB_BIN)"; exit 0; }
+
+T=$(mktemp -d "${TMPDIR:-/tmp}/kith-direct-lock-check.XXXXXX")
+T=$(cd "$T" && pwd -P)
+trap 'touch "$T/go" 2>/dev/null; kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_MACHINE=$T/state CLAUDE_CONFIG_DIR=$T/claude KITH_STUB_BIN=$STUB
+unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE KITH_VIA KITH_HIDE_SESSION KITH_RESUME \
+  KITH_CLAUDE_ARGS KITH_REQUIRE_STUB KITH_RUN_TOKEN KITH_ASK_TOKEN
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/designer/role" "$CLAUDE_CONFIG_DIR" "$T/bin" "$T/work"
+printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"
+LOCKS=$KITH_STATE/core/locks
+REG=$KITH_STATE/live/terminal
+SK=$KERNEL/bin/kith-sessions
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+# A one-shot is exec'd, so nothing is left to delete its claim file: the claim ends with the pid (a stale one is replaced).
+unheld() {
+  python3 - "$SK" "$1" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(m)
+sys.exit(0 if m.take_claim(sys.argv[2], os.getpid()) is None else 1)
+PY
+}
+is() { [[ $2 == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
+
+# A fake claude: notes that it started (its pid, its parent chain) and waits for $T/go.
+cat > "$T/bin/claude" <<'FAKE'
+#!/usr/bin/env bash
+[[ $1 == --version ]] && { echo "2.1.300 (Claude Code)"; exit 0; }
+[[ $1 == plugin ]] && exit 0
+echo "$$ $PPID" >> "$STUB_STARTED"
+while [[ ! -e $STUB_GO ]]; do sleep 0.1; done
+FAKE
+chmod +x "$T/bin/claude"
+export PATH=$T/bin:$PATH STUB_STARTED=$T/started STUB_GO=$T/go
+
+# run <session-id> <out> [args]: a one-shot direct run in the background; its pid is $RUNPID
+run() {
+  local sid=$1 out=$2; shift 2
+  ( cd "$T/work" && KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $sid" exec "$KERNEL/bin/kith" designer "$@" "task" ) > "$out" 2>&1 &
+  RUNPID=$!
+}
+waitfor() { for _ in $(seq 100); do eval "$1" && return 0; sleep 0.1; done; return 1; }
+stubs() { "$STUB" "$@" 2>&1; }
+
+SID=11111111-1111-4111-8111-111111111111
+rm -f "$T/go" "$T/started"
+run $SID "$T/r1.out"; R1=$RUNPID
+waitfor '[[ -s $T/started ]]' && ok "direct run: claude started under the stub" || bad "direct run: claude never started" "$(cat "$T/r1.out")"
+[[ -e $LOCKS/w-$SID.lock ]] && ok "lock folder <machine>/core/locks holds the key" || bad "no lock under $LOCKS"
+
+# the claim names the shell's pid, which the stub kept (exec); claude is the stub's child
+claimpid=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/$SID.claim" 2>/dev/null)
+is "claim file names the launcher's pid (the stub's)" "$claimpid" "$R1"
+read -r cpid cppid < "$T/started"
+is "claude's parent is the stub (same pid as the claim)" "$cppid" "$R1"
+[[ $(ps -o comm= -p "$R1") == *kith-stub* ]] && ok "the launcher's pid is now kith-stub (exec)" || bad "pid $R1 is not kith-stub" "$(ps -o comm= -p "$R1")"
+
+# a second stub on the key (a --held run) is busy while the direct run lives
+out=$("$STUB" --lock-dir "$LOCKS" --key "$SID" -- true 2>&1); rc=$?
+is "lock held for the run's life: a second holder is busy (75)" "$rc" 75
+# a second direct run on the same session is refused (the claim file answers first, the lock behind it)
+run $SID "$T/r2.out"; wait $RUNPID; rc=$?
+[[ $rc != 0 ]] && ok "second direct run: refused (exit $rc)" || bad "second direct run was let in"
+[[ $(grep -c . "$T/started") == 1 ]] && ok "second direct run: claude never started" || bad "claude started twice"
+# an app turn (the host's claim) is blocked by the claim file
+res=$(python3 - "$SK" "$SID" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(m)
+h = m.take_claim(sys.argv[2], os.getpid()); print('taken' if h is None else 'held')
+PY
+)
+is "app turn on the session: blocked by the claim file" "$res" held
+
+touch "$T/go"; wait $R1; is "direct run: exit 0 when claude exits" "$?" 0
+unheld $SID && ok "claim ended with the run" || bad "claim still held"
+"$STUB" --lock-dir "$LOCKS" --key "$SID" -- true >/dev/null 2>&1; is "lock free again after the run" "$?" 0
+
+# a conversation another holder (a --held run) has locked: the direct run is busy, claude never starts, no claim left
+SID2=22222222-2222-4222-8222-222222222222
+rm -f "$T/go" "$T/started"
+"$STUB" --lock-dir "$LOCKS" --key "$SID2" -- bash -c 'while [ ! -e "$0" ]; do sleep 0.1; done' "$T/go" & HELD=$!
+waitfor '! "$STUB" --lock-dir "$LOCKS" --key "$SID2" -- true >/dev/null 2>&1' || bad "held stub did not take the lock"
+run $SID2 "$T/r3.out"; wait $RUNPID; rc=$?
+[[ $rc != 0 ]] && ok "lock held elsewhere: direct run refused (exit $rc)" || bad "direct run ran on a locked conversation"
+[[ ! -s $T/started ]] && ok "lock held elsewhere: claude never started" || bad "claude started"
+grep -qi busy "$T/r3.out" && ok "busy line printed" || bad "no busy line" "$(cat "$T/r3.out")"
+unheld $SID2 && ok "busy: no live claim left behind" || bad "claim held after busy"
+touch "$T/go"; wait $HELD
+
+# no session id (-c): unlocked, as before
+rm -f "$T/go" "$T/started"; touch "$T/go"
+( cd "$T/work" && KITH_CLAUDE_ARGS="--continue" "$KERNEL/bin/kith" designer "task" ) >/dev/null 2>&1
+is "-c with no id: runs unlocked" "$?" 0
+
+# no kith-stub: one stderr line and the run goes on; KITH_REQUIRE_STUB=1 refuses
+SID3=33333333-3333-4333-8333-333333333333
+err=$(cd "$T/work" && KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
+[[ $rc == 0 && $err == *"no kith-stub program"* ]] && ok "no stub: runs unlocked with one line" || bad "no stub" "$rc $err"
+err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
+[[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
+
+# an interactive run: kith-sessions run keeps claude's registry entry and its /exit intent even though the child is the stub
+SID4=44444444-4444-4444-8444-444444444444
+cat > "$T/bin/claude-reg" <<'REG'
+#!/usr/bin/env bash
+mkdir -p "$CLAUDE_CONFIG_DIR/sessions" "$CLAUDE_CONFIG_DIR/projects/p"
+printf '{"pid":%s,"sessionId":"%s"}' "$$" "$STUB_SID" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
+printf '{"session_id":"%s","transcript_path":"%s/projects/p/%s.jsonl","cwd":"%s","source":"startup"}' "$STUB_SID" "$CLAUDE_CONFIG_DIR" "$STUB_SID" "$PWD" |
+  KITH_AGENT=designer KITH_TERMINAL_SESSION=1 python3 "$KERNEL_SK" record
+echo "$$" > "$STUB_STARTED"
+while [[ ! -e $STUB_GO ]]; do sleep 0.1; done
+REG
+chmod +x "$T/bin/claude-reg"
+rm -f "$T/go" "$T/started"
+( cd "$T/work" && KERNEL_SK=$SK STUB_SID=$SID4 python3 "$SK" run designer -- "$STUB" --lock-dir "$LOCKS" --key "$SID4" -- "$T/bin/claude-reg" ) >/dev/null 2>&1 &
+RP=$!
+waitfor '[[ -s $T/started && -f $REG/$SID4.json ]]' || bad "interactive: claude never registered"
+cpid=$(cat "$T/started")
+is "interactive: registry names claude's own pid" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/$SID4.json")" "$cpid"
+is "interactive: registry notes the stub as launcher" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("launcher"))' "$REG/$SID4.json")" "$(ps -o ppid= -p "$cpid" | tr -d ' ')"
+touch "$T/go"; wait $RP
+intent=$(find "$KITH_STATE" -path '*intent*' -name "$SID4.json" 2>/dev/null | head -1)
+[[ -n $intent ]] && is "interactive: Kai's /exit leaves a quit intent for claude's pid" "$(python3 -c 'import json,sys; i=json.load(open(sys.argv[1])); print(i["why"], i["pid"])' "$intent")" "quit $cpid" \
+  || bad "interactive: no quit intent (the wrapper lost claude behind the stub)"
+
+# kith-sessions run reads the stub's status pipe: "busy" is 75 whatever the engine exits with; "locked" and an engine exit of
+# 75/126/127 are the engine's own; no word and exit 70 is a lock error.
+verdict=$(python3 - "$SK" <<'PY'
+import importlib.machinery, importlib.util, os, sys
+l = importlib.machinery.SourceFileLoader('ks', sys.argv[1]); m = importlib.util.module_from_spec(importlib.util.spec_from_loader('ks', l)); l.exec_module(m)
+def v(word, code):
+    r, w = os.pipe(); os.write(w, word.encode()); os.close(w)
+    return m.stub_verdict(r, code)
+print(v('busy\n', 0), v('locked\n', 75), v('locked\n', 127), v('', 70))
+PY
+)
+is "stub status pipe: busy wins; the engine's own 75/127 stay; a lock error stays 70" "$verdict" "75 75 127 70"
+
+[[ $fail == 0 ]] && echo "all checks passed"
+exit $fail
