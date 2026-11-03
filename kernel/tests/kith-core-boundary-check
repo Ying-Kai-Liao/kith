@@ -6,7 +6,9 @@ Fails when:
      core/runtime/src that is not on the list below (a crude source scan, on purpose: it needs no nightly rustdoc).
   2. a crate other than the daemon's wiring and the CLI entry point (one crate today: serve/host) lists kith-core
      as a dependency, or Rust code outside serve/host/src/main.rs (and its end-to-end test) names `kith_core`.
-  3. "core.db" (or its sibling file names) appears outside core/runtime: Rust, the Python kernel, the apps. Docs and the
+  3. kith-api (core/api, the method table) depends on no other crate of this repo and names none of them: kith-core
+     may depend on it, never the reverse.
+  4. "core.db" (or its sibling file names) appears outside core/runtime: Rust, the Python kernel, the apps. Docs and the
      guard/sandbox lists (which name the folder `core`, not the file) are exempt.
 
   kernel/tests/kith-core-boundary-check              checks this repo; exit 1 on a violation
@@ -22,10 +24,11 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 
-# (file, item) of every `pub` thing kith-core exports. M0b adds the method table's entry point here, in review.
+# (file, item) of every `pub` thing kith-core exports. `call` is the method table's entry point (M0b).
 PUBLIC = {
     ("lib.rs", "Embedded"), ("lib.rs", "Migrated"), ("lib.rs", "Via"),
     ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "stateless_through_core"),
+    ("lib.rs", "call"),
     ("lib.rs", "use:db::Core"), ("lib.rs", "use:error::Error"),
     ("lib.rs", "field:from"), ("lib.rs", "field:to"),
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),
@@ -99,6 +102,23 @@ def check_dependents(root):
     return bad
 
 
+def check_api(root):
+    """kith-api sits under kith-core: it lists no kith-* or path dependency and its sources name no sibling crate."""
+    bad = []
+    dep = re.compile(r"^\s*(kith[-_a-z]*)\s*=|path\s*=\s*\"(?!src/)")
+    for n, line in enumerate(open(os.path.join(root, "core/api/Cargo.toml"), encoding="utf-8"), 1):
+        if line.lstrip().startswith("#") or re.match(r"^\s*name\s*=", line):
+            continue
+        if dep.search(line) and not re.match(r"^\s*(workspace)\s*=", line):
+            bad.append("core/api/Cargo.toml:%d depends on another crate of this repo: %s" % (n, line.strip()))
+    for rel in files(os.path.join(root, "core/api"), ".rs"):
+        text = open(os.path.join(root, "core/api", rel), encoding="utf-8", errors="replace").read()
+        m = re.search(r"\bkith_(core|kernel|holder|serve|acp|wire|mem|guest)\b", text)
+        if m:
+            bad.append("core/api/%s names %s; kith-api depends on no other crate" % (rel, m.group(0)))
+    return bad
+
+
 def check_names(root):
     bad = []
     for rel in files(root):
@@ -118,7 +138,7 @@ def check_names(root):
 
 
 def check(root):
-    return check_surface(root) + check_dependents(root) + check_names(root)
+    return check_surface(root) + check_dependents(root) + check_api(root) + check_names(root)
 
 
 def selftest():
@@ -159,6 +179,9 @@ def selftest():
         violate("another crate depends on it", append("serve/host/crates/wire/Cargo.toml", "\nkith-core = { path = \"../../../../core/runtime\" }\n"),
                 "crates/wire/Cargo.toml depends on kith-core")
         violate("rust names kith_core", append("serve/host/src/api/mod.rs", "\nuse kith_core::Core;\n"), "names kith_core")
+        violate("kith-api depends on kith-kernel", append("core/api/Cargo.toml", "\nkith-kernel = { path = \"../kernel\" }\n"),
+                "core/api/Cargo.toml")
+        violate("kith-api names kith_core", append("core/api/src/lib.rs", "\nuse kith_core::Core;\n"), "core/api/src/lib.rs names kith_core")
         violate("core.db in rust", append("serve/host/src/hub.rs", "\n// opens core.db directly\n"), "hub.rs mentions core.db")
         violate("core.db in python", append("kernel/lib/kith_paths.py", "\nDB = 'core.db'\n"), "kith_paths.py mentions core.db")
     finally:

@@ -16,6 +16,9 @@ path = "src/lib.rs"
 [dependencies]
 # kith-core depends on the kernel's pure rules, never the other way round (docs/plans/runtime-design.md section 1).
 kith-kernel = { path = "../kernel" }
+# The method table: kith-core calls through it with a principal (kith-api depends on no kith crate).
+kith-api = { path = "../api" }
+serde_json = { version = "1.0.151", features = ["preserve_order"] }
 # core.db is SQLite; the host and kith-kernel link the same bundled copy.
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 # The lifetime lock on core.lock: flock on Unix, LockFileEx on Windows.

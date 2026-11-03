@@ -1,0 +1,4274 @@
+{
+  "openrpc": "1.3.2",
+  "info": {
+    "title": "Kith core API",
+    "version": "0.1.0",
+    "description": "Generated from core/api/src/table.rs by kith-api-gen. Do not edit."
+  },
+  "methods": [
+    {
+      "name": "paths",
+      "summary": "Where Kith's folders are.",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "paths"
+        ],
+        "aliases": [
+          [
+            "kernel",
+            "paths"
+          ]
+        ],
+        "formats": [
+          "--json",
+          "--sh"
+        ],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.version",
+      "summary": "The interface version and modules of this build.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/KernelVersion"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "version"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "kernel.engines.list",
+      "summary": "The coding engines an agent can run on.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Engines"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "engines"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "kernel.engines.install",
+      "summary": "How to install an engine on this computer.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The engine's id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "engines",
+          "install"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.engines.login",
+      "summary": "How to sign in to an engine.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The engine's id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "engines",
+          "login"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.engines.launch",
+      "summary": "How to start an engine for a run: its ACP program, role prompt delivery, whether it serves guests.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The engine's id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "engines",
+          "launch"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.launch.prompt",
+      "summary": "The system prompt a run of the agent gets.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Whom the run is for (default: the owner).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "summary": "The project the run is in.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pkg",
+          "summary": "The pinned package folder.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cwd",
+          "summary": "The working folder shown in the prompt.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "date",
+          "summary": "The date shown in the prompt.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/LaunchPrompt"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "launch",
+          "prompt"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "project": {
+            "kind": "flag",
+            "spellings": [
+              "--project"
+            ]
+          },
+          "pkg": {
+            "kind": "flag",
+            "spellings": [
+              "--pkg"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "cwd": {
+            "kind": "flag",
+            "spellings": [
+              "--cwd"
+            ]
+          },
+          "date": {
+            "kind": "flag",
+            "spellings": [
+              "--date"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.launch.settings",
+      "summary": "The settings a run of the agent starts with.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Whom the run is for.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "mode",
+          "summary": "The permission mode.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pkg",
+          "summary": "The pinned package folder.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "snapshot",
+          "summary": "Read the pinned package, not the live folder.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "summary": "The project the run is in.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cwd",
+          "summary": "The working folder.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "harness",
+          "summary": "The engine the run is on.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kithBin",
+          "summary": "The kith program the run's helpers call.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pluginsJson",
+          "summary": "A file listing the plugins.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "terminal",
+          "summary": "The run is in a terminal.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "apiHelper",
+          "summary": "The API key helper.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "onceId",
+          "summary": "The one-shot grant id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "resolve",
+          "summary": "A file holding kith-auth's answer.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "launch",
+          "settings"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "mode": {
+            "kind": "flag",
+            "spellings": [
+              "--mode"
+            ]
+          },
+          "pkg": {
+            "kind": "flag",
+            "spellings": [
+              "--pkg"
+            ]
+          },
+          "snapshot": {
+            "kind": "switch",
+            "spellings": [
+              "--snapshot"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "project": {
+            "kind": "flag",
+            "spellings": [
+              "--project"
+            ]
+          },
+          "cwd": {
+            "kind": "flag",
+            "spellings": [
+              "--cwd"
+            ]
+          },
+          "harness": {
+            "kind": "flag",
+            "spellings": [
+              "--harness"
+            ]
+          },
+          "kithBin": {
+            "kind": "flag",
+            "spellings": [
+              "--kith-bin"
+            ]
+          },
+          "pluginsJson": {
+            "kind": "flag",
+            "spellings": [
+              "--plugins-json"
+            ]
+          },
+          "terminal": {
+            "kind": "switch",
+            "spellings": [
+              "--terminal"
+            ]
+          },
+          "apiHelper": {
+            "kind": "flag",
+            "spellings": [
+              "--api-helper"
+            ]
+          },
+          "onceId": {
+            "kind": "flag",
+            "spellings": [
+              "--once-id"
+            ]
+          },
+          "resolve": {
+            "kind": "flag",
+            "spellings": [
+              "--resolve"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.launch.mcp",
+      "summary": "The MCP servers a run of the agent starts with.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Whom the run is for.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pkg",
+          "summary": "The pinned package folder.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "snapshot",
+          "summary": "Read the pinned package, not the live folder.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "granted",
+          "summary": "A file listing the granted connectors.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "resolve",
+          "summary": "A file holding kith-auth's answer.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "launch",
+          "mcp"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "pkg": {
+            "kind": "flag",
+            "spellings": [
+              "--pkg"
+            ]
+          },
+          "snapshot": {
+            "kind": "switch",
+            "spellings": [
+              "--snapshot"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "granted": {
+            "kind": "flag",
+            "spellings": [
+              "--granted"
+            ]
+          },
+          "resolve": {
+            "kind": "flag",
+            "spellings": [
+              "--resolve"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.launch.whole",
+      "summary": "The whole launch of an agent (`AGENT --launch-json [flags]`, the flags passed through).",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "args",
+          "summary": "The agent, then the launch flags.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Launch"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "launch"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "args": {
+            "kind": "rest"
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.accounts.backups",
+      "summary": "The backup chain of an agent (`kith AGENT --backups-json`).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agentMd",
+          "summary": "The agent's agent.md.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "accounts",
+          "backups-json"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "agentMd": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.accounts.launchEnv",
+      "summary": "Shell assignments for a backup chain entry; refused (exit 4) when it can't run.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "entry",
+          "summary": "The backup entry.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "record",
+          "summary": "The launch is real: note `last_started`.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "accounts",
+          "launch-env"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "entry": {
+            "kind": "positional"
+          },
+          "record": {
+            "kind": "switch",
+            "spellings": [
+              "--record"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.accounts.mainEnv",
+      "summary": "`main_id=ID` plus the assignments of the agent's main account.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agentMd",
+          "summary": "The agent's agent.md.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "state",
+          "summary": "Start on `pick`'s first candidate.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "record",
+          "summary": "The launch is real: note `last_started`.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "prefer",
+          "summary": "The account a handed-on session was made under.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "accounts",
+          "main-env"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "agentMd": {
+            "kind": "positional"
+          },
+          "state": {
+            "kind": "switch",
+            "spellings": [
+              "--state"
+            ]
+          },
+          "record": {
+            "kind": "switch",
+            "spellings": [
+              "--record"
+            ]
+          },
+          "prefer": {
+            "kind": "flag",
+            "spellings": [
+              "--prefer"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.accounts.sessionRun",
+      "summary": "The harness, model and effort a session started with.",
+      "params": [
+        {
+          "name": "sid",
+          "summary": "The session.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "sh",
+          "summary": "Shell assignments.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "accounts",
+          "session-run"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "sid": {
+            "kind": "positional"
+          },
+          "sh": {
+            "kind": "switch",
+            "spellings": [
+              "--sh"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.accounts.sessionAccount",
+      "summary": "The account id a session was made under.",
+      "params": [
+        {
+          "name": "sid",
+          "summary": "The session.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "accounts",
+          "session-account"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "sid": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.accounts.list",
+      "summary": "Each extra account and whether it is logged in.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "That agent's order.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "accounts",
+          "list"
+        ],
+        "aliases": [
+          [
+            "kernel",
+            "accounts",
+            "ls"
+          ]
+        ],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.delegation.limits",
+      "summary": "How far a chain of asks may go.",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "delegation",
+          "limits"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.delegation.cap",
+      "summary": "The chain cost cap in dollars (`none` for no cap).",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "delegation",
+          "cap"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.delegation.record",
+      "summary": "The delegation record of one ask, as the code reads it.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask's id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "delegation",
+          "record"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.delegation.check",
+      "summary": "Whether the ask running now may start another.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask's id (default: a probe).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "crossing",
+          "summary": "The ask goes to an agent on another Mac.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "delegation",
+          "check"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "flag",
+            "spellings": [
+              "--id"
+            ]
+          },
+          "crossing": {
+            "kind": "switch",
+            "spellings": [
+              "--crossing"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.delegation.parked",
+      "summary": "Whether an ask waits on a card.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask's id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "boolean"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "delegation",
+          "parked"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.secrets",
+      "summary": "The read half of kith-auth: `resolve` and `may`, with its output and exit codes.",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "args",
+          "summary": "`resolve AGENT [--person ID] ...` or `may ID AGENT ...`.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "secrets"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "args": {
+            "kind": "rest"
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.threads",
+      "summary": "The writer claim of a session and the session registry (kith-sessions' claim half).",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "args",
+          "summary": "The verb and its arguments.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "threads"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "args": {
+            "kind": "rest"
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.runOnce",
+      "summary": "One task on one engine over ACP: the answer.",
+      "params": [
+        {
+          "name": "engine",
+          "summary": "The engine.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "model",
+          "summary": "The model.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cwd",
+          "summary": "The folder the engine works in.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "mcpConfig",
+          "summary": "MCP servers for the run, as JSON or a file.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "approve",
+          "summary": "Allow the tools the engine asks to use.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "timeout",
+          "summary": "Seconds the whole run may take (default 600).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "acpCommand",
+          "summary": "Start this ACP command line instead (tests).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "task",
+          "summary": "The task, after `--`.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "run-once"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "engine": {
+            "kind": "positional"
+          },
+          "model": {
+            "kind": "flag",
+            "spellings": [
+              "--model"
+            ]
+          },
+          "cwd": {
+            "kind": "flag",
+            "spellings": [
+              "--cwd"
+            ]
+          },
+          "mcpConfig": {
+            "kind": "flag",
+            "spellings": [
+              "--mcp-config"
+            ]
+          },
+          "approve": {
+            "kind": "switch",
+            "spellings": [
+              "--approve"
+            ]
+          },
+          "timeout": {
+            "kind": "flag",
+            "spellings": [
+              "--timeout"
+            ]
+          },
+          "acpCommand": {
+            "kind": "flag",
+            "spellings": [
+              "--acp-command"
+            ]
+          },
+          "task": {
+            "kind": "after"
+          }
+        }
+      }
+    },
+    {
+      "name": "kernel.coreMigrate",
+      "summary": "Makes (or migrates) this Mac's core database and releases it.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-migrate"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "agents.list",
+      "summary": "The agents on this Mac.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Agent"
+          }
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [
+          "--json"
+        ],
+        "args": {}
+      }
+    },
+    {
+      "name": "projects.list",
+      "summary": "The registered projects.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Projects"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "project",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [
+          "--json"
+        ],
+        "args": {}
+      }
+    },
+    {
+      "name": "agents.launch",
+      "summary": "How to start an agent (run in the folder the run works in; `KITH_PERSON` makes it an invited person's run).",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "backup",
+          "summary": "Launch a backup chain entry instead of the agent's own login.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "project",
+          "summary": "Load that project's context.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Launch"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [],
+        "aliases": [],
+        "formats": [],
+        "requires": [
+          "--launch-json"
+        ],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "backup": {
+            "kind": "flag",
+            "spellings": [
+              "--backup"
+            ]
+          },
+          "project": {
+            "kind": "flag",
+            "spellings": [
+              "-p"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "agents.create",
+      "summary": "Make an agent.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "Lowercase letters, digits, dashes.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "description",
+          "summary": "One line, no ': '.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "instructions",
+          "summary": "A file holding the first draft of agent.md's opening paragraph.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/NewAgent"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "new"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [
+          "--json"
+        ],
+        "args": {
+          "name": {
+            "kind": "positional"
+          },
+          "description": {
+            "kind": "positional"
+          },
+          "instructions": {
+            "kind": "flag",
+            "spellings": [
+              "--instructions"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "delegations.list",
+      "summary": "The delegation records on this Mac.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "$ref": "#/components/schemas/Delegations"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "stable",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "ask",
+          "delegations"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [
+          "--json"
+        ],
+        "args": {}
+      }
+    },
+    {
+      "name": "auth.list",
+      "summary": "Who holds which grants (no secret values).",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "auth",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "auth.granted",
+      "summary": "The agents granted a service, or what an agent was granted.",
+      "params": [
+        {
+          "name": "service",
+          "summary": "The service.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "forAgent",
+          "summary": "Limit to this agent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "auth",
+          "granted"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "service": {
+            "kind": "positional"
+          },
+          "forAgent": {
+            "kind": "flag",
+            "spellings": [
+              "--for"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "auth.grant",
+      "summary": "Grant an agent a scope of a service.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "scope",
+          "summary": "service/item.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "auth",
+          "grant"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "service": {
+            "kind": "positional"
+          },
+          "scope": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "auth.revoke",
+      "summary": "Take a service back from an agent.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "service",
+          "summary": "The service.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "auth",
+          "revoke"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "service": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "doctor",
+      "summary": "The health checks of this install.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "doctor"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "remote.list",
+      "summary": "The computers linked as remotes.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "remote",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "remote.add",
+      "summary": "Link a remote computer.",
+      "params": [
+        {
+          "name": "args",
+          "summary": "NAME and the ssh target.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "remote",
+          "add"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "args": {
+            "kind": "words"
+          }
+        }
+      }
+    },
+    {
+      "name": "remote.remove",
+      "summary": "Unlink a remote.",
+      "params": [
+        {
+          "name": "name",
+          "summary": "The remote.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "remote",
+          "rm"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "name": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.list",
+      "summary": "The asks in flight and recent.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "ask",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "bug.list",
+      "summary": "The bug reports kept on this Mac.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "bug",
+          "list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "bug.show",
+      "summary": "One bug report.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The report.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "bug",
+          "show"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "bug.create",
+      "summary": "Write a bug report.",
+      "params": [
+        {
+          "name": "title",
+          "summary": "The title.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "details",
+          "summary": "What happened.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "bug"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "title": {
+            "kind": "words"
+          },
+          "details": {
+            "kind": "flag",
+            "spellings": [
+              "--details"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "backup.list",
+      "summary": "The backup chain.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "backup",
+          "list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "backup.add",
+      "summary": "Add an account to the backup chain.",
+      "params": [
+        {
+          "name": "entry",
+          "summary": "The harness or harness:account.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "at",
+          "summary": "Where in the chain.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "Only for this agent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "backup",
+          "add"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "entry": {
+            "kind": "positional"
+          },
+          "at": {
+            "kind": "flag",
+            "spellings": [
+              "--at"
+            ]
+          },
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "backup.remove",
+      "summary": "Take an account off the backup chain.",
+      "params": [
+        {
+          "name": "entry",
+          "summary": "The entry.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "backup",
+          "remove"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "entry": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "update.self",
+      "summary": "Whether this program is the newest, or update it.",
+      "params": [
+        {
+          "name": "check",
+          "summary": "Only look.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "update",
+          "self"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "check": {
+            "kind": "switch",
+            "spellings": [
+              "--check"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.list",
+      "summary": "The wakes waiting.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "wake.status",
+      "summary": "Where one wake stands.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The wake.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "status"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "project.show",
+      "summary": "The project a folder is in, or the one it is.",
+      "params": [
+        {
+          "name": "path",
+          "summary": "A folder (default: here).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "project"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "path": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "project.notes",
+      "summary": "A project's notes.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The project.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "project",
+          "notes"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.versions",
+      "summary": "The versions of an agent's package.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "versions"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.history",
+      "summary": "The history of an agent's package, or one version of it.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "version",
+          "summary": "A version.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "history"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "version": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.pin",
+      "summary": "Pin an agent to a version.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "version",
+          "summary": "The version.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "pin"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "version": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.unpin",
+      "summary": "Follow an agent's live folder again.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "unpin"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.rollback",
+      "summary": "Roll an agent back one version.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "rollback"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.restore",
+      "summary": "Restore an agent's files from a ref.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "ref",
+          "summary": "The ref.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "restore"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "ref": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.commit",
+      "summary": "Commit an agent's changes.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "message",
+          "summary": "The message.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "commit"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "message": {
+            "kind": "flag",
+            "spellings": [
+              "-m"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.push",
+      "summary": "Push an agent's package to its remote.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "push"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.update",
+      "summary": "Update an agent's package from its remote.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "update"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.share",
+      "summary": "Share an agent's package.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "share"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.deps",
+      "summary": "What an agent's package depends on.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "deps"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "pkg.install",
+      "summary": "Install an agent's package.",
+      "params": [
+        {
+          "name": "source",
+          "summary": "Where from.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "yes",
+          "summary": "Install without asking.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "install"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "source": {
+            "kind": "positional"
+          },
+          "yes": {
+            "kind": "switch",
+            "spellings": [
+              "--yes"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.list",
+      "summary": "The scheduled runs.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "Only this agent's.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.add",
+      "summary": "Schedule a run.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "spec",
+          "summary": "The five cron fields, then the prompt.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The schedule's id.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "add"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "spec": {
+            "kind": "words"
+          },
+          "id": {
+            "kind": "flag",
+            "spellings": [
+              "--id"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.remove",
+      "summary": "Remove a schedule.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The schedule.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "rm"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.pause",
+      "summary": "Pause a schedule.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The schedule.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "pause"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.resume",
+      "summary": "Resume a schedule.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The schedule.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "resume"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.run",
+      "summary": "Run a schedule now.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The schedule.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "run"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.log",
+      "summary": "What the schedules did.",
+      "params": [
+        {
+          "name": "args",
+          "summary": "[AGENT [ID]] [COUNT], or AGENT/ID [COUNT].",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "log"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "args": {
+            "kind": "words"
+          }
+        }
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Harness": {
+        "description": "The program an agent runs on: `harness:` in its agent.md (`claude-code` is printed as claude), or a backup entry's. The host starts claude, codex, and any engine of the core's table with an ACP mode (`kith engines`); `agy` is the kernel's word for antigravity. One this version doesn't know is its own state: the host doesn't start it.",
+        "type": "string",
+        "enum": [
+          "claude",
+          "codex",
+          "pi",
+          "agy",
+          "hermes",
+          "qwen",
+          "dsh",
+          "opencode",
+          "cursor",
+          "omp",
+          "grok",
+          "gemini",
+          "copilot",
+          "goose",
+          "kimi",
+          "droid",
+          "amp",
+          "kilo",
+          "cline",
+          "auggie",
+          "vibe",
+          "kiro",
+          "devin",
+          "qoder",
+          "codebuddy",
+          "minimax",
+          "junie",
+          "antigravity",
+          "cortex",
+          "poolside"
+        ],
+        "x-kith-unknown": "unknown"
+      },
+      "RolePrompt": {
+        "description": "How an engine takes the agent's role prompt, from the engine table's `enforces`: `flag` (a flag or ACP option on the command line), `env` (an environment variable), `first-message` (in front of the first message), `none` (not known to be deliverable: the host puts it in front of the first message). One this version doesn't know is read as none.",
+        "type": "string",
+        "enum": [
+          "flag",
+          "env",
+          "first-message",
+          "none"
+        ],
+        "x-kith-unknown": "none"
+      },
+      "PermissionMode": {
+        "description": "The Claude Code permission mode a run starts in (kernel/lib/kith_settings.py CHOICES); a Codex run gets the host's translation. One this version doesn't know starts the run in default, which asks before every change.",
+        "type": "string",
+        "enum": [
+          "default",
+          "acceptEdits",
+          "plan",
+          "auto",
+          "bypassPermissions"
+        ],
+        "x-kith-unknown": "default"
+      },
+      "DelegationState": {
+        "description": "Where a delegation (one `kith ask` id) stands: `open` (running, or parked on a card), `answered`, `capped` (answered, and its run took the chain to its cost cap) or `stopped` (the run gave no answer). One this version doesn't know is its own state: the host leaves it alone.",
+        "type": "string",
+        "enum": [
+          "open",
+          "answered",
+          "capped",
+          "stopped"
+        ],
+        "x-kith-unknown": "unknown"
+      },
+      "Agent": {
+        "description": "One agent in `kith ls --json`. `home` is its folder, where its bot works. A kernel from before `harness` was listed runs every agent on Claude. `builtin` is true for an agent that ships with kith (like scratch): never backed up or shared; older kernels leave it out.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "home": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Harness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "builtin": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "home"
+        ]
+      },
+      "NewAgent": {
+        "description": "`kith new <name> <description> --json`: the agent just made. `home` is its folder (memory, data and files beside the role), `dir` its role folder (its own repo: agent.md, settings.json, skills). A failure prints `{\"ok\": false, \"error\": \"...\"}` and exits non-zero instead, and leaves no folder behind.",
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "home": {
+            "type": "string"
+          },
+          "dir": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent",
+          "home",
+          "dir",
+          "description"
+        ]
+      },
+      "Projects": {
+        "description": "`kith project ls --json`: every registered project, sorted by id.",
+        "type": "object",
+        "properties": {
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            }
+          }
+        },
+        "required": [
+          "projects"
+        ]
+      },
+      "Project": {
+        "description": "One registered project: its paths (absolute), its home folder when it has one, its git remotes, the project it sits in, its shared memory folder, and whether a folder of it is on this Mac.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "home": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "remotes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "memory": {
+            "type": "string"
+          },
+          "exists": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "paths",
+          "remotes",
+          "memory",
+          "exists"
+        ]
+      },
+      "Launch": {
+        "description": "`kith <agent> --launch-json`: how to start the agent, for claude and codex and, additively, any other engine the table lists with an ACP mode: `engine` is the table id (left out for claude and codex, which print what they always did), `acp` the installed CLI's own ACP program (null when it has none here: the host then starts the `registry` build), `role_prompt` how the engine takes `system_prompt`. `settings` is Claude Code's settings (null for another harness), `mcp_servers` its servers in Claude's format, `claude_args` the arguments `kith <agent>` would give claude (null for another harness). `backup`, `provider` and `account` say which backup entry, harness and login answer the run; `account_id` is that login as a backup id (`claude`, `claude:work`, `codex`), the agent's main account or the `--backup` entry.",
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "agent_version": {
+            "type": "string"
+          },
+          "harness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Harness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "system_prompt": {
+            "type": "string"
+          },
+          "settings": {},
+          "mcp_servers": {},
+          "add_dirs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "allowed_tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "disable_slash_commands": {
+            "type": "boolean"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "project": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "call_model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "permission_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PermissionMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cost_tag": {
+            "$ref": "#/components/schemas/CostTag"
+          },
+          "claude_args": {
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "backup": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Harness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "account_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "engine": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "acp": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AcpStart"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "registry": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role_prompt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RolePrompt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "version",
+          "agent",
+          "agent_version",
+          "cwd",
+          "env",
+          "system_prompt",
+          "mcp_servers",
+          "add_dirs",
+          "allowed_tools",
+          "disable_slash_commands",
+          "cost_tag"
+        ],
+        "x-kith-may-omit": [
+          "engine",
+          "acp",
+          "registry",
+          "role_prompt"
+        ]
+      },
+      "AcpStart": {
+        "description": "How to start an engine over ACP, from the engine table (`kith kernel engines launch <id> --json`): the installed CLI's own ACP mode as a program. `env` is extra environment for it (the engine's keys are the host's own).",
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          },
+          "args": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "env": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "command",
+          "args",
+          "env"
+        ]
+      },
+      "CostTag": {
+        "description": "What the cost ledger files a run's usage under. `via` is where the run came from (terminal, serve, a channel).",
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effort": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "via": {
+            "type": "string"
+          },
+          "project": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "person": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "agent",
+          "version",
+          "via"
+        ]
+      },
+      "Delegations": {
+        "description": "`kith ask delegations --json`: every delegation record on this Mac, newest first.",
+        "type": "object",
+        "properties": {
+          "delegations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Delegation"
+            }
+          }
+        },
+        "required": [
+          "delegations"
+        ]
+      },
+      "Delegation": {
+        "description": "The record of one `kith ask` id (foreground, --bg or agent@machine), in kernel/bin/kith-ask's ~/.kith/live/ask/ID.reg. `agent` is the agent asked, `chain` the id of the root ask of its chain, `hop` its depth (0 at the root) and `cross_hops` how many asks of the chain crossed to another Mac. Money is in micro-dollars (US$1 = 1000000) at API prices; `cost_micro_usd` is null for an ask from before costs were kept. `cap_micro_usd` is the chain cap in force now (null: none). `capped_ms` is when this ask's run took its chain to that cap, and `cap_card_ms` when the host raised the Needs-you card for it (once per chain and cap). Times are ms. A record from before delegation records reads as a root ask: chain = its id, hop 0. `brief` is the ask's text (at most 2000 characters) and `session` the asked agent's session once a --bg run claimed one; both are for the owner's peek, null on an older record, and never part of a member's or bot's RPC.",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "agent": {
+            "type": "string"
+          },
+          "chain": {
+            "type": "string"
+          },
+          "hop": {
+            "type": "integer"
+          },
+          "cross_hops": {
+            "type": "integer"
+          },
+          "crossed": {
+            "type": "boolean"
+          },
+          "caller": {
+            "$ref": "#/components/schemas/Caller"
+          },
+          "reply_to": {
+            "$ref": "#/components/schemas/ReplyTo"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DelegationState"
+          },
+          "cost_micro_usd": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "chain_cost_micro_usd": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cap_micro_usd": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "started_ms": {
+            "type": "integer"
+          },
+          "answered_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "capped_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "cap_card_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "brief": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "agent",
+          "chain",
+          "hop",
+          "cross_hops",
+          "crossed",
+          "caller",
+          "reply_to",
+          "state",
+          "started_ms"
+        ]
+      },
+      "Caller": {
+        "description": "Who asked: the agent (null for a terminal), the person whose run it is (null for the owner) and where it came from (`terminal`, `serve`, ...).",
+        "type": "object",
+        "properties": {
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "person": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "via": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": []
+      },
+      "ReplyTo": {
+        "description": "Where the answer goes: the caller's session (a wake once nobody waits for it) and the ask whose run asked. This is the only place the address lives; cards never carry it.",
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ask": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": []
+      },
+      "KernelVersion": {
+        "description": "`kith kernel version`: the interface version and the modules this build answers.",
+        "type": "object",
+        "properties": {
+          "abi": {
+            "type": "integer"
+          },
+          "modules": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "abi",
+          "modules"
+        ]
+      },
+      "Engines": {
+        "description": "`kith kernel engines --json`: the coding engines, installed or not, as the engine table describes them.",
+        "type": "object",
+        "properties": {
+          "engines": {
+            "type": "array",
+            "items": {}
+          }
+        },
+        "required": [
+          "engines"
+        ]
+      },
+      "LaunchPrompt": {
+        "description": "`kith kernel launch prompt --json`: the system prompt a run gets.",
+        "type": "object",
+        "properties": {
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    }
+  }
+}
