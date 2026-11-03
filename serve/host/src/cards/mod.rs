@@ -339,7 +339,7 @@ fn tell_asker(card: &Card, how: &str) {
             tracing::warn!(card = %card.id, "no kernel to answer a kith ask with");
             return;
         };
-        let env = std::env::vars().filter(|(k, _)| crate::channels::run::inherited(k));
+        let env = std::env::vars().filter(|(k, _)| crate::channels::run::inherited(k)).chain(crate::kernel::stub_env());
         let spawned = std::process::Command::new(bin)
             .args(&args)
             .env_clear()

@@ -19,7 +19,7 @@ import {
 import { normalizeFolder, type PlaceFolder, type PlaceSelection, type StartingFolder } from '@shared/place-folders'
 import { partialUpdate } from '@shared/optimistic'
 import { expireCalls, type IncomingCall } from '@shared/incoming-call'
-import { failureOf, OWN_TURN, type HeldPhase } from '@shared/held-run'
+import { CANT_STOP, failureOf, OWN_TURN, STILL_ENDING, type HeldPhase } from '@shared/held-run'
 import { DEFAULT_TURNS } from '@shared/conversation'
 import { parsePeek, parsePeeks, type Peek } from '@shared/handoff-peek'
 import type { KernelStatus } from '@shared/new-agent'
@@ -417,6 +417,8 @@ export class BotStore extends BotSync {
       try {
         const res = await this.withLink((c) => c.stopHolder(held.session), true)
         if (res.ownTurn) phase = OWN_TURN
+        else if (res.stillEnding) phase = STILL_ENDING
+        else if (res.cantStop) phase = CANT_STOP
         else if (res.stopped) this.stoppedRuns.set(entry.id, { kind: held.kind, at: new Date() })
       } catch (error) {
         phase = failureOf(error, this.hostName)
