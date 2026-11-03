@@ -14,7 +14,8 @@ pub(super) fn empty() -> Connection {
 }
 
 fn s(v: &Value, k: &str) -> Option<String> {
-    v.get(k).map(|x| x.as_str().expect("a string field").to_owned())
+    v.get(k)
+        .map(|x| x.as_str().expect("a string field").to_owned())
 }
 
 fn j(v: &Value, k: &str) -> Option<String> {
@@ -22,7 +23,8 @@ fn j(v: &Value, k: &str) -> Option<String> {
 }
 
 fn b(v: &Value, k: &str) -> Option<i64> {
-    v.get(k).map(|x| i64::from(x.as_bool().expect("a bool field")))
+    v.get(k)
+        .map(|x| i64::from(x.as_bool().expect("a bool field")))
 }
 
 fn truthy(v: Option<&Value>) -> bool {

@@ -125,7 +125,8 @@ fn same(auth: &Value, c: &Ctx) -> Result<(), String> {
                     if want != have {
                         return Err(format!("resolve_bot{q}: file {want:?}, core {have:?}"));
                     }
-                    let (allowed, _) = got(core.may(p, agent, via, once)).unwrap_or((false, String::new()));
+                    let (allowed, _) =
+                        got(core.may(p, agent, via, once)).unwrap_or((false, String::new()));
                     invariants(auth, &core, p, agent, via, allowed)?;
                 }
             }
@@ -168,7 +169,9 @@ fn invariants(
     if let Some(parent) = secrets::parent_of(auth, &id) {
         let (ok, why) = core.may(&parent, agent, via, false).unwrap();
         if !ok {
-            return Err(format!("bot {p:?} may use {agent}, its owner {parent} may not: {why}"));
+            return Err(format!(
+                "bot {p:?} may use {agent}, its owner {parent} may not: {why}"
+            ));
         }
         if !secrets::is_owner(auth, &parent) {
             let (Ok(mine), Ok(theirs)) = (
@@ -193,7 +196,9 @@ fn invariants(
                 return Err(format!("bot {p:?} lost a deny of its owner"));
             }
             if mine["budget"] != theirs["budget"] {
-                return Err(format!("bot {p:?} spends from another budget than its owner"));
+                return Err(format!(
+                    "bot {p:?} spends from another budget than its owner"
+                ));
             }
         }
     }
@@ -267,12 +272,18 @@ fn the_named_cases() {
     assert_eq!(may("sam", "sound").1, "member");
     // revoked: refused before any row, the `*` row included; their bot is dormant with them
     assert!(core.cut_off("ola").unwrap() && core.cut_off("bot-o").unwrap());
-    assert_eq!(may("ola", "house"), (false, "ola's access was removed".into()));
+    assert_eq!(
+        may("ola", "house"),
+        (false, "ola's access was removed".into())
+    );
     assert!(!may("bot-o", "house").0);
     // unknown
     assert!(!may("ghost", "garden").0);
     // a bot whose owner is gone, and a bot of the owner
-    assert_eq!(may("bot-x", "house"), (false, "bot-x's owner 'gone' is gone".into()));
+    assert_eq!(
+        may("bot-x", "house"),
+        (false, "bot-x's owner 'gone' is gone".into())
+    );
     assert_eq!(may("bot-k", "house"), (true, "bot of kai".into()));
     // an old id answers as the person it became
     assert_eq!(may("old-sam", "house").1, "member");
@@ -288,14 +299,24 @@ fn the_named_cases() {
     assert_eq!(r["mode"], "auto");
     assert_eq!(r["trusted"], true);
     // a bot: its owner's budget, a guest preset, its grants cut to its owner's
-    let r = core.resolve_bot("house", "bot-s", None, false).unwrap().unwrap();
+    let r = core
+        .resolve_bot("house", "bot-s", None, false)
+        .unwrap()
+        .unwrap();
     assert_eq!(r["preset"], "guest");
     assert_eq!(r["budget"], "20");
     assert_eq!(r["access"]["read"], json!(["/a/b"]));
     assert_eq!(r["access"]["domains"], json!(["x.com"]));
-    assert!(core.resolve_bot("house", "sam", None, false).unwrap().is_none());
+    assert!(
+        core.resolve_bot("house", "sam", None, false)
+            .unwrap()
+            .is_none()
+    );
     // the owner's bots are capped together by owner_bots_budget
-    let r = core.resolve_bot("house", "bot-k", None, false).unwrap().unwrap();
+    let r = core
+        .resolve_bot("house", "bot-k", None, false)
+        .unwrap()
+        .unwrap();
     assert_eq!(r["budget"], "50");
 }
 
@@ -303,10 +324,13 @@ fn the_named_cases() {
 fn a_missing_field_reads_as_kith_auth_defaults() {
     let (_t, c) = machine();
     // a row with nothing in it, a person with nothing in it: the older-version shapes
-    let auth = json!({"people": {"kai": {"owner": true}, "sam": {}}, "members": {"house": {"sam": {}}}});
+    let auth =
+        json!({"people": {"kai": {"owner": true}, "sam": {}}, "members": {"house": {"sam": {}}}});
     same(&auth, &c).unwrap();
     let conn = db_of(&auth);
-    let r = Authority::new(&conn, &c).resolve("house", "sam", None, false).unwrap();
+    let r = Authority::new(&conn, &c)
+        .resolve("house", "sam", None, false)
+        .unwrap();
     assert_eq!(r["preset"], "guest");
     assert_eq!(r["mode"], "default");
     assert_eq!(r["model"], "");
@@ -323,7 +347,9 @@ fn an_undefined_preset_is_the_same_refusal() {
                       "members": {"house": {"sam": {"preset": "nope"}}}});
     same(&auth, &c).unwrap();
     let conn = db_of(&auth);
-    let e = Authority::new(&conn, &c).resolve("house", "sam", None, false).unwrap_err();
+    let e = Authority::new(&conn, &c)
+        .resolve("house", "sam", None, false)
+        .unwrap_err();
     assert!(e.to_string().contains("no preset 'nope'"), "{e}");
 }
 
@@ -354,16 +380,36 @@ fn a_call_reads_one_snapshot() {
     let mut w = Connection::open(&path).unwrap();
     w.pragma_update(None, "journal_mode", "WAL").unwrap();
     crate::db::apply(&mut w, crate::db::MIGRATIONS, Some("t")).unwrap();
-    load(&w, &json!({"people": {"kai": {"owner": true}, "sam": {}}, "members": {"house": {"sam": {}}}}));
+    load(
+        &w,
+        &json!({"people": {"kai": {"owner": true}, "sam": {}}, "members": {"house": {"sam": {}}}}),
+    );
     let r = Connection::open(&path).unwrap();
     let tx = r.unchecked_transaction().unwrap();
-    let before: i64 = tx.query_row("SELECT count(*) FROM people WHERE revoked = 1", [], |x| x.get(0)).unwrap();
-    w.execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", []).unwrap();
-    let still: i64 = tx.query_row("SELECT count(*) FROM people WHERE revoked = 1", [], |x| x.get(0)).unwrap();
-    assert_eq!((before, still), (0, 0), "the open read transaction keeps its snapshot");
+    let before: i64 = tx
+        .query_row("SELECT count(*) FROM people WHERE revoked = 1", [], |x| {
+            x.get(0)
+        })
+        .unwrap();
+    w.execute("UPDATE people SET revoked = 1 WHERE id = 'sam'", [])
+        .unwrap();
+    let still: i64 = tx
+        .query_row("SELECT count(*) FROM people WHERE revoked = 1", [], |x| {
+            x.get(0)
+        })
+        .unwrap();
+    assert_eq!(
+        (before, still),
+        (0, 0),
+        "the open read transaction keeps its snapshot"
+    );
     drop(tx);
     // a call that starts after the commit sees it
-    assert!(snapshot(&r).unwrap()["people"]["sam"].get("revoked").is_some());
+    assert!(
+        snapshot(&r).unwrap()["people"]["sam"]
+            .get("revoked")
+            .is_some()
+    );
 }
 
 #[test]
@@ -375,7 +421,11 @@ fn the_schema_holds_the_tables_and_nothing_foreign() {
     // no SQL foreign key: a bot whose owner is gone, a row for an id that is no person, must load
     for t in ["people", "memberships", "presets", "authority_settings"] {
         let n: i64 = conn
-            .query_row(&format!("SELECT count(*) FROM pragma_foreign_key_list('{t}')"), [], |r| r.get(0))
+            .query_row(
+                &format!("SELECT count(*) FROM pragma_foreign_key_list('{t}')"),
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(n, 0, "{t}");
     }
@@ -415,14 +465,23 @@ type Row = (
 fn row() -> impl Strategy<Value = Row> {
     (
         some(pick(&["guest", "member", "pro", "empty", "nope"])),
-        some(pick(&["default", "acceptEdits", "auto", "bypassPermissions"])),
+        some(pick(&[
+            "default",
+            "acceptEdits",
+            "auto",
+            "bypassPermissions",
+        ])),
         some(any::<bool>()),
         some(strs(&["Bash", "Edit"])),
         some(pick(&["haiku", "opus"])),
         some(any::<bool>()),
         some(strs(&["house", "garden", "sound"])),
         some(pick(&["7", "20"])),
-        some((strs(&["/a", "/a/b"]), strs(&["/w", "/a"]), strs(&["x.com", "y.com"]))),
+        some((
+            strs(&["/a", "/a/b"]),
+            strs(&["/w", "/a"]),
+            strs(&["x.com", "y.com"]),
+        )),
         some(any::<bool>()),
         some((any::<bool>(), any::<bool>())),
     )
@@ -440,11 +499,27 @@ fn row_value(r: &Row) -> Value {
     put("trusted", r.2.map(Value::from));
     put("deny", r.3.as_ref().map(|v| json!(v)));
     put("model", r.4.map(Value::from));
-    put("env", r.5.map(|b| if b { json!({"FOO": "1"}) } else { json!({}) }));
+    put(
+        "env",
+        r.5.map(|b| if b { json!({"FOO": "1"}) } else { json!({}) }),
+    );
     put("helpers", r.6.as_ref().map(|v| json!(v)));
     put("budget", r.7.map(Value::from));
-    put("access", r.8.as_ref().map(|(a, b, c)| json!({"read": a, "write": b, "domains": c})));
-    put("jobs", r.9.map(|b| if b { json!({"work": {"snapshot": {"domains": ["a.example"], "helpers": ["garden"]}}}) } else { json!({}) }));
+    put(
+        "access",
+        r.8.as_ref()
+            .map(|(a, b, c)| json!({"read": a, "write": b, "domains": c})),
+    );
+    put(
+        "jobs",
+        r.9.map(|b| {
+            if b {
+                json!({"work": {"snapshot": {"domains": ["a.example"], "helpers": ["garden"]}}})
+            } else {
+                json!({})
+            }
+        }),
+    );
     put("helper_once", r.10.map(|(a, b)| json!({"garden": if a { FUTURE } else { 5 }, "sound": if b { FUTURE } else { 5 }})));
     Value::Object(o)
 }
@@ -456,7 +531,9 @@ fn person() -> impl Strategy<Value = Option<Person>> {
         0.8,
         (
             0u8..3,
-            some(pick(&["kai", "sam", "amy", "bot-a", "bot-b", "gone", "old-sam"])),
+            some(pick(&[
+                "kai", "sam", "amy", "bot-a", "bot-b", "gone", "old-sam",
+            ])),
             some(strs(&["old-sam", "old-amy", "old-b"])),
             any::<bool>(),
         ),
@@ -466,13 +543,19 @@ fn person() -> impl Strategy<Value = Option<Person>> {
 fn auth_value(
     people: &[Option<Person>],
     rows: &[Option<Row>],
-    presets: (Option<&'static str>, Option<bool>, Option<Vec<&'static str>>),
+    presets: (
+        Option<&'static str>,
+        Option<bool>,
+        Option<Vec<&'static str>>,
+    ),
     cap: Option<&'static str>,
 ) -> Value {
     let mut p = serde_json::Map::new();
     p.insert("kai".to_owned(), json!({"owner": true}));
     for (id, spec) in WHO[1..5].iter().zip(people) {
-        let Some((revoked, bot_of, was, named)) = spec else { continue };
+        let Some((revoked, bot_of, was, named)) = spec else {
+            continue;
+        };
         let mut o = serde_json::Map::new();
         if *named {
             o.insert("name".to_owned(), (*id).into());
@@ -531,7 +614,10 @@ fn auth_value(
 fn auth_strategy() -> impl Strategy<Value = Value> {
     (
         prop::collection::vec(person(), 4),
-        prop::collection::vec(prop::option::weighted(0.3, row()), MEMBERS.len() * WHO.len()),
+        prop::collection::vec(
+            prop::option::weighted(0.3, row()),
+            MEMBERS.len() * WHO.len(),
+        ),
         (
             some(pick(&["default", "acceptEdits", "auto"])),
             some(any::<bool>()),

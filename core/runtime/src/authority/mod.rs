@@ -105,9 +105,7 @@ fn text(r: &Row<'_>, i: usize) -> Result<Option<String>> {
 fn json(r: &Row<'_>, i: usize, what: &str) -> Result<Option<Value>> {
     match text(r, i)? {
         None => Ok(None),
-        Some(t) => serde_json::from_str(&t)
-            .map(Some)
-            .map_err(|e| bad(what, e)),
+        Some(t) => serde_json::from_str(&t).map(Some).map_err(|e| bad(what, e)),
     }
 }
 
@@ -171,7 +169,11 @@ pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
             set(&mut row, "budget", text(r, 9)?.map(Value::String));
             set(&mut row, "access", json(r, 10, "memberships.access")?);
             set(&mut row, "jobs", json(r, 11, "memberships.jobs")?);
-            set(&mut row, "helper_once", json(r, 12, "memberships.helper_once")?);
+            set(
+                &mut row,
+                "helper_once",
+                json(r, 12, "memberships.helper_once")?,
+            );
             let agent: String = r.get(0)?;
             let rows = members
                 .entry(agent)
