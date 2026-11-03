@@ -470,7 +470,7 @@ pub fn retarget(c: &Ctx, sid: &str, from: i64, to: i64, kind: &str) -> std::io::
     mine.pid = Some(to);
     mine.proc_start = os::proc_start(to);
     mine.at = iso_utc();
-    mine.kind = kind.to_owned();
+    kind.clone_into(&mut mine.kind);
     let tmp = dir.join(tmp_name(&format!("{sid}.claim")));
     create_new_private(&tmp, &pyjson::dumps(&mine.to_value()))?;
     std::fs::rename(&tmp, &dest).inspect_err(|_| {

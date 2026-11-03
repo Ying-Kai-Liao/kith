@@ -444,6 +444,7 @@ impl Terminals {
         }
     }
 
+    #[cfg_attr(not(test), allow(clippy::unused_self))]
     fn answer_wait(&self) -> Duration {
         #[cfg(test)]
         if let Some(d) = *self

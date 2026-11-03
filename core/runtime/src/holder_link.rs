@@ -344,6 +344,8 @@ fn connected(
     } else {
         reconcile(shared, &instance, &procs, cfg)?;
     }
+    // Before the state says connected: whoever waits for that state may call terminal.open at once.
+    shared.terminals.set_link(true);
     shared.set_holder(|h| {
         h.state = "connected";
         h.instance = Some(instance.clone());
@@ -356,7 +358,6 @@ fn connected(
         &shared.logs,
         &format!("holder: connected (instance {instance}, pid {pid}, {count} process(es))"),
     );
-    shared.terminals.set_link(true);
     let mut known = procs;
     let mut next_list = Instant::now() + cfg.poll;
     while !shared.stopping() {
