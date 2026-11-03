@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use kith_kernel::paths::Paths;
 use tempfile::TempDir;
 
-use crate::db::{MIGRATIONS, Migration};
+use crate::db::{MIGRATIONS as ALL_STEPS, Migration};
 use crate::layout::Layout;
 use crate::{
     Embedded, Error, Via, embedded_with, lock, migrate_with, perms, start_with,
@@ -19,6 +19,9 @@ const V2: Migration = Migration {
     name: "extra",
     sql: "CREATE TABLE extra (x INTEGER);",
 };
+// These tests are about the core's own schema rules, so they run on the M0 step alone: lanes add steps to the real
+// list (`ALL_STEPS`) and must not change what "today's head" means here.
+const MIGRATIONS: &[Migration] = &[ALL_STEPS[0]];
 const BOTH: &[Migration] = &[MIGRATIONS[0], V2];
 
 pub(crate) fn machine() -> (TempDir, PathBuf) {
