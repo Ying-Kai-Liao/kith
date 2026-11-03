@@ -780,6 +780,54 @@ mod tests {
     }
 
     #[test]
+    fn gone_sticks_once_a_kill_has_seen_the_tree_empty() {
+        let holder = test_holder();
+        let (core, theirs) = UnixStream::pair().unwrap();
+        let mut offered = vec![Ok(theirs)];
+        let looping = holder.clone();
+        std::thread::spawn(move || {
+            looping.accept_loop(
+                || {
+                    if offered.is_empty() {
+                        std::thread::sleep(Duration::from_secs(60));
+                    }
+                    offered.remove(0)
+                },
+                5,
+                Duration::from_millis(1),
+            )
+        });
+        let mut client = Client::over(core, "0123456789abcdef", 1).expect("served");
+        client
+            .spawn(&p::Spawn {
+                conv: "c".into(),
+                claim: 1,
+                generation: 1,
+                argv: vec!["sleep".into(), "30".into()],
+                env: std::env::vars().collect(),
+                cwd: "/".into(),
+                mode: p::Mode::Pipes,
+                cols: 80,
+                rows: 24,
+            })
+            .unwrap();
+        client
+            .expect(p::SPAWNED, 0, Duration::from_secs(10))
+            .expect("spawned");
+        let id = client.list().unwrap()[0].id;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while client.kill(id).unwrap() != KillState::Gone {
+            assert!(Instant::now() < deadline, "kill never reached gone");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Seen once: the entry remembers it, so a later kill says gone without signalling a group id that may by now
+        // belong to someone else (the blind spot of `tree_empty`).
+        assert!(holder.lock().procs[&id].gone.load(Ordering::Relaxed));
+        assert_eq!(client.kill(id).unwrap(), KillState::Gone);
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
     fn giving_up_on_accept_kills_what_is_held() {
         let holder = test_holder();
         let (core, theirs) = UnixStream::pair().unwrap();
