@@ -4,6 +4,7 @@
   kith_paths.py          the folders, one per line
   kith_paths.py --sh     export lines for bash: eval "$(python3 lib/kith_paths.py --sh)"
   kith_paths.py --json   the same as JSON (the Claude Code adapter)
+  kith_paths.py --kernel the kernel path for plists and hooks (KITH_KERNEL, else <machine>/cli/current/share/kith/kernel)
   kith_paths.py --bin    the kith program (Rust), or nothing when this Mac has none
   kith_paths.py --guest-sandbox   exit 0 inside the sandbox of a run for anyone but the owner, else 1
   kith_paths.py --guest-tmp ID    makes that guest's Claude Code temp folder and prints it (nothing: no short one fits)
@@ -29,7 +30,8 @@ Which one is this Mac's, since ~/.kith can exist long before the state moves (ki
 
 KITH_AGENTS (HQ_AGENTS) set: that folder for agents/ alone.
 KITH_HOME (HQ_HOME) set: that folder instead of ~/kith, else ~/kith when it exists, else ~/hq. Without either link:
-the Kith folder around the kernel when it sits there as kernel/, else the kernel folder. Before ~/.hq became a real
+the Kith folder around the kernel when it sits there as kernel/ (a checkout), else the kernel folder; a release copy of
+the kernel (<machine>/cli/<version>/share/kith/kernel) says nothing about it, so that is ~/kith. Before ~/.hq became a real
 folder it was a link to the Kith folder; then the state is <home>/state, machine things are in ~/.config/kith,
 logs in ~/Library/Logs/kith, caches in ~/Library/Caches/kith and snapshots in <agents>/.store (the hq-named
 folders, where they exist, still win).
@@ -96,6 +98,36 @@ def state_dir():
     return DOT, DOT.is_dir()   # nothing yet: the old link layout (state in <home>/state) until install.sh makes ~/.kith
 
 
+def is_release(kernel=None):
+    """Is this kernel a release copy (.../share/kith/kernel, in cli/<version>, a flat install or a Cellar) and not a checkout?"""
+    k = Path(kernel) if kernel else KERNEL
+    return k.parent.name == 'kith' and k.parent.parent.name == 'share'
+
+
+def cli_current():
+    """<machine>/cli/current, the stable address of the installed CLI release (it need not exist)."""
+    return Path(os.environ.get('KITH_PREFIX') or state_dir()[0]) / 'cli' / 'current'
+
+
+def stable_kernel():
+    """The kernel path for anything long-lived (launchd plists, hooks, plugin config): KITH_KERNEL when set (the developer
+    override, a checkout's kernel/), else <machine>/cli/current/share/kith/kernel, never a versioned folder and never a
+    checkout found by looking around. This kernel itself when there is no installed CLI (a test, a bare copy)."""
+    given = os.environ.get('KITH_KERNEL', '').strip()
+    if given:
+        return Path(os.path.expanduser(given))
+    cur = cli_current() / 'share/kith/kernel'
+    if cur.is_dir():
+        return cur
+    # No installed CLI: this kernel, by its logical address (~/kith/kernel) when that leads here, so a path with a
+    # volume name and spaces is not written into plists.
+    for home in (getenv('HOME').strip(), str(HOME / 'kith'), str(HOME / 'hq')):
+        c = Path(os.path.expanduser(home)) / 'kernel' if home else None
+        if c and c.is_dir() and os.path.samefile(c, KERNEL):
+            return c
+    return KERNEL
+
+
 def _first(*candidates):
     return next((c for c in candidates if c.exists()), candidates[0])
 
@@ -106,7 +138,7 @@ def paths():
     linked = HOME / 'kith'
     old_linked = HOME / 'hq'
     # Without either link: the Kith folder around the kernel when it sits there as kernel/, else the kernel folder.
-    fallback = KERNEL.parent if KERNEL.name == 'kernel' else KERNEL
+    fallback = linked if is_release() else KERNEL.parent if KERNEL.name == 'kernel' else KERNEL
     home = (Path(os.path.expanduser(given)) if given else linked if linked.is_dir()
             else old_linked if old_linked.is_dir() else dot if dot.is_symlink() and dot.is_dir() else fallback)
     given_agents = getenv('AGENTS').strip()   # moves the agents folder alone
@@ -286,6 +318,8 @@ if __name__ == '__main__':
     arg = sys.argv[1] if len(sys.argv) > 1 else ''
     if arg == '--sh':
         print('\n'.join('export %s=%s' % (k, shlex.quote(v)) for k, v in p.items()))
+    elif arg == '--kernel':
+        print(stable_kernel())
     elif arg == '--bin':
         print(kith_bin())
     elif arg == '--guest-sandbox':

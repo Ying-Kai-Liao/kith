@@ -7,7 +7,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// Current schema version (kv `schema`).
-const SCHEMA: i64 = 17;
+const SCHEMA: i64 = 18;
 
 /// 3: authorized devices (keys, not push tickets) with their push and Live Activity
 /// tickets. The old ticket-only `devices` table is dropped; phones re-register on connect.
@@ -35,6 +35,8 @@ const SCHEMA: i64 = 17;
 /// gives them back; and the revokes of people known only by a chat handle (`handle_revokes`), for the owner's other
 /// computers (Mac link).
 /// 17: a device's `PushKit` (`VoIP`) ticket (`push_tickets.voip_ticket`), for call pushes.
+/// 18: "This session" grants (`session_grants`, designs/2026-11-02-grant-card): an action the owner allowed for the rest
+/// of one conversation of an owner run.
 fn migrate(c: &Connection) -> Result<()> {
     let version: i64 =
         c.query_row("SELECT CAST(v AS INTEGER) FROM kv WHERE k = 'schema'", [], |r| r.get(0)).optional()?.unwrap_or(0);
@@ -75,7 +77,23 @@ fn migrate(c: &Connection) -> Result<()> {
     migrate_14(c)?;
     migrate_15(c)?;
     migrate_16(c)?;
-    migrate_17(c)
+    migrate_17(c)?;
+    migrate_18(c)
+}
+
+fn migrate_18(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "BEGIN;
+         CREATE TABLE IF NOT EXISTS session_grants(
+            id TEXT PRIMARY KEY, agent TEXT NOT NULL, run_session TEXT NOT NULL, claude_session TEXT NOT NULL DEFAULT '',
+            kind TEXT NOT NULL, rule TEXT NOT NULL, settings TEXT NOT NULL DEFAULT '', card_id TEXT NOT NULL UNIQUE,
+            entry_id TEXT, state TEXT NOT NULL CHECK (state IN ('live','removed','ended')), end_reason TEXT,
+            created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, ended_at INTEGER, tools TEXT NOT NULL DEFAULT '[]');
+         CREATE INDEX IF NOT EXISTS session_grants_live ON session_grants(agent, run_session) WHERE state = 'live';
+         INSERT INTO kv(k, v) VALUES('schema', '18') ON CONFLICT(k) DO UPDATE SET v = '18';
+         COMMIT;",
+    )?;
+    Ok(())
 }
 
 fn migrate_15(c: &Connection) -> Result<()> {
@@ -415,7 +433,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("17"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
         assert_eq!(s.device("old").unwrap().person_id, None, "an old device is the owner's");
         assert!(s.invites().unwrap().is_empty() && s.people().unwrap().is_empty());
     }
@@ -436,7 +454,7 @@ mod tests {
             .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("17"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
         let lane = crate::store::Lane::main("g");
         assert_eq!(s.lane_epoch(&lane), 0);
         let conv = s.open_conversation(&lane, 10, "owner").unwrap();
@@ -459,7 +477,7 @@ mod tests {
                 .unwrap();
         }
         let s = Store::open(&db).unwrap();
-        assert_eq!(s.kv_get("schema").as_deref(), Some("17"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
         assert!(s.peers_in().unwrap().is_empty() && s.peers_out().unwrap().is_empty());
     }
 
@@ -479,7 +497,7 @@ mod tests {
         }
         let s = Store::open(&db).unwrap();
         assert!(s.devices().unwrap().is_empty());
-        assert_eq!(s.kv_get("schema").as_deref(), Some("17"));
+        assert_eq!(s.kv_get("schema").as_deref(), Some("18"));
         assert!(s.thread("b", "root", 10).unwrap().is_empty(), "entries have a thread column");
         assert!(s.push_tickets().is_empty(), "push tickets have a voip column");
         drop(s);

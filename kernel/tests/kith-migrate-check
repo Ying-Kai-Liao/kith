@@ -114,6 +114,8 @@ build() {   # the live layout, scaled down
     > "$HOME/.kith/serve/config.json"
   echo data > "$HOME/.kith/serve/data.db"; echo co > "$HOME/.kith/hq-serve/README"
   ln -s "$REPO" "$HOME/hq"
+  mkdir -p "$HOME/.kith/cli/0.1.0/bin"; printf '#!/bin/sh\n' > "$HOME/.kith/cli/0.1.0/bin/kith"; chmod 755 "$HOME/.kith/cli/0.1.0/bin/kith"
+  ln -s 0.1.0 "$HOME/.kith/cli/current"   # the installed CLI (scripts/install.sh)
   ln -s "$HOME/hq/kernel/bin/kith" "$HOME/.local/bin/kith"; ln -s "$HOME/hq/kernel/bin/hq" "$HOME/.local/bin/hq"
   python3 -I - "$HOME" <<'EOF'
 import plistlib, sys
@@ -174,7 +176,7 @@ check "state repo works in ~/.kith: remote and log kept, only settings.json (its
 check "serve/ and hq-serve/ cannot be committed by kith backup" "git -C $HOME/.kith check-ignore -q serve/data.db && git -C $HOME/.kith check-ignore -q hq-serve/README"
 check "kith_paths resolves the state to ~/.kith" "python3 \"\$KERNEL/lib/kith_paths.py\" --sh | grep -q \"KITH_STATE=$HOME/.kith\$\""
 check "~/kith links where ~/hq does; ~/hq stays" "[ \"\$(readlink $HOME/kith)\" = \"\$REPO\" ] && [ \"\$(readlink $HOME/hq)\" = \"\$REPO\" ]"
-check "kith and hq commands lead to ~/kith/.../kith" "[ \"\$(readlink $HOME/.local/bin/kith)\" = $HOME/kith/kernel/bin/kith ] && [ \"\$(readlink $HOME/.local/bin/hq)\" = $HOME/kith/kernel/bin/kith ]"
+check "kith and hq commands lead to the installed CLI, ~/.kith/cli/current/bin/kith" "[ \"\$(readlink $HOME/.local/bin/kith)\" = $HOME/.kith/cli/current/bin/kith ] && [ \"\$(readlink $HOME/.local/bin/hq)\" = $HOME/.kith/cli/current/bin/kith ]"
 check "every dev.hq.* job became dev.kith.*" \
   "[ \"\$(ls $LA | tr '\n' ' ')\" = 'dev.kith.backup.plist dev.kith.cost.plist dev.kith.house.plist dev.kith.live.plist dev.kith.monitor.plist dev.kith.sched.plist dev.kith.serve.plist ' ]"
 check "sched plist came from its installer (new label, kith-sched, launcher is ~/.kith/bin/kith-uv)" \

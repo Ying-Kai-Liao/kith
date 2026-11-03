@@ -83,7 +83,7 @@ app.on('web-contents-created', (_e, contents) => {
 const background = () => (nativeTheme.shouldUseDarkColors ? '#0A0A0A' : '#FFFFFF')
 
 function snapshot(): HostSnapshot {
-  return { state: host.state, local: host.local, dev: devPort !== null, logPath: host.logPath }
+  return { state: host.state, local: host.local, dev: devPort !== null, logPath: host.logPath, cliNotice: host.cliNotice }
 }
 
 /** The chat window: roster on the left, the conversation on the right (Grok Bot's desktop layout). */
@@ -195,6 +195,7 @@ function registerIPC(tray: Tray) {
   ipcMain.handle('host:snapshot', fromRenderer(() => snapshot()))
   ipcMain.on('host:install', () => void host.install())
   ipcMain.on('host:restart', () => host.restart())
+  ipcMain.on('host:installCli', () => void host.installCli())
   ipcMain.on('app:openExternal', (_e, url: string) => {
     if (/^(https?|mailto|x-apple\.systempreferences):/.test(url)) void shell.openExternal(url)
   })

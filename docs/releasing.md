@@ -8,7 +8,8 @@ but publishes nothing (a dry run; give it a `version` or it uses `apps/desktop/p
 ## The desktop app
 
 The app's version comes from the tag (`v1.2.3` is 1.2.3); electron-updater compares it, so it must match. Nothing is
-committed for it.
+committed for it. The release build also passes it to `tools/native-host.mjs` as `KITH_APP_VERSION`, which stamps the
+CLI it bundles inside the app (`Resources/kith`, see below) with the same version.
 
 Asset names have no version, so `https://github.com/Ying-Kai-Liao/kith/releases/latest/download/<name>` always resolves
 (the download page links these):
@@ -32,6 +33,16 @@ The public links on kithbot.app (https://kithbot.app/download) redirect to those
 | `/download/linux/tar.gz` | `kith-linux-x64.tar.gz` |
 
 Auto-update reads the feed from GitHub directly.
+
+**The CLI inside the app.** The Mac app bundles the `kith` command in the release layout (`Resources/kith`: `bin/kith`,
+`share/kith/kernel` with a `VERSION` file) and `scripts/install.sh` as `Resources/kith-install.sh`. The app requires a
+CLI version, declared in one place: `"kith": { "cli": "0.1.0" }` in `apps/desktop/package.json`. Keep it equal to the
+host's `MIN_CLI` (`serve/host/src/kernel.rs`, the host crate's major.minor.0); a test checks it against the app's
+major.minor. At every launch, before the host is started or adopted (this includes the first launch after an update),
+the app reads the installed CLI version (`~/.kith/cli/current/share/kith/kernel/VERSION`, or the same under `~/.hq` on
+a Mac not yet migrated, or an old flat install) and, if it is missing or below the requirement and the bundled one is
+newer, runs the bundled installer unattended into `<machine folder>/cli/<version>/`. It never downgrades, and it does
+nothing when `KITH_KERNEL` is set (a dev kernel). A failure shows a notice with an "Install kith CLI" button.
 
 ### Releasing the desktop app: one-time secrets
 

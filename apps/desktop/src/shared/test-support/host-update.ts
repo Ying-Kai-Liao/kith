@@ -2,6 +2,7 @@ import { EventEmitter } from 'node:events'
 import * as crypto from 'node:crypto'
 import * as path from 'node:path'
 import { identity } from '../environment.ts'
+import * as cliInstall from '../cli-install.ts'
 import * as hostService from '../host-service.ts'
 import { loadMainModule, settle } from './main-module.ts'
 
@@ -52,6 +53,9 @@ export function hostUpdateFixture(options: { platform?: string; service?: string
     electron: { app: { isPackaged: true, getPath: () => '/prefs' } },
     './environment': { identity },
     '../shared/host-service': hostService,
+    // No bundled installer in the fixture's resources, so ensureCli is a no-op.
+    '../shared/cli-install': cliInstall,
+    '../../package.json': { kith: { cli: '0.1.0' } },
     './screen': { unregisterScreenAgent: () => { order.push('unregisterScreen') } },
   }, {
     __dirname: '/app/out/main',

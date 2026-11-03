@@ -17,6 +17,8 @@ pub const DOOR_TOOL: &str = "mcp__kithpermit__run_door";
 const NETWORK_TOOL: &str = "SandboxNetworkAccess";
 pub const ALWAYS: &str = "kith-always";
 pub const JOB: &str = "kith-job";
+/// "Always, for everyone <agent> is shared with": one agent-level host (`kith-auth agent-access`), not one person's row.
+pub const ALL: &str = "kith-always-all";
 
 /// A card's added line of text, its added options, and what they keep (`edge` on the entry).
 pub type Extra = (String, Vec<Value>, Value);
@@ -90,6 +92,11 @@ pub async fn extras(person: &str, name: &str, agent: &str, edge: &Edge, always: 
     let mut options = Vec::new();
     if always && !matches!(edge, Edge::Door(_)) {
         options.push(json!({"optionId": ALWAYS, "name": format!("Always for {name}"), "kind": "allow_always"}));
+        // Hosts only: a helper or a door is never agent-level.
+        if matches!(edge, Edge::Domain(_)) {
+            let all = format!("Always, for everyone {agent} is shared with");
+            options.push(json!({"optionId": ALL, "name": all, "kind": "allow_always"}));
+        }
     }
     let mut kept = json!({"kind": edge.kind(), "value": edge.value()});
     if let Some(j) = job {
@@ -149,7 +156,7 @@ pub async fn for_acp(
 /// never an id it didn't offer, and never its `allow_always`. None: it offered no `allow_once`, so it can only be
 /// cancelled.
 pub fn adapter_option<'a>(options: &'a Value, chosen: &'a str) -> Option<&'a str> {
-    if !matches!(chosen, ALWAYS | JOB) {
+    if !matches!(chosen, ALWAYS | ALL | JOB) {
         return Some(chosen);
     }
     options.as_array()?.iter().find(|o| o["kind"] == "allow_once")?["optionId"].as_str()
@@ -202,6 +209,7 @@ pub async fn apply(card: &Card, kept: &Value, option: Option<&str>, allow: bool)
     let args: Vec<&str> = match (allow, option, &edge, job) {
         (true, Some(JOB), _, Some(job)) => vec!["job", &card.agent, &card.person, job, "--shown", &shown],
         (true, Some(ALWAYS), Edge::Domain(host), _) => vec!["access", &card.agent, &card.person, "domain", host],
+        (true, Some(ALL), Edge::Domain(host), _) => vec!["agent-access", &card.agent, "domain", host],
         (true, Some(ALWAYS), Edge::Helper(h), _) => vec!["helper", &card.agent, &card.person, h],
         (true, _, Edge::Helper(h), _) => vec!["helper", &card.agent, &card.person, h, "--once"],
         (false, Some(_), _, Some(job)) if kept["hash"].as_str().is_some_and(|h| !h.is_empty()) => {

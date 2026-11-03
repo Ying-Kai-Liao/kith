@@ -2,7 +2,7 @@
 // contract (additive only, serve/contract/README.md), then run `node serve/contract/gen.mjs`.
 /* eslint-disable */
 
-export const CONTRACT_SHA256 = '37446c9073a15a468781a64fe11d73778e8211b3e8271907d2c5c828f163a4d8'
+export const CONTRACT_SHA256 = 'dcf2c9f6f7731c0787e76c2f7f47923ef67acab12089707b2eb1e34b1fdb6c6e'
 
 // ---- enums: a value a side doesn't know is decoded (decodeX) to what the contract says it means, never cast ----
 
@@ -153,6 +153,7 @@ export interface Hello {
   screen?: unknown | null
   analytics?: unknown | null
   urls?: unknown | null
+  cli?: unknown | null
 }
 
 /** An agent's card as a member sees it: only what it says about itself. */
@@ -1248,7 +1249,7 @@ export const SCHEMA: { enums: Record<string, EnumSchema>; types: Record<string, 
     Empty: { fields: {} },
     StoreHealth: { fields: { writable: 'bool', unsaved: 'int', dropped: 'int', error: 'string?' }, mayOmit: ['error'] },
     GrantedAgent: { fields: { agent: 'string', name: 'string?', role: 'AgentRole' } },
-    Hello: { fields: { hostId: 'string', computerId: 'string', signKey: 'string', boxKey: 'string', name: 'string', version: 'string', protocol: 'int', minProtocol: 'int', os: 'string', rev: 'int', store: 'StoreHealth', grantedAgents: '[GrantedAgent]?', cloud: 'string?', device: 'Device?', home: 'string?', backends: 'json?', screen: 'json?', analytics: 'json?', urls: 'json?' }, mayOmit: ['grantedAgents', 'cloud', 'device', 'home', 'backends', 'screen', 'analytics', 'urls'] },
+    Hello: { fields: { hostId: 'string', computerId: 'string', signKey: 'string', boxKey: 'string', name: 'string', version: 'string', protocol: 'int', minProtocol: 'int', os: 'string', rev: 'int', store: 'StoreHealth', grantedAgents: '[GrantedAgent]?', cloud: 'string?', device: 'Device?', home: 'string?', backends: 'json?', screen: 'json?', analytics: 'json?', urls: 'json?', cli: 'json?' }, mayOmit: ['grantedAgents', 'cloud', 'device', 'home', 'backends', 'screen', 'analytics', 'urls', 'cli'] },
     KithCard: { fields: { name: 'string?', description: 'string?', avatar: 'json?' }, mayOmit: ['name', 'description', 'avatar'] },
     KithInfo: { fields: { info: 'KithCard?', fetchedAt: 'int', error: 'string?' }, mayOmit: ['error'] },
     WorkingLane: { fields: { chat: 'string', thread: 'string?' } },

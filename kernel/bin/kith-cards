@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""kith-cards — the approval cards of your agents' runs, for an agent allowed to read them (kith cards).
+
+  kith cards history [-n N] [--json]   the last N cards (default 50): when, which agent, what kind of action, how it ended,
+                                       which button was tapped. Never the command, the file or anything it carried.
+  kith-cards --may-read AGENT          exit 0 when AGENT's package says `cards: read` (capabilities.yaml); the host asks this
+
+Run inside an agent's own run: it asks the Kith host over the run socket with the run's ask token, and the host answers
+only when that agent's capabilities.yaml has the line `cards: read` (builder adds it). serve.db itself stays secret.
+"""
+import json
+import os
+import re
+import socket
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)), '..', 'lib'))
+
+
+def may_read(agent):
+    """Does the agent's package say `cards: read`? Its role's capabilities.yaml, as kith-auth finds the package."""
+    from kith_paths import paths
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,63}', agent or ''):
+        return False
+    pkg = paths()['KITH_AGENTS'] / agent
+    for f in (pkg / 'role' / 'capabilities.yaml', pkg / 'capabilities.yaml'):
+        try:
+            return re.search(r'^cards:[ \t]*read[ \t]*$', f.read_text(), re.M) is not None
+        except OSError:
+            continue
+    return False
+
+
+def ask_host(limit):
+    token, path = os.environ.get('KITH_ASK_TOKEN'), os.environ.get('KITH_ASK_SOCKET')
+    if not (token and path):
+        return None, 'this run has no way to ask the Kith host (only an owner run the host or kith started has one)'
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(30)
+            s.connect(path)
+            s.sendall(json.dumps({'token': token, 'method': 'cardsHistory', 'limit': limit}).encode() + b'\n')
+            buf = b''
+            while not buf.endswith(b'\n'):
+                chunk = s.recv(65536)
+                if not chunk:
+                    break
+                buf += chunk
+        reply = json.loads(buf.decode())
+    except (OSError, ValueError):
+        return None, 'the Kith host could not be reached from this run'
+    if not isinstance(reply, dict) or reply.get('ok') is not True:
+        return None, (reply.get('error') or reply.get('message') if isinstance(reply, dict) else None) or 'the host refused'
+    return reply.get('cards') or [], None
+
+
+def main(argv):
+    if argv[:1] == ['--may-read'] and len(argv) == 2:
+        return 0 if may_read(argv[1]) else 1
+    if argv[:1] != ['history']:
+        print(__doc__.strip(), file=sys.stderr if argv and argv[0] not in ('-h', '--help') else sys.stdout)
+        return 0 if argv[:1] in (['-h'], ['--help']) else 2
+    rest, limit, as_json = argv[1:], 50, False
+    while rest:
+        if rest[0] == '--json':
+            as_json, rest = True, rest[1:]
+        elif rest[0] == '-n' and len(rest) > 1 and rest[1].isdigit():
+            limit, rest = max(1, min(int(rest[1]), 500)), rest[2:]
+        else:
+            print('kith cards: unknown argument %s' % rest[0], file=sys.stderr)
+            return 2
+    cards, why = ask_host(limit)
+    if cards is None:
+        print('kith cards: %s' % why, file=sys.stderr)
+        return 1
+    if as_json:
+        print(json.dumps({'cards': cards}))
+        return 0
+    import time
+    for c in cards:
+        at = time.strftime('%Y-%m-%d %H:%M', time.localtime((c.get('at') or 0) / 1000))
+        print('%s  %-12s %-8s %-10s %s' % (at, c.get('agent', ''), c.get('kind', ''), c.get('outcome', ''), c.get('button') or ''))
+    if not cards:
+        print('no cards')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))

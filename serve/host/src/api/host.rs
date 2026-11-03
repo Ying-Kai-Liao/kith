@@ -89,6 +89,8 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
                 "store": hub.store_health(true),
                 "screen": hub.screen.state(),
                 "analytics": hub.analytics.state(),
+                // Which kith CLI agent runs use and whether it passes the version gate; reads the kernel's VERSION.
+                "cli": tokio::task::spawn_blocking(crate::kernel::current_cli).await?.json(),
                 // Shells out to `tailscale`: keep it off the async workers.
                 "urls": tokio::task::spawn_blocking(move || crate::service::addresses(port)).await?,
             })
