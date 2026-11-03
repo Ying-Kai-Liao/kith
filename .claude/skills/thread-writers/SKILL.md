@@ -102,6 +102,12 @@ verb for one thread (fresh, stale, reused pid, damaged, live) and fails on a sec
 difftest. Nothing calls the crate for claims yet (the router and the host switch together, later); the differences
 from `kith-sessions` and `claim.rs` are in `docs/plans/one-bot-model.md` (A4-2).
 
+A4-3 adds the rest, still unswitched: `threads::terminal` (the host's `holder` with its App rule, `holders_of`, the revoke
+`sweep` with `keep`, its intents and its releases, `stop_holder`), `threads::listing` (the host's registry parser,
+`read_all`, `liveness`) and the wrapper (`run`, `pick`, `latest`, with the idle stop). The host-side check is
+`serve/host/src/terminal/kernel_twin.rs`: the host's code and the crate's on one fixture, the answers and the files left
+behind compared. The model's actions are unchanged; any change to either side of a pair must change the twin test.
+
 ## Bounds and assumptions
 
 - One thread, two terminal runs (`t1`, `t2`, each runs once), at most 2 sends (`MaxSends`), two session ids (the

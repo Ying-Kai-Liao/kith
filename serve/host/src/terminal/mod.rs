@@ -17,6 +17,8 @@
 pub mod claim;
 pub mod intent;
 mod jsonl;
+#[cfg(test)]
+mod kernel_twin;
 mod registry;
 mod sync;
 #[cfg(test)]

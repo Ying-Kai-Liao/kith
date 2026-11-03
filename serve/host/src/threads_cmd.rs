@@ -3,7 +3,7 @@
 //! `kith-sessions host_call` does), because the crate never calls the host itself. Not routed from `kith` yet, and the
 //! host's own claims (`terminal/claim.rs`) do not go through the crate yet either: the host never switches ahead of the CLI.
 
-use std::io::{Read as _, Write as _};
+use std::io::{BufRead as _, Read as _, Write as _};
 use std::net::{SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -105,12 +105,31 @@ pub fn run(kernel_dir: Option<PathBuf>, args: &[String]) -> i32 {
         home: home.clone(),
         env: &process_env,
     };
-    let host = Loopback { kernel: kernel_dir, home };
+    let host = Loopback { kernel: kernel_dir.clone(), home };
     let stdin = || {
         let mut text = String::new();
         let _ = std::io::stdin().read_to_string(&mut text);
         text
     };
+    // `pick` and `run` talk to the terminal as they go: a prompt is shown before it is read, the wrapper's notes come after
+    // the child ran.
+    let say_out = |text: &str| {
+        print!("{text}");
+        let _ = std::io::stdout().flush();
+    };
+    let say_err = |text: &str| {
+        eprint!("{text}");
+        let _ = std::io::stderr().flush();
+    };
+    let line = || {
+        let mut text = String::new();
+        let _ = std::io::stdin().lock().read_line(&mut text);
+        text
+    };
+    let io = cli::Io { out: &say_out, err: &say_err, line: &line, kernel: &kernel_dir };
+    if let Some(code) = cli::run_live(&ctx, &host, args, &io) {
+        return code;
+    }
     let out = cli::run(&ctx, &host, args, &stdin);
     print!("{}", out.stdout);
     eprint!("{}", out.stderr);

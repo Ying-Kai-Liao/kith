@@ -15,12 +15,20 @@
 //! named `*_differs_*`); none of them changes what a reader of the folder sees for a claim a live writer made.
 
 pub mod cli;
+mod clock;
+mod idle;
 pub mod intent;
+pub mod listing;
 // The one place with `unsafe` (kill(2)); the crate denies it everywhere else.
+#[cfg(test)]
+mod host_tests;
 #[allow(unsafe_code)]
 mod os;
+pub mod recent;
 pub mod registry;
 pub mod resolve;
+pub mod run;
+pub mod terminal;
 #[cfg(test)]
 mod tests;
 
@@ -439,7 +447,12 @@ pub fn release_claims(c: &Ctx, pid: i64) {
 /// Gives back the claim `pid` holds on `sid` under the name asked for (the host's `release`).
 pub fn release_one(c: &Ctx, sid: &str, pid: i64, takeover: bool) {
     let Some(dir) = c.reg_dir() else { return };
-    let path = claim_path(&dir, sid, takeover);
+    release_in(&dir, sid, pid, takeover);
+}
+
+/// [`release_one`] in a registry folder.
+pub(crate) fn release_in(dir: &Path, sid: &str, pid: i64, takeover: bool) {
+    let path = claim_path(dir, sid, takeover);
     let _lock = Lock::exclusive(&lock_path(&path)).ok();
     if read_claim(&path).is_some_and(|c| c.pid == Some(pid)) {
         let _ = std::fs::remove_file(path);

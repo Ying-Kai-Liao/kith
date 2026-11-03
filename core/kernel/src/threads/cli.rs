@@ -17,13 +17,20 @@
 //! holder SID                               the live claim on SID under either name, as its file says; exit 1 when none
 //! ```
 //!
-//! Not here: `run` (the wrapper that runs claude and writes the idle intent), `pick` and `latest` (they read the cost
-//! ledger to name a session). `run` is the launch's, and they take no claim.
+//! and the three that name a session or wrap claude (`latest` is a plain verb; `pick` and `run` talk to the terminal as they
+//! go, so they are [`run_live`]):
+//!
+//! ```text
+//! latest AGENT DIR                         the id of the agent's newest session begun in DIR
+//! pick AGENT                               lists recent sessions on stderr, reads a number on stdin, prints that session id
+//! run AGENT -- CMD...                      runs CMD (claude) as a child, passes signals and the exit code on, gives the claims back
+//! ```
 
 use std::time::Duration;
 
 use serde_json::Value;
 
+use super::recent;
 use super::resolve::{Host, resolve};
 use super::{
     Claim, Ctx, claim_path, claim_start, claim_wait, proc_claim, registry, release_claims,
@@ -57,7 +64,8 @@ impl Out {
 }
 
 const USAGE: &str = "usage: kith kernel threads record | resolve AGENT THREAD [PID [oneshot]] | claim SID PID [PERSON [AGENT]] | \
-terminal SID PID [PERSON [AGENT]] | proc PID PERSON AGENT | sweep PERSON... | release PID | holder SID";
+terminal SID PID [PERSON [AGENT]] | proc PID PERSON AGENT | sweep PERSON... | release PID | holder SID | \
+latest AGENT DIR | pick AGENT | run AGENT -- CMD...";
 
 fn int(s: &str) -> Result<i64, String> {
     s.trim()
@@ -117,6 +125,10 @@ pub fn run(c: &Ctx, host: &dyn Host, args: &[String], stdin: &dyn Fn() -> String
             proc_claim(c, int(a[1])?, a[2], a[3]).map_err(|e| e.to_string())?;
             Ok(Out::default())
         })()),
+        Some("latest") if n == 3 => match recent::latest(c, a[1], a[2]) {
+            Ok(sid) => Out::ok(format!("{sid}\n")),
+            Err(m) => Out::die(m),
+        },
         Some("sweep") if n > 1 => {
             let persons: Vec<String> = a[1..].iter().map(|s| (*s).to_owned()).collect();
             Out::ok(format!(
@@ -149,5 +161,39 @@ pub fn run(c: &Ctx, host: &dyn Host, args: &[String], stdin: &dyn Fn() -> String
             }
         }
         _ => Out::die(USAGE),
+    }
+}
+
+/// What the live verbs talk to: the terminal, as it goes.
+pub struct Io<'a> {
+    pub out: &'a dyn Fn(&str),
+    pub err: &'a dyn Fn(&str),
+    /// One line of standard input (`sys.stdin.readline()`).
+    pub line: &'a dyn Fn() -> String,
+    /// The kernel folder: `run` starts `kith-lifecycle`, `kith-ask` and `kith-wake` from its `bin/`.
+    pub kernel: &'a std::path::Path,
+}
+
+/// `pick` and `run`, which write to the terminal while they work (a prompt is read after it is shown; the wrapper's notes
+/// come after the child ran). `None` when the verb is not one of them: [`run`] has it. Otherwise the exit code.
+pub fn run_live(c: &Ctx, host: &dyn Host, args: &[String], io: &Io) -> Option<i32> {
+    let a: Vec<&str> = args.iter().map(String::as_str).collect();
+    match a.first().copied() {
+        Some("pick") if a.len() == 2 => Some(match recent::pick(c, a[1], io.err, io.line) {
+            Ok(sid) => {
+                (io.out)(&format!("{sid}\n"));
+                0
+            }
+            Err(None) => 1,
+            Err(Some(m)) => {
+                (io.err)(&format!("{m}\n"));
+                1
+            }
+        }),
+        Some("run") if a.len() > 3 && a[2] == "--" => {
+            let cmd: Vec<String> = a[3..].iter().map(|s| (*s).to_owned()).collect();
+            Some(super::run::run(c, host, io.kernel, a[1], &cmd, io.err))
+        }
+        _ => None,
     }
 }

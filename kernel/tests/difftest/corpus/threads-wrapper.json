@@ -1,0 +1,2124 @@
+[
+ {
+  "name": "threads-latest-newest-in-the-folder",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-old.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-new.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"later\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-other-dir.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/other\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"elsewhere\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-person.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"theirs\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-agent-b.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"writer's\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('s-old', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-new', 'coder', 'ask', 'kith', '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-other-dir', 'coder', 'terminal', 'kith', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-person', 'coder', 'terminal', 'kith', '2026-11-03T10:00:00', 'friend'); insert into runs (session, agent, via, project, started, person) values ('codex:abc', 'coder', 'terminal', 'kith', '2026-11-03T11:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-no-transcript', 'coder', 'terminal', 'kith', '2026-11-03T12:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-agent-b', 'writer', 'terminal', 'kith', '2026-11-03T13:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}/work"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-anywhere-else",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-old.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-new.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"later\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-other-dir.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/other\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"elsewhere\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-person.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"theirs\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-agent-b.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"writer's\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('s-old', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-new', 'coder', 'ask', 'kith', '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-other-dir', 'coder', 'terminal', 'kith', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-person', 'coder', 'terminal', 'kith', '2026-11-03T10:00:00', 'friend'); insert into runs (session, agent, via, project, started, person) values ('codex:abc', 'coder', 'terminal', 'kith', '2026-11-03T11:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-no-transcript', 'coder', 'terminal', 'kith', '2026-11-03T12:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-agent-b', 'writer', 'terminal', 'kith', '2026-11-03T13:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}/other"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-none-in-the-folder",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-old.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-new.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"later\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-other-dir.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/other\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"elsewhere\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-person.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"theirs\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-agent-b.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"writer's\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('s-old', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-new', 'coder', 'ask', 'kith', '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-other-dir', 'coder', 'terminal', 'kith', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-person', 'coder', 'terminal', 'kith', '2026-11-03T10:00:00', 'friend'); insert into runs (session, agent, via, project, started, person) values ('codex:abc', 'coder', 'terminal', 'kith', '2026-11-03T11:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-no-transcript', 'coder', 'terminal', 'kith', '2026-11-03T12:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-agent-b', 'writer', 'terminal', 'kith', '2026-11-03T13:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}/nowhere"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-no-ledger",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-old.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-new.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"later\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-other-dir.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/other\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"elsewhere\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-person.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"theirs\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-agent-b.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"writer's\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}/work"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-other-agent",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-old.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-new.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"later\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-other-dir.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/other\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"elsewhere\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-person.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"theirs\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-agent-b.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"writer's\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('s-old', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-new', 'coder', 'ask', 'kith', '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-other-dir', 'coder', 'terminal', 'kith', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-person', 'coder', 'terminal', 'kith', '2026-11-03T10:00:00', 'friend'); insert into runs (session, agent, via, project, started, person) values ('codex:abc', 'coder', 'terminal', 'kith', '2026-11-03T11:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-no-transcript', 'coder', 'terminal', 'kith', '2026-11-03T12:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-agent-b', 'writer', 'terminal', 'kith', '2026-11-03T13:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "writer",
+    "{HOME}/work"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-other-login",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.kith/accounts/claude/work/projects/-w/s-new.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"x\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('s-old', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-new', 'coder', 'ask', 'kith', '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-other-dir', 'coder', 'terminal', 'kith', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-person', 'coder', 'terminal', 'kith', '2026-11-03T10:00:00', 'friend'); insert into runs (session, agent, via, project, started, person) values ('codex:abc', 'coder', 'terminal', 'kith', '2026-11-03T11:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-no-transcript', 'coder', 'terminal', 'kith', '2026-11-03T12:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-agent-b', 'writer', 'terminal', 'kith', '2026-11-03T13:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}/work"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-config-dir",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05",
+   "CLAUDE_CONFIG_DIR": "{HOME}/cfg"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/cfg/projects/-w/s-new.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"x\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('s-old', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-new', 'coder', 'ask', 'kith', '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-other-dir', 'coder', 'terminal', 'kith', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-person', 'coder', 'terminal', 'kith', '2026-11-03T10:00:00', 'friend'); insert into runs (session, agent, via, project, started, person) values ('codex:abc', 'coder', 'terminal', 'kith', '2026-11-03T11:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-no-transcript', 'coder', 'terminal', 'kith', '2026-11-03T12:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-agent-b', 'writer', 'terminal', 'kith', '2026-11-03T13:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}/work"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-folder-through-a-link",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "link": "home/linked",
+    "to": "{HOME}/work"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-old.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-new.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"later\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-other-dir.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/other\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"elsewhere\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-person.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"theirs\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-agent-b.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"writer's\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('s-old', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-new', 'coder', 'ask', 'kith', '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-other-dir', 'coder', 'terminal', 'kith', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-person', 'coder', 'terminal', 'kith', '2026-11-03T10:00:00', 'friend'); insert into runs (session, agent, via, project, started, person) values ('codex:abc', 'coder', 'terminal', 'kith', '2026-11-03T11:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-no-transcript', 'coder', 'terminal', 'kith', '2026-11-03T12:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-agent-b', 'writer', 'terminal', 'kith', '2026-11-03T13:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}/linked"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-transcript-names-no-folder",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/s-new.jsonl",
+    "text": "{}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('s-old', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-new', 'coder', 'ask', 'kith', '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-other-dir', 'coder', 'terminal', 'kith', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-person', 'coder', 'terminal', 'kith', '2026-11-03T10:00:00', 'friend'); insert into runs (session, agent, via, project, started, person) values ('codex:abc', 'coder', 'terminal', 'kith', '2026-11-03T11:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-no-transcript', 'coder', 'terminal', 'kith', '2026-11-03T12:00:00', null); insert into runs (session, agent, via, project, started, person) values ('s-agent-b', 'writer', 'terminal', 'kith', '2026-11-03T13:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder",
+    "{HOME}/work"
+   ]
+  ]
+ },
+ {
+  "name": "threads-latest-usage",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   }
+  ],
+  "run": [
+   [
+    "latest",
+    "coder"
+   ]
+  ],
+  "stderr": false
+ },
+ {
+  "name": "threads-pick-chooses-a-number",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isMeta\": true, \"message\": {\"content\": \"meta\"}}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"  first\\n\\n  thing   typed \"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-2.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isSidechain\": true, \"message\": {\"content\": \"side\"}}\n{\"type\": \"user\", \"message\": {\"content\": \"<command-name>/x</command-name>\"}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>r\"}, {\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"from a block\"}]}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-3.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-4.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-5.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"assistant\", \"message\": {\"content\": \"no user turn\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('p-1', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-2', 'coder', 'ask', null, '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-3', 'coder', null, 'a-very-long-project', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-4', 'coder', 'helper', 'kith', 'not a time', null); insert into runs (session, agent, via, project, started, person) values ('p-5', 'coder', 'terminal', 'kith', null, null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "2\n"
+ },
+ {
+  "name": "threads-pick-the-newest-first",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isMeta\": true, \"message\": {\"content\": \"meta\"}}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"  first\\n\\n  thing   typed \"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-2.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isSidechain\": true, \"message\": {\"content\": \"side\"}}\n{\"type\": \"user\", \"message\": {\"content\": \"<command-name>/x</command-name>\"}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>r\"}, {\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"from a block\"}]}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-3.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-4.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-5.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"assistant\", \"message\": {\"content\": \"no user turn\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('p-1', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-2', 'coder', 'ask', null, '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-3', 'coder', null, 'a-very-long-project', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-4', 'coder', 'helper', 'kith', 'not a time', null); insert into runs (session, agent, via, project, started, person) values ('p-5', 'coder', 'terminal', 'kith', null, null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "1\n"
+ },
+ {
+  "name": "threads-pick-enter-cancels",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isMeta\": true, \"message\": {\"content\": \"meta\"}}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"  first\\n\\n  thing   typed \"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-2.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isSidechain\": true, \"message\": {\"content\": \"side\"}}\n{\"type\": \"user\", \"message\": {\"content\": \"<command-name>/x</command-name>\"}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>r\"}, {\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"from a block\"}]}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-3.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-4.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-5.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"assistant\", \"message\": {\"content\": \"no user turn\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('p-1', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-2', 'coder', 'ask', null, '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-3', 'coder', null, 'a-very-long-project', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-4', 'coder', 'helper', 'kith', 'not a time', null); insert into runs (session, agent, via, project, started, person) values ('p-5', 'coder', 'terminal', 'kith', null, null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "\n"
+ },
+ {
+  "name": "threads-pick-no-answer-cancels",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isMeta\": true, \"message\": {\"content\": \"meta\"}}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"  first\\n\\n  thing   typed \"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-2.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isSidechain\": true, \"message\": {\"content\": \"side\"}}\n{\"type\": \"user\", \"message\": {\"content\": \"<command-name>/x</command-name>\"}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>r\"}, {\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"from a block\"}]}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-3.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-4.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-5.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"assistant\", \"message\": {\"content\": \"no user turn\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('p-1', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-2', 'coder', 'ask', null, '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-3', 'coder', null, 'a-very-long-project', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-4', 'coder', 'helper', 'kith', 'not a time', null); insert into runs (session, agent, via, project, started, person) values ('p-5', 'coder', 'terminal', 'kith', null, null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": ""
+ },
+ {
+  "name": "threads-pick-not-a-number",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isMeta\": true, \"message\": {\"content\": \"meta\"}}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"  first\\n\\n  thing   typed \"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-2.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isSidechain\": true, \"message\": {\"content\": \"side\"}}\n{\"type\": \"user\", \"message\": {\"content\": \"<command-name>/x</command-name>\"}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>r\"}, {\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"from a block\"}]}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-3.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-4.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-5.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"assistant\", \"message\": {\"content\": \"no user turn\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('p-1', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-2', 'coder', 'ask', null, '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-3', 'coder', null, 'a-very-long-project', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-4', 'coder', 'helper', 'kith', 'not a time', null); insert into runs (session, agent, via, project, started, person) values ('p-5', 'coder', 'terminal', 'kith', null, null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "two\n"
+ },
+ {
+  "name": "threads-pick-out-of-range",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isMeta\": true, \"message\": {\"content\": \"meta\"}}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"  first\\n\\n  thing   typed \"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-2.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isSidechain\": true, \"message\": {\"content\": \"side\"}}\n{\"type\": \"user\", \"message\": {\"content\": \"<command-name>/x</command-name>\"}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>r\"}, {\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"from a block\"}]}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-3.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-4.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-5.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"assistant\", \"message\": {\"content\": \"no user turn\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('p-1', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-2', 'coder', 'ask', null, '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-3', 'coder', null, 'a-very-long-project', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-4', 'coder', 'helper', 'kith', 'not a time', null); insert into runs (session, agent, via, project, started, person) values ('p-5', 'coder', 'terminal', 'kith', null, null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "9\n"
+ },
+ {
+  "name": "threads-pick-zero",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isMeta\": true, \"message\": {\"content\": \"meta\"}}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"  first\\n\\n  thing   typed \"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-2.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"isSidechain\": true, \"message\": {\"content\": \"side\"}}\n{\"type\": \"user\", \"message\": {\"content\": \"<command-name>/x</command-name>\"}}\n{\"type\": \"user\", \"message\": {\"content\": [{\"type\": \"text\", \"text\": \"<system-reminder>r\"}, {\"type\": \"image\"}, {\"type\": \"text\", \"text\": \"from a block\"}]}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-3.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-4.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/p-5.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"assistant\", \"message\": {\"content\": \"no user turn\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('p-1', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-2', 'coder', 'ask', null, '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-3', 'coder', null, 'a-very-long-project', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-4', 'coder', 'helper', 'kith', 'not a time', null); insert into runs (session, agent, via, project, started, person) values ('p-5', 'coder', 'terminal', 'kith', null, null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "0\n"
+ },
+ {
+  "name": "threads-pick-nothing-to-resume",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('p-1', 'coder', 'terminal', 'kith', '2026-11-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-2', 'coder', 'ask', null, '2026-11-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-3', 'coder', null, 'a-very-long-project', '2026-11-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('p-4', 'coder', 'helper', 'kith', 'not a time', null); insert into runs (session, agent, via, project, started, person) values ('p-5', 'coder', 'terminal', 'kith', null, null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "1\n"
+ },
+ {
+  "name": "threads-pick-no-ledger",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "1\n"
+ },
+ {
+  "name": "threads-pick-sixteen-sessions-list-fifteen",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-00.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t0\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-01.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t1\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-02.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t2\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-03.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t3\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-04.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t4\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-05.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t5\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-06.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t6\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-07.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t7\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-08.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t8\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-09.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t9\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-10.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t10\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-11.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t11\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-12.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t12\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-13.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t13\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-14.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t14\"}}\n"
+   },
+   {
+    "write": "home/.claude/projects/-w/q-15.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"t15\"}}\n"
+   },
+   {
+    "sqlite": "home/.kith/cost.db",
+    "sql": "create table runs (session text primary key, agent text, version text, model text, effort text, via text, project text, started text, person text); insert into runs (session, agent, via, project, started, person) values ('q-00', 'coder', 'terminal', 'kith', '2026-10-01T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-01', 'coder', 'terminal', 'kith', '2026-10-02T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-02', 'coder', 'terminal', 'kith', '2026-10-03T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-03', 'coder', 'terminal', 'kith', '2026-10-04T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-04', 'coder', 'terminal', 'kith', '2026-10-05T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-05', 'coder', 'terminal', 'kith', '2026-10-06T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-06', 'coder', 'terminal', 'kith', '2026-10-07T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-07', 'coder', 'terminal', 'kith', '2026-10-08T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-08', 'coder', 'terminal', 'kith', '2026-10-09T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-09', 'coder', 'terminal', 'kith', '2026-10-10T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-10', 'coder', 'terminal', 'kith', '2026-10-11T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-11', 'coder', 'terminal', 'kith', '2026-10-12T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-12', 'coder', 'terminal', 'kith', '2026-10-13T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-13', 'coder', 'terminal', 'kith', '2026-10-14T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-14', 'coder', 'terminal', 'kith', '2026-10-15T09:00:00', null); insert into runs (session, agent, via, project, started, person) values ('q-15', 'coder', 'terminal', 'kith', '2026-10-16T09:00:00', null);"
+   }
+  ],
+  "run": [
+   [
+    "pick",
+    "coder"
+   ]
+  ],
+  "stdin": "15\n"
+ },
+ {
+  "name": "threads-run-passes-the-exit-code",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "exit 3"
+   ]
+  ]
+ },
+ {
+  "name": "threads-run-clean-exit-with-no-session",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "true"
+   ]
+  ]
+ },
+ {
+  "name": "threads-run-passes-output-and-arguments",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "echo out; echo err >&2; echo \"$1\"",
+    "x",
+    "an arg"
+   ]
+  ]
+ },
+ {
+  "name": "threads-run-a-signal-death-is-128-plus",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "kill -9 $$"
+   ]
+  ]
+ },
+ {
+  "name": "threads-run-command-not-found",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "no-such-program-here"
+   ]
+  ]
+ },
+ {
+  "name": "threads-run-gives-back-its-claim",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/s-2.claim",
+    "text": "{\"pid\": 1, \"procStart\": null, \"at\": \"x\", \"kind\": \"terminal\"}"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"pid\": %s, \"procStart\": null, \"at\": \"x\", \"kind\": \"terminal\"}' $PPID > {HOME}/.kith/live/terminal/s-1.claim"
+   ]
+  ]
+ },
+ {
+  "name": "threads-run-a-quit-is-recorded-and-the-resume-is-said",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"v\":1,\"sessionId\":\"r-1\",\"agent\":\"coder\",\"cwd\":\"{HOME}/work\",\"transcriptPath\":\"{HOME}/.claude/projects/-w/r-1.jsonl\",\"pid\":%s,\"startedAt\":\"2026-11-03T04:05:06Z\"}' $$ > {HOME}/.kith/live/terminal/r-1.json"
+   ],
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "sed 's/[0-9][0-9]*/N/g' {HOME}/.kith/sessions/intent/r-1.json 2>&1; echo"
+   ]
+  ],
+  "ignore": [
+   "/live/terminal/r-1\\.json",
+   "/sessions/intent/r-1\\.json"
+  ]
+ },
+ {
+  "name": "threads-run-a-failed-exit-is-not-a-quit",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"v\":1,\"sessionId\":\"r-1\",\"agent\":\"coder\",\"cwd\":\"{HOME}/work\",\"transcriptPath\":\"{HOME}/.claude/projects/-w/r-1.jsonl\",\"pid\":%s,\"startedAt\":\"2026-11-03T04:05:06Z\"}' $$ > {HOME}/.kith/live/terminal/r-1.json; exit 1"
+   ],
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "sed 's/[0-9][0-9]*/N/g' {HOME}/.kith/sessions/intent/r-1.json 2>&1; echo"
+   ]
+  ],
+  "ignore": [
+   "/live/terminal/r-1\\.json",
+   "/sessions/intent/r-1\\.json"
+  ]
+ },
+ {
+  "name": "threads-run-an-earlier-intent-is-kept",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.kith/sessions/intent/r-1.json",
+    "text": "{\"why\": \"idle\", \"at\": \"x\", \"pid\": 5, \"procStart\": null}"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"v\":1,\"sessionId\":\"r-1\",\"agent\":\"coder\",\"cwd\":\"{HOME}/work\",\"transcriptPath\":\"{HOME}/.claude/projects/-w/r-1.jsonl\",\"pid\":%s,\"startedAt\":\"2026-11-03T04:05:06Z\"}' $$ > {HOME}/.kith/live/terminal/r-1.json"
+   ],
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "sed 's/[0-9][0-9]*/N/g' {HOME}/.kith/sessions/intent/r-1.json 2>&1; echo"
+   ]
+  ],
+  "ignore": [
+   "/live/terminal/r-1\\.json",
+   "/sessions/intent/r-1\\.json"
+  ]
+ },
+ {
+  "name": "threads-run-no-note-without-a-transcript",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"v\":1,\"sessionId\":\"r-1\",\"agent\":\"coder\",\"cwd\":\"{HOME}/work\",\"transcriptPath\":\"{HOME}/.claude/projects/-w/gone.jsonl\",\"pid\":%s,\"startedAt\":\"2026-11-03T04:05:06Z\"}' $$ > {HOME}/.kith/live/terminal/r-1.json"
+   ],
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "sed 's/[0-9][0-9]*/N/g' {HOME}/.kith/sessions/intent/r-1.json 2>&1; echo"
+   ]
+  ],
+  "ignore": [
+   "/live/terminal/r-1\\.json",
+   "/sessions/intent/r-1\\.json"
+  ]
+ },
+ {
+  "name": "threads-run-the-host-took-it-over",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"v\":1,\"sessionId\":\"r-1\",\"agent\":\"coder\",\"cwd\":\"{HOME}/work\",\"transcriptPath\":\"{HOME}/.claude/projects/-w/r-1.jsonl\",\"pid\":%s,\"startedAt\":\"2026-11-03T04:05:06Z\"}' $$ > {HOME}/.kith/live/terminal/r-1.json; touch {HOME}/.kith/live/terminal/r-1.taken"
+   ],
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "sed 's/[0-9][0-9]*/N/g' {HOME}/.kith/sessions/intent/r-1.json 2>&1; echo"
+   ]
+  ],
+  "ignore": [
+   "/live/terminal/r-1\\.json",
+   "/sessions/intent/r-1\\.json"
+  ]
+ },
+ {
+  "name": "threads-run-a-stale-taken-file-is-ignored",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   },
+   {
+    "write": "home/.kith/live/terminal/r-1.taken",
+    "text": ""
+   },
+   {
+    "run": [
+     "touch",
+     "-t",
+     "202001010000",
+     "{ROOT}/home/.kith/live/terminal/r-1.taken"
+    ]
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"v\":1,\"sessionId\":\"r-1\",\"agent\":\"coder\",\"cwd\":\"{HOME}/work\",\"transcriptPath\":\"{HOME}/.claude/projects/-w/r-1.jsonl\",\"pid\":%s,\"startedAt\":\"2026-11-03T04:05:06Z\"}' $$ > {HOME}/.kith/live/terminal/r-1.json"
+   ],
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "sed 's/[0-9][0-9]*/N/g' {HOME}/.kith/sessions/intent/r-1.json 2>&1; echo"
+   ]
+  ],
+  "ignore": [
+   "/live/terminal/r-1\\.json",
+   "/sessions/intent/r-1\\.json"
+  ]
+ },
+ {
+  "name": "threads-run-no-state-folder",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": null,
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "exit 2"
+   ]
+  ]
+ },
+ {
+  "name": "threads-run-idle-session-is-put-to-sleep",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05",
+   "KITH_SLEEP_MINUTES": "0.001"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"v\":1,\"sessionId\":\"r-1\",\"agent\":\"coder\",\"cwd\":\"{HOME}/work\",\"transcriptPath\":\"{HOME}/.claude/projects/-w/r-1.jsonl\",\"pid\":%s,\"startedAt\":\"2026-11-03T04:05:06Z\"}' $$ > {HOME}/.kith/live/terminal/r-1.json; exec sleep 30"
+   ],
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "sed 's/[0-9][0-9]*/N/g' {HOME}/.kith/sessions/intent/r-1.json 2>&1; echo"
+   ]
+  ],
+  "ignore": [
+   "/live/terminal/r-1\\.json",
+   "/sessions/intent/r-1\\.json"
+  ]
+ },
+ {
+  "name": "threads-run-busy-session-is-not-put-to-sleep",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05",
+   "KITH_SLEEP_MINUTES": "0.001"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n{\"type\": \"assistant\", \"timestamp\": \"2026-11-01T10:00:01.000Z\", \"message\": {\"content\": [{\"type\": \"tool_use\", \"id\": \"t1\", \"name\": \"Bash\"}]}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "printf '{\"v\":1,\"sessionId\":\"r-1\",\"agent\":\"coder\",\"cwd\":\"{HOME}/work\",\"transcriptPath\":\"{HOME}/.claude/projects/-w/r-1.jsonl\",\"pid\":%s,\"startedAt\":\"2026-11-03T04:05:06Z\"}' $$ > {HOME}/.kith/live/terminal/r-1.json; sleep 2"
+   ],
+   [
+    "run",
+    "coder",
+    "--",
+    "sh",
+    "-c",
+    "sed 's/[0-9][0-9]*/N/g' {HOME}/.kith/sessions/intent/r-1.json 2>&1; echo"
+   ]
+  ],
+  "ignore": [
+   "/live/terminal/r-1\\.json",
+   "/sessions/intent/r-1\\.json"
+  ]
+ },
+ {
+  "name": "threads-run-usage",
+  "command": "threads",
+  "needs": "rust",
+  "program": {
+   "old": [
+    "python3",
+    "{KERNEL}/tests/difftest/threads-old.py"
+   ],
+   "new": [
+    "{BIN}",
+    "kernel",
+    "threads",
+    "--kernel",
+    "{KERNEL}"
+   ]
+  },
+  "env": {
+   "KITH_STATE": "{HOME}/.kith",
+   "KITH_CLAIM_WAIT": "0",
+   "KITH_SERVE_DIR": "{HOME}/.kith/serve",
+   "KITH_SERVE_PORT": "1",
+   "KITH_IDLE_POLL": "0.05"
+  },
+  "setup": [
+   {
+    "mkdir": "home/work"
+   },
+   {
+    "mkdir": "home/other"
+   },
+   {
+    "mkdir": "home/.kith/live/terminal"
+   },
+   {
+    "write": "home/.claude/projects/-w/r-1.jsonl",
+    "text": "{\"type\": \"summary\"}\n{\"type\": \"system\", \"cwd\": \"{HOME}/work\"}\n{\"type\": \"user\", \"timestamp\": \"2026-11-01T10:00:00.000Z\", \"message\": {\"content\": \"hello\"}}\n"
+   }
+  ],
+  "run": [
+   [
+    "run",
+    "coder"
+   ]
+  ],
+  "stderr": false
+ }
+]

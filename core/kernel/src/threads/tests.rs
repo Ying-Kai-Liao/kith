@@ -9,10 +9,10 @@ use std::sync::atomic::AtomicU32;
 
 static N: AtomicU32 = AtomicU32::new(0);
 
-struct Tmp(PathBuf);
+pub(super) struct Tmp(pub(super) PathBuf);
 
 impl Tmp {
-    fn new() -> Tmp {
+    pub(super) fn new() -> Tmp {
         let dir = std::env::temp_dir().join(format!(
             "kith-threads-{}-{}",
             std::process::id(),
@@ -23,15 +23,15 @@ impl Tmp {
         Tmp(dir)
     }
 
-    fn state(&self) -> PathBuf {
+    pub(super) fn state(&self) -> PathBuf {
         self.0.join("state")
     }
 
-    fn reg(&self) -> PathBuf {
+    pub(super) fn reg(&self) -> PathBuf {
         registry_dir(&self.state())
     }
 
-    fn put(&self, name: &str, text: &str) {
+    pub(super) fn put(&self, name: &str, text: &str) {
         fs::create_dir_all(self.reg()).unwrap();
         fs::write(self.reg().join(name), text).unwrap();
     }
@@ -43,11 +43,11 @@ impl Drop for Tmp {
     }
 }
 
-fn no_env(_: &str) -> Option<String> {
+pub(super) fn no_env(_: &str) -> Option<String> {
     None
 }
 
-fn ctx<'a>(t: &Tmp, env: &'a dyn Fn(&str) -> Option<String>) -> Ctx<'a> {
+pub(super) fn ctx<'a>(t: &Tmp, env: &'a dyn Fn(&str) -> Option<String>) -> Ctx<'a> {
     Ctx {
         state: Some(t.state()),
         machine: Some(t.0.join("machine")),
@@ -57,10 +57,10 @@ fn ctx<'a>(t: &Tmp, env: &'a dyn Fn(&str) -> Option<String>) -> Ctx<'a> {
 }
 
 /// A process that lives until the guard drops: a claimer that is not the test itself.
-struct Sleeper(Child);
+pub(super) struct Sleeper(pub(super) Child);
 
 impl Sleeper {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self(
             Command::new("sleep")
                 .arg("60")
@@ -70,7 +70,7 @@ impl Sleeper {
         )
     }
 
-    fn pid(&self) -> i64 {
+    pub(super) fn pid(&self) -> i64 {
         i64::from(self.0.id())
     }
 }
@@ -83,14 +83,14 @@ impl Drop for Sleeper {
 }
 
 /// A pid that ran and is gone.
-fn dead_pid() -> i64 {
+pub(super) fn dead_pid() -> i64 {
     let mut child = Command::new("true").spawn().unwrap();
     let pid = i64::from(child.id());
     child.wait().unwrap();
     pid
 }
 
-fn me() -> i64 {
+pub(super) fn me() -> i64 {
     i64::from(std::process::id())
 }
 
