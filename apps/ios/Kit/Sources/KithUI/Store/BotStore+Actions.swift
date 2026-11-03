@@ -242,6 +242,10 @@ extension BotStore {
                 let result = try await withLink(replay: true) { try await $0.stopHolder(session: held.session) }
                 if result.ownTurn != nil {
                     phase = HeldRunModel.ownTurnPhase
+                } else if result.stillEnding != nil {
+                    phase = HeldRunModel.stillEndingPhase
+                } else if result.cantStop != nil {
+                    phase = HeldRunModel.cantStopPhase
                 } else if result.stopped != nil {
                     Motion.animate { stoppedRuns[entry.id] = StoppedRun(kind: held.kind, at: .now) }
                 }

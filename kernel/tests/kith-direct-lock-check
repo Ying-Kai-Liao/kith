@@ -8,7 +8,8 @@
 #   - two direct runs on one session: the second is refused, whichever of the claim file or the lock answers first;
 #   - an app turn (the host's claim, kith-sessions take_claim) on a session a direct run holds is still blocked by the claim file;
 #   - the claim file names the shell pid, and claude descends from the stub which is that same pid (exec kept it);
-#   - no session id (-c) or no kith-stub: unlocked, as before (the missing stub says so on stderr; KITH_REQUIRE_STUB=1 refuses).
+#   - an interactive run on a busy lock: exit 75, claude never started, its claim released, no resume note;
+#   - no session id (-c) or no kith-stub: unlocked, as before (the missing stub says so on stderr; KITH_REQUIRE_STUB=1 refuses; the default flips in M3);
 #
 #   kernel/tests/kith-direct-lock-check    a few seconds; prints each check, exits 1 when one fails
 #   KITH_STUB_BIN=/path/to/kith-stub       else a build under $CARGO_TARGET_DIR / serve/host/target (no stub: the check skips)
@@ -117,10 +118,12 @@ rm -f "$T/go" "$T/started"; touch "$T/go"
 ( cd "$T/work" && KITH_CLAUDE_ARGS="--continue" "$KERNEL/bin/kith" designer "task" ) >/dev/null 2>&1
 is "-c with no id: runs unlocked" "$?" 0
 
-# no kith-stub: one stderr line and the run goes on; KITH_REQUIRE_STUB=1 refuses
+# no kith-stub: one stderr line and the run goes on (the default flips to a refusal in M3); KITH_REQUIRE_STUB=1 refuses
 SID3=33333333-3333-4333-8333-333333333333
 err=$(cd "$T/work" && KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
 [[ $rc == 0 && $err == *"no kith-stub program"* ]] && ok "no stub: runs unlocked with one line" || bad "no stub" "$rc $err"
+err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
+[[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
 err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
 [[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
 
@@ -143,6 +146,7 @@ waitfor '[[ -s $T/started && -f $REG/$SID4.json ]]' || bad "interactive: claude 
 cpid=$(cat "$T/started")
 is "interactive: registry names claude's own pid" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$REG/$SID4.json")" "$cpid"
 is "interactive: registry notes the stub as launcher" "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("launcher"))' "$REG/$SID4.json")" "$(ps -o ppid= -p "$cpid" | tr -d ' ')"
+sleep 0.5   # kith-sessions has found claude behind the stub by now (it names that pid in the quit intent)
 touch "$T/go"; wait $RP
 intent=$(find "$KITH_STATE" -path '*intent*' -name "$SID4.json" 2>/dev/null | head -1)
 [[ -n $intent ]] && is "interactive: Kai's /exit leaves a quit intent for claude's pid" "$(python3 -c 'import json,sys; i=json.load(open(sys.argv[1])); print(i["why"], i["pid"])' "$intent")" "quit $cpid" \
@@ -160,6 +164,21 @@ print(v('busy\n', 0), v('locked\n', 75), v('locked\n', 127), v('', 70))
 PY
 )
 is "stub status pipe: busy wins; the engine's own 75/127 stay; a lock error stays 70" "$verdict" "75 75 127 70"
+
+# an interactive run that finds the lock busy (another holder has the conversation): the wrapper exits 75, claude never starts,
+# the terminal claim it took is given back, and no resume note reaches Kai
+SID5=55555555-5555-4555-8555-555555555555
+rm -f "$T/go" "$T/started"
+"$STUB" --lock-dir "$LOCKS" --key "$SID5" -- bash -c 'while [ ! -e "$0" ]; do sleep 0.1; done' "$T/go" & HELD5=$!
+waitfor '! "$STUB" --lock-dir "$LOCKS" --key "$SID5" -- true >/dev/null 2>&1' || bad "interactive busy: held stub did not take the lock"
+( cd "$T/work" && KERNEL_SK=$SK STUB_SID=$SID5 exec bash -c 'python3 "$0" terminal "$1" $$ && exec python3 "$0" run designer -- "$2" --lock-dir "$3" --key "$1" -- "$4"' \
+  "$SK" "$SID5" "$STUB" "$LOCKS" "$T/bin/claude-reg" ) > "$T/r5.out" 2>&1
+rc=$?
+is "interactive busy: the run exits 75" "$rc" 75
+[[ ! -s $T/started && ! -f $REG/$SID5.json ]] && ok "interactive busy: claude never started" || bad "interactive busy: claude started"
+unheld $SID5 && ok "interactive busy: the claim was released" || bad "interactive busy: claim still held"
+grep -qE 'Resume it as|continued in Kith' "$T/r5.out" && bad "interactive busy: a resume note was printed" "$(cat "$T/r5.out")" || ok "interactive busy: no resume note"
+touch "$T/go"; wait $HELD5
 
 [[ $fail == 0 ]] && echo "all checks passed"
 exit $fail

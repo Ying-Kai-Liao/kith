@@ -89,4 +89,8 @@ private let calendar: Calendar = {
     #expect(gone.stopped == nil && gone.ownTurn == nil)
     let own = try JSONDecoder().decode(StopHolderResult.self, from: Data(#"{"stopped":null,"ownTurn":{"kind":"bot","pid":9,"since":"x"}}"#.utf8))
     #expect(own.ownTurn?.kind == "bot")
+    let ending = try JSONDecoder().decode(StopHolderResult.self, from: Data(#"{"stopped":null,"stillEnding":{"kind":"oneshot","pid":7,"since":"x"}}"#.utf8))
+    #expect(ending.stillEnding?.pid == 7 && ending.stopped == nil && ending.cantStop == nil)
+    let cant = try JSONDecoder().decode(StopHolderResult.self, from: Data(#"{"stopped":null,"cantStop":{"kind":"terminal","pid":8,"since":"x"}}"#.utf8))
+    #expect(cant.cantStop?.pid == 8)
 }
