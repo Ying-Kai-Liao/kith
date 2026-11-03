@@ -13,10 +13,10 @@
 //! Record names are stored in plaintext (they are the associated data and `list` needs them); only values are secret.
 //! Zeroizing is best effort: stack copies and formatted buffers are not tracked.
 //!
-//! Nothing calls this yet: the host vault and kith-auth's Keychain writes move onto it at M2-7 / M2-18, and the
+//! Secret cards write through it (`cards/secret.rs`, M2-12). Nothing else calls this yet: the host vault and kith-auth's Keychain writes move onto it at M2-7 / M2-18, and the
 //! signed daemon reads the key through Security.framework at M2-6.
 
-mod keystore;
+pub(crate) mod keystore;
 #[cfg(test)]
 mod tests;
 
@@ -45,7 +45,7 @@ impl Envelope {
         Ok(Self::with_store(keystore::os_key_store()?))
     }
 
-    fn with_store(store: Box<dyn KeyStore>) -> Self {
+    pub(crate) fn with_store(store: Box<dyn KeyStore>) -> Self {
         Self { store, key: None }
     }
 

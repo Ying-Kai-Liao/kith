@@ -5,7 +5,9 @@
 (*                                                                         *)
 (* Code: serve/host/src/cards/secret.rs (provide, respond, deny, grant),   *)
 (* serve/host/src/store/cards.rs (card_claim, card_claim_release,          *)
-(* card_saved, card_answer, cards_sweep).                                  *)
+(* card_saved, card_answer, cards_sweep); and the core's version,          *)
+(* core/runtime/src/cards/{mod,secret}.rs (claim, release, saved,          *)
+(* withdraw, sweep, park_run, provide) over secrets/ (the envelope).       *)
 (*                                                                         *)
 (*   Claim    = Slot::take + card_claim: one device, card open and before  *)
 (*              its deadline; the deadline is pushed out for the write.    *)
@@ -14,6 +16,21 @@
 (*   Fail     = the write failed: claim released, card still open.         *)
 (*   Sweep    = cards_sweep: an open card past its deadline expires.       *)
 (*   Deny     = respondPermission deny: refused while a slot is held.      *)
+(*                                                                         *)
+(*   Withdraw = withdraw: the asker cancelled; refused while a claim holds.*)
+(*   Crash    = the writer's process died; its claim stays until it is     *)
+(*              dropped (Lapse). Only with CrashPossible: the host's       *)
+(*              restarts are not modeled, the core's daemon can die.       *)
+(*   Lapse    = a claim ends without its holder: a dead pid is dropped,    *)
+(*              or a pid-less claim's time runs out. With a live writer    *)
+(*              the core refuses it (LapseNeedsDeadWriter): a claim with   *)
+(*              a pid holds past its time.                                 *)
+(*   Commit   = the core's one transaction: the claim is still ours, the   *)
+(*              card is open, the key is sealed and the card is saved,     *)
+(*              all or nothing (AtomicCommit). The host's Write + Finish   *)
+(*              are two steps (AtomicCommit FALSE), so a crash between    *)
+(*              them leaves a written, open card: see core-split.          *)
+(*   Park (park_run) keeps the card open and its claim: no action here.    *)
 (*                                                                         *)
 (* Two switches show the checks are not vacuous: Exclusive FALSE lets a    *)
 (* second device claim too; ClaimBlocksClose FALSE lets the sweep and a    *)
@@ -27,15 +44,15 @@
 (***************************************************************************)
 EXTENDS Naturals
 
-CONSTANTS Exclusive, ClaimBlocksClose, FailWritesNothing
+CONSTANTS Exclusive, ClaimBlocksClose, FailWritesNothing, AtomicCommit, CrashPossible, LapseNeedsDeadWriter
 
 Devices == {"d1", "d2"}
 
 VARIABLES
-    card,     \* "open" "saved" "denied" "expired"
+    card,     \* "open" "saved" "denied" "expired" "withdrawn"
     late,     \* the card's own deadline has passed (the clock only moves forward)
     claim,    \* the device holding the write claim, or "none"
-    pc,       \* per device: "idle" "writing" "wrote" "done"
+    pc,       \* per device: "idle" "writing" "wrote" "done" "dead"
     writes,   \* how many times the Keychain was written for this card
     wroteOpen \* every write happened while the card was open
 
@@ -61,6 +78,7 @@ Claim(d) ==
     /\ UNCHANGED <<card, late, writes, wroteOpen>>
 
 Write(d) ==
+    /\ ~AtomicCommit
     /\ pc[d] = "writing"
     /\ writes' = writes + 1
     /\ wroteOpen' = (wroteOpen /\ card = "open")
@@ -87,12 +105,42 @@ FailAfterWrite(d) ==
 
 \* card_saved only answers a card that is still open.
 Finish(d) ==
+    /\ ~AtomicCommit
     /\ pc[d] = "wrote"
     /\ card = "open"
     /\ card' = "saved"
     /\ pc' = [pc EXCEPT ![d] = "done"]
     /\ claim' = IF claim = d THEN "none" ELSE claim
     /\ UNCHANGED <<late, writes, wroteOpen>>
+
+\* The core's commit: one transaction. The claim is ours and the card open (saved_in checks both), the key is sealed
+\* and the card is saved together, or nothing happens.
+Commit(d) ==
+    /\ AtomicCommit
+    /\ pc[d] = "writing"
+    /\ claim = d
+    /\ card = "open"
+    /\ writes' = writes + 1
+    /\ wroteOpen' = (wroteOpen /\ card = "open")
+    /\ card' = "saved"
+    /\ pc' = [pc EXCEPT ![d] = "done"]
+    /\ claim' = "none"
+    /\ UNCHANGED late
+
+\* The writer's process dies: mid-write, or (non-atomic) after the key went in and before the card was saved.
+Crash(d) ==
+    /\ CrashPossible
+    /\ pc[d] \in {"writing", "wrote"}
+    /\ pc' = [pc EXCEPT ![d] = "dead"]
+    /\ UNCHANGED <<card, late, claim, writes, wroteOpen>>
+
+\* A claim ends without its holder. The core drops a claim whose pid is dead (void_dead_claims) and, with no pid, at
+\* its time; a claim whose writer lives is never lapsed (LapseNeedsDeadWriter).
+Lapse ==
+    /\ claim # "none"
+    /\ (LapseNeedsDeadWriter => pc[claim] = "dead")
+    /\ claim' = "none"
+    /\ UNCHANGED <<card, late, pc, writes, wroteOpen>>
 
 Held == claim # "none"
 
@@ -102,6 +150,12 @@ Sweep ==
     /\ card' = "expired"
     /\ UNCHANGED <<late, claim, pc, writes, wroteOpen>>
 
+Withdraw ==
+    /\ card = "open"
+    /\ (ClaimBlocksClose => ~Held)
+    /\ card' = "withdrawn"
+    /\ UNCHANGED <<late, claim, pc, writes, wroteOpen>>
+
 Deny ==
     /\ card = "open"
     /\ (ClaimBlocksClose => ~Held)
@@ -109,20 +163,20 @@ Deny ==
     /\ UNCHANGED <<late, claim, pc, writes, wroteOpen>>
 
 Next ==
-    \/ Tick \/ Sweep \/ Deny
-    \/ \E d \in Devices : Claim(d) \/ Write(d) \/ Fail(d) \/ FailAfterWrite(d) \/ Finish(d)
+    \/ Tick \/ Sweep \/ Deny \/ Withdraw \/ Lapse
+    \/ \E d \in Devices : Claim(d) \/ Write(d) \/ Fail(d) \/ FailAfterWrite(d) \/ Finish(d) \/ Commit(d) \/ Crash(d)
 
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
-    /\ card \in {"open", "saved", "denied", "expired"}
+    /\ card \in {"open", "saved", "denied", "expired", "withdrawn"}
     /\ writes \in 0..4
 
 \* Keychain written => the card was open when it was written ...
 WriteWhileOpen == writes > 0 => wroteOpen
 
-\* ... and a closed (denied or expired) card was never written.
-ClosedNeverWritten == card \in {"denied", "expired"} => writes = 0
+\* ... and a closed (denied, expired or withdrawn) card was never written.
+ClosedNeverWritten == card \in {"denied", "expired", "withdrawn"} => writes = 0
 
 \* ... and at most one write per card.
 AtMostOneWrite == writes <= 1

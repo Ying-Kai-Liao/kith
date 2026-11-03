@@ -5294,6 +5294,73 @@
       }
     },
     {
+      "name": "cards.provide",
+      "summary": "Types a key into a key card: the core claims the card, seals every value into the secrets envelope and spends the card in one commit, at most once. Answers `{result: saved}` (names only: the service, account and variables, never a value), `closed` (answered, denied, saved or withdrawn already), `expired` (its time ran out first) or `claimed` (another provide holds it). A failed write changes nothing and leaves the card open. Refuses a card that is not a key card, an account name that is taken or unusable, and values that do not match the card. The values are never logged or echoed; a terminal does not type them, an app fills them in.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The key card.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "account",
+          "summary": "The account name for a new key (the card names it when it replaces one).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "values",
+          "summary": "The key's fields by variable name. Never written on a command line.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "cards",
+          "provide"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "account": {
+            "kind": "flag",
+            "spellings": [
+              "--account"
+            ]
+          },
+          "values": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "gate.list",
       "summary": "The gate's slots and the line, in the order the line is kept. Frees holders whose process is gone first.",
       "params": [],
