@@ -159,7 +159,10 @@ pub fn find_kernel(env: Option<OsString>, exe: Option<&Path>, machine: Option<&P
 /// call: `kith update` flips `cli/current` while the host runs, and the next run must use the new release.
 pub fn current_kernel() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok();
-    let machine = dirs::home_dir().map(|h| machine_dir(&h));
+    // The machine folder is found without a kernel (`folders` asks `current_kernel` for its last fallback, which
+    // would loop back here), as `folders` itself does when there is none.
+    let machine = dirs::home_dir()
+        .map(|h| kith_kernel::paths::paths(&h, &h.join("kith/kernel"), &kith_kernel::paths::process_env).machine);
     find_kernel(std::env::var_os(KERNEL_ENV), exe.as_deref(), machine.as_deref())
 }
 
