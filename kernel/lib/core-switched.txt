@@ -1,0 +1,3 @@
+# verb-path	module: the verbs the Rust core answers (kernel/lib/kith-core.sh). A line is the switch, removing it the rollback.
+paths	paths
+engines	engines
