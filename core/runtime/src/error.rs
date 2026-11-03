@@ -1,7 +1,7 @@
 use std::fmt;
 
 /// Why the core would not open, or refused a write. The text says what to do about it.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Error {
     /// The core folder or one of its files is open to other users (or, on Windows, to other accounts).
     Permissions(String),
@@ -21,13 +21,13 @@ pub enum Error {
     StaleGeneration(String),
     /// A file or database call failed.
     Io(String),
-    /// [`crate::call`]: the table has no such method.
+    /// [`crate::Core::call`]: the table has no such method.
     NoSuchMethod(String),
-    /// [`crate::call`]: the method is not open to this principal.
+    /// [`crate::Core::call`]: the method is not open to this principal.
     NotAllowed(String),
-    /// [`crate::call`]: the params do not fit the method's row.
+    /// [`crate::Core::call`]: the params do not fit the method's row.
     BadParams(String),
-    /// [`crate::call`]: the method is in the table but nothing in the core answers it yet (a Python verb, or one the
+    /// [`crate::Core::call`]: the method is in the table but nothing in the core answers it yet (a Python verb, or one the
     /// daemon's wiring registers at M0c). The caller does what it did before the table.
     NotServed(String),
 }
@@ -48,6 +48,22 @@ impl fmt::Display for Error {
         | Self::BadParams(m)
         | Self::NotServed(m)) = self;
         f.write_str(m)
+    }
+}
+
+impl Error {
+    /// The recovery verb for a core that will not run (runtime-design, "The core-down list", item 5): the verbs that
+    /// keep working when no core can. Every other verb refuses with a status that names one of these.
+    pub fn recovery(&self) -> &'static str {
+        match self {
+            Self::Corrupt(_) | Self::DatabaseMissing(_) | Self::DatabaseSwapped(_) => {
+                "kith restore"
+            }
+            Self::NeedsMigration(_) => "kith migrate",
+            Self::BinaryOlder(_) => "kith update",
+            // A silent lock holder, a mode that is too open, a file that will not open: the doctor says which.
+            _ => "kith doctor",
+        }
     }
 }
 

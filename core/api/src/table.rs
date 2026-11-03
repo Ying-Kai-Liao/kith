@@ -51,6 +51,16 @@ const fn sw(
         summary,
     }
 }
+/// A param the client fills in from where it runs (see [`Arg::Caller`]); never written on a command line.
+const fn caller(name: &'static str, ty: &'static str, summary: &'static str) -> Param {
+    Param {
+        name,
+        ty,
+        required: false,
+        arg: Arg::Caller,
+        summary,
+    }
+}
 const fn rest(name: &'static str, summary: &'static str) -> Param {
     Param {
         name,
@@ -226,7 +236,17 @@ pub static EXTRA_TYPES: &[TypeDef] = &[
 
 pub static METHODS: &[Method] = &[
     // 1. Switched verbs.
-    core("paths", "Where Kith's folders are.", &[KERNEL], "{string}", &["paths"])
+    core(
+        "paths",
+        "Where Kith's folders are.",
+        &[
+            KERNEL,
+            caller("home", "string", "The caller's home folder (a daemon has its own)."),
+            caller("env", "{string}", "The caller's KITH_* and HQ_* variables (a daemon has its own)."),
+        ],
+        "{string}",
+        &["paths"],
+    )
         .alias(&[&["kernel", "paths"]])
         .formats(&["--json", "--sh"]),
     core("kernel.version", "The interface version and modules of this build.", &[], "KernelVersion", &["kernel", "version"]),
@@ -443,6 +463,23 @@ pub static METHODS: &[Method] = &[
         &["kernel", "run-once"],
     )
     .formats(J),
+    plumbing(
+        "kernel.coreStatus",
+        "The daemon, its owner socket and the holder, or why there is no daemon, and the verb that recovers a core that is down.",
+        &[],
+        "json",
+        &["kernel", "core-status"],
+    )
+    .formats(J),
+    row(
+        "kernel.coreDaemon",
+        "Runs the daemon front alone in the foreground (what `kith serve` starts inside itself); ends when stdin closes.",
+        &[],
+        "string",
+        &["kernel", "core-daemon"],
+        Served::Core,
+        Stability::Experimental,
+    ),
     row(
         "kernel.coreMigrate",
         "Makes (or migrates) this Mac's core database and releases it.",

@@ -60,6 +60,7 @@ fn method_doc(m: &Method) -> Value {
                 Arg::Words => json!({"kind": "words"}),
                 Arg::Rest => json!({"kind": "rest"}),
                 Arg::After => json!({"kind": "after"}),
+                Arg::Caller => json!({"kind": "caller"}),
             };
             (p.name.to_owned(), how)
         })

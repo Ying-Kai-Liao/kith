@@ -3,8 +3,10 @@
 //! few entry points below, everything else is `pub(crate)`.
 //! `kernel/tests/kith-core-boundary-check` fails when that stops being true.
 //!
-//! This step (M0a) is the foundation: core.db with its lifetime lock and generation, owner-only permissions, the
-//! marker that refuses an empty start, and embedded mode. Calls go through the method table of `kith-api` ([`call`]).
+//! M0a is the foundation: core.db with its lifetime lock and generation, owner-only permissions, the marker that refuses
+//! an empty start, and embedded mode. Calls go through the method table of `kith-api` ([`Core::call`]). M0c puts the
+//! daemon in front ([`Daemon`]: the owner socket, the version hello, the link to the holder) and gives the CLI its way
+//! in ([`reach`]).
 //!
 //! Three ways in, each of which takes the lifetime lock and bumps the generation under it:
 //! - [`start`]: the daemon. Checks the file, migrates an older one.
@@ -14,19 +16,26 @@
 //!   (the caller then asks the daemon). Two embedded commands at once behave the same way: the second one finds the
 //!   lock held.
 
+mod call;
+mod daemon;
 mod db;
 mod error;
+mod holder_link;
 mod layout;
 mod lock;
 mod log;
 mod marker;
+mod owner;
 mod perms;
 
 #[cfg(test)]
 mod tests;
 
+pub use daemon::Daemon;
+pub use daemon::status;
 pub use db::Core;
 pub use error::Error;
+pub use owner::Reached;
 
 use kith_kernel::paths::Paths;
 
@@ -64,7 +73,7 @@ pub enum Via {
 /// Starts the daemon's core: takes the lifetime lock for good, checks the file (`quick_check`), migrates an older
 /// schema after `integrity_check` and a `VACUUM INTO` snapshot, and bumps the generation.
 pub fn start(paths: &Paths) -> Result<Core, Error> {
-    start_with(&Layout::new(&paths.machine), MIGRATIONS)
+    start_with(&Layout::new(&paths.machine), MIGRATIONS).map(|c| c.with_folders(paths))
 }
 
 /// `kith migrate`: the same as [`start`], released at once. Needs the lock, so a running daemon refuses it.
@@ -74,7 +83,10 @@ pub fn migrate(paths: &Paths) -> Result<Migrated, Error> {
 
 /// Opens the core inside this process for one command.
 pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
-    embedded_with(&Layout::new(&paths.machine), MIGRATIONS)
+    match embedded_with(&Layout::new(&paths.machine), MIGRATIONS)? {
+        Embedded::Open(c) => Ok(Embedded::Open(Box::new(c.with_folders(paths)))),
+        busy @ Embedded::DaemonRunning { .. } => Ok(busy),
+    }
 }
 
 /// Runs a verb that touches NO core state (paths, engines, launch today) inside an embedded core, so the verbs already
@@ -105,47 +117,21 @@ pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T,
     }
 }
 
-/// Calls a method of the table (`kith-api`) as `who`: the method must exist, be open to the principal and take these
-/// params. The core answers the methods that need no core state itself (`paths`, `kernel.version`); every other row
-/// answers [`Error::NotServed`] until the daemon's wiring registers its handler (M0c), and the caller falls back to
-/// what it did before the table. The caller holds the core ([`open_embedded`] or the daemon's own) while it calls.
-pub fn call(
-    paths: &Paths,
-    who: kith_api::Principal,
-    method: &str,
-    params: &serde_json::Value,
-) -> Result<serde_json::Value, Error> {
-    let row = kith_api::method(method)
-        .ok_or_else(|| Error::NoSuchMethod(format!("kith-core: no method {method}")))?;
-    if !row.allows(who) {
-        return Err(Error::NotAllowed(format!(
-            "kith-core: {method} is not open to {}",
-            who.name()
-        )));
-    }
-    kith_api::params::validate(row, params)
-        .map_err(|e| Error::BadParams(format!("kith-core: {e}")))?;
-    match row.name {
-        "paths" => {
-            let folders = match params.get("kernel").and_then(serde_json::Value::as_str) {
-                Some(k) => kith_kernel::paths::paths(
-                    &kith_kernel::paths::process_home(),
-                    std::path::Path::new(k),
-                    &kith_kernel::paths::process_env,
-                ),
-                None => paths.clone(),
-            };
-            parse(&folders.json())
-        }
-        "kernel.version" => parse(&kith_kernel::version_json()),
-        _ => Err(Error::NotServed(format!(
-            "kith-core: {method} is not answered in the core yet"
-        ))),
-    }
+/// Calls a method of the table on the daemon of this machine, through the owner socket. `repeatable` says the method
+/// may run twice without harm (a read): a broken connection is then retried once, as a restarting daemon needs. A write
+/// is never sent a second time, whatever the connection did.
+///
+/// Where nothing answers (no daemon, a stale socket) the answer is [`Reached::NoDaemon`] and the caller runs the verb
+/// embedded as it did before; where a daemon answers but disagrees about the protocol or the method table it is
+/// [`Reached::Mismatch`] with a note, and nothing has run.
+pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable: bool) -> Reached {
+    owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
 }
 
-fn parse(text: &str) -> Result<serde_json::Value, Error> {
-    serde_json::from_str(text).map_err(|e| Error::Io(format!("kith-core: unreadable answer: {e}")))
+/// A line in the core log for the CLI's side of the front (a daemon that disagrees about the version or the method
+/// table), written once while it stays the same, so `kith paths` prints nothing about it.
+pub fn note_once(paths: &Paths, note: &str) {
+    log::note_once(&paths.logs, "front: ", &format!("front: {note}"));
 }
 
 pub(crate) fn start_with(layout: &Layout, migrations: &[Migration]) -> Result<Core, Error> {
@@ -172,7 +158,7 @@ pub(crate) fn embedded_with(layout: &Layout, migrations: &[Migration]) -> Result
     }
 }
 
-fn busy(holder: Option<lock::Holder>) -> Error {
+pub(crate) fn busy(holder: Option<lock::Holder>) -> Error {
     let who = holder.map_or(String::new(), |h| format!(" (pid {})", h.pid));
     Error::AlreadyRunning(format!(
         "kith-core: another core{who} holds the lock; stop it first (kith serve stop)"

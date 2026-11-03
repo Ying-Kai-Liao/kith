@@ -34,6 +34,8 @@ kith-acp = { path = "../../core/acp" }
 kith-kernel = { path = "../../core/kernel" }
 # The sealed core: only the daemon wiring and this entry point may depend on it (kernel/tests/kith-core-boundary-check).
 kith-core = { path = "../../core/runtime" }
+# The method table: the CLI reads a command line against it to know which verbs the daemon answers (core_front.rs).
+kith-api = { path = "../../core/api" }
 kith-mem = { path = "crates/memory" }
 kith-guest = { path = "crates/guest" }
 kith-wire = { path = "crates/wire" }

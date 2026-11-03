@@ -17,6 +17,25 @@
           "schema": {
             "type": "string"
           }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
         }
       ],
       "result": {
@@ -54,6 +73,12 @@
             "spellings": [
               "--kernel"
             ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
           }
         }
       }
@@ -1716,6 +1741,58 @@
             "kind": "after"
           }
         }
+      }
+    },
+    {
+      "name": "kernel.coreStatus",
+      "summary": "The daemon, its owner socket and the holder, or why there is no daemon, and the verb that recovers a core that is down.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-status"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "kernel.coreDaemon",
+      "summary": "Runs the daemon front alone in the foreground (what `kith serve` starts inside itself); ends when stdin closes.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "core-daemon"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
       }
     },
     {

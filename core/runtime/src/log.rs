@@ -30,3 +30,45 @@ pub(crate) fn fell_back(logs: &Path, e: &Error) {
         let _ = f.write_all(line.as_bytes());
     }
 }
+
+/// One line about the daemon front (it did not start, the holder is missing, ...). Same file, same rules: one line, a
+/// failed write is ignored.
+pub(crate) fn note(logs: &Path, what: &str) {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let what = what.replace(['\r', '\n'], " ");
+    let line = format!("unix={secs} pid={} {what}\n", std::process::id());
+    let _ = std::fs::create_dir_all(logs);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(logs.join(FILE))
+    {
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// `note`, unless the last line with this prefix says the same: a condition that stays (a daemon of another build)
+/// is one line, not one per command.
+pub(crate) fn note_once(logs: &Path, prefix: &str, what: &str) {
+    if last_note(logs, prefix).as_deref() != Some(&what.replace(['\r', '\n'], " ")[prefix.len()..])
+    {
+        note(logs, what);
+    }
+}
+
+/// The last line `note` wrote that starts with `prefix` after its pid, for `kith doctor` ("why is there no daemon").
+pub(crate) fn last_note(logs: &Path, prefix: &str) -> Option<String> {
+    let text = std::fs::read_to_string(logs.join(FILE)).ok()?;
+    text.lines()
+        .rev()
+        .find_map(|l| {
+            l.split_once(" pid=")?
+                .1
+                .split_once(' ')?
+                .1
+                .strip_prefix(prefix)
+        })
+        .map(str::to_owned)
+}

@@ -2,6 +2,7 @@
   {
     "name": "doctor-json",
     "command": "doctor",
+    "bin_both": true,
     "setup": [
       {
         "mkdir": "kith/state"
