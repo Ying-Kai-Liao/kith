@@ -1822,6 +1822,115 @@
       }
     },
     {
+      "name": "terminal.open",
+      "summary": "Starts an agent's engine in a held terminal (the holder runs it under the start stub, so it outlives the window) and returns a single-use attach ticket; `direct` when the holder is not reachable, `busy` when another writer has the session.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "session",
+          "summary": "The session id: the writer claim and the stub's lock key.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "argv",
+          "summary": "The assembled engine launch (program first).",
+          "required": true,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "cwd",
+          "summary": "The folder the engine works in.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The launch's environment; run tokens and their sockets are dropped.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "cols",
+          "summary": "Terminal width (default 80).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "rows",
+          "summary": "Terminal height (default 24).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "terminal-open"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "caller"
+          },
+          "session": {
+            "kind": "caller"
+          },
+          "argv": {
+            "kind": "caller"
+          },
+          "cwd": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          },
+          "cols": {
+            "kind": "caller"
+          },
+          "rows": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
       "name": "agents.list",
       "summary": "The agents on this Mac.",
       "params": [],

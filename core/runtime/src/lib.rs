@@ -27,6 +27,7 @@ mod log;
 mod marker;
 mod owner;
 mod perms;
+mod terminal;
 
 #[cfg(test)]
 mod tests;
