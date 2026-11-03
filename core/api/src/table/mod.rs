@@ -84,6 +84,8 @@ const LEN: usize = {
     n
 };
 
+// The table is a const in the binary; clippy counts the const fn's local as a big stack array.
+#[allow(clippy::large_stack_arrays)]
 const fn flatten() -> [Method; LEN] {
     // Any row will do to fill the array; every slot is overwritten below.
     let mut out = [PARTS[0][0]; LEN];

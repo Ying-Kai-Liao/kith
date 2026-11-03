@@ -26,6 +26,7 @@ use crate::lock::{self, Role};
 use crate::owner::{self, Handler, Reached, Server};
 use crate::runs::RunTokens;
 use crate::runsock::{self, RunHandler};
+use crate::terminal::Terminals;
 use crate::{busy, log};
 
 pub(crate) struct Config {
@@ -68,6 +69,7 @@ pub(crate) struct Shared {
     runs: Arc<RunTokens>,
     socket: PathBuf,
     started: Instant,
+    pub(crate) terminals: Terminals,
 }
 
 impl Shared {
@@ -105,6 +107,11 @@ impl Shared {
     fn dispatch(&self, method: &str, params: &Value) -> Result<Value> {
         if method == "kernel.coreStatus" {
             return self.running_status();
+        }
+        if method == "terminal.open" {
+            let answer = self.terminals.open(self, params)?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
         }
         if let Some(answer) = self.runs.owner_call(method, params) {
             let answer = answer?;
@@ -220,6 +227,7 @@ impl Daemon {
             runs: Arc::new(RunTokens::new()),
             socket: owner::endpoint(&layout),
             started: Instant::now(),
+            terminals: Terminals::new(),
         });
         let (s, p) = (shared.clone(), paths.clone());
         let spawned = std::thread::Builder::new()
@@ -258,6 +266,11 @@ impl Daemon {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .0;
         }
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) fn shared(&self) -> &Arc<Shared> {
+        &self.shared
     }
 
     /// How many calls the owner socket has run (not counting the status question).

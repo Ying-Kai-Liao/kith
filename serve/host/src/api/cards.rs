@@ -71,6 +71,7 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, mut b: Value) -> Result<C
             match result {
                 Stopped::Nobody => json!({"stopped": null}),
                 Stopped::OwnTurn(c) => json!({"stopped": null, "ownTurn": shown(&c)}),
+                Stopped::Busy(c) => json!({"stopped": null, "starting": shown(&c)}),
                 Stopped::Ended(c) => json!({"stopped": shown(&c)}),
                 Stopped::StillEnding(c) => json!({"stopped": null, "stillEnding": shown(&c)}),
                 Stopped::CantStop(c) => json!({"stopped": null, "cantStop": shown(&c)}),

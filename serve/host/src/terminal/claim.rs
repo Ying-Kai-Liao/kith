@@ -28,6 +28,9 @@ pub enum Kind {
     Bot,
     /// A `claude -p --resume` one-shot (`kith ask -c`, `kith <agent> -c "task"`, the bridge): keeps the host out like a terminal.
     Oneshot,
+    /// The core is starting a held terminal for the session and the claim still names the core's own pid (`kith serve`),
+    /// not the terminal's: nothing may signal it. `stop_holder` answers it as busy.
+    Starting,
     /// A kind this build does not know (a newer binary wrote it, e.g. M1's holder kind). Read as a live holder judged by
     /// pid + start alone, like `kith-sessions` and the crate do, and never removed as garbage by `take_as`.
     #[serde(other)]
@@ -292,6 +295,8 @@ pub enum Stopped {
     Nobody,
     /// The host's own turn holds it (the claimer is a child of this host): its Stop ends it, not this.
     OwnTurn(Claim),
+    /// The core is still starting a held terminal and the claim names the core's pid: nothing was signalled.
+    Busy(Claim),
     /// The claimer and its children were ended.
     Ended(Claim),
     /// SIGKILL was sent but something of the tree is still in the process table after the wait: the claim is kept, so a
@@ -307,7 +312,21 @@ pub enum Stopped {
 ///
 /// This is a small kill helper of its own; it should merge with the claim sweep of the kernel-side lease work (#248).
 pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopped {
+    stop_holder_unless(state, sid, grace, core_pid())
+}
+
+/// The running core daemon's pid, from its status (no database read). None when there is no core.
+fn core_pid() -> Option<u32> {
+    crate::core_front::daemon_pid()
+}
+
+/// [`stop_holder`] with the core's pid given. A claim naming the core's own pid is never signalled, whatever its kind:
+/// that is `kith serve` (or an older kernel's claim of it), and a Stop would end the daemon, not a terminal.
+pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Duration, core: Option<u32>) -> Stopped {
     let Some(claim) = holder(state, sid) else { return Stopped::Nobody };
+    if claim.kind == Kind::Starting || core == Some(claim.pid) {
+        return Stopped::Busy(claim);
+    }
     if parent_of(claim.pid) == Some(std::process::id()) {
         return Stopped::OwnTurn(claim);
     }
