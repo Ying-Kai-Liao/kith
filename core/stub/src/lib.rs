@@ -13,7 +13,7 @@
 //! - A second `take` of the same key in the same process is `Busy` too: each take opens its own file description
 //!   and locks belong to descriptions, not processes.
 //! - The folder is created owner-only (0700 on Unix; an access list naming this account and SYSTEM on Windows)
-//!   by whoever comes first. Nothing here needs `core.db`.
+//!   by whoever comes first. Nothing here needs the core's database.
 //!
 //! Keys: a key is a session id or similar. Only ASCII `a-z 0-9 . _ -` is accepted, at most 200 bytes, and never
 //! `..`; anything else is rejected, not rewritten. APFS and NTFS fold case and Unicode forms but ext4 does not,

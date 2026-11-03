@@ -23,6 +23,8 @@ const V2: Migration = Migration {
 // list (`ALL_STEPS`) and must not change what "today's head" means here.
 const MIGRATIONS: &[Migration] = &[ALL_STEPS[0]];
 const BOTH: &[Migration] = &[MIGRATIONS[0], V2];
+/// Schema 1 alone: the head these two-step tests stand for, whatever the real list grows to.
+const ONLY_V1: &[Migration] = &[MIGRATIONS[0]];
 
 pub(crate) fn machine() -> (TempDir, PathBuf) {
     let t = tempfile::tempdir().expect("tempdir");
@@ -72,7 +74,10 @@ fn a_first_setup_creates_the_folder_the_db_and_the_marker_owner_only() {
     let l = Layout::new(&m);
     let c = open(&l);
     assert!(l.db.is_file() && l.lock.is_file() && l.marker.is_file());
-    assert_eq!(c.schema_version(), 1);
+    assert_eq!(
+        c.schema_version(),
+        MIGRATIONS.last().expect("steps").version
+    );
     assert_eq!(
         l.dir,
         m.join("core"),
@@ -330,7 +335,7 @@ fn a_database_without_a_marker_adopts_it() {
 fn embedded_creates_but_never_migrates_and_the_daemon_snapshots_then_migrates() {
     let (_t, m) = machine();
     let l = Layout::new(&m);
-    drop(start_with(&l, MIGRATIONS).expect("v1"));
+    drop(start_with(&l, ONLY_V1).expect("v1"));
     // This binary now knows schema 2; one command must not migrate.
     let e = embedded_with(&l, BOTH).err().expect("needs migration");
     assert!(
@@ -681,8 +686,8 @@ fn an_m0_database_opens_unchanged_and_migrates_to_the_new_head() {
     let (_t, m) = machine();
     let l = Layout::new(&m);
     m0_database(&l);
-    // Today's head is still 1: the M0 file opens as it is, nothing migrates.
-    let c = start_with(&l, MIGRATIONS).expect("m0 opens");
+    // A head of 1: the M0 file opens as it is, nothing migrates.
+    let c = start_with(&l, ONLY_V1).expect("m0 opens");
     assert_eq!(c.schema_version(), 1);
     assert_eq!(c.migrated_from(), None);
     drop(c);
@@ -690,6 +695,29 @@ fn an_m0_database_opens_unchanged_and_migrates_to_the_new_head() {
     let c = start_with(&l, BOTH).expect("migrates");
     assert_eq!(c.schema_version(), 2);
     assert_eq!(c.migrated_from(), Some(1));
+}
+
+#[test]
+fn an_m0_database_migrates_forward_through_the_real_list() {
+    // The real MIGRATIONS, whatever lanes have added: the M0 file ends at the head with every lane's tables.
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    m0_database(&l);
+    let c = start_with(&l, MIGRATIONS).expect("migrates");
+    assert_eq!(
+        c.schema_version(),
+        MIGRATIONS.last().expect("steps").version
+    );
+    assert_eq!(c.migrated_from(), Some(1));
+    drop(c);
+    let names: Vec<String> = schema_of(&l)
+        .into_iter()
+        .filter(|(t, _, _)| t == "table")
+        .map(|(_, n, _)| n)
+        .collect();
+    for t in ["people", "memberships", "presets", "authority_settings"] {
+        assert!(names.iter().any(|n| n == t), "{t} in {names:?}");
+    }
 }
 
 #[test]

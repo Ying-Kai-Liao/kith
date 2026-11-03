@@ -117,6 +117,21 @@ class Normalizer:
         return v
 
 
+# argparse quotes the choices of an invalid choice differently by Python version ("(choose from 'set')" up to 3.11, "(choose from
+# set)" from 3.12.7), and a golden record keeps the Python it was recorded on. Both sides are compared with the quotes taken out.
+CHOICES_RX = re.compile(r"\(choose from ([^)]*)\)")
+
+
+def unquote_choices(v):
+    if isinstance(v, str):
+        return CHOICES_RX.sub(lambda m: '(choose from ' + m.group(1).replace("'", '') + ')', v)
+    if isinstance(v, list):
+        return [unquote_choices(x) for x in v]
+    if isinstance(v, dict):
+        return {k: unquote_choices(x) for k, x in v.items()}
+    return v
+
+
 def sort_lists(v):
     if isinstance(v, list):
         return sorted((sort_lists(x) for x in v), key=lambda x: json.dumps(x, sort_keys=True))
@@ -481,7 +496,7 @@ def compare(case, prefixes, keep=False):
         return {}
     diffs = {}
     for facet in sorted(set(got['old']) | set(got['new'])):
-        a, b = got['old'].get(facet, ABSENT), got['new'].get(facet, ABSENT)
+        a, b = unquote_choices(got['old'].get(facet, ABSENT)), unquote_choices(got['new'].get(facet, ABSENT))
         if a != b:
             diffs[facet] = (a, b)
     return diffs
