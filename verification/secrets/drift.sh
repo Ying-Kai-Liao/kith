@@ -10,7 +10,7 @@ set -euo pipefail
 
 # The commit at which the model was last confirmed to describe the files below (origin/main, 2026-10-28; first at
 # ed2ceb63, after the secret cards and the limit cards were merged).
-SYNC=0872ea58892e0f648d4206bd64e455b25cdf2d5c
+SYNC=b764339bc37a8afc57f2bfd9b436706400e41722
 
 FILES=(
   serve/host/src/cards/secret.rs    # provide, respond, deny, grant, Slot, write_key, open_card, list_keys, revoke_key
