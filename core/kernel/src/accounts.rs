@@ -746,6 +746,8 @@ pub fn launch_env(
             });
         }
     }
+    // The default login is always checked the light way: the host may hold its keys where `auth status` can't see them.
+    let light = light || (["claude", "codex"].contains(&harness.as_str()) && name.is_none());
     let (ready, why) = if light {
         present(ctx, entry, agent)?
     } else {

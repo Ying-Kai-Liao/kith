@@ -110,7 +110,7 @@ impl Recheck {
 
 /// `kith <agent> --backups-json` now, remembered in `backups` (a failure keeps what was known before).
 async fn fetch_chain(backups: &Backups, bin: &Path, agent: &str) -> Vec<ChainEntry> {
-    let got = crate::agent::hq::backups(bin, agent)
+    let got = crate::agent::hq::chain(bin, agent, backups)
         .await
         .inspect_err(|error| tracing::warn!(agent, error = format!("{error:#}"), "couldn't read the backup chain"))
         .ok();
@@ -271,7 +271,7 @@ impl Core {
         loop {
             // None: the agent's own account. A chain of one entry (or none) never changes anything.
             let (backup, serving) = match self.backups.pick(agent, &chain, &tried) {
-                Pick::Primary => (None, chain.first().map(|e| e.id.clone()).unwrap_or_default()),
+                Pick::Primary => (None, Backups::primary(&chain).map(|e| e.id.clone()).unwrap_or_default()),
                 Pick::Backup(entry) => (Some(entry.id.clone()), entry.id),
                 Pick::AllOut(outs) => {
                     let text = format!("⚠️ {}", self.backups.all_out_text(&outs));
@@ -290,12 +290,18 @@ impl Core {
                 sid.and_then(Value::as_str).map(str::to_owned)
             });
             let fresh_backup = backup.is_some() && session.is_none();
+            // The kernel keeps the marks and picks per run for a plain `kith AGENT -- task`, from its own state: the
+            // host's pick can differ (a mark it hasn't pushed yet, the session's account), and the limit is marked on
+            // the id the host says served. So the host's pick is always named, the main account too.
+            let account = backup.clone().or_else(|| {
+                if self.backups.kernel_keeps_marks() { Backups::primary(&chain).map(|e| e.id.clone()) } else { None }
+            });
             let mut run_env = env.clone();
             if let Some(session) = &session {
                 set(&mut run_env, "RESUME", session); // any harness: bin/hq starts a new session when this one is another harness's
             }
             let attempt = match self
-                .attempt(ad, agent, wk, task, conv, outbox, &still, run_env, backup.as_deref(), fresh_backup)
+                .attempt(ad, agent, wk, task, conv, outbox, &still, run_env, account.as_deref(), fresh_backup)
                 .await?
             {
                 Attempt::Stopped(ended) => return Ok(ended),
@@ -364,7 +370,7 @@ impl Core {
         outbox: &Path,
         still: &Recheck,
         mut env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
-        backup: Option<&str>,
+        account: Option<&str>,
         fresh_backup: bool,
     ) -> Result<Attempt> {
         // A person's run (the env names one) gets a token of its own, revoked when this attempt ends.
@@ -386,7 +392,7 @@ impl Core {
             return Ok(Attempt::NotStarted);
         }
         let mut cmd = tokio::process::Command::new(&self.paths.hq_bin);
-        cmd.args(run_args(agent, backup, &format!("{preface}{task}{}", ad.footer())))
+        cmd.args(run_args(agent, account, &format!("{preface}{task}{}", ad.footer())))
             .env_clear()
             .envs(env)
             .stdin(Stdio::null())
@@ -554,9 +560,11 @@ impl Core {
         ad.note_line(&line)
     }
 
-    /// The agent's backup chain as last known. A run never waits for hq: a chain gone stale is fetched again in the
-    /// background, and one never fetched is too, unless backups are in use (something is out), when this run needs it
-    /// to pick. No chain, or any failure, is an empty chain: nothing changes.
+    /// The agent's account chain as last known. A run never waits for hq to learn it: a chain gone stale is fetched again
+    /// in the background, and one never fetched is too, unless accounts are in use (something is out), when this run needs
+    /// it to pick. A wait here would also bunch the first runs of one agent together, and messages sent one after the
+    /// other would no longer answer in order. The kernel picks for a run that names no account, from its own marks, so a
+    /// first run that doesn't know the chain still starts on the right one. No chain, or any failure, is an empty chain.
     async fn chain(&self, agent: &str) -> Vec<ChainEntry> {
         let later = || {
             if self.backups.begin_refresh(agent) {

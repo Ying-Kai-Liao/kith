@@ -122,6 +122,11 @@ pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Ma
         let p = pick(ctx, s, agent, None, deep, now, &state);
         (order, p.candidates)
     };
+    let main = if agent.is_empty() {
+        None
+    } else {
+        in_order.first().cloned()
+    };
     let ids = dedup(
         in_order
             .iter()
@@ -129,7 +134,8 @@ pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Ma
             .chain(known_ids(ctx, s, agent))
             .collect(),
     );
-    let status: HashMap<String, Status> = statuses(ctx, &ids, agent, &out, deep, false);
+    let status: HashMap<String, Status> =
+        statuses(ctx, &ids, agent, &out, deep, false, main.as_deref());
     let mut pins: HashMap<String, Vec<Value>> = HashMap::new();
     if let Some(agents) = s.get("agents").and_then(Value::as_object) {
         for (name, a) in agents {

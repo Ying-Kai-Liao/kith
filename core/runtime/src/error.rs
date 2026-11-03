@@ -21,6 +21,15 @@ pub enum Error {
     StaleGeneration(String),
     /// A file or database call failed.
     Io(String),
+    /// [`crate::call`]: the table has no such method.
+    NoSuchMethod(String),
+    /// [`crate::call`]: the method is not open to this principal.
+    NotAllowed(String),
+    /// [`crate::call`]: the params do not fit the method's row.
+    BadParams(String),
+    /// [`crate::call`]: the method is in the table but nothing in the core answers it yet (a Python verb, or one the
+    /// daemon's wiring registers at M0c). The caller does what it did before the table.
+    NotServed(String),
 }
 
 impl fmt::Display for Error {
@@ -33,7 +42,11 @@ impl fmt::Display for Error {
         | Self::BinaryOlder(m)
         | Self::AlreadyRunning(m)
         | Self::StaleGeneration(m)
-        | Self::Io(m)) = self;
+        | Self::Io(m)
+        | Self::NoSuchMethod(m)
+        | Self::NotAllowed(m)
+        | Self::BadParams(m)
+        | Self::NotServed(m)) = self;
         f.write_str(m)
     }
 }

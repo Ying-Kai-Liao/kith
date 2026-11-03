@@ -548,3 +548,42 @@ fn the_database_id_is_written_in_the_first_migrations_transaction() {
         .expect("count");
     assert_eq!(tables, 0);
 }
+
+#[test]
+fn calls_go_through_the_table() {
+    use kith_api::Principal;
+    use serde_json::json;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let who = Principal::Owner;
+
+    // A method the core answers without state.
+    let v = crate::call(&p, who, "kernel.version", &json!({})).expect("version");
+    assert_eq!(v["abi"], 1);
+    let v = crate::call(&p, who, "paths", &json!({})).expect("paths");
+    assert_eq!(v["KITH_MACHINE"], m.to_string_lossy().as_ref());
+
+    // Refused before anything runs.
+    assert!(matches!(
+        crate::call(&p, who, "no.such", &json!({})),
+        Err(Error::NoSuchMethod(_))
+    ));
+    assert!(matches!(
+        crate::call(&p, Principal::Member, "kernel.version", &json!({})),
+        Err(Error::NotAllowed(_))
+    ));
+    assert!(matches!(
+        crate::call(&p, who, "kernel.version", &json!({"x": 1})),
+        Err(Error::BadParams(_))
+    ));
+    assert!(matches!(
+        crate::call(&p, who, "kernel.delegation.record", &json!({})),
+        Err(Error::BadParams(_))
+    ));
+
+    // In the table but not answered here: the caller falls back.
+    assert!(matches!(
+        crate::call(&p, who, "agents.list", &json!({})),
+        Err(Error::NotServed(_))
+    ));
+}

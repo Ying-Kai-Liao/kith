@@ -146,6 +146,29 @@ async fn a_first_message_never_waits_for_the_chain() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn with_the_kernel_keeping_the_accounts_the_run_names_the_account_the_host_picked_even_the_main_one() {
+    let r = Rig::new();
+    let row = |id: &str| {
+        json!({"id": id, "harness": id.split(':').next().unwrap(), "account": null, "kind": "subscription",
+        "status": "ready", "ready": true, "why": null})
+    };
+    let doc = json!({"version": 1, "agent": "house", "harness": "claude", "policy": "fill", "pin": null,
+        "cross_harness": false, "main": "claude", "order": ["claude", "codex"], "candidates": ["claude", "codex"],
+        "all_out": false, "skipped": [], "own": null, "accounts": [row("claude"), row("codex")]});
+    r.put("accounts", &doc);
+    // As after the first look at the agent: the chain is known, and it came from the kernel's accounts.
+    let view = crate::agent::backups::KernelAccounts::parse(&doc, r.backups.now()).unwrap();
+    assert!(r.backups.begin_refresh("house"));
+    r.backups.end_refresh("house", Some(view.chain.clone()));
+    assert!(r.backups.apply_kernel(&view, r.backups.generation()));
+    r.send(&Rig::msg("1", "@house hello")).await;
+    answered(&r, 1).await;
+    // The kernel would pick for a plain `kith house -- task` from its own state; the host's pick is the one that runs.
+    assert_eq!(runs(&r), [Some("claude".to_owned())]);
+    assert!(r.backups.kernel_keeps_marks());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn with_something_out_the_chain_is_read_before_the_run() {
     let r = Rig::new();
     r.backups.mark_out("claude", Some(r.backups.now() + 600), RATE_LIMIT);
