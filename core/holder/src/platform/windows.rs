@@ -944,3 +944,10 @@ pub fn lock_instance(dir: &Path) -> io::Result<Option<InstanceLock>> {
         Err(err)
     }
 }
+
+/// The process on the other end of a connection (`GetNamedPipeClientProcessId`).
+pub fn peer_pid(stream: &Stream) -> Option<u32> {
+    let mut pid = 0u32;
+    let ok = unsafe { GetNamedPipeClientProcessId(stream.0.raw(), &mut pid) };
+    (ok != 0 && pid != 0).then_some(pid)
+}

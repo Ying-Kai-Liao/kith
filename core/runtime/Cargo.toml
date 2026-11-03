@@ -28,9 +28,13 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 # The lifetime lock on core.lock: flock on Unix, LockFileEx on Windows.
 fs2 = "0.4.3"
 getrandom = "0.4"
+# Run tokens are kept as their SHA-256 (the holder links the same crate).
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = "3"
+# Generated checks of the run socket's rules (the port of the host's runauth_props.rs). Pinned like the host's.
+proptest = { version = "=1.12.0", default-features = false, features = ["std"] }
 
 [lints.rust]
 unsafe_code = "forbid"
