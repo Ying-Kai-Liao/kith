@@ -36,8 +36,53 @@ pub(crate) const INVITEE_SLOTS: i64 = 1;
 
 const MAX_KEY: &str = "max_running";
 
-/// The start time of a pid, as `core.holder` records it. A parameter so tests can end a "process" without killing one.
-pub(crate) type StartOf<'a> = &'a dyn Fn(u32) -> Option<String>;
+/// What the gate asks the system about a holder's process. A parameter so tests can end a "process" without killing one.
+pub(crate) trait Liveness {
+    /// The start time of a pid, as `core.holder` records it; `None` when it cannot be read (gone, or no `ps`).
+    fn start(&self, pid: u32) -> Option<String>;
+    /// True only when the system says there is no such process. An error, a refusal or a missing tool is not "gone":
+    /// a failed probe must never free a live holder.
+    fn gone(&self, pid: u32) -> bool;
+}
+
+/// The real system.
+pub(crate) struct System;
+
+impl Liveness for System {
+    fn start(&self, pid: u32) -> Option<String> {
+        crate::lock::process_start(pid)
+    }
+    fn gone(&self, pid: u32) -> bool {
+        pid_gone(pid)
+    }
+}
+
+/// `kill -0` answered "No such process" (ESRCH). Unsafe code is forbidden here, so no kill(2): the tool, by absolute path
+/// and in the C locale, so its words are the ones read. Where there is no such tool, nothing is ever gone.
+#[cfg(unix)]
+pub(crate) fn pid_gone(pid: u32) -> bool {
+    let kill = ["/bin/kill", "/usr/bin/kill"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).is_file());
+    let Some(kill) = kill else { return false };
+    let Ok(out) = std::process::Command::new(kill)
+        .env("LC_ALL", "C")
+        .args(["-s", "0", "--"])
+        .arg(pid.to_string())
+        .output()
+    else {
+        return false;
+    };
+    !out.status.success()
+        && String::from_utf8_lossy(&out.stderr)
+            .to_ascii_lowercase()
+            .contains("no such process")
+}
+
+#[cfg(not(unix))]
+pub(crate) fn pid_gone(_: u32) -> bool {
+    false
+}
 
 /// One request for a slot.
 pub(crate) struct Take<'a> {
@@ -46,9 +91,11 @@ pub(crate) struct Take<'a> {
     pub rt: &'a str,
     /// An invited person's turn: behind the owner's, and counted against [`INVITEE_SLOTS`].
     pub invitee: bool,
-    /// How many slots there are. Remembered for the later calls that make room.
-    pub max: i64,
-    /// The holder's process, so a crash frees the slot. `None`: nothing to check, only `release` frees it.
+    /// How many slots there are (1 or more, as the host's `max_running`). Remembered for the later calls that make room;
+    /// `None` uses the remembered one.
+    pub max: Option<i64>,
+    /// The holder's process, so a crash frees the slot. The rows require it; `None` is for a caller inside the core that
+    /// frees the holder itself with `release`.
     pub pid: Option<u32>,
 }
 
@@ -104,13 +151,16 @@ fn stored_max(tx: &Transaction<'_>) -> Result<Option<i64>> {
         .optional()?)
 }
 
-/// Frees the slots and places in line whose process is gone or is another process now. A holder with no recorded start
-/// time is never judged: with nothing to compare, a live-looking pid proves nothing (the same stance as `core.holder`).
-fn prune(tx: &Transaction<'_>, start_of: StartOf<'_>) -> Result<()> {
+/// Frees the slots and places in line whose process is gone or is another process now. One rule:
+/// - the start time reads and equals the recorded one: alive;
+/// - it reads and differs: the pid was reused, dead;
+/// - it cannot be read (or none was recorded): dead only when the system says there is no such process. A failed `ps`
+///   must never free a live holder, so any other answer keeps the row.
+fn prune(tx: &Transaction<'_>, live: &dyn Liveness) -> Result<()> {
     let mut dead: Vec<String> = Vec::new();
     for table in ["gate_slots", "gate_waiters"] {
         let mut st = tx.prepare(&format!(
-            "SELECT holder, pid, started FROM {table} WHERE pid IS NOT NULL AND started <> ''"
+            "SELECT holder, pid, started FROM {table} WHERE pid IS NOT NULL"
         ))?;
         let rows = st.query_map([], |r| {
             Ok((
@@ -121,10 +171,14 @@ fn prune(tx: &Transaction<'_>, start_of: StartOf<'_>) -> Result<()> {
         })?;
         for row in rows {
             let (holder, pid, started) = row?;
-            let alive = u32::try_from(pid)
-                .ok()
-                .and_then(start_of)
-                .is_some_and(|current| current == started);
+            let Ok(pid) = u32::try_from(pid) else {
+                continue;
+            };
+            let alive = match live.start(pid) {
+                Some(current) if !started.is_empty() => current == started,
+                Some(_) => true,
+                None => !live.gone(pid),
+            };
             if !alive {
                 dead.push(holder);
             }
@@ -243,12 +297,25 @@ fn state_of(tx: &Transaction<'_>, holder: &str) -> Result<State> {
 
 /// Asks for a slot. Idempotent: a holder that already holds one or waits is answered where it stands, and nothing is
 /// queued twice.
-pub(crate) fn take(core: &mut Core, t: &Take<'_>, start_of: StartOf<'_>) -> Result<State> {
+pub(crate) fn take(core: &mut Core, t: &Take<'_>, live: &dyn Liveness) -> Result<State> {
+    if t.max.is_some_and(|m| m < 1) {
+        return Err(Error::BadParams(
+            "kith-core: gate.take: max is 1 or more".into(),
+        ));
+    }
     let tx = core.claim_tx()?;
-    prune(&tx, start_of)?;
-    set_max(&tx, t.max)?;
+    prune(&tx, live)?;
+    match t.max {
+        Some(m) => set_max(&tx, m)?,
+        None if stored_max(&tx)?.is_none() => {
+            return Err(Error::BadParams(
+                "kith-core: gate.take needs max: none is remembered yet".into(),
+            ));
+        }
+        None => {}
+    }
     if state_of(&tx, t.holder)? == State::Gone {
-        let started = t.pid.and_then(start_of).unwrap_or_default();
+        let started = t.pid.and_then(|p| live.start(p)).unwrap_or_default();
         // The back of the line: one past the largest, or the first.
         let ord = count(&tx, "SELECT COALESCE(MAX(ord), 0) + 1 FROM gate_waiters")?;
         tx.execute(
@@ -271,9 +338,9 @@ pub(crate) fn take(core: &mut Core, t: &Take<'_>, start_of: StartOf<'_>) -> Resu
 }
 
 /// Gives a slot (or a place in line) back. False when the holder held nothing.
-pub(crate) fn release(core: &mut Core, holder: &str, start_of: StartOf<'_>) -> Result<bool> {
+pub(crate) fn release(core: &mut Core, holder: &str, live: &dyn Liveness) -> Result<bool> {
     let tx = core.claim_tx()?;
-    prune(&tx, start_of)?;
+    prune(&tx, live)?;
     let slots = tx.execute("DELETE FROM gate_slots WHERE holder = ?1", [holder])?;
     let line = tx.execute("DELETE FROM gate_waiters WHERE holder = ?1", [holder])?;
     pump(&tx)?;
@@ -283,13 +350,21 @@ pub(crate) fn release(core: &mut Core, holder: &str, start_of: StartOf<'_>) -> R
 
 /// The turn waits on another bot's reply: its slot is given up. Nested asks share one parking. False when the holder
 /// holds no slot (nothing is parked then).
-pub(crate) fn park(core: &mut Core, holder: &str, start_of: StartOf<'_>) -> Result<bool> {
+pub(crate) fn park(core: &mut Core, holder: &str, live: &dyn Liveness) -> Result<bool> {
     let tx = core.claim_tx()?;
-    prune(&tx, start_of)?;
+    prune(&tx, live)?;
     let changed = tx.execute(
         "UPDATE gate_slots SET asks = asks + 1, state = 'parked' WHERE holder = ?1",
         [holder],
     )?;
+    // A new ask while the turn is in line to come back: it is waiting on a reply again, so it leaves the line (the next
+    // unpark puts it back). Otherwise it would be granted a slot it cannot use.
+    if changed > 0 {
+        tx.execute(
+            "DELETE FROM gate_waiters WHERE holder = ?1 AND kind = 'resume'",
+            [holder],
+        )?;
+    }
     pump(&tx)?;
     tx.commit()?;
     Ok(changed > 0)
@@ -297,9 +372,9 @@ pub(crate) fn park(core: &mut Core, holder: &str, start_of: StartOf<'_>) -> Resu
 
 /// One ask is back. The last one puts the turn in line again, ahead of turns that have not started. Unparking a holder
 /// with no ask out (a double unpark, an unknown holder) changes nothing.
-pub(crate) fn unpark(core: &mut Core, holder: &str, start_of: StartOf<'_>) -> Result<State> {
+pub(crate) fn unpark(core: &mut Core, holder: &str, live: &dyn Liveness) -> Result<State> {
     let tx = core.claim_tx()?;
-    prune(&tx, start_of)?;
+    prune(&tx, live)?;
     let asks: Option<i64> = tx
         .query_row(
             "SELECT asks FROM gate_slots WHERE holder = ?1",
@@ -339,9 +414,9 @@ pub(crate) fn unpark(core: &mut Core, holder: &str, start_of: StartOf<'_>) -> Re
 }
 
 /// Everything the gate holds, in the order the line is kept. Frees dead holders first, so it never shows one.
-pub(crate) fn list(core: &mut Core, start_of: StartOf<'_>) -> Result<Value> {
+pub(crate) fn list(core: &mut Core, live: &dyn Liveness) -> Result<Value> {
     let tx = core.claim_tx()?;
-    prune(&tx, start_of)?;
+    prune(&tx, live)?;
     let max = stored_max(&tx)?;
     let mut slots = Vec::new();
     {
@@ -395,25 +470,34 @@ pub(crate) fn call(
     core: &mut Core,
     method: &str,
     params: &Value,
-    start_of: StartOf<'_>,
+    live: &dyn Liveness,
 ) -> Result<Value> {
     match method {
-        "gate.list" => list(core, start_of),
+        "gate.list" => list(core, live),
         "gate.take" => {
             let h = holder(params)?;
-            let max = params
-                .get("max")
-                .and_then(Value::as_i64)
-                .filter(|m| *m >= 0)
-                .ok_or_else(|| {
-                    Error::BadParams("kith-core: gate.take needs max, 0 or more".into())
-                })?;
-            let pid = match params.get("pid").and_then(Value::as_i64) {
+            let max = match params.get("max").and_then(Value::as_i64) {
                 None => None,
-                Some(p) => Some(u32::try_from(p).map_err(|_| {
-                    Error::BadParams("kith-core: gate.take: pid is not a process id".into())
-                })?),
+                Some(m) if m >= 1 => Some(m),
+                Some(_) => {
+                    return Err(Error::BadParams(
+                        "kith-core: gate.take: max is 1 or more".into(),
+                    ));
+                }
             };
+            // Required, so a crashed holder can always be freed. 0 and 1 are never a holder's own process.
+            let pid = params
+                .get("pid")
+                .and_then(Value::as_i64)
+                .and_then(|p| u32::try_from(p).ok())
+                .filter(|p| *p > 1)
+                .ok_or_else(|| {
+                    Error::BadParams(
+                        "kith-core: gate.take needs pid, the holder's process id (2 or more)"
+                            .into(),
+                    )
+                })?;
+            let pid = Some(pid);
             let t = Take {
                 holder: h,
                 rt: text(params, "rt").unwrap_or(h),
@@ -424,11 +508,11 @@ pub(crate) fn call(
                 max,
                 pid,
             };
-            Ok(take(core, &t, start_of)?.json())
+            Ok(take(core, &t, live)?.json())
         }
-        "gate.release" => Ok(json!({"released": release(core, holder(params)?, start_of)?})),
-        "gate.park" => Ok(json!({"parked": park(core, holder(params)?, start_of)?})),
-        "gate.unpark" => Ok(unpark(core, holder(params)?, start_of)?.json()),
+        "gate.release" => Ok(json!({"released": release(core, holder(params)?, live)?})),
+        "gate.park" => Ok(json!({"parked": park(core, holder(params)?, live)?})),
+        "gate.unpark" => Ok(unpark(core, holder(params)?, live)?.json()),
         _ => Err(Error::NotServed(format!(
             "kith-core: {method} is not answered in the core yet"
         ))),

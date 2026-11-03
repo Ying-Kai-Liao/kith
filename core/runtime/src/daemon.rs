@@ -111,7 +111,7 @@ impl Shared {
         if method.starts_with("gate.") {
             crate::call::check(kith_api::Principal::Owner, method, params)?;
             let answer =
-                self.with_core(|c| crate::gate::call(c, method, params, &lock::process_start))?;
+                self.with_core(|c| crate::gate::call(c, method, params, &crate::gate::System))?;
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }

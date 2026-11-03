@@ -4,7 +4,7 @@
 //! adds its rows here later.
 
 use super::build::*;
-use crate::Method;
+use crate::{Arg, Method};
 
 pub(super) const ROWS: &[Method] = &[
     row(
@@ -18,7 +18,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     row(
         "gate.take",
-        "Asks for a slot: `granted`, or `waiting` with a position. Asking again for the same holder changes nothing.",
+        "Asks for a slot. Answers `granted`, `waiting` (with a position), `parked` (gave its slot up, not in line) or `gone` (holds nothing). Asking again for the same holder changes nothing.",
         &[
             pos(
                 "holder",
@@ -36,19 +36,20 @@ pub(super) const ROWS: &[Method] = &[
                 "max",
                 "int",
                 &["--max"],
-                "How many slots there are (0 or more). Remembered for later calls.",
+                "How many slots there are (1 or more). Remembered; later takes may leave it out.",
             ),
             sw(
                 "invitee",
                 &["--invitee"],
                 "An invited person's turn: behind the owner's, and few at once.",
             ),
-            flag(
-                "pid",
-                "int",
-                &["--pid"],
-                "The holder's process, so a crash frees the slot.",
-            ),
+            Param {
+                name: "pid",
+                ty: "int",
+                required: true,
+                arg: Arg::Flag(&["--pid"]),
+                summary: "The holder's process (2 or more), so a crash frees the slot.",
+            },
         ],
         "json",
         &["gate", "take"],

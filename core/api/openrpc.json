@@ -4489,7 +4489,7 @@
     },
     {
       "name": "gate.take",
-      "summary": "Asks for a slot: `granted`, or `waiting` with a position. Asking again for the same holder changes nothing.",
+      "summary": "Asks for a slot. Answers `granted`, `waiting` (with a position), `parked` (gave its slot up, not in line) or `gone` (holds nothing). Asking again for the same holder changes nothing.",
       "params": [
         {
           "name": "holder",
@@ -4509,7 +4509,7 @@
         },
         {
           "name": "max",
-          "summary": "How many slots there are (0 or more). Remembered for later calls.",
+          "summary": "How many slots there are (1 or more). Remembered; later takes may leave it out.",
           "required": false,
           "schema": {
             "type": "integer"
@@ -4525,8 +4525,8 @@
         },
         {
           "name": "pid",
-          "summary": "The holder's process, so a crash frees the slot.",
-          "required": false,
+          "summary": "The holder's process (2 or more), so a crash frees the slot.",
+          "required": true,
           "schema": {
             "type": "integer"
           }
