@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use kith_kernel::paths::Paths;
 use tempfile::TempDir;
 
-use crate::db::{MIGRATIONS, Migration};
+use crate::db::{MIGRATIONS as ALL_STEPS, Migration};
 use crate::layout::Layout;
 use crate::{
     Embedded, Error, Via, embedded_with, lock, migrate_with, perms, start_with,
@@ -19,6 +19,9 @@ const V2: Migration = Migration {
     name: "extra",
     sql: "CREATE TABLE extra (x INTEGER);",
 };
+// These tests are about the core's own schema rules, so they run on the M0 step alone: lanes add steps to the real
+// list (`ALL_STEPS`) and must not change what "today's head" means here.
+const MIGRATIONS: &[Migration] = &[ALL_STEPS[0]];
 const BOTH: &[Migration] = &[MIGRATIONS[0], V2];
 /// Schema 1 alone: the head these two-step tests stand for, whatever the real list grows to.
 const ONLY_V1: &[Migration] = &[MIGRATIONS[0]];
@@ -432,17 +435,18 @@ fn stateless_through_core_runs_the_verb_inside_an_embedded_core_or_bare() {
     assert_eq!((v, via), (8, Via::Bare));
     assert_eq!(std::fs::read_dir(&m).expect("ls").count(), 0);
     let l = Layout::new(&m);
-    drop(open(&l));
+    // The verb opens the real list, so the database must hold it.
+    drop(start_with(&l, ALL_STEPS).expect("daemon creates"));
     let ((), via) = stateless_through_core(&p, || {
         // The lock is held while the verb runs.
         assert!(matches!(
-            embedded_with(&l, MIGRATIONS),
+            embedded_with(&l, ALL_STEPS),
             Ok(Embedded::DaemonRunning { .. })
         ));
     });
     assert_eq!(via, Via::Embedded);
     // A daemon holds the lock: the verb still runs.
-    let daemon = start_with(&l, MIGRATIONS).expect("daemon");
+    let daemon = start_with(&l, ALL_STEPS).expect("daemon");
     let (v, via) = stateless_through_core(&p, || "ran");
     assert_eq!((v, via), ("ran", Via::Bare));
     drop(daemon);
@@ -695,15 +699,12 @@ fn an_m0_database_opens_unchanged_and_migrates_to_the_new_head() {
 
 #[test]
 fn an_m0_database_migrates_forward_through_the_real_list() {
-    // The real MIGRATIONS, whatever lanes have added: the M0 file ends at the head with every lane's tables.
+    // The real list (ALL_STEPS), whatever lanes have added: the M0 file ends at the head with every lane's tables.
     let (_t, m) = machine();
     let l = Layout::new(&m);
     m0_database(&l);
-    let c = start_with(&l, MIGRATIONS).expect("migrates");
-    assert_eq!(
-        c.schema_version(),
-        MIGRATIONS.last().expect("steps").version
-    );
+    let c = start_with(&l, ALL_STEPS).expect("migrates");
+    assert_eq!(c.schema_version(), ALL_STEPS.last().expect("steps").version);
     assert_eq!(c.migrated_from(), Some(1));
     drop(c);
     let names: Vec<String> = schema_of(&l)
