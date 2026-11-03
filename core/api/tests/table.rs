@@ -264,6 +264,8 @@ fn every_switched_verb_has_a_row() {
         "kernel threads resolve s1",
         "kernel run-once claude -- hi",
         "kernel core-migrate",
+        "kernel core-status --json",
+        "kernel core-daemon",
     ];
     for line in lines {
         let argv: Vec<&str> = line.split(' ').collect();

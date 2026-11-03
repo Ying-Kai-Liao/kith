@@ -26,18 +26,64 @@ pub(crate) enum Taken {
     Busy(Option<Holder>),
 }
 
+/// What kind of core holds the lock: a daemon waits for an embedded command to finish and refuses a second daemon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Role {
+    Daemon,
+    Embedded,
+}
+
+impl Role {
+    fn word(self) -> &'static str {
+        match self {
+            Role::Daemon => "daemon",
+            Role::Embedded => "embedded",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Holder {
     pub pid: u32,
     pub started: String,
+    /// `None` for a core.holder written before the role was recorded (M0a).
+    pub role: Option<Role>,
 }
 
-/// Tries the lock without waiting. Two embedded commands at once: the second does not wait, it gets `Busy`.
-pub(crate) fn take(layout: &Layout) -> Result<Taken> {
+/// What a look at the lock found, without taking it for good (and so without bumping anything).
+pub(crate) enum Probe {
+    /// No core folder or lock file yet, or nobody holds the lock.
+    Free,
+    Held(Option<Holder>),
+}
+
+/// Looks at the lock: takes it and lets go at once. Creates nothing.
+pub(crate) fn probe(layout: &Layout) -> Result<Probe> {
+    if !layout.lock.is_file() {
+        return Ok(Probe::Free);
+    }
     let file = perms::open_private(&layout.lock)?;
     match file.try_lock_exclusive() {
         Ok(()) => {
-            write_holder(layout)?;
+            let _ = fs2::FileExt::unlock(&file);
+            Ok(Probe::Free)
+        }
+        Err(e)
+            if e.kind() == fs2::lock_contended_error().kind()
+                || e.kind() == std::io::ErrorKind::WouldBlock =>
+        {
+            Ok(Probe::Held(read_holder(layout)))
+        }
+        Err(e) => Err(Error::Io(format!("core.lock: {e}"))),
+    }
+}
+
+/// Tries the lock without waiting. Two embedded commands at once: the second does not wait, it gets `Busy`.
+pub(crate) fn take(layout: &Layout, role: Role) -> Result<Taken> {
+    let file = perms::open_private(&layout.lock)?;
+    match file.try_lock_exclusive() {
+        Ok(()) => {
+            write_holder(layout, role)?;
             Ok(Taken::Held(Lifetime { file }))
         }
         Err(e)
@@ -51,13 +97,13 @@ pub(crate) fn take(layout: &Layout) -> Result<Taken> {
 }
 
 /// Written after the lock is ours, so a line that names a process is never older than the lock it describes.
-fn write_holder(layout: &Layout) -> Result<()> {
+fn write_holder(layout: &Layout, role: Role) -> Result<()> {
     let pid = std::process::id();
     let started = process_start(pid).unwrap_or_default();
     let mut file = perms::open_private(&layout.holder)?;
     file.set_len(0)?;
     file.seek(SeekFrom::Start(0))?;
-    file.write_all(format!("pid={pid}\nstarted={started}\n").as_bytes())?;
+    file.write_all(format!("pid={pid}\nstarted={started}\nrole={}\n", role.word()).as_bytes())?;
     file.flush()?;
     Ok(())
 }
@@ -80,6 +126,11 @@ pub(crate) fn parse_holder(text: &str) -> Option<Holder> {
     Some(Holder {
         pid: get("pid")?.trim().parse().ok()?,
         started: get("started").unwrap_or("").trim().to_owned(),
+        role: match get("role").map(str::trim) {
+            Some("daemon") => Some(Role::Daemon),
+            Some("embedded") => Some(Role::Embedded),
+            _ => None,
+        },
     })
 }
 

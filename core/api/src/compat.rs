@@ -61,6 +61,7 @@ fn method(old: &Value, om: &Value, new: &Value, nm: &Value, name: &str, out: &mu
             ));
         }
     }
+    cli(&om["x-kith-cli"], &nm["x-kith-cli"], name, out);
     compat_out(
         old,
         &om["result"]["schema"],
@@ -69,6 +70,73 @@ fn method(old: &Value, om: &Value, new: &Value, nm: &Value, name: &str, out: &mu
         &format!("{name}: result"),
         out,
     );
+}
+
+/// The command line is part of the contract too: scripts and hooks spell it. Spellings (the path, the aliases, a
+/// flag's names, the presentation switches) may be added and never taken away, a required switch stays required, a
+/// param keeps the way it is written, and positional words keep their order (new ones go at the end).
+fn cli(old: &Value, new: &Value, name: &str, out: &mut Vec<String>) {
+    if old.is_null() {
+        return;
+    }
+    let spellings = |v: &Value| -> BTreeSet<String> {
+        std::iter::once(&v["path"])
+            .chain(v["aliases"].as_array().into_iter().flatten())
+            .map(Value::to_string)
+            .collect()
+    };
+    for gone in spellings(old).difference(&spellings(new)) {
+        out.push(format!(
+            "{name}: command {gone} no longer spells this method"
+        ));
+    }
+    let words = |v: &Value, key: &str| -> BTreeSet<String> {
+        v[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str().map(str::to_owned))
+            .collect()
+    };
+    for gone in words(old, "formats").difference(&words(new, "formats")) {
+        out.push(format!("{name}: switch {gone} is no longer accepted"));
+    }
+    if words(old, "requires") != words(new, "requires") {
+        out.push(format!("{name}: the switches the command requires changed"));
+    }
+    let empty = serde_json::Map::new();
+    let (old_args, new_args) = (
+        old["args"].as_object().unwrap_or(&empty),
+        new["args"].as_object().unwrap_or(&empty),
+    );
+    for (param, how) in old_args {
+        let Some(now) = new_args.get(param) else {
+            continue; // a removed param is reported with the params
+        };
+        if how["kind"] != now["kind"] {
+            out.push(format!(
+                "{name}: param {param} is written differently ({} became {})",
+                how["kind"], now["kind"]
+            ));
+            continue;
+        }
+        for gone in words(how, "spellings").difference(&words(now, "spellings")) {
+            out.push(format!("{name}: param {param} no longer accepts {gone}"));
+        }
+    }
+    // Positional words by position (the args object keeps the table's param order): the old ones stay first.
+    let positional = |args: &serde_json::Map<String, Value>| -> Vec<String> {
+        args.iter()
+            .filter(|(_, a)| a["kind"] == "positional")
+            .map(|(n, _)| n.clone())
+            .collect()
+    };
+    let (before, after) = (positional(old_args), positional(new_args));
+    if !after.starts_with(&before) {
+        out.push(format!(
+            "{name}: positional words were reordered or removed ({before:?} became {after:?})"
+        ));
+    }
 }
 
 /// One alternative of a schema, with its `$ref`s and `anyOf`s flattened.
@@ -541,5 +609,199 @@ mod tests {
         let mut old = base();
         old["methods"][0]["x-kith-stability"] = json!("experimental");
         assert!(breaks(&old, &doc(json!([]))).is_empty());
+    }
+
+    /// A stable method whose command line is `cli` (the cli check reads `x-kith-cli`).
+    fn with_cli(cli: Value) -> Value {
+        let mut d = base();
+        d["methods"][0]["x-kith-cli"] = cli;
+        d
+    }
+    fn cli_doc(
+        path: &[&str],
+        aliases: Value,
+        formats: &[&str],
+        requires: &[&str],
+        args: Value,
+    ) -> Value {
+        with_cli(
+            json!({"path": path, "aliases": aliases, "formats": formats, "requires": requires, "args": args}),
+        )
+    }
+    fn plain() -> Value {
+        cli_doc(
+            &["backup", "add"],
+            json!([["bk", "add"]]),
+            &["--json"],
+            &[],
+            json!({
+                "entry": {"kind": "positional"},
+                "name": {"kind": "positional"},
+                "at": {"kind": "flag", "spellings": ["--at", "-a"]},
+                "all": {"kind": "switch", "spellings": ["--all"]},
+            }),
+        )
+    }
+
+    #[test]
+    fn the_command_line_may_only_grow() {
+        let old = plain();
+        assert!(breaks(&old, &old).is_empty());
+        // a new alias, a new flag spelling, a new format, a new positional at the end, a new flag
+        let grown = cli_doc(
+            &["backup", "add"],
+            json!([["bk", "add"], ["backups", "add"]]),
+            &["--json", "--sh"],
+            &[],
+            json!({
+                "entry": {"kind": "positional"},
+                "name": {"kind": "positional"},
+                "extra": {"kind": "positional"},
+                "at": {"kind": "flag", "spellings": ["--at", "-a", "--when"]},
+                "all": {"kind": "switch", "spellings": ["--all"]},
+                "more": {"kind": "flag", "spellings": ["--more"]},
+            }),
+        );
+        assert!(
+            breaks(&old, &grown).is_empty(),
+            "{:?}",
+            breaks(&old, &grown)
+        );
+    }
+
+    #[test]
+    fn a_path_or_alias_taken_away_breaks() {
+        let old = plain();
+        let args = old["methods"][0]["x-kith-cli"]["args"].clone();
+        // the alias is gone
+        only(
+            &old,
+            &cli_doc(
+                &["backup", "add"],
+                json!([]),
+                &["--json"],
+                &[],
+                args.clone(),
+            ),
+            "no longer spells",
+        );
+        // the path moved and the old spelling is not kept as an alias
+        only(
+            &old,
+            &cli_doc(
+                &["backups", "add"],
+                json!([["bk", "add"]]),
+                &["--json"],
+                &[],
+                args.clone(),
+            ),
+            "no longer spells",
+        );
+        // the path moved and the old spelling is an alias now: fine
+        let moved = cli_doc(
+            &["backups", "add"],
+            json!([["bk", "add"], ["backup", "add"]]),
+            &["--json"],
+            &[],
+            args,
+        );
+        assert!(breaks(&old, &moved).is_empty());
+    }
+
+    #[test]
+    fn a_flag_spelling_or_format_taken_away_breaks() {
+        let old = plain();
+        let mut args = old["methods"][0]["x-kith-cli"]["args"].clone();
+        args["at"]["spellings"] = json!(["--at"]);
+        only(
+            &old,
+            &cli_doc(
+                &["backup", "add"],
+                json!([["bk", "add"]]),
+                &["--json"],
+                &[],
+                args,
+            ),
+            "no longer accepts -a",
+        );
+        let args = old["methods"][0]["x-kith-cli"]["args"].clone();
+        only(
+            &old,
+            &cli_doc(&["backup", "add"], json!([["bk", "add"]]), &[], &[], args),
+            "switch --json is no longer accepted",
+        );
+    }
+
+    #[test]
+    fn positional_words_keep_their_order() {
+        let old = plain();
+        let swapped = cli_doc(
+            &["backup", "add"],
+            json!([["bk", "add"]]),
+            &["--json"],
+            &[],
+            json!({
+                "name": {"kind": "positional"},
+                "entry": {"kind": "positional"},
+                "at": {"kind": "flag", "spellings": ["--at", "-a"]},
+                "all": {"kind": "switch", "spellings": ["--all"]},
+            }),
+        );
+        only(&old, &swapped, "positional words were reordered");
+        // a positional word turned into a flag is also a different command line
+        let flagged = cli_doc(
+            &["backup", "add"],
+            json!([["bk", "add"]]),
+            &["--json"],
+            &[],
+            json!({
+                "entry": {"kind": "positional"},
+                "name": {"kind": "flag", "spellings": ["--name"]},
+                "at": {"kind": "flag", "spellings": ["--at", "-a"]},
+                "all": {"kind": "switch", "spellings": ["--all"]},
+            }),
+        );
+        only(&old, &flagged, "is written differently");
+    }
+
+    #[test]
+    fn a_param_written_another_way_or_a_changed_requirement_breaks() {
+        let old = cli_doc(
+            &["ls"],
+            json!([]),
+            &[],
+            &["--json"],
+            json!({"all": {"kind": "switch", "spellings": ["--all"]}}),
+        );
+        only(
+            &old,
+            &cli_doc(
+                &["ls"],
+                json!([]),
+                &[],
+                &[],
+                json!({"all": {"kind": "switch", "spellings": ["--all"]}}),
+            ),
+            "switches the command requires changed",
+        );
+        only(
+            &old,
+            &cli_doc(
+                &["ls"],
+                json!([]),
+                &[],
+                &["--json"],
+                json!({"all": {"kind": "flag", "spellings": ["--all"]}}),
+            ),
+            "is written differently",
+        );
+    }
+
+    #[test]
+    fn an_experimental_command_line_may_change() {
+        let mut old = plain();
+        old["methods"][0]["x-kith-stability"] = json!("experimental");
+        let gone = cli_doc(&["other"], json!([]), &[], &[], json!({}));
+        assert!(breaks(&old, &gone).is_empty());
     }
 }

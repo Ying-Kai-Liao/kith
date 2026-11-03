@@ -15,7 +15,7 @@ from pathlib import Path
 KITH = Path(os.environ.get('KITH_ROOT') or os.path.dirname(os.path.dirname(
     os.path.normpath(os.path.join(os.environ.get('PWD') or os.getcwd(), sys.argv[0])))))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'lib'))
-from kith_paths import paths  # noqa: E402  the one place that knows where kith's folders are
+from kith_paths import kith_bin, paths  # noqa: E402  the one place that knows where kith's folders are
 import kith_settings  # noqa: E402
 import kith_migrate  # noqa: E402
 
@@ -27,8 +27,8 @@ CHECKS = []       # [{section, level, name, ok}] in the order the text mode prin
 SECTION = ['']
 
 
-def run(*args, cwd=None):
-    return subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+def run(*args, cwd=None, timeout=None):
+    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
 
 
 def emit(level, mark, text):
@@ -447,13 +447,56 @@ def serve():
     ok(f'relay: {relay} (config.json)') if relay else ok('relay: built-in default (kith serve relay <url> to change)')
 
 
+def core():
+    """The core's daemon front: the daemon (pid, generation), its owner socket, the holder, and when no core can run, the verb
+    that recovers it. `kith kernel core-status` reads the lock file and asks the socket; it creates nothing and reads no database."""
+    section('kith core')
+    binary = kith_bin()
+    if not binary:
+        note('no kith program on this Mac yet: the Python kernel answers everything')
+        return
+    try:
+        # Reaching a daemon that is busy can take a minute; doctor asks for a few seconds (TimeoutExpired is a SubprocessError).
+        r = run(binary, 'kernel', 'core-status', '--json', timeout=5)
+        status = json.loads(r.stdout)
+    except subprocess.TimeoutExpired:
+        warn('the core did not answer `kith kernel core-status` in 5 seconds (a daemon that is busy or stuck)')
+        return
+    except (OSError, ValueError, subprocess.SubprocessError):
+        note('this kith program does not report on the core yet (kith update)')
+        return
+    c, d, h = status.get('core') or {}, status.get('daemon') or {}, status.get('holder')
+    if d.get('running'):
+        ok(f'core daemon: pid {d.get("pid")}, generation {d.get("generation")}, schema {d.get("schema_version")}, {d.get("served")} call(s) served')
+        ok(f'owner socket: {d.get("socket")}')
+    elif c.get('state') == 'down':
+        bad(f'{c.get("note")} Recover with: {c.get("recovery")}')
+    else:
+        note(c.get('note') or 'no daemon is running')
+    if c.get('mismatch'):
+        warn(c['mismatch'])
+    if c.get('last_start_problem') and not d.get('running'):
+        warn(f'the daemon did not start: {c["last_start_problem"]}')
+    if isinstance(h, dict):
+        state = h.get('state')
+        if state == 'connected':
+            ok(f'holder: instance {h.get("instance")}, pid {h.get("pid")}, {h.get("processes")} process(es)'
+               + (' (tied to the daemon\'s job: it ends with it)' if h.get('tied_to_starter') else ''))
+        elif state == 'absent':
+            note('holder: no kith-holder program beside kith (nothing uses a holder before M1)')
+        elif state in ('unreachable',):
+            warn(f'holder: {h.get("error")} (the daemon retries; nothing uses a holder before M1)')
+        else:
+            note(f'holder: {state}')
+
+
 def main(argv):
     if '-h' in argv or '--help' in argv:
         print(__doc__.strip())
         return
     global JSON
     JSON = '--json' in argv
-    for check in (folders, kith_version, migration, tools, repos_and_agents, services, people, plugin, jobs, serve):
+    for check in (folders, kith_version, migration, tools, repos_and_agents, services, people, plugin, jobs, serve, core):
         try:
             check()
         except Exception as e:   # one broken check never hides the others

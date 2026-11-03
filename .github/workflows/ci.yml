@@ -446,6 +446,8 @@ jobs:
           kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
           # The same corpus again with the core database made first, so every Rust verb runs inside an embedded core.
           kernel/tests/difftest/kith-difftest --rust --core --bin "$PWD/serve/host/target/debug/kith"
+          # And once more with a daemon running in each NEW sandbox, so the verbs the daemon answers go through its owner socket.
+          kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
       # kith-sessions and the Rust threads module claiming one thread at once: never more than one writer.

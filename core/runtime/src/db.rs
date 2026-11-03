@@ -14,11 +14,12 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use kith_kernel::paths::Paths;
 use rusqlite::{Connection, Transaction, TransactionBehavior};
 
 use crate::error::{Error, Result};
 use crate::layout::Layout;
-use crate::lock::{self, Holder, Lifetime, Taken};
+use crate::lock::{self, Holder, Lifetime, Role, Taken};
 use crate::{marker, perms};
 
 #[derive(Clone, Copy)]
@@ -59,6 +60,25 @@ pub struct Core {
     generation: i64,
     schema: i64,
     migrated_from: Option<i64>,
+    /// The folders of the process that opened this core (`paths` answers with them when the caller gives no view).
+    folders: Option<Paths>,
+}
+
+/// A process the holder reported, as the core noted it: the group leader's pid and the start time the system gave that
+/// pid then, so a later kill can tell the process from a stranger that was handed the same pid.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct RecordedProc {
+    pub pid: u32,
+    pub started: String,
+    pub conv: String,
+}
+
+/// What the core last knew of the holder: its `instance` (random per holder start) and the processes it listed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct HolderRecord {
+    /// `None` until a hello has met a holder (a core.db from M0a has none: nothing is killed on that account).
+    pub instance: Option<String>,
+    pub procs: Vec<RecordedProc>,
 }
 
 pub(crate) enum Opened {
@@ -69,7 +89,11 @@ pub(crate) enum Opened {
 pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Result<Opened> {
     perms::ensure_dir(&layout.dir)?;
     perms::check_files(layout)?;
-    let lifetime = match lock::take(layout)? {
+    let role = match mode {
+        Mode::Daemon => Role::Daemon,
+        Mode::Embedded => Role::Embedded,
+    };
+    let lifetime = match lock::take(layout, role)? {
         Taken::Held(l) => l,
         Taken::Busy(h) => return Ok(Opened::Busy(h)),
     };
@@ -158,6 +182,7 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
         generation,
         schema,
         migrated_from,
+        folders: None,
     })))
 }
 
@@ -180,10 +205,6 @@ impl Core {
     /// The only door to a transaction that touches claims (claim, redeem, ack, reconcile apply): `BEGIN IMMEDIATE`, and
     /// the generation in core.db must still be this core's. A core that lost the lock (a lost lock on a network disk, a
     /// bug) finds a larger number and is refused, so the two layers each cover the other's failure.
-    #[cfg_attr(
-        not(test),
-        allow(dead_code, reason = "the first caller is the claim code of M3")
-    )]
     pub(crate) fn claim_tx(&mut self) -> Result<Transaction<'_>> {
         let tx = self
             .conn
@@ -196,6 +217,52 @@ impl Core {
             )));
         }
         Ok(tx)
+    }
+
+    /// Remembers the folders of the process that opened this core.
+    pub(crate) fn with_folders(mut self, folders: &Paths) -> Self {
+        self.folders = Some(folders.clone());
+        self
+    }
+
+    pub(crate) fn folders(&self) -> Option<&Paths> {
+        self.folders.as_ref()
+    }
+
+    /// The holder instance and processes the last hello recorded.
+    pub(crate) fn holder_record(&self) -> Result<HolderRecord> {
+        let instance = get_meta(&self.conn, "holder_instance")?;
+        let procs = match get_meta(&self.conn, "holder_procs")? {
+            None => Vec::new(),
+            Some(text) => parse_procs(&text),
+        };
+        Ok(HolderRecord { instance, procs })
+    }
+
+    /// Records the holder instance and its processes in one transaction that refuses a stale generation: an old core
+    /// that lost the lock cannot overwrite what the newer one noted.
+    pub(crate) fn save_holder_record(&mut self, rec: &HolderRecord) -> Result<()> {
+        let procs = serde_json::Value::Array(
+            rec.procs
+                .iter()
+                .map(|p| serde_json::json!({"pid": p.pid, "started": p.started, "conv": p.conv}))
+                .collect(),
+        )
+        .to_string();
+        let tx = self.claim_tx()?;
+        match &rec.instance {
+            Some(i) => tx.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('holder_instance', ?1)",
+                [i],
+            )?,
+            None => tx.execute("DELETE FROM meta WHERE key = 'holder_instance'", [])?,
+        };
+        tx.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('holder_procs', ?1)",
+            [&procs],
+        )?;
+        tx.commit()?;
+        Ok(())
     }
 
     /// The next claim id, advanced inside the caller's claim transaction so a restarted core never reuses one.
@@ -256,6 +323,27 @@ fn bump_generation(conn: &mut Connection) -> Result<i64> {
     let g = read_counter(&tx, "generation")?;
     tx.commit()?;
     Ok(g)
+}
+
+fn parse_procs(text: &str) -> Vec<RecordedProc> {
+    let Ok(serde_json::Value::Array(items)) = serde_json::from_str::<serde_json::Value>(text)
+    else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|v| {
+            Some(RecordedProc {
+                pid: u32::try_from(v.get("pid")?.as_u64()?).ok()?,
+                started: v.get("started")?.as_str()?.to_owned(),
+                conv: v
+                    .get("conv")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_owned(),
+            })
+        })
+        .collect()
 }
 
 fn get_meta(conn: &Connection, key: &str) -> Result<Option<String>> {

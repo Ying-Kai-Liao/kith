@@ -14,6 +14,13 @@ pub(crate) struct Layout {
     pub holder: PathBuf,
     pub marker: PathBuf,
     pub snapshots: PathBuf,
+    /// The local owner token: what a CLI shows the daemon to be the owner (with the same OS user). Rewritten at each
+    /// daemon start.
+    pub token: PathBuf,
+    /// The key the holder was started with; it never leaves this folder (the holder reads it from a pipe).
+    pub holder_secret: PathBuf,
+    /// The holder's own folder (socket, lock, log), inside the core folder so the same lists cover it.
+    pub holder_dir: PathBuf,
 }
 
 /// The name of the folder below the machine folder. `kernel/lib/kith_guard.py` (`SECRET_DIRS`) and its Rust ports name the same.
@@ -28,6 +35,9 @@ impl Layout {
             holder: dir.join("core.holder"),
             marker: dir.join("core.marker"),
             snapshots: dir.join("snapshots"),
+            token: dir.join("owner.token"),
+            holder_secret: dir.join("holder.secret"),
+            holder_dir: dir.join("holder"),
             dir,
         }
     }
@@ -42,6 +52,8 @@ impl Layout {
             self.lock.clone(),
             self.holder.clone(),
             self.marker.clone(),
+            self.token.clone(),
+            self.holder_secret.clone(),
         ]
     }
 }
