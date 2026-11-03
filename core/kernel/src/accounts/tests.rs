@@ -501,10 +501,15 @@ fn an_api_key_entry_runs_claude_through_a_helper() {
     let out = launch_env(&ctx, "echo", "claude-api:main", false, false).unwrap();
     assert!(out.starts_with("backup_harness=claude backup_account=main backup_cfg_var='' backup_cfg_dir='' backup_api_helper="));
     let auth = h.dir.join("kernel").join("bin/kith-auth"); // as the code joins it
-    assert!(out.contains(&format!(
+    // the helper command is quoted word by word, then once more as the value of the assignment
+    let helper = format!(
         "{} get --for echo --profile anthropic/main anthropic ANTHROPIC_API_KEY",
         q(&auth)
-    )));
+    );
+    assert!(
+        out.contains(&format!("backup_api_helper={}", sh_quote(&helper))),
+        "{out}"
+    );
     let e = launch_env(&ctx, "echo", "claude-api:other", false, false).unwrap_err();
     assert!(e.starts_with("claude-api:other: no anthropic/other key granted to echo (make it ready: kith auth set anthropic/other"));
 }
