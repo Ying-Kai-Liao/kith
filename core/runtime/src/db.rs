@@ -22,28 +22,7 @@ use crate::layout::Layout;
 use crate::lock::{self, Holder, Lifetime, Role, Taken};
 use crate::{marker, perms};
 
-#[derive(Clone, Copy)]
-pub(crate) struct Migration {
-    pub version: i64,
-    pub name: &'static str,
-    pub sql: &'static str,
-}
-
-/// Every schema this binary knows, oldest first. Add to the end; never edit a step that has shipped.
-pub(crate) const MIGRATIONS: &[Migration] = &[Migration {
-    version: 1,
-    name: "core",
-    sql: "
-        CREATE TABLE migrations (
-            version INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            applied_at INTEGER NOT NULL
-        );
-        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
-        CREATE TABLE counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID;
-        INSERT INTO counters (name, value) VALUES ('generation', 0), ('claim_id', 0);
-    ",
-}];
+pub(crate) use crate::migrations::{MIGRATIONS, Migration};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Mode {

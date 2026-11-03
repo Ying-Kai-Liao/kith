@@ -10,7 +10,9 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use kith_api::cli::{ParseError, parse_argv};
-use kith_api::{Arg, METHODS, Principal, compat, enums, method, named_types, openrpc, schema};
+use kith_api::{
+    Arg, METHODS, Principal, Served, Stability, compat, enums, method, named_types, openrpc, schema,
+};
 use serde_json::{Value, json};
 
 fn repo(path: &str) -> PathBuf {
@@ -277,7 +279,7 @@ fn every_switched_verb_has_a_row() {
     for line in lines {
         let argv: Vec<&str> = line.split(' ').collect();
         let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
-        assert_eq!(parsed.method.served, kith_api::Served::Core, "{line}");
+        assert_eq!(parsed.method.served, Served::Core, "{line}");
     }
 }
 
@@ -334,4 +336,111 @@ fn a_released_method_cannot_be_dropped_unseen() {
 fn lookup_by_name() {
     assert!(method("kernel.version").is_some());
     assert!(method("nope").is_none());
+}
+
+/// The M2 rows (M2-0b): experimental, owner only, still answered by the Python kernel, and not in `released.json` until
+/// M2 cuts them.
+const M2_STUBS: &[&str] = &[
+    "people.grant",
+    "people.revoke",
+    "people.list",
+    "people.requests",
+    "people.approve",
+    "people.deny",
+    "cards.list",
+    "cards.show",
+    "cards.answer",
+];
+
+#[test]
+fn the_m2_stubs_are_experimental_owner_only_and_unreleased() {
+    let released = read_json(openrpc::RELEASED_PATH);
+    let released: BTreeSet<&str> = released["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    for name in M2_STUBS {
+        let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
+        assert_eq!(m.stability, Stability::Experimental, "{name}");
+        assert_eq!(
+            m.served,
+            Served::Kernel,
+            "{name}: nobody in the core serves it yet"
+        );
+        assert_eq!(m.principals, &[Principal::Owner], "{name}");
+        assert!(!released.contains(name), "{name} is in released.json");
+    }
+}
+
+#[test]
+fn the_m2_stubs_parse_from_their_command_lines() {
+    for (line, name) in [
+        (
+            "people grant ann echo --preset member --mode default --budget 20 --json",
+            "people.grant",
+        ),
+        ("people revoke ann echo", "people.revoke"),
+        ("people access --agent echo --json", "people.list"),
+        ("people requests --json", "people.requests"),
+        ("people approve r1", "people.approve"),
+        ("people deny r1", "people.deny"),
+        ("cards ls --json", "cards.list"),
+        ("cards show c1", "cards.show"),
+        ("cards answer c1 yes", "cards.answer"),
+    ] {
+        let argv: Vec<&str> = line.split(' ').collect();
+        let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
+        assert_eq!(parsed.method.name, name, "{line}");
+    }
+    let grant = parse_argv(&[
+        "people", "grant", "ann", "echo", "--preset", "member", "--budget", "20",
+    ])
+    .unwrap();
+    assert_eq!(
+        grant.params,
+        json!({"person": "ann", "agent": "echo", "preset": "member", "budget": "20"})
+    );
+}
+
+#[test]
+fn the_m2_stubs_claim_no_command_line_python_serves_today() {
+    // `kith people ls|show` and `kith cards history` are kith-people's and kith-cards's; the stubs' spellings differ, so
+    // those lines stay NotInTable and the caller does what it did before the table.
+    for line in [
+        "people ls",
+        "people ls --json",
+        "people show ann",
+        "cards history",
+        "cards history --json",
+        "people",
+        "cards",
+    ] {
+        let argv: Vec<&str> = line.split(' ').collect();
+        assert_eq!(
+            parse_argv(&argv).unwrap_err(),
+            ParseError::NotInTable,
+            "{line}"
+        );
+    }
+}
+
+#[test]
+fn the_row_order_is_the_order_of_the_families() {
+    // The generated document follows this order; the split into area files must not move a row.
+    let names: Vec<&str> = METHODS.iter().map(|m| m.name).collect();
+    let at = |n: &str| {
+        names
+            .iter()
+            .position(|x| *x == n)
+            .unwrap_or_else(|| panic!("{n}"))
+    };
+    assert_eq!(at("paths"), 0);
+    assert!(at("kernel.version") < at("agents.list"));
+    assert!(at("delegations.list") < at("auth.list"));
+    assert!(at("bug.show") < at("run.recall"));
+    assert!(at("run.projectId") < at("backup.list"));
+    assert!(at("schedule.log") < at("people.grant"));
+    assert!(at("people.deny") < at("cards.list"));
 }

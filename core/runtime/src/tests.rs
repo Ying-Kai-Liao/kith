@@ -627,3 +627,121 @@ fn a_front_note_that_stays_the_same_is_one_line_in_the_core_log() {
         "{log}"
     );
 }
+
+/// Schema version 1 as M0 shipped it, written out here so the fixture does not depend on the code under test.
+const M0_SCHEMA: &str = "
+        CREATE TABLE migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at INTEGER NOT NULL
+        );
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+        CREATE TABLE counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID;
+        INSERT INTO counters (name, value) VALUES ('generation', 0), ('claim_id', 0);
+    ";
+
+/// A core.db as an M0 binary left it: the old SQL, its migrations row, a database id and the marker.
+fn m0_database(l: &Layout) {
+    perms::ensure_dir(&l.dir).expect("dir");
+    perms::create_private_file(&l.db).expect("db");
+    let c = rusqlite::Connection::open(&l.db).expect("open");
+    c.pragma_update(None, "journal_mode", "WAL").expect("wal");
+    c.execute_batch(M0_SCHEMA).expect("m0 schema");
+    c.execute(
+        "INSERT INTO migrations (version, name, applied_at) VALUES (1, 'core', 1)",
+        [],
+    )
+    .expect("row");
+    c.execute(
+        "INSERT INTO meta (key, value) VALUES ('database_id', 'm0-fixture')",
+        [],
+    )
+    .expect("id");
+    drop(c);
+    crate::marker::write(l, "m0-fixture").expect("marker");
+}
+
+fn schema_of(l: &Layout) -> Vec<(String, String, Option<String>)> {
+    let c = rusqlite::Connection::open(&l.db).expect("open");
+    let mut q = c
+        .prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name")
+        .expect("prepare");
+    q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .expect("query")
+        .map(|r| r.expect("row"))
+        .collect()
+}
+
+#[test]
+fn an_m0_database_opens_unchanged_and_migrates_to_the_new_head() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    m0_database(&l);
+    // Today's head is still 1: the M0 file opens as it is, nothing migrates.
+    let c = start_with(&l, MIGRATIONS).expect("m0 opens");
+    assert_eq!(c.schema_version(), 1);
+    assert_eq!(c.migrated_from(), None);
+    drop(c);
+    // A later head migrates it, and the daemon says where it came from.
+    let c = start_with(&l, BOTH).expect("migrates");
+    assert_eq!(c.schema_version(), 2);
+    assert_eq!(c.migrated_from(), Some(1));
+}
+
+#[test]
+fn a_fresh_database_and_a_migrated_one_end_with_the_same_schema() {
+    let (_t, fresh) = machine();
+    let lf = Layout::new(&fresh);
+    drop(start_with(&lf, BOTH).expect("fresh"));
+
+    let (_t2, old) = machine();
+    let lo = Layout::new(&old);
+    m0_database(&lo);
+    drop(start_with(&lo, BOTH).expect("migrated"));
+
+    assert_eq!(schema_of(&lf), schema_of(&lo));
+    assert_eq!(schema_of(&lf).len(), 3, "migrations, meta, counters");
+}
+
+#[test]
+fn the_m2_stub_rows_answer_not_served_so_the_caller_falls_back() {
+    let (_t, m) = machine();
+    let c = open(&Layout::new(&m));
+    let owner = kith_api::Principal::Owner;
+    for (name, params) in [
+        (
+            "people.grant",
+            serde_json::json!({"person": "ann", "agent": "echo"}),
+        ),
+        (
+            "people.revoke",
+            serde_json::json!({"person": "ann", "agent": "echo"}),
+        ),
+        ("people.list", serde_json::json!({})),
+        ("people.requests", serde_json::json!({})),
+        ("people.approve", serde_json::json!({"id": "r1"})),
+        ("people.deny", serde_json::json!({"id": "r1"})),
+        ("cards.list", serde_json::json!({})),
+        ("cards.show", serde_json::json!({"id": "c1"})),
+        (
+            "cards.answer",
+            serde_json::json!({"id": "c1", "answer": "yes"}),
+        ),
+    ] {
+        assert!(
+            matches!(c.call(owner, name, &params), Err(Error::NotServed(_))),
+            "{name}"
+        );
+        for other in [
+            kith_api::Principal::Member,
+            kith_api::Principal::Bot,
+            kith_api::Principal::RunToken,
+        ] {
+            assert!(
+                matches!(c.call(other, name, &params), Err(Error::NotAllowed(_))),
+                "{name} for {}",
+                other.name()
+            );
+        }
+    }
+}

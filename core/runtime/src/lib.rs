@@ -25,6 +25,7 @@ mod layout;
 mod lock;
 mod log;
 mod marker;
+mod migrations;
 mod owner;
 mod perms;
 mod runs;
