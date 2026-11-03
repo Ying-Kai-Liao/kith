@@ -159,7 +159,7 @@ fn spawn_list_kill_and_ack() {
             held[0].conv.as_str(),
             held[0].claim,
             held[0].generation,
-            held[0].exit
+            held[0].exit.clone()
         ),
         ("conv-a", 7, 1, None)
     );
@@ -206,8 +206,8 @@ fn a_terminal_takes_input_and_keeps_a_tail() {
         shell("read x; echo got:$x; exec sleep 300")
     };
     let id = spawn(&mut c, &spec("conv-t", 1, 1, Mode::Pty, &argv));
-    c.send(p::RESIZE, id, br#"{"cols":100,"rows":30}"#).unwrap();
-    c.send(p::INPUT, id, b"ping\r").unwrap();
+    c.resize(id, 100, 30).unwrap();
+    c.input(id, b"ping\r").unwrap();
     read_until(&mut c, id, "got:ping");
     assert!(String::from_utf8_lossy(&c.tail(id).unwrap()).contains("got:ping"));
     assert_eq!(c.list().unwrap()[0].cols, 100);
@@ -262,7 +262,8 @@ fn a_stale_generation_is_refused_and_a_newer_core_takes_over() {
     let mut new = fx.client(6);
     // The old core is cut off: its connection is closed, and nothing it still sends counts.
     assert!(old.closed(WAIT));
-    let _ = old.send(p::KILL, id, &[]);
+    let instance = old.welcome.instance.clone();
+    let _ = old.send_for(p::KILL, &instance, id, &[]);
     // The new core sees the old core's process and can control it.
     assert_eq!(new.welcome.procs.len(), 1);
     assert_eq!(new.welcome.procs[0].id, id);
@@ -275,7 +276,7 @@ fn a_stale_generation_is_refused_and_a_newer_core_takes_over() {
     // And the old core's kill did nothing.
     std::thread::sleep(Duration::from_millis(300));
     let held = new.list().unwrap();
-    assert_eq!((held.len(), held[0].exit), (1, None));
+    assert_eq!((held.len(), held[0].exit.clone()), (1, None));
     kill_until_gone(&mut new, id);
 }
 
@@ -296,7 +297,7 @@ fn an_exit_is_kept_until_it_is_acked_across_cores() {
             held.len(),
             held[0].conv.as_str(),
             held[0].claim,
-            held[0].exit
+            held[0].exit.clone()
         ),
         (1, "conv-e", 3, Some(exit))
     );
@@ -408,7 +409,7 @@ fn the_holder_and_its_process_outlive_the_process_that_started_it() {
     assert_eq!(second.welcome.pid, holder_pid, "the same holder answers");
     let held = second.list().unwrap();
     assert_eq!(
-        (held.len(), held[0].id, held[0].pid, held[0].exit),
+        (held.len(), held[0].id, held[0].pid, held[0].exit.clone()),
         (1, id, child_pid, None)
     );
     #[cfg(unix)]
@@ -578,4 +579,77 @@ fn a_secret_is_one_line() {
     assert_eq!(launch::read_secret(&b"abc\n"[..]).unwrap(), "abc");
     assert!(launch::read_secret(&b"\n"[..]).is_err());
     assert!(launch::read_secret(&b""[..]).is_err());
+}
+
+#[test]
+fn a_spawn_below_the_highest_claim_is_refused() {
+    let fx = Fixture::new("stale");
+    fx.start();
+    let mut c = fx.client(1);
+    let id = spawn(
+        &mut c,
+        &spec("conv-s", 5, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    // Even after the claim-5 process is killed and acked, claim 4 is still behind what the holder saw.
+    kill_until_gone(&mut c, id);
+    exit_of(&mut c, id);
+    assert_eq!(c.ack(id).unwrap(), AckState::Acked);
+    c.spawn(&spec("conv-s", 4, 1, Mode::Pipes, &shell(sleep_line())))
+        .unwrap();
+    let (_, _, payload) = c.expect(p::STALE_CLAIM, 0, WAIT).expect("stale claim");
+    let stale: p::StaleClaim = wire::parse(&payload).unwrap();
+    assert_eq!(
+        (stale.conv.as_str(), stale.claim, stale.highest),
+        ("conv-s", 4, 5)
+    );
+    assert!(c.list().unwrap().is_empty());
+    // A higher claim, and another conversation at a low one, still start.
+    let a = spawn(
+        &mut c,
+        &spec("conv-s", 6, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    let b = spawn(
+        &mut c,
+        &spec("conv-o", 1, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    kill_until_gone(&mut c, a);
+    kill_until_gone(&mut c, b);
+}
+
+#[test]
+fn an_id_from_another_holder_instance_touches_nothing() {
+    let fx = Fixture::new("foreign");
+    fx.start();
+    let mut c = fx.client(1);
+    let line = if cfg!(windows) {
+        "echo hello && ping -n 300 127.0.0.1 > nul"
+    } else {
+        "echo hello; exec sleep 300"
+    };
+    let id = spawn(&mut c, &spec("conv-i", 1, 1, Mode::Pipes, &shell(line)));
+    read_until(&mut c, id, "hello");
+    let other = "0".repeat(32);
+    assert_ne!(other, c.welcome.instance);
+    c.send_for(p::KILL, &other, id, &[]).unwrap();
+    let (_, _, payload) = c.expect(p::KILLED, id, WAIT).expect("killed");
+    let killed: p::Killed = wire::parse(&payload).unwrap();
+    assert_eq!(killed.state, KillState::Gone);
+    c.send_for(p::ACK, &other, id, &[]).unwrap();
+    let (_, _, payload) = c.expect(p::ACKED, id, WAIT).expect("acked");
+    let acked: p::Acked = wire::parse(&payload).unwrap();
+    assert_eq!(acked.state, AckState::Gone);
+    c.send_for(p::TAIL, &other, id, &[]).unwrap();
+    let (_, _, tail) = c.expect(p::TAILED, id, WAIT).expect("tailed");
+    assert!(tail.is_empty());
+    c.send_for(p::RESIZE, &other, id, br#"{"cols":120,"rows":40}"#)
+        .unwrap();
+    c.send_for(p::INPUT, &other, id, b"").unwrap();
+    // The process is still running, unresized, and its tail is still there.
+    let held = c.list().unwrap();
+    assert_eq!(
+        (held.len(), held[0].exit.clone(), held[0].cols),
+        (1, None, 80)
+    );
+    assert!(String::from_utf8_lossy(&c.tail(id).unwrap()).contains("hello"));
+    kill_until_gone(&mut c, id);
 }

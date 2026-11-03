@@ -131,6 +131,28 @@ impl Client {
         self.writer.flush()
     }
 
+    /// A command for process `id` of holder `instance`: the instance goes first in the payload (see proto.rs).
+    pub fn send_for(&mut self, kind: u8, instance: &str, id: u32, body: &[u8]) -> io::Result<()> {
+        let mut payload = instance.as_bytes().to_vec();
+        payload.extend_from_slice(body);
+        self.send(kind, id, &payload)
+    }
+
+    fn send_own(&mut self, kind: u8, id: u32, body: &[u8]) -> io::Result<()> {
+        let instance = self.welcome.instance.clone();
+        self.send_for(kind, &instance, id, body)
+    }
+
+    /// Raw bytes to process `id`, which must be one of this holder's.
+    pub fn input(&mut self, id: u32, bytes: &[u8]) -> io::Result<()> {
+        self.send_own(p::INPUT, id, bytes)
+    }
+
+    pub fn resize(&mut self, id: u32, cols: u16, rows: u16) -> io::Result<()> {
+        let body = serde_json::to_vec(&p::Size { cols, rows }).expect("serializable");
+        self.send_own(p::RESIZE, id, &body)
+    }
+
     pub fn send_json(&mut self, kind: u8, id: u32, msg: &impl serde::Serialize) -> io::Result<()> {
         self.send(kind, id, &serde_json::to_vec(msg).expect("serializable"))
     }
@@ -186,7 +208,7 @@ impl Client {
     }
 
     pub fn kill(&mut self, id: u32) -> io::Result<p::KillState> {
-        self.send(p::KILL, id, &[])?;
+        self.send_own(p::KILL, id, &[])?;
         let (_, _, payload) = self
             .expect(p::KILLED, id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
@@ -194,7 +216,7 @@ impl Client {
     }
 
     pub fn ack(&mut self, id: u32) -> io::Result<p::AckState> {
-        self.send(p::ACK, id, &[])?;
+        self.send_own(p::ACK, id, &[])?;
         let (_, _, payload) = self
             .expect(p::ACKED, id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
@@ -203,7 +225,7 @@ impl Client {
 
     /// Everything the process printed so far that is still in the holder's tail.
     pub fn tail(&mut self, id: u32) -> io::Result<Vec<u8>> {
-        self.send(p::TAIL, id, &[])?;
+        self.send_own(p::TAIL, id, &[])?;
         let (_, _, payload) = self
             .expect(p::TAILED, id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;

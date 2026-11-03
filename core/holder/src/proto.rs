@@ -5,6 +5,12 @@
 //! What a core and the holder say to each other. The holder never interprets `conv` or `claim`: it stores them so
 //! the core can match its records against `list` after a restart.
 //!
+//! Process ids. A frame id names a process only together with the holder instance (`Welcome::instance`): the
+//! payload of KILL, ACK, TAIL, RESIZE and INPUT begins with the 32 character instance, then the body (INPUT: the raw
+//! bytes, RESIZE: the JSON, the others: nothing). An id from another instance (a holder that was replaced and
+//! whose ids restart at 1) never touches a local process: KILL answers `Gone`, ACK `Gone`, TAIL is empty, INPUT
+//! and RESIZE are ignored.
+//!
 //! What "gone" means. A held process is the leader of its own process group on Unix (its own job on Windows), and
 //! `Killed::Gone` says that group or job is empty. Unix limit: a descendant that starts its own session (`setsid`)
 //! or double-forks into another group leaves the group, so "gone" means the group, not everything the program ever
@@ -49,6 +55,9 @@ pub const TAILED: u8 = 110;
 pub const ACKED: u8 = 111;
 /// The holder's nonce and its proof that it knows the secret, sent after a hello.
 pub const CHALLENGE: u8 = 112;
+/// A spawn whose claim is below the highest claim the holder has seen for that conversation: the core that sent it
+/// is working from an old decision. Payload `StaleClaim`; nothing was started.
+pub const STALE_CLAIM: u8 = 113;
 
 /// The first frame on every connection. The secret is an opaque key the holder was started with; it will be the
 /// local hand's pairing key (docs/plans/runtime-design.md section 10), and it never crosses the wire: the holder
@@ -115,10 +124,14 @@ pub struct Size {
     pub rows: u16,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Exit {
     pub code: Option<i32>,
     pub signal: Option<i32>,
+    /// Set when the holder could not read how the process ended (code and signal are then both None): an error
+    /// exit, kept until acked like any other so the core still learns the process is over.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -183,6 +196,14 @@ pub struct SpawnFailed {
     pub conv: String,
     pub claim: u64,
     pub error: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct StaleClaim {
+    pub conv: String,
+    pub claim: u64,
+    /// The highest claim the holder has seen for this conversation.
+    pub highest: u64,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone, Copy)]
