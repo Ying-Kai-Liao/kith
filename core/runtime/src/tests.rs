@@ -69,7 +69,7 @@ fn a_first_setup_creates_the_folder_the_db_and_the_marker_owner_only() {
     let l = Layout::new(&m);
     let c = open(&l);
     assert!(l.db.is_file() && l.lock.is_file() && l.marker.is_file());
-    assert_eq!(c.schema_version(), 1);
+    assert_eq!(c.schema_version(), MIGRATIONS.last().unwrap().version);
     assert_eq!(
         l.dir,
         m.join("core"),
@@ -327,7 +327,7 @@ fn a_database_without_a_marker_adopts_it() {
 fn embedded_creates_but_never_migrates_and_the_daemon_snapshots_then_migrates() {
     let (_t, m) = machine();
     let l = Layout::new(&m);
-    drop(start_with(&l, MIGRATIONS).expect("v1"));
+    drop(start_with(&l, &MIGRATIONS[..1]).expect("v1"));
     // This binary now knows schema 2; one command must not migrate.
     let e = embedded_with(&l, BOTH).err().expect("needs migration");
     assert!(
@@ -678,7 +678,7 @@ fn an_m0_database_opens_unchanged_and_migrates_to_the_new_head() {
     let l = Layout::new(&m);
     m0_database(&l);
     // Today's head is still 1: the M0 file opens as it is, nothing migrates.
-    let c = start_with(&l, MIGRATIONS).expect("m0 opens");
+    let c = start_with(&l, &MIGRATIONS[..1]).expect("m0 opens");
     assert_eq!(c.schema_version(), 1);
     assert_eq!(c.migrated_from(), None);
     drop(c);
