@@ -136,6 +136,24 @@ impl Ctx {
         self.agents.join(agent)
     }
 
+    /// `builtin()` in `kith-auth`: one of the kernel's own agents (scratch ...): found under `<kernel>/agents` and not in
+    /// the user's agents folder. Its life folder is one for everyone who runs it, so only the owner does.
+    fn is_builtin(&self, agent: &str) -> bool {
+        let has = |root: &Path| {
+            let d = root.join(agent);
+            !agent.is_empty()
+                && !agent.contains('/')
+                && !agent.starts_with('.')
+                && (d.join("role/agent.md").is_file() || d.join("agent.md").is_file())
+        };
+        let kernel_agents = self.kernel.join("agents");
+        let same = |a: &Path, b: &Path| match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == b,
+        };
+        !same(&self.agents, &kernel_agents) && !has(&self.agents) && has(&kernel_agents)
+    }
+
     fn serve_dir(&self) -> PathBuf {
         match &self.serve {
             ServeDir::Fixed(d) => d.clone(),
@@ -169,45 +187,14 @@ pub fn now_ms() -> f64 {
 }
 
 /// The account's home folder by the OS's password database (`pwd.getpwuid(...).pw_dir`), not `$HOME`: a guest's shell
-/// can change that. macOS answers `id -P`; Linux has no such flag, so it asks `getent passwd <uid>`, then reads
-/// `/etc/passwd`. `None` when nothing answers (a user without an entry): a guest, as `KeyError` is in Python.
-fn os_home() -> Option<PathBuf> {
-    let limit = Duration::from_secs(4);
-    let id = Path::new("/usr/bin/id");
-    if let Some(home) = run_with_timeout(id, &["-P"], limit).and_then(|o| home_from_bsd_id(&o)) {
-        return Some(home);
-    }
-    let uid = run_with_timeout(id, &["-u"], limit)?;
-    let uid = uid.trim();
-    if uid.is_empty() || !uid.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    for getent in ["/usr/bin/getent", "/bin/getent"] {
-        if let Some(home) = run_with_timeout(Path::new(getent), &["passwd", uid], limit)
-            .and_then(|o| home_from_passwd(&o, uid))
-        {
-            return Some(home);
-        }
-    }
-    home_from_passwd(&std::fs::read_to_string("/etc/passwd").ok()?, uid)
-}
-
-/// The home folder in BSD `id -P` output: `name:pw:uid:gid:class:change:expire:gecos:home:shell`.
-fn home_from_bsd_id(out: &str) -> Option<PathBuf> {
-    let home = out.trim_end().split(':').nth(8)?;
-    (!home.is_empty()).then(|| PathBuf::from(home))
-}
-
-/// The home folder of `uid` in passwd-format lines: `name:pw:uid:gid:gecos:home:shell`.
-fn home_from_passwd(text: &str, uid: &str) -> Option<PathBuf> {
-    text.lines().find_map(|line| {
-        let f: Vec<&str> = line.split(':').collect();
-        (f.len() >= 6 && f[2] == uid && !f[5].is_empty()).then(|| PathBuf::from(f[5]))
-    })
+/// can change that. Read natively (`getpwuid_r`): no program from `PATH`, none to time out into a wrong "guest". `None`
+/// when the user has no entry: a guest, as `KeyError` is in Python.
+pub(crate) fn os_home() -> Option<PathBuf> {
+    crate::threads::os::passwd_home()
 }
 
 /// Run a program and read its standard output; `None` when it can't start, outlives `limit`, or fails.
-fn run_with_timeout(program: &Path, args: &[&str], limit: Duration) -> Option<String> {
+pub(crate) fn run_with_timeout(program: &Path, args: &[&str], limit: Duration) -> Option<String> {
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
@@ -677,6 +664,13 @@ impl<'a> Rules<'a> {
         if truthy(get(entry, "revoked")) {
             // before any row, the `*` row included: revoke beats every row, and undo finds them all as they were
             return Ok((false, format!("{person}'s access was removed")));
+        }
+        if self.c.is_builtin(agent) {
+            // before any row, the `*` row and a helper list included: fail closed
+            return Ok((
+                false,
+                format!("{agent} is a built-in agent: only the owner runs it"),
+            ));
         }
         if truthy(get(entry, "bot_of")) {
             return self.bot_may(person, agent, via, once);

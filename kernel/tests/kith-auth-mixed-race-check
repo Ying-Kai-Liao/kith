@@ -2,13 +2,16 @@
 # kith-auth-mixed-race-check — the Rust core and the Python kith-auth writing one auth.json at once (docs/plans/one-bot-model.md
 # A3; docs/plans/core-design.md §3: a module that shares a protocol file with the host is never half-switched). Each round:
 # several `KITH_PERSON=sam KITH_AGENT=echo kith other --launch-json` (Rust path: each takes sam's one "just this once" for
-# `other` in the locked step of `secrets`) start together with Python `kith-auth preset` and `kith-auth member` writes. After
-# the round: auth.json is valid JSON, every Python write is in it (none lost to a stale read-modify-write), the once-grant went
-# to exactly one launch and is gone, and no stray temp file is left in the folder.
+# `other` in the locked step of `secrets`) start together with Python `kith-auth preset` and `kith-auth member` writes and with
+# Python `kith-auth resolve other --via echo --take-once` racers (the Python side of the same grant). After the round:
+# auth.json is valid JSON, every Python write is in it (none lost to a stale read-modify-write), the once-grant went to
+# exactly one taker (a launch or a Python racer) and is gone, and no stray temp file is left in the folder. The router
+# falls back to Python without a word, so the Rust path is proved by a marker: the kith program is reached through a
+# wrapper that records each `kernel launch` it is asked to run, and every launch must have left one.
 #
 #   kernel/tests/kith-auth-mixed-race-check          a few seconds a round; prints each check, exits 1 when one fails
 #   KITH_DIFFTEST_BIN=/path/to/kith                  the Rust kith program (else a build under $CARGO_TARGET_DIR / serve/host/target)
-#   ROUNDS=10 LAUNCHES=4 WRITERS=8                   how many rounds, launches and Python writers a round
+#   ROUNDS=10 LAUNCHES=4 WRITERS=8 TAKERS=2           how many rounds, launches, Python writers and Python take-once racers a round
 set -uo pipefail
 
 KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
@@ -17,7 +20,7 @@ T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 fail=0
 check() { if eval "$2" >/dev/null 2>&1; then echo "ok   $1"; else echo "FAIL $1"; fail=1; fi; }
-ROUNDS=${ROUNDS:-10} LAUNCHES=${LAUNCHES:-4} WRITERS=${WRITERS:-8}
+ROUNDS=${ROUNDS:-10} LAUNCHES=${LAUNCHES:-4} WRITERS=${WRITERS:-8} TAKERS=${TAKERS:-2}
 
 BIN=${KITH_DIFFTEST_BIN:-}
 if [[ -z $BIN ]]; then
@@ -31,6 +34,8 @@ check "the kith program lists launch" "'$BIN' kernel version | grep -q '\"launch
 mkdir -p "$T/bin"
 printf '#!/bin/sh\n[ "$1" = --version ] && { echo "2.1.300 (Claude Code)"; exit 0; }\necho claude "$@"\n' > "$T/bin/claude"
 chmod +x "$T/bin/claude"
+printf '#!/bin/sh\n[ "$1 $2" = "kernel launch" ] && echo launch >> "%s/rust-ran"\nexec "%s" "$@"\n' "$T" "$BIN" > "$T/bin/kith-wrapped"
+chmod +x "$T/bin/kith-wrapped"
 
 world() {
   rm -rf "$T/w"; mkdir -p "$T/w/home" "$T/w/kith/state" "$T/w/tmp"
@@ -49,7 +54,7 @@ world() {
 inworld() {
   ( cd "$T/w" && while [[ ! -e $T/go ]]; do sleep 0.005; done
     exec env -i HOME="$T/w/home" KITH_HOME="$T/w/kith" KITH_STATE="$T/w/kith/state" TMPDIR="$T/w/tmp" \
-      PATH="$T/bin:/usr/bin:/bin:$(dirname "$(command -v python3)")" LANG=C.UTF-8 KITH_CORE=rust KITH_BIN="$BIN" \
+      PATH="$T/bin:/usr/bin:/bin:$(dirname "$(command -v python3)")" LANG=C.UTF-8 KITH_CORE=rust KITH_BIN="$T/bin/kith-wrapped" \
       GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.com GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@example.com "$@" )
 }
 
@@ -65,7 +70,7 @@ for w in range(1, n + 1, 2):
 assert d["members"]["echo"]["lee"].get("budget") in [str(w) for w in range(2, n + 1, 2)], "lee row lost"
 '
 for round in $(seq 1 "$ROUNDS"); do
-  world; rm -f "$T"/go "$T"/code* "$T"/wcode* "$T"/out* "$T"/lerr* "$T"/werr*
+  world; rm -f "$T"/go "$T"/code* "$T"/wcode* "$T"/out* "$T"/lerr* "$T"/werr* "$T"/take* "$T"/rust-ran
   for i in $(seq 1 "$LAUNCHES"); do
     ( inworld env KITH_PERSON=sam KITH_AGENT=echo "$KERNEL/bin/kith" other --launch-json > "$T/out$i" 2> "$T/lerr$i"; echo $? > "$T/code$i" ) &
   done
@@ -76,17 +81,37 @@ for round in $(seq 1 "$ROUNDS"); do
       ( inworld python3 "$KERNEL/bin/kith-auth" member echo lee "budget=$w" > /dev/null 2> "$T/werr$w"; echo $? > "$T/wcode$w" ) &
     fi
   done
+  for k in $(seq 1 "$TAKERS"); do
+    ( inworld python3 "$KERNEL/bin/kith-auth" resolve other --person sam --via echo --take-once > "$T/take$k" 2> "$T/terr$k"; echo $? > "$T/tcode$k" ) &
+  done
   sleep 0.3; touch "$T/go"; wait
 
   won=0 refused=0 other=0
   for i in $(seq 1 "$LAUNCHES"); do
     case $(cat "$T/code$i") in 0) won=$((won + 1));; 3) refused=$((refused + 1));; *) other=$((other + 1));; esac
   done
-  check "round $round: one launch took the grant, the rest were refused ($won took it, $refused refused, $other other)" \
-    "[ $won -eq 1 ] && [ $refused -eq $((LAUNCHES - 1)) ]"
+  took=0; for k in $(seq 1 "$TAKERS"); do grep -q 'just this once' "$T/take$k" && took=$((took + 1)); done
+  check "round $round: one taker had the grant, the rest were refused ($won launches took it, $took Python racers, $refused launches refused, $other other)" \
+    "[ $((won + took)) -eq 1 ] && [ $other -eq 0 ]"
+  ran=0; [[ -f $T/rust-ran ]] && ran=$(wc -l < "$T/rust-ran" | tr -d ' ')
+  check "round $round: the Rust path ran in every launch ($ran of $LAUNCHES)" "[ $ran -eq $LAUNCHES ]"
   bad=0; for w in $(seq 1 "$WRITERS"); do [[ $(cat "$T/wcode$w") == 0 ]] || bad=$((bad + 1)); done
   check "round $round: every Python write exited 0" "[ $bad -eq 0 ]"
   check "round $round: auth.json is valid JSON, the grant is gone, no Python write was lost" "python3 -c '$VERIFY' '$AUTH' '$WRITERS'"
   check "round $round: no temp file left in the folder" "[ -z \"\$(ls '$T/w/kith/state/secrets' | grep -v '^auth.json\$' | grep -v '^auth.json.lock\$')\" ]"
 done
+
+# In sequence, since the racing rounds are won by the faster Python starts: a Rust launch takes the grant, then Python's
+# `resolve --take-once` is refused; and the other way round.
+rm -f "$T"/go "$T"/rust-ran; touch "$T/go"
+world
+inworld env KITH_PERSON=sam KITH_AGENT=echo "$KERNEL/bin/kith" other --launch-json > "$T/seq-out" 2> "$T/seq-err"; seq_code=$?
+check "sequence: a Rust launch takes the grant (exit $seq_code, the Rust path ran $(wc -l < "$T/rust-ran" 2>/dev/null | tr -d ' ') time)" "[ $seq_code -eq 0 ] && [ -s '$T/rust-ran' ]"
+inworld python3 "$KERNEL/bin/kith-auth" resolve other --person sam --via echo --take-once > "$T/seq-take" 2> /dev/null
+check "sequence: then Python's take-once is refused" "! grep -q 'just this once' '$T/seq-take' && python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))[\"allowed\"] is False else 1)' '$T/seq-take'"
+world; rm -f "$T/rust-ran"
+inworld python3 "$KERNEL/bin/kith-auth" resolve other --person sam --via echo --take-once > "$T/seq-take" 2> /dev/null
+check "sequence: Python takes the grant first" "grep -q 'just this once' '$T/seq-take'"
+inworld env KITH_PERSON=sam KITH_AGENT=echo "$KERNEL/bin/kith" other --launch-json > "$T/seq-out" 2> "$T/seq-err"; seq_code=$?
+check "sequence: then the Rust launch is refused (exit $seq_code), by the Rust path" "[ $seq_code -eq 3 ] && [ -s '$T/rust-ran' ]"
 exit $fail

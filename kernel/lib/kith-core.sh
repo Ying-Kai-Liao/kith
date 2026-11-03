@@ -20,7 +20,9 @@ kith_core_exec() {
   fi
   bin=$(python3 "$KITH/lib/kith_paths.py" --bin 2>/dev/null) && [[ -n $bin ]] || return 1
   "$bin" kernel version 2>/dev/null | grep -q "\"$module\"" || return 1
-  exec "$bin" kernel $verb "$@"
+  # KITH_BIN names the program that was checked, so the core launch (which takes KITH_BIN as it is, once it answers
+  # `memory hook`) and the router agree on one binary.
+  KITH_BIN=$bin exec "$bin" kernel $verb "$@"
 }
 
 # kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag

@@ -267,5 +267,31 @@ check "agent-access: removing one person leaves it on the agent" "A person dee -
 check "agent-access: the ledger lists it under person *, with a key that removes it" "A ledger --json | J \"[(g['kind'], g['agent'], g['person'], g['target'], g['approved_by']) for g in d if g['person'] == '*' and g['agent'] == 'house'] == [('domain', 'house', '*', 'registry.npmjs.org', 'owner')]\" | grep -qx True && A ledger --rm 'domain:house:*:registry.npmjs.org' && [ \"\$(A agent-access house --json)\" = '[]' ]"
 check "agent-access: --rm of a host not there is quiet; a package host can't be removed by ledger" "A agent-access house domain nowhere.org --rm && ! A ledger --rm 'domain:garden:*:pypi.org'"
 check "old data: an auth.json with no agent_access reads as none" "A agent-access house --json | grep -qx '\[\]'"
+# --- built-in agents (the kernel's own, e.g. scratch) are never given to anyone: one life folder serves every runner
+A person bi >/dev/null 2>&1
+A person bot-bi >/dev/null 2>&1
+check "builtin: member refuses a built-in, with the reason" "! A member scratch bi && [[ \$(A member scratch bi 2>&1) == *'built-in agent'* ]]"
+check "builtin: so does a * row" "! A member scratch '*'"
+check "builtin: a list with one refuses all of it and writes nothing" "! A member house,scratch bi && ! A may bi house"
+check "builtin: a name with a slash is no built-in (and no agent)" "! A member ../agents/scratch bi && [[ \$(A member ../agents/scratch bi 2>&1) == *\"no agent\"* ]]"
+check "builtin: the owner still runs it" "A may kai scratch"
+check "builtin: --rm of a built-in row is allowed (cleaning up)" "A member scratch bi --rm"
+python3 - <<'PY'
+import json, os
+p = os.environ['KITH_AUTH']; a = json.load(open(p))
+a['members']['scratch'] = {'bi': {'preset': 'member'}, '*': {'preset': 'guest'}, 'bot-bi': {}}   # old rows, from before the refusal
+a['members'].setdefault('house', {})['bi'] = {'preset': 'member', 'helpers': ['scratch']}
+json.dump(a, open(p, 'w'))
+PY
+check "builtin: an old own row is ignored" "! A may bi scratch && [ \"\$(A resolve scratch --person bi | J 'd[\"allowed\"]')\" = False ]"
+check "builtin: an old * row reaches no one" "! A may bob scratch"
+check "builtin: an old bot row gets nothing" "! A may bot-bi scratch"
+check "builtin: not even as a helper in a member's list" "A may bi house && ! A may bi scratch --via house"
+check "builtin: the person's access listing leaves it out" "! A people bi --json | grep -q scratch"
+check "builtin: the owner's resolve is still allowed" "[ \"\$(A resolve scratch --person kai | J 'd[\"allowed\"]')\" = True ]"
+mkdir -p "$KITH_HOME/agents/scratch/role"
+printf -- '---\nname: scratch\ndescription: mine\n---\nx\n' > "$KITH_HOME/agents/scratch/role/agent.md"
+check "builtin: a user's agent of the same name is not a built-in" "A may bi scratch"
+rm -rf "$KITH_HOME/agents/scratch"
 rm -f "$KITH_HOME/agents/garden/role/capabilities.yaml"
 exit $fail
