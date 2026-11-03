@@ -637,6 +637,17 @@ fn remote_holder(sock: &std::path::Path, secret_file: std::path::PathBuf) {
         while let Ok((mut s, _)) = listener.accept() {
             let secret_file = secret_file.clone();
             std::thread::spawn(move || {
+                // The relay a real command runs consumes the pairing key line first; `nc` does not.
+                let mut byte = [0u8; 1];
+                loop {
+                    use std::io::Read as _;
+                    if s.read_exact(&mut byte).is_err() {
+                        return;
+                    }
+                    if byte[0] == b'\n' {
+                        break;
+                    }
+                }
                 let Ok(Some((_, _, hello))) = wire::read(&mut s) else {
                     return;
                 };
