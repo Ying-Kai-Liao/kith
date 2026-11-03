@@ -10,6 +10,8 @@ pub(crate) struct Layout {
     pub dir: PathBuf,
     pub db: PathBuf,
     pub lock: PathBuf,
+    /// Who holds the lock (pid, start time). Apart from `lock` because on Windows a held lock covers the whole file.
+    pub holder: PathBuf,
     pub marker: PathBuf,
     pub snapshots: PathBuf,
 }
@@ -23,6 +25,7 @@ impl Layout {
         Self {
             db: dir.join("core.db"),
             lock: dir.join("core.lock"),
+            holder: dir.join("core.holder"),
             marker: dir.join("core.marker"),
             snapshots: dir.join("snapshots"),
             dir,
@@ -37,6 +40,7 @@ impl Layout {
             PathBuf::from(format!("{db}-wal")),
             PathBuf::from(format!("{db}-shm")),
             self.lock.clone(),
+            self.holder.clone(),
             self.marker.clone(),
         ]
     }

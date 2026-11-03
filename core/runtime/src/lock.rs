@@ -3,9 +3,9 @@
 //! and on macOS closing any other handle to that file drops them. Nothing deletes core.lock; a crash releases the lock
 //! and leaves the file, which is the "free" state.
 //!
-//! The holder writes its pid and process start time into the file, so `kith doctor` can end a holder that has the lock
-//! but does not answer the socket, after re-checking both. (On Windows the held lock covers the whole file, so a reader
-//! gets nothing there; it learns the holder some other way.)
+//! The holder writes its pid and process start time into a second file, `core.holder`, so `kith doctor` can end a holder
+//! that has the lock but does not answer the socket, after re-checking both. It is not in core.lock because on Windows
+//! `LockFileEx` locks the whole of that file, so nobody else could read the line there.
 
 use std::fs::File;
 use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
@@ -34,25 +34,27 @@ pub(crate) struct Holder {
 
 /// Tries the lock without waiting. Two embedded commands at once: the second does not wait, it gets `Busy`.
 pub(crate) fn take(layout: &Layout) -> Result<Taken> {
-    let mut file = perms::open_private(&layout.lock)?;
+    let file = perms::open_private(&layout.lock)?;
     match file.try_lock_exclusive() {
         Ok(()) => {
-            write_holder(&mut file)?;
+            write_holder(layout)?;
             Ok(Taken::Held(Lifetime { file }))
         }
         Err(e)
             if e.kind() == fs2::lock_contended_error().kind()
                 || e.kind() == std::io::ErrorKind::WouldBlock =>
         {
-            Ok(Taken::Busy(read_holder(&mut file)))
+            Ok(Taken::Busy(read_holder(layout)))
         }
         Err(e) => Err(Error::Io(format!("core.lock: {e}"))),
     }
 }
 
-fn write_holder(file: &mut File) -> Result<()> {
+/// Written after the lock is ours, so a line that names a process is never older than the lock it describes.
+fn write_holder(layout: &Layout) -> Result<()> {
     let pid = std::process::id();
     let started = process_start(pid).unwrap_or_default();
+    let mut file = perms::open_private(&layout.holder)?;
     file.set_len(0)?;
     file.seek(SeekFrom::Start(0))?;
     file.write_all(format!("pid={pid}\nstarted={started}\n").as_bytes())?;
@@ -60,10 +62,13 @@ fn write_holder(file: &mut File) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn read_holder(file: &mut File) -> Option<Holder> {
+/// The last holder's line. A free lock leaves it behind, so a reader checks the lock too.
+pub(crate) fn read_holder(layout: &Layout) -> Option<Holder> {
     let mut text = String::new();
-    file.seek(SeekFrom::Start(0)).ok()?;
-    file.read_to_string(&mut text).ok()?;
+    File::open(&layout.holder)
+        .ok()?
+        .read_to_string(&mut text)
+        .ok()?;
     parse_holder(&text)
 }
 
@@ -78,11 +83,9 @@ pub(crate) fn parse_holder(text: &str) -> Option<Holder> {
     })
 }
 
-/// Who wrote the file last. A free lock leaves its last holder's line behind; the caller checks the lock too.
 #[cfg(test)]
 pub(crate) fn recorded_holder(layout: &Layout) -> Option<Holder> {
-    let mut f = File::open(&layout.lock).ok()?;
-    read_holder(&mut f)
+    read_holder(layout)
 }
 
 /// The start time of a process as `ps` prints it in the C locale (Linux and macOS); `None` where there is no `ps`.

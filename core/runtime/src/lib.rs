@@ -37,7 +37,7 @@ use layout::Layout;
 pub enum Embedded {
     /// The lock is ours; the core is open for this command. Dropping it releases the lock.
     Open(Box<Core>),
-    /// A core (the daemon, or another embedded command) holds the lock. `pid` is its process when core.lock says.
+    /// A core (the daemon, or another embedded command) holds the lock. `pid` is its process when core.holder says.
     DaemonRunning { pid: Option<u32> },
 }
 

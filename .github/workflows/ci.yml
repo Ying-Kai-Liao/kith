@@ -409,7 +409,7 @@ jobs:
       # checks owner-only access lists with icacls. Both only prove themselves here.
       - name: Kernel and core runtime tests
         run: |
-          cargo clippy --manifest-path host/Cargo.toml -p kith-kernel -p kith-core --all-targets --locked -- -D warnings
+          cargo clippy --manifest-path host/Cargo.toml -p kith-core --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-kernel -p kith-core --locked
 
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.

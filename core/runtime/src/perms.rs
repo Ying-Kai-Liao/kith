@@ -1,4 +1,4 @@
-//! Owner-only files. The core folder is 0700 and core.db (+ -wal, -shm), core.lock and the marker 0600, refused at
+//! Owner-only files. The core folder is 0700 and core.db (+ -wal, -shm), core.lock, core.holder and the marker 0600, refused at
 //! start if looser, with the command that fixes it. On Windows the same rule is an access list with no entry for
 //! anyone but the owner, SYSTEM and Administrators (read with `icacls`).
 

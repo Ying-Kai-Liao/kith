@@ -169,7 +169,7 @@ fn the_lock_excludes_another_process_and_a_crash_frees_it() {
     }
     match embedded_with(&l, MIGRATIONS).expect("embedded") {
         Embedded::DaemonRunning { pid } => {
-            assert_eq!(pid, Some(child.id()), "core.lock names its holder");
+            assert_eq!(pid, Some(child.id()), "core.holder names its holder");
         }
         Embedded::Open(_) => panic!("the lock was not exclusive across processes"),
     }
@@ -191,24 +191,20 @@ fn the_lock_excludes_another_process_and_a_crash_frees_it() {
 }
 
 #[test]
-fn the_lock_file_records_the_holder_pid_and_start_time() {
+fn core_holder_records_the_holder_pid_and_start_time_while_the_lock_is_held() {
     let (_t, m) = machine();
     let l = Layout::new(&m);
     let c = open(&l);
-    let h = lock::recorded_holder(&l);
-    #[cfg(not(windows))]
-    {
-        let h = h.expect("holder line");
-        assert_eq!(h.pid, std::process::id());
-        assert_eq!(
-            Some(h.started),
-            lock::process_start(std::process::id()).or(Some(String::new()))
-        );
-    }
-    #[cfg(windows)]
-    let _ = h;
+    // Read while the lock is held: on Windows that is why the line is not in core.lock.
+    let h = lock::recorded_holder(&l).expect("holder line");
+    assert_eq!(h.pid, std::process::id());
+    assert_eq!(
+        Some(h.started),
+        lock::process_start(std::process::id()).or(Some(String::new()))
+    );
     drop(c);
     assert!(l.lock.is_file(), "released, not deleted");
+    assert!(l.holder.is_file(), "the last holder's line stays");
 }
 
 #[test]

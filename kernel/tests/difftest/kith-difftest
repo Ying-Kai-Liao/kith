@@ -38,6 +38,7 @@ ABSENT = '<absent>\n'
 SIDES = ('old', 'new')
 CORE = {'old': 'python', 'new': 'rust'}
 WITH_CORE = False    # --core: the NEW side has its core database before the case runs
+CORE_RAN, CORE_BARE = [], []    # --core: names of the cases that ran with a core, and those that started before any setup
 CORE_INTENDED = {'case': '*', 'facet': 'state:*/core/*',
                  'why': 'the --core pass: the NEW side made its core database first (kith kernel core-migrate), so its core/ folder '
                         'exists there and not on the OLD side; everything else must be the same'}
@@ -297,19 +298,27 @@ def snapshot(side_dir, case, norm):
     return facets
 
 
-def make_core(side_dir, env):
+def make_core(side_dir, env, name):
     """The --core pass: the NEW side's first setup has happened, so its core database exists and every Rust verb of the
     case runs inside an embedded core (its lock, its checks, a new generation). Only where the machine folder is
-    already there: a case that starts before any setup keeps running bare, as a first run does."""
+    already there: a case that starts before any setup keeps running bare, as a first run does. A failing
+    `core-migrate` fails the case (it would otherwise run bare and pass); the cases that did run with a core are counted
+    so the pass cannot be green having proved nothing."""
     got = subprocess.run([RUST_BIN, 'kernel', 'paths', '--json'], cwd=side_dir / 'home', env=env, capture_output=True,
                          text=True, timeout=TIMEOUT)
     try:
         machine = json.loads(got.stdout)['KITH_MACHINE']
     except (ValueError, KeyError):
+        CORE_BARE.append(name)
         return
-    if os.path.isdir(machine):
-        subprocess.run([RUST_BIN, 'kernel', 'core-migrate'], cwd=side_dir / 'home', env=env, capture_output=True,
-                       text=True, timeout=TIMEOUT)
+    if not os.path.isdir(machine):
+        CORE_BARE.append(name)
+        return
+    mig = subprocess.run([RUST_BIN, 'kernel', 'core-migrate'], cwd=side_dir / 'home', env=env, capture_output=True,
+                         text=True, timeout=TIMEOUT)
+    if mig.returncode != 0:
+        raise RuntimeError(f'kith kernel core-migrate exited {mig.returncode}: {(mig.stderr or mig.stdout).strip()[:300]}')
+    CORE_RAN.append(name)
 
 
 def run_side(side, work, case, prefix):
@@ -317,7 +326,7 @@ def run_side(side, work, case, prefix):
     side_dir.mkdir(parents=True)
     env = build(side, side_dir, case)
     if WITH_CORE and side == 'new':
-        make_core(side_dir, env)
+        make_core(side_dir, env, case['name'])
     norm = Normalizer(side_dir, case.get('normalize', []))
     facets = run_steps(side, side_dir, case, prefix, env, norm)
     facets.update(snapshot(side_dir, case, norm))
@@ -497,6 +506,11 @@ def main(argv=None):
         else:
             Path(a.summary).write_text(doc)
     print(f'{len(cases) - len(failed)}/{len(cases)} cases the same' + (f', {len(stale)} stale intended' if stale else ''))
+    if WITH_CORE:
+        print(f'core: {len(CORE_RAN)} case(s) ran with a core, {len(CORE_BARE)} started before any setup and ran bare')
+        if not CORE_RAN:
+            print('FAIL  the --core pass ran no case through a core, so it proved nothing')
+            return 1
     return 1 if failed or stale else 0
 
 
