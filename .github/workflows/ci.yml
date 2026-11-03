@@ -405,8 +405,7 @@ jobs:
         run: |
           cargo clippy --manifest-path host/Cargo.toml -p kith-core --all-targets --locked -- -D warnings
           cargo test --manifest-path host/Cargo.toml -p kith-core --locked
-          # accounts tests skipped on Windows until the accounts port (main #599/#577) makes them pass there
-          cargo test --manifest-path host/Cargo.toml -p kith-kernel --locked --no-fail-fast -- --skip accounts::
+          cargo test --manifest-path host/Cargo.toml -p kith-kernel --locked --no-fail-fast
 
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.
   host-build:

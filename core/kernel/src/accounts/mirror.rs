@@ -79,6 +79,7 @@ fn chmod_dir(d: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
+#[allow(clippy::unnecessary_wraps)] // same shape as the unix one
 fn chmod_dir(_: &Path) -> std::io::Result<()> {
     Ok(())
 }
