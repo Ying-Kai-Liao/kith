@@ -30,9 +30,9 @@ while [[ $# -gt 0 ]]; do [[ $1 == --settings ]] && cp "$2" "$STUB_SETTINGS" 2>/d
 STUB
 chmod +x "$T/bin/claude"
 # A guest run refuses to start without a kith program that answers `memory hook`; a stub stands in for the host build.
-printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-stub"
-chmod +x "$T/bin/kith-stub"
-export KITH_BIN=$T/bin/kith-stub PATH=$T/bin:$PATH STUB_OUT=$T/stub.out STUB_SETTINGS=$T/stub.settings
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-fake-host"
+chmod +x "$T/bin/kith-fake-host"
+export KITH_BIN=$T/bin/kith-fake-host PATH=$T/bin:$PATH STUB_OUT=$T/stub.out STUB_SETTINGS=$T/stub.settings
 
 KITH=$KERNEL/bin/kith
 fail=0
@@ -79,6 +79,11 @@ setting() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(e
 
 tty_run "$KITH" echo
 whole "owner at a terminal (kith echo)"
+
+# No kith-stub anywhere (not beside KITH_BIN, not on PATH, no KITH_STUB_BIN): the run still starts claude, unlocked, with one warning.
+tty_run "$KITH" echo
+has "no kith-stub: warns and runs unlocked" "$(cat "$T/out")" "this run is not locked"
+has "no kith-stub: claude still started with its flags" "$(args)" "--session-id"
 
 tty_run "$KITH" echo "do it"
 lazy "owner, a task given, even with a tty (one-shot)"

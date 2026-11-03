@@ -24,8 +24,8 @@ printf -- '---\nname: other\ndescription: another agent\n---\nYou other.\n' > "$
 printf '#!/bin/sh\n[ "$1" = "--version" ] && echo "2.1.309 (Claude Code)"\n[ "$1 $2" = "plugin list" ] && echo "[]"\nexit 0\n' > "$T/bin/claude"; chmod +x "$T/bin/claude"
 # A guest run refuses to start without a kith program that answers `memory hook` (fail closed, no unchecked memory writes);
 # CI has no host build, so a stub stands in for it (macOS dev machines pass without one only because a real kith is installed).
-printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-stub"; chmod +x "$T/bin/kith-stub"
-export KITH_BIN=$T/bin/kith-stub
+printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-fake-host"; chmod +x "$T/bin/kith-fake-host"
+export KITH_BIN=$T/bin/kith-fake-host
 export PATH=$T/bin:$PATH
 
 KITH=$KERNEL/bin/kith
