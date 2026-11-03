@@ -699,14 +699,14 @@ fn an_m0_database_opens_unchanged_and_migrates_to_the_new_head() {
 
 #[test]
 fn an_m0_database_migrates_forward_through_the_real_list() {
-    // The real MIGRATIONS, whatever lanes have added: the M0 file ends at the head with every lane's tables.
+    // The real list (ALL_STEPS), whatever lanes have added: the M0 file ends at the head with every lane's tables.
     let (_t, m) = machine();
     let l = Layout::new(&m);
     m0_database(&l);
-    let c = start_with(&l, MIGRATIONS).expect("migrates");
+    let c = start_with(&l, ALL_STEPS).expect("migrates");
     assert_eq!(
         c.schema_version(),
-        MIGRATIONS.last().expect("steps").version
+        ALL_STEPS.last().expect("steps").version
     );
     assert_eq!(c.migrated_from(), Some(1));
     drop(c);
