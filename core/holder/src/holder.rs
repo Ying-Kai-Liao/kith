@@ -791,6 +791,7 @@ mod tests {
                 input: None,
                 tail: VecDeque::new(),
                 readers: 0,
+                gone: AtomicBool::new(false),
             },
         );
         holder.reap(1, proc);
@@ -910,16 +911,16 @@ mod tests {
         client
             .expect(p::SPAWNED, 0, Duration::from_secs(10))
             .expect("spawned");
-        let id = client.list().unwrap()[0].id;
+        let id = client.list().unwrap()[0].held_id();
         let deadline = Instant::now() + Duration::from_secs(10);
-        while client.kill(id).unwrap() != KillState::Gone {
+        while client.kill(&id).unwrap() != KillState::Gone {
             assert!(Instant::now() < deadline, "kill never reached gone");
             std::thread::sleep(Duration::from_millis(20));
         }
         // Seen once: the entry remembers it, so a later kill says gone without signalling a group id that may by now
         // belong to someone else (the blind spot of `tree_empty`).
-        assert!(holder.lock().procs[&id].gone.load(Ordering::Relaxed));
-        assert_eq!(client.kill(id).unwrap(), KillState::Gone);
+        assert!(holder.lock().procs[&id.id].gone.load(Ordering::Relaxed));
+        assert_eq!(client.kill(&id).unwrap(), KillState::Gone);
         drop(holder.close_down(holder.lock()));
     }
 

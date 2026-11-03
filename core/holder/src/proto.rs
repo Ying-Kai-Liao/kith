@@ -33,7 +33,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Checked in hello and welcome. Bumped for a change an older peer cannot read.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 
 // core to holder
 pub const HELLO: u8 = 1;
