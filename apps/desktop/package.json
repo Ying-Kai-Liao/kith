@@ -9,6 +9,9 @@
   "homepage": "https://github.com/Ying-Kai-Liao/kith",
   "license": "Apache-2.0",
   "private": true,
+  "kith": {
+    "cli": "0.1.0"
+  },
   "main": "out/main/index.js",
   "scripts": {
     "dev": "node --experimental-transform-types --disable-warning=ExperimentalWarning --disable-warning=MODULE_TYPELESS_PACKAGE_JSON tools/dev.mjs",

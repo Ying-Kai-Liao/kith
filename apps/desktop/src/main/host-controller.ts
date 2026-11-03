@@ -1,10 +1,12 @@
 import { execFile, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { existsSync, promises as fs, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, promises as fs, lstatSync, readFileSync, realpathSync } from 'node:fs'
 import { homedir, platform } from 'node:os'
 import { join } from 'node:path'
 import { app } from 'electron'
+import { kith as declared } from '../../package.json'
+import { cliNoticeFromHello, decide, installedVersion, machineDir, plistSetsKernel, runInstaller, type HelloCli } from '../shared/cli-install'
 import type { HostState, LocalHost } from '../shared/ipc'
 import { unregisterScreenAgent } from './screen'
 import { identity } from './environment'
@@ -95,6 +97,10 @@ export class HostController extends EventEmitter {
    * Windows services stay the app's own.
    */
   private adopted = false
+  /** The kith CLI the host needs but can't use, with what to tell the user (`null`: fine). */
+  cliNotice: string | null = null
+  private cliInstalling: Promise<void> | null = null
+  private helloCheckedAt = 0
 
   get binary(): string | null {
     const candidates = [
@@ -152,7 +158,66 @@ export class HostController extends EventEmitter {
     return !bin || (!serviceRuns(bin) && !samePath(resolved(program), resolved(bin)))
   }
 
+  /**
+   * Installs the CLI bundled in the app when the installed one is missing or older than the app needs, before
+   * the host is started or adopted (the installer restarts KeepAlive dev.kith.* jobs, so it must not race the
+   * start). A running host needs nothing more: it finds the kernel on every run.
+   */
+  ensureCli(): Promise<void> {
+    // Two launches' worth of calls (refresh and a retry click) share one run; the installer has its own lock too.
+    this.cliInstalling ??= this.ensureCliOnce().finally(() => (this.cliInstalling = null))
+    return this.cliInstalling
+  }
+
+  private async ensureCliOnce() {
+    const resources = process.resourcesPath
+    const dir = join(resources, 'kith')
+    const script = join(resources, 'kith-install.sh')
+    if (!app.isPackaged || !isMac || !existsSync(script)) return
+    const dev = !!(process.env.KITH_KERNEL || process.env.HQ_KERNEL) || plistSetsKernel(serviceDefinition())
+    const machine = machineDir({
+      state: process.env.KITH_STATE || process.env.HQ_STATE,
+      home: homedir(),
+      exists: existsSync,
+      isRealDir: (p) => {
+        try {
+          return lstatSync(p).isDirectory()
+        } catch {
+          return false
+        }
+      },
+    })
+    const read = (path: string) => {
+      try {
+        return readFileSync(path, 'utf8')
+      } catch {
+        return null
+      }
+    }
+    const installed = installedVersion(machine, read)
+    const bundled = read(join(dir, 'share/kith/kernel/VERSION'))?.trim() || null
+    const decision = decide({ dev, required: declared.cli, installed, bundled })
+    const log = (line: string) => void fs.appendFile(this.logPath, `${new Date().toISOString()} app: ${line}\n`).catch(() => {})
+    if (decision.action === 'skip') return log(`kith CLI ${installed ?? 'missing'} (needs ${declared.cli}): ${decision.why}, not installing`)
+    log(`installing the bundled kith CLI ${bundled} (installed: ${installed ?? 'none'}, needs ${declared.cli})`)
+    this.cliNotice = null
+    this.emit('change')
+    // The installer defaults to ~/.kith; the host looks in the machine folder, which is ~/.hq on an unmigrated Mac.
+    const result = await runInstaller({ script, dir }, { ...process.env, KITH_PREFIX: machine })
+    log(`kith CLI install ${result.ok ? 'done' : `failed: ${result.message}`}${result.output ? `\n${result.output}` : ''}`)
+    this.cliNotice = result.ok ? null : result.message
+    this.emit('change')
+  }
+
+  /** The "Install kith CLI" button: runs the installer again, then re-checks what the host says. */
+  async installCli() {
+    await this.ensureCli()
+    this.helloCheckedAt = 0
+  }
+
   async refresh() {
+    if (this.preparingForUpdate) return
+    await this.ensureCli()
     if (this.preparingForUpdate) return
     this.adopted = this.foreignService()
     if (this.adopted) return this.connect()
@@ -304,6 +369,7 @@ export class HostController extends EventEmitter {
         if (generation !== this.generation) return
         this.setState({ kind: 'running' })
         if (devPort === null && prefs.get('hostRestartAfterAppUpdate') === true) prefs.set('hostRestartAfterAppUpdate', false)
+        void this.checkHelloCli()
       } else {
         this.failures++
         if (this.failures > 5) this.setState({ kind: 'failed', message: "The host isn't responding. See the log for details." })
@@ -316,6 +382,25 @@ export class HostController extends EventEmitter {
       if (bin && devPort === null && !this.adopted) this.expectedHash = await hashFile(bin)
       void tick()
     })()
+  }
+
+  /** The host's own verdict on the CLI (`hello.cli`), looked at most every 30 s, like its channels. */
+  private async checkHelloCli() {
+    if (Date.now() - this.helloCheckedAt < 30_000 || this.cliInstalling) return
+    this.helloCheckedAt = Date.now()
+    try {
+      const hello = await this.call<{ cli?: HelloCli }>('hello')
+      const notice = cliNoticeFromHello(hello.cli)
+      // A failed install's own message stays until the host says the CLI works.
+      if (notice !== null || hello.cli?.ok === true) {
+        if (notice !== this.cliNotice) {
+          this.cliNotice = notice
+          this.emit('change')
+        }
+      }
+    } catch {
+      // An older host has no cli field, or it isn't answering; the health loop handles that.
+    }
   }
 
   /** Attaches the local host once it answers, and again when its token or identity changed. */
