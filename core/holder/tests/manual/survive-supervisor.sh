@@ -19,6 +19,9 @@
 #     b. kill the core: the holder keeps its pid and starts the core again;
 #     c. kill the holder: launchd starts the job again, and the old core did not outlive it;
 #     d. a folder on a disk that is not mounted: the job does not run, retries, and comes up when the disk is there.
+# Because of (a), `kith serve install` with KITH_SERVE_HOLDER=1 refuses on macOS while the holder's folder, its secret
+# or the data folder is on a disk other than the boot disk, and names the fix: System Settings > Privacy & Security >
+# Full Disk Access, add the kith-holder binary at a path that stays put. KITH_SERVE_HOLDER=force installs anyway.
 # Both parts clean up their label, plist and folders even when a check fails. Prints one line per check and PASS or FAIL;
 # a disk that is blocked prints "DISK: blocked ..." with the error and what grant fixes it, and fails part 2.
 #

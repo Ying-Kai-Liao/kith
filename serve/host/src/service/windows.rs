@@ -2,6 +2,7 @@
 //! sign-in through `kith-servew.exe`, which keeps it running without a console
 //! window (`src/bin/kith-servew.rs`).
 
+use super::runvalue::{holder_dir, parse_run_value};
 use super::{current_exe, data_dir, holder_words, host_program, run, wait_for_host_exit};
 use anyhow::{Context, Result, bail, ensure};
 use std::os::windows::process::CommandExt as _;
@@ -23,16 +24,37 @@ const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
 /// Stops the running service. Its configuration stays for a later start; a
 /// manually started `kith-serve serve` is left alone.
 pub fn stop() -> Result<()> {
-    // Not running is fine; `/T` takes the host and its agents with the supervisor. A holder that supervises (opt-in, see
-    // `holder_wanted`) goes first, or it would start the host again.
-    for image in [HOLDER, SUPERVISOR] {
-        let _ = Command::new("taskkill")
-            .args(["/F", "/T", "/IM", image])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+    // Under the holder (opt-in, see `holder_wanted`) the supervising holder goes first, or it would start the host again.
+    // Only that one, found by its folder: another holder on the machine (the core's detached one, which must outlive a
+    // host restart, or a dev identity's) is never stopped by its image name.
+    if let Ok((program, args)) = configured()
+        && program.file_name().is_some_and(|n| n.eq_ignore_ascii_case(HOLDER))
+        && let Some(dir) = holder_dir(&args)
+    {
+        stop_supervising_holder(dir);
     }
+    // Not running is fine; `/T` takes the host and its agents with the supervisor.
+    let _ = Command::new("taskkill")
+        .args(["/F", "/T", "/IM", SUPERVISOR])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
     wait_for_host_exit()
+}
+
+/// Ends the `kith-holder supervise` process whose command line names `dir`, with its tree (the host and the core it
+/// supervises). The folder goes in through the environment so it needs no quoting.
+fn stop_supervising_holder(dir: &str) {
+    let script = "Get-CimInstance Win32_Process -Filter \"Name='kith-holder.exe'\" \
+        | Where-Object { $_.CommandLine -like '*supervise*' -and $_.CommandLine.Contains($env:KITH_HOLDER_DIR) } \
+        | ForEach-Object { taskkill /F /T /PID $_.ProcessId }";
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("KITH_HOLDER_DIR", dir)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
 }
 
 pub fn start() -> Result<()> {
@@ -101,57 +123,4 @@ fn configured() -> Result<(PathBuf, Vec<String>)> {
     let output = Command::new("reg").args(["query", RUN_KEY, "/v", VALUE]).output().context("running reg")?;
     ensure!(output.status.success(), "the host service isn't installed");
     parse_run_value(&String::from_utf8_lossy(&output.stdout)).context("cannot read the installed host service")
-}
-
-/// `    KithServe    REG_SZ    "C:\…\kith-servew.exe" serve --port 19222` → its parts.
-fn parse_run_value(query: &str) -> Option<(PathBuf, Vec<String>)> {
-    let value = query.lines().find_map(|line| Some(line.split_once("REG_SZ")?.1.trim()))?;
-    let mut words = split_words(value).into_iter();
-    let program = words.next()?;
-    Some((program.into(), words.collect()))
-}
-
-/// Splits on spaces, a double-quoted run being one word (no escapes: Windows paths cannot hold a quote).
-fn split_words(text: &str) -> Vec<String> {
-    let (mut words, mut word, mut quoted, mut any) = (Vec::new(), String::new(), false, false);
-    for c in text.chars() {
-        match c {
-            '"' => {
-                quoted = !quoted;
-                any = true;
-            }
-            c if c.is_whitespace() && !quoted => {
-                if std::mem::take(&mut any) {
-                    words.push(std::mem::take(&mut word));
-                }
-            }
-            c => word.push(c),
-        }
-    }
-    if any {
-        words.push(word);
-    }
-    words
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn reads_the_run_value() {
-        let query = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\r\n    KithServe    REG_SZ    \"C:\\Program Files\\Kith\\kith-servew.exe\" serve --port 19222\r\n\r\n";
-        let (program, args) = parse_run_value(query).unwrap();
-        assert_eq!(program, PathBuf::from("C:\\Program Files\\Kith\\kith-servew.exe"));
-        assert_eq!(args, ["serve", "--port", "19222"]);
-    }
-
-    #[test]
-    fn reads_a_run_value_with_the_holder_in_front() {
-        let query = "    KithServe    REG_SZ    \"C:\\K it\\kith-holder.exe\" \"supervise\" \"--dir\" \"C:\\a b\\holder\" \"--\" \"C:\\K it\\kith-servew.exe\" serve --port 19222\r\n";
-        let (program, args) = parse_run_value(query).unwrap();
-        assert_eq!(program, PathBuf::from("C:\\K it\\kith-holder.exe"));
-        assert_eq!(args[1..3], ["--dir", "C:\\a b\\holder"]);
-        assert_eq!(host_program(&args).unwrap(), "C:\\K it\\kith-servew.exe");
-    }
 }

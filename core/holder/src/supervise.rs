@@ -54,8 +54,69 @@ fn start(argv: &[String]) -> io::Result<Child> {
         .spawn()
 }
 
-/// Runs the holder in this process and keeps `argv` running beside it. Returns only when the holder stops
-/// serving (then the child is ended too) or `argv` is empty; a service restarts the whole process after that.
+enum Event {
+    /// This holder owns the folder and listens.
+    Serving,
+    /// `holder::run` came back (it ends the process itself on a clean shutdown, so this is an error).
+    Ended(io::Result<()>),
+}
+
+/// Whether this process serves the folder. Another live holder may own it (the core's detached one survives a
+/// service restart): the core then runs against that one and this process keeps asking for the folder.
+struct Holding {
+    cfg: holder::Config,
+    events: mpsc::Receiver<Event>,
+    sender: mpsc::Sender<Event>,
+    serving: bool,
+    /// An attempt (a `holder::run` thread) is in flight.
+    trying: bool,
+    next_try: Instant,
+    backoff: Duration,
+}
+
+impl Holding {
+    fn try_now(&mut self) {
+        self.trying = true;
+        let (cfg, tx) = (self.cfg.clone(), self.sender.clone());
+        std::thread::spawn(move || {
+            let ready = tx.clone();
+            let result = holder::run_with(cfg, move || {
+                let _ = ready.send(Event::Serving);
+            });
+            let _ = tx.send(Event::Ended(result));
+        });
+    }
+
+    /// An attempt came back without the folder: ask again later, slower each time.
+    fn lost(&mut self, max: Duration) {
+        self.trying = false;
+        self.next_try = Instant::now() + self.backoff;
+        self.backoff = (self.backoff * 2).min(max);
+    }
+
+    /// Waits up to `wait` for news. `Some(result)`: this holder served and then stopped, so the process must end.
+    fn poll(&mut self, wait: Duration, policy: &Policy) -> Option<io::Result<()>> {
+        match self.events.recv_timeout(wait) {
+            Ok(Event::Serving) => {
+                self.serving = true;
+                self.trying = false;
+                eprintln!("holder: serving {}", self.cfg.dir.display());
+            }
+            Ok(Event::Ended(result)) if self.serving => return Some(result),
+            Ok(Event::Ended(_)) => self.lost(policy.max),
+            Err(_) => {}
+        }
+        if !self.serving && !self.trying && Instant::now() >= self.next_try {
+            self.try_now();
+        }
+        None
+    }
+}
+
+/// Runs the holder in this process and keeps `argv` running beside it. The child starts once this holder serves, or
+/// once another live holder is known to own the folder; it is never ended because this holder could not get the
+/// folder (it keeps asking, quietly). Returns only when this holder served and then stopped (the child is ended
+/// too) or on a start-up error; a service restarts the whole process after that.
 pub fn run(cfg: holder::Config, argv: &[String], policy: &Policy) -> io::Result<()> {
     if argv.is_empty() {
         return Err(io::Error::new(
@@ -63,11 +124,34 @@ pub fn run(cfg: holder::Config, argv: &[String], policy: &Policy) -> io::Result<
             "no program to supervise",
         ));
     }
-    let (done_tx, done_rx) = mpsc::channel();
-    // `holder::run` ends the process itself on a clean shutdown; it comes back here only with an error.
-    std::thread::spawn(move || {
-        let _ = done_tx.send(holder::run(cfg));
-    });
+    let (sender, events) = mpsc::channel();
+    let mut holding = Holding {
+        cfg,
+        events,
+        sender,
+        serving: false,
+        trying: false,
+        next_try: Instant::now(),
+        backoff: policy.min,
+    };
+    holding.try_now();
+    // Before the child: wait until the folder is ours or known to be another live holder's.
+    match holding.events.recv() {
+        Ok(Event::Serving) => {
+            holding.serving = true;
+            holding.trying = false;
+        }
+        Ok(Event::Ended(Err(e))) if e.kind() == io::ErrorKind::AddrInUse => {
+            eprintln!(
+                "holder: {} is held by another holder; running {} against it and asking for the folder again",
+                holding.cfg.dir.display(),
+                argv[0]
+            );
+            holding.lost(policy.max);
+        }
+        Ok(Event::Ended(result)) => return result,
+        Err(_) => return Err(io::Error::other("the holder thread ended")),
+    }
     let mut pause: Option<Duration> = None;
     loop {
         let began = Instant::now();
@@ -83,18 +167,12 @@ pub fn run(cfg: holder::Config, argv: &[String], policy: &Policy) -> io::Result<
         };
         // Wait for the child to exit, or for the holder to give up.
         loop {
-            match done_rx.recv_timeout(Duration::from_millis(200)) {
-                Ok(result) => {
-                    if let Some(c) = child.as_mut() {
-                        let _ = c.kill();
-                        let _ = c.wait();
-                    }
-                    return result;
+            if let Some(result) = holding.poll(Duration::from_millis(200), policy) {
+                if let Some(c) = child.as_mut() {
+                    let _ = c.kill();
+                    let _ = c.wait();
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err(io::Error::other("the holder thread ended"));
-                }
+                return result;
             }
             match child.as_mut().map(Child::try_wait) {
                 None => break,
@@ -119,7 +197,7 @@ pub fn run(cfg: holder::Config, argv: &[String], policy: &Policy) -> io::Result<
         // Sleep in slices so a holder that gave up is noticed.
         let end = Instant::now() + wait;
         while Instant::now() < end {
-            if let Ok(result) = done_rx.recv_timeout(Duration::from_millis(100).min(wait)) {
+            if let Some(result) = holding.poll(Duration::from_millis(100).min(wait), policy) {
                 return result;
             }
         }
