@@ -336,7 +336,11 @@ fn parse_procs(text: &str) -> Vec<RecordedProc> {
             Some(RecordedProc {
                 pid: u32::try_from(v.get("pid")?.as_u64()?).ok()?,
                 started: v.get("started")?.as_str()?.to_owned(),
-                conv: v.get("conv").and_then(|c| c.as_str()).unwrap_or("").to_owned(),
+                conv: v
+                    .get("conv")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("")
+                    .to_owned(),
             })
         })
         .collect()

@@ -73,7 +73,11 @@ fn find_exe(cfg: &HolderConfig) -> Option<PathBuf> {
         let e = PathBuf::from(e);
         return e.is_file().then_some(e);
     }
-    let name = if cfg!(windows) { "kith-holder.exe" } else { "kith-holder" };
+    let name = if cfg!(windows) {
+        "kith-holder.exe"
+    } else {
+        "kith-holder"
+    };
     let beside = std::env::current_exe().ok()?.parent()?.join(name);
     beside.is_file().then_some(beside)
 }
@@ -96,7 +100,9 @@ fn secret(layout: &Layout) -> Result<String> {
 fn sleep_unless_stopped(shared: &Shared, total: Duration) {
     let end = Instant::now() + total;
     while !shared.stopping() && Instant::now() < end {
-        std::thread::sleep(Duration::from_millis(40).min(end.saturating_duration_since(Instant::now())));
+        std::thread::sleep(
+            Duration::from_millis(40).min(end.saturating_duration_since(Instant::now())),
+        );
     }
 }
 
@@ -155,7 +161,8 @@ fn connect(
         shared.set_holder(|h| h.binary = None);
         return Err((
             "absent",
-            "no kith-holder program to start (looked for $KITH_HOLDER_BIN and beside kith)".to_owned(),
+            "no kith-holder program to start (looked for $KITH_HOLDER_BIN and beside kith)"
+                .to_owned(),
         ));
     };
     shared.set_holder(|h| h.binary = Some(exe.clone()));
@@ -193,7 +200,11 @@ fn nothing_listens(e: &std::io::Error) -> bool {
 
 /// Reconciles the record with this hello, then keeps the record current until the connection ends. `Ok` means the
 /// supervisor was told to stop; `Err` carries why the link was lost.
-fn connected(shared: &Arc<Shared>, mut client: Client, cfg: &HolderConfig) -> std::result::Result<(), String> {
+fn connected(
+    shared: &Arc<Shared>,
+    mut client: Client,
+    cfg: &HolderConfig,
+) -> std::result::Result<(), String> {
     let procs = record_procs(&client.welcome.procs);
     let instance = client.welcome.instance.clone();
     let (pid, tied) = (client.welcome.pid, client.welcome.tied_to_starter);
@@ -297,7 +308,13 @@ fn end_groups(logs: &Path, procs: &[RecordedProc], wait: Duration) -> bool {
     let mut mine = Vec::new();
     for p in procs {
         if p.started.is_empty() {
-            log::note(logs, &format!("holder: pid {} has no recorded start time; left alone", p.pid));
+            log::note(
+                logs,
+                &format!(
+                    "holder: pid {} has no recorded start time; left alone",
+                    p.pid
+                ),
+            );
         } else if lock::process_start(p.pid).as_deref() == Some(p.started.as_str()) {
             mine.push(p.pid);
         } else {

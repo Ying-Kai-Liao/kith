@@ -43,7 +43,7 @@ pub fn try_cli(args: &[OsString]) -> Option<i32> {
 }
 
 /// The caller's view of the environment, for the methods that read it: the daemon's own environment is not the one
-/// this process has (a hook or an agent run has its own KITH_HOME, HOME, KITH_STATE ...).
+/// this process has (a hook or an agent run has its own `KITH_HOME`, `HOME`, `KITH_STATE` ...).
 fn caller_view(method: &str, mut params: Value, home: &std::path::Path) -> Value {
     if method == "paths" {
         let env: serde_json::Map<String, Value> = std::env::vars()
@@ -63,15 +63,14 @@ fn caller_view(method: &str, mut params: Value, home: &std::path::Path) -> Value
 
 /// Prints what the embedded verb prints, from the daemon's answer.
 fn print_answer(method: &str, answer: &Value, format: Option<&str>) -> Option<i32> {
-    let out = match method {
-        "kernel.version" => format!("{answer}\n"),
-        _ => {
-            let folders = folders_from(answer)?;
-            match format {
-                Some("--json") => format!("{}\n", folders.json()),
-                Some("--sh") => folders.sh(),
-                _ => folders.text(),
-            }
+    let out = if method == "kernel.version" {
+        format!("{answer}\n")
+    } else {
+        let folders = folders_from(answer)?;
+        match format {
+            Some("--json") => format!("{}\n", folders.json()),
+            Some("--sh") => folders.sh(),
+            _ => folders.text(),
         }
     };
     let mut stdout = std::io::stdout().lock();
@@ -132,7 +131,9 @@ pub fn print_status(json: bool) {
     if status["daemon"]["running"] == true {
         println!(
             "daemon: pid {}, generation {}, socket {}",
-            status["daemon"]["pid"], status["daemon"]["generation"], text(&status["daemon"]["socket"])
+            status["daemon"]["pid"],
+            status["daemon"]["generation"],
+            text(&status["daemon"]["socket"])
         );
     }
     if status["holder"].is_object() {
@@ -157,7 +158,9 @@ mod tests {
     fn only_rows_the_daemon_answers_are_asked() {
         // Nothing listens in a test, so a verb it would ask for comes back declined, like any other; the point is that
         // these lines parse to the rows the daemon is asked for and the rest never leave the process.
-        for (line, row) in [("paths --json", "paths"), ("kernel paths --sh", "paths"), ("kernel version", "kernel.version")] {
+        for (line, row) in
+            [("paths --json", "paths"), ("kernel paths --sh", "paths"), ("kernel version", "kernel.version")]
+        {
             let words: Vec<String> = line.split(' ').map(str::to_owned).collect();
             assert_eq!(kith_api::cli::parse_argv(&words).expect("parses").method.name, row);
         }

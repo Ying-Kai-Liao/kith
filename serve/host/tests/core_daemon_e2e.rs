@@ -1,9 +1,10 @@
 //! The daemon front on real processes: `kith kernel core-daemon` (the daemon `kith serve` starts inside itself), the real
 //! `kith` CLI asking it, and a real `kith-holder` it starts detached. The in-process cases (token, hello, lock, fake
-//! holders) are in core/runtime/src/daemon_tests.rs.
+//! holders) are in `core/runtime/src/daemon_tests.rs`.
 #![cfg(unix)]
 
 use std::io::{BufRead as _, BufReader, Read as _};
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -55,19 +56,14 @@ impl Daemon {
             .spawn()
             .expect("spawn");
         let mut line = String::new();
-        BufReader::new(child.stdout.as_mut().expect("stdout"))
-            .read_line(&mut line)
-            .expect("ready line");
+        BufReader::new(child.stdout.as_mut().expect("stdout")).read_line(&mut line).expect("ready line");
         if line.trim() != "ready" {
             let mut err = String::new();
             let _ = child.stderr.take().map(|mut e| e.read_to_string(&mut err));
             let _ = child.wait();
             return Err(format!("{line:?} {err}"));
         }
-        Ok(Daemon {
-            child,
-            home: home.to_owned(),
-        })
+        Ok(Daemon { child, home: home.to_owned() })
     }
 
     /// Closes its stdin, the way it is stopped; returns the number of calls it served.
@@ -76,11 +72,7 @@ impl Daemon {
         let mut out = String::new();
         self.child.stdout.take().expect("stdout").read_to_string(&mut out).expect("out");
         assert!(self.child.wait().expect("wait").success(), "the daemon ends cleanly");
-        out.lines()
-            .find_map(|l| l.strip_prefix("served="))
-            .expect("served= line")
-            .parse()
-            .expect("number")
+        out.lines().find_map(|l| l.strip_prefix("served=")).expect("served= line").parse().expect("number")
     }
 
     fn status(&self) -> Value {
@@ -159,7 +151,6 @@ fn the_cli_goes_to_a_real_daemon_with_its_own_environment_and_falls_back_when_th
     assert!(kith(&home, &[]).args(["kernel", "engines", "--json"]).output().expect("engines").status.success());
 
     // Owner-only: the folder, the socket and the token.
-    use std::os::unix::fs::PermissionsExt as _;
     let mode = |p: &Path| std::fs::metadata(p).expect("exists").permissions().mode() & 0o777;
     assert_eq!(mode(&m.join("core")), 0o700);
     assert_eq!(mode(&m.join("core/owner.sock")), 0o600);
@@ -190,21 +181,17 @@ fn a_restarted_daemon_is_a_newer_generation_and_waits_for_a_running_command() {
     again.stop();
 
     // An embedded command holds the lock while the daemon starts: it waits instead of failing.
-    let p = kith_kernel::paths::paths(
-        &home,
-        &home.join("kith/kernel"),
-        &|k: &str| match k {
-            "KITH_HOME" => Some(home.join("kith").to_string_lossy().into_owned()),
-            _ => None,
-        },
-    );
+    let p = kith_kernel::paths::paths(&home, &home.join("kith/kernel"), &|k: &str| match k {
+        "KITH_HOME" => Some(home.join("kith").to_string_lossy().into_owned()),
+        _ => None,
+    });
     let held = match kith_core::open_embedded(&p).expect("open") {
         kith_core::Embedded::Open(c) => c,
         kith_core::Embedded::DaemonRunning { .. } => panic!("free"),
     };
     let started = std::thread::spawn({
         let home = home.clone();
-        move || Daemon::start(&home, &[]).map(|d| d.stop())
+        move || Daemon::start(&home, &[]).map(Daemon::stop)
     });
     std::thread::sleep(Duration::from_millis(600));
     assert!(!started.is_finished(), "the daemon is waiting for the command");
@@ -231,7 +218,8 @@ fn no_holder_program_and_a_holder_killed_mid_run_stop_neither_the_daemon_nor_the
     let daemon = Daemon::start(&home, &env).expect("daemon");
     until("the holder to be connected", || daemon.status()["holder"]["state"] == "connected");
     let first = daemon.status()["holder"].clone();
-    let (instance, pid) = (first["instance"].as_str().expect("instance").to_owned(), first["pid"].as_u64().expect("pid"));
+    let (instance, pid) =
+        (first["instance"].as_str().expect("instance").to_owned(), first["pid"].as_u64().expect("pid"));
     assert!(pid_alive(pid));
     let startup = Instant::now();
     assert!(kith(&home, &[]).args(["paths", "--json"]).output().expect("paths").status.success());

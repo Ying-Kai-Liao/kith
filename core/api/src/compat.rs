@@ -86,7 +86,9 @@ fn cli(old: &Value, new: &Value, name: &str, out: &mut Vec<String>) {
             .collect()
     };
     for gone in spellings(old).difference(&spellings(new)) {
-        out.push(format!("{name}: command {gone} no longer spells this method"));
+        out.push(format!(
+            "{name}: command {gone} no longer spells this method"
+        ));
     }
     let words = |v: &Value, key: &str| -> BTreeSet<String> {
         v[key]
@@ -660,7 +662,11 @@ mod tests {
                 "more": {"kind": "flag", "spellings": ["--more"]},
             }),
         );
-        assert!(breaks(&old, &grown).is_empty(), "{:?}", breaks(&old, &grown));
+        assert!(
+            breaks(&old, &grown).is_empty(),
+            "{:?}",
+            breaks(&old, &grown)
+        );
     }
 
     #[test]
@@ -670,7 +676,13 @@ mod tests {
         // the alias is gone
         only(
             &old,
-            &cli_doc(&["backup", "add"], json!([]), &["--json"], &[], args.clone()),
+            &cli_doc(
+                &["backup", "add"],
+                json!([]),
+                &["--json"],
+                &[],
+                args.clone(),
+            ),
             "no longer spells",
         );
         // the path moved and the old spelling is not kept as an alias
@@ -703,7 +715,13 @@ mod tests {
         args["at"]["spellings"] = json!(["--at"]);
         only(
             &old,
-            &cli_doc(&["backup", "add"], json!([["bk", "add"]]), &["--json"], &[], args),
+            &cli_doc(
+                &["backup", "add"],
+                json!([["bk", "add"]]),
+                &["--json"],
+                &[],
+                args,
+            ),
             "no longer accepts -a",
         );
         let args = old["methods"][0]["x-kith-cli"]["args"].clone();

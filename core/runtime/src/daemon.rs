@@ -67,7 +67,10 @@ impl Shared {
 
     /// Runs `f` on the core. The core is gone once the daemon has stopped.
     pub(crate) fn with_core<R>(&self, f: impl FnOnce(&mut Core) -> Result<R>) -> Result<R> {
-        let mut guard = self.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self
+            .core
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         match guard.as_mut() {
             Some(core) => f(core),
             None => Err(Error::Io("kith-core: the daemon is not running".into())),
@@ -75,11 +78,17 @@ impl Shared {
     }
 
     pub(crate) fn set_holder(&self, f: impl FnOnce(&mut HolderState)) {
-        f(&mut self.holder.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        f(&mut self
+            .holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner));
     }
 
     fn set_outcome(&self, o: Outcome) {
-        *self.outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = o;
+        *self
+            .outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = o;
         self.changed.notify_all();
     }
 
@@ -93,7 +102,11 @@ impl Shared {
 
     fn running_status(&self) -> Result<Value> {
         let (generation, schema) = self.with_core(|c| Ok((c.generation(), c.schema_version())))?;
-        let h = self.holder.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let h = self
+            .holder
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         Ok(json!({
             "core": {"state": "daemon", "recovery": null, "note": "the daemon is running"},
             "daemon": {
@@ -169,7 +182,11 @@ impl Daemon {
     /// Waits until the daemon serves, or says why it will not.
     pub fn ready(&self, timeout: Duration) -> Result<()> {
         let end = Instant::now() + timeout;
-        let mut guard = self.shared.outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut guard = self
+            .shared
+            .outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         loop {
             match &*guard {
                 Outcome::Serving => return Ok(()),
@@ -198,16 +215,27 @@ impl Daemon {
     pub fn stop(&self) {
         let shared = &self.shared;
         shared.stop.store(true, Ordering::SeqCst);
-        let server = shared.server.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        let server = shared
+            .server
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         if let Some(server) = server {
             server.stop();
         }
-        let core = shared.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        let core = shared
+            .core
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
         if core.is_some() {
             log::note(&shared.logs, "daemon: stopped");
         }
         drop(core);
-        let mut outcome = shared.outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut outcome = shared
+            .outcome
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if !matches!(*outcome, Outcome::Failed(_)) {
             *outcome = Outcome::Failed(Error::Io("kith-core: the daemon has stopped".into()));
         }
@@ -227,22 +255,35 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         Err(e) => return failed(shared, e),
     };
     let generation = core.generation();
-    *shared.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(core);
+    *shared
+        .core
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(core);
     let for_calls = shared.clone();
     let handler: Arc<Handler> = Arc::new(move |method, params| for_calls.dispatch(method, params));
     match Server::bind(layout, generation, handler) {
         Ok(server) => {
-            *shared.server.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(server);
+            *shared
+                .server
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(server);
         }
         Err(e) => {
             // Holding the lock with nothing listening would only make every CLI call wait for nothing.
-            shared.core.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+            shared
+                .core
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
             return failed(shared, e);
         }
     }
     log::note(
         &shared.logs,
-        &format!("daemon: serving, generation {generation}, socket {}", shared.socket.display()),
+        &format!(
+            "daemon: serving, generation {generation}, socket {}",
+            shared.socket.display()
+        ),
     );
     if shared.stopping() {
         return;
@@ -268,7 +309,9 @@ fn acquire(shared: &Shared, layout: &Layout, cfg: &Config) -> Result<Core> {
     let mut told = false;
     loop {
         if shared.stopping() {
-            return Err(Error::Io("kith-core: stopped before the core was taken".into()));
+            return Err(Error::Io(
+                "kith-core: stopped before the core was taken".into(),
+            ));
         }
         match crate::db::open(layout, MIGRATIONS, Mode::Daemon)? {
             Opened::Core(core) => return Ok(*core),
@@ -278,7 +321,9 @@ fn acquire(shared: &Shared, layout: &Layout, cfg: &Config) -> Result<Core> {
                     return Err(busy(holder));
                 }
                 if !told {
-                    let who = holder.as_ref().map_or(String::new(), |h| format!(" (pid {})", h.pid));
+                    let who = holder
+                        .as_ref()
+                        .map_or(String::new(), |h| format!(" (pid {})", h.pid));
                     log::note(
                         &shared.logs,
                         &format!("daemon: a command{who} holds the core; waiting for it to finish"),
@@ -310,7 +355,8 @@ pub fn status(paths: &Paths) -> Value {
         Ok(lock::Probe::Free) if !layout.db.is_file() => (
             "no-core",
             None,
-            "no core yet: `kith serve` or `kith migrate` makes it; commands run without one".to_owned(),
+            "no core yet: `kith serve` or `kith migrate` makes it; commands run without one"
+                .to_owned(),
         ),
         Ok(lock::Probe::Free) => (
             "embedded",

@@ -124,12 +124,7 @@ pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T,
 /// Where nothing answers (no daemon, a stale socket) the answer is [`Reached::NoDaemon`] and the caller runs the verb
 /// embedded as it did before; where a daemon answers but disagrees about the protocol or the method table it is
 /// [`Reached::Mismatch`] with a note, and nothing has run.
-pub fn reach(
-    paths: &Paths,
-    method: &str,
-    params: &serde_json::Value,
-    repeatable: bool,
-) -> Reached {
+pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable: bool) -> Reached {
     owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
 }
 

@@ -70,9 +70,15 @@ fn a_daemon_serves_the_table_over_the_owner_socket_and_leaves_when_stopped() {
     ));
     assert_eq!(d.served(), 5);
     drop(d);
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::NoDaemon));
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::NoDaemon
+    ));
     #[cfg(unix)]
-    assert!(!crate::owner::endpoint(&Layout::new(&m)).exists(), "the socket goes with the daemon");
+    assert!(
+        !crate::owner::endpoint(&Layout::new(&m)).exists(),
+        "the socket goes with the daemon"
+    );
 }
 
 #[test]
@@ -98,7 +104,13 @@ fn the_socket_the_token_and_the_folder_are_owner_only() {
     let p = paths(&m);
     let l = Layout::new(&m);
     let d = serving(&p, quiet());
-    let mode = |path: &std::path::Path| std::fs::metadata(path).expect("exists").permissions().mode() & 0o777;
+    let mode = |path: &std::path::Path| {
+        std::fs::metadata(path)
+            .expect("exists")
+            .permissions()
+            .mode()
+            & 0o777
+    };
     assert_eq!(mode(&l.dir), 0o700);
     assert_eq!(mode(&crate::owner::endpoint(&l)), 0o600);
     assert_eq!(mode(&l.token), 0o600);
@@ -106,7 +118,10 @@ fn the_socket_the_token_and_the_folder_are_owner_only() {
     drop(d);
     std::fs::set_permissions(&l.dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
     let d = Daemon::spawn_with(&p, quiet());
-    assert!(matches!(d.ready(Duration::from_secs(10)), Err(Error::Permissions(_))));
+    assert!(matches!(
+        d.ready(Duration::from_secs(10)),
+        Err(Error::Permissions(_))
+    ));
 }
 
 /// Lines of JSON over the owner socket, by hand, to show what the daemon does with a client that does not follow the
@@ -120,8 +135,10 @@ struct Raw {
 #[cfg(unix)]
 impl Raw {
     fn connect(m: &std::path::Path) -> Raw {
-        let s = kith_holder::platform::connect(&crate::owner::endpoint(&Layout::new(m))).expect("connect");
-        s.set_read_timeout(Some(Duration::from_secs(5))).expect("timeout");
+        let s = kith_holder::platform::connect(&crate::owner::endpoint(&Layout::new(m)))
+            .expect("connect");
+        s.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout");
         Raw {
             writer: s.try_clone().expect("clone"),
             reader: std::io::BufReader::new(s),
@@ -152,7 +169,10 @@ fn a_client_that_skips_the_handshake_or_gets_the_token_wrong_is_refused_and_runs
     // A call with no hello.
     let mut c = Raw::connect(&m);
     c.send(1, "kernel.version", &json!({}));
-    assert_eq!(c.recv().expect("an error")["error"]["data"]["kind"], "protocol");
+    assert_eq!(
+        c.recv().expect("an error")["error"]["data"]["kind"],
+        "protocol"
+    );
     assert!(c.recv().is_none(), "and the connection is closed");
 
     // Hello, then a proof made with the wrong token.
@@ -162,7 +182,10 @@ fn a_client_that_skips_the_handshake_or_gets_the_token_wrong_is_refused_and_runs
     let hello = c.recv().expect("hello");
     assert_eq!(hello["result"]["compatible"], true);
     c.send(2, "auth", &json!({"proof": "00".repeat(32)}));
-    assert_eq!(c.recv().expect("refusal")["error"]["data"]["kind"], "unauthorized");
+    assert_eq!(
+        c.recv().expect("refusal")["error"]["data"]["kind"],
+        "unauthorized"
+    );
     assert!(c.recv().is_none());
 
     // Hello, then the right proof: the protocol as written, by hand.
@@ -172,14 +195,19 @@ fn a_client_that_skips_the_handshake_or_gets_the_token_wrong_is_refused_and_runs
     let hello = c.recv().expect("hello");
     let server_nonce = hello["result"]["nonce"].as_str().expect("nonce").to_owned();
     // The daemon proved the token first.
-    let theirs = kith_holder::auth::proof(token.trim().as_bytes(), "daemon", "bb", &server_nonce, 0);
+    let theirs =
+        kith_holder::auth::proof(token.trim().as_bytes(), "daemon", "bb", &server_nonce, 0);
     assert_eq!(hello["result"]["proof"], theirs.as_str());
     let mine = kith_holder::auth::proof(token.trim().as_bytes(), "cli", "bb", &server_nonce, 0);
     c.send(2, "auth", &json!({"proof": mine}));
     assert_eq!(c.recv().expect("ok")["result"]["ok"], true);
     c.send(3, "kernel.version", &json!({}));
     assert_eq!(c.recv().expect("answer")["result"]["abi"], 1);
-    assert_eq!(d.served(), 1, "only the call that went through the handshake ran");
+    assert_eq!(
+        d.served(),
+        1,
+        "only the call that went through the handshake ran"
+    );
 }
 
 #[test]
@@ -189,7 +217,10 @@ fn a_token_that_is_not_the_daemons_is_not_a_daemon_to_talk_to() {
     let d = serving(&p, quiet());
     // The client reads the token from the file; with another one it cannot prove the daemon is the one that wrote it.
     std::fs::write(Layout::new(&m).token, "not-the-daemons-token").expect("write");
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::NoDaemon));
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::NoDaemon
+    ));
     assert_eq!(d.served(), 0);
 }
 
@@ -199,25 +230,38 @@ fn a_protocol_or_method_table_that_differs_falls_back_with_a_note_and_runs_nothi
     let p = paths(&m);
     let d = serving(&p, quiet());
     let l = Layout::new(&m);
-    for identity in [(crate::owner::PROTOCOL + 1, kith_api::schema_hash()), (crate::owner::PROTOCOL, "0000000000000000")] {
+    for identity in [
+        (crate::owner::PROTOCOL + 1, kith_api::schema_hash()),
+        (crate::owner::PROTOCOL, "0000000000000000"),
+    ] {
         match crate::owner::reach_as(&l, "kernel.version", &json!({}), true, identity) {
             Reached::Mismatch(note) => {
                 assert!(note.contains("disagree"), "{note}");
-                assert!(note.contains(&format!("pid {}", std::process::id())), "{note}");
+                assert!(
+                    note.contains(&format!("pid {}", std::process::id())),
+                    "{note}"
+                );
             }
             other => panic!("{other:?}"),
         }
     }
     assert_eq!(d.served(), 0);
     // The honest client still gets through.
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::Answered(_)));
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::Answered(_)
+    ));
 }
 
 #[test]
 fn a_restart_takes_a_newer_generation_and_a_second_daemon_is_refused() {
     let (_t, m) = machine();
     let p = paths(&m);
-    let generation = |p: &Paths| crate::status(p)["daemon"]["generation"].as_i64().expect("generation");
+    let generation = |p: &Paths| {
+        crate::status(p)["daemon"]["generation"]
+            .as_i64()
+            .expect("generation")
+    };
     let first = serving(&p, quiet());
     let g1 = generation(&p);
     // One lock: the second daemon finds the first one's name in core.holder and refuses at once.
@@ -227,7 +271,10 @@ fn a_restart_takes_a_newer_generation_and_a_second_daemon_is_refused() {
         Err(Error::AlreadyRunning(m)) => assert!(m.contains("holds the lock"), "{m}"),
         other => panic!("{other:?}"),
     }
-    assert!(started.elapsed() < Duration::from_secs(3), "refused cleanly, not after a wait");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "refused cleanly, not after a wait"
+    );
     assert_eq!(generation(&p), g1, "and the first one is untouched");
     drop(first);
     let again = serving(&p, quiet());
@@ -246,9 +293,13 @@ fn the_daemon_waits_out_an_embedded_command_and_an_embedded_call_defers_to_the_d
         d.ready(Duration::from_millis(400)).is_err(),
         "the daemon is waiting for the command, not failing and not taking the lock"
     );
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::NoDaemon));
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::NoDaemon
+    ));
     drop(embedded);
-    d.ready(Duration::from_secs(10)).expect("it takes over once the command is done");
+    d.ready(Duration::from_secs(10))
+        .expect("it takes over once the command is done");
     let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
     assert!(log.contains("daemon: a command"), "{log}");
 
@@ -257,7 +308,10 @@ fn the_daemon_waits_out_an_embedded_command_and_an_embedded_call_defers_to_the_d
         crate::embedded_with(&l, crate::db::MIGRATIONS),
         Ok(crate::Embedded::DaemonRunning { .. })
     ));
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::Answered(_)));
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::Answered(_)
+    ));
 }
 
 #[test]
@@ -272,7 +326,10 @@ fn a_daemon_that_gives_up_waiting_says_who_held_the_core() {
             ..quiet()
         },
     );
-    assert!(matches!(d.ready(Duration::from_secs(5)), Err(Error::AlreadyRunning(_))));
+    assert!(matches!(
+        d.ready(Duration::from_secs(5)),
+        Err(Error::AlreadyRunning(_))
+    ));
 }
 
 #[cfg(unix)]
@@ -284,12 +341,19 @@ fn a_socket_file_left_by_a_dead_daemon_is_replaced_by_the_next_one() {
     crate::perms::ensure_dir(&l.dir).expect("dir");
     {
         // A bound and abandoned socket: the file stays, nothing listens.
-        let _gone = std::os::unix::net::UnixListener::bind(crate::owner::endpoint(&l)).expect("bind");
+        let _gone =
+            std::os::unix::net::UnixListener::bind(crate::owner::endpoint(&l)).expect("bind");
     }
     assert!(crate::owner::endpoint(&l).exists());
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::NoDaemon));
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::NoDaemon
+    ));
     let _d = serving(&p, quiet());
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::Answered(_)));
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::Answered(_)
+    ));
 }
 
 // --- the holder link -----------------------------------------------------------------------------------------------
@@ -310,7 +374,10 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
 }
 
 fn holder_state(p: &Paths) -> String {
-    crate::status(p)["holder"]["state"].as_str().unwrap_or("none").to_owned()
+    crate::status(p)["holder"]["state"]
+        .as_str()
+        .unwrap_or("none")
+        .to_owned()
 }
 
 #[test]
@@ -318,11 +385,21 @@ fn no_holder_program_stops_nothing() {
     let (_t, m) = machine();
     let p = paths(&m);
     let d = serving(&p, holder_cfg(m.join("no-such-kith-holder")));
-    until("the holder to be reported absent", || holder_state(&p) == "absent");
+    until("the holder to be reported absent", || {
+        holder_state(&p) == "absent"
+    });
     // The daemon serves, the CLI is answered, and the core log says why there is no holder, once.
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::Answered(_)));
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::Answered(_)
+    ));
     let status = crate::status(&p);
-    assert!(status["holder"]["error"].as_str().expect("error").contains("no kith-holder"));
+    assert!(
+        status["holder"]["error"]
+            .as_str()
+            .expect("error")
+            .contains("no kith-holder")
+    );
     let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
     assert_eq!(log.matches("holder: no kith-holder").count(), 1, "{log}");
     drop(d);
@@ -337,15 +414,26 @@ fn a_holder_program_that_will_not_start_stops_nothing() {
     std::fs::create_dir_all(&m).expect("machine");
     std::fs::write(&exe, "not a program").expect("write");
     let _d = serving(&p, holder_cfg(exe));
-    until("the holder to be reported unreachable", || holder_state(&p) == "unreachable");
-    assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::Answered(_)));
-    let error = crate::status(&p)["holder"]["error"].as_str().expect("error").to_owned();
+    until("the holder to be reported unreachable", || {
+        holder_state(&p) == "unreachable"
+    });
+    assert!(matches!(
+        read(&p, "kernel.version", &json!({})),
+        Reached::Answered(_)
+    ));
+    let error = crate::status(&p)["holder"]["error"]
+        .as_str()
+        .expect("error")
+        .to_owned();
     assert!(error.contains("can't start"), "{error}");
 }
 
 /// A fake holder on the real socket path: `answer` is what it does with each connection.
 #[cfg(unix)]
-fn fake_holder(m: &std::path::Path, answer: fn(kith_holder::platform::Stream)) -> std::path::PathBuf {
+fn fake_holder(
+    m: &std::path::Path,
+    answer: fn(kith_holder::platform::Stream),
+) -> std::path::PathBuf {
     let l = Layout::new(m);
     crate::perms::ensure_dir(&l.dir).expect("core dir");
     std::fs::create_dir_all(&l.holder_dir).expect("holder dir");
@@ -370,18 +458,36 @@ fn a_holder_that_answers_garbage_or_a_refusal_stops_nothing_and_proves_nothing()
     fn refusal(mut s: kith_holder::platform::Stream) {
         let _ = wire::read(&mut s);
         // A fake holder's easiest lie: a newer generation, before it has proved anything.
-        let _ = wire::write_json(&mut s, proto::REFUSED, 0, &proto::Refused { why: proto::Why::StaleGeneration, current: 999_999 });
+        let _ = wire::write_json(
+            &mut s,
+            proto::REFUSED,
+            0,
+            &proto::Refused {
+                why: proto::Why::StaleGeneration,
+                current: 999_999,
+            },
+        );
     }
     for answer in [garbage as fn(_), refusal as fn(_)] {
         let (_t, m) = machine();
         let p = paths(&m);
         let exe = fake_holder(&m, answer);
         let d = serving(&p, holder_cfg(exe));
-        let before = crate::status(&p)["daemon"]["generation"].as_i64().expect("generation");
-        until("the holder to be reported unreachable", || holder_state(&p) == "unreachable");
+        let before = crate::status(&p)["daemon"]["generation"]
+            .as_i64()
+            .expect("generation");
+        until("the holder to be reported unreachable", || {
+            holder_state(&p) == "unreachable"
+        });
         // The daemon still serves, at the generation core.db gave it: a refusal is a failed connection, not news.
-        assert!(matches!(read(&p, "kernel.version", &json!({})), Reached::Answered(_)));
-        assert_eq!(crate::status(&p)["daemon"]["generation"].as_i64(), Some(before));
+        assert!(matches!(
+            read(&p, "kernel.version", &json!({})),
+            Reached::Answered(_)
+        ));
+        assert_eq!(
+            crate::status(&p)["daemon"]["generation"].as_i64(),
+            Some(before)
+        );
         let claims_still_open = d.shared.with_core(|c| c.claim_tx().map(|_| ()));
         assert!(claims_still_open.is_ok(), "{claims_still_open:?}");
     }
@@ -440,7 +546,9 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
             instance: instance.map(str::to_owned),
             procs,
         };
-        d.shared.with_core(|c| c.save_holder_record(&rec)).expect("record");
+        d.shared
+            .with_core(|c| c.save_holder_record(&rec))
+            .expect("record");
     };
     let proc = |pid, started: &str| RecordedProc {
         pid,
@@ -462,16 +570,26 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
     //    since been handed to another process (the recorded start time is not that process's). A new instance appears.
     record(
         Some("one"),
-        vec![proc(held_pid, &held_start), proc(stranger_pid, "Thu Jan  1 00:00:00 1970")],
+        vec![
+            proc(held_pid, &held_start),
+            proc(stranger_pid, "Thu Jan  1 00:00:00 1970"),
+        ],
     );
     crate::holder_link::reconcile(&d.shared, "two", &[], &cfg).expect("takeover");
-    assert!(!alive(held_pid), "confirmed gone before the new instance is recorded");
+    assert!(
+        !alive(held_pid),
+        "confirmed gone before the new instance is recorded"
+    );
     assert!(alive(stranger_pid), "a reused pid is never hit");
     assert_eq!(recorded().instance.as_deref(), Some("two"));
 
     // 4. Processes the new instance lists itself are not the old one's, whatever the record says.
-    record(Some("two"), vec![proc(stranger_pid, "Thu Jan  1 00:00:00 1970")]);
-    crate::holder_link::reconcile(&d.shared, "three", &[proc(stranger_pid, "x")], &cfg).expect("listed");
+    record(
+        Some("two"),
+        vec![proc(stranger_pid, "Thu Jan  1 00:00:00 1970")],
+    );
+    crate::holder_link::reconcile(&d.shared, "three", &[proc(stranger_pid, "x")], &cfg)
+        .expect("listed");
     assert!(alive(stranger_pid));
     signal(stranger_pid, "KILL");
 }

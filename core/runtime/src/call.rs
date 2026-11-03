@@ -42,9 +42,15 @@ impl Core {
         let env = params.get("env").and_then(Value::as_object);
         let folders = if home.is_some() || env.is_some() {
             // The caller's view: its home and its variables, and nothing from this process's environment.
-            let home = home.map(Path::new).map_or_else(kith_kernel::paths::process_home, Path::to_path_buf);
+            let home = home
+                .map(Path::new)
+                .map_or_else(kith_kernel::paths::process_home, Path::to_path_buf);
             let kernel = kernel.map_or_else(|| home.join("kith/kernel"), Into::into);
-            let lookup = |name: &str| env.and_then(|e| e.get(name)).and_then(Value::as_str).map(str::to_owned);
+            let lookup = |name: &str| {
+                env.and_then(|e| e.get(name))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            };
             kith_kernel::paths::paths(&home, &kernel, &lookup)
         } else if let Some(k) = kernel {
             kith_kernel::paths::paths(

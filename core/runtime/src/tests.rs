@@ -559,7 +559,9 @@ fn calls_go_through_the_table() {
     let core = open(&Layout::new(&m)).with_folders(&p);
 
     // A method the core answers without state.
-    let v = core.call(who, "kernel.version", &json!({})).expect("version");
+    let v = core
+        .call(who, "kernel.version", &json!({}))
+        .expect("version");
     assert_eq!(v["abi"], 1);
     let v = core.call(who, "paths", &json!({})).expect("paths");
     assert_eq!(v["KITH_MACHINE"], m.to_string_lossy().as_ref());
@@ -577,7 +579,8 @@ fn calls_go_through_the_table() {
     assert_eq!(seen["KITH_STATE"], "/caller/state");
     assert_ne!(seen["KITH_MACHINE"], m.to_string_lossy().as_ref());
     assert!(
-        core.call(who, "paths", &json!({"env": {"KITH_HOME": 3}})).is_err(),
+        core.call(who, "paths", &json!({"env": {"KITH_HOME": 3}}))
+            .is_err(),
         "env is a map of strings"
     );
 

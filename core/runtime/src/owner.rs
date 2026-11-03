@@ -61,7 +61,8 @@ pub(crate) fn endpoint(layout: &Layout) -> PathBuf {
 /// 64 random hex digits: the owner token, the holder secret.
 pub(crate) fn random_secret() -> Result<String> {
     let mut raw = [0u8; 32];
-    getrandom::fill(&mut raw).map_err(|_| Error::Io("kith-core: random bytes unavailable".into()))?;
+    getrandom::fill(&mut raw)
+        .map_err(|_| Error::Io("kith-core: random bytes unavailable".into()))?;
     Ok(raw.iter().fold(String::with_capacity(64), |mut s, b| {
         let _ = write!(s, "{b:02x}");
         s
@@ -161,7 +162,9 @@ fn accept_loop(listener: &platform::Listener, ctx: &Arc<Ctx>) {
     loop {
         let stream = match platform::accept(listener) {
             Ok(s) => s,
-            Err(e) if platform::accept_error_is_temporary(&e) && !ctx.stop.load(Ordering::SeqCst) => {
+            Err(e)
+                if platform::accept_error_is_temporary(&e) && !ctx.stop.load(Ordering::SeqCst) =>
+            {
                 std::thread::sleep(Duration::from_millis(20));
                 continue;
             }
@@ -212,7 +215,10 @@ fn serve_connection(stream: Stream, ctx: &Ctx) {
             break; // a line over the limit, or the peer went away in the middle of one
         }
         let Ok(req) = serde_json::from_str::<Value>(line.trim()) else {
-            let _ = write_line(&mut writer, &failure(&Value::Null, -32700, "parse_error", "not JSON"));
+            let _ = write_line(
+                &mut writer,
+                &failure(&Value::Null, -32700, "parse_error", "not JSON"),
+            );
             break;
         };
         let id = req.get("id").cloned().unwrap_or(Value::Null);
@@ -230,14 +236,25 @@ fn serve_connection(stream: Stream, ctx: &Ctx) {
                     None => (reply, false),
                 }
             }
-            Phase::Auth { client_nonce, nonce } if method == "auth" => {
+            Phase::Auth {
+                client_nonce,
+                nonce,
+            } if method == "auth" => {
                 let expect = proof(&ctx.token, "cli", &client_nonce, &nonce);
                 let given = params.get("proof").and_then(Value::as_str).unwrap_or("");
                 if auth::same(expect.as_bytes(), given.as_bytes()) {
                     phase = Phase::Ready;
                     (success(&id, &json!({"ok": true})), true)
                 } else {
-                    (failure(&id, -32003, "unauthorized", "the owner token does not match"), false)
+                    (
+                        failure(
+                            &id,
+                            -32003,
+                            "unauthorized",
+                            "the owner token does not match",
+                        ),
+                        false,
+                    )
                 }
             }
             Phase::Ready if method != "hello" && method != "auth" => {
@@ -248,7 +265,10 @@ fn serve_connection(stream: Stream, ctx: &Ctx) {
                 };
                 (reply, true)
             }
-            _ => (failure(&id, -32002, "protocol", "hello and auth come first"), false),
+            _ => (
+                failure(&id, -32002, "protocol", "hello and auth come first"),
+                false,
+            ),
         };
         if write_line(&mut writer, &reply).is_err() || !keep {
             break;
@@ -262,7 +282,8 @@ fn hello(ctx: &Ctx, id: &Value, params: &Value) -> (Value, Option<Phase>) {
     let nonce = platform::random_hex();
     let protocol = params.get("protocol").and_then(Value::as_u64);
     let schema = params.get("schema").and_then(Value::as_str);
-    let compatible = protocol == Some(u64::from(PROTOCOL)) && schema == Some(kith_api::schema_hash());
+    let compatible =
+        protocol == Some(u64::from(PROTOCOL)) && schema == Some(kith_api::schema_hash());
     let reply = success(
         id,
         &json!({
@@ -343,13 +364,22 @@ pub enum Reached {
 enum Attempt {
     Done(Reached),
     /// Failed; `sent` says whether the call itself had gone out.
-    Failed { sent: bool, why: String },
+    Failed {
+        sent: bool,
+        why: String,
+    },
 }
 
 /// Calls `method` on the daemon of `layout`. `repeatable` says the call may run twice without harm (a read): it is
 /// then retried once when the connection breaks (the daemon restarting). A write is never sent a second time.
 pub(crate) fn reach(layout: &Layout, method: &str, params: &Value, repeatable: bool) -> Reached {
-    reach_as(layout, method, params, repeatable, (PROTOCOL, kith_api::schema_hash()))
+    reach_as(
+        layout,
+        method,
+        params,
+        repeatable,
+        (PROTOCOL, kith_api::schema_hash()),
+    )
 }
 
 /// [`reach`] as a client of another protocol number and method table (what a mismatch test needs to be).
@@ -370,7 +400,11 @@ pub(crate) fn reach_as(
                     return Reached::Lost(why);
                 }
                 if tried >= 2 {
-                    return if sent { Reached::Lost(why) } else { Reached::NoDaemon };
+                    return if sent {
+                        Reached::Lost(why)
+                    } else {
+                        Reached::NoDaemon
+                    };
                 }
                 std::thread::sleep(Duration::from_millis(150));
             }
@@ -419,8 +453,12 @@ impl Conn {
     /// The next reply, or why there is none.
     fn recv(&self, within: Duration) -> std::result::Result<Value, String> {
         match self.lines.recv_timeout(within) {
-            Ok(Some(line)) => serde_json::from_str(line.trim()).map_err(|_| "an unreadable reply".to_owned()),
-            Ok(None) | Err(RecvTimeoutError::Disconnected) => Err("the connection closed".to_owned()),
+            Ok(Some(line)) => {
+                serde_json::from_str(line.trim()).map_err(|_| "an unreadable reply".to_owned())
+            }
+            Ok(None) | Err(RecvTimeoutError::Disconnected) => {
+                Err("the connection closed".to_owned())
+            }
             Err(RecvTimeoutError::Timeout) => Err("no answer in time".to_owned()),
         }
     }
@@ -432,7 +470,12 @@ impl Drop for Conn {
     }
 }
 
-fn attempt(layout: &Layout, method: &str, params: &Value, (protocol, schema): (u32, &str)) -> Attempt {
+fn attempt(
+    layout: &Layout,
+    method: &str,
+    params: &Value,
+    (protocol, schema): (u32, &str),
+) -> Attempt {
     let before = |why: &str| Attempt::Failed {
         sent: false,
         why: why.to_owned(),
@@ -465,7 +508,10 @@ fn attempt(layout: &Layout, method: &str, params: &Value, (protocol, schema): (u
     let (Some(server_nonce), Some(given)) = (r["nonce"].as_str(), r["proof"].as_str()) else {
         return before("an unreadable hello");
     };
-    if !auth::same(proof(&token, "daemon", &nonce, server_nonce).as_bytes(), given.as_bytes()) {
+    if !auth::same(
+        proof(&token, "daemon", &nonce, server_nonce).as_bytes(),
+        given.as_bytes(),
+    ) {
         // Not the daemon that wrote this token: a restart in between, or something else on the socket.
         return before("the daemon did not prove it knows the owner token");
     }
@@ -502,7 +548,9 @@ fn attempt(layout: &Layout, method: &str, params: &Value, (protocol, schema): (u
     match conn.recv(CALL_TIMEOUT) {
         Ok(v) => {
             if let Some(err) = v.get("error") {
-                let message = err["message"].as_str().unwrap_or("the daemon refused the call");
+                let message = err["message"]
+                    .as_str()
+                    .unwrap_or("the daemon refused the call");
                 let kind = err["data"]["kind"].as_str().unwrap_or("");
                 return Attempt::Done(Reached::Refused(from_error(message, kind)));
             }

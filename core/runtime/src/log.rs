@@ -54,6 +54,12 @@ pub(crate) fn last_note(logs: &Path, prefix: &str) -> Option<String> {
     let text = std::fs::read_to_string(logs.join(FILE)).ok()?;
     text.lines()
         .rev()
-        .find_map(|l| l.split_once(" pid=")?.1.split_once(' ')?.1.strip_prefix(prefix))
+        .find_map(|l| {
+            l.split_once(" pid=")?
+                .1
+                .split_once(' ')?
+                .1
+                .strip_prefix(prefix)
+        })
         .map(str::to_owned)
 }

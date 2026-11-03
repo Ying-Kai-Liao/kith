@@ -51,6 +51,8 @@ DAEMON_INTENDED = [
             'exists there and not on the OLD side; everything else must be the same'},
     {'case': '*', 'facet': 'state:*/core.log',
      'why': 'the --daemon pass: the daemon notes in the core log that it is serving; the OLD side has no core'},
+    {'case': '*', 'facet': 'state:*/Logs/*/',
+     'why': 'the --daemon pass: the daemon writes core.log, so the log folder holds that one file where the case made it empty'},
 ]
 RUST_BIN = ''   # the kith program the NEW side's router uses; main() sets it for a run with the Rust cases
 
@@ -279,8 +281,8 @@ def snapshot(side_dir, case, norm):
             rel_dir = d.relative_to(side_dir).as_posix()
             # In the --core pass a folder holding only the core's own folder is as empty as the OLD side's (core/ is
             # compared on its own, and is an intended difference); the --daemon pass adds the log folder that holds
-            # the daemon's one line (core.log, itself an intended difference), so a logs folder with only that is empty too.
-            if (not dirnames or (WITH_CORE and dirnames == ['core']) or (WITH_DAEMON and set(dirnames) <= {'core', 'logs'})) and not (set(filenames) - ({'core.log'} if WITH_DAEMON else set())) and d != base:
+            # the daemon's one line.
+            if (not dirnames or (WITH_CORE and dirnames == ['core']) or (WITH_DAEMON and set(dirnames) <= {'core', 'logs'})) and not filenames and d != base:
                 facets[f'state:{rel_dir}/'] = '<empty dir>\n'
             for f in sorted(filenames):
                 p = d / f
