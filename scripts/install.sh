@@ -14,7 +14,8 @@
 #
 # Environment:
 #   KITH_VERSION          a release to install (1.2.3 or v1.2.3); default the latest
-#   KITH_PREFIX           where to install; default $KITH_STATE, else ~/.kith
+#   KITH_PREFIX           where to install; default $KITH_STATE, else $HQ_STATE, else this Mac's Kith folder by the
+#                         kernel's rule: ~/.kith once migrated (~/.kith/.migrated), ~/.hq while it is still the real folder
 #   KITH_KEEP_VERSIONS    how many older versions to keep besides the current one; default 3
 #   KITH_INSTALL_YES      never reconnect setup to the terminal (unattended; its offers are skipped)
 #   KITH_REPO             GitHub repo to download from; default Ying-Kai-Liao/kith
@@ -27,11 +28,24 @@
 set -eu
 
 REPO=${KITH_REPO:-Ying-Kai-Liao/kith}
-PREFIX=${KITH_PREFIX:-${KITH_STATE:-$HOME/.kith}}
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# This Mac's Kith folder, as kernel/lib/kith_paths.py and serve/host/src/kernel.rs (machine_dir) read it, so the CLI
+# lands where the host looks: ~/.kith once migrated; a real ~/.hq before that; a ~/.hq link to ~/.kith is ~/.kith.
+machine_dir() {
+  n=$HOME/.kith o=$HOME/.hq
+  if [ -e "$n/.migrated" ]; then echo "$n"
+  elif [ -L "$o" ]; then
+    if [ -d "$o" ] && [ -d "$n" ] && [ "$(cd "$o" && pwd -P)" = "$(cd "$n" && pwd -P)" ]; then echo "$n"
+    elif [ -d "$o" ]; then echo "$o"
+    else echo "$n"; fi
+  elif [ -d "$o" ]; then echo "$o"
+  else echo "$n"; fi
+}
+PREFIX=${KITH_PREFIX:-${KITH_STATE:-${HQ_STATE:-$(machine_dir)}}}
 
 [ "$(uname -s)" = Darwin ] || die "kith's download is for macOS. A Linux VM that only needs the client: curl -fsSL https://raw.githubusercontent.com/$REPO/main/scripts/install-guest.sh | sh. The full kith on Linux: clone https://github.com/$REPO and run ./install.sh"
 case $(uname -m) in

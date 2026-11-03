@@ -124,4 +124,24 @@ check "checkout: exit 0, says to install the CLI and use KITH_KERNEL, links noth
 out=$(bash "$T/checkout/install.sh" --dev 2>&1); rc=$?
 check "checkout --dev: the old linking, --dev not passed on to kith init" '[[ $rc == 0 && $(readlink "$HOME/.local/bin/kith") == "$HOME/kith/kernel/bin/kith" && -L $HOME/kith && $out == *init* && $out != *"init --dev"* ]]'
 
+# --- the default prefix follows the host's rule: a real ~/.hq that is not migrated yet keeps the CLI under ~/.hq ----------
+rm -rf "$M" "$HOME/.hq" "$HOME/kith" "$HOME/.local/bin"/*; mkdir -p "$HOME/.local/bin" "$HOME/.hq"
+release 0.3.0; cli_only 0.3.0 >/dev/null
+check "(a) real ~/.hq, not migrated: the CLI lands in ~/.hq/cli/<v> and ~/.hq/cli/current" '[[ $(readlink "$HOME/.hq/cli/current") == 0.3.0 && -f $HOME/.hq/cli/0.3.0/bin/kith && ! -e $M/cli ]]'
+rm -rf "$HOME/.hq"; mkdir -p "$M"; touch "$M/.migrated"; mkdir -p "$HOME/.hq"
+release 0.3.1; cli_only 0.3.1 >/dev/null
+check "(b) ~/.kith/.migrated beside a real ~/.hq: the CLI goes to ~/.kith/cli" '[[ $(readlink "$M/cli/current") == 0.3.1 && ! -e $HOME/.hq/cli ]]'
+release 0.3.2; KITH_PREFIX=$T/px cli_only 0.3.2 >/dev/null
+check "(c) KITH_PREFIX still wins over the machine folder" '[[ $(readlink "$T/px/cli/current") == 0.3.2 && $(readlink "$M/cli/current") == 0.3.1 ]]'
+rm -rf "$M" "$HOME/.hq" "$HOME/kith" "$HOME/.local/bin"/*; mkdir -p "$HOME/.local/bin"
+release 0.3.3; cli_only 0.3.3 >/dev/null
+check "(d) neither folder exists: the CLI goes to ~/.kith/cli" '[[ $(readlink "$M/cli/current") == 0.3.3 && ! -e $HOME/.hq ]]'
+rm -rf "$M" "$HOME/.hq"; mkdir -p "$T/hqreal" "$M"; ln -s "$T/hqreal" "$HOME/.hq"
+release 0.3.4; cli_only 0.3.4 >/dev/null
+check "(e) ~/.hq links to a different folder, unmigrated: the CLI goes to the linked ~/.hq" '[[ $(readlink "$T/hqreal/cli/current") == 0.3.4 ]]'
+rm -rf "$M" "$HOME/.hq" "$T/hqreal" "$T/px"; mkdir -p "$M"; ln -s "$M" "$HOME/.hq"
+release 0.3.5; cli_only 0.3.5 >/dev/null
+check "(f) ~/.hq links to ~/.kith: the CLI goes to ~/.kith/cli" '[[ $(readlink "$M/cli/current") == 0.3.5 ]]'
+rm -rf "$M" "$HOME/.hq" "$HOME/kith" "$HOME/.local/bin"/*
+
 exit $fail
