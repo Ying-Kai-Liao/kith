@@ -2143,6 +2143,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-holder"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "kith-kernel"
 version = "0.1.0"
 dependencies = [

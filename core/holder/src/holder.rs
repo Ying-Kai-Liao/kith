@@ -1,0 +1,596 @@
+// Adapted from herdr-core b63ecbd (crates/herdr-core/src/holder.rs: the shape of the holder, its per-core writer
+// thread and backlog, the pump and reap threads, the 1 MB output tail). Copyright herdrdev and the herdr-core
+// contributors, Apache-2.0. See NOTICE. Everything about who may do what (the secret, generation fencing, the
+// claim, kill and ack answers) is Kith's own; herdr's core restarting, scopes and sweeping are not taken.
+//
+//! The holder: owns every agent process, is its parent, always reads its output, keeps a tail and the unacked
+//! exits. No parsing, no policy: it checks a secret and a generation and does what the newest core says.
+
+use crate::platform::{self, Proc, Spec};
+use crate::proto::{self as p, Held, KillState, Refused, Why};
+use crate::wire;
+use std::collections::{HashMap, VecDeque};
+use std::io::{self, Write};
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
+const TAIL_BYTES: usize = 1 << 20;
+/// How long an exit waits for the last output of the process before it is reported anyway.
+const EXIT_DRAIN: Duration = Duration::from_millis(500);
+/// Output queued for a core that reads slowly before programs have to wait for it.
+const BACKLOG_BYTES: usize = 8 << 20;
+
+pub struct Config {
+    /// The holder's folder (private): its socket and log.
+    pub dir: PathBuf,
+    /// The opaque secret every hello must carry (the local hand's pairing key).
+    pub secret: String,
+    /// Exit after this long with no core and nothing held. Zero: never.
+    pub idle: Duration,
+}
+
+struct Entry {
+    held: Held,
+    proc: Arc<Proc>,
+    /// Input goes through its own thread: a program that stops reading blocks only itself. None once closed.
+    input: Option<Sender<Vec<u8>>>,
+    tail: VecDeque<u8>,
+    /// Output streams still being read.
+    readers: u8,
+}
+
+/// The connected core. Frames go out through its own writer thread: a core that stops reading must never block
+/// anyone holding the state lock.
+struct Core {
+    conn: u64,
+    frames: Sender<Vec<u8>>,
+    backlog: Arc<Backlog>,
+    /// Shut down to free a writer stuck on a core that is gone.
+    stream: platform::Stream,
+}
+
+/// Bytes queued for one core; None once its writer stopped.
+struct Backlog {
+    bytes: Mutex<Option<usize>>,
+    changed: Condvar,
+}
+
+impl Backlog {
+    fn update(&self, f: impl FnOnce(&mut Option<usize>)) {
+        f(&mut self.bytes.lock().unwrap_or_else(|p| p.into_inner()));
+        self.changed.notify_all();
+    }
+
+    fn over(&self, limit: usize) -> bool {
+        self.bytes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some_and(|n| n > limit)
+    }
+
+    /// Waits (never under the state lock) until at most `limit` bytes are queued or the writer stopped.
+    fn wait(&self, limit: usize) {
+        let bytes = self.bytes.lock().unwrap_or_else(|p| p.into_inner());
+        drop(
+            self.changed
+                .wait_while(bytes, |b| b.is_some_and(|n| n > limit)),
+        );
+    }
+}
+
+struct State {
+    procs: HashMap<u32, Entry>,
+    next_id: u32,
+    /// The newest generation any core has said hello with. Never goes down.
+    newest: u64,
+    conns: u64,
+    core: Option<Core>,
+    idle_since: Option<Instant>,
+}
+
+struct Holder {
+    state: Mutex<State>,
+    /// Signals: an output stream ended, or an exit was recorded.
+    changed: Condvar,
+    instance: String,
+    secret: Vec<u8>,
+    endpoint: PathBuf,
+    idle: Duration,
+}
+
+/// Runs a holder in `cfg.dir` until it is idle or told to shut down.
+pub fn run(cfg: Config) -> io::Result<()> {
+    if cfg.secret.len() < 16 {
+        return Err(io::Error::other(
+            "the holder secret must be at least 16 characters",
+        ));
+    }
+    platform::private_dir(&cfg.dir)?;
+    let endpoint = platform::endpoint(&cfg.dir);
+    let listener = match platform::listen(&endpoint) {
+        Ok(l) => l,
+        Err(e)
+            if e.kind() == io::ErrorKind::AddrInUse
+                || e.kind() == io::ErrorKind::PermissionDenied =>
+        {
+            // A live holder answers; a socket file left by a crash does not.
+            if platform::connect(&endpoint).is_ok() {
+                return Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    "a holder already runs here",
+                ));
+            }
+            platform::remove_endpoint(&endpoint);
+            platform::listen(&endpoint)?
+        }
+        Err(e) => return Err(e),
+    };
+    let holder = Arc::new(Holder {
+        state: Mutex::new(State {
+            procs: HashMap::new(),
+            next_id: 1,
+            newest: 0,
+            conns: 0,
+            core: None,
+            idle_since: Some(Instant::now()),
+        }),
+        changed: Condvar::new(),
+        instance: platform::random_hex(),
+        secret: cfg.secret.into_bytes(),
+        endpoint,
+        idle: cfg.idle,
+    });
+    let watcher = holder.clone();
+    std::thread::spawn(move || watcher.watch_idle());
+    loop {
+        let stream = platform::accept(&listener)?;
+        let holder = holder.clone();
+        std::thread::spawn(move || {
+            // A caller that hangs up (a liveness probe, a core that died) is not worth a log line.
+            let quiet = [
+                io::ErrorKind::BrokenPipe,
+                io::ErrorKind::UnexpectedEof,
+                io::ErrorKind::ConnectionReset,
+            ];
+            if let Err(e) = holder.serve(stream)
+                && !quiet.contains(&e.kind())
+            {
+                eprintln!("holder: connection: {e}");
+            }
+        });
+    }
+}
+
+/// Compares without stopping at the first difference.
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+impl Holder {
+    fn lock(&self) -> MutexGuard<'_, State> {
+        self.state.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    fn exit(&self) -> ! {
+        platform::remove_endpoint(&self.endpoint);
+        std::process::exit(0);
+    }
+
+    fn watch_idle(&self) {
+        loop {
+            std::thread::sleep(Duration::from_millis(100));
+            let st = self.lock();
+            if !self.idle.is_zero()
+                && st.core.is_none()
+                && st.procs.is_empty()
+                && st.idle_since.is_some_and(|t| t.elapsed() >= self.idle)
+            {
+                drop(st);
+                self.exit();
+            }
+        }
+    }
+
+    /// Queues a frame for the current core.
+    fn to_core(&self, st: &State, frame: Vec<u8>) {
+        if let Some(core) = &st.core {
+            core.backlog.update(|b| *b = b.map(|n| n + frame.len()));
+            let _ = core.frames.send(frame);
+        }
+    }
+
+    fn drop_core(&self, st: &mut State) {
+        if let Some(core) = st.core.take() {
+            let _ = core.stream.shutdown(std::net::Shutdown::Both);
+            core.backlog.update(|b| *b = None);
+        }
+        st.idle_since = Some(Instant::now());
+    }
+
+    /// Writes one core's frames in order; a failed write means that core is gone.
+    fn write_to_core(
+        &self,
+        conn: u64,
+        mut stream: platform::Stream,
+        frames: Receiver<Vec<u8>>,
+        backlog: Arc<Backlog>,
+    ) {
+        for frame in frames {
+            if stream.write_all(&frame).is_err() {
+                break;
+            }
+            backlog.update(|b| *b = b.map(|n| n.saturating_sub(frame.len())));
+        }
+        backlog.update(|b| *b = None);
+        let mut st = self.lock();
+        if st.core.as_ref().is_some_and(|c| c.conn == conn) {
+            self.drop_core(&mut st);
+        }
+    }
+
+    fn refuse(stream: &mut platform::Stream, why: Why, current: u64) -> io::Result<()> {
+        wire::write_json(stream, p::REFUSED, 0, &Refused { why, current })
+    }
+
+    fn held_list(st: &State) -> Vec<Held> {
+        let mut procs: Vec<Held> = st.procs.values().map(|e| e.held.clone()).collect();
+        procs.sort_by_key(|h| h.id);
+        procs
+    }
+
+    fn serve(self: &Arc<Self>, mut stream: platform::Stream) -> io::Result<()> {
+        let hello: p::Hello = match wire::read(&mut stream)? {
+            Some((p::HELLO, _, payload)) => wire::parse(&payload)?,
+            _ => {
+                let current = self.lock().newest;
+                return Self::refuse(&mut stream, Why::NoHello, current);
+            }
+        };
+        let conn = {
+            let mut st = self.lock();
+            if hello.version != p::VERSION {
+                return Self::refuse(&mut stream, Why::BadVersion, st.newest);
+            }
+            if !same_secret(hello.secret.as_bytes(), &self.secret) {
+                return Self::refuse(&mut stream, Why::BadSecret, st.newest);
+            }
+            // The same generation may come back (a dropped connection); an older one may not.
+            if hello.generation < st.newest {
+                return Self::refuse(&mut stream, Why::StaleGeneration, st.newest);
+            }
+            self.drop_core(&mut st);
+            st.newest = hello.generation;
+            st.conns += 1;
+            st.idle_since = None;
+            let conn = st.conns;
+            let (frames, queued) = std::sync::mpsc::channel();
+            let backlog = Arc::new(Backlog {
+                bytes: Mutex::new(Some(0)),
+                changed: Condvar::new(),
+            });
+            let (writer, kept) = (stream.try_clone()?, stream.try_clone()?);
+            let (holder, written) = (self.clone(), backlog.clone());
+            std::thread::spawn(move || holder.write_to_core(conn, writer, queued, written));
+            st.core = Some(Core {
+                conn,
+                frames,
+                backlog,
+                stream: kept,
+            });
+            let welcome = p::Welcome {
+                version: p::VERSION,
+                instance: self.instance.clone(),
+                pid: std::process::id(),
+                generation: st.newest,
+                procs: Self::held_list(&st),
+            };
+            self.to_core(&st, wire::json_frame(p::WELCOME, 0, &welcome));
+            conn
+        };
+        let result = self.commands(&mut stream, conn, hello.generation);
+        let mut st = self.lock();
+        if st.core.as_ref().is_some_and(|c| c.conn == conn) {
+            self.drop_core(&mut st);
+        }
+        result
+    }
+
+    fn commands(
+        self: &Arc<Self>,
+        stream: &mut platform::Stream,
+        conn: u64,
+        generation: u64,
+    ) -> io::Result<()> {
+        while let Some((kind, id, payload)) = wire::read(stream)? {
+            let mut st = self.lock();
+            // A newer core said hello: this one is done, and nothing it sends counts any more.
+            if st.core.as_ref().is_none_or(|c| c.conn != conn) {
+                let current = st.newest;
+                drop(st);
+                return Self::refuse(stream, Why::Superseded, current);
+            }
+            match kind {
+                p::SPAWN => {
+                    let spec: p::Spawn = wire::parse(&payload)?;
+                    if spec.generation != generation || generation != st.newest {
+                        let current = st.newest;
+                        self.to_core(
+                            &st,
+                            wire::json_frame(
+                                p::REFUSED,
+                                0,
+                                &Refused {
+                                    why: Why::StaleGeneration,
+                                    current,
+                                },
+                            ),
+                        );
+                        continue;
+                    }
+                    self.spawn(st, spec);
+                }
+                p::INPUT => {
+                    if let Some(e) = st.procs.get_mut(&id) {
+                        if payload.is_empty() {
+                            e.input = None;
+                        } else if let Some(tx) = &e.input {
+                            let _ = tx.send(payload);
+                        }
+                    }
+                }
+                p::RESIZE => {
+                    let size: p::Size = wire::parse(&payload)?;
+                    if let Some(e) = st.procs.get_mut(&id).filter(|e| e.held.exit.is_none()) {
+                        e.held.cols = size.cols;
+                        e.held.rows = size.rows;
+                        e.proc.resize(size.cols, size.rows);
+                    }
+                }
+                p::KILL => {
+                    let state = self.kill(&st, id);
+                    self.to_core(&st, wire::json_frame(p::KILLED, id, &p::Killed { state }));
+                }
+                p::ACK => {
+                    let state = match st.procs.get(&id).map(|e| e.held.exit.is_some()) {
+                        None => p::AckState::Gone,
+                        Some(false) => p::AckState::Running,
+                        Some(true) => {
+                            st.procs.remove(&id);
+                            if st.procs.is_empty() && st.core.is_none() {
+                                st.idle_since = Some(Instant::now());
+                            }
+                            p::AckState::Acked
+                        }
+                    };
+                    self.to_core(&st, wire::json_frame(p::ACKED, id, &p::Acked { state }));
+                }
+                p::LIST => {
+                    let listing = p::Listing {
+                        procs: Self::held_list(&st),
+                    };
+                    self.to_core(&st, wire::json_frame(p::LISTING, 0, &listing));
+                }
+                p::TAIL => {
+                    let tail = st
+                        .procs
+                        .get(&id)
+                        .map(|e| e.tail.iter().copied().collect::<Vec<u8>>())
+                        .unwrap_or_default();
+                    self.to_core(&st, wire::frame(p::TAILED, id, &tail));
+                }
+                p::SHUTDOWN => {
+                    for e in st.procs.values() {
+                        e.proc.kill_tree();
+                    }
+                    let deadline = Instant::now() + Duration::from_secs(3);
+                    while st.procs.values().any(|e| !e.proc.tree_empty())
+                        && Instant::now() < deadline
+                    {
+                        drop(st);
+                        std::thread::sleep(Duration::from_millis(20));
+                        st = self.lock();
+                    }
+                    drop(st);
+                    self.exit();
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    /// Idempotent: kills the whole tree and says "gone" only once nothing of it is left. A kill for an id never
+    /// held (or already acked) says "gone" too, so a core can resend until it hears that.
+    fn kill(&self, st: &State, id: u32) -> KillState {
+        let Some(e) = st.procs.get(&id) else {
+            return KillState::Gone;
+        };
+        // An ended process had its tree swept before its exit was recorded.
+        if e.held.exit.is_some() {
+            return KillState::Gone;
+        }
+        e.proc.kill_tree();
+        if e.proc.tree_empty() {
+            KillState::Gone
+        } else {
+            KillState::Killing
+        }
+    }
+
+    fn spawn(self: &Arc<Self>, mut st: MutexGuard<'_, State>, spec: p::Spawn) {
+        // The same spawn again (the core did not hear the first answer) is answered, not run twice.
+        if let Some(e) = st
+            .procs
+            .values()
+            .find(|e| e.held.conv == spec.conv && e.held.claim == spec.claim)
+        {
+            let frame = wire::json_frame(
+                p::SPAWNED,
+                e.held.id,
+                &p::Spawned {
+                    conv: spec.conv,
+                    claim: spec.claim,
+                    pid: e.held.pid,
+                },
+            );
+            return self.to_core(&st, frame);
+        }
+        let started = platform::spawn(&Spec {
+            argv: &spec.argv,
+            env: &spec.env,
+            cwd: &spec.cwd,
+            mode: spec.mode,
+            cols: spec.cols,
+            rows: spec.rows,
+        });
+        let started = match started {
+            Ok(s) => s,
+            Err(e) => {
+                let error = format!(
+                    "cannot start {:?}: {e}",
+                    spec.argv.first().map_or("", |s| s.as_str())
+                );
+                eprintln!("holder: {}: {error}", spec.conv);
+                let failed = p::SpawnFailed {
+                    conv: spec.conv,
+                    claim: spec.claim,
+                    error,
+                };
+                return self.to_core(&st, wire::json_frame(p::SPAWN_FAILED, 0, &failed));
+            }
+        };
+        let id = st.next_id;
+        st.next_id += 1;
+        let pid = started.proc.pid();
+        let proc = Arc::new(started.proc);
+        let (input, queued) = std::sync::mpsc::channel::<Vec<u8>>();
+        let mut writer = started.input;
+        std::thread::spawn(move || {
+            for bytes in queued {
+                if writer
+                    .write_all(&bytes)
+                    .and_then(|()| writer.flush())
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
+        st.procs.insert(
+            id,
+            Entry {
+                held: Held {
+                    id,
+                    conv: spec.conv.clone(),
+                    claim: spec.claim,
+                    generation: spec.generation,
+                    pid,
+                    mode: spec.mode,
+                    cols: spec.cols,
+                    rows: spec.rows,
+                    exit: None,
+                },
+                proc: proc.clone(),
+                input: Some(input),
+                tail: VecDeque::new(),
+                readers: 1 + u8::from(started.err.is_some()),
+            },
+        );
+        let reader = |stream: Box<dyn std::io::Read + Send>, kind: u8| {
+            let holder = self.clone();
+            std::thread::spawn(move || holder.pump(id, kind, stream));
+        };
+        reader(started.out, p::OUTPUT);
+        if let Some(err) = started.err {
+            reader(err, p::STDERR);
+        }
+        let holder = self.clone();
+        std::thread::spawn(move || holder.reap(id, proc));
+        self.to_core(
+            &st,
+            wire::json_frame(
+                p::SPAWNED,
+                id,
+                &p::Spawned {
+                    conv: spec.conv,
+                    claim: spec.claim,
+                    pid,
+                },
+            ),
+        );
+    }
+
+    /// Always reads, core or not, so programs never stall on a full pipe.
+    fn pump(&self, id: u32, kind: u8, mut reader: impl std::io::Read) {
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let n = match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break, // EIO on a pty: every slave side closed
+            };
+            let mut st = self.lock();
+            let Some(e) = st.procs.get_mut(&id) else {
+                break;
+            };
+            if kind == p::OUTPUT {
+                e.tail.extend(&buf[..n]);
+                let excess = e.tail.len().saturating_sub(TAIL_BYTES);
+                e.tail.drain(..excess);
+            }
+            self.to_core(&st, wire::frame(kind, id, &buf[..n]));
+            // A core that falls behind slows its programs, as a pipe nobody reads would.
+            let Some(backlog) = st
+                .core
+                .as_ref()
+                .map(|c| c.backlog.clone())
+                .filter(|b| b.over(BACKLOG_BYTES))
+            else {
+                continue;
+            };
+            drop(st);
+            backlog.wait(BACKLOG_BYTES);
+        }
+        if let Some(e) = self.lock().procs.get_mut(&id) {
+            e.readers -= 1;
+        }
+        self.changed.notify_all();
+    }
+
+    /// The exit is recorded after the tree is swept and the last output forwarded; it stays until a core acks it.
+    fn reap(&self, id: u32, proc: Arc<Proc>) {
+        proc.wait_exit();
+        // The program is done; what it left behind goes too, before its exit is reported.
+        proc.sweep();
+        let exit = match proc.reap() {
+            Ok(exit) => exit,
+            Err(e) => {
+                eprintln!("holder: wait for process {id}: {e}");
+                return;
+            }
+        };
+        let deadline = Instant::now() + EXIT_DRAIN;
+        let mut st = self.lock();
+        while st.procs.get(&id).is_some_and(|e| e.readers > 0) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            st = self
+                .changed
+                .wait_timeout(st, left)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+        if let Some(e) = st.procs.get_mut(&id) {
+            e.held.exit = Some(exit);
+            self.to_core(&st, wire::json_frame(p::EXITED, id, &exit));
+        }
+    }
+}

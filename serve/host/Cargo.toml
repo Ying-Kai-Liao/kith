@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 # The memory crate builds here and is mirrored to its own repository (docs/design/bot-memory.md#packaging).
 [workspace]
-members = ["crates/memory", "crates/tts", "crates/wire", "crates/guest", "../../core/kernel", "../../core/acp"]
+members = ["crates/memory", "crates/tts", "crates/wire", "crates/guest", "../../core/kernel", "../../core/acp", "../../core/holder"]
 
 [dependencies]
 anyhow = "1.0.104"
