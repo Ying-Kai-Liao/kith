@@ -286,7 +286,7 @@ Kai: "you are welcome to make it finer to execute and check", then "when we are 
 
 ### M0 build rules
 - **M0a:**
-  - The lock is a separate `core.lock` file, which nothing ever deletes. It records the holder's pid and start time, so `kith doctor` can end a holder that holds the lock but doesn't answer.
+  - The lock is a separate `core.lock` file, which nothing ever deletes. The holder's pid and start time go in a second file, `core.holder` (written after the lock is taken, owner-only, in the same folder; on Windows a held lock covers all of core.lock, so nobody could read the line there), so `kith doctor` can end a holder that holds the lock but doesn't answer.
   - Every lock holder bumps the generation, embedded mode included.
   - Embedded mode never says hello to a holder and runs no claim transactions.
   - One function opens every transaction that touches claims and checks the generation.

@@ -2118,6 +2118,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kith-core"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "getrandom 0.4.3",
+ "kith-kernel",
+ "rusqlite",
+ "tempfile",
+]
+
+[[package]]
 name = "kith-guest"
 version = "0.1.0"
 dependencies = [
@@ -2200,6 +2211,7 @@ dependencies = [
  "if-addrs",
  "keyring",
  "kith-acp",
+ "kith-core",
  "kith-guest",
  "kith-kernel",
  "kith-mem",

@@ -37,6 +37,11 @@ FAKES = HERE / 'fakes'
 ABSENT = '<absent>\n'
 SIDES = ('old', 'new')
 CORE = {'old': 'python', 'new': 'rust'}
+WITH_CORE = False    # --core: the NEW side has its core database before the case runs
+CORE_RAN, CORE_BARE = [], []    # --core: names of the cases that ran with a core, and those that started before any setup
+CORE_INTENDED = {'case': '*', 'facet': 'state:*/core/*',
+                 'why': 'the --core pass: the NEW side made its core database first (kith kernel core-migrate), so its core/ folder '
+                        'exists there and not on the OLD side; everything else must be the same'}
 RUST_BIN = ''   # the kith program the NEW side's router uses; main() sets it for a run with the Rust cases
 
 
@@ -259,7 +264,9 @@ def snapshot(side_dir, case, norm):
             dirnames.sort()
             d = Path(dirpath)
             rel_dir = d.relative_to(side_dir).as_posix()
-            if not dirnames and not filenames and d != base:
+            # In the --core pass a folder holding only the core's own folder is as empty as the OLD side's (core/ is
+            # compared on its own, and is an intended difference).
+            if (not dirnames or (WITH_CORE and dirnames == ['core'])) and not filenames and d != base:
                 facets[f'state:{rel_dir}/'] = '<empty dir>\n'
             for f in sorted(filenames):
                 p = d / f
@@ -293,10 +300,35 @@ def snapshot(side_dir, case, norm):
     return facets
 
 
+def make_core(side_dir, env, name):
+    """The --core pass: the NEW side's first setup has happened, so its core database exists and every Rust verb of the
+    case runs inside an embedded core (its lock, its checks, a new generation). Only where the machine folder is
+    already there: a case that starts before any setup keeps running bare, as a first run does. A failing
+    `core-migrate` fails the case (it would otherwise run bare and pass); the cases that did run with a core are counted
+    so the pass cannot be green having proved nothing."""
+    got = subprocess.run([RUST_BIN, 'kernel', 'paths', '--json'], cwd=side_dir / 'home', env=env, capture_output=True,
+                         text=True, timeout=TIMEOUT)
+    try:
+        machine = json.loads(got.stdout)['KITH_MACHINE']
+    except (ValueError, KeyError):
+        CORE_BARE.append(name)
+        return
+    if not os.path.isdir(machine):
+        CORE_BARE.append(name)
+        return
+    mig = subprocess.run([RUST_BIN, 'kernel', 'core-migrate'], cwd=side_dir / 'home', env=env, capture_output=True,
+                         text=True, timeout=TIMEOUT)
+    if mig.returncode != 0:
+        raise RuntimeError(f'kith kernel core-migrate exited {mig.returncode}: {(mig.stderr or mig.stdout).strip()[:300]}')
+    CORE_RAN.append(name)
+
+
 def run_side(side, work, case, prefix):
     side_dir = work / side
     side_dir.mkdir(parents=True)
     env = build(side, side_dir, case)
+    if WITH_CORE and side == 'new':
+        make_core(side_dir, env, case['name'])
     norm = Normalizer(side_dir, case.get('normalize', []))
     facets = run_steps(side, side_dir, case, prefix, env, norm)
     facets.update(snapshot(side_dir, case, norm))
@@ -435,6 +467,7 @@ def main(argv=None):
     ap.add_argument('--case', action='append', help='only cases whose name matches this glob')
     ap.add_argument('--rust', action='store_true', help='also run the cases that need the Rust binary (implied by --new)')
     ap.add_argument('--bin', help='the kith program for the Rust cases (default: $KITH_DIFFTEST_BIN, else a cargo build in serve/host/target)')
+    ap.add_argument('--core', action='store_true', help='second pass: make the core database on the NEW side first (kith kernel core-migrate), so the Rust verbs run inside an embedded core; its files (core/) are an intended difference. Needs --rust or --new')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--keep', action='store_true', help='keep the throwaway folders')
     ap.add_argument('--summary', metavar='FILE', help='write a JSON summary per command (green/red) to FILE; "-" for stdout')
@@ -444,7 +477,8 @@ def main(argv=None):
     cases = load_corpus(a.corpus or [HERE / 'corpus'])
     if a.case:
         cases = [c for c in cases if any(fnmatch.fnmatchcase(c['name'], g) for g in a.case)]
-    global RUST_BIN
+    global RUST_BIN, WITH_CORE
+    WITH_CORE = a.core
     RUST_BIN = a.bin or os.environ.get('KITH_DIFFTEST_BIN') or (find_rust_bin() if (a.rust or a.new) else '')
     if (a.rust or a.new) and not RUST_BIN and any(c.get('needs') == 'rust' for c in cases):
         raise SystemExit('no kith program for the Rust cases: build one (cargo build --bin kith in serve/host) or pass --bin')
@@ -460,7 +494,12 @@ def main(argv=None):
     default = [str(KERNEL / 'bin' / 'kith')]
     prefixes = {'default': {'old': default, 'new': default},
                 'old': shlex.split(a.old) if a.old else None, 'new': shlex.split(a.new) if a.new else None}
-    failed, stale, summary = run_all(cases, prefixes, load_intended(a.intended), a.jobs, a.keep)
+    intended = load_intended(a.intended)
+    if WITH_CORE:
+        if not RUST_BIN:
+            raise SystemExit('--core needs the Rust program: pass --rust (and --bin)')
+        intended.append(CORE_INTENDED)
+    failed, stale, summary = run_all(cases, prefixes, intended, a.jobs, a.keep)
     if a.summary:
         doc = json.dumps({'commands': {k: summary[k] for k in sorted(summary)}, 'stale': [e['case'] + ' ' + e['facet'] for e in stale]},
                          indent=2, sort_keys=True) + '\n'
@@ -469,6 +508,11 @@ def main(argv=None):
         else:
             Path(a.summary).write_text(doc)
     print(f'{len(cases) - len(failed)}/{len(cases)} cases the same' + (f', {len(stale)} stale intended' if stale else ''))
+    if WITH_CORE:
+        print(f'core: {len(CORE_RAN)} case(s) ran with a core, {len(CORE_BARE)} started before any setup and ran bare')
+        if not CORE_RAN:
+            print('FAIL  the --core pass ran no case through a core, so it proved nothing')
+            return 1
     return 1 if failed or stale else 0
 
 
