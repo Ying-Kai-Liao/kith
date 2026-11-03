@@ -11,7 +11,7 @@ use super::{Config, Daemon, Reached};
 use crate::Error;
 use crate::holder_link::HolderConfig;
 use crate::layout::Layout;
-use crate::tests::{machine, open, paths};
+use crate::tests::{machine, open, open_all, paths};
 
 fn quiet() -> Config {
     Config {
@@ -806,7 +806,7 @@ fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
     let pp = paths(&root);
     let layout = Layout::new(&root);
     {
-        let mut core = open(&layout);
+        let mut core = open_all(&layout);
         let clk = crate::sync_lease::System;
         crate::sync_lease::link(&mut core, &clk).expect("link");
         let mark = crate::sync_lease::mark(&mut core).expect("mark");
