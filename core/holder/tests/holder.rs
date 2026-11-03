@@ -919,5 +919,8 @@ fn an_older_cores_renewals_do_not_keep_the_lease() {
     new.renew(Duration::from_millis(400)).unwrap();
     // The superseded core keeps sending long renewals; none counts.
     let _ = old.renew(Duration::from_secs(600));
-    assert!(ended(&mut new, guest), "an old core's renewal kept the lease");
+    assert!(
+        ended(&mut new, guest),
+        "an old core's renewal kept the lease"
+    );
 }

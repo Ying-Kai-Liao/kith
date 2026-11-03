@@ -540,7 +540,10 @@ fn a_connected_core_keeps_renewing_the_holders_lease() {
     use kith_holder::{auth, proto, wire};
     fn proving(mut s: kith_holder::platform::Stream) {
         let file = SECRET_FILE.lock().unwrap().clone().expect("secret file");
-        let secret = std::fs::read_to_string(file).expect("secret").trim().to_owned();
+        let secret = std::fs::read_to_string(file)
+            .expect("secret")
+            .trim()
+            .to_owned();
         let Ok(Some((proto::HELLO, _, payload))) = wire::read(&mut s) else {
             return;
         };
@@ -553,8 +556,13 @@ fn a_connected_core_keeps_renewing_the_holders_lease() {
             &nonce,
             hello.generation,
         );
-        wire::write_json(&mut s, proto::CHALLENGE, 0, &proto::Challenge { nonce, proof })
-            .expect("challenge");
+        wire::write_json(
+            &mut s,
+            proto::CHALLENGE,
+            0,
+            &proto::Challenge { nonce, proof },
+        )
+        .expect("challenge");
         let Ok(Some((proto::AUTH, _, _))) = wire::read(&mut s) else {
             return;
         };
