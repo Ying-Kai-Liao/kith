@@ -508,7 +508,7 @@ jobs:
         run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel -p kith-core
 
   # The crates that must also work on Windows: kith-kernel (its Unix-only modules are cfg-gated: threads) and kith-core
-  # (core.lock via LockFileEx, owner-only access lists via icacls). Extended for kith-holder when that lands.
+  # (the lifetime lock via LockFileEx, owner-only access lists via icacls). Extended for kith-holder when that lands.
   windows:
     needs: changes
     if: needs.changes.outputs.host_core == 'true'

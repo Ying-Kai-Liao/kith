@@ -1,7 +1,7 @@
 //! kith-core: the sealed core (docs/plans/runtime-design.md). It is the only writer of core.db and, later, the only
 //! place decisions are made. Product modules call its API and never its tables; this crate's public surface is the
-//! few entry points below, everything else is `pub(crate)`. `core/runtime/tests/boundary.rs` and
-//! `kernel/tests/kith-core-boundary-check` fail when that stops being true.
+//! few entry points below, everything else is `pub(crate)`.
+//! `kernel/tests/kith-core-boundary-check` fails when that stops being true.
 //!
 //! This step (M0a) is the foundation: core.db with its lifetime lock and generation, owner-only permissions, the
 //! marker that refuses an empty start, and embedded mode. The method table comes next (M0b).

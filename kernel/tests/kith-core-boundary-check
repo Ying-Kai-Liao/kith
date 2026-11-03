@@ -5,7 +5,7 @@ Fails when:
   1. kith-core's public surface grows past its entry points: a `pub` item or a field of a `pub` struct in
      core/runtime/src that is not on the list below (a crude source scan, on purpose: it needs no nightly rustdoc).
   2. a crate other than the daemon's wiring and the CLI entry point (one crate today: serve/host) lists kith-core
-     as a dependency, or Rust code outside serve/host/src/main.rs names `kith_core`.
+     as a dependency, or Rust code outside serve/host/src/main.rs (and its end-to-end test) names `kith_core`.
   3. "core.db" (or its sibling file names) appears outside core/runtime: Rust, the Python kernel, the apps. Docs and the
      guard/sandbox lists (which name the folder `core`, not the file) are exempt.
 
@@ -34,7 +34,7 @@ PUBLIC = {
 # The crates that may depend on kith-core: the daemon's wiring and the CLI entry point are the one host crate.
 DEPENDENTS = {"serve/host/Cargo.toml"}
 # Rust files outside core/runtime that may name kith_core.
-RUST_USERS = {"serve/host/src/main.rs"}
+RUST_USERS = {"serve/host/src/main.rs", "serve/host/tests/core_embedded_e2e.rs"}
 # Files that may say "core.db": docs, this check, and the protected-paths list (runtime-design 9b rules 1 and 2).
 EXEMPT_NAME = ("kernel/tests/kith-core-boundary-check", "kernel/lib/kith_guard.py")
 NAMES = re.compile(r"core\.db|core\.lock|core\.marker")
