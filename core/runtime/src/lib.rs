@@ -36,6 +36,10 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+// The claim path's read (`lease_held_for_non_owner`, `held_in`) and `restart` have no caller until M3 and the daemon start
+// wire them; the rows reach the rest.
+#[allow(dead_code)]
+mod sync_lease;
 // The host vault calls `secrets.open|get|put` (M2-7); `delete` and `list` wait for kith-auth and rollback (M2-18).
 #[allow(dead_code, reason = "delete and list are M2-18's")]
 mod secrets;
