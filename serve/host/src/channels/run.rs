@@ -570,22 +570,18 @@ impl Core {
                 tokio::spawn(async move { drop(fetch_chain(&backups, &bin, &agent).await) });
             }
         };
-        match self.backups.chain_state(agent) {
-            Some((age, chain)) => {
-                if Backups::chain_stale(age, &chain) {
-                    later();
-                }
-                chain
+        if let Some((age, chain)) = self.backups.chain_state(agent) {
+            if Backups::chain_stale(age, &chain) {
+                later();
             }
-            None => {
-                let (backups, bin, name) = (self.backups.clone(), self.paths.hq_bin.clone(), agent.to_owned());
-                self.backups
-                    .chain_within(agent, FIRST_CHAIN_WAIT, move || async move {
-                        drop(fetch_chain(&backups, &bin, &name).await);
-                    })
-                    .await
-            }
+            return chain;
         }
+        let (backups, bin, name) = (self.backups.clone(), self.paths.hq_bin.clone(), agent.to_owned());
+        self.backups
+            .chain_within(agent, FIRST_CHAIN_WAIT, move || async move {
+                drop(fetch_chain(&backups, &bin, &name).await);
+            })
+            .await
     }
 
     async fn say(&self, ad: &Arc<dyn Adapter>, conv: &Value, agent: &str, text: &str, ctx: Option<f64>) {

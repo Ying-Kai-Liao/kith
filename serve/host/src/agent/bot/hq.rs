@@ -246,21 +246,17 @@ impl Actor {
     /// agent's account out (a terminal run, another agent that asked it), and a first turn that doesn't know starts on
     /// that account. No chain, or any failure, is an empty chain.
     async fn hq_chain(&self, agent: &str) -> Vec<ChainEntry> {
-        match self.hub.backups.chain_state(agent) {
-            Some((age, chain)) => {
-                if Backups::chain_stale(age, &chain) {
-                    refresh_chain_later(&self.hub, agent);
-                }
-                chain
+        if let Some((age, chain)) = self.hub.backups.chain_state(agent) {
+            if Backups::chain_stale(age, &chain) {
+                refresh_chain_later(&self.hub, agent);
             }
-            None => {
-                let (hub, name) = (self.hub.clone(), agent.to_owned());
-                self.hub
-                    .backups
-                    .chain_within(agent, FIRST_CHAIN_WAIT, move || async move { drop(fetch_chain(&hub, &name).await) })
-                    .await
-            }
+            return chain;
         }
+        let (hub, name) = (self.hub.clone(), agent.to_owned());
+        self.hub
+            .backups
+            .chain_within(agent, FIRST_CHAIN_WAIT, move || async move { drop(fetch_chain(&hub, &name).await) })
+            .await
     }
 
     /// A Codex backup's new session starts in the mode that matches the agent's permission mode, when the adapter lists

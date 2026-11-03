@@ -465,7 +465,7 @@ impl Backups {
     pub async fn chain_within<F, Fut>(self: &Arc<Self>, agent: &str, wait: Duration, fetch: F) -> Vec<ChainEntry>
     where
         F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = ()> + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
     {
         if self.begin_refresh(agent) {
             tokio::spawn(fetch());
