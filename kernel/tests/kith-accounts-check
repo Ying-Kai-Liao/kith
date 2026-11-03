@@ -197,6 +197,7 @@ rm "$HOME/.claude/.fake-login"
 OUT=$("$KITH" echo --accounts-json)
 check "--accounts-json: the main default login is a ready candidate even when auth status says logged out" "is \"(d['candidates'][:2], d['all_out'], [r['status'] for r in d['accounts'] if r['id']=='claude'])\" \"(['claude', 'claude:a'], False, ['ready'])\""
 OUT=$("$KITH" account pick echo --json); check "pick: the same" "is \"d['candidates'][:2]\" \"['claude', 'claude:a']\""
+OUT=$(KITH_AGENT=boss "$KITH" echo --backup claude "hi" 2>&1); check "--backup claude (the host naming the main account) launches on a logged-out default login: no auth status check" "echo \"\$OUT\" | grep -q 'ran-on=default'"
 login "$HOME/.claude"
 # own: the agent's own list when it has one (a client sends it back whole), else null; a pin is not part of it
 OUT=$("$KITH" echo --accounts-json); check "--accounts-json: own is null while the agent follows the global set" "is \"d['own']\" None"

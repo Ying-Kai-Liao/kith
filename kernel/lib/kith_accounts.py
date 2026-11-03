@@ -340,10 +340,12 @@ def prepare_claude_dir(directory, main_dir=None, main_json=None):
 
 def launch_env(agent, entry, light=False, record=False):
     """Shell assignments for bin/kith. Raises ValueError (exit 4) when the entry can't run. light: the main account's
-    check (present), not the harness's status command."""
+    check (present), not the harness's status command. The default login is always checked that way: the host may hold its
+    keys where `auth status` can't see them, and a logged-out one is the harness's to say, as on a plain run."""
     harness, name = parse(entry)
     if harness not in ('claude', 'claude-api', 'codex'):
         raise ValueError(f'{entry}: {harness} is not supported in launch-json yet')
+    light = light or (harness in ('claude', 'codex') and not name)
     ready, why = present(entry, agent) if light else check(entry, agent)
     if not ready:
         hint = fix(entry, agent)

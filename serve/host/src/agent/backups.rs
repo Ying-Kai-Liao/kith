@@ -42,6 +42,11 @@ const READING_STALE_SECS: i64 = 30 * 60;
 pub const FIRST_CHAIN_WAIT: Duration = Duration::from_secs(4);
 const PUSH_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Whether a failed `kith account out ... --extend` says the kith doesn't know the flag (its usage line, exit 2).
+fn flag_rejected(error: &str) -> bool {
+    error.contains("account out <id>")
+}
+
 /// One line of `kith <agent> --backups-json`'s chain.
 #[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Default)]
 pub struct ChainEntry {
@@ -195,7 +200,7 @@ pub struct Backups {
     /// is pushed with `kith account out`.
     kernel: Arc<AtomicBool>,
     /// Bumped by every write the apps make: a read of the kernel that began before it is out of date and applies nothing.
-    generation: AtomicU64,
+    generation: Arc<AtomicU64>,
     /// Ids whose `kith account out` is still on its way: the kernel can't say yet that they are out, so a read of it
     /// does not clear them.
     pushing: Arc<std::sync::Mutex<HashMap<String, usize>>>,
@@ -217,7 +222,7 @@ impl Backups {
             written: std::sync::Mutex::default(),
             now,
             kernel: Arc::default(),
-            generation: AtomicU64::new(0),
+            generation: Arc::default(),
             pushing: Arc::default(),
         }
     }
@@ -309,19 +314,35 @@ impl Backups {
     /// and the next read of the kernel's state decides what stays. Until it ends the id is not cleared by a read.
     fn push_out(&self, id: &str, out: &Out) {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+        self.register_push(id);
+        self.spawn_push(&runtime, id, out);
+    }
+
+    /// The id's push is on its way: a read of the kernel does not clear it.
+    fn register_push(&self, id: &str) {
+        *self.pushing.locked().entry(id.to_owned()).or_default() += 1;
+    }
+
+    /// The push of an id that is registered. When it ends the write count goes up: a read of the kernel that began
+    /// while the push was running may not have seen the mark, and must not clear the host's.
+    fn spawn_push(&self, runtime: &tokio::runtime::Handle, id: &str, out: &Out) {
         let (id, out, pushing) = (id.to_owned(), out.clone(), self.pushing.clone());
-        *pushing.locked().entry(id.clone()).or_default() += 1;
+        let done = self.generation.clone();
         runtime.spawn(async move {
             if let Ok(Some(bin)) = tokio::task::spawn_blocking(crate::agent::hq::bin).await {
                 let until = out.out_until.to_string();
                 let mut args =
                     vec!["account", "out", id.as_str(), "--until", until.as_str(), "--reason", out.reason.as_str()];
                 args.push("--extend");
-                if crate::agent::hq::run(&bin, &args, None, PUSH_TIMEOUT).await.is_err() {
+                let mut result = crate::agent::hq::run(&bin, &args, None, PUSH_TIMEOUT).await;
+                // Only a kith that doesn't know the flag gets the plain form: after a timeout or any other failure a
+                // plain `out` could shorten a longer mark.
+                if result.as_ref().is_err_and(|e| flag_rejected(&format!("{e:#}"))) {
                     args.pop();
-                    if let Err(error) = crate::agent::hq::run(&bin, &args, None, PUSH_TIMEOUT).await {
-                        tracing::warn!(entry = %id, error = format!("{error:#}"), "couldn't tell the kernel an account is out");
-                    }
+                    result = crate::agent::hq::run(&bin, &args, None, PUSH_TIMEOUT).await;
+                }
+                if let Err(error) = result {
+                    tracing::warn!(entry = %id, error = format!("{error:#}"), "couldn't tell the kernel an account is out");
                 }
             }
             let mut pushing = pushing.locked();
@@ -331,6 +352,7 @@ impl Backups {
                     pushing.remove(&id);
                 }
             }
+            done.fetch_add(1, Ordering::SeqCst);
         });
     }
 
@@ -377,16 +399,30 @@ impl Backups {
     pub fn apply_kernel(&self, view: &KernelAccounts, generation: u64) -> bool {
         let mut first = Vec::new();
         let mut retire = false;
+        let runtime = tokio::runtime::Handle::try_current().ok();
         let applied = self.with(|inner, _| {
             if generation != self.generation() {
                 return false;
             }
             if !self.kernel.swap(true, Ordering::SeqCst) {
                 retire = true;
-                first = std::mem::take(&mut inner.out).into_iter().filter(|(_, o)| o.reason != USAGE_95).collect();
+                first = inner
+                    .out
+                    .iter()
+                    .filter(|(_, o)| o.reason != USAGE_95)
+                    .map(|(i, o)| (i.clone(), o.clone()))
+                    .collect();
+                // The host's early marks go; the others stay until the kernel has them (a failed push loses nothing).
+                inner.out.retain(|_, o| o.reason != USAGE_95);
+                if runtime.is_some() {
+                    for (id, _) in &first {
+                        self.register_push(id);
+                    }
+                }
             }
             let pushing = self.pushing.locked();
-            for entry in view.chain.iter().filter(|e| !pushing.contains_key(&e.id)) {
+            let handed: HashSet<&String> = first.iter().map(|(id, _)| id).collect();
+            for entry in view.chain.iter().filter(|e| !pushing.contains_key(&e.id) && !handed.contains(&e.id)) {
                 match view.out.get(&entry.id) {
                     Some(out) => {
                         let since = inner.out.get(&entry.id).map_or(out.since, |o| o.since);
@@ -407,8 +443,10 @@ impl Backups {
             {
                 tracing::warn!(%error, "couldn't retire backups.json");
             }
-            for (id, out) in &first {
-                self.push_out(id, out);
+            if let Some(runtime) = &runtime {
+                for (id, out) in &first {
+                    self.spawn_push(runtime, id, out);
+                }
             }
         }
         applied
@@ -1038,6 +1076,34 @@ mod tests {
         assert!(!rig.dir.join("backups.json").exists());
         assert!(rig.dir.join("backups.json.retired").exists());
         assert!(!b.is_out("codex"), "an old early mark of the host's is dropped, the kernel is not told of it");
+        assert!(b.is_out("claude"), "the others stay in memory until the kernel has them");
+    }
+
+    #[test]
+    fn only_a_kith_that_does_not_know_extend_gets_the_plain_form() {
+        assert!(flag_rejected("exit status 2: kith: account out <id> [--until T] [--reason R]"));
+        assert!(!flag_rejected("timed out after 20s"));
+    }
+
+    #[tokio::test]
+    async fn a_finished_push_ends_the_reads_that_began_while_it_ran() {
+        let rig = Rig::new();
+        let b = rig.backups();
+        let none = KernelAccounts { chain: chain(), out: BTreeMap::new() };
+        assert!(b.apply_kernel(&none, b.generation()));
+        b.mark_out("claude", Some(rig.now() + 600), RATE_LIMIT);
+        let started = b.generation();
+        // Wait for the push (it fails fast here: no kith) to leave `pushing`.
+        for _ in 0..200 {
+            if b.pushing.locked().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(b.pushing.locked().is_empty());
+        assert_ne!(b.generation(), started, "the push ending is a write");
+        assert!(!b.apply_kernel(&none, started), "a read begun while it ran applies nothing");
+        assert!(b.is_out("claude"));
     }
 
     #[test]
