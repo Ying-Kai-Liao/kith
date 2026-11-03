@@ -90,6 +90,18 @@ One step in the code is one action here. A check followed later by the act it gu
 (`AppGate` then `Enqueue` then `HostStart` then `HostClaim`; `TermClaim` then `TermResolve` then `TermUp`;
 `TakeRecheck` then `TakeSignal`), because another writer can act between them.
 
+## The Rust twin (A4-2, not switched)
+
+`core/kernel/src/threads*` (`kith kernel threads ...`) ports the kernel half of the table above step for step: the
+same order in `resolve` (claim, then ask the host, then the checks), `take_in` = `take_claim` (temp file, lock file,
+`link`, up to three judgements of a stale claim under the lock, the lock given up before `prune_stale`), `claim_start`,
+`proc_claim`, `sweep_persons`, `record`. It writes the existing files with no version field, so Python, the host's
+`claim.rs` and the crate are three actors on one folder, and the model's one-step `take` holds for each as long as all
+use the lock. That is run, not modelled: `kernel/tests/kith-threads-race` races the Python `kith-sessions` and the Rust
+verb for one thread (fresh, stale, reused pid, damaged, live) and fails on a second winner; CI runs it after the
+difftest. Nothing calls the crate for claims yet (the router and the host switch together, later); the differences
+from `kith-sessions` and `claim.rs` are in `docs/plans/one-bot-model.md` (A4-2).
+
 ## Bounds and assumptions
 
 - One thread, two terminal runs (`t1`, `t2`, each runs once), at most 2 sends (`MaxSends`), two session ids (the

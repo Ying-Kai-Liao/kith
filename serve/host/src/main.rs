@@ -32,6 +32,7 @@ mod service;
 mod shell;
 mod store;
 mod terminal;
+mod threads_cmd;
 mod tui;
 mod update;
 mod usage;
@@ -455,6 +456,15 @@ enum KernelCmd {
         #[arg(long)]
         kernel: Option<std::path::PathBuf>,
         /// `resolve <agent> [--person ID] [--via CALLER] [--take-once] [--json]` or `may <id> <agent> [--via CALLER] [--once]`.
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
+        args: Vec<String>,
+    },
+    /// The writer claim of a Claude session and the session registry: `record`, `resolve`, `claim`, `terminal`, `proc`,
+    /// `sweep` as `kernel/bin/kith-sessions` runs them, plus `release` and `holder` (not routed from `kith` yet).
+    Threads {
+        /// The kernel folder (default: the one this program finds).
+        #[arg(long)]
+        kernel: Option<std::path::PathBuf>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 1..)]
         args: Vec<String>,
     },
@@ -1078,6 +1088,9 @@ async fn main() -> Result<()> {
             if let KernelCmd::Delegation { kernel, action } = cmd {
                 std::process::exit(print_delegation(kernel, action));
             }
+            if let KernelCmd::Threads { kernel, args } = cmd {
+                std::process::exit(threads_cmd::run(kernel, &args));
+            }
             match cmd {
                 KernelCmd::Version => println!("{}", kith_kernel::version_json()),
                 KernelCmd::Paths { json, sh, kernel } => print_paths(json, sh, kernel.as_deref()),
@@ -1145,6 +1158,7 @@ async fn main() -> Result<()> {
                 KernelCmd::RunOnce { .. }
                 | KernelCmd::Accounts { .. }
                 | KernelCmd::Delegation { .. }
+                | KernelCmd::Threads { .. }
                 | KernelCmd::Secrets { .. } => {
                     unreachable!("handled above")
                 }

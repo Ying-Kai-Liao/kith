@@ -22,9 +22,12 @@ fs2 = "0.4.3"
 sha2 = "0.11.0"
 # The cost ledger (`cost.db`) is SQLite; the host links the same bundled copy.
 rusqlite = { version = "0.40.2", features = ["bundled"] }
+# kill(2) for the claim sweep and "is that pid running" (threads::os); the host links the same version.
+libc = "0.2"
 
 [lints.rust]
-unsafe_code = "forbid"
+# `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).
+unsafe_code = "deny"
 unused_qualifications = "warn"
 
 [lints.clippy]

@@ -8,6 +8,7 @@ pub mod engines;
 pub mod launch;
 pub mod paths;
 pub mod secrets;
+pub mod threads;
 
 /// The version of the `kith kernel` interface the router in `kernel/bin/kith` speaks to.
 pub const ABI: u32 = 1;
@@ -21,6 +22,7 @@ pub const MODULES: &[&str] = &[
     "engines",
     "launch",
     "paths",
+    "threads",
 ];
 
 /// What `kith kernel version` prints.
@@ -35,7 +37,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","launch","paths"]}"#
+            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","launch","paths","threads"]}"#
         );
     }
 }

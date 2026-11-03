@@ -92,6 +92,9 @@ jobs:
               - 'serve/host/src/api/botguests.rs'
               - 'serve/host/src/agent/bot/**'
               - 'serve/host/src/hub/actors.rs'
+              - 'core/kernel/src/threads.rs'
+              - 'core/kernel/src/threads/**'
+              - 'kernel/tests/kith-threads-race'
               - '.github/workflows/ci.yml'
             # The TLA+ model of revoking a person and the code it covers (the list in the revoke-access skill).
             revoke:
@@ -394,6 +397,9 @@ jobs:
           kernel/tests/difftest/kith-difftest --rust --bin "$PWD/serve/host/target/debug/kith"
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
+      # kith-sessions and the Rust threads module claiming one thread at once: never more than one writer.
+      - name: Thread writers, Python and Rust as two actors
+        run: kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60
       - name: Core dependency rules
         run: kernel/tests/kith-core-deps-check
       - uses: actions/upload-artifact@v4

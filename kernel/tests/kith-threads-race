@@ -1,0 +1,175 @@
+#!/usr/bin/env -S python3 -I
+"""kith-threads-race: Python (kernel/bin/kith-sessions) and Rust (`kith kernel threads`) claiming one thread at once.
+
+The thread-writers model (verification/threads) assumes the writer claim is taken under its lock file, so two takers never
+both judge a stale claim dead and one deletes the other's fresh claim. When the claim moves to Rust, Python and Rust are
+two actors on one folder; this runs them against each other for real. Per iteration, on one session id:
+
+  round 1  a race of 2..4 actors, each claiming for a live process of its own, over one of: no claim, a claim of a dead
+           pid, a claim of a live pid that started at another time (a reused pid), a damaged claim, a live claim
+  rounds 2-3  the winner gives the claim back (by the other language than the one that took it) and the actors race again
+
+and checks that at most one claimer ever wins a round (exactly one unless a live claim already held the thread), that
+the claim file names the winner, and that the losers were refused. The Python actors load kith-sessions in-process and
+wait on a gate file with a random lag (the Rust ones are started behind the same gate, which costs them a few ms).
+
+    kernel/tests/kith-threads-race [--bin KITH] [--iterations N] [--seed S]
+
+Needs the Rust program (--bin, $KITH_DIFFTEST_BIN, or a cargo build under $CARGO_TARGET_DIR / serve/host/target).
+"""
+import argparse
+import importlib.util
+import json
+import multiprocessing
+import os
+import random
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from importlib.machinery import SourceFileLoader
+from pathlib import Path
+
+KERNEL = Path(__file__).resolve().parent.parent
+SESSIONS = KERNEL / 'bin' / 'kith-sessions'
+spec = importlib.util.spec_from_loader('kith_sessions', SourceFileLoader('kith_sessions', str(SESSIONS)))
+ks = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ks)
+
+
+def find_bin(given):
+    if given or os.environ.get('KITH_DIFFTEST_BIN'):
+        return given or os.environ['KITH_DIFFTEST_BIN']
+    for t in (os.environ.get('CARGO_TARGET_DIR'), str(KERNEL.parent / 'serve/host/target')):
+        for kind in ('debug', 'release'):
+            if t and os.access(Path(t) / kind / 'kith', os.X_OK):
+                return str(Path(t) / kind / 'kith')
+    sys.exit('kith-threads-race: no kith program (build serve/host, or pass --bin)')
+
+
+def py_actor(sid, pid, gate, lag):
+    """Exits 0 when it took the claim, 1 when refused: what `kith-sessions terminal SID PID` does."""
+    while not os.path.exists(gate):
+        pass
+    time.sleep(lag)
+    try:
+        ks.claim_terminal(sid, pid)
+    except SystemExit:
+        os._exit(1)
+    os._exit(0)
+
+
+def rust_actor(bin_, sid, pid, gate, env):
+    script = 'while [ ! -e "$1" ]; do :; done; shift; exec "$@"'
+    return subprocess.Popen(['sh', '-c', script, 'sh', gate, bin_, 'kernel', 'threads', '--kernel', str(KERNEL), 'terminal', sid, str(pid)],
+                            env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+
+def release(lang, bin_, pid, env):
+    if lang == 'py':
+        ks.release_claims(pid)
+    else:
+        subprocess.run([bin_, 'kernel', 'threads', '--kernel', str(KERNEL), 'release', str(pid)], env=env, check=True)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--bin')
+    ap.add_argument('--iterations', type=int, default=40)
+    ap.add_argument('--seed', type=int, default=int(time.time()))
+    a = ap.parse_args()
+    bin_, rng = find_bin(a.bin), random.Random(a.seed)
+    print(f'kith-threads-race: {a.iterations} iterations, seed {a.seed}, {bin_}')
+    root = Path(tempfile.mkdtemp(prefix='kith-race-'))
+    state = root / 'state'
+    env = {'PATH': os.environ['PATH'], 'HOME': str(root), 'KITH_STATE': str(state), 'KITH_CLAIM_WAIT': '0', 'LC_ALL': 'C'}
+    os.environ.update({'KITH_STATE': str(state), 'KITH_CLAIM_WAIT': '0', 'HOME': str(root)})
+    dead = subprocess.Popen(['true'])
+    dead.wait()
+    pool = [subprocess.Popen(['sleep', '600']) for _ in range(4)]
+    ctx = multiprocessing.get_context('fork')
+    failures, wins = [], {'py': 0, 'rust': 0}
+    try:
+        for it in range(a.iterations):
+            sid = f'race-{it}'
+            claim = state / 'live' / 'terminal' / f'{sid}.claim'
+            scenario = rng.choice(['fresh', 'dead', 'reused', 'garbage', 'held'])
+            claim.parent.mkdir(parents=True, exist_ok=True)
+            if scenario == 'dead':
+                claim.write_text(json.dumps({'pid': dead.pid, 'procStart': None, 'at': 'x', 'kind': 'terminal'}))
+            elif scenario == 'reused':
+                claim.write_text(json.dumps({'pid': pool[3].pid, 'procStart': 'Mon Jan  1 00:00:00 1990', 'at': 'x', 'kind': 'terminal'}))
+            elif scenario == 'garbage':
+                # (a pid that is no number kills kith-sessions with a traceback: a known difference, see intended.json)
+                claim.write_text(rng.choice(['', '{', '[]', '{}']))
+            elif scenario == 'held':
+                claim.write_text(json.dumps({'pid': pool[3].pid, 'procStart': ks.proc_start(pool[3].pid), 'at': 'x', 'kind': 'oneshot'}))
+            for rnd in range(3):
+                n = rng.randint(2, 3)   # pool[3] is the held/reused one, so the racers use the other three
+                lineup = [rng.choice(['py', 'rust']) for _ in range(n)]
+                if rng.random() < 0.7 and len(set(lineup)) == 1:
+                    lineup[0] = 'rust' if lineup[0] == 'py' else 'py'
+                gate = str(root / f'gate-{it}-{rnd}')
+                actors = []
+                for lang, holder in zip(lineup, pool):
+                    if lang == 'py':
+                        p = ctx.Process(target=py_actor, args=(sid, holder.pid, gate, rng.uniform(0, 0.03)))
+                        p.start()
+                        actors.append((lang, holder.pid, p))
+                    else:
+                        actors.append((lang, holder.pid, rust_actor(bin_, sid, holder.pid, gate, env)))
+                time.sleep(0.15)   # everyone is spinning on the gate
+                Path(gate).touch()
+                results = []
+                for lang, pid, p in actors:
+                    if lang == 'py':
+                        p.join()
+                        results.append((lang, pid, p.exitcode, ''))
+                    else:
+                        out, err = p.communicate()
+                        results.append((lang, pid, p.returncode, err.decode()))
+                winners = [r for r in results if r[2] == 0]
+                held_before = scenario == 'held' and rnd == 0
+                held_pid = pool[3].pid
+                got = ks.read_claim(claim)
+                bad = None
+                if held_before:
+                    if winners or not got or got.get('pid') != held_pid:
+                        bad = 'a live claim was taken from its holder'
+                elif len(winners) != 1:
+                    bad = f'{len(winners)} winners'
+                elif not got or got.get('pid') != winners[0][1]:
+                    bad = f'the claim names {got and got.get("pid")}, the winner is {winners[0][1]}'
+                elif any(r[2] != 1 or 'busy' not in r[3] for r in results if r[2] != 0 and r[0] == 'rust'):
+                    bad = 'a loser was not refused cleanly: ' + repr([r for r in results if r[2] != 0])
+                elif any(r[2] not in (0, 1) for r in results):
+                    bad = 'an actor failed: ' + repr(results)
+                if bad:
+                    failures.append(f'iteration {it} round {rnd} ({scenario}, {lineup}): {bad}')
+                    break
+                if winners:
+                    wins[winners[0][0]] += 1
+                    release('rust' if winners[0][0] == 'py' else 'py', bin_, winners[0][1], env)
+                    if claim.exists():
+                        failures.append(f'iteration {it} round {rnd}: the winner\'s claim was not given back')
+                        break
+                else:
+                    break   # the held claim stays; nothing more to race over
+            shutil.rmtree(state / 'live', ignore_errors=True)
+    finally:
+        for p in pool:
+            p.kill()
+            p.wait()
+        shutil.rmtree(root, ignore_errors=True)
+    print(f'kith-threads-race: wins by python {wins["py"]}, by rust {wins["rust"]}')
+    if failures:
+        print('FAIL')
+        print('\n'.join(failures[:20]))
+        return 1
+    print('ok: never more than one writer')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
