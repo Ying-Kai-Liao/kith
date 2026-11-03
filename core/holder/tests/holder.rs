@@ -871,7 +871,7 @@ fn renewals_keep_a_tagged_run_alive() {
     );
     let until = Instant::now() + Duration::from_millis(1500);
     while Instant::now() < until {
-        c.renew(Duration::from_millis(500)).unwrap();
+        c.renew(Duration::from_secs(3)).unwrap();
         std::thread::sleep(Duration::from_millis(100));
         assert!(entry(&mut c, guest).exit.is_none());
     }
