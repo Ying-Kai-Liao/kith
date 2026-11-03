@@ -278,7 +278,11 @@ fn engine_shares_the_stubs_group() {
     let mut s = cmd.spawn().unwrap();
     let stub_pid = s.id() as i32;
     let engine: i32 = first_line(&mut s).parse().unwrap();
-    // Even with the stub gone the group is not empty while the engine lives.
+    assert_eq!(
+        unsafe { libc::getpgid(engine) },
+        stub_pid,
+        "the engine must be in the stub's group"
+    );
     kill(stub_pid, libc::SIGKILL);
     s.wait().unwrap();
     #[cfg(target_os = "linux")]
@@ -290,41 +294,85 @@ fn engine_shares_the_stubs_group() {
             0,
             "the group must still hold the engine"
         );
-        assert_eq!(unsafe { libc::getpgid(engine) }, stub_pid);
         assert_eq!(unsafe { libc::killpg(stub_pid, libc::SIGKILL) }, 0);
         wait_until("engine killed by the group kill", || !alive(engine));
     }
 }
 
-#[test]
-fn status_fd_says_locked_then_busy() {
-    let dir = scratch("statusfd");
-    let mut a = stub(&dir, "k", &["sh", "-c", SLEEPER])
-        .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let engine: i32 = first_line(&mut a).parse().unwrap();
-    // A pipe whose write end becomes fd 9 in the stub.
+/// A pipe whose ends are close-on-exec (so tests running in parallel do not leak it into each other's engines).
+fn cloexec_pipe() -> (i32, i32) {
     let mut fds = [0 as libc::c_int; 2];
     assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
-    let (r, w) = (fds[0], fds[1]);
+    for fd in fds {
+        assert_eq!(
+            unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) },
+            0
+        );
+    }
+    (fds[0], fds[1])
+}
+
+/// Runs a stub with `--status-fd 9` wired to a fresh pipe; returns its exit code, stdout and what it wrote to fd 9.
+fn with_status_fd(dir: &Path, engine: &[&str]) -> (Option<i32>, String, String) {
+    let (r, w) = cloexec_pipe();
     let mut cmd = Command::new(STUB);
     cmd.arg("--lock-dir")
-        .arg(&dir)
-        .args(["--key", "k", "--status-fd", "9", "--", "true"]);
+        .arg(dir)
+        .args(["--key", "k", "--status-fd", "9", "--"])
+        .args(engine);
+    cmd.stdout(Stdio::piped());
     unsafe {
         cmd.pre_exec(move || {
+            // dup2 clears close-on-exec on the new fd 9, as a starter that passes the fd would.
             libc::dup2(w, 9);
             Ok(())
         });
     }
-    assert_eq!(cmd.status().unwrap().code(), Some(75));
+    let child = cmd.spawn().unwrap();
     unsafe { libc::close(w) };
+    let out = child.wait_with_output().unwrap();
     let mut text = String::new();
     unsafe { std::fs::File::from_raw_fd(r) }
         .read_to_string(&mut text)
         .unwrap();
-    assert_eq!(text, "busy\n");
-    kill(engine, libc::SIGKILL);
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        text,
+    )
+}
+
+#[test]
+fn status_fd_says_locked_then_busy_and_the_engine_never_has_it() {
+    let dir = scratch("statusfd");
+    let engine = "{ true >&9; } 2>/dev/null && echo has9 || echo no9";
+    let (code, out, status) = with_status_fd(&dir, &["sh", "-c", engine]);
+    assert_eq!(
+        (code, status.as_str(), out.trim()),
+        (Some(0), "locked\n", "no9")
+    );
+
+    let mut a = stub(&dir, "k", &["sh", "-c", SLEEPER])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let sleeper: i32 = first_line(&mut a).parse().unwrap();
+    let (code, _, status) = with_status_fd(&dir, &["true"]);
+    assert_eq!((code, status.as_str()), (Some(75), "busy\n"));
+    kill(sleeper, libc::SIGKILL);
     a.wait().unwrap();
+}
+
+/// If fd N were not open, the lock file would be opened on it and the status write would close the lock.
+#[test]
+fn status_fd_that_is_not_open_is_refused_and_leaves_the_lock_free() {
+    let dir = scratch("statusfd-closed");
+    let mut cmd = Command::new(STUB);
+    cmd.arg("--lock-dir")
+        .arg(&dir)
+        .args(["--key", "k", "--status-fd", "9", "--", "true"]);
+    let out = cmd.output().unwrap();
+    assert_eq!(out.status.code(), Some(64));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not an open descriptor"));
+    assert!(!is_busy(&dir, "k"));
 }

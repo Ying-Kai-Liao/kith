@@ -158,6 +158,16 @@ fn main() -> ExitCode {
             return ExitCode::from(USAGE);
         }
     };
+    // Before take(): a closed fd N would be handed to the lock file (open picks the lowest free fd), and report()
+    // would then write into the lock file and close it, freeing the lock under a running engine.
+    #[cfg(unix)]
+    if let Some(fd) = args.status_fd {
+        // SAFETY: F_GETFD only reads the descriptor flags.
+        if unsafe { libc::fcntl(fd, libc::F_GETFD) } == -1 {
+            eprintln!("kith-stub: --status-fd {fd} is not an open descriptor");
+            return ExitCode::from(USAGE);
+        }
+    }
     let lock = match take(Path::new(&args.lock_dir), &args.key) {
         Ok(Taken::Held(l)) => l,
         Ok(Taken::Busy) => {

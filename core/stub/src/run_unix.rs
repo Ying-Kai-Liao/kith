@@ -20,12 +20,16 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use libc::c_int;
 
 static CHILD: AtomicI32 = AtomicI32::new(0);
+/// A TERM/HUP that arrives before the engine's pid is stored; forwarded right after the spawn.
+static PENDING: AtomicI32 = AtomicI32::new(0);
 
 extern "C" fn forward(sig: c_int) {
     let pid = CHILD.load(Ordering::Relaxed);
     if pid > 0 {
         // SAFETY: kill is async-signal-safe.
         unsafe { libc::kill(pid, sig) };
+    } else {
+        PENDING.store(sig, Ordering::Relaxed);
     }
 }
 
@@ -52,12 +56,17 @@ pub fn run(engine: &[OsString]) -> i32 {
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::process::CommandExt;
+        let stub = std::process::id() as libc::pid_t;
         // If the stub is killed, the engine goes with it: no unguarded writer (macOS has no equivalent; there the
         // holder's group kill is the safety net).
         // SAFETY: prctl is async-signal-safe.
         unsafe {
-            cmd.pre_exec(|| {
+            cmd.pre_exec(move || {
                 libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL as libc::c_ulong);
+                // The stub may have died before the prctl took effect; then there is nobody left to guard the lock.
+                if libc::getppid() != stub {
+                    libc::_exit(1);
+                }
                 Ok(())
             });
         }
@@ -75,6 +84,11 @@ pub fn run(engine: &[OsString]) -> i32 {
     };
     let pid = child.id() as libc::pid_t;
     CHILD.store(pid, Ordering::Relaxed);
+    let pending = PENDING.load(Ordering::Relaxed);
+    if pending != 0 {
+        // SAFETY: kill has no preconditions beyond valid arguments.
+        unsafe { libc::kill(pid, pending) };
+    }
 
     loop {
         let mut status: c_int = 0;
