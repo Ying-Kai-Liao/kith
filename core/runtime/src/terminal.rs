@@ -691,6 +691,11 @@ mod claim {
         .to_string()
     }
 
+    fn unique() -> u64 {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
     fn lock(parent: &Path, sid: &str) -> io::Result<fs::File> {
         let file = OpenOptions::new()
             .write(true)
@@ -725,7 +730,12 @@ mod claim {
         let parent = dir(state);
         make_dir(&parent)?;
         let dest = parent.join(format!("{sid}.claim"));
-        let tmp = parent.join(format!(".{sid}.claim.{}.tmp", std::process::id()));
+        // Unique per call: two takers in this process at once must not share a temp file.
+        let tmp = parent.join(format!(
+            ".{sid}.claim.{}.{}.tmp",
+            std::process::id(),
+            unique()
+        ));
         write_new(&tmp, &record(pid))?;
         let result = (|| {
             let _lock = lock(&parent, sid)?;
@@ -759,7 +769,11 @@ mod claim {
         let dest = parent.join(format!("{sid}.claim"));
         let _lock = lock(&parent, sid)?;
         if read(&dest).is_some_and(|c| held_by(&c).pid == from) {
-            let tmp = parent.join(format!(".{sid}.claim.{}.retarget", std::process::id()));
+            let tmp = parent.join(format!(
+                ".{sid}.claim.{}.{}.retarget",
+                std::process::id(),
+                unique()
+            ));
             write_new(&tmp, &record(to))?;
             fs::rename(&tmp, &dest)?;
         }
