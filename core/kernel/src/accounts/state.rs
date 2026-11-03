@@ -134,7 +134,8 @@ fn lock(machine: &Path) -> std::io::Result<std::fs::File> {
     let mut name = f.into_os_string();
     name.push(".lock");
     let l = std::fs::OpenOptions::new()
-        .append(true)
+        .write(true)
+        .truncate(false)
         .create(true)
         .open(PathBuf::from(name))?;
     l.lock_exclusive()?;

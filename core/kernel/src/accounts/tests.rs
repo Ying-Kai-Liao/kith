@@ -500,7 +500,7 @@ fn an_api_key_entry_runs_claude_through_a_helper() {
     let ctx = h.ctx(&fake);
     let out = launch_env(&ctx, "echo", "claude-api:main", false, false).unwrap();
     assert!(out.starts_with("backup_harness=claude backup_account=main backup_cfg_var='' backup_cfg_dir='' backup_api_helper="));
-    let auth = h.dir.join("kernel").join("bin").join("kith-auth");
+    let auth = h.dir.join("kernel").join("bin/kith-auth"); // as the code joins it
     assert!(out.contains(&format!(
         "{} get --for echo --profile anthropic/main anthropic ANTHROPIC_API_KEY",
         q(&auth)

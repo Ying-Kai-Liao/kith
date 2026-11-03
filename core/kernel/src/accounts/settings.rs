@@ -329,7 +329,8 @@ pub fn policy(s: &Map) -> String {
 pub fn migrate_file(ctx: &Ctx<'_>) -> std::io::Result<bool> {
     std::fs::create_dir_all(&ctx.machine)?;
     let lock = std::fs::OpenOptions::new()
-        .append(true)
+        .write(true)
+        .truncate(false)
         .create(true)
         .open(ctx.machine.join("settings.json.lock"))?;
     lock.lock_exclusive()?;
