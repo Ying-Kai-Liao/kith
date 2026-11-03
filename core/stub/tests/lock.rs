@@ -4,7 +4,7 @@
 use kith_stub::{Error, Taken, file_name, take};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
@@ -35,9 +35,8 @@ fn held(t: Taken) -> kith_stub::Lock {
     }
 }
 
-fn line(child: &mut Child, want: &str) -> String {
-    let out = child.stdout.as_mut().unwrap();
-    let mut reader = BufReader::new(out);
+// One reader for the child's whole life: a fresh BufReader per call would swallow the next line in its buffer.
+fn line(reader: &mut impl BufRead, want: &str) -> String {
     loop {
         let mut s = String::new();
         assert!(reader.read_line(&mut s).unwrap() > 0, "child ended early");
@@ -118,8 +117,9 @@ fn child_of_a_killed_holder_does_not_keep_the_lock() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let sleeper: u32 = line(&mut holder, "sleeper").parse().unwrap();
-    line(&mut holder, "locked");
+    let mut reader = BufReader::new(holder.stdout.take().unwrap());
+    let sleeper: u32 = line(&mut reader, "sleeper").parse().unwrap();
+    line(&mut reader, "locked");
     assert!(matches!(take(&dir, "s1").unwrap(), Taken::Busy));
     holder.kill().unwrap();
     holder.wait().unwrap();
