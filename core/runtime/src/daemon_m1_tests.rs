@@ -9,7 +9,7 @@ use super::{Config, Daemon, Reached};
 use crate::error::Error;
 use crate::holder_link::HolderConfig;
 use crate::layout::Layout;
-use crate::tests::{machine, open, paths};
+use crate::tests::{machine, open_all as open, paths};
 
 fn quiet() -> Config {
     Config {

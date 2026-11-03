@@ -485,6 +485,42 @@ fn the_gate_rows_are_experimental_owner_only_unreleased_and_parse() {
 }
 
 #[test]
+fn the_sync_lease_rows_are_experimental_owner_only_unreleased_and_parse() {
+    let released = read_json(openrpc::RELEASED_PATH);
+    let released: BTreeSet<&str> = released["methods"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    for name in [
+        "syncLease.status",
+        "syncLease.link",
+        "syncLease.unlink",
+        "syncLease.mark",
+        "syncLease.changed",
+        "syncLease.drop",
+        "syncLease.pulled",
+        "syncLease.renew",
+    ] {
+        let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
+        assert_eq!(m.stability, Stability::Experimental, "{name}");
+        assert_eq!(m.principals, &[Principal::Owner], "{name}");
+        assert!(!released.contains(name), "{name} is in released.json");
+    }
+    let pulled = parse_argv(&["sync-lease", "pulled", "3", "--ms", "5000"]).unwrap();
+    assert_eq!(pulled.method.name, "syncLease.pulled");
+    // The mark a pull started at is required.
+    assert!(
+        method("syncLease.pulled")
+            .unwrap()
+            .params
+            .iter()
+            .any(|p| p.name == "mark" && p.required)
+    );
+}
+
+#[test]
 fn the_row_order_is_the_order_of_the_families() {
     // The generated document follows this order; the split into area files must not move a row.
     let names: Vec<&str> = METHODS.iter().map(|m| m.name).collect();

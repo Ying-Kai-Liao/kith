@@ -14,16 +14,12 @@ use crate::db::Core;
 use crate::error::Error;
 use crate::gate::Liveness;
 use crate::layout::Layout;
-use crate::tests::machine;
+use crate::tests::{machine, open_all};
 
 fn core() -> (tempfile::TempDir, Layout, Core) {
     let (t, m) = machine();
     let l = Layout::new(&m);
-    // The whole schema: tests.rs's own `open` runs on the M0 step alone.
-    let c = match crate::embedded_with(&l, crate::db::MIGRATIONS).expect("embedded") {
-        crate::Embedded::Open(c) => *c,
-        crate::Embedded::DaemonRunning { .. } => panic!("lock held"),
-    };
+    let c = open_all(&l);
     (t, l, c)
 }
 
