@@ -23,7 +23,7 @@ use crate::daemon::Shared;
 use crate::db::{HolderRecord, RecordedProc};
 use crate::error::Result;
 use crate::layout::Layout;
-use crate::terminal::{Placed, STUB_BUSY, SpawnReq};
+use crate::terminal::{Placed, Req, STUB_BUSY, SpawnReq};
 use crate::{lock, log, perms};
 
 pub(crate) struct HolderConfig {
@@ -149,6 +149,7 @@ pub(crate) fn supervise(shared: &Arc<Shared>, layout: &Layout, cfg: &HolderConfi
     let mut delay = cfg.retry_min;
     let mut last_error = String::new();
     shared.terminals.set_stub(cfg.stub.clone());
+    shared.terminals.set_remote(cfg.command.is_some());
     while !shared.stopping() {
         match connect(shared, layout, cfg) {
             Ok(client) => {
@@ -359,11 +360,13 @@ fn connected(
     let mut next_list = Instant::now() + cfg.poll;
     while !shared.stopping() {
         // A terminal to start is served at once; the listing keeps its own pace.
-        if let Some(req) = shared
+        match shared
             .terminals
             .next(cfg.poll.min(Duration::from_millis(100)))
         {
-            serve_spawn(&mut client, &req)?;
+            Some(Req::Spawn(req)) => serve_spawn(&mut client, &req)?,
+            Some(Req::End(held)) => end_held(&mut client, &held),
+            None => {}
         }
         discard_output(&mut client);
         if shared.stopping() {
@@ -400,6 +403,19 @@ fn discard_output(client: &mut Client) {
         })
         .is_some()
     {}
+}
+
+/// Ends a held process the core no longer wants (kill until the holder says its group is gone, then ack so it forgets
+/// it). A broken link is the supervisor's to find on its next turn.
+fn end_held(client: &mut Client, held: &proto::HeldId) {
+    for _ in 0..40 {
+        match client.kill(held) {
+            Ok(proto::KillState::Killing) => std::thread::sleep(Duration::from_millis(50)),
+            Ok(_) => break,
+            Err(_) => return,
+        }
+    }
+    let _ = client.ack(held);
 }
 
 /// Puts one spawn to the holder and tells the caller what came of it. `Err` is a broken link (the caller was told).

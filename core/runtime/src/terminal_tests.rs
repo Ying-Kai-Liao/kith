@@ -19,11 +19,12 @@ fn held(id: u32) -> HeldId {
 #[test]
 fn a_ticket_works_once() {
     let t = Tickets::default();
-    let ticket = t.issue(held(7), "sid", "kai").unwrap();
+    let ticket = t.issue(Role::Owner, held(7), "sid", "kai").unwrap();
     assert_eq!(ticket.len(), 64);
     assert_eq!(
         t.redeem(&ticket),
         Ok(Redeemed {
+            role: Role::Owner,
             held: held(7),
             session: "sid".into(),
             agent: "kai".into()
@@ -38,7 +39,7 @@ fn an_unknown_or_expired_ticket_is_refused_and_an_expired_one_is_used_up_too() {
     assert_eq!(t.redeem("nope"), Err(TicketRefused::Unknown));
     let now = Instant::now();
     let ticket = t
-        .issue_at(now, Duration::from_secs(60), held(1), "s", "a")
+        .issue_at(now, Duration::from_secs(60), Role::Owner, held(1), "s", "a")
         .unwrap();
     assert_eq!(
         t.redeem_at(now + Duration::from_secs(61), &ticket),
@@ -48,10 +49,39 @@ fn an_unknown_or_expired_ticket_is_refused_and_an_expired_one_is_used_up_too() {
 }
 
 #[test]
+fn a_ticket_fixes_the_role_an_attach_can_get() {
+    let t = Tickets::default();
+    let grant = |role, asked, takeover| {
+        let ticket = t.issue(role, held(1), "s", "a").unwrap();
+        t.redeem(&ticket).unwrap().grant(asked, takeover)
+    };
+    assert_eq!(grant(Role::Owner, Role::Owner, false), Some(Role::Owner));
+    assert_eq!(grant(Role::Owner, Role::Owner, true), Some(Role::Owner));
+    assert_eq!(
+        grant(Role::Owner, Role::Observer, false),
+        Some(Role::Observer)
+    );
+    assert_eq!(
+        grant(Role::Observer, Role::Observer, false),
+        Some(Role::Observer)
+    );
+    assert_eq!(
+        grant(Role::Observer, Role::Owner, false),
+        None,
+        "never a higher role"
+    );
+    assert_eq!(
+        grant(Role::Observer, Role::Observer, true),
+        None,
+        "only an owner ticket takes over"
+    );
+}
+
+#[test]
 fn tickets_are_random_kept_hashed_and_bounded() {
     let t = Tickets::default();
-    let a = t.issue(held(1), "s", "a").unwrap();
-    let b = t.issue(held(1), "s", "a").unwrap();
+    let a = t.issue(Role::Owner, held(1), "s", "a").unwrap();
+    let b = t.issue(Role::Owner, held(1), "s", "a").unwrap();
     assert_ne!(a, b);
     {
         let map = t.by_hash.lock().unwrap();
@@ -62,7 +92,8 @@ fn tickets_are_random_kept_hashed_and_bounded() {
         assert!(map.contains_key(&hash(&a)));
     }
     for i in 0..(MAX_TICKETS + 10) {
-        t.issue(held(u32::try_from(i).unwrap()), "s", "a").unwrap();
+        t.issue(Role::Owner, held(u32::try_from(i).unwrap()), "s", "a")
+            .unwrap();
     }
     assert!(t.by_hash.lock().unwrap().len() <= MAX_TICKETS);
 }
@@ -112,19 +143,75 @@ mod claims {
     fn a_live_claim_keeps_a_second_taker_out_and_release_frees_it() {
         let d = tempfile::tempdir().unwrap();
         let me = std::process::id();
-        assert!(claim::take(d.path(), "s1", me).unwrap().is_ok());
+        assert!(claim::take(d.path(), "s1", me, "terminal").unwrap().is_ok());
         let rec: Value =
             serde_json::from_str(&std::fs::read_to_string(file(d.path(), "s1")).unwrap()).unwrap();
         assert_eq!(rec["pid"], me);
         assert_eq!(rec["kind"], "terminal");
         assert!(rec["at"].as_str().unwrap().ends_with('Z'));
-        let held = claim::take(d.path(), "s1", me).unwrap().expect_err("held");
+        let held = claim::take(d.path(), "s1", me, "terminal")
+            .unwrap()
+            .expect_err("held");
         assert_eq!(held.pid, me);
         claim::release(d.path(), "s1", me + 1); // not the holder: leaves it
         assert!(file(d.path(), "s1").is_file());
         claim::release(d.path(), "s1", me);
         assert!(!file(d.path(), "s1").exists());
-        assert!(claim::take(d.path(), "s1", me).unwrap().is_ok());
+        assert!(claim::take(d.path(), "s1", me, "terminal").unwrap().is_ok());
+    }
+
+    #[test]
+    fn the_starting_record_is_kind_starting_and_a_retarget_makes_it_a_terminal_claim() {
+        let d = tempfile::tempdir().unwrap();
+        let me = std::process::id();
+        assert!(claim::take(d.path(), "s2", me, "starting").unwrap().is_ok());
+        let kind = || -> Value {
+            serde_json::from_str(&std::fs::read_to_string(file(d.path(), "s2")).unwrap()).unwrap()
+        };
+        assert_eq!(kind()["kind"], "starting");
+        let held = claim::take(d.path(), "s2", me, "terminal")
+            .unwrap()
+            .expect_err("held");
+        assert_eq!(held.kind, "starting");
+        // Not ours to move: nothing changes.
+        assert!(!claim::retarget(d.path(), "s2", me + 1, 1).unwrap());
+        assert_eq!(kind()["kind"], "starting");
+        assert!(claim::retarget(d.path(), "s2", me, me + 1).unwrap());
+        assert_eq!(kind()["kind"], "terminal");
+    }
+
+    #[test]
+    fn a_live_pid_whose_start_time_is_not_known_keeps_its_claim() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("live/terminal");
+        std::fs::create_dir_all(&dir).unwrap();
+        // Pid 1 runs (and is not ours to signal): with no recorded start there is nothing to say it is not the claimer.
+        std::fs::write(dir.join("p1.claim"), r#"{"pid":1,"kind":"terminal"}"#).unwrap();
+        let me = std::process::id();
+        let held = claim::take(d.path(), "p1", me, "terminal")
+            .unwrap()
+            .expect_err("live");
+        assert_eq!(held.pid, 1);
+        assert!(dir.join("p1.claim").is_file(), "never deleted");
+    }
+
+    #[test]
+    fn taking_a_claim_ends_the_sessions_intent_and_decision() {
+        let d = tempfile::tempdir().unwrap();
+        for sub in ["sessions/intent", "sessions/decisions"] {
+            std::fs::create_dir_all(d.path().join(sub)).unwrap();
+            std::fs::write(d.path().join(sub).join("s3.json"), "{}").unwrap();
+            std::fs::write(d.path().join(sub).join("other.json"), "{}").unwrap();
+        }
+        assert!(
+            claim::take(d.path(), "s3", std::process::id(), "terminal")
+                .unwrap()
+                .is_ok()
+        );
+        for sub in ["sessions/intent", "sessions/decisions"] {
+            assert!(!d.path().join(sub).join("s3.json").exists(), "{sub}");
+            assert!(d.path().join(sub).join("other.json").exists(), "{sub}");
+        }
     }
 
     #[test]
@@ -140,25 +227,39 @@ mod claims {
         .unwrap();
         std::fs::write(dir.join("junk.claim"), "not json").unwrap();
         let me = std::process::id();
-        assert!(claim::take(d.path(), "old", me).unwrap().is_ok());
-        assert!(claim::take(d.path(), "junk", me).unwrap().is_ok());
+        assert!(
+            claim::take(d.path(), "old", me, "terminal")
+                .unwrap()
+                .is_ok()
+        );
+        assert!(
+            claim::take(d.path(), "junk", me, "terminal")
+                .unwrap()
+                .is_ok()
+        );
         let mut sleeper = std::process::Command::new("sleep")
             .arg("30")
             .spawn()
             .unwrap();
-        claim::retarget(d.path(), "old", me, sleeper.id()).unwrap();
+        assert!(claim::retarget(d.path(), "old", me, sleeper.id()).unwrap());
         let rec: Value =
             serde_json::from_str(&std::fs::read_to_string(file(d.path(), "old")).unwrap()).unwrap();
         assert_eq!(rec["pid"], sleeper.id());
         // Another taker now sees the sleeper's claim as live.
         assert_eq!(
-            claim::take(d.path(), "old", me).unwrap().err().unwrap().pid,
+            claim::take(d.path(), "old", me, "terminal")
+                .unwrap()
+                .err()
+                .unwrap()
+                .pid,
             sleeper.id()
         );
         sleeper.kill().unwrap();
         sleeper.wait().unwrap();
         assert!(
-            claim::take(d.path(), "old", me).unwrap().is_ok(),
+            claim::take(d.path(), "old", me, "terminal")
+                .unwrap()
+                .is_ok(),
             "dead holder, free claim"
         );
     }
@@ -369,6 +470,71 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
     }
 
     #[test]
+    fn a_claim_that_cannot_be_handed_to_the_stub_ends_the_terminal_and_is_given_back() {
+        let rig = Rig::new(
+            r#"lock="$2"; key="$4"; shift 5
+echo $$ > "$lock/$key.pid"
+"$@""#,
+        );
+        rig.d
+            .shared()
+            .terminals
+            .fail_retarget
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let params = json!({"agent": "kai", "session": "sess-r", "argv": ["sh", "-c", "cat"], "cwd": "/tmp", "env": plain()});
+        match reach(
+            &crate::tests::paths(&rig.m),
+            "terminal.open",
+            &params,
+            false,
+        ) {
+            Reached::Refused(e) => assert!(e.to_string().contains("was ended"), "{e}"),
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            !rig.claim_file("sess-r").exists(),
+            "claim given back, not left on the daemon's pid"
+        );
+        let pid_file = Layout::new(&rig.m).dir.join("locks/sess-r.pid");
+        let pid: u32 = std::fs::read_to_string(pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        until("the terminal to be ended", || {
+            !std::process::Command::new("kill")
+                .args(["-s", "0", &pid.to_string()])
+                .output()
+                .unwrap()
+                .status
+                .success()
+        });
+    }
+
+    #[test]
+    fn a_holder_reached_through_a_command_answers_direct() {
+        let t = sandbox();
+        let m = t.path().join("m");
+        let stub = fake_stub(t.path(), RUNNING);
+        let mut cfg = config(Some(stub));
+        cfg.holder.exe = None;
+        cfg.holder.command = Some(vec![
+            holder_bin().to_string_lossy().into_owned(),
+            "--stdio".into(),
+        ]);
+        let d = serving(&m, cfg);
+        let p = crate::tests::paths(&m);
+        until("the command link", || {
+            crate::status(&p)["holder"]["state"] == "connected"
+        });
+        let a = answered(open(&m, "sess-c", &["cat"], &json!({})));
+        assert_eq!(a["status"], "direct", "{a}");
+        assert!(a["note"].as_str().unwrap().contains("another computer"));
+        assert!(!m.join("live/terminal/sess-c.claim").exists());
+        d.stop();
+    }
+
+    #[test]
     fn a_stub_that_says_busy_gives_the_claim_back() {
         let rig = Rig::new("exit 75");
         let a = answered(open(&rig.m, "sess-b", &["sh", "-c", "cat"], &plain()));
@@ -400,7 +566,11 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
             .arg("30")
             .spawn()
             .unwrap();
-        assert!(claim::take(&rig.m, "sess-w", other.id()).unwrap().is_ok());
+        assert!(
+            claim::take(&rig.m, "sess-w", other.id(), "terminal")
+                .unwrap()
+                .is_ok()
+        );
         let a = answered(open(&rig.m, "sess-w", &["sh", "-c", "cat"], &plain()));
         assert_eq!(a["status"], "busy", "{a}");
         assert_eq!(a["held_by"]["pid"], other.id());

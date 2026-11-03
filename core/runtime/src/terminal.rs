@@ -3,14 +3,19 @@
 //!
 //! What one call does, in this order (nothing is spawned unless every step before it held):
 //! 1. checks the params and finds the start stub (config, then `$KITH_STUB_BIN`, then `kith-stub` beside this program);
-//! 2. answers `direct` when there is no stub or the holder link is down: the caller runs the engine itself (`--direct`),
-//!    exactly as it did before, and nothing has been taken;
+//! 2. answers `direct` when there is no stub, the holder link is down, or the link is a command link (`ssh host
+//!    kith-holder --stdio`): the stub path, the lock dir and the claim file are all on the core's machine, and a remote
+//!    holder runs on another one. The caller runs the engine itself (`--direct`), as before, and nothing has been taken;
 //! 3. takes the session's writer claim, today's claim file (`<state>/live/terminal/<sid>.claim`, a port of
-//!    `kith-sessions take_claim`: same file, same lock file, same record), naming this daemon until the stub is known;
-//!    a live claim held by anyone else answers `busy` and spawns nothing;
+//!    `kith-sessions take_claim`: same file, same lock file, same record, and the same bookkeeping: the session's
+//!    pending intent and 54-minute decision end). Until the stub's pid is known the record is `kind: "starting"` and
+//!    names this daemon's pid. That pid is `kith serve`, so nothing may signal it: the host's `stop_holder` answers a
+//!    `starting` claim as busy, and the sweeps only touch claims that name a person. A live claim held by anyone else
+//!    answers `busy` and spawns nothing;
 //! 4. asks the holder, through the supervisor's connection, to spawn
 //!    `<stub> --lock-dir <machine>/core/locks --key <sid> -- <argv>` on a PTY with the filtered env;
-//! 5. gives the claim to the stub's pid (the held process), so it is live exactly as long as the stub runs;
+//! 5. gives the claim to the stub's pid (the held process, kind `terminal`), so it is live exactly as long as the stub
+//!    runs. If that fails the held process is killed and the claim given back: the daemon's pid never stays in a claim;
 //! 6. answers `{status: "open", ticket, held_id, ...}`.
 //!
 //! A spawn that fails, a stub that reports busy (exit 75: a `--direct` writer holds the stub's own lock) or an engine
@@ -26,7 +31,15 @@
 //!
 //! Tickets. 32 random bytes as hex; only their SHA-256 is kept, in memory, with the held process id and an expiry
 //! ([`TICKET_TTL`]). [`Terminals::redeem`] removes the entry on the first lookup whether or not it has expired, so a
-//! ticket works once and a replay finds nothing. M1-5's attach relay calls it.
+//! ticket works once and a replay finds nothing. M1-5's attach relay calls it. A ticket carries the role it allows
+//! ([`Role`]); `terminal.open` issues `owner`.
+//!
+//! # Before M1-5 (who owns what, so it is not found out later)
+//! - Nobody acks a terminal's EXITED yet. The relay acks it after it has sent EXIT to the attached clients, and the
+//!   holder's output tail is gone with the ack: a client that attaches later to an ended terminal gets nothing, so the
+//!   relay (or the core's exit handling) must decide what an ended terminal keeps before it acks.
+//! - `kill_on_lease_loss` is false for a terminal: it outlives its core on purpose. It MUST be true for any future guest
+//!   terminal (a person's or a bot guest's), whose process must not outlive the core that vouches for it.
 //!
 //! # Attach frames (the spec M1-5, the relay, and M1-6, the client, build to)
 //!
@@ -37,32 +50,45 @@
 //!
 //! ```text
 //! client -> relay
-//!   ATTACH  1  JSON {ticket, role: "owner" | "observer", cols?, rows?, credit?, takeover?}   first frame, once
+//!   ATTACH  1  JSON {v: 1, ticket, role: "owner" | "observer", cols?, rows?, takeover?}   first frame, once
 //!   INPUT   2  raw bytes for the engine                                  owner only; an observer's are dropped
 //!   RESIZE  3  JSON {cols, rows}                                         owner only
 //!   DETACH  4  empty: leave; the engine keeps running in the holder
-//!   CREDIT  5  u32 LE: the client will take this many more OUTPUT bytes (flow control)
 //! relay -> client
-//!   ATTACHED 101 JSON {held_id, role, cols, rows, replay}   the ticket was good; `replay` bytes of tail follow as OUTPUT
+//!   ATTACHED 101 JSON {v: 1, held_id, role, cols, rows, replay}   the ticket was good; `replay` bytes of tail follow as OUTPUT
 //!   OUTPUT   102 raw bytes of the terminal (first the holder's tail, then live)
 //!   EXIT     103 JSON {code, signal, error?}                the engine ended; the relay closes after it
-//!   DETACHED 104 JSON {why: "detach" | "taken_over" | "holder_lost" | "refused"}     the relay is done with this client
+//!   DETACHED 104 JSON {why: "detach" | "taken_over" | "slow" | "holder_lost" | "refused"}   the relay is done with this client
 //!   ERROR    105 JSON {error}                                a refused frame or ticket; the relay then closes
 //! ```
 //!
-//! - Roles. `owner` types and resizes; there is at most one. A second `owner` ATTACH is refused with ERROR
-//!   `owner_present` unless it carries `takeover: true`, which sends the first owner DETACHED `taken_over`. `observer`s
-//!   read only, any number, and never change the terminal's size.
-//! - Flow control. OUTPUT is sent only against credit: the client opens with `credit` in ATTACH (default
-//!   [`attach::DEFAULT_CREDIT`]) and grants more with CREDIT as it consumes. A relay out of credit stops reading for
-//!   that client; the holder's own backlog then slows the engine, so nothing is dropped and nothing grows without
-//!   bound. An observer that stays out of credit longer than the relay allows is DETACHED, never the owner.
+//! - Versions. `v` is 1 in ATTACH and ATTACHED; a relay that does not speak the client's `v` answers ERROR
+//!   `unsupported_version`. The largest payload the relay sends is [`attach::MAX_PAYLOAD`] bytes: OUTPUT (and the replay)
+//!   are cut into chunks that fit, and a client must accept a payload that size. Unknown kinds: the client ignores
+//!   kinds of 100 and up it does not know (they are later additions); the relay answers an unknown client kind (below
+//!   100) with ERROR `unknown_kind` and closes.
+//! - Roles. The ticket fixes the role: ATTACH may ask for the ticket's role or a lower one (`observer` is lower than
+//!   `owner`), never a higher; an observer ticket asking for `owner` is ERROR `role_not_allowed`. `owner` types and
+//!   resizes; there is at most one. A second `owner` ATTACH is refused with ERROR `owner_present` unless it carries
+//!   `takeover: true` and its ticket is an owner ticket, which sends the first owner DETACHED `taken_over`.
+//!   `observer`s read only, any number, and never change the terminal's size.
+//! - Flow control. There is one connection between the core and the holder and one backlog on it (8 MB): a relay that
+//!   stopped reading would pause every engine, not just one. So the relay always drains the holder, whatever its
+//!   clients do. Each attach gets a bounded buffer ([`attach::CLIENT_BUFFER`]); a client that lets it overflow (the
+//!   owner included) gets DETACHED `slow` and may attach again with a new ticket, which replays the holder's tail. An
+//!   engine never waits on a client. (There is no credit frame: a client that cannot keep up is cut, not waited for.)
 //! - The ticket is redeemed on ATTACH and only there; a refused ticket (used, expired, unknown) is ERROR with no
 //!   ATTACHED. One ticket attaches one client; a client that wants another view asks `terminal.open` or the later
 //!   `terminal.attach` for a new ticket.
+//! - Busy. An EXIT with code 75 right after ATTACHED means busy: another writer has this session (the start stub's own
+//!   lock, held by a `--direct` run). The client says so in those words and does not retry.
 //!
 //! Not part of this PR: the relay and the client. Until M1-5 the supervisor discards the engine's output as it reads it
 //! (a core that never reads would let it pile up in memory); the holder keeps its own 1 MB tail for the first replay.
+//!
+//! Later (listed in the PR): a durable claim-id counter from core.db instead of the epoch; person and agent on the claim
+//! before guests; a timeout on the `ps` fallback of `process_start`; `prune_stale` of dead claims; an e2e run against
+//! the real kith-stub.
 
 use std::collections::{BTreeMap, HashMap};
 #[cfg(unix)]
@@ -101,14 +127,15 @@ pub(crate) mod attach {
     pub const INPUT: u8 = 2;
     pub const RESIZE: u8 = 3;
     pub const DETACH: u8 = 4;
-    pub const CREDIT: u8 = 5;
     pub const ATTACHED: u8 = 101;
     pub const OUTPUT: u8 = 102;
     pub const EXIT: u8 = 103;
     pub const DETACHED: u8 = 104;
     pub const ERROR: u8 = 105;
-    /// Output bytes a client may be sent before it grants more, when its ATTACH names none.
-    pub const DEFAULT_CREDIT: u32 = 64 * 1024;
+    /// The largest payload the relay sends in one frame; OUTPUT and the replay are cut to fit.
+    pub const MAX_PAYLOAD: usize = 64 * 1024;
+    /// What the relay buffers for one attached client before it cuts the client with DETACHED `slow`.
+    pub const CLIENT_BUFFER: usize = 1024 * 1024;
 }
 
 // --- the filter ----------------------------------------------------------------------------------------------------
@@ -133,8 +160,17 @@ pub(crate) fn filter_env(env: &serde_json::Map<String, Value>) -> BTreeMap<Strin
 
 // --- tickets -------------------------------------------------------------------------------------------------------
 
+/// What an attach may do. Ordered: an observer is lower than an owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[allow(dead_code)] // M1-5's relay reads it
+pub(crate) enum Role {
+    Observer,
+    Owner,
+}
+
 #[allow(dead_code)] // read by redeem, which the attach relay (M1-5) calls
 struct Entry {
+    role: Role,
     held: HeldId,
     session: String,
     agent: String,
@@ -145,9 +181,20 @@ struct Entry {
 #[derive(Debug, PartialEq, Eq)]
 #[allow(dead_code)] // M1-5's relay reads it
 pub(crate) struct Redeemed {
+    /// The most this ticket allows; the ATTACH may ask for this or lower.
+    pub role: Role,
     pub held: HeldId,
     pub session: String,
     pub agent: String,
+}
+
+#[allow(dead_code)] // M1-5's relay calls it
+impl Redeemed {
+    /// The role an ATTACH gets for the role it asked for and whether it asked to take over: the ticket's role or a
+    /// lower one, and only an owner ticket may take over. `None` is ERROR `role_not_allowed`.
+    pub(crate) fn grant(&self, asked: Role, takeover: bool) -> Option<Role> {
+        (asked <= self.role && (!takeover || self.role == Role::Owner)).then_some(asked)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -175,14 +222,21 @@ fn hash(ticket: &str) -> String {
 }
 
 impl Tickets {
-    pub(crate) fn issue(&self, held: HeldId, session: &str, agent: &str) -> Result<String> {
-        self.issue_at(Instant::now(), TICKET_TTL, held, session, agent)
+    pub(crate) fn issue(
+        &self,
+        role: Role,
+        held: HeldId,
+        session: &str,
+        agent: &str,
+    ) -> Result<String> {
+        self.issue_at(Instant::now(), TICKET_TTL, role, held, session, agent)
     }
 
     fn issue_at(
         &self,
         now: Instant,
         ttl: Duration,
+        role: Role,
         held: HeldId,
         session: &str,
         agent: &str,
@@ -206,6 +260,7 @@ impl Tickets {
         map.insert(
             hash(&ticket),
             Entry {
+                role,
                 held,
                 session: session.to_owned(),
                 agent: agent.to_owned(),
@@ -238,6 +293,7 @@ impl Tickets {
             return Err(TicketRefused::Expired);
         }
         Ok(Redeemed {
+            role: entry.role,
             held: entry.held,
             session: entry.session,
             agent: entry.agent,
@@ -261,6 +317,13 @@ pub(crate) enum Placed {
     Stale,
 }
 
+/// What the supervisor is asked to do with its holder connection.
+pub(crate) enum Req {
+    Spawn(SpawnReq),
+    /// End a held process and forget it (a terminal whose claim could not be handed over).
+    End(HeldId),
+}
+
 /// A spawn waiting for the supervisor, which owns the holder connection. `deadline` is when the caller stops waiting:
 /// a request that sat in the queue past it (the link was down) is dropped, never run after its caller gave up.
 pub(crate) struct SpawnReq {
@@ -273,11 +336,16 @@ pub(crate) struct SpawnReq {
 /// Terminals as the daemon keeps them: the queue to the supervisor, whether the link is up, the stub, the tickets.
 pub(crate) struct Terminals {
     link_up: AtomicBool,
-    queue: Sender<SpawnReq>,
-    inbox: Mutex<Receiver<SpawnReq>>,
+    /// The holder link is a command (`ssh host kith-holder --stdio`): the holder is on another machine.
+    remote: AtomicBool,
+    queue: Sender<Req>,
+    inbox: Mutex<Receiver<Req>>,
     stub: Mutex<Option<PathBuf>>,
     last_claim: AtomicU64,
     pub(crate) tickets: Tickets,
+    /// Tests: make handing the claim to the stub's pid fail.
+    #[cfg(test)]
+    pub(crate) fail_retarget: AtomicBool,
 }
 
 impl Terminals {
@@ -285,11 +353,14 @@ impl Terminals {
         let (queue, inbox) = mpsc::channel();
         Self {
             link_up: AtomicBool::new(false),
+            remote: AtomicBool::new(false),
             queue,
             inbox: Mutex::new(inbox),
             stub: Mutex::new(None),
             last_claim: AtomicU64::new(0),
             tickets: Tickets::default(),
+            #[cfg(test)]
+            fail_retarget: AtomicBool::new(false),
         }
     }
 
@@ -298,11 +369,18 @@ impl Terminals {
         self.link_up.store(up, Ordering::SeqCst);
         if !up {
             while let Some(req) = self.next(Duration::ZERO) {
-                let _ = req
-                    .reply
-                    .send(Placed::Failed("the holder link went down".into()));
+                if let Req::Spawn(req) = req {
+                    let _ = req
+                        .reply
+                        .send(Placed::Failed("the holder link went down".into()));
+                }
             }
         }
+    }
+
+    /// Whether the holder is reached through a command (the supervisor says so once, when it starts).
+    pub(crate) fn set_remote(&self, remote: bool) {
+        self.remote.store(remote, Ordering::SeqCst);
     }
 
     pub(crate) fn set_stub(&self, stub: Option<PathBuf>) {
@@ -313,7 +391,7 @@ impl Terminals {
     }
 
     /// The next waiting spawn, waiting up to `wait` (the supervisor's idle tick).
-    pub(crate) fn next(&self, wait: Duration) -> Option<SpawnReq> {
+    pub(crate) fn next(&self, wait: Duration) -> Option<Req> {
         let inbox = self
             .inbox
             .lock()
@@ -376,6 +454,12 @@ impl Terminals {
                     .into(),
             );
         };
+        if self.remote.load(Ordering::SeqCst) {
+            return direct(
+                "the holder is on another computer: its stub, lock folder and claim files are not this one's; use --direct"
+                    .into(),
+            );
+        }
         if !self.link_up.load(Ordering::SeqCst) {
             return direct("the holder is not reachable: use --direct".into());
         }
@@ -406,7 +490,7 @@ impl Terminals {
         layout: &Layout,
     ) -> Result<Value> {
         let me = std::process::id();
-        match claim::take(state, &req.session, me)? {
+        match claim::take(state, &req.session, me, "starting")? {
             Ok(()) => {}
             Err(held) => {
                 return Ok(json!({
@@ -453,12 +537,12 @@ impl Terminals {
             kill_on_lease_loss: false,
         };
         let (reply, answer) = mpsc::channel();
-        let sent = self.queue.send(SpawnReq {
+        let sent = self.queue.send(Req::Spawn(SpawnReq {
             spec,
             deadline: Instant::now() + SPAWN_WAIT,
             busy_wait: BUSY_WAIT,
             reply,
-        });
+        }));
         let placed = match sent {
             Ok(()) => answer
                 .recv_timeout(SPAWN_WAIT + Duration::from_secs(2))
@@ -467,17 +551,38 @@ impl Terminals {
         };
         match placed {
             Some(Placed::Started { held, pid }) => {
-                if let Err(e) = claim::retarget(state, &req.session, me, pid) {
-                    // The claim stays with this daemon's pid: still live, still ours, only not tied to the stub.
+                #[cfg(test)]
+                let injected = self.fail_retarget.load(Ordering::SeqCst);
+                #[cfg(not(test))]
+                let injected = false;
+                let handed = if injected {
+                    Err(std::io::Error::other("injected"))
+                } else {
+                    claim::retarget(state, &req.session, me, pid)
+                };
+                if !matches!(handed, Ok(true)) {
+                    // Fail closed: a terminal whose claim is not the stub's must not run, and the daemon's pid (`kith
+                    // serve`) must never be left as the session's holder, where a Stop would signal it.
+                    let why = handed.err().map_or_else(
+                        || "the claim was taken by someone else".to_owned(),
+                        |e| e.to_string(),
+                    );
+                    let _ = self.queue.send(Req::End(held));
+                    give_back(me);
                     crate::log::note(
                         &shared.logs,
                         &format!(
-                            "terminal: could not hand the claim of {} to pid {pid}: {e}",
+                            "terminal: could not hand the claim of {} to pid {pid} ({why}); the terminal was ended",
                             req.session
                         ),
                     );
+                    return Err(Error::Io(format!(
+                        "kith-core: could not give the session's claim to the terminal ({why}); it was ended"
+                    )));
                 }
-                let ticket = self.tickets.issue(held.clone(), &req.session, &req.agent)?;
+                let ticket =
+                    self.tickets
+                        .issue(Role::Owner, held.clone(), &req.session, &req.agent)?;
                 Ok(json!({
                     "status": "open",
                     "ticket": ticket,
@@ -622,6 +727,25 @@ mod claim {
         v.is_object().then_some(v)
     }
 
+    /// `kill(pid, 0)`: it succeeds, or fails with EPERM (a process of another user), for a pid that exists. (No unsafe
+    /// code here, so the signal is sent by the system's `kill`, whose message tells ESRCH from EPERM.)
+    fn pid_alive(pid: u32) -> bool {
+        let kill = ["/bin/kill", "/usr/bin/kill"]
+            .into_iter()
+            .find(|p| Path::new(p).is_file())
+            .unwrap_or("/bin/kill");
+        std::process::Command::new(kill)
+            .args(["-s", "0", "--"])
+            .arg(pid.to_string())
+            .output()
+            .is_ok_and(|o| {
+                o.status.success()
+                    || String::from_utf8_lossy(&o.stderr)
+                        .to_lowercase()
+                        .contains("not permitted")
+            })
+    }
+
     /// The claimer runs and started when the record says (a reused pid started at another time is not it).
     fn live(c: &Value) -> bool {
         let Some(pid) = c
@@ -631,8 +755,13 @@ mod claim {
         else {
             return false;
         };
-        let Some(actual) = process_start(pid) else {
+        if !pid_alive(pid) {
             return false;
+        }
+        // Alive but its start time can't be read (no `ps` for it, another user's process): it counts as live, as
+        // `claim_live` in kith-sessions does, and its claim is never deleted.
+        let Some(actual) = process_start(pid) else {
+            return true;
         };
         match c
             .get("procStart")
@@ -683,12 +812,12 @@ mod claim {
         )
     }
 
-    fn record(pid: u32) -> String {
+    fn record(pid: u32, kind: &str) -> String {
         json!({
             "pid": pid,
             "procStart": process_start(pid).unwrap_or_default(),
             "at": stamp(),
-            "kind": "terminal",
+            "kind": kind,
         })
         .to_string()
     }
@@ -727,8 +856,14 @@ mod claim {
             .create(parent)
     }
 
-    /// Takes the claim for `pid`. `Ok(Err(held))`: a live claim is there.
-    pub(super) fn take(state: &Path, sid: &str, pid: u32) -> io::Result<Result<(), Held>> {
+    /// Takes the claim for `pid`, recorded as `kind`. `Ok(Err(held))`: a live claim is there. A taker ends the
+    /// session's pending intent and its 54-minute decision (`kith-lifecycle taken`), as `take_claim` does.
+    pub(super) fn take(
+        state: &Path,
+        sid: &str,
+        pid: u32,
+        kind: &str,
+    ) -> io::Result<Result<(), Held>> {
         let parent = dir(state);
         make_dir(&parent)?;
         let dest = parent.join(format!("{sid}.claim"));
@@ -738,7 +873,7 @@ mod claim {
             std::process::id(),
             unique()
         ));
-        write_new(&tmp, &record(pid))?;
+        write_new(&tmp, &record(pid, kind))?;
         let result = (|| {
             let _lock = lock(&parent, sid)?;
             for _ in 0..3 {
@@ -762,11 +897,21 @@ mod claim {
             )))
         })();
         let _ = fs::remove_file(&tmp);
+        if matches!(result, Ok(Ok(()))) {
+            taken(state, sid);
+        }
         result
     }
 
+    /// `kith_lifecycle.taken`: best effort, the claim never fails on bookkeeping.
+    fn taken(state: &Path, sid: &str) {
+        let _ = fs::remove_file(state.join("sessions/intent").join(format!("{sid}.json")));
+        let _ = fs::remove_file(state.join("sessions/decisions").join(format!("{sid}.json")));
+    }
+
     /// Hands a claim this daemon took for itself to the stub's pid, if it is still ours.
-    pub(super) fn retarget(state: &Path, sid: &str, from: u32, to: u32) -> io::Result<()> {
+    /// `Ok(false)`: the claim is no longer `from`'s, and nothing was changed.
+    pub(super) fn retarget(state: &Path, sid: &str, from: u32, to: u32) -> io::Result<bool> {
         let parent = dir(state);
         let dest = parent.join(format!("{sid}.claim"));
         let _lock = lock(&parent, sid)?;
@@ -776,10 +921,11 @@ mod claim {
                 std::process::id(),
                 unique()
             ));
-            write_new(&tmp, &record(to))?;
+            write_new(&tmp, &record(to, "terminal"))?;
             fs::rename(&tmp, &dest)?;
+            return Ok(true);
         }
-        Ok(())
+        Ok(false)
     }
 
     /// Gives the claim back if `pid` still holds it.
