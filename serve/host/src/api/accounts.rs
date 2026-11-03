@@ -71,10 +71,11 @@ pub(super) async fn call(hub: &Arc<Hub>, method: &str, b: Value) -> Result<Contr
         }
         "accountClear" => {
             let id = id_of(&b["id"])?;
-            let out = write(hub, vec!["clear".into(), id.to_owned()]).await;
-            // The host's own early mark (usage readings) goes too, or the next turn would put it back.
+            let out = write(hub, vec!["clear".into(), id.to_owned()]).await?;
+            // The host's own early mark (usage readings) goes too, or the next turn would put it back. Only once the
+            // kernel has cleared: after a failure the account is still out.
             hub.backups.clear_local(id);
-            out?
+            out
         }
         "accountAdd" => add(hub, &b).await?,
         "accountRemove" => {
@@ -279,7 +280,10 @@ async fn add(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     };
     let bin = kith().await?;
     let known = json_of(&bin, &["account", "list", "--json"]).await?;
-    let exists = known.as_array().is_some_and(|a| a.iter().any(|r| r["id"] == id.as_str()));
+    // As the CLI decides it: the account's folder is there. An id in the set whose folder is gone is new.
+    let exists = known.as_array().is_some_and(|a| {
+        a.iter().any(|r| r["id"] == id.as_str() && r["dir"].as_str().is_some_and(|d| Path::new(d).is_dir()))
+    });
     if harness == "claude" && !exists && b["yes"].as_bool() != Some(true) {
         // Nothing is made without `--yes`: the CLI prints its warning and ends on the missing answer.
         let warning = warning_text(&stdout_of(&bin, &["account", "add", harness, name]).await?);
