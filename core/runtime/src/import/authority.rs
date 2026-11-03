@@ -75,8 +75,7 @@ fn bad(what: &str, why: &str) -> Error {
 }
 
 fn object<'a>(v: &'a Value, what: &str) -> Result<&'a Map<String, Value>> {
-    v.as_object()
-        .ok_or_else(|| bad(what, "is not an object"))
+    v.as_object().ok_or_else(|| bad(what, "is not an object"))
 }
 
 /// The table `key` of the file: absent or null is empty.
@@ -346,9 +345,13 @@ pub(super) fn left_behind(auth: &Value) -> Vec<String> {
 
 fn why(key: &str) -> &'static str {
     match key {
-        "profiles" => "the profile table moves with kith-auth (M2-18); keychain: references have their items sealed separately",
+        "profiles" => {
+            "the profile table moves with kith-auth (M2-18); keychain: references have their items sealed separately"
+        }
         "grants" => "which profiles an agent may use moves with kith-auth (M2-18)",
-        "env" => "agent env values (plaintext in auth.json today) move with kith-auth (M2-18); never copied here",
+        "env" => {
+            "agent env values (plaintext in auth.json today) move with kith-auth (M2-18); never copied here"
+        }
         _ => "one-time secrets expire within the hour",
     }
 }

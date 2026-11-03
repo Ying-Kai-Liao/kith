@@ -93,7 +93,12 @@ fn scratch_db(auth: &Value) -> Result<Connection> {
 fn is_empty(snapshot: &Value) -> bool {
     ["people", "members", "presets", "invites", "retired"]
         .iter()
-        .all(|t| snapshot.get(t).and_then(Value::as_object).is_none_or(serde_json::Map::is_empty))
+        .all(|t| {
+            snapshot
+                .get(t)
+                .and_then(Value::as_object)
+                .is_none_or(serde_json::Map::is_empty)
+        })
         && snapshot.get("owner_bots_budget").is_none()
 }
 
@@ -198,7 +203,9 @@ fn dry(
         )
         .is_ok_and(|n| n > 0)
     };
-    let ready = db.as_ref().filter(|c| has(c, "people") && has(c, "retired"));
+    let ready = db
+        .as_ref()
+        .filter(|c| has(c, "people") && has(c, "retired"));
     let state = match ready {
         None => {
             rep.lines.push(
@@ -309,7 +316,9 @@ fn real(
             )));
         }
         rep.lines.push(match state {
-            Rows::Differs => format!("authority: replaced core.db's rows with auth.json's ({counts})"),
+            Rows::Differs => {
+                format!("authority: replaced core.db's rows with auth.json's ({counts})")
+            }
             _ => format!("authority: imported {counts}"),
         });
     } else {

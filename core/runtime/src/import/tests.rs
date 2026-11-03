@@ -196,7 +196,10 @@ fn a_real_shaped_file_goes_in_with_a_backup_a_log_row_and_the_keychain_item() {
     assert!(said.contains("left behind: profiles"), "{said}");
     assert!(said.contains("left behind: env"), "{said}");
     assert!(said.contains("person keys"), "{said}");
-    assert!(!said.contains("tok\n") && !said.contains("plain-value"), "{said}");
+    assert!(
+        !said.contains("tok\n") && !said.contains("plain-value"),
+        "{said}"
+    );
     assert_eq!(f.source(), before, "the source is never edited");
 }
 
@@ -326,7 +329,10 @@ fn an_empty_file_and_a_missing_file_import_nothing() {
     let rep = f.import(&mut sink).unwrap();
     assert!(!rep.changed);
     assert!(rep.lines[0].contains("no auth.json"), "{:?}", rep.lines);
-    assert!(!f.layout.db.exists(), "nothing to import must not make core.db");
+    assert!(
+        !f.layout.db.exists(),
+        "nothing to import must not make core.db"
+    );
     f.auth("{}");
     let rep = f.import(&mut sink).unwrap();
     assert!(!rep.changed, "{:?}", rep.lines);
@@ -381,12 +387,18 @@ fn rows_that_differ_are_refused_unless_forced_and_a_backup_comes_first() {
     {
         let core = open_all(&f.layout);
         core.conn()
-            .execute("UPDATE people SET name = 'Mia changed' WHERE id = 'mia'", [])
+            .execute(
+                "UPDATE people SET name = 'Mia changed' WHERE id = 'mia'",
+                [],
+            )
             .unwrap();
     }
     let snaps = f.snapshots();
     let e = f.import(&mut sink).unwrap_err();
-    assert!(matches!(&e, Error::Refused(m) if m.contains("--force")), "{e:?}");
+    assert!(
+        matches!(&e, Error::Refused(m) if m.contains("--force")),
+        "{e:?}"
+    );
     assert_eq!(f.snapshots(), snaps, "a refusal takes no backup");
     let name: String = open_all(&f.layout)
         .conn()
@@ -446,7 +458,9 @@ fn a_store_that_refuses_leaves_the_authority_import_standing() {
     assert!(rep.changed);
     assert!(sink.records.is_empty());
     assert!(
-        rep.lines.iter().any(|l| l.contains("secrets store unavailable")),
+        rep.lines
+            .iter()
+            .any(|l| l.contains("secrets store unavailable")),
         "{:?}",
         rep.lines
     );
@@ -492,7 +506,10 @@ fn the_same_answer_check_catches_rows_that_say_something_else() {
         c
     };
     let diffs = check::diffs(&auth, &conn, &f.ctx).unwrap();
-    assert!(!diffs.is_empty(), "a membership the rows lack went unnoticed");
+    assert!(
+        !diffs.is_empty(),
+        "a membership the rows lack went unnoticed"
+    );
     // And the same rows against the same file agree.
     let conn = {
         let mut c = Connection::open_in_memory().unwrap();
@@ -500,7 +517,10 @@ fn the_same_answer_check_catches_rows_that_say_something_else() {
         super::authority::insert_all(&c, &auth).unwrap();
         c
     };
-    assert_eq!(check::diffs(&auth, &conn, &f.ctx).unwrap(), Vec::<String>::new());
+    assert_eq!(
+        check::diffs(&auth, &conn, &f.ctx).unwrap(),
+        Vec::<String>::new()
+    );
 }
 
 #[test]
@@ -513,10 +533,17 @@ fn the_source_files_are_left_exactly_as_they_were() {
     f.import(&mut sink).unwrap();
     f.import(&mut sink).unwrap();
     assert_eq!(f.source(), before);
-    assert_eq!(std::fs::metadata(&f.ctx.auth).unwrap().modified().unwrap(), mtime);
+    assert_eq!(
+        std::fs::metadata(&f.ctx.auth).unwrap().modified().unwrap(),
+        mtime
+    );
     let names: Vec<_> = std::fs::read_dir(f.root.join("secrets"))
         .unwrap()
         .map(|e| e.unwrap().file_name())
         .collect();
-    assert_eq!(names.len(), 1, "something else appeared beside auth.json: {names:?}");
+    assert_eq!(
+        names.len(),
+        1,
+        "something else appeared beside auth.json: {names:?}"
+    );
 }
