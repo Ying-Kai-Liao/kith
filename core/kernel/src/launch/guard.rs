@@ -90,7 +90,11 @@ pub fn valid_domain(d: &str) -> bool {
         let ok = |c: u8| c.is_ascii_lowercase() || c.is_ascii_digit();
         !b.is_empty()
             && b.len() <= 63
-            && if first_alpha { b[0].is_ascii_lowercase() } else { ok(b[0]) }
+            && if first_alpha {
+                b[0].is_ascii_lowercase()
+            } else {
+                ok(b[0])
+            }
             && ok(b[b.len() - 1])
             && b.iter().all(|c| ok(*c) || *c == b'-')
     };

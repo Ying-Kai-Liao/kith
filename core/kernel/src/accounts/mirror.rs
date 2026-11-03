@@ -22,7 +22,11 @@ const MIRRORED_FLAGS: [&str; 6] = [
 ];
 /// Plugin state: the JSON files are copied (Claude Code rewrites them in place, so a link would not survive), the folders
 /// are linked (their paths in `installed_plugins.json` are absolute, into the main login's).
-const PLUGIN_FILES: [&str; 3] = ["installed_plugins.json", "known_marketplaces.json", "blocklist.json"];
+const PLUGIN_FILES: [&str; 3] = [
+    "installed_plugins.json",
+    "known_marketplaces.json",
+    "blocklist.json",
+];
 const PLUGIN_DIRS: [&str; 3] = ["marketplaces", "cache", "data"];
 
 fn read_json(path: &Path) -> Option<Map> {
@@ -104,7 +108,12 @@ fn symlink(target: &Path, link: &Path) -> std::io::Result<()> {
     std::os::windows::fs::symlink_dir(target, link)
 }
 
-fn sync(directory: &Path, main_dir: &Path, main_json: &Path, changed: &mut Vec<String>) -> std::io::Result<()> {
+fn sync(
+    directory: &Path,
+    main_dir: &Path,
+    main_json: &Path,
+    changed: &mut Vec<String>,
+) -> std::io::Result<()> {
     if !directory.is_dir() || realpath(directory) == realpath(main_dir) {
         return Ok(());
     }
@@ -120,7 +129,10 @@ fn sync(directory: &Path, main_dir: &Path, main_json: &Path, changed: &mut Vec<S
         mkdir_private(&plugins_dst)?;
         for name in PLUGIN_FILES {
             let from = plugins_src.join(name);
-            if from.is_file() && read_json(&from).is_some() && copy_if_changed(&from, &plugins_dst.join(name))? {
+            if from.is_file()
+                && read_json(&from).is_some()
+                && copy_if_changed(&from, &plugins_dst.join(name))?
+            {
                 changed.push(format!("plugins/{name}"));
             }
         }

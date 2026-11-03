@@ -4,6 +4,9 @@
     "command": "launch-json",
     "setup": [
       {
+        "mkdir": "kith/kernel"
+      },
+      {
         "write": "kith/agents/echo/role/agent.md",
         "text": "---\nname: echo\ndescription: test agent\nharness: codex\n---\nYou are echo.\n"
       },
@@ -44,6 +47,7 @@
     ],
     "ignore": [
       "/state/store/",
+      "/agents/\\.store/",
       "/\\.runs/",
       "/state/run/"
     ],

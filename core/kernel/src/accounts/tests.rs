@@ -109,7 +109,7 @@ impl Home {
         d.join("agent.md")
     }
 
-    fn state(&self) -> serde_json::Value {
+    fn state(&self) -> Value {
         serde_json::from_slice(&std::fs::read(state::state_file(&self.machine())).unwrap()).unwrap()
     }
 
@@ -148,8 +148,16 @@ fn ids_parse_like_the_python() {
         ("claude-api".into(), Some("main".into()))
     );
     assert!(parse("claude-api").unwrap_err().contains("needs a profile"));
-    assert!(parse("Claude").unwrap_err().contains("is not an account id"));
-    assert!(parse("claude:").unwrap_err().contains("is not an account id"));
+    assert!(
+        parse("Claude")
+            .unwrap_err()
+            .contains("is not an account id")
+    );
+    assert!(
+        parse("claude:")
+            .unwrap_err()
+            .contains("is not an account id")
+    );
     assert!(
         parse("claude@")
             .unwrap_err()
@@ -194,7 +202,7 @@ fn json_is_written_the_way_python_writes_it() {
     .unwrap();
     assert_eq!(
         pyjson::dumps(&v),
-        r#"{"a": [1, 2.5, 70.0, 1e-07, 1e+16], "b": {}, "c": [], "d": "é\u0001", "e": null, "f": true}"#
+        r#"{"a": [1, 2.5, 70.0, 1e-07, 1e+16], "b": {}, "c": [], "d": "\u00e9\u0001", "e": null, "f": true}"#
     );
     assert_eq!(
         pyjson::dumps_pretty(&v),
@@ -229,8 +237,14 @@ fn settings_that_cant_be_used_set_nothing() {
     }
     h.settings(r#"{"accounts": ["codex"], "permission_mode": "dontAsk", "agents": {"a": {"pin": {"id": "codex"}}}}"#);
     let s = read_settings(&m);
-    assert_eq!(s["permission_mode"], "auto", "a retired mode reads as its successor");
-    assert_eq!(settings::accounts(&s, "a"), (Some(vec!["codex".to_owned()]), "global"));
+    assert_eq!(
+        s["permission_mode"], "auto",
+        "a retired mode reads as its successor"
+    );
+    assert_eq!(
+        settings::accounts(&s, "a"),
+        (Some(vec!["codex".to_owned()]), "global")
+    );
 }
 
 #[test]
@@ -240,7 +254,10 @@ fn an_agents_own_set_replaces_the_global_one_even_when_empty() {
     let s = read(&h);
     assert_eq!(settings::accounts(&s, "a"), (Some(vec![]), "agent"));
     assert_eq!(settings::accounts(&s, "b").1, "global");
-    assert_eq!(settings::accounts(&s, "nobody").0, Some(vec!["codex".to_owned()]));
+    assert_eq!(
+        settings::accounts(&s, "nobody").0,
+        Some(vec!["codex".to_owned()])
+    );
     assert_eq!(settings::accounts(&s, "").0, Some(vec!["codex".to_owned()]));
 }
 
@@ -259,15 +276,26 @@ fn the_older_settings_shape_reads_as_the_account_set() {
         settings::accounts(&s, "").0.unwrap(),
         ["codex:b", "claude", "claude@sonnet"]
     );
-    assert_eq!(settings::accounts(&s, "cdx").0.unwrap(), ["codex:z", "codex"]);
+    assert_eq!(
+        settings::accounts(&s, "cdx").0.unwrap(),
+        ["codex:z", "codex"]
+    );
     assert_eq!(
         settings::pin(&s, "cdx"),
-        Some(settings::Pin { id: "codex:z".into(), only: false })
+        Some(settings::Pin {
+            id: "codex:z".into(),
+            only: false
+        })
     );
     // echo is a claude agent (no agent.md): the global main account is not of its family, so its harness leads
     assert_eq!(settings::accounts(&s, "echo").0.unwrap(), ["claude"]);
     assert!(!s.contains_key("account") && !s.contains_key("backups"));
-    assert!(!s["agents"]["cdx"].as_object().unwrap().contains_key("backups"));
+    assert!(
+        !s["agents"]["cdx"]
+            .as_object()
+            .unwrap()
+            .contains_key("backups")
+    );
 }
 
 #[test]
@@ -277,14 +305,20 @@ fn a_file_in_the_older_shape_is_rewritten_by_list_only() {
     let fake = Fake::new();
     let ctx = h.ctx(&fake);
     let before = std::fs::read_to_string(h.machine().join("settings.json")).unwrap();
-    assert_eq!(super::main_id(&ctx, "echo", None, None), "claude:work");
-    assert_eq!(std::fs::read_to_string(h.machine().join("settings.json")).unwrap(), before);
+    assert_eq!(main_id(&ctx, "echo", None, None), "claude:work");
+    assert_eq!(
+        std::fs::read_to_string(h.machine().join("settings.json")).unwrap(),
+        before
+    );
     assert!(settings::migrate_file(&ctx).unwrap());
     assert_eq!(
         std::fs::read_to_string(h.machine().join("settings.json")).unwrap(),
         "{\n  \"permission_mode\": \"auto\",\n  \"accounts\": [\n    \"claude:work\"\n  ]\n}\n"
     );
-    assert!(!settings::migrate_file(&ctx).unwrap(), "the second time there is nothing to write");
+    assert!(
+        !settings::migrate_file(&ctx).unwrap(),
+        "the second time there is nothing to write"
+    );
     assert!(h.machine().join("settings.json.lock").exists());
 }
 
@@ -303,8 +337,14 @@ fn the_pin_leads_and_only_closes_the_rest() {
     assert_eq!(pin.unwrap().id, "claude:b");
     assert_eq!(static_order(&s, "solo", "claude").0, ["claude:a"]);
     // a pin the agent's harness can't use is no pin
-    assert_eq!(static_order(&s, "odd", "claude").0, ["claude", "claude:a", "claude:b"]);
-    assert_eq!(main_id(&h.ctx(&Fake::new()), "echo", Some(&md), None), "claude:b");
+    assert_eq!(
+        static_order(&s, "odd", "claude").0,
+        ["claude", "claude:a", "claude:b"]
+    );
+    assert_eq!(
+        main_id(&h.ctx(&Fake::new()), "echo", Some(&md), None),
+        "claude:b"
+    );
 }
 
 #[test]
@@ -317,7 +357,10 @@ fn another_harness_serves_only_when_the_agent_or_the_switch_says_so() {
     );
     let s = read(&h);
     assert_eq!(static_order(&s, "echo", "claude").0, ["claude"]);
-    assert_eq!(static_order(&s, "on", "claude").0, ["claude", "codex", "codex:b"]);
+    assert_eq!(
+        static_order(&s, "on", "claude").0,
+        ["claude", "codex", "codex:b"]
+    );
     // an agent's own list may name any harness
     assert_eq!(static_order(&s, "own", "claude").0, ["claude", "codex"]);
     // an explicitly empty list: only the pin, if there is one, else the harness's login
@@ -340,7 +383,10 @@ fn the_default_login_has_no_environment() {
         fake.asked.borrow().is_empty(),
         "the main account asks the harness nothing"
     );
-    assert!(!state::state_file(&h.machine()).exists(), "nothing recorded without --record");
+    assert!(
+        !state::state_file(&h.machine()).exists(),
+        "nothing recorded without --record"
+    );
 }
 
 #[test]
@@ -474,7 +520,16 @@ fn a_launch_notes_when_the_account_started() {
     launch_env(&ctx, "echo", "codex:b", false, false).unwrap();
     assert!(!state::state_file(&h.machine()).exists());
     launch_env(&ctx, "echo", "codex:b", false, true).unwrap();
-    main_env(&ctx, "echo", &md, MainOpts { record: true, ..MainOpts::default() }).unwrap();
+    main_env(
+        &ctx,
+        "echo",
+        &md,
+        MainOpts {
+            record: true,
+            ..MainOpts::default()
+        },
+    )
+    .unwrap();
     // a launch that cannot run notes nothing
     launch_env(&ctx, "echo", "codex:none", false, true).unwrap_err();
     let s = h.state();
@@ -483,12 +538,28 @@ fn a_launch_notes_when_the_account_started() {
     assert_eq!(accts.keys().collect::<Vec<_>>(), ["codex:b", "claude"]);
     assert!(accts["claude"]["last_started"].as_i64().unwrap() > 1_700_000_000);
     let text = std::fs::read_to_string(state::state_file(&h.machine())).unwrap();
-    assert!(text.starts_with("{\n  \"version\": 1,\n  \"accounts\": {\n    \"codex:b\": {\n      \"last_started\": "));
+    assert!(text.starts_with(
+        "{\n  \"version\": 1,\n  \"accounts\": {\n    \"codex:b\": {\n      \"last_started\": "
+    ));
     assert!(text.ends_with("}\n"));
-    assert!(h.machine().join("accounts").join("state.json.lock").exists());
+    assert!(
+        h.machine()
+            .join("accounts")
+            .join("state.json.lock")
+            .exists()
+    );
     // a state file from another writer keeps what it holds
     h.put_state(r#"{"version": 1, "accounts": {"claude:w": {"out_until": 1900000000, "reason": "rate_limit"}}}"#);
-    main_env(&ctx, "echo", &md, MainOpts { record: true, ..MainOpts::default() }).unwrap();
+    main_env(
+        &ctx,
+        "echo",
+        &md,
+        MainOpts {
+            record: true,
+            ..MainOpts::default()
+        },
+    )
+    .unwrap();
     let s = h.state();
     assert_eq!(s["accounts"]["claude:w"]["out_until"], 1_900_000_000);
     assert!(s["accounts"]["claude"]["last_started"].is_number());
@@ -500,8 +571,14 @@ fn a_state_file_that_is_not_ours_is_kept_and_replaced() {
     h.put_state("{not json");
     state::record_started(&h.machine(), "claude", 1_900_000_000);
     let dir = h.machine().join("accounts");
-    assert_eq!(std::fs::read_to_string(dir.join("state.json.corrupt")).unwrap(), "{not json");
-    assert_eq!(h.state()["accounts"]["claude"]["last_started"], 1_900_000_000);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("state.json.corrupt")).unwrap(),
+        "{not json"
+    );
+    assert_eq!(
+        h.state()["accounts"]["claude"]["last_started"],
+        1_900_000_000
+    );
     // empty, a list, no accounts: all damaged
     for bad in ["", "[]", r#"{"version": 1}"#, r#"{"accounts": []}"#] {
         h.put_state(bad);
@@ -533,12 +610,22 @@ fn marks_from_the_older_files_count_until_cleared() {
     h.put_state(r#"{"accounts": {"claude:b": {"cleared_at": 1900000400, "cleared_host_until": 1900000500}}}"#);
     let st = state::read(&m);
     assert!(!m.join("serve").join("kernel-backups-out.json").exists());
-    assert!(m.join("serve").join("kernel-backups-out.json.imported").exists());
+    assert!(
+        m.join("serve")
+            .join("kernel-backups-out.json.imported")
+            .exists()
+    );
     assert_eq!(st["claude:c"]["out_until"], 1_900_000_900);
     assert_eq!(st["claude:c"]["since"], 1_900_000_100);
     let marks = state::out_marks(&m, &st, 1_900_000_200.0);
     // claude:a is out per the host; claude:b was cleared after the host's mark; claude:c is out per the imported mark
-    assert_eq!(marks["claude:a"], state::Mark { until: 1_900_000_500, reason: "usage".into() });
+    assert_eq!(
+        marks["claude:a"],
+        state::Mark {
+            until: 1_900_000_500,
+            reason: "usage".into()
+        }
+    );
     assert!(!marks.contains_key("claude:b"));
     assert_eq!(marks["claude:c"].until, 1_900_000_900);
     assert!(!marks.contains_key("codex"));
@@ -553,9 +640,14 @@ fn a_fresh_reading_is_the_fullest_window() {
     )
     .unwrap();
     assert_eq!(state::usage_level(Some(&st), 1000.0 + 60.0), Some(71.5));
-    assert_eq!(state::usage_level(Some(&st), 1000.0 + 1801.0), None, "stale");
+    assert_eq!(
+        state::usage_level(Some(&st), 1000.0 + 1801.0),
+        None,
+        "stale"
+    );
     assert_eq!(state::usage_level(None, 0.0), None);
-    let bad: Value = serde_json::from_str(r#"{"usage": {"read_at": 1000, "windows": []}}"#).unwrap();
+    let bad: Value =
+        serde_json::from_str(r#"{"usage": {"read_at": 1000, "windows": []}}"#).unwrap();
     assert_eq!(state::usage_level(Some(&bad), 1000.0), None);
 }
 
@@ -579,7 +671,11 @@ fn pick_skips_what_is_out_or_signed_out() {
     assert_eq!(p.candidates, ["claude:a", "claude:b"]);
     assert!(!p.all_out);
     assert_eq!(p.policy, "fill");
-    let why: Vec<(&str, &str)> = p.skipped.iter().map(|s| (s.id.as_str(), s.status.status)).collect();
+    let why: Vec<(&str, &str)> = p
+        .skipped
+        .iter()
+        .map(|s| (s.id.as_str(), s.status.status))
+        .collect();
     assert_eq!(why, [("claude", "out"), ("claude:gone", "signed_out")]);
     assert_eq!(p.skipped[0].status.out_until, Some(1_900_000_500));
     assert_eq!(p.skipped[1].status.why.as_deref(), Some("no account gone"));
@@ -637,11 +733,20 @@ fn a_pin_is_tried_first_and_only_alone() {
             "solo": {"pin": {"id": "claude:b", "only": true}}}}"#,
     );
     let fake = Fake::new();
-    assert_eq!(picked(&h, &fake, "echo", false, 1.0).candidates, ["claude:b", "claude:a"]);
-    assert_eq!(picked(&h, &fake, "solo", false, 1.0).candidates, ["claude:b"]);
+    assert_eq!(
+        picked(&h, &fake, "echo", false, 1.0).candidates,
+        ["claude:b", "claude:a"]
+    );
+    assert_eq!(
+        picked(&h, &fake, "solo", false, 1.0).candidates,
+        ["claude:b"]
+    );
     // the pin out: a preferred pin falls back to the set, an "only" pin runs anyway and says what is wrong
     h.put_state(r#"{"accounts": {"claude:b": {"out_until": 1900000500, "reason": "rate_limit"}}}"#);
-    assert_eq!(picked(&h, &fake, "echo", false, 1_900_000_000.0).candidates, ["claude:a"]);
+    assert_eq!(
+        picked(&h, &fake, "echo", false, 1_900_000_000.0).candidates,
+        ["claude:a"]
+    );
     let solo = picked(&h, &fake, "solo", false, 1_900_000_000.0);
     assert!(solo.all_out);
     assert_eq!(solo.candidates, ["claude:b"]);
@@ -656,16 +761,31 @@ fn main_env_by_state_starts_on_the_first_candidate() {
     h.put_state(r#"{"accounts": {"claude:a": {"out_until": 4000000000, "reason": "rate_limit"}}}"#);
     let fake = Fake::new();
     let ctx = h.ctx(&fake);
-    let by_state = MainOpts { state: true, ..MainOpts::default() };
+    let by_state = MainOpts {
+        state: true,
+        ..MainOpts::default()
+    };
     let out = main_env(&ctx, "echo", &md, by_state).unwrap();
     assert!(out.starts_with("main_id=claude:b "), "{out}");
     assert!(out.contains(&q(&b)));
     // the static main ignores the state
-    assert!(main_env(&ctx, "echo", &md, MainOpts::default()).unwrap().contains(&q(&a)));
+    assert!(
+        main_env(&ctx, "echo", &md, MainOpts::default())
+            .unwrap()
+            .contains(&q(&a))
+    );
     // a session made under an account that is a candidate goes first
     h.put_state(r#"{"accounts": {}}"#);
-    let prefer = MainOpts { state: true, prefer: Some("claude:b"), ..MainOpts::default() };
-    assert!(main_env(&ctx, "echo", &md, prefer).unwrap().starts_with("main_id=claude:b "));
+    let prefer = MainOpts {
+        state: true,
+        prefer: Some("claude:b"),
+        ..MainOpts::default()
+    };
+    assert!(
+        main_env(&ctx, "echo", &md, prefer)
+            .unwrap()
+            .starts_with("main_id=claude:b ")
+    );
 }
 
 #[cfg(unix)]
@@ -677,39 +797,72 @@ fn an_extra_claude_account_mirrors_the_main_login() {
     let main = h.dir.join("home").join(".claude");
     std::fs::create_dir_all(main.join("plugins").join("cache")).unwrap();
     std::fs::write(main.join("settings.json"), r#"{"model": "opus"}"#).unwrap();
-    std::fs::write(main.join("plugins").join("installed_plugins.json"), r#"{"version": 2}"#).unwrap();
+    std::fs::write(
+        main.join("plugins").join("installed_plugins.json"),
+        r#"{"version": 2}"#,
+    )
+    .unwrap();
     std::fs::write(main.join("plugins").join("blocklist.json"), "not json").unwrap();
     std::fs::write(
         h.dir.join("home").join(".claude.json"),
         r#"{"hasCompletedOnboarding": true, "autoModeEnvSetup": 3, "oauthAccount": {"email": "x"}}"#,
     )
     .unwrap();
-    std::fs::write(dir.join(".claude.json"), r#"{"userID": "u", "hasCompletedOnboarding": false}"#).unwrap();
+    std::fs::write(
+        dir.join(".claude.json"),
+        r#"{"userID": "u", "hasCompletedOnboarding": false}"#,
+    )
+    .unwrap();
     let mut fake = Fake::new();
     fake.login(std::slice::from_ref(&dir));
     let ctx = h.ctx(&fake);
     launch_env(&ctx, "echo", "claude:work", false, false).unwrap();
-    assert_eq!(std::fs::read_to_string(dir.join("settings.json")).unwrap(), r#"{"model": "opus"}"#);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("settings.json")).unwrap(),
+        r#"{"model": "opus"}"#
+    );
     assert_eq!(
         std::fs::read_to_string(dir.join("plugins").join("installed_plugins.json")).unwrap(),
         r#"{"version": 2}"#
     );
-    assert!(!dir.join("plugins").join("blocklist.json").exists(), "a broken file is not copied");
-    assert_eq!(std::fs::read_link(dir.join("plugins").join("cache")).unwrap(), main.join("plugins").join("cache"));
+    assert!(
+        !dir.join("plugins").join("blocklist.json").exists(),
+        "a broken file is not copied"
+    );
+    assert_eq!(
+        std::fs::read_link(dir.join("plugins").join("cache")).unwrap(),
+        main.join("plugins").join("cache")
+    );
     // only the acknowledgements, into what the account already has
-    let cfg: Value = serde_json::from_slice(&std::fs::read(dir.join(".claude.json")).unwrap()).unwrap();
+    let cfg: Value =
+        serde_json::from_slice(&std::fs::read(dir.join(".claude.json")).unwrap()).unwrap();
     assert_eq!(
         cfg,
         serde_json::json!({"userID": "u", "hasCompletedOnboarding": true, "autoModeEnvSetup": 3})
     );
     // a second launch writes nothing
-    let settings_before = std::fs::metadata(dir.join("settings.json")).unwrap().modified().unwrap();
-    assert!(mirror::prepare_claude_dir(&ctx, &dir).is_empty());
-    assert_eq!(std::fs::metadata(dir.join("settings.json")).unwrap().modified().unwrap(), settings_before);
+    let settings_before = std::fs::metadata(dir.join("settings.json"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    assert_eq!(mirror::prepare_claude_dir(&ctx, &dir), Vec::<String>::new());
+    assert_eq!(
+        std::fs::metadata(dir.join("settings.json"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        settings_before
+    );
     // a run on an account is not mistaken for the main login
-    let own = Ctx { claude_config_dir: Some(dir.to_string_lossy().into_owned()), ..h.ctx(&fake) };
+    let own = Ctx {
+        claude_config_dir: Some(dir.to_string_lossy().into_owned()),
+        ..h.ctx(&fake)
+    };
     assert_eq!(mirror::main_claude_paths(&own).0, main);
-    let other = Ctx { claude_config_dir: Some("/elsewhere".to_owned()), ..h.ctx(&fake) };
+    let other = Ctx {
+        claude_config_dir: Some("/elsewhere".to_owned()),
+        ..h.ctx(&fake)
+    };
     assert_eq!(mirror::main_claude_paths(&other).0, Path::new("/elsewhere"));
 }
 

@@ -118,6 +118,7 @@ impl Tree {
             developer_dir: "",
             ctmp: "",
             claude_version,
+            guest_domains: Ok(&[]),
             env: &env,
         };
         settings::build(&input)
@@ -209,9 +210,20 @@ fn guest_sandbox_is_closed_and_fails_closed() {
             .iter()
             .any(|p| p.contains("agents/other"))
     );
-    assert_eq!(
-        s["permissions"]["blockReadsOutsideWorkingDirectories"],
-        json!(true)
+    // the file tools are fenced by the readfence hook, not by a permission switch
+    assert!(
+        s["permissions"]
+            .get("blockReadsOutsideWorkingDirectories")
+            .is_none()
+    );
+    assert!(
+        s["hooks"]["PreToolUse"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|h| h["hooks"][0]["command"]
+                .as_str()
+                .is_some_and(|c| c.contains("kith_readfence.py")))
     );
     // no broad Bash rule for an untrusted guest
     let allow = strs(&s["permissions"]["allow"]);
@@ -228,12 +240,12 @@ fn guest_sandbox_is_closed_and_fails_closed() {
 fn guest_needs_a_new_enough_claude_code() {
     let t = Tree::new();
     let m = t.guest("sam", "default");
-    for v in [None, Some("2.1.256"), Some("1.9.999")] {
+    for v in [None, Some("2.1.294"), Some("1.9.999")] {
         let e = t.settings_with(&m, "", v).err().unwrap();
         assert_eq!(e.code, 3);
-        assert!(e.message.contains("2.1.257"));
+        assert!(e.message.contains("2.1.295"));
     }
-    assert!(t.settings_with(&m, "", Some("2.1.257")).is_ok());
+    assert!(t.settings_with(&m, "", Some("2.1.295")).is_ok());
     assert!(t.settings_with(&m, "", Some("2.10.0")).is_ok());
 }
 
@@ -270,6 +282,7 @@ fn guest_work_dir_is_never_the_home_folder() {
         developer_dir: "",
         ctmp: "",
         claude_version: Some("2.1.309"),
+        guest_domains: Ok(&[]),
         env: &env,
     })
     .unwrap();
@@ -311,6 +324,7 @@ fn guest_without_the_memory_check_does_not_run() {
         developer_dir: "",
         ctmp: "",
         claude_version: Some("2.1.309"),
+        guest_domains: Ok(&[]),
         env: &env,
     })
     .err()

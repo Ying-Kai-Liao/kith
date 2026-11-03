@@ -70,8 +70,8 @@ pub fn parse_args(args: &[String]) -> Args {
                 a.launch = true;
                 1
             }
-            "--hold" | "--resume" | "--account" | "--backup" | "-p" | "--project" | "-m" | "--model"
-            | "-e" | "--effort" | "-H" | "--harness" | "--permission-mode" => {
+            "--hold" | "--resume" | "--account" | "--backup" | "-p" | "--project" | "-m"
+            | "--model" | "-e" | "--effort" | "-H" | "--harness" | "--permission-mode" => {
                 let v = match need(i, x) {
                     Ok(v) => v,
                     Err(e) => {

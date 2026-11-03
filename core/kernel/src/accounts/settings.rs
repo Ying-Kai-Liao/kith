@@ -113,10 +113,10 @@ pub fn read_valid(machine: &Path) -> Option<Map> {
         return None;
     }
     if !level_ok(&s, true)
-        || !s
-            .get("agents")
-            .and_then(Value::as_object)
-            .is_none_or(|a| a.values().all(|a| a.as_object().is_some_and(|a| level_ok(a, false))))
+        || !s.get("agents").and_then(Value::as_object).is_none_or(|a| {
+            a.values()
+                .all(|a| a.as_object().is_some_and(|a| level_ok(a, false)))
+        })
     {
         return None;
     }
@@ -141,7 +141,11 @@ pub fn read_settings(machine: &Path) -> Map {
 
 fn strings(v: Option<&Value>) -> Vec<String> {
     v.and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|i| i.as_str().map(str::to_owned)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| i.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -175,12 +179,11 @@ fn migrate(s: &mut Map, harness_of: &dyn Fn(&str) -> String) {
         .unwrap_or_default()
         .to_owned();
     let old_backups = strings(s.get("backups"));
-    let agent_has_old = s
-        .get("agents")
-        .and_then(Value::as_object)
-        .is_some_and(|a| {
-            a.values().filter_map(Value::as_object).any(|a| a.contains_key("account") || a.contains_key("backups"))
-        });
+    let agent_has_old = s.get("agents").and_then(Value::as_object).is_some_and(|a| {
+        a.values()
+            .filter_map(Value::as_object)
+            .any(|a| a.contains_key("account") || a.contains_key("backups"))
+    });
     if !(s.contains_key("account") || s.contains_key("backups") || agent_has_old) {
         return;
     }
@@ -200,7 +203,11 @@ fn migrate(s: &mut Map, harness_of: &dyn Fn(&str) -> String) {
         s.insert("account_cross_harness".to_owned(), Value::Bool(true));
     }
     if !s.contains_key("accounts") && (!old_main.is_empty() || !old_backups.is_empty()) {
-        let mut head = vec![if old_main.is_empty() { "claude".to_owned() } else { old_main.clone() }];
+        let mut head = vec![if old_main.is_empty() {
+            "claude".to_owned()
+        } else {
+            old_main.clone()
+        }];
         if old_main.starts_with("codex") {
             head.push("claude".to_owned());
         }
@@ -212,8 +219,15 @@ fn migrate(s: &mut Map, harness_of: &dyn Fn(&str) -> String) {
     if let Some(Value::Object(agents)) = s.get_mut("agents") {
         for (name, a) in agents.iter_mut() {
             let Some(a) = a.as_object_mut() else { continue };
-            let own_main = a.get("account").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_owned);
-            let own_backups = a.get("backups").and_then(Value::as_array).map(|_| strings(a.get("backups")));
+            let own_main = a
+                .get("account")
+                .and_then(Value::as_str)
+                .filter(|m| !m.is_empty())
+                .map(str::to_owned);
+            let own_backups = a
+                .get("backups")
+                .and_then(Value::as_array)
+                .map(|_| strings(a.get("backups")));
             if own_main.is_some() || own_backups.is_some() {
                 let h = harness_of(name);
                 let main = [own_main.as_deref(), Some(old_main.as_str())]
@@ -320,7 +334,9 @@ pub fn migrate_file(ctx: &Ctx<'_>) -> std::io::Result<bool> {
         .open(ctx.machine.join("settings.json.lock"))?;
     lock.lock_exclusive()?;
     let file = ctx.machine.join("settings.json");
-    let Ok(Ok(Value::Object(raw))) = std::fs::read_to_string(&file).map(|t| serde_json::from_str::<Value>(&t)) else {
+    let Ok(Ok(Value::Object(raw))) =
+        std::fs::read_to_string(&file).map(|t| serde_json::from_str::<Value>(&t))
+    else {
         return Ok(false);
     };
     let Some(mut s) = read_valid(&ctx.machine) else {

@@ -407,11 +407,7 @@ pub fn layout(s: &Map, agent: &str, harness: &str) -> Layout {
 
 /// The agent's accounts as the settings say, the same on every call: the pin first (alone when it is "only"), then its own
 /// harness family, then other harnesses.
-pub fn static_order(
-    s: &Map,
-    agent: &str,
-    harness: &str,
-) -> (Vec<String>, Option<settings::Pin>) {
+pub fn static_order(s: &Map, agent: &str, harness: &str) -> (Vec<String>, Option<settings::Pin>) {
     let l = layout(s, agent, harness);
     match l.pin {
         Some(p) if p.only => (vec![p.id.clone()], Some(p)),
@@ -637,7 +633,11 @@ pub fn chain(ctx: &Ctx<'_>, agent: &str, agent_md: &Path) -> J {
 pub fn main_json(ctx: &Ctx<'_>, agent: &str) -> J {
     let s = settings::read(ctx);
     let (entry, harness, source): (Option<String>, Option<String>, &str) = if agent.is_empty() {
-        let first = settings::accounts(&s, "").0.unwrap_or_default().into_iter().next();
+        let first = settings::accounts(&s, "")
+            .0
+            .unwrap_or_default()
+            .into_iter()
+            .next();
         (first, None, "global")
     } else {
         let md = agent_md_of(ctx, agent);
@@ -1022,7 +1022,10 @@ fn temp_in(dir: &Path, prefix: &str, suffix: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.subsec_nanos());
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    dir.join(format!("{prefix}{}-{nanos:x}-{n}{suffix}", std::process::id()))
+    dir.join(format!(
+        "{prefix}{}-{nanos:x}-{n}{suffix}",
+        std::process::id()
+    ))
 }
 
 /// A new file for writing, with `mode` (less the umask) on Unix; fails when the name is taken.

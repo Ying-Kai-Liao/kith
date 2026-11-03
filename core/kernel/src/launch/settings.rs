@@ -1379,7 +1379,7 @@ fn guest_sandbox(
     let refused = r#"{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "the read check could not run, so this read is refused"}}"#;
     let fence = format!(
         "out=$(python3 -I {}/lib/kith_readfence.py {}) || out={}; printf %s \"$out\"",
-        shquote(&g.kernel),
+        shquote(g.kernel),
         fence_roots
             .iter()
             .map(|r| format!("--root {}", shquote(r)))

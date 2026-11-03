@@ -3,9 +3,13 @@
 
 use super::pick::{Status, pick, statuses};
 use super::state::{self, Mark};
-use super::{Ctx, Map, account_dir, agent_harness, agent_md_of, clock, kind, parse, pyjson, settings, static_order};
+use super::{
+    Ctx, Map, account_dir, agent_harness, agent_md_of, clock, kind, parse, pyjson, settings,
+    static_order,
+};
 use serde_json::Value;
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 /// Every id worth listing: the sets (global, each agent's, or just this agent's), pins, the default logins of the installed
 /// harnesses, and every account folder on this Mac. Hand-edited bad ids stay in, as invalid.
@@ -13,7 +17,11 @@ fn known_ids(ctx: &Ctx<'_>, s: &Map, agent: &str) -> Vec<String> {
     let mut ids: Vec<String> = s
         .get("accounts")
         .and_then(Value::as_array)
-        .map(|a| a.iter().filter_map(|i| i.as_str().map(str::to_owned)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|i| i.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
     if let Some(agents) = s.get("agents").and_then(Value::as_object) {
         for (name, a) in agents {
@@ -28,7 +36,11 @@ fn known_ids(ctx: &Ctx<'_>, s: &Map, agent: &str) -> Vec<String> {
                     .flatten()
                     .filter_map(|i| i.as_str().map(str::to_owned)),
             );
-            if let Some(pin) = a.get("pin").and_then(|p| p.get("id")).and_then(Value::as_str) {
+            if let Some(pin) = a
+                .get("pin")
+                .and_then(|p| p.get("id"))
+                .and_then(Value::as_str)
+            {
                 ids.push(pin.to_owned());
             }
         }
@@ -43,7 +55,10 @@ fn known_ids(ctx: &Ctx<'_>, s: &Map, agent: &str) -> Vec<String> {
             .unwrap_or_default();
         dirs.sort();
         for d in dirs {
-            let name = d.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            let name = d
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
             if d.is_dir() && !name.starts_with('.') {
                 ids.push(format!("{h}:{name}"));
             }
@@ -118,16 +133,25 @@ pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Ma
     let mut pins: HashMap<String, Vec<Value>> = HashMap::new();
     if let Some(agents) = s.get("agents").and_then(Value::as_object) {
         for (name, a) in agents {
-            if let Some(pin) = a.get("pin").and_then(Value::as_object).filter(|p| !p.is_empty()) {
+            if let Some(pin) = a
+                .get("pin")
+                .and_then(Value::as_object)
+                .filter(|p| !p.is_empty())
+            {
                 let mut m = Map::new();
                 m.insert("agent".to_owned(), Value::String(name.clone()));
                 m.insert(
                     "only".to_owned(),
                     Value::Bool(pin.get("only").and_then(Value::as_bool).unwrap_or(false)),
                 );
-                pins.entry(pin.get("id").and_then(Value::as_str).unwrap_or_default().to_owned())
-                    .or_default()
-                    .push(Value::Object(m));
+                pins.entry(
+                    pin.get("id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned(),
+                )
+                .or_default()
+                .push(Value::Object(m));
             }
         }
     }
@@ -152,9 +176,17 @@ pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Ma
             opt(harness.map(|h| if h == "claude-api" { "claude" } else { h })),
         );
         put(&mut row, "account", opt(name));
-        put(&mut row, "kind", Value::String(harness.map_or("unknown", kind).to_owned()));
+        put(
+            &mut row,
+            "kind",
+            Value::String(harness.map_or("unknown", kind).to_owned()),
+        );
         put(&mut row, "in_set", Value::Bool(place.is_some()));
-        put(&mut row, "order", place.map_or(Value::Null, |n| Value::from(n + 1)));
+        put(
+            &mut row,
+            "order",
+            place.map_or(Value::Null, |n| Value::from(n + 1)),
+        );
         put(&mut row, "status", Value::String(st.status.to_owned()));
         put(&mut row, "ready", Value::Bool(st.status == "ready"));
         put(&mut row, "why", opt(st.why.as_deref()));
@@ -168,9 +200,17 @@ pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Ma
                 .cloned()
                 .unwrap_or(Value::Null),
         );
-        put(&mut row, "pins", Value::Array(pins.remove(i).unwrap_or_default()));
+        put(
+            &mut row,
+            "pins",
+            Value::Array(pins.remove(i).unwrap_or_default()),
+        );
         if st.status == "out" {
-            put(&mut row, "out_until", Value::from(st.out_until.unwrap_or(0)));
+            put(
+                &mut row,
+                "out_until",
+                Value::from(st.out_until.unwrap_or(0)),
+            );
             put(&mut row, "reason", opt(st.reason.as_deref()));
         }
         if !agent.is_empty() {
@@ -184,7 +224,11 @@ pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Ma
             );
         }
         // the older fields, which the host reads
-        put(&mut row, "logged_in", Value::Bool(st.status != "signed_out"));
+        put(
+            &mut row,
+            "logged_in",
+            Value::Bool(st.status != "signed_out"),
+        );
         if let (Some(h @ ("claude" | "codex")), Some(n)) = (harness, name) {
             put(&mut row, "name", Value::String(n.to_owned()));
             put(
@@ -209,8 +253,16 @@ fn status_text(r: &Map) -> String {
         "ready" => "ready".to_owned(),
         "signed_out" => "signed out".to_owned(),
         other => {
-            let word = if other == "unsupported" { "not supported yet" } else { "invalid id" };
-            match r.get("why").and_then(Value::as_str).filter(|w| !w.is_empty()) {
+            let word = if other == "unsupported" {
+                "not supported yet"
+            } else {
+                "invalid id"
+            };
+            match r
+                .get("why")
+                .and_then(Value::as_str)
+                .filter(|w| !w.is_empty())
+            {
                 Some(w) => format!("{word} ({w})"),
                 None => word.to_owned(),
             }
@@ -237,7 +289,12 @@ fn fmt_g(x: f64) -> String {
         let decimals = usize::try_from(5 - exp).unwrap_or(0);
         trim(&format!("{x:.decimals$}"))
     } else {
-        format!("{}e{}{:02}", trim(mantissa), if exp < 0 { '-' } else { '+' }, exp.abs())
+        format!(
+            "{}e{}{:02}",
+            trim(mantissa),
+            if exp < 0 { '-' } else { '+' },
+            exp.abs()
+        )
     }
 }
 
@@ -247,7 +304,11 @@ fn ago(seconds: i64) -> String {
             return format!("{}{unit}", seconds / size);
         }
     }
-    if seconds < 5 { "now".to_owned() } else { format!("{seconds}s") }
+    if seconds < 5 {
+        "now".to_owned()
+    } else {
+        format!("{seconds}s")
+    }
 }
 
 fn usage_text(r: &Map) -> String {
@@ -266,7 +327,10 @@ fn usage_text(r: &Map) -> String {
                 "seven_day" | "weekly" => "week",
                 n => n,
             };
-            format!("{name} {}%", fmt_g(w.get("percent").and_then(Value::as_f64).unwrap_or(0.0)))
+            format!(
+                "{name} {}%",
+                fmt_g(w.get("percent").and_then(Value::as_f64).unwrap_or(0.0))
+            )
         })
         .collect();
     format!(
@@ -287,16 +351,31 @@ pub fn list(ctx: &Ctx<'_>, json: bool, agent: &str) -> String {
     if rows.is_empty() {
         return "no accounts (kith account add claude|codex <name>)\n".to_owned();
     }
-    let text = |r: &Map, k: &str| r.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
-    let mut table = vec![["ID", "SET", "STATUS", "USAGE", "PINNED"].map(str::to_owned).to_vec()];
+    let text = |r: &Map, k: &str| {
+        r.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let mut table = vec![
+        ["ID", "SET", "STATUS", "USAGE", "PINNED"]
+            .map(str::to_owned)
+            .to_vec(),
+    ];
     for r in &rows {
         let in_set = r.get("in_set").and_then(Value::as_bool).unwrap_or(false);
         let mut place = if in_set {
-            r.get("order").and_then(Value::as_i64).map_or_else(String::new, |n| n.to_string())
+            r.get("order")
+                .and_then(Value::as_i64)
+                .map_or_else(String::new, |n| n.to_string())
         } else {
             "-".to_owned()
         };
-        if let Some(c) = r.get("candidate").and_then(Value::as_i64).filter(|c| *c != 0) {
+        if let Some(c) = r
+            .get("candidate")
+            .and_then(Value::as_i64)
+            .filter(|c| *c != 0)
+        {
             place = format!("{place}  starts #{c}");
         }
         let pins: Vec<String> = r
@@ -313,10 +392,22 @@ pub fn list(ctx: &Ctx<'_>, json: bool, agent: &str) -> String {
                 )
             })
             .collect();
-        table.push(vec![text(r, "id"), place, status_text(r), usage_text(r), pins.join(", ")]);
+        table.push(vec![
+            text(r, "id"),
+            place,
+            status_text(r),
+            usage_text(r),
+            pins.join(", "),
+        ]);
     }
     let widths: Vec<usize> = (0..4)
-        .map(|i| table.iter().map(|t| t[i].chars().count()).max().unwrap_or(0))
+        .map(|i| {
+            table
+                .iter()
+                .map(|t| t[i].chars().count())
+                .max()
+                .unwrap_or(0)
+        })
         .collect();
     let mut out = String::new();
     for t in &table {
@@ -333,17 +424,30 @@ pub fn list(ctx: &Ctx<'_>, json: bool, agent: &str) -> String {
     }
     for r in &rows {
         if text(r, "status") == "signed_out"
-            && let Some(fix) = r.get("fix").and_then(Value::as_str).filter(|f| !f.is_empty())
+            && let Some(fix) = r
+                .get("fix")
+                .and_then(Value::as_str)
+                .filter(|f| !f.is_empty())
         {
-            out.push_str(&format!("  {}: {}; to sign it in: {fix}\n", text(r, "id"), text(r, "why")));
+            let _ = writeln!(
+                out,
+                "  {}: {}; to sign it in: {fix}",
+                text(r, "id"),
+                text(r, "why")
+            );
         }
     }
     let cross = settings::cross_harness(&s, agent);
-    out.push_str(&format!(
-        "policy: {}; cross-harness fallback: {}{}\n",
+    let _ = writeln!(
+        out,
+        "policy: {}; cross-harness fallback: {}{}",
         settings::policy(&s),
         if cross { "on" } else { "off" },
-        if agent.is_empty() { String::new() } else { format!(" (for {agent})") }
-    ));
+        if agent.is_empty() {
+            String::new()
+        } else {
+            format!(" (for {agent})")
+        }
+    );
     out
 }

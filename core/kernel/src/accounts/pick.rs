@@ -3,13 +3,17 @@
 //! command says which are signed out.
 
 use super::state::{Mark, usage_level};
-use super::{Ctx, Map, agent_harness, agent_md_of, check, fix, layout, parse, present, settings, static_order};
+use super::{
+    Ctx, Map, agent_harness, agent_md_of, check, fix, layout, parse, present, settings,
+    static_order,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
 /// Where an account stands: `ready`, `out`, `signed_out`, `unsupported` or `invalid`.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_field_names)] // `status` is the word the JSON view uses
 pub struct Status {
     pub status: &'static str,
     pub why: Option<String>,
@@ -46,7 +50,10 @@ pub fn account_status(
         Err(e) => return Status::of("invalid", Some(e)),
     };
     if !["claude", "claude-api", "codex"].contains(&harness.as_str()) {
-        return Status::of("unsupported", Some(format!("{harness} is not supported yet")));
+        return Status::of(
+            "unsupported",
+            Some(format!("{harness} is not supported yet")),
+        );
     }
     if let Some(o) = out.get(entry) {
         return Status {
@@ -86,7 +93,10 @@ pub fn statuses(
     let mut res = HashMap::new();
     for i in ids {
         if !res.contains_key(i) {
-            res.insert(i.clone(), account_status(ctx, i, agent, out, deep, assume_default));
+            res.insert(
+                i.clone(),
+                account_status(ctx, i, agent, out, deep, assume_default),
+            );
         }
     }
     res

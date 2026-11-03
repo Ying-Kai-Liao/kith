@@ -93,10 +93,7 @@ fn read_raw(machine: &Path) -> (Map, bool) {
         return (Map::new(), true);
     };
     (
-        accts
-            .into_iter()
-            .filter(|(_, v)| v.is_object())
-            .collect(),
+        accts.into_iter().filter(|(_, v)| v.is_object()).collect(),
         false,
     )
 }
@@ -112,7 +109,10 @@ fn render(accts: &Map) -> String {
 /// `_write_atomic(path, data, 0o600)`: a temp file beside it, then the swap.
 pub fn write_atomic(path: &Path, data: &[u8], mode: u32) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or(Path::new("."));
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let tmp = temp_in(dir, &format!(".{name}."), "");
     let result = (|| {
         let mut f = create_new(&tmp, mode)?;
@@ -223,7 +223,10 @@ fn import_kernel_marks(machine: &Path) {
                     Some(s) if truthy(Some(s)) => pyint(s)?,
                     _ => pyint(v.get("out_until")?)?,
                 };
-                e.insert("out_until".to_owned(), Value::from(pyint(v.get("out_until")?)?));
+                e.insert(
+                    "out_until".to_owned(),
+                    Value::from(pyint(v.get("out_until")?)?),
+                );
                 e.insert(
                     "reason".to_owned(),
                     Value::String(reason_of(&v).chars().take(40).collect()),
@@ -251,9 +254,7 @@ pub fn out_marks(machine: &Path, state: &Map, now: f64) -> HashMap<String, Mark>
     for (k, v) in legacy_marks(&legacy_files(machine).0) {
         let cleared = state.get(&k).and_then(Value::as_object);
         let num = |m: Option<&Map>, key: &str| {
-            m.and_then(|m| m.get(key))
-                .and_then(pyfloat)
-                .unwrap_or(0.0)
+            m.and_then(|m| m.get(key)).and_then(pyfloat).unwrap_or(0.0)
         };
         let until = v.get("out_until").and_then(pyfloat).unwrap_or(0.0);
         // A mark the host made before our `clear` is ignored; one it made or extended after it (a later since, or an
@@ -277,6 +278,7 @@ pub fn out_marks(machine: &Path, state: &Map, now: f64) -> HashMap<String, Mark>
         let Some(until) = v.get("out_until").map_or(Some(0.0), pyfloat) else {
             continue;
         };
+        #[allow(clippy::cast_precision_loss)] // epoch seconds fit an f64
         let have = marks.get(k).map_or(0.0, |m| m.until as f64);
         if until > now && until > have {
             let Some(i) = v.get("out_until").and_then(pyint) else {

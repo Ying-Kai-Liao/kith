@@ -591,9 +591,7 @@ fn print_accounts(kernel: Option<std::path::PathBuf>, action: AccountsAction) ->
         AccountsAction::BackupsJson { agent, agent_md } => {
             Ok(accounts::chain(&ctx, &agent, std::path::Path::new(&agent_md)).dumps())
         }
-        AccountsAction::LaunchEnv { agent, entry, record } => {
-            accounts::launch_env(&ctx, &agent, &entry, false, record)
-        }
+        AccountsAction::LaunchEnv { agent, entry, record } => accounts::launch_env(&ctx, &agent, &entry, false, record),
         AccountsAction::MainEnv { agent, agent_md, state, record, prefer } => accounts::main_env(
             &ctx,
             &agent,
