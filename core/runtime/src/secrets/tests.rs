@@ -276,3 +276,70 @@ fn os_store_is_unsupported_here() {
     let _ = os_tests_enabled();
     let _: fn(&dyn KeyStore) = exercise;
 }
+
+fn slot(store: &MemoryKeyStore) -> std::sync::Mutex<Option<Envelope>> {
+    std::sync::Mutex::new(Some(envelope(store)))
+}
+
+#[test]
+fn the_rows_open_put_and_get() {
+    use serde_json::json;
+    let c = db();
+    let store = MemoryKeyStore::default();
+    let s = slot(&store);
+    let call = |m: &str, p: serde_json::Value| super::call(&c, &s, m, &p);
+    assert_eq!(
+        call("secrets.get", json!({"name": "a"})).expect("get"),
+        json!({"found": false})
+    );
+    assert!(store.peek().is_none(), "a read never mints a key");
+    call("secrets.open", json!({})).expect("open");
+    assert!(
+        store.peek().is_some(),
+        "open mints the key on an empty table"
+    );
+    call("secrets.put", json!({"name": "a", "value": "one"})).expect("put");
+    call("secrets.put", json!({"name": "a", "value": "two"})).expect("replace");
+    call("secrets.put", json!({"name": "e", "value": ""})).expect("empty");
+    assert_eq!(
+        call("secrets.get", json!({"name": "a"})).expect("get"),
+        json!({"found": true, "value": "two"})
+    );
+    assert_eq!(
+        call("secrets.get", json!({"name": "e"})).expect("get"),
+        json!({"found": true, "value": ""})
+    );
+    assert_eq!(count(&c), 2);
+    assert!(matches!(
+        call("secrets.put", json!({"name": "a"})),
+        Err(crate::Error::BadParams(_))
+    ));
+    assert!(matches!(
+        call("secrets.delete", json!({"name": "a"})),
+        Err(crate::Error::NotServed(_))
+    ));
+}
+
+#[test]
+fn the_rows_refuse_without_the_key_and_keep_the_records() {
+    use serde_json::json;
+    let c = db();
+    let store = MemoryKeyStore::default();
+    let s = slot(&store);
+    super::call(&c, &s, "secrets.put", &json!({"name": "a", "value": "one"})).expect("put");
+    store.forget();
+    let fresh = slot(&store);
+    for (m, p) in [
+        ("secrets.get", json!({"name": "a"})),
+        ("secrets.open", json!({})),
+        ("secrets.put", json!({"name": "b", "value": "two"})),
+    ] {
+        let err = super::call(&c, &fresh, m, &p).expect_err(m);
+        assert!(
+            err.to_string().contains("master key is missing"),
+            "{m}: {err}"
+        );
+    }
+    assert!(store.peek().is_none(), "no new key over existing records");
+    assert_eq!(count(&c), 1);
+}

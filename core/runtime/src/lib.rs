@@ -36,8 +36,8 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
-// Nothing calls the envelope yet: the host vault and kith-auth move onto it at M2-7 and M2-18.
-#[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
+// The host vault calls `secrets.open|get|put` (M2-7); `delete` and `list` wait for kith-auth and rollback (M2-18).
+#[allow(dead_code, reason = "delete and list are M2-18's")]
 mod secrets;
 
 #[cfg(test)]

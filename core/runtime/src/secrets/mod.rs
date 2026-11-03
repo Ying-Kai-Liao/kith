@@ -13,8 +13,8 @@
 //! Record names are stored in plaintext (they are the associated data and `list` needs them); only values are secret.
 //! Zeroizing is best effort: stack copies and formatted buffers are not tracked.
 //!
-//! Nothing calls this yet: the host vault and kith-auth's Keychain writes move onto it at M2-7 / M2-18, and the
-//! signed daemon reads the key through Security.framework at M2-6.
+//! The host vault calls it through the owner socket's `secrets.open|get|put` rows ([`call`], M2-7); kith-auth's
+//! Keychain writes move onto it at M2-18, and the signed daemon reads the key through Security.framework at M2-6.
 
 mod keystore;
 #[cfg(test)]
@@ -25,11 +25,58 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit, Payload},
 };
 use rusqlite::{Connection, OptionalExtension as _, params};
+use serde_json::{Value, json};
+use std::sync::Mutex;
 use sha2::{Digest as _, Sha256};
 use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 use keystore::{KEY_LEN, KeyStore};
+
+/// The `secrets.*` rows of the method table, on the core's connection. The envelope is made on the first call and kept
+/// (it holds the master key once read); where the OS has no key store the call refuses, every time, and nothing is
+/// stored. Values cross as text: the host's vault only keeps text.
+pub(crate) fn call(
+    conn: &Connection,
+    slot: &Mutex<Option<Envelope>>,
+    method: &str,
+    params: &Value,
+) -> Result<Value> {
+    let mut guard = slot
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if guard.is_none() {
+        *guard = Some(Envelope::os()?);
+    }
+    let envelope = guard.as_mut().ok_or_else(unreachable_key)?;
+    let text = |field: &str| {
+        params
+            .get(field)
+            .and_then(Value::as_str)
+            .ok_or_else(|| Error::BadParams(format!("kith-core: {method} needs {field}")))
+    };
+    match method {
+        "secrets.open" => {
+            envelope.key(conn, true)?;
+            Ok(json!({"open": true}))
+        }
+        "secrets.get" => Ok(match envelope.get(conn, text("name")?)? {
+            None => json!({"found": false}),
+            Some(bytes) => {
+                let value = std::str::from_utf8(&bytes)
+                    .map_err(|_| Error::Corrupt("kith-core: the secret is not text".into()))?;
+                json!({"found": true, "value": value})
+            }
+        }),
+        "secrets.put" => {
+            envelope.put(conn, text("name")?, text("value")?.as_bytes())?;
+            Ok(json!({}))
+        }
+        _ => Err(Error::NotServed(format!(
+            "kith-core: {method} is not answered in the core yet"
+        ))),
+    }
+}
 
 /// Longest record name, in bytes. Names are the associated data, so they stay short and printable-ish.
 const MAX_NAME: usize = 256;

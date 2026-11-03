@@ -41,6 +41,8 @@ pub struct Core {
     migrated_from: Option<i64>,
     /// The folders of the process that opened this core (`paths` answers with them when the caller gives no view).
     folders: Option<Paths>,
+    /// The secrets envelope, made on the first `secrets.*` call (it asks the OS key store, which may refuse).
+    pub(crate) secrets: std::sync::Mutex<Option<crate::secrets::Envelope>>,
 }
 
 /// A process the holder reported, as the core noted it: the group leader's pid and the start time the system gave that
@@ -163,6 +165,7 @@ pub(crate) fn open(layout: &Layout, migrations: &[Migration], mode: Mode) -> Res
         schema,
         migrated_from,
         folders: None,
+        secrets: std::sync::Mutex::new(None),
     })))
 }
 
@@ -258,7 +261,6 @@ impl Core {
         read_counter(tx, "claim_id")
     }
 
-    #[cfg(test)]
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
     }

@@ -22,6 +22,9 @@ impl Core {
         match row.name {
             "paths" => self.paths(params),
             "kernel.version" => parse(&kith_kernel::version_json()),
+            "secrets.open" | "secrets.get" | "secrets.put" => {
+                crate::secrets::call(self.conn(), &self.secrets, row.name, params)
+            }
             _ => Err(Error::NotServed(format!(
                 "kith-core: {method} is not answered in the core yet"
             ))),
