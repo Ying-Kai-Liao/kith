@@ -14,12 +14,13 @@ pub mod threads;
 pub const ABI: u32 = 1;
 
 /// The modules this build has, as `kith kernel version` lists them. A verb in `kernel/lib/core-switched.txt` moves to
-/// the core only when its module is here (`acp`: the `run-once` verb, whose code lives in the kith-acp crate).
+/// the core only when its module is here (`acp`: the `run-once` verb, whose code lives in the kith-acp crate; `launch`: `kith AGENT --launch-json`).
 pub const MODULES: &[&str] = &[
     "accounts",
     "acp",
     "delegation",
     "engines",
+    "launch",
     "paths",
     "threads",
 ];
@@ -36,7 +37,7 @@ mod tests {
     fn version_lists_the_modules() {
         assert_eq!(
             super::version_json(),
-            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","paths","threads"]}"#
+            r#"{"abi":1,"modules":["accounts","acp","delegation","engines","launch","paths","threads"]}"#
         );
     }
 }

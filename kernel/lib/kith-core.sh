@@ -22,3 +22,17 @@ kith_core_exec() {
   "$bin" kernel version 2>/dev/null | grep -q "\"$module\"" || return 1
   exec "$bin" kernel $verb "$@"
 }
+
+# kith_launch_json_flag ARGS...   succeeds when --launch-json stands among the leading flags of `kith AGENT ARGS` (the flag
+# loop of bin/kith: a flag with a value skips it, `--`, a word or a task that starts with a dash ends the flags).
+kith_launch_json_flag() {
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --launch-json) return 0 ;;
+      --hold|--resume|--backup|-p|--project|-m|--model|-e|--effort|-H|--harness|--permission-mode) shift 2 || return 1 ;;
+      --print|-r|-c|--continue|--bypass) shift ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
+}
