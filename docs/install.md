@@ -91,8 +91,14 @@ Or remove the quarantine flag yourself:
 xattr -dr com.apple.quarantine "/Applications/Kith Dev.app"
 ```
 
-**The app and the command.** The app is a client of the `kith` command and needs a CLI version. If none is installed, the
-app installs one into `~/.kith/cli/` (the same layout as above), and it updates the CLI when the app updates. The app also has:
+**The app and the command.** The app is a client of the `kith` command and needs a CLI version. If none is installed, or the
+installed one is older than the app needs, the app installs the CLI it ships into `~/.kith/cli/` (the same layout as
+above) at launch, including the first launch after an app update, before it starts the host. It never replaces a newer
+CLI, and it leaves a developer's `KITH_KERNEL` alone. The needed version is declared in `apps/desktop/package.json`
+(`kith.cli`). If the install fails, the app shows a notice with an "Install kith CLI" button. A Homebrew-installed `kith`
+stays as it is: the app installs its own copy under `~/.kith/cli`, which the host prefers.
+
+The app also has:
 
 - the host, `kith-serve`, which it runs as a launchd service;
 - local speech and voice helpers;
