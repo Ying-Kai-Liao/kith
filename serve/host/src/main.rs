@@ -427,9 +427,9 @@ enum KernelCmd {
     /// Makes (or migrates) this Mac's core database, as the daemon's first start would, and releases it. The difftest uses it
     /// to run the same corpus through an embedded core.
     ///
-    /// `--authority` also imports auth.json's access tables and the Keychain items its profiles name into core.db and the
+    /// `--authority` also imports auth.json's access tables and the Keychain items its profiles name into the core database and the
     /// secrets envelope (M2-8): idempotent, a backup first, refuses rather than store a different answer. `--dry-run`
-    /// prints what it would do and writes nothing; `--force` replaces authority rows core.db already holds.
+    /// prints what it would do and writes nothing; `--force` replaces authority rows the core already holds.
     #[command(hide = true)]
     CoreMigrate {
         #[arg(long)]

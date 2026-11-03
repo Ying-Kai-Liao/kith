@@ -90,6 +90,39 @@ fn scratch_db(auth: &Value) -> Result<Connection> {
     Ok(conn)
 }
 
+/// A scratch database holding exactly the authority rows `src` holds, every column as stored.
+fn copy_out(src: &Connection) -> Result<Connection> {
+    let mut dst = Connection::open_in_memory()?;
+    db::apply(&mut dst, MIGRATIONS, Some("import-readback"))?;
+    for table in [
+        "people",
+        "memberships",
+        "presets",
+        "invites",
+        "retired",
+        "authority_settings",
+    ] {
+        let cols: Vec<String> = src
+            .prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))?
+            .query_map([], |r| r.get(0))?
+            .collect::<std::result::Result<_, _>>()?;
+        let list = cols.join(", ");
+        let marks = vec!["?"; cols.len()].join(", ");
+        // `people` keeps file order in `seq`; the other tables are WITHOUT ROWID and read in key order.
+        let order = if table == "people" { "ORDER BY seq" } else { "" };
+        let mut read = src.prepare(&format!("SELECT {list} FROM {table} {order}"))?;
+        let mut rows = read.query([])?;
+        let mut write = dst.prepare(&format!("INSERT INTO {table} ({list}) VALUES ({marks})"))?;
+        while let Some(r) = rows.next()? {
+            let values = (0..cols.len())
+                .map(|i| r.get::<_, rusqlite::types::Value>(i))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            write.execute(rusqlite::params_from_iter(values))?;
+        }
+    }
+    Ok(dst)
+}
+
 fn is_empty(snapshot: &Value) -> bool {
     ["people", "members", "presets", "invites", "retired"]
         .iter()
@@ -276,7 +309,7 @@ fn real(
     let mut core = crate::start_with(layout, MIGRATIONS)?;
     let (state, have) = {
         let tx = core.claim_tx()?;
-        let state = rows_state(&crate::authority::snapshot(&tx)?, desired);
+        let state = rows_state(&crate::authority::snapshot(&copy_out(&tx)?)?, desired);
         if state == Rows::Differs && !opts.force {
             return Err(refuse_differs(&tx));
         }
@@ -305,12 +338,15 @@ fn real(
             authority::clear(&tx)?;
         }
         authority::insert_all(&tx, auth)?;
-        if crate::authority::snapshot(&tx)? != *desired {
+        // The authority reader opens its own read transaction, which cannot nest in this write one, so the rows just
+        // written are read back raw into a scratch database and asked from there: same bytes, same answers.
+        let back = copy_out(&tx)?;
+        if crate::authority::snapshot(&back)? != *desired {
             return Err(Error::Refused(
                 "authority import: the stored rows do not read back as the file's; nothing was imported".into(),
             ));
         }
-        let diffs = check::diffs(auth, &tx, ctx)?;
+        let diffs = check::diffs(auth, &back, ctx)?;
         if !diffs.is_empty() {
             return Err(Error::Refused(format!(
                 "authority import: core.db's answers differ from the file's; nothing was imported, core.db is as the backup. \
