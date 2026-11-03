@@ -185,11 +185,11 @@ impl Server {
         );
         drop(ended);
         let handle = self.accept.lock().ok().and_then(|mut a| a.take());
-        if let Some(handle) = handle {
-            if done {
-                let _ = handle.join();
-            }
-            // Otherwise it is left to end on its own; the flag is set, so it will not serve another connection.
+        // If it did not end in time it is left to end on its own: the flag is set, so it serves nothing more.
+        if let Some(handle) = handle
+            && done
+        {
+            let _ = handle.join();
         }
         platform::remove_endpoint(&self.endpoint);
     }
@@ -319,7 +319,7 @@ fn serve_connection(stream: Stream, ctx: &Ctx) {
     let _ = writer.shutdown(std::net::Shutdown::Both);
 }
 
-/// A short fingerprint of one row of the table (FNV-1a over its OpenRPC entry: name, params, result, who, how it is
+/// A short fingerprint of one row of the table (FNV-1a over its `OpenRPC` entry: name, params, result, who, how it is
 /// served), or `None` for a name the table does not have.
 pub(crate) fn row_hash(name: &str) -> Option<&'static str> {
     static ROWS: std::sync::OnceLock<std::collections::HashMap<String, String>> =
@@ -471,11 +471,12 @@ pub(crate) fn reach(layout: &Layout, method: &str, params: &Value, repeatable: b
         params,
         repeatable,
         (PROTOCOL, kith_api::schema_hash()),
-        Some(rows_for(method)),
+        Some(&rows_for(method)),
     )
 }
 
 /// [`reach`] as a client of another protocol number and method table (what a mismatch test needs to be).
+#[cfg(test)]
 pub(crate) fn reach_as(
     layout: &Layout,
     method: &str,
@@ -494,11 +495,11 @@ pub(crate) fn reach_with(
     params: &Value,
     repeatable: bool,
     identity: (u32, &str),
-    rows: Option<serde_json::Map<String, Value>>,
+    rows: Option<&serde_json::Map<String, Value>>,
 ) -> Reached {
     let mut tried = 0;
     loop {
-        match attempt(layout, method, params, identity, rows.as_ref()) {
+        match attempt(layout, method, params, identity, rows) {
             Attempt::Done(r) => return r,
             Attempt::Failed { sent, why } => {
                 tried += 1;

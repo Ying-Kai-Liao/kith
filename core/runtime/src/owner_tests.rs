@@ -21,13 +21,11 @@ fn echo() -> Arc<Handler> {
     Arc::new(|method, _| Ok(json!({"ran": method})))
 }
 
-fn rows(pairs: &[(&str, &str)]) -> Option<Map<String, Value>> {
-    Some(
-        pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), json!(v)))
-            .collect(),
-    )
+fn rows(pairs: &[(&str, &str)]) -> Map<String, Value> {
+    pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), json!(v)))
+        .collect()
 }
 
 #[test]
@@ -43,7 +41,7 @@ fn a_daemon_with_extra_rows_still_serves_and_one_missing_a_row_or_shaped_differe
         &json!({}),
         true,
         (super::PROTOCOL, "0000000000000000"),
-        rows(&[("paths", paths_row)]),
+        Some(&rows(&[("paths", paths_row)])),
     ) {
         Reached::Answered(v) => assert_eq!(v["ran"], "paths"),
         other => panic!("{other:?}"),
@@ -55,7 +53,7 @@ fn a_daemon_with_extra_rows_still_serves_and_one_missing_a_row_or_shaped_differe
         &json!({}),
         true,
         (super::PROTOCOL, kith_api::schema_hash()),
-        rows(&[("frobnicate", "1234567812345678")]),
+        Some(&rows(&[("frobnicate", "1234567812345678")])),
     ) {
         Reached::Mismatch(note) => assert!(note.contains("frobnicate"), "{note}"),
         other => panic!("{other:?}"),
@@ -67,7 +65,7 @@ fn a_daemon_with_extra_rows_still_serves_and_one_missing_a_row_or_shaped_differe
         &json!({}),
         true,
         (super::PROTOCOL, kith_api::schema_hash()),
-        rows(&[("paths", "1234567812345678")]),
+        Some(&rows(&[("paths", "1234567812345678")])),
     ) {
         Reached::Mismatch(note) => assert!(note.contains("paths"), "{note}"),
         other => panic!("{other:?}"),

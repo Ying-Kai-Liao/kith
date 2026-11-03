@@ -58,17 +58,14 @@ fn a_daemon_stopped_while_it_waits_or_at_once_leaves_the_core_free() {
         begun.elapsed()
     );
     let end = Instant::now() + Duration::from_secs(10);
-    loop {
-        match crate::embedded_with(&l, crate::db::MIGRATIONS) {
-            Ok(crate::Embedded::DaemonRunning { .. }) | Err(_) => {
-                assert!(
-                    Instant::now() < end,
-                    "the stopped daemon still holds the core"
-                );
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Ok(_) => break,
-        }
+    while let Ok(crate::Embedded::DaemonRunning { .. }) | Err(_) =
+        crate::embedded_with(&l, crate::db::MIGRATIONS)
+    {
+        assert!(
+            Instant::now() < end,
+            "the stopped daemon still holds the core"
+        );
+        std::thread::sleep(Duration::from_millis(25));
     }
     // Stopped while waiting behind a command.
     let embedded = open(&l);
