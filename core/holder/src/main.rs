@@ -1,9 +1,11 @@
 //! `kith-holder serve --dir D [--idle-secs N]`: run a holder in the foreground (what `start` launches).
 //! `kith-holder start --dir D [--idle-secs N]`: start one detached if none answers, then exit.
+//! `kith-holder --stdio --dir D [--idle-secs N]`: relay stdin/stdout to the holder of D (what a remote core runs
+//! over ssh); starts the holder if none answers. `--dir` defaults to `~/.kith/holder`.
 //! The secret is the first line of stdin, never the command line or the environment (both stay readable by this
 //! user's other processes for the holder's whole life).
 
-use kith_holder::{holder, launch};
+use kith_holder::{holder, launch, stdio};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -21,6 +23,7 @@ fn main() -> ExitCode {
         );
         return ExitCode::SUCCESS;
     }
+    let stdio = command == "--stdio";
     let (mut dir, mut idle) = (None, 120u64);
     while let Some(flag) = args.next() {
         match (flag.as_str(), args.next()) {
@@ -32,9 +35,28 @@ fn main() -> ExitCode {
             _ => return usage(),
         }
     }
-    let Some(dir) = dir else {
+    let Some(dir) = dir.or_else(|| stdio.then(default_dir).flatten()) else {
         return usage();
     };
+    if stdio {
+        // stdout carries frames only; anything to say goes to stderr, which ssh passes on.
+        let result = std::env::current_exe().and_then(|exe| {
+            stdio::relay(
+                &exe,
+                &dir,
+                Duration::from_secs(idle),
+                std::io::stdin(),
+                std::io::stdout(),
+            )
+        });
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("kith-holder: {e}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     let secret = match launch::read_secret(std::io::stdin().lock()) {
         Ok(secret) => secret,
         Err(e) => {
@@ -60,7 +82,13 @@ fn main() -> ExitCode {
     }
 }
 
+/// Where a remote shell finds the holder without being told: the user's own Kith folder.
+fn default_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+    Some(PathBuf::from(home).join(".kith").join("holder"))
+}
+
 fn usage() -> ExitCode {
-    eprintln!("usage: echo SECRET | kith-holder (serve|start) --dir DIR [--idle-secs N]");
+    eprintln!("usage: echo SECRET | kith-holder (serve|start|--stdio) --dir DIR [--idle-secs N]");
     ExitCode::from(2)
 }

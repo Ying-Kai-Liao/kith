@@ -579,3 +579,117 @@ fn a_secret_is_one_line() {
     assert!(launch::read_secret(&b"\n"[..]).is_err());
     assert!(launch::read_secret(&b""[..]).is_err());
 }
+
+// --- the holder over a command's stdio (`ssh host kith-holder --stdio`, here run directly) ---------------------------
+
+impl Fixture {
+    /// The relay a remote shell would run, without the shell: `kith-holder --stdio` on this folder.
+    fn relay(&self) -> Command {
+        let mut cmd = Command::new(EXE);
+        cmd.arg("--stdio").arg("--dir").arg(&self.dir);
+        cmd
+    }
+
+    fn over_stdio(&self, generation: u64) -> Client {
+        Client::over_command(self.relay(), SECRET, generation).expect("hello over stdio accepted")
+    }
+}
+
+#[test]
+fn a_stdio_link_starts_the_holder_when_none_runs_and_it_outlives_the_link() {
+    let fx = Fixture::new("sstart");
+    // No `start` here: the relay starts the holder, detached, as the machine's own holder would be.
+    let mut c = fx.over_stdio(1);
+    let id = spawn(
+        &mut c,
+        &spec("conv-s", 1, 1, Mode::Pipes, &shell(sleep_line())),
+    );
+    drop(c);
+    // The link is gone (the relay was killed); the holder and its process are not.
+    let mut again = fx.client(1);
+    assert_eq!(again.list().unwrap().len(), 1);
+    kill_until_gone(&mut again, id);
+}
+
+#[test]
+fn a_dropped_stdio_link_keeps_the_process_and_a_reconnect_resumes_from_the_tail() {
+    let fx = Fixture::new("sdrop");
+    fx.start();
+    let mut c = fx.over_stdio(1);
+    let line = format!("echo before-the-drop; {}", sleep_line());
+    let id = spawn(&mut c, &spec("conv-d", 7, 1, Mode::Pipes, &shell(&line)));
+    read_until(&mut c, id, "before-the-drop");
+    drop(c);
+    let mut back = fx.over_stdio(1);
+    let held = back.welcome.procs.clone();
+    assert_eq!(
+        (held.len(), held[0].id, held[0].claim, held[0].exit),
+        (1, id, 7, None)
+    );
+    assert!(
+        String::from_utf8_lossy(&back.tail(id).unwrap()).contains("before-the-drop"),
+        "the tail resumes what the link missed"
+    );
+    // The same spawn again (the link dropped mid-spawn) answers with the process already running.
+    let again = spawn(&mut back, &spec("conv-d", 7, 1, Mode::Pipes, &shell(&line)));
+    assert_eq!(again, id);
+    assert_eq!(back.list().unwrap().len(), 1);
+    kill_until_gone(&mut back, id);
+}
+
+#[test]
+fn an_exit_during_a_stdio_drop_is_kept_until_acked_over_the_next_link() {
+    let fx = Fixture::new("sexit");
+    fx.start();
+    let mut c = fx.over_stdio(1);
+    let line = if cfg!(windows) {
+        "ping -n 2 127.0.0.1 > nul & exit 4"
+    } else {
+        "sleep 1; exit 4"
+    };
+    let id = spawn(&mut c, &spec("conv-x", 9, 1, Mode::Pipes, &shell(line)));
+    drop(c);
+    // Nobody is connected when it exits.
+    std::thread::sleep(Duration::from_millis(2500));
+    let mut next = fx.over_stdio(1);
+    let held = &next.welcome.procs;
+    assert_eq!(held.len(), 1);
+    assert_eq!(held[0].exit.map(|e| e.code), Some(Some(4)));
+    assert_eq!(next.ack(id).unwrap(), AckState::Acked);
+    assert!(next.list().unwrap().is_empty());
+}
+
+#[test]
+fn a_stdio_link_with_the_wrong_pairing_key_is_refused() {
+    let fx = Fixture::new("skey");
+    fx.start();
+    match Client::over_command(fx.relay(), "not-the-secret-not-the-secret-00", 1) {
+        Err(ConnectError::Impostor) => {}
+        other => panic!(
+            "expected the holder to be distrusted, got {:?}",
+            other.err()
+        ),
+    }
+    // The failed link did not claim a generation or leave a connection behind.
+    fx.over_stdio(1);
+}
+
+#[test]
+fn an_older_generation_over_stdio_is_refused_after_a_newer_core_connected() {
+    let fx = Fixture::new("sgen");
+    fx.start();
+    let mut first = fx.over_stdio(5);
+    match Client::over_command(fx.relay(), SECRET, 4) {
+        Err(ConnectError::Refused(r)) => assert_eq!((r.why, r.current), (Why::StaleGeneration, 5)),
+        other => panic!("expected a refusal, got {:?}", other.err()),
+    }
+    // A newer core over a second link is the only one that drives; the first is cut off.
+    let mut newest = fx.over_stdio(6);
+    assert!(first.closed(WAIT));
+    assert!(newest.list().unwrap().is_empty());
+    // A local-socket client of the older generation is refused just the same.
+    assert!(matches!(
+        Client::connect(&fx.dir, SECRET, 5),
+        Err(ConnectError::Refused(_))
+    ));
+}

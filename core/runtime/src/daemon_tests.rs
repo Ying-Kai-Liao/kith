@@ -373,8 +373,17 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
             retry_min: Duration::from_millis(50),
             retry_max: Duration::from_millis(200),
             kill_wait: Duration::from_secs(5),
+            command: None,
         },
     }
+}
+
+/// A daemon whose holder link is a command's stdio (the `ssh host kith-holder --stdio` of M0f).
+fn command_cfg(argv: &[&str]) -> Config {
+    let mut cfg = holder_cfg(std::path::PathBuf::new());
+    cfg.holder.exe = None;
+    cfg.holder.command = Some(argv.iter().map(|a| (*a).to_owned()).collect());
+    cfg
 }
 
 fn holder_state(p: &Paths) -> String {
@@ -407,6 +416,26 @@ fn no_holder_program_stops_nothing() {
     let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
     assert_eq!(log.matches("holder: no kith-holder").count(), 1, "{log}");
     drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stdio_link_that_cannot_run_or_speaks_garbage_stops_nothing() {
+    for argv in [
+        vec!["/no/such/ssh", "host", "kith-holder", "--stdio"],
+        // Anything on stdout that is not a proved holder is a failed connection, not an error for the daemon.
+        vec!["/bin/sh", "-c", "echo not a holder; sleep 5"],
+    ] {
+        let (_t, m) = machine();
+        let p = paths(&m);
+        let d = serving(&p, command_cfg(&argv));
+        until("the stdio link to be reported unreachable", || {
+            holder_state(&p) == "unreachable"
+        });
+        // The daemon still answers its owner.
+        assert!(crate::status(&p)["holder"]["error"].is_string());
+        drop(d);
+    }
 }
 
 #[test]

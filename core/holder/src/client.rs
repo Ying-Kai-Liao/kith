@@ -6,8 +6,9 @@ use crate::platform::{self, Stream};
 use crate::proto as p;
 use crate::wire::{self, Frame};
 use std::collections::VecDeque;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
@@ -39,8 +40,12 @@ impl std::fmt::Display for ConnectError {
     }
 }
 
+/// Ends the link when the client goes: shuts a socket down, or kills the child that carries a stdio link.
+type Closer = Box<dyn FnMut() + Send>;
+
 pub struct Client {
-    writer: Stream,
+    writer: Box<dyn Write + Send>,
+    close: Closer,
     frames: Receiver<Frame>,
     /// Frames read but not yet asked for, in order.
     pending: VecDeque<Frame>,
@@ -50,7 +55,7 @@ pub struct Client {
 impl Drop for Client {
     /// The reader thread holds the other end of the connection; ending it is what hangs up.
     fn drop(&mut self) {
-        let _ = self.writer.shutdown(std::net::Shutdown::Both);
+        (self.close)();
     }
 }
 
@@ -66,8 +71,91 @@ impl Client {
 
     /// Says hello over a connection already made (any stream the platform gives).
     pub fn over(stream: Stream, secret: &str, generation: u64) -> Result<Client, ConnectError> {
-        let mut writer = stream.try_clone()?;
-        let mut reader = stream;
+        let writer = stream.try_clone()?;
+        let closer = stream.try_clone()?;
+        Self::over_parts(
+            Box::new(stream),
+            Box::new(writer),
+            Box::new(move || {
+                let _ = closer.shutdown(std::net::Shutdown::Both);
+            }),
+            secret,
+            generation,
+        )
+    }
+
+    /// Says hello to a holder reached through a child process's stdio: `ssh <host> kith-holder --stdio`, or in tests
+    /// `kith-holder --stdio --dir D` run directly. The child relays to the holder of its machine (starting one
+    /// detached if none runs), so ending the child never ends a held process. The pairing key goes down the child's
+    /// stdin as its first line (it is what a relay needs to start a holder), never in argv or the environment, and
+    /// then the usual hello and mutual proof follow over the same pipes. Dropping the client kills the child.
+    pub fn over_command(
+        mut cmd: Command,
+        secret: &str,
+        generation: u64,
+    ) -> Result<Client, ConnectError> {
+        if secret.contains(['\r', '\n']) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the pairing key cannot hold a line break",
+            )
+            .into());
+        }
+        let mut child = cmd
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()?;
+        let mut writer = child.stdin.take().expect("piped");
+        let reader = child.stdout.take().expect("piped");
+        let mut close: Closer = Box::new(move || {
+            let _ = child.kill();
+            let _ = child.wait();
+        });
+        if let Err(e) = writeln!(writer, "{secret}").and_then(|()| writer.flush()) {
+            close();
+            return Err(e.into());
+        }
+        Self::over_parts(
+            Box::new(reader),
+            Box::new(writer),
+            close,
+            secret,
+            generation,
+        )
+    }
+
+    fn over_parts(
+        reader: Box<dyn Read + Send>,
+        writer: Box<dyn Write + Send>,
+        mut close: Closer,
+        secret: &str,
+        generation: u64,
+    ) -> Result<Client, ConnectError> {
+        match Self::handshake(reader, writer, secret, generation) {
+            Ok((frames, welcome, writer)) => Ok(Client {
+                writer,
+                close,
+                frames,
+                pending: VecDeque::new(),
+                welcome,
+            }),
+            // A refused or silent link leaves nothing behind (no child, no open socket).
+            Err(e) => {
+                close();
+                Err(e)
+            }
+        }
+    }
+
+    /// The hello and the mutual proof; on success the reader moves to a thread of its own.
+    #[allow(clippy::type_complexity)]
+    fn handshake(
+        mut reader: Box<dyn Read + Send>,
+        mut writer: Box<dyn Write + Send>,
+        secret: &str,
+        generation: u64,
+    ) -> Result<(Receiver<Frame>, p::Welcome, Box<dyn Write + Send>), ConnectError> {
         let key = secret.as_bytes();
         let nonce = platform::random_hex();
         let hello = p::Hello {
@@ -106,12 +194,7 @@ impl Client {
                         }
                     }
                 });
-                Ok(Client {
-                    writer,
-                    frames,
-                    pending: VecDeque::new(),
-                    welcome,
-                })
+                Ok((frames, welcome, writer))
             }
             (p::REFUSED, _, payload) => Err(ConnectError::Refused(wire::parse(&payload)?)),
             (kind, _, _) => {
