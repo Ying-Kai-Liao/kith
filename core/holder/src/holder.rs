@@ -49,6 +49,17 @@ struct Entry {
     /// A kill has seen the tree empty. Sticks: the group id may be handed to an unrelated group afterwards (the blind
     /// spot of `Proc::tree_empty`), and a later kill must neither say "killing" nor signal that group.
     gone: AtomicBool,
+    /// Killed by the holder itself when the lease lapses.
+    kill_on_lease_loss: bool,
+}
+
+/// The lease the newest core keeps alive. See `proto` for the rules.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Lease {
+    /// No renewal has ever arrived: nothing expires.
+    Unarmed,
+    Until(Instant),
+    Lost,
 }
 
 /// The connected core. Frames go out through its own writer thread: a core that stops reading must never block
@@ -103,6 +114,7 @@ struct State {
     /// can start between that decision and the exit.
     closing: bool,
     idle_since: Option<Instant>,
+    lease: Lease,
 }
 
 struct Holder {
@@ -152,6 +164,8 @@ pub fn run(cfg: Config) -> io::Result<()> {
     let holder = Arc::new(Holder::new(cfg.secret.into_bytes(), endpoint, cfg.idle));
     let watcher = holder.clone();
     std::thread::spawn(move || watcher.watch_idle());
+    let watcher = holder.clone();
+    std::thread::spawn(move || watcher.watch_lease());
     let gave_up = holder.accept_loop(
         || platform::accept(&listener),
         ACCEPT_RETRIES,
@@ -236,6 +250,7 @@ impl Holder {
                 core: None,
                 closing: false,
                 idle_since: Some(Instant::now()),
+                lease: Lease::Unarmed,
             }),
             changed: Condvar::new(),
             instance: platform::random_hex(),
@@ -267,6 +282,37 @@ impl Holder {
                 st.closing = true;
                 self.exit();
             }
+        }
+    }
+
+    /// Expiry and the kill are one step under the state lock: a later kill would be a window in which a cut-off
+    /// hand still runs a revoked guest. Callers hold the lock and call this before acting on anything, so a
+    /// renewal or spawn that arrives as the lease lapses sees the lapse first. While lost it keeps killing, since
+    /// a tree that was slow to die must not be left alone.
+    fn expire_lease(&self, st: &mut State) {
+        if let Lease::Until(t) = st.lease
+            && Instant::now() >= t
+        {
+            st.lease = Lease::Lost;
+        }
+        if st.lease == Lease::Lost {
+            for e in st.procs.values() {
+                if e.kill_on_lease_loss && e.held.exit.is_none() && !e.gone.load(Ordering::Relaxed)
+                {
+                    e.proc.kill_tree();
+                }
+            }
+        }
+    }
+
+    fn watch_lease(&self) {
+        loop {
+            std::thread::sleep(Duration::from_millis(10));
+            let mut st = self.lock();
+            if st.closing {
+                return;
+            }
+            self.expire_lease(&mut st);
         }
     }
 
@@ -417,7 +463,15 @@ impl Holder {
                 drop(st);
                 return Self::refuse(stream, Why::Superseded, current);
             }
+            self.expire_lease(&mut st);
             match kind {
+                p::RENEW => {
+                    let renew: p::Renew = wire::parse(&payload)?;
+                    // A zero period would lapse at once; it is not a way to end a lease.
+                    if renew.ms > 0 {
+                        st.lease = Lease::Until(Instant::now() + Duration::from_millis(renew.ms));
+                    }
+                }
                 p::SPAWN => {
                     let spec: p::Spawn = wire::parse(&payload)?;
                     if st.closing {
@@ -565,6 +619,13 @@ impl Holder {
             );
             return self.to_core(&st, frame);
         }
+        if spec.kill_on_lease_loss && st.lease == Lease::Lost {
+            let lost = p::LeaseLost {
+                conv: spec.conv,
+                claim: spec.claim,
+            };
+            return self.to_core(&st, wire::json_frame(p::LEASE_LOST, 0, &lost));
+        }
         // A claim at or below the highest started for this conversation was decided before (or is) one whose job
         // already ran: refuse it, whether or not that process is still held or was acked.
         if let Some(highest) = st
@@ -643,6 +704,7 @@ impl Holder {
                 tail: VecDeque::new(),
                 readers: 1 + u8::from(started.err.is_some()),
                 gone: AtomicBool::new(false),
+                kill_on_lease_loss: spec.kill_on_lease_loss,
             },
         );
         let reader = |stream: Box<dyn std::io::Read + Send>, kind: u8| {
@@ -792,6 +854,7 @@ mod tests {
                 tail: VecDeque::new(),
                 readers: 0,
                 gone: AtomicBool::new(false),
+                kill_on_lease_loss: false,
             },
         );
         holder.reap(1, proc);
@@ -867,6 +930,7 @@ mod tests {
                 mode: p::Mode::Pipes,
                 cols: 80,
                 rows: 24,
+                kill_on_lease_loss: false,
             })
             .unwrap();
         client
@@ -906,6 +970,7 @@ mod tests {
                 mode: p::Mode::Pipes,
                 cols: 80,
                 rows: 24,
+                kill_on_lease_loss: false,
             })
             .unwrap();
         client
@@ -955,6 +1020,7 @@ mod tests {
                 mode: p::Mode::Pipes,
                 cols: 80,
                 rows: 24,
+                kill_on_lease_loss: false,
             })
             .unwrap();
         client

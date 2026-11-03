@@ -13,6 +13,18 @@
 //! An error exit (`Exit::error`) says the holder could not read how the process ended. It does not say the group is
 //! empty: the core still waits for KILL `Gone` before it releases the claim.
 //!
+//! The lease (docs/plans/runtime-design.md section 10). A hand that cannot reach its core for a lease period kills
+//! its guest and bot runs itself, so a revoke is never stranded on a cut-off hand. The core says which processes
+//! those are when it spawns them (`Spawn::kill_on_lease_loss`; the default, false, is an owner run and is never
+//! touched) and keeps the lease alive with `RENEW` frames, each carrying the period (`Renew::ms`) from now. The
+//! holder tracks one deadline, renewed only by the newest generation's connection (an older one is refused as
+//! `Superseded` before its frame counts). No renewal has ever arrived: no lease is armed and nothing expires, so a
+//! local holder no core ever leased never kills anything. The deadline outlives a dropped connection: a core that
+//! drops and does not come back is exactly the cut-off case. When the deadline passes, in one step under the
+//! holder's state lock, the lease is marked lost and every tagged process still running has its whole tree killed;
+//! their exits are kept until acked like any exit. While lost, a tagged spawn is answered `LEASE_LOST`; any
+//! renewal from the newest core restores the lease.
+//!
 //! Process ids. A frame id names a process only together with the holder instance (`Welcome::instance`): the
 //! payload of KILL, ACK, TAIL, RESIZE and INPUT begins with the 32 character instance, then the body (INPUT: the raw
 //! bytes, RESIZE: the JSON, the others: nothing). An id from another instance (a holder that was replaced and
@@ -33,7 +45,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// Checked in hello and welcome. Bumped for a change an older peer cannot read.
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 
 // core to holder
 pub const HELLO: u8 = 1;
@@ -49,6 +61,8 @@ pub const TAIL: u8 = 8;
 pub const SHUTDOWN: u8 = 9;
 /// The core's answer to the holder's challenge (see `auth`).
 pub const AUTH: u8 = 10;
+/// The core's lease renewal (payload `Renew`); the holder answers nothing. See `Spawn::kill_on_lease_loss`.
+pub const RENEW: u8 = 11;
 
 // holder to core
 pub const WELCOME: u8 = 101;
@@ -69,6 +83,9 @@ pub const CHALLENGE: u8 = 112;
 /// A spawn whose claim is below the highest claim the holder has seen for that conversation: the core that sent it
 /// is working from an old decision. Payload `StaleClaim`; nothing was started.
 pub const STALE_CLAIM: u8 = 113;
+/// A spawn tagged `kill_on_lease_loss` while the lease is lost. Payload `LeaseLost`; nothing was started, and the
+/// claim is not used up, so the same spawn works once a renewal restores the lease.
+pub const LEASE_LOST: u8 = 114;
 
 /// The first frame on every connection. The secret is an opaque key the holder was started with; it will be the
 /// local hand's pairing key (docs/plans/runtime-design.md section 10), and it never crosses the wire: the holder
@@ -119,6 +136,21 @@ pub struct Spawn {
     pub cols: u16,
     #[serde(default = "default_rows")]
     pub rows: u16,
+    /// Kill this process's tree if the lease lapses (a guest's or a bot's run). Default false: an owner run.
+    #[serde(default)]
+    pub kill_on_lease_loss: bool,
+}
+
+/// How long the lease lasts from the moment the holder reads this frame.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct Renew {
+    pub ms: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct LeaseLost {
+    pub conv: String,
+    pub claim: u64,
 }
 
 fn default_cols() -> u16 {

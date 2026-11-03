@@ -352,6 +352,12 @@ impl Client {
         self.send_json(p::SPAWN, 0, spec)
     }
 
+    /// Keeps the lease alive for `period` from now; the holder answers nothing.
+    pub fn renew(&mut self, period: Duration) -> io::Result<()> {
+        let ms = u64::try_from(period.as_millis()).unwrap_or(u64::MAX);
+        self.send_json(p::RENEW, 0, &p::Renew { ms })
+    }
+
     pub fn list(&mut self) -> io::Result<Vec<p::Held>> {
         self.send(p::LIST, 0, &[])?;
         let (_, _, payload) = self

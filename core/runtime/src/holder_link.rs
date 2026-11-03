@@ -42,6 +42,9 @@ pub(crate) struct HolderConfig {
     pub command: Option<Vec<String>>,
     /// How long a command link may take to answer its hello before it is ended and tried again later.
     pub handshake: Duration,
+    /// The lease the core grants the holder: it renews at a third of this, and a holder that hears nothing for this
+    /// long kills the processes the core tagged `kill_on_lease_loss`. Nothing is tagged yet.
+    pub lease: Duration,
 }
 
 impl Default for HolderConfig {
@@ -55,6 +58,7 @@ impl Default for HolderConfig {
             kill_wait: Duration::from_secs(10),
             command: None,
             handshake: Duration::from_secs(15),
+            lease: Duration::from_secs(30),
         }
     }
 }
@@ -237,6 +241,12 @@ fn nothing_listens(e: &std::io::Error) -> bool {
 
 /// Reconciles the record with this hello, then keeps the record current until the connection ends. `Ok` means the
 /// supervisor was told to stop; `Err` carries why the link was lost.
+fn renew(client: &mut Client, cfg: &HolderConfig) -> std::result::Result<(), String> {
+    client
+        .renew(cfg.lease)
+        .map_err(|e| format!("the holder stopped answering: {e}"))
+}
+
 fn connected(
     shared: &Arc<Shared>,
     mut client: Client,
@@ -279,11 +289,21 @@ fn connected(
         &format!("holder: connected (instance {instance}, pid {pid}, {count} process(es))"),
     );
     let mut known = procs;
+    let renew_every = (cfg.lease / 3).max(Duration::from_millis(1));
+    // Renewals are due more often than the listing, so the loop wakes at the shorter of the two.
+    let tick = cfg.poll.min(renew_every);
+    let mut next_list = Instant::now() + cfg.poll;
+    renew(&mut client, cfg)?;
     while !shared.stopping() {
-        sleep_unless_stopped(shared, cfg.poll);
+        sleep_unless_stopped(shared, tick);
         if shared.stopping() {
             break;
         }
+        renew(&mut client, cfg)?;
+        if Instant::now() < next_list {
+            continue;
+        }
+        next_list = Instant::now() + cfg.poll;
         let held = client
             .list()
             .map_err(|e| format!("the holder stopped answering: {e}"))?;
