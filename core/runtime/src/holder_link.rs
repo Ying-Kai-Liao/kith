@@ -36,6 +36,15 @@ pub(crate) struct HolderConfig {
     pub retry_max: Duration,
     /// How long ending an old instance's process groups may take before the core tries again later.
     pub kill_wait: Duration,
+    /// Reach the holder through this command's stdio instead of the local socket: `ssh <host> kith-holder --stdio`
+    /// (program first, then its arguments). The command carries bytes to the holder of the machine it runs on and
+    /// starts one there if none answers, so this core starts nothing itself. Tests put `kith-holder --stdio` here.
+    pub command: Option<Vec<String>>,
+    /// How long a command link may take to answer its hello before it is ended and tried again later.
+    pub handshake: Duration,
+    /// The lease the core grants the holder: it renews at a third of this, and a holder that hears nothing for this
+    /// long kills the processes the core tagged `kill_on_lease_loss`. Nothing is tagged yet.
+    pub lease: Duration,
 }
 
 impl Default for HolderConfig {
@@ -47,6 +56,9 @@ impl Default for HolderConfig {
             retry_min: Duration::from_secs(1),
             retry_max: Duration::from_secs(60),
             kill_wait: Duration::from_secs(10),
+            command: None,
+            handshake: Duration::from_secs(15),
+            lease: Duration::from_secs(30),
         }
     }
 }
@@ -157,6 +169,9 @@ fn connect(
     cfg: &HolderConfig,
 ) -> std::result::Result<Client, (&'static str, String)> {
     let unreachable = |why: String| ("unreachable", why);
+    if let Some(argv) = cfg.command.as_deref().filter(|a| !a.is_empty()) {
+        return connect_command(shared, layout, argv, cfg.handshake);
+    }
     let Some(exe) = find_exe(cfg) else {
         shared.set_holder(|h| h.binary = None);
         return Err((
@@ -181,21 +196,87 @@ fn connect(
         }
         other => other,
     };
-    first.map_err(|e| match e {
-        ConnectError::Refused(r) => unreachable(format!(
+    first.map_err(|e| link_error(e, "at the holder's socket"))
+}
+
+/// The holder through a command's stdio (M0f). A dropped link is the same retry as a dropped socket: the supervisor
+/// connects again with the same generation, `connected` lists what the holder holds, and exits wait there until acked.
+fn connect_command(
+    shared: &Arc<Shared>,
+    layout: &Layout,
+    argv: &[String],
+    handshake: Duration,
+) -> std::result::Result<Client, (&'static str, String)> {
+    let unreachable = |why: String| ("unreachable", why);
+    shared.set_holder(|h| h.binary = Some(PathBuf::from(&argv[0])));
+    let secret = secret(layout).map_err(|e| unreachable(e.to_string()))?;
+    let generation = shared
+        .with_core(|c| Ok(c.generation()))
+        .map_err(|e| unreachable(e.to_string()))?;
+    let generation = u64::try_from(generation).unwrap_or(0);
+    let mut cmd = std::process::Command::new(&argv[0]);
+    cmd.args(&argv[1..]);
+    Client::over_command(cmd, &secret, generation, handshake)
+        .map_err(|e| link_error(e, &format!("through `{}`", argv.join(" "))))
+}
+
+fn link_error(e: ConnectError, via: &str) -> (&'static str, String) {
+    let why = match e {
+        ConnectError::Refused(r) => format!(
             "the holder refused the hello ({:?}); that settles nothing, the generation in core.db is the authority",
             r.why
-        )),
+        ),
         ConnectError::Impostor => {
-            unreachable("what answers at the holder's socket does not know the holder secret".to_owned())
+            format!("what answers {via} does not know the holder secret")
         }
-        ConnectError::Io(e) => unreachable(format!("the holder did not answer properly: {e}")),
-    })
+        ConnectError::Io(e) => format!("the holder did not answer properly: {e}"),
+    };
+    ("unreachable", why)
 }
 
 fn nothing_listens(e: &std::io::Error) -> bool {
     use std::io::ErrorKind::{ConnectionRefused, NotFound};
     matches!(e.kind(), NotFound | ConnectionRefused)
+}
+
+/// Ends the renewal thread when the link's loop returns, however it returns.
+struct RenewalGuard(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for RenewalGuard {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Renews the lease at once, then from a thread of its own every third of the lease: never behind a listing or a
+/// reconcile, which can take long enough on a loaded machine for a leftover deadline to lapse.
+fn start_renewing(
+    shared: &Arc<Shared>,
+    client: &Client,
+    cfg: &HolderConfig,
+) -> std::result::Result<RenewalGuard, String> {
+    let renewer = client.renewer();
+    let lease = cfg.lease;
+    renewer
+        .renew(lease)
+        .map_err(|e| format!("the holder stopped answering: {e}"))?;
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (stop, shared) = (done.clone(), shared.clone());
+    let every = (lease / 3).max(Duration::from_millis(1));
+    std::thread::spawn(move || {
+        let stopped = || stop.load(std::sync::atomic::Ordering::Relaxed) || shared.stopping();
+        let mut due = Instant::now() + every;
+        while !stopped() {
+            std::thread::sleep(Duration::from_millis(10).min(every));
+            if Instant::now() >= due {
+                if renewer.renew(lease).is_err() {
+                    return; // the link is gone; its loop notices on its next listing
+                }
+                due = Instant::now() + every;
+            }
+        }
+    });
+    Ok(RenewalGuard(done))
 }
 
 /// Reconciles the record with this hello, then keeps the record current until the connection ends. `Ok` means the
@@ -205,24 +286,43 @@ fn connected(
     mut client: Client,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), String> {
-    let procs = record_procs(&client.welcome.procs);
+    // First thing after the welcome: a deadline left over from before this link must not lapse while we reconcile.
+    let _renewing = start_renewing(shared, &client, cfg)?;
+    // A holder reached through a command runs on another machine: its pids mean nothing here, so no start time is
+    // read and no process group is ended on this machine's account, and the local holder's record is left alone.
+    let remote = cfg.command.is_some();
+    let procs = if remote {
+        Vec::new()
+    } else {
+        record_procs(&client.welcome.procs)
+    };
     let instance = client.welcome.instance.clone();
     let (pid, tied) = (client.welcome.pid, client.welcome.tied_to_starter);
-    reconcile(shared, &instance, &procs, cfg)?;
+    let count = client
+        .welcome
+        .procs
+        .iter()
+        .filter(|h| h.exit.is_none())
+        .count();
+    if remote {
+        log::note(
+            &shared.logs,
+            "holder: linked through a command; its pids are not this machine's, so nothing is recorded or ended here",
+        );
+    } else {
+        reconcile(shared, &instance, &procs, cfg)?;
+    }
     shared.set_holder(|h| {
         h.state = "connected";
         h.instance = Some(instance.clone());
         h.pid = Some(pid);
         h.tied_to_starter = tied;
         h.error = None;
-        h.procs = procs.len();
+        h.procs = count;
     });
     log::note(
         &shared.logs,
-        &format!(
-            "holder: connected (instance {instance}, pid {pid}, {} process(es))",
-            procs.len()
-        ),
+        &format!("holder: connected (instance {instance}, pid {pid}, {count} process(es))"),
     );
     let mut known = procs;
     while !shared.stopping() {
@@ -233,6 +333,11 @@ fn connected(
         let held = client
             .list()
             .map_err(|e| format!("the holder stopped answering: {e}"))?;
+        if remote {
+            let live = held.iter().filter(|h| h.exit.is_none()).count();
+            shared.set_holder(|h| h.procs = live);
+            continue;
+        }
         let now = record_procs(&held);
         if now != known {
             reconcile(shared, &instance, &now, cfg)?;
