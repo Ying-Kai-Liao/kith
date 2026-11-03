@@ -25,3 +25,4 @@ Package.resolved
 # Local PostHog project key for app builds (see apps/README.md)
 apps/shared/Config/Secrets.plist
 .hypothesis/
+.target-*/

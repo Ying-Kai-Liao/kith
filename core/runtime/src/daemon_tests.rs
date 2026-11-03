@@ -373,8 +373,19 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
             retry_min: Duration::from_millis(50),
             retry_max: Duration::from_millis(200),
             kill_wait: Duration::from_secs(5),
+            command: None,
+            handshake: Duration::from_secs(5),
         },
     }
+}
+
+#[cfg(unix)]
+/// A daemon whose holder link is a command's stdio (the `ssh host kith-holder --stdio` of M0f).
+fn command_cfg(argv: &[&str]) -> Config {
+    let mut cfg = holder_cfg(std::path::PathBuf::new());
+    cfg.holder.exe = None;
+    cfg.holder.command = Some(argv.iter().map(|a| (*a).to_owned()).collect());
+    cfg
 }
 
 fn holder_state(p: &Paths) -> String {
@@ -407,6 +418,26 @@ fn no_holder_program_stops_nothing() {
     let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
     assert_eq!(log.matches("holder: no kith-holder").count(), 1, "{log}");
     drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stdio_link_that_cannot_run_or_speaks_garbage_stops_nothing() {
+    for argv in [
+        vec!["/no/such/ssh", "host", "kith-holder", "--stdio"],
+        // Anything on stdout that is not a proved holder is a failed connection, not an error for the daemon.
+        vec!["/bin/sh", "-c", "echo not a holder; sleep 5"],
+    ] {
+        let (_t, m) = machine();
+        let p = paths(&m);
+        let d = serving(&p, command_cfg(&argv));
+        until("the stdio link to be reported unreachable", || {
+            holder_state(&p) == "unreachable"
+        });
+        // The daemon still answers its owner.
+        assert!(crate::status(&p)["holder"]["error"].is_string());
+        drop(d);
+    }
 }
 
 #[test]
@@ -596,4 +627,110 @@ fn a_new_holder_instance_ends_what_the_old_one_held_matched_by_pid_and_start_tim
         .expect("listed");
     assert!(alive(stranger_pid));
     signal(stranger_pid, "KILL");
+}
+
+/// A holder "on another machine": speaks the real proof and welcome at `sock`, claims an instance and holds nothing.
+#[cfg(unix)]
+fn remote_holder(sock: &std::path::Path, secret_file: std::path::PathBuf) {
+    use kith_holder::{auth, proto, wire};
+    let listener = std::os::unix::net::UnixListener::bind(sock).expect("bind");
+    std::thread::spawn(move || {
+        while let Ok((mut s, _)) = listener.accept() {
+            let secret_file = secret_file.clone();
+            std::thread::spawn(move || {
+                // The relay a real command runs consumes the pairing key line first; `nc` does not.
+                let mut byte = [0u8; 1];
+                loop {
+                    use std::io::Read as _;
+                    if s.read_exact(&mut byte).is_err() {
+                        return;
+                    }
+                    if byte[0] == b'\n' {
+                        break;
+                    }
+                }
+                let Ok(Some((_, _, hello))) = wire::read(&mut s) else {
+                    return;
+                };
+                let hello: proto::Hello = wire::parse(&hello).expect("hello");
+                let key = std::fs::read_to_string(secret_file).expect("secret");
+                let nonce = "cd".repeat(16);
+                let proof = auth::proof(
+                    key.trim().as_bytes(),
+                    auth::HOLDER,
+                    &hello.nonce,
+                    &nonce,
+                    hello.generation,
+                );
+                let challenge = proto::Challenge { nonce, proof };
+                wire::write_json(&mut s, proto::CHALLENGE, 0, &challenge).expect("challenge");
+                let Ok(Some(_)) = wire::read(&mut s) else {
+                    return;
+                };
+                let welcome = proto::Welcome {
+                    version: proto::VERSION,
+                    instance: "remote-instance".into(),
+                    pid: 1,
+                    tied_to_starter: false,
+                    generation: hello.generation,
+                    procs: vec![],
+                };
+                wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
+                while let Ok(Some((kind, _, _))) = wire::read(&mut s) {
+                    if kind == proto::LIST {
+                        let listing = proto::Listing { procs: vec![] };
+                        wire::write_json(&mut s, proto::LISTING, 0, &listing).expect("listing");
+                    }
+                }
+            });
+        }
+    });
+}
+
+#[cfg(unix)]
+#[test]
+fn a_holder_linked_through_a_command_never_makes_the_core_end_local_processes() {
+    use crate::db::{HolderRecord, RecordedProc};
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let sock = m.join("r.sock");
+    let sock_arg = sock.display().to_string();
+    let d = serving(&p, command_cfg(&["/usr/bin/nc", "-U", &sock_arg]));
+    // A local holder's record: a process of this machine, under another instance than the remote's.
+    let (pid, started) = leader();
+    let rec = HolderRecord {
+        instance: Some("local-instance".into()),
+        procs: vec![RecordedProc {
+            pid,
+            started,
+            conv: "c".into(),
+        }],
+    };
+    d.shared
+        .with_core(|c| c.save_holder_record(&rec))
+        .expect("record");
+    remote_holder(&sock, Layout::new(&m).holder_secret);
+    until("the command link to be connected", || {
+        holder_state(&p) == "connected"
+    });
+    std::thread::sleep(Duration::from_millis(500));
+    // The instance differs from the recorded one and the remote lists nothing: the local-holder path would end the
+    // recorded group. It did not, and the local record is untouched.
+    assert!(
+        std::process::Command::new("/bin/kill")
+            .args(["-s", "0", "--", &format!("-{pid}")])
+            .status()
+            .expect("kill")
+            .success(),
+        "the local process group was ended on a remote holder's account"
+    );
+    let now = d.shared.with_core(|c| c.holder_record()).expect("record");
+    assert_eq!(now.instance.as_deref(), Some("local-instance"));
+    assert_eq!(now.procs.len(), 1);
+    let log = std::fs::read_to_string(m.join(crate::log::FILE)).expect("core.log");
+    // Only now end the group this test started (a failed assert above leaks it, as the other leader() tests do).
+    let _ = std::process::Command::new("/bin/kill")
+        .args(["-s", "KILL", "--", &format!("-{pid}")])
+        .status();
+    assert!(log.contains("nothing is recorded or ended here"), "{log}");
 }
