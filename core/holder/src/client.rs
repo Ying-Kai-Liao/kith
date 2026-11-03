@@ -39,6 +39,12 @@ impl std::fmt::Display for ConnectError {
     }
 }
 
+/// The doctor's line for a holder that is tied to its starter (Windows only).
+pub const TIED_TO_STARTER_NOTE: &str = "The program that keeps your agents running was started inside a Windows job that \
+won't let it leave, so stopping or restarting Kith also stops every agent that is running. Nothing is broken now. \
+To fix it, quit Kith and Start Kith from the Start menu or a normal terminal (not from a tool that runs it inside a \
+job, such as some IDEs, CI runners or service wrappers).";
+
 pub struct Client {
     writer: Stream,
     frames: Receiver<Frame>,
@@ -124,6 +130,12 @@ impl Client {
     /// `kith doctor` shows.
     pub fn tied_to_starter(&self) -> bool {
         self.welcome.tied_to_starter
+    }
+
+    /// What `kith doctor` says when [`Self::tied_to_starter`]: what it means and what to do, in plain words. None when
+    /// the holder is free of its starter.
+    pub fn tied_to_starter_note(&self) -> Option<&'static str> {
+        self.tied_to_starter().then_some(TIED_TO_STARTER_NOTE)
     }
 
     pub fn send(&mut self, kind: u8, id: u32, payload: &[u8]) -> io::Result<()> {
@@ -215,6 +227,16 @@ impl Client {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn the_tied_note_says_what_it_means_and_what_to_do() {
+        assert!(TIED_TO_STARTER_NOTE.contains("also stops"));
+        assert!(TIED_TO_STARTER_NOTE.contains("Start Kith from"));
+        assert!(
+            !TIED_TO_STARTER_NOTE.contains("starter"),
+            "no field names in a user's words"
+        );
+    }
 
     #[test]
     fn a_welcome_that_skips_the_challenge_is_an_impostor() {

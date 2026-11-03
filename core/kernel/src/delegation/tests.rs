@@ -259,3 +259,36 @@ fn a_check_answers_with_the_record_it_would_get() {
     assert_eq!(ok["chain"], "new");
     assert_eq!(ok["hop"], 0);
 }
+
+#[test]
+fn a_box_lock_that_cannot_be_taken_refuses_the_ask() {
+    let t = Tmp::new("nolock");
+    // "live" is a file, so the box folder cannot be made and the lock cannot be taken.
+    fs::remove_dir_all(t.0.join("live")).unwrap();
+    fs::write(t.0.join("live"), "not a folder").unwrap();
+    let err = check(&t.0, &env_of(&[]), "new", false).unwrap_err();
+    assert!(err.0.contains("can't lock the ask box"), "{}", err.0);
+}
+
+#[test]
+fn check_and_write_writes_only_an_admitted_ask_and_inside_the_check() {
+    let t = Tmp::new("cw");
+    t.reg("p", r#"{"chain":"root","hop":8,"cross_hops":0,"cost":1.0}"#);
+    let mut wrote = false;
+    let refused = check_and_write(&t.0, &env_of(&[("KITH_ASK_ID", "p")]), "new", false, |_| {
+        wrote = true;
+        Ok(())
+    });
+    assert!(refused.is_err() && !wrote, "a refused ask writes nothing");
+    let ok = check_and_write(&t.0, &env_of(&[]), "new", false, |d| {
+        wrote = d["chain"] == "new";
+        Ok(())
+    })
+    .unwrap();
+    assert!(wrote);
+    assert_eq!(ok["hop"], 0);
+    let failed = check_and_write(&t.0, &env_of(&[]), "new", false, |_| {
+        Err(std::io::Error::other("disk full"))
+    });
+    assert!(failed.unwrap_err().0.contains("disk full"));
+}

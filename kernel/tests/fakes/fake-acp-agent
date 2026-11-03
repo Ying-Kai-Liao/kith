@@ -2,7 +2,8 @@
 """A fake ACP agent for tests: speaks initialize, session/new, session/set_model, session/prompt over stdio.
 
 FAKE_ACP_MODE   ok (default) | signin (session/new says authentication required) | depleted (the prompt fails with a
-                usage limit) | hang (the prompt is never answered) | crash (exits during the prompt, saying why on stderr)
+                usage limit) | hang (the prompt is never answered) | crash (exits during the prompt, saying why on stderr; with FAKE_ACP_COST it first
+                reports that cost in a usage_update) | answer-exit (answers, then exits at once)
 FAKE_ACP_ANSWER  the answer, instead of echoing the task
 FAKE_ACP_COST   dollars to report in the prompt result (default: none reported)
 FAKE_ACP_PIDFILE  file to write this process's pid to (a test checks nothing is left running)
@@ -47,6 +48,11 @@ for line in sys.stdin:
         if mode == 'hang':
             time.sleep(300)
         elif mode == 'crash':
+            if os.environ.get('FAKE_ACP_COST'):
+                send({'jsonrpc': '2.0', 'method': 'session/update', 'params': {
+                    'sessionId': params.get('sessionId'),
+                    'update': {'sessionUpdate': 'usage_update',
+                               'cost': {'amount': float(os.environ['FAKE_ACP_COST']), 'currency': 'USD'}}}})
             sys.stderr.write('fake agent: out of memory\n')
             sys.stderr.flush()
             sys.exit(3)
@@ -62,3 +68,5 @@ for line in sys.stdin:
             if os.environ.get('FAKE_ACP_COST'):
                 result['_meta'] = {'costUsd': float(os.environ['FAKE_ACP_COST'])}
             reply(id, result)
+            if mode == 'answer-exit':
+                sys.exit(0)

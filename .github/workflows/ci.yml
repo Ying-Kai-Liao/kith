@@ -450,6 +450,8 @@ jobs:
           kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
+      - name: Run-once cost and kernel notes
+        run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
       # kith-sessions and the Rust threads module claiming one thread at once: never more than one writer.
       - name: Thread writers, Python and Rust as two actors
         run: kernel/tests/kith-threads-race --bin "$PWD/serve/host/target/debug/kith" --iterations 60

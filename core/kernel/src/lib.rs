@@ -9,6 +9,7 @@ pub mod engines;
 // (the `windows` CI job) is accounts, delegation, engines and paths; the core runtime needs paths.
 #[cfg(unix)]
 pub mod launch;
+pub mod log;
 pub mod paths;
 #[cfg(unix)]
 pub mod secrets;

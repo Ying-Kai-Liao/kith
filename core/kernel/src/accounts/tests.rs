@@ -575,6 +575,30 @@ fn a_launch_notes_when_the_account_started() {
 }
 
 #[test]
+fn a_state_change_that_cannot_be_locked_or_written_is_noted_not_dropped_silently() {
+    let seen = crate::log::tests::collect();
+    let h = Home::new("state-note");
+    // "accounts" is a file: the lock file can't be made, so the mark is lost, and the log says so.
+    let _ = std::fs::remove_dir_all(h.machine().join("accounts"));
+    std::fs::write(h.machine().join("accounts"), "in the way").unwrap();
+    state::record_started(&h.machine(), "claude", 1_900_000_000);
+    let marker = h
+        .machine()
+        .join("accounts")
+        .join("state.json")
+        .display()
+        .to_string();
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|m| m.contains(&marker) && m.contains("lost")),
+        "{:?}",
+        seen.lock().unwrap()
+    );
+}
+
+#[test]
 fn a_state_file_that_is_not_ours_is_kept_and_replaced() {
     let h = Home::new("corrupt");
     h.put_state("{not json");
@@ -849,6 +873,8 @@ fn an_extra_claude_account_mirrors_the_main_login() {
         cfg,
         serde_json::json!({"userID": "u", "hasCompletedOnboarding": true, "autoModeEnvSetup": 3})
     );
+    // the write was made under its lock file
+    assert!(dir.join(".claude.json.lock").exists());
     // a second launch writes nothing
     let settings_before = std::fs::metadata(dir.join("settings.json"))
         .unwrap()
