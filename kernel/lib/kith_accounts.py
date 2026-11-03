@@ -370,7 +370,8 @@ def prepare_claude_dir(directory, main_dir=None, main_json=None):
 
 def launch_env(agent, entry, light=False, record=False):
     """Shell assignments for bin/kith. Raises ValueError (exit 4) when the entry can't run. light: the main account's
-    check (present), not the harness's status command."""
+    check (present), not the harness's status command. The default login is always checked that way: the host may hold its
+    keys where `auth status` can't see them, and a logged-out one is the harness's to say, as on a plain run."""
     harness, name = parse(entry)
     if harness not in ('claude', 'claude-api', 'codex'):
         raise ValueError(f'{entry}: {harness} is not supported in launch-json yet')
@@ -383,6 +384,7 @@ def launch_env(agent, entry, light=False, record=False):
         if entry not in ids:
             found = [split(i)[1] for i in ids if split(i)[0] == entry and split(i)[1]]
             model = found[0] if found else None
+    light = light or (harness in ('claude', 'codex') and not name)
     ready, why = present(entry, agent) if light else check(entry, agent)
     if not ready:
         hint = fix(entry, agent)
@@ -779,14 +781,17 @@ def account_status(entry, agent, out, deep=True, assume_default=False):
     return out_
 
 
-def _statuses(ids, agent, out, deep, assume_default):
-    """account_status for each id; the harness status commands run side by side."""
+def _statuses(ids, agent, out, deep, assume_default, main=None):
+    """account_status for each id; the harness status commands run side by side. `main`: the agent's main account, which
+    on the default login counts as signed in whatever `auth status` says, as in --backups-json (the host may hold that
+    login's keys where the harness can't see them)."""
     ids = list(dict.fromkeys(ids))
+    one = lambda i: account_status(i, agent, out, deep, assume_default or i == main)
     if deep and len(ids) > 1:
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(8, len(ids))) as ex:
-            res = list(ex.map(lambda i: account_status(i, agent, out, deep, assume_default), ids))
+            res = list(ex.map(one, ids))
     else:
-        res = [account_status(i, agent, out, deep, assume_default) for i in ids]
+        res = [one(i) for i in ids]
     return dict(zip(ids, res))
 
 
@@ -809,7 +814,7 @@ def pick(agent, agent_md=None, deep=True, now=None, state=None):
     ordered = order[:1] if pin else []
     if not (pin and pin['only']):
         ordered += POLICIES.get(policy, fill_policy)(own, state, now) + foreign
-    status = _statuses(ordered, agent, out, deep, assume_default=not deep)
+    status = _statuses(ordered, agent, out, deep, assume_default=not deep, main=order[0])
     cands = [i for i in ordered if status[i]['status'] == 'ready']
     skipped = [{'id': i, **{k: v for k, v in status[i].items() if k != 'fix' and v is not None}}
                for i in ordered if status[i]['status'] != 'ready']
@@ -868,11 +873,12 @@ def rows(agent=None, deep=True, now=None, ids=None):
     if agent:
         harness = agent_harness(agent_md_of(agent))
         in_order, _ = static_order(agent, harness)
+        main = in_order[0]
         cands = pick(agent, deep=deep, now=now, state=state)['candidates']
     else:
-        in_order, cands = list((s.get('accounts') or [])), []
+        in_order, cands, main = list((s.get('accounts') or [])), [], None
     ids = list(dict.fromkeys(list(in_order) + (ids if ids is not None else known_ids(agent))))
-    status = _statuses(ids, agent, out, deep, assume_default=False)
+    status = _statuses(ids, agent, out, deep, assume_default=False, main=main)
     pins = {}
     for name, a in s.get('agents', {}).items():
         if a.get('pin'):
@@ -907,12 +913,14 @@ def accounts_json(agent, agent_md):
 
       {"version": 1, "agent", "harness", "policy", "pin": {"id","only"} | null, "cross_harness": bool, "main": id,
        "order": [ids, pin first],
-       "candidates": [ids pick() would try], "all_out": bool, "accounts": [rows() for each id in order]}"""
+       "candidates": [ids pick() would try], "all_out": bool, "accounts": [rows() for each id in order],
+       "own": the agent's own list when it has one (a client sends it back whole to change it), else null}"""
     harness = agent_harness(agent_md)
     order, pin = static_order(agent, harness)
     state = read_state()
     p = pick(agent, agent_md, deep=True, state=state)
-    return {'version': 1, 'agent': agent, 'harness': harness, 'policy': p['policy'], 'pin': pin, 'main': order[0],
+    own_ids, where = kith_settings.accounts(agent)
+    return {'version': 1, 'own': list(own_ids or []) if where == 'agent' else None, 'agent': agent, 'harness': harness, 'policy': p['policy'], 'pin': pin, 'main': order[0],
             'cross_harness': p['cross_harness'],
             'order': order, 'candidates': p['candidates'], 'all_out': p['all_out'], 'skipped': p['skipped'],
             'accounts': rows(agent, deep=True, ids=order)}

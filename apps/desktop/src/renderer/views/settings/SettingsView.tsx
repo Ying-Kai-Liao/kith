@@ -22,6 +22,7 @@ import { MyBotsPage } from './BotGuestsView'
 import { PeopleView } from './PeopleView'
 import { ProfileImagePicker } from './ProfileImagePicker'
 import { KeysView } from './KeysView'
+import { AccountsView } from './AccountsView'
 import { LinkChatRow, ReplyCardsRow, ScheduleMessagesRow } from './LinkChatRow'
 import { errorText, isMac, thisMac } from './parts'
 import { BackupChains } from './BackupChain'
@@ -44,6 +45,7 @@ const pages: { id: SettingsPage; title: string; icon: string; gapAfter?: boolean
   { id: 'crew', title: 'Crew', icon: 'person.2' },
   { id: 'people', title: 'People', icon: 'person.2' },
   { id: 'keys', title: 'Keys', icon: 'key' },
+  { id: 'accounts', title: 'Accounts', icon: 'person.crop.circle.badge.checkmark' },
   { id: 'bots', title: 'Your bots', icon: 'bubble.left.and.bubble.right' },
   { id: 'voice', title: 'Voice chat', icon: 'waveform' },
   { id: 'usage', title: 'Usage', icon: 'gauge.with.dots.needle.33percent', gapAfter: true },
@@ -54,7 +56,7 @@ const pages: { id: SettingsPage; title: string; icon: string; gapAfter?: boolean
 ]
 
 /** Pages only the owner of the connected Mac has: an invited person keeps Account and what is theirs alone. */
-const ownerOnly: SettingsPage[] = ['people', 'keys', 'voice', 'usage', 'updates']
+const ownerOnly: SettingsPage[] = ['people', 'keys', 'accounts', 'voice', 'usage', 'updates']
 
 /** This account's part in the connected Mac, from the cloud's computer rows; the owner when it isn't listed (the Mac's own app). */
 export function useComputerRole(): ComputerRole {
@@ -136,6 +138,8 @@ function PageContent({ page }: { page: SettingsPage }) {
       return <PeopleView />
     case 'keys':
       return <KeysView />
+    case 'accounts':
+      return <AccountsView />
     case 'bots':
       return <MyBotsPage />
     case 'voice':

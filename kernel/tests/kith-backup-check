@@ -263,7 +263,7 @@ check "main claude:<name>: a terminal/one-shot run uses it" "echo \"\$OUT\" | gr
 OUT=$("$KITH" echo --launch-json --backup codex:deep 2>/dev/null)
 check "main + --backup: the backup wins, its own id" "is \"(d['backup'], d['account_id'], 'CLAUDE_CONFIG_DIR' in d['env'], d['env']['CODEX_HOME'])\" \"('codex:deep', 'codex:deep', False, '$M/accounts/codex/deep')\""
 OUT=$("$KITH" echo --launch-json --backup claude 2>/dev/null); rc=$?
-check "main + --backup claude (the default login) not logged in: exit 4" "[ $rc = 4 ]"
+check "main + --backup claude (the default login) not logged in: still launches, the harness says so (the host may hold its keys)" "[ $rc = 0 ]"
 touch "$HOME/.claude/.fake-login" 2>/dev/null || { mkdir -p "$HOME/.claude"; touch "$HOME/.claude/.fake-login"; }
 OUT=$("$KITH" echo --launch-json --backup claude 2>/dev/null)
 check "main + --backup claude: the default login, no config dir" "is \"(d['backup'], d['account_id'], 'CLAUDE_CONFIG_DIR' in d['env'])\" \"('claude', 'claude', False)\""

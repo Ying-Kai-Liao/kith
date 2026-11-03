@@ -116,3 +116,44 @@ percent 0 to 100, nothing else accepted; `read_at` defaults to now).
 
 Older commands still work with the same effect and are deprecated: `kith account use`, `kith backup list|add|remove`,
 `kith account backup set|reset`.
+
+## Host (`kith serve`)
+
+The host is a client of everything above; it keeps no set of its own.
+
+**Per turn.** An hq agent's chain is `kith AGENT --accounts-json`: `candidates` (what `pick` would try now) first, then the
+rest of `order`; `main` (the plain launch) is the entry marked `primary`. Each turn starts on the first entry that is ready
+and not out: the plain launch when that is `main`, `--account ID` otherwise. The same code serves a typed message, an agent
+asked by another agent (`ask_bot`, `message_bot`) and a channel's run (a `kith ask` an agent runs itself is the kernel's: pick
+and retry, nothing pinned by the host); a chain the host has not read yet for an agent is
+read before its first turn, so an account the kernel already has out (marked by a terminal run, or by another agent) is
+never started. A turn that ends on a usage limit marks the account out in the host and tells the kernel
+(`kith account out ID --until T --reason rate_limit`), then goes on with the next entry once. The chain is read again after
+five minutes and after every write below, so a `kith account clear` in a terminal reaches the host within that time; its out
+marks replace the host's own (a limit met after the read began is kept until the next read). When every candidate is out,
+the host does not run an account that is out: it tells the user which are out and when the first is back (the kernel's own
+runs start the first one anyway). A pin with `only` that is out is a chain of one, so it runs, as in the kernel.
+
+With a kith that has no `--accounts-json` the host reads `--backups-json` and keeps its own `backups.json` (the kernel reads
+it live) as before. With one that has it, the host writes no `backups.json`; an old file is still honoured by the kernel until
+its marks expire or are cleared. The host does not push usage readings (`kith account usage`).
+
+**Methods** (owner only, on the local API and a paired phone; never on a member's or bot guest's list). Times in
+milliseconds. Every write takes one lock (the last wins) and answers with the fresh `accounts` read.
+
+| method | body | does |
+| --- | --- | --- |
+| `accounts` | none | `{policy, crossHarness, accounts: [row], agents: {name: view}}`, see below |
+| `accountsSet` | `{agent?, ids}` or `{agent, reset: true}` | `kith account set` (the global set, an agent's own list, or drop the agent's list) |
+| `accountPolicy` | `{policy: "fill"\|"spread"}` | `kith account policy` |
+| `accountPin` / `accountUnpin` | `{agent, id, only?}` / `{agent}` | `kith account pin|unpin` |
+| `accountCrossHarness` | `{agent?, value: "on"\|"off"\|"reset"}` | `kith account cross-harness` (`reset` needs an agent) |
+| `accountClear` | `{id}` | `kith account clear` ("it is back"); the host forgets its own mark and reading too |
+| `accountAdd` | `{harness: "claude"\|"codex", name, yes?, cols?, rows?}` | a new Claude account first answers `{ok: false, warning}` (the CLI's own text, nothing made); with `yes`, opens a terminal running `kith account add H N --yes` and answers `{account: {ok, id, harness, name, created}, term}` |
+| `accountRemove` | `{id}` | `kith account remove ID --yes`; the app confirms first |
+
+`row` is a row of `kith account list --json` in camelCase, without the folder: `id, harness, account, kind, inSet, order,
+status, ready, why, fix, outUntil?, reason?, usage: {readAt, windows: [{name, percent, resetsAt?}]}|null, lastStarted, pins,
+loggedIn`. `view` per hq agent: `harness, pin, own` (its own list, else `null`), `order, main, candidates, allOut,
+crossHarness, skipped: [{id, status, why, outUntil?, reason?}]`. The older `backups`, `backupsSet` and `accountSet` keep
+working and read out marks from the kernel's rows as well as the host's.

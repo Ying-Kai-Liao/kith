@@ -3,7 +3,8 @@ import { parseCall, type IncomingCall } from '@shared/incoming-call'
 import { parseAgentPeople, parseAgentUsage, parseBotsCap, parseUsageReport, type AgentPeople, type AgentUsage, type AtLimit, type BotsCap, type Period, type UsageReport } from '@shared/usage-limits'
 import type { CallError } from '@shared/ipc'
 import type { RelayCallError } from '@shared/relay'
-import { parseAccountAdd, parseAccountRemove, parseBackups, type AccountAdd, type Backups } from '@shared/backups'
+import { parseBackups, type Backups } from '@shared/backups'
+import { parseAccountAdd, parseAccounts, type AccountAdd, type Accounts, type Policy } from '@shared/accounts'
 import { parseBotGuest, parseBotGuests, parseBotRequest, parseCreatedBotInvite, type BotGuest, type BotProvider, type CreatedBotInvite } from '@shared/bot-guests'
 import { parseKeys, type KeyRow } from '@shared/secret-card'
 import { parseAllowed, type AllowedList } from '@shared/kith-access'
@@ -12,13 +13,10 @@ import {
   parseDiff, parseHistory, parseMemoryList, parseRead, parseSave, parseTidyUps, parseUndo,
   type HqMemoryDiff, type HqMemoryList, type HqMemoryRead, type HqMemoryVersion, type HqSaveResult, type HqTidyUp, type HqUndoResult,
 } from '@shared/hq-memory'
-import { parseAvailable, parseMarket, parsePreview, parseTools, type AvailableConnector, type InstallPreview, type KithTools, type MarketBot } from '@shared/kith-tools'
 import { isUnsupportedHost, parseAccessLedger, parseKithInfoResult, parseSearchResult, type AccessGrant, type KithInfoResult, type KithSearchResult } from '@shared/kith-info'
 import { isAccessRemoved, parseGranted } from '@shared/mac-role'
 import { parseAudit, parseCreatedInvite, parseInvites, parsePeople, type AuditRow, type CreatedInvite, type PendingInvite, type Person, type Role } from '@shared/people'
 import { threadWriterCode, threadWriterMessage, type TakeOverResult, type ThreadWriterCode } from '@shared/thread-writer'
-import type { QuickEngine } from '@shared/quick-chat'
-import { parseKernelStatus, parseNewAgentResult, type KernelStatus, type NewAgentResult } from '@shared/new-agent'
 import type { PlaceFolder, PlaceSelection, ProjectInfo, RecentFolder, StartingFolder } from '@shared/place-folders'
 import { METHODS, receive, type MethodName, type Params, type Received, type Results } from '@shared/host-contract.gen'
 import {
@@ -299,17 +297,12 @@ export class HostClient {
   }
 
   /** `pasted`: what the user pasted rather than typed, which memory never takes as their own words. */
-  async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null, engine: QuickEngine | null = null) {
+  async send(botId: string, text: string, clientNonce: string, threadId: string | null, attachments: string[] | null, pasted: string[] = [], newTask = false, place: StartingFolder | null = null, via: 'call' | null = null, budget: number | null = null) {
     try {
-      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}), ...(budget !== null ? { budget: clampTurns(budget) } : {}), ...(engine ?? {}) })).entry)
+      return asEntry((await this.callHost('send', { botId, text, clientNonce, threadId, attachments, ...(pasted.length ? { pasted } : {}), ...(newTask ? { newTask } : {}), ...(place ?? {}), ...(via ? { via } : {}), ...(budget !== null ? { budget: clampTurns(budget) } : {}) })).entry)
     } catch (e) {
       throw typedWriterError(e)
     }
-  }
-
-  /** Keeps a quick chat (a thread of the built-in scratch agent) as a real agent. Owner only; a refusal throws the host's own text. */
-  keepScratchThread(botId: string, threadId: string, name: string) {
-    return this.call<{ agent: string; botId: string | null }>('keepScratchThread', { botId, threadId, name }, 240_000)
   }
 
   /** Takes a thread over from the terminal that holds it; the host ends an idle terminal. Owner only. Throws `ThreadWriterError` (`terminalBusy`) while it works. */
@@ -346,80 +339,9 @@ export class HostClient {
     return parseKithInfoResult(await this.call('kithSetCallModel', { botId, model }, 60_000))
   }
 
-  /** Writes a kith agent's own model, effort or harness (`kith <agent> set …`; `default` forgets it; `model` rides a harness change). Returns kith's info read back. */
-  async kithSetSetting(botId: string, setting: 'model' | 'effort' | 'harness', value: string, model?: string): Promise<KithInfoResult> {
-    return parseKithInfoResult(await this.call('kithSetSetting', { botId, setting, value, ...(model ? { model } : {}) }, 60_000))
-  }
-
-  /** The engines table as `kith engines --json` prints it (owner only). A kith that can't run answers with its own error. */
-  async kithEngines(): Promise<unknown> {
-    return this.call('kithEngines', {}, 60_000)
-  }
-
-  /** Makes a kith agent (`kith new --json`; owner only). A refusal throws the host's own words. `bot` is null while the roster lags or its engine isn't one the host runs. */
-  async newKithAgent(params: Record<string, string>): Promise<NewAgentResult<Bot>> {
-    return parseNewAgentResult<Bot>(await this.call('newKithAgent', params, 240_000))
-  }
-
-  /** Whether the kernel can run (`refresh` asks again now instead of taking the host's short-lived answer). A host before this call answers 404. */
-  async kernelStatus(refresh = false): Promise<KernelStatus> {
-    return parseKernelStatus(await this.call('kernelStatus', refresh ? { refresh: true } : {}, 30_000))
-  }
-
   /** A Schedule card's button on a kith job (owner only): kith-sched does it, and the answer is the agent's info read back. */
   async kithSchedule(botId: string, id: string, op: 'pause' | 'resume' | 'run' | 'remove'): Promise<KithInfoResult> {
     return parseKithInfoResult(await this.call('kithSchedule', { botId, id, op }, 60_000))
-  }
-
-  // Connectors, skills and shared bots on a kith agent (owner only): each is one `kith … --json` line, answered as printed.
-  // A refused line throws with the CLI's own error text.
-  /** A kith agent's connectors and skills; `only` reads one half. A half that failed comes with its `…Error`. */
-  async kithTools(botId: string, only?: 'connectors' | 'skills'): Promise<KithTools> {
-    return parseTools(await this.call('kithTools', { botId, ...(only ? { only } : {}) }, 90_000))
-  }
-
-  /** Lets the agent use a connector installed on this computer (`kith <agent> connect`). */
-  kithConnect(botId: string, connector: string) {
-    return this.call('kithConnect', { botId, connector }, 60_000)
-  }
-
-  kithDisconnect(botId: string, connector: string) {
-    return this.call('kithDisconnect', { botId, connector }, 60_000)
-  }
-
-  /** Links a skill from anthropics/skills (or another GitHub link) to the agent (`kith <agent> skill add`). */
-  kithSkillAdd(botId: string, skill: string) {
-    return this.call('kithSkillAdd', { botId, skill }, 150_000)
-  }
-
-  kithSkillRemove(botId: string, skill: string) {
-    return this.call('kithSkillRemove', { botId, skill }, 90_000)
-  }
-
-  /** The connectors this computer can connect, with the agents that have each (`kith connectors --json`). */
-  async kithConnectorsAvailable(): Promise<AvailableConnector[]> {
-    return parseAvailable(await this.call('kithConnectorsAvailable', {}, 60_000))
-  }
-
-  /** The anthropics/skills catalog (`kith skills available --json`). */
-  async kithSkillsAvailable(refresh = false): Promise<{ name: string; description: string }[]> {
-    const rows = await this.call<{ name?: string; description?: string }[]>('kithSkillsAvailable', refresh ? { refresh: true } : {}, 150_000)
-    return (Array.isArray(rows) ? rows : []).filter((r) => r.name).map((r) => ({ name: r.name!, description: r.description ?? '' }))
-  }
-
-  /** Shared bots (`kith market [words] [--new] --json`). */
-  async kithMarket(query = '', fresh = false): Promise<MarketBot[]> {
-    return parseMarket(await this.call('kithMarket', { query, ...(fresh ? { new: true } : {}) }, 90_000))
-  }
-
-  /** What installing a shared bot would do here, before anything is kept. */
-  async kithInstallPreview(link: string): Promise<InstallPreview> {
-    return parsePreview(await this.call('kithInstallPreview', { link }, 150_000))
-  }
-
-  /** Installs a shared bot (`--as` when its name is taken); the host's roster picks the new agent up on its own. */
-  kithInstall(link: string, as: string | null) {
-    return this.call<{ ok: boolean; name: string }>('kithInstall', { link, ...(as ? { as } : {}) }, 300_000)
   }
 
   /** The backup chain: global order, per-agent orders and each entry's state. A host before this call answers 404. */
@@ -437,14 +359,47 @@ export class HostClient {
     return parseBackups(await this.call('accountSet', { agent, account }, 90_000))
   }
 
-  /** Makes a login folder and starts its login in a terminal on the computer. A new Claude account answers with the warning until `yes`. Owner only. */
+  /** The managed account set: every account, the policy, and each agent's view. Owner only; a host before it answers "unknown method". */
+  async accounts(): Promise<Accounts> {
+    return parseAccounts(await this.call('accounts', {}, 90_000))
+  }
+
+  /** The whole list of the global set (`agent` null), or of one agent's own list; `ids` null drops the agent's list. Every write below answers like `accounts`. */
+  async accountsSet(agent: string | null, ids: string[] | null): Promise<Accounts> {
+    const body = agent === null ? { ids: ids ?? [] } : ids === null ? { agent, reset: true } : { agent, ids }
+    return parseAccounts(await this.call('accountsSet', body, 90_000))
+  }
+
+  async accountPolicy(policy: Policy): Promise<Accounts> {
+    return parseAccounts(await this.call('accountPolicy', { policy }, 90_000))
+  }
+
+  async accountPin(agent: string, id: string, only: boolean): Promise<Accounts> {
+    return parseAccounts(await this.call('accountPin', { agent, id, only }, 90_000))
+  }
+
+  async accountUnpin(agent: string): Promise<Accounts> {
+    return parseAccounts(await this.call('accountUnpin', { agent }, 90_000))
+  }
+
+  /** `agent` null is the global setting; `reset` (an agent only) makes it follow the global one again. */
+  async accountCrossHarness(agent: string | null, value: 'on' | 'off' | 'reset'): Promise<Accounts> {
+    return parseAccounts(await this.call('accountCrossHarness', agent === null ? { value } : { agent, value }, 90_000))
+  }
+
+  /** "It's back": clears an account that is marked out. */
+  async accountClear(id: string): Promise<Accounts> {
+    return parseAccounts(await this.call('accountClear', { id }, 90_000))
+  }
+
+  /** Makes a login folder and starts its login in a terminal on the computer. A new Claude account answers with a warning until `yes`. */
   async accountAdd(harness: string, name: string, yes: boolean, cols: number, rows: number): Promise<AccountAdd> {
     return parseAccountAdd(await this.call('accountAdd', { harness, name, yes, cols, rows }, 90_000))
   }
 
-  /** Deletes an extra login (the app has confirmed). Owner only. */
-  async accountRemove(harness: string, name: string): Promise<{ inChain: boolean }> {
-    return parseAccountRemove(await this.call('accountRemove', { harness, name }, 90_000))
+  /** Deletes an extra login (the app has confirmed). */
+  async accountRemove(id: string): Promise<Accounts> {
+    return parseAccounts(await this.call('accountRemove', { id }, 90_000))
   }
 
   /** The grants ledger: every lasting grant for anyone but the owner, of one agent and/or one person. Owner only: a member gets 403; a host before it 404. */
@@ -484,16 +439,6 @@ export class HostClient {
 
   async hqMemoryRestore(botId: string, shared: boolean, name: string, version: number): Promise<HqSaveResult> {
     return parseSave(await this.call('kithMemoryRestore', { botId, shared, name, version }, 30_000))
-  }
-
-  /** Owner only. The deletion is a version, so `hqMemoryRestore` brings the file back. */
-  async hqMemoryDelete(botId: string, shared: boolean, name: string): Promise<void> {
-    await this.call('kithMemoryDelete', { botId, shared, name }, 30_000)
-  }
-
-  /** Owner only: keeps a fact out of every agent's memory (`kith memory forget`). */
-  async hqMemoryForget(botId: string, text: string): Promise<void> {
-    await this.call('kithMemoryForget', { botId, text }, 30_000)
   }
 
   async hqTidyUps(botId: string, limit = 20): Promise<HqTidyUp[]> {

@@ -46,45 +46,161 @@ def schedules():
     return json.load(open(path, encoding="utf-8")) if os.path.exists(path) else []
 
 
-def setting(name):
-    """`set model|effort|harness` keeps the choice in the file of that name; none means the agent's default."""
-    path = os.path.join(home, name)
-    return (open(path, encoding="utf-8").read().strip() if os.path.exists(path) else "") or None
-
-
 def permission(default):
     path = os.path.join(home, "permission")
     return open(path, encoding="utf-8").read().strip() if os.path.exists(path) else default
 
 
-def made_agents():
-    """Agents `new` made: folders under `made/`, with the settings `set` wrote beside them."""
-    root = os.path.join(home, "made")
-    return sorted(os.listdir(root)) if os.path.isdir(root) else []
+# --- a small kernel for the managed account set -----------------------------------------------------------------------
+# With a file `kernel.json` in the agent's folder the stub answers `--accounts-json`, `account list|set|pin|unpin|policy|
+# cross-harness|out|clear|add|remove|pick` and `backup list` the way kernel/lib/kith_accounts.py does (docs/accounts.md),
+# for the one agent `house` (a Claude agent): {"set": [ids], "agents": {"house": {"accounts"?: [ids], "pin"?: {id, only}}},
+# "policy", "cross", "out": {id: {out_until, reason}}, "signed_out": {id: why}, "usage": {id: reading}}. Without the file
+# the older stub answers (`--backups-json`, `chain_settings.json`), as a kith from before the account set does.
+import time as _time
+
+
+def kernel_path():
+    return os.path.join(home, "kernel.json")
+
+
+def kernel_on():
+    return os.path.exists(kernel_path())
+
+
+def kernel():
+    st = {"set": [], "agents": {}, "policy": "fill", "cross": False, "out": {}, "signed_out": {}, "usage": {}}
+    st.update(json.load(open(kernel_path(), encoding="utf-8")))
+    return st
+
+
+def kernel_save(st):
+    # Replaced whole: the host reads while a background `account out` writes, and a half-written file is not JSON.
+    tmp = kernel_path() + ".%d.tmp" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(st, f)
+    os.replace(tmp, kernel_path())
+
+
+def family(i):
+    return "claude" if i.split(":")[0] in ("claude", "claude-api") else i.split(":")[0]
+
+
+def layout(st):
+    a = st["agents"].get("house", {})
+    ids = a.get("accounts", st["set"])
+    own = [i for i in ids if family(i) == "claude"]
+    foreign = [i for i in ids if family(i) != "claude"] if "accounts" in a or st["cross"] else []
+    pin = a.get("pin")
+    if not own and not ("accounts" in a and not ids and pin):
+        own = ["claude"]
+    if pin:
+        own, foreign = [i for i in own if i != pin["id"]], [i for i in foreign if i != pin["id"]]
+    return pin, own, foreign
+
+
+def static_order(st):
+    pin, own, foreign = layout(st)
+    if pin:
+        return ([pin["id"]] if pin["only"] else [pin["id"]] + own + foreign), pin
+    return own + foreign, None
+
+
+def status_of(st, i, now):
+    o = st["out"].get(i)
+    if o and o["out_until"] > now:
+        return {"status": "out", "why": "out of usage", "out_until": o["out_until"], "reason": o["reason"]}
+    if i in st["signed_out"]:
+        return {"status": "signed_out", "why": st["signed_out"][i], "fix": "kith account login " + i}
+    return {"status": "ready", "why": None}
+
+
+def row_of(st, i, now, order):
+    h, _, n = i.partition(":")
+    stt = status_of(st, i, now)
+    pins = [{"agent": k, "only": bool(v["pin"]["only"])} for k, v in st["agents"].items() if v.get("pin", {}).get("id") == i]
+    row = {"id": i, "harness": family(i), "account": n or None, "kind": "api-key" if h == "claude-api" else "subscription",
+           "in_set": i in order, "order": order.index(i) + 1 if i in order else None, "status": stt["status"],
+           "ready": stt["status"] == "ready", "why": stt.get("why"), "fix": stt.get("fix"),
+           "usage": st["usage"].get(i), "last_started": None, "pins": pins, "logged_in": stt["status"] != "signed_out"}
+    if n:
+        row.update(name=n, dir="/secret/dir/" + i)
+    if stt["status"] == "out":
+        row["out_until"], row["reason"] = stt["out_until"], stt["reason"]
+    return row
+
+
+def kernel_pick(st, now):
+    order, pin = static_order(st)
+    cands = [i for i in order if status_of(st, i, now)["status"] == "ready"]
+    skipped = [{"id": i, **{k: v for k, v in status_of(st, i, now).items() if k != "fix" and v is not None}}
+               for i in order if status_of(st, i, now)["status"] != "ready"]
+    return {"version": 1, "agent": "house", "harness": "claude", "policy": st["policy"], "pin": pin,
+            "cross_harness": st["cross"], "candidates": cands or order[:1], "skipped": skipped, "all_out": not cands}
+
+
+def kernel_accounts_json(st, now):
+    order, pin = static_order(st)
+    p = kernel_pick(st, now)
+    return {"version": 1, "agent": "house", "harness": "claude", "policy": st["policy"], "pin": pin, "main": order[0],
+            "cross_harness": st["cross"], "own": st["agents"].get("house", {}).get("accounts"), "order": order, "candidates": p["candidates"], "all_out": p["all_out"],
+            "skipped": p["skipped"], "accounts": [row_of(st, i, now, order) for i in order]}
+
+
+def kernel_command():
+    st, now = kernel(), _time.time()
+    sub, rest = args[1], args[2:]
+    agent = rest[rest.index("--agent") + 1] if "--agent" in rest else None
+    ids = [a for a in rest if not a.startswith("--") and a != agent]
+    if sub == "list":
+        every = list(dict.fromkeys(st["set"] + [i for a in st["agents"].values() for i in a.get("accounts", [])]
+                                   + [a["pin"]["id"] for a in st["agents"].values() if a.get("pin")] + ["claude"]
+                                   + list(st["out"]) + list(st["signed_out"])))
+        print(json.dumps([row_of(st, i, now, st["set"]) for i in every]))
+        return
+    if sub == "policy":
+        if ids:
+            st["policy"] = ids[0]
+        print(st["policy"])
+    elif sub == "cross-harness":
+        if ids:
+            st["cross"] = ids[0] == "on"
+        print("on" if st["cross"] else "off")
+    elif sub == "set":
+        if "--reset" in rest:
+            st["agents"].get(agent, {}).pop("accounts", None)
+        elif agent:
+            st["agents"].setdefault(agent, {})["accounts"] = ids
+        else:
+            st["set"] = ids
+    elif sub == "pin":
+        st["agents"].setdefault(ids[0], {})["pin"] = {"id": ids[1], "only": "--only" in rest}
+    elif sub == "unpin":
+        st["agents"].setdefault(ids[0], {}).pop("pin", None)
+    elif sub == "out":
+        until = int(rest[rest.index("--until") + 1]) if "--until" in rest else int(now) + 3600
+        reason = rest[rest.index("--reason") + 1] if "--reason" in rest else "manual"
+        if not ("--extend" in rest and st["out"].get(ids[0], {}).get("out_until", 0) > until):
+            st["out"][ids[0]] = {"out_until": until, "reason": reason}
+    elif sub == "clear":
+        st["out"].pop(ids[0], None)
+    elif sub == "remove":
+        st["set"] = [i for i in st["set"] if i != ids[0]]
+    elif sub == "add":
+        i = ids[0] + ":" + ids[1]
+        if "--yes" not in rest and ids[0] == "claude":
+            print("WARNING: use several Claude accounts at your own risk.")
+            sys.exit(1)
+        st["set"] = list(dict.fromkeys(st["set"] + [i]))
+        open(os.path.join(home, "login_ran"), "w", encoding="utf-8").write("login " + i)
+    elif sub == "pick":
+        print(json.dumps(kernel_pick(st, now)))
+    kernel_save(st)
 
 
 if args == ["ls", "--json"]:
-    listed = [{"name": "house", "description": "Keeps the house", "home": home, "model": None,
-               "effort": None, "harness": "claude"}]
-    for name in made_agents():
-        folder = os.path.join(home, "made", name)
-        read = lambda key: open(os.path.join(folder, key), encoding="utf-8").read().strip() if os.path.exists(os.path.join(folder, key)) else None
-        listed.append({"name": name, "description": read("description"), "home": folder, "model": read("model"),
-                       "effort": read("effort"), "harness": read("harness") or "claude"})
-    print(json.dumps(listed))
-elif args[:1] == ["new"] and args[-1] == "--json" and len(args) == 4:
-    # kith's `new --json`: {agent, home, dir, description}; a refusal is {ok: false, error} on stdout, exit 1.
-    folder = os.path.join(home, "made", args[1])
-    if os.path.exists(folder) or args[1] == "house":
-        print(json.dumps({"ok": False, "error": f'kith: there is already an agent called "{args[1]}"'}))
-        sys.exit(1)
-    os.makedirs(os.path.join(folder, "role"))
-    open(os.path.join(folder, "description"), "w", encoding="utf-8").write(args[2])
-    print(json.dumps({"ok": True, "agent": args[1], "home": folder, "dir": os.path.join(folder, "role"), "description": args[2]}))
-elif len(args) == 5 and args[0] in made_agents() and args[1] == "set" and args[4] == "--json":
-    # `<made agent> set model|effort|harness VALUE --json`: kept in a file of that name beside the agent.
-    open(os.path.join(home, "made", args[0], args[2]), "w", encoding="utf-8").write(args[3])
-    print(json.dumps({"agent": args[0], "setting": args[2], "value": args[3], "previous": None, "changed": True}))
+    print(json.dumps([{"name": "house", "description": "Keeps the house", "home": home, "model": None,
+                       "effort": None, "harness": "claude"}]))
 elif args[:2] == ["project", "ls"]:
     path = os.path.join(home, "projects.json")
     print(open(path, encoding="utf-8").read() if os.path.exists(path) else '{"projects": []}')
@@ -106,29 +222,6 @@ elif args[:3] == ["house", "set", "permission"] and len(args) == 4:
         open(path, "w", encoding="utf-8").write(args[3])
     elif os.path.exists(path):
         os.remove(path)
-elif args[:2] == ["house", "set"] and args[2] in ("model", "effort", "harness") and args[-1] == "--json":
-    # kith's --json shape: {agent, setting, value, previous, changed}; a refusal is {ok: false, error} on stdout, exit 2.
-    name, value = args[2], args[3]
-    if name == "effort" and value not in ("default", "low", "medium", "high", "xhigh", "max"):
-        print(json.dumps({"ok": False, "error": f"effort {value} is not one of low, medium, high, xhigh, max"}))
-        sys.exit(2)
-    model = args[args.index("--model") + 1] if "--model" in args else setting("model")
-    harness = value if name == "harness" else (setting("harness") or "claude")
-    if model in ("opus", "sonnet", "haiku") and harness != "claude":
-        print(json.dumps({"ok": False, "error": f"a Claude model needs a Claude harness (harness is {harness})"}))
-        sys.exit(2)
-    previous = setting(name)
-    new = None if value == "default" else value
-    writes = [(name, new)]
-    if name == "harness":
-        writes.append(("model", None if model == "default" else model))
-    for key, val in writes:
-        path = os.path.join(home, key)
-        if val:
-            open(path, "w", encoding="utf-8").write(val)
-        elif os.path.exists(path):
-            os.remove(path)
-    print(json.dumps({"agent": "house", "setting": name, "value": new, "previous": previous, "changed": previous != new}))
 elif args[:3] == ["house", "set", "call-model"] and len(args) == 4:
     path = os.path.join(home, "call_model")
     if args[3] == "default":
@@ -150,34 +243,16 @@ elif args[:1] == ["schedule"] and len(args) == 4 and args[1] in ("pause", "resum
     else:
         job["paused"] = args[1] == "pause"
     json.dump(jobs, open(os.path.join(home, "schedules.json"), "w", encoding="utf-8"))
-elif args[:2] in (["account", "add"], ["account", "remove"]):
-    # `account add|remove H N [--yes] --json`: folders under `acc/`; the login is a command that records its env in
-    # `login_ran` (so a test sees the host ran exactly this argv with this env). A new claude account needs --yes.
-    h, n = args[2], args[3]
-    d = os.path.join(home, "acc", h + "-" + n)
-    if args[1] == "add":
-        created = not os.path.isdir(d)
-        if h == "claude" and created and "--yes" not in args:
-            print(json.dumps({"ok": False, "error": "needs --yes after the warning is shown", "warning": "WARN"}))
-            sys.exit(2)
-        if h == "codex" and os.path.exists(os.path.join(home, "no_codex")):
-            print(json.dumps({"ok": False, "error": "codex is not installed here"}))
-            sys.exit(1)
-        os.makedirs(d, exist_ok=True)
-        ran = os.path.join(home, "login_ran")
-        print(json.dumps({"ok": True, "id": h + ":" + n, "harness": h, "name": n, "dir": d, "created": created,
-                          "login": {"argv": ["sh", "-c", 'echo "$STUB_LOGIN_ENV $1" > "$2"', "sh", "a b", ran],
-                                    "env": {"STUB_LOGIN_ENV": "from the cli"}},
-                          **({"warning": "WARN"} if h == "claude" else {})}))
-    elif "--yes" not in args:
-        print(json.dumps({"ok": False, "error": "run again with --yes"}))
-        sys.exit(2)
-    elif not os.path.isdir(d):
-        print(json.dumps({"ok": False, "error": "no account " + h + ":" + n}))
-        sys.exit(1)
-    else:
-        os.rmdir(d)
-        print(json.dumps({"ok": True, "changed": True, "id": h + ":" + n, "dir": d, "in_chain": True}))
+elif kernel_on() and args[:1] == ["account"] and len(args) > 1:
+    kernel_command()
+elif kernel_on() and args == ["house", "--accounts-json"]:
+    print(json.dumps(kernel_accounts_json(kernel(), _time.time())))
+elif kernel_on() and args[:2] == ["backup", "list"]:
+    st = kernel()
+    order, _ = static_order(st)
+    print(json.dumps({"agent": "house", "source": "agent" if "accounts" in st["agents"].get("house", {}) else "global",
+                      "backups": [{"id": i, "ready": status_of(st, i, _time.time())["status"] == "ready"} for i in order[1:]],
+                      "main": {"id": order[0], "source": "global", "harness": "claude", "ready": True}}))
 elif args[:2] == ["account", "use"]:
     # `account use ID --agent house` / `account use --reset --agent house`: the main account, in `main`.
     path = os.path.join(home, "main")
@@ -231,8 +306,8 @@ elif args == ["house", "--info-json"]:
     names = sorted(n for n in os.listdir(memory) if os.path.isfile(os.path.join(memory, n))) if os.path.isdir(memory) else []
     files = [{"path": n, "bytes": os.path.getsize(os.path.join(memory, n)), "modified": "2026-10-22T00:00:00Z"} for n in names]
     print(json.dumps({
-        "version": 1, "agent": "house", "description": "Keeps the house", "harness": setting("harness") or "claude",
-        "model": setting("model"), "effort": setting("effort"), "permission_mode": permission("auto"), "home": home,
+        "version": 1, "agent": "house", "description": "Keeps the house", "harness": "claude", "model": None,
+        "effort": None, "permission_mode": permission("auto"), "home": home,
         "call_model": call_model()[0], "call_model_effective": call_model()[1],
         "role": {"path": home + "/role", "intro": "Keeps the house.", "sections": [{"title": "Not yours", "text": "Money."}]},
         "package": {"version": None, "remote": None, "dirty": False, "unpushed": 0, "pinned": None},
@@ -277,17 +352,13 @@ elif args[:2] == ["house", "--launch-json"]:
         print(open(fail, encoding="utf-8").read(), file=sys.stderr)
         sys.exit(1)
     backup = args[args.index("--backup") + 1] if "--backup" in args else None
+    backup = backup or (args[args.index("--account") + 1] if "--account" in args else None)
     # A file named `launch_fail_<entry>` (":" as "_") makes hq refuse that entry, as it does one it can't run.
     if backup and os.path.exists(os.path.join(home, "launch_fail_" + backup.replace(":", "_"))):
         print(f"{backup} is not logged in", file=sys.stderr)
         sys.exit(4)
     harness = "codex" if backup and backup.split(":")[0] == "codex" else "claude"
-    # An agent on another ACP engine (the file `harness`): the launch also names the engine, as the real kernel does.
-    own = setting("harness")
-    other = own if not backup and own not in (None, "claude", "codex") else None
-    if other:
-        harness = other
-    account_id = backup or main_account()
+    account_id = backup or (static_order(kernel())[0][0] if kernel_on() else main_account())
     account = account_id.split(":")[1] if ":" in account_id else None
     model = args[args.index("-m") + 1] if "-m" in args else "haiku"
     project = args[args.index("-p") + 1] if "-p" in args else None
@@ -309,7 +380,6 @@ elif args[:2] == ["house", "--launch-json"]:
         "cost_tag": {"agent": "house", "version": "v1", "model": model, "effort": None, "via": os.environ.get("KITH_VIA") or "cli",
                      "project": project, "person": os.environ.get("KITH_PERSON") or None},
         "claude_args": [],
-        **({"engine": other, "acp": None, "registry": other, "role_prompt": "none"} if other else {}),
     }))
 else:
     print("unknown agent", file=sys.stderr)
