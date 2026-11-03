@@ -96,6 +96,16 @@ if me == "kith-auth":
         fail("kith-auth: unknown command")
 elif me == "kith":
     agent = args[0]
+    if args[1] == "--accounts-json":
+        # `accounts.json` there is what the kernel prints; without it this is a kith from before the account set, and
+        # the host falls back to `--backups-json`.
+        doc = load("accounts", None)
+        if doc is None:
+            print("kith: unknown option --accounts-json", file=sys.stderr)
+            sys.exit(2)
+        log({"tool": "kith-accounts", "agent": agent})
+        print(json.dumps(doc))
+        sys.exit(0)
     if args[1] == "--backups-json":
         log({"tool": "kith-chain", "agent": agent})
         default = {"chain": [{"id": "claude", "harness": "claude", "account": None, "kind": "primary", "ready": True}]}

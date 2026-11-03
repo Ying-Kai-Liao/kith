@@ -768,11 +768,46 @@ pub async fn project_context(
 
 /// `kith <agent> --backups-json`: the accounts the agent's turns may move to when one runs out, the agent's own login
 /// first. An hq too old to know the flag, or any failure, is no chain: nothing changes.
-pub async fn backups(bin: &Path, agent: &str) -> Result<Vec<crate::agent::backups::ChainEntry>> {
+pub async fn backups_chain(bin: &Path, agent: &str) -> Result<Vec<crate::agent::backups::ChainEntry>> {
     let out = run(bin, &[agent, "--backups-json"], None, LIST_TIMEOUT).await?;
     let doc: crate::agent::backups::ChainDoc = serde_json::from_str(out.trim())
         .with_context(|| format!("`kith {agent} --backups-json` didn't print a chain"))?;
     Ok(doc.entries())
+}
+
+/// `kith <agent> --accounts-json`: the agent's accounts in pick order with the kernel's out marks (see
+/// `docs/accounts.md`). The document as printed, for the apps' view; [`chain`] is what the turns use.
+pub async fn accounts_doc(bin: &Path, agent: &str) -> Result<Value> {
+    let out = run(bin, &[agent, "--accounts-json"], None, LIST_TIMEOUT).await?;
+    serde_json::from_str(out.trim()).with_context(|| format!("`kith {agent} --accounts-json` didn't print JSON"))
+}
+
+/// The agent's account chain now: from `--accounts-json` (its out marks go to `backups`), else from an older kith's
+/// `--backups-json`. A read that a write of the apps overtook is read again (twice at most), so no old answer is applied.
+pub async fn chain(
+    bin: &Path,
+    agent: &str,
+    backups: &crate::agent::backups::Backups,
+) -> Result<Vec<crate::agent::backups::ChainEntry>> {
+    for attempt in 0..3 {
+        let generation = backups.generation();
+        match accounts_doc(bin, agent).await {
+            Ok(doc) => {
+                if let Some(view) = crate::agent::backups::KernelAccounts::parse(&doc, backups.now()) {
+                    if backups.apply_kernel(&view, generation) || attempt == 2 {
+                        return Ok(view.chain);
+                    }
+                    continue;
+                }
+                tracing::debug!(agent, "`--accounts-json` printed something else; using `--backups-json`");
+            }
+            Err(error) => {
+                tracing::debug!(agent, error = format!("{error:#}"), "no `--accounts-json`; using `--backups-json`");
+            }
+        }
+        break;
+    }
+    backups_chain(bin, agent).await
 }
 
 /// The name of the host's file-sharing server in an hq agent's launch.
