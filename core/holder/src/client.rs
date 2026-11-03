@@ -143,6 +143,23 @@ impl Client {
         self.writer.flush()
     }
 
+    /// A command for process `id` of holder `instance`: the instance goes first in the payload (see proto.rs).
+    pub fn send_for(&mut self, kind: u8, instance: &str, id: u32, body: &[u8]) -> io::Result<()> {
+        let mut payload = instance.as_bytes().to_vec();
+        payload.extend_from_slice(body);
+        self.send(kind, id, &payload)
+    }
+
+    /// Raw bytes to a process; one held by another instance than this holder ignores them.
+    pub fn input(&mut self, h: &p::HeldId, bytes: &[u8]) -> io::Result<()> {
+        self.send_for(p::INPUT, &h.instance, h.id, bytes)
+    }
+
+    pub fn resize(&mut self, h: &p::HeldId, cols: u16, rows: u16) -> io::Result<()> {
+        let body = serde_json::to_vec(&p::Size { cols, rows }).expect("serializable");
+        self.send_for(p::RESIZE, &h.instance, h.id, &body)
+    }
+
     pub fn send_json(&mut self, kind: u8, id: u32, msg: &impl serde::Serialize) -> io::Result<()> {
         self.send(kind, id, &serde_json::to_vec(msg).expect("serializable"))
     }
@@ -197,27 +214,27 @@ impl Client {
         Ok(wire::parse::<p::Listing>(&payload)?.procs)
     }
 
-    pub fn kill(&mut self, id: u32) -> io::Result<p::KillState> {
-        self.send(p::KILL, id, &[])?;
+    pub fn kill(&mut self, h: &p::HeldId) -> io::Result<p::KillState> {
+        self.send_for(p::KILL, &h.instance, h.id, &[])?;
         let (_, _, payload) = self
-            .expect(p::KILLED, id, Duration::from_secs(10))
+            .expect(p::KILLED, h.id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
         Ok(wire::parse::<p::Killed>(&payload)?.state)
     }
 
-    pub fn ack(&mut self, id: u32) -> io::Result<p::AckState> {
-        self.send(p::ACK, id, &[])?;
+    pub fn ack(&mut self, h: &p::HeldId) -> io::Result<p::AckState> {
+        self.send_for(p::ACK, &h.instance, h.id, &[])?;
         let (_, _, payload) = self
-            .expect(p::ACKED, id, Duration::from_secs(10))
+            .expect(p::ACKED, h.id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
         Ok(wire::parse::<p::Acked>(&payload)?.state)
     }
 
     /// Everything the process printed so far that is still in the holder's tail.
-    pub fn tail(&mut self, id: u32) -> io::Result<Vec<u8>> {
-        self.send(p::TAIL, id, &[])?;
+    pub fn tail(&mut self, h: &p::HeldId) -> io::Result<Vec<u8>> {
+        self.send_for(p::TAIL, &h.instance, h.id, &[])?;
         let (_, _, payload) = self
-            .expect(p::TAILED, id, Duration::from_secs(10))
+            .expect(p::TAILED, h.id, Duration::from_secs(10))
             .ok_or_else(|| io::Error::from(io::ErrorKind::TimedOut))?;
         Ok(payload)
     }
