@@ -986,7 +986,8 @@ async fn memberships_changed_in_kith_auth_are_followed() {
     let own: Vec<&str> = row.agents.iter().filter(|a| a.via == "own").map(|a| a.agent.as_str()).collect();
     assert_eq!(own, ["house"]);
     assert!(row.agents.iter().any(|a| a.via == "everyone" && a.agent == "money"));
-    assert_eq!(r.hub.store.person("sam").unwrap().agents.keys().collect::<Vec<_>>(), ["house"]);
+    // The copy follows kith-auth's reach, the `*` row included (an untick never touched it).
+    assert_eq!(r.hub.store.person("sam").unwrap().agents.keys().collect::<Vec<_>>(), ["house", "money"]);
 
     // kith-auth that can't be read stops the change before anything is done.
     *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.dir.join("no-such-kith-auth"));
@@ -994,4 +995,38 @@ async fn memberships_changed_in_kith_auth_are_followed() {
         call(&r, &Caller::Local, "setPersonAccess", json!({"personId": "sam", "agents": {"money": "guest"}})).await;
     *crate::remote::account::TEST_BIN.lock().unwrap() = Some(r.bin.clone());
     assert!(broken.is_err());
+}
+
+/// An agent given to everyone (the `*` row) is one `startChat` lets a member into, so their own chat's events must
+/// arrive too (F8): the copy `event_for` reads follows the `*` row. Taking the row away stops them.
+#[tokio::test]
+async fn a_row_for_everyone_lets_the_members_chat_events_through() {
+    let r = Rig::new().await;
+    r.owner_bot("house");
+    r.owner_bot("money");
+    let (sam, _) = joined(&r, json!({"house": "member"})).await;
+    r.auth(&["member", "money", "*", "preset=guest"]);
+    let started = call(&r, &sam, "startChat", json!({"agent": "money"})).await.unwrap();
+    let chat = started["bot"]["id"].as_str().unwrap().to_owned();
+    let hears = || roles::event_for(&r.hub.store, Some("sam"), json!({"type": "bot", "bot": {"id": chat}})).is_some();
+    assert!(!hears(), "not before the look");
+    members::refresh_mirror(&r.hub).await;
+    assert!(hears());
+    r.auth(&["member", "money", "*", "--rm"]);
+    members::refresh_mirror(&r.hub).await;
+    assert!(!hears());
+}
+
+/// The 10 s mirror reads kith-auth and writes the copy under the lock `setPersonAccess` holds (F8): while an owner's
+/// change holds it, the mirror waits, so its older read can't land over the change.
+#[tokio::test]
+async fn the_mirror_waits_for_the_lock_of_an_access_change() {
+    let r = Rig::new().await;
+    let held = crate::api::people::AUTH_WRITES.lock().await;
+    let hub = r.hub.clone();
+    let mut mirror = tokio::spawn(async move { members::refresh_mirror(&hub).await });
+    let early = tokio::time::timeout(Duration::from_millis(300), &mut mirror).await;
+    assert!(early.is_err(), "the mirror must wait while a change holds the lock");
+    drop(held);
+    tokio::time::timeout(Duration::from_secs(10), mirror).await.unwrap().unwrap();
 }

@@ -13,6 +13,7 @@ use crate::wire;
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -45,6 +46,9 @@ struct Entry {
     tail: VecDeque<u8>,
     /// Output streams still being read.
     readers: u8,
+    /// A kill has seen the tree empty. Sticks: the group id may be handed to an unrelated group afterwards (the blind
+    /// spot of `Proc::tree_empty`), and a later kill must neither say "killing" nor signal that group.
+    gone: AtomicBool,
 }
 
 /// The connected core. Frames go out through its own writer thread: a core that stops reading must never block
@@ -529,8 +533,12 @@ impl Holder {
         // An ended process had its tree swept before its exit was recorded, but "gone" still means the group or job
         // is empty: a member that is slow to die keeps the answer at "killing". (After the leader is reaped, Unix
         // sends no more signals, since its group id could be recycled; the sweep's SIGKILL is already on its way.)
+        if e.gone.load(Ordering::Relaxed) {
+            return KillState::Gone;
+        }
         e.proc.kill_tree();
         if e.proc.tree_empty() {
+            e.gone.store(true, Ordering::Relaxed);
             KillState::Gone
         } else {
             KillState::Killing
@@ -634,6 +642,7 @@ impl Holder {
                 input: Some(input),
                 tail: VecDeque::new(),
                 readers: 1 + u8::from(started.err.is_some()),
+                gone: AtomicBool::new(false),
             },
         );
         let reader = |stream: Box<dyn std::io::Read + Send>, kind: u8| {
@@ -863,6 +872,54 @@ mod tests {
             .expect(p::SPAWNED, 0, Duration::from_secs(10))
             .expect("spawned");
         assert_eq!(client.list().unwrap().len(), 1);
+        drop(holder.close_down(holder.lock()));
+    }
+
+    #[test]
+    fn gone_sticks_once_a_kill_has_seen_the_tree_empty() {
+        let holder = test_holder();
+        let (core, theirs) = UnixStream::pair().unwrap();
+        let mut offered = vec![Ok(theirs)];
+        let looping = holder.clone();
+        std::thread::spawn(move || {
+            looping.accept_loop(
+                || {
+                    if offered.is_empty() {
+                        std::thread::sleep(Duration::from_secs(60));
+                    }
+                    offered.remove(0)
+                },
+                5,
+                Duration::from_millis(1),
+            )
+        });
+        let mut client = Client::over(core, "0123456789abcdef", 1).expect("served");
+        client
+            .spawn(&p::Spawn {
+                conv: "c".into(),
+                claim: 1,
+                generation: 1,
+                argv: vec!["sleep".into(), "30".into()],
+                env: std::env::vars().collect(),
+                cwd: "/".into(),
+                mode: p::Mode::Pipes,
+                cols: 80,
+                rows: 24,
+            })
+            .unwrap();
+        client
+            .expect(p::SPAWNED, 0, Duration::from_secs(10))
+            .expect("spawned");
+        let id = client.list().unwrap()[0].id;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while client.kill(id).unwrap() != KillState::Gone {
+            assert!(Instant::now() < deadline, "kill never reached gone");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        // Seen once: the entry remembers it, so a later kill says gone without signalling a group id that may by now
+        // belong to someone else (the blind spot of `tree_empty`).
+        assert!(holder.lock().procs[&id].gone.load(Ordering::Relaxed));
+        assert_eq!(client.kill(id).unwrap(), KillState::Gone);
         drop(holder.close_down(holder.lock()));
     }
 

@@ -29,7 +29,10 @@ FILES=(
   serve/host/src/agent/bot/session.rs # forget_loaded
   serve/host/src/api/botguests.rs     # ask: terminal::bot_gate (the bot's writer gate)
   serve/host/src/cards/resume.rs      # handle: a waiting message's wake re-runs the send gate (terminal_holds); bot_door: Cmd::WakeBatch; run_door: kith --resume
-  serve/host/src/terminal/claim.rs    # the writer claim: take_as, holder, is_live, Kind::Bot
+  serve/host/src/terminal/claim.rs    # the writer claim: take_as, holder, is_live, Kind::Bot, Kind::Other (unknown kinds are live)
+  core/kernel/src/threads.rs          # the Rust twin of kith-sessions (A4-2): take_in, resolve, claim_live, sweep_persons
+  core/kernel/src/threads/os.rs       # pid_runs / start time the twin judges a claim by
+  core/kernel/src/threads/registry.rs # the twin's registry reads and writes
   serve/host/src/hub/actors.rs        # working_lanes, Cmd::ForgetLoaded fan-out
 )
 paths=()

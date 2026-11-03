@@ -199,7 +199,10 @@ pub fn mirror_agents(store: &Store, auth: &[AuthPerson]) {
     for row in stored {
         let want: std::collections::BTreeMap<String, String> = match auth.iter().find(|a| a.id == row.person_id) {
             Some(a) if a.revoked_at.is_some() => continue,
-            Some(a) => a.agents.iter().filter(|r| r.via == "own").map(|r| (r.agent.clone(), r.role.clone())).collect(),
+            // The `*` row too: `startChat` asks kith-auth, which honours it, so the one sync reader of this copy
+            // (`roles::event_for`) must let a `*` agent's events through. kith-auth never lists a built-in agent in
+            // `agents` (`agent_rows` skips them), and the `*` row never reaches a bot, so neither appears here.
+            Some(a) => a.agents.iter().map(|r| (r.agent.clone(), r.role.clone())).collect(),
             None => std::collections::BTreeMap::new(),
         };
         if want != row.agents
@@ -210,9 +213,12 @@ pub fn mirror_agents(store: &Store, auth: &[AuthPerson]) {
     }
 }
 
-/// Reads kith-auth and mirrors it (see [`mirror_agents`]); a failed read changes nothing.
+/// Reads kith-auth and mirrors it (see [`mirror_agents`]); a failed read changes nothing. Read and write happen under
+/// `AUTH_WRITES`, as every other change of kith-auth's rows and this copy does: otherwise a `setPersonAccess` landing
+/// between the read and the write would be overwritten by the older list.
 pub async fn refresh_mirror(hub: &Hub) {
     let Some(bin) = account::bin().await else { return };
+    let _w = crate::api::people::AUTH_WRITES.lock().await;
     if let Ok(auth) = auth_people(&bin).await {
         mirror_agents(&hub.store, &auth);
     }

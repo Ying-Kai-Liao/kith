@@ -1014,7 +1014,14 @@ pub fn sh_line(harness: &str, model: Option<&str>, effort: Option<&str>) -> Stri
 /// `kith account list [--agent A] [--json]` as `kernel/bin/kith-account` runs it: a settings file still in the older shape
 /// is rewritten in the new one first, then every account is listed. The error is a usage error (exit 2).
 pub fn list(ctx: &Ctx<'_>, json: bool, agent: &str) -> Result<String, String> {
-    let _ = settings::migrate_file(ctx);
+    // The list is still shown when the rewrite can't be done (Python's `try`), but the failure is noted: a settings file
+    // stuck in the old shape would otherwise stay so without a word.
+    if let Err(e) = settings::migrate_file(ctx) {
+        crate::log::note(&format!(
+            "settings migration: couldn't lock or write {}: {e}",
+            ctx.machine.join("settings.json").display()
+        ));
+    }
     if !agent.is_empty() && agent_md_of(ctx, agent).is_none() {
         return Err(format!("no agent '{agent}' (kith ls)"));
     }

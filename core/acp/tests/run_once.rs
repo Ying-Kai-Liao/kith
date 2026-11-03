@@ -1,7 +1,7 @@
 //! run_once against the fake ACP agent (kernel/tests/fakes/fake-acp-agent).
 #![cfg(unix)]
 
-use kith_acp::{Failure, FailureKind, RunSpec, depleted, needs_sign_in, run_once};
+use kith_acp::{Failure, FailureKind, RunSpec, depleted, needs_sign_in, run_once, run_once_spent};
 use serde_json::json;
 use std::time::Duration;
 
@@ -85,6 +85,34 @@ async fn an_engine_that_dies_says_why() {
         Some(FailureKind::Exited)
     );
     assert!(format!("{e:#}").contains("out of memory"), "{e:#}");
+}
+
+#[tokio::test]
+async fn an_engine_that_answers_and_exits_at_once_still_gives_its_answer_usage_and_cost() {
+    for _ in 0..5 {
+        let out = run_once(spec(&[
+            ("FAKE_ACP_MODE", "answer-exit"),
+            ("FAKE_ACP_COST", "0.5"),
+        ]))
+        .await
+        .unwrap();
+        assert_eq!(out.text, "echo: say hi");
+        assert_eq!(out.cost_usd, Some(0.5));
+        assert_eq!(out.usage.unwrap().output, 5);
+    }
+}
+
+#[tokio::test]
+async fn a_crash_reports_the_cost_seen_so_far() {
+    let (result, spent) = run_once_spent(spec(&[
+        ("FAKE_ACP_MODE", "crash"),
+        ("FAKE_ACP_COST", "0.25"),
+    ]))
+    .await;
+    assert!(result.is_err());
+    assert_eq!(spent, Some(0.25));
+    let (_, none) = run_once_spent(spec(&[("FAKE_ACP_MODE", "crash")])).await;
+    assert_eq!(none, None);
 }
 
 #[tokio::test]

@@ -259,6 +259,23 @@ fn s(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// The python3 the read fence hook runs, by absolute path: the first executable `python3` in an absolute directory of the
+/// launching PATH, else `/usr/bin/python3`. A bare `python3` would be looked up on the PATH of the hook's run, which a
+/// guest's shell can change.
+fn python3_abs(env: &dyn Fn(&str) -> Option<String>) -> String {
+    use std::os::unix::fs::PermissionsExt as _;
+    env("PATH")
+        .into_iter()
+        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+        .filter(|d| d.is_absolute())
+        .map(|d| d.join("python3"))
+        .find(|c| fs::metadata(c).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+        .map_or_else(
+            || "/usr/bin/python3".to_owned(),
+            |c| c.to_string_lossy().into_owned(),
+        )
+}
+
 /// `shlex.quote`.
 fn shquote(x: &str) -> String {
     if !x.is_empty()
@@ -1378,7 +1395,8 @@ fn guest_sandbox(
     );
     let refused = r#"{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "the read check could not run, so this read is refused"}}"#;
     let fence = format!(
-        "out=$(python3 -I {}/lib/kith_readfence.py {}) || out={}; printf %s \"$out\"",
+        "out=$({} -I {}/lib/kith_readfence.py {}) || out={}; printf %s \"$out\"",
+        shquote(&python3_abs(i.env)),
         shquote(g.kernel),
         fence_roots
             .iter()

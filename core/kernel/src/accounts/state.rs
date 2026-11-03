@@ -142,10 +142,12 @@ fn lock(machine: &Path) -> std::io::Result<std::fs::File> {
     Ok(l)
 }
 
-/// `change(accounts)` under the lock, then written back atomically. A disk that can't be written to loses the mark.
+/// `change(accounts)` under the lock, then written back atomically. A disk that can't be written to loses the mark and the
+/// run goes on, but the loss is noted in the host's log (`crate::log`) instead of vanishing.
 pub fn update(machine: &Path, change: impl FnOnce(&mut Map)) {
-    let _ = (|| -> std::io::Result<()> {
-        let _lock = lock(machine)?;
+    let done = (|| -> std::io::Result<()> {
+        let _lock = lock(machine)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("can't take the lock: {e}")))?;
         let (mut accts, corrupt) = read_raw(machine);
         if corrupt {
             let f = state_file(machine);
@@ -153,7 +155,14 @@ pub fn update(machine: &Path, change: impl FnOnce(&mut Map)) {
         }
         change(&mut accts);
         write_atomic(&state_file(machine), render(&accts).as_bytes(), 0o600)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("can't write it: {e}")))
     })();
+    if let Err(e) = done {
+        crate::log::note(&format!(
+            "accounts state: a change to {} was lost: {e}",
+            state_file(machine).display()
+        ));
+    }
 }
 
 /// A launch is real: note when the account last started.

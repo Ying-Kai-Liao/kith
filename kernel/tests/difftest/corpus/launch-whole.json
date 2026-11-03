@@ -14361,6 +14361,7 @@
   "env": {
    "KITH_STATE": "{KITH_HOME}/state",
    "KITH_BIN": "/bin/true",
+   "PATH": "{ROOT}/fakes:{KERNEL}/tests/difftest/fakes:/usr/bin:/bin",
    "CARGO_TARGET_DIR": "{TMP}/no-target"
   },
   "run_old": [
@@ -14516,6 +14517,7 @@
   "env": {
    "KITH_STATE": "{KITH_HOME}/state",
    "KITH_BIN": "{HOME}/notexec",
+   "PATH": "{ROOT}/fakes:{KERNEL}/tests/difftest/fakes:/usr/bin:/bin",
    "CARGO_TARGET_DIR": "{TMP}/no-target"
   },
   "run_old": [

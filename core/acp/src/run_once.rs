@@ -129,11 +129,21 @@ pub fn mcp_servers(config: &Value) -> Value {
 /// future being dropped. A sign-in need or a spent plan comes back as the errors [`crate::needs_sign_in`] and
 /// [`crate::depleted`] read; a timeout as a [`Failure`] of kind [`FailureKind::Timeout`].
 pub async fn run_once(spec: RunSpec) -> Result<Outcome> {
-    let (acp, mut rx) = Acp::spawn(&spec.command, &spec.cwd, &spec.env)?;
-    let result = tokio::time::timeout(spec.timeout, session(&acp, &mut rx, &spec)).await;
+    run_once_spent(spec).await.0
+}
+
+/// [`run_once`], and with it what the engine had reported it cost when the run ended, whether it finished or not: a run
+/// that crashed or timed out still spent that money, and a delegation's cost cap must count it.
+pub async fn run_once_spent(spec: RunSpec) -> (Result<Outcome>, Option<f64>) {
+    let (acp, mut rx) = match Acp::spawn(&spec.command, &spec.cwd, &spec.env) {
+        Ok(spawned) => spawned,
+        Err(e) => return (Err(e), None),
+    };
+    let mut cost = None;
+    let result = tokio::time::timeout(spec.timeout, session(&acp, &mut rx, &spec, &mut cost)).await;
     acp.kill().await;
     crate::stopped().await;
-    result.unwrap_or_else(|_| {
+    let result = result.unwrap_or_else(|_| {
         Err(Failure::error(
             FailureKind::Timeout,
             format!(
@@ -141,13 +151,16 @@ pub async fn run_once(spec: RunSpec) -> Result<Outcome> {
                 spec.timeout.as_secs()
             ),
         ))
-    })
+    });
+    let spent = result.as_ref().ok().and_then(|o| o.cost_usd).or(cost);
+    (result, spent)
 }
 
 async fn session(
     acp: &Acp,
     rx: &mut tokio::sync::mpsc::UnboundedReceiver<Incoming>,
     spec: &RunSpec,
+    cost: &mut Option<f64>,
 ) -> Result<Outcome> {
     // The handshake is answered before anything else is read, but a hung agent still ends at the run's deadline.
     acp.request(
@@ -178,24 +191,36 @@ async fn session(
     );
     tokio::pin!(prompt);
     let mut text = String::new();
-    let mut cost = None;
     let result = loop {
         // Biased: when the process dies, `Closed` (with its stderr) is queued before the request fails.
         tokio::select! {
             biased;
-            inc = rx.recv() => handle(acp, inc, &mut text, &mut cost, spec.approve).await?,
+            inc = rx.recv() => {
+                // An agent that answers and exits at once queues `Closed` behind its answer: the answer is in already
+                // (the reader fills it before it reads the close), so take it instead of failing the finished run.
+                if matches!(inc, None | Some(Incoming::Closed { .. }))
+                    && let Ok(answered) = tokio::time::timeout(Duration::ZERO, &mut prompt).await
+                    && answered.is_ok()
+                {
+                    break answered?;
+                }
+                handle(acp, inc, &mut text, cost, spec.approve).await?;
+            }
             r = &mut prompt => break r?,
         }
     };
-    // Whatever the agent streamed before its answer is already queued.
+    // Whatever the agent streamed before its answer is already queued; a close after the answer is not a failure.
     while let Ok(inc) = rx.try_recv() {
-        handle(acp, Some(inc), &mut text, &mut cost, spec.approve).await?;
+        if matches!(inc, Incoming::Closed { .. }) {
+            break;
+        }
+        handle(acp, Some(inc), &mut text, cost, spec.approve).await?;
     }
     Ok(Outcome {
         text,
         stop_reason: result["stopReason"].as_str().map(str::to_owned),
         usage: Usage::of(&result),
-        cost_usd: cost_of(&result).or(cost),
+        cost_usd: cost_of(&result).or(*cost),
         session_id: sid,
     })
 }

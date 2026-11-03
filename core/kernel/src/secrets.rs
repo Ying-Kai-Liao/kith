@@ -175,9 +175,15 @@ impl Ctx {
     fn in_guest_sandbox(&self) -> bool {
         match self.sandbox {
             Sandbox::Fixed(b) => b,
-            Sandbox::Os => os_home().is_none_or(|h| std::fs::read_dir(h).is_err()),
+            Sandbox::Os => guest_sandbox(),
         }
     }
+}
+
+/// Whether this process is inside the guest sandbox: the account's home folder (by the OS, not `$HOME`) can't be listed.
+/// No answer is a guest, as `kith_paths.guest_sandbox` has it. For the host's owner-only commands.
+pub fn guest_sandbox() -> bool {
+    os_home().is_none_or(|h| std::fs::read_dir(h).is_err())
 }
 
 pub fn now_ms() -> f64 {
@@ -195,8 +201,15 @@ pub(crate) fn os_home() -> Option<PathBuf> {
 
 /// Run a program and read its standard output; `None` when it can't start, outlives `limit`, or fails.
 pub(crate) fn run_with_timeout(program: &Path, args: &[&str], limit: Duration) -> Option<String> {
-    let mut child = Command::new(program)
-        .args(args)
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    run_command_with_timeout(cmd, limit)
+}
+
+/// [`run_with_timeout`] for a command the caller has set up (its environment, say): stdin, stdout and stderr are set
+/// here. `None` when it can't start, outlives `limit` (it is killed), or fails.
+pub fn run_command_with_timeout(mut cmd: Command, limit: Duration) -> Option<String> {
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

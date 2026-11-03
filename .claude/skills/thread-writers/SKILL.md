@@ -37,6 +37,13 @@ files since the writer claims re-read: the wakes and `kernel/bin/kith-wake`, com
 through `kernel/bin/kith` still claims its session before claude starts, and a host turn takes the claim or is refused). The same sha is in `drift.sh` (`SYNC=`). Move it only after you have
 confirmed that the model describes the code at the new commit (steps below), and change both places.
 
+**Re-run for F7 (rust-rebuild, after #680):** `run.sh` at the F7 commit: 52 rows, every row as expected. Read: the F7 change to
+`serve/host/src/terminal/claim.rs` (an unknown claim `kind` is `Kind::Other`: a live holder judged by pid + start only, and
+`take_as` never removes it, as `kith-sessions` and the crate already do, so the "three actors" line below is true) and its
+test; the Rust twin (`core/kernel/src/threads*`) is now in `drift.sh`'s file list. **SYNC is not moved:** `drift.sh` still lists
+about 1500 changed lines in the covered files since `6fc1ae0d` (the twin itself, the off-turn sends, `kernel/bin/kith`,
+the wakes) that this re-run did not read against the model, so the pin stays until someone does.
+
 ## What is promised, and the harm if not
 
 | Property (in Threads.tla) | Plain sentence | Harm |
