@@ -204,6 +204,8 @@ pub struct Backups {
     /// Ids whose `kith account out` is still on its way: the kernel can't say yet that they are out, so a read of it
     /// does not clear them.
     pushing: Arc<std::sync::Mutex<HashMap<String, usize>>>,
+    /// One per agent: first-turn waits for its chain go through it, in the order they came.
+    gates: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 fn clock() -> i64 {
@@ -224,6 +226,7 @@ impl Backups {
             kernel: Arc::default(),
             generation: Arc::default(),
             pushing: Arc::default(),
+            gates: std::sync::Mutex::default(),
         }
     }
 
@@ -499,25 +502,36 @@ impl Backups {
 
     /// The chain of `agent` when it is not known yet: a fetch is started (once) with `fetch`, which ends it with
     /// [`Backups::end_refresh`], and waited for up to `wait`. Later than that the turn goes on with no chain (the agent's
-    /// own account, as before there were backups) and the fetch finishes in the background.
+    /// own account, as before there were backups) and the fetch finishes in the background. The waiters pass a fair
+    /// lock one by one, so turns that began in an order go on in it when the chain arrives (polling would let a later
+    /// one overtake an earlier one by its timer's phase).
     pub async fn chain_within<F, Fut>(self: &Arc<Self>, agent: &str, wait: Duration, fetch: F) -> Vec<ChainEntry>
     where
         F: FnOnce() -> Fut,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        if self.begin_refresh(agent) {
-            tokio::spawn(fetch());
+        if let Some(chain) = self.known_chain(agent) {
+            return chain;
         }
-        let deadline = Instant::now() + wait;
-        loop {
-            if let Some(chain) = self.known_chain(agent) {
-                return chain;
+        let gate = self.gates.locked().entry(agent.to_owned()).or_default().clone();
+        let waiting = async {
+            let _turn = gate.lock().await;
+            if self.begin_refresh(agent) {
+                tokio::spawn(fetch());
             }
-            if Instant::now() >= deadline {
-                return Vec::new();
+            loop {
+                if let Some(chain) = self.known_chain(agent) {
+                    return chain;
+                }
+                tokio::time::sleep(Duration::from_millis(40)).await;
             }
-            tokio::time::sleep(Duration::from_millis(40)).await;
-        }
+        };
+        tokio::time::timeout(wait, waiting).await.unwrap_or_default()
+    }
+
+    /// Whether anything is out now (the feature is in use).
+    pub fn any_out(&self) -> bool {
+        !self.out().is_empty()
     }
 
     /// Every account entry any agent's chain named, for the usage poll: `(id, harness, account)`.

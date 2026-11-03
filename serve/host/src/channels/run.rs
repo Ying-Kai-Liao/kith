@@ -11,7 +11,7 @@ use super::queue::kill;
 use super::text::{context_pct, short};
 use crate::LockExt;
 use crate::agent::acp::{self, Depleted};
-use crate::agent::backups::{Backups, ChainEntry, FIRST_CHAIN_WAIT, MAX_MOVES, Pick, RATE_LIMIT};
+use crate::agent::backups::{Backups, ChainEntry, MAX_MOVES, Pick, RATE_LIMIT};
 use crate::agent::gate::Permit;
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -560,9 +560,11 @@ impl Core {
         ad.note_line(&line)
     }
 
-    /// The agent's account chain as last known. A chain gone stale is fetched again in the background; one never
-    /// fetched is waited for (the kernel may already have the agent's account out, and a first run that doesn't know
-    /// starts on it). No chain, or any failure, is an empty chain: nothing changes.
+    /// The agent's account chain as last known. A run never waits for hq to learn it: a chain gone stale is fetched again
+    /// in the background, and one never fetched is too, unless accounts are in use (something is out), when this run needs
+    /// it to pick. A wait here would also bunch the first runs of one agent together, and messages sent one after the
+    /// other would no longer answer in order. The kernel picks for a run that names no account, from its own marks, so a
+    /// first run that doesn't know the chain still starts on the right one. No chain, or any failure, is an empty chain.
     async fn chain(&self, agent: &str) -> Vec<ChainEntry> {
         let later = || {
             if self.backups.begin_refresh(agent) {
@@ -570,18 +572,19 @@ impl Core {
                 tokio::spawn(async move { drop(fetch_chain(&backups, &bin, &agent).await) });
             }
         };
-        if let Some((age, chain)) = self.backups.chain_state(agent) {
-            if Backups::chain_stale(age, &chain) {
-                later();
+        match self.backups.chain_state(agent) {
+            Some((age, chain)) => {
+                if Backups::chain_stale(age, &chain) {
+                    later();
+                }
+                chain
             }
-            return chain;
+            None if self.backups.any_out() => fetch_chain(&self.backups, &self.paths.hq_bin, agent).await,
+            None => {
+                later();
+                Vec::new()
+            }
         }
-        let (backups, bin, name) = (self.backups.clone(), self.paths.hq_bin.clone(), agent.to_owned());
-        self.backups
-            .chain_within(agent, FIRST_CHAIN_WAIT, move || async move {
-                drop(fetch_chain(&backups, &bin, &name).await);
-            })
-            .await
     }
 
     async fn say(&self, ad: &Arc<dyn Adapter>, conv: &Value, agent: &str, text: &str, ctx: Option<f64>) {

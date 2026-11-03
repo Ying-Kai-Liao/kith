@@ -135,15 +135,14 @@ async fn an_agent_with_no_chain_runs_as_it_always_did() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_first_message_reads_the_chain_before_the_run() {
-    // The kernel may already have the account out (a terminal run, another agent), so the first run asks.
+async fn a_first_message_never_waits_for_the_chain() {
     let r = Rig::new();
     r.put("chain", &json!({"chain": [entry("claude"), entry("codex")]}));
     r.send(&Rig::msg("1", "@house hello")).await;
     answered(&r, 1).await;
-    // Nothing is out: the run is on the agent's own account.
+    // Nothing is out: the run is on the agent's own account, and the chain is read in the background.
     assert_eq!(r.fake.posts()[0].1, super::echo("hello"));
-    assert!(r.backups.known_chain("house").is_some_and(|c| c.len() == 2));
+    until("the chain", || r.backups.known_chain("house").is_some_and(|c| c.len() == 2)).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -153,12 +152,15 @@ async fn with_the_kernel_keeping_the_accounts_the_run_names_the_account_the_host
         json!({"id": id, "harness": id.split(':').next().unwrap(), "account": null, "kind": "subscription",
         "status": "ready", "ready": true, "why": null})
     };
-    r.put(
-        "accounts",
-        &json!({"version": 1, "agent": "house", "harness": "claude", "policy": "fill", "pin": null,
+    let doc = json!({"version": 1, "agent": "house", "harness": "claude", "policy": "fill", "pin": null,
         "cross_harness": false, "main": "claude", "order": ["claude", "codex"], "candidates": ["claude", "codex"],
-        "all_out": false, "skipped": [], "own": null, "accounts": [row("claude"), row("codex")]}),
-    );
+        "all_out": false, "skipped": [], "own": null, "accounts": [row("claude"), row("codex")]});
+    r.put("accounts", &doc);
+    // As after the first look at the agent: the chain is known, and it came from the kernel's accounts.
+    let view = crate::agent::backups::KernelAccounts::parse(&doc, r.backups.now()).unwrap();
+    assert!(r.backups.begin_refresh("house"));
+    r.backups.end_refresh("house", Some(view.chain.clone()));
+    assert!(r.backups.apply_kernel(&view, r.backups.generation()));
     r.send(&Rig::msg("1", "@house hello")).await;
     answered(&r, 1).await;
     // The kernel would pick for a plain `kith house -- task` from its own state; the host's pick is the one that runs.

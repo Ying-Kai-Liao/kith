@@ -75,7 +75,11 @@ def kernel():
 
 
 def kernel_save(st):
-    json.dump(st, open(kernel_path(), "w", encoding="utf-8"))
+    # Replaced whole: the host reads while a background `account out` writes, and a half-written file is not JSON.
+    tmp = kernel_path() + ".%d.tmp" % os.getpid()
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(st, f)
+    os.replace(tmp, kernel_path())
 
 
 def family(i):
