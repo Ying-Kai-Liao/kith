@@ -14,11 +14,12 @@
 //!   core renews only a lease that is still held: one that ran out (the Mac slept, the network dropped) is gone until
 //!   a pull acquires it again, so a missed ping can never be papered over by a late one.
 //! - **Lose.** At once on [`changed`] (until the pull that applies the change), on [`drop_lease`] (the connection
-//!   dropped or is being made), on [`unlink`], and by itself when `until` passes.
+//!   dropped or is being made; any of these also turns an `off` cloud back on, since the cloud just spoke), on [`unlink`], and by itself when `until` passes.
 //! - **Clocks and timeouts.** Time is milliseconds from an injected [`Clock`] (wall clock in production). `LEASE_MS` is
 //!   120 s: past the relay's silence limit plus one ping, so a live connection renews in time and a dead one runs out.
-//!   The row also keeps the latest reading any change saw (`at`). A clock that steps back below it extends nothing:
-//!   [`pulled`] and [`renew`] refuse, and the lease reads as not held until the clock catches up.
+//!   The row also keeps the latest reading any change saw (`at`). A clock that steps back below it
+//!   cannot be trusted: [`pulled`] and [`renew`] refuse, and the lease reads as not held until the clock catches up. A step
+//!   back that stays at or above it is invisible and, as on the host, can make a lease last that much longer.
 //! - **On loss.** Nothing in the core reacts. What the host does on loss (account devices and bot asks wait for sync,
 //!   the chat channels hold everyone but the owner) stays in the host until lane H.
 //! - **What a non-owner's `may()` needs.** [`lease_held_for_non_owner`]: true when the cloud is `off` on purpose
@@ -216,25 +217,36 @@ pub(crate) fn mark(core: &mut Core) -> Result<i64> {
 pub(crate) fn changed(core: &mut Core, clock: &dyn Clock) -> Result<i64> {
     change(core, clock, |row, _| {
         row.changes = row.changes.saturating_add(1);
-        row.synced = false;
-        row.until = 0;
+        saw_cloud(row);
         row.changes
     })
 }
 
-/// The connection dropped or is being made: out of sync. The cloud's change count stays.
+/// The connection dropped or is being made: out of sync. The cloud's change count stays. A cloud that was off is on.
 pub(crate) fn drop_lease(core: &mut Core, clock: &dyn Clock) -> Result<()> {
-    change(core, clock, |row, _| {
-        row.synced = false;
-        row.until = 0;
-    })
+    change(core, clock, |row, _| saw_cloud(row))
+}
+
+/// Any word from the cloud means it is on, whatever this Mac was told (unknown stays unknown): out of sync, and no longer "off" (an
+/// off that kept reading as held would pass the stale view a revoke must not pass).
+fn saw_cloud(row: &mut Row) {
+    if row.cloud == Cloud::Off {
+        row.cloud = Cloud::Linked;
+    }
+    row.synced = false;
+    row.until = 0;
 }
 
 /// A pull that started at `mark` succeeded. True when the lease is now held for `ms`; false when it is not: the cloud
-/// changed since the mark, the cloud is not linked, or the clock is behind its last reading.
+/// changed since the mark, the cloud was off (a pull turns it on, unsynced), or the clock is behind its last reading.
 pub(crate) fn pulled(core: &mut Core, clock: &dyn Clock, mark: i64, ms: i64) -> Result<bool> {
     let ms = check_ms(ms)?;
     change(core, clock, |row, now| {
+        if row.cloud == Cloud::Off {
+            // A pull is the cloud answering: it is on. Not held on this call; the next pull acquires.
+            saw_cloud(row);
+            return false;
+        }
         if row.cloud != Cloud::Linked || row.changes != mark || now < row.at {
             return false;
         }
@@ -260,7 +272,10 @@ pub(crate) fn renew(core: &mut Core, clock: &dyn Clock, ms: i64) -> Result<bool>
 /// A daemon (re)start: the relay connection of the last run is gone, so a lease held then is not held now. The cloud
 /// setting and the change count stay.
 pub(crate) fn restart(core: &mut Core, clock: &dyn Clock) -> Result<()> {
-    drop_lease(core, clock)
+    change(core, clock, |row, _| {
+        row.synced = false;
+        row.until = 0;
+    })
 }
 
 /// The lease as the rows show it.

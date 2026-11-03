@@ -799,3 +799,27 @@ fn a_holder_linked_through_a_command_never_makes_the_core_end_local_processes() 
         .status();
     assert!(log.contains("nothing is recorded or ended here"), "{log}");
 }
+
+#[test]
+fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    {
+        let mut c = open(&l);
+        let clk = crate::sync_lease::System;
+        crate::sync_lease::link(&mut c, &clk).expect("link");
+        let mark = crate::sync_lease::mark(&mut c).expect("mark");
+        assert!(crate::sync_lease::pulled(&mut c, &clk, mark, 600_000).expect("pulled"));
+        assert!(crate::sync_lease::lease_held_for_non_owner(&mut c, &clk));
+    }
+    let d = serving(&p, quiet());
+    match read(&p, "syncLease.status", &json!({})) {
+        Reached::Answered(v) => {
+            assert_eq!(v["held"], false, "{v}");
+            assert_eq!(v["cloud"], "linked");
+        }
+        other => panic!("{other:?}"),
+    }
+    drop(d);
+}

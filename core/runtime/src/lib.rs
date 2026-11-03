@@ -40,6 +40,9 @@ mod runsock;
 // wire them; the rows reach the rest.
 #[allow(dead_code)]
 mod sync_lease;
+// Nothing calls the envelope yet: the host vault and kith-auth move onto it at M2-7 and M2-18.
+#[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
+mod secrets;
 
 #[cfg(test)]
 mod runs_props;

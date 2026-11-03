@@ -298,6 +298,14 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         Ok(core) => core.with_folders(paths),
         Err(e) => return failed(shared, e),
     };
+    let mut core = core;
+    // The relay connection of the last run is gone, so a lease row it left held must not be read as held.
+    if let Err(e) = crate::sync_lease::restart(&mut core, &crate::sync_lease::System) {
+        log::note(
+            &shared.logs,
+            &format!("daemon: could not end the sync lease of the last run: {e}"),
+        );
+    }
     let generation = core.generation();
     {
         // Checked under the lock `stop` takes the core with: a stop that came first leaves nothing held here.

@@ -203,6 +203,43 @@ fn a_cloud_that_is_off_waits_for_nothing_and_a_relink_starts_unsynced() {
 }
 
 #[test]
+fn a_word_from_the_cloud_turns_an_off_cloud_on_and_not_held() {
+    for event in 0..3 {
+        let (_t, _l, mut c) = core();
+        let clk = clock(0);
+        unlink(&mut c, &clk).unwrap();
+        assert!(held(&mut c, &clk));
+        match event {
+            0 => {
+                changed(&mut c, &clk).unwrap();
+            }
+            1 => drop_lease(&mut c, &clk).unwrap(),
+            _ => {
+                let m = mark(&mut c).unwrap();
+                assert!(
+                    !pulled(&mut c, &clk, m, LEASE_MS).unwrap(),
+                    "not held on this call"
+                );
+            }
+        }
+        assert!(
+            !held(&mut c, &clk),
+            "event {event}: the stale off no longer passes"
+        );
+        assert_eq!(status(&mut c, &clk).unwrap()["cloud"], "linked");
+    }
+}
+
+#[test]
+fn a_restart_leaves_an_off_cloud_off() {
+    let (_t, _l, mut c) = core();
+    let clk = clock(0);
+    unlink(&mut c, &clk).unwrap();
+    restart(&mut c, &clk).unwrap();
+    assert!(held(&mut c, &clk));
+}
+
+#[test]
 fn a_clock_stepping_back_never_extends_a_lease() {
     let (_t, _l, mut c) = core();
     let clk = clock(1_000_000);
