@@ -211,8 +211,10 @@ pub fn sweep(state: &Path, persons: &[String], keep: &dyn Fn(&Claim) -> bool, gr
         {
             super::intent::write(state, sid.strip_suffix(".takeover").unwrap_or(sid), "access revoked", claim.pid);
         }
-        // Children first found while the parent still lives; a one-shot's claimer is claude itself (the launcher's shell
-        // exec'd), so the claim's pid is the writing process and its children are what it started.
+        // Children first found while the parent still lives; a one-shot's claimer is the launcher's shell, exec'd into
+        // kith-stub (the conversation lock), whose child is claude: the claim's pid is the stub and its descendants are
+        // claude and what it started. The registry entry records the stub as `launcher`, so an intent written here
+        // for the claim's pid still reads as the run's reason.
         for pid in descendants(claim.pid).into_iter().chain([claim.pid]) {
             if pid != me && !victims.contains(&pid) {
                 victims.push(pid);
@@ -304,7 +306,7 @@ pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopp
     if parent_of(claim.pid) == Some(std::process::id()) {
         return Stopped::OwnTurn(claim);
     }
-    let mut victims = children_of(claim.pid, 3);
+    let mut victims = children_of(claim.pid, 4);
     victims.insert(0, claim.pid);
     // Recorded before the signal lands (F12 rule 8): a session gone with no intent reads as a crash.
     super::intent::write(state, sid, "stopped from the app", claim.pid);

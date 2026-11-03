@@ -104,7 +104,11 @@ for x in "$@"; do [[ $prev == --session-id ]] && given=$x; [[ $prev == --resume 
 sid=${sid:-${given:-${resumed:-stub-sid}}}
 c=$KITH_STATE/live/terminal/$sid.claim; held=""
 [[ -f $c ]] && held=$(python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); p=c["pid"]
-print(c["kind"] + ":" + ("self" if p == int(sys.argv[2]) else "parent" if p == int(sys.argv[3]) else str(p)))' "$c" $$ $PPID)
+import subprocess
+ps = lambda q, f: subprocess.run(["ps", "-o", f + "=", "-p", str(q)], capture_output=True, text=True).stdout.strip()
+me, up = int(sys.argv[2]), int(sys.argv[3])
+if ps(up, "comm").endswith("kith-stub"): me, up = up, int(ps(up, "ppid"))   # under the stub the launcher is the stub
+print(c["kind"] + ":" + ("self" if p == me else "parent" if p == up else str(p)))' "$c" $$ $PPID)
 a=$*; printf '%s\n' "$PWD" "${a//$'\n'/ }" "${KITH_RESUMED_FROM:-}" "${KITH_TERMINAL_SESSION:-}" "$held" > "$STUB_OUT"
 printf '{"pid":%s,"sessionId":"%s"}' "$$" "$sid" > "$CLAUDE_CONFIG_DIR/sessions/$$.json"
 printf '{"session_id":"%s","transcript_path":"%s/p/%s.jsonl","cwd":"%s","source":"startup"}' "$sid" "$CLAUDE_CONFIG_DIR/projects" "$sid" "$PWD" |
@@ -410,8 +414,19 @@ rm -rf "$REG"; : > "$T/oneshot.go"; rm -f "$T/oneshot.go"
 for _ in $(seq 100); do [[ -e $REG/os1.claim ]] && break; sleep 0.1; done
 is "one-shot resume: claim kind" "$(field $REG/os1.claim kind)" oneshot
 claimant=$(field $REG/os1.claim pid)
-for _ in $(seq 100); do [[ -f $CLAUDE_CONFIG_DIR/sessions/$claimant.json ]] && break; sleep 0.1; done
-is "one-shot resume: claim names claude's own pid" "$([[ -f $CLAUDE_CONFIG_DIR/sessions/$claimant.json ]] && echo yes)" yes
+# claude's own pid, or (under kith-stub, the conversation lock) the stub that is claude's parent and kept kith's pid
+claude_is_claimant() {
+  local f p n
+  for f in "$CLAUDE_CONFIG_DIR"/sessions/*.json; do
+    p=$(basename "$f" .json); n=0
+    while [[ $p =~ ^[0-9]+$ && $p -gt 1 && $n -lt 4 ]]; do
+      [[ $p == "$claimant" ]] && { echo yes; return; }
+      p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); n=$((n + 1))
+    done
+  done
+}
+for _ in $(seq 100); do [[ -n $(claude_is_claimant) ]] && break; sleep 0.1; done
+is "one-shot resume: claim names claude's own pid" "$(claude_is_claimant)" yes
 # two resumes at once: exactly one runs; the other waits KITH_CLAIM_WAIT, then says who holds it
 out=$(cd "$T/work/a" && KITH_RESUME=os1 STUB_OUT=$T/os-b.out KITH_CLAIM_WAIT=1 "$KERNEL/bin/kith" designer "second" 2>&1); rc=$?
 is "one-shot resume: second is refused" "$rc" 1
