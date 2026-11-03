@@ -33,6 +33,9 @@ use crate::{accounts, engines, paths, secrets};
 
 pub type Env = HashMap<String, String>;
 
+/// How long a launch waits for `kith-auth agent-access` (kernel/bin/kith waits the same).
+const AGENT_ACCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// What `kith AGENT [flags]` was given.
 #[derive(Default, Debug)]
 pub struct Args {
@@ -218,6 +221,17 @@ impl Sys<'_> {
         )
     }
 
+    /// [`Self::out`] for a program that may hang: killed after `limit`, which reads as no answer. Quiet.
+    fn out_within(
+        &self,
+        prog: impl AsRef<std::ffi::OsStr>,
+        args: &[&str],
+        limit: std::time::Duration,
+    ) -> Option<String> {
+        secrets::run_command_with_timeout(self.cmd(prog, args), limit)
+            .map(|o| o.trim_end_matches('\n').to_owned())
+    }
+
     /// A program whose stdout, in the launch, goes to stderr.
     fn run_loud(&self, prog: impl AsRef<std::ffi::OsStr>, args: &[&str]) -> bool {
         let mut c = self.cmd(prog, args);
@@ -400,13 +414,26 @@ fn claude_version(sys: &Sys<'_>) -> Option<String> {
     None
 }
 
-/// `uuid4().hex`.
-fn random_hex() -> String {
+/// `uuid4().hex`. An unreadable random source is an error: an all-zero id would be shared by every run, and a run's
+/// id and temp file names must not collide.
+fn random_hex() -> Result<String, String> {
     let mut b = [0u8; 16];
-    if let Ok(mut f) = fs::File::open("/dev/urandom") {
-        let _ = std::io::Read::read_exact(&mut f, &mut b);
+    #[cfg(unix)]
+    fs::File::open("/dev/urandom")
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut b))
+        .map_err(|e| format!("kith: can't read random bytes from /dev/urandom: {e}"))?;
+    #[cfg(not(unix))]
+    {
+        // No /dev/urandom: std's hasher keys come from the OS random source, one fresh key per `RandomState`.
+        use std::hash::{BuildHasher, Hasher};
+        for chunk in b.chunks_mut(8) {
+            let r = std::collections::hash_map::RandomState::new()
+                .build_hasher()
+                .finish();
+            chunk.copy_from_slice(&r.to_le_bytes()[..chunk.len()]);
+        }
     }
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
 fn pj_indent1(v: &Value) -> String {
@@ -1096,14 +1123,14 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     let guest_domains: Result<Vec<String>, String> = if p_owner || !claude {
         Ok(vec![])
     } else {
-        settings::guest_domains(
-            sys.out(
-                kernel.join("bin/kith-auth"),
-                &["agent-access", agent, "--json"],
-                false,
-            )
-            .as_deref(),
-        )
+        // A hung kith-auth must not hang the launch: on the timeout the guest gets no extra domains and the run goes
+        // on with a warning (the same as a failure; kernel/bin/kith waits 20 s too).
+        let answer = sys.out_within(
+            kernel.join("bin/kith-auth"),
+            &["agent-access", agent, "--json"],
+            AGENT_ACCESS_TIMEOUT,
+        );
+        settings::guest_domains(answer.as_deref())
     };
     let kith_bin = Some(get(&env, "KITH_BIN"))
         .filter(|b| usable_kith_bin(Path::new(b)))
@@ -1112,7 +1139,13 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
     if perm_mode.is_empty() {
         perm_mode.clear();
     }
-    let once_id = random_hex();
+    let once_id = match random_hex() {
+        Ok(id) => id,
+        Err(m) => {
+            say(&m);
+            return Err(1);
+        }
+    };
     let out = {
         let envf = {
             let e = env.clone();
@@ -1178,7 +1211,10 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         && let Some(sv) = &settings_val
     {
         // F11 2b: what the session was given beyond the box goes into the settings (kith-permit apply rewrites the file).
-        let tmp = std::env::temp_dir().join(format!("kith-launch-{}.settings.json", random_hex()));
+        let Ok(tag) = random_hex().inspect_err(|m| say(m)) else {
+            return Err(1);
+        };
+        let tmp = std::env::temp_dir().join(format!("kith-launch-{tag}.settings.json"));
         if fs::write(&tmp, pj_indent1(sv)).is_ok() {
             let sys = Sys { env: &env };
             let _ = sys.run_loud(
@@ -1371,6 +1407,19 @@ mod tests {
 
     fn v(a: &[&str]) -> Vec<String> {
         a.iter().map(|x| (*x).to_owned()).collect()
+    }
+
+    #[test]
+    fn random_hex_is_32_digits_and_never_the_same_twice() {
+        let (a, b) = (random_hex().unwrap(), random_hex().unwrap());
+        assert_eq!(a.len(), 32);
+        assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+        assert_ne!(
+            a,
+            "0".repeat(32),
+            "zeros are what a failed read used to give"
+        );
     }
 
     #[test]

@@ -13,6 +13,7 @@ use crate::wire;
 use std::collections::{HashMap, VecDeque};
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -45,6 +46,9 @@ struct Entry {
     tail: VecDeque<u8>,
     /// Output streams still being read.
     readers: u8,
+    /// A kill has seen the tree empty. Sticks: the group id may be handed to an unrelated group afterwards (the blind
+    /// spot of `Proc::tree_empty`), and a later kill must neither say "killing" nor signal that group.
+    gone: AtomicBool,
 }
 
 /// The connected core. Frames go out through its own writer thread: a core that stops reading must never block
@@ -508,8 +512,12 @@ impl Holder {
         // An ended process had its tree swept before its exit was recorded, but "gone" still means the group or job
         // is empty: a member that is slow to die keeps the answer at "killing". (After the leader is reaped, Unix
         // sends no more signals, since its group id could be recycled; the sweep's SIGKILL is already on its way.)
+        if e.gone.load(Ordering::Relaxed) {
+            return KillState::Gone;
+        }
         e.proc.kill_tree();
         if e.proc.tree_empty() {
+            e.gone.store(true, Ordering::Relaxed);
             KillState::Gone
         } else {
             KillState::Killing
@@ -593,6 +601,7 @@ impl Holder {
                 input: Some(input),
                 tail: VecDeque::new(),
                 readers: 1 + u8::from(started.err.is_some()),
+                gone: AtomicBool::new(false),
             },
         );
         let reader = |stream: Box<dyn std::io::Read + Send>, kind: u8| {

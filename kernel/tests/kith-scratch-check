@@ -148,8 +148,15 @@ python3 - "$KITH_SERVE_DB" <<'EOF'
 import sqlite3, sys
 c = sqlite3.connect(sys.argv[1])
 c.execute("insert into thread_summaries values ('root-7', 'Sorting out a trip budget. More: one.', '[]', 1, 1)")
+# The host's own record of whose chat a thread is in: root-7 is scratch's, root-9 another agent's (both have a summary).
+c.execute('create table bots (id text, deleted int, config text)')
+c.execute("insert into bots values ('b-scratch', 0, '{\"hqAgent\": \"scratch\"}'), ('b-other', 0, '{\"hqAgent\": \"other\"}')")
+c.execute("insert into entries values ('root-7', 'b-scratch', null), ('root-9', 'b-other', null)")
+c.execute("insert into thread_summaries values ('root-9', 'Another agent talks money. More: two.', '[]', 1, 1)")
 c.commit()
 EOF
+"$KITH" scratch thread root-9 >/dev/null 2>&1
+check "app thread: a summary alone does not make another agent's thread scratch's" "[ $? != 0 ]"
 OUT=$("$KITH" scratch thread root-7 --json 2>/dev/null)
 check "app thread: the summary alone knows it, but not its engine" "is 'd[\"harness\"], d[\"summary\"]' 'None True'"
 OUT=$("$KITH" scratch thread root-7 --session s-app-1 --json 2>/dev/null)

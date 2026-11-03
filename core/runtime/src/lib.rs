@@ -85,6 +85,8 @@ pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
 /// - with one line in `core.log` (in the logs folder, never stdout) when the open failed, so a damaged or swapped
 ///   core.db does not go unnoticed until the daemon refuses to start.
 pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T, Via) {
+    // The verb's kernel rules note a lock or write they could not do (the accounts state, the settings migration) here.
+    log::route_kernel_notes(&paths.logs);
     // A read-only verb never creates the core as a side effect (a sandbox's state folder stays as it was): the daemon,
     // `kith migrate` or a first embedded open that needs it makes core.db, and only then do verbs pass through it.
     if !Layout::new(&paths.machine).db.is_file() {

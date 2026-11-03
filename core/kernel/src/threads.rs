@@ -19,6 +19,7 @@ pub mod intent;
 // The one place with `unsafe` (kill(2)); the crate denies it everywhere else.
 #[allow(unsafe_code)]
 pub(crate) mod os;
+pub use os::native_proc_start;
 pub mod registry;
 pub mod resolve;
 #[cfg(test)]

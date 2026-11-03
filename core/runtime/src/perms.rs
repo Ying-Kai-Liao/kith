@@ -1,6 +1,10 @@
 //! Owner-only files. The core folder is 0700 and core.db (+ -wal, -shm), core.lock, core.holder and the marker 0600, refused at
 //! start if looser, with the command that fixes it. On Windows the same rule is an access list with no entry for
 //! anyone but the owner, SYSTEM and Administrators (read with `icacls`).
+//!
+//! TODO(windows): read the access list natively (`GetNamedSecurityInfoW` and the DACL's entries, through windows-sys)
+//! instead of running `icacls`, as the holder's start time on macOS no longer runs `ps`. Left: it can only be written
+//! and tried on Windows, and `acl_is_owner_only` below is the rule the native read would feed.
 
 use std::fs;
 use std::path::Path;

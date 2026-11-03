@@ -357,12 +357,15 @@ def prepare_claude_dir(directory, main_dir=None, main_json=None):
             want = {k: main_cfg[k] for k in MIRRORED_FLAGS if k in main_cfg}
             cfg = _read_json(cfg_path) if cfg_path.exists() else {}
             if cfg is not None and any(cfg.get(k) != v for k, v in want.items()):
-                # Read again just before the swap: Claude Code may have written in between.
-                cfg = _read_json(cfg_path) if cfg_path.exists() else {}
-                if cfg is not None:
-                    cfg.update(want)
-                    _write_atomic(cfg_path, json.dumps(cfg, indent=2).encode())
-                    changed.append('.claude.json')
+                # Two launches on one account mirror one at a time (.claude.json.lock, flock; the Rust side takes the same),
+                # and the file is read again under it, just before the swap: Claude Code may have written in between.
+                with open(directory / '.claude.json.lock', 'a') as lock:
+                    fcntl.flock(lock, fcntl.LOCK_EX)
+                    cfg = _read_json(cfg_path) if cfg_path.exists() else {}
+                    if cfg is not None:
+                        cfg.update(want)
+                        _write_atomic(cfg_path, json.dumps(cfg, indent=2).encode())
+                        changed.append('.claude.json')
     except OSError as e:
         print(f'kith: could not sync {directory} with the main Claude login: {e}', file=sys.stderr)
     return changed

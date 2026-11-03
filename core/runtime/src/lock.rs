@@ -89,7 +89,13 @@ pub(crate) fn recorded_holder(layout: &Layout) -> Option<Holder> {
 }
 
 /// The start time of a process as `ps` prints it in the C locale (Linux and macOS); `None` where there is no `ps`.
+/// macOS reads it natively (the kernel's own record, no `ps` to start; same text); elsewhere `ps` answers.
+/// TODO(windows): there is no start time there yet (the holder line keeps it empty); `GetProcessTimes` would give it.
 pub(crate) fn process_start(pid: u32) -> Option<String> {
+    #[cfg(unix)]
+    if let Some(started) = kith_kernel::threads::native_proc_start(pid) {
+        return Some(started);
+    }
     let out = std::process::Command::new("ps")
         .env("LC_ALL", "C")
         .args(["-o", "lstart=", "-p", &pid.to_string()])
