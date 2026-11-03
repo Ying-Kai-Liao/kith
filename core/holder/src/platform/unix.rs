@@ -360,8 +360,8 @@ mod tests {
     fn a_long_socket_path_gets_a_clear_error() {
         let long = Path::new("/tmp").join("x".repeat(120)).join("holder.sock");
         for err in [
-            connect(&long).err().expect("connect fails"),
-            listen(&long).err().expect("listen fails"),
+            connect(&long).expect_err("connect fails"),
+            listen(&long).expect_err("listen fails"),
         ] {
             assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
             let text = err.to_string();

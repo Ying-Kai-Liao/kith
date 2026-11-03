@@ -39,8 +39,11 @@ pub fn ensure(exe: &Path, dir: &Path, secret: &str, idle: Duration) -> io::Resul
     }
     platform::private_dir(dir)?;
     let endpoint = platform::endpoint(dir);
-    if platform::connect(&endpoint).is_ok() {
-        return Ok(());
+    match platform::connect(&endpoint) {
+        Ok(_) => return Ok(()),
+        // A socket path the system cannot hold: starting a holder would only fail later and silently.
+        Err(e) if e.kind() == io::ErrorKind::InvalidInput => return Err(e),
+        Err(_) => {}
     }
     let log = std::fs::OpenOptions::new()
         .create(true)

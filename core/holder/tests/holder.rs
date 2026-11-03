@@ -498,12 +498,14 @@ fn the_holders_environment_and_command_line_hold_no_secret() {
         .spawn()
         .unwrap();
     std::thread::sleep(Duration::from_millis(200));
-    assert!(
-        environment_of(control.id()).contains("control-value"),
-        "this system's process listing shows environments"
-    );
+    let readable = environment_of(control.id()).contains("control-value");
     let _ = control.kill();
     let _ = control.wait();
+    if !readable {
+        // macOS hides other processes' environments from ps; Linux (CI) reads /proc and runs this for real.
+        eprintln!("skipped: this system's process listing shows no environments");
+        return;
+    }
 
     let fx = Fixture::new("env");
     fx.start();
@@ -536,7 +538,13 @@ fn only_one_lock_on_a_holder_folder_at_a_time() {
         .expect("first lock");
     assert!(platform::lock_instance(&fx.dir).unwrap().is_none());
     drop(first);
-    assert!(platform::lock_instance(&fx.dir).unwrap().is_some());
+    // A process another test forks at this moment holds the descriptor until its exec closes it (O_CLOEXEC), so the
+    // lock can come back a few milliseconds late.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while platform::lock_instance(&fx.dir).unwrap().is_none() {
+        assert!(Instant::now() < deadline, "the lock was never released");
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 /// A folder whose socket path is over the limit (macOS 104 bytes, Linux 108) is a clear error, not a bind failure.
