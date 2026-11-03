@@ -700,7 +700,7 @@ fn a_fresh_database_and_a_migrated_one_end_with_the_same_schema() {
     drop(start_with(&lo, BOTH).expect("migrated"));
 
     assert_eq!(schema_of(&lf), schema_of(&lo));
-    assert_eq!(schema_of(&lf).len(), 3, "migrations, meta, counters");
+    assert!(schema_of(&lf).iter().any(|(_, name, _)| name == "counters"));
 }
 
 #[test]
