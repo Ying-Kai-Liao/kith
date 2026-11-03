@@ -263,7 +263,9 @@ def snapshot(side_dir, case, norm):
             dirnames.sort()
             d = Path(dirpath)
             rel_dir = d.relative_to(side_dir).as_posix()
-            if not dirnames and not filenames and d != base:
+            # In the --core pass a folder holding only the core's own folder is as empty as the OLD side's (core/ is
+            # compared on its own, and is an intended difference).
+            if (not dirnames or (WITH_CORE and dirnames == ['core'])) and not filenames and d != base:
                 facets[f'state:{rel_dir}/'] = '<empty dir>\n'
             for f in sorted(filenames):
                 p = d / f
