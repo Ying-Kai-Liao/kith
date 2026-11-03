@@ -32,6 +32,7 @@ PUBLIC = {
     ("lib.rs", "Embedded"), ("lib.rs", "Migrated"), ("lib.rs", "Via"),
     ("lib.rs", "start"), ("lib.rs", "migrate"), ("lib.rs", "open_embedded"), ("lib.rs", "stateless_through_core"),
     ("lib.rs", "reach"), ("lib.rs", "note_once"),
+    ("lib.rs", "route_kernel_notes"),   # the host's main.rs sends every kernel verb's notes to core.log
     ("lib.rs", "use:db::Core"), ("lib.rs", "use:error::Error"), ("lib.rs", "use:daemon::Daemon"),
     ("lib.rs", "use:daemon::status"), ("lib.rs", "use:owner::Reached"),
     ("lib.rs", "field:from"), ("lib.rs", "field:to"),

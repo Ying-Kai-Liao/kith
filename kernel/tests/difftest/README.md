@@ -27,6 +27,20 @@ program through `KITH_BIN`, which the runner sets from `--bin`, `$KITH_DIFFTEST_
 / `serve/host/target`. Cases for verbs the core does not have yet are the same program on both sides, which proves the
 runner is deterministic. Or point `--new` at any other program.
 
+## Golden corpus (access verbs)
+
+`golden/` freezes the access verbs' cases (copies of json-auth, people, secrets-read and the seed's `auth-ls-empty-and-granted`,
+plus `auth-invite-bot.json`: `kith-auth who|whois|retired|people` and the `invite` / `bot` `--json` usage errors) with what the
+Python kernel printed and did, so the check survives the day authority moves into core.db and Python is no longer there to compare to.
+
+    kith-difftest --golden golden --record      run the OLD (Python) side alone, store its facets in golden/facets/NAME.json
+    kith-difftest --golden golden               replay on the Python kernel against the store (green = the record still holds)
+    kith-difftest --golden golden --rust --bin PATH   replay the Rust program against the same store
+
+Same masks as the two-sided run, plus the kernel checkout's path (`<KERNEL>`). `intended.json` is not read: a frozen record has
+no side to differ on purpose, so re-record (and say why in the PR) when a change is meant. Cases are copies: editing corpus/ does
+not move the golden.
+
 ## Per-command summary
 
 `--summary FILE` (`-` for stdout) writes `{"commands": {"<command>": {"green": bool, "cases": {"<case>": "same" |

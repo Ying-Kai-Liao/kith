@@ -982,10 +982,16 @@ async fn a_socket_closed_without_a_disconnect_reconnects_in_run_and_keeps_order(
     rig.fake.state.locked().pending.push_back(json!({"type": "close-without-saying-so"}));
     until("a second socket", || rig.fake.opened() == 2 && rig.fake.state.locked().connected == 2).await;
     rig.fake.state.locked().file_delay = Duration::ZERO;
+    // The adapter takes messages one at a time, in order, but each top-level DM message is its own thread and an
+    // agent run per thread: two runs started a millisecond apart may answer in either order. So the order is checked
+    // where it is promised, at the hand-over: the second message is sent once the first (the one that was mid-download
+    // when the socket was replaced) has reached its agent, and the agent was started for them in that order.
+    until("the first message to reach its agent", || !rig.hq_calls().is_empty()).await;
     dm(&rig, "@house msg-second");
     until("both answers", || rig.fake.answers("msg-first") == 1 && rig.fake.answers("msg-second") == 1).await;
-    let order: Vec<String> = rig.fake.texts().into_iter().filter(|t| t.contains("echo:")).collect();
-    assert!(order[0].contains("msg-first") && order[1].contains("msg-second"), "{order:?}");
+    let tasks: Vec<String> = rig.hq_calls().iter().map(|c| c["task"].as_str().unwrap().to_owned()).collect();
+    assert_eq!(tasks.len(), 2, "{tasks:?}");
+    assert!(tasks[0].starts_with("msg-first") && tasks[1].starts_with("msg-second"), "{tasks:?}");
     assert_eq!(rig.fake.calls("auth.test").len(), 1, "no new login: run() itself reconnected");
     assert!(!task.is_finished());
     task.abort();

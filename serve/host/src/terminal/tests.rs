@@ -1042,6 +1042,28 @@ async fn a_oneshot_claim_written_by_the_kernel_is_parsed_and_holds_the_session()
     assert!(claim::take(&r.state(), "s1", Kind::App, std::process::id(), false).unwrap().is_err());
 }
 
+#[tokio::test]
+async fn a_claim_of_an_unknown_kind_is_a_live_holder_and_take_as_never_removes_it() {
+    let r = Rig::new();
+    let pid = r.sleeper();
+    // A kind a newer binary writes (M1's holder). Python and the crate keep it as a live holder; so must this.
+    let p = claim::path(&r.state(), "s1", false);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    let start = registry::proc_start(pid).expect("ps knows the process");
+    let body = json!({"pid": pid, "procStart": start, "at": "2026-11-03T00:00:00+00:00", "kind": "newer-kind"});
+    std::fs::write(&p, body.to_string()).unwrap();
+    assert_eq!(claim::read(&p).expect("an unknown kind still parses").kind, Kind::Other);
+    assert_eq!(claim::holder(&r.state(), "s1").expect("it holds the session").pid, pid);
+    let held = claim::take(&r.state(), "s1", Kind::Terminal, std::process::id(), false).unwrap().unwrap_err();
+    assert_eq!(held.0.pid, pid);
+    assert!(p.exists(), "take_as must not delete a live claim it cannot name");
+    // Judged by pid + start only: a reused pid (another start time) is stale whatever the kind, and replaced.
+    let stale = json!({"pid": pid, "procStart": "Thu Jan  1 00:00:00 1970", "kind": "newer-kind"});
+    std::fs::write(&p, stale.to_string()).unwrap();
+    assert!(claim::holder(&r.state(), "s1").is_none());
+    assert!(claim::take(&r.state(), "s1", Kind::Terminal, std::process::id(), false).unwrap().is_ok());
+}
+
 // --- the revoke sweep: claims name the person, the sweep ends their holders -----------------------------------------
 
 /// A process with a child of its own (`sh` waiting on a `sleep`), so the sweep's reach to children can be seen. The child's pid

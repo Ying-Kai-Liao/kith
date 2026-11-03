@@ -700,6 +700,7 @@ impl Proc {
         Ok(Exit {
             code: Some(code as i32),
             signal: None,
+            error: None,
         })
     }
 }

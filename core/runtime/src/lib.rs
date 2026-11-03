@@ -95,6 +95,12 @@ pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
     }
 }
 
+/// Points the kernel's notes (a lock or write it could not do and carried on) at the core log for the rest of this
+/// process: a kernel verb that does not go through the core (`kernel accounts`) calls this itself.
+pub fn route_kernel_notes(paths: &Paths) {
+    log::route_kernel_notes(&paths.logs);
+}
+
 /// Runs a verb that touches NO core state (paths, engines, launch today) inside an embedded core, so the verbs already
 /// switched to Rust go through the core's lock and checks. A verb that reads or writes core state must use
 /// [`open_embedded`], which refuses instead of falling back. This helper goes when M0b/M0c give those verbs the
@@ -103,6 +109,8 @@ pub fn open_embedded(paths: &Paths) -> Result<Embedded, Error> {
 /// - with one line in `core.log` (in the logs folder, never stdout) when the open failed, so a damaged or swapped
 ///   core.db does not go unnoticed until the daemon refuses to start.
 pub fn stateless_through_core<T>(paths: &Paths, verb: impl FnOnce() -> T) -> (T, Via) {
+    // The verb's kernel rules note a lock or write they could not do (the accounts state, the settings migration) here.
+    log::route_kernel_notes(&paths.logs);
     // A read-only verb never creates the core as a side effect (a sandbox's state folder stays as it was): the daemon,
     // `kith migrate` or a first embedded open that needs it makes core.db, and only then do verbs pass through it.
     if !Layout::new(&paths.machine).db.is_file() {

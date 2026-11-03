@@ -74,7 +74,8 @@ pub async fn run(a: Args) -> Result<i32> {
         timeout: Duration::from_secs(a.timeout),
         approve: a.approve,
     };
-    match kith_acp::run_once(spec).await {
+    let (result, spent) = kith_acp::run_once_spent(spec).await;
+    match result {
         Ok(out) if a.json => {
             println!("{}", out.to_json());
             Ok(0)
@@ -88,7 +89,11 @@ pub async fn run(a: Args) -> Result<i32> {
         Err(e) => {
             let (kind, resets_at) = classify(&e);
             if a.json {
-                println!("{}", json!({"error": format!("{e:#}"), "kind": kind, "resets_at": resets_at}));
+                // `cost_usd`: what the engine had reported before it failed, which a delegation's cap still counts.
+                println!(
+                    "{}",
+                    json!({"error": format!("{e:#}"), "kind": kind, "resets_at": resets_at, "cost_usd": spent})
+                );
             } else {
                 eprintln!("kith: {} ({kind}): {e:#}", engine.id);
             }
