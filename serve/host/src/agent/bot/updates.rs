@@ -303,8 +303,13 @@ impl Actor {
             && let Some(agent) = self.cfg.hq_agent.clone()
         {
             let reason = autoallow::clean_reason(&title);
-            let lookup = autoallow::derive(&agent, &tool_name, raw, &reason);
-            derived = tokio::time::timeout(Duration::from_secs(8), lookup).await.ok().flatten().map(|d| (d, reason));
+            let lookup = autoallow::check(&agent, &tool_name, raw, &reason);
+            derived = tokio::time::timeout(Duration::from_secs(8), lookup)
+                .await
+                .ok()
+                .flatten()
+                .and_then(|c| c.derived)
+                .map(|d| (d, reason));
             options = derived_always(options, derived.as_ref().map(|(d, _)| d));
         }
         let mut detail = json!({"output": "", "diffs": []});
