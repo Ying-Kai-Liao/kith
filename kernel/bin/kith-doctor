@@ -27,8 +27,8 @@ CHECKS = []       # [{section, level, name, ok}] in the order the text mode prin
 SECTION = ['']
 
 
-def run(*args, cwd=None):
-    return subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+def run(*args, cwd=None, timeout=None):
+    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, timeout=timeout)
 
 
 def emit(level, mark, text):
@@ -456,8 +456,12 @@ def core():
         note('no kith program on this Mac yet: the Python kernel answers everything')
         return
     try:
-        r = run(binary, 'kernel', 'core-status', '--json')
+        # Reaching a daemon that is busy can take a minute; doctor asks for a few seconds (TimeoutExpired is a SubprocessError).
+        r = run(binary, 'kernel', 'core-status', '--json', timeout=5)
         status = json.loads(r.stdout)
+    except subprocess.TimeoutExpired:
+        warn('the core did not answer `kith kernel core-status` in 5 seconds (a daemon that is busy or stuck)')
+        return
     except (OSError, ValueError, subprocess.SubprocessError):
         note('this kith program does not report on the core yet (kith update)')
         return

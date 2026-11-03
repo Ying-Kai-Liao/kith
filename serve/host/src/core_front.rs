@@ -16,8 +16,13 @@ use serde_json::{Value, json};
 use crate::kernel;
 
 /// The table rows the daemon answers today (`Core::call`). Any other row is `NotServed` there, and asking would only
-/// cost a round trip.
-const DAEMON_ROWS: &[&str] = &["paths", "kernel.version"];
+/// cost a round trip. `kernel.version` is not one: the bash router asks `kith kernel version` of ONE binary (which
+/// engines it has) before it execs that binary, and a daemon from another build would answer for itself.
+const DAEMON_ROWS: &[&str] = &["paths"];
+
+/// The variables `paths` reads (kith-kernel `paths::getenv`: `KITH_<name>`, else `HQ_<name>`). The caller sends these
+/// and nothing else, so no token or other secret in its environment reaches the daemon.
+const PATHS_VARS: &[&str] = &["KITH_STATE", "HQ_STATE", "KITH_HOME", "HQ_HOME", "KITH_AGENTS", "HQ_AGENTS"];
 
 /// Reads a command line against the table and, if the daemon serves it and answers, prints its answer.
 /// `Some(exit code)` when the command was handled; `None` when the caller carries on as before. `args[0]` is the
@@ -34,8 +39,9 @@ pub fn try_cli(args: &[OsString]) -> Option<i32> {
     let params = caller_view(parsed.method.name, parsed.params, &home);
     match kith_core::reach(&folders, parsed.method.name, &params, true) {
         kith_core::Reached::Answered(answer) => print_answer(parsed.method.name, &answer, parsed.format.as_deref()),
+        // Said once, in the core log: a stderr line on every `kith paths` would end up in scripts' output.
         kith_core::Reached::Mismatch(note) => {
-            eprintln!("kith: {note}");
+            kith_core::note_once(&folders, &note);
             None
         }
         _ => None,
@@ -46,9 +52,10 @@ pub fn try_cli(args: &[OsString]) -> Option<i32> {
 /// this process has (a hook or an agent run has its own `KITH_HOME`, `HOME`, `KITH_STATE` ...).
 fn caller_view(method: &str, mut params: Value, home: &std::path::Path) -> Value {
     if method == "paths" {
-        let env: serde_json::Map<String, Value> = std::env::vars()
-            .filter(|(k, _)| k.starts_with("KITH_") || k.starts_with("HQ_"))
-            .map(|(k, v)| (k, Value::String(v)))
+        // var_os: a variable that is not UTF-8 must not stop `kith paths`; one paths reads is skipped if it is.
+        let env: serde_json::Map<String, Value> = PATHS_VARS
+            .iter()
+            .filter_map(|k| Some(((*k).to_owned(), Value::String(std::env::var_os(k)?.into_string().ok()?))))
             .collect();
         let object = params.as_object_mut().expect("parsed params are an object");
         if !object.contains_key("kernel") {
@@ -73,8 +80,9 @@ fn print_answer(method: &str, answer: &Value, format: Option<&str>) -> Option<i3
             _ => folders.text(),
         }
     };
+    // A failed write is the end of it (exit 1): running the embedded verb after a partial print would print twice.
     let mut stdout = std::io::stdout().lock();
-    (stdout.write_all(out.as_bytes()).is_ok() && stdout.flush().is_ok()).then_some(0)
+    Some(if stdout.write_all(out.as_bytes()).is_ok() && stdout.flush().is_ok() { 0 } else { 1 })
 }
 
 fn folders_from(answer: &Value) -> Option<Paths> {
@@ -164,23 +172,43 @@ mod tests {
             let words: Vec<String> = line.split(' ').map(str::to_owned).collect();
             assert_eq!(kith_api::cli::parse_argv(&words).expect("parses").method.name, row);
         }
-        for line in ["kernel engines --json", "kernel launch prompt echo", "ls --json", "frobnicate", "paths --bogus"] {
+        // `kernel version` is the router's per-binary question: never the daemon's to answer.
+        for line in [
+            "kernel version",
+            "kernel engines --json",
+            "kernel launch prompt echo",
+            "ls --json",
+            "frobnicate",
+            "paths --bogus",
+        ] {
             assert_eq!(try_cli(&args(line)), None, "{line}");
         }
     }
 
     #[test]
-    fn the_caller_view_carries_home_kernel_and_only_kith_variables() {
+    fn the_caller_view_carries_home_kernel_and_only_the_variables_paths_reads() {
         let home = PathBuf::from("/h");
         let v = caller_view("paths", json!({}), &home);
         assert_eq!(v["home"], "/h");
         assert!(v["kernel"].is_string());
         for k in v["env"].as_object().expect("env").keys() {
-            assert!(k.starts_with("KITH_") || k.starts_with("HQ_"), "{k}");
+            assert!(PATHS_VARS.contains(&k.as_str()), "{k}");
         }
         // The kernel the caller named stays; other methods get nothing added.
         assert_eq!(caller_view("paths", json!({"kernel": "/k"}), &home)["kernel"], "/k");
         assert_eq!(caller_view("kernel.version", json!({}), &home), json!({}));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_variable_that_is_not_utf8_does_not_stop_the_caller_view() {
+        use std::os::unix::ffi::OsStringExt as _;
+        // The old std::env::vars() panicked on any such variable, whatever its name.
+        // SAFETY: the name is private to this test.
+        unsafe { std::env::set_var("KITH_TEST_NOT_UTF8", OsString::from_vec(vec![0xff, 0xfe])) };
+        let v = caller_view("paths", json!({}), &PathBuf::from("/h"));
+        assert!(v["env"].is_object());
+        unsafe { std::env::remove_var("KITH_TEST_NOT_UTF8") };
     }
 
     #[test]

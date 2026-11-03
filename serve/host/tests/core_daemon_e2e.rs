@@ -156,8 +156,9 @@ fn the_cli_goes_to_a_real_daemon_with_its_own_environment_and_falls_back_when_th
     assert_eq!(mode(&m.join("core/owner.sock")), 0o600);
     assert_eq!(mode(&m.join("core/owner.token")), 0o600);
 
-    // paths (json), paths (--sh), paths, version: through the socket. engines and the first `paths` before it: not.
-    assert_eq!(daemon.stop(), 4);
+    // paths (json), paths (--sh), paths: through the socket. `kernel version` is the router's per-binary question and is
+    // never the daemon's to answer; engines is not served; the first `paths` before it was asked ahead of a daemon.
+    assert_eq!(daemon.stop(), 3);
     let after = kith(&home, &[]).args(["paths", "--json"]).output().expect("paths");
     assert_eq!(after.stdout, alone.stdout, "a stopped daemon leaves the CLI as it was");
     assert!(!m.join("core/owner.sock").exists());

@@ -128,6 +128,12 @@ pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable
     owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
 }
 
+/// A line in the core log for the CLI's side of the front (a daemon that disagrees about the version or the method
+/// table), written once while it stays the same, so `kith paths` prints nothing about it.
+pub fn note_once(paths: &Paths, note: &str) {
+    log::note_once(&paths.logs, "front: ", &format!("front: {note}"));
+}
+
 pub(crate) fn start_with(layout: &Layout, migrations: &[Migration]) -> Result<Core, Error> {
     match db::open(layout, migrations, Mode::Daemon)? {
         Opened::Core(c) => Ok(*c),

@@ -49,6 +49,15 @@ pub(crate) fn note(logs: &Path, what: &str) {
     }
 }
 
+/// `note`, unless the last line with this prefix says the same: a condition that stays (a daemon of another build)
+/// is one line, not one per command.
+pub(crate) fn note_once(logs: &Path, prefix: &str, what: &str) {
+    if last_note(logs, prefix).as_deref() != Some(&what.replace(['\r', '\n'], " ")[prefix.len()..])
+    {
+        note(logs, what);
+    }
+}
+
 /// The last line `note` wrote that starts with `prefix` after its pid, for `kith doctor` ("why is there no daemon").
 pub(crate) fn last_note(logs: &Path, prefix: &str) -> Option<String> {
     let text = std::fs::read_to_string(logs.join(FILE)).ok()?;

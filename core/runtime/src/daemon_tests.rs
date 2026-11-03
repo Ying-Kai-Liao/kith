@@ -68,7 +68,8 @@ fn a_daemon_serves_the_table_over_the_owner_socket_and_leaves_when_stopped() {
         read(&p, "kernel.version", &json!({"x": 1})),
         Reached::Refused(Error::BadParams(_))
     ));
-    assert_eq!(d.served(), 5);
+    // Two answers; the three refusals are not counted as served.
+    assert_eq!(d.served(), 2);
     drop(d);
     assert!(matches!(
         read(&p, "kernel.version", &json!({})),
@@ -89,7 +90,10 @@ fn a_verb_that_depends_on_the_environment_answers_for_the_caller_not_the_daemon(
     let view = json!({"home": "/nowhere/home", "kernel": "/k/kernel", "env": {"KITH_HOME": "/caller/kith"}});
     match read(&p, "paths", &view) {
         Reached::Answered(v) => {
-            assert_eq!(v["KITH_HOME"], "/caller/kith");
+            assert_eq!(
+                std::path::Path::new(v["KITH_HOME"].as_str().expect("home")),
+                std::path::Path::new("/caller/kith")
+            );
             assert_ne!(v["KITH_MACHINE"], m.to_string_lossy().as_ref());
         }
         other => panic!("{other:?}"),

@@ -362,7 +362,13 @@ fn end_groups(_: &Path, _: &[RecordedProc], _: Duration) -> bool {
 
 #[cfg(unix)]
 fn signal_group(pid: u32, signal: &str) -> bool {
-    std::process::Command::new("kill")
+    // An absolute path, never `kill` from PATH: this ends process groups, and the daemon's PATH is not its own to trust.
+    // (unsafe code is forbidden here, so no killpg.)
+    let kill = ["/bin/kill", "/usr/bin/kill"]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).is_file())
+        .unwrap_or("/bin/kill");
+    std::process::Command::new(kill)
         .args(["-s", signal, "--"])
         .arg(format!("-{pid}"))
         .output()

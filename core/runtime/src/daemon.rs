@@ -96,8 +96,10 @@ impl Shared {
         if method == "kernel.coreStatus" {
             return self.running_status();
         }
+        // Counts answers only: a refused or failed call was not served.
+        let answer = self.with_core(|c| c.call(kith_api::Principal::Owner, method, params))?;
         self.served.fetch_add(1, Ordering::SeqCst);
-        self.with_core(|c| c.call(kith_api::Principal::Owner, method, params))
+        Ok(answer)
     }
 
     fn running_status(&self) -> Result<Value> {

@@ -575,8 +575,10 @@ fn calls_go_through_the_table() {
             &json!({"home": "/nowhere/home", "env": {"KITH_HOME": "/caller/kith", "KITH_STATE": "/caller/state"}, "kernel": "/k/kernel"}),
         )
         .expect("caller view");
-    assert_eq!(seen["KITH_HOME"], "/caller/kith");
-    assert_eq!(seen["KITH_STATE"], "/caller/state");
+    // Compared as paths: Windows spells them with backslashes.
+    let path = |k: &str| std::path::PathBuf::from(seen[k].as_str().expect(k));
+    assert_eq!(path("KITH_HOME"), std::path::Path::new("/caller/kith"));
+    assert_eq!(path("KITH_STATE"), std::path::Path::new("/caller/state"));
     assert_ne!(seen["KITH_MACHINE"], m.to_string_lossy().as_ref());
     assert!(
         core.call(who, "paths", &json!({"env": {"KITH_HOME": 3}}))
@@ -607,4 +609,18 @@ fn calls_go_through_the_table() {
         core.call(who, "agents.list", &json!({})),
         Err(Error::NotServed(_))
     ));
+}
+
+#[test]
+fn a_front_note_that_stays_the_same_is_one_line_in_the_core_log() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    for _ in 0..3 {
+        crate::note_once(&p, "the daemon speaks protocol 9");
+    }
+    crate::note_once(&p, "the daemon has another method table");
+    crate::note_once(&p, "the daemon has another method table");
+    let log = std::fs::read_to_string(p.logs.join("core.log")).expect("core.log");
+    assert_eq!(log.lines().count(), 2, "{log}");
+    assert!(log.lines().all(|l| l.contains(" front: the daemon ")), "{log}");
 }
