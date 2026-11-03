@@ -43,7 +43,7 @@ impl<'a> Authority<'a> {
         let auth = snapshot(self.conn)?;
         Rules::new(self.ctx, &auth)
             .may(person, agent, via, once)
-            .map_err(refused)
+            .map_err(|d| refused(&d))
     }
 
     /// `resolve`: what a run of `agent` for `person` gets (a bot's too: see [`Self::resolve_bot`]).
@@ -57,7 +57,7 @@ impl<'a> Authority<'a> {
         let auth = snapshot(self.conn)?;
         Rules::new(self.ctx, &auth)
             .resolve(agent, person, via, once)
-            .map_err(refused)
+            .map_err(|d| refused(&d))
     }
 
     /// `resolve_bot`: `resolve`, for a bot only: `None` when `person` is not a bot. The bot rules are not a separate
@@ -78,7 +78,7 @@ impl<'a> Authority<'a> {
         Rules::new(self.ctx, &auth)
             .resolve(agent, &id, via, once)
             .map(Some)
-            .map_err(refused)
+            .map_err(|d| refused(&d))
     }
 
     /// `cut_off`: whether the person, or the person a bot of theirs answers to, is revoked.
@@ -90,7 +90,7 @@ impl<'a> Authority<'a> {
 
 /// A rule that stopped with a refusal `kith-auth` would `die` with (a membership naming a preset nobody defined): the
 /// tables are not in a state the rules can answer from, so the caller gets no answer, which it must read as "no".
-fn refused(d: secrets::Die) -> Error {
+fn refused(d: &secrets::Die) -> Error {
     Error::Corrupt(format!("authority: {}", d.msg))
 }
 

@@ -543,7 +543,7 @@ fn person() -> impl Strategy<Value = Option<Person>> {
 fn auth_value(
     people: &[Option<Person>],
     rows: &[Option<Row>],
-    presets: (
+    presets: &(
         Option<&'static str>,
         Option<bool>,
         Option<Vec<&'static str>>,
@@ -561,10 +561,10 @@ fn auth_value(
             o.insert("name".to_owned(), (*id).into());
         }
         // a person's id as their bot's owner, or any other id: hand edits and removed owners happen
-        if id.starts_with("bot") {
-            if let Some(b) = bot_of {
-                o.insert("bot_of".to_owned(), (*b).into());
-            }
+        if id.starts_with("bot")
+            && let Some(b) = bot_of
+        {
+            o.insert("bot_of".to_owned(), (*b).into());
         }
         if let Some(w) = was {
             o.insert("was".to_owned(), json!(w));
@@ -625,7 +625,7 @@ fn auth_strategy() -> impl Strategy<Value = Value> {
         ),
         some(pick(&["50", "0"])),
     )
-        .prop_map(|(people, rows, presets, cap)| auth_value(&people, &rows, presets, cap))
+        .prop_map(|(people, rows, presets, cap)| auth_value(&people, &rows, &presets, cap))
 }
 
 #[test]
