@@ -220,6 +220,22 @@ def agent_dirs():
             if not d.name.startswith('.') and (pkg / 'agent.md').is_file():
                 out.setdefault(d.name, pkg)
     return out
+_BUILTIN = {}
+
+
+def builtin(agent):
+    """Whether agent is one of the kernel's own (scratch ...), not the user's: found under $KITH/agents and not in the user's
+    agents folder. One life folder serves everyone who runs it, so it is never granted: only the owner runs a built-in."""
+    if agent not in _BUILTIN:
+        def has(root):
+            d = root / agent
+            return (bool(agent) and '/' not in agent and not agent.startswith('.')
+                    and ((d / 'role' / 'agent.md').is_file() or (d / 'agent.md').is_file()))
+        kernel_agents = KITH / 'agents'
+        _BUILTIN[agent] = (AGENTS.resolve() != kernel_agents.resolve() and not has(AGENTS) and has(kernel_agents))
+    return _BUILTIN[agent]
+
+
 AUTH = Path(os.environ.get('KITH_AUTH') or paths()['KITH_SECRETS'] / 'auth.json')
 LOG = AUTH.with_name('auth.log')   # every secret handed out: when, to whom, for which service; never the value
 SECURITY = os.environ.get('KITH_SECURITY_BIN') or '/usr/bin/security'   # the one tool that reads and writes Keychain items
@@ -464,6 +480,8 @@ def bots_of(auth, person):
 
 def row_of(auth, agent, person):
     """The person's membership of agent: their own row, else the agent's `*` row, else None."""
+    if builtin(agent):
+        return None
     rows = auth['members'].get(agent, {})
     return rows.get(person, rows.get(EVERYONE))
 
@@ -479,6 +497,8 @@ def may(auth, person, agent, via=None, once=False):
     if auth['people'][person].get('revoked'):
         # before any row, the `*` row included: revoke beats every row, and undo finds them all as they were
         return False, f"{person}'s access was removed"
+    if builtin(agent):   # before any row, the `*` row and a helper list included: fail closed
+        return False, f'{agent} is a built-in agent: only the owner runs it'
     if auth['people'][person].get('bot_of'):
         return bot_may(auth, person, agent, via, once)
     if row_of(auth, agent, person) is not None:
@@ -2179,6 +2199,8 @@ def access(auth, person):
     bot = bool(auth['people'].get(person, {}).get('bot_of'))
     for agent in agents():
         rows = auth['members'].get(agent, {})
+        if builtin(agent):
+            continue
         if bot and not (person in rows and may(auth, person, agent)[0]):
             continue
         if person in rows or (EVERYONE in rows and not bot):
@@ -2221,6 +2243,8 @@ def agent_rows(auth, person):
     bot = bool(auth['people'][person].get('bot_of'))
     out = []
     for agent in sorted(auth['members']):
+        if builtin(agent):
+            continue
         rows = auth['members'][agent]
         row, via = (rows[person], 'own') if person in rows else (rows.get(EVERYONE), 'everyone')
         if row is None or (bot and via == 'everyone'):
@@ -2676,6 +2700,8 @@ def cmd_member(args):
     for agent in names:
         if '--rm' not in flags and agent not in agent_dirs():   # taking access away needs no folder: a row must not wait for one to come back
             die(f"no agent '{agent}' (kith ls)")
+        if '--rm' not in flags and builtin(agent):
+            die(f"{agent} is a built-in agent: only the owner runs it, it can't be given to {'everyone' if pid == EVERYONE else pid}", 2)
         if '--rm' in flags:
             n = drop_self_approved(auth, agent, pid) if pid != EVERYONE else 0   # their bots' rows keep nothing of theirs
             auth['members'].get(agent, {}).pop(pid, None)

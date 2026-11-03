@@ -46,7 +46,7 @@ kernel/tests/kith-auth-secret-check           # kith-auth: set --stdin-json, acc
 
 ## Sync commit
 
-**b241d7bbd3372fb6bd31bf1024c10b179ef2645b** (origin/main on 2026-10-28; first written at ed2ceb63, after the secret
+**0872ea58892e0f648d4206bd64e455b25cdf2d5c** (2026-11-03: rust-rebuild at 0872ea58892e with F5 (kith-auth refuses built-in agents; narrower only). Re-run: `run.sh` every row as expected (14 rows), `cargo test cards::secret` and `a_secret_card_is_written_at_most_once` pass, `kith-auth-secret-check` passes. Read since the last sync: `secret.rs` gained the holder redirect, `openKeyCard` (an owner-opened card through the same `card_open`/provide write path), `answerable_by` and the card lane; the claim, slot, `write_key` and deny steps are unchanged. The resume claim added in `store/cards.rs` is a different claim from the write claim. Earlier: **b241d7bbd3372fb6bd31bf1024c10b179ef2645b** (origin/main on 2026-10-28; first written at ed2ceb63, after the secret
 cards, host d8713608 and kernel 7863e2e9, and the limit cards, adcfb2f7, which only add a branch after the secret
 routing in `respondPermission`). Between the two, the covered files changed only around access cards (the escape
 card's once grants in `store/cards.rs`, `cards::answer` writing the entry first), the grants ledger and other

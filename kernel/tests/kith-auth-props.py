@@ -94,7 +94,7 @@ OPS = st.one_of(
     st.tuples(st.just('unrevoke'), st.sampled_from(PEOPLE)),
     st.tuples(st.just('access'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(BEYOND)),
     st.tuples(st.just('access-rm'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS), st.sampled_from(BEYOND)),
-    st.tuples(st.just('hand'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS + ['ghost']), st.sampled_from(HAND)),
+    st.tuples(st.just('hand'), st.sampled_from(AGENTS + ['scratch']), st.sampled_from(PEOPLE + BOTS + ['ghost']), st.sampled_from(HAND)),
     st.tuples(st.just('job'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE])),
     st.tuples(st.just('job-rm'), st.sampled_from(AGENTS), st.sampled_from(PEOPLE + BOTS)),
     st.tuples(st.just('helper'), st.sampled_from(AGENTS), st.sampled_from(ALL + [EVERYONE]), st.sampled_from(['', '--once'])),
@@ -190,6 +190,11 @@ def covered(have, kind, value):
 def state_properties():
     """What must hold of the access table after any sequence of commands."""
     a = auth()
+    for who in ALL:
+        # (F5) a built-in agent (the kernel's own: scratch) is the owner's alone, whatever rows a hand edit left on it
+        if who != OWNER:
+            r = ka.resolve(a, 'scratch', who)
+            assert r['allowed'] is False, f'{who} may use the built-in scratch: {r}'
     for agent in AGENTS:
         rows = a['members'].get(agent, {})
         for who in ALL:

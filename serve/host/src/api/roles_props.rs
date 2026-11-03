@@ -483,6 +483,8 @@ pub(super) fn router_methods() -> Vec<String> {
         include_str!("peers.rs"),
         include_str!("threads.rs"),
         include_str!("delegations.rs"),
+        include_str!("kith_tools.rs"),
+        include_str!("scratch.rs"),
     ];
     let mut out = std::collections::BTreeSet::new();
     for src in sources {
