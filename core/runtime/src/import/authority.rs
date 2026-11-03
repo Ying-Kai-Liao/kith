@@ -270,7 +270,7 @@ pub(super) fn left_behind(auth: &Value) -> Vec<String> {
         return out;
     };
     for key in LEFT_TOP {
-        let n = match top.get(key) {
+        let n = match top.get(*key) {
             Some(Value::Object(o)) => o.len(),
             _ => 0,
         };

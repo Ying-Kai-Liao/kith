@@ -125,7 +125,7 @@ impl Fixture {
     }
 
     fn snapshots(&self) -> usize {
-        std::fs::read_dir(&self.layout.snapshots).map_or(0, std::iter::Iterator::count)
+        std::fs::read_dir(&self.layout.snapshots).map_or(0, Iterator::count)
     }
 
     fn count(&self, table: &str) -> i64 {

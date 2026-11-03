@@ -211,6 +211,7 @@ impl Core {
 
     /// `VACUUM INTO` a private copy in the snapshots folder, named for `label` (`kith migrate`'s imports take one before
     /// their first write). Returns the copy's path.
+    #[cfg(unix)]
     pub(crate) fn backup(&self, layout: &Layout, label: &str) -> Result<std::path::PathBuf> {
         perms::ensure_dir(&layout.snapshots)?;
         let nanos = SystemTime::now()
