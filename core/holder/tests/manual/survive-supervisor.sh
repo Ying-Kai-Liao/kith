@@ -17,7 +17,7 @@ exe=${1:-serve/host/target/debug/kith-holder}
 exe=$(cd "$(dirname "$exe")" && pwd)/$(basename "$exe")
 dir=$(mktemp -d "${TMPDIR:-/tmp}/khs.XXXXXX")
 label=dev.kith.holder-survive-test
-export KITH_HOLDER_SECRET=0123456789abcdef0123456789abcdef
+secret=0123456789abcdef0123456789abcdef
 
 cleanup() {
   launchctl remove "$label" 2>/dev/null || true
@@ -28,7 +28,7 @@ trap cleanup EXIT
 
 # The job is the would-be daemon: it starts the holder detached, then exits. launchd then cleans up the job.
 launchctl submit -l "$label" -o "$dir/job.out" -e "$dir/job.err" -- \
-  /usr/bin/env "KITH_HOLDER_SECRET=$KITH_HOLDER_SECRET" "$exe" start --dir "$dir" --idle-secs 60
+  /bin/sh -c 'printf "%s\n" "$1" | "$2" start --dir "$3" --idle-secs 60' sh "$secret" "$exe" "$dir"
 
 i=0
 while [ ! -S "$dir/holder.sock" ] && [ "$i" -lt 100 ]; do sleep 0.1; i=$((i + 1)); done

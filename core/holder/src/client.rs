@@ -120,6 +120,12 @@ impl Client {
         }
     }
 
+    /// True when this holder cannot outlive the process that started it (Windows, job without breakaway): what
+    /// `kith doctor` shows.
+    pub fn tied_to_starter(&self) -> bool {
+        self.welcome.tied_to_starter
+    }
+
     pub fn send(&mut self, kind: u8, id: u32, payload: &[u8]) -> io::Result<()> {
         wire::write_frame(&mut self.writer, kind, id, payload)?;
         self.writer.flush()
@@ -219,6 +225,7 @@ mod tests {
                 version: p::VERSION,
                 instance: "fake".into(),
                 pid: 1,
+                tied_to_starter: false,
                 generation: 1,
                 procs: vec![],
             };

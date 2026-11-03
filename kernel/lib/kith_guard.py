@@ -12,10 +12,11 @@ import os
 import re
 
 # Under the Kith state folder and the machine folder: whole folders that hold logins, tokens and every audience's index.
-SECRET_DIRS = ("secrets", "serve", "browsers", "bridge", "index", "room-ledger")
+# core/ is kith-core's folder: core.db and its -wal/-shm, core.lock, the owner token and the owner socket (runtime-design 9b).
+SECRET_DIRS = ("secrets", "serve", "browsers", "bridge", "index", "room-ledger", "core")
 # The same places as permission-rule patterns (Read/Edit), plus the database files that sit among them.
 SECRET_RULES = ("secrets/**", "serve/token", "serve/identity.json", "serve/*.db", "serve/*.db-*", "browsers/**", "bridge/**",
-                "index/**", "memory.db*")
+                "index/**", "memory.db*", "core/**")
 
 # Below any folder a run may write in (and below the working directory, which is read-only for a guest): files and
 # folders that Claude Code, git, an editor or a shell loads and runs on the owner's next call.
@@ -318,6 +319,7 @@ class Places:
             files.append(d + "/settings.json")
         for m in self.machine:
             trees.append(m + "/run/once")
+            trees.append(m + "/core")   # writing kith-core's files is trust: a steered run must ask first
         for a in ABS_TREES:
             trees += both(a)
         trees += self.package

@@ -18,7 +18,29 @@ use std::sync::Mutex;
 pub type Stream = std::os::unix::net::UnixStream;
 pub type Listener = std::os::unix::net::UnixListener;
 
+/// A clear error for a socket path the system cannot hold (sun_path is 104 bytes on macOS, 108 on Linux, with the
+/// ending NUL), instead of the bare "path must be shorter" the bind or connect would give.
+fn check_path_length(path: &Path) -> io::Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let sun_path = unsafe { std::mem::zeroed::<libc::sockaddr_un>() }
+        .sun_path
+        .len();
+    let len = path.as_os_str().as_bytes().len();
+    if len >= sun_path {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "the holder's socket path is too long ({len} bytes, at most {} here): {}. Use a shorter folder",
+                sun_path - 1,
+                path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 pub fn connect(path: &Path) -> io::Result<Stream> {
+    check_path_length(path)?;
     Stream::connect(path)
 }
 
@@ -30,6 +52,7 @@ pub fn endpoint(dir: &Path) -> PathBuf {
 /// The socket lives in a folder only this user can enter, and is itself 0600.
 pub fn listen(path: &Path) -> io::Result<Listener> {
     use std::os::unix::fs::PermissionsExt;
+    check_path_length(path)?;
     let listener = Listener::bind(path)?;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
     Ok(listener)
@@ -102,9 +125,10 @@ pub fn random_bytes(bytes: &mut [u8]) {
 }
 
 /// Starts `cmd` in its own session (closing the terminal it was started from, or killing its process group, won't
-/// end it), stdin and stdout to /dev/null, stderr to `log`. Reaped by a thread if it ends while we live.
-pub fn spawn_detached(mut cmd: Command, log: File) -> io::Result<()> {
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(log);
+/// end it), `input` on its stdin (then closed; it is how the secret travels, see `launch`), stdout to /dev/null,
+/// stderr to `log`. Reaped by a thread if it ends while we live.
+pub fn spawn_detached(mut cmd: Command, log: File, input: &[u8]) -> io::Result<()> {
+    cmd.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log);
     unsafe {
         cmd.pre_exec(|| {
             libc::setsid();
@@ -112,8 +136,18 @@ pub fn spawn_detached(mut cmd: Command, log: File) -> io::Result<()> {
         });
     }
     let mut child = cmd.spawn()?;
+    // The pipe holds it until the child reads, so this does not wait on the child; dropping stdin closes it.
+    let sent = child
+        .stdin
+        .take()
+        .map_or(Ok(()), |mut s| s.write_all(input));
     std::thread::spawn(move || child.wait());
-    Ok(())
+    sent
+}
+
+/// The holder was started inside a job that ends it with the starter. Never on Unix: it has its own session.
+pub fn tied_to_starter() -> bool {
+    false
 }
 
 // --- Processes -------------------------------------------------------------
@@ -152,16 +186,11 @@ impl Proc {
         }
     }
 
-    /// True once no process of the group is left (a zombie still counts: it goes when the leader is reaped).
+    /// True once no process of the group is left (a zombie still counts: it goes when the leader is reaped). Also
+    /// asked after the leader is reaped: the group id cannot be handed to a new group while a member lives, so
+    /// ESRCH means every member is gone. (The one blind spot: a new, unrelated group that reuses the id after the
+    /// whole group ended reads as non-empty; the entry goes at its ack.)
     pub fn tree_empty(&self) -> bool {
-        if self
-            .child
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .is_none()
-        {
-            return true;
-        }
         let gone = unsafe { libc::killpg(self.pid as i32, 0) } != 0;
         gone && io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
     }
@@ -319,5 +348,54 @@ pub fn lock_instance(dir: &Path) -> io::Result<Option<InstanceLock>> {
         Ok(None)
     } else {
         Err(err)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn a_long_socket_path_gets_a_clear_error() {
+        let long = Path::new("/tmp").join("x".repeat(120)).join("holder.sock");
+        for err in [
+            connect(&long).err().expect("connect fails"),
+            listen(&long).err().expect("listen fails"),
+        ] {
+            assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+            let text = err.to_string();
+            assert!(
+                text.contains("too long") && text.contains("shorter folder"),
+                "{text}"
+            );
+        }
+    }
+
+    /// The exited leader is reaped but a member of its group lives on: the tree is not empty until that ends.
+    #[test]
+    fn a_reaped_leader_with_a_live_group_is_not_an_empty_tree() {
+        let argv = ["sh", "-c", "sleep 300 & exit 0"].map(String::from);
+        let env = BTreeMap::new();
+        let started = spawn(&Spec {
+            argv: &argv,
+            env: &env,
+            cwd: "/",
+            mode: Mode::Pipes,
+            cols: 80,
+            rows: 24,
+        })
+        .unwrap();
+        let proc = started.proc;
+        proc.wait_exit();
+        proc.reap().unwrap();
+        // No sweep: the backgrounded sleep keeps the group alive.
+        assert!(!proc.tree_empty(), "a member of the group is still running");
+        unsafe { libc::killpg(proc.pid as i32, libc::SIGKILL) };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !proc.tree_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(proc.tree_empty());
     }
 }

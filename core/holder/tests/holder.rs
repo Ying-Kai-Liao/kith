@@ -5,8 +5,9 @@ use kith_holder::client::{Client, ConnectError};
 use kith_holder::proto::{self as p, AckState, KillState, Mode, Why};
 use kith_holder::{launch, wire};
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 const SECRET: &str = "0123456789abcdef0123456789abcdef";
@@ -45,6 +46,14 @@ impl Drop for Fixture {
         }
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+/// Starts `cmd` with the secret on its stdin, the way `launch::ensure` hands it to a holder.
+fn spawn_with_secret(cmd: &mut Command) -> std::process::Child {
+    let mut child = cmd.stdin(Stdio::piped()).spawn().unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    writeln!(stdin, "{SECRET}").unwrap();
+    child
 }
 
 fn env() -> BTreeMap<String, String> {
@@ -365,10 +374,7 @@ fn the_holder_and_its_process_outlive_the_process_that_started_it() {
     let fx = Fixture::new("survive");
     // `start` is the would-be daemon: it starts the holder detached and exits.
     let mut parent = Command::new(EXE);
-    parent
-        .args(["start", "--dir"])
-        .arg(&fx.dir)
-        .env(launch::SECRET_VAR, SECRET);
+    parent.args(["start", "--dir"]).arg(&fx.dir);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -380,7 +386,7 @@ fn the_holder_and_its_process_outlive_the_process_that_started_it() {
             });
         }
     }
-    let mut parent = parent.spawn().unwrap();
+    let mut parent = spawn_with_secret(&mut parent);
     assert!(parent.wait().unwrap().success());
     #[cfg(unix)]
     unsafe {
@@ -450,14 +456,7 @@ fn two_concurrent_starts_on_a_stale_socket_leave_one_holder() {
     std::fs::create_dir_all(&fx.dir).unwrap();
     // A socket file nobody listens on, as a crashed holder leaves it.
     drop(std::os::unix::net::UnixListener::bind(fx.dir.join("holder.sock")).unwrap());
-    let serve = || {
-        Command::new(EXE)
-            .args(["serve", "--dir"])
-            .arg(&fx.dir)
-            .env(launch::SECRET_VAR, SECRET)
-            .spawn()
-            .unwrap()
-    };
+    let serve = || spawn_with_secret(Command::new(EXE).args(["serve", "--dir"]).arg(&fx.dir));
     let mut kids = [serve(), serve()];
     std::thread::sleep(Duration::from_secs(2));
     let running = kids
@@ -471,4 +470,88 @@ fn two_concurrent_starts_on_a_stale_socket_leave_one_holder() {
         let _ = k.kill();
         let _ = k.wait();
     }
+}
+
+/// The environment a process was started with, as another process of this user can read it.
+#[cfg(unix)]
+fn environment_of(pid: u32) -> String {
+    if cfg!(target_os = "linux") {
+        let raw = std::fs::read(format!("/proc/{pid}/environ")).unwrap_or_default();
+        return String::from_utf8_lossy(&raw).replace('\0', " ");
+    }
+    let out = Command::new("ps")
+        .args(["-Eww", "-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+/// The secret reaches the holder over stdin: it is in neither the environment it was started with (readable by any
+/// process of this user for the holder's life) nor its command line.
+#[cfg(unix)]
+#[test]
+fn the_holders_environment_and_command_line_hold_no_secret() {
+    // A control, so a reader that sees nothing at all cannot make this pass.
+    let mut control = Command::new("sleep")
+        .arg("30")
+        .env("KITH_CONTROL_VAR", "control-value")
+        .spawn()
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert!(
+        environment_of(control.id()).contains("control-value"),
+        "this system's process listing shows environments"
+    );
+    let _ = control.kill();
+    let _ = control.wait();
+
+    let fx = Fixture::new("env");
+    fx.start();
+    let c = fx.client(1);
+    let seen = environment_of(c.welcome.pid);
+    assert!(
+        !seen.contains(SECRET),
+        "the holder's environment has the secret: {seen}"
+    );
+    assert!(!seen.contains("KITH_HOLDER_SECRET"), "{seen}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_holder_on_unix_is_not_tied_to_its_starter() {
+    let fx = Fixture::new("tied");
+    fx.start();
+    assert!(!fx.client(1).tied_to_starter());
+}
+
+/// One holder per folder, on every platform: a second lock on the folder is refused while the first is held, and
+/// works again once it is let go.
+#[test]
+fn only_one_lock_on_a_holder_folder_at_a_time() {
+    use kith_holder::platform;
+    let fx = Fixture::new("lock");
+    platform::private_dir(&fx.dir).unwrap();
+    let first = platform::lock_instance(&fx.dir)
+        .unwrap()
+        .expect("first lock");
+    assert!(platform::lock_instance(&fx.dir).unwrap().is_none());
+    drop(first);
+    assert!(platform::lock_instance(&fx.dir).unwrap().is_some());
+}
+
+/// A folder whose socket path is over the limit (macOS 104 bytes, Linux 108) is a clear error, not a bind failure.
+#[cfg(unix)]
+#[test]
+fn a_folder_with_too_long_a_socket_path_is_a_clear_error() {
+    let dir = std::env::temp_dir().join("x".repeat(120));
+    let err = launch::ensure(EXE.as_ref(), &dir, SECRET, Duration::from_secs(60)).unwrap_err();
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(err.to_string().contains("too long"), "{err}");
+}
+
+#[test]
+fn a_secret_is_one_line() {
+    assert_eq!(launch::read_secret(&b"abc\n"[..]).unwrap(), "abc");
+    assert!(launch::read_secret(&b"\n"[..]).is_err());
+    assert!(launch::read_secret(&b""[..]).is_err());
 }
