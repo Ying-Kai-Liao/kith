@@ -728,15 +728,27 @@ def record_quit(child):
 def run(agent, cmd):
     """Run cmd as a child of ours so the take-over note can follow it. The child gets the default signals back; we ignore ^C
     (the child decides what it means), pass TERM/HUP on and return its exit code (128+n for a signal)."""
+    # Under kith-stub the stub says on a status pipe whether it holds the lock ("locked", "busy"; nothing and EOF means it hit
+    # a lock error, exit 70): the engine can itself exit 75, 126 or 127, so the exit code alone cannot tell.
+    status_r = None
+    if os.path.basename(cmd[0]) == 'kith-stub' and '--status-fd' not in cmd and '--' in cmd:
+        status_r, status_w = os.pipe()
+        cut = cmd.index('--')
+        cmd = cmd[:cut] + ['--status-fd', str(status_w)] + cmd[cut:]
     child = os.fork()
     if not child:
         for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             signal.signal(s, signal.SIG_DFL)
         try:
+            if status_r is not None:
+                os.close(status_r)
+                os.set_inheritable(status_w, True)
             os.execvp(cmd[0], cmd)
         except OSError as e:
             print(f'kith: cannot run {cmd[0]}: {e}', file=sys.stderr)
             os._exit(127)
+    if status_r is not None:
+        os.close(status_w)
     signal.signal(signal.SIGINT, signal.SIG_IGN)
     for s in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(s, lambda n, _f: os.kill(child, n))
@@ -767,7 +779,27 @@ def run(agent, cmd):
         wake_owed()
     except Exception as e:  # noqa: BLE001
         print(f'kith-sessions: {e}', file=sys.stderr)
-    return os.waitstatus_to_exitcode(st)   # a signal death comes back as -n
+    code = os.waitstatus_to_exitcode(st)   # a signal death comes back as -n
+    if status_r is not None:
+        code = stub_verdict(status_r, code)
+    return code
+
+
+def stub_verdict(fd, code):
+    """What the stub said on its status pipe, against the exit code: "busy" is busy (75) whatever the engine would exit with,
+    "locked" then 126/127 means the engine never started, and no word at all (EOF) is a lock error, not an engine exit."""
+    try:
+        with os.fdopen(fd) as f:
+            word = f.read().strip()
+    except OSError:
+        return code
+    if word == 'busy':
+        return 75
+    if word == 'locked' and code in (126, 127):
+        print(f'kith: the engine did not start ({code}); it never ran', file=sys.stderr)
+    elif not word and code == 70:
+        print('kith: the conversation lock could not be taken (not busy); this run did not start', file=sys.stderr)
+    return code
 
 
 def wake_owed():
