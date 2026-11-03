@@ -3,8 +3,8 @@
 #
 #   kith init [--from <github-user>]   set kith up on this Mac, or bring yours back on a new one (kith-init)
 #   kith doctor                     check the install: links, repos, agents, services, plugin, background jobs
-#   kith backup run [--yes|--check|--nightly [off]]   everything to private GitHub repos, making the missing ones; --check says what isn't; --nightly at 03:00 (kith-state)
-#   kith backup list|add|remove ...                      the backup chain kith serve moves to when the agent's own harness runs out of usage (kith-account)
+#   kith backup [--yes|--check|--nightly [off]]   everything to private GitHub repos, making the missing ones; --check says what isn't; --nightly at 03:00 (kith-state)
+#   kith backup list|add|remove ...                      deprecated aliases of kith account add|remove|order (kith-account); the accounts live in `kith account`
 #   kith account add|list|remove ... [--json]            extra Claude / Codex logins for that chain, one folder each (kith-account); add --json returns the login command instead of running it
 #   kith account use <id> [--agent A] | --reset           the main account an agent's runs use; the chain sits on top of it
 #   kith ls [--json]                list agents (--json: name, description, home, model, effort, harness, for programs)
@@ -22,15 +22,22 @@
 #   kith <agent> --launch-json [--hold PID] [...]   for a program that starts the run itself (kith serve): one JSON object on stdout
 #                                 with everything the run needs (env, cwd, system_prompt, settings, MCP servers, directories,
 #                                 claude_args to give claude as-is). Claude and Codex (Codex: settings and claude_args null); ignores
-#                                 KITH_CLAUDE_ARGS/KITH_OUTPUT/KITH_RESUME. --backup ID launches that backup chain entry instead (exit 4 when it
-#                                 can't run); "backup", "provider", "account" and "account_id" say which login the run is on.
-#                                 Without --backup a run is on the agent's main account (kith account use), the default login
-#                                 unless one is chosen; a session is resumed only under the account it was made under.
-#   kith <agent> --backup ID [task]  a normal run (interactive or one-shot) on that backup chain entry: claude:<name> and claude-api:<profile>
+#                                 KITH_CLAUDE_ARGS/KITH_OUTPUT/KITH_RESUME. --account ID launches that account instead (--backup is the old
+#                                 name; exit 4 when it can't run); "backup", "provider", "account" and "account_id" say which login the
+#                                 run is on. Without --account a launch is on the agent's main account (kith account pin, else the first
+#                                 of its set; a host picks per turn from --accounts-json); a session is resumed only under the account
+#                                 it was made under. Every launch notes last_started for its account (kith account list)
+#   kith <agent> --account ID [task]  a normal run (interactive or one-shot) on that account: claude:<name> and claude-api:<profile>
 #                                 on Claude Code, codex[:<name>] on Codex; exit 4 when it can't run. KITH_PROVIDER/KITH_ACCOUNT say which.
-#                                 A one-shot another run started (kith ask) or a schedule started, with no --backup, skips chain entries
-#                                 marked out and moves to the next on a usage-limit failure (marks kept in serve/kernel-backups-out.json).
-#   kith <agent> --backups-json     for a program: the agent's backup chain as one JSON object, each entry with whether it is ready
+#                                 Without --account a terminal run starts on `kith account pick <agent>`'s first candidate (policy fill or
+#                                 spread, pins, accounts marked out skipped). A one-shot another run started (kith ask) or a schedule
+#                                 started also moves to the next candidate on a usage-limit failure, marking the account out for later
+#                                 runs (the kernel's state file, <state>/accounts/state.json; kith account out|clear edit it)
+#   kith <agent> --accounts-json    for a program (the host): the agent's accounts as one JSON object: its set in order, each with status
+#                                 (ready, out until, signed out), usage and last start, the policy, pin and pick's candidate order
+#                                 (docs/accounts.md is the contract)
+#   kith <agent> --backups-json     for a program: the older view of the same, the agent's accounts as a chain (primary first), each entry
+#                                 with whether it is ready; no usage or out marks in it
 #                                 Nothing in it points at a temp file. The pinned snapshot (KITH_AGENT_DIR) is kept while --hold's
 #                                 pid (default: the caller) lives; pass the long-lived process's pid. KITH_VIA=<name> tags the cost ledger.
 #   kith versions|pin|unpin|rollback <agent> [VERSION]   agent package versions (kith-pkg)
@@ -297,6 +304,7 @@ fi
 builtin=0; [[ $src_pkg == "$KITH"/agents/* ]] && builtin=1
 if [[ $builtin == 1 && ${1:-} =~ ^(keep|thread)$ ]]; then exec "$KITH/bin/kith-scratch" "$agent" "$@"; fi
 [[ ${1:-} == --backups-json ]] && exec python3 "$KITH/lib/kith_accounts.py" backups-json "$agent" "$src_pkg/agent.md"
+[[ ${1:-} == --accounts-json ]] && exec python3 "$KITH/lib/kith_accounts.py" accounts-json "$agent" "$src_pkg/agent.md"
 # kith AGENT --launch-json: the Rust core assembles the launch when `launch` is switched (lib/core-switched.txt) and a
 # program is here, else the script below does. Before anything is asked of kith-auth, so a "just this once" grant is taken
 # by one side only. The agent exists and is no name of a `kith kernel launch` piece (prompt, settings, mcp).
@@ -462,7 +470,7 @@ while [[ $# -gt 0 ]]; do
     --resume)     resume_thread=${2:?kith: --resume needs a thread id or a Claude session id}; shift 2 ;;
     -r)           if [[ -n ${2:-} && $2 != -* ]]; then resume_thread=$2; shift 2; else resume_pick=pick; shift; fi ;;
     -c|--continue) resume_pick=latest; shift ;;
-    --backup)     backup=${2:?kith: --backup needs a chain entry id}; shift 2 ;;
+    --account|--backup)   backup=${2:?kith: $1 needs an account id}; shift 2 ;;   # --backup: the old name
     -p|--project) project=$2; shift 2 ;;
     -m|--model)   KITH_MODEL=$2; shift 2 ;;
     -e|--effort)  KITH_EFFORT=$2; shift 2 ;;
@@ -503,8 +511,9 @@ if [[ -n $resume_thread || -n $resume_pick ]]; then
   fi
 fi
 # A one-shot that no host is picking the account for (another run's `kith ask`, a schedule: KITH_AGENT or
-# KITH_BACKUP_CHAIN) walks the backup chain: entries marked out are skipped, and a usage-limit failure moves to the next
-# one (lib/kith_accounts.py run-chain, each attempt a whole `kith AGENT --backup ID` run). Not for an explicit --backup,
+# KITH_BACKUP_CHAIN) walks the candidates `kith account pick` lists: accounts marked out are skipped, and a usage-limit failure
+# marks the account out and moves to the next (lib/kith_accounts.py run-chain, each attempt a whole `kith AGENT --account ID`
+# run). Not for an explicit --account,
 # --launch-json (the host picks), --print, a terminal's --resume/-r/-c, or an attempt of the walk itself.
 if [[ $# -gt 0 && -z $backup && $launch -eq 0 && $print -eq 0 && -z $resume_thread && -z $resume_pick && -z ${KITH_CHAIN_CHILD:-} ]] \
    && [[ $p_owner == 1 ]] && [[ $nested -eq 1 || -n ${KITH_BACKUP_CHAIN:-} ]]; then
@@ -590,37 +599,53 @@ elif [[ $pkg == "$src_pkg" ]]; then runs=$(mktemp -d); else runs=$pkg/.runs; mkd
 field() { awk -v k="$1" 'NR==1 && /^---$/ {fm=1; next} fm && /^---$/ {exit} fm && $1 == k":" {sub(/^[^:]*:[ \t]*/, ""); print; exit}' "$pkg/agent.md" 2>/dev/null || true; }
 own=$(field harness); own=${own:-claude}; [[ $own == claude-code ]] && own=claude
 harness=${KITH_HARNESS:-$own}; [[ $harness == claude-code ]] && harness=claude
-# Which login answers: a backup chain entry (--backup ID, with --launch-json or for a normal run) replaces the harness
-# and login; else the agent's main account (kith account use; lib/kith_accounts.py) on its own harness, the default
-# login when none is chosen. Both go through the same launch-env. The config dir a run of kith's set (KITH_ACCOUNT_VAR)
-# is not inherited: a helper agent runs on its own main account.
+# Which login answers: an explicit account (--account ID, with --launch-json or for a normal run) replaces the harness
+# and login; else a terminal run takes the first candidate of `kith account pick` (owner runs: the set in policy order, pins,
+# accounts that are out skipped) and a launch for a program, or a guest's run, the agent's static main account (its pin, else
+# the first of its set; the host picks per turn itself). Both go through the same launch-env. --record notes last_started
+# for the account (not for --print, which starts nothing). The config dir a run of kith's set (KITH_ACCOUNT_VAR) is not
+# inherited: a helper agent runs on its own account.
 case ${KITH_ACCOUNT_VAR:-} in CLAUDE_CONFIG_DIR|CODEX_HOME) unset "$KITH_ACCOUNT_VAR" ;; esac
 unset KITH_ACCOUNT_VAR HQ_ACCOUNT_VAR
 account_id=$harness
+record=(); [[ $print -eq 1 ]] || record=(--record)
 use_account() {   # use_account ID: the entry's env, or exit 4 with one line
   local be
-  be=$(python3 "$KITH/lib/kith_accounts.py" launch-env "$agent" "$1") || exit 4
+  be=$(python3 "$KITH/lib/kith_accounts.py" launch-env "$agent" "$1" ${record[@]+"${record[@]}"}) || exit 4
   eval "$be"
   harness=$backup_harness acct=$backup_account account_id=${1%%@*}   # the ledger and sessions know the login, not the entry's model
 }
+# The account a session was made under (the cost ledger's account_id; one it doesn't know is taken as it is): --resume runs
+# under it, a handed-on session (KITH_RESUME) is continued on it when it is a ready candidate.
+made=""
+if [[ -n ${r_sid:-} || -n ${KITH_RESUME:-} ]]; then
+  made=$(python3 "$KITH/lib/kith_accounts.py" session-account "${r_sid:-$KITH_RESUME}" 2>/dev/null || true)
+fi
 if [[ -n $backup ]]; then
   use_account "$backup"
+elif [[ -n ${r_sid:-} && -n $made ]]; then
+  # Straight to the session's account: no pick (it would note a start on an account this run never uses).
+  main_now=$(python3 "$KITH/lib/kith_accounts.py" main-id "$agent" "$pkg/agent.md" 2>/dev/null || true)
+  [[ $made == "$main_now" ]] || echo "kith: that session was made under $made, so it runs under $made (main account for $agent: ${main_now:-$account_id})" >&2
+  use_account "$made"   # not runnable: exit 4 with what makes it ready
 elif [[ $harness == "$own" ]]; then
-  be=$(python3 "$KITH/lib/kith_accounts.py" main-env "$agent" "$pkg/agent.md") || exit 4
+  by_state=(); [[ $launch -eq 0 && $p_owner == 1 ]] && by_state=(--state)
+  prefer=(); [[ -n $made && ${#by_state[@]} -gt 0 ]] && prefer=(--prefer "$made")
+  be=$(python3 "$KITH/lib/kith_accounts.py" main-env "$agent" "$pkg/agent.md" ${by_state[@]+"${by_state[@]}"} ${prefer[@]+"${prefer[@]}"} ${record[@]+"${record[@]}"}) || exit 4
   eval "$be"
   acct=$backup_account account_id=$main_id
+  # The pick can be an account of another harness (a Claude agent's Codex fallback): it runs there, as --account would.
+  if [[ -n $backup_harness && $backup_harness != "$harness" ]]; then harness=$backup_harness; KITH_MODEL=""; unset HQ_MODEL; fi
 fi
-# A session is resumed only under the account it was made under (the cost ledger's account_id; one it doesn't know is
-# taken as it is). --resume runs under that account; a session handed on (KITH_RESUME: a channel, kith ask -c) starts anew.
+# A session is resumed only under the account it was made under. A session handed on (KITH_RESUME: a channel, kith ask -c)
+# whose account is not the one this run is on starts anew.
 if [[ -n ${r_sid:-} || -n ${KITH_RESUME:-} ]]; then
-  r_check=${r_sid:-$KITH_RESUME}
-  made=$(python3 "$KITH/lib/kith_accounts.py" session-account "$r_check" 2>/dev/null || true)
   if [[ -n $made && $made != "$account_id" ]]; then
     if [[ -n ${r_sid:-} && -z $backup ]]; then
       echo "kith: that session was made under $made, so it runs under $made (main account for $agent: $account_id)" >&2
       use_account "$made"   # not runnable: exit 4 with what makes it ready
     elif [[ -n ${r_sid:-} ]]; then
-      echo "kith: that session was made under $made, not $backup: kith $agent --resume $resume_thread --backup $made" >&2; exit 4
+      echo "kith: that session was made under $made, not $backup: kith $agent --resume $resume_thread --account $made" >&2; exit 4
     else
       echo "kith: session $KITH_RESUME was made under $made, not $account_id; starting a new one" >&2
       unset KITH_RESUME HQ_RESUME
