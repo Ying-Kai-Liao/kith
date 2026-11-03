@@ -232,7 +232,8 @@ pub fn current_cli() -> Cli {
 /// A run the host starts has an empty environment, so the host names it: beside this program (a service copy in
 /// `~/.kith/serve/bin`, a checkout's target folder), in the Mac app's bundle (`Resources/kith-serve` with
 /// `Resources/kith/bin/kith-stub`), or beside the real path of the `kith` on PATH (`install.sh` links only `kith`).
-pub const STUB_ENV: &str = "KITH_STUB_BIN";
+#[cfg(not(test))]
+const STUB_ENV: &str = "KITH_STUB_BIN";
 
 fn executable(p: &Path) -> bool {
     #[cfg(unix)]
@@ -261,7 +262,7 @@ pub fn find_stub(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// `(KITH_STUB_BIN, program)` for a process the host starts, resolved once: an explicit `KITH_STUB_BIN` that runs wins.
-/// None when there is no stub (the kernel then warns and runs unlocked, or refuses under KITH_REQUIRE_STUB=1).
+/// None when there is no stub (the kernel then warns and runs unlocked, or refuses under `KITH_REQUIRE_STUB=1`).
 pub fn stub_env() -> Option<(String, String)> {
     // Unit tests compare the environments of the runs they see; `find_stub` has its own test.
     #[cfg(test)]
