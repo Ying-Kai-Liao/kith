@@ -42,6 +42,9 @@ pub(crate) struct HolderConfig {
     pub command: Option<Vec<String>>,
     /// How long a command link may take to answer its hello before it is ended and tried again later.
     pub handshake: Duration,
+    /// The lease the core grants the holder: it renews at a third of this, and a holder that hears nothing for this
+    /// long kills the processes the core tagged `kill_on_lease_loss`. Nothing is tagged yet.
+    pub lease: Duration,
 }
 
 impl Default for HolderConfig {
@@ -55,6 +58,7 @@ impl Default for HolderConfig {
             kill_wait: Duration::from_secs(10),
             command: None,
             handshake: Duration::from_secs(15),
+            lease: Duration::from_secs(30),
         }
     }
 }
@@ -235,6 +239,46 @@ fn nothing_listens(e: &std::io::Error) -> bool {
     matches!(e.kind(), NotFound | ConnectionRefused)
 }
 
+/// Ends the renewal thread when the link's loop returns, however it returns.
+struct RenewalGuard(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for RenewalGuard {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Renews the lease at once, then from a thread of its own every third of the lease: never behind a listing or a
+/// reconcile, which can take long enough on a loaded machine for a leftover deadline to lapse.
+fn start_renewing(
+    shared: &Arc<Shared>,
+    client: &Client,
+    cfg: &HolderConfig,
+) -> std::result::Result<RenewalGuard, String> {
+    let renewer = client.renewer();
+    let lease = cfg.lease;
+    renewer
+        .renew(lease)
+        .map_err(|e| format!("the holder stopped answering: {e}"))?;
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (stop, shared) = (done.clone(), shared.clone());
+    let every = (lease / 3).max(Duration::from_millis(1));
+    std::thread::spawn(move || {
+        let stopped = || stop.load(std::sync::atomic::Ordering::Relaxed) || shared.stopping();
+        let mut due = Instant::now() + every;
+        while !stopped() {
+            std::thread::sleep(Duration::from_millis(10).min(every));
+            if Instant::now() >= due {
+                if renewer.renew(lease).is_err() {
+                    return; // the link is gone; its loop notices on its next listing
+                }
+                due = Instant::now() + every;
+            }
+        }
+    });
+    Ok(RenewalGuard(done))
+}
+
 /// Reconciles the record with this hello, then keeps the record current until the connection ends. `Ok` means the
 /// supervisor was told to stop; `Err` carries why the link was lost.
 fn connected(
@@ -242,6 +286,8 @@ fn connected(
     mut client: Client,
     cfg: &HolderConfig,
 ) -> std::result::Result<(), String> {
+    // First thing after the welcome: a deadline left over from before this link must not lapse while we reconcile.
+    let _renewing = start_renewing(shared, &client, cfg)?;
     // A holder reached through a command runs on another machine: its pids mean nothing here, so no start time is
     // read and no process group is ended on this machine's account, and the local holder's record is left alone.
     let remote = cfg.command.is_some();
