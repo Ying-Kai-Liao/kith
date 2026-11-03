@@ -1,5 +1,5 @@
 > **Source and links.** Copied unchanged from the architect's `designs/2026-11-03-runtime-shapes/design.md`
-> (below the line); section 4's writer lock and Verified round 3 copied again on 2026-11-03. Page: <https://claude.ai/artifact/J7HAXmxMBD3pK9qDmRLWAT>. The TLA+ model (`Runtime.tla`,
+> (below the line); section 4's writer lock and Verified round 3 copied again on 2026-11-03 and Verified round 4 copied on 2026-11-04. Page: <https://claude.ai/artifact/J7HAXmxMBD3pK9qDmRLWAT>. The TLA+ model (`Runtime.tla`,
 > `results.md`) lives in the architect's `model/` folder next to `design.md`, not in this repo. This design
 > supersedes [core-design.md](core-design.md) from A4 onward; the order of work is its section 7 (M0-M5), which
 > replaced A4-A7 in [one-bot-model.md](one-bot-model.md).
@@ -111,9 +111,9 @@ live turn:
   process dies; the lock file is never deleted, since a lock on an unlinked inode is a second writer). Whoever runs
   the engine holds it for as long as the engine writes: for a terminal engine the holder spawns, its start stub
   (taken before the engine starts, kept to the engine's exit, not dropped when the core dies; start step 3), the
-  holder per turn for a warm headless process (taken at
+  resident stub holding each warm turn's lock (passed over the socket by the holder, taken at
   `claimed -> running`, released at turn end), and a `--direct` run for its own life. A holder that can't take it
-  answers `busy`; the core ends that claim and requeues the turn. Why: without it, a `--direct` run that found no
+  answers `busy`; the core ends that claim and parks the turn (see below). Why: without it, a `--direct` run that found no
   core writes a mark a later core never sees, and a startup scan doesn't help (the run's check and its write are two
   steps). The core.db claim stays the queue and the record; the lock is what keeps two engines apart.
   Refined after a second, independent architect's review (2026-11-03):
@@ -134,9 +134,16 @@ live turn:
   - **A hand cut off from its brain**: `--direct` there starts an announced offline branch ("brain unreachable:
     starting an offline branch of X") that takes no wakes, waiters, children or schedules, and is imported later as
     a separate thread, never merged on its own. `--no-fork` refuses instead.
-  Model owed before M3 (round 4): holder crash with and without the stub, a lock held by an escaped child (Leak),
-  revoke killing a lock holder ("gone" only once the group is empty), the park and level-triggered wake under
-  NoLostTurn, take-over.
+  Round 4 checked this refinement (see Verified): a holder crash with and without the stub, an escaped child,
+  a revoke killing a lock holder, the park and its wake, and a take-over. It made two rules explicit:
+  - **The claim id rides on everything:** the spawn message, the holder's job, the stub's redeem, every report
+    (done, busy, exit) and the holder's reconcile list. The holder runs only the job of the current claim id, and
+    the core acts only on reports for its current claim id. A late spawn for an older claim of the same turn
+    otherwise reads "busy" against the turn's own stub and parks a running turn.
+  - **Reports are kept per claim id until acked, never overwritten:** a busy report must not replace an unacked
+    "done".
+  "Park with no claim" isn't required by any modelled property (keeping the claim passed too). It stays for the
+  reasons above: revoke has nothing to chase, and the conversation doesn't look claimed while it waits.
 - **Headless turns** (app, schedule, ask, wake): the core speaks ACP to the engine (it links kith-acp) over pipes the
   holder owns. One warm process may serve several sessions (today's turn.rs), so the claim is per conversation per
   turn: the core claims before each `session/prompt` and releases at turn end, not at process exit (Opus 7).
@@ -398,6 +405,21 @@ Round 3, the writer lock (model: designs/2026-11-03-writer-lock/model/WriterLock
 | Lock file never deleted | pass | yes: unlink variant (71) |
 
 Not modelled in round 3: more than one machine or conversation, revoke inside it, a holder crash, the start stub.
+
+Round 4, the refined writer lock (model: designs/2026-11-03-writer-lock/model/WriterLock4.tla, results4.md;
+1 conversation, 2 turns, 1 core crash, 1 holder crash, 1 revoke, 1 take-over, 1 escaped child; all runs by the
+architect; 2026-11-04):
+
+| Property | Result | Broken variant fails? |
+|---|---|---|
+| Safety: NoTwoWriters, NoLostTurn, gone means empty, stale never prompted, lock file never deleted (2 direct runs, revoke + take-over) | pass, 39,444,026 states (group survives a holder crash); 22,820,510 (group dies with it) | yes: stub exits before its engine (NoTwoWriters, 22,913); holder holds warm locks itself (NoTwoWriters, 3,037); "gone" at kill sent (4,625); no hash check (stale prompted, 22,289); hash read at ack (22,519) |
+| Turns get done (weak fairness, 1 direct run) | pass with revoke (1,536,823 / 781,021) and with take-over (716,486 / 306,224), survive / die | yes: engine holds the fd and an escaped child keeps it (165,537); wake only on a release event (8,132) |
+| Busy keeps the claim instead of parking without one | passes too (186,406; with revoke 1,409,331; with take-over 633,232) | n/a: not a modelled requirement, kept for revoke and display |
+
+Found: the first model had no claim ids and one report slot. Liveness failed three ways until the model followed
+the design (ids on every message, job, report and reconcile entry; reports kept until acked).
+Not checked: liveness with 2 direct runs, or with a revoke and a take-over together (out of TLC's 512 MB heap;
+no violation in 3.36M states before that).
 
 Not modelled in round 2: two conversations together with crashes in the warm and fencing runs, brain failover, more
 than one hand, reordering beyond FIFO per sender, the cloud sync lease inside the claim transaction, bots.
