@@ -244,3 +244,19 @@ async fn a_persons_launch_with_access_carries_what_their_conversation_was_given(
     assert!(!owner.settings.as_ref().unwrap().to_string().contains(&docs));
     let _ = std::fs::remove_file(&sock);
 }
+
+#[tokio::test]
+async fn a_guests_launch_without_a_run_socket_still_carries_the_guest_domains_of_the_agent() {
+    let k = Kernel::new().await;
+    k.auth(&["member", "house", "sam", "preset=guest"]);
+    k.auth(&["agent-access", "house", "domain", "pypi.org"]);
+    let domains = |l: &hq::Launch| l.settings.as_ref().unwrap()["sandbox"]["network"]["allowedDomains"].clone();
+
+    let plain = k.launch(Some("sam")).await.unwrap();
+    assert_eq!(domains(&plain), serde_json::json!(["pypi.org"]), "no access token, still the host kept for everyone");
+    let owner = k.launch(None).await.unwrap();
+    assert!(owner.settings.as_ref().unwrap().get("sandbox").is_none(), "the owner's run is unchanged");
+    k.auth(&["agent-access", "house", "domain", "pypi.org", "--rm"]);
+    let after = k.launch(Some("sam")).await.unwrap();
+    assert!(domains(&after).is_null(), "taken away, gone at the next launch");
+}
