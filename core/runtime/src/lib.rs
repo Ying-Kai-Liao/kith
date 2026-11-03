@@ -16,7 +16,9 @@
 //!   (the caller then asks the daemon). Two embedded commands at once behave the same way: the second one finds the
 //!   lock held.
 
-// Nothing outside the tests calls it until the host and the CLI are switched to core.db (M2-9 onward).
+// Nothing outside the tests calls it until the host and the CLI are switched to core.db (M2-9 onward). Unix only for
+// now: the rules it reuses (`kith_kernel::secrets`) are.
+#[cfg(unix)]
 #[allow(dead_code)]
 mod authority;
 mod call;

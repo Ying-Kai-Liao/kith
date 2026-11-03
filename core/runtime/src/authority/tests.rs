@@ -86,7 +86,6 @@ fn got<T>(r: crate::error::Result<T>) -> Result<T, String> {
 fn same(auth: &Value, c: &Ctx) -> Result<(), String> {
     let conn = db_of(auth);
     let core = Authority::new(&conn, c);
-    let file = Rules::new(c, auth);
     let people = ids(auth);
     for p in &people {
         let (a, b) = (secrets::cut_off(auth, p), core.cut_off(p).unwrap());
@@ -98,14 +97,14 @@ fn same(auth: &Value, c: &Ctx) -> Result<(), String> {
                 for once in [false, true] {
                     let q = format!("({p:?}, {agent:?}, {via:?}, once {once})");
                     let (a, b) = (
-                        said(file.may(p, agent, via, once)),
+                        said(Rules::new(c, auth).may(p, agent, via, once)),
                         got(core.may(p, agent, via, once)),
                     );
                     if a != b {
                         return Err(format!("may{q}: file {a:?}, core {b:?}"));
                     }
                     let (a, b) = (
-                        said(file.resolve(agent, p, via, once)),
+                        said(Rules::new(c, auth).resolve(agent, p, via, once)),
                         got(core.resolve(agent, p, via, once)),
                     );
                     if a != b {
@@ -113,7 +112,7 @@ fn same(auth: &Value, c: &Ctx) -> Result<(), String> {
                     }
                     let id = secrets::canonical(auth, p);
                     let want = if secrets::parent_of(auth, &id).is_some() {
-                        Some(said(file.resolve(agent, &id, via, once)))
+                        Some(said(Rules::new(c, auth).resolve(agent, &id, via, once)))
                     } else {
                         None
                     };
