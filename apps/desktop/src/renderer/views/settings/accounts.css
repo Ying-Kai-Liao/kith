@@ -8,3 +8,4 @@
 .accounts-fix { flex-wrap: wrap; }
 .accounts-code { font-family: var(--mono); font-size: var(--text-caption); padding: 1px 6px; border-radius: var(--radius-s); border: 1px solid var(--border); user-select: all; overflow-wrap: anywhere; }
 .accounts-agent { width: 100%; }
+.accounts-warning { display: block; white-space: pre-wrap; text-align: left; }

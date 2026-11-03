@@ -52,6 +52,12 @@ export class AccountsStore extends Observable {
     }
   }
 
+  clearError() {
+    if (this.error === null) return
+    this.error = null
+    this.changed()
+  }
+
   /** Sends one write; its answer is the new read. A failure shows its words and keeps what was shown. */
   private write(send: (client: HostClient) => Promise<Accounts>): Promise<boolean> {
     this.error = null

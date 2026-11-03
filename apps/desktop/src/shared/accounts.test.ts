@@ -71,6 +71,7 @@ test('status lines say what the user needs', () => {
 test('accountAdd answers a warning to confirm, or the login terminal', () => {
   assert.deepEqual(parseAccountAdd({ ok: false, error: 'x', warning: 'Be careful.' }), { kind: 'warning', warning: 'Be careful.' })
   assert.deepEqual(parseAccountAdd({ account: { ok: true, id: 'codex:deep' }, term: 't1' }), { kind: 'term', term: 't1', id: 'codex:deep' })
+  assert.equal(parseAccountAdd({ ok: false, warning: '' }).kind, 'warning')
   assert.throws(() => parseAccountAdd({ ok: false, error: 'nope' }), /nope/)
   assert.throws(() => parseAccountAdd({}), /terminal/)
 })
@@ -78,4 +79,6 @@ test('accountAdd answers a warning to confirm, or the login terminal', () => {
 test('only named logins can be removed', () => {
   const a = parseAccounts(sample)
   assert.deepEqual(a.accounts.map(isExtra), [false, true, true])
+  const api = parseAccounts({ accounts: [{ id: 'claude-api:main', harness: 'claude', account: 'main', kind: 'api-key' }] })
+  assert.equal(isExtra(api.accounts[0]!), false)
 })

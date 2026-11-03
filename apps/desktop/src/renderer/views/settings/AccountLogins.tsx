@@ -29,7 +29,7 @@ export function AccountLogins({ store, host }: { store: AccountsStore; host: Bot
     <VStack gap={8} className="accounts-logins">
       <HStack gap={8}>
         <Text size="callout" tone="secondary" grow>Logins you added</Text>
-        <Button kind="secondary" disabled={busy} onClick={() => setAdding({ harness: 'claude', name: '' })}>Add login</Button>
+        <Button kind="secondary" disabled={busy} onClick={() => { store.clearError(); setAdding({ harness: 'claude', name: '' }) }}>Add login</Button>
       </HStack>
       {logins.length === 0 && store.loaded ? (
         <Text size="callout" tone="secondary">None. Add a Claude or Codex login to use in the set.</Text>
@@ -40,7 +40,7 @@ export function AccountLogins({ store, host }: { store: AccountsStore; host: Bot
           <span className="accounts-spacer" />
           {/* Adding it again makes no second folder: kith hands back the same login to run. */}
           {!account.loggedIn && (account.harness === 'claude' || account.harness === 'codex') && account.account
-            ? <Button kind="secondary" disabled={busy} onClick={() => setAdding({ harness: account.harness as Harness, name: account.account! })}>Log in</Button>
+            ? <Button kind="secondary" disabled={busy} onClick={() => { store.clearError(); setAdding({ harness: account.harness as Harness, name: account.account! }) }}>Log in</Button>
             : null}
           <IconButton title={`Remove ${account.id}`} icon="trash" size={24} disabled={busy} onClick={() => setRemoving(account)} />
         </HStack>
@@ -127,7 +127,7 @@ function AddLogin({ store, initial, done }: { store: AccountsStore; initial: { h
       <Dialog
         open={warning !== null}
         title="Add another Claude account?"
-        message={warning}
+        message={warning === null ? null : <span className="accounts-warning">{warning}</span>}
         actions={[{ title: 'Add account', action: () => void add(true) }]}
         onClose={() => setWarning(null)}
       />

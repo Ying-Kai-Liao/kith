@@ -146,7 +146,7 @@ function AccountList({ store, agent, ids, empty }: { store: AccountsStore; agent
           <DropdownMenu
             className="styled-button secondary"
             title="Add to the list"
-            items={() => options.map((a) => ({ title: a.ready ? a.id : `${a.id} (${statusText(a).text})`, action: () => save(withId(ids, a.id)) }))}
+            items={() => options.map((a) => ({ title: a.ready ? a.id : `${a.id} (${statusText(a).text})`, disabled: store.saving, action: () => !store.saving && save(withId(ids, a.id)) }))}
           >
             Add to the list
           </DropdownMenu>
@@ -201,7 +201,7 @@ function AgentCard({ store, name, view }: { store: AccountsStore; name: string; 
         <DropdownMenu
           className="styled-button secondary"
           title={`Pin an account for ${name}`}
-          items={() => pinChoices.map((a) => ({ title: a.id, action: () => void store.pin(name, a.id, view.pin?.only ?? false) }))}
+          items={() => pinChoices.map((a) => ({ title: a.id, disabled: store.saving, action: () => !store.saving && void store.pin(name, a.id, view.pin?.only ?? false) }))}
         >
           {view.pin ? 'Change' : 'Pin'}
         </DropdownMenu>
@@ -224,11 +224,11 @@ function AgentCard({ store, name, view }: { store: AccountsStore; name: string; 
         <DropdownMenu
           className="styled-button secondary"
           title={`Cross-harness for ${name}`}
-          items={() => [
-            { title: 'On', action: () => void store.setCrossHarness(name, 'on') },
-            { title: 'Off', action: () => void store.setCrossHarness(name, 'off') },
-            { title: 'Follow the computer', action: () => void store.setCrossHarness(name, 'reset') },
-          ]}
+          items={() => (['on', 'off', 'reset'] as const).map((value) => ({
+            title: value === 'on' ? 'On' : value === 'off' ? 'Off' : 'Follow the computer',
+            disabled: store.saving,
+            action: () => !store.saving && void store.setCrossHarness(name, value),
+          }))}
         >
           Change
         </DropdownMenu>

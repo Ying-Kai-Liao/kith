@@ -149,7 +149,8 @@ export function SetupTerminalView({ backend, step, method, back, open, title: gi
           return
         }
         termId = id
-        sent = size
+        // A terminal another caller started was sized by that caller (a guess), so send the fitted size.
+        sent = custom.current.open ? { cols: 0, rows: 0 } : size
         syncSize()
         // Reattach after a dropped connection; the host replays the whole scrollback.
         while (exited === null && !cancelled) {

@@ -152,8 +152,8 @@ export function parseAccounts(raw: unknown): Accounts {
 export function parseAccountAdd(raw: unknown): AccountAdd {
   const r = isObject(raw) ? raw : {}
   if (r.ok === false) {
-    const warning = str(r.warning)
-    if (warning) return { kind: 'warning', warning }
+    // The caller must still be able to confirm when the computer sent no text.
+    if ('warning' in r) return { kind: 'warning', warning: str(r.warning)?.trim() || 'Adding another Claude account is your decision.' }
     throw new Error(str(r.error) ?? 'The computer would not add the account.')
   }
   const term = str(r.term)
@@ -243,4 +243,4 @@ export const pinText = (p: AccountPin) => (p.only ? `${p.agent} (only)` : p.agen
 export const loginId = (harness: string, name: string) => `${harness}:${name}`
 
 /** Whether `id` is an extra login (has a name) rather than a harness's own login, which cannot be removed. */
-export const isExtra = (a: Account) => a.account !== null && a.account !== ''
+export const isExtra = (a: Account) => a.kind !== 'api-key' && a.account !== null && a.account !== ''

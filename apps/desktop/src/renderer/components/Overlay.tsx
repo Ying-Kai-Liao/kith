@@ -145,7 +145,7 @@ export interface DialogAction {
 export function Dialog({ open, title, message, actions, cancel = 'Cancel', onClose }: {
   open: boolean
   title: string
-  message?: string | null
+  message?: ReactNode
   actions: DialogAction[]
   cancel?: string | null
   onClose: () => void

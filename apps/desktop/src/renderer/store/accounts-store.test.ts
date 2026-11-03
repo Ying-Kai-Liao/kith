@@ -66,3 +66,21 @@ test('a host from before the account set is marked unsupported, not an error', a
   assert.equal(store.unsupported, true)
   assert.equal(store.error, null)
 })
+
+test('a menu action sent while a write is in flight can be told apart by saving, and clearError clears the old words', async () => {
+  const client = {
+    accounts: async () => read('fill'),
+    accountPolicy: async (p: string) => { await new Promise((r) => setTimeout(r, 10)); return read(p) },
+    accountClear: async () => { throw new Error('old failure') },
+  } as unknown as HostClient
+  const store = new AccountsStore(async () => client)
+  await store.load()
+  const pending = store.setPolicy('spread')
+  assert.equal(store.saving, true)
+  await pending
+  assert.equal(store.saving, false)
+  await store.clear('codex')
+  assert.equal(store.error, 'old failure')
+  store.clearError()
+  assert.equal(store.error, null)
+})
