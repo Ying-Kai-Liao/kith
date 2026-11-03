@@ -1131,7 +1131,6 @@ async fn stopping_a_holder_writes_its_intent_first() {
 
 #[tokio::test]
 async fn stopping_a_holder_that_ignores_term_ends_it_and_its_child_before_the_claim_goes() {
-    let r = Rig::new();
     // outer sh -> claimer (ignores TERM) -> child (ignores TERM): the claimer is a one-shot's stub, the child its claude.
     let mut sh = std::process::Command::new("sh")
         .args(["-c", r#"sh -c 'trap "" TERM; sleep 300 & echo $!; wait' & echo $!; wait"#])
@@ -1139,16 +1138,19 @@ async fn stopping_a_holder_that_ignores_term_ends_it_and_its_child_before_the_cl
         .spawn()
         .unwrap();
     let mut lines = std::io::BufReader::new(sh.stdout.take().unwrap());
-    let (mut a, mut b) = (String::new(), String::new());
-    std::io::BufRead::read_line(&mut lines, &mut a).unwrap();
-    std::io::BufRead::read_line(&mut lines, &mut b).unwrap();
+    let mut pids: Vec<u32> = Vec::new();
+    for _ in 0..2 {
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut lines, &mut line).unwrap();
+        pids.push(line.trim().parse().unwrap());
+    }
     // The two lines come in either order: the claimer is the one whose parent is the outer shell.
-    let (x, y): (u32, u32) = (a.trim().parse().unwrap(), b.trim().parse().unwrap());
-    let (claimer, kid) = if parent_pid(x) == sh.id() { (x, y) } else { (y, x) };
-    claim::take(&r.state(), "h2", Kind::Terminal, claimer, false).unwrap().unwrap();
-    assert!(matches!(claim::stop_holder(&r.state(), "h2", GRACE), claim::Stopped::Ended(_)));
+    let (claimer, kid) = if parent_pid(pids[0]) == sh.id() { (pids[0], pids[1]) } else { (pids[1], pids[0]) };
+    let rig = Rig::new();
+    claim::take(&rig.state(), "h2", Kind::Terminal, claimer, false).unwrap().unwrap();
+    assert!(matches!(claim::stop_holder(&rig.state(), "h2", GRACE), claim::Stopped::Ended(_)));
     // The claim goes only once they were gone: with the claim file removed, nothing of the tree is in the table.
-    assert!(claim::read(&claim::path(&r.state(), "h2", false)).is_none());
+    assert!(claim::read(&claim::path(&rig.state(), "h2", false)).is_none());
     assert!(!alive(claimer) && !alive(kid), "the tree is gone (or a zombie) when the claim is");
     sh.wait().unwrap();
 }
