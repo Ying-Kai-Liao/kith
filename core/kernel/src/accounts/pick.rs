@@ -81,7 +81,7 @@ pub fn account_status(
 }
 
 /// `account_status` for each id (once each). Python runs the harness status commands side by side; here they go one after
-/// the other, which asks the same questions.
+/// the other, which asks the same questions. `main`: the agent's main account, which counts as the default login does.
 pub fn statuses(
     ctx: &Ctx<'_>,
     ids: &[String],
@@ -89,13 +89,21 @@ pub fn statuses(
     out: &HashMap<String, Mark>,
     deep: bool,
     assume_default: bool,
+    main: Option<&str>,
 ) -> HashMap<String, Status> {
     let mut res = HashMap::new();
     for i in ids {
         if !res.contains_key(i) {
             res.insert(
                 i.clone(),
-                account_status(ctx, i, agent, out, deep, assume_default),
+                account_status(
+                    ctx,
+                    i,
+                    agent,
+                    out,
+                    deep,
+                    assume_default || Some(i.as_str()) == main,
+                ),
             );
         }
     }
@@ -178,7 +186,15 @@ pub fn pick(
         }
         ordered.extend(l.foreign.iter().cloned());
     }
-    let status = statuses(ctx, &ordered, agent, &out, deep, !deep);
+    let status = statuses(
+        ctx,
+        &ordered,
+        agent,
+        &out,
+        deep,
+        !deep,
+        order.first().map(String::as_str),
+    );
     let mut candidates: Vec<String> = ordered
         .iter()
         .filter(|i| status[*i].status == "ready")
