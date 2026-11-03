@@ -96,7 +96,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use kith_holder::proto::{self, HeldId};
@@ -334,7 +334,7 @@ pub(crate) struct SpawnReq {
     pub spec: proto::Spawn,
     pub deadline: Instant,
     pub busy_wait: Duration,
-    pub reply: Sender<Placed>,
+    pub reply: SyncSender<Placed>,
 }
 
 /// Terminals as the daemon keeps them: the queue to the supervisor, whether the link is up, the stub, the tickets.
@@ -567,7 +567,9 @@ impl Terminals {
             // A terminal outlives its core by design; the lease would end it.
             kill_on_lease_loss: false,
         };
-        let (reply, answer) = mpsc::channel();
+        // A rendezvous: a send succeeds only if this call actually received it, so a `Started` that arrives after the caller
+        // gave up fails in the supervisor, which then ends the terminal.
+        let (reply, answer) = mpsc::sync_channel(0);
         let sent = self.queue.send(Req::Spawn(SpawnReq {
             spec,
             deadline: Instant::now() + SPAWN_WAIT,
@@ -578,6 +580,7 @@ impl Terminals {
             Ok(()) => answer.recv_timeout(self.answer_wait()).ok(),
             Err(_) => None,
         };
+        drop(answer);
         match placed {
             Some(Placed::Started { held, pid }) => {
                 #[cfg(test)]

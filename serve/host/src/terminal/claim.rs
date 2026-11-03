@@ -307,8 +307,20 @@ pub enum Stopped {
 ///
 /// This is a small kill helper of its own; it should merge with the claim sweep of the kernel-side lease work (#248).
 pub fn stop_holder(state: &Path, sid: &str, grace: std::time::Duration) -> Stopped {
+    stop_holder_unless(state, sid, grace, core_pid())
+}
+
+/// The running core daemon's pid, from its status (no database read). None when there is no core.
+fn core_pid() -> Option<u32> {
+    let status = kith_core::status(&crate::kernel::folders(&kith_kernel::paths::process_home()));
+    status["daemon"]["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
+}
+
+/// [`stop_holder`] with the core's pid given. A claim naming the core's own pid is never signalled, whatever its kind:
+/// that is `kith serve` (or an older kernel's claim of it), and a Stop would end the daemon, not a terminal.
+pub(super) fn stop_holder_unless(state: &Path, sid: &str, grace: std::time::Duration, core: Option<u32>) -> Stopped {
     let Some(claim) = holder(state, sid) else { return Stopped::Nobody };
-    if claim.kind == Kind::Starting {
+    if claim.kind == Kind::Starting || core == Some(claim.pid) {
         return Stopped::Busy(claim);
     }
     if parent_of(claim.pid) == Some(std::process::id()) {

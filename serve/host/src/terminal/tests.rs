@@ -1132,6 +1132,19 @@ async fn stopping_a_session_the_core_is_still_starting_signals_nothing() {
 }
 
 #[tokio::test]
+async fn stopping_a_claim_that_names_the_core_pid_signals_nothing_whatever_its_kind() {
+    let r = Rig::new();
+    // Version skew: an older kernel wrote the core's pid under a kind this build would otherwise end.
+    let (mut shell, held) = shell_with_child();
+    claim::take(&r.state(), "c1", Kind::Terminal, held, false).unwrap().unwrap();
+    let got = claim::stop_holder_unless(&r.state(), "c1", GRACE, Some(held));
+    assert!(matches!(got, claim::Stopped::Busy(_)), "{got:?}");
+    assert!(shell.try_wait().unwrap().is_none(), "nothing was signalled");
+    shell.kill().unwrap();
+    shell.wait().unwrap();
+}
+
+#[tokio::test]
 async fn stopping_a_holder_writes_its_intent_first() {
     let r = Rig::new();
     // The holder is the shell's child, so it is not this process' own turn (`OwnTurn`).

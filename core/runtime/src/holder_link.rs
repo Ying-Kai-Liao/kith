@@ -407,6 +407,10 @@ fn discard_output(client: &mut Client) {
     {}
 }
 
+/// How many started terminals were ended because their caller had given up (a test reads it to see the late path).
+#[cfg(test)]
+pub(crate) static LATE_ENDS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 /// Ends a held process the core no longer wants (kill until the holder says its group is gone, then ack so it forgets
 /// it). A broken link is the supervisor's to find on its next turn.
 fn end_held(client: &mut Client, held: &proto::HeldId) {
@@ -463,6 +467,8 @@ fn serve_spawn(client: &mut Client, req: &SpawnReq) -> std::result::Result<(), S
     // A caller that gave up (its receiver is gone) must not leave the terminal it asked for running with no claim and
     // no ticket: it is ended here.
     if let Err(mpsc::SendError(Placed::Started { held, .. })) = req.reply.send(placed) {
+        #[cfg(test)]
+        LATE_ENDS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         end_held(client, &held);
     }
     Ok(())

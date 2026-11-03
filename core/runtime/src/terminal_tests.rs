@@ -275,7 +275,10 @@ mod daemon {
 
     use serde_json::{Value, json};
 
-    use super::super::{Layout, TicketRefused, claim};
+    use std::sync::atomic::Ordering;
+    use std::sync::mpsc;
+
+    use super::super::{Layout, Placed, Req, SpawnReq, Terminals, TicketRefused, claim};
     use crate::daemon::{Config, Daemon};
     use crate::holder_link::HolderConfig;
     use crate::{Reached, reach};
@@ -520,6 +523,7 @@ echo $$ > "$lock/$key.pid"
         );
         // The supervisor watches a new stub for 600 ms before it answers: this caller stops waiting after 100.
         *rig.d.shared().terminals.answer_wait.lock().unwrap() = Some(Duration::from_millis(100));
+        let late = crate::holder_link::LATE_ENDS.load(Ordering::SeqCst);
         let a = answered(open(&rig.m, "sess-l", &["sh", "-c", "cat"], &plain()));
         assert_eq!(a["status"], "direct", "{a}");
         assert!(!rig.claim_file("sess-l").exists(), "claim given back");
@@ -530,6 +534,9 @@ echo $$ > "$lock/$key.pid"
             .trim()
             .parse()
             .unwrap();
+        until("the late path to take the end_held branch", || {
+            crate::holder_link::LATE_ENDS.load(Ordering::SeqCst) > late
+        });
         until("the late terminal to be ended", || {
             !std::process::Command::new("kill")
                 .args(["-s", "0", &pid.to_string()])
@@ -538,6 +545,40 @@ echo $$ > "$lock/$key.pid"
                 .status
                 .success()
         });
+    }
+
+    #[test]
+    fn a_link_that_drops_keeps_the_queued_ends_and_answers_the_spawns() {
+        let t = Terminals::new();
+        let (reply, answer) = mpsc::sync_channel(0);
+        t.queue
+            .send(Req::Spawn(SpawnReq {
+                spec: kith_holder::proto::Spawn {
+                    conv: "c".into(),
+                    claim: 1,
+                    generation: 1,
+                    argv: vec!["cat".into()],
+                    env: Default::default(),
+                    cwd: String::new(),
+                    mode: kith_holder::proto::Mode::Pty,
+                    cols: 80,
+                    rows: 24,
+                    kill_on_lease_loss: false,
+                },
+                deadline: Instant::now() + Duration::from_secs(5),
+                busy_wait: Duration::ZERO,
+                reply,
+            }))
+            .unwrap();
+        t.queue.send(Req::End(super::held(9))).unwrap();
+        let waiter = std::thread::spawn(move || answer.recv_timeout(Duration::from_secs(5)));
+        t.set_link(false);
+        assert!(matches!(waiter.join().unwrap(), Ok(Placed::Failed(_))));
+        match t.next(Duration::ZERO) {
+            Some(Req::End(h)) => assert_eq!(h, super::held(9)),
+            _ => panic!("the End was dropped"),
+        }
+        assert!(t.next(Duration::ZERO).is_none());
     }
 
     #[test]
