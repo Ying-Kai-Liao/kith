@@ -1,3 +1,11 @@
+> **Source and links.** Copied unchanged from the architect's `designs/2026-11-03-runtime-shapes/design.md`
+> (below the line). Page: <https://claude.ai/artifact/J7HAXmxMBD3pK9qDmRLWAT>. The TLA+ model (`Runtime.tla`,
+> `results.md`) lives in the architect's `model/` folder next to `design.md`, not in this repo. This design
+> supersedes [core-design.md](core-design.md) from A4 onward; the order of work is its section 7 (M0-M5), which
+> replaced A4-A7 in [one-bot-model.md](one-bot-model.md).
+
+---
+
 # Kith core runtime: one daemon with the core inside, a holder below (v2)
 
 Status: **agreed** v2 (Kai 2026-11-03: "Look great", on the proposed page v3), after two reviews (Opus: races and principals; Sonnet: operability) and TLC rounds 1 and 2 green (`## Verified`). Comparison A-E and Kai's answers:

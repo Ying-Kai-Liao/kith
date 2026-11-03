@@ -1,3 +1,8 @@
+> **2026-11-03: superseded from A4 onward by [runtime-design.md](runtime-design.md)** (agreed by Kai). That design
+> replaces this one's section 3, the per-module switch for protocol modules (claims, secrets, scheduler): they go into
+> one daemon with the core inside and a holder below, in the order M0-M5. A0-A3 (paths, engines, launch) stand as built.
+> The rest of this document is unchanged below.
+
 # Core design: the Rust kernel crate (A0)
 
 Status: **reviewed by the architect agent, awaiting the user's call on Q1 and Q2** (2026-11-03). Part of [one-bot-model.md](one-bot-model.md), track A. Built on the survey
