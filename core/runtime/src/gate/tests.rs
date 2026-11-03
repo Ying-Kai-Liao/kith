@@ -11,7 +11,7 @@ use super::{
 };
 use crate::db::Core;
 use crate::layout::Layout;
-use crate::tests::{machine, open};
+use crate::tests::{machine, open_all as open};
 
 fn core() -> (tempfile::TempDir, Layout, Core) {
     let (t, m) = machine();

@@ -4,5 +4,6 @@
 use super::Migration;
 
 mod m0030_gate;
+mod m0031_sync_lease;
 
-pub(super) const STEPS: &[Migration] = &[m0030_gate::MIGRATION];
+pub(super) const STEPS: &[Migration] = &[m0030_gate::MIGRATION, m0031_sync_lease::MIGRATION];

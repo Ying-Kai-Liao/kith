@@ -4799,6 +4799,241 @@
           }
         }
       }
+    },
+    {
+      "name": "syncLease.status",
+      "summary": "Whether this Mac is in sync with the cloud. Answers `cloud` (`unknown`, `linked` or `off`), `synced`, `held` (what a non-owner's claim needs: the cloud is off, or linked with the lease unexpired), `until` (ms) and `mark`.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "sync-lease",
+          "status"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "syncLease.link",
+      "summary": "The cloud is on: the lease decides from now on, and it is not held until a pull says so. Linking again changes nothing.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "sync-lease",
+          "link"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "syncLease.unlink",
+      "summary": "The cloud is off on purpose: nothing waits on it, and any lease is gone.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "sync-lease",
+          "unlink"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "syncLease.mark",
+      "summary": "Where the cloud's changes stand. Take it before a pull reads the cloud's state, and give it back to `syncLease.pulled`.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "sync-lease",
+          "mark"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "syncLease.changed",
+      "summary": "The cloud said its state changed: the lease ends at once, until a pull that started after this succeeds. Answers the new `mark`.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "sync-lease",
+          "changed"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "syncLease.drop",
+      "summary": "The connection to the cloud dropped or is being made: the lease ends. Dropping when nothing is held does nothing.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "sync-lease",
+          "drop"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "syncLease.pulled",
+      "summary": "A pull of the cloud's state succeeded. Answers `held: true` when the lease now runs, `held: false` when it does not: the cloud changed since the mark, the cloud is not linked, or the clock is behind its last reading.",
+      "params": [
+        {
+          "name": "mark",
+          "summary": "The `mark` taken before the pull read the cloud's state.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "ms",
+          "summary": "How long the lease runs, 1 to 3600000 (120000 when absent).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "sync-lease",
+          "pulled"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "mark": {
+            "kind": "positional"
+          },
+          "ms": {
+            "kind": "flag",
+            "spellings": [
+              "--ms"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "syncLease.renew",
+      "summary": "The relay was heard: runs a held lease out again. Answers `renewed: true`, or `renewed: false` when nothing is held to renew (never acquired, lost, expired or the clock is behind): only a pull acquires.",
+      "params": [
+        {
+          "name": "ms",
+          "summary": "How long the lease runs from now, 1 to 3600000 (120000 when absent).",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "sync-lease",
+          "renew"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "ms": {
+            "kind": "flag",
+            "spellings": [
+              "--ms"
+            ]
+          }
+        }
+      }
     }
   ],
   "components": {
