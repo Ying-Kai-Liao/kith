@@ -88,8 +88,16 @@ fn second_process_gets_busy_then_held_after_drop() {
     let status = child("try", &dir, "s1").status().unwrap();
     assert_eq!(status.code(), Some(0), "another process must see Busy");
     drop(lock);
-    let status = child("try", &dir, "s1").status().unwrap();
-    assert_eq!(status.code(), Some(1), "after drop it is free");
+    let start = Instant::now();
+    let code = loop {
+        let code = child("try", &dir, "s1").status().unwrap().code();
+        // A sibling test's fork can briefly hold a copy of the descriptor; see the same-process test.
+        if code == Some(1) || start.elapsed() > Duration::from_secs(5) {
+            break code;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(code, Some(1), "after drop it is free");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -106,7 +114,21 @@ fn second_take_in_the_same_process_is_busy() {
     // A different key is independent.
     let b = held(take(&dir, "s2").unwrap());
     drop(a);
-    let again = held(take(&dir, "s1").unwrap());
+    // Sibling tests spawn children in parallel; between fork and exec such a child still holds a copy of `a`'s
+    // descriptor (CLOEXEC closes it at exec), so the release can lag by an instant. Wait for it briefly.
+    let start = Instant::now();
+    let again = loop {
+        match take(&dir, "s1").unwrap() {
+            Taken::Held(l) => break l,
+            Taken::Busy => {
+                assert!(
+                    start.elapsed() < Duration::from_secs(5),
+                    "lock not released"
+                );
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    };
     // Windows cannot delete files that are still open.
     drop((b, again));
     std::fs::remove_dir_all(&dir).unwrap();
@@ -165,7 +187,12 @@ fn lock_file_stays_after_drop_and_is_reused() {
     drop(lock);
     assert!(path.exists(), "the lock file must survive a drop");
     for _ in 0..3 {
-        let l = held(take(&dir, "s1").unwrap());
+        let l = loop {
+            match take(&dir, "s1").unwrap() {
+                Taken::Held(l) => break l,
+                Taken::Busy => std::thread::sleep(Duration::from_millis(10)), // fork/exec lag, see above
+            }
+        };
         assert_eq!(l.path(), path);
         drop(l);
     }
