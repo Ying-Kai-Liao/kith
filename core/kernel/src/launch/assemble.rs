@@ -298,19 +298,34 @@ fn which_in(env: &Env, program: &str) -> Option<PathBuf> {
         .find(|p| is_exec(p))
 }
 
-/// Whether this process is inside the guest sandbox: the account's home folder (by the OS, not `$HOME`) can't be listed.
-fn in_guest_sandbox(sys: &Sys<'_>, env: &Env) -> bool {
-    let home = sys
-        .out("/usr/bin/id", &["-P"], false)
-        .and_then(|l| l.split(':').nth(8).map(str::to_owned))
-        .filter(|h| !h.is_empty())
-        .or_else(|| {
-            let uid = sys.out("id", &["-u"], false)?;
-            let l = sys.out("getent", &["passwd", &uid], false)?;
-            l.split(':').nth(5).map(str::to_owned)
-        })
-        .or_else(|| env.get("HOME").cloned());
+/// Whether this process is inside the guest sandbox: the account's home folder (by the OS, not `$HOME`, and by absolute
+/// programs, not the caller's `PATH`) can't be listed. No answer is a guest, as in `kith_paths.guest_sandbox`.
+fn in_guest_sandbox() -> bool {
+    home_closed(crate::secrets::os_home())
+}
+
+fn home_closed(home: Option<PathBuf>) -> bool {
     home.is_none_or(|h| fs::read_dir(h).is_err())
+}
+
+/// `kith_paths._has_hook` and the checks `kith_bin` makes of `KITH_BIN`: an executable file, not the kernel's bash entry,
+/// that answers `memory hook --help` with "phase". Anything else (an older kith, `/bin/true`) is not the program the hooks
+/// need, so the caller's own executable stands in.
+pub(crate) fn usable_kith_bin(bin: &Path) -> bool {
+    if !is_exec(bin) {
+        return false;
+    }
+    let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    let tail: Vec<_> = real.iter().rev().take(3).collect();
+    if tail.len() == 3 && tail[0] == "kith" && tail[1] == "bin" && tail[2] == "kernel" {
+        return false;
+    }
+    crate::secrets::run_with_timeout(
+        bin,
+        &["memory", "hook", "--help"],
+        std::time::Duration::from_secs(10),
+    )
+    .is_some_and(|o| o.to_lowercase().contains("phase"))
 }
 
 /// `kith_paths.guest_tmp_ready`: the guest's Claude Code temp folder, made.
@@ -601,8 +616,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
             }
         }
     }
-    let sys0 = Sys { env: &env };
-    if p_owner && in_guest_sandbox(&sys0, &env) {
+    if p_owner && in_guest_sandbox() {
         say("kith: this is inside a guest's run, which can't start a run as the owner");
         return Err(3);
     }
@@ -1085,7 +1099,7 @@ pub fn launch(agent: &str, argv: &[String], kernel: &Path, env0: Env) -> Result<
         )
     };
     let kith_bin = Some(get(&env, "KITH_BIN"))
-        .filter(|b| !b.is_empty())
+        .filter(|b| usable_kith_bin(Path::new(b)))
         .map(str::to_owned)
         .or_else(|| std::env::current_exe().ok().map(|e| s(&e)));
     if perm_mode.is_empty() {
@@ -1384,6 +1398,37 @@ mod tests {
         );
         // a task that starts with a dash stops the flags
         assert!(parse_args(&v(&["- one thing", "--nosuch"])).error.is_none());
+    }
+
+    #[test]
+    fn closed_or_unknown_home_is_a_guest() {
+        assert!(home_closed(None));
+        assert!(home_closed(Some(PathBuf::from("/nonexistent/kith-home"))));
+        assert!(!home_closed(Some(std::env::temp_dir())));
+    }
+
+    #[test]
+    fn kith_bin_must_answer_memory_hook() {
+        let dir = std::env::temp_dir().join(format!("kith-bin-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let script = |name: &str, body: &str, mode: u32| {
+            let p = dir.join(name);
+            fs::write(&p, body).unwrap();
+            fs::set_permissions(&p, fs::Permissions::from_mode(mode)).unwrap();
+            p
+        };
+        let good = script("good", "#!/bin/sh\necho 'usage: hook --Phase x'\n", 0o755);
+        let wrong = script("wrong", "#!/bin/sh\necho nothing\n", 0o755);
+        let failing = script("failing", "#!/bin/sh\necho phase\nexit 1\n", 0o755);
+        let plain = script("plain", "#!/bin/sh\necho phase\n", 0o644);
+        assert!(usable_kith_bin(&good));
+        assert!(!usable_kith_bin(&wrong));
+        assert!(!usable_kith_bin(&failing));
+        assert!(!usable_kith_bin(&plain));
+        assert!(!usable_kith_bin(&dir.join("missing")));
+        assert!(!usable_kith_bin(Path::new("")));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -136,6 +136,24 @@ impl Ctx {
         self.agents.join(agent)
     }
 
+    /// `builtin()` in `kith-auth`: one of the kernel's own agents (scratch ...): found under `<kernel>/agents` and not in
+    /// the user's agents folder. Its life folder is one for everyone who runs it, so only the owner does.
+    fn is_builtin(&self, agent: &str) -> bool {
+        let has = |root: &Path| {
+            let d = root.join(agent);
+            !agent.is_empty()
+                && !agent.contains('/')
+                && !agent.starts_with('.')
+                && (d.join("role/agent.md").is_file() || d.join("agent.md").is_file())
+        };
+        let kernel_agents = self.kernel.join("agents");
+        let same = |a: &Path, b: &Path| match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => a == b,
+        };
+        !same(&self.agents, &kernel_agents) && !has(&self.agents) && has(&kernel_agents)
+    }
+
     fn serve_dir(&self) -> PathBuf {
         match &self.serve {
             ServeDir::Fixed(d) => d.clone(),
@@ -171,7 +189,7 @@ pub fn now_ms() -> f64 {
 /// The account's home folder by the OS's password database (`pwd.getpwuid(...).pw_dir`), not `$HOME`: a guest's shell
 /// can change that. macOS answers `id -P`; Linux has no such flag, so it asks `getent passwd <uid>`, then reads
 /// `/etc/passwd`. `None` when nothing answers (a user without an entry): a guest, as `KeyError` is in Python.
-fn os_home() -> Option<PathBuf> {
+pub(crate) fn os_home() -> Option<PathBuf> {
     let limit = Duration::from_secs(4);
     let id = Path::new("/usr/bin/id");
     if let Some(home) = run_with_timeout(id, &["-P"], limit).and_then(|o| home_from_bsd_id(&o)) {
@@ -207,7 +225,7 @@ fn home_from_passwd(text: &str, uid: &str) -> Option<PathBuf> {
 }
 
 /// Run a program and read its standard output; `None` when it can't start, outlives `limit`, or fails.
-fn run_with_timeout(program: &Path, args: &[&str], limit: Duration) -> Option<String> {
+pub(crate) fn run_with_timeout(program: &Path, args: &[&str], limit: Duration) -> Option<String> {
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::null())
@@ -677,6 +695,13 @@ impl<'a> Rules<'a> {
         if truthy(get(entry, "revoked")) {
             // before any row, the `*` row included: revoke beats every row, and undo finds them all as they were
             return Ok((false, format!("{person}'s access was removed")));
+        }
+        if self.c.is_builtin(agent) {
+            // before any row, the `*` row and a helper list included: fail closed
+            return Ok((
+                false,
+                format!("{agent} is a built-in agent: only the owner runs it"),
+            ));
         }
         if truthy(get(entry, "bot_of")) {
             return self.bot_may(person, agent, via, once);

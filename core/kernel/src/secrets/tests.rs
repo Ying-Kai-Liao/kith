@@ -1294,3 +1294,46 @@ fn owner_by_the_os_probe_is_not_a_guest() {
     assert!(os_home().is_some(), "the passwd home must be found");
     assert!(!c.in_guest_sandbox());
 }
+
+#[test]
+fn a_builtin_agent_is_the_owners_alone_whatever_the_rows_say() {
+    let t = Tmp::new("builtin");
+    let c = ctx(&t);
+    let agent = |root: &str, name: &str| {
+        let d = t.0.join(root).join(name).join("role");
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("agent.md"), "---\nname: x\n---\n").unwrap();
+    };
+    agent("kernel/agents", "scratch");
+    agent("kernel/agents", "both");
+    agent("agents", "both");
+    agent("agents", "house");
+    let mut a = people();
+    a["members"]["scratch"] = json!({"sam": {"preset": "pro"}, "*": {}, "bot-s": {}});
+    a["members"]["house"]["sam"]["helpers"] = json!(["scratch"]);
+    a["members"]["both"] = json!({"sam": {}});
+    let r = rules(&c, &a);
+    let why = "scratch is a built-in agent: only the owner runs it";
+    assert_eq!(
+        r.may("kai", "scratch", None, false).unwrap(),
+        (true, "owner".into())
+    );
+    // an old own row, the `*` row, a bot's row and a helper list all give nothing
+    for who in ["sam", "lone", "bot-s"] {
+        assert_eq!(
+            r.may(who, "scratch", None, false).unwrap(),
+            (false, why.into()),
+            "{who}"
+        );
+    }
+    assert_eq!(
+        r.may("sam", "scratch", Some("house"), false).unwrap(),
+        (false, why.into())
+    );
+    assert!(!r.resolve("scratch", "sam", None, false).unwrap()["allowed"].as_bool().unwrap());
+    // the user's own agent of the same name is theirs to grant
+    assert_eq!(
+        r.may("sam", "both", None, false).unwrap(),
+        (true, "member".into())
+    );
+}
