@@ -113,7 +113,8 @@ async fn always_for_everyone_keeps_one_host_on_the_agent_for_every_guest_and_not
     assert_eq!(job(&r)["ticked"], false, "no job turned on");
 
     // A helper is never agent-level.
-    let call = ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::HELPER_TOOL, json!({"agent": "money", "task": "x"}));
+    let call =
+        ask(&r.hub, guest_run("sam", "1:1:house:sam"), edge::HELPER_TOOL, json!({"agent": "money", "task": "x"}));
     let card = shown(&r.hub).await;
     assert_eq!(ids(&options(&r, &card)), ["allow", edge::ALWAYS, "deny"]);
     answer(&r.hub, card.entry_id.as_ref().unwrap(), Some("deny"), None).unwrap();
