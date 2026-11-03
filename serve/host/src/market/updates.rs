@@ -1,7 +1,7 @@
 //! Track Registry package releases without interrupting running connectors.
 
 use super::{Connector, connectors, install::package_reference, registry::registry_server, update_connectors};
-use crate::{LockExt, hub::Hub, store::Store};
+use crate::{hub::Hub, store::Store};
 use anyhow::{Result, anyhow, bail};
 use serde_json::Value;
 use std::{collections::HashMap, sync::Arc, time::Duration};

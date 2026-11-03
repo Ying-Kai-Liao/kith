@@ -476,7 +476,7 @@ mod tests {
         store.kv_set("connectors", &one).unwrap();
         store.kv_set("credential.1password", &two).unwrap();
         store.kv_set("unrelated", "not a record").unwrap();
-        assert!(move_old_records(&store).is_empty());
+        assert_eq!(move_old_records(&store), Vec::<String>::new());
         assert_eq!(link.puts.load(Ordering::SeqCst), 2);
         assert_eq!(link.values.locked().get("connectors").map(String::as_str), Some("[1]"));
         assert_eq!(link.values.locked().get("credential.1password").map(String::as_str), Some("token"));
@@ -486,7 +486,7 @@ mod tests {
         // A value written after the move survives a second run.
         write(&store, "connectors", "[2]").unwrap();
         let puts = link.puts.load(Ordering::SeqCst);
-        assert!(move_old_records(&store).is_empty());
+        assert_eq!(move_old_records(&store), Vec::<String>::new());
         assert_eq!(link.puts.load(Ordering::SeqCst), puts, "the second run wrote nothing");
         assert_eq!(read(&store, "connectors").unwrap().as_deref(), Some("[2]"));
     }
@@ -520,7 +520,7 @@ mod tests {
         assert_eq!(move_old_records(&store), ["slot"]);
         assert!(read(&store, "slot").is_err());
         assert_eq!(store.kv_read("slot").unwrap().as_deref(), Some(rec.as_str()));
-        assert!(link.values.locked().is_empty());
+        assert_eq!(link.values.locked().len(), 0);
     }
 
     #[test]
@@ -533,7 +533,7 @@ mod tests {
             let error = format!("{:#}", result.unwrap_err());
             assert!(error.contains("no key store here") && error.contains("never saved as plain text"), "{error}");
         }
-        assert!(link.values.locked().is_empty());
+        assert_eq!(link.values.locked().len(), 0);
         assert_eq!(store.kv_read("new").unwrap(), None, "no plaintext fallback");
         assert_eq!(store.kv_read("old").unwrap().as_deref(), Some("plain value"));
         assert!(link.open().is_err());
@@ -548,6 +548,6 @@ mod tests {
         assert!(read(&store, "record").is_err());
         assert!(write(&store, "record", "replacement").is_err());
         assert_eq!(store.kv_read("record").unwrap().as_deref(), Some("existing secret"));
-        assert!(link.values.locked().is_empty());
+        assert_eq!(link.values.locked().len(), 0);
     }
 }
