@@ -93,6 +93,7 @@ pub(crate) fn check_files(layout: &Layout) -> Result<()> {
 /// never creates core.db with the process umask). On Windows files take their access list from the core folder (set
 /// with `(OI)(CI)` in `ensure_dir`), so nothing is pre-made: SQLite creates core.db itself and `check_files` reads the
 /// result. (Pre-making it and rewriting its list with `icacls` first is what SQLite then could not open there.)
+#[cfg_attr(not(unix), allow(clippy::unnecessary_wraps))]
 pub(crate) fn create_private_file(path: &Path) -> Result<()> {
     #[cfg(unix)]
     if !path.exists() {
