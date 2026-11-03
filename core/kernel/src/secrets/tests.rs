@@ -1264,25 +1264,27 @@ fn a_lone_dash_is_a_person_not_a_flag() {
 }
 
 #[test]
-fn passwd_home_parses_linux_and_bsd_lines() {
-    let getent = "kai:x:1000:1000:Kai,,,:/home/kai:/bin/bash\n";
-    assert_eq!(
-        home_from_passwd(getent, "1000"),
-        Some(PathBuf::from("/home/kai"))
-    );
-    let file = "root:x:0:0:root:/root:/bin/sh\nkai:x:1000:1000::/home/kai:/bin/sh\n";
-    assert_eq!(
-        home_from_passwd(file, "1000"),
-        Some(PathBuf::from("/home/kai"))
-    );
-    assert_eq!(home_from_passwd(file, "0"), Some(PathBuf::from("/root")));
-    // No entry (a container user), a short line, an empty home: nothing, so a guest.
-    assert_eq!(home_from_passwd(file, "1001"), None);
-    assert_eq!(home_from_passwd("kai:x:1000:1000", "1000"), None);
-    assert_eq!(home_from_passwd("kai:x:1000:1000:::/bin/sh", "1000"), None);
-    let bsd = "kai:*:501:20::0:0:Kai:/Users/kai:/bin/zsh\n";
-    assert_eq!(home_from_bsd_id(bsd), Some(PathBuf::from("/Users/kai")));
-    assert_eq!(home_from_bsd_id("garbage"), None);
+fn the_runners_own_user_has_a_home_from_the_password_database_and_is_no_guest() {
+    // getpwuid_r, as Python's pwd: the user running the test has an entry (the runner's, on Linux CI too), and no
+    // program from PATH or $HOME is consulted. A PATH that holds a fake `id` and `getent` changes nothing.
+    let home = os_home().expect("the test user has a passwd entry");
+    assert!(home.is_absolute(), "{home:?}");
+    assert!(std::fs::read_dir(&home).is_ok(), "{home:?} is readable");
+    let uid = test_uid();
+    if let Some(line) = std::fs::read_to_string("/etc/passwd").ok().and_then(|t| {
+        t.lines()
+            .find(|l| l.split(':').nth(2) == Some(uid.as_str()))
+            .map(str::to_owned)
+    }) {
+        // Where /etc/passwd is the database (Linux CI), the two agree.
+        assert_eq!(line.split(':').nth(5).map(PathBuf::from), Some(home));
+    }
+}
+
+/// The numeric uid of this process, from `id -u` (a test-only use of a program; the code under test runs none).
+fn test_uid() -> String {
+    let out = Command::new("/usr/bin/id").arg("-u").output().unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_owned()
 }
 
 #[test]
@@ -1313,6 +1315,11 @@ fn a_builtin_agent_is_the_owners_alone_whatever_the_rows_say() {
     a["members"]["house"]["sam"]["helpers"] = json!(["scratch"]);
     a["members"]["both"] = json!({"sam": {}});
     let r = rules(&c, &a);
+    // a name with a slash or a dot in front names no agent folder, so it is no built-in (Python's builtin() agrees)
+    for odd in ["", "../agents/scratch", "agents/scratch", ".scratch"] {
+        assert!(!c.is_builtin(odd), "{odd:?}");
+    }
+    assert!(c.is_builtin("scratch"));
     let why = "scratch is a built-in agent: only the owner runs it";
     assert_eq!(
         r.may("kai", "scratch", None, false).unwrap(),

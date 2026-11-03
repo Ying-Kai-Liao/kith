@@ -273,6 +273,7 @@ A person bot-bi >/dev/null 2>&1
 check "builtin: member refuses a built-in, with the reason" "! A member scratch bi && [[ \$(A member scratch bi 2>&1) == *'built-in agent'* ]]"
 check "builtin: so does a * row" "! A member scratch '*'"
 check "builtin: a list with one refuses all of it and writes nothing" "! A member house,scratch bi && ! A may bi house"
+check "builtin: a name with a slash is no built-in (and no agent)" "! A member ../agents/scratch bi && [[ \$(A member ../agents/scratch bi 2>&1) == *\"no agent\"* ]]"
 check "builtin: the owner still runs it" "A may kai scratch"
 check "builtin: --rm of a built-in row is allowed (cleaning up)" "A member scratch bi --rm"
 python3 - <<'PY'

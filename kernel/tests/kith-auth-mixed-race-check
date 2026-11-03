@@ -100,4 +100,18 @@ for round in $(seq 1 "$ROUNDS"); do
   check "round $round: auth.json is valid JSON, the grant is gone, no Python write was lost" "python3 -c '$VERIFY' '$AUTH' '$WRITERS'"
   check "round $round: no temp file left in the folder" "[ -z \"\$(ls '$T/w/kith/state/secrets' | grep -v '^auth.json\$' | grep -v '^auth.json.lock\$')\" ]"
 done
+
+# In sequence, since the racing rounds are won by the faster Python starts: a Rust launch takes the grant, then Python's
+# `resolve --take-once` is refused; and the other way round.
+rm -f "$T"/go "$T"/rust-ran; touch "$T/go"
+world
+inworld env KITH_PERSON=sam KITH_AGENT=echo "$KERNEL/bin/kith" other --launch-json > "$T/seq-out" 2> "$T/seq-err"; seq_code=$?
+check "sequence: a Rust launch takes the grant (exit $seq_code, the Rust path ran $(wc -l < "$T/rust-ran" 2>/dev/null | tr -d ' ') time)" "[ $seq_code -eq 0 ] && [ -s '$T/rust-ran' ]"
+inworld python3 "$KERNEL/bin/kith-auth" resolve other --person sam --via echo --take-once > "$T/seq-take" 2> /dev/null
+check "sequence: then Python's take-once is refused" "! grep -q 'just this once' '$T/seq-take' && python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))[\"allowed\"] is False else 1)' '$T/seq-take'"
+world; rm -f "$T/rust-ran"
+inworld python3 "$KERNEL/bin/kith-auth" resolve other --person sam --via echo --take-once > "$T/seq-take" 2> /dev/null
+check "sequence: Python takes the grant first" "grep -q 'just this once' '$T/seq-take'"
+inworld env KITH_PERSON=sam KITH_AGENT=echo "$KERNEL/bin/kith" other --launch-json > "$T/seq-out" 2> "$T/seq-err"; seq_code=$?
+check "sequence: then the Rust launch is refused (exit $seq_code), by the Rust path" "[ $seq_code -eq 3 ] && [ -s '$T/rust-ran' ]"
 exit $fail

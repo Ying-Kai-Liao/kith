@@ -88,3 +88,41 @@ pub fn ps_table() -> Vec<(i64, i64)> {
 pub fn parent_pid() -> i64 {
     i64::from(std::os::unix::process::parent_id())
 }
+
+/// The home folder of this process's real user from the password database, as Python's `pwd.getpwuid(os.getuid()).pw_dir`
+/// (`getpwuid_r`, no subprocess, no `$HOME`). `None` when the user has no entry or an empty home: the caller counts that
+/// as a guest.
+pub fn passwd_home() -> Option<std::path::PathBuf> {
+    use std::os::unix::ffi::OsStrExt as _;
+    // SAFETY: getuid has no arguments and cannot fail.
+    let uid = unsafe { libc::getuid() };
+    let mut size = 1024;
+    loop {
+        let mut buf = vec![0 as libc::c_char; size];
+        // SAFETY: an all-zero passwd is a valid value to pass for getpwuid_r to fill in.
+        let mut pw: libc::passwd = unsafe { std::mem::zeroed() };
+        let mut found: *mut libc::passwd = std::ptr::null_mut();
+        // SAFETY: `pw` and `buf` outlive the call and `buf.len()` is its true size; on success `pw_dir` points into `buf`.
+        let rc = unsafe {
+            libc::getpwuid_r(
+                uid,
+                &raw mut pw,
+                buf.as_mut_ptr(),
+                buf.len(),
+                &raw mut found,
+            )
+        };
+        if rc == libc::ERANGE && size < 1 << 20 {
+            size *= 4;
+            continue;
+        }
+        if rc != 0 || found.is_null() || pw.pw_dir.is_null() {
+            return None;
+        }
+        // SAFETY: getpwuid_r set `pw_dir` to a NUL-terminated string inside `buf`.
+        let dir = unsafe { std::ffi::CStr::from_ptr(pw.pw_dir) };
+        let bytes = dir.to_bytes();
+        return (!bytes.is_empty())
+            .then(|| std::path::PathBuf::from(std::ffi::OsStr::from_bytes(bytes)));
+    }
+}

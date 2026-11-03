@@ -316,6 +316,13 @@ pub(crate) fn usable_kith_bin(bin: &Path) -> bool {
         return false;
     }
     let real = fs::canonicalize(bin).unwrap_or_else(|_| bin.to_path_buf());
+    // The running program is the usual answer (the router execs with KITH_BIN set to it): it is a kith by being us.
+    if std::env::current_exe()
+        .and_then(fs::canonicalize)
+        .is_ok_and(|me| me == real)
+    {
+        return true;
+    }
     let tail: Vec<_> = real.iter().rev().take(3).collect();
     if tail.len() == 3 && tail[0] == "kith" && tail[1] == "bin" && tail[2] == "kernel" {
         return false;
@@ -1428,6 +1435,8 @@ mod tests {
         assert!(!usable_kith_bin(&plain));
         assert!(!usable_kith_bin(&dir.join("missing")));
         assert!(!usable_kith_bin(Path::new("")));
+        // The running program is taken without asking it anything (the test binary has no `memory hook`).
+        assert!(usable_kith_bin(&std::env::current_exe().unwrap()));
         let _ = fs::remove_dir_all(&dir);
     }
 

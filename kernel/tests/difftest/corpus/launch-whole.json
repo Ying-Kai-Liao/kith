@@ -14360,7 +14360,8 @@
   ],
   "env": {
    "KITH_STATE": "{KITH_HOME}/state",
-   "KITH_BIN": "/bin/true"
+   "KITH_BIN": "/bin/true",
+   "CARGO_TARGET_DIR": "{TMP}/no-target"
   },
   "run_old": [
    [
@@ -14514,7 +14515,8 @@
   ],
   "env": {
    "KITH_STATE": "{KITH_HOME}/state",
-   "KITH_BIN": "{HOME}/notexec"
+   "KITH_BIN": "{HOME}/notexec",
+   "CARGO_TARGET_DIR": "{TMP}/no-target"
   },
   "run_old": [
    [

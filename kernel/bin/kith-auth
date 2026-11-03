@@ -229,7 +229,8 @@ def builtin(agent):
     if agent not in _BUILTIN:
         def has(root):
             d = root / agent
-            return not agent.startswith('.') and ((d / 'role' / 'agent.md').is_file() or (d / 'agent.md').is_file())
+            return (bool(agent) and '/' not in agent and not agent.startswith('.')
+                    and ((d / 'role' / 'agent.md').is_file() or (d / 'agent.md').is_file()))
         kernel_agents = KITH / 'agents'
         _BUILTIN[agent] = (AGENTS.resolve() != kernel_agents.resolve() and not has(AGENTS) and has(kernel_agents))
     return _BUILTIN[agent]
