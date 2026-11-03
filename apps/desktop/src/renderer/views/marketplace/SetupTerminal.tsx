@@ -3,7 +3,7 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { useEffect, useRef, useState } from 'react'
-import { fromBase64, HostError, toBase64 } from '../../client/host-client'
+import { fromBase64, HostError, toBase64, type HostClient } from '../../client/host-client'
 import { Button } from '../../components/Controls'
 import { Icon } from '../../components/Icon'
 import { SheetPage } from '../../components/Overlay'
@@ -23,7 +23,7 @@ const openLink = (uri: string) => {
  * Installing or signing in to an agent, or adding Node.js, live: the command runs in a
  * terminal on the computer and this screen is that terminal (links open here).
  */
-export function SetupTerminalView({ backend, step, method, back }: {
+export function SetupTerminalView({ backend, step, method, back, open, title: given, finished }: {
   /** Null only for the `node` step, which belongs to the computer. */
   backend: Backend | null
   step: SetupStep
@@ -31,8 +31,15 @@ export function SetupTerminalView({ backend, step, method, back }: {
   method?: AuthMethod | null
   /** Back to the agent's sheet (the terminal is a step inside it). */
   back: () => void
+  /** Starts some other terminal in place of the agent step (an account login); the screen is the same. */
+  open?: (client: HostClient, cols: number, rows: number) => Promise<string>
+  title?: string
+  /** Runs when the terminal has ended, in place of checking the agents again. */
+  finished?: () => void | Promise<void>
 }) {
   const store = useStore()
+  const custom = useRef({ open, finished })
+  custom.current = { open, finished }
   const surface = useRef<HTMLDivElement>(null)
   const [exitCode, setExitCode] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -135,13 +142,15 @@ export function SetupTerminalView({ backend, step, method, back }: {
     void (async () => {
       try {
         const client = await store.ready()
-        const id = await market.agentSetup(client, backend?.id ?? '', step, method?.id ?? null, size.cols, size.rows)
+        const id = await (custom.current.open?.(client, size.cols, size.rows)
+          ?? market.agentSetup(client, backend?.id ?? '', step, method?.id ?? null, size.cols, size.rows))
         if (cancelled) {
           void market.termClose(client, id).catch(() => {})
           return
         }
         termId = id
-        sent = size
+        // A terminal another caller started was sized by that caller (a guess), so send the fitted size.
+        sent = custom.current.open ? { cols: 0, rows: 0 } : size
         syncSize()
         // Reattach after a dropped connection; the host replays the whole scrollback.
         while (exited === null && !cancelled) {
@@ -152,7 +161,7 @@ export function SetupTerminalView({ backend, step, method, back }: {
         if (!cancelled) setError(e instanceof HostError ? e.message : errorText(e))
         return
       }
-      if (!cancelled) await store.refreshBackends()
+      if (!cancelled) await (custom.current.finished?.() ?? store.refreshBackends())
     })()
 
     // Leaving the screen ends whatever is still running.
@@ -168,7 +177,7 @@ export function SetupTerminalView({ backend, step, method, back }: {
   }, [store, backend?.id, step, method?.id])
 
   const name = backend?.name ?? 'the agent'
-  const title = step === 'node' ? 'Add Node.js' : step === 'install' ? `Install ${name}` : (method?.name ?? `Sign in to ${name}`)
+  const title = given ?? (step === 'node' ? 'Add Node.js' : step === 'install' ? `Install ${name}` : (method?.name ?? `Sign in to ${name}`))
   return (
     <SheetPage>
       <ScreenHeader title={title} onBack={back} />
