@@ -119,11 +119,13 @@ check "a corrupt state file marks nothing out" "[ \"\$(P)\" = claude,claude:a,cl
 "$KITH" account out claude:a --until 1h >/dev/null
 check "a write over a corrupt file keeps the old one aside and works" "[ -f $M/accounts/state.json.corrupt ] && [ \"\$(P)\" = claude,claude:b ]"
 "$KITH" account clear claude:a >/dev/null
+"$KITH" account set claude:a claude claude:b >/dev/null
 rm -f "$HOME/.claude/.fake-login"
-check "a signed-out account is skipped" "[ \"\$(P)\" = claude:a,claude:b ]"
+check "a signed-out account is skipped (the main account on the default login is not: see below)" "[ \"\$(P)\" = claude:a,claude:b ]"
 OUT=$("$KITH" account pick echo --json)
 check "the skipped list says signed out" "is \"[(s['id'], s['status']) for s in d['skipped']]\" \"[('claude', 'signed_out')]\""
 touch "$HOME/.claude/.fake-login"
+"$KITH" account set claude claude:a claude:b >/dev/null
 "$KITH" account out claude >/dev/null; "$KITH" account out claude:a >/dev/null; "$KITH" account out claude:b >/dev/null
 OUT=$("$KITH" account pick echo --json)
 check "every account out: the first runs (all_out)" "is \"(d['candidates'], d['all_out'])\" \"(['claude'], True)\""
@@ -189,6 +191,26 @@ OUT=$("$KITH" echo --accounts-json); check "--accounts-json carries cross_harnes
 "$KITH" account set --agent echo >/dev/null; "$KITH" account pin echo claude:a >/dev/null
 check "an explicit empty list with a pin: the pin alone, nothing to fall back to" "[ \"\$(P)\" = claude:a ]"
 "$KITH" account unpin echo >/dev/null; "$KITH" account set --reset --agent echo >/dev/null
+# The main account on the default login stays a ready candidate in its place when `auth status` can't see its login (the host may
+# hold the keys), as --backups-json counts it; a named account that is logged out is still skipped.
+rm "$HOME/.claude/.fake-login"
+OUT=$("$KITH" echo --accounts-json)
+check "--accounts-json: the main default login is a ready candidate even when auth status says logged out" "is \"(d['candidates'][:2], d['all_out'], [r['status'] for r in d['accounts'] if r['id']=='claude'])\" \"(['claude', 'claude:a'], False, ['ready'])\""
+OUT=$("$KITH" account pick echo --json); check "pick: the same" "is \"d['candidates'][:2]\" \"['claude', 'claude:a']\""
+login "$HOME/.claude"
+# own: the agent's own list when it has one (a client sends it back whole), else null; a pin is not part of it
+OUT=$("$KITH" echo --accounts-json); check "--accounts-json: own is null while the agent follows the global set" "is \"d['own']\" None"
+"$KITH" account set claude:b --agent echo >/dev/null; "$KITH" account pin echo claude:a --only >/dev/null
+OUT=$("$KITH" echo --accounts-json); check "--accounts-json: own is the agent's list, without the pin" "is \"(d['own'], d['order'])\" \"(['claude:b'], ['claude:a'])\""
+"$KITH" account unpin echo >/dev/null; "$KITH" account set --reset --agent echo >/dev/null
+# out --extend never shortens a mark (what the host sends); plain out sets it exactly
+"$KITH" account out claude:a --until 2h >/dev/null; "$KITH" account out claude:a --until 1h --extend >/dev/null
+check "out --extend keeps a later mark" "[ \"\$(ss \"d['accounts']['claude:a']['out_until'] - __import__('time').time() > 5400\")\" = True ]"
+"$KITH" account out claude:a --until 3h --extend >/dev/null
+check "out --extend lengthens a shorter mark" "[ \"\$(ss \"d['accounts']['claude:a']['out_until'] - __import__('time').time() > 9000\")\" = True ]"
+"$KITH" account out claude:a --until 1h >/dev/null
+check "plain out sets the time exactly" "[ \"\$(ss \"d['accounts']['claude:a']['out_until'] - __import__('time').time() < 4000\")\" = True ]"
+"$KITH" account clear claude:a >/dev/null
 printf '{"accounts":["claude","Bad id!","pi","claude:nobody","claude-api:main","codex"]}\n' > "$SET"
 OUT=$("$KITH" account list --json); rc=$?
 check "bad ids, unknown harnesses, missing folders and ungranted keys are listed, not ready, never a crash" "[ $rc = 0 ] && is \"[(r['id'], r['status']) for r in d if r['in_set']]\" \"[('claude', 'ready'), ('Bad id!', 'invalid'), ('pi', 'unsupported'), ('claude:nobody', 'signed_out'), ('claude-api:main', 'signed_out'), ('codex', 'ready')]\""

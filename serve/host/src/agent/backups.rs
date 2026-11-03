@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// Why an entry is out: its provider refused a turn, or its usage reached [`EARLY_PERCENT`] before that.
@@ -38,6 +38,8 @@ const CHAIN_FRESH_EMPTY: Duration = Duration::from_secs(15 * 60);
 const UNAVAILABLE_FOR: Duration = Duration::from_secs(120);
 /// A usage reading older than this says nothing about now.
 const READING_STALE_SECS: i64 = 30 * 60;
+/// How long a first turn waits for an agent's accounts before it goes on with what it has.
+pub const FIRST_CHAIN_WAIT: Duration = Duration::from_secs(4);
 const PUSH_TIMEOUT: Duration = Duration::from_secs(20);
 
 /// One line of `kith <agent> --backups-json`'s chain.
@@ -179,8 +181,6 @@ struct Inner {
     refreshing: HashSet<String>,
     /// Counts changes of `out`, so the file is never overwritten by an older copy.
     seq: u64,
-    /// When this host last marked an entry out for a limit it met: a kernel read that began before can't clear it.
-    marked_at: Option<Instant>,
 }
 
 type Clock = Box<dyn Fn() -> i64 + Send + Sync>;
@@ -194,6 +194,11 @@ pub struct Backups {
     /// The kernel keeps the out marks (`--accounts-json` was read): `backups.json` is no longer written and a mark
     /// is pushed with `kith account out`.
     kernel: Arc<AtomicBool>,
+    /// Bumped by every write the apps make: a read of the kernel that began before it is out of date and applies nothing.
+    generation: AtomicU64,
+    /// Ids whose `kith account out` is still on its way: the kernel can't say yet that they are out, so a read of it
+    /// does not clear them.
+    pushing: Arc<std::sync::Mutex<HashMap<String, usize>>>,
 }
 
 fn clock() -> i64 {
@@ -212,7 +217,19 @@ impl Backups {
             written: std::sync::Mutex::default(),
             now,
             kernel: Arc::default(),
+            generation: AtomicU64::new(0),
+            pushing: Arc::default(),
         }
+    }
+
+    /// The count of writes so far: read before asking the kernel, given back to [`Backups::apply_kernel`].
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::SeqCst)
+    }
+
+    /// The kernel's state or the set was just changed by a write: reads that began before are out of date.
+    pub fn bump_generation(&self) {
+        self.generation.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Whether the kernel keeps the out marks (the last chain came from `--accounts-json`).
@@ -281,23 +298,38 @@ impl Backups {
         if changed && self.kernel_keeps_marks() && reason != USAGE_95 {
             // The mark as it stands (a later reset may have kept the longer one), for the terminal's runs to see.
             if let Some(out) = self.out().get(id) {
-                Self::push_out(id, out);
+                self.push_out(id, out);
             }
         }
         changed
     }
 
-    /// `kith account out ID --until T --reason R` in the background; a failure is logged and the next read of the
-    /// kernel's state decides what stays.
-    fn push_out(id: &str, out: &Out) {
+    /// `kith account out ID --until T --reason R --extend` in the background (`--extend`: the host only knows its own
+    /// limit and must not shorten a longer mark; a kith that rejects the flag gets the plain form). A failure is logged
+    /// and the next read of the kernel's state decides what stays. Until it ends the id is not cleared by a read.
+    fn push_out(&self, id: &str, out: &Out) {
         let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
-        let (id, out) = (id.to_owned(), out.clone());
+        let (id, out, pushing) = (id.to_owned(), out.clone(), self.pushing.clone());
+        *pushing.locked().entry(id.clone()).or_default() += 1;
         runtime.spawn(async move {
-            let Ok(Some(bin)) = tokio::task::spawn_blocking(crate::agent::hq::bin).await else { return };
-            let until = out.out_until.to_string();
-            let args = ["account", "out", id.as_str(), "--until", until.as_str(), "--reason", out.reason.as_str()];
-            if let Err(error) = crate::agent::hq::run(&bin, &args, None, PUSH_TIMEOUT).await {
-                tracing::warn!(entry = %id, error = format!("{error:#}"), "couldn't tell the kernel an account is out");
+            if let Ok(Some(bin)) = tokio::task::spawn_blocking(crate::agent::hq::bin).await {
+                let until = out.out_until.to_string();
+                let mut args =
+                    vec!["account", "out", id.as_str(), "--until", until.as_str(), "--reason", out.reason.as_str()];
+                args.push("--extend");
+                if crate::agent::hq::run(&bin, &args, None, PUSH_TIMEOUT).await.is_err() {
+                    args.pop();
+                    if let Err(error) = crate::agent::hq::run(&bin, &args, None, PUSH_TIMEOUT).await {
+                        tracing::warn!(entry = %id, error = format!("{error:#}"), "couldn't tell the kernel an account is out");
+                    }
+                }
+            }
+            let mut pushing = pushing.locked();
+            if let Some(n) = pushing.get_mut(&id) {
+                *n -= 1;
+                if *n == 0 {
+                    pushing.remove(&id);
+                }
             }
         });
     }
@@ -318,9 +350,6 @@ impl Backups {
                 reason
             };
             inner.out.insert(id.to_owned(), Out { out_until: until, reason: reason.to_owned(), since });
-            if reason != USAGE_95 {
-                inner.marked_at = Some(Instant::now());
-            }
             tracing::info!(entry = id, reason, until, "backup entry marked out");
             true
         })
@@ -332,23 +361,32 @@ impl Backups {
 
     /// "It is back" (`kith account clear`): the host forgets its own mark and usage reading for `id` too.
     pub fn clear_local(&self, id: &str) {
+        self.bump_generation();
         self.with(|inner, _| {
             inner.out.remove(id);
             inner.readings.remove(id);
         });
     }
 
-    /// Takes the kernel's view of `view.chain`, read by a call that began at `started`: its out marks replace the
-    /// host's for those ids, and an id it says is ready is freed (`kith account clear`). The host's own early marks
-    /// (usage readings) stay, and a limit this host met after the call began is kept: the kernel may not have heard
-    /// of it yet.
-    pub fn apply_kernel(&self, view: &KernelAccounts, started: Instant) {
-        self.kernel.store(true, Ordering::SeqCst);
-        self.with(|inner, _| {
-            if inner.marked_at.is_some_and(|at| at > started) {
-                return;
+    /// Takes the kernel's view of `view.chain`, read by a call that began when the write count was `generation`: its out
+    /// marks replace the host's for those ids, and an id it says is ready is freed (`kith account clear`). The host's own
+    /// early marks (usage readings) stay, and so does an id whose push to the kernel is still on its way. A read that
+    /// began before a write applies nothing (false). The first read that is applied hands the kernel the host's own file
+    /// marks that still count and retires `backups.json` to `backups.json.retired`: the kernel reads that file live, so
+    /// left alone its old marks (the host's early ones among them) would go on blocking terminal runs.
+    pub fn apply_kernel(&self, view: &KernelAccounts, generation: u64) -> bool {
+        let mut first = Vec::new();
+        let mut retire = false;
+        let applied = self.with(|inner, _| {
+            if generation != self.generation() {
+                return false;
             }
-            for entry in &view.chain {
+            if !self.kernel.swap(true, Ordering::SeqCst) {
+                retire = true;
+                first = std::mem::take(&mut inner.out).into_iter().filter(|(_, o)| o.reason != USAGE_95).collect();
+            }
+            let pushing = self.pushing.locked();
+            for entry in view.chain.iter().filter(|e| !pushing.contains_key(&e.id)) {
                 match view.out.get(&entry.id) {
                     Some(out) => {
                         let since = inner.out.get(&entry.id).map_or(out.since, |o| o.since);
@@ -360,7 +398,20 @@ impl Backups {
                     None => {}
                 }
             }
+            true
         });
+        if retire {
+            let retired = self.path.with_extension("json.retired");
+            if self.path.exists()
+                && let Err(error) = std::fs::rename(&self.path, &retired)
+            {
+                tracing::warn!(%error, "couldn't retire backups.json");
+            }
+            for (id, out) in &first {
+                self.push_out(id, out);
+            }
+        }
+        applied
     }
 
     #[cfg(test)]
@@ -385,11 +436,6 @@ impl Backups {
         self.inner.locked().chains.keys().cloned().collect()
     }
 
-    /// The chains hq gave are out of date (the user changed the order): the next turn asks again.
-    pub fn forget_chains(&self) {
-        self.inner.locked().chains.clear();
-    }
-
     /// Whether the chain is old enough to ask hq again: an agent without backups is asked rarely.
     pub fn chain_stale(age: Duration, chain: &[ChainEntry]) -> bool {
         age >= if chain.len() > 1 { CHAIN_FRESH } else { CHAIN_FRESH_EMPTY }
@@ -406,6 +452,34 @@ impl Backups {
         inner.refreshing.remove(agent);
         let chain = chain.or_else(|| inner.chains.get(agent).map(|(_, c)| c.clone())).unwrap_or_default();
         inner.chains.insert(agent.to_owned(), (Instant::now(), chain));
+    }
+
+    /// A chain read for `agent` stored; nobody's fetch flag is touched (a refresh after a write, beside a background fetch).
+    pub fn set_chain(&self, agent: &str, chain: Vec<ChainEntry>) {
+        self.inner.locked().chains.insert(agent.to_owned(), (Instant::now(), chain));
+    }
+
+    /// The chain of `agent` when it is not known yet: a fetch is started (once) with `fetch`, which ends it with
+    /// [`Backups::end_refresh`], and waited for up to `wait`. Later than that the turn goes on with no chain (the agent's
+    /// own account, as before there were backups) and the fetch finishes in the background.
+    pub async fn chain_within<F, Fut>(self: &Arc<Self>, agent: &str, wait: Duration, fetch: F) -> Vec<ChainEntry>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        if self.begin_refresh(agent) {
+            tokio::spawn(fetch());
+        }
+        let deadline = Instant::now() + wait;
+        loop {
+            if let Some(chain) = self.known_chain(agent) {
+                return chain;
+            }
+            if Instant::now() >= deadline {
+                return Vec::new();
+            }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
     }
 
     /// Every account entry any agent's chain named, for the usage poll: `(id, harness, account)`.
@@ -902,7 +976,7 @@ mod tests {
         let rig = Rig::new();
         let b = rig.backups();
         let view = KernelAccounts::parse(&accounts_doc(rig.now()), rig.now()).unwrap();
-        b.apply_kernel(&view, Instant::now());
+        b.apply_kernel(&view, b.generation());
         // `claude:b` (the main one, a pin) is out: the turn starts on `claude` by name, not on the plain launch.
         let picked = |b: &Backups| match b.pick("house", &view.chain, &HashSet::new()) {
             Pick::Backup(entry) => entry.id,
@@ -918,11 +992,13 @@ mod tests {
     fn the_kernels_marks_replace_the_hosts_and_a_clear_in_a_terminal_frees_the_account() {
         let rig = Rig::new();
         let b = rig.backups();
+        let none = KernelAccounts { chain: chain(), out: BTreeMap::new() };
+        assert!(b.apply_kernel(&none, b.generation()));
         b.mark_out("claude:work", Some(rig.now() + 600), RATE_LIMIT);
         b.mark_out("codex", Some(rig.now() + 600), USAGE_95);
         let manual = Out { out_until: rig.now() + 900, reason: "manual".into(), since: 0 };
         let view = KernelAccounts { chain: chain(), out: BTreeMap::from([("claude".to_owned(), manual)]) };
-        b.apply_kernel(&view, Instant::now());
+        assert!(b.apply_kernel(&view, b.generation()));
         assert!(b.kernel_keeps_marks());
         assert_eq!(b.out()["claude"].reason, "manual", "marked in a terminal");
         assert!(!b.is_out("claude:work"), "cleared in a terminal");
@@ -930,22 +1006,45 @@ mod tests {
     }
 
     #[test]
-    fn a_limit_met_while_the_kernel_was_being_asked_is_not_cleared_by_its_older_answer() {
+    fn an_id_whose_push_is_on_its_way_is_not_cleared_and_a_read_before_a_write_applies_nothing() {
         let rig = Rig::new();
         let b = rig.backups();
-        let started = Instant::now();
+        let none = KernelAccounts { chain: chain(), out: BTreeMap::new() };
+        assert!(b.apply_kernel(&none, b.generation()));
         b.mark_out("claude", Some(rig.now() + 600), RATE_LIMIT);
-        b.apply_kernel(&KernelAccounts { chain: chain(), out: BTreeMap::new() }, started);
-        assert!(b.is_out("claude"), "the kernel read began before the mark");
-        b.apply_kernel(&KernelAccounts { chain: chain(), out: BTreeMap::new() }, Instant::now());
-        assert!(!b.is_out("claude"), "a later read is the truth");
+        *b.pushing.locked().entry("claude".into()).or_default() += 1;
+        assert!(b.apply_kernel(&none, b.generation()));
+        assert!(b.is_out("claude"), "the kernel can't know yet");
+        b.pushing.locked().clear();
+        let old = b.generation();
+        b.bump_generation();
+        assert!(!b.apply_kernel(&none, old), "begun before a write");
+        assert!(b.is_out("claude"));
+        assert!(b.apply_kernel(&none, b.generation()));
+        assert!(!b.is_out("claude"), "a read after everything settled is the truth");
+    }
+
+    #[test]
+    fn the_first_read_hands_the_kernel_the_old_file_and_retires_it() {
+        let rig = Rig::new();
+        std::fs::create_dir_all(&rig.dir).unwrap();
+        let marks = serde_json::json!({
+            "claude": {"out_until": rig.now() + 600, "reason": "rate_limit", "since": 1},
+            "codex": {"out_until": rig.now() + 600, "reason": "usage_95", "since": 1}
+        });
+        std::fs::write(rig.dir.join("backups.json"), marks.to_string()).unwrap();
+        let b = rig.backups();
+        assert!(b.apply_kernel(&KernelAccounts { chain: chain(), out: BTreeMap::new() }, b.generation()));
+        assert!(!rig.dir.join("backups.json").exists());
+        assert!(rig.dir.join("backups.json.retired").exists());
+        assert!(!b.is_out("codex"), "an old early mark of the host's is dropped, the kernel is not told of it");
     }
 
     #[test]
     fn with_the_kernel_keeping_the_marks_backups_json_is_not_written() {
         let rig = Rig::new();
         let b = rig.backups();
-        b.apply_kernel(&KernelAccounts { chain: chain(), out: BTreeMap::new() }, Instant::now());
+        b.apply_kernel(&KernelAccounts { chain: chain(), out: BTreeMap::new() }, b.generation());
         b.mark_out("claude", Some(rig.now() + 600), RATE_LIMIT);
         assert!(b.is_out("claude"));
         assert!(!rig.dir.join("backups.json").exists());

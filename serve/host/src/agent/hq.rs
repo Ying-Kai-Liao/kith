@@ -783,24 +783,29 @@ pub async fn accounts_doc(bin: &Path, agent: &str) -> Result<Value> {
 }
 
 /// The agent's account chain now: from `--accounts-json` (its out marks go to `backups`), else from an older kith's
-/// `--backups-json`.
+/// `--backups-json`. A read that a write of the apps overtook is read again (twice at most), so no old answer is applied.
 pub async fn chain(
     bin: &Path,
     agent: &str,
     backups: &crate::agent::backups::Backups,
 ) -> Result<Vec<crate::agent::backups::ChainEntry>> {
-    let started = Instant::now();
-    match accounts_doc(bin, agent).await {
-        Ok(doc) => {
-            if let Some(view) = crate::agent::backups::KernelAccounts::parse(&doc, backups.now()) {
-                backups.apply_kernel(&view, started);
-                return Ok(view.chain);
+    for attempt in 0..3 {
+        let generation = backups.generation();
+        match accounts_doc(bin, agent).await {
+            Ok(doc) => {
+                if let Some(view) = crate::agent::backups::KernelAccounts::parse(&doc, backups.now()) {
+                    if backups.apply_kernel(&view, generation) || attempt == 2 {
+                        return Ok(view.chain);
+                    }
+                    continue;
+                }
+                tracing::debug!(agent, "`--accounts-json` printed something else; using `--backups-json`");
             }
-            tracing::debug!(agent, "`--accounts-json` printed something else; using `--backups-json`");
+            Err(error) => {
+                tracing::debug!(agent, error = format!("{error:#}"), "no `--accounts-json`; using `--backups-json`");
+            }
         }
-        Err(error) => {
-            tracing::debug!(agent, error = format!("{error:#}"), "no `--accounts-json`; using `--backups-json`");
-        }
+        break;
     }
     backups_chain(bin, agent).await
 }

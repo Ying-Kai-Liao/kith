@@ -168,6 +168,26 @@ async fn a_limit_the_host_meets_is_told_to_the_kernel_and_the_next_turn_starts_o
 }
 
 #[tokio::test]
+async fn what_the_host_tells_the_kernel_never_shortens_a_longer_mark() {
+    let s = start(&two()).await;
+    s.host.reply(&s.bot, "first").await;
+    // After the host last read the kernel: a terminal marks the account out for a week; the host's next turn still
+    // starts there, meets an hour's limit and says so.
+    let week = now() + 7 * 86400;
+    let mut kernel = s.kernel();
+    kernel["out"] = json!({"claude": {"out_until": week, "reason": "manual"}});
+    std::fs::write(s.home.join("kernel.json"), kernel.to_string()).unwrap();
+    s.limit("primary", 3600);
+
+    s.host.reply(&s.bot, "second").await;
+
+    assert_eq!(s.answers().await[1].1, json!("claude:work"));
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let out = &s.kernel()["out"]["claude"];
+    assert_eq!(out["out_until"], json!(week), "the week stays: {out}");
+}
+
+#[tokio::test]
 async fn every_account_out_gives_the_user_the_time_it_is_back_and_starts_nothing() {
     let until = now() + 5400;
     let out = json!({"out_until": until, "reason": "rate_limit"});

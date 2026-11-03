@@ -11,7 +11,7 @@ use super::queue::kill;
 use super::text::{context_pct, short};
 use crate::LockExt;
 use crate::agent::acp::{self, Depleted};
-use crate::agent::backups::{Backups, ChainEntry, MAX_MOVES, Pick, RATE_LIMIT};
+use crate::agent::backups::{Backups, ChainEntry, FIRST_CHAIN_WAIT, MAX_MOVES, Pick, RATE_LIMIT};
 use crate::agent::gate::Permit;
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -290,12 +290,18 @@ impl Core {
                 sid.and_then(Value::as_str).map(str::to_owned)
             });
             let fresh_backup = backup.is_some() && session.is_none();
+            // The kernel keeps the marks and picks per run for a plain `kith AGENT -- task`, from its own state: the
+            // host's pick can differ (a mark it hasn't pushed yet, the session's account), and the limit is marked on
+            // the id the host says served. So the host's pick is always named, the main account too.
+            let account = backup.clone().or_else(|| {
+                if self.backups.kernel_keeps_marks() { Backups::primary(&chain).map(|e| e.id.clone()) } else { None }
+            });
             let mut run_env = env.clone();
             if let Some(session) = &session {
                 set(&mut run_env, "RESUME", session); // any harness: bin/hq starts a new session when this one is another harness's
             }
             let attempt = match self
-                .attempt(ad, agent, wk, task, conv, outbox, &still, run_env, backup.as_deref(), fresh_backup)
+                .attempt(ad, agent, wk, task, conv, outbox, &still, run_env, account.as_deref(), fresh_backup)
                 .await?
             {
                 Attempt::Stopped(ended) => return Ok(ended),
@@ -364,7 +370,7 @@ impl Core {
         outbox: &Path,
         still: &Recheck,
         mut env: Vec<(std::ffi::OsString, std::ffi::OsString)>,
-        backup: Option<&str>,
+        account: Option<&str>,
         fresh_backup: bool,
     ) -> Result<Attempt> {
         // A person's run (the env names one) gets a token of its own, revoked when this attempt ends.
@@ -386,7 +392,7 @@ impl Core {
             return Ok(Attempt::NotStarted);
         }
         let mut cmd = tokio::process::Command::new(&self.paths.hq_bin);
-        cmd.args(run_args(agent, backup, &format!("{preface}{task}{}", ad.footer())))
+        cmd.args(run_args(agent, account, &format!("{preface}{task}{}", ad.footer())))
             .env_clear()
             .envs(env)
             .stdin(Stdio::null())
@@ -571,7 +577,14 @@ impl Core {
                 }
                 chain
             }
-            None => fetch_chain(&self.backups, &self.paths.hq_bin, agent).await,
+            None => {
+                let (backups, bin, name) = (self.backups.clone(), self.paths.hq_bin.clone(), agent.to_owned());
+                self.backups
+                    .chain_within(agent, FIRST_CHAIN_WAIT, move || async move {
+                        drop(fetch_chain(&backups, &bin, &name).await);
+                    })
+                    .await
+            }
         }
     }
 

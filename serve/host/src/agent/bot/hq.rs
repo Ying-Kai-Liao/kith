@@ -6,7 +6,7 @@ use super::fast_mode::Listing;
 use super::launch::{launch_commands, start_agent};
 use super::{Actor, NoticeStyle, Profile};
 use crate::agent::acp::Incoming;
-use crate::agent::backups::{Backups, ChainEntry, NoAccount, Pick};
+use crate::agent::backups::{Backups, ChainEntry, FIRST_CHAIN_WAIT, NoAccount, Pick};
 use crate::agent::{folder, hq, project};
 use crate::cards::access::Reservation;
 use crate::hub::Hub;
@@ -242,9 +242,9 @@ impl Actor {
     }
 
     /// The agent's account chain as last known. A chain gone stale is fetched again in the background; one never
-    /// fetched is waited for, once per agent per host run: the kernel may already have the agent's account out (a
-    /// terminal run, another agent that asked it), and a first turn that doesn't know starts on that account. No chain,
-    /// or any failure, is an empty chain.
+    /// fetched is waited for, for a few seconds at most, once per agent per host run: the kernel may already have the
+    /// agent's account out (a terminal run, another agent that asked it), and a first turn that doesn't know starts on
+    /// that account. No chain, or any failure, is an empty chain.
     async fn hq_chain(&self, agent: &str) -> Vec<ChainEntry> {
         match self.hub.backups.chain_state(agent) {
             Some((age, chain)) => {
@@ -253,7 +253,13 @@ impl Actor {
                 }
                 chain
             }
-            None => fetch_chain(&self.hub, agent).await,
+            None => {
+                let (hub, name) = (self.hub.clone(), agent.to_owned());
+                self.hub
+                    .backups
+                    .chain_within(agent, FIRST_CHAIN_WAIT, move || async move { drop(fetch_chain(&hub, &name).await) })
+                    .await
+            }
         }
     }
 

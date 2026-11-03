@@ -28,7 +28,7 @@
 //! terminal the host opens (`kith account add ...`); a new Claude account first answers `{ok: false, warning}` and
 //! is made only when asked again with `yes`.
 
-use super::backups::{READ_TIMEOUT, WRITE_TIMEOUT, WRITES, kith, valid_id};
+use super::backups::{READ_TIMEOUT, WRITE_TIMEOUT, WRITES, kith, refresh_known, valid_id};
 use crate::agent::hq;
 use crate::hub::Hub;
 use anyhow::{Result, anyhow, bail};
@@ -125,8 +125,8 @@ async fn write(hub: &Hub, args: Vec<String>) -> Result<Value> {
         full.extend(args.iter().map(String::as_str));
         hq::run(&bin, &full, None, WRITE_TIMEOUT).await?;
     }
-    // Turns started from now on use the new set, not the chain kith gave up to minutes ago.
-    hub.backups.forget_chains();
+    // Turns started from now on use the new set: the chains are read again (turns go on with the old ones meanwhile).
+    refresh_known(hub, &bin).await;
     read(&bin).await
 }
 
@@ -192,13 +192,12 @@ fn skipped(s: &Value) -> Value {
     out
 }
 
-/// One agent's view from `kith <agent> --accounts-json`, and whether it has a list of its own (`kith backup list
-/// --agent` says where its accounts come from).
-fn agent_view(doc: &Value, source: Option<&str>) -> Value {
+/// One agent's view from `kith <agent> --accounts-json`. `own` is the kernel's: the agent's own list, else null.
+fn agent_view(doc: &Value) -> Value {
     let strings = |v: &Value| -> Vec<Value> { v.as_array().cloned().unwrap_or_default() };
     json!({
         "harness": doc["harness"], "pin": doc["pin"], "order": strings(&doc["order"]), "main": doc["main"],
-        "own": (source == Some("agent")).then(|| strings(&doc["order"])),
+        "own": doc["own"].as_array().map(|_| doc["own"].clone()),
         "candidates": strings(&doc["candidates"]), "allOut": doc["all_out"] == true,
         "crossHarness": doc["cross_harness"] == true,
         "skipped": strings(&doc["skipped"]).iter().map(skipped).collect::<Vec<_>>(),
@@ -219,10 +218,8 @@ async fn read(bin: &Path) -> Result<Value> {
         hq::run(bin, &["account", "policy"], None, READ_TIMEOUT),
         hq::run(bin, &["account", "cross-harness"], None, READ_TIMEOUT),
         futures::future::join_all(agents.into_iter().map(|name| async move {
-            let args = ["backup", "list", "--agent", name.as_str(), "--json"];
-            let (doc, source) = tokio::join!(hq::accounts_doc(bin, &name), json_of(bin, &args));
-            let source = source.ok().and_then(|s| s["source"].as_str().map(str::to_owned));
-            (name, doc.ok().map(|d| agent_view(&d, source.as_deref())))
+            let doc = hq::accounts_doc(bin, &name).await;
+            (name, doc.ok().map(|d| agent_view(&d)))
         })),
     );
     let rows = rows?;
@@ -244,8 +241,8 @@ async fn read(bin: &Path) -> Result<Value> {
 // MARK: add
 
 /// What a kith command printed on stdout, whatever its exit code: `account add` without `--yes` prints the warning and
-/// then ends on the missing answer, and `hq::run` keeps only the error text of a failure.
-async fn stdout_of(bin: &Path, args: &[&str]) -> String {
+/// then ends on the missing answer, and `hq::run` keeps only the error text of a failure. Nothing printed is an error.
+async fn stdout_of(bin: &Path, args: &[&str]) -> Result<String> {
     let mut command = tokio::process::Command::new(bin);
     command
         .args(args)
@@ -254,28 +251,39 @@ async fn stdout_of(bin: &Path, args: &[&str]) -> String {
         .kill_on_drop(true)
         .env_remove(crate::runauth::TOKEN_ENV)
         .env_remove(crate::runauth::SOCKET_ENV);
-    match tokio::time::timeout(WRITE_TIMEOUT, command.output()).await {
-        Ok(Ok(out)) => String::from_utf8_lossy(&out.stdout).into_owned(),
-        _ => String::new(),
+    let out = tokio::time::timeout(WRITE_TIMEOUT, command.output())
+        .await
+        .map_err(|_| anyhow!("`kith {}` took longer than {}s", args.join(" "), WRITE_TIMEOUT.as_secs()))??;
+    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+    if text.trim().is_empty() {
+        bail!("`kith {}` printed nothing", args.join(" "));
     }
+    Ok(text)
+}
+
+/// The warning `account add claude` prints, without the question it ends on ("Add this account? Type y to continue:"),
+/// which the app asks itself.
+fn warning_text(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim_start().starts_with("Add this account?")).collect();
+    lines.join("\n").trim().to_owned()
 }
 
 /// `accountAdd {harness, name, yes?, cols?, rows?}`: `kith account add`'s own login, in a terminal of the host's. A
 /// claude folder that isn't there yet first asks the CLI without `--yes`, which prints the warning it shows a person and
 /// stops (nothing is made); the app shows it and asks again with `yes`. A second call while that login runs gets the
-/// same terminal.
-async fn add(hub: &Hub, b: &Value) -> Result<Value> {
+/// same terminal. When the login's terminal ends, the chains the turns use are read again.
+async fn add(hub: &Arc<Hub>, b: &Value) -> Result<Value> {
     let id = account_id(b)?;
     let Some((harness, name)) = id.split_once(':').filter(|(h, _)| matches!(*h, "claude" | "codex")) else {
         bail!("`harness` must be claude or codex");
     };
     let bin = kith().await?;
-    let known = read(&bin).await?;
-    let exists = known["accounts"].as_array().is_some_and(|a| a.iter().any(|r| r["id"] == id.as_str()));
+    let known = json_of(&bin, &["account", "list", "--json"]).await?;
+    let exists = known.as_array().is_some_and(|a| a.iter().any(|r| r["id"] == id.as_str()));
     if harness == "claude" && !exists && b["yes"].as_bool() != Some(true) {
         // Nothing is made without `--yes`: the CLI prints its warning and ends on the missing answer.
-        let warning = stdout_of(&bin, &["account", "add", harness, name]).await;
-        return Ok(json!({"ok": false, "error": "this needs a yes after the warning", "warning": warning.trim()}));
+        let warning = warning_text(&stdout_of(&bin, &["account", "add", harness, name]).await?);
+        return Ok(json!({"ok": false, "error": "this needs a yes after the warning", "warning": warning}));
     }
     let dim = |k: &str, default: u16| b[k].as_u64().and_then(|v| u16::try_from(v).ok()).unwrap_or(default);
     let command = [
@@ -286,8 +294,39 @@ async fn add(hub: &Hub, b: &Value) -> Result<Value> {
         name.into(),
         "--yes".into(),
     ];
-    let _one_at_a_time = WRITES.lock().await;
-    let term = hub.terms.start_argv(&format!("account:{id}"), &command, &[], dim("cols", 80), dim("rows", 24))?;
-    hub.backups.forget_chains();
+    let term = {
+        let _one_at_a_time = WRITES.lock().await;
+        hub.terms.start_argv(&format!("account:{id}"), &command, &[], dim("cols", 80), dim("rows", 24))?
+    };
+    refresh_known(hub, &bin).await;
+    // The login adds the account to the set when it ends: the chains are read again then, not only at its start.
+    if let Some(term) = hub.terms.get(&term) {
+        let (hub, bin) = (hub.clone(), bin.clone());
+        tokio::spawn(async move {
+            let (head, mut rx) = term.attach();
+            if !head.iter().any(|m| m["type"] == "exit") {
+                while let Ok(m) = rx.recv().await {
+                    if m["type"] == "exit" {
+                        break;
+                    }
+                }
+            }
+            refresh_known(&hub, &bin).await;
+        });
+    }
     Ok(json!({"account": {"ok": true, "id": id, "harness": harness, "name": name, "created": !exists}, "term": term}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::warning_text;
+
+    #[test]
+    fn the_warning_is_the_clis_text_without_the_question_it_ends_on() {
+        let printed = "Before adding a second Claude subscription account:\n\n  Whether to do this is your decision.\n\nAdd this account? Type y to continue: ";
+        assert_eq!(
+            warning_text(printed),
+            "Before adding a second Claude subscription account:\n\n  Whether to do this is your decision."
+        );
+    }
 }

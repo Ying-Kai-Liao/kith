@@ -201,23 +201,28 @@ async fn set_main(hub: &Hub, b: &Value) -> Result<()> {
         args.extend(["--agent", agent]);
     }
     let bin = kith().await?;
-    let _one_at_a_time = WRITES.lock().await;
-    // kith asks the account's harness whether it is logged in, for its note.
-    hq::run(&bin, &args, None, READ_TIMEOUT).await?;
-    // The next turn starts on the new account. The chains are asked for again now, not left to the next turn: a bot
-    // whose session is warm only learns its main account changed from its chain, and an unknown chain changes nothing.
-    let agents = hub.backups.known_agents();
-    hub.backups.forget_chains();
-    futures::future::join_all(agents.iter().map(|agent| {
-        let bin = &bin;
-        async move {
-            if let Ok(chain) = hq::chain(bin, agent, &hub.backups).await {
-                hub.backups.end_refresh(agent, Some(chain));
-            }
+    {
+        let _one_at_a_time = WRITES.lock().await;
+        // kith asks the account's harness whether it is logged in, for its note.
+        hq::run(&bin, &args, None, READ_TIMEOUT).await?;
+    }
+    // The next turn starts on the new account: the chains the turns use are read again now (the turns go on with the
+    // old ones until they land, none waits for it), since a bot whose session is warm only learns its main account
+    // changed from its chain.
+    refresh_known(hub, &bin).await;
+    Ok(())
+}
+
+/// After a write of the apps: reads of the kernel that began before it are out of date from here on, and the chains of
+/// the agents the host knows are read again.
+pub(super) async fn refresh_known(hub: &Hub, bin: &Path) {
+    hub.backups.bump_generation();
+    futures::future::join_all(hub.backups.known_agents().iter().map(|agent| async move {
+        if let Ok(chain) = hq::chain(bin, agent, &hub.backups).await {
+            hub.backups.set_chain(agent, chain);
         }
     }))
     .await;
-    Ok(())
 }
 
 /// `backupsSet {agent: string|null, chain: [ids]|null}`: the whole list for one agent or (agent null) for every agent.
@@ -248,9 +253,11 @@ async fn set(hub: &Hub, b: &Value) -> Result<()> {
             args.extend(["--agent", agent]);
         }
     }
-    let _one_at_a_time = WRITES.lock().await;
-    hq::run(&bin, &args, None, WRITE_TIMEOUT).await?;
+    {
+        let _one_at_a_time = WRITES.lock().await;
+        hq::run(&bin, &args, None, WRITE_TIMEOUT).await?;
+    }
     // Turns started from now on use the new order, not the chain kith gave up to minutes ago.
-    hub.backups.forget_chains();
+    refresh_known(hub, &bin).await;
     Ok(())
 }

@@ -139,7 +139,7 @@ def kernel_accounts_json(st, now):
     order, pin = static_order(st)
     p = kernel_pick(st, now)
     return {"version": 1, "agent": "house", "harness": "claude", "policy": st["policy"], "pin": pin, "main": order[0],
-            "cross_harness": st["cross"], "order": order, "candidates": p["candidates"], "all_out": p["all_out"],
+            "cross_harness": st["cross"], "own": st["agents"].get("house", {}).get("accounts"), "order": order, "candidates": p["candidates"], "all_out": p["all_out"],
             "skipped": p["skipped"], "accounts": [row_of(st, i, now, order) for i in order]}
 
 
@@ -176,7 +176,8 @@ def kernel_command():
     elif sub == "out":
         until = int(rest[rest.index("--until") + 1]) if "--until" in rest else int(now) + 3600
         reason = rest[rest.index("--reason") + 1] if "--reason" in rest else "manual"
-        st["out"][ids[0]] = {"out_until": until, "reason": reason}
+        if not ("--extend" in rest and st["out"].get(ids[0], {}).get("out_until", 0) > until):
+            st["out"][ids[0]] = {"out_until": until, "reason": reason}
     elif sub == "clear":
         st["out"].pop(ids[0], None)
     elif sub == "remove":
