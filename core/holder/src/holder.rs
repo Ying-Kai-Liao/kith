@@ -88,7 +88,7 @@ impl Backlog {
 
 struct State {
     procs: HashMap<u32, Entry>,
-    /// The highest claim seen per conversation, kept after the process is acked: a spawn below it is stale.
+    /// The highest claim seen per conversation, kept after the process is acked: a spawn at or below it is stale.
     claims: HashMap<String, u64>,
     next_id: u32,
     /// The newest generation any core has said hello with. Never goes down.
@@ -468,16 +468,15 @@ impl Holder {
                     let state = if self.body_for(&payload).is_some() {
                         self.kill(&st, id)
                     } else {
-                        KillState::Gone
+                        KillState::NotHere
                     };
                     self.to_core(&st, wire::json_frame(p::KILLED, id, &p::Killed { state }));
                 }
                 p::ACK => {
-                    let known = self
-                        .body_for(&payload)
-                        .and_then(|_| st.procs.get(&id))
-                        .map(|e| e.held.exit.is_some());
-                    let state = match known {
+                    let here = self.body_for(&payload).is_some();
+                    let known = st.procs.get(&id).map(|e| e.held.exit.is_some());
+                    let state = match known.filter(|_| here) {
+                        None if !here => p::AckState::NotHere,
                         None => p::AckState::Gone,
                         Some(false) => p::AckState::Running,
                         Some(true) => {
@@ -552,14 +551,20 @@ impl Holder {
                     conv: spec.conv,
                     claim: spec.claim,
                     pid: e.held.pid,
+                    instance: self.instance.clone(),
+                    id: e.held.id,
                 },
             );
             return self.to_core(&st, frame);
         }
-        // A claim below the highest seen for this conversation was decided before a newer one: refuse it, whether
-        // or not that newer one is still held.
-        let highest = st.claims.get(&spec.conv).copied().unwrap_or(0);
-        if spec.claim < highest {
+        // A claim at or below the highest started for this conversation was decided before (or is) one whose job
+        // already ran: refuse it, whether or not that process is still held or was acked.
+        if let Some(highest) = st
+            .claims
+            .get(&spec.conv)
+            .copied()
+            .filter(|h| spec.claim <= *h)
+        {
             let stale = p::StaleClaim {
                 conv: spec.conv,
                 claim: spec.claim,
@@ -567,7 +572,6 @@ impl Holder {
             };
             return self.to_core(&st, wire::json_frame(p::STALE_CLAIM, 0, &stale));
         }
-        st.claims.insert(spec.conv.clone(), spec.claim);
         let started = platform::spawn(&Spec {
             argv: &spec.argv,
             env: &spec.env,
@@ -592,6 +596,8 @@ impl Holder {
                 return self.to_core(&st, wire::json_frame(p::SPAWN_FAILED, 0, &failed));
             }
         };
+        // Recorded only now: a start that failed can be tried again with the same claim.
+        st.claims.insert(spec.conv.clone(), spec.claim);
         let id = st.next_id;
         st.next_id += 1;
         let pid = started.proc.pid();
@@ -613,6 +619,7 @@ impl Holder {
             id,
             Entry {
                 held: Held {
+                    instance: self.instance.clone(),
                     id,
                     conv: spec.conv.clone(),
                     claim: spec.claim,
@@ -648,6 +655,8 @@ impl Holder {
                     conv: spec.conv,
                     claim: spec.claim,
                     pid,
+                    instance: self.instance.clone(),
+                    id,
                 },
             ),
         );
@@ -758,6 +767,7 @@ mod tests {
             1,
             Entry {
                 held: Held {
+                    instance: String::new(),
                     id: 1,
                     conv: "c".into(),
                     claim: 1,
