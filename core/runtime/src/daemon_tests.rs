@@ -801,7 +801,7 @@ fn a_holder_linked_through_a_command_never_makes_the_core_end_local_processes() 
 }
 
 /// The owner's authority writes (M2-2) go through the daemon like the gate's: they need `&mut Core`, so `Core::call`
-/// alone would answer NotServed.
+/// alone would answer `NotServed`.
 #[cfg(unix)]
 #[test]
 fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {

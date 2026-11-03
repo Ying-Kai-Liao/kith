@@ -27,7 +27,7 @@ use crate::layout::Layout;
 /// built-in `scratch`).
 struct Rig {
     _core_dir: tempfile::TempDir,
-    _machine: tempfile::TempDir,
+    machine_dir: tempfile::TempDir,
     core: Core,
     c: Ctx,
 }
@@ -44,7 +44,7 @@ impl Rig {
         let (machine_dir, c) = machine();
         Rig {
             _core_dir: core_dir,
-            _machine: machine_dir,
+            machine_dir,
             core,
             c,
         }
@@ -927,7 +927,7 @@ fn the_list_answers_what_the_rules_answer_and_changes_nothing() {
         .unwrap();
     assert_eq!(only["rows"].as_array().unwrap().len(), 1);
     let only = rig.call("people.list", &json!({"person": "amy"})).unwrap();
-    assert!(only["rows"].as_array().unwrap().is_empty());
+    assert_eq!(only["rows"], json!([]));
     assert_eq!(rig.tables(), before);
 }
 
@@ -936,7 +936,7 @@ fn the_list_answers_what_the_rules_answer_and_changes_nothing() {
 #[test]
 fn the_handler_takes_the_callers_view_of_where_the_agents_are() {
     let mut rig = Rig::new(&base());
-    let root = rig._machine.path().to_path_buf();
+    let root = rig.machine_dir.path().to_path_buf();
     let view = |mut p: Value| {
         p["home"] = root.to_string_lossy().as_ref().into();
         p["kernel"] = root.join("kernel").to_string_lossy().as_ref().into();

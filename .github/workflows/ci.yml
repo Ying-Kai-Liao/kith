@@ -992,15 +992,6 @@ jobs:
             sel="$sel -p $p"
           done
           echo "SEL=$sel" >> "$GITHUB_ENV"
-      - name: TEMP regenerate openrpc
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo run --locked -q -p kith-api --bin kith-api-gen -- --write
-      - name: TEMP upload openrpc
-        if: matrix.os == 'ubuntu-latest' && always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: openrpc
-          path: core/api/openrpc.json
       - name: fmt
         run: cargo fmt --check $SEL
       - name: clippy

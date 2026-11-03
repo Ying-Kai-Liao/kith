@@ -68,8 +68,9 @@ fn settings(params: &Value, keys: &[&str]) -> Settings {
         .collect()
 }
 
-fn lines(lines: Vec<String>) -> Value {
-    json!({ "lines": lines })
+fn lines(said: Vec<String>) -> Value {
+    let said = said.into_iter().map(Value::String).collect();
+    json!({ "lines": Value::Array(said) })
 }
 
 /// A new `/link` code: six letters and digits with no 0/O or 1/I to misread, from the OS's randomness.
@@ -103,12 +104,12 @@ pub(crate) fn call_with(core: &mut Core, c: &Ctx, method: &str, params: &Value) 
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))
         }
         m if serves(m) => {
-            let code = if m == "people.invite" {
+            let fresh = if m == "people.invite" {
                 new_code()?
             } else {
                 String::new()
             };
-            store::run(core, c, |a| write_op(m, params, c, a, &code))
+            store::run(core, c, |a| write_op(m, params, c, a, &fresh))
         }
         _ => Err(Error::NotServed(format!(
             "kith-core: {method} is not answered in the core yet"

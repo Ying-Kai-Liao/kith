@@ -626,7 +626,7 @@ pub(crate) fn bot_add(
     let mut line = format!("{bid}: bot of {parent}");
     for k in ["name", "provider"] {
         if let Some(v) = p.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()) {
-            line.push_str(&format!(", {k} {v}"));
+            line = format!("{line}, {k} {v}");
         }
     }
     Ok(vec![line])
