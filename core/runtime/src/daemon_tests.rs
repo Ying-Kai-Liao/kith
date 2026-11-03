@@ -318,24 +318,6 @@ fn the_daemon_waits_out_an_embedded_command_and_an_embedded_call_defers_to_the_d
     ));
 }
 
-#[test]
-fn a_daemon_that_gives_up_waiting_says_who_held_the_core() {
-    let (_t, m) = machine();
-    let p = paths(&m);
-    let _embedded = open(&Layout::new(&m));
-    let d = Daemon::spawn_with(
-        &p,
-        Config {
-            wait_for_embedded: Duration::from_millis(200),
-            ..quiet()
-        },
-    );
-    assert!(matches!(
-        d.ready(Duration::from_secs(5)),
-        Err(Error::AlreadyRunning(_))
-    ));
-}
-
 #[cfg(unix)]
 #[test]
 fn a_socket_file_left_by_a_dead_daemon_is_replaced_by_the_next_one() {

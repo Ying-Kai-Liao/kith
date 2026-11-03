@@ -2,7 +2,7 @@
 //! daemon starts inside `kith serve`, and `kith kernel core-daemon` / `core-status` are the two small verbs around it.
 //!
 //! The CLI never depends on the daemon. A verb goes to the owner socket only when the table says the core serves it and
-//! a daemon answers; otherwise (no daemon, a daemon that disagrees about the method table, a connection that broke, a
+//! a daemon answers; otherwise (no daemon, a daemon that lacks a row this verb calls or reads it differently, a connection that broke, a
 //! row the core does not answer yet, a command line the table does not spell) it runs exactly as it did before.
 //! `kernel::route` has already sent the command line here; clap still parses everything this module declines.
 
@@ -36,7 +36,8 @@ pub fn try_cli(args: &[OsString]) -> Option<i32> {
     }
     let home = kith_kernel::paths::process_home();
     let folders = kernel::folders(&home);
-    let params = caller_view(parsed.method.name, parsed.params, &home);
+    // None: a path that is not UTF-8 can't be sent as JSON without changing it, so the verb runs embedded.
+    let params = caller_view(parsed.method.name, parsed.params, &home)?;
     match kith_core::reach(&folders, parsed.method.name, &params, true) {
         kith_core::Reached::Answered(answer) => print_answer(parsed.method.name, &answer, parsed.format.as_deref()),
         // Said once, in the core log: a stderr line on every `kith paths` would end up in scripts' output.
@@ -49,8 +50,9 @@ pub fn try_cli(args: &[OsString]) -> Option<i32> {
 }
 
 /// The caller's view of the environment, for the methods that read it: the daemon's own environment is not the one
-/// this process has (a hook or an agent run has its own `KITH_HOME`, `HOME`, `KITH_STATE` ...).
-fn caller_view(method: &str, mut params: Value, home: &std::path::Path) -> Value {
+/// this process has (a hook or an agent run has its own `KITH_HOME`, `HOME`, `KITH_STATE` ...). `None` when the home or
+/// the kernel folder is not UTF-8: the daemon would be told another path than the caller has.
+fn caller_view(method: &str, mut params: Value, home: &std::path::Path) -> Option<Value> {
     if method == "paths" {
         // var_os: a variable that is not UTF-8 must not stop `kith paths`; one paths reads is skipped if it is.
         let env: serde_json::Map<String, Value> = PATHS_VARS
@@ -60,12 +62,12 @@ fn caller_view(method: &str, mut params: Value, home: &std::path::Path) -> Value
         let object = params.as_object_mut().expect("parsed params are an object");
         if !object.contains_key("kernel") {
             let kernel: PathBuf = kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
-            object.insert("kernel".into(), json!(kernel.to_string_lossy()));
+            object.insert("kernel".into(), json!(kernel.to_str()?));
         }
-        object.insert("home".into(), json!(home.to_string_lossy()));
+        object.insert("home".into(), json!(home.to_str()?));
         object.insert("env".into(), Value::Object(env));
     }
-    params
+    Some(params)
 }
 
 /// Prints what the embedded verb prints, from the daemon's answer.
@@ -188,28 +190,49 @@ mod tests {
     #[test]
     fn the_caller_view_carries_home_kernel_and_only_the_variables_paths_reads() {
         let home = PathBuf::from("/h");
-        let v = caller_view("paths", json!({}), &home);
+        let v = caller_view("paths", json!({}), &home).expect("view");
         assert_eq!(v["home"], "/h");
         assert!(v["kernel"].is_string());
         for k in v["env"].as_object().expect("env").keys() {
             assert!(PATHS_VARS.contains(&k.as_str()), "{k}");
         }
         // The kernel the caller named stays; other methods get nothing added.
-        assert_eq!(caller_view("paths", json!({"kernel": "/k"}), &home)["kernel"], "/k");
-        assert_eq!(caller_view("kernel.version", json!({}), &home), json!({}));
+        assert_eq!(caller_view("paths", json!({"kernel": "/k"}), &home).expect("view")["kernel"], "/k");
+        assert_eq!(caller_view("kernel.version", json!({}), &home), Some(json!({})));
     }
 
     #[cfg(unix)]
     #[test]
     fn a_variable_that_is_not_utf8_does_not_stop_the_caller_view() {
         use std::os::unix::ffi::OsStringExt as _;
-        // The old std::env::vars() panicked on any such variable, whatever its name.
-        // SAFETY: the name is private to this test.
-        unsafe { std::env::set_var("KITH_TEST_NOT_UTF8", OsString::from_vec(vec![0xff, 0xfe])) };
-        let v = caller_view("paths", json!({}), &PathBuf::from("/h"));
-        assert!(v["env"].is_object());
-        // SAFETY: as above.
-        unsafe { std::env::remove_var("KITH_TEST_NOT_UTF8") };
+        // The old std::env::vars() panicked on any such variable, whatever its name. The variable is the child
+        // process's environment, so this process never calls the unsafe `set_var`.
+        if std::env::var_os("KITH_TEST_CHILD").is_none() {
+            let out = std::process::Command::new(std::env::current_exe().expect("test exe"))
+                .args(["--exact", "core_front::tests::a_variable_that_is_not_utf8_does_not_stop_the_caller_view"])
+                .env("KITH_TEST_CHILD", "1")
+                .env("KITH_STATE", OsString::from_vec(vec![0xff, 0xfe]))
+                .output()
+                .expect("child runs");
+            assert!(
+                out.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            );
+            return;
+        }
+        let v = caller_view("paths", json!({}), &PathBuf::from("/h")).expect("view");
+        // The one paths reads is skipped, not sent mangled.
+        assert!(v["env"].as_object().expect("env").get("KITH_STATE").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_home_that_is_not_utf8_is_not_sent_so_the_verb_runs_embedded() {
+        use std::os::unix::ffi::OsStringExt as _;
+        let home = PathBuf::from(OsString::from_vec(vec![b'/', 0xff, 0xfe]));
+        assert_eq!(caller_view("paths", json!({}), &home), None);
     }
 
     #[test]

@@ -301,7 +301,9 @@ def snapshot(side_dir, case, norm):
             if own is not None:
                 filenames = [f for f in filenames if f != 'core.log' or own]   # all its lines were the daemon's: nothing to compare
             made_by_daemon = WITH_DAEMON and DAEMON_LOGS.get(str(side_dir)) == rel_dir
-            if (not dirnames or (WITH_CORE and dirnames == ['core']) or (WITH_DAEMON and set(dirnames) <= {'core', 'logs'})) and not filenames and d != base:
+            # Only the daemon's own folders are free: `core`, and `logs` when it is the one the daemon made (not a `logs` the case made).
+            daemon_dirs = {'core'} | ({'logs'} if WITH_DAEMON and DAEMON_LOGS.get(str(side_dir)) == f'{rel_dir}/logs' else set())
+            if (not dirnames or (WITH_CORE and dirnames == ['core']) or (WITH_DAEMON and set(dirnames) <= daemon_dirs)) and not filenames and d != base:
                 if not made_by_daemon:   # a folder only the daemon's log made is no state of the case
                     facets[f'state:{rel_dir}/'] = '<empty dir>\n'
             for f in sorted(filenames):
@@ -657,6 +659,11 @@ def main(argv=None):
                         and not DAEMON_PER_CASE[c['name']])
         if silent:
             print(f'FAIL  paths case(s) ran against a daemon that answered nothing: {", ".join(silent)}')
+            return 1
+        # A case that sets a daemon_env is about the daemon: one that started before any setup ran bare and proved nothing.
+        bare = sorted(c['name'] for c in cases if c['name'] in DAEMON_BARE and 'daemon_env' in c)
+        if bare:
+            print(f'FAIL  daemon case(s) ran without a daemon: {", ".join(bare)}')
             return 1
     return 1 if failed or stale else 0
 
