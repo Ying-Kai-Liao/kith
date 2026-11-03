@@ -480,6 +480,9 @@ jobs:
           kernel/tests/difftest/kith-difftest --rust --daemon --bin "$PWD/serve/host/target/debug/kith"
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-launch-once-race-check
           KITH_DIFFTEST_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-auth-mixed-race-check
+          # A direct run holds its conversation's lock under kith-stub (M1-3).
+          cargo build --manifest-path serve/host/Cargo.toml -p kith-stub
+          KITH_STUB_BIN="$PWD/serve/host/target/debug/kith-stub" kernel/tests/kith-direct-lock-check
       - name: Run-once cost and kernel notes
         run: KITH_BIN="$PWD/serve/host/target/debug/kith" kernel/tests/kith-run-once-cost-check
       # kith-sessions and the Rust threads module claiming one thread at once: never more than one writer.

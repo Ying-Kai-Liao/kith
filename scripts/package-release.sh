@@ -18,6 +18,8 @@ mkdir -p "$STAGE/$NAME/bin" "$STAGE/$NAME/share/kith" "$OUT"
 install -m 755 "$BIN" "$STAGE/$NAME/bin/kith"
 # The host looks for kith-tts next to itself; Apple silicon only, so the x86_64 tarball has none.
 [ -z "${KITH_TTS_BIN:-}" ] || install -m 755 "$KITH_TTS_BIN" "$STAGE/$NAME/bin/kith-tts"
+# The conversation lock's launcher, beside kith where `kith <agent>` looks for it (KITH_STUB_BIN names a built one).
+[ -z "${KITH_STUB_BIN:-}" ] || install -m 755 "$KITH_STUB_BIN" "$STAGE/$NAME/bin/kith-stub"
 sh "$ROOT/scripts/stage-kernel.sh" "$STAGE/$NAME/share/kith" "$VERSION"
 tar -C "$STAGE" -czf "$OUT/$NAME.tar.gz" "$NAME"
 (cd "$OUT" && shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256")
