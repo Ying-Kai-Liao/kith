@@ -336,7 +336,10 @@ mod tests {
         std::fs::create_dir_all(&res).unwrap();
         std::fs::write(res.join("kith-serve"), "").unwrap();
         stub_at(&res.join("kith/bin/kith-stub"));
-        assert_eq!(find_stub(Some(&res.join("kith-serve")), None), Some(res.join("kith/bin/kith-stub").canonicalize().unwrap()));
+        assert_eq!(
+            find_stub(Some(&res.join("kith-serve")), None),
+            Some(res.join("kith/bin/kith-stub").canonicalize().unwrap())
+        );
         // A service copy with the stub beside it wins over the bundle layout.
         let svc = t.join("serve/bin");
         std::fs::create_dir_all(&svc).unwrap();
@@ -358,7 +361,11 @@ mod tests {
                 Some(cli.join("kith-stub").canonicalize().unwrap())
             );
             // A stub that is not executable is not a stub.
-            std::fs::set_permissions(cli.join("kith-stub"), <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o644)).unwrap();
+            std::fs::set_permissions(
+                cli.join("kith-stub"),
+                <std::fs::Permissions as std::os::unix::fs::PermissionsExt>::from_mode(0o644),
+            )
+            .unwrap();
             assert_eq!(find_stub(Some(&t.join("lone-serve")), Some(&local.join("kith"))), None);
         }
         let _ = std::fs::remove_dir_all(&t);

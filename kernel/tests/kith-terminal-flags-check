@@ -32,7 +32,7 @@ chmod +x "$T/bin/claude"
 # A guest run refuses to start without a kith program that answers `memory hook`; a stub stands in for the host build.
 printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-fake-host"
 chmod +x "$T/bin/kith-fake-host"
-export KITH_BIN=$T/bin/kith-fake-hostPATH=$T/bin:$PATH STUB_OUT=$T/stub.out STUB_SETTINGS=$T/stub.settings
+export KITH_BIN=$T/bin/kith-fake-host PATH=$T/bin:$PATH STUB_OUT=$T/stub.out STUB_SETTINGS=$T/stub.settings
 
 KITH=$KERNEL/bin/kith
 fail=0

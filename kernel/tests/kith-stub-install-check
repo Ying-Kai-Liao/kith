@@ -73,9 +73,10 @@ check "kith serve: no built stub leaves the old one" 'cmp -s "$T/new-stub" "$T/s
 # names it (a tarball without it would ship unlocked installs to Homebrew and install.sh alike)
 mkdir -p "$T/pack"
 printf '#!/bin/sh\necho kith\n' > "$T/pack/kith"; chmod 755 "$T/pack/kith"
-KITH_STUB_BIN=$d/bin/kith-stub sh "$ROOT/scripts/package-release.sh" 0.1.0 arm64 "$T/pack/kith" "$T/pack/out" >/dev/null 2>&1
+KITH_STUB_BIN=$d/bin/kith-stub sh "$ROOT/scripts/package-release.sh" 0.1.0 arm64 "$T/pack/kith" "$T/pack/out" >"$T/pack.log" 2>&1
 tar -tzf "$T/pack/out/kith-0.1.0-darwin-arm64.tar.gz" 2>/dev/null | grep -q '/bin/kith-stub$' && packed=1 || packed=0
 check "package-release.sh: the tarball holds bin/kith-stub" '[ $packed = 1 ]'
+[ $packed = 1 ] || tail -n 5 "$T/pack.log"
 check "release.yml builds the stub for both CPUs and packs it" \
   'grep -q "cargo build --release --locked -p kith-stub --target" "$ROOT/.github/workflows/release.yml" && grep -q "KITH_STUB_BIN: serve/host/target/\${{ matrix.target }}/release/kith-stub" "$ROOT/.github/workflows/release.yml"'
 # Homebrew: the formula installs it from that tarball, unconditionally (brew links bin/kith and bin/kith-stub side by side)
