@@ -4,7 +4,10 @@
 //! `kith serve` goes on without it.
 //!
 //! Against embedded commands: the lock is one lock. If an embedded command holds it when the daemon starts, the daemon
-//! waits it out with backoff (and says so in the log) instead of failing or taking it. A second daemon finds the first
+//! waits it out with bounded backoff (and says so in the log, once) instead of failing or taking it, and keeps trying
+//! for as long as the holder is an embedded command: a command is short, and a daemon that gave up would leave the
+//! machine without one until the next `kith serve`. Only a holder that does not say it is an embedded command (an
+//! unknown process) is waited for no longer than `wait_for_embedded`. A second daemon finds the first
 //! one's name in core.holder and refuses at once. While the daemon holds the lock, an embedded call goes to the socket.
 
 use std::path::PathBuf;
@@ -28,7 +31,8 @@ use crate::{busy, log};
 
 pub(crate) struct Config {
     pub holder: HolderConfig,
-    /// How long an embedded command may hold the lock before the daemon gives up waiting.
+    /// How long a holder that is not a known embedded command may hold the lock before the daemon gives up waiting.
+    /// An embedded command is waited for without limit.
     pub wait_for_embedded: Duration,
     /// Off for tests that are not about the holder.
     pub holder_on: bool,
@@ -291,18 +295,32 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
         Err(e) => return failed(shared, e),
     };
     let generation = core.generation();
-    *shared
-        .core
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(core);
+    {
+        // Checked under the lock `stop` takes the core with: a stop that came first leaves nothing held here.
+        let mut slot = shared
+            .core
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if shared.stopping() {
+            return;
+        }
+        *slot = Some(core);
+    }
     let for_calls = shared.clone();
     let handler: Arc<Handler> = Arc::new(move |method, params| for_calls.dispatch(method, params));
     match Server::bind(layout, generation, handler) {
         Ok(server) => {
-            *shared
+            let mut slot = shared
                 .server
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(server);
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // `stop` sets the flag before it looks in this slot, so a server put here after that is stopped here.
+            if shared.stopping() {
+                drop(slot);
+                server.stop();
+            } else {
+                *slot = Some(server);
+            }
         }
         Err(e) => {
             // Holding the lock with nothing listening would only make every CLI call wait for nothing.
@@ -366,7 +384,10 @@ fn acquire(shared: &Shared, layout: &Layout, cfg: &Config) -> Result<Core> {
             Opened::Core(core) => return Ok(*core),
             Opened::Busy(holder) => {
                 let role = holder.as_ref().and_then(|h| h.role);
-                if role == Some(Role::Daemon) || begun.elapsed() >= cfg.wait_for_embedded {
+                let patient = role == Some(Role::Embedded);
+                if role == Some(Role::Daemon)
+                    || (!patient && begun.elapsed() >= cfg.wait_for_embedded)
+                {
                     return Err(busy(holder));
                 }
                 if !told {
@@ -389,6 +410,10 @@ fn acquire(shared: &Shared, layout: &Layout, cfg: &Config) -> Result<Core> {
 #[cfg(test)]
 #[path = "daemon_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "daemon_m1_tests.rs"]
+mod m1_tests;
 
 /// What `kith doctor` shows: asks the daemon when one answers, and otherwise says what the lock and the folder say.
 /// Never takes the lock for good, never creates anything, never reads core.db.
