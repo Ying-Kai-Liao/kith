@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used)]
+#![allow(clippy::unwrap_used, clippy::many_single_char_names)]
 
 use std::time::{Duration, Instant};
 
