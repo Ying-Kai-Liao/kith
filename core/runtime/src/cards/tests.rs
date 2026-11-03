@@ -301,7 +301,7 @@ fn a_second_answer_a_closed_card_and_an_unknown_card_change_nothing() {
     assert_eq!(stored(&mut c, &a.id), before, "the first answer stands");
 
     let w = new(&mut c, "s1", "w");
-    assert!(withdraw(&mut c, &w.id).unwrap());
+    assert!(withdraw(&mut c, &w.id, T0, &Nobody).unwrap());
     assert_eq!(
         yes(&mut c, &w.id, T0 + 4),
         Answered::Nothing(Some(State::Withdrawn))
@@ -368,13 +368,16 @@ fn answers_must_say_who_and_what() {
 fn withdraw_closes_an_open_card_once() {
     let (_t, _l, mut c) = core();
     let a = new(&mut c, "s1", "a");
-    assert!(withdraw(&mut c, &a.id).unwrap());
-    assert!(!withdraw(&mut c, &a.id).unwrap(), "already closed");
-    assert!(!withdraw(&mut c, "no-such-card").unwrap());
+    assert!(withdraw(&mut c, &a.id, T0, &Nobody).unwrap());
+    assert!(
+        !withdraw(&mut c, &a.id, T0, &Nobody).unwrap(),
+        "already closed"
+    );
+    assert!(!withdraw(&mut c, "no-such-card", T0, &Nobody).unwrap());
     // An answered card is not open: a withdrawal does not undo the answer.
     let b = new(&mut c, "s1", "b");
     yes(&mut c, &b.id, T0 + 1);
-    assert!(!withdraw(&mut c, &b.id).unwrap());
+    assert!(!withdraw(&mut c, &b.id, T0, &Nobody).unwrap());
     assert_eq!(state(&mut c, &b.id), State::Approved);
 }
 
@@ -513,8 +516,9 @@ fn saved_needs_the_claim_and_an_open_card() {
             .is_none()
     );
     assert_eq!(state(&mut c, &a.id), State::Pending);
-    // Withdrawn under the holder: the save finds it closed.
-    assert!(withdraw(&mut c, &a.id).unwrap());
+    // A withdrawal waits for the holder; once the claim has run out it closes the card and the save finds it closed.
+    assert!(!withdraw(&mut c, &a.id, T0, &Nobody).unwrap(), "held");
+    assert!(withdraw(&mut c, &a.id, DEADLINE + 1, &Nobody).unwrap());
     assert!(
         saved(&mut c, &a.id, "w1", "owner", T0, DEADLINE, &Nobody)
             .unwrap()
@@ -750,6 +754,9 @@ fn a_claim_whose_process_is_gone_is_dropped_and_an_unreadable_one_is_kept() {
     assert_eq!(state(&mut c, &d.id), State::Expired);
 }
 
+// One Core per process, as in the daemon: `Core` owns the lifetime lock, and a second open of the same folder is refused
+// (or, were it let in, bumps the generation and strands the first). So the threads share one Core behind a Mutex, as
+// the daemon's do; what these check is that the claim and the answer are decided in the rows, not in who got there.
 #[test]
 fn threads_claiming_one_card_leave_exactly_one_holder() {
     for round in 0..20 {
@@ -789,6 +796,9 @@ fn threads_claiming_one_card_leave_exactly_one_holder() {
     }
 }
 
+// One Core per process, as in the daemon: `Core` owns the lifetime lock, and a second open of the same folder is refused
+// (or, were it let in, bumps the generation and strands the first). So the threads share one Core behind a Mutex, as
+// the daemon's do; what these check is that the claim and the answer are decided in the rows, not in who got there.
 #[test]
 fn threads_answering_one_card_record_exactly_one_answer() {
     for round in 0..20 {
@@ -1014,7 +1024,7 @@ fn cards_answer_says_closed_expired_or_claimed_and_changes_nothing() {
     assert_eq!(stored(&mut c, &a.id), before);
 
     let withdrawn_card = raised(&mut c, &with_options("s1", "w"));
-    withdraw(&mut c, &withdrawn_card.id).unwrap();
+    withdraw(&mut c, &withdrawn_card.id, T0, &Nobody).unwrap();
     let got = row(
         &mut c,
         "cards.answer",
@@ -1211,13 +1221,23 @@ fn random_sequences_answer_a_card_at_most_once_and_never_after_it_closes() {
                         .clone()
                 })
             };
-            let op = rng.below(9);
+            let op = rng.below(11);
             let before: Option<Card> = pick(&mut rng, &ids).map(|id| stored(&mut c, &id));
             let label = format!("seed {seed} step {step} op {op}");
+            // The claims in force before the op, at the clock the op runs at.
+            let mut held: Vec<(String, String)> = Vec::new();
+            for id in &ids {
+                if let Some(h) = stored(&mut c, id).holder(now) {
+                    held.push((id.clone(), h.to_owned()));
+                }
+            }
+            // The one claim the op may end: a release or a save by its own holder.
+            let mut ended: Option<(String, String)> = None;
             match (op, &before) {
                 (0, _) => {
                     let n = NewCard {
                         deadline: now + 50 + i64::try_from(rng.below(300)).unwrap(),
+                        run_id: Some(format!("run{}", rng.below(2))),
                         ..ask(&format!("s{}", rng.below(3)), &format!("r{}", rng.below(2)))
                     };
                     match raise(&mut c, &n, now, &Nobody).unwrap() {
@@ -1261,10 +1281,12 @@ fn random_sequences_answer_a_card_at_most_once_and_never_after_it_closes() {
                 (4, Some(b)) => {
                     let who = HOLDERS[usize::try_from(rng.below(3)).unwrap()];
                     release(&mut c, &b.id, who, &Nobody).unwrap();
+                    ended = Some((b.id.clone(), who.to_owned()));
                 }
                 (5, Some(b)) => {
                     let who = HOLDERS[usize::try_from(rng.below(3)).unwrap()];
                     let got = saved(&mut c, &b.id, who, "owner", now, now + 100, &Nobody).unwrap();
+                    ended = Some((b.id.clone(), who.to_owned()));
                     if got.is_some() {
                         *taken.entry(b.id.clone()).or_default() += 1;
                         assert!(
@@ -1280,15 +1302,36 @@ fn random_sequences_answer_a_card_at_most_once_and_never_after_it_closes() {
                     }
                 }
                 (6, Some(b)) => {
-                    withdraw(&mut c, &b.id).unwrap();
+                    withdraw(&mut c, &b.id, now, &Nobody).unwrap();
                 }
                 (7, _) => {
                     sweep(&mut c, now, &Nobody).unwrap();
+                }
+                (8, _) => {
+                    park_run(&mut c, &format!("run{}", rng.below(2))).unwrap();
+                }
+                (9, Some(b)) => {
+                    mark_live(&mut c, &b.id, Some("e1"), None).unwrap();
                 }
                 _ => now += i64::try_from(rng.below(120)).unwrap(),
             }
             for id in &ids {
                 let now_card = stored(&mut c, id);
+                // A claim in force stays with its holder, on an open card, whatever the op was: only its own holder
+                // ends it (a dead pid would too, but this clock has none).
+                if let Some((_, h)) = held.iter().find(|(held_id, _)| held_id == id)
+                    && ended.as_ref() != Some(&(id.clone(), h.clone()))
+                {
+                    assert!(
+                        now_card.state.open(),
+                        "{label}: card {id} held by {h} closed under it"
+                    );
+                    assert_eq!(
+                        now_card.claim_by.as_deref(),
+                        Some(h.as_str()),
+                        "{label}: the claim of {h} on {id} was lost"
+                    );
+                }
                 assert!(
                     taken.get(id).copied().unwrap_or(0) <= 1,
                     "{label}: card {id} answered twice"
@@ -1334,4 +1377,102 @@ fn random_sequences_answer_a_card_at_most_once_and_never_after_it_closes() {
             }
         }
     }
+}
+
+#[test]
+fn parking_a_run_keeps_a_held_claim() {
+    let (_t, _l, mut c) = core();
+    let a = new(&mut c, "s1", "a");
+    claim(&mut c, &a.id, &hold("w1", DEADLINE + 500), T0, &Nobody)
+        .unwrap()
+        .unwrap();
+    assert_eq!(park_run(&mut c, "r1").unwrap().len(), 1);
+    let got = stored(&mut c, &a.id);
+    assert_eq!(got.state, State::Parked);
+    assert_eq!(got.claim_by.as_deref(), Some("w1"), "the claim stays");
+    // The clock stays off it, and nobody else gets in.
+    assert_eq!(
+        sweep(&mut c, DEADLINE + 1, &Nobody).unwrap().len(),
+        0,
+        "held"
+    );
+    assert_eq!(state(&mut c, &a.id), State::Parked);
+    assert!(
+        claim(&mut c, &a.id, &hold("w2", DEADLINE + 900), T0 + 1, &Nobody)
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(yes(&mut c, &a.id, T0 + 2), Answered::Claimed("w1".into()));
+}
+
+#[test]
+fn a_withdrawal_waits_for_a_held_claim() {
+    let (_t, _l, mut c) = core();
+    let a = new(&mut c, "s1", "a");
+    claim(&mut c, &a.id, &hold("w1", T0 + 100), T0, &Nobody)
+        .unwrap()
+        .unwrap();
+    assert!(!withdraw(&mut c, &a.id, T0 + 1, &Nobody).unwrap());
+    assert_eq!(state(&mut c, &a.id), State::Pending);
+    // The holder can still finish.
+    assert!(
+        saved(&mut c, &a.id, "w1", "owner", T0 + 2, DEADLINE, &Nobody)
+            .unwrap()
+            .is_some()
+    );
+    // A claim whose process is gone does not hold a withdrawal either.
+    let b = new(&mut c, "s1", "b");
+    let with_pid = Claim {
+        holder: "w1",
+        pid: Some(4242),
+        until: T0 + 100_000,
+    };
+    claim(&mut c, &b.id, &with_pid, T0, &Nobody)
+        .unwrap()
+        .unwrap();
+    assert!(!withdraw(&mut c, &b.id, T0 + 1, &Nobody).unwrap());
+    assert!(withdraw(&mut c, &b.id, T0 + 2, &Gone).unwrap());
+}
+
+#[test]
+fn a_yes_to_a_secret_card_is_refused_by_the_store_and_never_becomes_a_grant() {
+    let (_t, _l, mut c) = core();
+    let a = raised(
+        &mut c,
+        &NewCard {
+            tool: "request_secret".into(),
+            ..ask("s1", "key")
+        },
+    );
+    assert!(matches!(
+        answer(&mut c, &reply(&a.id, true), T0 + 1, &Nobody),
+        Err(Error::NotAllowed(_))
+    ));
+    assert_eq!(state(&mut c, &a.id), State::Pending);
+    // A no needs no write and is recorded.
+    assert!(matches!(
+        answer(&mut c, &reply(&a.id, false), T0 + 2, &Nobody).unwrap(),
+        Answered::Applied { .. }
+    ));
+    // A grant picked up by a later ask is never a secret card's.
+    let b = raised(
+        &mut c,
+        &NewCard {
+            tool: "request_secret".into(),
+            ..ask("s1", "key2")
+        },
+    );
+    {
+        let tx = c.claim_tx().unwrap();
+        tx.execute(
+            "UPDATE cards SET state = 'approved', allowed = 1, granted_at = 5 WHERE id = ?1",
+            [&b.id],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    assert!(matches!(
+        raise(&mut c, &ask("s1", "key2"), T0 + 3, &Nobody).unwrap(),
+        Raised::New(_)
+    ));
 }

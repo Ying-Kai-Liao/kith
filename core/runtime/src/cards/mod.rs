@@ -302,17 +302,24 @@ fn list_where(tx: &Transaction<'_>, tail: &str, args: impl rusqlite::Params) -> 
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
 }
 
-/// Moves every card matching `where_` to `to` and drops its claim; returns them as they were before.
+/// Moves every card matching `where_` to `to`; returns them as they were before. A move that closes the card drops its
+/// claim; `keep_claim` is for a move that leaves the card open (parking), whose claim holder is still writing.
 fn move_where(
     tx: &Transaction<'_>,
     where_: &str,
     args: impl rusqlite::Params + Copy,
     to: State,
+    keep_claim: bool,
 ) -> Result<Vec<Card>> {
     let before = list_where(tx, &format!("WHERE {where_}"), args)?;
+    let claim = if keep_claim {
+        String::new()
+    } else {
+        format!(", {CLEAR_CLAIM}")
+    };
     tx.execute(
         &format!(
-            "UPDATE cards SET state = '{}', {CLEAR_CLAIM} WHERE {where_}",
+            "UPDATE cards SET state = '{}'{claim} WHERE {where_}",
             to.as_str()
         ),
         args,
@@ -413,7 +420,7 @@ pub(crate) fn raise(core: &mut Core, n: &NewCard, now: i64, live: &dyn Liveness)
     let grant = list_where(
         &tx,
         "WHERE session = ?1 AND resource = ?2 AND state = 'approved' AND granted_at IS NOT NULL AND scope = 'once'
-           AND tool != 'request_access' ORDER BY answered_at LIMIT 1",
+           AND tool NOT IN ('request_access', 'request_secret') ORDER BY answered_at LIMIT 1",
         params![n.session, n.resource],
     )?
     .pop();
@@ -513,7 +520,8 @@ pub(crate) fn mark_live(
     Ok(c)
 }
 
-/// The run's process is gone: its live cards park (C6). Returns them as they were.
+/// The run's process is gone: its live cards park (C6). Returns them as they were. A parked card is still open, so a
+/// held claim stays: its holder is mid-write and the card must not be answered or swept under it.
 pub(crate) fn park_run(core: &mut Core, run_id: &str) -> Result<Vec<Card>> {
     let tx = core.claim_tx()?;
     let moved = move_where(
@@ -521,6 +529,7 @@ pub(crate) fn park_run(core: &mut Core, run_id: &str) -> Result<Vec<Card>> {
         "run_id = ?1 AND state IN ('pending','live')",
         params![run_id],
         State::Parked,
+        true,
     )?;
     tx.commit()?;
     Ok(moved)
@@ -545,6 +554,13 @@ pub(crate) fn answer(
     };
     if !card.state.open() {
         return Ok(Answered::Nothing(Some(card.state)));
+    }
+    // A secret card's yes is a write to the Keychain (M2-12, on the envelope). Recording it here would leave an approved
+    // card with nothing written, which a later ask would be handed as a grant. A no needs no write.
+    if r.allow && SECRET_TOOLS.contains(&card.tool.as_str()) {
+        return Err(Error::NotAllowed(format!(
+            "kith-core: cards: {SECRET_HINT}"
+        )));
     }
     if let Some(h) = card.holder(now) {
         return Ok(Answered::Claimed(h.to_owned()));
@@ -652,6 +668,9 @@ pub(crate) fn release(
 /// owed whether or not the asker was still up (`answered_parked`, `used_by_ask`). Only the holder of the claim, and only
 /// while the card is open: a card the clock, a withdrawal or a no closed is never saved. `keep_until` keeps the owed
 /// resume alive past a deadline that passed during the write.
+///
+/// The claim's own time is not checked here, on purpose: a write that finished after `claim_until` is still the
+/// holder's, as long as nobody took the claim over and the card is still open.
 pub(crate) fn saved(
     core: &mut Core,
     id: &str,
@@ -680,15 +699,18 @@ pub(crate) fn saved(
     Ok(card)
 }
 
-/// An open card is withdrawn (the asker cancelled, the person's access ended), claim or not. Returns whether it was
-/// open; a claim holder's later [`saved`] then finds it closed.
-pub(crate) fn withdraw(core: &mut Core, id: &str) -> Result<bool> {
+/// An open card is withdrawn (the asker cancelled, the person's access ended). A card whose claim is held is not: its
+/// holder is mid-write, and closing the card under it would let the write land on a closed card, so this answers false
+/// as the sweep leaves it alone, and the caller asks again once the claim has ended. Returns whether it was withdrawn.
+pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness) -> Result<bool> {
     let tx = core.claim_tx()?;
+    void_dead_claims(&tx, live)?;
     let n = tx.execute(
         &format!(
-            "UPDATE cards SET state = 'withdrawn', {CLEAR_CLAIM} WHERE id = ?1 AND state IN ({OPEN_STATES})"
+            "UPDATE cards SET state = 'withdrawn', {CLEAR_CLAIM} WHERE id = ?1 AND state IN ({OPEN_STATES})
+                AND NOT (claim_by IS NOT NULL AND claim_until >= ?2)"
         ),
-        [id],
+        params![id, now],
     )?;
     tx.commit()?;
     Ok(n == 1)
@@ -708,6 +730,7 @@ pub(crate) fn sweep(core: &mut Core, now: i64, live: &dyn Liveness) -> Result<Ve
         ),
         params![now],
         State::Expired,
+        false,
     )?;
     tx.commit()?;
     Ok(moved)
