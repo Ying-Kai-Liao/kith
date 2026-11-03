@@ -138,6 +138,25 @@ const fn core(
         Stability::Stable,
     )
 }
+/// Kernel plumbing (`kith kernel ...`): switched, but not frozen. Only `paths`, `kernel.version` and the contract
+/// verbs are stable; these may change shape until they have been used by a client other than the CLI.
+const fn plumbing(
+    name: &'static str,
+    summary: &'static str,
+    params: &'static [Param],
+    result: &'static str,
+    path: &'static [&'static str],
+) -> Method {
+    row(
+        name,
+        summary,
+        params,
+        result,
+        path,
+        Served::Core,
+        Stability::Experimental,
+    )
+}
 /// A verb the host reads from the kernel (family 2).
 const fn contract(
     name: &'static str,
@@ -211,9 +230,9 @@ pub static METHODS: &[Method] = &[
         .alias(&[&["kernel", "paths"]])
         .formats(&["--json", "--sh"]),
     core("kernel.version", "The interface version and modules of this build.", &[], "KernelVersion", &["kernel", "version"]),
-    core("kernel.engines.list", "The coding engines an agent can run on.", &[], "Engines", &["kernel", "engines"])
+    plumbing("kernel.engines.list", "The coding engines an agent can run on.", &[], "Engines", &["kernel", "engines"])
         .formats(J),
-    core(
+    plumbing(
         "kernel.engines.install",
         "How to install an engine on this computer.",
         &[pos("id", "string", true, "The engine's id.")],
@@ -221,7 +240,7 @@ pub static METHODS: &[Method] = &[
         &["kernel", "engines", "install"],
     )
     .formats(J),
-    core(
+    plumbing(
         "kernel.engines.login",
         "How to sign in to an engine.",
         &[pos("id", "string", true, "The engine's id.")],
@@ -229,7 +248,7 @@ pub static METHODS: &[Method] = &[
         &["kernel", "engines", "login"],
     )
     .formats(J),
-    core(
+    plumbing(
         "kernel.engines.launch",
         "How to start an engine for a run: its ACP program, role prompt delivery, whether it serves guests.",
         &[pos("id", "string", true, "The engine's id.")],
@@ -237,7 +256,7 @@ pub static METHODS: &[Method] = &[
         &["kernel", "engines", "launch"],
     )
     .formats(J),
-    core(
+    plumbing(
         "kernel.launch.prompt",
         "The system prompt a run of the agent gets.",
         &[
@@ -253,7 +272,7 @@ pub static METHODS: &[Method] = &[
         &["kernel", "launch", "prompt"],
     )
     .formats(J),
-    core(
+    plumbing(
         "kernel.launch.settings",
         "The settings a run of the agent starts with.",
         &[
@@ -277,7 +296,7 @@ pub static METHODS: &[Method] = &[
         &["kernel", "launch", "settings"],
     )
     .formats(J),
-    core(
+    plumbing(
         "kernel.launch.mcp",
         "The MCP servers a run of the agent starts with.",
         &[
@@ -293,14 +312,14 @@ pub static METHODS: &[Method] = &[
         &["kernel", "launch", "mcp"],
     )
     .formats(J),
-    core(
+    plumbing(
         "kernel.launch.whole",
         "The whole launch of an agent (`AGENT --launch-json [flags]`, the flags passed through).",
         &[KERNEL, rest("args", "The agent, then the launch flags.")],
         "Launch",
         &["kernel", "launch"],
     ),
-    core(
+    plumbing(
         "kernel.accounts.backups",
         "The backup chain of an agent (`kith AGENT --backups-json`).",
         &[
@@ -311,7 +330,7 @@ pub static METHODS: &[Method] = &[
         "json",
         &["kernel", "accounts", "backups-json"],
     ),
-    core(
+    plumbing(
         "kernel.accounts.launchEnv",
         "Shell assignments for a backup chain entry; refused (exit 4) when it can't run.",
         &[
@@ -323,7 +342,7 @@ pub static METHODS: &[Method] = &[
         "string",
         &["kernel", "accounts", "launch-env"],
     ),
-    core(
+    plumbing(
         "kernel.accounts.mainEnv",
         "`main_id=ID` plus the assignments of the agent's main account.",
         &[
@@ -337,7 +356,7 @@ pub static METHODS: &[Method] = &[
         "string",
         &["kernel", "accounts", "main-env"],
     ),
-    core(
+    plumbing(
         "kernel.accounts.sessionRun",
         "The harness, model and effort a session started with.",
         &[
@@ -348,14 +367,14 @@ pub static METHODS: &[Method] = &[
         "json",
         &["kernel", "accounts", "session-run"],
     ),
-    core(
+    plumbing(
         "kernel.accounts.sessionAccount",
         "The account id a session was made under.",
         &[pos("sid", "string", true, "The session."), KERNEL],
         "string",
         &["kernel", "accounts", "session-account"],
     ),
-    core(
+    plumbing(
         "kernel.accounts.list",
         "Each extra account and whether it is logged in.",
         &[flag("agent", "string", &["--agent"], "That agent's order."), KERNEL],
@@ -364,16 +383,16 @@ pub static METHODS: &[Method] = &[
     )
     .alias(&[&["kernel", "accounts", "ls"]])
     .formats(J),
-    core("kernel.delegation.limits", "How far a chain of asks may go.", &[KERNEL], "json", &["kernel", "delegation", "limits"]),
-    core("kernel.delegation.cap", "The chain cost cap in dollars (`none` for no cap).", &[KERNEL], "string", &["kernel", "delegation", "cap"]),
-    core(
+    plumbing("kernel.delegation.limits", "How far a chain of asks may go.", &[KERNEL], "json", &["kernel", "delegation", "limits"]),
+    plumbing("kernel.delegation.cap", "The chain cost cap in dollars (`none` for no cap).", &[KERNEL], "string", &["kernel", "delegation", "cap"]),
+    plumbing(
         "kernel.delegation.record",
         "The delegation record of one ask, as the code reads it.",
         &[pos("id", "string", true, "The ask's id."), KERNEL],
         "json",
         &["kernel", "delegation", "record"],
     ),
-    core(
+    plumbing(
         "kernel.delegation.check",
         "Whether the ask running now may start another.",
         &[
@@ -384,14 +403,14 @@ pub static METHODS: &[Method] = &[
         "json",
         &["kernel", "delegation", "check"],
     ),
-    core(
+    plumbing(
         "kernel.delegation.parked",
         "Whether an ask waits on a card.",
         &[pos("id", "string", true, "The ask's id."), KERNEL],
         "bool",
         &["kernel", "delegation", "parked"],
     ),
-    core(
+    plumbing(
         "kernel.secrets",
         "The read half of kith-auth: `resolve` and `may`, with its output and exit codes.",
         &[KERNEL, rest("args", "`resolve AGENT [--person ID] ...` or `may ID AGENT ...`.")],
@@ -407,7 +426,7 @@ pub static METHODS: &[Method] = &[
         Served::Core,
         Stability::Experimental,
     ),
-    core(
+    plumbing(
         "kernel.runOnce",
         "One task on one engine over ACP: the answer.",
         &[

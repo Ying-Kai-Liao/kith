@@ -1,11 +1,14 @@
 //! The break test: an OpenRPC document against the snapshot cut at the last release. Additions pass; these fail:
 //! - a stable method removed (an experimental one in the snapshot may change shape or go: that is what the word says);
 //! - a param removed or renamed, made required when it was optional, or added as required;
-//! - a type narrowed: a scalar type, an enum value, a list item, an object field removed or turned required, or a
-//!   nullable made plain. One rule for params and results alike, because the contract's rule is "additive only".
+//! - a param type narrowed: a scalar type, an enum value, a list item, an object field removed or turned required, or
+//!   a nullable made plain (a param may widen: the new version must accept everything the old one did);
+//! - a result type widened or changed for an older reader: the new version may only send what the old one could.
+//!   A result field going `T` -> `T?`, a required field made optional, a field dropped, a result becoming `json`
+//!   (anything), or a new required field all fail. A new result field may only be added optional (`T?`), an enum may
+//!   gain values (every enum has its `unknown` word), and an optional field made required is harmless.
 //!
-//! Types are compared as sets of alternatives (`anyOf`, `type: [..]`, `$ref`s resolved in their own document), so
-//! `string` -> `string | null` is a widening and the reverse is a break.
+//! Types are compared as sets of alternatives (`anyOf`, `type: [..]`, `$ref`s resolved in their own document).
 
 use std::collections::BTreeSet;
 
@@ -58,7 +61,7 @@ fn method(old: &Value, om: &Value, new: &Value, nm: &Value, name: &str, out: &mu
             ));
         }
     }
-    compat(
+    compat_out(
         old,
         &om["result"]["schema"],
         new,
@@ -175,6 +178,98 @@ fn compat(old: &Value, o: &Value, new: &Value, n: &Value, at: &str, out: &mut Ve
                 out.append(&mut why);
             }
         }
+    }
+}
+
+/// Results, the other way round: appends to `out` what `new` may send that `old` could not.
+fn compat_out(old: &Value, o: &Value, new: &Value, n: &Value, at: &str, out: &mut Vec<String>) {
+    let old_alts = alts(old, o, 0);
+    if old_alts.iter().any(|a| matches!(a, Alt::Any)) {
+        return;
+    }
+    for na in alts(new, n, 0) {
+        let mut why: Vec<String> = Vec::new();
+        let mut covered = false;
+        for oa in &old_alts {
+            let mut errs = Vec::new();
+            if covers_out(old, oa, new, &na, at, &mut errs) {
+                covered = true;
+                break;
+            }
+            if std::mem::discriminant(&na) == std::mem::discriminant(oa) && why.is_empty() {
+                why = errs;
+            }
+        }
+        if !covered {
+            if why.is_empty() {
+                out.push(format!(
+                    "{at}: may now be {}, which it never was",
+                    label(&na)
+                ));
+            } else {
+                out.append(&mut why);
+            }
+        }
+    }
+}
+
+/// Whether what `n` (new) sends is something `o` (old) could send.
+fn covers_out(
+    old: &Value,
+    o: &Alt<'_>,
+    new: &Value,
+    n: &Alt<'_>,
+    at: &str,
+    out: &mut Vec<String>,
+) -> bool {
+    match (o, n) {
+        (Alt::Any, _) => true,
+        (Alt::Null, Alt::Null)
+        | (Alt::Bool, Alt::Bool)
+        | (Alt::Int, Alt::Int)
+        | (Alt::Str(None), Alt::Str(_))
+        // An enum may gain values: a reader that does not know one reads the `unknown` word.
+        | (Alt::Str(Some(_)), Alt::Str(Some(_))) => true,
+        (Alt::Arr(oi), Alt::Arr(ni)) => {
+            let before = out.len();
+            compat_out(old, oi, new, ni, &format!("{at}[]"), out);
+            out.len() == before
+        }
+        (
+            Alt::Obj {
+                props: op,
+                required: oreq,
+                extra: oextra,
+            },
+            Alt::Obj {
+                props: np,
+                required: nreq,
+                extra: nextra,
+            },
+        ) => {
+            let before = out.len();
+            for (k, ov) in op {
+                match np.iter().find(|(nk, _)| nk == k) {
+                    None => out.push(format!("{at}: field {k} was removed or renamed")),
+                    Some((_, nv)) => compat_out(old, ov, new, nv, &format!("{at}.{k}"), out),
+                }
+            }
+            for k in oreq.difference(nreq) {
+                out.push(format!("{at}: field {k} became optional"));
+            }
+            for (k, _) in np {
+                if !op.iter().any(|(ok, _)| ok == k) && nreq.contains(k) {
+                    out.push(format!("{at}: new field {k} is required (add it optional, `T?`)"));
+                }
+            }
+            match (oextra, nextra) {
+                (None, _) => {}
+                (Some(oe), Some(ne)) => compat_out(old, oe, new, ne, &format!("{at}.*"), out),
+                (Some(_), None) => out.push(format!("{at}: values may now be anything")),
+            }
+            out.len() == before
+        }
+        _ => false,
     }
 }
 
@@ -348,6 +443,18 @@ mod tests {
         only(&old, &new, "null is no longer accepted");
     }
 
+    fn result_doc(thing: Value) -> Value {
+        let mut d = doc(json!([m(
+            json!([]),
+            json!({"$ref": "#/components/schemas/Thing"})
+        )]));
+        d["components"]["schemas"]["Thing"] = thing;
+        d
+    }
+    fn thing(props: Value, required: Value) -> Value {
+        json!({"type": "object", "properties": props, "required": required})
+    }
+
     #[test]
     fn removing_or_renaming_a_result_field_breaks() {
         let mut new = base();
@@ -356,9 +463,63 @@ mod tests {
             .unwrap()
             .shift_remove("n");
         only(&base(), &new, "field n was removed or renamed");
-        let mut new = base();
-        new["components"]["schemas"]["Thing"]["required"] = json!(["id", "n"]);
-        only(&base(), &new, "field n became required");
+    }
+
+    #[test]
+    fn a_result_field_made_nullable_breaks() {
+        let old = result_doc(thing(json!({"id": {"type": "string"}}), json!(["id"])));
+        let new = result_doc(thing(
+            json!({"id": {"type": ["string", "null"]}}),
+            json!(["id"]),
+        ));
+        only(&old, &new, "null, which it never was");
+    }
+
+    #[test]
+    fn a_required_result_field_made_optional_breaks() {
+        let old = result_doc(thing(json!({"id": {"type": "string"}}), json!(["id"])));
+        let new = result_doc(thing(json!({"id": {"type": "string"}}), json!([])));
+        only(&old, &new, "field id became optional");
+    }
+
+    #[test]
+    fn a_result_turned_into_anything_breaks() {
+        let old = doc(json!([m(json!([]), json!({"type": "string"}))]));
+        let new = doc(json!([m(json!([]), json!({}))]));
+        only(&old, &new, "result: may now be anything");
+        let old = result_doc(thing(json!({"id": {"type": "string"}}), json!(["id"])));
+        let new = result_doc(thing(json!({"id": {}}), json!(["id"])));
+        only(&old, &new, "result.id: may now be anything");
+    }
+
+    #[test]
+    fn a_new_required_result_field_breaks_but_an_optional_one_passes() {
+        let old = result_doc(thing(json!({"id": {"type": "string"}}), json!(["id"])));
+        let required = result_doc(thing(
+            json!({"id": {"type": "string"}, "more": {"type": "string"}}),
+            json!(["id", "more"]),
+        ));
+        only(&old, &required, "new field more is required");
+        let optional = result_doc(thing(
+            json!({"id": {"type": "string"}, "more": {"type": ["string", "null"]}}),
+            json!(["id"]),
+        ));
+        assert_eq!(breaks(&old, &optional), Vec::<String>::new());
+    }
+
+    #[test]
+    fn harmless_result_changes_pass() {
+        // an optional field made required, a nullable made plain, an enum gaining a value
+        let old = result_doc(thing(
+            json!({"id": {"type": "string"}, "n": {"type": ["integer", "null"]}, "k": {"$ref": "#/components/schemas/Kind"}}),
+            json!(["id"]),
+        ));
+        let mut new = result_doc(thing(
+            json!({"id": {"type": "string"}, "n": {"type": "integer"}, "k": {"$ref": "#/components/schemas/Kind"}}),
+            json!(["id", "n"]),
+        ));
+        new["components"]["schemas"]["Kind"]["enum"] = json!(["a", "b", "c"]);
+        assert_eq!(breaks(&old, &new), Vec::<String>::new());
     }
 
     #[test]
