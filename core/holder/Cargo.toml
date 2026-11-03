@@ -1,0 +1,43 @@
+[package]
+name = "kith-holder"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "The holder: a small process with no policy that owns every agent process (PTYs and ACP pipes) so a daemon restart keeps them alive"
+license = "Apache-2.0"
+publish = false
+# An out-of-tree member of the host workspace (shares its Cargo.lock and target/), like core/kernel and core/acp.
+workspace = "../../serve/host"
+
+# Links neither kith-core nor kith-kernel, on purpose: a holder that cannot see policy cannot grow any. Enforced by
+# scripts/check-holder-deps.sh in CI. Keep this list short.
+[lib]
+name = "kith_holder"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kith-holder"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+hmac = "0.12"
+sha2 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+] }
