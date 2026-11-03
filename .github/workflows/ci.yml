@@ -54,6 +54,7 @@ jobs:
       e2e: ${{ steps.h.outputs.e2e }}
       guest_linux: ${{ steps.h.outputs.guest_linux }}
       bot_e2e: ${{ steps.h.outputs.bot_e2e }}
+      windows: ${{ steps.h.outputs.windows }}
     steps:
       - uses: actions/checkout@v4
       # On push to main dorny compares with the previous commit, so main only runs what changed.
@@ -143,6 +144,10 @@ jobs:
               - '{serve/host/**,core/**,serve/rust-toolchain.toml,serve/docs/reference/fixtures/**,serve/contract/**,kernel/bin/**,kernel/lib/**,.github/workflows/ci.yml}'
               - '!serve/host/crates/guest/**'
               - '!serve/host/crates/tts/**'
+              - '!**/*.md'
+            # The Windows job builds and tests the holder (and kith-core when the branch has it) and what they stand on.
+            windows:
+              - '{core/holder/**,core/runtime/**,serve/host/Cargo.toml,serve/host/Cargo.lock,serve/rust-toolchain.toml,.github/workflows/ci.yml}'
               - '!**/*.md'
             cloud:
               - '{serve/cloud/**,serve/contract/**,serve/docs/reference/fixtures/**,.github/workflows/ci.yml}'
@@ -371,6 +376,41 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy
         run: cargo clippy --manifest-path host/Cargo.toml --workspace --all-targets -- -D warnings
+      # The holder owns processes and decides nothing: it must not link kith-core, kith-kernel or any other kith crate.
+      - name: The holder links no kith crate
+        run: sh ../scripts/check-holder-deps.sh
+
+  # Windows from day one (docs/plans/runtime-design.md section 8): the holder's ConPTY, named pipes, job objects and
+  # detaching only prove themselves here, including that the holder and its process survive the process that
+  # started it. Runs on workflow_dispatch too (the changes job reports it for any run that is not a pull request).
+  windows:
+    needs: changes
+    if: needs.changes.outputs.windows == 'true' || needs.changes.outputs.host_core == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: bash
+        working-directory: serve
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: host-windows
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Clippy
+        run: cargo clippy --manifest-path host/Cargo.toml -p kith-holder --all-targets --locked -- -D warnings
+      - name: Holder and platform layer tests
+        run: cargo test --manifest-path host/Cargo.toml -p kith-holder --locked -- --test-threads=1
+      # kith-kernel has Unix-only modules (threads) behind cfg; kith-core takes its lifetime lock with LockFileEx and
+      # checks owner-only access lists with icacls. Both only prove themselves here.
+      - name: Kernel and core runtime tests
+        run: |
+          cargo clippy --manifest-path host/Cargo.toml -p kith-kernel -p kith-core --all-targets --locked -- -D warnings
+          cargo test --manifest-path host/Cargo.toml -p kith-kernel -p kith-core --locked
 
   # Builds every test binary once and ships them as a nextest archive, so the shards below only run tests.
   host-build:
@@ -508,30 +548,6 @@ jobs:
         run: cargo nextest run --profile ci -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel -p kith-core
       - name: Doctests
         run: cargo test --doc -p kith-guest -p kith-tts -p kith-wire -p kith-mem -p kith-kernel -p kith-core
-
-  # The crates that must also work on Windows: kith-kernel (its Unix-only modules are cfg-gated: threads) and kith-core
-  # (the lifetime lock via LockFileEx, owner-only access lists via icacls). Extended for kith-holder when that lands.
-  windows:
-    needs: changes
-    if: needs.changes.outputs.host_core == 'true'
-    runs-on: windows-latest
-    timeout-minutes: 40
-    defaults:
-      run:
-        shell: bash
-        working-directory: serve/host
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install pinned toolchain
-        working-directory: serve
-        run: rustup show active-toolchain || rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: serve/host
-          shared-key: host-windows
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Tests
-        run: cargo test --locked -p kith-kernel -p kith-core
 
   cloud:
     needs: changes
@@ -820,7 +836,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() }}
-    needs: [changes, kernel, host, host-build, host-test, host-e2e, host-crates, windows, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, windows, host-build, host-test, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
