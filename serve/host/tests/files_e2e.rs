@@ -12,6 +12,9 @@ use std::time::Duration;
 struct Host {
     child: Child,
     home: PathBuf,
+    /// The agents' folders. Beside the host's data folder, never inside it: a run's folder in there is the host's
+    /// secrets (N1), as a real run's never is.
+    work: PathBuf,
     base: String,
     token: String,
 }
@@ -20,6 +23,7 @@ impl Drop for Host {
     fn drop(&mut self) {
         common::stop(&mut self.child);
         let _ = std::fs::remove_dir_all(&self.home);
+        let _ = std::fs::remove_dir_all(&self.work);
     }
 }
 
@@ -27,8 +31,10 @@ impl Host {
     async fn start() -> Self {
         let home = std::env::temp_dir().join(format!("kith-files-e2e-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&home).unwrap();
+        let work = std::env::temp_dir().join(format!("kith-files-e2e-work-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&work).unwrap();
         let (child, base) = common::serve(&home).await;
-        let mut host = Self { child, home, base, token: String::new() };
+        let mut host = Self { child, home, work, base, token: String::new() };
         common::read_token(&host.home).trim().clone_into(&mut host.token);
         host
     }
@@ -77,7 +83,7 @@ async fn ready(host: &Host, bot: &str, expected_files: usize) -> Vec<Value> {
 async fn publishes_all_types_with_final_text_and_survives_restart_workspace_changes_and_threads() {
     use base64::Engine as _;
     let mut host = Host::start().await;
-    let cwd = host.home.join("workspace");
+    let cwd = host.work.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
     let data = [0, 255, 128, 17].repeat(150_000);
     for (name, bytes) in [
@@ -156,7 +162,7 @@ async fn publishes_all_types_with_final_text_and_survives_restart_workspace_chan
     .await;
     waited.unwrap();
     let mut updated = created["bot"].clone();
-    updated["cwd"] = host.home.to_string_lossy().into();
+    updated["cwd"] = host.work.to_string_lossy().into();
     host.call("updateBot", updated).await;
     host.call("readFile", json!({"entryId":entry_id,"fileId":file_id,"offset":0})).await;
     host.call("deleteBot", json!({"botId":bot})).await;
@@ -174,20 +180,20 @@ async fn publishes_all_types_with_final_text_and_survives_restart_workspace_chan
 async fn rejects_invalid_sources_without_a_file_entry() {
     let host = Host::start().await;
     let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file_agent.py");
-    let large = std::fs::File::create(host.home.join("oversized")).unwrap();
+    let large = std::fs::File::create(host.work.join("oversized")).unwrap();
     large.set_len(100 * 1024 * 1024 + 1).unwrap();
-    let created = host.call("createBot", json!({"name":"Errors", "backend":"custom", "tasks": false, "cwd":host.home, "command":common::python_agent(&agent), "connectors":[], "notify":false})).await;
+    let created = host.call("createBot", json!({"name":"Errors", "backend":"custom", "tasks": false, "cwd":host.work, "command":common::python_agent(&agent), "connectors":[], "notify":false})).await;
     let bot = created["bot"]["id"].as_str().unwrap();
     host.call("send", json!({"botId":bot,"text":"invalid-files"})).await;
     ready(&host, bot, 0).await;
-    let results: Value = serde_json::from_slice(&std::fs::read(host.home.join("file-results.json")).unwrap()).unwrap();
+    let results: Value = serde_json::from_slice(&std::fs::read(host.work.join("file-results.json")).unwrap()).unwrap();
     assert!(results.as_array().unwrap().iter().all(|r| r["isError"] == true));
 }
 
 #[tokio::test]
 async fn several_paths_publish_one_entry_in_order_and_a_bad_path_publishes_nothing() {
     let host = Host::start().await;
-    let cwd = host.home.join("workspace");
+    let cwd = host.work.join("workspace");
     std::fs::create_dir_all(&cwd).unwrap();
     for (name, bytes) in [("report.pdf", b"%PDF".to_vec()), (".hidden", vec![13]), ("empty", vec![])] {
         std::fs::write(cwd.join(name), bytes).unwrap();
@@ -234,9 +240,9 @@ async fn rejected(path: &std::path::Path) {
 async fn groups_routines_and_delegated_turns_cannot_publish_files() {
     let host = Host::start().await;
     let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file_agent.py");
-    let created = host.call("createBot", json!({"name":"Recipient", "backend":"custom", "tasks": false, "cwd":host.home, "command":common::python_agent(&agent), "connectors":[], "notify":false})).await;
+    let created = host.call("createBot", json!({"name":"Recipient", "backend":"custom", "tasks": false, "cwd":host.work, "command":common::python_agent(&agent), "connectors":[], "notify":false})).await;
     let bot = created["bot"]["id"].as_str().unwrap();
-    let results_path = host.home.join("file-results.json");
+    let results_path = host.work.join("file-results.json");
     let group = host.call("createBot", json!({"name":"Group", "kind":"group", "members":[bot]})).await;
     host.call("send", json!({"botId":group["bot"]["id"],"text":"share-files"})).await;
     rejected(&results_path).await;
@@ -253,7 +259,7 @@ async fn groups_routines_and_delegated_turns_cannot_publish_files() {
     rejected(&results_path).await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     std::fs::remove_file(&results_path).unwrap();
-    let caller_dir = host.home.join("caller");
+    let caller_dir = host.work.join("caller");
     std::fs::create_dir_all(&caller_dir).unwrap();
     let caller_agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/team_agent.py");
     let caller = host.call("createBot", json!({"name":"Caller", "backend":"custom", "tasks": false, "cwd":caller_dir, "command":common::python_agent(&caller_agent), "connectors":[], "notify":false})).await;
@@ -272,9 +278,9 @@ async fn files_only_turns_finish_without_duplicate_text_and_input_uploads_still_
     let host = Host::start().await;
     let agent = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/file_agent.py");
     for name in ["binary.dat", ".hidden", "empty", "report.pdf"] {
-        std::fs::write(host.home.join(name), []).unwrap();
+        std::fs::write(host.work.join(name), []).unwrap();
     }
-    let created = host.call("createBot", json!({"name":"Files only", "backend":"custom", "tasks": false, "cwd":host.home, "command":common::python_agent(&agent), "connectors":[], "notify":false})).await;
+    let created = host.call("createBot", json!({"name":"Files only", "backend":"custom", "tasks": false, "cwd":host.work, "command":common::python_agent(&agent), "connectors":[], "notify":false})).await;
     let bot = created["bot"]["id"].as_str().unwrap();
     let upload_id = uuid::Uuid::new_v4().to_string();
     host.call(

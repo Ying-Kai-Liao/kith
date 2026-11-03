@@ -67,6 +67,10 @@ export class FakeHost {
     if (typeof location !== 'undefined' && /[?&]secrets\b/.test(location.search)) {
       for (const s of story.secretEntries) this.add({ botId: s.botId, threadId: null, kind: s.kind, data: s.data }, s.id, now - s.at * 60_000, false)
     }
+    if (typeof location !== 'undefined' && /[?&]tasks\b/.test(location.search)) {
+      this.bots.set(story.taskBot.id, normalizeBot({ ...story.taskBot, cwd: story.cwd, createdAt: now - 86_400_000, permission: 'default', workingLanes: story.taskLanes }))
+      for (const s of story.taskEntries) this.add({ botId: s.botId, threadId: s.threadId ?? null, kind: s.kind, data: s.data }, s.id, now - s.at * 60_000, false)
+    }
     // `?room=live|livebot|idle|spent|quiet|stopped|late|bot` puts a room run in the Ship room (screenshots of the agent conversations).
     const room = typeof location !== 'undefined' ? /[?&]room=(\w+)/.exec(location.search)?.[1] : undefined
     if (room === 'topic' || room === 'topicwait') this.seedTopic(room === 'topicwait', now)
