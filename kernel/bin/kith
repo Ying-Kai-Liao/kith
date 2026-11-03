@@ -121,6 +121,8 @@ export KITH_ROOT=$KITH
 # Where things are, from the one place that knows (lib/kith_paths.py): KITH_HOME (~/kith) holding kernel/ and agents/ (each
 # agent: role/ its repo, memory/ data/ files/ its life), and ~/.kith (user.md, projects, this Mac's things). Exported
 # for agents' tools.
+# What the caller gave for the folders: the Rust launch starts from these, as this call did, not from the answer below.
+kith_in=(); for v in KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS; do [[ -n ${!v+x} ]] && kith_in+=("$v=${!v}"); done
 eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
 
 case $1 in
@@ -290,6 +292,21 @@ fi
 builtin=0; [[ $src_pkg == "$KITH"/agents/* ]] && builtin=1
 if [[ $builtin == 1 && ${1:-} =~ ^(keep|thread)$ ]]; then exec "$KITH/bin/kith-scratch" "$agent" "$@"; fi
 [[ ${1:-} == --backups-json ]] && exec python3 "$KITH/lib/kith_accounts.py" backups-json "$agent" "$src_pkg/agent.md"
+# kith AGENT --launch-json: the Rust core assembles the launch when `launch` is switched (lib/core-switched.txt) and a
+# program is here, else the script below does. Before anything is asked of kith-auth, so a "just this once" grant is taken
+# by one side only. The agent exists and is no name of a `kith kernel launch` piece (prompt, settings, mcp).
+if [[ $agent != prompt && $agent != settings && $agent != mcp ]]; then
+  . "$KITH/lib/kith-core.sh"
+  if kith_launch_json_flag "$@"; then
+    # The Rust launch finds the folders itself from what the caller gave: put those back for it (kith_in, above).
+    unset KITH_HOME KITH_STATE KITH_AGENTS HQ_HOME HQ_STATE HQ_AGENTS
+    for kv in ${kith_in[@]+"${kith_in[@]}"}; do export "$kv"; done
+    kith_core_exec launch "$agent" --kernel "$KITH" "$@" || true
+    # Not switched, or no program: the script goes on with its own answer.
+    eval "$(python3 "$KITH/lib/kith_paths.py" --sh)"
+    kith_env_sync
+  fi
+fi
 if [[ $src_pkg == */role ]]; then home=${src_pkg%/role}; else home="$KITH_STATE/agents/$agent"; fi
 
 # Who the run is for: KITH_PERSON, set by the entry point (the bridge, a schedule) and inherited by every helper, so
