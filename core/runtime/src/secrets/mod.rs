@@ -151,8 +151,8 @@ impl Envelope {
     /// The master key, loaded once. `create` allows minting one, and only when the table is empty.
     fn key(&mut self, conn: &Connection, create: bool) -> Result<Option<Zeroizing<[u8; KEY_LEN]>>> {
         if self.key.is_none() {
-            match self.store.get()? {
-                Some(raw) => {
+            if let Some(raw) = self.store.get()? {
+                {
                     let arr: [u8; KEY_LEN] = raw.as_slice().try_into().map_err(|_| {
                         Error::Io(
                             "kith-core: the secrets master key in the key store has the wrong length; it was left untouched"
@@ -161,7 +161,8 @@ impl Envelope {
                     })?;
                     self.key = Some(Zeroizing::new(arr));
                 }
-                None => {
+            } else {
+                {
                     let records: i64 =
                         conn.query_row("SELECT COUNT(*) FROM secret_records", [], |r| r.get(0))?;
                     if records > 0 {

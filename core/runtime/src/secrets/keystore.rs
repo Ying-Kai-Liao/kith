@@ -33,6 +33,10 @@ pub(crate) trait KeyStore: Send {
 }
 
 /// The store of this operating system, or a refusal where there is none. Never an in-memory or file fallback.
+#[allow(
+    clippy::unnecessary_wraps,
+    reason = "only the unsupported platforms refuse"
+)]
 pub(crate) fn os_key_store() -> Result<Box<dyn KeyStore>> {
     #[cfg(target_os = "macos")]
     {
@@ -253,7 +257,7 @@ pub(crate) fn hex_encode(bytes: &[u8]) -> Zeroizing<String> {
 
 pub(crate) fn hex_decode(text: &str) -> Option<Zeroizing<Vec<u8>>> {
     let raw = text.as_bytes();
-    if raw.len() % 2 != 0 {
+    if raw.len() & 1 == 1 {
         return None;
     }
     let nibble = |c: u8| match c {
