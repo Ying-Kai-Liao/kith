@@ -177,14 +177,14 @@ fn prov(
 fn saved(p: Result<Provided, Error>) -> (Card, String) {
     match p.unwrap() {
         Provided::Saved { card, profile, .. } => (*card, profile),
-        other => panic!("{other:?}"),
+        Provided::Refused(why) => panic!("{why:?}"),
     }
 }
 
 fn refused(p: Result<Provided, Error>) -> Refused {
     match p.unwrap() {
         Provided::Refused(r) => r,
-        other => panic!("{other:?}"),
+        Provided::Saved { card, .. } => panic!("saved {}", card.id),
     }
 }
 
@@ -406,7 +406,7 @@ fn nothing_is_written_to_a_card_that_closed() {
     for svc in ["a1", "a2", "a3", "a4"] {
         assert_eq!(writes(&c, svc), 0, "{svc}");
     }
-    assert!(Envelope::list(c.conn()).unwrap().is_empty());
+    assert_eq!(Envelope::list(c.conn()).unwrap(), Vec::<String>::new());
 }
 
 #[test]
@@ -464,7 +464,7 @@ fn only_a_key_card_is_provided() {
         assert!(matches!(err, Error::Refused(_)), "{input}: {err}");
         assert_eq!(stored(&mut c, &id).state, State::Pending);
     }
-    assert!(Envelope::list(c.conn()).unwrap().is_empty());
+    assert_eq!(Envelope::list(c.conn()).unwrap(), Vec::<String>::new());
 }
 
 #[test]
@@ -766,8 +766,8 @@ fn a_new_account_never_replaces_a_key_but_a_replacing_card_does() {
     let (_t, _l, mut c) = core();
     let store = MemoryKeyStore::default();
     let mut e = env(&store);
-    let k = key_card(&mut c, "github");
-    saved(prov(&mut c, &mut e, &k.id, &two(), T0 + 1, &Nobody));
+    let first = key_card(&mut c, "github");
+    saved(prov(&mut c, &mut e, &first.id, &two(), T0 + 1, &Nobody));
     // Another card for the same service asking for a new account of the same name is refused, and stays open.
     let k2 = key_card_with(&mut c, "github", DEADLINE, "r9");
     let err = prov(
@@ -787,7 +787,7 @@ fn a_new_account_never_replaces_a_key_but_a_replacing_card_does() {
         Some(SECRET)
     );
     // A card that replaces names the account itself; the caller's account is ignored.
-    let n = NewCard {
+    let ask = NewCard {
         session: "s2".into(),
         source: "run",
         bot_id: None,
@@ -805,13 +805,13 @@ fn a_new_account_never_replaces_a_key_but_a_replacing_card_does() {
         asked_by: None,
         options: None,
     };
-    let Raised::New(r) = raise(&mut c, &n, T0, &Nobody).unwrap() else {
+    let Raised::New(repl) = raise(&mut c, &ask, T0, &Nobody).unwrap() else {
         panic!("new")
     };
     let (_, profile) = saved(provide(
         &mut c,
         &mut e,
-        &r.id,
+        &repl.id,
         Some("elsewhere"),
         &vals(&[("A", "rotated-a"), ("B", "rotated-b")]),
         &|| T0 + 3,

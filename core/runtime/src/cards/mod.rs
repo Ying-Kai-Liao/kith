@@ -62,10 +62,10 @@ const SECRET_HINT: &str = "this card asks for a key or access; answer it in the 
 const OPEN_STATES: &str = "'pending','live','parked'";
 const CLEAR_CLAIM: &str =
     "claim_by = NULL, claim_until = NULL, claim_pid = NULL, claim_started = ''";
-/// The deadline the clock goes by: the card's own, or the claim's time while one is held.
-/// A claim whose holder gave a pid: it holds while that process lives, whatever `claim_until` says (void_dead_claims has
-/// already dropped the dead ones in the same transaction).
+/// A claim whose holder gave a pid: it holds while that process lives, whatever `claim_until` says (`void_dead_claims`
+/// has already dropped the dead ones in the same transaction).
 const PID_HELD: &str = "(claim_by IS NOT NULL AND claim_pid IS NOT NULL)";
+/// The deadline the clock goes by: the card's own, or the claim's time while one is held.
 const EFFECTIVE: &str = "MAX(deadline, CASE WHEN claim_by IS NULL THEN 0 ELSE claim_until END)";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

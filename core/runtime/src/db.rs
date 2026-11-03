@@ -258,7 +258,6 @@ impl Core {
         read_counter(tx, "claim_id")
     }
 
-    #[cfg(test)]
     pub(crate) fn conn(&self) -> &Connection {
         &self.conn
     }
