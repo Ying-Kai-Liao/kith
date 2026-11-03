@@ -31,3 +31,4 @@ src/api/room_secrets_props.rs	api::room_secrets_props::
 # Reach kith-wake through production code (cards::resume), found by tracing kernel/bin during the full host-test run
 # (344 tests across 25 modules; these two were the ones the static check missed). Re-trace when wake gains a caller.
 src/chat/team/tests.rs	chat::team::tests::
+src/cards/session_tests.rs	cards::session_tests::
