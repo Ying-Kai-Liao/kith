@@ -84,6 +84,8 @@ const LEN: usize = {
     n
 };
 
+// The table is a const built at compile time; it crossed clippy's 16 KiB array line as rows were added.
+#[allow(clippy::large_stack_arrays)]
 const fn flatten() -> [Method; LEN] {
     // Any row will do to fill the array; every slot is overwritten below.
     let mut out = [PARTS[0][0]; LEN];
