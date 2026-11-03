@@ -287,3 +287,26 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
         }
     }
 }
+
+/// Held for the holder's life; the lock goes when the process does.
+pub struct InstanceLock(#[allow(dead_code)] File);
+
+/// One holder per folder: an exclusive flock on `holder.lock`, taken before the socket is touched and never
+/// released or deleted (the file stays, so no second holder can lock a fresh one). `Ok(None)`: another holds it.
+pub fn lock_instance(dir: &Path) -> io::Result<Option<InstanceLock>> {
+    // Rust opens with O_CLOEXEC, so the holder's programs do not inherit the lock.
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join("holder.lock"))?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+        return Ok(Some(InstanceLock(file)));
+    }
+    let err = io::Error::last_os_error();
+    if err.kind() == io::ErrorKind::WouldBlock {
+        Ok(None)
+    } else {
+        Err(err)
+    }
+}

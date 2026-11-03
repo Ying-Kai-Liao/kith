@@ -183,12 +183,20 @@ fn a_terminal_takes_input_and_keeps_a_tail() {
     let fx = Fixture::new("pty");
     fx.start();
     let mut c = fx.client(1);
-    let line = if cfg!(windows) {
-        "set /p x=& echo got:%x%"
+    // cmd expands %x% when it parses the whole line, before `set /p` has run, so the Windows
+    // line needs delayed expansion (!x!) to see the typed input; the holder delivered it fine.
+    let argv: Vec<&str> = if cfg!(windows) {
+        vec![
+            "cmd.exe",
+            "/d",
+            "/v:on",
+            "/c",
+            "set /p x=& echo got:!x!& ping -n 300 127.0.0.1 > nul",
+        ]
     } else {
-        "read x; echo got:$x; exec sleep 300"
+        shell("read x; echo got:$x; exec sleep 300")
     };
-    let id = spawn(&mut c, &spec("conv-t", 1, 1, Mode::Pty, &shell(line)));
+    let id = spawn(&mut c, &spec("conv-t", 1, 1, Mode::Pty, &argv));
     c.send(p::RESIZE, id, br#"{"cols":100,"rows":30}"#).unwrap();
     c.send(p::INPUT, id, b"ping\r").unwrap();
     read_until(&mut c, id, "got:ping");
@@ -201,10 +209,30 @@ fn a_terminal_takes_input_and_keeps_a_tail() {
 fn the_wrong_secret_is_refused() {
     let fx = Fixture::new("secret");
     fx.start();
+    // A client with the wrong key cannot verify the holder's proof, so it stops there.
     match Client::connect(&fx.dir, "not-the-secret-not-the-secret-00", 1) {
-        Err(ConnectError::Refused(r)) => assert_eq!(r.why, Why::BadSecret),
-        other => panic!("expected a refusal, got {:?}", other.err()),
+        Err(ConnectError::Impostor) => {}
+        other => panic!(
+            "expected the holder to be distrusted, got {:?}",
+            other.err()
+        ),
     }
+    // A raw peer that answers the challenge with a wrong proof is refused by the holder.
+    let ep = kith_holder::platform::endpoint(&fx.dir);
+    let mut raw = kith_holder::platform::connect(&ep).unwrap();
+    let hello = p::Hello {
+        version: p::VERSION,
+        generation: 1,
+        nonce: "aa".repeat(16),
+    };
+    wire::write_json(&mut raw, p::HELLO, 0, &hello).unwrap();
+    let (kind, _, _) = wire::read(&mut raw).unwrap().unwrap();
+    assert_eq!(kind, p::CHALLENGE);
+    wire::write_json(&mut raw, p::AUTH, 0, &p::Auth { proof: "00".into() }).unwrap();
+    let (kind, _, payload) = wire::read(&mut raw).unwrap().unwrap();
+    assert_eq!(kind, p::REFUSED);
+    let refused: p::Refused = wire::parse(&payload).unwrap();
+    assert_eq!(refused.why, Why::BadSecret);
     // A refused hello did not claim a generation.
     fx.client(1);
 }
@@ -382,4 +410,65 @@ fn the_holder_and_its_process_outlive_the_process_that_started_it() {
     kill_until_gone(&mut second, id);
     exit_of(&mut second, id);
     assert_eq!(second.ack(id).unwrap(), AckState::Acked);
+}
+
+#[test]
+fn a_holder_that_does_not_know_the_key_fails_the_handshake() {
+    use kith_holder::{auth, platform};
+    let fx = Fixture::new("fake");
+    platform::private_dir(&fx.dir).unwrap();
+    let listener = platform::listen(&platform::endpoint(&fx.dir)).unwrap();
+    let fake = std::thread::spawn(move || {
+        let mut s = platform::accept(&listener).unwrap();
+        let (_, _, payload) = wire::read(&mut s).unwrap().unwrap();
+        let hello: p::Hello = wire::parse(&payload).unwrap();
+        let nonce = "ff".repeat(16);
+        // Well formed, but made with another key: all a holder without the secret can do.
+        let proof = auth::proof(
+            b"not-the-key-not-the-key",
+            auth::HOLDER,
+            &hello.nonce,
+            &nonce,
+            1,
+        );
+        wire::write_json(&mut s, p::CHALLENGE, 0, &p::Challenge { nonce, proof }).unwrap();
+        // Whatever it says next is never read as a welcome.
+        let _ = wire::read(&mut s);
+    });
+    match Client::connect(&fx.dir, SECRET, 1) {
+        Err(ConnectError::Impostor) => {}
+        other => panic!("expected the impostor to be refused, got {:?}", other.err()),
+    }
+    fake.join().unwrap();
+}
+
+/// Two holders started at once on a stale socket: the second cannot take the folder.
+#[cfg(unix)]
+#[test]
+fn two_concurrent_starts_on_a_stale_socket_leave_one_holder() {
+    let fx = Fixture::new("race");
+    std::fs::create_dir_all(&fx.dir).unwrap();
+    // A socket file nobody listens on, as a crashed holder leaves it.
+    drop(std::os::unix::net::UnixListener::bind(fx.dir.join("holder.sock")).unwrap());
+    let serve = || {
+        Command::new(EXE)
+            .args(["serve", "--dir"])
+            .arg(&fx.dir)
+            .env(launch::SECRET_VAR, SECRET)
+            .spawn()
+            .unwrap()
+    };
+    let mut kids = [serve(), serve()];
+    std::thread::sleep(Duration::from_secs(2));
+    let running = kids
+        .iter_mut()
+        .map(|k| k.try_wait().unwrap().is_none())
+        .filter(|alive| *alive)
+        .count();
+    assert_eq!(running, 1, "exactly one holder keeps the folder");
+    fx.client(1);
+    for k in &mut kids {
+        let _ = k.kill();
+        let _ = k.wait();
+    }
 }

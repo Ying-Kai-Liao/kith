@@ -867,3 +867,10 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
         }
     }
 }
+
+/// Nothing to hold: the first-instance flag on the pipe already allows one holder per folder.
+pub struct InstanceLock;
+
+pub fn lock_instance(_dir: &Path) -> io::Result<Option<InstanceLock>> {
+    Ok(Some(InstanceLock))
+}

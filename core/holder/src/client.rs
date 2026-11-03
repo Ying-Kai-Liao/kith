@@ -1,6 +1,7 @@
 //! A blocking client of the holder: what the core does at start (hello, list) and what the tests do. Reads happen
 //! on their own thread so a caller can wait with a timeout on any platform.
 
+use crate::auth;
 use crate::platform::{self, Stream};
 use crate::proto as p;
 use crate::wire::{self, Frame};
@@ -14,6 +15,8 @@ use std::time::{Duration, Instant};
 pub enum ConnectError {
     Io(io::Error),
     Refused(p::Refused),
+    /// The far end did not prove it holds the secret: not our holder.
+    Impostor,
 }
 
 impl From<io::Error> for ConnectError {
@@ -26,6 +29,7 @@ impl std::fmt::Display for ConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConnectError::Io(e) => write!(f, "{e}"),
+            ConnectError::Impostor => write!(f, "the holder did not prove it knows the secret"),
             ConnectError::Refused(r) => write!(
                 f,
                 "the holder refused: {:?} (newest generation {})",
@@ -64,14 +68,28 @@ impl Client {
     pub fn over(stream: Stream, secret: &str, generation: u64) -> Result<Client, ConnectError> {
         let mut writer = stream.try_clone()?;
         let mut reader = stream;
+        let key = secret.as_bytes();
+        let nonce = platform::random_hex();
         let hello = p::Hello {
             version: p::VERSION,
-            secret: secret.to_string(),
             generation,
+            nonce: nonce.clone(),
         };
         wire::write_json(&mut writer, p::HELLO, 0, &hello)?;
-        let first = wire::read(&mut reader)?
+        let mut first = wire::read(&mut reader)?
             .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+        if first.0 == p::CHALLENGE {
+            // The holder goes first: nothing is answered to a peer that cannot prove the key.
+            let challenge: p::Challenge = wire::parse(&first.2)?;
+            let expect = auth::proof(key, auth::HOLDER, &nonce, &challenge.nonce, generation);
+            if !auth::same(expect.as_bytes(), challenge.proof.as_bytes()) {
+                return Err(ConnectError::Impostor);
+            }
+            let mine = auth::proof(key, auth::CORE, &nonce, &challenge.nonce, generation);
+            wire::write_json(&mut writer, p::AUTH, 0, &p::Auth { proof: mine })?;
+            first = wire::read(&mut reader)?
+                .ok_or_else(|| io::Error::from(io::ErrorKind::UnexpectedEof))?;
+        }
         match first {
             (p::WELCOME, _, payload) => {
                 let welcome: p::Welcome = wire::parse(&payload)?;

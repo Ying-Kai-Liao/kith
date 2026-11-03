@@ -23,6 +23,8 @@ pub const LIST: u8 = 7;
 pub const TAIL: u8 = 8;
 /// Kill everything and exit. Not an update path: it ends live processes.
 pub const SHUTDOWN: u8 = 9;
+/// The core's answer to the holder's challenge (see `auth`).
+pub const AUTH: u8 = 10;
 
 // holder to core
 pub const WELCOME: u8 = 101;
@@ -38,15 +40,31 @@ pub const KILLED: u8 = 108;
 pub const LISTING: u8 = 109;
 pub const TAILED: u8 = 110;
 pub const ACKED: u8 = 111;
+/// The holder's nonce and its proof that it knows the secret, sent after a hello.
+pub const CHALLENGE: u8 = 112;
 
-/// The first frame on every connection. `secret` is an opaque string the holder was started with; it will be the
-/// local hand's pairing key (docs/plans/runtime-design.md section 10), so the holder only ever compares it and
-/// never looks inside. `generation` is the core's generation from core.db.
+/// The first frame on every connection. The secret is an opaque key the holder was started with; it will be the
+/// local hand's pairing key (docs/plans/runtime-design.md section 10), and it never crosses the wire: the holder
+/// answers with a challenge and the core with an `Auth` (see `auth`). `generation` is the core's generation from
+/// core.db; `nonce` is random hex, fresh per connection.
 #[derive(Serialize, Deserialize)]
 pub struct Hello {
     pub version: u32,
-    pub secret: String,
     pub generation: u64,
+    pub nonce: String,
+}
+
+/// The holder's half: its own nonce, and its proof over both nonces, so the core knows who it is talking to.
+#[derive(Serialize, Deserialize)]
+pub struct Challenge {
+    pub nonce: String,
+    pub proof: String,
+}
+
+/// The core's proof over the same exchange. Only after it checks out does the holder say anything about itself.
+#[derive(Serialize, Deserialize)]
+pub struct Auth {
+    pub proof: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
@@ -124,12 +142,15 @@ pub struct Welcome {
 #[serde(rename_all = "snake_case")]
 pub enum Why {
     BadVersion,
+    /// The core's proof did not match: it does not hold the secret.
     BadSecret,
     /// A newer core has already said hello. `current` has its generation.
     StaleGeneration,
     NoHello,
     /// A command from a connection that is no longer the newest.
     Superseded,
+    /// The holder is exiting; start a new one.
+    Closing,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

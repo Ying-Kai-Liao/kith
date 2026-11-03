@@ -7,6 +7,7 @@
 //! - `holder`: the process itself. `client`: a blocking client (the core's side, and the tests').
 //! - `launch`: starting a holder detached when none answers.
 
+pub mod auth;
 pub mod client;
 pub mod holder;
 pub mod launch;

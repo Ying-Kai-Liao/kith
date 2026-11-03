@@ -6,6 +6,7 @@
 //! The holder: owns every agent process, is its parent, always reads its output, keeps a tail and the unacked
 //! exits. No parsing, no policy: it checks a secret and a generation and does what the newest core says.
 
+use crate::auth;
 use crate::platform::{self, Proc, Spec};
 use crate::proto::{self as p, Held, KillState, Refused, Why};
 use crate::wire;
@@ -87,6 +88,9 @@ struct State {
     newest: u64,
     conns: u64,
     core: Option<Core>,
+    /// Set under the lock by whoever decides the holder exits; hello and spawn refuse from then on, so nothing
+    /// can start between that decision and the exit.
+    closing: bool,
     idle_since: Option<Instant>,
 }
 
@@ -108,6 +112,13 @@ pub fn run(cfg: Config) -> io::Result<()> {
         ));
     }
     platform::private_dir(&cfg.dir)?;
+    // Before the socket is touched: with the lock held, a socket file nobody answers on is a crash's leftover.
+    let Some(_instance) = platform::lock_instance(&cfg.dir)? else {
+        return Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
+            "a holder already runs here",
+        ));
+    };
     let endpoint = platform::endpoint(&cfg.dir);
     let listener = match platform::listen(&endpoint) {
         Ok(l) => l,
@@ -127,21 +138,7 @@ pub fn run(cfg: Config) -> io::Result<()> {
         }
         Err(e) => return Err(e),
     };
-    let holder = Arc::new(Holder {
-        state: Mutex::new(State {
-            procs: HashMap::new(),
-            next_id: 1,
-            newest: 0,
-            conns: 0,
-            core: None,
-            idle_since: Some(Instant::now()),
-        }),
-        changed: Condvar::new(),
-        instance: platform::random_hex(),
-        secret: cfg.secret.into_bytes(),
-        endpoint,
-        idle: cfg.idle,
-    });
+    let holder = Arc::new(Holder::new(cfg.secret.into_bytes(), endpoint, cfg.idle));
     let watcher = holder.clone();
     std::thread::spawn(move || watcher.watch_idle());
     loop {
@@ -163,15 +160,26 @@ pub fn run(cfg: Config) -> io::Result<()> {
     }
 }
 
-/// Compares without stopping at the first difference.
-fn same_secret(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
 impl Holder {
+    fn new(secret: Vec<u8>, endpoint: PathBuf, idle: Duration) -> Holder {
+        Holder {
+            state: Mutex::new(State {
+                procs: HashMap::new(),
+                next_id: 1,
+                newest: 0,
+                conns: 0,
+                core: None,
+                closing: false,
+                idle_since: Some(Instant::now()),
+            }),
+            changed: Condvar::new(),
+            instance: platform::random_hex(),
+            secret,
+            endpoint,
+            idle,
+        }
+    }
+
     fn lock(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -184,13 +192,14 @@ impl Holder {
     fn watch_idle(&self) {
         loop {
             std::thread::sleep(Duration::from_millis(100));
-            let st = self.lock();
+            let mut st = self.lock();
             if !self.idle.is_zero()
                 && st.core.is_none()
                 && st.procs.is_empty()
                 && st.idle_since.is_some_and(|t| t.elapsed() >= self.idle)
             {
-                drop(st);
+                // The lock stays held through the exit: a hello or spawn cannot land in between.
+                st.closing = true;
                 self.exit();
             }
         }
@@ -246,18 +255,46 @@ impl Holder {
     fn serve(self: &Arc<Self>, mut stream: platform::Stream) -> io::Result<()> {
         let hello: p::Hello = match wire::read(&mut stream)? {
             Some((p::HELLO, _, payload)) => wire::parse(&payload)?,
-            _ => {
-                let current = self.lock().newest;
-                return Self::refuse(&mut stream, Why::NoHello, current);
-            }
+            // Nothing is known about this peer yet, so nothing about the holder is told to it.
+            _ => return Self::refuse(&mut stream, Why::NoHello, 0),
         };
+        if hello.version != p::VERSION {
+            return Self::refuse(&mut stream, Why::BadVersion, 0);
+        }
+        if self.lock().closing {
+            return Self::refuse(&mut stream, Why::Closing, 0);
+        }
+        // The holder proves the key first, then the core does; only then does the holder say what it holds.
+        let nonce = platform::random_hex();
+        let challenge = p::Challenge {
+            proof: auth::proof(
+                &self.secret,
+                auth::HOLDER,
+                &hello.nonce,
+                &nonce,
+                hello.generation,
+            ),
+            nonce,
+        };
+        wire::write_json(&mut stream, p::CHALLENGE, 0, &challenge)?;
+        let answer: p::Auth = match wire::read(&mut stream)? {
+            Some((p::AUTH, _, payload)) => wire::parse(&payload)?,
+            _ => return Self::refuse(&mut stream, Why::NoHello, 0),
+        };
+        let expect = auth::proof(
+            &self.secret,
+            auth::CORE,
+            &hello.nonce,
+            &challenge.nonce,
+            hello.generation,
+        );
+        if !auth::same(expect.as_bytes(), answer.proof.as_bytes()) {
+            return Self::refuse(&mut stream, Why::BadSecret, 0);
+        }
         let conn = {
             let mut st = self.lock();
-            if hello.version != p::VERSION {
-                return Self::refuse(&mut stream, Why::BadVersion, st.newest);
-            }
-            if !same_secret(hello.secret.as_bytes(), &self.secret) {
-                return Self::refuse(&mut stream, Why::BadSecret, st.newest);
+            if st.closing {
+                return Self::refuse(&mut stream, Why::Closing, st.newest);
             }
             // The same generation may come back (a dropped connection); an older one may not.
             if hello.generation < st.newest {
@@ -317,6 +354,15 @@ impl Holder {
             match kind {
                 p::SPAWN => {
                     let spec: p::Spawn = wire::parse(&payload)?;
+                    if st.closing {
+                        let current = st.newest;
+                        let refused = Refused {
+                            why: Why::Closing,
+                            current,
+                        };
+                        self.to_core(&st, wire::json_frame(p::REFUSED, 0, &refused));
+                        continue;
+                    }
                     if spec.generation != generation || generation != st.newest {
                         let current = st.newest;
                         self.to_core(
@@ -384,6 +430,7 @@ impl Holder {
                     self.to_core(&st, wire::frame(p::TAILED, id, &tail));
                 }
                 p::SHUTDOWN => {
+                    st.closing = true;
                     for e in st.procs.values() {
                         e.proc.kill_tree();
                     }
@@ -395,7 +442,7 @@ impl Holder {
                         std::thread::sleep(Duration::from_millis(20));
                         st = self.lock();
                     }
-                    drop(st);
+                    // Still holding the lock: nothing can start between the wait and the exit.
                     self.exit();
                 }
                 _ => {}
@@ -592,5 +639,34 @@ impl Holder {
             e.held.exit = Some(exit);
             self.to_core(&st, wire::json_frame(p::EXITED, id, &exit));
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn once_closing_is_set_a_hello_is_refused() {
+        let holder = Arc::new(Holder::new(
+            b"0123456789abcdef".to_vec(),
+            PathBuf::from("unused"),
+            Duration::ZERO,
+        ));
+        holder.lock().closing = true;
+        let (mut core, theirs) = UnixStream::pair().unwrap();
+        let served = holder.clone();
+        let t = std::thread::spawn(move || served.serve(theirs));
+        let hello = p::Hello {
+            version: p::VERSION,
+            generation: 1,
+            nonce: "aa".into(),
+        };
+        wire::write_json(&mut core, p::HELLO, 0, &hello).unwrap();
+        let (kind, _, payload) = wire::read(&mut core).unwrap().unwrap();
+        assert_eq!(kind, p::REFUSED);
+        assert_eq!(wire::parse::<Refused>(&payload).unwrap().why, Why::Closing);
+        t.join().unwrap().unwrap();
     }
 }
