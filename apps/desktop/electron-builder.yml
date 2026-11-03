@@ -68,6 +68,9 @@ mac:
     # The `kith` command line in the release layout (Resources/kith/bin/kith, share/kith/kernel).
     - from: build/native/kith
       to: kith
+    # The CLI installer (scripts/install.sh) the app runs on Resources/kith at launch and after an update.
+    - from: build/native/kith-install.sh
+      to: kith-install.sh
     - from: build/native/kith-speech
       to: kith-speech
   extraFiles:

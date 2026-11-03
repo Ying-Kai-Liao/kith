@@ -313,7 +313,7 @@ export class FakeHost {
         return {
           hostId: this.hostId, computerId: story.COMPUTER_ID, signKey: '', boxKey: '', cloud: null, name: story.HOST_NAME,
           version: this.version, protocol: 1, minProtocol: 1, os: 'macos', device: 'MacBookPro', home: '/Users/demo', rev: this.rev, analytics: this.analytics,
-          urls: [], backends: [
+          urls: [], cli: { version: this.version, kernel: '/Users/demo/.kith/cli/current/share/kith/kernel', dev: false, min: '0.1.0', ok: true }, backends: [
             { id: 'claude', name: 'Claude Code', available: true, installed: true, signedIn: true, command: 'claude', installHint: '' },
             { id: 'codex', name: 'Codex', available: true, installed: true, signedIn: true, command: 'codex', installHint: '' },
           ],
