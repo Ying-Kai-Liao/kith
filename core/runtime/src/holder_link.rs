@@ -317,7 +317,7 @@ fn connected(
             .terminals
             .next(cfg.poll.min(Duration::from_millis(100)))
         {
-            serve_spawn(&mut client, req)?;
+            serve_spawn(&mut client, &req)?;
         }
         discard_output(&mut client);
         if shared.stopping() {
@@ -357,7 +357,7 @@ fn discard_output(client: &mut Client) {
 }
 
 /// Puts one spawn to the holder and tells the caller what came of it. `Err` is a broken link (the caller was told).
-fn serve_spawn(client: &mut Client, req: SpawnReq) -> std::result::Result<(), String> {
+fn serve_spawn(client: &mut Client, req: &SpawnReq) -> std::result::Result<(), String> {
     if Instant::now() >= req.deadline {
         let _ = req
             .reply

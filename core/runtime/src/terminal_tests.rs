@@ -118,10 +118,7 @@ mod claims {
         assert_eq!(rec["pid"], me);
         assert_eq!(rec["kind"], "terminal");
         assert!(rec["at"].as_str().unwrap().ends_with('Z'));
-        let held = claim::take(d.path(), "s1", me)
-            .unwrap()
-            .err()
-            .expect("held");
+        let held = claim::take(d.path(), "s1", me).unwrap().expect_err("held");
         assert_eq!(held.pid, me);
         claim::release(d.path(), "s1", me + 1); // not the holder: leaves it
         assert!(file(d.path(), "s1").is_file());

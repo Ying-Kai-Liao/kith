@@ -70,7 +70,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use kith_holder::proto::{self, HeldId};
@@ -133,6 +133,7 @@ pub(crate) fn filter_env(env: &serde_json::Map<String, Value>) -> BTreeMap<Strin
 
 // --- tickets -------------------------------------------------------------------------------------------------------
 
+#[allow(dead_code)] // read by redeem, which the attach relay (M1-5) calls
 struct Entry {
     held: HeldId,
     session: String,
@@ -142,6 +143,7 @@ struct Entry {
 
 /// What a good ticket was for.
 #[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)] // M1-5's relay reads it
 pub(crate) struct Redeemed {
     pub held: HeldId,
     pub session: String,
@@ -149,6 +151,7 @@ pub(crate) struct Redeemed {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)] // M1-5's relay reads it
 pub(crate) enum TicketRefused {
     /// Never issued, or already used (the two look the same, on purpose).
     Unknown,
@@ -214,10 +217,12 @@ impl Tickets {
 
     /// Uses the ticket up. A second call, an unknown string and an expired ticket are all refused; the first call
     /// removes the entry whatever it finds.
+    #[allow(dead_code)] // M1-5's relay calls it
     pub(crate) fn redeem(&self, ticket: &str) -> std::result::Result<Redeemed, TicketRefused> {
         self.redeem_at(Instant::now(), ticket)
     }
 
+    #[allow(dead_code)]
     fn redeem_at(
         &self,
         now: Instant,
@@ -313,12 +318,10 @@ impl Terminals {
             .inbox
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        match inbox.recv_timeout(wait) {
-            Ok(req) => Some(req),
-            Err(RecvTimeoutError::Timeout | RecvTimeoutError::Disconnected) => None,
-        }
+        inbox.recv_timeout(wait).ok()
     }
 
+    #[allow(dead_code)] // M1-5's relay calls it
     pub(crate) fn redeem(&self, ticket: &str) -> std::result::Result<Redeemed, TicketRefused> {
         self.tickets.redeem(ticket)
     }
