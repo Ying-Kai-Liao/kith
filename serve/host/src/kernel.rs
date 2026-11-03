@@ -261,8 +261,7 @@ pub fn find_stub(exe: Option<&Path>, kith: Option<&Path>) -> Option<PathBuf> {
 }
 
 /// `(KITH_STUB_BIN, program)` for a process the host starts, resolved once: an explicit `KITH_STUB_BIN` that runs wins.
-/// None when there is no stub (the kernel then refuses the run, unless KITH_ALLOW_UNLOCKED=1 is set, which is inherited
-/// only where the process environment is).
+/// None when there is no stub (the kernel then warns and runs unlocked, or refuses under KITH_REQUIRE_STUB=1).
 pub fn stub_env() -> Option<(String, String)> {
     // Unit tests compare the environments of the runs they see; `find_stub` has its own test.
     #[cfg(test)]

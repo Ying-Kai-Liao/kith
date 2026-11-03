@@ -28,7 +28,7 @@ class Kith < Formula
 
   def install
     bin.install "bin/kith"
-    bin.install "bin/kith-stub" if File.exist?("bin/kith-stub")   # the conversation lock's launcher; without it runs go unlocked
+    bin.install "bin/kith-stub"   # the conversation lock's launcher (every release tarball carries it)
     bin.install "bin/kith-tts" if File.exist?("bin/kith-tts")   # local voice helper, Apple silicon builds only
     bin.install_symlink bin/"kith" => "hq"   # the old name keeps working
     (share/"kith").install Dir["share/kith/*"], Dir["share/kith/.claude-plugin"]

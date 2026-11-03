@@ -32,7 +32,6 @@ chmod +x "$T/bin/claude"
 # A guest run refuses to start without a kith program that answers `memory hook`; a stub stands in for the host build.
 printf '#!/bin/sh\n[ "$1 $2 $3" = "memory hook --help" ] && echo "usage: kith memory hook <phase>"\nexit 0\n' > "$T/bin/kith-fake-host"
 chmod +x "$T/bin/kith-fake-host"
-export KITH_ALLOW_UNLOCKED=1   # no kith-stub here: these runs are unlocked on purpose (the refusal is checked below)
 export KITH_BIN=$T/bin/kith-fake-hostPATH=$T/bin:$PATH STUB_OUT=$T/stub.out STUB_SETTINGS=$T/stub.settings
 
 KITH=$KERNEL/bin/kith
@@ -81,11 +80,7 @@ setting() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(e
 tty_run "$KITH" echo
 whole "owner at a terminal (kith echo)"
 
-# No kith-stub anywhere (not beside KITH_BIN, not on PATH, no KITH_STUB_BIN): the run is refused (an unlocked run breaks I11)...
-tty_run KITH_ALLOW_UNLOCKED= "$KITH" echo
-has "no kith-stub: refused with an install hint" "$(cat "$T/out")" "cannot be locked"
-[[ ! -e $STUB_OUT ]] && echo "ok   no kith-stub: claude never started" || { echo "FAIL no kith-stub: claude started"; fail=1; }
-# ...unless the dev escape is set on purpose (every run below): claude still starts, unlocked, with one warning.
+# No kith-stub anywhere (not beside KITH_BIN, not on PATH, no KITH_STUB_BIN): the run still starts claude, unlocked, with one warning.
 tty_run "$KITH" echo
 has "no kith-stub: warns and runs unlocked" "$(cat "$T/out")" "this run is not locked"
 has "no kith-stub: claude still started with its flags" "$(args)" "--session-id"

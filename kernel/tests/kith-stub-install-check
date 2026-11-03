@@ -5,6 +5,9 @@
 #     resolves that link and finds the stub beside the real program;
 #   - `kith serve start` puts kith-stub beside kith-serve (install_helper), where a run started by the host with no KITH_BIN
 #     finds it.
+# Every path a user gets kith by is checked: install.sh, the release tarball, Homebrew's formula, the Mac app's CLI folder,
+# `kith serve start` from a checkout and the runs the host starts (the Homebrew, app-build and host-site checks read the files
+# that do it; their programs run in release.yml and the Rust jobs).
 # A fake release (a kith that answers `memory hook --help`, a stub that notes its argv and runs what follows `--`), a fake
 # claude, a throwaway HOME.
 #
@@ -65,6 +68,34 @@ install_stub "$T/new-stub" >/dev/null 2>&1
 check "kith serve: a changed stub replaces it" 'cmp -s "$T/new-stub" "$T/serve/bin/kith-stub"'
 install_stub "$T/none" >/dev/null 2>&1
 check "kith serve: no built stub leaves the old one" 'cmp -s "$T/new-stub" "$T/serve/bin/kith-stub"'
+
+# release tarball: scripts/package-release.sh carries the stub beside kith when KITH_STUB_BIN names one, and the release workflow
+# names it (a tarball without it would ship unlocked installs to Homebrew and install.sh alike)
+mkdir -p "$T/pack"
+printf '#!/bin/sh\necho kith\n' > "$T/pack/kith"; chmod 755 "$T/pack/kith"
+KITH_STUB_BIN=$d/bin/kith-stub sh "$ROOT/scripts/package-release.sh" 0.1.0 arm64 "$T/pack/kith" "$T/pack/out" >/dev/null 2>&1
+tar -tzf "$T/pack/out/kith-0.1.0-darwin-arm64.tar.gz" 2>/dev/null | grep -q '/bin/kith-stub$' && packed=1 || packed=0
+check "package-release.sh: the tarball holds bin/kith-stub" '[ $packed = 1 ]'
+check "release.yml builds the stub for both CPUs and packs it" \
+  'grep -q "cargo build --release --locked -p kith-stub --target" "$ROOT/.github/workflows/release.yml" && grep -q "KITH_STUB_BIN: serve/host/target/\${{ matrix.target }}/release/kith-stub" "$ROOT/.github/workflows/release.yml"'
+# Homebrew: the formula installs it from that tarball, unconditionally (brew links bin/kith and bin/kith-stub side by side)
+check "Homebrew formula installs bin/kith-stub and tests for it" \
+  'grep -q "^    bin.install \"bin/kith-stub\"" "$ROOT/packaging/homebrew/kith.rb" && grep -q "assert_predicate bin/\"kith-stub\"" "$ROOT/packaging/homebrew/kith.rb"'
+# The Mac app: its bundled CLI folder (Resources/kith, bin/kith + bin/kith-stub) is installed by install.sh from a folder
+# (KITH_INSTALL_DIR, what Resources/kith-install.sh does), and the build lipos the stub into that folder
+rm -rf "$M" "$HOME/.local/bin/kith" "$HOME/.local/bin/hq"
+app=$T/app-kith; mkdir -p "$app/share"; cp -R "$d/bin" "$app/bin"; cp -R "$d/share/kith" "$app/share/kith"
+KITH_INSTALL_DIR=$app sh "$ROOT/scripts/install.sh" >/dev/null 2>&1
+check "the app's CLI folder installs with its stub (install.sh from a folder)" '[ -x "$M/cli/0.1.0/bin/kith-stub" ] && [ -L "$HOME/.local/bin/kith" ]'
+check "the app build lipos kith-stub into build/native/kith/bin" \
+  'grep -q "join(kith, .bin/kith-stub.)" "$ROOT/apps/desktop/tools/native-host.mjs" && grep -q "from: build/native/kith\$" "$ROOT/apps/desktop/electron-builder.yml"'
+# kith serve start from a checkout: builds the stub next to kith-serve's build and installs it beside the host
+check "kith serve builds and installs kith-stub from a checkout" \
+  'grep -q -- "-p kith-stub" "$KERNEL/bin/kith-serve" && grep -q "install_stub \"\$(dirname \"\$built\")/kith-stub\"" "$KERNEL/bin/kith-serve"'
+# Runs the host starts: serve/host names the stub (KITH_STUB_BIN) in every empty environment it builds; its unit test
+# (kernel.rs, the bundle layout) runs in the Rust jobs. The three sites are checked here so a new one is not forgotten.
+check "host-started runs get KITH_STUB_BIN (resume, channel run, ask, kernel commands)" \
+  '[ "$(grep -l "kernel::stub_env()" "$ROOT"/serve/host/src/cards/resume.rs "$ROOT"/serve/host/src/channels/run.rs "$ROOT"/serve/host/src/cards/mod.rs "$ROOT"/serve/host/src/agent/hq.rs | wc -l)" -eq 4 ]'
 
 [[ $fail == 0 ]] && echo "all checks passed"
 exit $fail

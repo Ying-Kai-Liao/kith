@@ -461,7 +461,7 @@ def core():
     if any(os.access(s, os.X_OK) for s in stubs):
         ok('conversation lock: kith-stub found, so each run holds its session\'s lock')
     else:
-        (warn if os.environ.get('KITH_ALLOW_UNLOCKED') == '1' else bad)('conversation lock: no kith-stub beside kith, so runs that need the lock are refused (kith update self; KITH_ALLOW_UNLOCKED=1 only for a dev checkout)')
+        warn('conversation lock: no kith-stub beside kith, so runs start unlocked (kith update self; KITH_REQUIRE_STUB=1 refuses instead)')
     try:
         # Reaching a daemon that is busy can take a minute; doctor asks for a few seconds (TimeoutExpired is a SubprocessError).
         r = run(binary, 'kernel', 'core-status', '--json', timeout=5)

@@ -13,7 +13,6 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/kith-sessions-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'kill $HOSTPID 2>/dev/null; rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state CLAUDE_CONFIG_DIR=$T/claude
-export KITH_ALLOW_UNLOCKED=1   # no kith-stub in this check: its runs are unlocked on purpose (a missing stub is otherwise refused)
 unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE KITH_VIA KITH_HIDE_SESSION KITH_RESUME KITH_CLAUDE_ARGS
 mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/designer/role" "$CLAUDE_CONFIG_DIR/sessions" "$CLAUDE_CONFIG_DIR/projects/p" "$T/bin" "$T/work/a" "$T/serve"
 printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"

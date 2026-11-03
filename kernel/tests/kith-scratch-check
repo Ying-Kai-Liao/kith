@@ -12,7 +12,6 @@ T=$(mktemp -d "${TMPDIR:-/tmp}/kith-scratch-check.XXXXXX")
 T=$(cd "$T" && pwd -P)
 trap 'rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_AUTH=$T/auth.json
-export KITH_ALLOW_UNLOCKED=1   # no kith-stub in this check: its runs are unlocked on purpose (a missing stub is otherwise refused)
 unset KITH_STATE HQ_STATE KITH_PROJECT KITH_PERSON KITH_AGENT KITH_CLAUDE_ARGS KITH_HARNESS KITH_MODEL KITH_EFFORT KITH_PERMISSION_MODE CLAUDE_CONFIG_DIR CODEX_HOME HQ_HOME KITH_SERVE_HOME
 mkdir -p "$HOME/.claude/projects/x" "$HOME/.codex" "$KITH_HOME/state" "$T/bin"
 export KITH_STATE=$KITH_HOME/state KITH_SERVE_DB=$T/serve.db

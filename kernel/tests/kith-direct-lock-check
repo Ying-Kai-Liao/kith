@@ -9,7 +9,7 @@
 #   - an app turn (the host's claim, kith-sessions take_claim) on a session a direct run holds is still blocked by the claim file;
 #   - the claim file names the shell pid, and claude descends from the stub which is that same pid (exec kept it);
 #   - an interactive run on a busy lock: exit 75, claude never started, its claim released, no resume note;
-#   - no session id (-c): unlocked, as before; no kith-stub: refused with an install hint (exit 1, claude never starts), unless KITH_ALLOW_UNLOCKED=1 (one stderr line, the run goes on);
+#   - no session id (-c) or no kith-stub: unlocked, as before (the missing stub says so on stderr; KITH_REQUIRE_STUB=1 refuses; the default flips in M3);
 #
 #   kernel/tests/kith-direct-lock-check    a few seconds; prints each check, exits 1 when one fails
 #   KITH_STUB_BIN=/path/to/kith-stub       else a build under $CARGO_TARGET_DIR / serve/host/target (no stub: the check skips)
@@ -29,7 +29,7 @@ T=$(cd "$T" && pwd -P)
 trap 'touch "$T/go" 2>/dev/null; kill $(jobs -p) 2>/dev/null; rm -rf "$T"' EXIT
 export HOME=$T/home KITH_HOME=$T/kith KITH_STATE=$T/state KITH_MACHINE=$T/state CLAUDE_CONFIG_DIR=$T/claude KITH_STUB_BIN=$STUB
 unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE KITH_VIA KITH_HIDE_SESSION KITH_RESUME \
-  KITH_CLAUDE_ARGS KITH_REQUIRE_STUB KITH_ALLOW_UNLOCKED KITH_RUN_TOKEN KITH_ASK_TOKEN
+  KITH_CLAUDE_ARGS KITH_REQUIRE_STUB KITH_RUN_TOKEN KITH_ASK_TOKEN
 mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/designer/role" "$CLAUDE_CONFIG_DIR" "$T/bin" "$T/work"
 printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"
 LOCKS=$KITH_STATE/core/locks
@@ -118,16 +118,12 @@ rm -f "$T/go" "$T/started"; touch "$T/go"
 ( cd "$T/work" && KITH_CLAUDE_ARGS="--continue" "$KERNEL/bin/kith" designer "task" ) >/dev/null 2>&1
 is "-c with no id: runs unlocked" "$?" 0
 
-# no kith-stub: refused with an install hint (an unlocked run breaks I11), claude never starts; KITH_ALLOW_UNLOCKED=1 is the dev
-# escape (one stderr line, the run goes on) and KITH_REQUIRE_STUB=1 refuses even then
+# no kith-stub: one stderr line and the run goes on (the default flips to a refusal in M3); KITH_REQUIRE_STUB=1 refuses
 SID3=33333333-3333-4333-8333-333333333333
-rm -f "$T/go" "$T/started"; touch "$T/go"
 err=$(cd "$T/work" && KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
-[[ $rc != 0 && $err == *"cannot be locked"* && ! -s $T/started ]] && ok "no stub: refused by default, claude never started" || bad "no stub refusal" "$rc $err"
-err=$(cd "$T/work" && KITH_ALLOW_UNLOCKED=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
-[[ $rc == 0 && $err == *"no kith-stub program"* && -s $T/started ]] && ok "no stub, KITH_ALLOW_UNLOCKED=1: runs unlocked with one line" || bad "no stub, escape" "$rc $err"
-err=$(cd "$T/work" && KITH_ALLOW_UNLOCKED=1 KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
-[[ $rc != 0 ]] && ok "KITH_REQUIRE_STUB=1 beats the escape" || bad "require beats escape" "$rc $err"
+[[ $rc == 0 && $err == *"no kith-stub program"* ]] && ok "no stub: runs unlocked with one line" || bad "no stub" "$rc $err"
+err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
+[[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
 err=$(cd "$T/work" && KITH_REQUIRE_STUB=1 KITH_STUB_BIN=$T/nope KITH_BIN=$T/nope KITH_CLAUDE_ARGS="--session-id $SID3" "$KERNEL/bin/kith" designer "task" 2>&1 >/dev/null); rc=$?
 [[ $rc != 0 && $err == *"cannot be locked"* ]] && ok "KITH_REQUIRE_STUB=1: refused with an install hint" || bad "require stub" "$rc $err"
 
