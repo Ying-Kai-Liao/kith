@@ -3989,6 +3989,707 @@
           }
         }
       }
+    },
+    {
+      "name": "people.grant",
+      "summary": "Let a person use an agent, with their own settings on top of the agent's.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person (`*` is everyone kith knows).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent, or agents separated by commas.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "preset",
+          "summary": "A named bundle of permissions.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "mode",
+          "summary": "The permission mode.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "budget",
+          "summary": "At most this many dollars a calendar month of their runs of the agent (as `budget=` in `kith-auth member`).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "deny",
+          "summary": "Tools to refuse, separated by commas.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "model",
+          "summary": "The model their runs use.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "helpers",
+          "summary": "The helpers their runs may call, separated by commas.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "trusted",
+          "summary": "Allow a mode that is a free shell on this Mac.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "grant"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "agent": {
+            "kind": "positional"
+          },
+          "preset": {
+            "kind": "flag",
+            "spellings": [
+              "--preset"
+            ]
+          },
+          "mode": {
+            "kind": "flag",
+            "spellings": [
+              "--mode"
+            ]
+          },
+          "budget": {
+            "kind": "flag",
+            "spellings": [
+              "--budget"
+            ]
+          },
+          "deny": {
+            "kind": "flag",
+            "spellings": [
+              "--deny"
+            ]
+          },
+          "model": {
+            "kind": "flag",
+            "spellings": [
+              "--model"
+            ]
+          },
+          "helpers": {
+            "kind": "flag",
+            "spellings": [
+              "--helpers"
+            ]
+          },
+          "trusted": {
+            "kind": "switch",
+            "spellings": [
+              "--trusted"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "people.revoke",
+      "summary": "Take a person's use of an agent away.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent, or agents separated by commas.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "revoke"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.list",
+      "summary": "Who may use which agent, with their preset, mode and budget.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "Only this agent.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "Only this person.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "access"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "people.requests",
+      "summary": "The access requests waiting for the owner.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "requests"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "people.approve",
+      "summary": "Approve an access request.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "approve"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.deny",
+      "summary": "Deny an access request.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "deny"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "cards.list",
+      "summary": "The cards waiting, and recent ones.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "cards",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "cards.show",
+      "summary": "One card.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The card.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "cards",
+          "show"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "cards.answer",
+      "summary": "Answer a card.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The card.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "answer",
+          "summary": "The answer (the button's value, or the text asked for).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "kernel",
+      "x-kith-cli": {
+        "path": [
+          "cards",
+          "answer"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "answer": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "gate.list",
+      "summary": "The gate's slots and the line, in the order the line is kept. Frees holders whose process is gone first.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "list"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "gate.take",
+      "summary": "Asks for a slot. Answers `granted`, `waiting` (with a position), `parked` (gave its slot up, not in line) or `gone` (holds nothing). Asking again for the same holder changes nothing.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The run or claim that wants the slot.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "rt",
+          "summary": "The actor it belongs to (display only; the holder when absent).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "max",
+          "summary": "How many slots there are (1 or more). Remembered; later takes may leave it out.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "invitee",
+          "summary": "An invited person's turn: behind the owner's, and few at once.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The holder's process (2 or more), so a crash frees the slot.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "take"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "positional"
+          },
+          "rt": {
+            "kind": "flag",
+            "spellings": [
+              "--rt"
+            ]
+          },
+          "max": {
+            "kind": "flag",
+            "spellings": [
+              "--max"
+            ]
+          },
+          "invitee": {
+            "kind": "switch",
+            "spellings": [
+              "--invitee"
+            ]
+          },
+          "pid": {
+            "kind": "flag",
+            "spellings": [
+              "--pid"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "gate.release",
+      "summary": "Gives a slot or a place in line back. Releasing a holder that holds nothing does nothing.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The run or claim.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "release"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "gate.park",
+      "summary": "The holder waits on another bot's reply: its slot is given up. Nested asks share one parking.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The run or claim.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "park"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "gate.unpark",
+      "summary": "One ask is back; the last one puts the holder in line again, ahead of turns that have not started.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The run or claim.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "gate",
+          "unpark"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "positional"
+          }
+        }
+      }
     }
   ],
   "components": {

@@ -1,0 +1,6 @@
+//! M2 lane B: secrets envelope. Versions 20-29, one file per step (`m0020_<what>.rs` holding a `pub(super) const MIGRATION`),
+//! listed in `STEPS` below in version order, first step 20, no gaps (`migrations::check`).
+
+use super::Migration;
+
+pub(super) const STEPS: &[Migration] = &[];

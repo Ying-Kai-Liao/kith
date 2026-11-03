@@ -20,6 +20,8 @@ const V2: Migration = Migration {
     sql: "CREATE TABLE extra (x INTEGER);",
 };
 const BOTH: &[Migration] = &[MIGRATIONS[0], V2];
+/// Schema 1 alone: the head these two-step tests stand for, whatever the real list grows to.
+const ONLY_V1: &[Migration] = &[MIGRATIONS[0]];
 
 pub(crate) fn machine() -> (TempDir, PathBuf) {
     let t = tempfile::tempdir().expect("tempdir");
@@ -69,7 +71,10 @@ fn a_first_setup_creates_the_folder_the_db_and_the_marker_owner_only() {
     let l = Layout::new(&m);
     let c = open(&l);
     assert!(l.db.is_file() && l.lock.is_file() && l.marker.is_file());
-    assert_eq!(c.schema_version(), 1);
+    assert_eq!(
+        c.schema_version(),
+        MIGRATIONS.last().expect("steps").version
+    );
     assert_eq!(
         l.dir,
         m.join("core"),
@@ -327,7 +332,7 @@ fn a_database_without_a_marker_adopts_it() {
 fn embedded_creates_but_never_migrates_and_the_daemon_snapshots_then_migrates() {
     let (_t, m) = machine();
     let l = Layout::new(&m);
-    drop(start_with(&l, MIGRATIONS).expect("v1"));
+    drop(start_with(&l, ONLY_V1).expect("v1"));
     // This binary now knows schema 2; one command must not migrate.
     let e = embedded_with(&l, BOTH).err().expect("needs migration");
     assert!(
@@ -530,7 +535,7 @@ fn the_database_id_is_written_in_the_first_migrations_transaction() {
               INSERT INTO nowhere VALUES (1);",
     }];
     let mut conn = rusqlite::Connection::open_in_memory().expect("memory");
-    crate::db::apply(&mut conn, MIGRATIONS, 0, Some("abc")).expect("apply");
+    crate::db::apply(&mut conn, MIGRATIONS, Some("abc")).expect("apply");
     let id: String = conn
         .query_row(
             "SELECT value FROM meta WHERE key = 'database_id'",
@@ -542,7 +547,7 @@ fn the_database_id_is_written_in_the_first_migrations_transaction() {
 
     // A first step that fails after its schema leaves nothing: no tables, hence no database without an id.
     let mut conn = rusqlite::Connection::open_in_memory().expect("memory");
-    assert!(crate::db::apply(&mut conn, BROKEN, 0, Some("abc")).is_err());
+    assert!(crate::db::apply(&mut conn, BROKEN, Some("abc")).is_err());
     let tables: i64 = conn
         .query_row("SELECT count(*) FROM sqlite_master", [], |r| r.get(0))
         .expect("count");
@@ -626,4 +631,231 @@ fn a_front_note_that_stays_the_same_is_one_line_in_the_core_log() {
         log.lines().all(|l| l.contains(" front: the daemon ")),
         "{log}"
     );
+}
+
+/// Schema version 1 as M0 shipped it, written out here so the fixture does not depend on the code under test.
+const M0_SCHEMA: &str = "
+        CREATE TABLE migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at INTEGER NOT NULL
+        );
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+        CREATE TABLE counters (name TEXT PRIMARY KEY, value INTEGER NOT NULL) WITHOUT ROWID;
+        INSERT INTO counters (name, value) VALUES ('generation', 0), ('claim_id', 0);
+    ";
+
+/// A core.db as an M0 binary left it: the old SQL, its migrations row, a database id and the marker.
+fn m0_database(l: &Layout) {
+    perms::ensure_dir(&l.dir).expect("dir");
+    perms::create_private_file(&l.db).expect("db");
+    let c = rusqlite::Connection::open(&l.db).expect("open");
+    c.pragma_update(None, "journal_mode", "WAL").expect("wal");
+    c.execute_batch(M0_SCHEMA).expect("m0 schema");
+    c.execute(
+        "INSERT INTO migrations (version, name, applied_at) VALUES (1, 'core', 1)",
+        [],
+    )
+    .expect("row");
+    c.execute(
+        "INSERT INTO meta (key, value) VALUES ('database_id', 'm0-fixture')",
+        [],
+    )
+    .expect("id");
+    drop(c);
+    crate::marker::write(l, "m0-fixture").expect("marker");
+}
+
+fn schema_of(l: &Layout) -> Vec<(String, String, Option<String>)> {
+    let c = rusqlite::Connection::open(&l.db).expect("open");
+    let mut q = c
+        .prepare("SELECT type, name, sql FROM sqlite_master ORDER BY type, name")
+        .expect("prepare");
+    q.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .expect("query")
+        .map(|r| r.expect("row"))
+        .collect()
+}
+
+#[test]
+fn an_m0_database_opens_unchanged_and_migrates_to_the_new_head() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    m0_database(&l);
+    // A head of 1: the M0 file opens as it is, nothing migrates.
+    let c = start_with(&l, ONLY_V1).expect("m0 opens");
+    assert_eq!(c.schema_version(), 1);
+    assert_eq!(c.migrated_from(), None);
+    drop(c);
+    // A later head migrates it, and the daemon says where it came from.
+    let c = start_with(&l, BOTH).expect("migrates");
+    assert_eq!(c.schema_version(), 2);
+    assert_eq!(c.migrated_from(), Some(1));
+}
+
+#[test]
+fn an_m0_database_migrates_forward_through_the_real_list() {
+    // The real MIGRATIONS, whatever lanes have added: the M0 file ends at the head with every lane's tables.
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    m0_database(&l);
+    let c = start_with(&l, MIGRATIONS).expect("migrates");
+    assert_eq!(
+        c.schema_version(),
+        MIGRATIONS.last().expect("steps").version
+    );
+    assert_eq!(c.migrated_from(), Some(1));
+    drop(c);
+    let names: Vec<String> = schema_of(&l)
+        .into_iter()
+        .filter(|(t, _, _)| t == "table")
+        .map(|(_, n, _)| n)
+        .collect();
+    for t in ["people", "memberships", "presets", "authority_settings"] {
+        assert!(names.iter().any(|n| n == t), "{t} in {names:?}");
+    }
+}
+
+#[test]
+fn a_fresh_database_and_a_migrated_one_end_with_the_same_schema() {
+    let (_t, fresh) = machine();
+    let lf = Layout::new(&fresh);
+    drop(start_with(&lf, BOTH).expect("fresh"));
+
+    let (_t2, old) = machine();
+    let lo = Layout::new(&old);
+    m0_database(&lo);
+    drop(start_with(&lo, BOTH).expect("migrated"));
+
+    assert_eq!(schema_of(&lf), schema_of(&lo));
+    assert!(schema_of(&lf).iter().any(|(_, name, _)| name == "counters"));
+}
+
+#[test]
+fn the_m2_stub_rows_answer_not_served_so_the_caller_falls_back() {
+    let (_t, m) = machine();
+    let c = open(&Layout::new(&m));
+    let owner = kith_api::Principal::Owner;
+    for (name, params) in [
+        (
+            "people.grant",
+            serde_json::json!({"person": "ann", "agent": "echo"}),
+        ),
+        (
+            "people.revoke",
+            serde_json::json!({"person": "ann", "agent": "echo"}),
+        ),
+        ("people.list", serde_json::json!({})),
+        ("people.requests", serde_json::json!({})),
+        ("people.approve", serde_json::json!({"id": "r1"})),
+        ("people.deny", serde_json::json!({"id": "r1"})),
+        ("cards.list", serde_json::json!({})),
+        ("cards.show", serde_json::json!({"id": "c1"})),
+        (
+            "cards.answer",
+            serde_json::json!({"id": "c1", "answer": "yes"}),
+        ),
+    ] {
+        assert!(
+            matches!(c.call(owner, name, &params), Err(Error::NotServed(_))),
+            "{name}"
+        );
+        for other in [
+            kith_api::Principal::Member,
+            kith_api::Principal::Bot,
+            kith_api::Principal::RunToken,
+        ] {
+            assert!(
+                matches!(c.call(other, name, &params), Err(Error::NotAllowed(_))),
+                "{name} for {}",
+                other.name()
+            );
+        }
+    }
+}
+
+const MID: Migration = Migration {
+    version: 11,
+    name: "mid",
+    sql: "CREATE TABLE mid (x INTEGER);",
+};
+const LATE: Migration = Migration {
+    version: 20,
+    name: "late",
+    sql: "CREATE TABLE late (x INTEGER);",
+};
+const LATE_RENAMED: Migration = Migration {
+    version: 20,
+    name: "other",
+    sql: "CREATE TABLE late (x INTEGER);",
+};
+
+#[test]
+fn a_step_below_the_highest_applied_one_is_applied_and_ends_like_a_fresh_database() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    // A binary that shipped step 20 before step 11 was merged.
+    drop(start_with(&l, &[MIGRATIONS[0], LATE]).expect("{1, 20}"));
+    let all = [MIGRATIONS[0], MID, LATE];
+    // One command does not migrate, and says which step is missing.
+    let e = embedded_with(&l, &all).err().expect("missing 11");
+    assert!(
+        matches!(&e, Error::NeedsMigration(t) if t.contains("11")),
+        "{e}"
+    );
+    let c = start_with(&l, &all).expect("daemon applies 11");
+    assert_eq!(c.schema_version(), 20);
+    drop(c);
+
+    let (_t2, fresh) = machine();
+    let lf = Layout::new(&fresh);
+    drop(start_with(&lf, &all).expect("fresh"));
+    assert_eq!(schema_of(&l), schema_of(&lf));
+    let c = rusqlite::Connection::open(&l.db).expect("open");
+    let rows: i64 = c
+        .query_row("SELECT COUNT(*) FROM migrations", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(rows, 3);
+    // Now nothing is missing, so one command opens it.
+    assert!(matches!(
+        embedded_with(&l, &all).expect("embedded"),
+        Embedded::Open(_)
+    ));
+}
+
+#[test]
+fn an_unknown_applied_step_is_refused_by_the_daemon_and_by_embedded_mode() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    drop(start_with(&l, &[MIGRATIONS[0], LATE]).expect("{1, 20}"));
+    // This binary knows 1 and 11 only: 20 is somebody else's.
+    let known = [MIGRATIONS[0], MID];
+    for e in [
+        start_with(&l, &known).err().expect("daemon"),
+        embedded_with(&l, &known).err().expect("embedded"),
+    ] {
+        assert!(
+            matches!(&e, Error::BinaryOlder(t) if t.contains("Update kith")),
+            "{e}"
+        );
+    }
+    let c = rusqlite::Connection::open(&l.db).expect("open");
+    let rows: i64 = c
+        .query_row("SELECT COUNT(*) FROM migrations", [], |r| r.get(0))
+        .expect("count");
+    assert_eq!(rows, 2, "nothing was applied");
+}
+
+#[test]
+fn a_known_version_under_another_name_is_refused() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    drop(start_with(&l, &[MIGRATIONS[0], LATE]).expect("{1, 20}"));
+    let other = [MIGRATIONS[0], LATE_RENAMED];
+    for e in [
+        start_with(&l, &other).err().expect("daemon"),
+        embedded_with(&l, &other).err().expect("embedded"),
+    ] {
+        assert!(matches!(&e, Error::Corrupt(t) if t.contains("20")), "{e}");
+    }
 }

@@ -7,10 +7,14 @@
 //! Both come from `kith-holder`'s platform layer, which already does exactly that for the holder's socket.
 //!
 //! Messages are JSON-RPC lines. A connection says hello first and proves the token before anything runs:
-//! 1. client: `hello` with the protocol number, the api schema hash (`kith_api::schema_hash`), its version and a nonce;
+//! 1. client: `hello` with the protocol number, its version, a nonce, and the rows it may call (`rows`: name -> hash
+//!    of that row, see [`row_hash`]). A client that sends no `rows` (an older one) is held to the whole table's hash
+//!    (`schema`, `kith_api::schema_hash`) instead;
 //! 2. daemon: its own protocol, schema, version, generation, pid, a nonce and HMAC(token, "daemon", both nonces), and
-//!    `compatible`. The client checks the proof (it is talking to the daemon that made the token), and a
-//!    disagreement on protocol or schema ends here: the client falls back and says so, nothing is run;
+//!    `compatible`. The client checks the proof (it is talking to the daemon that made the token). Compatible means
+//!    the same protocol and a table that has every row the client named, with the same shape: a daemon with extra
+//!    rows still serves, one missing a row (or with another shape of it, listed in `unfit`) does not. Otherwise this
+//!    is where it ends: the client falls back and says so, nothing is run;
 //! 3. client: `auth` with HMAC(token, "cli", both nonces); the token itself never crosses the socket;
 //! 4. any number of calls: a method of the table with params. The caller is the owner, always.
 //!
@@ -108,7 +112,12 @@ pub(crate) struct Server {
     stop: Arc<AtomicBool>,
     endpoint: PathBuf,
     accept: Mutex<Option<std::thread::JoinHandle<()>>>,
+    /// Closed (its sender dropped) when the accept thread ends: what `stop` waits on, for a bounded time.
+    ended: Mutex<Receiver<()>>,
 }
+
+/// How long `stop` waits for the accept thread before it lets go of it.
+const STOP_WAIT: Duration = Duration::from_secs(2);
 
 struct Ctx {
     token: String,
@@ -131,6 +140,12 @@ impl Server {
                 ep.display()
             ))
         })?;
+        // Polled, not blocked in: `stop` then only sets a flag, and nothing it does can hang (a wake-up connection to a
+        // socket with a full backlog could). Windows pipes have no such mode; `stop` wakes those with a connection.
+        #[cfg(unix)]
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| Error::Io(format!("kith-core: can't poll the owner socket: {e}")))?;
         let stop = Arc::new(AtomicBool::new(false));
         let ctx = Arc::new(Ctx {
             token,
@@ -139,25 +154,47 @@ impl Server {
             stop: stop.clone(),
             active: AtomicUsize::new(0),
         });
+        let (end_tx, ended) = mpsc::channel::<()>();
         let accept = std::thread::Builder::new()
             .name("kith-owner-accept".into())
-            .spawn(move || accept_loop(&listener, &ctx))
+            .spawn(move || {
+                accept_loop(&listener, &ctx);
+                drop(end_tx);
+            })
             .map_err(|e| Error::Io(format!("kith-core: can't start the owner socket: {e}")))?;
         Ok(Server {
             stop,
             endpoint: ep,
             accept: Mutex::new(Some(accept)),
+            ended: Mutex::new(ended),
         })
     }
 
     /// Stops accepting, removes the socket and lets the accept thread end. Connections in flight finish their line.
+    /// Never waits for longer than [`STOP_WAIT`] for the accept thread, and may be called from several threads: each
+    /// returns with the socket gone.
     pub(crate) fn stop(&self) {
-        if self.stop.swap(true, Ordering::SeqCst) {
-            return;
+        self.stop.store(true, Ordering::SeqCst);
+        #[cfg(not(unix))]
+        {
+            // The thread sits in a blocking accept: one connection of our own wakes it.
+            let _ = platform::connect(&self.endpoint);
         }
-        // The thread sits in accept: one connection of our own wakes it.
-        let _ = platform::connect(&self.endpoint);
-        if let Some(handle) = self.accept.lock().ok().and_then(|mut a| a.take()) {
+        let ended = self
+            .ended
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Nothing is ever sent: this returns when the thread has dropped its end, or after the wait.
+        let done = !matches!(
+            ended.recv_timeout(STOP_WAIT),
+            Err(RecvTimeoutError::Timeout)
+        );
+        drop(ended);
+        let handle = self.accept.lock().ok().and_then(|mut a| a.take());
+        // If it did not end in time it is left to end on its own: the flag is set, so it serves nothing more.
+        if let Some(handle) = handle
+            && done
+        {
             let _ = handle.join();
         }
         platform::remove_endpoint(&self.endpoint);
@@ -171,13 +208,18 @@ fn accept_loop(listener: &platform::Listener, ctx: &Arc<Ctx>) {
             Err(e)
                 if platform::accept_error_is_temporary(&e) && !ctx.stop.load(Ordering::SeqCst) =>
             {
-                std::thread::sleep(Duration::from_millis(20));
+                std::thread::sleep(Duration::from_millis(10));
                 continue;
             }
             Err(_) => break,
         };
         if ctx.stop.load(Ordering::SeqCst) {
             break;
+        }
+        // BSD-derived systems hand the listener's non-blocking mode on to the connection.
+        #[cfg(unix)]
+        if stream.set_nonblocking(false).is_err() {
+            continue;
         }
         if ctx.active.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
             ctx.active.fetch_sub(1, Ordering::SeqCst);
@@ -283,13 +325,62 @@ fn serve_connection(stream: Stream, ctx: &Ctx) {
     let _ = writer.shutdown(std::net::Shutdown::Both);
 }
 
+/// A short fingerprint of one row of the table (FNV-1a over its `OpenRPC` entry: name, params, result, who, how it is
+/// served), or `None` for a name the table does not have.
+pub(crate) fn row_hash(name: &str) -> Option<&'static str> {
+    static ROWS: std::sync::OnceLock<std::collections::HashMap<String, String>> =
+        std::sync::OnceLock::new();
+    ROWS.get_or_init(|| {
+        let doc = kith_api::openrpc::generate();
+        doc["methods"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|m| {
+                let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+                for b in m.to_string().bytes() {
+                    h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+                }
+                Some((m["name"].as_str()?.to_owned(), format!("{h:016x}")))
+            })
+            .collect()
+    })
+    .get(name)
+    .map(String::as_str)
+}
+
+/// The rows a client that calls `method` sends: just that one, if the table has it.
+fn rows_for(method: &str) -> serde_json::Map<String, Value> {
+    row_hash(method)
+        .map(|h| serde_json::Map::from_iter([(method.to_owned(), json!(h))]))
+        .unwrap_or_default()
+}
+
+/// The rows of `wanted` this daemon lacks or shapes differently.
+fn unfit(wanted: &serde_json::Map<String, Value>) -> Vec<String> {
+    wanted
+        .iter()
+        .filter(|(name, hash)| row_hash(name) != hash.as_str())
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 fn hello(ctx: &Ctx, id: &Value, params: &Value) -> (Value, Option<Phase>) {
     let client_nonce = params.get("nonce").and_then(Value::as_str).unwrap_or("");
     let nonce = platform::random_hex();
     let protocol = params.get("protocol").and_then(Value::as_u64);
-    let schema = params.get("schema").and_then(Value::as_str);
-    let compatible =
-        protocol == Some(u64::from(PROTOCOL)) && schema == Some(kith_api::schema_hash());
+    let (fits, unfit) = match params.get("rows").and_then(Value::as_object) {
+        Some(rows) => {
+            let unfit = unfit(rows);
+            (unfit.is_empty(), unfit)
+        }
+        // An older client names no rows: it is held to the whole table.
+        None => (
+            params.get("schema").and_then(Value::as_str) == Some(kith_api::schema_hash()),
+            Vec::new(),
+        ),
+    };
+    let compatible = protocol == Some(u64::from(PROTOCOL)) && fits;
     let reply = success(
         id,
         &json!({
@@ -301,6 +392,7 @@ fn hello(ctx: &Ctx, id: &Value, params: &Value) -> (Value, Option<Phase>) {
             "nonce": nonce,
             "proof": proof(&ctx.token, "daemon", client_nonce, &nonce),
             "compatible": compatible,
+            "unfit": unfit,
         }),
     );
     let next = (compatible && !client_nonce.is_empty()).then(|| Phase::Auth {
@@ -379,16 +471,18 @@ enum Attempt {
 /// Calls `method` on the daemon of `layout`. `repeatable` says the call may run twice without harm (a read): it is
 /// then retried once when the connection breaks (the daemon restarting). A write is never sent a second time.
 pub(crate) fn reach(layout: &Layout, method: &str, params: &Value, repeatable: bool) -> Reached {
-    reach_as(
+    reach_with(
         layout,
         method,
         params,
         repeatable,
         (PROTOCOL, kith_api::schema_hash()),
+        Some(&rows_for(method)),
     )
 }
 
 /// [`reach`] as a client of another protocol number and method table (what a mismatch test needs to be).
+#[cfg(test)]
 pub(crate) fn reach_as(
     layout: &Layout,
     method: &str,
@@ -396,9 +490,22 @@ pub(crate) fn reach_as(
     repeatable: bool,
     identity: (u32, &str),
 ) -> Reached {
+    reach_with(layout, method, params, repeatable, identity, None)
+}
+
+/// [`reach_as`] naming the rows the client may call (`None`: an older client that names none and is held to the whole
+/// table's hash).
+pub(crate) fn reach_with(
+    layout: &Layout,
+    method: &str,
+    params: &Value,
+    repeatable: bool,
+    identity: (u32, &str),
+    rows: Option<&serde_json::Map<String, Value>>,
+) -> Reached {
     let mut tried = 0;
     loop {
-        match attempt(layout, method, params, identity) {
+        match attempt(layout, method, params, identity, rows) {
             Attempt::Done(r) => return r,
             Attempt::Failed { sent, why } => {
                 tried += 1;
@@ -481,6 +588,7 @@ fn attempt(
     method: &str,
     params: &Value,
     (protocol, schema): (u32, &str),
+    rows: Option<&serde_json::Map<String, Value>>,
 ) -> Attempt {
     let before = |why: &str| Attempt::Failed {
         sent: false,
@@ -496,14 +604,12 @@ fn attempt(
         return before("can't read from the socket");
     };
     let nonce = platform::random_hex();
-    if conn
-        .send(
-            1,
-            "hello",
-            &json!({"protocol": protocol, "version": VERSION, "schema": schema, "nonce": nonce}),
-        )
-        .is_err()
-    {
+    let mut hello =
+        json!({"protocol": protocol, "version": VERSION, "schema": schema, "nonce": nonce});
+    if let Some(rows) = rows {
+        hello["rows"] = json!(rows);
+    }
+    if conn.send(1, "hello", &hello).is_err() {
         return before("can't write to the socket");
     }
     let hello = match conn.recv(STEP_TIMEOUT) {
@@ -522,8 +628,16 @@ fn attempt(
         return before("the daemon did not prove it knows the owner token");
     }
     if r["compatible"] != true {
+        let unfit = r["unfit"]
+            .as_array()
+            .filter(|a| !a.is_empty())
+            .map(|a| {
+                let names: Vec<&str> = a.iter().filter_map(Value::as_str).collect();
+                format!(", and it lacks or reads differently: {}", names.join(", "))
+            })
+            .unwrap_or_default();
         return Attempt::Done(Reached::Mismatch(format!(
-            "the running daemon (pid {}, kith-core {}, protocol {}, method table {}) and this kith (kith-core {VERSION}, protocol {protocol}, method table {schema}) disagree, so this command runs on its own",
+            "the running daemon (pid {}, kith-core {}, protocol {}, method table {}) and this kith (kith-core {VERSION}, protocol {protocol}, method table {schema}) disagree{unfit}, so this command runs on its own",
             r["pid"],
             r["version"].as_str().unwrap_or("?"),
             r["protocol"],
@@ -571,3 +685,7 @@ fn attempt(
         Err(why) => Attempt::Failed { sent: true, why },
     }
 }
+
+#[cfg(test)]
+#[path = "owner_tests.rs"]
+mod tests;

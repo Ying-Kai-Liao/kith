@@ -21,6 +21,10 @@ pub enum Error {
     StaleGeneration(String),
     /// A file or database call failed.
     Io(String),
+    /// The authority rules could not answer from the tables as they are (a membership names a preset nobody defined, a
+    /// column holds text that is not JSON). The file is not damaged, so nothing here says to restore a backup (which
+    /// could undo a later revoke); the caller reads it as "no".
+    Refused(String),
     /// [`crate::Core::call`]: the table has no such method.
     NoSuchMethod(String),
     /// [`crate::Core::call`]: the method is not open to this principal.
@@ -43,6 +47,7 @@ impl fmt::Display for Error {
         | Self::AlreadyRunning(m)
         | Self::StaleGeneration(m)
         | Self::Io(m)
+        | Self::Refused(m)
         | Self::NoSuchMethod(m)
         | Self::NotAllowed(m)
         | Self::BadParams(m)
