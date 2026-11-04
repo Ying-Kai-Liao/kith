@@ -176,7 +176,7 @@ fn begin_with(w: &mut World, person: &str, id: Option<&str>) -> Result<super::St
     start(
         &mut w.core,
         &w.c,
-        &Started("T1"),
+        &Started("e1"),
         &Start {
             id,
             agent: "house",
@@ -226,7 +226,7 @@ fn a_start_writes_one_starting_row_and_a_retry_with_its_id_is_the_same_door() {
     let d = begin(&mut w, "sam");
     assert_eq!(
         (d.state, d.version, d.pid, d.proc_start.as_str()),
-        (State::Starting, 0, 4242, "T1")
+        (State::Starting, 0, 4242, "e1")
     );
     assert_eq!(d.id.len(), 16);
     let again = begin_with(&mut w, "sam", Some(&d.id)).unwrap();
@@ -268,7 +268,7 @@ fn a_person_with_no_access_to_the_agent_and_an_unknown_one_start_nothing() {
     let e = start(
         &mut w.core,
         &w.c,
-        &Started("T1"),
+        &Started("e1"),
         &Start {
             id: None,
             agent: "garden",
@@ -315,7 +315,7 @@ fn a_door_their_jobs_do_not_give_them_is_not_started() {
         let r = start(
             &mut w.core,
             &w.c,
-            &Started("T1"),
+            &Started("e1"),
             &Start {
                 id: None,
                 agent: "house",
@@ -348,7 +348,7 @@ fn a_bot_gets_the_door_only_while_its_owner_holds_it() {
     let e = begin_with(&mut w, "bot-a", None).unwrap_err();
     assert!(refusal(&e).contains("not part of a job"), "{e}");
     // and the recheck ends the one that was running
-    let out = sweep_all(&mut w, &[], true, &Started("T1"));
+    let out = sweep_all(&mut w, &[], true, &Started("e1"));
     assert_eq!(out.swept.len(), 1);
     assert_eq!(out.swept[0].person, "bot-a");
 }
@@ -380,7 +380,7 @@ fn a_supervisor_that_is_not_running_starts_nothing() {
 fn a_sweep_that_got_there_first_makes_the_late_mark_live_lose() {
     let mut w = world();
     let d = begin(&mut w, "sam");
-    let out = sweep_all(&mut w, &["sam"], true, &Started("T1"));
+    let out = sweep_all(&mut w, &["sam"], true, &Started("e1"));
     assert_eq!(out.swept.len(), 1);
     assert_eq!(
         (out.swept[0].state, out.swept[0].version),
@@ -424,7 +424,7 @@ fn mark_live_goes_by_the_version_and_is_idempotent() {
 fn a_swept_or_ended_door_is_never_started_again_under_its_id() {
     let mut w = world();
     let a = begin(&mut w, "sam");
-    sweep_all(&mut w, &["sam"], true, &Started("T1"));
+    sweep_all(&mut w, &["sam"], true, &Started("e1"));
     let e = begin_with(&mut w, "sam", Some(&a.id)).unwrap_err();
     assert!(refusal(&e).contains("swept already"), "{e}");
     let b = begin(&mut w, "sam");
@@ -459,7 +459,7 @@ fn threads_starting_doors_while_a_revoke_commits_leave_none_open() {
                     let r = start(
                         &mut core.lock().unwrap(),
                         &c,
-                        &Started("T1"),
+                        &Started("e1"),
                         &Start {
                             id: None,
                             agent: "house",
@@ -598,9 +598,9 @@ fn a_rename_carries_the_doors_so_a_later_revoke_finds_them() {
 fn sweeping_twice_reports_a_door_whose_box_is_not_confirmed_gone_until_it_is() {
     let mut w = world();
     let d = begin(&mut w, "sam");
-    let first = sweep_all(&mut w, &["sam"], true, &Started("T1"));
+    let first = sweep_all(&mut w, &["sam"], true, &Started("e1"));
     assert_eq!(first.swept.len(), 1);
-    let second = sweep_all(&mut w, &["sam"], true, &Started("T1"));
+    let second = sweep_all(&mut w, &["sam"], true, &Started("e1"));
     assert!(second.swept.is_empty());
     assert_eq!(second.pending.len(), 1, "try to stop it again");
     let done = end(&mut w.core, &d.id, T0 + 30).unwrap();
@@ -609,7 +609,7 @@ fn sweeping_twice_reports_a_door_whose_box_is_not_confirmed_gone_until_it_is() {
         end(&mut w.core, &d.id, T0 + 40).unwrap().reaped,
         "twice is fine"
     );
-    let third = sweep_all(&mut w, &["sam"], true, &Started("T1"));
+    let third = sweep_all(&mut w, &["sam"], true, &Started("e1"));
     assert!(third.swept.is_empty() && third.pending.is_empty());
 }
 
@@ -618,10 +618,10 @@ fn naming_the_owner_sweeps_nothing_but_naming_a_person_takes_their_bots() {
     let mut w = world();
     let kai = owner_door(&w);
     let bot = begin(&mut w, "bot-a");
-    let out = sweep_all(&mut w, &["kai"], false, &Started("T1"));
+    let out = sweep_all(&mut w, &["kai"], false, &Started("e1"));
     assert!(out.swept.is_empty());
     assert_eq!(state_of(&mut w, &kai), State::Starting);
-    let out = sweep_all(&mut w, &["sam"], false, &Started("T1"));
+    let out = sweep_all(&mut w, &["sam"], false, &Started("e1"));
     assert_eq!(out.swept.len(), 1, "bot-a answers to sam");
     assert_eq!(state_of(&mut w, &bot.id), State::Swept);
 }
@@ -632,14 +632,14 @@ fn a_door_whose_supervisor_is_gone_is_swept_by_its_start_time() {
     let d = begin(&mut w, "sam");
     // alive: the same pid with the start time the door recorded
     assert!(
-        sweep_all(&mut w, &[], false, &Started("T1"))
+        sweep_all(&mut w, &[], false, &Started("e1"))
             .swept
             .is_empty()
     );
     // a probe that failed never ends a live door
     assert!(sweep_all(&mut w, &[], false, &Nobody).swept.is_empty());
     // the pid is another process now
-    let out = sweep_all(&mut w, &[], false, &Started("T2"));
+    let out = sweep_all(&mut w, &[], false, &Started("e2"));
     assert_eq!(out.swept.len(), 1);
     assert_eq!(out.swept[0].why, "its supervisor is gone");
     assert_eq!(state_of(&mut w, &d.id), State::Swept);
@@ -659,11 +659,11 @@ fn a_door_whose_person_lost_the_agent_is_swept_by_the_recheck_only() {
         &json!({"agent": "house", "person": "sam"}),
     );
     assert!(
-        sweep_all(&mut w, &[], false, &Started("T1"))
+        sweep_all(&mut w, &[], false, &Started("e1"))
             .swept
             .is_empty()
     );
-    let out = sweep_all(&mut w, &[], true, &Started("T1"));
+    let out = sweep_all(&mut w, &[], true, &Started("e1"));
     assert_eq!(out.swept.len(), 1);
     assert_eq!(out.swept[0].why, "its person may no longer run it");
     assert_eq!(state_of(&mut w, &d.id), State::Swept);
@@ -692,9 +692,9 @@ fn the_sweep_dooms_the_doors_kith_door_py_dooms_for_every_combination() {
             );
         }
         let live: &dyn Liveness = if alive {
-            &Started("T1")
+            &Started("e1")
         } else {
-            &Started("T2")
+            &Started("e2")
         };
         let persons: &[&str] = if listed { &["sam"] } else { &[] };
         let out = sweep_all(&mut w, persons, recheck, live);
@@ -723,7 +723,7 @@ fn the_rows_start_mark_live_list_sweep_and_end() {
         }
         p
     };
-    let live = Started("T1");
+    let live = Started("e1");
     let s = call_at(
         &mut w.core,
         "doors.start",
@@ -787,7 +787,7 @@ fn a_start_decides_and_writes_under_one_lock() {
     let r = start_between(
         &mut w.core,
         &w.c,
-        &Started("T1"),
+        &Started("e1"),
         &Start {
             id: None,
             agent: "house",
@@ -818,7 +818,7 @@ fn a_sweep_decides_and_writes_under_one_lock() {
     let out = sweep_between(
         &mut w.core,
         &w.c,
-        &Started("T1"),
+        &Started("e1"),
         &["sam".to_owned()],
         true,
         T0 + 1,

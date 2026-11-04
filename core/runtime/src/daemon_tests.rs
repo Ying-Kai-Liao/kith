@@ -1068,4 +1068,52 @@ fn the_host_secret_is_owner_only_and_in_no_environment() {
     }
     assert!(l.files().contains(&l.host_token));
     drop(d);
+=======
+#[test]
+fn the_gate_answers_over_the_owner_socket_and_frees_a_holder_whose_process_is_gone() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let _d = serving(&p, quiet());
+    let call = |method: &str, params: Value| match read(&p, method, &params) {
+        Reached::Answered(v) => v,
+        other => panic!("{method}: {other:?}"),
+    };
+    let me = std::process::id();
+    assert_eq!(
+        call("gate.take", json!({"holder": "a", "max": 1, "pid": me}))["state"],
+        "granted"
+    );
+    // A process that ended and was reaped: its pid is gone for the system.
+    let mut child = std::process::Command::new(if cfg!(windows) { "cmd" } else { "true" })
+        .args(if cfg!(windows) {
+            vec!["/C", "exit"]
+        } else {
+            vec![]
+        })
+        .spawn()
+        .expect("child");
+    let dead = child.id();
+    child.wait().expect("child");
+    assert_eq!(
+        call("gate.take", json!({"holder": "b", "pid": dead}))["state"],
+        "waiting"
+    );
+    assert_eq!(
+        call("gate.release", json!({"holder": "a"}))["released"],
+        true
+    );
+    // b's process is gone: its place is freed by the next call, so c is first in line and granted.
+    assert_eq!(
+        call("gate.take", json!({"holder": "c", "pid": me}))["state"],
+        "granted"
+    );
+    let listed = call("gate.list", json!({}));
+    assert_eq!(listed["running"], 1);
+    assert_eq!(listed["slots"][0]["holder"], "c");
+    assert_eq!(listed["waiting"], json!([]));
+    assert!(matches!(
+        read(&p, "gate.take", &json!({"holder": "d", "max": 1})),
+        Reached::Refused(Error::BadParams(_))
+    ));
+>>>>>>> origin/rust-rebuild
 }

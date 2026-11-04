@@ -189,7 +189,10 @@ pub(crate) fn call_in(
                 core,
                 c,
                 |a| write_in(m, params, c, life, a, &fresh),
-                |tx, said| revoke::follow_in_doors(tx, m, params, said, c.now_ms),
+                |tx, said| {
+                    revoke::follow_in_doors(tx, m, params, said, c.now_ms)?;
+                    revoke::follow_in_cards(tx, m, params, said)
+                },
             )?;
             // The folders follow a rename once it is committed. `kith-auth --local` clears no temp folder: the
             // caller stops their runs first and then asks `people.clearTemp` (the `ids` of a suspend or a removal
@@ -265,7 +268,13 @@ pub(super) fn write_in(
                 &kv,
             )?))
         }
-        "people.removeBot" => Ok(lines(write::bot_remove(a, need(params, "id")?)?)),
+        "people.removeBot" => {
+            // read before the row goes: a renamed bot's cards may still sit under its old ids
+            let was = revoke::was_ids(a, need(params, "id")?);
+            let mut out = lines(write::bot_remove(a, need(params, "id")?)?);
+            out["was"] = json!(was);
+            Ok(out)
+        }
         "people.botsCap" => Ok(lines(write::bots_cap(a, need(params, "amount")?)?)),
         "people.invite" => {
             let said = write::invite_create(
@@ -315,15 +324,20 @@ pub(super) fn write_in(
             revoke::person_remove_unused(a, life, need(params, "id")?)?,
         )),
         "people.removePerson" => {
+            let was = revoke::was_ids(a, need(params, "id")?);
             let (said, ids) = revoke::person_remove(a, life, c, need(params, "id")?)?;
             let mut out = lines(said);
             out["ids"] = json!(ids);
+            out["was"] = json!(was);
             Ok(out)
         }
         "people.suspend" | "people.undo" => {
             let (said, ids) =
                 revoke::person_suspend(a, c, need(params, "id")?, method == "people.suspend")?;
             let mut out = lines(said);
+            if method == "people.suspend" {
+                out["was"] = json!(revoke::was_ids(a, need(params, "id")?));
+            }
             out["ids"] = json!(ids);
             Ok(out)
         }
