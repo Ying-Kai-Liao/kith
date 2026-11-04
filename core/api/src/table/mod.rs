@@ -22,8 +22,10 @@
 
 use crate::{Method, TypeDef};
 
+mod accounts;
 mod build;
 mod cards;
+mod children;
 mod contract;
 mod conversations;
 mod doors;
@@ -36,6 +38,8 @@ mod run_tokens;
 mod runs;
 mod secrets;
 mod switched;
+mod transcripts;
+mod wake;
 
 /// Types the switched verbs add to the contract's.
 pub static EXTRA_TYPES: &[TypeDef] = &[
@@ -76,6 +80,13 @@ const PARTS: &[&[Method]] = &[
     import::ROWS,
     // M3: conversations and their claims.
     conversations::ROWS,
+    transcripts::ROWS,
+    // M3-7: the wake queue and the waiters.
+    wake::ROWS,
+    // M3: delegation and children (the ask tree).
+    children::ROWS,
+    // M3-9a: account state and `pick`, read only.
+    accounts::ROWS,
 ];
 
 const LEN: usize = {

@@ -63,6 +63,12 @@ pub async fn may_use_checked(person: &str, agent: &str) -> Option<bool> {
 /// What kith-auth says `person` gets of `agent` (see `kith-auth resolve`); None when it can't be asked or the person
 /// is the owner, who never comes through here.
 pub(crate) async fn resolve(person: &str, agent: &str) -> Option<Value> {
+    // `KITH_CORE_AUTHORITY=1` (M2-16): the core's `people.may` is the truth, asked within a bound; None when it can't be
+    // asked in time, which every caller reads as "no" (or "try again" for `may_use_checked`). The owner is None too.
+    if super::authority::guard_on_core() {
+        let v = super::authority::core_verdict(person, agent).await.filter(|v| !v.owner)?;
+        return Some(json!({"allowed": v.allowed, "preset": v.preset}));
+    }
     let bin = account::bin().await?;
     let out = crate::channels::hq::output(&bin, &["resolve", agent, "--person", person]).await?;
     serde_json::from_slice::<Value>(&out.stdout).ok().filter(|v| v["owner"].as_bool() != Some(true))

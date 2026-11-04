@@ -97,6 +97,19 @@ impl<'a> Authority<'a> {
     }
 }
 
+/// Whether a run may exist for `person` (M2-13): they are a known person or bot and neither they nor the owner of
+/// the bot are revoked. A removed or never-added id is "no", the same as a revoked one. Read from core.db alone (the
+/// run tokens have no `Ctx` to give).
+pub(crate) fn run_allowed_in(conn: &Connection, person: &str) -> Result<bool> {
+    let auth = snapshot(conn)?;
+    let id = secrets::canonical(&auth, person);
+    let known = auth
+        .get("people")
+        .and_then(Value::as_object)
+        .is_some_and(|p| p.contains_key(&id));
+    Ok(known && !secrets::cut_off(&auth, &id))
+}
+
 /// A rule that stopped with a refusal `kith-auth` would `die` with (a membership naming a preset nobody defined, which
 /// `kith-auth preset X --rm` leaves behind): the rules have no answer, which the caller must read as "no". It is not a
 /// damaged database, so it is never `Corrupt` (whose recovery is `kith restore`).

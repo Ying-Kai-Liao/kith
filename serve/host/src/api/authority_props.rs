@@ -20,16 +20,16 @@ const AGENTS: [&str; 2] = ["house", "money"];
 const PEOPLE: [&str; 2] = ["sam", "ann"];
 
 /// A short folder of its own (the owner socket's path has a length limit), removed on drop.
-struct Tmp(std::path::PathBuf);
+pub(super) struct Tmp(std::path::PathBuf);
 
 impl Tmp {
-    fn new() -> Self {
+    pub(super) fn new() -> Self {
         let dir = std::env::temp_dir().join(format!("kap-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]));
         std::fs::create_dir_all(&dir).unwrap();
         Self(dir)
     }
 
-    fn path(&self) -> &Path {
+    pub(super) fn path(&self) -> &Path {
         &self.0
     }
 }
@@ -40,7 +40,7 @@ impl Drop for Tmp {
     }
 }
 
-fn folders(machine: &Path) -> Paths {
+pub(super) fn folders(machine: &Path) -> Paths {
     let p = machine.to_path_buf();
     Paths {
         home: p.clone(),
@@ -57,7 +57,7 @@ fn folders(machine: &Path) -> Paths {
     }
 }
 
-fn chat(id: &str, person: Option<&str>, agent: &str) -> crate::store::BotConfig {
+pub(super) fn chat(id: &str, person: Option<&str>, agent: &str) -> crate::store::BotConfig {
     serde_json::from_value(json!({
         "id": id, "name": id, "backend": "claude", "cwd": "/Users/secret", "command": "/Users/secret/run",
         "hqAgent": agent, "person": person, "permission": "ask", "tasks": false, "connectors": [], "skills": [],
