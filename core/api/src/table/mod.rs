@@ -25,6 +25,7 @@ use crate::{Method, TypeDef};
 mod accounts;
 mod build;
 mod cards;
+mod children;
 mod contract;
 mod conversations;
 mod doors;
@@ -77,6 +78,8 @@ const PARTS: &[&[Method]] = &[
     import::ROWS,
     // M3: conversations and their claims.
     conversations::ROWS,
+    // M3: delegation and children (the ask tree).
+    children::ROWS,
     // M3-9a: account state and `pick`, read only.
     accounts::ROWS,
 ];
