@@ -264,9 +264,12 @@ pub fn reach(paths: &Paths, method: &str, params: &serde_json::Value, repeatable
     owner::reach(&Layout::new(&paths.machine), method, params, repeatable)
 }
 
-/// [`reach`] as the host: proves the host secret (`<machine>/core/host.token`) instead of the owner token, so the daemon
-/// labels the connection `Host` and answers the rows only the host may call (the `syncLease` writes). Only `kith serve`
-/// calls this; the secret is never given to a run or child process, and the guest deny list covers the folder it is in.
+/// [`reach`] as the host: proves the host secret instead of the owner token, so the daemon labels the connection `Host`
+/// and answers the rows only the host may call (the `syncLease` writes, and `secrets.get`). The secret lives only in the
+/// memory of the `kith serve` process whose own daemon ([`Daemon::spawn_as_host`]) holds the core lock: a process
+/// without such a daemon (a CLI, a second serve) finds no secret and gets [`Reached::NoDaemon`]; a daemon that has no
+/// Host (a standalone one) or is too old to know the principal gets [`Reached::Mismatch`] with the reason. Only `kith
+/// serve` calls this, and the secret is never given to a run or child process.
 /// A write is never sent twice (pass `repeatable: false`).
 pub fn reach_as_host(
     paths: &Paths,

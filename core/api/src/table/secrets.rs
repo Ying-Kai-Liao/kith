@@ -1,6 +1,6 @@
 //! M2 lane B (secrets in the envelope): the owner's door to it. The host vault is a client of these rows over the owner
 //! socket (M2-7), because the host may not link the core's internals (runtime-design section 9b rule 6). Values cross
-//! as text and only on the owner socket; `put` takes its value as a caller param, never on a command line. Experimental
+//! as text and only on the owner socket (`get` only on the host's connection); `put` takes its value as a caller param, never on a command line. Experimental
 //! until kith-auth and rollback (M2-18) have used them; not in `released.json`.
 
 use super::build::*;
@@ -45,7 +45,11 @@ pub(super) const ROWS: &[Method] = &[
         Served::Core,
         Stability::Experimental,
     )
-    .formats(J),
+    .formats(J)
+    // The only row that hands a value back: the host (the vault) proves its in-memory secret for it. The owner token
+    // is a file any same-user process can read, so it gets has/put/delete/open and never the value (M2-10c).
+    .principals(HOST)
+    .no_cli(),
     row(
         "secrets.put",
         "Store a secret sealed under the machine's key, replacing an earlier value of that name.",
