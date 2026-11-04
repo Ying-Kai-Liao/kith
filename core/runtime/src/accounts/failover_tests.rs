@@ -131,13 +131,16 @@ impl World {
     }
     /// The next claim for `turn` through the failover pick.
     fn next(&mut self, turn: i64, sid: &str) -> Result<Started, Error> {
+        self.next_as(turn, sid, "sam")
+    }
+    fn next_as(&mut self, turn: i64, sid: &str, person: &str) -> Result<Started, Error> {
         let out = SignedIn(RefCell::new(()));
         let ctx = self.ctx(&out);
         let tctx = self.tctx();
         let req = NewClaim {
             conversation: "c1",
             kind: Kind::Turn,
-            person: "sam",
+            person,
             turn: Some(turn),
             holder_instance: Some("h1"),
             account: None,
@@ -413,7 +416,8 @@ fn a_report_for_an_ended_claim_or_another_process_changes_nothing() {
         "running"
     );
     assert!(read_all(w.core.conn()).unwrap().is_empty());
-    // Ended: a late report from the real pid, and one for an unknown claim, change nothing.
+    // Ended: a repeat of the writer's report (kept once per claim, kind and pid), and one for an unknown claim, change
+    // nothing; a first out report after the claim ended is `an_out_exit_marks_the_account_whatever_state_the_claim_is_in`.
     w.out_report(first, 100, Some(T0 + 7200));
     let after = read_all(w.core.conn()).unwrap();
     assert_eq!(
@@ -626,4 +630,212 @@ fn mark_out_is_the_pythons_mark_out() {
     )
     .unwrap();
     assert_eq!(read_all(conn).unwrap()["claude"]["note"], json!(1));
+}
+
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "test clocks are whole seconds"
+)]
+fn out_until(w: &World, id: &str) -> Option<i64> {
+    read_all(w.core.conn())
+        .unwrap()
+        .get(id)
+        .and_then(|e| e["out_until"].as_f64())
+        .map(|f| f as i64)
+}
+
+#[test]
+fn an_out_exit_marks_the_account_whatever_state_the_claim_is_in() {
+    let mut w = world(&["claude", "claude:a"]);
+    w.switch();
+    // The turn finished its reply (`done` ended the claim), then the same process hit the limit.
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    report(&mut w.core, first, "done", r#"{"pid":100}"#, MS + 25).unwrap();
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "done"
+    );
+    assert_eq!(out_until(&w, "claude"), None);
+    let r = w.out_report(first, 100, Some(T0 + 7200));
+    assert_eq!(r, Reported::Stored { applied: None });
+    assert_eq!(out_until(&w, "claude"), Some(T0 + 7200));
+    assert_eq!(
+        w.one(&format!(
+            "SELECT end_reason FROM claims WHERE claim_id = {first}"
+        )),
+        "done"
+    );
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "done"
+    );
+    // Another process's word still marks nothing.
+    let turn2 = w.turn();
+    let (second, account) = w.claimed(turn2, "s-b", 110);
+    assert_eq!(account, "claude:a");
+    w.out_report(second, 999, Some(T0 + 7200));
+    assert_eq!(out_until(&w, "claude:a"), None);
+}
+
+#[test]
+fn an_out_exit_after_end_gone_marks_the_account() {
+    let mut w = world(&["claude", "claude:a"]);
+    w.switch();
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    w.core
+        .conn()
+        .execute(
+            "UPDATE claims SET state = 'ended', ended_at = 1, end_reason = 'gone' WHERE claim_id = ?1",
+            [first],
+        )
+        .unwrap();
+    w.out_report(first, 100, Some(T0 + 600));
+    assert_eq!(out_until(&w, "claude"), Some(T0 + 600));
+}
+
+#[test]
+fn a_revoked_claim_keeps_its_end_reason_when_the_account_ran_out() {
+    let mut w = world(&["claude", "claude:a"]);
+    w.switch();
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    crate::conversations::claims::revoke_person(&mut w.core, "sam", MS + 25).unwrap();
+    w.out_report(first, 100, Some(T0 + 600));
+    assert_eq!(
+        w.one(&format!(
+            "SELECT end_reason FROM claims WHERE claim_id = {first}"
+        )),
+        "revoked"
+    );
+    assert_eq!(out_until(&w, "claude"), Some(T0 + 600));
+}
+
+#[test]
+fn a_stops_end_reason_is_replaced_by_out_of_usage() {
+    let mut w = world(&["claude", "claude:a"]);
+    w.switch();
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    stop(&mut w.core, first, "stopped", true, MS + 25).unwrap();
+    w.out_report(first, 100, Some(T0 + 600));
+    assert_eq!(
+        w.one(&format!(
+            "SELECT end_reason FROM claims WHERE claim_id = {first}"
+        )),
+        OUT_OF_USAGE
+    );
+}
+
+#[test]
+fn resets_at_is_capped_and_a_float_is_truncated_like_pythons_int() {
+    let mut w = world(&["claude", "claude:a", "claude:b"]);
+    w.switch();
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    let mut body = json!({"pid": 100, "out_of_usage": true, "resets_at": 1_900_007_200.9});
+    report(&mut w.core, first, "exit", &body.to_string(), MS + 30).unwrap();
+    assert_eq!(out_until(&w, "claude"), Some(T0 + 7200));
+    // Milliseconds for seconds: far beyond 8 days, so the default hour applies.
+    let (second, account) = w.claimed(turn, "s-a", 101);
+    assert_eq!(account, "claude:a");
+    body = json!({"pid": 101, "out_of_usage": true, "resets_at": T0 * 1000});
+    report(&mut w.core, second, "exit", &body.to_string(), MS + 30).unwrap();
+    assert_eq!(out_until(&w, "claude:a"), Some(T0 + 3600));
+}
+
+#[test]
+fn the_exhausted_notice_names_accounts_tried_without_a_mark() {
+    // Not switched: no account row is written, so the notice has only the turn's own record to name them.
+    let mut w = world(&["claude", "claude:a"]);
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    w.out_report(first, 100, None);
+    let (second, _) = w.claimed(turn, "s-b", 101);
+    w.out_report(second, 101, None);
+    match w.next(turn, "s-none").expect("next") {
+        Started::Exhausted(text) => {
+            assert!(text.contains("claude (ran out on this turn)"), "{text}");
+            assert!(text.contains("claude:a (ran out on this turn)"), "{text}");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn exhausting_fails_only_the_callers_own_turn() {
+    let mut w = world(&["claude"]);
+    w.switch();
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    w.out_report(first, 100, Some(T0 + 600));
+    // Another person naming this turn does not fail it.
+    assert!(matches!(
+        w.next_as(turn, "s-x", "eve"),
+        Ok(Started::Exhausted(_))
+    ));
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "queued"
+    );
+    assert!(matches!(w.next(turn, "s-y"), Ok(Started::Exhausted(_))));
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "failed"
+    );
+}
+
+#[test]
+fn a_failing_session_write_rolls_the_claim_back() {
+    let mut w = world(&["claude", "claude:a"]);
+    w.switch();
+    let turn = w.turn();
+    w.core
+        .conn()
+        .execute_batch(
+            "CREATE TRIGGER boom BEFORE INSERT ON engine_sessions BEGIN SELECT RAISE(ABORT, 'boom'); END;",
+        )
+        .unwrap();
+    assert!(w.next(turn, "s-main").is_err());
+    assert_eq!(w.one("SELECT count(*) FROM claims"), "0");
+    assert_eq!(
+        w.one(&format!("SELECT state FROM turns WHERE id = {turn}")),
+        "queued"
+    );
+    // The conversation is not blocked: the same call goes through once the write can.
+    w.core.conn().execute("DROP TRIGGER boom", []).unwrap();
+    assert!(matches!(
+        w.next(turn, "s-main"),
+        Ok(Started::Claimed { fresh: true, .. })
+    ));
+}
+
+#[test]
+fn an_account_with_a_session_resumes_it_and_is_not_fresh() {
+    let mut w = world(&["claude", "claude:a"]);
+    w.switch();
+    let turn = w.turn();
+    let (first, _) = w.claimed(turn, "s-main", 100);
+    w.out_report(first, 100, Some(T0 + 7200));
+    let (second, _) = w.claimed(turn, "s-backup", 101);
+    w.out_report(second, 101, Some(T0 + 600));
+    // The main account is back: its row from the first claim is the one the engine resumes.
+    w.core
+        .conn()
+        .execute("DELETE FROM account_state", [])
+        .unwrap();
+    let turn2 = w.turn();
+    let Started::Claimed {
+        account,
+        fresh,
+        session,
+        ..
+    } = w.next(turn2, "s-new").unwrap()
+    else {
+        panic!("exhausted")
+    };
+    assert_eq!(account, "claude");
+    assert!(!fresh);
+    assert_eq!(session.session_id, "s-main");
 }

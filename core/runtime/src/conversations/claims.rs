@@ -244,19 +244,33 @@ fn cancel_turn(tx: &Transaction<'_>, claim_id: i64, now: i64) -> Result<()> {
 /// transaction. The partial index `claims_one_writer` is the last word on a second writer. Refused until this
 /// generation's reconcile has committed (step 5).
 pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Claimed> {
+    let generation = core.generation();
+    let tx = core.claim_tx()?;
+    let claimed = claim_in(&tx, generation, req, now)?;
+    tx.commit()?;
+    Ok(claimed)
+}
+
+/// [`claim`] inside the caller's open `claim_tx` (the caller commits; `generation` is the core's own). For a caller that
+/// writes more rows in the same transaction as the claim (M3-9b's session row), so a failure of the later write rolls the
+/// claim back and the generation check covers both.
+pub(crate) fn claim_in(
+    tx: &Transaction<'_>,
+    generation: i64,
+    req: &NewClaim<'_>,
+    now: i64,
+) -> Result<Claimed> {
     if req.kind == Kind::External && req.process.is_none() {
         return Err(Error::BadParams(
             "kith-core: an external claim needs its pid and start time".into(),
         ));
     }
-    let generation = core.generation();
-    let tx = core.claim_tx()?;
-    if reconciled(&tx)? != Some(generation) {
+    if reconciled(tx)? != Some(generation) {
         return Err(Error::Refused(format!(
             "kith-core: claims wait for the reconcile of generation {generation}"
         )));
     }
-    if epoch(&tx, req.person)? != req.revoke_seen {
+    if epoch(tx, req.person)? != req.revoke_seen {
         return Err(Error::Refused(format!(
             "kith-core: {} was revoked after the may check",
             req.person
@@ -307,7 +321,7 @@ pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Cla
             req.conversation
         )));
     }
-    let claim_id = Core::next_claim_id(&tx)?;
+    let claim_id = Core::next_claim_id(tx)?;
     let (pid, started) = req
         .process
         .map_or((None, None), |(p, s)| (Some(p), Some(s)));
@@ -345,7 +359,6 @@ pub(crate) fn claim(core: &mut Core, req: &NewClaim<'_>, now: i64) -> Result<Cla
             )));
         }
     }
-    tx.commit()?;
     Ok(Claimed {
         claim_id,
         generation,
@@ -424,17 +437,17 @@ pub(crate) fn report(
         "INSERT OR IGNORE INTO reports (claim_id, kind, pid, body, received_at) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![claim_id, kind, said, body, now],
     )?;
+    let mut unacked: Vec<(String, String)> = Vec::new();
+    {
+        let mut st = tx.prepare(
+            "SELECT kind, body FROM reports WHERE claim_id = ?1 AND acked_at IS NULL ORDER BY received_at, pid",
+        )?;
+        for r in st.query_map([claim_id], |r| Ok((r.get(0)?, r.get(1)?)))? {
+            unacked.push(r?);
+        }
+    }
     let mut applied = None;
     if is_newest(&tx, claim_id, &claim.conversation)? {
-        let mut unacked: Vec<(String, String)> = Vec::new();
-        {
-            let mut st = tx.prepare(
-                "SELECT kind, body FROM reports WHERE claim_id = ?1 AND acked_at IS NULL ORDER BY received_at, pid",
-            )?;
-            for r in st.query_map([claim_id], |r| Ok((r.get(0)?, r.get(1)?)))? {
-                unacked.push(r?);
-            }
-        }
         'kinds: for k in PRECEDENCE {
             for (_, b) in unacked.iter().filter(|(uk, _)| uk == k) {
                 if apply(&tx, claim_id, k, b, now)? {
@@ -443,6 +456,20 @@ pub(crate) fn report(
                 }
             }
         }
+    }
+    // Marking an account out is a fact about the account, not about the claim or the turn: the writer's own out-of-usage
+    // exit counts whatever state the claim is in (a `done` that won the batch, a claim `end_gone` already ended, an older
+    // claim). `extend_only` makes a repeat harmless.
+    let could_be_writer = claim.pid.is_some() || claim.state == "claimed";
+    for (_, b) in unacked.iter().filter(|(uk, _)| uk == "exit") {
+        crate::accounts::failover::mark_out_of_usage(
+            &tx,
+            claim_id,
+            claim.pid,
+            could_be_writer,
+            b,
+            now,
+        )?;
     }
     tx.execute(
         "UPDATE reports SET acked_at = ?2 WHERE claim_id = ?1 AND acked_at IS NULL",
@@ -494,11 +521,10 @@ fn apply(tx: &Transaction<'_>, claim_id: i64, kind: &str, body: &str, now: i64) 
                     )?;
                 } else {
                     requeue_turn(tx, claim_id)?;
-                    // The account ran out (M3-9b): the same ack records why and marks it out, so the turn's next claim
-                    // starts from the top of the chain without it.
-                    if b.get("out_of_usage").and_then(serde_json::Value::as_bool) == Some(true) {
-                        let resets_at = b.get("resets_at").and_then(serde_json::Value::as_i64);
-                        crate::accounts::failover::on_exit(tx, claim_id, resets_at, now)?;
+                    // The account ran out (M3-9b): the same ack records why, so the turn's next claim skips the account.
+                    // The account's own mark is written by `report`, which also sees the exits this branch never applies.
+                    if crate::accounts::failover::says_out_of_usage(&b) {
+                        crate::accounts::failover::on_exit(tx, claim_id)?;
                     }
                 }
             }
