@@ -23,6 +23,7 @@ use crate::error::{Error, Result};
 pub(crate) mod call;
 #[cfg(test)]
 mod load;
+mod requests;
 mod revoke;
 mod store;
 #[cfg(test)]

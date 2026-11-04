@@ -16,6 +16,7 @@ use serde_json::{Value, json};
 use super::{Authority, snapshot};
 use crate::authority::load::{empty, load};
 
+mod requests;
 mod revoke;
 mod writes;
 
