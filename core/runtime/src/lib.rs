@@ -74,6 +74,10 @@ mod sync_lease;
 #[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
 mod secrets;
 
+// The wake queue and waiters (M3-7): nothing calls them but the daemon's `wake.*` rows and the tests until the switch (M3-10).
+#[allow(dead_code, reason = "first callers are the switch of kith-wake, M3-10")]
+mod wake;
+
 #[cfg(test)]
 mod runs_props;
 #[cfg(all(test, unix))]
