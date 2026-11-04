@@ -162,6 +162,18 @@ class SelfTest(unittest.TestCase):
         self.assertEqual(failed, ['mask'])
         self.assertIn('once masked', out.getvalue())
 
+    def test_mask_keys_mask_a_leading_zero_clock_in_text_that_is_not_json(self):
+        # %N gives nine digits, so a clock can start with 0; JSON forbids that, so the file does not parse and is text.
+        with tempfile.TemporaryDirectory() as t:
+            n = D.Normalizer(Path(t), mask_keys=['at', 'pid'])
+        self.assertEqual(n.unparsed_json('{"n": 1, "at": 012345678, "pid": 21895}'),
+                         '{"n": 1, "at": <MASKED>, "pid": <MASKED>}')
+        self.assertEqual(n.unparsed_json('{"at": "09:30", "pid": null, "at": -07, "pid": true}'),
+                         '{"at": <MASKED>, "pid": <MASKED>, "at": <MASKED>, "pid": <MASKED>}')
+        # Negative: other keys (even ones that end in or start with a mask key) and other values are left alone.
+        self.assertEqual(n.unparsed_json('{"hat": 012, "atlas": 012, "n": 012, "at": {"x": 1}}'),
+                         '{"hat": 012, "atlas": 012, "n": 012, "at": {"x": 1}}')
+
     def test_mask_keys_mask_any_scalar_and_only_last_started_is_epoch(self):
         # A pid is a number on one machine and null on another: a case's own mask key must give the same text for both.
         with tempfile.TemporaryDirectory() as t:
