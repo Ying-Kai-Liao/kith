@@ -116,7 +116,7 @@ impl TestDaemon {
 /// Starts a daemon on `folders`, ready before it returns.
 #[cfg(test)]
 pub fn serve_for_test(folders: &Paths) -> TestDaemon {
-    let d = kith_core::Daemon::spawn_as_host(folders);
+    let d = kith_core::Daemon::spawn_as_host(folders, || false);
     d.ready(std::time::Duration::from_secs(30)).expect("the daemon serves");
     TestDaemon(d)
 }
@@ -407,7 +407,7 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
 /// will not start is a line in the core log and a status for `kith doctor`, and the host goes on.
 pub fn start_beside_host() -> kith_core::Daemon {
     // The one daemon that has a Host: it makes the host secret in this process's memory.
-    kith_core::Daemon::spawn_as_host(&kernel::folders(&kith_kernel::paths::process_home()))
+    kith_core::Daemon::spawn_as_host(&kernel::folders(&kith_kernel::paths::process_home()), crate::service::is_exiting)
 }
 
 /// `kith kernel core-daemon`: the daemon front alone, in the foreground. Prints `ready` once it serves and

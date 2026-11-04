@@ -415,6 +415,7 @@ fn holder_cfg(exe: std::path::PathBuf) -> Config {
         holder_on: true,
         key_load: None,
         host: false,
+        exiting: || false,
         wait_for_embedded: Duration::from_secs(10),
         holder: HolderConfig {
             exe: Some(exe),
@@ -1486,7 +1487,7 @@ fn the_serve_whose_daemon_holds_the_lock_alone_is_host() {
     // A second serve on this Mac: its daemon does not get the core lock, so it never binds and never has a secret,
     // and the first serve's secret stays the one that proves.
     let second = Daemon::spawn_with(&p, hosted());
-    assert!(second.ready(Duration::from_secs(10)).is_err());
+    assert!(second.ready(Duration::from_secs(1)).is_err());
     assert_eq!(
         crate::owner::forget_host_secret(&l).as_deref(),
         Some(mine.as_str())
@@ -1506,6 +1507,52 @@ fn the_serve_whose_daemon_holds_the_lock_alone_is_host() {
     crate::owner::set_host_secret(&l, &mine);
     drop(second);
     drop(first);
+}
+
+/// A serve whose daemon starts while another daemon holds the lock (an old serve still exiting, a standalone daemon)
+/// keeps trying for it, and is the Host once the lock is free. Until then it has no secret and proves nothing.
+#[test]
+fn a_host_daemon_waits_out_a_daemon_that_holds_the_lock_and_then_is_host() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let standalone = serving(&p, quiet());
+    let serve = Daemon::spawn_with(&p, hosted());
+    assert!(serve.ready(Duration::from_millis(500)).is_err());
+    assert!(
+        crate::owner::forget_host_secret(&l).is_none(),
+        "no secret while another daemon holds the lock"
+    );
+    standalone.stop();
+    drop(standalone);
+    serve
+        .ready(Duration::from_secs(20))
+        .expect("the serve takes the lock");
+    let mine = crate::owner::forget_host_secret(&l).expect("the serve's secret");
+    crate::owner::set_host_secret(&l, &mine);
+    assert_eq!(
+        answered(host(&p, "syncLease.link", &json!({})))["cloud"],
+        "linked"
+    );
+    drop(serve);
+}
+
+/// The wait ends when the process is exiting.
+#[test]
+fn a_host_daemon_stops_waiting_when_the_process_is_exiting() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let standalone = serving(&p, quiet());
+    let serve = Daemon::spawn_with(
+        &p,
+        Config {
+            exiting: || true,
+            ..hosted()
+        },
+    );
+    assert!(serve.ready(Duration::from_secs(10)).is_err());
+    drop(serve);
+    drop(standalone);
 }
 
 #[test]
@@ -1533,7 +1580,8 @@ fn a_restarted_daemon_makes_a_new_secret_and_the_client_picks_it_up() {
     drop(d);
 }
 
-/// A daemon from before the host principal answers the hello with a protocol error: said as such, not as "no daemon".
+/// A daemon from before the host principal ignores the claim and answers normally, with no `principals` field: said as
+/// "too old", not as "no daemon".
 #[cfg(unix)]
 #[test]
 fn a_daemon_too_old_for_host_rows_is_named() {
@@ -1554,7 +1602,7 @@ fn a_daemon_too_old_for_host_rows_is_named() {
         writeln!(
             out,
             "{}",
-            json!({"jsonrpc": "2.0", "id": 1, "error": {"code": -32002, "message": "an unknown principal in the hello", "data": {"kind": "protocol"}}})
+            json!({"jsonrpc": "2.0", "id": 1, "result": {"protocol": crate::owner::PROTOCOL, "version": "0.0.0", "schema": "old", "generation": 1, "pid": 1, "nonce": "n", "proof": "p", "compatible": true}})
         )
         .expect("reply");
     });

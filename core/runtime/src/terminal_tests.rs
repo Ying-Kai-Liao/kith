@@ -340,6 +340,7 @@ printf '%s\n' "$lock" "$key" "$@" > "$lock/$key.args"
             holder_on: true,
             key_load: None,
             host: false,
+            exiting: || false,
             wait_for_embedded: Duration::from_secs(10),
             holder: HolderConfig {
                 exe: Some(holder_bin()),

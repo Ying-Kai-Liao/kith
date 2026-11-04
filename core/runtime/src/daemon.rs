@@ -42,6 +42,9 @@ pub(crate) struct Config {
     /// The daemon of a `kith serve`: it makes the host secret in its memory. Off for a standalone daemon, which has no
     /// Host.
     pub host: bool,
+    /// Whether the process around the daemon has begun to exit: a Host daemon waiting for another daemon's lock stops
+    /// waiting then.
+    pub exiting: fn() -> bool,
 }
 
 impl Default for Config {
@@ -52,6 +55,7 @@ impl Default for Config {
             holder_on: true,
             key_load: None,
             host: false,
+            exiting: || false,
         }
     }
 }
@@ -315,12 +319,14 @@ impl Daemon {
 
     /// The daemon `kith serve` runs inside itself: as [`Daemon::spawn`], and it also makes the host secret in this
     /// process's memory (never a file), so only this serve's own code can call the host rows. A serve whose daemon
-    /// does not get the core lock (another one holds it) never gets a secret.
-    pub fn spawn_as_host(paths: &Paths) -> Daemon {
+    /// finds another daemon holding the core lock (an old serve still exiting, a standalone daemon) keeps trying for
+    /// it, until `exiting` says the process is leaving, and has no secret until it gets it.
+    pub fn spawn_as_host(paths: &Paths, exiting: fn() -> bool) -> Daemon {
         Self::spawn_with(
             paths,
             Config {
                 host: true,
+                exiting,
                 ..Config::default()
             },
         )
@@ -595,8 +601,15 @@ fn acquire(shared: &Shared, layout: &Layout, cfg: &Config) -> Result<Core> {
             Opened::Busy(holder) => {
                 let role = holder.as_ref().and_then(|h| h.role);
                 let patient = role == Some(Role::Embedded);
-                if role == Some(Role::Daemon)
-                    || (!patient && begun.elapsed() >= cfg.wait_for_embedded)
+                // The serve's own daemon outlasts a daemon that is on its way out: it is the only one that can have a
+                // Host, so it waits for the lock and does not fail for the serve's whole life.
+                let waits_for_daemon = cfg.host && role == Some(Role::Daemon);
+                if waits_for_daemon && (cfg.exiting)() {
+                    return Err(busy(holder));
+                }
+                if !waits_for_daemon
+                    && (role == Some(Role::Daemon)
+                        || (!patient && begun.elapsed() >= cfg.wait_for_embedded))
                 {
                     return Err(busy(holder));
                 }
@@ -604,14 +617,25 @@ fn acquire(shared: &Shared, layout: &Layout, cfg: &Config) -> Result<Core> {
                     let who = holder
                         .as_ref()
                         .map_or(String::new(), |h| format!(" (pid {})", h.pid));
+                    let what = if waits_for_daemon {
+                        "another daemon"
+                    } else {
+                        "a command"
+                    };
                     log::note(
                         &shared.logs,
-                        &format!("daemon: a command{who} holds the core; waiting for it to finish"),
+                        &format!("daemon: {what}{who} holds the core; waiting for it to finish"),
                     );
                     told = true;
                 }
                 std::thread::sleep(delay);
-                delay = (delay * 2).min(Duration::from_secs(1));
+                // A command is short; a daemon may stay a while, so its wait backs off further.
+                let cap = if waits_for_daemon {
+                    Duration::from_secs(5)
+                } else {
+                    Duration::from_secs(1)
+                };
+                delay = (delay * 2).min(cap);
             }
         }
     }

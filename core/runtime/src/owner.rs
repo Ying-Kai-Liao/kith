@@ -38,6 +38,7 @@ use kith_api::Principal;
 use kith_holder::auth;
 use kith_holder::platform::{self, Stream};
 use serde_json::{Value, json};
+use zeroize::Zeroizing;
 
 use crate::error::{Error, Result};
 use crate::layout::Layout;
@@ -76,22 +77,29 @@ pub(crate) fn pipe_name(layout: &Layout, kind: &str) -> PathBuf {
 
 /// 64 random hex digits: the owner token, the holder secret.
 pub(crate) fn random_secret() -> Result<String> {
+    Ok(random_zeroizing()?.to_string())
+}
+
+/// [`random_secret`] for a secret that stays in this process's memory, cleared when dropped.
+fn random_zeroizing() -> Result<Zeroizing<String>> {
     let mut raw = [0u8; 32];
     getrandom::fill(&mut raw)
         .map_err(|_| Error::Io("kith-core: random bytes unavailable".into()))?;
-    Ok(raw.iter().fold(String::with_capacity(64), |mut s, b| {
-        let _ = write!(s, "{b:02x}");
-        s
-    }))
+    let mut hex = Zeroizing::new(String::with_capacity(64));
+    for b in raw {
+        let _ = write!(hex, "{b:02x}");
+    }
+    raw.fill(0);
+    Ok(hex)
 }
 
 /// A new secret at `path`, owner-only, in place through a rename (a reader sees the old one or the new one, never half
 /// of it).
-fn write_secret(path: &std::path::Path) -> Result<String> {
-    let token = random_secret()?;
+fn write_secret(path: &std::path::Path) -> Result<Zeroizing<String>> {
+    let token = random_zeroizing()?;
     let tmp = path.with_extension("token.tmp");
     perms::create_private_file(&tmp)?;
-    std::fs::write(&tmp, &token)?;
+    std::fs::write(&tmp, token.as_bytes())?;
     std::fs::rename(&tmp, path)?;
     perms::make_private(path)?;
     Ok(token)
@@ -101,9 +109,9 @@ fn write_secret(path: &std::path::Path) -> Result<String> {
 /// puts its secret here when it binds and takes it out when it stops; its own client (`reach_as_principal`) reads it
 /// from here, so the secret is never on disk. A process that holds no daemon (a second serve, the CLI) has nothing
 /// here and cannot prove Host.
-static HOST_SECRETS: Mutex<Vec<(PathBuf, String)>> = Mutex::new(Vec::new());
+static HOST_SECRETS: Mutex<Vec<(PathBuf, Zeroizing<String>)>> = Mutex::new(Vec::new());
 
-fn host_secrets() -> std::sync::MutexGuard<'static, Vec<(PathBuf, String)>> {
+fn host_secrets() -> std::sync::MutexGuard<'static, Vec<(PathBuf, Zeroizing<String>)>> {
     HOST_SECRETS
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -112,11 +120,11 @@ fn host_secrets() -> std::sync::MutexGuard<'static, Vec<(PathBuf, String)>> {
 fn publish_host_secret(dir: &std::path::Path, secret: &str) {
     let mut all = host_secrets();
     all.retain(|(d, _)| d != dir);
-    all.push((dir.to_owned(), secret.to_owned()));
+    all.push((dir.to_owned(), Zeroizing::new(secret.to_owned())));
 }
 
 fn retire_host_secret(dir: &std::path::Path, secret: &str) {
-    host_secrets().retain(|(d, s)| !(d == dir && s == secret));
+    host_secrets().retain(|(d, s)| !(d == dir && s.as_str() == secret));
 }
 
 /// Test hooks: take this process's host secret out (what a process that never ran the daemon has), or put one in (what
@@ -125,7 +133,7 @@ fn retire_host_secret(dir: &std::path::Path, secret: &str) {
 pub(crate) fn forget_host_secret(layout: &Layout) -> Option<String> {
     let mut all = host_secrets();
     let at = all.iter().position(|(d, _)| d == &layout.dir)?;
-    Some(all.remove(at).1)
+    Some(all.remove(at).1.to_string())
 }
 
 #[cfg(test)]
@@ -146,7 +154,7 @@ pub(crate) fn remove_legacy_host_token(layout: &Layout) -> Result<()> {
 }
 
 /// The secret a client of `who` proves with: the owner token (a file), or the host secret (this process's memory).
-fn read_token(layout: &Layout, who: Principal) -> std::io::Result<String> {
+fn read_token(layout: &Layout, who: Principal) -> std::io::Result<Zeroizing<String>> {
     if who == Principal::Host {
         return host_secrets()
             .iter()
@@ -154,12 +162,12 @@ fn read_token(layout: &Layout, who: Principal) -> std::io::Result<String> {
             .map(|(_, s)| s.clone())
             .ok_or_else(|| std::io::Error::other("this process holds no host secret"));
     }
-    let text = std::fs::read_to_string(&layout.token)?;
+    let text = Zeroizing::new(std::fs::read_to_string(&layout.token)?);
     let t = text.trim();
     if t.is_empty() {
         return Err(std::io::Error::other("the token is empty"));
     }
-    Ok(t.to_owned())
+    Ok(Zeroizing::new(t.to_owned()))
 }
 
 /// The name a connection gives in its hello for the principal it will prove to be; the owner is the default.
@@ -185,7 +193,7 @@ pub(crate) struct Server {
     stop: Arc<AtomicBool>,
     endpoint: PathBuf,
     /// The host secret this server published, taken back out when it stops.
-    retire: Option<(PathBuf, String)>,
+    retire: Option<(PathBuf, Zeroizing<String>)>,
     accept: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// Closed (its sender dropped) when the accept thread ends: what `stop` waits on, for a bounded time.
     ended: Mutex<Receiver<()>>,
@@ -195,9 +203,9 @@ pub(crate) struct Server {
 const STOP_WAIT: Duration = Duration::from_secs(2);
 
 struct Ctx {
-    token: String,
+    token: Zeroizing<String>,
     /// `None` for a standalone daemon: it has no Host, and no proof of one can match.
-    host_token: Option<String>,
+    host_token: Option<Zeroizing<String>>,
     generation: i64,
     handler: Arc<Handler>,
     stop: Arc<AtomicBool>,
@@ -218,13 +226,28 @@ impl Server {
     ) -> Result<Server> {
         let token = write_secret(&layout.token)?;
         let host_token = if host {
-            Some(random_secret().map_err(|e| Error::Io(format!("kith-core: host secret: {e}")))?)
+            Some(
+                random_zeroizing()
+                    .map_err(|e| Error::Io(format!("kith-core: host secret: {e}")))?,
+            )
         } else {
             None
         };
         let ep = endpoint(layout);
         platform::remove_endpoint(&ep);
+        // Published before anyone can connect: a Host call that arrives the moment the socket listens must find the
+        // secret, or it would be told another serve holds the lock.
+        let retire = host_token.clone().map(|s| (layout.dir.clone(), s));
+        if let Some((dir, secret)) = &retire {
+            publish_host_secret(dir, secret);
+        }
+        let unpublish = || {
+            if let Some((dir, secret)) = &retire {
+                retire_host_secret(dir, secret);
+            }
+        };
         let listener = platform::listen(&ep).map_err(|e| {
+            unpublish();
             Error::Io(format!(
                 "kith-core: can't listen on the owner socket {}: {e}",
                 ep.display()
@@ -233,14 +256,11 @@ impl Server {
         // Polled, not blocked in: `stop` then only sets a flag, and nothing it does can hang (a wake-up connection to a
         // socket with a full backlog could). Windows pipes have no such mode; `stop` wakes those with a connection.
         #[cfg(unix)]
-        listener
-            .set_nonblocking(true)
-            .map_err(|e| Error::Io(format!("kith-core: can't poll the owner socket: {e}")))?;
+        listener.set_nonblocking(true).map_err(|e| {
+            unpublish();
+            Error::Io(format!("kith-core: can't poll the owner socket: {e}"))
+        })?;
         let stop = Arc::new(AtomicBool::new(false));
-        if let Some(secret) = &host_token {
-            publish_host_secret(&layout.dir, secret);
-        }
-        let retire = host_token.clone().map(|s| (layout.dir.clone(), s));
         let ctx = Arc::new(Ctx {
             token,
             host_token,
@@ -256,7 +276,10 @@ impl Server {
                 accept_loop(&listener, &ctx);
                 drop(end_tx);
             })
-            .map_err(|e| Error::Io(format!("kith-core: can't start the owner socket: {e}")))?;
+            .map_err(|e| {
+                unpublish();
+                Error::Io(format!("kith-core: can't start the owner socket: {e}"))
+            })?;
         Ok(Server {
             stop,
             endpoint: ep,
@@ -473,9 +496,9 @@ impl Ctx {
     /// What a connection of `who` proves with; `None` for Host on a daemon that has no Host.
     fn secret(&self, who: Principal) -> Option<&str> {
         if who == Principal::Host {
-            self.host_token.as_deref()
+            self.host_token.as_ref().map(|t| t.as_str())
         } else {
-            Some(&self.token)
+            Some(self.token.as_str())
         }
     }
 
@@ -799,7 +822,9 @@ fn attempt(
         // A daemon from before the host principal answers the hello with a protocol error; a daemon of this build
         // that has no Host (a standalone one) names its principals without it. Either way no host row can run, and
         // the caller should be told why rather than see "no daemon".
-        let old = hello["error"]["data"]["kind"] == "protocol";
+        // A real pre-host daemon ignores the claim and answers normally, with no `principals` field at all.
+        let old = hello["error"]["data"]["kind"] == "protocol"
+            || (hello["result"].is_object() && !hello["result"]["principals"].is_array());
         let lacks_host = hello["result"]["principals"]
             .as_array()
             .is_some_and(|p| !p.iter().any(|n| n == "host"));
