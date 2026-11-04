@@ -1,0 +1,10 @@
+{
+  "fakes": "",
+  "state:home/work/": "<empty dir>\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: unknown thread \"nope\" (the Kith host is not running, so only a Claude session id can be resumed)\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "kith: unknown thread \"../x\" (the Kith host is not running, so only a Claude session id can be resumed)\n",
+  "step1.stdout": ""
+}

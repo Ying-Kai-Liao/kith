@@ -97,6 +97,19 @@ impl<'a> Authority<'a> {
     }
 }
 
+/// Whether a run may exist for `person` (M2-13): they are a known person or bot and neither they nor the owner of
+/// the bot are revoked. A removed or never-added id is "no", the same as a revoked one. Read from core.db alone (the
+/// run tokens have no `Ctx` to give).
+pub(crate) fn run_allowed_in(conn: &Connection, person: &str) -> Result<bool> {
+    let auth = snapshot(conn)?;
+    let id = secrets::canonical(&auth, person);
+    let known = auth
+        .get("people")
+        .and_then(Value::as_object)
+        .is_some_and(|p| p.contains_key(&id));
+    Ok(known && !secrets::cut_off(&auth, &id))
+}
+
 /// A rule that stopped with a refusal `kith-auth` would `die` with (a membership naming a preset nobody defined, which
 /// `kith-auth preset X --rm` leaves behind): the rules have no answer, which the caller must read as "no". It is not a
 /// damaged database, so it is never `Corrupt` (whose recovery is `kith restore`).
@@ -134,6 +147,31 @@ fn flag(r: &Row<'_>, i: usize) -> Result<Option<Value>> {
 /// A NULL column is a missing key.
 pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
     snapshot_with(conn, &mut || {})
+}
+
+/// The tables as the rules read them, inside a transaction the caller holds and writes in (the doors decide in the
+/// transaction that writes the row, so the answer and the write cannot be split by a revoke).
+pub(crate) fn tables_within(tx: &Connection) -> Result<Value> {
+    read_tables(tx, &mut || {})
+}
+
+/// `may` over tables already read (see [`tables_within`]): (allowed, why), a rule with no answer being an error.
+pub(crate) fn may_in(ctx: &Ctx, auth: &Value, person: &str, agent: &str) -> Result<(bool, String)> {
+    Rules::new(ctx, auth)
+        .may(person, agent, None, false)
+        .map_err(|d| refused(&d))
+}
+
+/// `resolve` over tables already read: what a run of `agent` for `person` gets (a bot's already cut to its owner's).
+pub(crate) fn resolve_in(
+    ctx: &Ctx,
+    auth: &Value,
+    agent: &str,
+    person: &str,
+) -> Result<Map<String, Value>> {
+    Rules::new(ctx, auth)
+        .resolve(agent, person, None, false)
+        .map_err(|d| refused(&d))
 }
 
 /// [`snapshot`], calling `between` after each table is read: a test writes there to prove the later tables are read

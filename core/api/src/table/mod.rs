@@ -11,7 +11,8 @@
 //! 3. `json_forms`, `runs`, `json_forms_more`: the kernel tools' `--json` forms (B6 in docs/plans/one-bot-model.md),
 //!    [`Served::Kernel`], [`Stability::Experimental`], result `json` until their types follow, and the run socket's rows;
 //! 4. the M2 lanes (`people`, `cards`, `secrets`, `gate`, `run_tokens`, `doors`, `import`): experimental stubs, owner
-//!    only, served by nobody in the core yet (`Core::call` answers NotServed, the caller falls back).
+//!    only, served by nobody in the core yet (`Core::call` answers NotServed, the caller falls back);
+//! 5. the M3 areas (`conversations`): the same kind of stub, one file per M3 lane.
 //!
 //! Until M2 only the owner may call anything. Param names are camelCase; result fields keep the kernel's own
 //! snake_case, as the contract does.
@@ -21,9 +22,12 @@
 
 use crate::{Method, TypeDef};
 
+mod accounts;
 mod build;
 mod cards;
+mod children;
 mod contract;
+mod conversations;
 mod doors;
 mod gate;
 mod import;
@@ -32,8 +36,11 @@ mod json_forms_more;
 mod people;
 mod run_tokens;
 mod runs;
+mod schedule_store;
 mod secrets;
 mod switched;
+mod transcripts;
+mod wake;
 
 /// Types the switched verbs add to the contract's.
 pub static EXTRA_TYPES: &[TypeDef] = &[
@@ -72,6 +79,17 @@ const PARTS: &[&[Method]] = &[
     run_tokens::ROWS,
     doors::ROWS,
     import::ROWS,
+    // M3: conversations and their claims.
+    conversations::ROWS,
+    // M4: the schedule store's reads and its unserved write rows.
+    schedule_store::ROWS,
+    transcripts::ROWS,
+    // M3-7: the wake queue and the waiters.
+    wake::ROWS,
+    // M3: delegation and children (the ask tree).
+    children::ROWS,
+    // M3-9a: account state and `pick`, read only.
+    accounts::ROWS,
 ];
 
 const LEN: usize = {

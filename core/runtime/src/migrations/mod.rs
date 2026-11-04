@@ -13,7 +13,13 @@
 //! | 50-59    | F run tokens                           | `run_tokens/`              |
 //! | 60-69    | G doors                                | `doors/`                   |
 //! | 70-79    | C import bookkeeping                   | `import/`                  |
-//! | 80+      | spare (a new lane takes the next 10)   |                            |
+//! | 80-89    | M3 conversations (claims, turns)       | `conversations/`           |
+//! | 90-99    | M3 wake queue and waiters (reserved)   | `wake/`                    |
+//! | 100-104  | M3 delegation, children (reserved)     | `children/`                |
+//! | 105-109  | M3 account choice (reserved)           | `accounts/`                |
+//! | 110-119  | M3 transcripts (engine sessions)       | `transcripts/`             |
+//! | 120-129  | M4 schedules' run state                | `schedules/`               |
+//! | 130+     | spare (a new lane takes the next 10)   |                            |
 //!
 //! A lane's versions start at its first number and run without a gap; the list is strictly increasing and no number
 //! appears twice ([`check`], run by a test on the real list and on bad ones). A step that has shipped is never edited.
@@ -35,14 +41,20 @@ pub(crate) struct Migration {
     pub sql: &'static str,
 }
 
+mod accounts;
 mod authority;
 mod cards;
+mod children;
+mod conversations;
 mod doors;
 mod gate;
 mod import;
 mod m0001_core;
 mod run_tokens;
+mod schedules;
 mod secrets;
+mod transcripts;
+mod wake;
 
 /// A lane's reserved range of versions.
 #[cfg(test)]
@@ -96,8 +108,38 @@ pub(crate) const LANES: &[Lane] = &[
         last: 79,
     },
     Lane {
-        name: "spare",
+        name: "conversations",
         first: 80,
+        last: 89,
+    },
+    Lane {
+        name: "wake",
+        first: 90,
+        last: 99,
+    },
+    Lane {
+        name: "children",
+        first: 100,
+        last: 104,
+    },
+    Lane {
+        name: "accounts",
+        first: 105,
+        last: 109,
+    },
+    Lane {
+        name: "transcripts",
+        first: 110,
+        last: 119,
+    },
+    Lane {
+        name: "schedules",
+        first: 120,
+        last: 129,
+    },
+    Lane {
+        name: "spare",
+        first: 130,
         last: i64::MAX,
     },
 ];
@@ -114,6 +156,12 @@ const PARTS: &[&[Migration]] = &[
     run_tokens::STEPS,
     doors::STEPS,
     import::STEPS,
+    conversations::STEPS,
+    wake::STEPS,
+    children::STEPS,
+    accounts::STEPS,
+    transcripts::STEPS,
+    schedules::STEPS,
 ];
 
 const LEN: usize = {

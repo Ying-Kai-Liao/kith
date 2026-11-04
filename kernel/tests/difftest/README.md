@@ -41,6 +41,21 @@ Same masks as the two-sided run, plus the kernel checkout's path (`<KERNEL>`). `
 no side to differ on purpose, so re-record (and say why in the PR) when a change is meant. Cases are copies: editing corpus/ does
 not move the golden.
 
+### Conversation verbs (M3-0d)
+
+`golden/` also freezes what M3 replaces: `threads.json`, `delegation.json`, `accounts.json`, `accounts-core.json` (copies of the
+corpora of the same names; the threads copy masks `ps` start times and, for `threads-record-*`, the claude pid found above the
+hook, which depends on the machine's process tree), `wake.json` (kith-wake: enqueue, merge, dedupe, withdraw, withdraw-person,
+take, done, back, ls, status, the `[kith wake RUN]` recovery rule, waiters `ci:` / `pid:` / `at:` fired by `drain` with a fake
+`gh` and a held session so no turn starts, and `deliver` with a fake `kith`) and `sessions.json` (kith-sessions: resolve, claim,
+terminal, proc, sweep, release, latest, pick).
+
+Extra case fields these use: `mask_keys` (names whose value means nothing: a number becomes `<EPOCH>`, anything else `<MASKED>`),
+`normalize_paths` (the case's own `normalize` rules also apply to file names, for files named by an id the program makes up; two
+files with one masked name are an error), and `unswitched` (text saying why the Rust side has no such verb yet). A golden replay
+with `--rust` skips an `unswitched` case and prints `skip  NAME  (not switched: ...)`; `--require-switched` replays it, so it is
+red until the verb exists. The Python replay always runs every case.
+
 ## Per-command summary
 
 `--summary FILE` (`-` for stdout) writes `{"commands": {"<command>": {"green": bool, "cases": {"<case>": "same" |

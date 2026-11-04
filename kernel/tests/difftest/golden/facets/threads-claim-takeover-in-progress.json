@@ -1,0 +1,16 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/s-1.claim.lock": "",
+  "state:home/.kith/live/terminal/s-1.takeover.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"app\", \"takeover\": true}",
+  "state:home/.kith/live/terminal/s-1.takeover.claim.lock": "",
+  "state:home/.kith/live/terminal/s-2.claim": "{\"pid\": 2147482999, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"oneshot\"}",
+  "state:home/.kith/live/terminal/s-2.claim.lock": "",
+  "state:home/.kith/live/terminal/s-2.takeover.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"app\", \"takeover\": true}",
+  "state:home/.kith/live/terminal/s-2.takeover.claim.lock": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: that session is being taken over in the app right now; try again in a moment\n",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": ""
+}

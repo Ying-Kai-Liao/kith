@@ -1,0 +1,7 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "step0.exit": "4\n",
+  "step0.stderr": "kith ask: delegation cost cap: chain far has spent US$5.00 of its US$5 cap; ask the user before starting another ask\n",
+  "step0.stdout": ""
+}

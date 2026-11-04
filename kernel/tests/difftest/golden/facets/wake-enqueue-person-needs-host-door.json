@@ -1,0 +1,11 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/queue/": "<empty dir>\n",
+  "state:home/.kith/sessions/waits/": "<empty dir>\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith-wake: a person's session wakes through the host (--door host): only it can issue their run token\n",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": ""
+}

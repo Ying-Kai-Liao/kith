@@ -1,0 +1,13 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"turn\", \"session\": \"s2\", \"run\": \"<ID12>\", \"ids\": [\"b\"]}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/ad328846aa18b32a335816374511cac1.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"host\",\n  \"next\": \"<MASKED>\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"b\",\n      \"run\": \"<ID12>\",\n      \"text\": \"hi\",\n      \"why\": \"\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"s2\",\n  \"tries\": 0,\n  \"turn\": {\n    \"at\": \"<TS>\",\n    \"pid\": 2147483000,\n    \"procStart\": null,\n    \"run\": \"<ID12>\",\n    \"sid\": \"abc\"\n  },\n  \"v\": 1\n}\n",
+  "state:home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"host\",\n  \"next\": \"<MASKED>\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"a\",\n      \"run\": null,\n      \"text\": \"hi\",\n      \"why\": \"\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"s1\",\n  \"tries\": 0,\n  \"turn\": null,\n  \"v\": 1\n}\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"host\",\n  \"ids\": [\n    \"b\"\n  ],\n  \"note\": \"[kith wake <ID12>] hi\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"id\": \"b\",\n      \"text\": \"hi\",\n      \"why\": \"\"\n    }\n  ],\n  \"room\": null,\n  \"run\": \"<ID12>\",\n  \"session\": \"s2\"\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "[\n  {\n    \"agent\": \"coder\",\n    \"door\": \"host\",\n    \"next\": \"<MASKED>\",\n    \"person\": null,\n    \"requests\": [\n      {\n        \"at\": \"<TS>\",\n        \"id\": \"b\",\n        \"run\": \"<ID12>\",\n        \"text\": \"hi\",\n        \"why\": \"\"\n      }\n    ],\n    \"room\": null,\n    \"session\": \"s2\",\n    \"tries\": 0,\n    \"turn\": {\n      \"at\": \"<TS>\",\n      \"pid\": 2147483000,\n      \"procStart\": null,\n      \"run\": \"<ID12>\",\n      \"sid\": \"abc\"\n    },\n    \"v\": 1\n  },\n  {\n    \"agent\": \"coder\",\n    \"door\": \"host\",\n    \"next\": \"<MASKED>\",\n    \"person\": null,\n    \"requests\": [\n      {\n        \"at\": \"<TS>\",\n        \"id\": \"a\",\n        \"run\": null,\n        \"text\": \"hi\",\n        \"why\": \"\"\n      }\n    ],\n    \"room\": null,\n    \"session\": \"s1\",\n    \"tries\": 0,\n    \"turn\": null,\n    \"v\": 1\n  }\n]\n",
+  "step1.stderr": ""
+}

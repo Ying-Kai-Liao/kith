@@ -1,0 +1,11 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/waits/.lock": "",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "withdrew 0\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "withdrew 0\n"
+}

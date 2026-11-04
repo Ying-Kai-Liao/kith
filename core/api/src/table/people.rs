@@ -111,6 +111,18 @@ pub(super) const ROWS: &[Method] = &[
         &["people", "access"],
     ),
     people(
+        "people.may",
+        "Whether a person may use an agent right now, and why (the kernel's `may`: a removed access beats every row, then their own, then everyone's), with whether they are the owner and the preset they hold.",
+        &[
+            pos("person", "string", true, "The person."),
+            pos("agent", "string", true, "The agent."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "may"],
+    ),
+    people(
         "people.addBot",
         "Add a bot that belongs to a person (it is never more than its owner's).",
         &[

@@ -560,11 +560,17 @@ fn a_connected_core_keeps_renewing_the_holders_lease() {
             pid: std::process::id(),
             tied_to_starter: false,
             generation: hello.generation,
+            lease_lost: false,
             procs: Vec::new(),
         };
         wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
         while let Ok(Some((kind, _, payload))) = wire::read(&mut s) {
             match kind {
+                proto::PING => {
+                    let ping: proto::Ping = wire::parse(&payload).expect("ping");
+                    let _ =
+                        wire::write_json(&mut s, proto::PONG, 0, &proto::Pong { seq: ping.seq });
+                }
                 proto::RENEW => {
                     let r: proto::Renew = wire::parse(&payload).expect("renew");
                     RENEWALS.lock().expect("lock").push(r.ms);
@@ -739,6 +745,7 @@ fn remote_holder(sock: &std::path::Path, secret_file: std::path::PathBuf) {
                     pid: 1,
                     tied_to_starter: false,
                     generation: hello.generation,
+                    lease_lost: false,
                     procs: vec![],
                 };
                 wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
@@ -841,6 +848,31 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
             assert_eq!(v["rows"][0]["agent"], "house");
             assert_eq!(v["rows"][0]["allowed"], true);
         }
+        other => panic!("{other:?}"),
+    }
+    // `may` itself (M2-15): a grant is a yes with its reason, a stranger a no, and the `*` row grants to everyone
+    match read(
+        &p,
+        "people.may",
+        &view(json!({"person": "sam", "agent": "house"})),
+    ) {
+        Reached::Answered(v) => {
+            assert_eq!(
+                (v["allowed"].clone(), v["why"].clone()),
+                (json!(true), json!("member"))
+            );
+            // M2-16: not the owner, and the preset the grant carries (the host's guard reads both)
+            assert_eq!(v["owner"], false);
+            assert_eq!(v["preset"], "member", "{v}");
+        }
+        other => panic!("{other:?}"),
+    }
+    match read(
+        &p,
+        "people.may",
+        &view(json!({"person": "nobody", "agent": "house"})),
+    ) {
+        Reached::Answered(v) => assert_eq!(v["allowed"], false),
         other => panic!("{other:?}"),
     }
     // a refusal of the rules is an answer about the call, and nothing was written for it

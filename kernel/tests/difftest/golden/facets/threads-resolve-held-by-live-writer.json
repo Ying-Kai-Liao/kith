@@ -1,0 +1,13 @@
+{
+  "fakes": "",
+  "state:home/.claude/projects/-work/abc-1.jsonl": "{\"type\": \"summary\"}\n{\"cwd\": \"<HOME>/work\", \"type\": \"user\"}\n",
+  "state:home/.kith/live/terminal/abc-1.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"oneshot\"}",
+  "state:home/.kith/live/terminal/abc-1.claim.lock": "",
+  "state:home/work/": "<empty dir>\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: that session is open in another writer (pid 1, oneshot); close it first\n",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"at\": \"<TS>\",\n  \"kind\": \"oneshot\",\n  \"pid\": 1,\n  \"procStart\": null\n}\n",
+  "step1.stderr": ""
+}

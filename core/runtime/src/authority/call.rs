@@ -6,7 +6,7 @@
 
 use std::io::Read as _;
 
-use kith_kernel::secrets::{self, Ctx, Die, Sandbox, ServeDir};
+use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
 use serde_json::{Value, json};
 
 use super::revoke::{self, Life};
@@ -22,6 +22,7 @@ pub(crate) fn serves(method: &str) -> bool {
         "people.grant"
             | "people.revoke"
             | "people.list"
+            | "people.may"
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
@@ -40,7 +41,7 @@ pub(crate) fn serves(method: &str) -> bool {
     )
 }
 
-fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
+pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let (folders, kernel) = core.folders_for(params)?;
     Ok(Ctx {
         auth: folders.secrets.join("auth.json"),
@@ -129,6 +130,35 @@ pub(crate) fn call_in(
             core,
             |a| json!({ "rows": write::list(a, c, word(params, "agent"), word(params, "person")) }),
         ),
+        // The answer of `may` itself (M2-15): the host's event filter asks it per person and agent. A refusal of the
+        // rules is a "no" with its words, as for `kith-auth may`.
+        "people.may" => {
+            let (person, agent) = (
+                need(params, "person").map_err(|d| store::refusal(&d))?,
+                need(params, "agent").map_err(|d| store::refusal(&d))?,
+            );
+            store::read(core, |a| {
+                let rules = Rules::new(c, a);
+                match rules.may(person, agent, None, false) {
+                    Ok((allowed, why)) => {
+                        // M2-16: the host's guard also needs to know the owner (never a guest) and the preset (a
+                        // member answers their own cards), so `resolve`'s preset rides along. No preset when the
+                        // rules have none to give; the caller then reads "not a member".
+                        let owner = why == "owner";
+                        let preset = (allowed && !owner)
+                            .then(|| rules.resolve(agent, person, None, false).ok())
+                            .flatten()
+                            .and_then(|r| {
+                                r.get("preset").and_then(Value::as_str).map(str::to_owned)
+                            });
+                        json!({ "allowed": allowed, "why": why, "owner": owner, "preset": preset })
+                    }
+                    Err(d) => {
+                        json!({ "allowed": false, "why": d.msg, "owner": false, "preset": null })
+                    }
+                }
+            })
+        }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         "people.botsCap" if word(params, "amount").is_none() => {
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))
@@ -154,7 +184,13 @@ pub(crate) fn call_in(
             } else {
                 String::new()
             };
-            let said = store::run(core, c, |a| write_in(m, params, c, life, a, &fresh))?;
+            // A person cut off, removed or renamed takes their guest doors with it, in the same transaction (M2-14).
+            let said = store::run_with(
+                core,
+                c,
+                |a| write_in(m, params, c, life, a, &fresh),
+                |tx, said| revoke::follow_in_doors(tx, m, params, said, c.now_ms),
+            )?;
             // The folders follow a rename once it is committed. `kith-auth --local` clears no temp folder: the
             // caller stops their runs first and then asks `people.clearTemp` (the `ids` of a suspend or a removal
             // say whose).

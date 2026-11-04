@@ -2698,7 +2698,7 @@
     },
     {
       "name": "run.mint",
-      "summary": "A run token for one run of an agent, for a person in a conversation (and the claim it holds, when it holds one). The token is shown once; it works on the run socket only for a peer that descends from the process bound with run.bind. Tokens live in the daemon's memory and are gone when it restarts.",
+      "summary": "A run token for one run of an agent, for a person in a conversation (and the claim it holds, when it holds one). The token is shown once; it works on the run socket only for a peer that descends from the process bound with run.bind. Tokens live in the daemon's memory and are gone when it restarts, and when the person (or the owner of a bot) is suspended or removed; a mint for a revoked person is refused. The answer also names the run socket (`socket`).",
       "params": [
         {
           "name": "agent",
@@ -4535,6 +4535,95 @@
             "spellings": [
               "--person"
             ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "people.may",
+      "summary": "Whether a person may use an agent right now, and why (the kernel's `may`: a removed access beats every row, then their own, then everyone's), with whether they are the owner and the preset they hold.",
+      "params": [
+        {
+          "name": "person",
+          "summary": "The person.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "people",
+          "may"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "person": {
+            "kind": "positional"
+          },
+          "agent": {
+            "kind": "positional"
           },
           "kernel": {
             "kind": "flag",
@@ -6639,6 +6728,1905 @@
             "kind": "flag",
             "spellings": [
               "--ms"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.list",
+      "summary": "The guest doors that are starting or live, and swept ones whose box is not confirmed gone, as `{doors}`. With `--all` the closed ones kept for a day too.",
+      "params": [
+        {
+          "name": "all",
+          "summary": "Include doors that ended or were confirmed gone.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "ls"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "all": {
+            "kind": "switch",
+            "spellings": [
+              "--all"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.start",
+      "summary": "Starts a door for a person: the access check and the row in one step. Answers the door (`state` starting, its `version`) and `repeat` (true when this id was already starting or live, nothing written). Refuses, as `kith-auth door` does: the owner (doors are for the people an agent is shared with), a person who is cut off or may not run the agent, a Mac out of sync with the cloud, a door that is not among the doors their ticked jobs grant now (a bot's cut to its owner's); then a supervisor that is not running and an id that is a swept or ended door.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent whose door it is.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "door",
+          "summary": "The door as `name@digest`, the piece a job grants.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person (or bot) it runs for.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "folder",
+          "summary": "The person's folder it runs on (display only).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The door's id, 16 hex digits (a new one when absent). A start retried with it is the same door.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The supervisor's process (2 or more), so a crash is found by its start time.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "start"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "door": {
+            "kind": "positional"
+          },
+          "person": {
+            "kind": "positional"
+          },
+          "folder": {
+            "kind": "flag",
+            "spellings": [
+              "--folder"
+            ]
+          },
+          "id": {
+            "kind": "flag",
+            "spellings": [
+              "--id"
+            ]
+          },
+          "pid": {
+            "kind": "flag",
+            "spellings": [
+              "--pid"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.markLive",
+      "summary": "The supervisor says the box is up. Answers `{result: live}`, or `{result: lost, state}` when a sweep (or an end) got to the door first: the box must not run. Only a `starting` door at this `version` goes live.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The door.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "version",
+          "summary": "The version `doors.start` answered.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "live"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "version": {
+            "kind": "flag",
+            "spellings": [
+              "--version"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.end",
+      "summary": "The box is gone. An open door becomes ended; a swept one is confirmed gone (it stays swept). Answers `{result: ended}` or `{result: swept}`. Ending twice changes nothing; refuses an id that is no door.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The door.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "end"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "doors.sweep",
+      "summary": "Marks swept every open door of the named people and their bots, every door whose supervisor is gone, and (unless `--no-recheck`) every door whose person may no longer run its agent. Answers `swept` (this call's) and `pending` (swept before, box not confirmed gone). The owner is never swept by a name, only for a gone supervisor. Kills nothing.",
+      "params": [
+        {
+          "name": "persons",
+          "summary": "People whose doors all end.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "noRecheck",
+          "summary": "Do not ask again whether each person may still run their door (it does by default).",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "doors",
+          "sweep"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "persons": {
+            "kind": "rest"
+          },
+          "noRecheck": {
+            "kind": "switch",
+            "spellings": [
+              "--no-recheck"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "conversation.list",
+      "summary": "The conversations, newest first, with the engine, the account and whether a writer holds each.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "conversations",
+          "list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "conversation.show",
+      "summary": "One conversation in full: its engine session pointer, the transcript hash, its live claim and its queued or parked turns. Refuses an id that is no conversation.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The conversation.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "conversations",
+          "show"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "claim.list",
+      "summary": "The writer claims: the live ones (queued, claimed, running) and the recent ended ones, as `{live, recent}`.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "claims",
+          "list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "schedule.jobs",
+      "summary": "Every job of every agent with its next run and its last run, from jobs.json and the core's run state. Also says which agents' files could not be read, the runs of jobs since removed, and the last tick.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "Only this agent's.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "jobs"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.show",
+      "summary": "One job in full: its definition, next run, last run, recent runs and recent fires. Refuses an agent or job that does not exist.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The job.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "show"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule.next",
+      "summary": "The jobs that are not paused, soonest first, with when each runs next.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "Only this agent's.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "schedule",
+          "next"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "conversation.transcript",
+      "summary": "The engine sessions a conversation has, one per account: the engine, its session id, the pointer to where the engine keeps it, the hash and size as of the last read, and whether the engine's copy is there now and has changed since. Refuses an id that is no conversation. Only Claude's sessions are held; another engine's row says `held: false`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The conversation.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "account",
+          "summary": "Only this account's session (`claude`, `claude:work`).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "conversations",
+          "transcript"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "account": {
+            "kind": "flag",
+            "spellings": [
+              "--account"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.enqueue",
+      "summary": "Asks for a turn of a session. Answers `result`: `queued`, `merged` (the session was already owed something: one turn carries both) or `duplicate` (the id is queued, answered or withdrawn: dropped). Refuses a person's session on the run door, and a session that is another person's or agent's.",
+      "params": [
+        {
+          "name": "session",
+          "summary": "The session to wake.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "The request's id; one already queued, answered or withdrawn is dropped.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent whose session it is.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The person the session serves (needs `--door host`).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "room",
+          "summary": "The room it was asked in.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "door",
+          "summary": "`run` (the kernel resumes the session; the default) or `host` (the host runs the turn).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "why",
+          "summary": "A few words on what happened.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "text",
+          "summary": "What the session is told.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "enqueue"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "session": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "flag",
+            "spellings": [
+              "--id"
+            ]
+          },
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "person": {
+            "kind": "flag",
+            "spellings": [
+              "--person"
+            ]
+          },
+          "room": {
+            "kind": "flag",
+            "spellings": [
+              "--room"
+            ]
+          },
+          "door": {
+            "kind": "flag",
+            "spellings": [
+              "--door"
+            ]
+          },
+          "why": {
+            "kind": "flag",
+            "spellings": [
+              "--why"
+            ]
+          },
+          "text": {
+            "kind": "after"
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.withdraw",
+      "summary": "Stop: drops what a session is still owed (not what a running turn already holds), keeping the ids so a late copy is dropped; without `--id` its waiters go too. Answers `count`.",
+      "params": [
+        {
+          "name": "session",
+          "summary": "The session.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "id",
+          "summary": "Only this request.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "withdraw"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "session": {
+            "kind": "positional"
+          },
+          "id": {
+            "kind": "flag",
+            "spellings": [
+              "--id"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.withdrawPerson",
+      "summary": "Revoke or removal: drops what every session of these people is owed, and those sessions' waiters. Answers `count`.",
+      "params": [
+        {
+          "name": "persons",
+          "summary": "The people.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "withdraw-person"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "persons": {
+            "kind": "rest"
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.take",
+      "summary": "The host starts a host-door turn: marks what a session is owed as carried by this holder and answers `turn` (the turn as `kith-wake take` prints it), or null when nothing is owed. Recovers turns whose holder died first (a turn whose marker is in its transcript is answered, one that is not is owed again). A session a live writer holds is still offered, as in the Python: the host answers `back --held`. Creates no turn in the conversations lane yet.",
+      "params": [
+        {
+          "name": "holder",
+          "summary": "The holder's process id.",
+          "required": true,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "session",
+          "summary": "Only this session.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "sid",
+          "summary": "The Claude session the turn runs in (default: the session itself, when it is one).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "take"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "holder": {
+            "kind": "flag",
+            "spellings": [
+              "--holder"
+            ]
+          },
+          "session": {
+            "kind": "flag",
+            "spellings": [
+              "--session"
+            ]
+          },
+          "sid": {
+            "kind": "flag",
+            "spellings": [
+              "--sid"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.done",
+      "summary": "The turn ended: what it carried is answered (`--how withdrawn`: dropped, not delivered). Answers `done`: false when no turn has that run id.",
+      "params": [
+        {
+          "name": "run",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "how",
+          "summary": "How it ended (default answered).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "done"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "run": {
+            "kind": "positional"
+          },
+          "how": {
+            "kind": "flag",
+            "spellings": [
+              "--how"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.back",
+      "summary": "The turn did not start: what it carried is owed again, after a pause that doubles (5 s to 10 min), and after five failed tries it ends as failed. `--held` (a writer had the session) is not a failed try. Answers `done`: false when no turn has that run id.",
+      "params": [
+        {
+          "name": "run",
+          "summary": "The turn.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "held",
+          "summary": "A writer held the session: owed again soon, not a failed try.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "back"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "run": {
+            "kind": "positional"
+          },
+          "held": {
+            "kind": "switch",
+            "spellings": [
+              "--held"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.queueList",
+      "summary": "What is owed and what is waited for, as `items` (a queue file each), `waiters` and `lines` (what `kith-wake ls` prints).",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "queue-list"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
+      "name": "wake.queueStatus",
+      "summary": "Where a request is: `queued`, `running`, how it was answered (`answered`, `failed`, `withdrawn`, ...) or `unknown`, and the turn that carried it, as `{id, state, run}`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The request's id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "queue-status"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "wake.wait",
+      "summary": "Wakes a session once something happened: `ci:OWNER/REPO#PR` (its checks finished, or it was merged or closed), `pid:N` (the process exited) or `at:TIME` (`+30m`, or a local `2026-10-27T15:00`). A waiter always has a timeout. Waiting twice on the same thing keeps the first waiter. Answers the waiter as `waiter`.",
+      "params": [
+        {
+          "name": "on",
+          "summary": "What to wait for.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "session",
+          "summary": "The session to wake.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agent",
+          "summary": "The agent whose session it is.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "why",
+          "summary": "A few words, told to the session when it wakes.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "timeout",
+          "summary": "Give up after this long (default 6h).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "note",
+          "summary": "A note for the session, told when it wakes.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "person",
+          "summary": "The caller's KITH_PERSON (a guest may not set waiters).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "via",
+          "summary": "The caller's KITH_VIA (default terminal).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "wake",
+          "wait"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "on": {
+            "kind": "flag",
+            "spellings": [
+              "--on"
+            ]
+          },
+          "session": {
+            "kind": "flag",
+            "spellings": [
+              "--session"
+            ]
+          },
+          "agent": {
+            "kind": "flag",
+            "spellings": [
+              "--agent"
+            ]
+          },
+          "why": {
+            "kind": "flag",
+            "spellings": [
+              "--why"
+            ]
+          },
+          "timeout": {
+            "kind": "flag",
+            "spellings": [
+              "--timeout"
+            ]
+          },
+          "note": {
+            "kind": "words"
+          },
+          "person": {
+            "kind": "caller"
+          },
+          "via": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.open",
+      "summary": "Opens an ask: the hop and cost-cap check and the insert of its record in ONE transaction, so no second ask passes the cap between them. Answers `{decision, record}` (the chain, hop and cross hops the record got). A cap that refuses it is an error with the words `kith ask` prints. With `--check-only` nothing is written (`record` is null).",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The new ask's id.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "asked",
+          "summary": "The agent asked.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "crossing",
+          "summary": "The ask goes to another Mac.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "brief",
+          "summary": "What was asked (at most 2000 characters kept).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "pid",
+          "summary": "The asking process, so a crash is found.",
+          "required": false,
+          "schema": {
+            "type": "integer"
+          }
+        },
+        {
+          "name": "conversation",
+          "summary": "The asked agent's session of a `--bg` run, when it has one.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "checkOnly",
+          "summary": "Decide, write nothing.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (`KITH_ASK_ID`, `KITH_ASK_CHAIN`/`HOP`/`CROSS`/`COST`/`FROM`, `KITH_AGENT`, `KITH_PERSON`, `KITH_VIA`, `CLAUDE_CODE_SESSION_ID`); a daemon has its own.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "open"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "asked": {
+            "kind": "flag",
+            "spellings": [
+              "--asked"
+            ]
+          },
+          "crossing": {
+            "kind": "switch",
+            "spellings": [
+              "--crossing"
+            ]
+          },
+          "brief": {
+            "kind": "flag",
+            "spellings": [
+              "--brief"
+            ]
+          },
+          "pid": {
+            "kind": "flag",
+            "spellings": [
+              "--pid"
+            ]
+          },
+          "conversation": {
+            "kind": "flag",
+            "spellings": [
+              "--conversation"
+            ]
+          },
+          "checkOnly": {
+            "kind": "switch",
+            "spellings": [
+              "--check-only"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.settle",
+      "summary": "The run behind an ask ended a turn at a cost (US$): it joins its chain's cost, and a chain that reaches its cap with this turn is marked once per cap. `--state` answered or stopped settles an open ask (capped when this turn tipped the chain). Settling a settled ask only adds the cost. Answers `{id, state, cost, tipped}`; refuses an id that is no ask.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "cost",
+          "summary": "US$ this turn cost (a number).",
+          "required": false,
+          "schema": {}
+        },
+        {
+          "name": "state",
+          "summary": "answered or stopped; left out while the run waits on a card.",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (`KITH_ASK_ID`, `KITH_ASK_CHAIN`/`HOP`/`CROSS`/`COST`/`FROM`, `KITH_AGENT`, `KITH_PERSON`, `KITH_VIA`, `CLAUDE_CODE_SESSION_ID`); a daemon has its own.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "settle"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "cost": {
+            "kind": "flag",
+            "spellings": [
+              "--cost"
+            ]
+          },
+          "state": {
+            "kind": "flag",
+            "spellings": [
+              "--state"
+            ]
+          },
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.capTold",
+      "summary": "The host raised the chain's cap card: it is not raised again for this cap. Answers `{marked}`, the records marked.",
+      "params": [
+        {
+          "name": "chain",
+          "summary": "The chain (its root ask's id).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "cap-told"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "chain": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.end",
+      "summary": "Settles `stopped` the asks whose caller is one of the sessions or persons (Stop, a revoke, a removal): an ask already delivered, answered to its caller or ended stays. Stops no process and withdraws no wake; answers `{ended, sessions}` (the ids, and the sessions owed a withdrawal) for the callers that do.",
+      "params": [
+        {
+          "name": "sessions",
+          "summary": "Caller sessions whose asks end.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "name": "persons",
+          "summary": "People whose asks end.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "end"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "sessions": {
+            "kind": "flag",
+            "spellings": [
+              "--sessions"
+            ]
+          },
+          "persons": {
+            "kind": "flag",
+            "spellings": [
+              "--persons"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.delegations",
+      "summary": "`kith ask delegations --json`: every ask record, newest first, as `{delegations}` (money in micro-dollars, times in ms).",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (`KITH_ASK_ID`, `KITH_ASK_CHAIN`/`HOP`/`CROSS`/`COST`/`FROM`, `KITH_AGENT`, `KITH_PERSON`, `KITH_VIA`, `CLAUDE_CODE_SESSION_ID`); a daemon has its own.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "delegations"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.record",
+      "summary": "The record of one ask as `kith ask` reads it (an old registration reads as a root ask). Refuses an id that has none.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The ask.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "record"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
+      "name": "ask.limits",
+      "summary": "The delegation caps: hops on one Mac, hops across Macs, the refused exit code, the default cap and `cap_usd`, the chain cap in force (null for none).",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "home",
+          "summary": "The caller's home folder (a daemon has its own).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "env",
+          "summary": "The caller's KITH_* and HQ_* variables (`KITH_ASK_ID`, `KITH_ASK_CHAIN`/`HOP`/`CROSS`/`COST`/`FROM`, `KITH_AGENT`, `KITH_PERSON`, `KITH_VIA`, `CLAUDE_CODE_SESSION_ID`); a daemon has its own.",
+          "required": false,
+          "schema": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "asks",
+          "limits"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "home": {
+            "kind": "caller"
+          },
+          "env": {
+            "kind": "caller"
+          }
+        }
+      }
+    },
+    {
+      "name": "account.state",
+      "summary": "What each account is doing: its out mark, usage reading and last start, as `state.json` keeps them, from the core's database. One entry with `--entry`, else all as `{accounts}`.",
+      "params": [
+        {
+          "name": "entry",
+          "summary": "One account id, such as `claude:work`; answers `{id, state}` (`state` is null when it has no row).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "state"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "entry": {
+            "kind": "flag",
+            "spellings": [
+              "--entry"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "account.pick",
+      "summary": "The accounts a run of the agent would try, in order, reading the core's database for what is out or used least (`kith account pick AGENT --json`): `{candidates, skipped, all_out, harness, policy, pin}`.",
+      "params": [
+        {
+          "name": "agent",
+          "summary": "The agent.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "agentMd",
+          "summary": "The agent's agent.md, when it is not in the agents folder (the harness comes from it).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "deep",
+          "summary": "Ask each harness whether its login is good, not only look for the folder or the key.",
+          "required": false,
+          "schema": {
+            "type": "boolean"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "account",
+          "pick"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "agent": {
+            "kind": "positional"
+          },
+          "agentMd": {
+            "kind": "flag",
+            "spellings": [
+              "--agent-md"
+            ]
+          },
+          "deep": {
+            "kind": "switch",
+            "spellings": [
+              "--deep"
             ]
           }
         }

@@ -3,4 +3,6 @@
 
 use super::Migration;
 
-pub(super) const STEPS: &[Migration] = &[];
+mod m0060_doors;
+
+pub(super) const STEPS: &[Migration] = &[m0060_doors::MIGRATION];

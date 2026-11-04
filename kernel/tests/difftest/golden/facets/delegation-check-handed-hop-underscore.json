@@ -1,0 +1,7 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "step0.exit": "4\n",
+  "step0.stderr": "kith ask: delegation hop limit: this chain is already 8 asks deep on this Mac (at most 8); ask the user before starting another chain\n",
+  "step0.stdout": ""
+}

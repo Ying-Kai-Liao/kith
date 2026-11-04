@@ -56,6 +56,7 @@ DAEMON_INTENDED = [
 ]
 GOLDEN = None   # --golden DIR: DIR/*.json are frozen cases, DIR/facets/NAME.json what the OLD (Python) side printed and did for each
 RECORD = False  # --golden --record: run the OLD side alone and store its facets; without it, run the NEW side alone and compare to the store
+REQUIRE_SWITCHED = False   # --require-switched: a golden replay on the Rust program runs the cases marked "unswitched" too (red until they are switched)
 REPLAY_SIDE = 'old'   # which side a golden replay runs: 'old' (KITH_CORE=python), or 'new' (the Rust program) with --rust / --new
 RUST_BIN = ''   # the kith program the NEW side's router uses; main() sets it for a run with the Rust cases
 
@@ -93,16 +94,36 @@ def roots(side_dir):
 
 
 class Normalizer:
-    def __init__(self, side_dir, extra=()):
+    def __init__(self, side_dir, extra=(), mask_keys=()):
+        self.mask_keys = set(mask_keys)   # a case's own keys whose value means nothing (a clock, a pid): any scalar is masked to <MASKED> (last_started alone is <EPOCH>)
         self.roots = roots(side_dir)
-        self.rules = [(re.compile(p), r) for p, r in [*extra, *GENERIC]]
+        self.own = [(re.compile(p), r) for p, r in extra]
+        self.rules = self.own + [(re.compile(p), r) for p, r in GENERIC]
 
     def text(self, s):
         for path, ph in self.roots:
             s = s.replace(path, ph)
+        # A checkout path with a space is shlex-quoted in a command line ('...<KERNEL>/bin/x' becomes ''"'"'<KERNEL>/bin/x'"'"'
+        # inside a quote); strip those quotes so the record does not depend on the path having a space.
+        s = re.sub(r"'\"'\"'(<KERNEL>[^']*?)'\"'\"'", r"\1", s)
         for rx, repl in self.rules:
             s = rx.sub(repl, s)
         return s
+
+    def own_text(self, s):
+        """Only the case's own rules (a file name is not masked by the generic ones: two sessions' queue files must stay two.)"""
+        for rx, repl in self.own:
+            s = rx.sub(repl, s)
+        return s
+
+    def value(self, k, x):
+        # A case's own key is <MASKED> whatever it holds: a pid is a number on one machine and null on another, so a
+        # value-dependent mask would not replay across machines. Only last_started keeps <EPOCH>.
+        if k in self.mask_keys and not isinstance(x, (dict, list)):
+            return '<MASKED>'
+        if k == 'last_started' and isinstance(x, (int, float)) and not isinstance(x, bool):
+            return '<EPOCH>'
+        return self.data(x)
 
     def data(self, v):
         if isinstance(v, str):
@@ -112,8 +133,7 @@ class Normalizer:
         if isinstance(v, dict):
             # last_started in a state file is the clock at the launch: two sides run a second apart. Only that key is
             # masked, so fixture times (out_until, since, cleared_at) are still compared exactly.
-            return {self.text(k): ('<EPOCH>' if k == 'last_started' and isinstance(x, (int, float)) and not isinstance(x, bool) else self.data(x))
-                    for k, x in v.items()}
+            return {self.text(k): self.value(k, x) for k, x in v.items()}
         return v
 
 
@@ -326,6 +346,10 @@ def snapshot(side_dir, case, norm):
                 rel = p.relative_to(side_dir).as_posix()
                 if f.endswith(('-wal', '-shm')) or any(rx.search(rel) for rx in skip):
                     continue
+                if case.get('normalize_paths'):   # files named by an id the program makes up (a waiter's, a turn's log): the name is masked like any text
+                    rel = norm.own_text(rel)
+                    if f'state:{rel}' in facets:   # two files, one masked name: a facet would silently vanish
+                        raise RuntimeError(f'normalize_paths: two files are called {rel} once masked')
                 if p.is_symlink():
                     facets[f'state:{rel}'] = 'link -> ' + norm.text(os.readlink(p)) + '\n'
                     continue
@@ -442,7 +466,7 @@ def run_side(side, work, case, prefix):
     if WITH_CORE and side == 'new':
         make_core(side_dir, env, case['name'])
     daemon = start_daemon(side_dir, env, case) if WITH_DAEMON and side == 'new' else None
-    norm = Normalizer(side_dir, case.get('normalize', []))
+    norm = Normalizer(side_dir, case.get('normalize', []), case.get('mask_keys', []))
     try:
         facets = run_steps(side, side_dir, case, prefix, env, norm)
     finally:
@@ -542,6 +566,8 @@ def load_corpus(dirs):
 def run_all(cases, prefixes, intended, jobs=4, keep=False, out=sys.stdout):
     """-> (failed case names, stale entries). Prints one block per case."""
     def one(case):
+        if GOLDEN and not RECORD and REPLAY_SIDE == 'new' and case.get('unswitched') and not REQUIRE_SWITCHED:
+            return case, None, 'SKIP'   # its verb is still Python on the Rust side: not run, said out loud
         try:
             return case, compare(copy.deepcopy(case), prefixes, keep), None
         except Exception as e:  # a broken case is a failure, not a crash of the others
@@ -554,6 +580,10 @@ def run_all(cases, prefixes, intended, jobs=4, keep=False, out=sys.stdout):
         name = case['name']
         cmd = case_command(case)
         status = summary.setdefault(cmd, {'green': True, 'cases': {}})
+        if err == 'SKIP':
+            status['cases'][name] = 'unswitched'
+            print(f'skip  {name}  (not switched: {case["unswitched"]})', file=out)
+            continue
         if err:
             status['cases'][name] = 'error'
             print(f'ERROR {name}: {err}', file=out)
@@ -603,13 +633,15 @@ def main(argv=None):
     ap.add_argument('--daemon', action='store_true', help='second pass: the NEW side runs a daemon (kith kernel core-daemon) in its sandbox, so the Rust verbs the daemon answers go through its owner socket; its files (core/) are an intended difference. Needs --rust or --new; not with --core')
     ap.add_argument('--golden', metavar='DIR', help='golden mode: DIR holds frozen cases (*.json) and their recorded facets (facets/NAME.json). Replay (default) runs one side only and compares it to the record: the Python kernel, or with --rust / --new the Rust program. The same masks and intended.json as the two-sided run apply')
     ap.add_argument('--record', action='store_true', help='with --golden: run the OLD (Python) side alone and (re)write the recorded facets of the selected cases; compares nothing')
+    ap.add_argument('--require-switched', action='store_true', help='with --golden --rust: also replay the cases marked "unswitched" (their verb has no Rust side yet), which are red until it exists; without it they are listed as skipped')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--keep', action='store_true', help='keep the throwaway folders')
     ap.add_argument('--summary', metavar='FILE', help='write a JSON summary per command (green/red) to FILE; "-" for stdout')
     ap.add_argument('--list', action='store_true')
     a = ap.parse_args(argv)
 
-    global GOLDEN, RECORD, REPLAY_SIDE
+    global GOLDEN, RECORD, REPLAY_SIDE, REQUIRE_SWITCHED
+    REQUIRE_SWITCHED = a.require_switched
     if a.record and not a.golden:
         raise SystemExit('--record needs --golden DIR')
     if a.golden and (a.corpus or a.core or a.daemon):
@@ -657,7 +689,10 @@ def main(argv=None):
             print(doc, end='')
         else:
             Path(a.summary).write_text(doc)
-    print(f'{len(cases) - len(failed)}/{len(cases)} cases the same' + (f', {len(stale)} stale intended' if stale else ''))
+    unswitched = sum(1 for st in summary.values() for v in st['cases'].values() if v == 'unswitched')
+    if unswitched:
+        print(f'{unswitched} case(s) skipped: not switched to Rust yet (--require-switched replays them)')
+    print(f'{len(cases) - len(failed) - unswitched}/{len(cases) - unswitched} cases the same' + (f', {len(stale)} stale intended' if stale else ''))
     if WITH_CORE:
         print(f'core: {len(CORE_RAN)} case(s) ran with a core, {len(CORE_BARE)} started before any setup and ran bare')
         if not CORE_RAN:

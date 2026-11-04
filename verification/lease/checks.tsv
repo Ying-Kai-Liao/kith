@@ -1,0 +1,32 @@
+# variant	kind	property	expected
+# --- the fix: ping-anchored deadline, a clock that counts sleep -----------------
+fixed	INVARIANT	TypeOK	pass
+fixed	INVARIANT	GuestsWithinBelief	pass
+fixed	INVARIANT	OwnerNeverKilled	pass
+fixed	PROPERTY	NoSilentResurrection	pass
+fixed	PROPERTY	RevokedThenDead	pass
+# --- the code today (holder.rs): anchored at read time, Instant stops in sleep: FAILS ---
+today	INVARIANT	GuestsWithinBelief	fail
+today	PROPERTY	NoSilentResurrection	fail
+today	INVARIANT	OwnerNeverKilled	pass
+# --- one half of the fix alone is not enough ----------------------------------------
+read-anchor	INVARIANT	GuestsWithinBelief	fail
+read-anchor	PROPERTY	NoSilentResurrection	fail
+sleep-stops	INVARIANT	GuestsWithinBelief	fail
+# --- broken variants: each check removed must fail ----------------------------------
+no-echo	INVARIANT	GuestsWithinBelief	fail
+kill-later	INVARIANT	GuestsWithinBelief	fail
+kills-owner	INVARIANT	OwnerNeverKilled	fail
+# --- the conservative rule (no restore after a lapse) is as safe as the fix -------------
+no-restore	INVARIANT	GuestsWithinBelief	pass
+no-restore	INVARIANT	OwnerNeverKilled	pass
+no-restore	PROPERTY	NoSilentResurrection	pass
+# --- the runs are not vacuous: each of these happens (the property FAILS) ---------------
+fixed	INVARIANT	NeverSpawned	fail
+fixed	INVARIANT	NeverKilled	fail
+fixed	INVARIANT	NeverLost	fail
+fixed	INVARIANT	NeverRestored	fail
+fixed	INVARIANT	NeverHandSleptWithGuest	fail
+fixed	PROPERTY	NeverLapsedAsleep	fail
+sleep-stops	PROPERTY	NeverLapsedAsleep	pass
+fixed	INVARIANT	NeverStaleRenewIgnored	fail
