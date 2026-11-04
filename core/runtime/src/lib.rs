@@ -31,6 +31,9 @@ mod db;
 mod error;
 mod gate;
 mod holder_link;
+// `kith migrate --authority`: auth.json and the Keychain into core.db and the envelope (M2-8).
+#[cfg(unix)]
+mod import;
 mod layout;
 mod lock;
 mod log;
@@ -85,6 +88,26 @@ pub struct Migrated {
     pub to: i64,
 }
 
+/// What `kith migrate --authority` may do.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AuthorityOptions {
+    /// Print what would change and write nothing.
+    pub dry_run: bool,
+    /// Replace authority rows core.db already holds when they differ from auth.json (the default is to refuse).
+    pub force: bool,
+}
+
+/// What [`migrate_authority`] did, one line each.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AuthorityReport {
+    pub dry_run: bool,
+    /// Whether core.db (or the envelope) changed, or in a dry run would.
+    pub changed: bool,
+    /// The `VACUUM INTO` copy taken before the first write.
+    pub backup: Option<std::path::PathBuf>,
+    pub lines: Vec<String>,
+}
+
 /// How [`stateless_through_core`] ran a verb.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Via {
@@ -106,6 +129,24 @@ pub fn start(paths: &Paths) -> Result<Core, Error> {
 /// `kith migrate`: the same as [`start`], released at once. Needs the lock, so a running daemon refuses it.
 pub fn migrate(paths: &Paths) -> Result<Migrated, Error> {
     migrate_with(&Layout::new(&paths.machine), MIGRATIONS)
+}
+
+/// `kith migrate --authority`: imports auth.json's access tables into core.db and its profiles' Keychain items into the
+/// secrets envelope (see `import`). Idempotent, never edits the sources, `VACUUM INTO` a backup before the first write, and
+/// refuses rather than store an answer different from the file's. `ctx` says where the auth.json and the agents are.
+#[cfg(unix)]
+pub fn migrate_authority(
+    paths: &Paths,
+    ctx: &kith_kernel::secrets::Ctx,
+    opts: AuthorityOptions,
+) -> Result<AuthorityReport, Error> {
+    import::run(
+        &Layout::new(&paths.machine),
+        ctx,
+        opts,
+        &import::items::Keychain,
+        &mut import::items::OsEnvelope::default(),
+    )
 }
 
 /// Opens the core inside this process for one command.
