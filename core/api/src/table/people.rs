@@ -1,10 +1,10 @@
 //! M2 lane A (authority): the owner's access to people, as `kith-auth member`, `bot`, `bots-cap`, `preset` and `invite`
 //! have it today. Experimental, owner principal only, not in `released.json`; the result is `json` until the lane types
 //! it. The rows the core serves (M2-2: grant, revoke, list, the bots, the invites and the presets; M2-4: add, rename and
-//! remove a person, suspend and undo, clear-temp, retired) are answered by the daemon, because a write needs `&mut Core`
+//! remove a person, suspend and undo, clear-temp, retired; M2-3: the device access requests) are answered by the daemon, because a write needs `&mut Core`
 //! (`Core::call` itself answers NotServed). `people.revoke` takes one agent away from a person (`member --rm`);
 //! `people.suspend` is `kith-auth person --revoke`: they reach nothing, until `people.undo`. The access requests
-//! (`requests`, `approve`, `deny`) are M2-3's and still stubs: the caller falls back to `kith-auth`/`kith-people`.
+//! (`requests`, `approve`, `deny`) are the host's device-pairing requests (`accessRequests`, `decideAccessRequest`).
 //!
 //! `people.list` is spelled `kith people access` because `kith people ls` is the people list of `kith-people` today.
 //!
@@ -303,22 +303,51 @@ pub(super) const ROWS: &[Method] = &[
         &[pos("id", "string", true, "The id."), KERNEL, HOME, ENV],
         &["people", "retired"],
     ),
-    stub(
+    people(
         "people.requests",
-        "The access requests waiting for the owner.",
-        &[],
+        "The devices asking this computer for access, waiting for the owner (with the code to compare once the device has shown it).",
+        &[
+            sw(
+                "members",
+                &["--members"],
+                "Only members' requests (what the owner's other devices see).",
+            ),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
         &["people", "requests"],
     ),
-    stub(
+    people(
         "people.approve",
-        "Approve an access request.",
-        &[pos("id", "string", true, "The request.")],
+        "Approve a device's access request (it needs the device's code first). Answers the device to add.",
+        &[
+            pos("id", "string", true, "The request."),
+            sw(
+                "members",
+                &["--members"],
+                "Answer as one of the owner's other devices: members' requests only.",
+            ),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
         &["people", "approve"],
     ),
-    stub(
+    people(
         "people.deny",
-        "Deny an access request.",
-        &[pos("id", "string", true, "The request.")],
+        "Deny a device's access request.",
+        &[
+            pos("id", "string", true, "The request."),
+            sw(
+                "members",
+                &["--members"],
+                "Answer as one of the owner's other devices: members' requests only.",
+            ),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
         &["people", "deny"],
     ),
 ];
@@ -337,25 +366,6 @@ const fn people(
         "json",
         path,
         Served::Core,
-        Stability::Experimental,
-    )
-    .formats(J)
-}
-
-/// An M2 stub: owner only, `--json` form, experimental, still answered by the Python kernel.
-const fn stub(
-    name: &'static str,
-    summary: &'static str,
-    params: &'static [Param],
-    path: &'static [&'static str],
-) -> Method {
-    row(
-        name,
-        summary,
-        params,
-        "json",
-        path,
-        Served::Kernel,
         Stability::Experimental,
     )
     .formats(J)

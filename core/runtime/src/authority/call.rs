@@ -1,4 +1,4 @@
-//! The `people.*` rows the core answers (M2-2): the owner's writes to authority. The daemon routes them here (they need
+//! The `people.*` rows the core answers (M2-2: the owner's writes to authority; M2-3: the access requests). The daemon routes them here (they need
 //! `&mut Core`: a write is a claim transaction, as the gate's are). The params were checked against the row already.
 //!
 //! Answers are `{"lines": [...]}`, the lines `kith-auth` prints, so a CLI that switches to this prints them as they were;
@@ -9,6 +9,7 @@ use std::io::Read as _;
 use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
 use serde_json::{Value, json};
 
+use super::requests;
 use super::revoke::{self, Life};
 use super::store;
 use super::write::{self, Settings};
@@ -38,6 +39,9 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.undo"
             | "people.clearTemp"
             | "people.retired"
+            | "people.requests"
+            | "people.approve"
+            | "people.deny"
     )
 }
 
@@ -158,6 +162,19 @@ pub(crate) fn call_in(
                     }
                 }
             })
+        }
+        // The device-pairing access requests (M2-3): a table of their own, not `store::run`'s auth.json-shaped write.
+        // `members` is the caller's say, and leaving it out means full owner power (the owner's own request too, with
+        // `screen`). Today the host refuses remote devices itself (`api/remote.rs`) before it asks. M2-17 must derive
+        // "at the computer" from the caller's connection, or default to the narrow answer (`members` on).
+        "people.requests" => requests::list(core, c, switch(params, "members")),
+        "people.approve" => {
+            let id = need(params, "id").map_err(|d| store::refusal(&d))?;
+            requests::approve(core, c, id, switch(params, "members"))
+        }
+        "people.deny" => {
+            let id = need(params, "id").map_err(|d| store::refusal(&d))?;
+            requests::deny(core, c, id, switch(params, "members"))
         }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         "people.botsCap" if word(params, "amount").is_none() => {
