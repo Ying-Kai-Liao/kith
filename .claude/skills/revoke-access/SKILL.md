@@ -18,7 +18,7 @@ design). This skill is its only documentation.
 ## Run it
 
 ```
-verification/revoke/run.sh                          # every row of checks.tsv (80 rows, about 5 minutes)
+verification/revoke/run.sh                          # every row of checks.tsv (111 rows, about 13 minutes)
 verification/revoke/run.sh --show VARIANT PROPERTY   # TLC's full output (the counterexample) for one row
 verification/revoke/drift.sh                        # covered files changed since the sync commit?
 ```
