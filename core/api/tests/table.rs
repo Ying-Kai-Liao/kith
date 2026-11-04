@@ -26,6 +26,10 @@ const HOST_ROWS: [&str; 6] = [
     "syncLease.renew",
 ];
 
+/// The one row that hands a secret's value back (M2-10c): the host's, because its proof is process memory, where the
+/// owner token is a file any process of the user can read. The owner keeps `secrets.open|has|put|delete`.
+const SECRET_VALUE_ROW: &str = "secrets.get";
+
 fn repo(path: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
@@ -73,7 +77,7 @@ fn every_row_is_well_formed() {
         // The sync lease's writes are the host's (M2-10b); the sync-lease test below holds each of those rows.
         let want: &[Principal] = if on_the_run_socket.contains(&m.name) {
             &[Principal::RunToken]
-        } else if HOST_ROWS.contains(&m.name) {
+        } else if HOST_ROWS.contains(&m.name) || m.name == SECRET_VALUE_ROW {
             &[Principal::Host]
         // The host also reads two owner rows: the lease counter (`mark`) and the cutover gate (`cutover.mayServe`, which
         // the host-start guard calls). `kernel.cutover`, the write side, stays Owner only.
@@ -651,4 +655,47 @@ fn the_row_order_is_the_order_of_the_families() {
     assert!(at("run.projectId") < at("backup.list"));
     assert!(at("schedule.log") < at("people.grant"));
     assert!(at("people.deny") < at("cards.list"));
+}
+
+#[test]
+fn only_the_host_reads_a_secrets_value_and_the_owner_keeps_the_rest() {
+    let get = method(SECRET_VALUE_ROW).unwrap();
+    assert_eq!(get.principals, &[Principal::Host]);
+    // The CLI always connects as the owner, so the row has no command line.
+    assert!(get.cli.hidden);
+    assert!(parse_argv(&["secrets", "get", "a"]).is_err());
+    for name in [
+        "secrets.open",
+        "secrets.has",
+        "secrets.put",
+        "secrets.delete",
+    ] {
+        assert_eq!(
+            method(name).unwrap().principals,
+            &[Principal::Owner],
+            "{name}"
+        );
+    }
+    // No other secrets row hands a value back: `get` is the only one the table may give to Host.
+    let host_secrets: Vec<_> = METHODS
+        .iter()
+        .filter(|m| m.name.starts_with("secrets.") && m.principals.contains(&Principal::Host))
+        .map(|m| m.name)
+        .collect();
+    assert_eq!(host_secrets, [SECRET_VALUE_ROW]);
+}
+
+#[test]
+fn the_launch_keys_row_is_the_owners_alone() {
+    let row = method("secrets.serviceKeys").unwrap();
+    assert_eq!(row.principals, &[Principal::Owner]);
+    for who in [
+        Principal::Host,
+        Principal::Member,
+        Principal::Bot,
+        Principal::RunToken,
+    ] {
+        assert!(!row.principals.contains(&who), "{who:?}");
+    }
+    assert!(row.cli.hidden);
 }

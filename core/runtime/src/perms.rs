@@ -187,12 +187,12 @@ enum Verdict {
     Unreadable,
 }
 
-/// `SQLite`'s -wal and -shm: the only files allowed to vanish mid-check.
+/// `SQLite`'s `<name>.db-wal` and `<name>.db-shm`: the only files allowed to vanish mid-check.
 #[cfg_attr(unix, allow(dead_code))]
 fn is_sidecar(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .is_some_and(|n| n.ends_with("-wal") || n.ends_with("-shm"))
+        .is_some_and(|n| n.ends_with(".db-wal") || n.ends_with(".db-shm"))
 }
 
 /// Whether `icacls` output holds at least one `principal:(rights)` entry.
@@ -213,8 +213,15 @@ fn judge(
     if read_ok {
         // `icacls` can exit 0 while naming no entry: its error text ("...being used by another process", "Failed
         // processing 1 files") stands where the list should be. That is no list at all, not an open one.
+        // When the sidecar is gone by now, that error text is its deletion ("The system cannot find the file
+        // specified", exit 0): the CI flake. Only a sidecar that is provably gone is excused; a list with entries is
+        // never excused here: entries beside a failure are a partial read of a file that existed, so Unreadable.
         if !has_entries(text) || text.contains("Failed processing 1 ") {
-            Verdict::Unreadable
+            if !has_entries(text) && !still_exists && allow_vanish {
+                Verdict::Vanished
+            } else {
+                Verdict::Unreadable
+            }
         } else if acl_is_owner_only(text, path, user) {
             Verdict::Private
         } else {
@@ -340,6 +347,58 @@ mod tests {
         );
     }
 
+    /// The CI flake: `icacls` exits 0 with "Failed processing 1 files ... cannot find the file specified" when the
+    /// sidecar is deleted between the existence check and the read.
+    #[test]
+    fn icacls_exit_zero_with_a_deleted_sidecar_is_vanished_only_for_sidecars() {
+        let msg = "Successfully processed 0 files; Failed processing 1 files\nC:\\m\\core.db-wal: The system cannot find the file specified.\n";
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", false, true),
+            Verdict::Vanished
+        );
+        // Still there: not excused. Not a sidecar (core.db must never vanish): not excused.
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db", "me", false, false),
+            Verdict::Unreadable
+        );
+        // A real list open to Users is refused even when the sidecar is gone by the time we look.
+        let open = format!("{OWNER_ONLY} BUILTIN\\Users:(R)\n");
+        assert_eq!(
+            judge(true, &open, "C:\\m\\core.db-shm", "me", false, true),
+            Verdict::Open
+        );
+    }
+
+    /// The sidecar was deleted and created again (a new connection) before we looked: it exists, so it is judged,
+    /// never excused as vanished.
+    #[test]
+    fn a_recreated_open_sidecar_is_never_vanished() {
+        let msg = "C:\\m\\core.db-wal: The process cannot access the file because it is being used by another process.\nSuccessfully processed 0 files; Failed processing 1 files\n";
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+        assert_eq!(
+            judge(false, "", "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
+    }
+
+    #[test]
+    fn entries_beside_a_failure_are_not_vanished() {
+        let text = "C:\\m\\core.db-wal HOST\\me:(F)\n NT AUTHORITY\\SYSTEM:(F)\n\nSuccessfully processed 0 files; Failed processing 1 files\n";
+        for exists in [true, false] {
+            assert_eq!(
+                judge(true, text, "C:\\m\\core.db-wal", "me", exists, true),
+                Verdict::Unreadable
+            );
+        }
+    }
+
     #[test]
     fn only_sidecars_may_vanish() {
         assert_eq!(
@@ -354,6 +413,12 @@ mod tests {
             "core.holder",
             "core.token",
             "snap.db",
+            "core.db-journal",
+            "core.db-wal.bak",
+            "x-wal",
+            "x-shm",
+            "-wal",
+            "core.db-shm.tmp",
         ] {
             assert!(!is_sidecar(Path::new(n)), "{n}");
         }

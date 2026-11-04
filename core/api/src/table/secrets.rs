@@ -1,6 +1,6 @@
 //! M2 lane B (secrets in the envelope): the owner's door to it. The host vault is a client of these rows over the owner
 //! socket (M2-7), because the host may not link the core's internals (runtime-design section 9b rule 6). Values cross
-//! as text and only on the owner socket; `put` takes its value as a caller param, never on a command line. Experimental
+//! as text and only on the owner socket (`get` only on the host's connection); `put` takes its value as a caller param, never on a command line. Experimental
 //! until kith-auth and rollback (M2-18) have used them; not in `released.json`.
 
 use super::build::*;
@@ -45,7 +45,11 @@ pub(super) const ROWS: &[Method] = &[
         Served::Core,
         Stability::Experimental,
     )
-    .formats(J),
+    .formats(J)
+    // The only row that hands a value back: the host (the vault) proves its in-memory secret for it. The owner token
+    // is a file any same-user process can read, so it gets has/put/delete/open and never the value (M2-10c).
+    .principals(HOST)
+    .no_cli(),
     row(
         "secrets.put",
         "Store a secret sealed under the machine's key, replacing an earlier value of that name.",
@@ -63,4 +67,32 @@ pub(super) const ROWS: &[Method] = &[
         Stability::Experimental,
     )
     .formats(J),
+    row(
+        "secrets.serviceKeys",
+        "The keys one agent may use for one service, for a launch: the values of the service's declared variables, from the profile the agent is granted (the person's own grant first, then the agent's). A source that is not in the envelope (env:, env-file:) comes back unresolved for the caller to resolve itself. Refuses when there is no grant or no such profile, the profile is another person's and not lent, or a declared variable has no row or an empty value. Writes no audit line: the caller (kith-auth) logs agent, service, profile and person, never the value.",
+        &[
+            pos("agent", "string", true, "The agent being launched."),
+            pos("service", "string", true, "The service whose server starts."),
+            caller(
+                "vars",
+                "[string]",
+                "The variables the service declares as secrets (the core has no service specs). None declared: the grant and person rule still apply and the profile is returned, but no key is read.",
+            ),
+            caller(
+                "person",
+                "string",
+                "Whom the run is for (kith-auth's acting()): their own grant (agent@person) comes first, and another person's profile is refused unless lent, the owner's runs included. Only \"\" skips the check.",
+            ),
+            flag("profile", "string", &["--profile"], "Which of the granted profiles to use; the first granted otherwise."),
+        ],
+        "json",
+        &["secrets", "service-keys"],
+        Served::Core,
+        Stability::Experimental,
+    )
+    .formats(J)
+    // Owner only, and it hands values back: the narrow door kith-auth uses at the switch (M2-18b, q223), so `get` can
+    // stay the host's alone. Per service, as `kith-auth exec` resolves them: a broken grant fails that service only.
+    // Not wired into kith-auth yet.
+    .no_cli(),
 ];
