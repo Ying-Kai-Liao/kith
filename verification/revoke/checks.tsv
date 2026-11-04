@@ -83,6 +83,14 @@ broken-answer-after-end	PROPERTY	StoppedNeverWakes	fail
 broken-no-ask-sweep	PROPERTY	AsksEnded	fail
 broken-no-wake-withdraw	PROPERTY	WakesWithdrawn	fail
 asks	INVARIANT	NeverAnswerWake	fail
+# --- the core's revoke order (M3-10d, core/runtime/src/revoke_order.rs): claims of P and B swept, THEN the asks ended ---
+core-order	INVARIANT	TypeOK	pass
+core-order	INVARIANT	OrderKept	pass
+core-order	PROPERTY	Swept	pass
+core-order	PROPERTY	AsksEnded	pass
+core-order	PROPERTY	StoppedNeverWakes	pass
+broken-asks-first	INVARIANT	OrderKept	fail
+broken-bots-skipped	PROPERTY	Swept	fail
 handle	INVARIANT	TypeOK	pass
 handle	PROPERTY	HandleConverges	pass
 handle	PROPERTY	HandleStampsGrow	pass

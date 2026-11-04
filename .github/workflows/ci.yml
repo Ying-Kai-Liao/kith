@@ -8,12 +8,13 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
-      # mode=check is the cheap by-hand Rust check for workers (the rust-check job at the bottom). Push, PR and
-      # a dispatch with no inputs are all mode=full: exactly the jobs below, as before.
+      # mode=check is the cheap by-hand Rust check for workers (the rust-check job at the bottom). mode=model runs
+      # only the schedule-fire TLA+ job (it needs no packages). Push, PR and a dispatch with no inputs are all
+      # mode=full: exactly the jobs below, as before.
       mode:
-        description: "full = the whole pipeline (batch runs); check = only the rust-check job"
+        description: "full = the whole pipeline (batch runs); check = only the rust-check job; model = only the schedule-fire model"
         type: choice
-        options: [full, check]
+        options: [full, check, model]
         default: full
       packages:
         description: "check mode: cargo package names (-p), space separated"
@@ -49,8 +50,8 @@ jobs:
   # Path filtering happens here, not in `on.paths`, so the `ci` job below always
   # reports and can be the one required check.
   changes:
-    # Check mode skips this job, and with it (needs) every job below that depends on it.
-    if: ${{ inputs.mode != 'check' }}
+    # Check and model mode skip this job, and with it (needs) every job below that depends on it.
+    if: ${{ inputs.mode != 'check' && inputs.mode != 'model' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     # dorny/paths-filter lists a pull request's files through the API.
@@ -74,6 +75,7 @@ jobs:
       revoke: ${{ steps.f.outputs.revoke }}
       secrets: ${{ steps.f.outputs.secrets }}
       lease: ${{ steps.f.outputs.lease }}
+      schedule_fire: ${{ steps.f.outputs.schedule_fire }}
       ios: ${{ steps.h.outputs.ios }}
       desktop: ${{ steps.h.outputs.desktop }}
       relay: ${{ steps.h.outputs.relay }}
@@ -191,6 +193,16 @@ jobs:
               - 'core/holder/src/client.rs'
               - 'core/holder/src/clock.rs'
               - 'core/runtime/src/holder_link.rs'
+              - '.github/workflows/ci.yml'
+            # The TLA+ model of the schedule fire protocol and the code it covers (the list in the schedule-fire skill).
+            schedule_fire:
+              - 'verification/schedule-fire/**'
+              - 'verification/lease/run.sh'
+              - '.claude/skills/schedule-fire/**'
+              - 'core/runtime/src/schedules/**'
+              - 'core/runtime/src/migrations/schedules/**'
+              - 'core/runtime/src/conversations/claims.rs'
+              - 'kernel/bin/kith-sched'
               - '.github/workflows/ci.yml'
       # 'every': a file must match the whole list, so each filter is one brace pattern plus a markdown
       # exclusion. A docs-only change then runs no heavy job. The only markdown that ships is
@@ -436,6 +448,27 @@ jobs:
           key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
       - name: TLA+ model check
         run: verification/lease/run.sh
+
+  # The same for the schedule fire protocol (one transaction per fire, skip rule, deadline): verification/schedule-fire/checks.tsv.
+  # Check mode skips this job (it needs `changes`); mode=model runs just this one:
+  #   gh workflow run ci.yml --repo Ying-Kai-Liao/kith --ref <branch> -f mode=model
+  schedule-fire:
+    needs: changes
+    if: ${{ !cancelled() && (inputs.mode == 'model' || needs.changes.outputs.schedule_fire == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/kith-verify
+          key: kith-verify-${{ hashFiles('verification/threads/run.sh') }}
+      - name: TLA+ model check
+        run: verification/schedule-fire/run.sh
 
   # Format and clippy on the whole host workspace. The tests are in host-build, host-test and host-crates.
   host:
@@ -1037,8 +1070,8 @@ jobs:
   # skipped by the filter, fails on any failure or cancellation.
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
-    if: ${{ !cancelled() && inputs.mode != 'check' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, writer-lock, holder-lease, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    if: ${{ !cancelled() && inputs.mode != 'check' && inputs.mode != 'model' }}
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, core-keystore, cloud, licenses, thread-writers, writer-lock, holder-lease, schedule-fire, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1138,3 +1171,46 @@ jobs:
             serve/host/target/debug/kith-stub
           if-no-files-found: error
           retention-days: 3
+
+  # Check mode also runs the host-kernel list check (the script only, no build, seconds): a host test that reads the
+  # kernel and is missing from scripts/ci/host-kernel-tests.txt fails by hand, not first on a batch run.
+  rust-check-host-kernel:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' }}
+    name: host-kernel-check (check mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/ci/host-kernel-tests.sh check
+
+  # Check mode with kith-serve in packages also runs its unit tests (host-test's `-E 'not kind(test)'`), scoped to that
+  # crate, on the requested os. Never Windows: kith-serve is not built there.
+  rust-check-host-test:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' && inputs.os != 'windows' && contains(inputs.packages, 'kith-serve') }}
+    name: host-test (${{ matrix.os }}, check mode)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os == 'linux' && '["ubuntu-latest"]' || inputs.os == 'macos' && '["macos-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+    defaults:
+      run:
+        working-directory: serve/host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: rust-check-host-test-${{ matrix.os }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.100
+      - name: Run the kith-serve unit tests
+        run: cargo nextest run --profile ci -p kith-serve -E 'not kind(test)'

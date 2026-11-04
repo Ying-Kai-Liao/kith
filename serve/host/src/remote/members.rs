@@ -21,10 +21,17 @@ pub use kith_wire::cloud::Membership as Listed;
 /// Applies the cloud's membership list. `None` (an older cloud that doesn't list them) changes nothing. Never fails
 /// the pull: a problem is logged and the next pull tries again.
 pub async fn sync(hub: &Hub, listed: Option<&[Listed]>, owner_uid: Option<&str>) {
-    let Some(listed) = listed else { return };
     let bin = account::bin().await;
-    if let Err(e) = apply(hub, bin.as_deref(), listed, owner_uid).await {
+    if let Some(listed) = listed
+        && let Err(e) = apply(hub, bin.as_deref(), listed, owner_uid).await
+    {
         tracing::warn!(error = format!("{e:#}"), "couldn't apply the cloud's memberships");
+    }
+    // Every pass, whatever changed (or whether the cloud lists memberships at all): a request of a person with no
+    // membership here is dead.
+    super::cloud::deny_without_membership(hub).await;
+    if listed.is_none() {
+        return;
     }
     if let Some(bin) = bin.as_deref() {
         forget_removed(hub, bin).await;
@@ -190,6 +197,31 @@ pub async fn auth_people(bin: &Path) -> Result<Vec<AuthPerson>> {
     serde_json::from_str(&out).context("reading kith-auth people --json")
 }
 
+/// [`auth_people`] as the owner's access stands now. With `KITH_CORE_AUTHORITY=1` the core holds the membership rows
+/// (M2-17: `setPersonAccess` writes them there, kith-auth's file no longer changes), so each person's `agents` come from
+/// `people.list` and kith-auth only says who the people are. A core that can't be asked is an error, never a list that
+/// reads as the old file.
+pub async fn auth_people_now(bin: &Path) -> Result<Vec<AuthPerson>> {
+    let mut people = auth_people(bin).await?;
+    if crate::api::authority::guard_on_core() {
+        let rows = crate::api::authority::owner_call("people.list", json!({}), true).await?;
+        let rows = rows["rows"].as_array().cloned().unwrap_or_default();
+        let agent = |r: &serde_json::Value| AuthAgent {
+            agent: r["agent"].as_str().unwrap_or_default().to_owned(),
+            role: r["preset"].as_str().unwrap_or_default().to_owned(),
+            via: r["via"].as_str().unwrap_or_default().to_owned(),
+        };
+        for p in &mut people {
+            // The person's own rows, and the `*` row for everyone, as kith-auth lists them.
+            p.agents =
+                rows.iter().filter(|r| r["via"] == "everyone" || r["person"] == p.id.as_str()).map(agent).collect();
+            // The `*` row first, so a person's own row for the same agent is the one the mirror keeps.
+            p.agents.sort_by_key(|a| a.via != "everyone");
+        }
+    }
+    Ok(people)
+}
+
 /// Makes the store's copy of each person's own agents (`PersonRow.agents`) what kith-auth says, so a membership added or
 /// removed with `kith-auth member` shows in the one sync reader of it, `roles::event_for`. kith-auth wins: a person
 /// kith-auth no longer lists holds nothing. A revoked person's copy is left as it stands (their rows stand for the
@@ -219,7 +251,7 @@ pub fn mirror_agents(store: &Store, auth: &[AuthPerson]) {
 pub async fn refresh_mirror(hub: &Hub) {
     let Some(bin) = account::bin().await else { return };
     let _w = crate::api::people::AUTH_WRITES.lock().await;
-    if let Ok(auth) = auth_people(&bin).await {
+    if let Ok(auth) = auth_people_now(&bin).await {
         mirror_agents(&hub.store, &auth);
     }
 }
@@ -246,6 +278,11 @@ pub async fn auth_person(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
     Ok(auth_people(bin).await?.into_iter().find(|p| p.id == id))
 }
 
+/// [`auth_person`] as the owner's access stands now (see [`auth_people_now`]).
+pub async fn auth_person_now(bin: &Path, id: &str) -> Result<Option<AuthPerson>> {
+    Ok(auth_people_now(bin).await?.into_iter().find(|p| p.id == id))
+}
+
 /// Applies the cloud's list of accounts this computer's owner revoked, on any of their Macs (R6): a person here whose
 /// Kith account is listed gets the revoked state in kith-auth, and one revoked here whose account is no longer listed
 /// gets it cleared (undone on another Mac). A person with no Kith account is this Mac's alone and is left as it is.
@@ -262,9 +299,15 @@ pub async fn apply_revoked(bin: Option<&Path>, listed: Option<&[String]>) -> Res
             continue;
         }
         let flag = if revoked { "--revoke" } else { "--unrevoke" };
-        locked_run(bin, &["person", &p.id, flag, "--local"])
-            .await
-            .with_context(|| format!("kith-auth person {} {flag}", p.id))?;
+        // Each person is logged on their own (a pull can change several): a core that missed the change is said here, once
+        // per person, because kith-auth exits 0 for it.
+        let said = {
+            let _w = crate::api::people::AUTH_WRITES.lock().await;
+            account::run_noted(bin, &["person", &p.id, flag, "--local"]).await
+        }
+        .with_context(|| format!("kith-auth person {} {flag}", p.id))?
+        .1;
+        account::note_stderr(&p.id, &said);
         tracing::info!(person = p.id, revoked, "applied the owner's revoke from the cloud");
         if revoked { out.cut.push(p.id) } else { out.restored.push(p.id) }
     }

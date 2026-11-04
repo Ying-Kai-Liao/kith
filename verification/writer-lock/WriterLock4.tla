@@ -20,6 +20,7 @@
 (*   "nohash"     no transcript-hash check before prompting a warm process *)
 (*   "readlate"   core records the hash when it acks, not the turn end's   *)
 (*   "stubfirst"  the stub may die before its engine (killed group)        *)
+(*   "tonolock"   M3-10b1: the take-over writer starts without the lock    *)
 (* HMode: on holder crash its group "survive"s (detached) or "die"s.       *)
 (*                                                                         *)
 (* Copied from the architect's folder (2026-11-03-writer-lock/model/       *)
@@ -197,7 +198,7 @@ TWStart ==   \* after "gone": the new writer's session is claimed, then waits fo
   /\ UNCHANGED <<coreV, cst, killReq, ext, cv, goneSeen, revokes, tos, st, hV, gV, lk, dSt, dSaw, xV>>
 
 TWLock ==
-  /\ twSt = "wait" /\ lk = {} /\ lk' = {"tw"} /\ twSt' = "running"
+  /\ twSt = "wait" /\ (lk = {} \/ Variant = "tonolock") /\ lk' = lk \cup {"tw"} /\ twSt' = "running"   \* M3-10b1: tonolock = the take-over writer skips the lock
   /\ UNCHANGED <<coreV, dbV, st, hV, gV, dSt, dSaw, xV>>
 
 TWExit ==
