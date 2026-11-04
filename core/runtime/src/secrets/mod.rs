@@ -85,6 +85,24 @@ pub(crate) fn call(
                 json!({"found": true, "value": value})
             }
         }),
+        "secrets.serviceKeys" => {
+            let vars: Vec<&str> = params
+                .get("vars")
+                .and_then(Value::as_array)
+                .map(|a| a.iter().filter_map(Value::as_str).collect())
+                .unwrap_or_default();
+            let opt = |f: &str| params.get(f).and_then(Value::as_str);
+            envelope.service_keys(
+                conn,
+                &ServiceKeys {
+                    agent: text("agent")?,
+                    service: text("service")?,
+                    vars: &vars,
+                    person: text("person")?,
+                    profile: opt("profile"),
+                },
+            )
+        }
         "secrets.put" => {
             envelope.put(conn, text("name")?, text("value")?.as_bytes())?;
             Ok(json!({}))
@@ -93,6 +111,16 @@ pub(crate) fn call(
             "kith-core: {method} is not answered in the core yet"
         ))),
     }
+}
+
+/// The params of `secrets.serviceKeys`.
+pub(crate) struct ServiceKeys<'a> {
+    pub agent: &'a str,
+    pub service: &'a str,
+    pub vars: &'a [&'a str],
+    /// Who the run acts for (`acting()`'s answer); only "" means no person check.
+    pub person: &'a str,
+    pub profile: Option<&'a str>,
 }
 
 /// Longest record name, in bytes. Names are the associated data, so they stay short and printable-ish.
@@ -156,6 +184,121 @@ impl Envelope {
             params![name, key_id, nonce.as_slice(), sealed, now],
         )?;
         Ok(())
+    }
+
+    /// The keys `agent` may use for `service` (M2-18b), as `kith-auth exec` resolves them: the values of the `vars` the
+    /// service declares, from the profile granted (`agent@person` first, then `agent`; `profile` picks one of a list,
+    /// else the lowest `seq`). Refuses, naming what is missing and never a value: no grant (with the `kith-auth grant`
+    /// hint), another person's profile that is not lent, a declared variable with no row or an empty value. A source
+    /// that is not a `keychain:` record (`env:`, `env-file:`) comes back unresolved: it names the caller's own
+    /// environment or files, which the core must not read for it. With no `vars` the grant and the person rule
+    /// are still applied and the profile row must exist, but no variable row or record is read; the chosen profile is
+    /// returned for the caller's audit. `person` is required (the caller passes `acting()`): the run is checked like
+    /// anyone's, the owner's included, and only "" skips the check, as Python's empty `acting()` does. A `profile` pick
+    /// with a single-string grant refuses here where Python ignores `KITH_AUTH_PROFILE` for a string grant (the only
+    /// setter, kith-send-to, sets it for a granted profile, so no live path differs). "no profile" (no `secret_profiles`
+    /// row) and "not set" (a declared var with no row) stay distinct messages. The audit line (agent, service, profile, person) is the caller's to write; the core writes none.
+    /// Through the daemon the master key is loaded before the call (see `daemon.rs`), so a locked key store refuses
+    /// even a call that would read no record.
+    pub(crate) fn service_keys(&mut self, conn: &Connection, p: &ServiceKeys) -> Result<Value> {
+        for n in [p.agent, p.service] {
+            if n.is_empty()
+                || n.len() > MAX_NAME
+                || n.chars().any(|c| c.is_control() || c == '/' || c == '@')
+            {
+                return Err(Error::BadParams(
+                    "kith-core: secrets.serviceKeys needs an agent and a service name".into(),
+                ));
+            }
+        }
+        let (agent, service) = (p.agent, p.service);
+        let granted = |who: &str| -> Result<Vec<String>> {
+            let mut stmt = conn.prepare(
+                "SELECT profile FROM secret_grants WHERE agent = ?1 AND service = ?2 ORDER BY seq",
+            )?;
+            let rows = stmt
+                .query_map([who, service], |r| r.get::<_, String>(0))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(rows)
+        };
+        let person = p.person;
+        let mut list = if person.is_empty() {
+            Vec::new()
+        } else {
+            granted(&format!("{agent}@{person}"))?
+        };
+        if list.is_empty() {
+            list = granted(agent)?;
+        }
+        let profile = match (p.profile, list.first()) {
+            (_, None) => {
+                return Err(Error::Refused(format!(
+                    "kith-core: {agent} has no grant for {service} (kith-auth grant {agent} {service} <profile>)"
+                )));
+            }
+            (Some(pick), _) if list.iter().any(|g| g == pick) => pick.to_string(),
+            (Some(pick), _) => {
+                return Err(Error::Refused(format!(
+                    "kith-core: {agent} has no grant for {service} as {pick} (kith-auth grant {agent} {service} {pick})"
+                )));
+            }
+            (None, Some(first)) => first.clone(),
+        };
+        let row: Option<(Option<String>, Option<String>)> = conn
+            .query_row(
+                "SELECT person, lent FROM secret_profiles WHERE profile = ?1",
+                [&profile],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        let Some(row) = row else {
+            return Err(Error::Refused(format!(
+                "kith-core: no profile '{profile}' (granted to {agent} for {service}; kith-auth set {profile} <var>)"
+            )));
+        };
+        if let (Some(owner), lent, false) = (&row.0, &row.1, person.is_empty()) {
+            let lent: Vec<String> = lent
+                .as_deref()
+                .and_then(|t| serde_json::from_str(t).ok())
+                .unwrap_or_default();
+            if owner != person && !lent.iter().any(|l| l == person) {
+                return Err(Error::Refused(format!(
+                    "kith-core: {profile} is {owner}'s and this run is for {person} (kith-auth grant {agent}@{person} {service} <their profile>)"
+                )));
+            }
+        }
+        let mut keys = Vec::new();
+        let mut unresolved = Vec::new();
+        for var in p.vars {
+            let source: Option<String> = conn
+                .query_row(
+                    "SELECT source FROM secret_vars WHERE profile = ?1 AND var = ?2",
+                    [&profile, *var],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let Some(source) = source else {
+                return Err(Error::Refused(format!(
+                    "kith-core: {profile}: {var} does not resolve (not set; kith-auth set {profile} {var})"
+                )));
+            };
+            if !source.starts_with("keychain:") {
+                unresolved.push(json!({"var": var, "source": source}));
+                continue;
+            }
+            let value = self.get(conn, &source)?.filter(|v| !v.is_empty());
+            let Some(value) = value else {
+                return Err(Error::Refused(format!(
+                    "kith-core: {profile}: {var} does not resolve ({source} is not stored or empty; kith-auth set {profile} {var})"
+                )));
+            };
+            let value = std::str::from_utf8(&value)
+                .map_err(|_| Error::Corrupt("kith-core: the secret is not text".into()))?;
+            keys.push(json!({"var": var, "value": value}));
+        }
+        Ok(
+            json!({"agent": agent, "service": service, "profile": profile, "keys": keys, "unresolved": unresolved}),
+        )
     }
 
     /// The secret under `name`, or `None` if there is no such record.
