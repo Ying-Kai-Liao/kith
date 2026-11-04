@@ -222,6 +222,7 @@ fn check_acl(path: &Path) -> Result<()> {
     let allow_vanish = is_sidecar(path);
     // A -shm being created or torn down by another connection answers `icacls` with an error for a moment; a real
     // open list never goes away, so a few short retries cost nothing on the normal path.
+    let mut unreadable = false;
     for attempt in 0..5 {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_millis(40));
@@ -246,11 +247,11 @@ fn check_acl(path: &Path) -> Result<()> {
         };
         match verdict {
             Verdict::Private | Verdict::Vanished => return Ok(()),
-            Verdict::Open => break,
+            Verdict::Open => {
+                unreadable = false;
+                break;
+            }
             Verdict::Unreadable => unreadable = true,
-        }
-        if verdict == Verdict::Open {
-            unreadable = false;
         }
     }
     if unreadable {
