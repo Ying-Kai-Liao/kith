@@ -1,0 +1,8 @@
+{
+  "fakes": "",
+  "state:home/.kith/machine/accounts/claude/work/projects/-w/abc-9.jsonl": "{\"cwd\": \"<HOME>/work\"}\n",
+  "state:home/work/": "<empty dir>\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: unknown thread \"abc-9\" (the Kith host is not running, so only a Claude session id can be resumed)\n",
+  "step0.stdout": ""
+}

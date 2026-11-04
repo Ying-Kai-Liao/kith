@@ -1,0 +1,11 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"host\",\n  \"next\": \"<EPOCH>\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"a\",\n      \"run\": \"<ID12>\",\n      \"text\": \"hi\",\n      \"why\": \"\"\n    },\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"b\",\n      \"run\": null,\n      \"text\": \"hi\",\n      \"why\": \"\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"s1\",\n  \"tries\": 0,\n  \"turn\": {\n    \"at\": \"<TS>\",\n    \"pid\": 2147483000,\n    \"procStart\": null,\n    \"run\": \"<ID12>\",\n    \"sid\": null\n  },\n  \"v\": 1\n}\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "",
+  "step1.stdout": ""
+}

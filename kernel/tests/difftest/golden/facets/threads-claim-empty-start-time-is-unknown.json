@@ -1,0 +1,8 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/s-1.claim": "{\"pid\": 1, \"procStart\": \"\", \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/s-1.claim.lock": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: that session is busy: held by terminal (pid 1); try again in a moment\n",
+  "step0.stdout": ""
+}

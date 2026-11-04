@@ -1,0 +1,13 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"wait\", \"session\": \"s1\", \"wait\": \"<ID12>\", \"on\": \"at:+30m\", \"until\": \"<TS>\"}\n",
+  "state:home/.kith/sessions/queue/": "<empty dir>\n",
+  "state:home/.kith/sessions/waits/.lock": "",
+  "state:home/.kith/sessions/waits/<ID12>.json": "{\n  \"agent\": \"coder\",\n  \"at\": \"<EPOCH>\",\n  \"checked\": \"<EPOCH>\",\n  \"created\": \"<EPOCH>\",\n  \"id\": \"<ID12>\",\n  \"kind\": \"at\",\n  \"note\": \"\",\n  \"on\": \"at:+30m\",\n  \"seen\": null,\n  \"session\": \"s1\",\n  \"until\": \"<EPOCH>\",\n  \"v\": 1,\n  \"why\": \"tea\"\n}\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "waiting <ID12>: this session gets a turn at <TS>; while a terminal holds it, the turn waits for the terminal to close\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "s1  coder  waiting <ID12> on at:+30m until <TS>\n"
+}

@@ -1,0 +1,13 @@
+{
+  "fakes": "\nclaude auth status cfg=\nclaude auth status cfg=\nclaude auth status cfg=\ncodex login status home=\ncodex login status home=\ncodex login status home=",
+  "state:home/.kith/settings.json.lock": "",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "  codex: not logged in; to sign it in: codex login\nID      SET  STATUS      USAGE  PINNED\nclaude  -    ready\ncodex   -    signed out\npolicy: fill; cross-harness fallback: off\n",
+  "step1.exit": "0\n",
+  "step1.json": "[\n  {\n    \"account\": null,\n    \"fix\": null,\n    \"harness\": \"claude\",\n    \"id\": \"claude\",\n    \"in_set\": false,\n    \"kind\": \"subscription\",\n    \"last_started\": null,\n    \"logged_in\": true,\n    \"order\": null,\n    \"pins\": [],\n    \"ready\": true,\n    \"status\": \"ready\",\n    \"usage\": null,\n    \"why\": null\n  },\n  {\n    \"account\": null,\n    \"fix\": \"codex login\",\n    \"harness\": \"codex\",\n    \"id\": \"codex\",\n    \"in_set\": false,\n    \"kind\": \"subscription\",\n    \"last_started\": null,\n    \"logged_in\": false,\n    \"order\": null,\n    \"pins\": [],\n    \"ready\": false,\n    \"status\": \"signed_out\",\n    \"usage\": null,\n    \"why\": \"not logged in\"\n  }\n]\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "[\n  {\n    \"account\": null,\n    \"fix\": null,\n    \"harness\": \"claude\",\n    \"id\": \"claude\",\n    \"in_set\": false,\n    \"kind\": \"subscription\",\n    \"last_started\": null,\n    \"logged_in\": true,\n    \"order\": null,\n    \"pins\": [],\n    \"ready\": true,\n    \"status\": \"ready\",\n    \"usage\": null,\n    \"why\": null\n  },\n  {\n    \"account\": null,\n    \"fix\": \"codex login\",\n    \"harness\": \"codex\",\n    \"id\": \"codex\",\n    \"in_set\": false,\n    \"kind\": \"subscription\",\n    \"last_started\": null,\n    \"logged_in\": false,\n    \"order\": null,\n    \"pins\": [],\n    \"ready\": false,\n    \"status\": \"signed_out\",\n    \"usage\": null,\n    \"why\": \"not logged in\"\n  }\n]\n",
+  "step2.stderr": ""
+}

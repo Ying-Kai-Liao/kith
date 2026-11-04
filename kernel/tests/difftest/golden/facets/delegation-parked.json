@@ -1,0 +1,13 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/ask-1.parked": "",
+  "step0.exit": "0\n",
+  "step0.json": "true\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "false\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "false\n",
+  "step2.stderr": ""
+}
