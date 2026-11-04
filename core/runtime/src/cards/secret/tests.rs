@@ -131,12 +131,16 @@ fn pair(a: &str, b: &str) -> BTreeMap<String, Zeroizing<String>> {
 }
 
 fn key_card_with(c: &mut Core, svc: &str, deadline: i64, run: &str) -> Card {
+    key_card_of(c, svc, deadline, run, "")
+}
+
+fn key_card_of(c: &mut Core, svc: &str, deadline: i64, run: &str, person: &str) -> Card {
     let n = NewCard {
         session: "s1".into(),
         source: "run",
         bot_id: None,
         run_id: Some(run.into()),
-        person: String::new(),
+        person: person.into(),
         agent: "echo".into(),
         answerable_by: None,
         in_grants: false,
@@ -1168,4 +1172,31 @@ fn a_damaged_record_does_not_make_a_card_unprovidable_and_an_account_is_taken_by
         &Nobody,
     ));
     assert_eq!(done.state, State::Used);
+}
+
+#[test]
+fn a_revoke_under_a_held_claim_closes_the_card_and_the_holders_write_is_refused() {
+    let (_t, _l, mut c) = core();
+    instrument(&c);
+    let store = MemoryKeyStore::default();
+    let mut e = env(&store);
+    let k = key_card_of(&mut c, "github", DEADLINE, "r1", "sam");
+    let plan = plan_of(&mut c, &k.id, &two());
+    let held = begin(&mut c, &k.id, T0 + 1, &Nobody)
+        .unwrap()
+        .expect("claims");
+    // the person's suspension withdraws the card although a device holds the claim
+    let tx = c.claim_tx().unwrap();
+    let gone = crate::cards::withdraw_people(&tx, &["sam".to_owned()]).unwrap();
+    tx.commit().unwrap();
+    assert_eq!(gone, vec![k.id.clone()]);
+    // the holder's write finds the card closed: nothing is saved, no row lands
+    let _ = commit(&mut c, &mut e, &held, &plan, &two(), T0 + 2, &Nobody);
+    assert_eq!(stored(&mut c, &k.id).state, State::Withdrawn);
+    assert_eq!(writes(&c, "github"), 0);
+    assert_eq!(
+        refused(prov(&mut c, &mut e, &k.id, &two(), T0 + 3, &Nobody)),
+        Refused::Closed(Some(State::Withdrawn))
+    );
+    assert_eq!(writes(&c, "github"), 0);
 }

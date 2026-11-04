@@ -26,7 +26,8 @@
 //! drops the claim; a failed probe never does.
 //!
 //! A claim with a pid is not a timer. While that process is alive the claim holds past its `claim_until`: a second
-//! claimer, a plain answer, the sweep and a withdrawal all leave the card alone (M2-11 review, precondition 1: a claim
+//! claimer, a plain answer, the sweep and a single-card withdrawal all leave the card alone (a revoke's [`withdraw_people`] is the exception and
+//! takes a claimed card too, the holder's `saved` then finds it closed; M2-11 review, precondition 1: a claim
 //! that ran out by time must not be taken over under a writer that is still going). Only the holder's own end, or its
 //! death (start time and ESRCH-only, as above), frees it. A claim with no pid is the caller's own timer: it ends at
 //! `claim_until`. The secret path ([`secret`]) claims with the daemon's own pid, so the writer is the claimer and no
@@ -311,7 +312,11 @@ fn get(tx: &Transaction<'_>, id: &str) -> Result<Option<Card>> {
         .optional()?)
 }
 
-fn list_where(tx: &Transaction<'_>, tail: &str, args: impl rusqlite::Params) -> Result<Vec<Card>> {
+fn list_where(
+    tx: &rusqlite::Connection,
+    tail: &str,
+    args: impl rusqlite::Params,
+) -> Result<Vec<Card>> {
     let mut st = tx.prepare(&format!("SELECT {COLS} FROM cards {tail}"))?;
     let rows = st.query_map(args, row)?;
     Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
@@ -320,7 +325,7 @@ fn list_where(tx: &Transaction<'_>, tail: &str, args: impl rusqlite::Params) -> 
 /// Moves every card matching `where_` to `to`; returns them as they were before. A move that closes the card drops its
 /// claim; `keep_claim` is for a move that leaves the card open (parking), whose claim holder is still writing.
 fn move_where(
-    tx: &Transaction<'_>,
+    tx: &rusqlite::Connection,
     where_: &str,
     args: impl rusqlite::Params + Copy,
     to: State,
@@ -730,7 +735,8 @@ fn saved_in(
 
 /// An open card is withdrawn (the asker cancelled, the person's access ended). A card whose claim is held is not: its
 /// holder is mid-write, and closing the card under it would let the write land on a closed card, so this answers false
-/// as the sweep leaves it alone, and the caller asks again once the claim has ended. Returns whether it was withdrawn.
+/// as the sweep leaves it alone, and the caller asks again once the claim has ended. (The one exception is a revoke,
+/// [`withdraw_people`], which takes a claimed card too.) Returns whether it was withdrawn.
 pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness) -> Result<bool> {
     let tx = core.claim_tx()?;
     void_dead_claims(&tx, live)?;
@@ -743,6 +749,42 @@ pub(crate) fn withdraw(core: &mut Core, id: &str, now: i64, live: &dyn Liveness)
     )?;
     tx.commit()?;
     Ok(n == 1)
+}
+
+/// The people's access ended (A7, M2-11b): every open card and unused once-grant asked by one of `people` (a person
+/// and their bots) is withdrawn, inside the caller's transaction so it commits with the revoke. Like the host's
+/// `cards_withdraw_person` it takes a card whose claim is held too, and drops the claim: after a revoke nothing of
+/// theirs may stay answerable, and the holder's `saved` then finds a closed card. Returns the ids that moved. The owner
+/// (an empty person) is never named here.
+pub(crate) fn withdraw_people(tx: &rusqlite::Connection, people: &[String]) -> Result<Vec<String>> {
+    // the caller passes each person's old ids too (`people.was`, see `revoke::was_ids`): a run that began before a
+    // rename can raise under the old id after it
+    let mut named: Vec<String> = people.to_vec();
+    named.sort();
+    named.dedup();
+    let people = &named[..];
+    let mut gone = Vec::new();
+    for p in people.iter().filter(|p| !p.is_empty()) {
+        let moved = move_where(
+            tx,
+            &format!("person = ?1 AND state IN ({OPEN_STATES},'approved')"),
+            params![p],
+            State::Withdrawn,
+            false,
+        )?;
+        gone.extend(moved.into_iter().map(|c| c.id));
+    }
+    Ok(gone)
+}
+
+/// A person's new id (`people.renamePerson`): their cards follow in the rename's own transaction, so a later revoke
+/// of the new id finds them (like `doors::renamed`). A renamed person's bots keep their ids.
+pub(crate) fn renamed(tx: &rusqlite::Connection, old: &str, new: &str) -> Result<()> {
+    tx.execute(
+        "UPDATE cards SET person = ?2 WHERE person = ?1",
+        params![old, new],
+    )?;
+    Ok(())
 }
 
 /// Past its deadline (or its claim's time): open cards and unused grants expire, silence is no. Returns the cards as
