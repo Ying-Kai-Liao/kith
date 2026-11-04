@@ -91,3 +91,43 @@ pub fn file_private(open: &mut OpenOptions) {
     const FILE_SHARE_WRITE: u32 = 2;
     open.share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE);
 }
+
+/// The pid of the process serving this named pipe (the holder, if the pipe is the holder's).
+pub fn pipe_server_pid(pipe: &std::fs::File) -> Option<u32> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::System::Pipes::GetNamedPipeServerProcessId;
+    let mut pid = 0u32;
+    // SAFETY: the handle is a valid open file for the call; pid is written.
+    let ok = unsafe { GetNamedPipeServerProcessId(pipe.as_raw_handle() as HANDLE, &mut pid) };
+    (ok != 0).then_some(pid)
+}
+
+/// The pid of the process that started this one.
+pub fn parent_pid() -> Option<u32> {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
+    let me = std::process::id();
+    // SAFETY: a process snapshot walked with the documented first/next calls, closed after.
+    unsafe {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap.is_null() || snap == INVALID_HANDLE_VALUE {
+            return None;
+        }
+        let mut e: PROCESSENTRY32W = std::mem::zeroed();
+        e.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = None;
+        let mut ok = Process32FirstW(snap, &mut e);
+        while ok != 0 {
+            if e.th32ProcessID == me {
+                found = Some(e.th32ParentProcessID);
+                break;
+            }
+            ok = Process32NextW(snap, &mut e);
+        }
+        CloseHandle(snap);
+        found
+    }
+}
