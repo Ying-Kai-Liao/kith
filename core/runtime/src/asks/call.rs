@@ -4,7 +4,7 @@
 
 use serde_json::{Value, json};
 
-use super::{Open, cap_told, delegations, end, limits, open, record, settle};
+use super::{EndReq, Open, cap_told, delegations, end_tree, limits, open, record, settle};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -105,13 +105,26 @@ pub(crate) fn call_at(core: &mut Core, method: &str, params: &Value, now: i64) -
             Ok(json!({ "marked": n }))
         }
         "ask.end" => {
-            let ended = end(
+            let (roots, sessions, persons) = (
+                strings(params, "roots"),
+                strings(params, "sessions"),
+                strings(params, "persons"),
+            );
+            let ended = end_tree(
                 core,
-                &strings(params, "sessions"),
-                &strings(params, "persons"),
+                &EndReq {
+                    roots: &roots,
+                    sessions: &sessions,
+                    persons: &persons,
+                },
                 now,
             )?;
-            Ok(json!({ "ended": ended.ids, "sessions": ended.sessions }))
+            let kill: Vec<Value> = ended
+                .kill
+                .iter()
+                .map(|k| json!({"claimId": k.claim_id, "pid": k.pid, "started": k.started}))
+                .collect();
+            Ok(json!({ "ended": ended.ids, "sessions": ended.sessions, "kill": kill }))
         }
         "ask.delegations" => {
             let (folders, _) = core.folders_for(params)?;

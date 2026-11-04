@@ -2196,9 +2196,13 @@ dependencies = [
 name = "kith-kernel"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "chrono-tz",
+ "croner",
  "fs2",
  "libc",
  "rusqlite",
+ "serde",
  "serde_json",
  "sha2 0.11.0",
  "windows-sys 0.61.2",

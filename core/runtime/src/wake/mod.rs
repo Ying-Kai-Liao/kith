@@ -94,3 +94,28 @@ pub(crate) fn write_after<T>(
         "wake: the queue kept changing under the evaluation".into(),
     ))
 }
+
+/// What a stop owes the callers (`kith ask --end`): the requests and waiters of each session are withdrawn, and then of
+/// everything the persons are owed, inside the transaction the caller holds (the stop's, so the records, the claims and the
+/// wakes change in one step). Answers how many went. Withdrawing nothing is fine.
+pub(crate) fn withdraw_owed_in(
+    tx: &rusqlite::Connection,
+    now_ms: i64,
+    sessions: &[String],
+    persons: &[String],
+) -> Result<usize> {
+    #[allow(clippy::cast_precision_loss)]
+    let now = now_ms as f64 / 1000.0;
+    let before = load(tx)?;
+    let mut after = before.clone();
+    after.prune(now);
+    let mut n: usize = sessions
+        .iter()
+        .map(|s| queue::withdraw(&mut after, now, s, None))
+        .sum();
+    if !persons.is_empty() {
+        n += queue::withdraw_person(&mut after, now, persons);
+    }
+    save(tx, &before, &after)?;
+    Ok(n)
+}
