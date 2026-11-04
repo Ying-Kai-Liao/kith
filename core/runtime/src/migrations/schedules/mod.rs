@@ -5,5 +5,11 @@
 use super::Migration;
 
 mod m0120_schedules;
+mod m0121_watermark;
+mod m0122_index;
 
-pub(super) const STEPS: &[Migration] = &[m0120_schedules::MIGRATION];
+pub(super) const STEPS: &[Migration] = &[
+    m0120_schedules::MIGRATION,
+    m0121_watermark::MIGRATION,
+    m0122_index::MIGRATION,
+];
