@@ -28,7 +28,7 @@
 //!   code rejects, not an error.
 //!
 //! Every step runs with foreign keys on, in its own transaction, so a later step cannot rebuild `claims` (`turns` points
-//! at it). The value lists CHECKed in SQL are therefore only those that cannot grow (`claims.state`, `claims.kind`,
+//! at it). The value lists checked in SQL are therefore only those that cannot grow (`claims.state`, `claims.kind`,
 //! `turns.state`); `turns.source`, `turns.parked_reason` and `reports.kind` are validated in code.
 //!
 //! How the start protocol (section 4) maps to rows, each step in one `Core::claim_tx`:
