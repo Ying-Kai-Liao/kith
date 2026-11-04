@@ -37,4 +37,18 @@ for crate in holder stub; do
   # Printed per crate; a failure in the first must not hide the second's line.
   if [ "$crate_fail" = 0 ]; then echo "$pkg links no kith crate"; fi
 done
+
+# 3. kith-procstart is the one kith crate the stub may link, so its own direct dependencies are held to libc and
+# windows-sys here: anything added there would reach the stub (and the holder's tree) without the checks above noticing.
+for target in "" "--target x86_64-pc-windows-msvc"; do
+  # shellcheck disable=SC2086
+  direct=$(cd "$root/serve/host" && cargo tree --manifest-path Cargo.toml -p kith-procstart --locked --edges normal,build $target --depth 1 --prefix none | sort -u)
+  bad=$(printf '%s\n' "$direct" | grep -vE '^(kith-procstart|libc|windows-sys) ' || true)
+  if [ -n "$bad" ]; then
+    echo "kith-procstart depends on more than libc and windows-sys ${target:+($target)}:" >&2
+    echo "$bad" >&2
+    fail=1
+  fi
+done
+[ "$fail" = 0 ] && echo "kith-procstart depends on libc and windows-sys only"
 exit "$fail"

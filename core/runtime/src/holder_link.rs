@@ -94,7 +94,8 @@ impl Default for HolderConfig {
 /// What `kith doctor` shows of the holder.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct HolderState {
-    /// `starting`, `connected`, `absent` (no program to start), `unreachable` (retrying), `stopped`.
+    /// `starting`, `connected`, `absent` (no program to start), `unreachable` (retrying), `blocked` (the old instance's processes
+    /// cannot be ended or told apart; retrying slowly, nothing signalled), `stopped`.
     pub state: &'static str,
     pub instance: Option<String>,
     pub pid: Option<u32>,
@@ -156,16 +157,28 @@ pub(crate) fn supervise(shared: &Arc<Shared>, layout: &Layout, cfg: &HolderConfi
     while !shared.stopping() {
         match connect(shared, layout, cfg) {
             Ok(client) => {
-                delay = cfg.retry_min;
-                last_error.clear();
                 let ended = connected(shared, client, cfg);
                 // Attached clients are told the link is gone; terminals asked for while it was down are answered, not
                 // left to run late.
                 shared.terminals.relay.link_lost();
                 shared.terminals.set_link(false);
                 match ended {
-                    Ok(()) => continue,
-                    Err(why) => fail(shared, &mut last_error, "unreachable", &why),
+                    Ok(()) => {
+                        delay = cfg.retry_min;
+                        last_error.clear();
+                        continue;
+                    }
+                    // A wedged reconcile connects fine every time: resetting here would turn it into a reconnect a
+                    // second, two log lines each. Keep what failed and back off as for an absent program.
+                    Err(Lost::Blocked(why)) => {
+                        fail(shared, &mut last_error, "blocked", &why);
+                        delay = cfg.retry_max;
+                    }
+                    Err(Lost::Link(why)) => {
+                        delay = cfg.retry_min;
+                        last_error.clear();
+                        fail(shared, &mut last_error, "unreachable", &why);
+                    }
                 }
             }
             Err((state, why)) => {
@@ -182,6 +195,29 @@ pub(crate) fn supervise(shared: &Arc<Shared>, layout: &Layout, cfg: &HolderConfi
     shared.terminals.relay.link_lost();
     shared.terminals.set_link(false);
     shared.set_holder(|h| h.state = "stopped");
+}
+
+/// Why a connected link ended.
+#[derive(Debug)]
+pub(crate) enum Lost {
+    /// The holder stopped answering, or the core could not keep its record.
+    Link(String),
+    /// Processes of the old holder instance are still there and cannot be ended or told apart from strangers: the
+    /// new instance is not recorded, nothing is signalled, and the same hello meets the same answer until they go.
+    Blocked(String),
+}
+
+impl From<String> for Lost {
+    fn from(why: String) -> Self {
+        Lost::Link(why)
+    }
+}
+
+impl std::fmt::Display for Lost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Lost::Link(why) | Lost::Blocked(why)) = self;
+        f.write_str(why)
+    }
 }
 
 /// Notes a failure once per distinct message in the core log, so a holder that stays down is one line, not one per try.
@@ -335,7 +371,7 @@ fn connected(
     shared: &Arc<Shared>,
     mut client: Client,
     cfg: &HolderConfig,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), Lost> {
     // First thing after the welcome: a deadline left over from before this link must not lapse while we reconcile.
     let _renewing = start_renewing(shared, &client, cfg)?;
     // A holder reached through a command runs on another machine: its pids mean nothing here, so no start time is
@@ -587,14 +623,23 @@ fn watch_start(client: &mut Client, held: proto::HeldId, pid: u32, wait: Duratio
 }
 
 /// The listed processes with the start stamp (`kith_kernel::procstart`) the system gives their pid now, noted while the
-/// holder is alive so a later kill can tell them from a stranger that was handed the pid. Empty when it cannot be read.
-fn record_procs(held: &[proto::Held]) -> Vec<RecordedProc> {
+/// holder is alive so a later kill can tell them from a stranger that was handed the pid. One that has gone since the
+/// holder listed it is dropped (a pid recorded with no start could be a stranger's by the next poll); one that is there
+/// but whose start cannot be read is recorded with an empty one, which a later kill treats as unknown.
+pub(crate) fn record_procs(held: &[proto::Held]) -> Vec<RecordedProc> {
     held.iter()
         .filter(|h| h.exit.is_none())
-        .map(|h| RecordedProc {
-            pid: h.pid,
-            started: procstart::start_stamp(h.pid).unwrap_or_default(),
-            conv: h.conv.clone(),
+        .filter_map(|h| {
+            let started = match procstart::probe(h.pid) {
+                procstart::Probe::Gone => return None,
+                procstart::Probe::Alive(start) => start.unwrap_or_default(),
+                procstart::Probe::Unknown => String::new(),
+            };
+            Some(RecordedProc {
+                pid: h.pid,
+                started,
+                conv: h.conv.clone(),
+            })
         })
         .collect()
 }
@@ -606,10 +651,10 @@ pub(crate) fn reconcile(
     instance: &str,
     procs: &[RecordedProc],
     cfg: &HolderConfig,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), Lost> {
     let recorded = shared
         .with_core(|c| c.holder_record())
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| Lost::Link(e.to_string()))?;
     if let Some(old) = recorded.instance.as_deref().filter(|old| *old != instance) {
         // Never a process the new instance lists: it is alive and its own by that holder's account.
         let stale: Vec<RecordedProc> = recorded
@@ -618,17 +663,23 @@ pub(crate) fn reconcile(
             .filter(|p| !procs.iter().any(|n| n.pid == p.pid))
             .cloned()
             .collect();
+        // The notes are logged only when the pass gets through: a blocked one comes back on every hello, and its
+        // reason goes out once, through the supervisor's one-line-per-message failure note.
+        let mut notes = Vec::new();
+        if let Err(stuck) = end_groups(&mut notes, &stale, cfg.kill_wait) {
+            return Err(Lost::Blocked(format!(
+                "processes of the old holder instance {old} are still running and not ended: {stuck}; not recording the new instance yet"
+            )));
+        }
         log::note(
             &shared.logs,
             &format!(
-                "holder: instance {old} is gone, now {instance}; ending {} process group(s) it held",
+                "holder: instance {old} is gone, now {instance}; ended {} process group(s) it held",
                 stale.len()
             ),
         );
-        if !end_groups(&shared.logs, &stale, cfg.kill_wait) {
-            return Err(format!(
-                "processes of the old holder instance {old} are still running; not recording the new one yet"
-            ));
+        for n in notes {
+            log::note(&shared.logs, &n);
         }
     }
     if recorded.instance.as_deref() != Some(instance) || recorded.procs != procs {
@@ -638,82 +689,101 @@ pub(crate) fn reconcile(
         };
         shared
             .with_core(|c| c.save_holder_record(&rec))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| Lost::Link(e.to_string()))?;
     }
     Ok(())
 }
 
 /// Ends the process group of each recorded process whose pid still has the recorded start stamp, and waits for the
-/// groups to be empty. A pid that is gone, or has another start in the same form, is not ours: left alone. A start
-/// that cannot be told (the pid's own cannot be read, or the record is empty, old `ps` text, or of another form) is
-/// neither: nothing is signalled for it and the answer is false, as for a group that will not end, so the caller keeps
-/// the old record and the next hello looks again. True when nothing it was asked to end is left.
+/// groups to be empty. A pid that is gone, or has another start in the same form, is not ours: left alone. So is a
+/// live pid that is not a session leader: every holder spawn calls `setsid`, so the recorded process leads its session
+/// and anything else at that pid is a stranger, whatever the record says. A start that cannot be told otherwise (the
+/// pid's own cannot be read, or the record is empty, old `ps` text, or of another form) is neither: nothing is
+/// signalled for it and it comes back in the `Err`, as does a group that will not end, so the caller keeps the old
+/// record and the next hello looks again. `notes` gets what happened to the ones that were not in doubt.
 #[cfg(unix)]
-fn end_groups(logs: &Path, procs: &[RecordedProc], wait: Duration) -> bool {
+fn end_groups(
+    notes: &mut Vec<String>,
+    procs: &[RecordedProc],
+    wait: Duration,
+) -> std::result::Result<(), String> {
     let mut mine = Vec::new();
-    let mut unsure = false;
+    let mut stuck: Vec<String> = Vec::new();
     for p in procs {
         match procstart::probe(p.pid) {
-            procstart::Probe::Gone => log::note(
-                logs,
-                &format!("holder: pid {} is gone; nothing to end", p.pid),
-            ),
+            procstart::Probe::Gone => {
+                notes.push(format!("holder: pid {} is gone; nothing to end", p.pid));
+            }
             procstart::Probe::Alive(Some(now)) if procstart::comparable(&p.started, &now) => {
                 if procstart::same_process(&p.started, &now) {
                     mine.push(p.pid);
                 } else {
-                    log::note(
-                        logs,
-                        &format!(
-                            "holder: pid {} is not the process that was recorded (another start); left alone",
-                            p.pid
-                        ),
-                    );
+                    notes.push(format!(
+                        "holder: pid {} is not the process that was recorded (another start); left alone",
+                        p.pid
+                    ));
                 }
             }
             procstart::Probe::Alive(_) | procstart::Probe::Unknown => {
-                unsure = true;
-                log::note(
-                    logs,
-                    &format!(
-                        "holder: pid {} is running but its start cannot be told from the record ({:?}); not ended",
+                if procstart::session_id(p.pid).is_some_and(|sid| sid != p.pid) {
+                    notes.push(format!(
+                        "holder: pid {} is not a session leader, so not the process that was recorded; left alone",
+                        p.pid
+                    ));
+                } else {
+                    stuck.push(format!(
+                        "pid {} is running but its start cannot be told from the record ({:?})",
                         p.pid, p.started
-                    ),
-                );
+                    ));
+                }
             }
         }
     }
-    if mine.is_empty() {
-        return !unsure;
-    }
-    for pid in &mine {
-        signal_group(*pid, "TERM");
-    }
-    let begun = Instant::now();
-    let mut forced = false;
-    loop {
-        mine.retain(|pid| group_alive(*pid));
-        if mine.is_empty() {
-            return !unsure;
+    if !mine.is_empty() {
+        for pid in &mine {
+            signal_group(*pid, "TERM");
         }
-        if begun.elapsed() >= wait {
-            return false;
-        }
-        // Politely first; whatever ignored it gets the hard signal after a third of the time.
-        if !forced && begun.elapsed() >= wait / 3 {
-            for pid in &mine {
-                signal_group(*pid, "KILL");
+        let begun = Instant::now();
+        let mut forced = false;
+        loop {
+            mine.retain(|pid| group_alive(*pid));
+            if mine.is_empty() {
+                break;
             }
-            forced = true;
+            if begun.elapsed() >= wait {
+                stuck.extend(mine.iter().map(|pid| {
+                    format!(
+                        "the group of pid {pid} did not end within {}s",
+                        wait.as_secs()
+                    )
+                }));
+                break;
+            }
+            // Politely first; whatever ignored it gets the hard signal after a third of the time.
+            if !forced && begun.elapsed() >= wait / 3 {
+                for pid in &mine {
+                    signal_group(*pid, "KILL");
+                }
+                forced = true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
-        std::thread::sleep(Duration::from_millis(50));
+    }
+    if stuck.is_empty() {
+        Ok(())
+    } else {
+        Err(stuck.join("; "))
     }
 }
 
 /// Windows needs no extra step: each spawn's job object ends with the holder (runtime-design section 4, step 7).
 #[cfg(not(unix))]
-fn end_groups(_: &Path, _: &[RecordedProc], _: Duration) -> bool {
-    true
+fn end_groups(
+    _: &mut Vec<String>,
+    _: &[RecordedProc],
+    _: Duration,
+) -> std::result::Result<(), String> {
+    Ok(())
 }
 
 #[cfg(unix)]

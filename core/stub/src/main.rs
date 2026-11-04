@@ -309,6 +309,11 @@ fn resident_main(args: Args) -> ExitCode {
             return ExitCode::from(USAGE);
         }
     };
+    // The engine first: a take answered while it is still between fork and exec would leave it a copy of the lock.
+    let engine = match run::spawn(&args.engine) {
+        Ok(e) => e,
+        Err(code) => std::process::exit(code),
+    };
     let dir = std::path::PathBuf::from(&args.lock_dir);
     std::thread::spawn(move || {
         resident::serve(&dir, std::io::BufReader::new(r), w, |lock| {
@@ -320,7 +325,7 @@ fn resident_main(args: Args) -> ExitCode {
             redeem_run_token()
         })
     });
-    std::process::exit(run::run(&args.engine))
+    std::process::exit(run::wait(engine))
 }
 
 fn main() -> ExitCode {

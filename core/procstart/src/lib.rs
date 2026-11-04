@@ -44,6 +44,13 @@ pub fn start_stamp(pid: u32) -> Option<String> {
     }
 }
 
+/// The session id of `pid` (`getsid(2)`): its own pid for a process that called `setsid`, which every holder spawn does.
+/// `None` when it is gone, cannot be asked, or on a system without sessions (Windows).
+#[must_use]
+pub fn session_id(pid: u32) -> Option<u32> {
+    imp::session_id(pid)
+}
+
 /// The recorded form of an epoch start.
 #[must_use]
 pub fn epoch_stamp(ms: i64) -> String {
@@ -126,6 +133,13 @@ mod imp {
         start(pid)
     }
 
+    pub(super) fn session_id(pid: u32) -> Option<u32> {
+        let p = libc::pid_t::try_from(pid).ok().filter(|p| *p > 0)?;
+        // SAFETY: getsid only reads the process table.
+        let sid = unsafe { libc::getsid(p) };
+        u32::try_from(sid).ok().filter(|_| sid > 0)
+    }
+
     #[cfg(target_os = "macos")]
     fn start(pid: u32) -> Probe {
         let Ok(pid) = libc::c_int::try_from(pid) else {
@@ -202,6 +216,10 @@ mod imp {
     /// 100 ns ticks between 1601-01-01 (FILETIME) and 1970-01-01.
     const EPOCH_DIFF_TICKS: i64 = 116_444_736_000_000_000;
 
+    pub(super) fn session_id(_: u32) -> Option<u32> {
+        None
+    }
+
     pub(super) fn probe(pid: u32) -> Probe {
         if pid == 0 {
             return Probe::Gone;
@@ -265,6 +283,10 @@ mod imp {
 
     pub(super) fn probe(_: u32) -> Probe {
         Probe::Unknown
+    }
+
+    pub(super) fn session_id(_: u32) -> Option<u32> {
+        None
     }
 }
 
