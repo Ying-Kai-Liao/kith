@@ -182,6 +182,23 @@ fn removing_a_bot_withdraws_its_cards_only() {
 }
 
 #[test]
+fn removing_a_renamed_bot_withdraws_the_cards_of_its_old_id_too() {
+    let mut rig = Rig::new(&world());
+    let first = ask("bot-a", "s1", "Bash:k");
+    let first_id = open(&mut rig, &first);
+    rename(&mut rig, "bot-a", "bot-c");
+    // a run that began before the rename raises under the id it knows
+    let late = ask("bot-a", "s2", "Bash:late");
+    let late_id = open(&mut rig, &late);
+    let said = rig.call("people.removeBot", &id("bot-c")).unwrap();
+    assert!(said.get("was").is_none(), "the old ids stay inside: {said}");
+    let mut moved = first;
+    moved.person = "bot-c".into();
+    dead(&mut rig, &first_id, &moved);
+    dead(&mut rig, &late_id, &late);
+}
+
+#[test]
 fn a_refused_suspension_withdraws_nothing() {
     let mut rig = Rig::new(&world());
     let c = raise_all(&mut rig);
