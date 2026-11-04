@@ -110,6 +110,57 @@ fn folders_from(answer: &Value) -> Option<Paths> {
     })
 }
 
+/// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7).
+const CORE_CALL_METHODS: &[&str] = &["terminal.open", "terminal.attach", "terminal.list"];
+
+/// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered, 3 no daemon
+/// answers (nothing ran, the caller falls back), 4 refused, 5 lost after sending, 2 usage.
+pub fn core_call(method: &str, params_stdin: bool) -> i32 {
+    if !CORE_CALL_METHODS.contains(&method) {
+        eprintln!("core-call: {method} is not one of {}", CORE_CALL_METHODS.join(", "));
+        return 2;
+    }
+    if !params_stdin {
+        eprintln!("core-call: the params are read from stdin: pass --params-stdin");
+        return 2;
+    }
+    let mut text = String::new();
+    if std::io::Read::read_to_string(&mut std::io::stdin(), &mut text).is_err() {
+        eprintln!("core-call: params on stdin are not text");
+        return 2;
+    }
+    let params: Value =
+        if text.trim().is_empty() { json!({}) } else { serde_json::from_str(&text).unwrap_or(Value::Null) };
+    if !params.is_object() {
+        eprintln!("core-call: params must be a JSON object");
+        return 2;
+    }
+    let folders = kernel::folders(&kith_kernel::paths::process_home());
+    // Only a list is repeated when the connection breaks: an open or a ticket may have run.
+    match kith_core::reach(&folders, method, &params, method == "terminal.list") {
+        kith_core::Reached::Answered(answer) => {
+            println!("{answer}");
+            0
+        }
+        kith_core::Reached::Refused(e) => {
+            eprintln!("{e}");
+            4
+        }
+        kith_core::Reached::NoDaemon => {
+            eprintln!("no core daemon answers");
+            3
+        }
+        kith_core::Reached::Mismatch(note) => {
+            eprintln!("{note}");
+            3
+        }
+        kith_core::Reached::Lost(note) => {
+            eprintln!("{note}");
+            5
+        }
+    }
+}
+
 /// `kith serve` has the daemon front start beside the host. It never waits for it and never fails on it: a core that
 /// will not start is a line in the core log and a status for `kith doctor`, and the host goes on.
 pub fn start_beside_host() -> kith_core::Daemon {

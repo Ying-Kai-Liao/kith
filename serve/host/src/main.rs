@@ -522,6 +522,19 @@ enum KernelCmd {
         #[arg(long)]
         tty: bool,
     },
+    /// Calls one of the held-terminal methods (`terminal.open`, `terminal.attach`, `terminal.list`) on the running core
+    /// daemon's owner socket and prints its JSON answer (M1-7, the bash `kith --held` and `kith attach`). Owner-only by
+    /// construction: it speaks the owner socket and nothing else, and refuses any other method. Params are JSON on stdin
+    /// (never argv: the launch env is in them). Exit: 0 answered; 3 no daemon answers (nothing ran); 4 the core refused
+    /// the call (stderr says why); 5 the connection broke after the call went out (it may have run); 2 usage.
+    #[command(hide = true)]
+    CoreCall {
+        /// `terminal.open`, `terminal.attach` or `terminal.list`.
+        method: String,
+        /// Read the params (a JSON object) from stdin; the only way to give them.
+        #[arg(long)]
+        params_stdin: bool,
+    },
     /// One task on one engine over ACP: the answer on stdout (the task after `--`, or on stdin).
     RunOnce {
         engine: String,
@@ -1246,6 +1259,9 @@ async fn main() -> Result<()> {
                 let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
+            if let KernelCmd::CoreCall { method, params_stdin } = cmd {
+                std::process::exit(core_front::core_call(&method, params_stdin));
+            }
             if let KernelCmd::Attach { endpoint, ticket_stdin, observer, takeover, detach_key, tty } = cmd {
                 std::process::exit(run_attach(&endpoint, ticket_stdin, observer, takeover, &detach_key, tty));
             }
@@ -1355,6 +1371,7 @@ async fn main() -> Result<()> {
                     }
                     KernelCmd::RunOnce { .. }
                     | KernelCmd::Attach { .. }
+                    | KernelCmd::CoreCall { .. }
                     | KernelCmd::Accounts { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }

@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+# kith-held-check — `kith <agent> --held` and `kith attach` (runtime-design section 4; one-bot-model M1-7), with a fake claude and
+# the real core daemon, holder, kith-stub and attach client:
+#   1. --direct then --held on one conversation: the second is busy (75); and --held then --direct: the second is refused;
+#   2. --held, then the window closes (the attach client is killed): the engine keeps running, terminal.list shows it, its output grows;
+#   3. `kith attach` from a second pty gets the tail and can type;
+#   4. an observer sees the tail and cannot type; a second owner is told about --takeover; Ctrl-\ detaches and the engine goes on;
+#   5. no daemon, or a daemon with no holder: one line, and the run goes on here (--direct);
+#   6. not at a terminal (`kith AGENT --held < /dev/null | cat`): held and headless, the held id and how to attach on stdout;
+#   and: the engine's exit code is the attach client's; an unknown target says so; a task or another harness runs here.
+#
+#   kernel/tests/kith-held-check     about 30 s; prints each check, exits 1 when one fails
+#   KITH_BIN=… KITH_STUB_BIN=… KITH_HOLDER_BIN=…   else builds under $CARGO_TARGET_DIR / serve/host/target (none: the check skips)
+set -uo pipefail
+
+KERNEL="$(cd "$(dirname "$0")/.." && pwd)"
+find_bin() {   # name -> path of a built program
+  local t k
+  for t in "${CARGO_TARGET_DIR:-}" "$KERNEL/../serve/host/target" "$KERNEL/../target"; do
+    for k in debug release; do [[ -n $t && -x $t/$k/$1 ]] && { echo "$t/$k/$1"; return 0; }; done
+  done
+  return 1
+}
+BIN=${KITH_BIN:-$(find_bin kith)}; STUB=${KITH_STUB_BIN:-$(find_bin kith-stub)}; HOLDER=${KITH_HOLDER_BIN:-$(find_bin kith-holder)}
+[[ -n $BIN && -x $BIN && -n $STUB && -x $STUB && -n $HOLDER && -x $HOLDER ]] || { echo "skip: needs the kith, kith-stub and kith-holder programs (KITH_BIN, KITH_STUB_BIN, KITH_HOLDER_BIN)"; exit 0; }
+[[ $(uname) == Darwin || $(uname) == Linux ]] || { echo "skip: held terminals are Unix only"; exit 0; }
+
+# A short path: the daemon's sockets live under it and a Unix socket path is at most ~100 bytes.
+T=$(mktemp -d /tmp/khc.XXXXXX)
+T=$(cd "$T" && pwd -P)
+PIDS=()
+cleanup() {
+  touch "$T/engine.stop" "$T/engine.go" 2>/dev/null
+  for p in ${PIDS[@]+"${PIDS[@]}"}; do kill "$p" 2>/dev/null; done
+  exec 7>&- 8>&- 2>/dev/null
+  sleep 0.3
+  # The holders outlive their daemons by design; these two were started under $T (a pid is matched by its --dir, not by name).
+  for p in $(ps -eo pid=,command= | awk -v d="kith-holder serve --dir $T/" 'index($0, d) { print $1 }'); do kill "$p" 2>/dev/null; done
+  rm -rf "$T"
+}
+trap cleanup EXIT
+export HOME=$T/home KITH_HOME=$T/kith KITH_AGENTS=$T/kith/agents KITH_STATE=$T/state KITH_MACHINE=$T/state CLAUDE_CONFIG_DIR=$T/claude
+export KITH_BIN=$BIN KITH_STUB_BIN=$STUB KITH_HOLDER_BIN=$HOLDER
+unset KITH_PROJECT KITH_PERSON KITH_AGENT KITH_PERMISSION_MODE HQ_HOME HQ_STATE KITH_VIA KITH_HIDE_SESSION KITH_RESUME \
+  KITH_CLAUDE_ARGS KITH_REQUIRE_STUB KITH_RUN_TOKEN KITH_ASK_TOKEN KITH_DETACH_KEY KITH_CORE
+mkdir -p "$HOME" "$KITH_STATE" "$KITH_HOME/agents/designer/role" "$CLAUDE_CONFIG_DIR" "$T/bin" "$T/work"
+printf -- '---\nname: designer\ndescription: test agent\n---\nbody\n' > "$KITH_HOME/agents/designer/role/agent.md"
+KITH=$KERNEL/bin/kith
+fail=0
+ok() { echo "ok   $1"; }
+bad() { echo "FAIL $1${2:+: $2}"; fail=1; }
+is() { [[ $2 == "$3" ]] && ok "$1" || bad "$1" "got '$2', wanted '$3'"; }
+waitfor() { for _ in $(seq ${WAIT:-150}); do eval "$1" && return 0; sleep 0.1; done; return 1; }
+
+# A fake claude: notes its start (pid and arguments), ticks into a file every 0.2 s, echoes what it is typed ("quit" ends it
+# with code 7, so the attach client's exit code is checkable).
+cat > "$T/bin/claude" <<'FAKE'
+#!/usr/bin/env bash
+[[ $1 == --version ]] && { echo "2.1.300 (Claude Code)"; exit 0; }
+[[ $1 == plugin ]] && exit 0
+echo "$$ ${@: -1}" >> "$ENGINE_STARTED"   # the last argument is the session id
+( n=0; while [[ ! -e $ENGINE_STOP ]]; do n=$((n+1)); echo "tick $n" >> "$ENGINE_TICKS.$$"; sleep 0.2; done ) &
+ticker=$!
+trap 'kill $ticker 2>/dev/null' EXIT
+echo "engine ready"
+while IFS= read -r line; do
+  line=${line%$'\r'}
+  echo "GOT:$line" >> "$ENGINE_LOG"
+  echo "GOT:$line"
+  [[ $line == quit ]] && exit 7
+done
+FAKE
+chmod +x "$T/bin/claude"
+export PATH=$T/bin:$PATH ENGINE_STARTED=$T/started ENGINE_TICKS=$T/ticks ENGINE_LOG=$T/log ENGINE_STOP=$T/engine.stop
+
+# A terminal for a command: `pty NAME cmd...` runs it on a pty, output in $T/NAME.out, keys from $T/NAME.in (write to it), its
+# exit code in $T/NAME.rc; pid in $PTY_PID. Killing PTY_PID is closing the window.
+cat > "$T/ptyrun.py" <<'PY'
+import fcntl, os, pty, select, signal, struct, sys, termios
+out, inp, rcf, *cmd = sys.argv[1:]
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp(cmd[0], cmd)
+fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+fin = os.open(inp, os.O_RDWR)
+log = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+def hup(*_):
+    os.kill(pid, signal.SIGHUP)
+    os._exit(1)
+signal.signal(signal.SIGTERM, hup)
+while True:
+    try:
+        ready, _, _ = select.select([fd, fin], [], [])
+        if fd in ready:
+            data = os.read(fd, 65536)
+            if not data:
+                break
+            os.write(log, data)
+        if fin in ready:
+            os.write(fd, os.read(fin, 4096))
+    except OSError:
+        break
+_, status = os.waitpid(pid, 0)
+open(rcf, "w").write(str(os.waitstatus_to_exitcode(status)))
+PY
+pty() {
+  local name=$1; shift
+  rm -f "$T/$name.out" "$T/$name.rc" "$T/$name.in"; mkfifo "$T/$name.in"; : > "$T/$name.out"
+  python3 -I "$T/ptyrun.py" "$T/$name.out" "$T/$name.in" "$T/$name.rc" "$@" &
+  PTY_PID=$!; PIDS+=("$PTY_PID")
+}
+keys() { printf "$2" > "$T/$1.in"; }
+saw() { grep -aq -- "$2" "$T/$1.out"; }
+rc_of() { cat "$T/$1.rc" 2>/dev/null; }
+
+# kith AGENT with a given session id, in this sandbox's work folder
+kith_run() {   # sid args...
+  local sid=$1; shift
+  ( cd "$T/work" && KITH_CLAUDE_ARGS="--session-id $sid" exec "$KITH" designer "$@" )
+}
+started_count() { grep -c -- "$1" "$T/started" 2>/dev/null || true; }
+engine_pid() { grep -- "$1" "$T/started" | head -1 | cut -d' ' -f1; }
+ticks() { cat "$T"/ticks.* 2>/dev/null | wc -l | tr -d ' '; }
+list() { "$KITH" attach 2>&1; }
+
+# --- (5a) no daemon at all: one line, and the run goes on here
+S5=55555555-5555-4555-8555-555555555555
+rm -f "$T/started"
+pty p5a env KITH_CLAIM_WAIT=1 KITH_CLAUDE_ARGS="--session-id $S5" "$KITH" designer --held
+waitfor 'saw p5a "engine ready"' && ok "no daemon: the run goes on here" || bad "no daemon: engine never started" "$(cat "$T/p5a.out")"
+saw p5a "holder not reachable; running here (--direct)" && ok "no daemon: one line says so" || bad "no daemon: no line" "$(cat "$T/p5a.out")"
+keys p5a 'quit\r'; WAIT=50 waitfor '[[ -n $(rc_of p5a) ]]'
+is "no daemon: the direct run's exit code is the engine's" "$(rc_of p5a)" 7
+out=$("$KITH" attach 2>&1); rc=$?
+[[ $rc == 1 && $out == *"no core daemon"* ]] && ok "kith attach with no daemon: one line, exit 1" || bad "attach with no daemon" "$rc $out"
+
+# --- the daemon, its holder, the stub and the attach client are the real ones
+mkfifo "$T/daemon.in"; exec 7<>"$T/daemon.in"
+"$BIN" kernel core-daemon <&7 > "$T/daemon.out" 2>&1 &
+PIDS+=($!)
+WAIT=300 waitfor 'grep -q ready "$T/daemon.out"' || { bad "the core daemon did not start" "$(cat "$T/daemon.out")"; exit 1; }
+sleep 2   # the holder links in a moment after ready
+
+# --- (1) --direct then --held, and --held then --direct, on one conversation
+S1=11111111-1111-4111-8111-111111111111
+rm -f "$T/started"
+pty p1d env KITH_CLAUDE_ARGS="--session-id $S1" "$KITH" designer --direct
+waitfor 'saw p1d "engine ready"' || bad "(1) direct run never started" "$(cat "$T/p1d.out")"
+out=$(kith_run $S1 --held < /dev/null 2>&1); rc=$?
+is "(1) --held on a conversation a --direct run has: busy (75)" "$rc" 75
+[[ $(started_count $S1) == 1 ]] && ok "(1) --held on a direct conversation: the engine did not start twice" || bad "(1) engine started twice"
+keys p1d 'quit\r'; WAIT=50 waitfor '[[ -n $(rc_of p1d) ]]'
+
+S2=22222222-2222-4222-8222-222222222222
+pty p1h env KITH_CLAUDE_ARGS="--session-id $S2" "$KITH" designer --held
+waitfor 'saw p1h "engine ready"' && ok "(1) --held: the engine started in the holder and the screen is attached" || bad "(1) held run did not come up" "$(cat "$T/p1h.out") $(cat "$T/daemon.out")"
+out=$(kith_run $S2 --direct < /dev/null 2>&1); rc=$?
+[[ $rc != 0 ]] && ok "(1) --direct on a held conversation: refused (exit $rc)" || bad "(1) a direct run was let in on a held conversation" "$out"
+[[ $(started_count $S2) == 1 ]] && ok "(1) --direct on a held conversation: the engine did not start twice" || bad "(1) engine started twice on a held conversation"
+keys p1h 'quit\r'; WAIT=80 waitfor '[[ -n $(rc_of p1h) ]]'
+is "(1) the engine's exit code is the attach client's (and kith's)" "$(rc_of p1h)" 7
+
+# --- (2) the window closes, the engine keeps running
+S3=33333333-3333-4333-8333-333333333333
+pty p2 env KITH_CLAUDE_ARGS="--session-id $S3" "$KITH" designer --held
+waitfor 'saw p2 "engine ready"' || bad "(2) held run did not come up" "$(cat "$T/p2.out")"
+EP=$(engine_pid $S3)
+kill -9 "$PTY_PID" 2>/dev/null   # the window closes
+{ wait "$PTY_PID"; } 2>/dev/null
+sleep 1
+kill -0 "$EP" 2>/dev/null && ok "(2) window closed: the engine is still running" || bad "(2) the engine died with the window"
+list | grep -q "$S3" && ok "(2) window closed: kith attach lists the held terminal" || bad "(2) not listed" "$(list)"
+list | grep "$S3" | grep -q "0 owner" && ok "(2) the list says no one is attached" || bad "(2) attached count" "$(list)"
+t1=$(ticks); sleep 1; t2=$(ticks)
+[[ $t2 -gt $t1 ]] && ok "(2) the engine's output keeps growing ($t1 -> $t2)" || bad "(2) no output after the window closed" "$t1 $t2"
+
+# --- (3) kith attach from a second terminal: the tail, and it can type
+pty p3 "$KITH" attach designer
+waitfor 'saw p3 "engine ready"' && ok "(3) kith attach <agent>: the tail is replayed" || bad "(3) no tail" "$(cat "$T/p3.out")"
+keys p3 'hello\r'
+waitfor 'grep -q "GOT:hello" "$T/log"' && ok "(3) kith attach: typing reaches the engine" || bad "(3) typed text never arrived" "$(cat "$T/p3.out")"
+
+# --- (4) an observer reads and cannot type; a second owner is told about --takeover; Ctrl-\ detaches
+pty p4 "$KITH" attach --observer "$S3"
+waitfor 'saw p4 "GOT:hello"' && ok "(4) observer: sees the terminal (the tail has the earlier line)" || bad "(4) observer saw nothing" "$(cat "$T/p4.out")"
+keys p4 'nope\r'; sleep 1
+grep -q "GOT:nope" "$T/log" && bad "(4) an observer typed into the engine" || ok "(4) observer: its keys do not reach the engine"
+list | grep "$S3" | grep -q "1 owner, 1 observer" && ok "(4) the list counts the owner and the observer" || bad "(4) counts" "$(list)"
+pty p4o "$KITH" attach "$S3"
+WAIT=80 waitfor '[[ -n $(rc_of p4o) ]]'
+saw p4o "takeover" && [[ $(rc_of p4o) != 0 ]] && ok "(4) a second owner is refused and told about --takeover" || bad "(4) second owner" "$(rc_of p4o) $(cat "$T/p4o.out")"
+keys p3 '\034'   # Ctrl-\
+WAIT=80 waitfor '[[ -n $(rc_of p3) ]]'
+is "(4) Ctrl-\\ detaches: exit 0" "$(rc_of p3)" 0
+kill -0 "$EP" 2>/dev/null && ok "(4) after the detach the engine goes on" || bad "(4) engine died on detach"
+pty p4t "$KITH" attach --takeover "$S3"
+waitfor 'saw p4t "engine ready"' && ok "(4) --takeover attaches as the owner again" || bad "(4) takeover" "$(cat "$T/p4t.out")"
+keys p4t 'quit\r'; WAIT=80 waitfor '[[ -n $(rc_of p4t) ]]'
+is "(3) the engine's exit code reaches kith attach" "$(rc_of p4t)" 7
+out=$(list); [[ $out != *"$S3"* ]] && ok "(3) an ended terminal is not listed" || bad "(3) still listed" "$out"
+out=$("$KITH" attach nobody-here 2>&1); rc=$?
+[[ $rc == 1 && $out == *"nothing held"* ]] && ok "kith attach <unknown>: one line, exit 1" || bad "attach unknown" "$rc $out"
+
+# --- (6) not at a terminal: held and headless
+S6=66666666-6666-4666-8666-666666666666
+out=$(kith_run $S6 --held < /dev/null 2>&1 | cat); rc=${PIPESTATUS[0]}
+[[ $out == *"held as session $S6"* && $out == *"kith attach $S6"* ]] && ok "(6) no tty: held, with the held session and how to attach" || bad "(6) headless line" "$out"
+waitfor '[[ $(started_count $S6) == 1 ]]' && ok "(6) no tty: the engine runs" || bad "(6) the engine never started"
+list | grep -q "$S6" && ok "(6) no tty: it is listed as held" || bad "(6) not listed" "$(list)"
+pty p6 "$KITH" attach "$S6"
+waitfor 'saw p6 "engine ready"' && ok "(6) it can be attached to afterwards" || bad "(6) attach" "$(cat "$T/p6.out")"
+keys p6 'quit\r'; WAIT=80 waitfor '[[ -n $(rc_of p6) ]]'
+
+# --- a task or another harness is not held
+out=$(cd "$T/work" && KITH_CLAUDE_ARGS="--session-id 77777777-7777-4777-8777-777777777777" "$KITH" designer --held "do it" 2>&1); rc=$?
+[[ $out == *"--held is for an interactive session"* ]] && ok "--held with a task: runs the task here, with a line" || bad "held task" "$rc $out"
+
+# --- (5b) a daemon with no holder: terminal.open answers direct; one line, and the run goes on here
+export KITH_STATE=$T/state2 KITH_MACHINE=$T/state2 KITH_HOLDER_BIN=$T/nope
+mkdir -p "$KITH_STATE"
+mkfifo "$T/daemon2.in"; exec 8<>"$T/daemon2.in"
+"$BIN" kernel core-daemon <&8 > "$T/daemon2.out" 2>&1 &
+PIDS+=($!)
+WAIT=300 waitfor 'grep -q ready "$T/daemon2.out"' || bad "(5) the second daemon did not start" "$(cat "$T/daemon2.out")"
+sleep 1
+S8=88888888-8888-4888-8888-888888888888
+pty p5b env KITH_CLAUDE_ARGS="--session-id $S8" "$KITH" designer --held
+waitfor 'saw p5b "engine ready"' && ok "(5) holder down: the run goes on here" || bad "(5) engine never started" "$(cat "$T/p5b.out") $(cat "$T/daemon2.out")"
+saw p5b "running here (--direct)" && ok "(5) holder down: one line says so" || bad "(5) no line" "$(cat "$T/p5b.out")"
+keys p5b 'quit\r'; WAIT=50 waitfor '[[ -n $(rc_of p5b) ]]'
+is "(5) holder down: the direct run's exit code is the engine's" "$(rc_of p5b)" 7
+
+[[ $fail == 0 ]] && echo "all checks passed"
+exit $fail

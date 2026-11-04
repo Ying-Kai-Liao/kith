@@ -13,6 +13,7 @@
   kith-sessions terminal SID PID [PERSON [AGENT]]  for an interactive run that resolve did not claim (a fresh one, on the
                                            --session-id bin/kith chose; KITH_RESUME): the claim, kind terminal, for PID (the
                                            launcher's shell, which then execs `run`, which gives it back); refused at once when held
+  kith-sessions release PID                gives back every claim PID holds (`kith AGENT --held` after a resume: terminal.open takes the claim itself)
   kith-sessions proc PID PERSON AGENT     every non-owner run: a session-less `proc-PID.claim` naming the person, so the revoke sweep
                                            finds the run (and the claude below it) after a host restart
   kith-sessions sweep PERSON...            revoke or removal with no host running: ends the live holders of every claim naming one of
@@ -876,6 +877,9 @@ if __name__ == '__main__':
         claim_oneshot(a[1], int(a[2]), a[3] if len(a) > 3 else None, a[4] if len(a) > 4 else None)
     elif a[:1] == ['terminal'] and len(a) in (3, 4, 5):
         claim_terminal(a[1], int(a[2]), a[3] if len(a) > 3 else None, a[4] if len(a) > 4 else None)
+    elif a[:1] == ['release'] and len(a) == 2:
+        # --held gives back the claim a resume took for the launcher's shell: terminal.open takes the session's claim itself.
+        release_claims(int(a[1]))
     elif a[:1] == ['proc'] and len(a) == 4:
         proc_claim(int(a[1]), a[2], a[3])
     elif a[:1] == ['sweep'] and len(a) > 1:
