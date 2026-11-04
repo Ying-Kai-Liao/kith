@@ -117,10 +117,10 @@ fn run(steps: &[Step]) -> Result<(), TestCaseError> {
                     next_pid += 1;
                     let inst = format!("h{instance}");
                     let r =
-                        redeem(&mut c, id, next_pid, &format!("s{next_pid}"), &inst, now).unwrap();
+                        redeem(&mut c, id, next_pid, &format!("e{next_pid}"), &inst, now).unwrap();
                     // A refused stub exits; only a redeemed one goes on to run the engine.
                     if matches!(r, Redeemed::Running { again: false }) {
-                        procs.spawn(next_pid, &format!("s{next_pid}"));
+                        procs.spawn(next_pid, &format!("e{next_pid}"));
                     }
                 }
             }

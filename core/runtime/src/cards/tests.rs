@@ -707,12 +707,12 @@ fn a_claim_whose_process_is_gone_is_dropped_and_an_unreadable_one_is_kept() {
         pid: Some(4242),
         until: T0 + 100_000,
     };
-    claim(&mut c, &a.id, &with_pid, T0, &Started("t1"))
+    claim(&mut c, &a.id, &with_pid, T0, &Started("e1"))
         .unwrap()
         .unwrap();
     // The same start time: alive. A failed probe: kept too.
     assert!(
-        claim(&mut c, &a.id, &hold("w2", T0 + 9), T0 + 1, &Started("t1"))
+        claim(&mut c, &a.id, &hold("w2", T0 + 9), T0 + 1, &Started("e1"))
             .unwrap()
             .is_none()
     );
@@ -724,7 +724,7 @@ fn a_claim_whose_process_is_gone_is_dropped_and_an_unreadable_one_is_kept() {
     assert_eq!(yes(&mut c, &a.id, T0 + 2), Answered::Claimed("w1".into()));
     // The pid has another start time now: reused, so the holder is dead and the card is free.
     assert!(matches!(
-        answer(&mut c, &reply(&a.id, true), T0 + 3, &Started("t2")).unwrap(),
+        answer(&mut c, &reply(&a.id, true), T0 + 3, &Started("e2")).unwrap(),
         Answered::Applied { .. }
     ));
 

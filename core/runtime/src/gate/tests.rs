@@ -371,7 +371,7 @@ fn with_pid(holder: &str, max: i64, pid: u32) -> Take<'_> {
 fn the_crash_of_a_holder_frees_its_slot_on_the_next_take() {
     let (_t, _l, mut c) = core();
     let procs = Procs::default();
-    procs.start(100, "Mon Nov  3 10:00:00 2026");
+    procs.start(100, "e1000");
     let of = procs.clone();
     assert_eq!(
         take(&mut c, &with_pid("a", 1, 100), &of).unwrap(),
@@ -391,10 +391,10 @@ fn the_crash_of_a_holder_frees_its_slot_on_the_next_take() {
 fn a_reused_pid_is_another_process_and_does_not_keep_the_slot() {
     let (_t, _l, mut c) = core();
     let procs = Procs::default();
-    procs.start(100, "Mon Nov  3 10:00:00 2026");
+    procs.start(100, "e1000");
     let of = procs.clone();
     take(&mut c, &with_pid("a", 1, 100), &of).unwrap();
-    procs.start(100, "Tue Nov  4 09:00:00 2026");
+    procs.start(100, "e9000");
     assert_eq!(take(&mut c, &t("b", 1), &of).unwrap(), State::Granted);
 }
 
@@ -775,15 +775,34 @@ fn old_lstart_text_never_frees_a_live_holder_and_a_dead_pid_still_frees_it() {
 }
 
 #[test]
-fn an_epoch_start_within_the_tolerance_is_the_same_process() {
+fn a_start_in_the_same_form_must_be_equal_to_be_the_same_process() {
     let (_t, _l, mut c) = core();
     let procs = Procs::default();
-    procs.start(100, "e1000000");
+    procs.start(100, "bAAA:1000");
     take(&mut c, &with_pid("a", 1, 100), &procs).unwrap();
-    procs.start(100, "e1001000");
+    // A wall-clock step moves nothing in a boot stamp: still the holder.
     assert_eq!(take(&mut c, &t("b", 1), &procs).unwrap(), waiting(1));
-    procs.start(100, "e1900000");
+    // Another tick in the same boot, or the same tick in another boot, is another process.
+    procs.start(100, "bAAA:1001");
     assert_eq!(take(&mut c, &t("b", 1), &procs).unwrap(), State::Granted);
+}
+
+#[test]
+fn a_start_in_another_form_is_unknown_and_only_a_dead_pid_frees_it() {
+    for (recorded, now) in [("e1000", "bAAA:1"), ("bAAA:1", "e1000"), ("t1", "bAAA:1")] {
+        let (_t, _l, mut c) = core();
+        let procs = Procs::default();
+        procs.start(100, recorded);
+        take(&mut c, &with_pid("a", 1, 100), &procs).unwrap();
+        procs.start(100, now);
+        assert_eq!(
+            take(&mut c, &t("b", 1), &procs).unwrap(),
+            waiting(1),
+            "{recorded} vs {now}"
+        );
+        procs.end(100);
+        assert_eq!(take(&mut c, &t("b", 1), &procs).unwrap(), State::Granted);
+    }
 }
 
 #[test]

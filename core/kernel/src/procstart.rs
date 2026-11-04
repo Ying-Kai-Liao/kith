@@ -1,23 +1,28 @@
 //! One answer to "is that process still there, and is it the one we recorded": the OS's own record, no `ps`, no
-//! local-time text. A start time is milliseconds since the Unix epoch, so a change of time zone changes nothing (a
-//! change of the wall clock moves Linux's boot-relative record by the same amount; callers compare with a tolerance).
+//! local-time text. A start is a *stamp*, a string compared with plain equality, never a tolerance:
 //!
-//! - macOS: `proc_pidinfo(PROC_PIDTBSDINFO)`, the record `ps` itself prints from.
-//! - Linux: `/proc/<pid>/stat` field 22 (clock ticks since boot) plus `btime` from `/proc/stat`.
-//! - Windows: `OpenProcess` + `GetProcessTimes` (creation time), `GetExitCodeProcess` for a process that has ended but
-//!   whose handle someone still holds.
+//! - macOS and Windows: `e<epoch ms>` (a time zone changes nothing; the record is the process' own creation time, which
+//!   a wall-clock step does not move).
+//! - Linux: `b<boot id>:<ticks>`, the boot id from `/proc/sys/kernel/random/boot_id` and `/proc/<pid>/stat` field 22
+//!   (clock ticks since boot). No `btime`: it moves with every wall-clock step, so a step would free live holders.
+//!
+//! Sources: macOS `proc_pidinfo(PROC_PIDTBSDINFO)`, the record `ps` prints from; Windows `OpenProcess` +
+//! `GetProcessTimes`, and a zero-timeout wait on the handle for a process that has ended but whose handle someone holds.
 //!
 //! The answer is three-valued so a failed probe can never be taken for a dead process: [`Probe::Gone`] only when the
 //! system says there is no such process (ESRCH; on Windows an invalid pid, or one that has exited), [`Probe::Alive`] when
-//! it exists (we may not be allowed to read its start time, so that is optional), [`Probe::Unknown`] for anything else.
+//! it exists (we may not be allowed to read its start, so that is optional), [`Probe::Unknown`] for anything else.
+//!
+//! Two stamps of different forms (`e…` against `b…`, or old `ps -o lstart=` text or nothing against either) cannot be
+//! told apart or told the same: see [`same_process`], which calls that an *unknown start* and never a different process.
 
 #![allow(unsafe_code)]
 
 /// What the system said about a pid.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Probe {
-    /// The process exists; its start time in epoch milliseconds when it could be read.
-    Alive(Option<i64>),
+    /// The process exists; its start stamp when it could be read.
+    Alive(Option<String>),
     /// The system says there is no such process (or it is a zombie / has exited).
     Gone,
     /// The probe failed for another reason (a refusal, an unreadable record): neither alive nor gone.
@@ -30,13 +35,59 @@ pub fn probe(pid: u32) -> Probe {
     imp::probe(pid)
 }
 
-/// The start time of `pid` in epoch milliseconds; `None` when it is gone or cannot be read.
+/// The start stamp of `pid`; `None` when it is gone or cannot be read.
 #[must_use]
-pub fn start_ms(pid: u32) -> Option<i64> {
+pub fn start_stamp(pid: u32) -> Option<String> {
     match probe(pid) {
         Probe::Alive(start) => start,
         Probe::Gone | Probe::Unknown => None,
     }
+}
+
+/// The recorded form of an epoch start.
+#[must_use]
+pub fn epoch_stamp(ms: i64) -> String {
+    format!("e{ms}")
+}
+
+/// The recorded form of a Linux start (the boot it began in, and its ticks since that boot).
+#[must_use]
+pub fn boot_stamp(boot_id: &str, ticks: u64) -> String {
+    format!("b{}:{ticks}", boot_id.trim())
+}
+
+/// Which family a stamp is in; `None` for old `lstart` text, test markers, or nothing.
+fn form(s: &str) -> Option<char> {
+    if let Some(r) = s.strip_prefix('e') {
+        return r.parse::<i64>().is_ok().then_some('e');
+    }
+    let r = s.strip_prefix('b')?;
+    let (id, ticks) = r.split_once(':')?;
+    (!id.is_empty() && ticks.parse::<u64>().is_ok()).then_some('b')
+}
+
+/// Whether a recorded start and a current reading are one process: plain equality when both are in one form (a
+/// different boot id is a different process), and *yes* when the forms differ or the record is unknown (empty, old
+/// `lstart` text, `e…` against `b…`): that cannot be told apart, and a wrong "no" would free a live holder. Such a
+/// holder is freed only when the pid is gone (ESRCH / exited).
+#[must_use]
+pub fn same_process(recorded: &str, current: &str) -> bool {
+    match (form(recorded), form(current)) {
+        (Some(a), Some(b)) if a == b => recorded == current,
+        _ => true,
+    }
+}
+
+/// `/proc/<pid>/stat` text: (state letter, starttime ticks). The command (field 2) is in parentheses and may hold
+/// anything, so count from the last `)`. Pure, so the Linux reading is tested on every platform.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+fn parse_linux_stat(stat: &str) -> Option<(char, u64)> {
+    let rest = stat.rfind(')').map(|i| &stat[i + 1..])?;
+    let mut fields = rest.split_whitespace();
+    let state = fields.next()?.chars().next()?;
+    // Field 3 (state) is consumed; field 22 (starttime) is 18 on.
+    let ticks = fields.nth(18)?.parse().ok()?;
+    Some((state, ticks))
 }
 
 #[cfg(unix)]
@@ -94,7 +145,10 @@ mod imp {
         }
         let secs = i64::try_from(info.pbi_start_tvsec).ok();
         let micros = i64::try_from(info.pbi_start_tvusec).ok();
-        Probe::Alive(secs.zip(micros).map(|(s, u)| s * 1000 + u / 1000))
+        Probe::Alive(
+            secs.zip(micros)
+                .map(|(s, u)| super::epoch_stamp(s * 1000 + u / 1000)),
+        )
     }
 
     #[cfg(target_os = "linux")]
@@ -103,26 +157,14 @@ mod imp {
             // kill(2) said it exists; its stat file is unreadable or vanished: do not guess.
             return Probe::Alive(None);
         };
-        // The command (field 2) is in parentheses and may hold anything, so count from the last ')'.
-        let Some(rest) = stat.rfind(')').map(|i| &stat[i + 1..]) else {
+        let Some((state, ticks)) = super::parse_linux_stat(&stat) else {
             return Probe::Alive(None);
         };
-        let mut fields = rest.split_whitespace();
-        if fields.next() == Some("Z") {
+        if state == 'Z' {
             return Probe::Gone;
         }
-        // Field 3 (state) is consumed; field 22 (starttime) is 18 on.
-        let ticks: Option<i64> = fields.nth(18).and_then(|t| t.parse().ok());
-        let btime: Option<i64> = std::fs::read_to_string("/proc/stat").ok().and_then(|s| {
-            s.lines()
-                .find_map(|l| l.strip_prefix("btime ")?.trim().parse().ok())
-        });
-        // SAFETY: sysconf has no preconditions.
-        let hz = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
-        // `c_long` is `i32` on 32-bit targets, so the widening is needed there.
-        #[allow(clippy::useless_conversion)]
-        let hz = if hz > 0 { i64::from(hz) } else { 100 };
-        Probe::Alive(ticks.zip(btime).map(|(t, b)| b * 1000 + t * 1000 / hz))
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").ok();
+        Probe::Alive(boot.map(|b| super::boot_stamp(&b, ticks)))
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -136,13 +178,13 @@ mod imp {
     use super::Probe;
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER, FILETIME, GetLastError,
+        WAIT_OBJECT_0,
     };
     use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+        WaitForSingleObject,
     };
 
-    /// `GetExitCodeProcess` gives this while the process runs.
-    const STILL_ACTIVE: u32 = 259;
     /// 100 ns ticks between 1601-01-01 (FILETIME) and 1970-01-01.
     const EPOCH_DIFF_TICKS: i64 = 116_444_736_000_000_000;
 
@@ -151,7 +193,13 @@ mod imp {
             return Probe::Gone;
         }
         // SAFETY: plain Win32 call with a pid; a null handle means failure.
-        let h = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        let h = unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+                0,
+                pid,
+            )
+        };
         if h.is_null() {
             // SAFETY: reads the calling thread's last error.
             return match unsafe { GetLastError() } {
@@ -162,9 +210,10 @@ mod imp {
                 _ => Probe::Unknown,
             };
         }
-        let mut code = 0u32;
-        // SAFETY: `h` is an open process handle and `code` outlives the call.
-        let got_code = unsafe { GetExitCodeProcess(h, &raw mut code) } != 0;
+        // A process object is signalled once it has ended; unlike an exit code of 259 (STILL_ACTIVE), which a process may
+        // itself exit with, this cannot be mistaken for "running".
+        // SAFETY: `h` is an open process handle; a zero timeout only polls.
+        let ended = unsafe { WaitForSingleObject(h, 0) } == WAIT_OBJECT_0;
         let zero = FILETIME {
             dwLowDateTime: 0,
             dwHighDateTime: 0,
@@ -183,14 +232,16 @@ mod imp {
         // SAFETY: `h` came from OpenProcess and is closed once.
         unsafe { CloseHandle(h) };
         // A process that has ended but whose handle someone still holds is a crashed holder: gone.
-        if got_code && code != STILL_ACTIVE {
+        if ended {
             return Probe::Gone;
         }
         if !got_times {
             return Probe::Alive(None);
         }
         let ticks = (i64::from(created.dwHighDateTime) << 32) | i64::from(created.dwLowDateTime);
-        Probe::Alive(Some((ticks - EPOCH_DIFF_TICKS) / 10_000))
+        Probe::Alive(Some(super::epoch_stamp(
+            (ticks - EPOCH_DIFF_TICKS) / 10_000,
+        )))
     }
 }
 
@@ -209,26 +260,75 @@ mod tests {
     use super::*;
 
     #[test]
-    fn this_process_is_alive_and_started_in_the_past() {
-        let Probe::Alive(Some(ms)) = probe(std::process::id()) else {
-            panic!("this process is alive with a readable start time");
+    fn this_process_is_alive_with_a_stable_stamp() {
+        let Probe::Alive(Some(stamp)) = probe(std::process::id()) else {
+            panic!("this process is alive with a readable start");
         };
-        let now = i64::try_from(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis(),
-        )
-        .unwrap();
-        assert!(
-            ms <= now + 2000 && ms > now - 24 * 3600 * 1000,
-            "{ms} vs {now}"
-        );
+        assert!(form(&stamp).is_some(), "{stamp}");
+        if cfg!(target_os = "linux") {
+            assert!(stamp.starts_with('b'), "{stamp}");
+        } else {
+            assert!(stamp.starts_with('e'), "{stamp}");
+        }
         assert_eq!(
-            start_ms(std::process::id()),
-            Some(ms),
+            start_stamp(std::process::id()),
+            Some(stamp),
             "stable across calls"
         );
+    }
+
+    // A real Linux line: the command holds spaces and parentheses; field 22 is 123456.
+    const STAT: &str = "4242 (my (odd) cmd) S 1 4242 4242 0 -1 4194560 100 0 0 0 5 3 0 0 20 0 1 0 123456 1000000 200 18446744073709551615 0 0 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0";
+
+    #[test]
+    fn linux_stat_and_boot_id_text_make_a_boot_stamp() {
+        assert_eq!(parse_linux_stat(STAT), Some(('S', 123_456)));
+        assert_eq!(
+            parse_linux_stat(&STAT.replace(") S ", ") Z ")).map(|s| s.0),
+            Some('Z')
+        );
+        assert_eq!(parse_linux_stat("garbage"), None);
+        assert_eq!(parse_linux_stat("1 (x) S 1 2"), None);
+        let id = "6f1c2d3e-0000-4000-8000-0123456789ab\n";
+        assert_eq!(
+            boot_stamp(id, 123_456),
+            "b6f1c2d3e-0000-4000-8000-0123456789ab:123456"
+        );
+        assert_eq!(form(&boot_stamp(id, 1)), Some('b'));
+    }
+
+    #[test]
+    fn same_form_compares_with_equality_and_no_tolerance() {
+        assert!(same_process("e1000", "e1000"));
+        assert!(!same_process("e1000", "e1001"));
+        assert!(same_process("bAAA:10", "bAAA:10"));
+        assert!(
+            !same_process("bAAA:10", "bAAA:11"),
+            "another start in one boot"
+        );
+        assert!(
+            !same_process("bAAA:10", "bBBB:10"),
+            "same tick, another boot"
+        );
+    }
+
+    #[test]
+    fn a_different_form_is_an_unknown_start_never_another_process() {
+        for (recorded, current) in [
+            ("e1000", "bAAA:10"),
+            ("bAAA:10", "e1000"),
+            ("Mon Nov  4 10:00:00 2026", "e1000"),
+            ("Mon Nov  4 10:00:00 2026", "bAAA:10"),
+            ("", "e1000"),
+            ("", "bAAA:10"),
+            ("e", "bAAA:10"),
+            ("bAAA", "e1000"),
+        ] {
+            assert!(
+                same_process(recorded, current),
+                "{recorded:?} vs {current:?}"
+            );
+        }
     }
 
     #[test]

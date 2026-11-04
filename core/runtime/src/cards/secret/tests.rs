@@ -603,7 +603,7 @@ fn a_writer_that_lost_its_claim_writes_nothing() {
     let k2 = key_card(&mut c, "slack");
     let plan2 = plan_of(&mut c, &k2.id, &two());
     let timed = crate::cards::Claim {
-        holder: "t1",
+        holder: "e1",
         pid: None,
         until: T0 + 10,
     };
@@ -613,7 +613,7 @@ fn a_writer_that_lost_its_claim_writes_nothing() {
     assert_eq!(sweep(&mut c, DEADLINE + 1, &Nobody).unwrap().len(), 1);
     let held = Held {
         id: k2.id.clone(),
-        holder: "t1".into(),
+        holder: "e1".into(),
     };
     assert!(commit(&mut c, &mut e, &held, &plan2, &two(), DEADLINE + 2, &Nobody).is_err());
     assert_eq!(writes(&c, "slack"), 0);
@@ -628,11 +628,11 @@ fn a_claim_that_ran_out_by_time_is_not_taken_over_while_its_writer_lives() {
     let mut e = env(&store);
     let k = key_card_with(&mut c, "github", T0 + 100, "r1");
     let plan = plan_of(&mut c, &k.id, &two());
-    let first = begin(&mut c, &k.id, T0 + 1, &Started("t1"))
+    let first = begin(&mut c, &k.id, T0 + 1, &Started("e1"))
         .unwrap()
         .expect("claims");
     let late = T0 + 1 + CLAIM_MS + 1_000;
-    let live = Started("t1");
+    let live = Started("e1");
     // Nobody takes it over, answers it, withdraws it or sweeps it.
     assert_eq!(
         refused(prov(&mut c, &mut e, &k.id, &two(), late, &live)),
@@ -677,11 +677,11 @@ fn a_claim_that_ran_out_by_time_is_not_taken_over_while_its_writer_lives() {
 
     // Its process is gone, or has another start time (pid reuse): the claim is dropped and the clock may close the card.
     let k2 = key_card_with(&mut c, "slack", T0 + 100, "r1");
-    begin(&mut c, &k2.id, T0 + 1, &Started("t1"))
+    begin(&mut c, &k2.id, T0 + 1, &Started("e1"))
         .unwrap()
         .expect("claims");
-    assert_eq!(sweep(&mut c, late, &Started("t1")).unwrap().len(), 0);
-    assert_eq!(sweep(&mut c, late, &Started("t2")).unwrap().len(), 1);
+    assert_eq!(sweep(&mut c, late, &Started("e1")).unwrap().len(), 0);
+    assert_eq!(sweep(&mut c, late, &Started("e2")).unwrap().len(), 1);
     assert_eq!(stored(&mut c, &k2.id).state, State::Expired);
     let k3 = key_card_with(&mut c, "teams", T0 + 100, "r1");
     begin(&mut c, &k3.id, T0 + 1, &Nobody)
