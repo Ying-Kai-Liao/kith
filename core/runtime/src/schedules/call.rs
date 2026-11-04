@@ -6,7 +6,7 @@
 use rusqlite::{Connection, OptionalExtension as _, params};
 use serde_json::{Map, Value, json};
 
-use super::{AgentJobs, Index, Rule, index};
+use super::{AgentJobs, Index, Rule, RuleError, index};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -39,14 +39,8 @@ pub(crate) fn call_with(
         local: local.as_deref(),
     };
     match method {
-        "schedule.jobs" => {
-            let idx = index(&paths, agent);
-            ctx.list(&idx)
-        }
-        "schedule.next" => {
-            let idx = index(&paths, agent);
-            ctx.next(&idx)
-        }
+        "schedule.jobs" => ctx.list(&known_agent(&paths, agent)?),
+        "schedule.next" => ctx.next(&known_agent(&paths, agent)?),
         "schedule.show" => {
             let agent = agent.ok_or_else(|| bad("agent is required"))?;
             let id = params
@@ -60,6 +54,24 @@ pub(crate) fn call_with(
             "kith-core: {method} is not answered in the core yet"
         ))),
     }
+}
+
+/// The index for the agent asked for (all when none). An agent that is not there is refused as `kith-sched` refuses it,
+/// naming the agents there are; with the agents folder unmounted nothing is known, so that is a status, not a refusal.
+fn known_agent(paths: &kith_kernel::paths::Paths, agent: Option<&str>) -> Result<Index> {
+    let idx = index(paths, agent);
+    if let Some(a) = agent
+        && idx.mounted
+        && idx.agents.is_empty()
+    {
+        let have: Vec<String> = index(paths, None)
+            .agents
+            .into_iter()
+            .map(|a| a.agent)
+            .collect();
+        return Err(bad(&format!("no agent {a:?} (have: {})", have.join(" "))));
+    }
+    Ok(idx)
 }
 
 fn bad(what: &str) -> Error {
@@ -136,7 +148,10 @@ impl Ctx<'_> {
                 Some(c) => match self.rule.next(c, self.now) {
                     Ok(Some(n)) => next = json!(n),
                     Ok(None) => {}
-                    Err(e) => {
+                    Err(RuleError::NotWired) => {
+                        row.insert("note".into(), json!("trigger not wired"));
+                    }
+                    Err(RuleError::Bad(e)) => {
                         row.insert("error".into(), json!(format!("bad cron: {e}")));
                     }
                 },
@@ -162,6 +177,8 @@ impl Ctx<'_> {
         Ok(Run {
             json: json!({
                 "at": r.get::<_, String>("at")?,
+                "slot": r.get::<_, String>("slot")?,
+                "turn": r.get::<_, Option<String>>("turn_id")?,
                 "why": r.get::<_, Option<String>>("why")?,
                 "pid": pid,
                 "log": r.get::<_, Option<String>>("log")?,
@@ -327,11 +344,11 @@ impl Ctx<'_> {
             )));
         };
         let mut fires = self.conn.prepare(
-            "SELECT slot, turn_id, at FROM sched_fires WHERE agent = ?1 AND job = ?2 ORDER BY at DESC, slot DESC LIMIT 20",
+            "SELECT slot, turn_id, at, outcome FROM sched_fires WHERE agent = ?1 AND job = ?2 ORDER BY at DESC, slot DESC LIMIT 20",
         )?;
         let fires = fires
             .query_map(params![agent, id], |r| {
-                Ok(json!({"slot": r.get::<_, String>(0)?, "turn": r.get::<_, Option<String>>(1)?, "at": r.get::<_, i64>(2)?}))
+                Ok(json!({"slot": r.get::<_, String>(0)?, "turn": r.get::<_, Option<String>>(1)?, "at": r.get::<_, i64>(2)?, "outcome": r.get::<_, String>(3)?}))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(json!({

@@ -29,16 +29,63 @@ pub(crate) use call::{call, serves};
 /// The cron rule `next` needs: when a job runs after `now_ms`, as the local minute `YYYY-MM-DDTHH:MM` that
 /// `kith-sched` prints, or `None` when it never does. The kernel's Trigger (M4-1) is the real one.
 pub(crate) trait Rule {
-    fn next(&self, cron: &str, now_ms: i64) -> std::result::Result<Option<String>, String>;
+    fn next(&self, cron: &str, now_ms: i64) -> std::result::Result<Option<String>, RuleError>;
+}
+
+/// Why a rule gave no time.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RuleError {
+    /// The cron rule is not wired into the core yet: not a fault of the job.
+    NotWired,
+    /// The job's cron is no cron.
+    Bad(String),
 }
 
 /// Stands in until the kernel's Trigger is wired: every job's `next` is unknown, and says so.
 pub(crate) struct NoRule;
 
 impl Rule for NoRule {
-    fn next(&self, _cron: &str, _now_ms: i64) -> std::result::Result<Option<String>, String> {
-        Err("the cron rule is not wired into the core yet".into())
+    fn next(&self, _cron: &str, _now_ms: i64) -> std::result::Result<Option<String>, RuleError> {
+        Err(RuleError::NotWired)
     }
+}
+
+/// What a fire decided: `fired`, or `skipped:<reason>`. Checked here, not in SQL, so a new reason needs no rebuild.
+pub(crate) fn valid_fire_outcome(s: &str) -> bool {
+    s == "fired"
+        || s.strip_prefix("skipped:")
+            .is_some_and(|r| !r.trim().is_empty())
+}
+
+/// The states of a run. Checked here, not in SQL, since firing (M4-3) grows the set.
+pub(crate) fn valid_run_state(s: &str) -> bool {
+    matches!(s, "started" | "done" | "failed" | "skipped")
+}
+
+/// A slot: a UTC instant in whole minutes (`2026-11-04T00:00:00Z`) or `manual:<id>`.
+pub(crate) fn valid_slot(s: &str) -> bool {
+    if let Some(id) = s.strip_prefix("manual:") {
+        return !id.is_empty()
+            && id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
+    }
+    chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%SZ")
+        .is_ok_and(|t| chrono::Timelike::second(&t) == 0)
+}
+
+/// The slot of a local minute as `kith-sched` writes it (`YYYY-MM-DDTHH:MM`, this Mac's local time): the UTC instant.
+/// `None` for text that is no minute, or a local time that did not exist (the clock skipped it). A time that happened
+/// twice (the clock went back) is the earlier one.
+pub(crate) fn slot_of_local(local: &str) -> Option<String> {
+    use chrono::TimeZone as _;
+    let naive = chrono::NaiveDateTime::parse_from_str(local, "%Y-%m-%dT%H:%M").ok()?;
+    let t = chrono::Local.from_local_datetime(&naive).earliest()?;
+    Some(
+        t.with_timezone(&chrono::Utc)
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string(),
+    )
 }
 
 /// The file in the machine folder that names this machine, for the `mac` field of schedule rows and, later, of a
@@ -53,11 +100,28 @@ pub(crate) const MAC_ID_FILE: &str = "mac-id";
 /// rather than replaced, since every row written under the old id would be orphaned.
 pub(crate) fn mac_id(machine: &Path) -> Result<String> {
     let path = machine.join(MAC_ID_FILE);
-    match std::fs::read_to_string(&path) {
-        Ok(text) => return valid_mac_id(&path, text.trim()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(Error::Io(format!("{}: {e}", path.display()))),
+    for _ in 0..3 {
+        match std::fs::read_to_string(&path) {
+            Ok(text) if text.trim().is_empty() => {
+                // Left empty by something other than this function (which never shows a reader a partial file):
+                // nobody can have used it, so it is repaired. Another repairer may win; the next read says which.
+                let _ = std::fs::remove_file(&path);
+            }
+            Ok(text) => return valid_mac_id(&path, text.trim()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(Error::Io(format!("{}: {e}", path.display()))),
+        }
+        make_mac_id(machine, &path)?;
     }
+    Err(Error::Io(format!(
+        "{}: could not settle on a machine id",
+        path.display()
+    )))
+}
+
+/// Writes the id to a private temp file and hard-links it into place: the name appears whole or not at all, and of two
+/// creators exactly one links (the other finds the name taken and reads the winner's id on the next turn).
+fn make_mac_id(machine: &Path, path: &Path) -> Result<()> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes)
         .map_err(|_| Error::Io("kith-core: random bytes unavailable".into()))?;
@@ -67,16 +131,18 @@ pub(crate) fn mac_id(machine: &Path) -> Result<String> {
         s
     });
     std::fs::create_dir_all(machine)?;
-    match create_new_private(&path) {
-        Ok(mut f) => {
-            use std::io::Write as _;
-            f.write_all(id.as_bytes())?;
-            Ok(id)
-        }
-        // Another process made it between the read and now: its id is the one.
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            valid_mac_id(&path, std::fs::read_to_string(&path)?.trim())
-        }
+    let tmp = machine.join(format!(".{MAC_ID_FILE}.{}.{id}.tmp", std::process::id()));
+    {
+        use std::io::Write as _;
+        let mut f = create_new_private(&tmp)?;
+        f.write_all(id.as_bytes())?;
+        f.sync_all()?;
+    }
+    let linked = std::fs::hard_link(&tmp, path);
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
         Err(e) => Err(Error::Io(format!("{}: {e}", path.display()))),
     }
 }

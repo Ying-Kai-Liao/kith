@@ -31,6 +31,8 @@ use crate::AuthorityReport as Report;
 struct Run {
     agent: String,
     job: String,
+    /// The UTC instant of `at` (see `schedules::slot_of_local`).
+    slot: String,
     at: String,
     why: Option<String>,
     pid: Option<i64>,
@@ -92,10 +94,15 @@ fn read_source(path: &Path) -> Result<Option<(Source, String)>> {
                 skipped.push(format!("{key}: no start time"));
                 continue;
             };
+            let Some(slot) = crate::schedules::slot_of_local(at) else {
+                skipped.push(format!("{key}: {at:?} is no local minute that existed"));
+                continue;
+            };
             let text = |k: &str| entry.get(k).and_then(Value::as_str).map(str::to_owned);
             runs.push(Run {
                 agent: agent.to_owned(),
                 job: job.to_owned(),
+                slot,
                 at: at.to_owned(),
                 why: text("why"),
                 pid: entry.get("pid").and_then(Value::as_i64),
@@ -140,8 +147,8 @@ fn plan(c: &Connection, src: &Source, mac: &str) -> (bool, Vec<usize>) {
     for (i, r) in src.runs.iter().enumerate() {
         let seen = c
             .query_row(
-                "SELECT 1 FROM sched_runs WHERE agent = ?1 AND job = ?2 AND mac = ?3 AND at = ?4",
-                params![r.agent, r.job, mac, r.at],
+                "SELECT 1 FROM sched_runs WHERE agent = ?1 AND job = ?2 AND mac = ?3 AND slot = ?4",
+                params![r.agent, r.job, mac, r.slot],
                 |_| Ok(()),
             )
             .is_ok();
@@ -151,6 +158,10 @@ fn plan(c: &Connection, src: &Source, mac: &str) -> (bool, Vec<usize>) {
     }
     (tick, new)
 }
+
+/// What an imported run is: started (kith-sched never told how it ended) at a slot that fired.
+const STATE: &str = "started";
+const OUTCOME: &str = "fired";
 
 fn describe(tick: bool, runs: usize) -> String {
     format!(
@@ -202,6 +213,9 @@ pub(crate) fn run(layout: &Layout, machine: &Path, dry_run: bool) -> Result<Repo
         return Ok(rep);
     }
 
+    debug_assert!(
+        crate::schedules::valid_run_state(STATE) && crate::schedules::valid_fire_outcome(OUTCOME)
+    );
     let mac = crate::schedules::mac_id(machine)?;
     // The lifetime lock for the whole step; this also brings the schema up to date, as `kith migrate` does.
     let mut core = crate::start_with(layout, MIGRATIONS)?;
@@ -231,9 +245,16 @@ pub(crate) fn run(layout: &Layout, machine: &Path, dry_run: bool) -> Result<Repo
     for &i in &new {
         let r = &src.runs[i];
         tx.execute(
-            "INSERT OR IGNORE INTO sched_runs (agent, job, mac, at, state, why, pid, log)
-             VALUES (?1, ?2, ?3, ?4, 'started', ?5, ?6, ?7)",
-            params![r.agent, r.job, mac, r.at, r.why, r.pid, r.log],
+            "INSERT OR IGNORE INTO sched_runs (agent, job, mac, slot, at, state, why, pid, log)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                r.agent, r.job, mac, r.slot, r.at, STATE, r.why, r.pid, r.log
+            ],
+        )?;
+        // The run exists, so its slot was fired. A fire the core already decided is left as it is.
+        tx.execute(
+            "INSERT OR IGNORE INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+            params![r.agent, r.job, r.slot, OUTCOME, now * 1000],
         )?;
     }
     let summary = format!("schedules: {}", describe(tick, new.len()));

@@ -167,8 +167,10 @@ pub fn migrate_authority(
 
 /// `kith migrate --schedules`: copies `kith-sched`'s state files (the last tick and each job's last run) into core.db
 /// (see `import::schedules`). Idempotent, read-only on the sources, `--dry-run` writes nothing; jobs.json is not imported.
+// Crate-private until `kith migrate` runs it (M3-10) and the host switches (M4-5); only the tests call it.
 #[cfg(unix)]
-pub fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<AuthorityReport, Error> {
+#[allow(dead_code, reason = "first caller is M3-10 / M4-5")]
+pub(crate) fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<AuthorityReport, Error> {
     import::schedules::run(&Layout::new(&paths.machine), &paths.machine, dry_run)
 }
 

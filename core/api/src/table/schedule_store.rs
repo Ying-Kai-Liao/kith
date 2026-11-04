@@ -6,8 +6,8 @@
 //! `kith schedule ls --json` row (kernel, in `json_forms_more`), which stays as it is until the switch.
 //!
 //! The write rows (`schedule.add`, `.remove`, `.pause`, `.resume`, `.run`) already exist in `json_forms_more` as kernel
-//! rows. The one the store adds is `schedule.edit`, kernel-served too: nothing in the core writes a jobs.json, which
-//! `kith-sched` keeps to itself until M4-5.
+//! rows and stay unserved by the core: nothing in the core writes a jobs.json, which `kith-sched` keeps to itself until
+//! M4-5. (`kith-sched` has no edit verb, so there is no `schedule.edit`.)
 
 use super::build::*;
 
@@ -33,24 +33,6 @@ pub(super) const ROWS: &[Method] = &[
         &[pos("agent", "string", false, "Only this agent's.")],
         &["schedule", "next"],
     ),
-    row(
-        "schedule.edit",
-        "Change a job's cron, task, model, effort or harness.",
-        &[
-            pos("agent", "string", true, "The agent."),
-            pos("id", "string", true, "The job."),
-            flag("cron", "string", &["--cron"], "The new cron."),
-            flag("task", "string", &["--task"], "The new task."),
-            flag("model", "string", &["--model", "-m"], "The model."),
-            flag("effort", "string", &["--effort", "-e"], "The effort."),
-            flag("harness", "string", &["--harness", "-H"], "The harness."),
-        ],
-        "json",
-        &["schedule", "edit"],
-        Served::Kernel,
-        Stability::Experimental,
-    )
-    .formats(J),
 ];
 
 const fn read(

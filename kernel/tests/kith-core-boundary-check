@@ -42,7 +42,7 @@ PUBLIC = {
     ("lib.rs", "field:from"), ("lib.rs", "field:to"),
     # `kith kernel core-migrate --authority` (M2-8): the host's main.rs passes its options and prints the report lines;
     # it reads no table and names no file of the core.
-    ("lib.rs", "migrate_authority"), ("lib.rs", "migrate_schedules"), ("lib.rs", "AuthorityOptions"), ("lib.rs", "AuthorityReport"),
+    ("lib.rs", "migrate_authority"), ("lib.rs", "AuthorityOptions"), ("lib.rs", "AuthorityReport"),
     ("lib.rs", "field:dry_run"), ("lib.rs", "field:force"), ("lib.rs", "field:changed"), ("lib.rs", "field:backup"),
     ("lib.rs", "field:lines"),
     ("db.rs", "Core"), ("db.rs", "generation"), ("db.rs", "schema_version"),

@@ -11,7 +11,7 @@ use kith_kernel::paths::Paths;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use super::{NoRule, Rule, mac_id};
+use super::{NoRule, Rule, RuleError, mac_id};
 use crate::import::schedules::run as import;
 use crate::layout::Layout;
 use crate::tests::{machine, open_all, paths};
@@ -19,11 +19,13 @@ use crate::tests::{machine, open_all, paths};
 struct Fixed;
 
 impl Rule for Fixed {
-    fn next(&self, cron: &str, _now: i64) -> Result<Option<String>, String> {
+    fn next(&self, cron: &str, _now: i64) -> Result<Option<String>, RuleError> {
         match cron {
             "0 8 * * *" => Ok(Some("2026-11-05T08:00".into())),
             "*/5 * * * *" => Ok(Some("2026-11-04T12:05".into())),
-            other => Err(format!("cron needs 5 fields, got {other:?}")),
+            other => Err(RuleError::Bad(format!(
+                "cron needs 5 fields, got {other:?}"
+            ))),
         }
     }
 }
@@ -97,6 +99,11 @@ fn the_mac_id_is_made_private_once_and_stays() {
             & 0o777;
         assert_eq!(mode, 0o600);
     }
+    // An empty file (a crash of something else) is repaired; a file holding something else is not.
+    std::fs::write(m.join("mac-id"), "").unwrap();
+    let b = mac_id(&m).unwrap();
+    assert_eq!(b.len(), 32);
+    assert_eq!(mac_id(&m).unwrap(), b);
     std::fs::write(m.join("mac-id"), "not an id").unwrap();
     assert!(
         mac_id(&m).is_err(),
@@ -167,7 +174,11 @@ fn list_joins_definitions_with_run_state_and_names_what_is_off() {
     assert_eq!(out["mounted"], true);
     // The stub rule: next is unknown and the job says why.
     assert_eq!(digest["next"], Value::Null);
-    assert!(digest["error"].as_str().unwrap().contains("not wired"));
+    assert_eq!(digest["note"], "trigger not wired");
+    assert!(
+        digest.get("error").is_none(),
+        "an unwired rule is not a bad cron"
+    );
     // One agent only: the other agents' runs are not orphans of this listing.
     let one = core
         .call(owner(), "schedule.jobs", &json!({"agent": "kit"}))
@@ -184,7 +195,7 @@ fn next_and_show_use_the_rule_and_the_run_history() {
     let core = core_in(&m, &p);
     let conn = core.conn();
     conn.execute(
-        "INSERT INTO sched_fires (agent, job, slot, turn_id, at) VALUES ('mel', 'digest', '2026-11-04T08:00', NULL, 5)",
+        "INSERT INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES ('mel', 'digest', '2026-11-04T08:00:00Z', 'skipped:paused', NULL, 9999999999999)",
         [],
     )
     .unwrap();
@@ -211,7 +222,8 @@ fn next_and_show_use_the_rule_and_the_run_history() {
     assert_eq!(show["job"]["next"], "2026-11-05T08:00");
     assert_eq!(show["definition"]["task"], "send the digest");
     assert_eq!(show["runs"].as_array().unwrap().len(), 1);
-    assert_eq!(show["fires"][0]["slot"], "2026-11-04T08:00");
+    assert_eq!(show["fires"][0]["slot"], "2026-11-04T08:00:00Z");
+    assert_eq!(show["fires"][0]["outcome"], "skipped:paused");
     assert_eq!(show["fires"][0]["turn"], Value::Null);
     // Refusals: an unknown job, an unknown agent, an agent whose file is unreadable.
     for (a, j) in [("mel", "nope"), ("zed", "digest")] {
@@ -237,7 +249,7 @@ fn next_and_show_use_the_rule_and_the_run_history() {
         .is_err()
     );
     // NoRule is what the core wires until M4-1 merges.
-    assert!(NoRule.next("0 8 * * *", 0).is_err());
+    assert_eq!(NoRule.next("0 8 * * *", 0), Err(RuleError::NotWired));
 }
 
 #[test]
@@ -263,6 +275,22 @@ fn an_unmounted_agents_folder_is_a_status_not_a_failure() {
 }
 
 #[test]
+fn an_unknown_agent_is_refused_as_kith_sched_refuses_it() {
+    let (_t, m, p) = world();
+    let core = core_in(&m, &p);
+    for method in ["schedule.jobs", "schedule.next"] {
+        let e = core
+            .call(owner(), method, &json!({"agent": "zed"}))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("no agent \"zed\"") && e.contains("kit mel ola"),
+            "{method}: {e}"
+        );
+    }
+}
+
+#[test]
 fn the_write_rows_are_not_served_by_the_core() {
     let (_t, m, p) = world();
     let core = core_in(&m, &p);
@@ -270,10 +298,6 @@ fn the_write_rows_are_not_served_by_the_core() {
         (
             "schedule.add",
             json!({"agent": "mel", "spec": ["0 8 * * *", "x"]}),
-        ),
-        (
-            "schedule.edit",
-            json!({"agent": "mel", "id": "digest", "cron": "0 9 * * *"}),
         ),
         ("schedule.pause", json!({"agent": "mel", "id": "digest"})),
         ("schedule.resume", json!({"agent": "mel", "id": "digest"})),
@@ -312,6 +336,26 @@ fn the_import_is_idempotent_read_only_and_has_a_dry_run() {
     let core = open_all(&l);
     assert_eq!(count(core.conn(), "sched_runs"), 2);
     assert_eq!(count(core.conn(), "sched_tick"), 1);
+    // Every imported run is keyed on a UTC slot, linked to a fire that has no turn yet.
+    assert_eq!(count(core.conn(), "sched_fires"), 2);
+    let slot: String = core
+        .conn()
+        .query_row(
+            "SELECT slot FROM sched_runs WHERE job = 'digest'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(Some(slot.clone()), super::slot_of_local("2026-11-04T08:00"));
+    let (outcome, turn): (String, Option<String>) = core
+        .conn()
+        .query_row(
+            "SELECT outcome, turn_id FROM sched_fires WHERE slot = ?1 AND job = 'digest'",
+            [&slot],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((outcome.as_str(), turn), ("fired", None));
     assert_eq!(count(core.conn(), "import_log"), 1);
     drop(core);
     // Second run, and a dry run after it: nothing.
@@ -371,7 +415,7 @@ fn the_import_reads_old_files_and_refuses_unreadable_ones() {
 /// What `kith-sched ls --json` prints for the jobs of the world above after the state file of `STATE`: the job rows
 /// (`next` and `error` left out: the cron rule is M4-1's, so they are compared when it is wired).
 #[test]
-fn parity_with_kith_sched_json_ls() {
+fn matches_the_fixture_of_kith_sched_json_ls_until_the_golden_lands() {
     let (_t, m, p) = world();
     state_json(&m, STATE);
     import(&Layout::new(&m), &m, false).unwrap();
@@ -384,6 +428,7 @@ fn parity_with_kith_sched_json_ls() {
         let obj = o.as_object_mut().unwrap();
         obj.remove("next");
         obj.remove("error");
+        obj.remove("note");
         if let Some(l) = obj.get_mut("last").and_then(Value::as_object_mut) {
             // kith-sched's `last` is these five keys; the core adds state, outcome and mac.
             l.retain(|k, _| ["at", "why", "pid", "log", "running"].contains(&k.as_str()));
@@ -405,4 +450,56 @@ fn parity_with_kith_sched_json_ls() {
         {"agent": "mel", "id": "weird", "cron": "bad", "task": "x", "paused": false, "last": null}
     ]);
     assert_eq!(Value::Array(got), want);
+}
+
+#[test]
+fn two_creators_end_with_one_id_and_nobody_sees_an_empty_file() {
+    for _ in 0..20 {
+        let (_t, m) = machine();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let ids: Vec<String> = (0..8)
+            .map(|_| {
+                let (m, b) = (m.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    b.wait();
+                    mac_id(&m).unwrap()
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+        assert!(ids.iter().all(|i| *i == ids[0] && i.len() == 32), "{ids:?}");
+        assert_eq!(std::fs::read_to_string(m.join("mac-id")).unwrap(), ids[0]);
+        // No temp file is left behind.
+        let left: Vec<_> = std::fs::read_dir(&m)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .collect();
+        assert!(left.is_empty());
+    }
+}
+
+#[test]
+fn slots_are_utc_instants_or_manual_and_states_are_checked_in_code() {
+    use super::{slot_of_local, valid_fire_outcome, valid_run_state, valid_slot};
+    let slot = slot_of_local("2026-11-04T08:00").unwrap();
+    assert!(valid_slot(&slot) && slot.ends_with(":00Z"), "{slot}");
+    assert_eq!(slot_of_local("not a time"), None);
+    for good in ["2026-11-04T08:00:00Z", "manual:abc-1"] {
+        assert!(valid_slot(good), "{good}");
+    }
+    for bad in [
+        "2026-11-04T08:00",
+        "2026-11-04T08:00:30Z",
+        "manual:",
+        "manual:a b",
+        "",
+    ] {
+        assert!(!valid_slot(bad), "{bad}");
+    }
+    assert!(valid_fire_outcome("fired") && valid_fire_outcome("skipped:paused"));
+    assert!(!valid_fire_outcome("skipped:") && !valid_fire_outcome("fire"));
+    assert!(valid_run_state("started") && !valid_run_state("weird"));
 }

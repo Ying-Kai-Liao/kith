@@ -5,12 +5,17 @@
 //!
 //! - `sched_tick`: per machine (`mac`, the stable id of `<machine>/mac-id`), the last tick as `kith-sched` writes it
 //!   (`tick` in state.json: a local minute, `YYYY-MM-DDTHH:MM`).
-//! - `sched_fires`: one row per (agent, job, slot): the due time a job was fired for. `turn_id` is the turn the fire made
-//!   (NULL until M4-3 enqueues turns), `at` when (ms). The key is what makes a fire happen once.
-//! - `sched_runs`: one row per run. `at` is the start as `kith-sched` writes it (local minute text, so `ls` prints what
-//!   it printed), `started_at`/`finished_at` are ms when known (NULL for an imported run). `state` is `started`,
-//!   `done`, `failed` or `skipped`; `outcome` says why in a word or a line; `outbox` is the run's outbox key. No SQL
-//!   foreign key to a job: a job removed from jobs.json keeps its runs, and a job with no run has no row.
+//! - A SLOT names one due time of one job: a UTC instant (`2026-11-04T00:00:00Z`, whole minutes) or `manual:<id>` for a
+//!   run started by hand. Never local-minute text, which repeats at a clock change and means nothing on another Mac.
+//! - `sched_fires`: one row per (agent, job, slot), the decision made for that slot, so a slot is decided once. `outcome`
+//!   is `fired` or `skipped:<reason>` (checked in code, so a new reason needs no table rebuild). `turn_id` is the turn the
+//!   fire made (NULL until M4-3 enqueues turns and for a skip), `at` when it was decided (ms).
+//! - `sched_runs`: one row per run, keyed on (agent, job, mac, slot) and linked to its fire by the slot and to its turn by
+//!   `turn_id`. `state` is validated in code (`started`, `done`, `failed`, `skipped`), not by a CHECK, since the set
+//!   grows with firing. `outcome` says why in a word or a line; `outbox` is the run's outbox key. `at` is the start as
+//!   `kith-sched` printed it (local minute text), kept only so `ls` prints what it printed; `started_at`/`finished_at`
+//!   are ms when known (NULL for an imported run). No SQL foreign key to a job or a fire: a job removed from jobs.json
+//!   keeps its runs, and a job with no run has no row.
 
 use super::Migration;
 
@@ -28,6 +33,7 @@ pub(super) const MIGRATION: Migration = Migration {
             agent TEXT NOT NULL,
             job TEXT NOT NULL,
             slot TEXT NOT NULL,
+            outcome TEXT NOT NULL,
             turn_id TEXT,
             at INTEGER NOT NULL,
             PRIMARY KEY (agent, job, slot)
@@ -38,8 +44,10 @@ pub(super) const MIGRATION: Migration = Migration {
             agent TEXT NOT NULL,
             job TEXT NOT NULL,
             mac TEXT NOT NULL,
+            slot TEXT NOT NULL,
+            turn_id TEXT,
             at TEXT NOT NULL,
-            state TEXT NOT NULL CHECK (state IN ('started', 'done', 'failed', 'skipped')),
+            state TEXT NOT NULL,
             outcome TEXT,
             why TEXT,
             pid INTEGER,
@@ -47,7 +55,7 @@ pub(super) const MIGRATION: Migration = Migration {
             outbox TEXT,
             started_at INTEGER,
             finished_at INTEGER,
-            UNIQUE (agent, job, mac, at)
+            UNIQUE (agent, job, mac, slot)
         );
         CREATE INDEX sched_runs_job ON sched_runs (agent, job, id);
     ",
