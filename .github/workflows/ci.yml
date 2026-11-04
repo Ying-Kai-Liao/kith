@@ -141,6 +141,7 @@ jobs:
               - 'verification/threads/run.sh'
               - '.claude/skills/revoke-access/**'
               - 'kernel/bin/kith-auth'
+              - 'core/runtime/src/authority/**'
               - 'serve/host/src/channels/**'
               - 'serve/host/src/api/people.rs'
               - 'serve/host/src/api/botguests.rs'

@@ -3,23 +3,23 @@
 //! is the reference. They change the value and say what `kith-auth` would print; `store.rs` writes the difference to
 //! core.db, in one transaction, and the tests hold the two shapes equal.
 //!
-//! Not here, with who owns it: adding, renaming and removing a person (`kith-auth person`, M2-4's removal rules and
-//! `retired`), `revoke`/`unrevoke` of a person (M2-4), what `forget` also drops from `grants` and `profiles` (lane B,
-//! secrets), and `env.VAR` settings through the table (they work in [`member`]; the row has no param for them yet).
+//! Not here, with who owns it: adding, renaming and removing a person, `revoke`/`unrevoke` of a person and the ids a
+//! removal retires (`revoke.rs`, M2-4), what `forget` also drops from `grants` and `profiles` (lane B, secrets), and
+//! `env.VAR` settings through the table (they work in [`member`]; the row has no param for them yet).
 
 use std::collections::BTreeMap;
 
 use kith_kernel::secrets::{self, Ctx, Die, Rules, pyjson};
 use serde_json::{Map, Value, json};
 
-type R<T> = Result<T, Die>;
+pub(super) type R<T> = Result<T, Die>;
 
 /// Modes that run any command without asking (`FREE_SHELL`).
 const FREE_SHELL: [&str; 2] = ["bypassPermissions", "auto"];
 /// The membership row for every person kith knows.
 const EVERYONE: &str = "*";
 
-fn die<T>(msg: impl Into<String>) -> R<T> {
+pub(super) fn die<T>(msg: impl Into<String>) -> R<T> {
     Err(Die {
         msg: msg.into(),
         code: 1,
@@ -27,7 +27,7 @@ fn die<T>(msg: impl Into<String>) -> R<T> {
 }
 
 /// A refusal that is usage (`die(..., 2)`): the request is wrong, not the state.
-fn usage<T>(msg: impl Into<String>) -> R<T> {
+pub(super) fn usage<T>(msg: impl Into<String>) -> R<T> {
     Err(Die {
         msg: msg.into(),
         code: 2,
@@ -48,7 +48,7 @@ pub(super) fn tables(auth: &mut Value) {
     }
 }
 
-fn table<'a>(auth: &'a mut Value, name: &str) -> &'a mut Map<String, Value> {
+pub(super) fn table<'a>(auth: &'a mut Value, name: &str) -> &'a mut Map<String, Value> {
     tables(auth);
     auth.get_mut(name)
         .and_then(Value::as_object_mut)
@@ -56,7 +56,7 @@ fn table<'a>(auth: &'a mut Value, name: &str) -> &'a mut Map<String, Value> {
 }
 
 /// `dict.setdefault(key, {})` and the object behind it.
-fn entry<'a>(m: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
+pub(super) fn entry<'a>(m: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Value> {
     let v = m
         .entry(key.to_owned())
         .or_insert_with(|| Value::Object(Map::new()));
@@ -66,12 +66,12 @@ fn entry<'a>(m: &'a mut Map<String, Value>, key: &str) -> &'a mut Map<String, Va
     v.as_object_mut().expect("just made")
 }
 
-fn str_of<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
+pub(super) fn str_of<'a>(v: &'a Value, k: &str) -> Option<&'a str> {
     v.get(k).and_then(Value::as_str)
 }
 
 /// Python's truth of a value.
-fn truthy(v: Option<&Value>) -> bool {
+pub(super) fn truthy(v: Option<&Value>) -> bool {
     match v {
         None | Some(Value::Null) => false,
         Some(Value::Bool(b)) => *b,
@@ -101,25 +101,25 @@ fn py_float(text: &str) -> Option<f64> {
 }
 
 /// `re.fullmatch(r'[a-z][a-z0-9-]*', id)`.
-fn is_id(id: &str) -> bool {
+pub(super) fn is_id(id: &str) -> bool {
     let mut it = id.chars();
     it.next().is_some_and(|c| c.is_ascii_lowercase())
         && it.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
-fn people(auth: &Value) -> &Map<String, Value> {
+pub(super) fn people(auth: &Value) -> &Map<String, Value> {
     static EMPTY: std::sync::OnceLock<Map<String, Value>> = std::sync::OnceLock::new();
     auth.get("people")
         .and_then(Value::as_object)
         .unwrap_or_else(|| EMPTY.get_or_init(Map::new))
 }
 
-fn is_bot(auth: &Value, id: &str) -> bool {
+pub(super) fn is_bot(auth: &Value, id: &str) -> bool {
     truthy(people(auth).get(id).and_then(|p| p.get("bot_of")))
 }
 
 /// `bots_of`: the bots a person owns, sorted.
-fn bots_of(auth: &Value, person: &str) -> Vec<String> {
+pub(super) fn bots_of(auth: &Value, person: &str) -> Vec<String> {
     let mut out: Vec<String> = people(auth)
         .iter()
         .filter(|(_, v)| {
@@ -133,7 +133,7 @@ fn bots_of(auth: &Value, person: &str) -> Vec<String> {
 }
 
 /// `need_person`: someone removed (or never added) is refused.
-fn need_person(auth: &Value, pid: &str) -> R<()> {
+pub(super) fn need_person(auth: &Value, pid: &str) -> R<()> {
     if people(auth).contains_key(pid) {
         Ok(())
     } else {
@@ -211,7 +211,7 @@ fn list_of(v: &str) -> Value {
     )
 }
 
-fn words(v: Option<&Value>) -> Vec<String> {
+pub(super) fn words(v: Option<&Value>) -> Vec<String> {
     v.and_then(Value::as_array)
         .map(|a| {
             a.iter()
@@ -285,7 +285,7 @@ fn drop_self_approved(auth: &mut Value, agent: &str, pid: &str) -> usize {
 // remove-and-re-add would get its old logins back. See the ignored test `forget_also_clears_grants_and_profiles`.
 /// `forget`: everything that gives these ids access in the tables the core keeps: memberships and open invites. (A
 /// removed person's grants and shared profiles are lane B's.)
-fn forget(auth: &mut Value, ids: &[&str]) {
+pub(super) fn forget(auth: &mut Value, ids: &[&str]) {
     let members = table(auth, "members");
     for rows in members.values_mut() {
         if let Some(rows) = rows.as_object_mut() {

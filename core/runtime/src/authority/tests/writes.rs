@@ -25,19 +25,19 @@ use crate::layout::Layout;
 
 /// A core.db on a temp folder and the machine of agents the tests use (`house`, `garden`, `sound`, and the kernel's
 /// built-in `scratch`).
-struct Rig {
+pub(super) struct Rig {
     _core_dir: tempfile::TempDir,
-    machine_dir: tempfile::TempDir,
-    core: Core,
-    c: Ctx,
+    pub(super) machine_dir: tempfile::TempDir,
+    pub(super) core: Core,
+    pub(super) c: Ctx,
 }
 
-fn plain(e: &Error) -> String {
+pub(super) fn plain(e: &Error) -> String {
     e.to_string().trim_start_matches("authority: ").to_owned()
 }
 
 impl Rig {
-    fn new(auth: &Value) -> Rig {
+    pub(super) fn new(auth: &Value) -> Rig {
         let (core_dir, m) = crate::tests::machine();
         let core = crate::tests::open_all(&Layout::new(&m));
         load(core.conn(), auth);
@@ -51,7 +51,7 @@ impl Rig {
     }
 
     /// Empties every table of authority and loads `auth`.
-    fn reset(&self, auth: &Value) {
+    pub(super) fn reset(&self, auth: &Value) {
         for t in [
             "people",
             "memberships",
@@ -68,11 +68,11 @@ impl Rig {
         load(self.core.conn(), auth);
     }
 
-    fn call(&mut self, method: &str, params: &Value) -> Result<Value, String> {
+    pub(super) fn call(&mut self, method: &str, params: &Value) -> Result<Value, String> {
         call_with(&mut self.core, &self.c, method, params).map_err(|e| plain(&e))
     }
 
-    fn lines(&mut self, method: &str, params: &Value) -> Result<Vec<String>, String> {
+    pub(super) fn lines(&mut self, method: &str, params: &Value) -> Result<Vec<String>, String> {
         self.call(method, params).map(|v| {
             v["lines"]
                 .as_array()
@@ -83,12 +83,12 @@ impl Rig {
         })
     }
 
-    fn tables(&mut self) -> Value {
+    pub(super) fn tables(&mut self) -> Value {
         store::read(&mut self.core, Value::clone).unwrap()
     }
 }
 
-fn base() -> Value {
+pub(super) fn base() -> Value {
     json!({
         "people": {
             "kai": {"owner": true},
@@ -1090,6 +1090,38 @@ fn op() -> impl Strategy<Value = Op> {
             }),
         1 => pick(&["pro", "guest", "new"])
             .prop_map(|name| Op { method: "people.removePreset", params: json!({"name": name}), code: "" }),
+        // M2-4: the person-level writes
+        2 => (pick(&PERSONS), any::<bool>())
+            .prop_map(|(person, suspend)| Op {
+                method: if suspend { "people.suspend" } else { "people.undo" },
+                params: json!({"id": person}),
+                code: "",
+            }),
+        1 => (
+            pick(&["sam", "zed", "kai", "Bad", "bot-a", "samuel", "old-bot"]),
+            maybe(pick(&["Z", ""])),
+            any::<bool>(),
+        )
+            .prop_map(|(person, name, owner)| {
+                let mut p = json!({"id": person, "owner": owner});
+                put(&mut p, &[("name", name)]);
+                Op { method: "people.addPerson", params: p, code: "" }
+            }),
+        1 => (
+            pick(&["sam", "amy", "bot-a", "ghost"]),
+            pick(&["anna", "sam", "zed", "amy", "Bad", "samuel"]),
+        )
+            .prop_map(|(from, to)| Op {
+                method: "people.renamePerson",
+                params: json!({"id": from, "to": to}),
+                code: "",
+            }),
+        1 => (pick(&["sam", "amy", "bot-a", "ghost", "kai"]), any::<bool>())
+            .prop_map(|(person, unused)| Op {
+                method: "people.removePerson",
+                params: json!({"id": person, "unused": unused}),
+                code: "",
+            }),
     ]
 }
 

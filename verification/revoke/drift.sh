@@ -30,6 +30,8 @@ FILES=(
   serve/host/src/run_outbox.rs            # a run's outbox into the person's app chat (the app door: the relay's block)
   kernel/lib/kith_door.py                 # the guest door: run (lock, kith-auth door, claim, start = DoorStart), sweep (DoorSweep)
   serve/host/src/doors.rs                 # the host's door sweep: on cut_off, the bot-guest sweep and every 60 s (DoorSweep)
+  core/runtime/src/authority/revoke.rs   # M2-4: person_suspend (the revoked fact, rows untouched), person_remove, person_rename
+  core/runtime/src/authority/mod.rs       # the readers: snapshot (revoked), may/resolve/cut_off over secrets
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

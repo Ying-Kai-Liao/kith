@@ -9,6 +9,7 @@ use std::io::Read as _;
 use kith_kernel::secrets::{self, Ctx, Die, Sandbox, ServeDir};
 use serde_json::{Value, json};
 
+use super::revoke::{self, Life};
 use super::store;
 use super::write::{self, Settings};
 use crate::db::Core;
@@ -29,6 +30,13 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.removeInvite"
             | "people.preset"
             | "people.removePreset"
+            | "people.addPerson"
+            | "people.renamePerson"
+            | "people.removePerson"
+            | "people.suspend"
+            | "people.undo"
+            | "people.clearTemp"
+            | "people.retired"
     )
 }
 
@@ -42,6 +50,15 @@ fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
         now_ms: secrets::now_ms(),
         sandbox: Sandbox::Fixed(false),
         serve: ServeDir::Fixed(folders.machine.join("serve")),
+    })
+}
+
+fn life_of(core: &Core, params: &Value) -> Result<Life> {
+    let (folders, _) = core.folders_for(params)?;
+    Ok(Life {
+        agents: folders.agents.clone(),
+        state: folders.state.clone(),
+        machine: folders.machine.clone(),
     })
 }
 
@@ -89,11 +106,24 @@ fn new_code() -> Result<String> {
 /// agent folders.
 pub(crate) fn call(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     let c = ctx_of(core, params)?;
-    call_with(core, &c, method, params)
+    let life = life_of(core, params)?;
+    call_in(core, &c, &life, method, params)
 }
 
 /// [`call`] with the context given (a test fixes the clock).
+#[cfg(test)]
 pub(crate) fn call_with(core: &mut Core, c: &Ctx, method: &str, params: &Value) -> Result<Value> {
+    call_in(core, c, &Life::beside(c), method, params)
+}
+
+/// [`call_with`] with the folders of a person's life given too.
+pub(crate) fn call_in(
+    core: &mut Core,
+    c: &Ctx,
+    life: &Life,
+    method: &str,
+    params: &Value,
+) -> Result<Value> {
     match method {
         "people.list" => store::read(
             core,
@@ -103,13 +133,38 @@ pub(crate) fn call_with(core: &mut Core, c: &Ctx, method: &str, params: &Value) 
         "people.botsCap" if word(params, "amount").is_none() => {
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))
         }
+        "people.retired" => store::read(core, |a| {
+            revoke::retired_line(a, life, word(params, "id").unwrap_or_default())
+                .map(|said| json!({ "retired": !said.is_empty(), "lines": said }))
+        })?
+        .map_err(|d| store::refusal(&d)),
+        "people.clearTemp" => {
+            let pid = need(params, "id").map_err(|d| store::refusal(&d))?;
+            let ids =
+                store::read(core, |a| revoke::temp_ids(a, pid))?.map_err(|d| store::refusal(&d))?;
+            // whoever asks has stopped their runs; what is left is a folder, no table
+            for x in &ids {
+                revoke::guest_tmp_remove(life, x);
+            }
+            Ok(json!({ "lines": [], "cleared": ids }))
+        }
         m if serves(m) => {
             let fresh = if m == "people.invite" {
                 new_code()?
             } else {
                 String::new()
             };
-            store::run(core, c, |a| write_op(m, params, c, a, &fresh))
+            let said = store::run(core, c, |a| write_in(m, params, c, life, a, &fresh))?;
+            // The folders follow a rename once it is committed. `kith-auth --local` clears no temp folder: the
+            // caller stops their runs first and then asks `people.clearTemp` (the `ids` of a suspend or a removal
+            // say whose).
+            if m == "people.renamePerson"
+                && let (Some(old), Some(new)) = (word(params, "id"), word(params, "to"))
+            {
+                let (moved, notes) = revoke::move_life(life, old, new);
+                return Ok(renamed(said, &moved, notes));
+            }
+            Ok(said)
         }
         _ => Err(Error::NotServed(format!(
             "kith-core: {method} is not answered in the core yet"
@@ -119,10 +174,23 @@ pub(crate) fn call_with(core: &mut Core, c: &Ctx, method: &str, params: &Value) 
 
 /// One write over the auth.json-shaped value: what the transaction runs, and what the tests run on a plain value to
 /// hold core.db to. `code` is the new invite code, for `people.invite`.
+#[cfg(test)]
 pub(super) fn write_op(
     method: &str,
     params: &Value,
     c: &Ctx,
+    a: &mut Value,
+    code: &str,
+) -> std::result::Result<Value, Die> {
+    write_in(method, params, c, &Life::beside(c), a, code)
+}
+
+/// [`write_op`] with the folders of a person's life given (the rules of an id read them).
+pub(super) fn write_in(
+    method: &str,
+    params: &Value,
+    c: &Ctx,
+    life: &Life,
     a: &mut Value,
     code: &str,
 ) -> std::result::Result<Value, Die> {
@@ -191,9 +259,60 @@ pub(super) fn write_op(
             false,
             true,
         )?)),
+        "people.addPerson" => {
+            let kv = settings(params, &["name", "lang", "tz"]);
+            Ok(lines(revoke::person_set(
+                a,
+                life,
+                need(params, "id")?,
+                &kv,
+                switch(params, "owner"),
+            )?))
+        }
+        "people.renamePerson" => Ok(lines(revoke::person_rename(
+            a,
+            life,
+            need(params, "id")?,
+            need(params, "to")?,
+        )?)),
+        "people.removePerson" if switch(params, "unused") => Ok(lines(
+            revoke::person_remove_unused(a, life, need(params, "id")?)?,
+        )),
+        "people.removePerson" => {
+            let (said, ids) = revoke::person_remove(a, life, c, need(params, "id")?)?;
+            let mut out = lines(said);
+            out["ids"] = json!(ids);
+            Ok(out)
+        }
+        "people.suspend" | "people.undo" => {
+            let (said, ids) =
+                revoke::person_suspend(a, c, need(params, "id")?, method == "people.suspend")?;
+            let mut out = lines(said);
+            out["ids"] = json!(ids);
+            Ok(out)
+        }
         _ => Err(Die {
             msg: format!("{method} is not a write"),
             code: 2,
         }),
     }
+}
+
+/// The answer of a committed rename, with the folders that really moved and a note for each that did not.
+fn renamed(mut said: Value, moved: &[String], notes: Vec<String>) -> Value {
+    let mut out = Vec::new();
+    for (i, l) in said["lines"].as_array().into_iter().flatten().enumerate() {
+        let line = l.as_str().unwrap_or_default();
+        match line.strip_suffix(revoke::RENAMED_TAIL) {
+            Some(head) if i == 0 && !moved.is_empty() => out.push(format!(
+                "{head}; moved their memory and files in {}{}",
+                moved.join(", "),
+                revoke::RENAMED_TAIL
+            )),
+            _ => out.push(line.to_owned()),
+        }
+    }
+    out.extend(notes);
+    said["lines"] = json!(out);
+    said
 }
