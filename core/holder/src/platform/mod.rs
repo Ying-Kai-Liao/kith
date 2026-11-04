@@ -44,6 +44,16 @@ pub struct Ctl {
     pub read: Box<dyn Read + Send>,
 }
 
+/// Waits for a stub to open its control channel (Windows: a named pipe the holder serves, which can take seconds).
+pub type AcceptCtl = Box<dyn FnOnce(&Proc) -> std::io::Result<Ctl> + Send>;
+
+/// How a started process's control channel comes to be: already there, or still to be accepted. The accept runs
+/// outside the holder's state lock.
+pub enum CtlStart {
+    Ready(Ctl),
+    Accept(AcceptCtl),
+}
+
 /// A started process and its pipes. `err` is only there for `Mode::Pipes`.
 pub struct Started {
     pub proc: Proc,
@@ -51,7 +61,7 @@ pub struct Started {
     pub out: Box<dyn Read + Send>,
     pub err: Option<Box<dyn Read + Send>>,
     /// Set for a pipes process started under a resident stub.
-    pub ctl: Option<Ctl>,
+    pub ctl: Option<CtlStart>,
 }
 
 /// 32 random hex digits (instance ids, socket and pipe names).

@@ -6,7 +6,7 @@
 //! Windows: named pipes only this account can open, ConPTY, one job object per held process, detaching out of the
 //! parent's job.
 
-use super::{Ctl, Spec, Started};
+use super::{AcceptCtl, Ctl, CtlStart, Spec, Started};
 use crate::proto::{Exit, Mode};
 use std::collections::BTreeMap;
 use std::ffi::c_void;
@@ -927,8 +927,13 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
                 job,
                 console: None,
             };
-            let ctl = match (listener, &ctl_name) {
-                (Some(l), Some(name)) => Some(accept_stub(l, name, &proc)?),
+            // Not waited for here: the holder holds its state lock while it spawns, and a stub that is slow to start
+            // (a virus scan, a cold disk) would stall every other process for up to the whole wait.
+            let ctl = match (listener, ctl_name) {
+                (Some(l), Some(name)) => {
+                    let accept: AcceptCtl = Box::new(move |proc| accept_stub(l, &name, proc));
+                    Some(CtlStart::Accept(accept))
+                }
                 _ => None,
             };
             Ok(Started {

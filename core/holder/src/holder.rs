@@ -70,21 +70,39 @@ struct Entry {
     /// Answers for the core, kept until it acks the claim (`LOCK_ACK`), one per claim and kind: a busy for one claim
     /// never replaces a report of another, and a later take of a claim never hides its release.
     reports: BTreeMap<(u64, p::LockOp), p::LockAnswer>,
+    /// The highest claim a take was relayed for, whatever the answer: a take below it is stale even when that one came
+    /// back busy (a mistaken high claim can still be refused by the stub, but it must not let an older take through).
+    requested: u64,
 }
 
 /// The claim a warm process serves now: the spawn's until a take is answered `locked`, then that take's. The holder
 /// relays a take only for the current claim or a newer one, and never for a claim it has already released (the stub
 /// cannot know a claim is finished: that is the core's redeem). A take that came back busy or failed moves nothing,
 /// so the lock the stub may still hold for the current claim can always be released.
+///
+/// `released` is the highest claim a release was accepted for, set when the release is relayed (not when it is
+/// answered) and never lowered: a take of that claim, or any older one, is not relayed again. A take still in flight
+/// when its release arrives is covered the same way, and a late `locked` cannot undo it.
 #[derive(Clone, Copy)]
 struct Turn {
     claim: u64,
-    released: bool,
+    released: Option<u64>,
 }
 
-/// How many unacked lock reports one process keeps; the lowest claim goes first. A core that never acks cannot grow
-/// the holder without bound.
+/// How many unacked lock reports (and requests in flight) one process may have. Past it a new take is refused with
+/// `too-many-unacked`: a kept answer is never evicted, and a core that never acks cannot grow the holder without bound.
 const MAX_REPORTS: usize = 256;
+
+/// How strong an answer is when two are kept for one (claim, kind): what happened beats a refusal, a refusal beats an
+/// error. A later weaker answer (a retried take that came back as an error after the first one locked) must not hide
+/// that the turn ran.
+fn strength(word: p::LockWord) -> u8 {
+    match word {
+        p::LockWord::Locked | p::LockWord::Released => 2,
+        p::LockWord::Busy | p::LockWord::NotHeld => 1,
+        p::LockWord::Error => 0,
+    }
+}
 
 /// The stub's own rules for a lock key, checked here too because the key is written into a line: a space or a line
 /// break in it would be a second command.
@@ -674,14 +692,7 @@ impl Holder {
                     if here {
                         self.lock_request(&mut st, op, id, &req);
                     } else {
-                        self.answer(
-                            &mut st,
-                            id,
-                            op,
-                            req.claim,
-                            p::LockWord::Error,
-                            Some("not-here"),
-                        );
+                        self.refuse_lock(&st, id, op, req.claim, p::LockWord::Error, "not-here");
                     }
                 }
                 p::LOCK_ACK => {
@@ -731,30 +742,32 @@ impl Holder {
         }
     }
 
-    fn spawn(self: &Arc<Self>, mut st: MutexGuard<'_, State>, spec: p::Spawn) {
+    /// Why a spawn must not start, as the frame that tells the core: the same start again (answered, not run twice), a
+    /// lease that would not end a tagged run, or a claim decided before. Asked again after the Windows stub wait,
+    /// which runs outside the state lock.
+    fn spawn_refusal(&self, st: &State, spec: &p::Spawn) -> Option<Vec<u8>> {
         // The same spawn again (the core did not hear the first answer) is answered, not run twice.
         if let Some(e) = st
             .procs
             .values()
             .find(|e| e.held.conv == spec.conv && e.held.claim == spec.claim)
         {
-            let frame = wire::json_frame(
+            return Some(wire::json_frame(
                 p::SPAWNED,
                 e.held.id,
                 &p::Spawned {
-                    conv: spec.conv,
+                    conv: spec.conv.clone(),
                     claim: spec.claim,
                     pid: e.held.pid,
                     instance: self.instance.clone(),
                     id: e.held.id,
                 },
-            );
-            return self.to_core(&st, frame);
+            ));
         }
         // Unarmed counts as lost here: a tagged run must never start without a lease that will end it.
         if spec.kill_on_lease_loss && !matches!(st.lease, Lease::Until(_)) {
             let lost = p::LeaseLost {
-                conv: spec.conv,
+                conv: spec.conv.clone(),
                 claim: spec.claim,
                 why: if st.lease == Lease::Lost {
                     p::LeaseWhy::Lapsed
@@ -762,22 +775,26 @@ impl Holder {
                     p::LeaseWhy::Unarmed
                 },
             };
-            return self.to_core(&st, wire::json_frame(p::LEASE_LOST, 0, &lost));
+            return Some(wire::json_frame(p::LEASE_LOST, 0, &lost));
         }
         // A claim at or below the highest started for this conversation was decided before (or is) one whose job
         // already ran: refuse it, whether or not that process is still held or was acked.
-        if let Some(highest) = st
+        let highest = st
             .claims
             .get(&spec.conv)
             .copied()
-            .filter(|h| spec.claim <= *h)
-        {
-            let stale = p::StaleClaim {
-                conv: spec.conv,
-                claim: spec.claim,
-                highest,
-            };
-            return self.to_core(&st, wire::json_frame(p::STALE_CLAIM, 0, &stale));
+            .filter(|h| spec.claim <= *h)?;
+        let stale = p::StaleClaim {
+            conv: spec.conv.clone(),
+            claim: spec.claim,
+            highest,
+        };
+        Some(wire::json_frame(p::STALE_CLAIM, 0, &stale))
+    }
+
+    fn spawn<'a>(self: &'a Arc<Self>, mut st: MutexGuard<'a, State>, spec: p::Spawn) {
+        if let Some(frame) = self.spawn_refusal(&st, &spec) {
+            return self.to_core(&st, frame);
         }
         // A warm engine always runs under the resident stub (runtime-design section 4): without it nothing holds the
         // conversation's lock for a turn. No stub is a failed start, never a bare engine.
@@ -807,6 +824,37 @@ impl Holder {
             rows: spec.rows,
             resident,
         });
+        // Windows: the stub opens its control pipe a moment after it starts, and waiting for it holds up every other
+        // process if the state lock is held (a stub can be slow for seconds, and the lease is 30). So the wait runs
+        // without the lock, and everything the spawn rules looked at is looked at again once it is back.
+        let mut waited = false;
+        let started = match started {
+            Ok(mut s) => match s.ctl.take() {
+                Some(platform::CtlStart::Accept(accept)) => {
+                    drop(st);
+                    let accepted = accept(&s.proc);
+                    st = self.lock();
+                    waited = true;
+                    accepted.map(|ctl| {
+                        s.ctl = Some(platform::CtlStart::Ready(ctl));
+                        s
+                    })
+                }
+                other => {
+                    s.ctl = other;
+                    Ok(s)
+                }
+            },
+            Err(e) => Err(e),
+        };
+        if waited
+            && let Ok(s) = &started
+            && let Some(frame) = self.spawn_refusal(&st, &spec)
+        {
+            // Another start of this conversation got in while the lock was free: this one is not wanted.
+            s.proc.kill_tree();
+            return self.to_core(&st, frame);
+        }
         let started = match started {
             Ok(s) => s,
             Err(e) => {
@@ -837,7 +885,7 @@ impl Holder {
         let proc = Arc::new(started.proc);
         let (input, queued) = std::sync::mpsc::channel::<Vec<u8>>();
         let (mut ctl_lines, mut ctl_reader) = (None, None);
-        if let Some(ctl) = started.ctl {
+        if let Some(platform::CtlStart::Ready(ctl)) = started.ctl {
             let (tx, lines) = std::sync::mpsc::channel::<String>();
             let (holder, mut to_stub) = (self.clone(), ctl.write);
             std::thread::spawn(move || {
@@ -893,10 +941,11 @@ impl Holder {
                 ctl: ctl_lines,
                 turn: Turn {
                     claim: spec.claim,
-                    released: false,
+                    released: None,
                 },
                 pending: VecDeque::new(),
                 reports: BTreeMap::new(),
+                requested: 0,
             },
         );
         if let Some(read) = ctl_reader {
@@ -929,7 +978,9 @@ impl Holder {
         );
     }
 
-    /// Records an answer for the core under its claim and kind, and sends it. Reports are kept until acked.
+    /// Sends an answer for the core and keeps it until acked, one per claim and kind. For what the stub said (or its
+    /// loss): the core may not have heard it, and LIST after a reconnect tells it. A weaker answer never replaces a
+    /// stronger one for the same key (see `strength`).
     fn answer(
         &self,
         st: &mut State,
@@ -939,70 +990,117 @@ impl Holder {
         word: p::LockWord,
         reason: Option<&str>,
     ) {
-        let answer = p::LockAnswer {
+        let answer = self.lock_answer(id, op, claim, word, reason);
+        if let Some(e) = st.procs.get_mut(&id) {
+            let keep = e
+                .reports
+                .get(&(claim, op))
+                .is_none_or(|old| strength(old.word) <= strength(word));
+            if keep {
+                e.reports.insert((claim, op), answer.clone());
+            }
+        }
+        self.to_core(st, wire::json_frame(p::LOCK_ANSWER, id, &answer));
+    }
+
+    /// Sends an answer the holder made up itself, on the spot (a refusal): the core has it on the frame, there is
+    /// nothing to recover, so it is not kept.
+    fn refuse_lock(
+        &self,
+        st: &State,
+        id: u32,
+        op: p::LockOp,
+        claim: u64,
+        word: p::LockWord,
+        reason: &str,
+    ) {
+        let answer = self.lock_answer(id, op, claim, word, Some(reason));
+        self.to_core(st, wire::json_frame(p::LOCK_ANSWER, id, &answer));
+    }
+
+    fn lock_answer(
+        &self,
+        id: u32,
+        op: p::LockOp,
+        claim: u64,
+        word: p::LockWord,
+        reason: Option<&str>,
+    ) -> p::LockAnswer {
+        p::LockAnswer {
             instance: self.instance.clone(),
             id,
             op,
             claim,
             word,
             reason: reason.map(str::to_owned),
-        };
-        if let Some(e) = st.procs.get_mut(&id) {
-            e.reports.insert((claim, op), answer.clone());
-            while e.reports.len() > MAX_REPORTS {
-                e.reports.pop_first();
-            }
         }
-        self.to_core(st, wire::json_frame(p::LOCK_ANSWER, id, &answer));
     }
 
-    /// A core's `TAKE` or `RELEASE`: relayed to the process's stub only for its current claim, answered here when
-    /// there is nothing to ask. The holder decides nothing about the lock itself: the stub's answer is the truth.
+    /// A core's `TAKE` or `RELEASE`: relayed to the process's stub only for its current claim (or one whose take is
+    /// still in flight), refused here when there is nothing to ask. The holder decides nothing about the lock itself:
+    /// the stub's answer is the truth.
     fn lock_request(&self, st: &mut State, op: p::LockOp, id: u32, req: &p::LockReq) {
         use p::LockWord::{Error, NotHeld};
         let claim = req.claim;
         let take = op == p::LockOp::Take;
+        let miss = if take { Error } else { NotHeld };
         if !lock_key_ok(&req.key) {
-            return self.answer(st, id, op, claim, Error, Some("bad-key"));
+            return self.refuse_lock(st, id, op, claim, Error, "bad-key");
         }
-        // A claim below the highest the holder saw for this conversation is an old decision (the spawn rule too).
-        let older_for_conv = st.claims.get(&req.key).is_some_and(|h| claim < *h);
         let Some(e) = st.procs.get_mut(&id) else {
-            let word = if take { Error } else { NotHeld };
-            return self.answer(st, id, op, claim, word, Some("gone"));
+            return self.refuse_lock(st, id, op, claim, miss, "gone");
         };
+        // The process's lock is its conversation's: another key is a core mixing two conversations up.
+        if e.held.conv != req.key {
+            return self.refuse_lock(st, id, op, claim, Error, "wrong-key");
+        }
         // The engine has ended, and its stub with it: no lock is held, and the core hears of the end as an exit.
         if e.held.exit.is_some() {
-            let word = if take { Error } else { NotHeld };
-            return self.answer(st, id, op, claim, word, Some("exited"));
+            return self.refuse_lock(st, id, op, claim, miss, "exited");
         }
         let Some(tx) = e.ctl.clone() else {
-            let word = if take { Error } else { NotHeld };
-            return self.answer(st, id, op, claim, word, Some("stub-gone"));
+            return self.refuse_lock(st, id, op, claim, miss, "stub-gone");
         };
+        // A claim below the highest the holder saw for this conversation is an old decision (the spawn rule too).
+        let older_for_conv = st.claims.get(&e.held.conv).is_some_and(|h| claim < *h);
+        let take_in_flight = e
+            .pending
+            .iter()
+            .any(|(o, c, _)| *o == p::LockOp::Take && *c == claim);
         if take {
             let refuse = if claim < e.turn.claim || older_for_conv {
                 Some("stale-claim")
-            } else if claim == e.turn.claim && e.turn.released {
+            } else if e.turn.released.is_some_and(|r| claim <= r) {
                 // No `take` after `release` for one claim: the stub cannot know the claim is finished.
                 Some("claim-released")
+            } else if claim < e.requested {
+                Some("stale-claim")
+            } else if e.reports.len() + e.pending.len() >= MAX_REPORTS {
+                Some("too-many-unacked")
             } else {
                 None
             };
             if let Some(why) = refuse {
-                return self.answer(st, id, op, claim, Error, Some(why));
+                return self.refuse_lock(st, id, op, claim, Error, why);
             }
-        } else if claim != e.turn.claim {
-            // Only the current claim's lock can be held here; an older or unknown claim holds nothing.
-            return self.answer(st, id, op, claim, NotHeld, Some("not-current"));
+            e.requested = e.requested.max(claim);
+        } else if claim != e.turn.claim && !take_in_flight {
+            // Only the current claim's lock, or one being taken right now, can be held here; an older or unknown
+            // claim holds nothing. (Below a newer take's claim it is an old decision, not just an unknown one.)
+            let why = if claim < e.requested {
+                "stale-claim"
+            } else {
+                "not-current"
+            };
+            return self.refuse_lock(st, id, op, claim, NotHeld, why);
         } else {
-            e.turn.released = true;
+            e.turn.released = Some(e.turn.released.map_or(claim, |r| r.max(claim)));
         }
         e.pending.push_back((op, claim, req.key.clone()));
         let verb = if take { "take" } else { "release" };
         if tx.send(format!("{verb} {} {claim}\n", req.key)).is_err() {
             e.pending.pop_back();
-            self.answer(st, id, op, claim, Error, Some("stub-gone"));
+            self.refuse_lock(st, id, op, claim, miss, "stub-gone");
         }
     }
 
@@ -1038,15 +1136,15 @@ impl Holder {
         let at = e.pending.iter().position(|(o, c, _)| {
             op.is_none_or(|op| op == *o) && (claim == "-" || claim.parse() == Ok(*c))
         });
-        let Some((op, claim, key)) = at.and_then(|i| e.pending.remove(i)) else {
+        let Some((op, claim, _)) = at.and_then(|i| e.pending.remove(i)) else {
             return;
         };
-        if word == p::LockWord::Locked && claim >= e.turn.claim {
-            e.turn = Turn {
-                claim,
-                released: false,
-            };
-            let highest = st.claims.entry(key).or_insert(claim);
+        if word == p::LockWord::Locked {
+            // `released` stays: a release relayed while this take was in flight is still the later word.
+            if claim > e.turn.claim {
+                e.turn.claim = claim;
+            }
+            let highest = st.claims.entry(e.held.conv.clone()).or_insert(claim);
             *highest = (*highest).max(claim);
         }
         self.answer(st, id, op, claim, word, reason);
@@ -1060,6 +1158,11 @@ impl Holder {
             return;
         };
         e.ctl = None;
+        // An engine with nobody to hold its lock must not go on running: end its tree. The exit is reported by the
+        // reaper as for any other end.
+        if e.held.exit.is_none() && !e.gone.load(Ordering::Relaxed) {
+            e.proc.kill_tree();
+        }
         let waiting: Vec<_> = e.pending.drain(..).collect();
         for (op, claim, _) in waiting {
             self.answer(
@@ -1205,10 +1308,11 @@ mod tests {
                 ctl: None,
                 turn: Turn {
                     claim: 1,
-                    released: false,
+                    released: None,
                 },
                 pending: VecDeque::new(),
                 reports: BTreeMap::new(),
+                requested: 0,
             },
         );
         holder.reap(1, proc);
@@ -1216,6 +1320,81 @@ mod tests {
         let exit = st.procs[&1].held.exit.clone().expect("an exit is kept");
         assert_eq!((exit.code, exit.signal), (None, None));
         assert!(exit.error.is_some());
+    }
+
+    #[test]
+    fn a_weaker_answer_never_replaces_a_stronger_one_for_the_same_claim_and_kind() {
+        use p::LockOp::{Release, Take};
+        use p::LockWord::{Busy, Error, Locked, NotHeld, Released};
+        let holder = test_holder();
+        let argv = ["sleep".to_string(), "30".to_string()];
+        let env = std::env::vars().collect();
+        let started = platform::spawn(&Spec {
+            argv: &argv,
+            env: &env,
+            cwd: "/",
+            mode: p::Mode::Pipes,
+            cols: 80,
+            rows: 24,
+            resident: None,
+        })
+        .unwrap();
+        let proc = Arc::new(started.proc);
+        holder.lock().procs.insert(
+            1,
+            Entry {
+                held: Held {
+                    instance: String::new(),
+                    id: 1,
+                    conv: "c".into(),
+                    claim: 1,
+                    generation: 1,
+                    pid: proc.pid(),
+                    mode: p::Mode::Pipes,
+                    cols: 80,
+                    rows: 24,
+                    exit: None,
+                    locks: Vec::new(),
+                },
+                proc: proc.clone(),
+                input: None,
+                tail: VecDeque::new(),
+                readers: 0,
+                gone: AtomicBool::new(false),
+                kill_on_lease_loss: false,
+                lapsed: false,
+                ctl: None,
+                turn: Turn {
+                    claim: 1,
+                    released: None,
+                },
+                pending: VecDeque::new(),
+                reports: BTreeMap::new(),
+                requested: 0,
+            },
+        );
+        let kept = |holder: &Holder, claim, op| holder.lock().procs[&1].reports[&(claim, op)].word;
+        let mut st = holder.lock();
+        holder.answer(&mut st, 1, Take, 2, Locked, None);
+        // A refused retry (busy, or an error after the stub went away) is told to the core, and not kept over it.
+        holder.answer(&mut st, 1, Take, 2, Busy, None);
+        holder.answer(&mut st, 1, Take, 2, Error, Some("stub-gone"));
+        drop(st);
+        assert_eq!(kept(&holder, 2, Take), Locked);
+        // Weaker kinds fill in until something stronger comes.
+        let mut st = holder.lock();
+        holder.answer(&mut st, 1, Release, 2, Error, Some("stub-gone"));
+        holder.answer(&mut st, 1, Release, 2, NotHeld, None);
+        drop(st);
+        assert_eq!(kept(&holder, 2, Release), NotHeld);
+        let mut st = holder.lock();
+        holder.answer(&mut st, 1, Release, 2, Released, None);
+        holder.answer(&mut st, 1, Release, 2, NotHeld, None);
+        drop(st);
+        assert_eq!(kept(&holder, 2, Release), Released);
+        proc.kill_tree();
+        proc.wait_exit();
+        let _ = proc.reap();
     }
 
     #[test]

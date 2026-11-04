@@ -13,8 +13,12 @@ written by the architect and run green in his own folder; M3-0a committed them h
 drift shows. Their origin (path, date) is in each file's header. `results4.md` is the architect's result table plus
 what M3-0a added. This skill is the only other documentation.
 
-State today: the stub's lock primitive exists (`core/stub/src/lib.rs`); what is missing is holding it across the
-engine's life, claim ids on the wire, and the core's claim transaction with the redeem (M3-2, M3-4, M3-5). A green run
+State today: the stub's lock primitive exists (`core/stub/src/lib.rs`), and since M3-4 the holder runs every Pipes
+engine under `kith-stub --resident` and relays the core's `take`/`release` for a turn to it (claim id on every frame;
+the holder acts only on the current claim or a take in flight; unacked answers are kept per claim and kind, a weaker
+answer never replacing a stronger; a dead stub ends its engine). What is still missing is the core's claim transaction
+with the redeem (M3-2, M3-5). The holder's relay rules (in-flight take, report keeping) are bookkeeping on top of the
+modelled safety properties and are not in `Holder.tla`; model them at M3-5. A green run
 says the design holds; it does not say the code follows it. `drift.sh` lists the code that exists and tells you when
 it moves. `Holder.tla` was derived from the holder at 73a03656; `WriterLock4.tla` models the design only.
 

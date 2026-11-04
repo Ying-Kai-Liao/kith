@@ -1303,3 +1303,167 @@ fn a_core_of_the_older_protocol_is_refused_at_hello() {
     let refused: p::Refused = wire::parse(&payload).unwrap();
     assert_eq!(refused.why, Why::BadVersion);
 }
+
+/// Sends a take or release without waiting for its answer (a core whose `lock_call` timed out, or two requests in a row).
+fn send_lock(c: &mut Client, held: &p::HeldId, op: p::LockOp, key: &str, claim: u64) {
+    let body = serde_json::to_vec(&p::LockReq {
+        key: key.to_owned(),
+        claim,
+    })
+    .unwrap();
+    let kind = if op == p::LockOp::Take {
+        p::TAKE
+    } else {
+        p::RELEASE
+    };
+    c.send_for(kind, &held.instance, held.id, &body).unwrap();
+}
+
+/// The answer to one request, waited for on its own.
+fn answer_of(c: &mut Client, held: &p::HeldId, op: p::LockOp, claim: u64) -> p::LockAnswer {
+    let (_, _, payload) = c
+        .take(WAIT, |f| {
+            f.0 == p::LOCK_ANSWER
+                && f.1 == held.id
+                && wire::parse::<p::LockAnswer>(&f.2).is_ok_and(|a| a.op == op && a.claim == claim)
+        })
+        .expect("an answer");
+    wire::parse(&payload).unwrap()
+}
+
+#[test]
+fn a_release_sent_right_behind_its_take_is_relayed_and_the_claim_stays_released() {
+    use p::LockOp::{Release, Take};
+    use p::LockWord::{Error, Locked, Released};
+    let fx = Fixture::new("lk7b");
+    fx.start();
+    let mut c = fx.client(1);
+    // The current claim: take then release, no wait between them.
+    let held = warm(&mut c, "lock-g", 1);
+    send_lock(&mut c, &held, Take, "lock-g", 1);
+    send_lock(&mut c, &held, Release, "lock-g", 1);
+    assert_eq!(word(&answer_of(&mut c, &held, Take, 1)), (Take, 1, Locked));
+    assert_eq!(
+        word(&answer_of(&mut c, &held, Release, 1)),
+        (Release, 1, Released)
+    );
+    assert!(!lock_busy("lock-g"), "the stub ended up released");
+    let again = c.take_lock(&held, "lock-g", 1).unwrap();
+    assert_eq!(
+        (again.word, again.reason.as_deref()),
+        (Error, Some("claim-released"))
+    );
+    // A newer claim whose take is still in flight when its release arrives: the release is not dropped as
+    // "not current", and the late `locked` does not make the claim takeable again.
+    send_lock(&mut c, &held, Take, "lock-g", 2);
+    send_lock(&mut c, &held, Release, "lock-g", 2);
+    assert_eq!(word(&answer_of(&mut c, &held, Take, 2)), (Take, 2, Locked));
+    assert_eq!(
+        word(&answer_of(&mut c, &held, Release, 2)),
+        (Release, 2, Released)
+    );
+    assert!(!lock_busy("lock-g"), "a lock the core released is not held");
+    let again = c.take_lock(&held, "lock-g", 2).unwrap();
+    assert_eq!(
+        (again.word, again.reason.as_deref()),
+        (Error, Some("claim-released"))
+    );
+    assert!(!lock_busy("lock-g"));
+    // The next claim is a new turn.
+    assert_eq!(c.take_lock(&held, "lock-g", 3).unwrap().word, Locked);
+    assert_eq!(c.release_lock(&held, "lock-g", 3).unwrap().word, Released);
+    kill_until_gone(&mut c, held.id);
+}
+
+#[test]
+fn a_busy_for_a_higher_claim_still_makes_older_takes_stale_and_the_held_lock_releasable() {
+    use p::LockWord::{Busy, Error, Locked, Released};
+    let fx = Fixture::new("lk8b");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-hh", 1);
+    assert_eq!(c.take_lock(&held, "lock-hh", 1).unwrap().word, Locked);
+    assert_eq!(c.take_lock(&held, "lock-hh", 3).unwrap().word, Busy);
+    // A delayed take for claim 2 must not reach the stub, whatever happened to claim 3.
+    let late = c.take_lock(&held, "lock-hh", 2).unwrap();
+    assert_eq!(
+        (late.word, late.reason.as_deref()),
+        (Error, Some("stale-claim"))
+    );
+    let late = c.release_lock(&held, "lock-hh", 2).unwrap();
+    assert_eq!(late.reason.as_deref(), Some("stale-claim"));
+    // Claim 1 is still the one that holds, and still releasable.
+    assert!(lock_busy("lock-hh"));
+    assert_eq!(c.release_lock(&held, "lock-hh", 1).unwrap().word, Released);
+    // The same key as the process's conversation only.
+    let other = c.take_lock(&held, "lock-other", 4).unwrap();
+    assert_eq!(
+        (other.word, other.reason.as_deref()),
+        (Error, Some("wrong-key"))
+    );
+    assert!(!lock_busy("lock-other"));
+    kill_until_gone(&mut c, held.id);
+}
+
+#[test]
+fn the_holders_own_refusals_are_not_kept_and_a_full_report_store_refuses_new_takes() {
+    use p::LockWord::{Busy, Error, Locked};
+    let fx = Fixture::new("lk9b");
+    fx.start();
+    let mut c = fx.client(1);
+    let held = warm(&mut c, "lock-i", 5);
+    // The holder's own refusal answers the frame and is not a report.
+    assert_eq!(c.take_lock(&held, "lock-i", 4).unwrap().word, Error);
+    assert!(c.list().unwrap()[0].locks.is_empty());
+    assert_eq!(c.take_lock(&held, "lock-i", 5).unwrap().word, Locked);
+    // Claims 6 and up are busy (5 holds it), one kept answer each, until the store is full.
+    for claim in 6..6 + 255 {
+        assert_eq!(c.take_lock(&held, "lock-i", claim).unwrap().word, Busy);
+    }
+    assert_eq!(c.list().unwrap()[0].locks.len(), 256);
+    let full = c.take_lock(&held, "lock-i", 400).unwrap();
+    assert_eq!(
+        (full.word, full.reason.as_deref()),
+        (Error, Some("too-many-unacked"))
+    );
+    // Nothing was evicted: the oldest answer is still there, and an ack makes room.
+    assert_eq!(c.list().unwrap()[0].locks.len(), 256);
+    c.ack_lock(&held, 6).unwrap();
+    wait_for("the ack", || c.list().unwrap()[0].locks.len() == 255);
+    assert_eq!(c.take_lock(&held, "lock-i", 400).unwrap().word, Busy);
+    kill_until_gone(&mut c, held.id);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stub_that_dies_takes_its_engine_with_it() {
+    let fx = Fixture::new("lk10");
+    fx.start();
+    let mut c = fx.client(1);
+    let pidfile = std::env::temp_dir().join(format!("kh-{}-engine-pid", std::process::id()));
+    let _ = std::fs::remove_file(&pidfile);
+    let line = format!("echo $$ > {}; exec sleep 300", pidfile.display());
+    let id = spawn(&mut c, &spec("lock-j", 1, 1, Mode::Pipes, &shell(&line)));
+    let held = h(&c, id);
+    assert_eq!(
+        c.take_lock(&held, "lock-j", 1).unwrap().word,
+        p::LockWord::Locked
+    );
+    let engine = {
+        let mut pid = None;
+        wait_for("the engine's pid", || {
+            pid = std::fs::read_to_string(&pidfile)
+                .ok()
+                .and_then(|s| s.trim().parse::<i32>().ok());
+            pid.is_some()
+        });
+        pid.unwrap()
+    };
+    // Only the stub dies, not its group: the engine would run on with nobody holding its lock.
+    kill_pid(c.list().unwrap()[0].pid);
+    exit_of(&mut c, id);
+    wait_for("the engine to end", || unsafe {
+        libc::kill(engine, 0) != 0
+    });
+    let _ = std::fs::remove_file(&pidfile);
+}

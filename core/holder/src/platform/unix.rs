@@ -3,7 +3,7 @@
 //
 //! Linux and macOS: Unix sockets only this user can open, PTYs, process groups.
 
-use super::{Ctl, Spec, Started};
+use super::{Ctl, CtlStart, Spec, Started};
 use crate::proto::{Exit, Mode};
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -357,10 +357,10 @@ pub fn spawn(spec: &Spec) -> io::Result<Started> {
             // owns nothing of it: it was passed by number.
             drop(theirs.take());
             let ctl = match ours.take() {
-                Some(s) => Some(Ctl {
+                Some(s) => Some(CtlStart::Ready(Ctl {
                     write: Box::new(s.try_clone()?),
                     read: Box::new(s),
-                }),
+                })),
                 None => None,
             };
             let input: Box<dyn Write + Send> = Box::new(child.stdin.take().expect("piped"));
