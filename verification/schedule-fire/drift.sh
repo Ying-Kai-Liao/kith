@@ -12,11 +12,13 @@ set -euo pipefail
 # (M4-3 does not exist yet): SYNC is the base the model was written against, and kith-sched is the only covered file
 # that exists. When M4-3 lands, the first reader replaces this with the M4-3 merge commit after checking the code
 # against the table in the skill.
-SYNC=2f102cab4cdd352a651e041ff3fec61ef593601a
+SYNC=8b4c8f27f9287917f0ad30568da280d3724953c9
 
 FILES=(
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)
-  core/runtime/src/schedules          # M4-3: tick, fire (the one transaction), run now, the webhook entry (does not exist yet)
+  core/runtime/src/schedules          # M4-2 store and index; M4-3 will add tick, fire (the one transaction), run now, the webhook entry
+  core/runtime/src/migrations/schedules  # sched_tick, sched_fires, sched_runs (unique keys)
+  core/runtime/src/conversations/claims.rs  # enqueue_turn, claim, park, unpark_ready, expire_parked, revoke_person
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

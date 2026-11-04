@@ -27,7 +27,7 @@ CI runs `run.sh` (job `schedule-fire`) on pull requests and pushes that touch `v
 skill, or the covered code. `run.sh` exits 0 only when every row of `checks.tsv` (variant, kind, property, expected
 pass/fail) came out as expected. Tools are the same pinned, sha256-checked `tla2tools.jar` v1.7.4 and Temurin JRE as
 the holder-lease and writer-lock skills (`run.sh` is a copy of their harness). The design config has 2,871,168
-states and about 80 s a row; a failing row stops at its first counterexample. A row that changes (a finding fixed, a
+states and about 75 s a row (all 45 rows: about 5 min on four workers); a failing row stops at its first counterexample. A row that changes (a finding fixed, a
 new break) exits 1: read this skill, do not edit the table to fit.
 
 ## What is modelled
@@ -81,15 +81,20 @@ i. The claim is the start: the deadline is checked at claim only (`no-deadline`)
 
 ## Code to model
 
-Nothing of M4-3 exists yet. The table maps the model to the plan's names; when M4-3 lands the first reader checks it.
+M4-3 (the fire transaction) does not exist yet; the M4-2 store and M3-2's turn API do (at the sync commit). The table
+maps each model action to the code that holds or will hold it; when M4-3 lands the first reader checks it row by row.
 
-| Model action | Planned code | Today |
+| Model action | Code | Today |
 |---|---|---|
-| `TickFresh`, `TickStale` | `schedules::tick`: read clock, read `sched_tick`, pick the slot, fire, write `sched_tick` | `kernel/bin/kith-sched` `tick()` |
-| `FireOne` | `schedules::fire`: the one transaction | the skip rules in `tick()` |
-| `AdHocFire` | `schedules::fire` for `manual:<id>` / `event:<id>` | run now in kith-sched |
-| `Edit`, `Revoke`, `Grant` | the core re-indexing `jobs.json`; authority tables (M2) | |
-| `Claim`, `Expire`, `Start`, `Finish`, `Crash`, `Restart`, `Hold`, `Release` | M3-2 turn rules (claim/park, deadline, expire) | |
+| `TickFresh`, `TickStale` | M4-3 `schedules::tick`: read clock, read `sched_tick`, pick the slot, fire, write `sched_tick` | `kernel/bin/kith-sched` `tick()`; `sched_tick` table in `core/runtime/src/migrations/schedules/m0120_schedules.rs` |
+| `FireOne` | M4-3 `schedules::fire`: the one transaction over `sched_fires` (unique per agent, job, slot) and `enqueue_turn` | skip rules in `tick()`; `sched_fires` / `sched_runs` in m0120; index in `core/runtime/src/schedules/mod.rs` |
+| `AdHocFire` | M4-3 `schedules::fire` for `manual:<id>` / `event:<id>` | run now in kith-sched |
+| `Edit` | the core re-indexing `jobs.json` (`schedules::index`, `read_jobs` in `schedules/mod.rs`) | |
+| `Revoke`, `Grant` | authority tables (M2); `revoke_person` in `core/runtime/src/conversations/claims.rs` cancels the person's turns | |
+| `Claim`, `Hold`, `Release` | `claim`, `park`, `unpark_ready` in `conversations/claims.rs` | |
+| `Expire` | `expire_parked` in `conversations/claims.rs` (q218) | |
+| `Start`, `Finish`, `Crash`, `Restart` | M3-2 `redeem`, `report`, `reconcile` in `conversations/claims.rs` | |
+| (the turn row) | `enqueue_turn` in `conversations/claims.rs`, source `schedule` | |
 
 ## Broken variants
 
@@ -120,7 +125,7 @@ Nothing of M4-3 exists yet. The table maps the model to the plan's names; when M
 4. A pass can have lost the ability to fail: break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `2f102cab4cdd352a651e041ff3fec61ef593601a` (the base the model was written on; M4-3 does not exist
+**Sync commit:** `8b4c8f27f9287917f0ad30568da280d3724953c9` (the base the model was written on; M4-3 does not exist
 yet). When M4-3 merges, the first reader checks the code against the table above and replaces this with the merge commit.
 
 ## Map of the folder
