@@ -9,8 +9,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use windows_sys::Win32::System::Console::{
-    CONSOLE_SCREEN_BUFFER_INFO, GetConsoleMode, GetConsoleScreenBufferInfo, GetStdHandle, STD_INPUT_HANDLE,
-    STD_OUTPUT_HANDLE, SetConsoleCtrlHandler, SetConsoleMode,
+    CONSOLE_SCREEN_BUFFER_INFO, GetConsoleMode, GetConsoleScreenBufferInfo, GetStdHandle, ReadConsoleW,
+    STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, SetConsoleCtrlHandler, SetConsoleMode,
 };
 
 const ENABLE_PROCESSED_INPUT: u32 = 0x0001;
@@ -60,10 +60,73 @@ impl Tty {
 pub(super) fn open_input(tty: bool) -> io::Result<(Box<dyn Read + Send>, Tty)> {
     if tty {
         let file = File::options().read(true).write(true).open("CONIN$")?;
-        let reader = file.try_clone()?;
+        let clone = file.try_clone()?;
+        let reader = ConsoleReader::new(clone.as_raw_handle() as usize, Some(clone));
         return Ok((Box::new(reader), Tty { file: Some(file) }));
     }
+    // SAFETY: GetStdHandle takes no pointers; GetConsoleMode only writes the local.
+    let (handle, is_console) = unsafe {
+        let h = GetStdHandle(STD_INPUT_HANDLE);
+        let mut mode = 0u32;
+        (h as usize, GetConsoleMode(h, &raw mut mode) != 0)
+    };
+    // A console is read as UTF-16 text: Rust's own console stdin would turn a lone Ctrl+Z into end of input.
+    if is_console {
+        return Ok((Box::new(ConsoleReader::new(handle, None)), Tty { file: None }));
+    }
     Ok((Box::new(io::stdin()), Tty { file: None }))
+}
+
+/// Console keys as UTF-8, through `ReadConsoleW` (so any code page and Ctrl+Z pass through unchanged).
+struct ConsoleReader {
+    handle: usize,
+    /// Keeps a `CONIN$` handle open while this reads it.
+    _file: Option<File>,
+    /// Decoded bytes not yet handed out.
+    out: std::collections::VecDeque<u8>,
+    /// A high surrogate at the end of the last read, waiting for its pair.
+    high: Option<u16>,
+}
+
+impl ConsoleReader {
+    fn new(handle: usize, file: Option<File>) -> Self {
+        Self { handle, _file: file, out: std::collections::VecDeque::new(), high: None }
+    }
+}
+
+impl Read for ConsoleReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        while self.out.is_empty() {
+            let mut units = [0u16; 512];
+            let mut got = 0u32;
+            // SAFETY: the buffer holds 512 units, the count says so, and `got` is a local the call fills in.
+            let ok = unsafe {
+                ReadConsoleW(self.handle as _, units.as_mut_ptr().cast(), 512, &raw mut got, std::ptr::null())
+            };
+            if ok == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if got == 0 {
+                return Ok(0);
+            }
+            let mut all: Vec<u16> = self.high.take().into_iter().collect();
+            all.extend_from_slice(&units[..got as usize]);
+            if let Some(last) = all.last().copied()
+                && (0xD800..0xDC00).contains(&last)
+            {
+                self.high = all.pop();
+            }
+            for c in char::decode_utf16(all).map(|r| r.unwrap_or(char::REPLACEMENT_CHARACTER)) {
+                let mut b = [0u8; 4];
+                self.out.extend(c.encode_utf8(&mut b).as_bytes());
+            }
+        }
+        let n = buf.len().min(self.out.len());
+        for (slot, byte) in buf.iter_mut().zip(self.out.drain(..n)) {
+            *slot = byte;
+        }
+        Ok(n)
+    }
 }
 
 static ARMED: AtomicBool = AtomicBool::new(false);

@@ -94,15 +94,14 @@ pub fn parse_detach_key(s: &str) -> Result<u8, String> {
     let byte = match c.to_ascii_lowercase() {
         l @ 'a'..='z' => l as u8 - b'a' + 1,
         '@' => 0,
-        '[' => 27,
         '\\' => 28,
         ']' => 29,
         '^' => 30,
         '_' => 31,
         _ => return Err(format!("detach key {s:?}: ctrl-{c} is not a control key")),
     };
-    if matches!(byte, 0 | 9 | 10 | 13) {
-        return Err(format!("detach key {s:?}: that key is needed for typing (nul, tab, newline, enter)"));
+    if matches!(byte, 0 | 9 | 10 | 13 | 27) {
+        return Err(format!("detach key {s:?}: that key is needed for typing (nul, tab, newline, enter, escape)"));
     }
     Ok(byte)
 }
@@ -221,7 +220,14 @@ pub(crate) fn session(stream: Stream, io: Io, opts: &Opts) -> i32 {
                     guard = enter();
                 }
                 if let Some(input) = input.take() {
-                    spawn_input(input, writer.clone(), read_half.try_clone().ok(), opts, detached.clone());
+                    spawn_input(
+                        input,
+                        writer.clone(),
+                        read_half.try_clone().ok(),
+                        opts,
+                        detached.clone(),
+                        guard.is_some(),
+                    );
                 }
                 if opts.role == Role::Owner {
                     spawn_resize(size.clone(), start, writer.clone(), stop.clone());
@@ -270,36 +276,51 @@ pub(crate) fn session(stream: Stream, io: Io, opts: &Opts) -> i32 {
 }
 
 /// Keys to the relay. The detach key sends DETACH, is not forwarded, and ends the attach (the thread stops, so a second
-/// press never arrives). An observer's keys are read only for the detach key.
+/// press never arrives). An observer's keys are read only for the detach key. When the keys stop (end of input, a read
+/// error, a failed send) on a raw terminal there is no way left to type, so that detaches too; a headless pipe that ends
+/// just stops sending and the output keeps coming.
 fn spawn_input(
     mut input: Box<dyn Read + Send>,
     writer: Writer,
     wake: Option<Stream>,
     opts: &Opts,
     detached: Arc<AtomicBool>,
+    on_terminal: bool,
 ) {
     let owner = opts.role == Role::Owner;
     let key = opts.detach_key;
     thread::spawn(move || {
+        let leave = |wake: Option<Stream>| {
+            // The flag first: a relay that closes without answering DETACH still reads as a clean detach.
+            detached.store(true, Ordering::SeqCst);
+            let _ = send(&writer, kind::DETACH, b"");
+            // Wakes the main thread out of its read.
+            if let Some(w) = wake {
+                let _ = w.shutdown(std::net::Shutdown::Both);
+            }
+        };
         let mut buf = [0u8; INPUT_CHUNK];
         loop {
             let n = match input.read(&mut buf) {
-                Ok(0) | Err(_) => return,
+                Ok(0) | Err(_) => {
+                    if on_terminal {
+                        leave(wake);
+                    }
+                    return;
+                }
                 Ok(n) => n,
             };
             let data = &buf[..n];
             let hit = data.iter().position(|b| *b == key);
             let keys = hit.map_or(data, |i| &data[..i]);
             if owner && !keys.is_empty() && send(&writer, kind::INPUT, keys).is_err() {
+                if on_terminal {
+                    leave(wake);
+                }
                 return;
             }
             if hit.is_some() {
-                let _ = send(&writer, kind::DETACH, b"");
-                detached.store(true, Ordering::SeqCst);
-                // Wakes the main thread out of its read.
-                if let Some(w) = wake {
-                    let _ = w.shutdown(std::net::Shutdown::Both);
-                }
+                leave(wake);
                 return;
             }
         }

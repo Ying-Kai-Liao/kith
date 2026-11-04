@@ -88,22 +88,40 @@ extern "C" fn on_signal(sig: libc::c_int) {
     }
 }
 
-fn set_handlers(on: bool) {
+/// Installs the restoring handler for each fatal signal that is not ignored (a `nohup` SIGHUP, or SIGINT / SIGQUIT in a
+/// background job, stay ignored) and returns what was there, to put back.
+fn install_handlers() -> Vec<(libc::c_int, libc::sigaction)> {
+    let mut old = Vec::new();
     for sig in DYING {
-        // SAFETY: a zeroed sigaction with the fields below set is a valid one; sigaction only reads it.
+        // SAFETY: a zeroed sigaction with the fields below set is a valid one; sigaction only reads `sa` and fills `prev`.
         unsafe {
+            let mut prev: libc::sigaction = std::mem::zeroed();
+            if libc::sigaction(sig, std::ptr::null(), &raw mut prev) != 0 || prev.sa_sigaction == libc::SIG_IGN {
+                continue;
+            }
             let mut sa: libc::sigaction = std::mem::zeroed();
-            sa.sa_sigaction = if on { on_signal as extern "C" fn(libc::c_int) as usize } else { libc::SIG_DFL };
+            sa.sa_sigaction = on_signal as extern "C" fn(libc::c_int) as usize;
             sa.sa_flags = libc::SA_RESETHAND | libc::SA_NODEFER;
             libc::sigemptyset(&raw mut sa.sa_mask);
-            libc::sigaction(sig, &raw const sa, std::ptr::null_mut());
+            if libc::sigaction(sig, &raw const sa, std::ptr::null_mut()) == 0 {
+                old.push((sig, prev));
+            }
         }
+    }
+    old
+}
+
+fn put_back(old: &[(libc::c_int, libc::sigaction)]) {
+    for (sig, prev) in old {
+        // SAFETY: `prev` came from sigaction for this signal.
+        unsafe { libc::sigaction(*sig, prev, std::ptr::null_mut()) };
     }
 }
 
 /// Raw mode on a tty until dropped.
 struct RawGuard {
     _keep: Option<File>,
+    old: Vec<(libc::c_int, libc::sigaction)>,
 }
 
 impl RawGuard {
@@ -127,19 +145,22 @@ impl RawGuard {
         unsafe { (*SAVED.0.get()).write(saved) };
         SAVED_FD.store(fd, Ordering::Release);
         ARMED.store(true, Ordering::Release);
+        // Handlers first: a signal between raw mode going on and the handler being there would leave the terminal raw.
+        let old = install_handlers();
         // SAFETY: raw is a valid termios for this fd.
         if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &raw const raw) } != 0 {
             ARMED.store(false, Ordering::Release);
+            put_back(&old);
             return None;
         }
-        set_handlers(true);
-        Some(Self { _keep: keep })
+        Some(Self { _keep: keep, old })
     }
 }
 
 impl Drop for RawGuard {
     fn drop(&mut self) {
-        set_handlers(false);
+        // Terminal first, then the handlers: the other way round leaves a window where a signal kills us raw.
         restore_now(true);
+        put_back(&self.old);
     }
 }

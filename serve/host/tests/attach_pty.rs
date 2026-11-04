@@ -77,6 +77,11 @@ const COOKED: libc::tcflag_t = libc::ICANON | libc::ECHO | libc::ISIG;
 
 /// Starts the client on a pty, feeds it a ticket, accepts its connection and reads its ATTACH.
 fn start(tag: &str) -> Run {
+    start_with(tag, false)
+}
+
+/// `via_tty`: stdin is a pipe holding the ticket (as a caller like M1-7 will have it) and the keys come from `--tty`.
+fn start_with(tag: &str, via_tty: bool) -> Run {
     let dir = std::env::temp_dir().join(format!("kat{}{tag}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let sock = dir.join("a.sock");
@@ -84,8 +89,16 @@ fn start(tag: &str) -> Run {
     listener.set_nonblocking(true).unwrap();
 
     let pair = native_pty_system().openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).unwrap();
-    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_kith"));
-    cmd.args(["kernel", "attach", "--endpoint", sock.to_str().unwrap(), "--ticket-stdin"]);
+    let bin = env!("CARGO_BIN_EXE_kith");
+    let mut cmd;
+    if via_tty {
+        cmd = CommandBuilder::new("sh");
+        cmd.args(["-c", "printf 'tkt-1\\n' | exec \"$0\" \"$@\"", bin]);
+        cmd.args(["kernel", "attach", "--endpoint", sock.to_str().unwrap(), "--ticket-stdin", "--tty"]);
+    } else {
+        cmd = CommandBuilder::new(bin);
+        cmd.args(["kernel", "attach", "--endpoint", sock.to_str().unwrap(), "--ticket-stdin"]);
+    }
     cmd.env_remove("KITH_DETACH_KEY");
     let child = pair.slave.spawn_command(cmd).unwrap();
     let mut writer = pair.master.take_writer().unwrap();
@@ -101,7 +114,9 @@ fn start(tag: &str) -> Run {
             sink.lock().unwrap().extend_from_slice(&buf[..n]);
         }
     });
-    writer.write_all(b"tkt-1\n").unwrap();
+    if !via_tty {
+        writer.write_all(b"tkt-1\n").unwrap();
+    }
 
     let mut relay = None;
     wait_for("the client to connect", || {
@@ -152,7 +167,8 @@ fn restored_when_the_client_is_terminated() {
     // SAFETY: signals the client process this test started.
     unsafe { libc::kill(i32::try_from(pid).unwrap(), libc::SIGTERM) };
     let status = run.child.wait().unwrap();
-    assert_ne!(status.exit_code(), 0);
+    // Killed by the signal itself (re-raised after the restore), not a plain exit.
+    assert!(status.signal().is_some(), "{status:?}");
     cooked_again(&run);
 }
 
@@ -172,4 +188,16 @@ fn keys_resizes_and_the_detach_key_reach_the_relay_and_detach_restores() {
     assert_eq!(run.child.wait().unwrap().exit_code(), 0);
     cooked_again(&run);
     assert!(String::from_utf8_lossy(&run.shown.lock().unwrap()).contains("detached; the agent keeps running"));
+}
+
+#[test]
+fn keys_come_from_the_tty_when_stdin_is_the_ticket_pipe() {
+    let mut run = start_with("d", true);
+    attach(&mut run);
+    run.writer.write_all(b"y").unwrap();
+    assert_eq!(read_frame(&mut run.relay), (INPUT, b"y".to_vec()));
+    run.writer.write_all(&[0x1c]).unwrap();
+    assert_eq!(read_frame(&mut run.relay), (DETACH, Vec::new()));
+    assert_eq!(run.child.wait().unwrap().exit_code(), 0);
+    cooked_again(&run);
 }

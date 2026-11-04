@@ -332,7 +332,31 @@ fn detach_key_parsing() {
     assert_eq!(parse_detach_key("ctrl-a").unwrap(), 1);
     assert_eq!(parse_detach_key("Ctrl-]").unwrap(), 0x1d);
     assert_eq!(parse_detach_key("^_").unwrap(), 0x1f);
-    for bad in ["", "ctrl-", "ctrl-ab", "a", "ctrl-1", "ctrl-m", "ctrl-i", "ctrl-@"] {
+    for bad in ["", "ctrl-", "ctrl-ab", "a", "ctrl-1", "ctrl-m", "ctrl-i", "ctrl-@", "ctrl-["] {
         assert!(parse_detach_key(bad).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn keys_ending_on_a_raw_terminal_detach() {
+    let mut r = rig(opts(Role::Owner));
+    r.attach_frame();
+    r.attached();
+    // The keyboard goes away (end of input): nothing can be typed any more, so the client leaves.
+    let keys = std::mem::replace(&mut r.keys, channel().0);
+    drop(keys);
+    assert_eq!(r.frame(), (kind::DETACH, Vec::new()));
+    assert_eq!(r.finish(), 0);
+}
+
+#[test]
+fn a_relay_that_closes_after_the_detach_key_still_exits_zero() {
+    let mut r = rig(opts(Role::Owner));
+    r.attach_frame();
+    r.attached();
+    r.keys.send(vec![0x1c]).unwrap();
+    assert_eq!(r.frame(), (kind::DETACH, Vec::new()));
+    // The relay just closes, with no DETACHED: still a clean detach (the client may have closed its side first).
+    let _ = r.relay.shutdown(std::net::Shutdown::Both);
+    assert_eq!(r.finish(), 0);
 }
