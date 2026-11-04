@@ -1,0 +1,11 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/ask/.lock": "",
+  "state:home/.kith/live/ask/p.reg": "{\"chain\": \"c\", \"hop\": 3, \"cross_hops\": 3, \"crossed\": true, \"cost\": 0.0}",
+  "step0.exit": "4\n",
+  "step0.stderr": "kith ask: delegation hop limit: this chain has already crossed to another Mac 2 times (at most 2); ask the user before starting another chain\n",
+  "step0.stdout": "",
+  "step1.exit": "4\n",
+  "step1.stderr": "kith ask: delegation hop limit: this chain has already crossed to another Mac 2 times (at most 2); ask the user before starting another chain\n",
+  "step1.stdout": ""
+}

@@ -1,0 +1,9 @@
+{
+  "fakes": "",
+  "step0.exit": "2\n",
+  "step0.stderr": "usage: kith-wake take [-h] --holder HOLDER [--session SESSION] [--sid SID]\nkith-wake take: error: the following arguments are required: --holder\n",
+  "step0.stdout": "",
+  "step1.exit": "2\n",
+  "step1.stderr": "usage: kith-wake take [-h] --holder HOLDER [--session SESSION] [--sid SID]\nkith-wake take: error: argument --holder: invalid int value: 'x'\n",
+  "step1.stdout": ""
+}

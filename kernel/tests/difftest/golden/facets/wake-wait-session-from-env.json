@@ -1,0 +1,13 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"wait\", \"session\": \"envsess\", \"wait\": \"<ID12>\", \"on\": \"at:+1h\", \"until\": \"<TS>\"}\n",
+  "state:home/.kith/sessions/queue/": "<empty dir>\n",
+  "state:home/.kith/sessions/waits/.lock": "",
+  "state:home/.kith/sessions/waits/<ID12>.json": "{\n  \"agent\": \"envagent\",\n  \"at\": \"<MASKED>\",\n  \"checked\": \"<MASKED>\",\n  \"created\": \"<MASKED>\",\n  \"id\": \"<ID12>\",\n  \"kind\": \"at\",\n  \"note\": \"\",\n  \"on\": \"at:+1h\",\n  \"seen\": null,\n  \"session\": \"envsess\",\n  \"until\": \"<MASKED>\",\n  \"v\": 1,\n  \"why\": \"\"\n}\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "waiting <ID12>: this session gets a turn at <TS>; while a terminal holds it, the turn waits for the terminal to close\n",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "envsess  envagent  waiting <ID12> on at:+1h until <TS>\n"
+}

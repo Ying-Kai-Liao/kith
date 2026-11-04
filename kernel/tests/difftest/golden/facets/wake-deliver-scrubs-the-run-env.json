@@ -1,0 +1,12 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"turn\", \"session\": \"s1\", \"run\": \"<ID12>\", \"ids\": [\"a\"]}\n{\"at\": \"<TS>\", \"event\": \"done\", \"session\": \"s1\", \"run\": \"<ID12>\", \"ids\": [\"a\"], \"how\": \"answered\"}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/answered.json": "{\n  \"a\": {\n    \"how\": \"answered\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<MASKED>\"\n  }\n}\n",
+  "state:home/bin/kith-fake": "#!/bin/sh\necho \"person=${KITH_PERSON:-none} room=${KITH_ROOM:-none} resume=${KITH_RESUME:-none} cc=${CLAUDECODE:-none}\"\nexit 0\n",
+  "state:home/logs/wake/<ID12>.err": "",
+  "state:home/logs/wake/<ID12>.log": "person=none room=none resume=none cc=none\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": ""
+}

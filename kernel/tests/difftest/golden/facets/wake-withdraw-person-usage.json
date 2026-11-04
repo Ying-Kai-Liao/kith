@@ -1,0 +1,6 @@
+{
+  "fakes": "",
+  "step0.exit": "2\n",
+  "step0.stderr": "usage: kith-wake withdraw-person [-h] persons [persons ...]\nkith-wake withdraw-person: error: the following arguments are required: persons\n",
+  "step0.stdout": ""
+}

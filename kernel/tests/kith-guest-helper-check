@@ -90,9 +90,10 @@ expect "after waiting for the sync" "$((SECONDS - start >= 2))" 1
 wait
 lease -1000
 "$AUTH" person kai owner >/dev/null 2>&1
-start=$SECONDS
+start=$(python3 -c 'import time; print(time.time())')
 has "held: the owner's run (KITH_PERSON is the owner) does not wait" "$(KITH_PERSON=kai KITH_SYNC_HOLD=30 "$KERNEL/bin/kith" helper "say pong" 2>&1)" "pong from helper for kai"
-expect "and is not held at all" "$((SECONDS - start < 2))" 1
+# sub-second clock: bash SECONDS is whole seconds, so a boundary crossing read 1.2 s as 2; a wait would be ~30 s
+expect "and is not held at all" "$(python3 -c 'import sys, time; print(int(time.time() - float(sys.argv[1]) < 5))' "$start")" 1
 rm "$KITH_SERVE_DIR/cloud-sync.json"
 
 # the tool is listed for a run that has a person and for none else

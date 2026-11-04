@@ -1,0 +1,15 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/e8bc163c82eee18733288c7d4ac636db.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"host\",\n  \"next\": \"<MASKED>\",\n  \"person\": \"p1\",\n  \"requests\": [\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"a\",\n      \"run\": null,\n      \"text\": \"hi\",\n      \"why\": \"\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"s1\",\n  \"tries\": 0,\n  \"turn\": null,\n  \"v\": 1\n}\n",
+  "state:home/.kith/sessions/waits/": "<empty dir>\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith-wake: s1 is p1's session, not p2's\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "kith-wake: s1 is p1's session, not the owner's\n",
+  "step1.stdout": "",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "s1  coder  p1  host  owed  1 request(s)\n"
+}

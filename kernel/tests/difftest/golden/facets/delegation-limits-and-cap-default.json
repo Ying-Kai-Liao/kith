@@ -1,0 +1,9 @@
+{
+  "fakes": "",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"default_cap_usd\": 5.0,\n  \"max_cross_hops\": 2,\n  \"max_local_hops\": 8,\n  \"refused_exit\": 4\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "5\n",
+  "step1.stderr": ""
+}

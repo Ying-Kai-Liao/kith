@@ -1,0 +1,6 @@
+{
+  "fakes": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: KITH_STATE is not set, so the session cannot be claimed\n",
+  "step0.stdout": ""
+}

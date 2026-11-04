@@ -1,0 +1,7 @@
+{
+  "fakes": "",
+  "state:home/.kith/settings.json": "{not json",
+  "step0.exit": "0\n",
+  "step0.json": "5\n",
+  "step0.stderr": ""
+}

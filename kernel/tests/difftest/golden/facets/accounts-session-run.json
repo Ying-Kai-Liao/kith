@@ -1,0 +1,22 @@
+{
+  "fakes": "",
+  "state:home/.kith/cost.db": "## runs: CREATE TABLE runs (session text, agent text, provider text, account text, account_id text, model text, effort text)\n{\"account\": \"w\", \"account_id\": \"\", \"agent\": \"echo\", \"effort\": \"\", \"model\": \"\", \"provider\": \"claude\", \"session\": \"s-named\"}\n{\"account\": \"work\", \"account_id\": \"claude:work\", \"agent\": \"echo\", \"effort\": \"high\", \"model\": \"opus\", \"provider\": \"claude\", \"session\": \"s-full\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"café\", \"effort\": null, \"model\": null, \"provider\": \"claude\", \"session\": \"s-uni\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"cdx\", \"effort\": null, \"model\": \"gpt-5\", \"provider\": \"codex\", \"session\": \"s-codex\"}\n{\"account\": null, \"account_id\": null, \"agent\": \"echo\", \"effort\": null, \"model\": null, \"provider\": null, \"session\": \"s-bare\"}\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agent\": \"echo\",\n  \"effort\": \"high\",\n  \"harness\": \"claude\",\n  \"model\": \"opus\"\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"agent\": \"cdx\",\n  \"effort\": null,\n  \"harness\": \"codex\",\n  \"model\": \"gpt-5\"\n}\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"agent\": \"echo\",\n  \"effort\": null,\n  \"harness\": \"claude\",\n  \"model\": null\n}\n",
+  "step2.stderr": "",
+  "step3.exit": "0\n",
+  "step3.json": "{\n  \"agent\": \"echo\",\n  \"effort\": null,\n  \"harness\": \"claude\",\n  \"model\": null\n}\n",
+  "step3.stderr": "",
+  "step4.exit": "0\n",
+  "step4.json": "{\n  \"agent\": \"café\",\n  \"effort\": null,\n  \"harness\": \"claude\",\n  \"model\": null\n}\n",
+  "step4.stderr": "",
+  "step5.exit": "0\n",
+  "step5.json": "{}\n",
+  "step5.stderr": ""
+}

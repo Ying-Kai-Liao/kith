@@ -1,0 +1,9 @@
+{
+  "fakes": "",
+  "state:home/.claude/projects/-work/abc-1.jsonl": "{\"type\": \"summary\"}\n",
+  "state:home/.kith/live/terminal/abc-1.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/abc-1.claim.lock": "",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "r_sid='abc-1' r_cwd='' r_from='abc-1'\n"
+}
