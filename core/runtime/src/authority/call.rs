@@ -208,7 +208,23 @@ pub(crate) fn call_in(
                 |a| write_in(m, params, c, life, a, &fresh),
                 |tx, said| {
                     revoke::follow_in_doors(tx, m, params, said, c.now_ms)?;
-                    revoke::follow_in_cards(tx, m, params, said)
+                    revoke::follow_in_cards(tx, m, params, said)?;
+                    // a removal drops the bots' rows: keep their ids for the revoke order, so a crash before it
+                    // does not lose them
+                    if m == "people.removePerson"
+                        && let (Some(id), Some(ids)) = (word(params, "id"), said.get("ids"))
+                    {
+                        let bots: Vec<String> = ids
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(Value::as_str)
+                            .filter(|x| *x != id)
+                            .map(str::to_owned)
+                            .collect();
+                        crate::revoke_order::record_pending(tx, id, &bots, c.now_ms)?;
+                    }
+                    Ok(())
                 },
             )?;
             // The folders follow a rename once it is committed. `kith-auth --local` clears no temp folder: the

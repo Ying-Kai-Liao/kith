@@ -24,7 +24,8 @@ struct Fixture {
 
 fn fixture() -> Fixture {
     let t = tempfile::tempdir().unwrap();
-    let mut core = open_all(&Layout::new(&t.path().join("core")));
+    let mut core = open_all(&Layout::new(&t.path().join("core")))
+        .with_folders(&crate::tests::paths(&t.path().join("machine")));
     reconcile(&mut core, &[], &[], i64::MAX, 1).unwrap();
     for (id, bot_of) in [
         ("mia", None),
@@ -278,7 +279,9 @@ fn a_removed_person_whose_bot_rows_are_gone_is_revoked_through_the_bots_the_call
         run(&mut f.core, "c-b1b", "mia-b1-b", "app", 13),
     ];
     let bots = ["mia-b1", "mia-b1-b", "mia-b2", "mia"].map(str::to_owned);
-    // the authority removal: the person's and every bot's row is deleted
+    // the authority removal: the bots are recorded, then the person's and every bot's row is deleted
+    let rec: Vec<String> = bots.iter().filter(|b| *b != "mia").cloned().collect();
+    super::record_pending(f.core.conn(), "mia", &rec, 1.0).unwrap();
     f.core
         .conn()
         .execute("DELETE FROM people WHERE id LIKE 'mia%'", [])
@@ -292,8 +295,84 @@ fn a_removed_person_whose_bot_rows_are_gone_is_revoked_through_the_bots_the_call
     for p in &out.principals {
         assert_eq!(revoke_epoch(&f.core, p).unwrap(), 1, "{p}");
     }
-    // kai's side is untouched, and a repeat with the same bots finds nothing new
+    // kai's side is untouched; the record is spent, so stale `--bots` are refused (rows gone, nothing to vouch for
+    // them), and a repeat without them finds nothing new
     assert_eq!(revoke_epoch(&f.core, "kai").unwrap(), 0);
-    let again = revoke_everywhere(&mut f.core, "mia", &bots, NOW + 1).unwrap();
+    revoke_everywhere(&mut f.core, "mia", &bots, NOW + 1).unwrap_err();
+    let again = revoke_everywhere(&mut f.core, "mia", &[], NOW + 1).unwrap();
     assert!(again.ended.is_empty() && again.cancelled_turns == 0);
+}
+
+#[test]
+fn a_crash_between_the_removal_and_the_order_loses_no_bot() {
+    let mut f = fixture();
+    f.core
+        .conn()
+        .execute(
+            "INSERT INTO people (id, bot_of) VALUES ('mia-b1-b', 'mia-b1')",
+            [],
+        )
+        .unwrap();
+    ask(&f.core, "a1", None, "mia", "c-a1");
+    ask(&f.core, "a9", None, "mia-b1-b", "c-a9");
+    let live = run(&mut f.core, "c-b1b", "mia-b1-b", "app", 13);
+    // the real removal write: the rows go, and the bot set is recorded in the same transaction
+    crate::authority::call::call(&mut f.core, "people.removePerson", &json!({"id": "mia"}))
+        .unwrap();
+    let rows: i64 = f
+        .core
+        .conn()
+        .query_row(
+            "SELECT count(*) FROM people WHERE id LIKE 'mia%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 0);
+    // the process died here: the retry has no `--bots` to pass, and the record carries them
+    let out = revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
+    assert_eq!(out.principals, ["mia", "mia-b1", "mia-b1-b", "mia-b2"]);
+    assert_eq!(out.ended, ["a1", "a9"]);
+    assert_eq!(state_of(&f.core, "claims", "claim_id", live), "ending");
+    // finished: the record is cleared, and a second run is a no-op
+    let left: i64 = f
+        .core
+        .conn()
+        .query_row("SELECT count(*) FROM pending_revokes", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(left, 0);
+    let again = revoke_everywhere(&mut f.core, "mia", &[], NOW + 1).unwrap();
+    assert!(again.ended.is_empty() && again.cancelled_turns == 0);
+}
+
+#[test]
+fn forged_bots_are_refused_and_nothing_is_ended() {
+    let mut f = fixture();
+    world(&mut f);
+    f.core
+        .conn()
+        .execute("INSERT INTO people (id, owner) VALUES ('boss', 1)", [])
+        .unwrap();
+    ask(&f.core, "o1", None, "boss", "c-o1");
+    for forged in ["boss", "kai-b", "kai", "nobody-known"] {
+        let err = revoke_everywhere(&mut f.core, "mia", &[forged.to_owned()], NOW).unwrap_err();
+        assert!(
+            matches!(&err, Error::Refused(m) if m.contains(forged)),
+            "{forged}: {err}"
+        );
+    }
+    // a forged name next to a true one still refuses the lot
+    let mixed = ["mia-b1".to_owned(), "kai-b".to_owned()];
+    revoke_everywhere(&mut f.core, "mia", &mixed, NOW).unwrap_err();
+    // the owner can not be the revoked person either
+    revoke_everywhere(&mut f.core, "boss", &[], NOW).unwrap_err();
+    for id in ["a1", "a2", "a3", "k1", "o1"] {
+        assert_eq!(state_of(&f.core, "asks", "id", id), "open", "{id}");
+    }
+    for p in ["mia", "mia-b1", "kai-b", "boss"] {
+        assert_eq!(revoke_epoch(&f.core, p).unwrap(), 0, "{p}");
+    }
+    // the true bots are accepted
+    let ok = ["mia-b1".to_owned(), "mia-b2".to_owned()];
+    revoke_everywhere(&mut f.core, "mia", &ok, NOW).unwrap();
 }
