@@ -4,6 +4,7 @@ mod access;
 mod agent;
 mod analytics;
 mod api;
+mod attach_client;
 mod background;
 mod calls;
 mod cards;
@@ -488,6 +489,29 @@ enum KernelCmd {
         #[command(subcommand)]
         what: LaunchCmd,
     },
+    /// Attaches this terminal to an agent's held terminal through the relay (M1-6): raw mode until detach or exit.
+    /// The ticket (from `terminal.open`) is one line on stdin. Exit: the engine's code, 75 busy, 0 detached, 1 otherwise.
+    #[command(hide = true)]
+    Attach {
+        /// The relay's attach endpoint: a socket path, or a pipe name on Windows.
+        #[arg(long)]
+        endpoint: std::path::PathBuf,
+        /// Read the ticket from the first line of stdin (the only way to give it; never argv).
+        #[arg(long)]
+        ticket_stdin: bool,
+        /// Watch only: no keys are sent and the size never changes.
+        #[arg(long)]
+        observer: bool,
+        /// Take the owner place from a client that has it (an owner ticket only).
+        #[arg(long)]
+        takeover: bool,
+        /// The key that leaves the terminal running: `ctrl-<char>`.
+        #[arg(long, env = "KITH_DETACH_KEY", default_value = "ctrl-\\")]
+        detach_key: String,
+        /// Read keys from the controlling terminal (/dev/tty, CONIN$) instead of stdin, for when stdin is the ticket pipe.
+        #[arg(long)]
+        tty: bool,
+    },
     /// One task on one engine over ACP: the answer on stdout (the task after `--`, or on stdin).
     RunOnce {
         engine: String,
@@ -514,6 +538,45 @@ enum KernelCmd {
         #[arg(last = true)]
         task: Vec<String>,
     },
+}
+
+/// `kith kernel attach ...`; the exit code is the client's (see `attach_client`).
+// The flags are the command line's own switches.
+#[allow(clippy::fn_params_excessive_bools)]
+fn run_attach(
+    endpoint: &std::path::Path,
+    ticket_stdin: bool,
+    observer: bool,
+    takeover: bool,
+    detach_key: &str,
+    tty: bool,
+) -> i32 {
+    use std::io::BufRead;
+    let key = match attach_client::parse_detach_key(detach_key) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    if !ticket_stdin {
+        eprintln!("the ticket is read from stdin: pass --ticket-stdin");
+        return 2;
+    }
+    // One line, from the shared stdin buffer: whatever follows stays there for the keys (when stdin is also the keyboard).
+    let mut ticket = String::new();
+    if std::io::stdin().lock().read_line(&mut ticket).unwrap_or(0) == 0 || ticket.trim().is_empty() {
+        eprintln!("no ticket on stdin");
+        return 2;
+    }
+    let opts = attach_client::Opts {
+        ticket: ticket.trim().to_string(),
+        role: if observer { attach_client::Role::Observer } else { attach_client::Role::Owner },
+        takeover,
+        detach_key: key,
+        tty_input: tty,
+    };
+    attach_client::run(endpoint, &opts)
 }
 
 /// What `kith kernel delegation ...` can be asked.
@@ -1147,6 +1210,9 @@ async fn main() -> Result<()> {
                 let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
+            if let KernelCmd::Attach { endpoint, ticket_stdin, observer, takeover, detach_key, tty } = cmd {
+                std::process::exit(run_attach(&endpoint, ticket_stdin, observer, takeover, &detach_key, tty));
+            }
             // Every kernel verb's notes (the accounts state, the settings migration) reach core.log, also the ones that
             // exit before `through_core`.
             kith_core::route_kernel_notes(&kernel::folders(&kith_kernel::paths::process_home()));
@@ -1246,6 +1312,7 @@ async fn main() -> Result<()> {
                         std::process::exit(launch_cmd::print_whole(&args));
                     }
                     KernelCmd::RunOnce { .. }
+                    | KernelCmd::Attach { .. }
                     | KernelCmd::Accounts { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }

@@ -36,6 +36,8 @@ kith-kernel = { path = "../../core/kernel" }
 kith-core = { path = "../../core/runtime" }
 # The method table: the CLI reads a command line against it to know which verbs the daemon answers (core_front.rs).
 kith-api = { path = "../../core/api" }
+# Frames and the platform connection (socket or pipe) of the attach client (src/attach_client).
+kith-holder = { path = "../../core/holder" }
 kith-mem = { path = "crates/memory" }
 kith-guest = { path = "crates/guest" }
 kith-wire = { path = "crates/wire" }
@@ -83,6 +85,8 @@ keyring = { version = "3.6.3", features = ["sync-secret-service", "crypto-rust",
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6.3", features = ["windows-native"] }
+# Console modes and size for the attach client (src/attach_client).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
 
 # rust-skills lint-* rules: all default groups plus pedantic, with the
 # library-oriented pedantic lints turned off for this binary crate.
