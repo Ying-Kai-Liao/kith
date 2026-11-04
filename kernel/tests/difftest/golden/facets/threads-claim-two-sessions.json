@@ -2,7 +2,7 @@
   "fakes": "",
   "state:home/.kith/live/terminal/s-1.claim": "{\"pid\": 1, \"procStart\": \"<PSTART>\", \"at\": \"<TS>\", \"kind\": \"oneshot\"}",
   "state:home/.kith/live/terminal/s-1.claim.lock": "",
-  "state:home/.kith/live/terminal/s-2.claim": "{\"pid\": 2, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/s-2.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
   "state:home/.kith/live/terminal/s-2.claim.lock": "",
   "step0.exit": "0\n",
   "step0.stderr": "",

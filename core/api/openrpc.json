@@ -4553,7 +4553,7 @@
     },
     {
       "name": "people.may",
-      "summary": "Whether a person may use an agent right now, and why (the kernel's `may`: a removed access beats every row, then their own, then everyone's).",
+      "summary": "Whether a person may use an agent right now, and why (the kernel's `may`: a removed access beats every row, then their own, then everyone's), with whether they are the owner and the preset they hold.",
       "params": [
         {
           "name": "person",

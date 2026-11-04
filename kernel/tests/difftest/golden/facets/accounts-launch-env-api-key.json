@@ -5,7 +5,7 @@
   "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nharness: claude-code\n---\nYou are echo.\n",
   "step0.exit": "0\n",
   "step0.stderr": "",
-  "step0.stdout": "backup_harness=claude backup_account=main backup_cfg_var='' backup_cfg_dir='' backup_api_helper=''\"'\"'<KERNEL>/bin/kith-auth'\"'\"' get --for echo --profile anthropic/main anthropic ANTHROPIC_API_KEY' backup_model=''\n",
+  "step0.stdout": "backup_harness=claude backup_account=main backup_cfg_var='' backup_cfg_dir='' backup_api_helper='<KERNEL>/bin/kith-auth get --for echo --profile anthropic/main anthropic ANTHROPIC_API_KEY' backup_model=''\n",
   "step1.exit": "4\n",
   "step1.stderr": "kith: claude-api:other: no anthropic/other key granted to echo (make it ready: kith auth set anthropic/other ANTHROPIC_API_KEY && kith auth grant echo anthropic anthropic/other)\n",
   "step1.stdout": "",
@@ -14,5 +14,5 @@
   "step2.stdout": "",
   "step3.exit": "0\n",
   "step3.stderr": "",
-  "step3.stdout": "backup_harness=claude backup_account=main backup_cfg_var='' backup_cfg_dir='' backup_api_helper=''\"'\"'<KERNEL>/bin/kith-auth'\"'\"' get --for echo --profile anthropic/main anthropic ANTHROPIC_API_KEY' backup_model=opus\n"
+  "step3.stdout": "backup_harness=claude backup_account=main backup_cfg_var='' backup_cfg_dir='' backup_api_helper='<KERNEL>/bin/kith-auth get --for echo --profile anthropic/main anthropic ANTHROPIC_API_KEY' backup_model=opus\n"
 }
