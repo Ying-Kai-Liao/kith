@@ -852,3 +852,78 @@ fn a_second_connection_that_releases_between_claim_and_redeem_wins_the_cas() {
         Redeemed::Refused("ended".into())
     );
 }
+
+// ---- turns
+
+fn new_turn<'a>(
+    conv: &'a str,
+    source: &'a str,
+    deadline: Option<i64>,
+) -> super::claims::NewTurn<'a> {
+    super::claims::NewTurn {
+        conversation: conv,
+        agent: "a",
+        engine: "claude",
+        source,
+        person: "sam",
+        prompt: "hi",
+        deadline,
+    }
+}
+
+#[test]
+fn enqueue_creates_the_conversation_and_validates_the_source() {
+    use super::claims::enqueue_turn;
+    let (_t, mut c) = open();
+    let t = enqueue_turn(&mut c, &new_turn("fresh", "wake", None), 5).expect("enqueue");
+    assert_eq!(turn_state(&c, t), "queued");
+    assert_eq!(
+        count(&c, "SELECT count(*) FROM conversations WHERE id = 'fresh'"),
+        1
+    );
+    assert!(matches!(
+        enqueue_turn(&mut c, &new_turn("fresh", "bogus", None), 6),
+        Err(Error::BadParams(_))
+    ));
+    // The queued turn can be claimed.
+    claim(&mut c, &new_claim("fresh", Some(t)), 7).expect("claim");
+}
+
+#[test]
+fn park_wake_and_expire() {
+    use super::claims::{enqueue_turn, expire_parked, park, unpark_ready};
+    let (_t, mut c) = open();
+    let a = enqueue_turn(&mut c, &new_turn("c1", "app", None), 1).expect("a");
+    let b = enqueue_turn(&mut c, &new_turn("c1", "schedule", Some(100)), 1).expect("b");
+    assert!(matches!(
+        park(&mut c, a, "nope", 2),
+        Err(Error::BadParams(_))
+    ));
+    assert!(park(&mut c, a, "lock_busy", 2).expect("park"));
+    assert!(!park(&mut c, a, "lock_busy", 3).expect("already parked"));
+    assert!(park(&mut c, b, "terminal_live", 2).expect("park b"));
+    // A live writer keeps them parked.
+    let (w, _) = running(&mut c, "c1", 100);
+    assert!(
+        unpark_ready(&mut c, "c1", true, false, 4)
+            .expect("held")
+            .is_empty()
+    );
+    report(&mut c, w, "done", "{}", 5).expect("done");
+    // The probes decide per reason.
+    assert_eq!(
+        unpark_ready(&mut c, "c1", false, true, 6).expect("none"),
+        Vec::<i64>::new()
+    );
+    assert_eq!(
+        unpark_ready(&mut c, "c1", true, true, 7).expect("lock"),
+        vec![a]
+    );
+    assert_eq!(turn_state(&c, a), "queued");
+    assert_eq!(turn_state(&c, b), "parked");
+    // q218: b expires at its deadline.
+    assert!(expire_parked(&mut c, 99).expect("early").is_empty());
+    assert_eq!(expire_parked(&mut c, 100).expect("expire"), vec![b]);
+    assert_eq!(turn_state(&c, b), "expired");
+    assert_eq!(turn_state(&c, a), "queued", "no deadline: never expires");
+}

@@ -694,3 +694,140 @@ pub(crate) fn different_holder(
     tx.commit()?;
     Ok(out)
 }
+
+// ---- turns: the queue other lanes (wake, asks, accounts, transcripts) call; none of them writes these tables
+
+/// Where a turn came from (`turns.source` is checked here, not in SQL, so a new source needs no table rebuild).
+const SOURCES: [&str; 6] = ["app", "schedule", "ask", "wake", "terminal", "cli"];
+/// Why a turn waits without a claim (`turns.parked_reason`, checked here).
+const PARK_REASONS: [&str; 2] = ["lock_busy", "terminal_live"];
+
+/// A turn to queue. The conversation row is created from `agent` and `engine` when it is missing.
+pub(crate) struct NewTurn<'a> {
+    pub conversation: &'a str,
+    pub agent: &'a str,
+    pub engine: &'a str,
+    pub source: &'a str,
+    pub person: &'a str,
+    pub prompt: &'a str,
+    /// A scheduled run expires at this time instead of waiting for ever (q218).
+    pub deadline: Option<i64>,
+}
+
+/// Queues a turn (`queued`), creating the conversation when needed.
+pub(crate) fn enqueue_turn(core: &mut Core, t: &NewTurn<'_>, now: i64) -> Result<i64> {
+    if !SOURCES.contains(&t.source) {
+        return Err(Error::BadParams(format!(
+            "kith-core: no such turn source {}",
+            t.source
+        )));
+    }
+    let tx = core.claim_tx()?;
+    tx.execute(
+        "INSERT OR IGNORE INTO conversations (id, agent, engine, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)",
+        params![t.conversation, t.agent, t.engine, now],
+    )?;
+    tx.execute(
+        "INSERT INTO turns (conversation, person, source, prompt, state, deadline, queued_at)
+         VALUES (?1, ?2, ?3, ?4, 'queued', ?5, ?6)",
+        params![
+            t.conversation,
+            t.person,
+            t.source,
+            t.prompt,
+            t.deadline,
+            now
+        ],
+    )?;
+    let id = tx.last_insert_rowid();
+    tx.commit()?;
+    Ok(id)
+}
+
+/// Parks a queued turn (no claim, no run token) as waiting for `lock_busy` or `terminal_live`. False when the turn is not
+/// queued (the busy path of [`report`] parks a claimed one itself).
+pub(crate) fn park(core: &mut Core, turn_id: i64, reason: &str, now: i64) -> Result<bool> {
+    if !PARK_REASONS.contains(&reason) {
+        return Err(Error::BadParams(format!(
+            "kith-core: no such park reason {reason}"
+        )));
+    }
+    let tx = core.claim_tx()?;
+    let n = tx.execute(
+        "UPDATE turns SET state = 'parked', parked_reason = ?2, parked_at = ?3 WHERE id = ?1 AND state = 'queued'",
+        params![turn_id, reason, now],
+    )?;
+    tx.commit()?;
+    Ok(n == 1)
+}
+
+/// Level-triggered wake: parked turns of the conversation go back to `queued` once nothing holds it. The caller probes
+/// outside the transaction (`lock_free`: the writer lock could be taken; `terminal_live`: a terminal session is open);
+/// the CAS here also needs the conversation to have no live claim.
+pub(crate) fn unpark_ready(
+    core: &mut Core,
+    conversation: &str,
+    lock_free: bool,
+    terminal_live: bool,
+    _now: i64,
+) -> Result<Vec<i64>> {
+    let tx = core.claim_tx()?;
+    let held: i64 = tx.query_row(
+        "SELECT count(*) FROM claims WHERE conversation = ?1 AND state IN ('claimed', 'running', 'ending')",
+        [conversation],
+        |r| r.get(0),
+    )?;
+    let mut woken = Vec::new();
+    if held == 0 {
+        let mut ids: Vec<(i64, String)> = Vec::new();
+        {
+            let mut st = tx.prepare(
+                "SELECT id, parked_reason FROM turns WHERE conversation = ?1 AND state = 'parked' ORDER BY id",
+            )?;
+            for r in st.query_map([conversation], |r| Ok((r.get(0)?, r.get(1)?)))? {
+                ids.push(r?);
+            }
+        }
+        for (id, reason) in ids {
+            let ready = match reason.as_str() {
+                "lock_busy" => lock_free,
+                "terminal_live" => !terminal_live,
+                _ => false,
+            };
+            if ready
+                && tx.execute(
+                    "UPDATE turns SET state = 'queued', parked_reason = NULL, parked_at = NULL
+                     WHERE id = ?1 AND state = 'parked'",
+                    [id],
+                )? == 1
+            {
+                woken.push(id);
+            }
+        }
+    }
+    tx.commit()?;
+    Ok(woken)
+}
+
+/// q218: queued and parked turns past their `deadline` become `expired`.
+pub(crate) fn expire_parked(core: &mut Core, now: i64) -> Result<Vec<i64>> {
+    let tx = core.claim_tx()?;
+    let mut ids: Vec<i64> = Vec::new();
+    {
+        let mut st = tx.prepare(
+            "SELECT id FROM turns WHERE state IN ('queued', 'parked') AND deadline IS NOT NULL AND deadline <= ?1 ORDER BY id",
+        )?;
+        for r in st.query_map([now], |r| r.get(0))? {
+            ids.push(r?);
+        }
+    }
+    for id in &ids {
+        tx.execute(
+            "UPDATE turns SET state = 'expired', parked_reason = NULL, parked_at = NULL, finished_at = ?2
+             WHERE id = ?1 AND state IN ('queued', 'parked')",
+            params![id, now],
+        )?;
+    }
+    tx.commit()?;
+    Ok(ids)
+}
