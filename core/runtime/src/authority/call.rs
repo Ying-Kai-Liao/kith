@@ -6,7 +6,7 @@
 
 use std::io::Read as _;
 
-use kith_kernel::secrets::{self, Ctx, Die, Sandbox, ServeDir};
+use kith_kernel::secrets::{self, Ctx, Die, Rules, Sandbox, ServeDir};
 use serde_json::{Value, json};
 
 use super::revoke::{self, Life};
@@ -22,6 +22,7 @@ pub(crate) fn serves(method: &str) -> bool {
         "people.grant"
             | "people.revoke"
             | "people.list"
+            | "people.may"
             | "people.addBot"
             | "people.removeBot"
             | "people.botsCap"
@@ -129,6 +130,20 @@ pub(crate) fn call_in(
             core,
             |a| json!({ "rows": write::list(a, c, word(params, "agent"), word(params, "person")) }),
         ),
+        // The answer of `may` itself (M2-15): the host's event filter asks it per person and agent. A refusal of the
+        // rules is a "no" with its words, as for `kith-auth may`.
+        "people.may" => {
+            let (person, agent) = (
+                need(params, "person").map_err(|d| store::refusal(&d))?,
+                need(params, "agent").map_err(|d| store::refusal(&d))?,
+            );
+            store::read(core, |a| {
+                match Rules::new(c, a).may(person, agent, None, false) {
+                    Ok((allowed, why)) => json!({ "allowed": allowed, "why": why }),
+                    Err(d) => json!({ "allowed": false, "why": d.msg }),
+                }
+            })
+        }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         "people.botsCap" if word(params, "amount").is_none() => {
             store::read(core, |a| lines(vec![write::bots_cap_line(a)]))

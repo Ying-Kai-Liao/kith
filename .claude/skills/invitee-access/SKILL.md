@@ -90,6 +90,7 @@ How it got there: first written at `5ced9454` (breaks run on `7b6622a0`); rechec
 | serve/host/src/cards/access.rs | `TOOL` (`request_access`): an escape card on a run card | 21 |
 | serve/host/src/api/calls.rs, api/cards.rs | their router methods (in the by-name sweeps of `roles_props`, `roles_tests`, `bot_guests_tests`) | 1, 15 |
 | | `event_for`, `bot_person` | 6 |
+| | `event_for_with`, `route`'s grant question (`authority::Authority`, `HostData`, `CoreData`, `Selected`, opt-in `KITH_CORE_AUTHORITY=1`; M2-15) | 6 (`authority_props`: parity of the host mirror and the core's `people.may` over generated grants, `*` rows, suspensions; fail closed with no core) |
 | | `shape`, `shape_bot`, `hello_for` | 7 |
 | serve/host/src/api/roles.rs (bots) | `BOT_METHODS`, `BOT_PENDING_METHODS`, `bot_may` | 15 |
 | | `event_for_bot`, `bot_entry` | 18 (and `a_bot_guest_is_shown_words_only`) |
@@ -180,6 +181,7 @@ Each break below was a one-line change in the product code behind a thread-local
 | 38 | the cap counts the computer owner's bots for everyone | `a_bot_owner_has_at_most_ten_live_bots` (19) |
 | 39, 40, 41 | `event_for_bot` drops the conversation owner check; the active check; the word shaping | `a_bot_is_sent_only_its_own_conversations` (18) |
 | 42 | `myBots` lists others' bots | `a_bot_never_has_more_than_its_owner_holds_now` (17) |
+| 43 | `CoreData` grants whenever the core answers at all (not only `allowed`): all five `authority_props` tests fail (seen failing 2026-11-04) | `authority_props` (6) |
 | 43 | a person may raise their bot's limits past the defaults | same (17) |
 | 44 | the store finds an ended bot by its key and the device is not removed | same (16) |
 | 47, 48, 49, 50 | `revokeBotInvite`, `setBotLimits`, `revokeBot`, `createBotInvite{botId}` skip the owner check | same (17) |
