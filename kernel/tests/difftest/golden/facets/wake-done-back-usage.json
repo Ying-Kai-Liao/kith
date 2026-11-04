@@ -1,0 +1,9 @@
+{
+  "fakes": "",
+  "step0.exit": "2\n",
+  "step0.stderr": "usage: kith-wake done [-h] [--how HOW] run\nkith-wake done: error: the following arguments are required: run\n",
+  "step0.stdout": "",
+  "step1.exit": "2\n",
+  "step1.stderr": "usage: kith-wake back [-h] [--held] run\nkith-wake back: error: the following arguments are required: run\n",
+  "step1.stdout": ""
+}

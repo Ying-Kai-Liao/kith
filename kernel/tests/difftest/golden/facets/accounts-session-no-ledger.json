@@ -1,0 +1,12 @@
+{
+  "fakes": "",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "\n",
+  "step1.exit": "0\n",
+  "step1.json": "{}\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "s_harness='' s_model='' s_effort=''\n"
+}

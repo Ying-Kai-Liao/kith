@@ -1,0 +1,7 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/11111111-1111-4111-8111-111111111111.claim.lock": "",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "exit 0\n<UUID>.claim.lock\n"
+}

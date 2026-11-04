@@ -142,6 +142,44 @@ class SelfTest(unittest.TestCase):
             del os.environ['KITH_HOME']
         self.assertEqual(failed, [], out)
 
+    def test_mask_keys_and_masked_file_names(self):
+        """mask_keys: a case's own meaningless values (a clock, a pid) are masked in JSON; normalize_paths: a file named by
+        an id the program makes up is one facet whatever the id, and two files with one masked name are an error."""
+        def sh(script):
+            return ['/bin/sh', '-c', script, 'sh']
+        prog = sh('id=$(date +%N)$$; mkdir -p "$HOME/w"; echo "{\\"n\\": 1, \\"at\\": $(date +%N), \\"pid\\": $$}" > "$HOME/w/id$id.json"')
+        base = {'name': 'mask', 'run': [['x']], 'normalize': [['id\\d+', 'ID']]}
+        both = {'default': {}, 'old': prog, 'new': prog}
+        out = io.StringIO()
+        failed, _, _ = D.run_all([base], both, [], jobs=1, out=out)
+        self.assertEqual(failed, ['mask'], 'unmasked, the two runs differ: ' + out.getvalue())
+        out = io.StringIO()
+        failed, _, _ = D.run_all([dict(base, normalize_paths=True, mask_keys=['at', 'pid'])], both, [], jobs=1, out=out)
+        self.assertEqual(failed, [], out.getvalue())
+        two = sh('mkdir -p "$HOME/w"; echo 1 > "$HOME/w/id1.json"; echo 2 > "$HOME/w/id2.json"')
+        out = io.StringIO()
+        failed, _, _ = D.run_all([dict(base, normalize_paths=True)], {'default': {}, 'old': two, 'new': two}, [], jobs=1, out=out)
+        self.assertEqual(failed, ['mask'])
+        self.assertIn('once masked', out.getvalue())
+
+    def test_unswitched_golden_cases_are_skipped_out_loud_until_required(self):
+        """A golden replay on the Rust program skips a case marked unswitched and says so; --require-switched runs it."""
+        case = dict(CASE, unswitched='no Rust side yet')
+        D.GOLDEN, D.REPLAY_SIDE = Path('/nonexistent-golden'), 'new'
+        try:
+            out = io.StringIO()
+            failed, _, summary = D.run_all([case], prefixes(None), [], jobs=1, out=out)
+            self.assertEqual(failed, [])
+            self.assertIn('skip  ls-one  (not switched: no Rust side yet)', out.getvalue())
+            self.assertEqual(summary['ls']['cases'], {'ls-one': 'unswitched'})
+            self.assertFalse(summary['ls']['green'])
+            D.REQUIRE_SWITCHED = True
+            out = io.StringIO()
+            failed, _, _ = D.run_all([case], prefixes(None), [], jobs=1, out=out)
+            self.assertEqual(failed, ['ls-one'], 'with --require-switched it runs (here: no record, so it errors)')
+        finally:
+            D.GOLDEN, D.REPLAY_SIDE, D.REQUIRE_SWITCHED = None, 'old', False
+
 
 if __name__ == '__main__':
     unittest.main(argv=[sys.argv[0], '-v'])

@@ -1,0 +1,14 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/s-1.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/s-1.claim.lock": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: that session is busy: held by terminal (pid 1); try again in a moment\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "kith: that session is busy: held by terminal (pid 1); try again in a moment\n",
+  "step1.stdout": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"at\": \"<TS>\",\n  \"kind\": \"terminal\",\n  \"pid\": 1,\n  \"procStart\": null\n}\n",
+  "step2.stderr": ""
+}
