@@ -93,6 +93,7 @@ fn the_m3_lanes_are_reserved_in_order() {
         ("wake", 90, 99),
         ("children", 100, 104),
         ("accounts", 105, 109),
+        ("transcripts", 110, 119),
         ("schedules", 120, 129),
     ];
     for (name, first, last) in want {
