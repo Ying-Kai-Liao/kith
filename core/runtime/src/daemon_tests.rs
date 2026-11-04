@@ -1226,11 +1226,15 @@ fn a_daemon_answers_the_people_writes_and_refuses_what_kith_auth_refuses() {
         Reached::Refused(_)
     ));
     // the access requests (M2-3) are answered here too: no such request is a refusal of the rules, not "not served"
-    match read(&p, "people.approve", &view(json!({"id": "r1"}))) {
+    match read(
+        &p,
+        "people.approve",
+        &view(json!({"id": "r1", "local": true})),
+    ) {
         Reached::Refused(e) => assert!(e.to_string().contains("unknown request"), "{e}"),
         other => panic!("{other:?}"),
     }
-    match read(&p, "people.requests", &view(json!({}))) {
+    match read(&p, "people.requests", &view(json!({"local": true}))) {
         Reached::Answered(v) => assert_eq!(v["requests"], json!([])),
         other => panic!("{other:?}"),
     }
