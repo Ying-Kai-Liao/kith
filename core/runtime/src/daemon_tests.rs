@@ -560,11 +560,17 @@ fn a_connected_core_keeps_renewing_the_holders_lease() {
             pid: std::process::id(),
             tied_to_starter: false,
             generation: hello.generation,
+            lease_lost: false,
             procs: Vec::new(),
         };
         wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
         while let Ok(Some((kind, _, payload))) = wire::read(&mut s) {
             match kind {
+                proto::PING => {
+                    let ping: proto::Ping = wire::parse(&payload).expect("ping");
+                    let _ =
+                        wire::write_json(&mut s, proto::PONG, 0, &proto::Pong { seq: ping.seq });
+                }
                 proto::RENEW => {
                     let r: proto::Renew = wire::parse(&payload).expect("renew");
                     RENEWALS.lock().expect("lock").push(r.ms);
@@ -739,6 +745,7 @@ fn remote_holder(sock: &std::path::Path, secret_file: std::path::PathBuf) {
                     pid: 1,
                     tied_to_starter: false,
                     generation: hello.generation,
+                    lease_lost: false,
                     procs: vec![],
                 };
                 wire::write_json(&mut s, proto::WELCOME, 0, &welcome).expect("welcome");
