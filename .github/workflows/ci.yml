@@ -967,7 +967,7 @@ jobs:
   # Skipped when the run itself is cancelled (a re-push superseded it), so it reports no failing `ci`. A job cancelled or timed out inside a live run still fails it through RESULTS.
   ci:
     if: ${{ !cancelled() && inputs.mode != 'check' }}
-    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
+    needs: [changes, kernel, host, windows, host-build, host-test, host-kernel, host-kernel-check, host-e2e, host-crates, cloud, licenses, thread-writers, revoke-access, secret-cards, holder-lease, relay, ios, desktop, desktop-js, desktop-relay-e2e, bot-guests-e2e, guest-linux]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

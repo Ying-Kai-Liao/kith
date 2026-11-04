@@ -6,11 +6,13 @@
 \*
 \* Time. `t` is real time (the model's god clock, one tick = one unit of the lease period L / 3 in the real code).
 \* The brain ("core") and the hand ("hand") can each sleep: asleep a side runs nothing, reads nothing, and its guest
-\* process is frozen. The hand keeps a clock `clk`. Instant on macOS stops while the Mac sleeps, so the clock of
+\* process is frozen. The hand keeps a clock `clk`. Instant stops while the machine sleeps (macOS; on Linux it is
+\* CLOCK_MONOTONIC, which stops in suspend too), so the clock of
 \* `today` does not advance while the hand sleeps (SleepClockCounts = FALSE); the fix reads a clock that counts sleep
 \* (CLOCK_BOOTTIME, mach_continuous_time, interrupt time). The core needs no clock of its own here: its promise is
 \* stated in real time (`belief`), and a core clock that stalls in the core's sleep only makes the core wait longer.
-\* Clock rate is taken as exact; the real margin for drift is the renewal at L/3 against a deadline at L.
+\* Clock rate is taken as exact. A hand clock slow by eps puts the real deadline eps*L past the belief; the renewal
+\* cadence (L/3) protects liveness only, not this bound, so the core must add eps*L to its belief before it acts on it.
 \*
 \* The promise. Every RENEW the core sends says "L from now". The core therefore believes the lease can last until
 \* the send time + L, and from then on no guest run may still be alive on an awake hand (GuestsWithinBelief). The
@@ -34,7 +36,7 @@ CONSTANTS L,                \* the lease period, in ticks
           MaxSeq,           \* pings the core sends in total
           MaxSleeps,        \* sleeps per side
           Anchor,           \* "read" | "ping" | "latest"
-          SleepClockCounts, \* TRUE: the hand's clock counts the time it sleeps; FALSE: it stops (Instant on macOS)
+          SleepClockCounts, \* TRUE: the hand's clock counts the time it sleeps; FALSE: it stops (Instant: macOS, Linux suspend)
           ExpireKills,      \* TRUE: expiry and the kill are one step (the code); FALSE: the kill is a later step
           KillOwner,        \* TRUE: expiry also kills the owner run (a bug; I18)
           RenewRestores     \* TRUE: a renewal restores a lost lease (the code); FALSE: no resurrection, re-hello needed
@@ -245,4 +247,8 @@ NeverKilled == ~killedGuest
 NeverLost == ~lostSeen
 NeverRestored == ~restored
 NeverHandSleptWithGuest == ~(~awake.hand /\ guest)
+\* A hand wakes with its lease already lapsed (the sleep-aware clock at work).
+NeverWokeIntoLapse == [][~(~awake.hand /\ awake'.hand /\ ExpiryDue)]_vars
+\* A stale RENEW (its deadline already past) is in the hand's hands and gets ignored.
+NeverStaleRenewIgnored == ~(awake.hand /\ \E m \in msgs : m.k = "RENEW" /\ AnchorOf(m) # NONE /\ AnchorOf(m) + L <= clk)
 ====

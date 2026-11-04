@@ -33,7 +33,7 @@ minutes on a laptop with four parallel workers. A failing cfg stops at its first
 ## What is modelled
 
 Real time `t` (the model's own clock). The hand keeps a clock `clk` that either counts the time the Mac sleeps
-(`SleepClockCounts = TRUE`) or stops (FALSE, `Instant` on macOS). Either side can sleep once: asleep it runs nothing
+(`SleepClockCounts = TRUE`) or stops (FALSE: `Instant`, i.e. CLOCK_MONOTONIC on Linux and mach_absolute_time on macOS, stops in suspend/sleep). Either side can sleep once: asleep it runs nothing
 and its guest is frozen. Messages are a set in flight, both directions: any order, any delay, lost at will. The
 core stops all traffic (revoke, crash, cut off) at some tick. The hand's steps are the code's: every frame is
 handled after the expiry check, expiry and the kill are one step, a tagged spawn needs an armed lease else
@@ -58,7 +58,7 @@ GuestsWithinBelief`). Two causes, each enough alone (`read-anchor`, `sleep-stops
 1. **Anchor.** The deadline starts when the holder reads the RENEW (`Instant::now() + period`), not when the core sent
    it. A RENEW delayed by the link, or sitting in the pipe while the hand's process was stopped, extends the deadline
    past the core's belief; a stale RENEW read after a lapse restores a lease the core no longer stands behind.
-2. **Clock.** `Instant` stops while a Mac sleeps. A hand that sleeps 10 minutes inside a 30 s lease wakes with 29 s
+2. **Clock.** `Instant` stops while the machine sleeps or suspends (macOS and Linux). A hand that sleeps 10 minutes inside a 30 s lease wakes with 29 s
    left, and the revoked guest runs on.
 
 The fix (`fixed` rows pass): the hand's deadline is its own clock at a moment before the core's send, plus the period,
@@ -75,11 +75,11 @@ and the clock counts sleep.
 | Model action | Code today (rust-rebuild 387c7b5a) | What M3-0c changes |
 |---|---|---|
 | `SendRenewDirect` (core, `Anchor = "read"`) | `holder_link.rs` `start_renewing`: RENEW at once after welcome, then every `lease/3` on its own thread; `client.rs` `Renewer::renew` writes `Renew { ms }` | Becomes `SendPing` + `CorePong`: the core sends PING(seq), and answers the PONG(seq) with RENEW(seq, ms). `Renew` carries the seq; new frames PING/PONG in `proto.rs` (bump `VERSION`) |
-| `belief` | not tracked | The core records, per RENEW sent, send time + `lease` (its own monotonic clock that counts sleep); it releases/requeues guest runs of a hand only after that |
+| `belief` | not tracked | The core records, per RENEW sent, send time + `lease` (its own monotonic clock that counts sleep); it releases/requeues guest runs of a hand only after belief + eps*L (eps = the hand clock's worst slowness) + the 10 ms watcher + kill latency, or once the hand reports the kill |
 | `HandRenew` | `holder.rs` ~478-487, the `p::RENEW` arm: `Instant::now().checked_add(period)` -> `Lease::Until(deadline)` | Deadline = the clock stored for the echoed seq + `ms` (capped at `MAX_LEASE_MS`); a deadline already past leaves the lease lost; a seq the holder never answered is ignored |
 | `HandPing` | none | `holder.rs`: on PING(seq), store the current clock under seq (a small ring, newest few) and answer PONG(seq) |
 | `Expire`, `WakeHand` | `expire_lease` (~302): `Instant::now() >= t` -> `Lease::Lost`, then `kill_tree()` for each `kill_on_lease_loss` entry, one step under the state lock; `watch_lease` runs it every 10 ms and every frame runs it first | Same step, same lock; the clock is the sleep-aware one below, so the first run after a wake sees the lapse |
-| clock `clk` | `std::time::Instant` (stops in sleep on macOS) | One `lease_clock()` in the holder: Linux `CLOCK_BOOTTIME`, macOS `mach_continuous_time`, Windows the interrupt-time clock (`QueryInterruptTime`, counts sleep). Not `Instant`, not wall time |
+| clock `clk` | `std::time::Instant` (stops in sleep on macOS and Linux) | One `lease_clock()` in the holder: Linux `CLOCK_BOOTTIME`, macOS `mach_continuous_time`, Windows the interrupt-time clock (`QueryInterruptTime`; not checked whether `Instant`'s QPC counts sleep there). Not `Instant`, not wall time |
 | `HandSpawn` | `holder.rs` ~636: tagged spawn and lease not `Until` -> `LEASE_LOST` frame, nothing started | Same; `LeaseLost` also says why (`unarmed`, `lapsed`, `stale`) and the welcome and exit tell the core a lapse killed a run |
 | `CoreLeaseLost` | nothing: `holder_link.rs` does not read `LEASE_LOST` yet | The core re-pings at once and retries the spawn once the lease is armed |
 | `OwnerNeverKilled` | `kill_on_lease_loss: false` entries are skipped in `expire_lease` | Unchanged; keep the row |
@@ -92,9 +92,11 @@ re-hello) also passes every safety row (`no-restore`), but then the model has no
 one and say which in the PR. Either way the exits of the killed runs are kept until acked, which is how the core
 learns the guest runs are gone.
 
-Not modelled: clock rate drift (covered by the renewal at L/3 against a deadline at L), the 10 ms watcher window,
+Not modelled: clock rate drift (a hand clock slow by eps puts the deadline eps*L past the belief; the L/3 renewal cadence protects liveness only, so the core adds eps*L, see the belief row), the 10 ms watcher window,
 several holders or cores (generation fencing is the Holder model's job), a holder restart (its leases and runs go
 with it), a hand whose processes run on while the machine is asleep (they cannot).
+
+Later: key the PONG ring by connection and generation (a PONG seq from an older connection must not anchor a newer one); a holder stalled while awake (SIGSTOP, a long GC, a loaded machine) is not modelled: its clock keeps running but nothing acts, so the lapse is late by the stall.
 
 ## Broken variants
 

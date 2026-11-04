@@ -27,3 +27,5 @@ fixed	INVARIANT	NeverKilled	fail
 fixed	INVARIANT	NeverLost	fail
 fixed	INVARIANT	NeverRestored	fail
 fixed	INVARIANT	NeverHandSleptWithGuest	fail
+fixed	PROPERTY	NeverWokeIntoLapse	fail
+fixed	INVARIANT	NeverStaleRenewIgnored	fail
