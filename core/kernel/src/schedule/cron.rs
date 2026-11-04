@@ -82,9 +82,18 @@ impl CronSpec {
             Self::Croner(text) => text.parse().ok()?,
         };
         // An Err is "no occurrence" (a day that no month has): croner searches a bounded span.
-        cron.find_next_occurrence(&from, false)
-            .ok()
-            .map(|t| t.timestamp_millis())
+        // croner can answer a time at or before `from` in the repeated hour of a fall-back (01:30 EDT asked from the
+        // second 01:00): a next time is never in the past, so keep asking from an hour later until it is after (the second pass of the hour does not fire again).
+        let mut from = from;
+        for step in 1..=26_i64 {
+            let t = cron.find_next_occurrence(&from, false).ok()?;
+            if t.timestamp_millis() > after {
+                return Some(t.timestamp_millis());
+            }
+            from = DateTime::<Utc>::from_timestamp_millis(after + step * 3_600_000)?
+                .with_timezone(zone);
+        }
+        None
     }
 }
 

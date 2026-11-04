@@ -1034,3 +1034,29 @@ fn a_tick_that_slept_through_the_repeated_hour_still_fires_once() {
     r.tick(at(2026, 4, 4, 17, 0));
     assert_eq!(r.outcomes("half-two"), ["fired"]);
 }
+
+// ---- 12. the trigger never returns a time at or before `after` (the host routines' fall-back bug)
+
+#[test]
+fn new_york_fall_back_never_returns_a_time_at_or_before_after() {
+    let t = Trigger::Cron {
+        expr: "30 1 * * *".into(),
+        tz: kith_kernel::schedule::Zone::Iana("America/New_York".into()),
+    };
+    // 2026-11-01: 01:30 EDT is 05:30Z, 01:30 EST (the second pass) would be 06:30Z.
+    let after = at(2026, 11, 1, 6, 0);
+    let next = t.next_after(after).unwrap();
+    assert!(next > after, "{next} <= {after}");
+    // Whatever a tick stores as the next time is after the clock it read.
+    for now in [at(2026, 11, 1, 5, 30), at(2026, 11, 1, 6, 10)] {
+        assert!(t.next_after(now).unwrap() > now);
+    }
+    // The fire: a slot due at 05:30Z, ticked at 06:10Z, gets a deadline after now.
+    let d = deadline_of(
+        Kind::Timed,
+        Some(&t),
+        at(2026, 11, 1, 5, 30),
+        at(2026, 11, 1, 6, 10),
+    );
+    assert!(d > at(2026, 11, 1, 6, 10));
+}
