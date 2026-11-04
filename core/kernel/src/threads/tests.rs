@@ -230,7 +230,7 @@ fn a_reused_pid_is_stale_when_it_has_another_start_stamp() {
     let c = ctx(&t, &no_env);
     let other = Sleeper::new();
     // The same form as this system's stamps, another start: a reused pid.
-    let stamp = other_start(os::proc_start(other.pid()).unwrap());
+    let stamp = other_start(&os::proc_start(other.pid()).unwrap());
     t.put(
         "s-1.claim",
         &format!(
@@ -243,7 +243,7 @@ fn a_reused_pid_is_stale_when_it_has_another_start_stamp() {
 }
 
 /// A stamp of the same form as `real` that is not it.
-fn other_start(real: String) -> String {
+fn other_start(real: &str) -> String {
     match real.split_once(':') {
         Some((boot, _)) => format!("{boot}:1"),
         None => "e1".to_owned(),
