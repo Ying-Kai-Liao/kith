@@ -36,6 +36,7 @@ mod json_forms_more;
 mod people;
 mod run_tokens;
 mod runs;
+mod schedule_store;
 mod schedules;
 mod secrets;
 mod switched;
@@ -83,6 +84,8 @@ const PARTS: &[&[Method]] = &[
     conversations::ROWS,
     // M4: schedules.
     schedules::ROWS,
+    // M4: the schedule store's reads and its unserved write rows.
+    schedule_store::ROWS,
     transcripts::ROWS,
     // M3-7: the wake queue and the waiters.
     wake::ROWS,

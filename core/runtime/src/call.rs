@@ -34,6 +34,7 @@ impl Core {
                 kith_kernel::schedule::preview(params, now)
                     .map_err(|e| Error::BadParams(format!("kith-core: schedule.preview: {e}")))
             }
+            m if crate::schedules::serves(m) => crate::schedules::call(self, m, params),
             #[cfg(unix)]
             "conversation.transcript" => self.transcript(params),
             m if crate::accounts::call::serves(m) => self.account_call(m, params),

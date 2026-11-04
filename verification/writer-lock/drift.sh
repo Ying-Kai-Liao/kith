@@ -21,7 +21,7 @@ FILES=(
   core/holder/src/proto.rs            # the frames: SPAWN/SPAWNED/EXITED/ACK/KILL, the ids, hello and the instance
   core/runtime/src/holder_link.rs     # the core's side: hello, the recorded pids, step 7 (end the old instance's groups), the poll
   core/runtime/src/terminal.rs        # the terminal entrance: open, claim, spawn through the holder, attach
-  core/runtime/src/conversations      # (M3) the claim transaction, claim ids, redeem, park and wake, take-over; not written yet
+  core/runtime/src/conversations      # (M3-2) claims.rs: the claim transaction, claim ids, redeem CAS, reports, reconcile, revoke, new holder instance (park and wake, take-over: later)
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

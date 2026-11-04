@@ -83,7 +83,11 @@ CONSTANTS
     HandleStoreFirst,   \* a peer's stamp is kept before the change is applied, so a failed apply is never retried
     HandleApplyFails,   \* applying a peer's change can fail (kith-auth refuses, or there is none)
     Removal,            \* TRUE = the owner can remove P while P is revoked
-    RemoveKeeps         \* a removal leaves what the revoke parked (device keys, invite token hashes) behind
+    RemoveKeeps,        \* a removal leaves what the revoke parked (device keys, invite token hashes) behind
+    \* ---- the core's cards (M2-11b, core/runtime/src/cards, authority/revoke.rs follow_in_cards) ----
+    CardsOn,            \* TRUE = one card of P's, asked on m1 before any revoke, and the yes that becomes a once grant
+    CardNoWithdraw,     \* the revoke leaves P's open cards and unused grants as they were (before M2-11b)
+    CardUndoRevives     \* an undo puts a withdrawn card back (the core's undo touches no card)
 
 Macs    == {"m1", "m2"}
 Who     == {"P", "B"}
@@ -129,13 +133,16 @@ VARIABLES
     clk,           \* a clock for the stamps
     hops,          \* handle changes made (0..2)
     bdoor,         \* bdoor[m] \in GDoor: B's guest door on m (its own tick names the door)
+    cardst,        \* cardst[m] \in CardSt: P's card on m (asked, answered yes, picked up, or withdrawn)
+    cardhit,       \* cardhit[m]: a revoke has landed on m while the card was open or unused (the oracle; no step reads it)
     ptick          \* P holds the door's job (P's tick on P's own row), given and taken back by the owner
 
+CardSt == {"none", "open", "approved", "used", "withdrawn"}
 AskState == {"none", "open", "answered", "stopped"}
 
 vars == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, gdoor,
-          items, parked, gone, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
-ext4 == <<items, parked, gone, ask, wakeOwed, hrev, hat, clk, hops>>
+          items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+ext4 == <<items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, hat, clk, hops>>
 ext == <<ext4, bdoor, ptick>>
 auth == <<rows, revoked, ver, outbox, net, cloudRevoked, cloudVer, revokes, undos>>
 
@@ -210,6 +217,8 @@ Init ==
     /\ hops = 0
     /\ bdoor = [m \in Macs |-> "idle"]
     /\ ptick = FALSE
+    /\ cardst = [m \in Macs |-> "none"]
+    /\ cardhit = [m \in Macs |-> FALSE]
 
 (* ---- owner ---- *)
 \* From the phone app: the cloud record first; Macs learn by cloud delivery.
@@ -240,6 +249,16 @@ DoorsSwept(d, m, nowRevoked) ==
 DoorsUndone(d, m, nowRevoked) ==
     IF DoorUndoRevives /\ ~nowRevoked /\ d[m] = "killed" THEN [d EXCEPT ![m] = "running"] ELSE d
 
+\* The core's card hook (authority/revoke.rs follow_in_cards, M2-11b): in the transaction that sets the revoked fact on m,
+\* P's and B's open cards and unused once-grants there are withdrawn. Undo calls nothing, and a withdrawn card is final.
+\* `cardhit` is the oracle: a revoke landed while the card was still worth something.
+CardsAfter(m, nowRevoked) ==
+    IF nowRevoked /\ ~CardNoWithdraw /\ cardst[m] \in {"open", "approved"} THEN [cardst EXCEPT ![m] = "withdrawn"]
+    ELSE IF ~nowRevoked /\ CardUndoRevives /\ cardst[m] = "withdrawn" THEN [cardst EXCEPT ![m] = "approved"]
+    ELSE cardst
+CardHitAfter(m, nowRevoked) ==
+    IF nowRevoked /\ cardst[m] \in {"open", "approved"} THEN [cardhit EXCEPT ![m] = TRUE] ELSE cardhit
+
 \* On m's terminal: local flag at once (rows untouched), cloud now or later.
 CliRevoke(m) ==
     /\ OwnerCli
@@ -252,6 +271,8 @@ CliRevoke(m) ==
     /\ ItemsRevoke(m)
     /\ gdoor' = DoorsSwept(gdoor, m, TRUE)
     /\ bdoor' = DoorsSwept(bdoor, m, TRUE)
+    /\ cardst' = CardsAfter(m, TRUE)
+    /\ cardhit' = CardHitAfter(m, TRUE)
     /\ UNCHANGED <<net, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 CliUndo(m) ==
@@ -266,6 +287,8 @@ CliUndo(m) ==
     /\ ItemsUndo(m)
     /\ gdoor' = DoorsUndone(gdoor, m, FALSE)
     /\ bdoor' = DoorsUndone(bdoor, m, FALSE)
+    /\ cardst' = CardsAfter(m, FALSE)
+    /\ cardhit' = cardhit
     /\ UNCHANGED <<rows, net, revokes, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 (* ---- cloud and network ---- *)
@@ -290,6 +313,8 @@ CloudDeliver(m) ==
     /\ ItemsStep(m, cloudRevoked)
     /\ gdoor' = DoorsUndone(DoorsSwept(gdoor, m, cloudRevoked), m, cloudRevoked)
     /\ bdoor' = DoorsUndone(DoorsSwept(bdoor, m, cloudRevoked), m, cloudRevoked)
+    /\ cardst' = CardsAfter(m, cloudRevoked)
+    /\ cardhit' = CardHitAfter(m, cloudRevoked)
     /\ UNCHANGED <<outbox, net, cloudRevoked, cloudVer, revokes, undos, turn, door, ask, wakeOwed, hrev, hat, clk, hops, ptick>>
 
 \* Internet lost, Kith cloud lost (or unreachable from m), or back.
@@ -449,14 +474,14 @@ AskStart(m) ==
     /\ turn[m]["P"] \in Live
     /\ MayP(m)
     /\ ask' = [ask EXCEPT ![m] = "open"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 \* The asked agent answers; nobody waits, so the answer is a wake of P's session. An ended ask keeps nothing (R8).
 AskAnswer(m) ==
     /\ Asks
     /\ ask[m] = "open" \/ (AnswerIgnoresEnd /\ ask[m] = "stopped")
     /\ ask' = [ask EXCEPT ![m] = IF ask[m] = "open" THEN "answered" ELSE ask[m]]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = TRUE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, hrev, hat, clk, hops, bdoor, ptick>>
 \* The owed wake starts P's turn: the host's Recheck reads may().
 WakeStart(m) ==
     /\ Asks
@@ -465,7 +490,7 @@ WakeStart(m) ==
     /\ MayP(m)
     /\ turn' = [turn EXCEPT ![m]["P"] = "running"]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, ask, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick>>
 \* A revoke on m (cut_off -> sweep_asks): P's open delegation ends (kith ask --end) ...
 AskSweep(m) ==
     /\ Asks
@@ -473,7 +498,7 @@ AskSweep(m) ==
     /\ revoked[m]
     /\ ask[m] = "open"
     /\ ask' = [ask EXCEPT ![m] = "stopped"]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 \* ... and the wake owed to P's session is withdrawn (kith-wake withdraw-person).
 WakeWithdraw(m) ==
     /\ Asks
@@ -481,7 +506,7 @@ WakeWithdraw(m) ==
     /\ revoked[m]
     /\ wakeOwed[m]
     /\ wakeOwed' = [wakeOwed EXCEPT ![m] = FALSE]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, hrev, hat, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, hrev, hat, clk, hops, bdoor, ptick>>
 
 (* ---- a person known only by a chat handle (remote/handle_revokes.rs) ---- *)
 \* The owner revokes or undoes Q on m's terminal or app: stamped, kept. With no catch-up the change is sent only now.
@@ -498,7 +523,7 @@ HChange(m) ==
            toAll(n) == n = m \/ (HandleNoCatchup /\ net[m] = "online" /\ net[n] = "online")
        IN /\ hrev' = [n \in Macs |-> IF toAll(n) THEN v ELSE hrev[n]]
           /\ hat' = [n \in Macs |-> IF kept /\ toAll(n) THEN st ELSE hat[n]]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, bdoor, ptick>>
 \* Two paired Macs, both online, exchange their lists (peerRevokes): the latest stamp wins on both.
 HExchange(a, b) ==
     /\ HandleSync
@@ -511,7 +536,7 @@ HExchange(a, b) ==
        ELSE \* the newer stamp wins; an equal one changes nothing (the receiver knows it already)
             /\ hrev' = [n \in Macs |-> IF hat[a] > hat[b] THEN hrev[a] ELSE IF hat[b] > hat[a] THEN hrev[b] ELSE hrev[n]]
             /\ hat' = [n \in Macs |-> IF hat[a] > hat[b] THEN hat[a] ELSE hat[b]]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, clk, hops, bdoor, ptick>>
 \* The same exchange where applying a's newer change on b fails: with the stamp kept first, b then believes it has it.
 HExchangeFails(a, b) ==
     /\ HandleSync
@@ -521,7 +546,7 @@ HExchangeFails(a, b) ==
     /\ net[a] = "online" /\ net[b] = "online"
     /\ hat[a] > hat[b]
     /\ hat' = IF HandleStoreFirst THEN [hat EXCEPT ![b] = hat[a]] ELSE hat
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, hrev, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, hrev, clk, hops, bdoor, ptick>>
 \* A peer sends a stamp from the far future; only a computer that does not bound stamps takes it.
 HForge(m) ==
     /\ HandleSync
@@ -530,7 +555,7 @@ HForge(m) ==
     /\ hat[m] < 9
     /\ hrev' = [hrev EXCEPT ![m] = TRUE]
     /\ hat' = [hat EXCEPT ![m] = 9]
-    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, ask, wakeOwed, clk, hops, bdoor, ptick>>
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardst, cardhit, ask, wakeOwed, clk, hops, bdoor, ptick>>
 
 (* ---- removing a revoked person ---- *)
 \* kith-auth `--rm` (or the owner dropping them) while P is revoked: what the revoke parked goes with them, on whichever
@@ -541,7 +566,32 @@ Remove(m) ==
     /\ ~gone[m]
     /\ gone' = [gone EXCEPT ![m] = TRUE]
     /\ parked' = [parked EXCEPT ![m] = IF RemoveKeeps THEN parked[m] ELSE {}]
+    /\ cardst' = CardsAfter(m, TRUE)
+    /\ cardhit' = CardHitAfter(m, TRUE)
     /\ UNCHANGED <<auth, turn, door, gdoor, items, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+
+(* ---- P's card and its once grant (core/runtime/src/cards) ---- *)
+\* A live turn of P asks the owner (bound: m1, once, before any revoke, so every card is a pre-revoke one).
+CardAsk(m) ==
+    /\ CardsOn
+    /\ m = "m1"
+    /\ revokes = 0
+    /\ cardst[m] = "none"
+    /\ turn[m]["P"] \in Live
+    /\ cardst' = [cardst EXCEPT ![m] = "open"]
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+\* The owner's yes (cards::answer): only an open card takes one; it becomes a once grant.
+CardYes(m) ==
+    /\ CardsOn
+    /\ cardst[m] = "open"
+    /\ cardst' = [cardst EXCEPT ![m] = "approved"]
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
+\* The session asks again: the unused grant is handed to it and spent (cards::raise, `Granted`). It reads no access.
+CardPickup(m) ==
+    /\ CardsOn
+    /\ cardst[m] = "approved"
+    /\ cardst' = [cardst EXCEPT ![m] = "used"]
+    /\ UNCHANGED <<auth, turn, door, gdoor, items, parked, gone, cardhit, ask, wakeOwed, hrev, hat, clk, hops, bdoor, ptick>>
 
 \* Host restart (round 1's Restart) is left out here: it only aborts live turns, which no property depends on.
 
@@ -566,6 +616,9 @@ Next ==
           \/ BotDoorStart(m)
           \/ BotDoorEnd(m)
           \/ BotDoorSweep(m)
+          \/ CardAsk(m)
+          \/ CardYes(m)
+          \/ CardPickup(m)
           \/ AskStart(m)
           \/ AskAnswer(m)
           \/ WakeStart(m)
@@ -612,6 +665,8 @@ TypeOK ==
     /\ hops \in 0..2
     /\ bdoor \in [Macs -> GDoor]
     /\ ptick \in BOOLEAN
+    /\ cardst \in [Macs -> CardSt]
+    /\ cardhit \in [Macs -> BOOLEAN]
 
 \* Lemma the fix rests on: a Mac with nothing to push that has the cloud's latest version agrees with the cloud.
 SyncAgrees == \A m \in Macs : (~outbox[m] /\ ver[m] = cloudVer) => revoked[m] = cloudRevoked
@@ -682,7 +737,18 @@ NoOrphan == \A m \in Macs : gone[m] => parked[m] = {}
 \* HandleNoCloud: a handle revoke changes nothing in the cloud.
 HandleNoCloud == [][(hrev' # hrev) => (cloudRevoked' = cloudRevoked /\ cloudVer' = cloudVer)]_vars
 
+\* CardsCut (M2-11b): a yes given before a revoke landed on m is never handed to the session afterwards, undo or no undo;
+\* and an answer to a card a revoke closed changes nothing (CardYes needs it open). Fails in broken-card-no-withdraw
+\* and broken-card-undo-revives.
+CardsCut == [][\A m \in Macs : (cardst[m] = "approved" /\ cardst'[m] = "used") => ~cardhit[m]]_vars
+\* A withdrawn card is final. Fails in broken-card-undo-revives.
+CardNoResurrect == [][\A m \in Macs : cardst[m] = "withdrawn" => cardst'[m] = "withdrawn"]_vars
+
 (* ---- probes: each must FAIL on the design (a reachability witness), unless noted ---- *)
+\* A card before any revoke is picked up (the card path is reachable).
+NeverCardUsed == \A m \in Macs : cardst[m] # "used"
+\* ... and a revoke does withdraw one.
+NeverCardWithdrawn == \A m \in Macs : cardst[m] # "withdrawn"
 \* The bridge does serve P end to end when in sync and nothing is revoked.
 NeverBridgeServed == \A m \in Macs : ~(turn[m]["P"] = "delivered" /\ door[m] = "bridge" /\ revokes = 0)
 \* After an undo that m2 has applied, P gets an app turn on m2 again.

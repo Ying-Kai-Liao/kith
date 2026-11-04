@@ -31,6 +31,10 @@ chrono-tz = "0.10.4"
 croner = "3"
 serde = { version = "1.0.229", features = ["derive"] }
 
+# OpenProcess + GetProcessTimes for the process start time (procstart); the holder links the same version.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [lints.rust]
 # `deny`, not `forbid`: threads/os.rs allows its kill(2) calls (a process check has no safe std spelling).
 unsafe_code = "deny"

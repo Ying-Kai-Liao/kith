@@ -59,7 +59,7 @@ use serde_json::{Value, json};
 use crate::authority;
 use crate::db::Core;
 use crate::error::{Error, Result};
-use crate::gate::Liveness;
+use crate::gate::{Liveness, holder_alive};
 
 pub(crate) mod call;
 #[cfg(test)]
@@ -211,15 +211,11 @@ fn valid_id(id: &str) -> bool {
     id.len() == 16 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-/// Whether the door's supervisor is gone. The gate's and the cards' rule: a start time that reads and differs is a
-/// reused pid; one that cannot be read is gone only when the system says there is no such process (a failed `ps` never
-/// ends a live door).
+/// Whether the door's supervisor is gone. The gate's and the cards' rule ([`holder_alive`]): a start time that reads and
+/// differs is a reused pid; one that cannot be read (or old `lstart` text) is gone only when the system says there is no
+/// such process, so a failed probe never ends a live door.
 fn supervisor_gone(d: &Door, live: &dyn Liveness) -> bool {
-    match live.start(d.pid) {
-        Some(current) if !d.proc_start.is_empty() => current != d.proc_start,
-        Some(_) => false,
-        None => live.gone(d.pid),
-    }
+    !holder_alive(live, d.pid, &d.proc_start)
 }
 
 /// The compare-and-swap of a sweep: this row at this version, still open, becomes `swept`. A row that changed since it

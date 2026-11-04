@@ -2141,6 +2141,7 @@ name = "kith-core"
 version = "0.1.0"
 dependencies = [
  "chacha20poly1305",
+ "chrono",
  "fs2",
  "getrandom 0.4.3",
  "kith-api",
@@ -2204,6 +2205,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
