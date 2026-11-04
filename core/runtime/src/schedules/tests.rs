@@ -195,7 +195,7 @@ fn next_and_show_use_the_rule_and_the_run_history() {
     let core = core_in(&m, &p);
     let conn = core.conn();
     conn.execute(
-        "INSERT INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES ('mel', 'digest', '2026-11-04T08:00:00Z', 'skipped:paused', NULL, 9999999999999)",
+        "INSERT OR REPLACE INTO sched_fires (agent, job, slot, outcome, turn_id, at) VALUES ('mel', 'digest', '2026-11-04T08:00:00Z', 'skipped:paused', NULL, 9999999999999)",
         [],
     )
     .unwrap();
