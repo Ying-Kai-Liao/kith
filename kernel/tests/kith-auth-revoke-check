@@ -160,6 +160,6 @@ check "doctor: a clean auth.json says nothing about a revoked owner" "! grep -q 
 python3 -c "
 import json; p='$KITH_AUTH'; d=json.load(open(p)); d['people']['kai']['revoked']={'at':'2026-01-01T00:00:00Z'}; json.dump(d,open(p,'w'))"
 D > "$T/bad.txt"; D --json > "$T/bad.json"
-check "doctor: names the owner who is also revoked, with the fix" "grep -q 'kai is the owner and also revoked' '$T/bad.txt' && grep -q 'person kai --unrevoke' '$T/bad.txt'"
+check "doctor: names the owner who is also revoked, with the fix" "grep -q 'kai is the owner and also revoked' '$T/bad.txt' && grep -q 'person kai --rm' '$T/bad.txt' && grep -q 'Only if kai is you' '$T/bad.txt' && [ \"\$(grep -o -E -- '--rm|--unrevoke' '$T/bad.txt' | head -1)\" = --rm ]"
 check "doctor --json: the same line, not ok" "python3 -c \"import json; d=json.load(open('$T/bad.json')); assert any(not c['ok'] and 'owner and also revoked' in c['name'] for c in d['checks'])\""
 exit $fail

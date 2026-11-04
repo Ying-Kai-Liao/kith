@@ -252,8 +252,9 @@ def people():
     for pid in owners:
         if folks[pid].get('revoked'):
             issues += 1
-            bad(f'people: {pid} is the owner and also revoked, and the owner check comes first, so the revoke does not hold: '
-                f'kith auth person {pid} --unrevoke (to keep them out, remove the person instead: kith auth person {pid} --rm)')
+            bad(f'people: {pid} is the owner and also revoked: kith treats them as revoked, not as the owner. '
+                f'If they are not this Mac\'s real owner: kith auth person {pid} --rm. '
+                f'Only if {pid} is you, the Mac\'s owner: kith auth person {pid} --unrevoke')
     for agent, rows in members.items():
         if agent not in known:
             issues += 1
