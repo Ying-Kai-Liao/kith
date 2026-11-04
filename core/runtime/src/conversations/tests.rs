@@ -968,15 +968,55 @@ fn the_writers_exit_ends_the_claim_after_another_process_exit_was_acked() {
 }
 
 #[test]
-fn a_report_with_no_pid_ends_neither_a_running_nor_an_ending_claim() {
+fn a_report_with_no_pid_moves_a_claim_with_a_recorded_pid_to_ending_and_end_gone_ends_it() {
     let (_t, mut c) = open();
     let (id, _) = running(&mut c, "c1", 100);
     report(&mut c, id, "done", "{}", 30).expect("done");
-    report(&mut c, id, "exit", "{}", 31).expect("exit");
-    assert_eq!(state(&c, id), "running");
-    stop(&mut c, id, "stop", false, 32).expect("stop");
-    report(&mut c, id, "exit", "{}", 33).expect("exit");
+    // Still the writer: nothing else may claim the conversation, and a later nameless exit changes nothing.
     assert_eq!(state(&c, id), "ending");
+    report(&mut c, id, "exit", "{}", 31).expect("exit");
+    assert_eq!(state(&c, id), "ending");
+    assert!(matches!(
+        claim(&mut c, &new_claim("c1", None), 32),
+        Err(Error::Refused(_))
+    ));
+    let alive = procs_with(&[(100, "s100")]);
+    assert!(end_gone(&mut c, &alive, 33).expect("alive").is_empty());
+    assert_eq!(state(&c, id), "ending");
+    assert_eq!(
+        end_gone(&mut c, &Procs::default(), 34).expect("gone"),
+        vec![id]
+    );
+    assert_eq!(state(&c, id), "ended");
+    // An exit nameless on a claim still `claimed` with a pid from `spawned` goes the same way.
+    let (id2, _) = take(&mut c, "c2");
+    report(
+        &mut c,
+        id2,
+        "spawned",
+        r#"{"pid":200,"started":"s200"}"#,
+        40,
+    )
+    .expect("spawned");
+    report(&mut c, id2, "exit", "{}", 41).expect("exit");
+    assert_eq!(state(&c, id2), "ending");
+    assert_eq!(
+        end_gone(&mut c, &Procs::default(), 42).expect("gone"),
+        vec![id2]
+    );
+    assert_eq!(state(&c, id2), "ended");
+}
+
+#[test]
+fn a_report_with_no_pid_on_a_claim_with_no_pid_ends_a_claimed_one_only() {
+    let (_t, mut c) = open();
+    let (id, _) = take(&mut c, "c1");
+    report(&mut c, id, "exit", "{}", 30).expect("exit");
+    assert_eq!(state(&c, id), "ended");
+    let (id2, _) = running(&mut c, "c2", 100);
+    stop(&mut c, id2, "stop", false, 32).expect("stop");
+    report(&mut c, id2, "exit", "{}", 33).expect("exit");
+    assert_eq!(state(&c, id2), "ending");
 }
 
 #[test]
@@ -986,7 +1026,9 @@ fn a_busy_naming_another_process_leaves_the_claim_alone() {
     report(&mut c, id, "spawned", r#"{"pid":100,"started":"s100"}"#, 20).expect("spawned");
     report(&mut c, id, "busy", r#"{"pid":999}"#, 21).expect("busy");
     assert_eq!(state(&c, id), "claimed");
-    report(&mut c, id, "busy", r#"{"pid":100}"#, 22).expect("busy");
+    report(&mut c, id, "busy", "{}", 22).expect("nameless busy");
+    assert_eq!(state(&c, id), "claimed");
+    report(&mut c, id, "busy", r#"{"pid":100}"#, 23).expect("busy");
     assert_eq!(state(&c, id), "ended");
 }
 
@@ -1016,7 +1058,8 @@ fn a_claim_for_one_person_cannot_run_another_persons_turn() {
 }
 
 #[test]
-fn a_revoke_between_the_may_check_and_the_claim_or_redeem_refuses_it() {
+fn a_revoke_between_the_may_check_and_the_claim_refuses_it_and_one_before_the_redeem_leaves_no_claimed_row()
+ {
     use super::claims::revoke_epoch;
     let (_t, mut c) = open();
     conversation(&c, "c1");
@@ -1029,12 +1072,15 @@ fn a_revoke_between_the_may_check_and_the_claim_or_redeem_refuses_it() {
     // A check made after the revoke goes through.
     req.revoke_seen = revoke_epoch(&c, "sam").expect("epoch");
     let got = claim(&mut c, &req, 7).expect("claim");
-    // And a redeem that carries a stale epoch is refused.
-    assert_eq!(
-        redeem(&mut c, got.claim_id, 100, "s100", "h1", 8).expect("redeem"),
-        Redeemed::Refused("revoked".into())
-    );
-    assert_eq!(state(&c, got.claim_id), "claimed");
+    // A revoke after the claim ends the unspawned claim, so the redeem finds nothing to take and is refused; the
+    // claim is never left `claimed` (a stuck writer slot).
+    revoke_person(&mut c, "sam", 8).expect("revoke");
+    assert!(matches!(
+        redeem(&mut c, got.claim_id, 100, "s100", "h1", 9).expect("redeem"),
+        Redeemed::Refused(_)
+    ));
+    assert_ne!(state(&c, got.claim_id), "claimed");
+    assert_eq!(state(&c, got.claim_id), "ended");
 }
 
 fn direct(c: &mut Core, conv: &str, pid: u32) -> i64 {

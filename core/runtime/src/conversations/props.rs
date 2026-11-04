@@ -12,7 +12,8 @@ use proptest::prelude::*;
 use proptest::test_runner::{Config, TestCaseError, TestRunner};
 
 use super::claims::{
-    Redeemed, claim, different_holder, end_gone, reconcile, redeem, report, revoke_person, stop,
+    Redeemed, claim, claim_high_water, different_holder, end_gone, reconcile, redeem, report,
+    revoke_epoch, revoke_person, stop,
 };
 use super::tests::{Procs, conversation, count, new_claim, open, state, unreconcile};
 use crate::db::Core;
@@ -104,6 +105,8 @@ fn run(steps: &[Step]) -> Result<(), TestCaseError> {
                 let mut req = new_claim(&name, None);
                 let inst = format!("h{instance}");
                 req.holder_instance = Some(&inst);
+                // Read right before the claim, as the caller reads it before its may check.
+                req.revoke_seen = revoke_epoch(&c, "sam").unwrap();
                 if let Ok(got) = claim(&mut c, &req, now) {
                     prop_assert!(ids.iter().all(|&i| i < got.claim_id), "claim ids grow");
                     ids.push(got.claim_id);
@@ -113,8 +116,8 @@ fn run(steps: &[Step]) -> Result<(), TestCaseError> {
                 if let Some(id) = pick(*i) {
                     next_pid += 1;
                     let inst = format!("h{instance}");
-                    let r = redeem(&mut c, id, next_pid, &format!("s{next_pid}"), &inst, 0, now)
-                        .unwrap();
+                    let r =
+                        redeem(&mut c, id, next_pid, &format!("s{next_pid}"), &inst, now).unwrap();
                     // A refused stub exits; only a redeemed one goes on to run the engine.
                     if matches!(r, Redeemed::Running { again: false }) {
                         procs.spawn(next_pid, &format!("s{next_pid}"));
@@ -165,14 +168,15 @@ fn run(steps: &[Step]) -> Result<(), TestCaseError> {
             Step::Different(list_all) => {
                 instance += 1;
                 let listed: Vec<i64> = if *list_all { ids.clone() } else { Vec::new() };
-                different_holder(&mut c, &format!("h{instance}"), &listed, &[], i64::MAX, now)
-                    .unwrap();
+                let high = claim_high_water(&c).unwrap();
+                different_holder(&mut c, &format!("h{instance}"), &listed, &[], high, now).unwrap();
             }
             Step::Reconcile(list_all) => {
                 let listed: Vec<i64> = if *list_all { ids.clone() } else { Vec::new() };
                 // A reconcile is once per generation: this is a new core's.
                 unreconcile(&c);
-                reconcile(&mut c, &listed, &[], i64::MAX, now).unwrap();
+                let high = claim_high_water(&c).unwrap();
+                reconcile(&mut c, &listed, &[], high, now).unwrap();
             }
             Step::Die(i) => {
                 if let Some(p) = pick(*i).and_then(|id| recorded_pid(&c, id)) {
@@ -207,6 +211,8 @@ fn liveness(c: &mut Core, procs: &Procs, mut now: i64) -> Result<(), TestCaseErr
         now += 1;
         procs.kill(u32::try_from(pid).unwrap());
         report(c, id, "exit", &format!(r#"{{"pid":{pid}}}"#), now).unwrap();
+        // A claim a nameless report moved to `ending` has no exit that names it again: `end_gone` ends it.
+        end_gone(c, procs, now).unwrap();
         let after = state(c, id);
         prop_assert_eq!(after, "ended", "claim {} still live after its exit", id);
     }

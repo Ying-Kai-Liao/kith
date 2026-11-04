@@ -144,7 +144,7 @@ M3-2 added the redeem write to `Holder.tla` (switches `RedeemWrite`, `RedeemCAS`
 `DoneTruth` rows above; the first three rules are in `claims.rs` with tests (`holder_crash_donetruth_*`) and a proptest of
 random step sequences. Still open: the fourth rule. `WriterLock4.tla` keeps its omniscient `Orphan`; replacing it needs a
 recorded "redeemed under instance" bit in a model whose slow rows take 15-30 min each and were not re-run here.
-A `done` or `exit` that names no pid, or another pid, ends a running or ending claim in neither the code nor the model (`Settle`'s `h.pid = cpid`); reports are keyed by `(claim_id, kind, pid)` so the writer's own is never shadowed. A `--direct` claim (kind `external`) is outside the model: reconcile and a holder change skip it and only `end_gone` ends it.
+A `done` or `exit` that names another pid ends a running or ending claim in neither the code nor the model (`Settle`'s `h.pid = cpid`). One that names no pid ends nothing either: in the code a claim with a recorded pid moves to `ending` (still the writer, `apply` in claims.rs) and `end_gone` ends it once the pid is gone, which the model leaves out as a stutter (`ending` is already the writer there, and `ConfirmGone` is the end); reports are keyed by `(claim_id, kind, pid)` so the writer's own is never shadowed. A `--direct` claim (kind `external`) is outside the model: reconcile and a holder change skip it and only `end_gone` ends it.
 
 ## When you change covered code
 
