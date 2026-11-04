@@ -230,6 +230,13 @@ pub(super) fn approve(core: &mut Core, c: &Ctx, id: &str, members: bool) -> Resu
 }
 
 fn approve_in(tx: &Connection, c: &Ctx, id: &str, members: bool) -> Result<Outcome> {
+    // A repeat of an approve gives the same answer and files nothing again: the host's retry after a lost reply.
+    if let Some(done) = load(tx, id)?.filter(|r| r.status == "approved") {
+        if members && done.person.is_none() {
+            return Err(only_at_the_computer());
+        }
+        return Ok(Outcome::Done(approved_json(&done)));
+    }
     let r = open(tx, c, id, members)?;
     if r.code.is_none() {
         return Err(refuse("The device hasn't shown its code yet."));
@@ -249,7 +256,11 @@ fn approve_in(tx: &Connection, c: &Ctx, id: &str, members: bool) -> Result<Outco
         ));
     }
     end(tx, c, id, "approved")?;
-    Ok(Outcome::Done(json!({
+    Ok(Outcome::Done(approved_json(&r)))
+}
+
+fn approved_json(r: &Req) -> Value {
+    json!({
         "requestId": r.id,
         "status": "approved",
         // The device `settle` stores once the cloud has given its grant. A member never shares this computer's screen.
@@ -260,7 +271,7 @@ fn approve_in(tx: &Connection, c: &Ctx, id: &str, members: bool) -> Result<Outco
             "personId": r.person,
             "scopes": if r.person.is_some() { json!(["control"]) } else { json!(["control", "screen"]) },
         },
-    })))
+    })
 }
 
 /// `people.deny` (`decideAccessRequest` with `approve: false`): the request ends; the host tells the cloud.

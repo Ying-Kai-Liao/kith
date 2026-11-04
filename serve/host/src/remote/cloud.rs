@@ -219,6 +219,9 @@ pub struct Cloud {
     pub(super) pairings: super::peers::Pairings,
     /// One state pull at a time.
     pulling: tokio::sync::Mutex<()>,
+    /// Held across every load-change-store of the deny queue: the pull's end step and `deny_or_queue` (which does not
+    /// hold `pulling`) both write it.
+    deny_queue: Mutex<()>,
     /// Bumped when the cloud is turned on or off or pointed elsewhere: the relay restarts.
     pub config: watch::Sender<u64>,
 }
@@ -230,6 +233,7 @@ impl Default for Cloud {
             requests: Mutex::default(),
             pairings: super::peers::Pairings::default(),
             pulling: tokio::sync::Mutex::new(()),
+            deny_queue: Mutex::new(()),
             config: watch::Sender::new(0),
         }
     }
@@ -794,20 +798,12 @@ async fn sync_requests(hub: &Hub, base: &str, list: Vec<HostAccessRequest>, owne
             }
             Next::Deny(id) => {
                 deny(hub, base, &id).await;
-                ended.push(id);
             }
         }
     }
     // "Unknown request" in the core (never filed there, or already ended) is fine. One the core could not be told about
     // stays queued (kept across a restart) and is ended on the next sync; the switch off ends them all at once.
-    let mut ended = take_deny_queue(hub);
-    let held: Vec<String> = hub.cloud.requests.locked().iter().map(|r| r.id.clone()).collect();
-    ended.retain(|id| !held.contains(id));
-    ended.sort();
-    ended.dedup();
-    let done = deny_in_core(hub, &ended).await;
-    let left: Vec<String> = ended.into_iter().filter(|id| !done.contains(id)).collect();
-    set_deny_queue(hub, &left);
+    end_queued_in_core(hub, async {}).await;
     // Before the event, so what it carries (the core's list, with the switch on) already has this pull's requests.
     changed |= file_in_core(hub).await;
     if changed {
@@ -823,17 +819,38 @@ const CORE_DENY_BUDGET: Duration = Duration::from_secs(10);
 /// Where the ids `sync_requests` ended but the core could not be told about wait for the next sync.
 const DENY_QUEUE_KEY: &str = "core_deny_queue";
 
+/// The pull's end step: ends the queued ids in the core, then takes out of the queue only the ones it finished. It
+/// never stores its snapshot back, so a deny queued meanwhile survives. `between` runs after the read and before the
+/// write-back (a seam for the test of exactly that).
+async fn end_queued_in_core(hub: &Hub, between: impl std::future::Future<Output = ()>) {
+    let mut ended = take_deny_queue(hub);
+    let held: Vec<String> = hub.cloud.requests.locked().iter().map(|r| r.id.clone()).collect();
+    ended.retain(|id| !held.contains(id));
+    ended.sort();
+    ended.dedup();
+    let done = deny_in_core(hub, &ended).await;
+    between.await;
+    // A held id is back in the host's list (the cloud re-listed it): it leaves the queue unended, as before.
+    edit_deny_queue(hub, |queue| queue.retain(|id| !done.contains(id) && !held.contains(id)));
+}
+
+/// The one way to change the queue: load, change and store under one lock.
+fn edit_deny_queue(hub: &Hub, change: impl FnOnce(&mut Vec<String>)) {
+    let _one = hub.cloud.deny_queue.locked();
+    let mut queue = take_deny_queue(hub);
+    change(&mut queue);
+    queue.sort();
+    queue.dedup();
+    set_deny_queue(hub, &queue);
+}
+
 fn take_deny_queue(hub: &Hub) -> Vec<String> {
     hub.store.kv_get(DENY_QUEUE_KEY).and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default()
 }
 
 /// Adds `ids` to the queue (kept across a restart) before anything that can wait or fail is tried.
 fn queue_for_core<'a>(hub: &Hub, ids: impl IntoIterator<Item = &'a String>) {
-    let mut queue = take_deny_queue(hub);
-    queue.extend(ids.into_iter().cloned());
-    queue.sort();
-    queue.dedup();
-    set_deny_queue(hub, &queue);
+    edit_deny_queue(hub, |queue| queue.extend(ids.into_iter().cloned()));
 }
 
 /// Ends `id` in the core; one the core could not be told about is queued for the next sync, which the host's own copy
@@ -2416,6 +2433,56 @@ mod tests {
         assert!(fake.posts.lock().unwrap().is_empty());
         assert_eq!(ids_in_core(true).await, ["req_sam"], "still pending in the core");
         assert_eq!(hub.cloud.requests_json().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_deny_queued_while_the_pull_ends_the_queue_survives_its_write_back() {
+        let hub = temp_hub();
+        let _rig = CoreRig::new().await;
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        queue_for_core(&hub, [&"req_old".to_owned()]);
+        // `deny_or_queue` runs between the pull's read of the queue and its write-back, with the core refusing the
+        // call (unknown request is fine) only for req_old; req_new reaches the queue because the core is unreachable.
+        let late = async {
+            queue_for_core(&hub, [&"req_new".to_owned()]);
+        };
+        end_queued_in_core(&hub, late).await;
+        assert_eq!(take_deny_queue(&hub), ["req_new"], "req_old is ended, req_new was not lost");
+    }
+
+    #[tokio::test]
+    async fn the_gate_flipping_between_filing_and_deciding_decides_a_request_once() {
+        let hub = temp_hub();
+        let fake = Arc::new(FakeCloud::default());
+        let base = fake_cloud(fake.clone()).await;
+        hub.store.kv_set("test_cloud_url", &base).unwrap();
+        add_member(&hub);
+        let _rig = CoreRig::new().await;
+        hub.cloud.requests.locked().extend([waiting("req_a", 1, Some("sam"), 0), waiting("req_b", 2, Some("sam"), 1)]);
+
+        // On when filed, off when decided: the host store decides (`settle`) and the device is stored once. The
+        // core's row is only a mirror; it stays pending there and is not what the person's access reads.
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        file_in_core(&hub).await;
+        hub.store.kv_delete("test_core_authority").unwrap();
+        assert!(!core_on(&hub));
+        decide(&hub, "req_a", true).await.unwrap();
+        assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[1; 32])).count(), 1);
+        assert!(hub.cloud.requests_json().iter().all(|r| r["requestId"] != "req_a"));
+        let again = decide(&hub, "req_a", true).await.unwrap_err();
+        assert!(again.to_string().contains("unknown request"), "{again:#}");
+        assert_eq!(hub.store.devices().unwrap().iter().filter(|d| d.key == b64(&[1; 32])).count(), 1);
+
+        // Off when filed (nothing is in the core), on when decided: the core refuses what it never saw, nothing is
+        // stored, and the request waits; the next pull files it and the decision then goes through once.
+        hub.store.kv_set("test_core_authority", "1").unwrap();
+        let err = decide_in_core(&hub, "req_b", true, true, true).await.unwrap_err();
+        assert!(err.to_string().contains("unknown request"), "{err:#}");
+        assert!(hub.store.device(&b64(&[2; 32])).is_none(), "nothing was stored by the refused decision");
+        file_in_core(&hub).await;
+        decide_in_core(&hub, "req_b", true, true, true).await.unwrap();
+        assert!(hub.store.device(&b64(&[2; 32])).is_some());
+        assert!(decide_in_core(&hub, "req_b", true, true, true).await.is_err());
     }
 
     #[tokio::test]

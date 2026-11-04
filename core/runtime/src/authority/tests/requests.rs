@@ -275,6 +275,25 @@ fn a_person_undone_after_a_suspension_can_have_their_request_approved_again() {
 }
 
 #[test]
+fn approving_twice_gives_the_same_answer_and_files_nothing_again() {
+    let mut rig = Rig::new(&world());
+    arrive(&mut rig, "r", Some("sam"), true);
+    let first = at_computer(&mut rig, "people.approve", &json!({"id": "r"})).unwrap();
+    let again = at_computer(&mut rig, "people.approve", &json!({"id": "r"})).unwrap();
+    assert_eq!(first, again);
+    assert_eq!(first["status"], "approved");
+    assert_eq!(requests::status_of(rig.core.conn(), "r").as_deref(), Some("approved"));
+    // Approving settles nothing else in the core: no member or grant is filed by either call.
+    let people = at_computer(&mut rig, "people.requests", &json!({})).unwrap();
+    assert_eq!(people, json!({"requests": []}));
+    // A denied request still refuses.
+    arrive(&mut rig, "d", Some("sam"), true);
+    at_computer(&mut rig, "people.deny", &json!({"id": "d"})).unwrap();
+    at_computer(&mut rig, "people.approve", &json!({"id": "d"})).unwrap_err();
+    at_computer(&mut rig, "people.approve", &json!({"id": "nope"})).unwrap_err();
+}
+
+#[test]
 fn filing_has_the_rules_of_the_hosts_sync() {
     let mut rig = Rig::new(&world());
     let mut step =
@@ -347,11 +366,16 @@ fn two_devices_answering_at_once_one_wins() {
         let a = requests::decide_on(&mut me, &rig.c, "r", first);
         let b = requests::decide_on(&mut other, &rig.c, "r", second);
         assert!(a.is_ok(), "{first} {second}");
-        assert_eq!(
-            b.unwrap_err().to_string(),
-            "authority: unknown request",
-            "{first} {second}"
-        );
+        if first && second {
+            // A second approve is the same answer, not a second decision.
+            assert_eq!(b.unwrap(), a.unwrap(), "{first} {second}");
+        } else {
+            assert_eq!(
+                b.unwrap_err().to_string(),
+                "authority: unknown request",
+                "{first} {second}"
+            );
+        }
         assert_eq!(
             requests::status_of(&me, "r").as_deref(),
             Some(if first { "approved" } else { "denied" }),
