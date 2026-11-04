@@ -29,7 +29,15 @@
 //! `route` and `owned_bot_chat_agent` (`store.bot_guest_of_person`, `owner_person`: chat/bot data, not a grant), the bot
 //! guest's state in `event_for_bot` and `bot_call` (`BotState`, set by `enforce`/`end_bot` from the moved fact), the
 //! person's shared projects (`store.person(..).projects`: the host's, not an access grant), and the member / bot /
-//! unproven method lists (the contract). `api/people.rs setPersonAccess` and `remote.rs decideAccessRequest` are M2-17.
+//! unproven method lists (the contract).
+//!
+//! M2-17 puts the owner's side on the same switch: `api/people.rs setPersonAccess` sends `people.grant` / `people.revoke`
+//! ([`owner_call`]; kith-auth is not written), the listing of people reads the membership rows from `people.list`
+//! (`members::auth_people_now`, also what the 10-second mirror reads), and `api/remote.rs accessRequests` /
+//! `decideAccessRequest` use `people.requests|approve|deny` (`cloud::decide_in_core`, which stores exactly the device the
+//! core answered). The host files each request it holds with `people.fileRequest` on every pull. All of it fails CLOSED:
+//! a core that can't be reached is an error to the app ([`CoreDown`]), never a write to kith-auth or an answer from the
+//! host's copy.
 
 use super::roles;
 use crate::store::Store;
@@ -90,6 +98,15 @@ impl CoreData {
             env: self.env.clone(),
             memo: Some(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// The caller's view params every `people.*` call carries (`home`, `kernel`, `env`).
+    fn view(&self) -> serde_json::Map<String, Value> {
+        let mut m = serde_json::Map::new();
+        m.insert("home".into(), self.home.to_string_lossy().into_owned().into());
+        m.insert("kernel".into(), self.kernel.to_string_lossy().into_owned().into());
+        m.insert("env".into(), Value::Object(self.env.clone()));
+        m
     }
 
     /// The core's answer for one pair; None when it could not be asked (no daemon, a refusal, a lost connection).
@@ -346,6 +363,57 @@ pub fn guard_on_core() -> bool {
         return true;
     }
     core_selected()
+}
+
+/// The core refused the call itself: the rules said no (its words, without the `authority: ` the core puts in front).
+#[derive(Debug)]
+pub struct CoreRefused(pub String);
+
+impl std::fmt::Display for CoreRefused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for CoreRefused {}
+
+/// The core could not be asked (no daemon, a mismatch, a lost connection). A caller fails CLOSED on it: it is an error
+/// to the app, and nothing is written another way.
+#[derive(Debug)]
+pub struct CoreDown(pub String);
+
+impl std::fmt::Display for CoreDown {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Not "nothing was changed": a `setPersonAccess` that asked for several grants may have made the earlier ones.
+        write!(f, "Kith's core isn't answering ({}). Changes made before this point may stand.", self.0)
+    }
+}
+
+impl std::error::Error for CoreDown {}
+
+/// An owner's call to the core over the owner socket (M2-17: `setPersonAccess`, the access requests), off the async
+/// threads. `repeatable` is for reads: a write is never sent twice, and a connection lost after it went out is an error
+/// that says it may have run. There is no fallback to kith-auth, whatever happened.
+pub async fn owner_call(method: &'static str, mut params: Value, repeatable: bool) -> anyhow::Result<Value> {
+    let core = process_core();
+    if let Some(o) = params.as_object_mut() {
+        o.extend(core.view());
+    }
+    let answer =
+        tokio::task::spawn_blocking(move || crate::core_front::call_owner(&core.folders, method, &params, repeatable))
+            .await
+            .map_err(|e| anyhow::anyhow!(CoreDown(e.to_string())))?;
+    match answer {
+        crate::core_front::Answer::Done(v) => Ok(v),
+        crate::core_front::Answer::Refused(said) => {
+            let said = said.strip_prefix("authority: ").unwrap_or(&said).to_owned();
+            Err(anyhow::anyhow!(CoreRefused(said)))
+        }
+        crate::core_front::Answer::Down { why, lost: false } => Err(anyhow::anyhow!(CoreDown(why))),
+        crate::core_front::Answer::Down { why, lost: true } => {
+            Err(anyhow::anyhow!(CoreDown(format!("{why}; it may have run"))))
+        }
+    }
 }
 
 #[cfg(test)]

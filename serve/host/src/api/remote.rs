@@ -93,6 +93,17 @@ pub(super) async fn call(hub: &Arc<Hub>, caller: &Caller, method: &str, b: Value
         }
         // The owner's phone sees and answers members' requests; a new device of the owner's own is approved at the
         // computer, so a phone in the wrong hands can't add another owner device.
+        // With KITH_CORE_AUTHORITY=1 (M2-17) the core lists and decides; a core that can't be reached is an error here,
+        // never the host's own copy. Only a loopback caller is "at the computer" to the core.
+        "accessRequests" if super::authority::guard_on_core() => {
+            json!({"requests": crate::remote::cloud::core_requests(matches!(caller, Caller::Local)).await?})
+        }
+        "decideAccessRequest" if super::authority::guard_on_core() => {
+            let approve = b["approve"].as_bool().ok_or_else(|| anyhow!("`approve` is required"))?;
+            let id = str_arg(&b, "requestId")?;
+            crate::remote::cloud::decide_in_core(hub, id, approve, matches!(caller, Caller::Local), true).await?;
+            json!({})
+        }
         "accessRequests" => json!({"requests": hub.cloud.requests_json_for(matches!(caller, Caller::Local))}),
         "decideAccessRequest" => {
             let approve = b["approve"].as_bool().ok_or_else(|| anyhow!("`approve` is required"))?;

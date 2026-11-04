@@ -74,14 +74,52 @@ pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
     }
 }
 
+/// What an owner-socket call came to, for the callers that must tell the core's "no" from a core that was not there
+/// (M2-17: the owner's grants and the access requests fail closed on the second, and show the first as it was said).
+pub enum Answer {
+    Done(Value),
+    /// The core ran the rules and refused (its words, or a call that does not fit the method's row).
+    Refused(String),
+    /// Nothing answered, or the connection ended before an answer: `lost` says the call had gone out and may have run.
+    Down {
+        why: String,
+        lost: bool,
+    },
+}
+
+/// One call of the owner's to the daemon. `repeatable` is for reads; a write is never sent a second time.
+pub fn call_owner(folders: &Paths, method: &str, params: &Value, repeatable: bool) -> Answer {
+    match kith_core::reach(folders, method, params, repeatable) {
+        kith_core::Reached::Answered(v) => Answer::Done(v),
+        kith_core::Reached::Refused(e) => Answer::Refused(e.to_string()),
+        kith_core::Reached::NoDaemon => Answer::Down { why: "no core is running".to_owned(), lost: false },
+        kith_core::Reached::Mismatch(note) => Answer::Down { why: note, lost: false },
+        kith_core::Reached::Lost(why) => Answer::Down { why, lost: true },
+    }
+}
+
+/// The host rows that say "not in sync" (the lease is gone), so sending one twice does no harm and a lost connection is
+/// worth a second try (M2-10c): `changed` and `drop` run the same the second time. A failure to deliver either is still
+/// `None`, which the host side must read as "not in sync", never as a lease it still holds. The rest (`link`, `unlink`,
+/// `pulled`, `renew`) say a thing is so, and are never sent twice.
+fn host_row_is_repeatable(method: &str) -> bool {
+    matches!(method, "syncLease.changed" | "syncLease.drop")
+}
+
 /// One row the daemon takes from the host alone (the sync-lease writes, M2-10b), called on a connection that proves the
 /// host secret. `Some(answer)` only when the daemon answered; any refusal, a missing daemon or a lost connection is `None`.
-/// Only the relay owner's code calls this: the secret is read from the core folder by `kith_core`, never put in an
-/// environment or passed to a child, and a write is never sent twice.
+/// Only the relay owner's code calls this: the secret is made in this process's memory by the serve's own daemon
+/// ([`start_beside_host`]) and read by `kith_core` from there, never written to a file, put in an environment or passed
+/// to a child, and a write is never sent twice. A reason the host rows are not served here (a daemon too old for them, or
+/// one without a Host) is logged once in the core log, apart from "no daemon".
 // The authority gate (`cutover.mayServe`) is its caller today; the lease rows come with M3.
 pub fn call_as_host(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
-    match kith_core::reach_as_host(folders, method, params, false) {
+    match kith_core::reach_as_host(folders, method, params, host_row_is_repeatable(method)) {
         kith_core::Reached::Answered(answer) => Some(answer),
+        kith_core::Reached::Mismatch(note) => {
+            kith_core::note_once(folders, &format!("host rows: {note}"));
+            None
+        }
         _ => None,
     }
 }
@@ -100,7 +138,7 @@ impl TestDaemon {
 /// Starts a daemon on `folders`, ready before it returns.
 #[cfg(test)]
 pub fn serve_for_test(folders: &Paths) -> TestDaemon {
-    let d = kith_core::Daemon::spawn(folders);
+    let d = kith_core::Daemon::spawn_as_host(folders, || false);
     d.ready(std::time::Duration::from_secs(30)).expect("the daemon serves");
     TestDaemon(d)
 }
@@ -169,7 +207,14 @@ pub fn secrets_call(method: &str, params: &Value, wait: std::time::Duration) -> 
 fn secrets_call_at(folders: &Paths, method: &str, params: &Value, wait: std::time::Duration) -> anyhow::Result<Value> {
     let deadline = std::time::Instant::now() + wait;
     loop {
-        match kith_core::reach(folders, method, params, true) {
+        // `secrets.get` is the one row that returns a value, and the daemon gives it to the host alone: the secret only
+        // this serve's own daemon thread made. Every other row is the owner's, on the owner token.
+        let reached = if method == "secrets.get" {
+            kith_core::reach_as_host(folders, method, params, true)
+        } else {
+            kith_core::reach(folders, method, params, true)
+        };
+        match reached {
             kith_core::Reached::Answered(answer) => return Ok(answer),
             kith_core::Reached::Refused(e) => anyhow::bail!("{e}"),
             kith_core::Reached::NoDaemon if std::time::Instant::now() < deadline && !crate::service::is_exiting() => {
@@ -329,8 +374,11 @@ impl CoreRun {
     }
 }
 
-/// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7).
-const CORE_CALL_METHODS: &[&str] = &["terminal.open", "terminal.attach", "terminal.list"];
+/// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7), and the three
+/// person-level writes `kith-auth` mirrors into the core until M2-18 makes the core the authority (a revoke, its undo and
+/// a removal; each is idempotent there, so a replay after a lost answer is harmless).
+const CORE_CALL_METHODS: &[&str] =
+    &["terminal.open", "terminal.attach", "terminal.list", "people.suspend", "people.undo", "people.removePerson"];
 
 /// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered, 3 no daemon
 /// answers (nothing ran, the caller falls back), 4 refused, 5 lost after sending, 2 usage.
@@ -383,7 +431,8 @@ pub fn core_call(method: &str, params_stdin: bool) -> i32 {
 /// `kith serve` has the daemon front start beside the host. It never waits for it and never fails on it: a core that
 /// will not start is a line in the core log and a status for `kith doctor`, and the host goes on.
 pub fn start_beside_host() -> kith_core::Daemon {
-    kith_core::Daemon::spawn(&kernel::folders(&kith_kernel::paths::process_home()))
+    // The one daemon that has a Host: it makes the host secret in this process's memory.
+    kith_core::Daemon::spawn_as_host(&kernel::folders(&kith_kernel::paths::process_home()), crate::service::is_exiting)
 }
 
 /// `kith kernel core-daemon`: the daemon front alone, in the foreground. Prints `ready` once it serves and
@@ -461,11 +510,25 @@ mod tests {
         assert_eq!(ask(&f, "syncLease.status", &json!({})).expect("owner reads")["cloud"], "linked");
         // And the host's connection reads nothing of the owner's.
         assert_eq!(call_as_host(&f, "syncLease.status", &json!({})), None);
-        // The secret is a file in the core folder, never an environment variable of this process.
-        let secret = std::fs::read_to_string(machine.join("core/host.token")).expect("host secret");
-        assert!(std::env::vars().all(|(_, v)| !v.contains(secret.trim())));
+        // The secret is in no file of the core folder.
+        assert!(!machine.join("core/host.token").exists());
         daemon.stop();
         let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn only_changed_and_drop_are_sent_twice() {
+        for (row, twice) in [
+            ("syncLease.changed", true),
+            ("syncLease.drop", true),
+            ("syncLease.link", false),
+            ("syncLease.unlink", false),
+            ("syncLease.pulled", false),
+            ("syncLease.renew", false),
+            ("secrets.get", false),
+        ] {
+            assert_eq!(host_row_is_repeatable(row), twice, "{row}");
+        }
     }
 
     #[test]

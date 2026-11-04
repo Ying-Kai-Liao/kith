@@ -32,14 +32,26 @@
 //!
 //! # Known gaps (M2-17 MUST)
 //!
-//! - **The membership gone from the cloud.** The host's check is its membership table, and the cloud can report a
-//!   membership gone while the person stays in kith-auth (`remote/members.rs`, `remote/cloud.rs`). The core reads only
-//!   kith-auth (`cut_off`), so it cannot see that event and would still approve. The parity script marks this as a
-//!   known, expected difference (scenario `membership_gone`, `known_difference`, steps with `core_expect`); it is not
-//!   parity. M2-17 MUST: on every membership sync the host denies the pending requests of any person with no
-//!   membership (every pass, not only on change).
-//! - **`members` defaults to full power** when omitted (see `call.rs`): M2-17 derives "at the computer" from the
-//!   caller's connection, or defaults to the narrow answer.
+//! - **The membership gone from the cloud** (closed in M2-17). The host's check is its membership table, and the cloud
+//!   can report a membership gone while the person stays in kith-auth (`remote/members.rs`, `remote/cloud.rs`). The core
+//!   reads only kith-auth (`cut_off`), so it cannot see that event: the HOST closes it. On every membership sync (every
+//!   pass, not only when something changed) `cloud::deny_without_membership` denies the pending requests of any person
+//!   with no membership, on the cloud and, with `KITH_CORE_AUTHORITY=1`, through `people.deny`. Between two syncs the
+//!   core can still approve such a request: the same window the host had, whose check was the membership table that
+//!   changes at the sync.
+//! - **"At the computer"** (closed in M2-17). Every owner-socket call is the same Unix user, so the core cannot tell the
+//!   owner's own terminal from the host answering for a remote device. It defaults to the narrow answer (members'
+//!   requests only); the caller says `local` when it is the owner at this computer. The host sets it for a loopback
+//!   owner caller and on two paths of its own that act for the owner (the auto-approval and `deny_without_membership`,
+//!   which only ends members' requests).
+//!
+//! # Filing (M2-17)
+//!
+//! The core files nothing by itself. With the switch on the host calls `people.fileRequest` for every request it holds
+//! on each state pull (idempotent), and `people.requests|approve|deny` are the only readers and deciders. A request held
+//! in the host's memory from before the switch flips is filed on the next pull; until then the app sees none (a short
+//! window that fails closed). The expiry is the core's own clock (`expires_at` against the Mac's time) next to the cloud
+//! ceasing to list a request: whichever comes first ends it for the app.
 
 use kith_kernel::secrets::{self, Ctx};
 use rusqlite::{Connection, OptionalExtension as _, Row, params};
@@ -262,7 +274,6 @@ pub(super) fn deny(core: &mut Core, c: &Ctx, id: &str, members: bool) -> Result<
 
 /// A request the cloud lists and the host takes up (`sync_requests`). Not an owner row: no `people.*` method files
 /// one. M2-17 calls it when the host switches.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) struct NewRequest<'a> {
     pub id: &'a str,
     pub device_key: &'a str,
@@ -280,7 +291,6 @@ const KEEP_MS: i64 = 7 * 24 * 60 * 60 * 1000;
 
 /// Files a request, pending, with the refusals `sync_requests` has: a member who is not a member (the host denies it on
 /// the cloud) and a second request from a device that has one waiting for its code (it waits its turn there).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn create(core: &mut Core, c: &Ctx, new: &NewRequest<'_>) -> Result<()> {
     let tx = core.claim_tx()?;
     let now = now_of(c);
@@ -335,7 +345,6 @@ pub(crate) fn create(core: &mut Core, c: &Ctx, new: &NewRequest<'_>) -> Result<(
 }
 
 /// The device revealed a nonce that matches its commit: the owner can now compare this code.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn reveal(db: &mut Core, id: &str, digits: &str) -> Result<()> {
     let tx = db.claim_tx()?;
     let n = tx.execute(
@@ -347,6 +356,45 @@ pub(crate) fn reveal(db: &mut Core, id: &str, digits: &str) -> Result<()> {
     }
     tx.commit()?;
     Ok(())
+}
+
+/// `people.fileRequest`: the host takes a request up (or has it again). A request the table knows is not filed twice: if
+/// the device has shown its code by now, only the code is added. So the host can say it on every state pull, and a core
+/// that was down when the request arrived gets it on the next pull. A known id filed with a different device key,
+/// person, platform, name or code is refused (the host logs the refusal), so whoever filed the row first does not get
+/// it kept as the host's.
+pub(super) fn file(
+    core: &mut Core,
+    c: &Ctx,
+    req: &NewRequest<'_>,
+    digits: Option<&str>,
+) -> Result<Value> {
+    let known = load(core.conn(), req.id)?;
+    if let Some(k) = &known {
+        let differs = k.device_key != req.device_key
+            || k.person.as_deref() != req.person
+            || k.platform != req.platform
+            || k.device_name != req.device_name
+            || matches!((&k.code, digits), (Some(have), Some(d)) if !d.is_empty() && have != d);
+        if differs {
+            return Err(refuse(format!(
+                "request {} is already known as a different request",
+                req.id
+            )));
+        }
+    } else {
+        create(core, c, req)?;
+    }
+    let known = known.is_some();
+    if let Some(digits) = digits.filter(|d| !d.is_empty()) {
+        let tx = core.claim_tx()?;
+        tx.execute(
+            "UPDATE access_requests SET code = ?2 WHERE id = ?1 AND status = 'pending' AND code IS NULL",
+            params![req.id, digits],
+        )?;
+        tx.commit()?;
+    }
+    Ok(json!({ "requestId": req.id, "filed": !known }))
 }
 
 /// The status column of one request, read straight from the table (the tests do not ask the module that wrote it).
