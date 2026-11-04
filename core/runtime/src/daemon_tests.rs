@@ -1840,7 +1840,7 @@ fn service_keys_go_through_a_real_daemon_to_the_owner_alone() {
         &json!({"agent": "ghost", "service": "github", "vars": ["GITHUB_TOKEN"]}),
     ) {
         Reached::Refused(Error::Refused(note)) => {
-            assert!(note.contains("kith-auth grant ghost github"), "{note}")
+            assert!(note.contains("kith-auth grant ghost github"), "{note}");
         }
         other => panic!("no grant: {other:?}"),
     }

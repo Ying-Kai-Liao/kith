@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::collections::HashSet;
 
 use rusqlite::Connection;
@@ -498,6 +500,7 @@ fn launch_fixture(c: &Connection, e: &mut Envelope) {
     }
 }
 
+#[allow(clippy::needless_pass_by_value)] // call sites build the json! inline
 fn keys(
     c: &Connection,
     s: &std::sync::Mutex<Option<Envelope>>,
