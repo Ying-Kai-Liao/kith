@@ -195,6 +195,12 @@ fn is_sidecar(path: &Path) -> bool {
         .is_some_and(|n| n.ends_with("-wal") || n.ends_with("-shm"))
 }
 
+/// Whether `icacls` output holds at least one `principal:(rights)` entry.
+#[cfg_attr(unix, allow(dead_code))]
+fn has_entries(text: &str) -> bool {
+    text.lines().any(|l| l.contains(":("))
+}
+
 #[cfg_attr(unix, allow(dead_code))]
 fn judge(
     read_ok: bool,
@@ -205,7 +211,11 @@ fn judge(
     allow_vanish: bool,
 ) -> Verdict {
     if read_ok {
-        if acl_is_owner_only(text, path, user) {
+        // `icacls` can exit 0 while naming no entry: its error text ("...being used by another process", "Failed
+        // processing 1 files") stands where the list should be. That is no list at all, not an open one.
+        if !has_entries(text) || text.contains("Failed processing 1 ") {
+            Verdict::Unreadable
+        } else if acl_is_owner_only(text, path, user) {
             Verdict::Private
         } else {
             Verdict::Open
@@ -223,11 +233,15 @@ fn check_acl(path: &Path) -> Result<()> {
     // A -shm being created or torn down by another connection answers `icacls` with an error for a moment; a real
     // open list never goes away, so a few short retries cost nothing on the normal path.
     let mut unreadable = false;
+    let mut last_text = String::new();
     for attempt in 0..5 {
         if attempt > 0 {
             std::thread::sleep(std::time::Duration::from_millis(40));
         }
         let out = std::process::Command::new("icacls").arg(path).output();
+        if let Ok(o) = &out {
+            last_text = String::from_utf8_lossy(&o.stdout).into_owned();
+        }
         let verdict = match out {
             Ok(o) => judge(
                 o.status.success(),
@@ -247,6 +261,9 @@ fn check_acl(path: &Path) -> Result<()> {
         };
         match verdict {
             Verdict::Private | Verdict::Vanished => return Ok(()),
+            // A sidecar is made and torn down by other connections; give a fresh one a moment (bounded, and each
+            // try reads the list again) before calling it open. Any other file is refused at once.
+            Verdict::Open if allow_vanish && attempt < 4 => unreadable = false,
             Verdict::Open => {
                 unreadable = false;
                 break;
@@ -262,10 +279,11 @@ fn check_acl(path: &Path) -> Result<()> {
         )));
     }
     Err(Error::Permissions(format!(
-        "kith-core: {} is open to other accounts; kith won't start until it is private: icacls \"{}\" /inheritance:r /grant:r \"{}:(OI)(CI)F\"",
+        "kith-core: {} is open to other accounts; kith won't start until it is private: icacls \"{}\" /inheritance:r /grant:r \"{}:(OI)(CI)F\" (icacls saw: {})",
         path.display(),
         path.display(),
-        user()
+        user(),
+        last_text.split_whitespace().collect::<Vec<_>>().join(" ")
     )))
 }
 
@@ -298,6 +316,15 @@ mod tests {
     fn a_sidecar_deleted_while_being_read_is_not_an_open_file() {
         assert_eq!(judge(false, "", "x", "me", false, true), Verdict::Vanished);
         assert_eq!(judge(false, "", "x", "me", true, true), Verdict::Unreadable);
+    }
+
+    #[test]
+    fn error_text_in_place_of_a_list_is_unreadable_not_open() {
+        let msg = "C:\\m\\core.db-wal: The process cannot access the file because it is being used by another process.\nSuccessfully processed 0 files; Failed processing 1 files\n";
+        assert_eq!(
+            judge(true, msg, "C:\\m\\core.db-wal", "me", true, true),
+            Verdict::Unreadable
+        );
     }
 
     #[test]
