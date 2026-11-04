@@ -27,6 +27,9 @@ mod call;
 #[allow(dead_code, reason = "first callers are M2-12 and lane H")]
 mod cards;
 mod daemon;
+// Held terminals start on Unix only for now; elsewhere the relay has nothing to relay.
+#[cfg_attr(not(unix), allow(dead_code))]
+mod attach;
 mod db;
 mod error;
 mod gate;

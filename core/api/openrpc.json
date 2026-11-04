@@ -1931,6 +1931,30 @@
       }
     },
     {
+      "name": "terminal.list",
+      "summary": "The held terminals the core knows (held id, session, agent if known, pid, when it started, how many owners and observers are attached, size). An ended terminal is not listed.",
+      "params": [],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "terminal-list"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {}
+      }
+    },
+    {
       "name": "agents.list",
       "summary": "The agents on this Mac.",
       "params": [],

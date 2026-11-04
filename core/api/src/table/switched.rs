@@ -274,6 +274,15 @@ pub(super) const ROWS: &[Method] = &[
         Served::Core,
         Stability::Experimental,
     ),
+    row(
+        "terminal.list",
+        "The held terminals the core knows (held id, session, agent if known, pid, when it started, how many owners and observers are attached, size). An ended terminal is not listed.",
+        &[],
+        "json",
+        &["kernel", "terminal-list"],
+        Served::Core,
+        Stability::Experimental,
+    ),
 ];
 
 /// A param only a client that knows the launch can fill (never typed): like `caller`, but it may be required.
