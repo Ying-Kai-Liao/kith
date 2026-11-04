@@ -81,15 +81,23 @@ pub(super) fn indexed(
     )))
 }
 
-/// The time the agent's file was last indexed (ms), the anchor of an interval that never fired.
-pub(super) fn indexed_at(conn: &rusqlite::Connection, agent: &str) -> Result<Option<i64>> {
+/// When the job was first indexed (ms), the anchor of an interval that never fired. Set when its row is inserted and
+/// never changed by an update, so an edit to another job in the file does not move it.
+pub(super) fn first_seen(
+    conn: &rusqlite::Connection,
+    agent: &str,
+    job: &str,
+) -> Result<Option<i64>> {
+    // NULL and 0 both mean "not known": 0 would count an interval from 1970.
     Ok(conn
         .query_row(
-            "SELECT at FROM sched_index WHERE agent = ?1",
-            [agent],
-            |r| r.get(0),
+            "SELECT first_seen FROM sched_jobs WHERE agent = ?1 AND job = ?2",
+            params![agent, job],
+            |r| r.get::<_, Option<i64>>(0),
         )
-        .optional()?)
+        .optional()?
+        .flatten()
+        .filter(|t| *t != 0))
 }
 
 /// The latest timed slot of the job with a row, whatever it decided (ms): where an interval counts from.
@@ -191,11 +199,14 @@ pub(super) fn cancel_in(
 /// read made before another one was applied must not put the index back, so the file is looked at again here, inside the
 /// transaction (the writes of core.db are one at a time), and a read that is no longer the file's is not applied.
 pub(super) fn sync_in(tx: &Transaction<'_>, read: &Read<'_>, now: i64) -> Result<Synced> {
-    if hash_in(tx, read.agent)?.as_deref() == Some(read.hash) {
-        return Ok(Synced::Same);
-    }
+    // The file is looked at on `Same` too: a pause written after this read (after the settle of the same tick, say) must
+    // not be decided over. It costs one file read per fire.
+    let same = hash_in(tx, read.agent)?.as_deref() == Some(read.hash);
     if !read.is_current()? {
         return Ok(Synced::Stale);
+    }
+    if same {
+        return Ok(Synced::Same);
     }
     let mut keep = Vec::new();
     for def in read.jobs {
@@ -206,9 +217,9 @@ pub(super) fn sync_in(tx: &Transaction<'_>, read: &Read<'_>, now: i64) -> Result
             .and_then(Value::as_str)
             .filter(|p| !p.is_empty());
         tx.execute(
-            "INSERT INTO sched_jobs (agent, job, def, paused, person) VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO sched_jobs (agent, job, def, paused, person, first_seen) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (agent, job) DO UPDATE SET def = excluded.def, paused = excluded.paused, person = excluded.person",
-            params![read.agent, id, def.to_string(), i64::from(paused), person],
+            params![read.agent, id, def.to_string(), i64::from(paused), person, now],
         )?;
         if paused {
             cancel_in(tx, read.agent, &id, "paused", now)?;

@@ -8,7 +8,8 @@ use serde_json::json;
 use super::revoke_everywhere;
 use crate::asks::call::call_at;
 use crate::conversations::claims::{
-    Kind, NewClaim, NewTurn, claim, enqueue_turn, reconcile, redeem, revoke_epoch, revoke_person,
+    Kind, NewClaim, NewTurn, claim, enqueue_turn, park, reconcile, redeem, revoke_epoch,
+    revoke_person,
 };
 use crate::db::Core;
 use crate::error::Error;
@@ -64,6 +65,7 @@ fn turn(core: &mut Core, conv: &str, source: &str, person: &str) -> i64 {
             person,
             prompt: "p",
             deadline: None,
+            revoke_seen: 0,
         },
         2,
     )
@@ -210,17 +212,144 @@ fn a_claim_that_passed_its_may_check_before_the_revoke_is_refused_for_the_person
             matches!(&err, Error::Refused(m) if m.contains("was revoked after the may check")),
             "{p}: {err}"
         );
+        // a turn enqueued by someone who checked before the revoke is refused at the enqueue, in the insert's transaction
+        let late = enqueue_turn(
+            &mut f.core,
+            &NewTurn {
+                revoke_seen: *e,
+                ..new_turn(&format!("c-{p}"), "app", p)
+            },
+            6,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(&late, Error::Refused(m) if m.contains("was revoked after the may check")),
+            "{p}: {late}"
+        );
+        // a turn queued with the new epoch is valid; a stale claimer's refusal leaves it queued for a fresh claim
+        let now = revoke_epoch(&f.core, p).unwrap();
+        let t = enqueue_turn(
+            &mut f.core,
+            &NewTurn {
+                revoke_seen: now,
+                ..new_turn(&format!("c-{p}"), "app", p)
+            },
+            6,
+        )
+        .unwrap();
+        let err = claim(&mut f.core, &new_claim(&format!("c-{p}"), p, t, *e), 6).unwrap_err();
+        assert!(matches!(err, Error::Refused(_)), "{p}: {err}");
+        assert_eq!(state_of(&f.core, "turns", "id", t), "queued", "{p}");
+        claim(&mut f.core, &new_claim(&format!("c-{p}"), p, t, now), 7).unwrap();
     }
+}
+
+fn new_turn<'a>(conv: &'a str, source: &'a str, person: &'a str) -> NewTurn<'a> {
+    NewTurn {
+        conversation: conv,
+        agent: "a",
+        engine: "claude",
+        source,
+        person,
+        prompt: "p",
+        deadline: None,
+        revoke_seen: 0,
+    }
+}
+
+#[test]
+fn a_turn_whose_enqueuer_checked_before_a_revoke_never_outlives_it() {
+    let mut f = fixture();
+    // c4-epochleak: the may check at epoch 0, the revoke, then the insert. The insert is refused; the other order is swept.
+    let seen = revoke_epoch(&f.core, "mia").unwrap();
+    let before = enqueue_turn(
+        &mut f.core,
+        &NewTurn {
+            revoke_seen: seen,
+            ..new_turn("c-m", "app", "mia")
+        },
+        2,
+    )
+    .unwrap();
+    revoke_person(&mut f.core, "mia", NOW).unwrap();
+    assert_eq!(state_of(&f.core, "turns", "id", before), "cancelled");
+    let err = enqueue_turn(
+        &mut f.core,
+        &NewTurn {
+            revoke_seen: seen,
+            ..new_turn("c-m", "app", "mia")
+        },
+        3,
+    )
+    .unwrap_err();
+    assert!(matches!(err, Error::Refused(_)), "{err}");
+    let n: i64 = f
+        .core
+        .conn()
+        .query_row(
+            "SELECT count(*) FROM turns WHERE state IN ('queued', 'parked')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(n, 0);
+}
+
+#[test]
+fn a_revoked_refusal_leaves_the_turn_and_other_peoples_turns_in_the_conversation_alone() {
+    let mut f = fixture();
+    let kai = turn(&mut f.core, "c-shared", "app", "kai");
+    revoke_person(&mut f.core, "mia", NOW).unwrap();
+    let now = revoke_epoch(&f.core, "mia").unwrap();
+    let mia = enqueue_turn(
+        &mut f.core,
+        &NewTurn {
+            revoke_seen: now,
+            ..new_turn("c-shared", "app", "mia")
+        },
+        5,
+    )
+    .unwrap();
+    let err = claim(&mut f.core, &new_claim("c-shared", "mia", mia, 0), 6).unwrap_err();
+    assert!(matches!(err, Error::Refused(_)), "{err}");
+    assert_eq!(state_of(&f.core, "turns", "id", mia), "queued");
+    assert_eq!(state_of(&f.core, "turns", "id", kai), "queued");
+}
+
+#[test]
+fn a_fenced_parked_turn_is_cancelled_and_loses_its_park_reason() {
+    let mut f = fixture();
+    ask(&f.core, "a1", None, "mia", "c-a1");
+    revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
+    let t = turn(&mut f.core, "c-a1", "wake", "kai");
+    assert!(park(&mut f.core, t, "terminal_live", 3).unwrap());
+    let err = claim(&mut f.core, &new_claim("c-a1", "kai", t, 0), 5).unwrap_err();
+    assert!(matches!(err, Error::Stopped(_)), "{err}");
+    assert_eq!(state_of(&f.core, "turns", "id", t), "cancelled");
+    let reason: Option<String> = f
+        .core
+        .conn()
+        .query_row("SELECT parked_reason FROM turns WHERE id = ?1", [t], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(reason, None);
 }
 
 #[test]
 fn a_stopped_asks_conversation_refuses_its_ask_turn_with_the_stopped_kind_not_the_busy_one() {
     let mut f = fixture();
     ask(&f.core, "a1", None, "mia", "c-a1");
-    let t = turn(&mut f.core, "c-a1", "wake", "kai");
     revoke_everywhere(&mut f.core, "mia", &[], NOW).unwrap();
+    // arrives after the stop (the stop itself cancels only what was queued by then)
+    let t = turn(&mut f.core, "c-a1", "wake", "kai");
     let err = claim(&mut f.core, &new_claim("c-a1", "kai", t, 0), 5).unwrap_err();
     assert!(matches!(err, Error::Stopped(_)), "{err}");
+    // the fence never lifts: the turn is cancelled, and a second attempt (a racing claimer) changes nothing
+    assert_eq!(state_of(&f.core, "turns", "id", t), "cancelled");
+    let err = claim(&mut f.core, &new_claim("c-a1", "kai", t, 0), 5).unwrap_err();
+    assert!(matches!(err, Error::Stopped(_)), "{err}");
+    assert_eq!(state_of(&f.core, "turns", "id", t), "cancelled");
     // a busy conversation stays a plain refusal
     let live = run(&mut f.core, "c-busy", "kai", "app", 30);
     let t2 = turn(&mut f.core, "c-busy", "app", "kai");
@@ -230,6 +359,8 @@ fn a_stopped_asks_conversation_refuses_its_ask_turn_with_the_stopped_kind_not_th
         "{err}"
     );
     assert_eq!(state_of(&f.core, "claims", "claim_id", live), "running");
+    // and its turn stays queued for the writer to finish
+    assert_eq!(state_of(&f.core, "turns", "id", t2), "queued");
 }
 
 #[test]

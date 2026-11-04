@@ -41,3 +41,20 @@ Holder	holder-crash-donetruth-nokey	pass	-	fast
 Holder	holder-crash-donetruth-norecord	pass	-	fast
 Holder	holder-crash-donetruth-minimal	pass	-	fast
 Holder	holder-crash-all-write	pass	-	fast
+# --- WriterLock4: M3-10b1, the take-over writer must take the lock (round-4 row: take-over) ---
+WriterLock4	r4-tonolock	fail	P1_NoTwoWriters	fast
+# --- Claims4: M3-10b1, the claim and turn rows of claims.rs against the processes (stop, revoke, kill resend, give-back, card resume, take-over, holder crash) ---
+Claims4	c4-fix-die	pass	-	fast
+Claims4	c4-fix-survive	pass	-	fast
+Claims4	c4-fix-doubletake	pass	-	fast
+Claims4	c4-nofence	fail	StoppedNeverRuns	fast
+Claims4	c4-noepoch	fail	RevokedQuiet	fast
+Claims4	c4-endearly	fail	WriterHasClaim	fast
+Claims4	c4-doneoverwrites	fail	action	fast
+Claims4	c4-nokillresend	fail	temporal	fast
+Claims4	c4-promoteearly	fail	OneLive	fast
+Claims4	c4-stopall	fail	action	fast
+Claims4	c4-fenceleak	fail	temporal	fast
+Claims4	c4-fencecancel	pass	-	fast
+Claims4	c4-epochleak	fail	temporal	fast
+Claims4	c4-epochcancel	pass	-	fast

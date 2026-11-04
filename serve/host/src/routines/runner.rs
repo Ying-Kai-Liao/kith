@@ -209,7 +209,8 @@ impl Routines {
                         match trigger.advance(at, now) {
                             Ok(future) => {
                                 fired = true;
-                                *next = future;
+                                // Never store a fire time at or before now: it would be due on every tick.
+                                *next = future.filter(|t| *t > now);
                             }
                             Err(error) => {
                                 routine.enabled = false;

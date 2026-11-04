@@ -1,6 +1,6 @@
 //! Validated schedules. Calendar schedules retain their IANA time zone across restarts.
 use anyhow::{Context, Result, bail};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use croner::Cron;
 use serde::{Deserialize, Serialize};
@@ -75,7 +75,7 @@ impl Trigger {
                 let date = DateTime::<Utc>::from_timestamp_millis(after)
                     .context("invalid schedule timestamp")?
                     .with_timezone(&zone);
-                Some(Cron::from_str(expression)?.find_next_occurrence(&date, false)?.timestamp_millis())
+                Some(next_cron(&Cron::from_str(expression)?, date, after)?)
             }
             Self::Webhook | Self::Event { .. } => None,
         })
@@ -126,6 +126,25 @@ impl Trigger {
     }
 }
 
+/// The next cron fire strictly after `after`. On a DST fall-back croner can answer with the
+/// earlier offset of a repeated local time, which lies before `after` when `after` is already in
+/// the second pass; take the later offset of that local time, else keep searching forward.
+fn next_cron(cron: &Cron, mut from: DateTime<Tz>, after: i64) -> Result<i64> {
+    for _ in 0..8 {
+        let found = cron.find_next_occurrence(&from, false)?;
+        if found.timestamp_millis() > after {
+            return Ok(found.timestamp_millis());
+        }
+        if let chrono::LocalResult::Ambiguous(_, late) = found.timezone().from_local_datetime(&found.naive_local())
+            && late.timestamp_millis() > after
+        {
+            return Ok(late.timestamp_millis());
+        }
+        from = found;
+    }
+    bail!("schedule has no occurrence after the given time")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +186,44 @@ mod tests {
         assert!(Trigger::Interval { seconds: 0 }.validate(0).is_err());
         assert!(Trigger::Once { at: 0 }.validate(0).is_err());
         assert!(Trigger::Cron { expression: "* * * * *".into(), time_zone: "not-a-zone".into() }.validate(0).is_err());
+    }
+
+    fn ms(rfc: &str) -> i64 {
+        DateTime::parse_from_rfc3339(rfc).unwrap().timestamp_millis()
+    }
+    fn cron(expression: &str, zone: &str) -> Trigger {
+        Trigger::Cron { expression: expression.into(), time_zone: zone.into() }
+    }
+
+    #[test]
+    fn fall_back_second_pass_never_returns_a_past_time() {
+        // 01:30 happens twice on 2026-11-01 in New York: 05:30Z (EDT) and 06:30Z (EST).
+        let t = cron("30 1 * * *", "America/New_York");
+        let after = ms("2026-11-01T06:00:00Z");
+        assert_eq!(t.next(after).unwrap(), Some(ms("2026-11-01T06:30:00Z")));
+        // From the first pass the first fire is still the EDT one.
+        assert_eq!(t.next(ms("2026-11-01T05:00:00Z")).unwrap(), Some(ms("2026-11-01T05:30:00Z")));
+        // After the second pass the next fire is the following day.
+        assert_eq!(t.next(ms("2026-11-01T06:30:00Z")).unwrap(), Some(ms("2026-11-02T06:30:00Z")));
+    }
+
+    #[test]
+    fn sydney_april_fall_back_is_strictly_after() {
+        // Sydney ends DST 2026-04-05 03:00 AEDT -> 02:00 AEST; 02:30 occurs at 15:30Z and 16:30Z (Apr 4).
+        let t = cron("30 2 * * *", "Australia/Sydney");
+        let after = ms("2026-04-04T16:00:00Z");
+        let next = t.next(after).unwrap().unwrap();
+        assert!(next > after);
+        assert_eq!(next, ms("2026-04-04T16:30:00Z"));
+    }
+
+    #[test]
+    fn spring_forward_gap_never_returns_a_past_time() {
+        // 02:30 does not exist on 2026-03-08 in New York.
+        let t = cron("30 2 * * *", "America/New_York");
+        let after = ms("2026-03-08T06:00:00Z");
+        let next = t.next(after).unwrap().unwrap();
+        assert!(next > after);
+        assert!(next < ms("2026-03-10T00:00:00Z"));
     }
 }
