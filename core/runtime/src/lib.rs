@@ -27,6 +27,10 @@ mod accounts;
 #[cfg(unix)]
 #[allow(dead_code)]
 mod authority;
+// The ask tree (M3-8a): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at M3-10.
+#[cfg(unix)]
+#[allow(dead_code, reason = "first callers are the switch of kith-ask (M3-10)")]
+mod asks;
 mod call;
 // Nothing calls the store but the daemon's cards rows and the tests: the host's callers switch in lane H, and the raise,
 // claim and close verbs get theirs there and in M2-12.
@@ -62,6 +66,14 @@ mod runsock;
 // Held terminals start on Unix only for now; elsewhere `terminal.open` answers `direct` and most of it is unused.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod terminal;
+// Engine sessions held by the core (M3-6): built and tested, called by no start until the switch.
+// Unix only for now, like `authority`: it reads through `kith_kernel::threads`, which is.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "first callers are the start protocol after the switch"
+)]
+mod transcripts;
 // The claim path's read (`lease_held_for_non_owner`, `held_in`) and `restart` have no caller until M3 and the daemon start
 // wire them; the rows reach the rest.
 #[allow(dead_code)]
@@ -69,6 +81,10 @@ mod sync_lease;
 // Nothing calls the envelope yet: the host vault and kith-auth move onto it at M2-7 and M2-18.
 #[allow(dead_code, reason = "first callers are M2-6 and M2-7")]
 mod secrets;
+
+// The wake queue and waiters (M3-7): nothing calls them but the daemon's `wake.*` rows and the tests until the switch (M3-10).
+#[allow(dead_code, reason = "first callers are the switch of kith-wake, M3-10")]
+mod wake;
 
 #[cfg(test)]
 mod runs_props;

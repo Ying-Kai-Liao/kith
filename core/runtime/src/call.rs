@@ -34,6 +34,8 @@ impl Core {
                 kith_kernel::schedule::preview(params, now)
                     .map_err(|e| Error::BadParams(format!("kith-core: schedule.preview: {e}")))
             }
+            #[cfg(unix)]
+            "conversation.transcript" => self.transcript(params),
             m if crate::accounts::call::serves(m) => self.account_call(m, params),
             _ => Err(Error::NotServed(format!(
                 "kith-core: {method} is not answered in the core yet"

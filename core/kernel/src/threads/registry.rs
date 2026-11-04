@@ -202,7 +202,7 @@ pub fn live_pid(c: &Ctx, entry: &Map<String, Value>) -> Option<i64> {
 
 /// The places Claude keeps transcripts (`<root>/projects/<p>/<sid>.jsonl`): this run's login, the default one, and each
 /// extra account's (`kith account add claude <name>`), so a session made under another main account is still found.
-fn transcript_roots(c: &Ctx) -> Vec<PathBuf> {
+pub fn transcript_roots(c: &Ctx) -> Vec<PathBuf> {
     let mut roots = vec![c.claude_dir(), c.home.join(".claude")];
     if let Some(m) = &c.machine {
         let mut extra: Vec<PathBuf> = std::fs::read_dir(m.join("accounts").join("claude"))
@@ -224,7 +224,7 @@ fn transcript_roots(c: &Ctx) -> Vec<PathBuf> {
 }
 
 /// The folder a transcript's session ran in; empty when it names none.
-fn cwd_in(transcript: &Path) -> String {
+pub fn cwd_in(transcript: &Path) -> String {
     use std::io::BufRead as _;
     let Ok(f) = std::fs::File::open(transcript) else {
         return String::new();

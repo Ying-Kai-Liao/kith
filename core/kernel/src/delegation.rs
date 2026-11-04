@@ -54,10 +54,11 @@ impl Refusal {
 
 // --- the record -------------------------------------------------------------------------------------------------------
 
-type Reg = Map<String, Value>;
+/// A delegation record as the code reads it: the JSON object of a `.reg` file, or the same shape built from a row of the core's store.
+pub type Reg = Map<String, Value>;
 
 /// Python's truthiness of a JSON value.
-fn truthy(v: Option<&Value>) -> bool {
+pub fn truthy(v: Option<&Value>) -> bool {
     match v {
         None | Some(Value::Null) => false,
         Some(Value::Bool(b)) => *b,
@@ -249,13 +250,19 @@ pub fn lineage(
     env: &dyn Fn(&str) -> Option<String>,
     crossing: bool,
 ) -> Result<Place, Refusal> {
+    lineage_with(&|id| read_reg(box_dir, id), env, crossing)
+}
+
+/// [`lineage`] with the parent's record looked up by `parent` instead of read from a file: the seam the core's rows use.
+/// `parent` is asked only for a safe id; it answers the upgraded record, or `None` when there is none.
+pub fn lineage_with(
+    parent: &dyn Fn(&str) -> Option<Reg>,
+    env: &dyn Fn(&str) -> Option<String>,
+    crossing: bool,
+) -> Result<Place, Refusal> {
     let get = |k: &str| env(k).filter(|v| !v.is_empty());
     let mine = get("KITH_ASK_ID").unwrap_or_default();
-    let parent = if safe_id(&mine) {
-        read_reg(box_dir, &mine)
-    } else {
-        None
-    };
+    let parent = if safe_id(&mine) { parent(&mine) } else { None };
     if let Some(p) = parent {
         return Ok(Place {
             chain: chain_of(&p).map(str::to_owned),
@@ -374,16 +381,22 @@ pub fn check_and_write(
         HashMap::new()
     };
     decide(&place, &costs, chain_cost_cap(machine))?;
-    let decision = json!({
+    let decision = decision_json(&place, id);
+    write(&decision).map_err(|e| Refusal::new(format!("can't write the ask's record: {e}")))?;
+    Ok(decision)
+}
+
+/// What [`check`] answers for an admitted ask `id` at `place`: the chain (the ask's own id when it starts one), hop, cross
+/// hops and the rest the record gets.
+pub fn decision_json(place: &Place, id: &str) -> Value {
+    json!({
         "chain": place.chain.as_deref().unwrap_or(id),
         "hop": place.hop,
         "cross_hops": place.cross_hops,
         "crossed": place.crossed,
         "ask": place.ask,
         "cost_base": place.cost_base,
-    });
-    write(&decision).map_err(|e| Refusal::new(format!("can't write the ask's record: {e}")))?;
-    Ok(decision)
+    })
 }
 
 /// What `kith kernel delegation limits` prints.
