@@ -1,0 +1,22 @@
+\* The design (see Fire.tla for what each switch means). A variant's .set file overrides lines here.
+\* Sizes: slots at 2 and 4 (NS = 2, P = 2), the clock 0..6, one edit, 3 turn rows, one ad hoc slot (run now and a webhook are the same code path).
+NS = 2
+P = 2
+Catch = 2
+MaxEdits = 1
+MaxTurns = 3
+AdHoc = {7}
+Unique = TRUE
+SweepInFire = TRUE
+SkipPrev = TRUE
+ManualSkips = TRUE
+RecordSkips = TRUE
+MayInTxn = TRUE
+DefInTxn = TRUE
+PauseCancels = TRUE
+RevokeCancels = TRUE
+DeadlineCheck = TRUE
+Window = TRUE
+CatchMode = "latest"
+Shape = "one-txn"
+TickGuard = FALSE

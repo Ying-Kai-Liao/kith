@@ -1,0 +1,55 @@
+# variant	kind	property	expected
+# --- the design: one transaction per fire, every property holds ----------------------------------
+fixed	INVARIANT	TypeOK	pass
+fixed	INVARIANT	AtMostOncePerSlot	pass
+fixed	INVARIANT	NoStacking	pass
+fixed	INVARIANT	CrashSafe	pass
+fixed	INVARIANT	NoRunForRevoked	pass
+fixed	INVARIANT	CatchUpWindow	pass
+fixed	INVARIANT	CatchUpOnce	pass
+fixed	PROPERTY	NoFireForRevokedPerson	pass
+fixed	PROPERTY	PausedNeverFires	pass
+fixed	PROPERTY	PausedNeverStarts	pass
+fixed	PROPERTY	EditUsesNewDefinition	pass
+fixed	PROPERTY	DeadlineExpires	pass
+fixed	PROPERTY	SkipIsJustified	pass
+wide-window	INVARIANT	CatchUpOnce	pass
+live	PROPERTY	DueGetsRow	pass
+live	PROPERTY	TurnsEnd	pass
+# --- AtMostOncePerSlot needs the unique row; the crash needs one transaction ----------------------
+no-unique	INVARIANT	AtMostOncePerSlot	fail
+insert-first	INVARIANT	CrashSafe	fail
+enqueue-first	INVARIANT	CrashSafe	fail
+enqueue-first	INVARIANT	AtMostOncePerSlot	fail
+# --- NoStacking needs the skip rule, for every kind of fire ---------------------------------------
+no-skip	INVARIANT	NoStacking	fail
+manual-bypass	INVARIANT	NoStacking	fail
+no-sweep	INVARIANT	NoStacking	pass
+no-sweep	PROPERTY	SkipIsJustified	fail
+# --- the checks inside the transaction: may, definition ----------------------------------------------
+stale-may	PROPERTY	NoFireForRevokedPerson	fail
+stale-def	PROPERTY	PausedNeverFires	fail
+stale-def	PROPERTY	EditUsesNewDefinition	fail
+# --- what pause and revoke do to turns already enqueued ---------------------------------------------
+pause-keeps	PROPERTY	PausedNeverStarts	fail
+pause-keeps	PROPERTY	PausedNeverFires	pass
+revoke-keeps	INVARIANT	NoRunForRevoked	fail
+# --- the deadline ---------------------------------------------------------------------------------
+no-deadline	PROPERTY	DeadlineExpires	fail
+# --- catch-up -------------------------------------------------------------------------------------
+no-window	INVARIANT	CatchUpWindow	fail
+catch-each	INVARIANT	CatchUpOnce	fail
+# --- liveness: a skip leaves its reason --------------------------------------------------------------
+no-record	PROPERTY	DueGetsRow	fail
+# --- the runs are not vacuous: each of these happens (the invariant FAILS) -----------------------------
+fixed	INVARIANT	NeverFired	fail
+fixed	INVARIANT	NeverSkipPrev	fail
+fixed	INVARIANT	NeverSkipPaused	fail
+fixed	INVARIANT	NeverSkipRevoked	fail
+fixed	INVARIANT	NeverAdHocFired	fail
+fixed	INVARIANT	NeverCaughtUp	fail
+fixed	INVARIANT	NeverParked	fail
+fixed	INVARIANT	NeverExpired	fail
+fixed	INVARIANT	NeverDone	fail
+fixed	INVARIANT	NeverCancelled	fail
+fixed	INVARIANT	NeverDown	fail
