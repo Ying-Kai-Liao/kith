@@ -283,7 +283,7 @@ pub fn read_gate(answer: Option<&Value>) -> (bool, Option<String>) {
         // "authority: N difference(s) between the core and the old store (...)": the import is behind the file.
         Some(w) => match w.split_once(" difference(s)").and_then(|(head, _)| head.rsplit(' ').next()?.parse::<usize>().ok()) {
             Some(n) => format!(
-                "core.db missed {n} changes, run `kith kernel core-migrate --authority --force`; staying on kith-auth ({w})"
+                "the core missed {n} changes, run `kith kernel core-migrate --authority --force`; staying on kith-auth ({w})"
             ),
             None => format!("{w}; staying on kith-auth"),
         },
@@ -359,7 +359,7 @@ mod gate_tests {
         let line = line.unwrap();
         assert!(!open);
         assert!(
-            line.contains("core.db missed 3 changes, run `kith kernel core-migrate --authority --force`"),
+            line.contains("the core missed 3 changes, run `kith kernel core-migrate --authority --force`"),
             "{line}"
         );
         let (open, line) = read_gate(Some(&json!({"ok": false, "warning": null})));

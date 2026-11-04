@@ -33,6 +33,7 @@
 //! - `kith-auth agent-access ... [--rm]` writes only auth.json: the core has no writer for `agent_access` (m0013). A file
 //!   that keeps domains there is refused by the import and shows as a difference in `same_answer`, so it blocks the
 //!   gate until the rules learn `agent_domains`; the verb stays on Python.
+//!
 //! These do not change what the gate (`may_serve`) serves, which is the READ side (`may`, `resolve`, the request guard);
 //! they are why `export_back` takes `profiles` and `grants` from the old copy and not from the core.
 
@@ -227,13 +228,11 @@ fn stat_line(p: &Path) -> String {
 }
 
 /// `serve.db` of the caller's serve folder (the host's store, where the vault's old rows live).
-fn serve_db(ctx: &Ctx) -> Option<PathBuf> {
+fn serve_db(ctx: &Ctx) -> PathBuf {
     match &ctx.serve {
-        kith_kernel::secrets::ServeDir::Fixed(d) => Some(d.join("serve.db")),
+        kith_kernel::secrets::ServeDir::Fixed(d) => d.join("serve.db"),
         // The endpoint would run a program; the default place is enough for a fingerprint.
-        kith_kernel::secrets::ServeDir::Endpoint { home, .. } => {
-            Some(home.join(".kith/serve/serve.db"))
-        }
+        kith_kernel::secrets::ServeDir::Endpoint { home, .. } => home.join(".kith/serve/serve.db"),
     }
 }
 
@@ -473,9 +472,7 @@ impl Module for AuthorityModule {
     }
 
     fn fingerprint(&self, env: &Env, _db: &Connection) -> Result<String> {
-        let Some(db) = serve_db(ctx(env)?) else {
-            return Ok(String::new());
-        };
+        let db = serve_db(ctx(env)?);
         let wal = PathBuf::from(format!("{}-wal", db.display()));
         let vault_rows =
             Connection::open_with_flags(&db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)

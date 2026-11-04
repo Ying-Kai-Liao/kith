@@ -74,7 +74,7 @@ impl OsStore for MemOs {
 }
 
 struct Rig {
-    _t: TempDir,
+    dir: TempDir,
     env: Env,
     /// The envelope the import sealed into.
     sealed: Shared<BTreeMap<String, Vec<u8>>>,
@@ -109,11 +109,9 @@ fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
     let (t, m) = machine();
     let root = t.path().to_path_buf();
     std::fs::create_dir_all(&m).unwrap();
-    for a in ["house"] {
-        let d = root.join("agents").join(a).join("role");
-        std::fs::create_dir_all(&d).unwrap();
-        std::fs::write(d.join("agent.md"), format!("---\nname: {a}\n---\n")).unwrap();
-    }
+    let house = root.join("agents/house/role");
+    std::fs::create_dir_all(&house).unwrap();
+    std::fs::write(house.join("agent.md"), "---\nname: house\n---\n").unwrap();
     std::fs::create_dir_all(root.join("kernel/agents")).unwrap();
     std::fs::create_dir_all(root.join("secrets")).unwrap();
     let ctx = Ctx {
@@ -147,7 +145,7 @@ fn rig_with(limit: Option<usize>) -> (Rig, Vec<Box<dyn Module>>) {
     );
     let rig = Rig {
         env: Env::new(&m).with_ctx(ctx),
-        _t: t,
+        dir: t,
         sealed,
         vault,
         os,
@@ -239,7 +237,7 @@ fn import_is_idempotent_and_a_dry_run_writes_nothing() {
     let again = reg[0].import(&r.env, Some(&mut core), opts()).unwrap();
     assert!(said(&again, "nothing to change"), "{again:?}");
     assert_eq!((r.count("people"), r.count("import_log")), (people, log));
-    assert!(r.diffs(reg[0].as_ref()).is_empty());
+    assert_eq!(r.diffs(reg[0].as_ref()), Vec::<String>::new());
 }
 
 #[test]
@@ -259,7 +257,7 @@ fn same_answer_catches_bot_was_and_retired_differences_and_removals() {
     r.edit(|v| v["people"]["mia-bot"]["bot_of"] = json!("sam"));
     assert!(said(&r.diffs(m), "person mia-bot"));
     r.edit(|v| v["people"]["mia-bot"]["bot_of"] = json!("mia"));
-    assert!(r.diffs(m).is_empty());
+    assert_eq!(r.diffs(m), Vec::<String>::new());
     // A rename: `was` changed.
     r.edit(|v| v["people"]["mia"]["was"] = json!(["old-mia", "older"]));
     assert!(said(&r.diffs(m), "person mia"));
@@ -270,7 +268,7 @@ fn same_answer_catches_bot_was_and_retired_differences_and_removals() {
     r.edit(|v| {
         v["retired"].as_object_mut().unwrap().remove("sam");
     });
-    assert!(r.diffs(m).is_empty());
+    assert_eq!(r.diffs(m), Vec::<String>::new());
     // A bot removed in the file leaves no row there: the core still has it, and that is a difference.
     r.edit(|v| {
         v["people"].as_object_mut().unwrap().remove("mia-bot");
@@ -314,10 +312,10 @@ fn a_changed_source_makes_the_opt_in_guard_check_again_and_the_kith_auth_side_an
 #[test]
 fn fingerprint_follows_the_vault_rows_and_the_serve_db() {
     let (r, reg) = rig();
-    let db = r.db_or_memory();
+    let db = Connection::open_in_memory().unwrap();
     let a = reg[0].fingerprint(&r.env, &db).unwrap();
     assert!(a.contains("novault"), "{a}");
-    let serve = r._t.path().join("serve");
+    let serve = r.dir.path().join("serve");
     std::fs::create_dir_all(&serve).unwrap();
     let s = Connection::open(serve.join("serve.db")).unwrap();
     s.execute_batch(
@@ -328,12 +326,6 @@ fn fingerprint_follows_the_vault_rows_and_the_serve_db() {
     let b = reg[0].fingerprint(&r.env, &db).unwrap();
     assert_ne!(a, b);
     assert!(b.contains("vault:1"), "{b}");
-}
-
-impl Rig {
-    fn db_or_memory(&self) -> Connection {
-        Connection::open_in_memory().unwrap()
-    }
 }
 
 #[test]

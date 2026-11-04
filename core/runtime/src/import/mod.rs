@@ -364,12 +364,11 @@ fn real(
     let counts = authority::counts(scratch)?;
     // The lifetime lock for the whole step; this also brings the schema up to date, as `kith migrate` does.
     let mut own;
-    let core = match held {
-        Some(c) => c,
-        None => {
-            own = crate::start_with(layout, MIGRATIONS)?;
-            &mut own
-        }
+    let core = if let Some(c) = held {
+        c
+    } else {
+        own = crate::start_with(layout, MIGRATIONS)?;
+        &mut own
     };
     let (state, have) = {
         let tx = core.claim_tx()?;
