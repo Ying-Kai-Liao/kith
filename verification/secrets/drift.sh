@@ -10,7 +10,7 @@ set -euo pipefail
 
 # The commit at which the model was last confirmed to describe the files below (origin/main, 2026-10-28; first at
 # ed2ceb63, after the secret cards and the limit cards were merged).
-SYNC=0872ea58892e0f648d4206bd64e455b25cdf2d5c
+SYNC=732dfef5fa4a31a190277b2ffb02895d3da3ff1a
 
 FILES=(
   serve/host/src/cards/secret.rs    # provide, respond, deny, grant, Slot, write_key, open_card, list_keys, revoke_key
@@ -20,6 +20,10 @@ FILES=(
   serve/host/src/api/bots.rs        # respondPermission: a secret card goes to secret::respond, before any other answer
   serve/host/src/api/roles.rs       # guard: nobody but the owner answers a secret card
   kernel/bin/kith-auth              # set --stdin-json --grant (the Write step), grant, keys, revoke --profile
+  core/runtime/src/cards/mod.rs     # the core's card store: claim, release, saved, saved_in, withdraw, sweep, park_run, answer
+  core/runtime/src/cards/secret.rs  # the core's secret path: begin, commit (write + save in one transaction), provide, cards.provide
+  core/runtime/src/secrets/mod.rs   # the envelope the secret path writes through (put, get, list)
+  core/api/src/table/cards.rs       # the cards.provide row (owner only, values by the client)
 )
 paths=()
 for f in "${FILES[@]}"; do paths+=("${f%% *}"); done

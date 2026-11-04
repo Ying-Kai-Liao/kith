@@ -450,6 +450,12 @@ impl Slot {
     }
 }
 
+/// Whether an answer of this card is in flight (a write is under the claim). The closers that would withdraw an open
+/// card ask first: closing it under a writer would let the key land on a closed card (Secrets.tla `Withdraw`).
+pub fn claimed(card_id: &str) -> bool {
+    SLOTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).contains(card_id)
+}
+
 impl Drop for Slot {
     fn drop(&mut self) {
         SLOTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&self.0);

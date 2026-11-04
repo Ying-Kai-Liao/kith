@@ -1,7 +1,9 @@
 //! M2 lane A (authority): the owner's access to people, as `kith-auth member`, `bot`, `bots-cap`, `preset` and `invite`
 //! have it today. Experimental, owner principal only, not in `released.json`; the result is `json` until the lane types
-//! it. The rows the core serves (M2-2: grant, revoke, list, the bots, the invites and the presets) are answered by the
-//! daemon, because a write needs `&mut Core` (`Core::call` itself answers NotServed). The access requests
+//! it. The rows the core serves (M2-2: grant, revoke, list, the bots, the invites and the presets; M2-4: add, rename and
+//! remove a person, suspend and undo, clear-temp, retired) are answered by the daemon, because a write needs `&mut Core`
+//! (`Core::call` itself answers NotServed). `people.revoke` takes one agent away from a person (`member --rm`);
+//! `people.suspend` is `kith-auth person --revoke`: they reach nothing, until `people.undo`. The access requests
 //! (`requests`, `approve`, `deny`) are M2-3's and still stubs: the caller falls back to `kith-auth`/`kith-people`.
 //!
 //! `people.list` is spelled `kith people access` because `kith people ls` is the people list of `kith-people` today.
@@ -107,6 +109,18 @@ pub(super) const ROWS: &[Method] = &[
             ENV,
         ],
         &["people", "access"],
+    ),
+    people(
+        "people.may",
+        "Whether a person may use an agent right now, and why (the kernel's `may`: a removed access beats every row, then their own, then everyone's).",
+        &[
+            pos("person", "string", true, "The person."),
+            pos("agent", "string", true, "The agent."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "may"],
     ),
     people(
         "people.addBot",
@@ -216,6 +230,78 @@ pub(super) const ROWS: &[Method] = &[
             ENV,
         ],
         &["people", "preset-remove"],
+    ),
+    people(
+        "people.addPerson",
+        "Add a person, or change their name, language or time zone, or make them the owner.",
+        &[
+            pos(
+                "id",
+                "string",
+                true,
+                "The person's id (lowercase letters, digits and -).",
+            ),
+            flag("name", "string", &["--name"], "Their name."),
+            flag("lang", "string", &["--lang"], "Their language."),
+            flag("tz", "string", &["--tz"], "Their time zone."),
+            sw("owner", &["--owner"], "Make them the owner (there is one)."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "person", "add"],
+    ),
+    people(
+        "people.renamePerson",
+        "Give a person a new id. Their memberships, owned accounts and invites come along; the old id stays as an alias.",
+        &[
+            pos("id", "string", true, "The person's id now."),
+            pos("to", "string", true, "The new id."),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "person", "rename"],
+    ),
+    people(
+        "people.removePerson",
+        "Remove a person with their bots, memberships and codes, and retire the id. Their memory and files stay.",
+        &[
+            pos("id", "string", true, "The person."),
+            sw(
+                "unused",
+                &["--unused"],
+                "Only if they never had anything; the id is then free again.",
+            ),
+            KERNEL,
+            HOME,
+            ENV,
+        ],
+        &["people", "person", "remove"],
+    ),
+    people(
+        "people.suspend",
+        "Cut a person off from everything on this computer, and their bots with them. Their rows are kept; `people undo` brings it all back.",
+        &[pos("id", "string", true, "The person."), KERNEL, HOME, ENV],
+        &["people", "suspend"],
+    ),
+    people(
+        "people.undo",
+        "Bring back a person cut off by `people suspend`, with exactly the access they had.",
+        &[pos("id", "string", true, "The person."), KERNEL, HOME, ENV],
+        &["people", "undo"],
+    ),
+    people(
+        "people.clearTemp",
+        "Remove the temp folder of a person's runs, and of their bots' (their runs must be stopped).",
+        &[pos("id", "string", true, "The person."), KERNEL, HOME, ENV],
+        &["people", "person", "clear-temp"],
+    ),
+    people(
+        "people.retired",
+        "Why a new person or bot can't take this id (removed, an old id of someone, or what a removal left); nothing when it can.",
+        &[pos("id", "string", true, "The id."), KERNEL, HOME, ENV],
+        &["people", "retired"],
     ),
     stub(
         "people.requests",

@@ -499,6 +499,42 @@ enum KernelCmd {
         #[command(subcommand)]
         what: LaunchCmd,
     },
+    /// Attaches this terminal to an agent's held terminal through the relay (M1-6): raw mode until detach or exit.
+    /// The ticket (from `terminal.open`) is one line on stdin. Exit: the engine's code, 75 busy, 0 detached, 76 cut as too slow (attach again), 77 taken over, 78 holder lost, 1 otherwise.
+    #[command(hide = true)]
+    Attach {
+        /// The relay's attach endpoint: a socket path, or a pipe name on Windows.
+        #[arg(long)]
+        endpoint: std::path::PathBuf,
+        /// Read the ticket from the first line of stdin (the only way to give it; never argv).
+        #[arg(long)]
+        ticket_stdin: bool,
+        /// Watch only: no keys are sent and the size never changes.
+        #[arg(long)]
+        observer: bool,
+        /// Take the owner place from a client that has it (an owner ticket only).
+        #[arg(long)]
+        takeover: bool,
+        /// The key that leaves the terminal running: `ctrl-<char>`.
+        #[arg(long, env = "KITH_DETACH_KEY", default_value = "ctrl-\\")]
+        detach_key: String,
+        /// Read keys from the controlling terminal (/dev/tty, CONIN$) instead of stdin, for when stdin is the ticket pipe.
+        #[arg(long)]
+        tty: bool,
+    },
+    /// Calls one of the held-terminal methods (`terminal.open`, `terminal.attach`, `terminal.list`) on the running core
+    /// daemon's owner socket and prints its JSON answer (M1-7, the bash `kith --held` and `kith attach`). Owner-only by
+    /// construction: it speaks the owner socket and nothing else, and refuses any other method. Params are JSON on stdin
+    /// (never argv: the launch env is in them). Exit: 0 answered; 3 no daemon answers (nothing ran); 4 the core refused
+    /// the call (stderr says why); 5 the connection broke after the call went out (it may have run); 2 usage.
+    #[command(hide = true)]
+    CoreCall {
+        /// `terminal.open`, `terminal.attach` or `terminal.list`.
+        method: String,
+        /// Read the params (a JSON object) from stdin; the only way to give them.
+        #[arg(long)]
+        params_stdin: bool,
+    },
     /// One task on one engine over ACP: the answer on stdout (the task after `--`, or on stdin).
     RunOnce {
         engine: String,
@@ -525,6 +561,45 @@ enum KernelCmd {
         #[arg(last = true)]
         task: Vec<String>,
     },
+}
+
+/// `kith kernel attach ...`; the exit code is the client's (see `kith-attach`).
+// The flags are the command line's own switches.
+#[allow(clippy::fn_params_excessive_bools)]
+fn run_attach(
+    endpoint: &std::path::Path,
+    ticket_stdin: bool,
+    observer: bool,
+    takeover: bool,
+    detach_key: &str,
+    tty: bool,
+) -> i32 {
+    use std::io::BufRead;
+    let key = match kith_attach::parse_detach_key(detach_key) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("{e}");
+            return 2;
+        }
+    };
+    if !ticket_stdin {
+        eprintln!("the ticket is read from stdin: pass --ticket-stdin");
+        return 2;
+    }
+    // One line, from the shared stdin buffer: whatever follows stays there for the keys (when stdin is also the keyboard).
+    let mut ticket = String::new();
+    if std::io::stdin().lock().read_line(&mut ticket).unwrap_or(0) == 0 || ticket.trim().is_empty() {
+        eprintln!("no ticket on stdin");
+        return 2;
+    }
+    let opts = kith_attach::Opts {
+        ticket: ticket.trim().to_string(),
+        role: if observer { kith_attach::Role::Observer } else { kith_attach::Role::Owner },
+        takeover,
+        detach_key: key,
+        tty_input: tty,
+    };
+    kith_attach::run(endpoint, &opts)
 }
 
 /// What `kith kernel delegation ...` can be asked.
@@ -1184,6 +1259,12 @@ async fn main() -> Result<()> {
                 let args = runonce::Args { engine, model, cwd, mcp_config, json, approve, timeout, acp_command, task };
                 std::process::exit(runonce::run(args).await?);
             }
+            if let KernelCmd::CoreCall { method, params_stdin } = cmd {
+                std::process::exit(core_front::core_call(&method, params_stdin));
+            }
+            if let KernelCmd::Attach { endpoint, ticket_stdin, observer, takeover, detach_key, tty } = cmd {
+                std::process::exit(run_attach(&endpoint, ticket_stdin, observer, takeover, &detach_key, tty));
+            }
             // Every kernel verb's notes (the accounts state, the settings migration) reach core.log, also the ones that
             // exit before `through_core`.
             kith_core::route_kernel_notes(&kernel::folders(&kith_kernel::paths::process_home()));
@@ -1289,6 +1370,8 @@ async fn main() -> Result<()> {
                         std::process::exit(launch_cmd::print_whole(&args));
                     }
                     KernelCmd::RunOnce { .. }
+                    | KernelCmd::Attach { .. }
+                    | KernelCmd::CoreCall { .. }
                     | KernelCmd::Accounts { .. }
                     | KernelCmd::Delegation { .. }
                     | KernelCmd::Threads { .. }

@@ -13,10 +13,11 @@
 //! Record names are stored in plaintext (they are the associated data and `list` needs them); only values are secret.
 //! Zeroizing is best effort: stack copies and formatted buffers are not tracked.
 //!
-//! The host vault calls it through the owner socket's `secrets.open|get|put` rows ([`call`], M2-7); kith-auth's
-//! Keychain writes move onto it at M2-18, and the signed daemon reads the key through Security.framework at M2-6.
+//! Secret cards write through it (`cards/secret.rs`, M2-12). The host vault calls it through the owner socket's
+//! `secrets.open|get|put` rows ([`call`], M2-7); kith-auth's Keychain writes move onto it at M2-18, and the signed
+//! daemon reads the key through Security.framework at M2-6.
 
-mod keystore;
+pub(crate) mod keystore;
 #[cfg(test)]
 mod tests;
 
@@ -108,8 +109,14 @@ impl Envelope {
         Ok(Self::with_store(keystore::os_key_store()?))
     }
 
-    fn with_store(store: Box<dyn KeyStore>) -> Self {
+    pub(crate) fn with_store(store: Box<dyn KeyStore>) -> Self {
         Self { store, key: None }
+    }
+
+    /// Loads the master key from the key store without opening any record (a locked store fails here; with records and
+    /// no key it refuses, as every call does). Mints nothing.
+    pub(crate) fn warm(&mut self, conn: &Connection) -> Result<()> {
+        self.key(conn, false).map(drop)
     }
 
     /// Stores `bytes` under `name`, replacing an earlier value (one statement, so last write wins atomically).

@@ -394,6 +394,17 @@ fn the_people_rows_of_m2_2_are_served_experimental_owner_only_unreleased_and_par
         ("people invite-remove ABC234", "people.removeInvite"),
         ("people preset pro --mode acceptEdits", "people.preset"),
         ("people preset-remove pro", "people.removePreset"),
+        (
+            "people person add ann --name Ann --owner",
+            "people.addPerson",
+        ),
+        ("people person rename ann anna", "people.renamePerson"),
+        ("people person remove ann --unused", "people.removePerson"),
+        ("people suspend ann", "people.suspend"),
+        ("people undo ann", "people.undo"),
+        ("people person clear-temp ann", "people.clearTemp"),
+        ("people retired ann", "people.retired"),
+        ("people may ann echo", "people.may"),
     ] {
         let argv: Vec<&str> = line.split(' ').collect();
         let parsed = parse_argv(&argv).unwrap_or_else(|e| panic!("{line}: {e}"));
@@ -446,6 +457,7 @@ fn the_cards_rows_are_experimental_owner_only_unreleased_and_served_by_the_core(
         ("cards ls --json", "cards.list"),
         ("cards show c1", "cards.show"),
         ("cards answer c1 yes", "cards.answer"),
+        ("cards provide c1 --account work", "cards.provide"),
     ] {
         let m = method(name).unwrap_or_else(|| panic!("{name}: no row"));
         assert_eq!(m.stability, Stability::Experimental, "{name}");
@@ -460,6 +472,18 @@ fn the_cards_rows_are_experimental_owner_only_unreleased_and_served_by_the_core(
     for name in ["cards.show", "cards.answer"] {
         assert!(method(name).unwrap().params.iter().all(|p| p.required));
     }
+    // A key is never typed on a command line: the values come from the client (an app), and nothing else takes them.
+    let provide = method("cards.provide").unwrap();
+    let values = provide.params.iter().find(|p| p.name == "values").unwrap();
+    assert!(matches!(values.arg, Arg::Caller));
+    assert!(
+        provide
+            .params
+            .iter()
+            .filter(|p| matches!(p.arg, Arg::Flag(_)))
+            .all(|p| p.name == "account")
+    );
+    assert!(parse_argv(&["cards", "provide", "c1", "--values", "x"]).is_err());
 }
 
 #[test]

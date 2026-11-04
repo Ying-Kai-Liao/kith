@@ -1,0 +1,11 @@
+\* The fixed design (see Lease.tla for what each switch means). A variant's .set file overrides lines here.
+\* Sizes: L = 3 ticks, the core stops by tick 3, at most 2 pings, one sleep per side: each cfg is seconds.
+L = 3
+RevokeBy = 3
+MaxSeq = 2
+MaxSleeps = 1
+Anchor = "ping"
+SleepClockCounts = TRUE
+ExpireKills = TRUE
+KillOwner = FALSE
+RenewRestores = TRUE

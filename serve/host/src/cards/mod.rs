@@ -675,7 +675,7 @@ pub fn delivered(store: &Store, entry_id: &str, allow: bool) {
     let Some(card) = store.card_by_entry(entry_id) else { return };
     let done = match card.state {
         CardState::Approved if allow => store.card_use(&card.id).map(drop),
-        s if s.open() => store.card_withdraw(&card.id).map(drop),
+        s if s.open() && !secret::claimed(&card.id) => store.card_withdraw(&card.id).map(drop),
         _ => Ok(()),
     };
     if let Err(error) = done {
@@ -740,6 +740,7 @@ pub fn park_entry(hub: &Hub, entry_id: &str) -> bool {
 /// A failed attempt's question can never be answered usefully: withdrawn, shown as expired like before.
 pub fn withdraw_entry(hub: &Hub, entry_id: &str) {
     if let Some(card) = hub.store.card_by_entry(entry_id)
+        && !secret::claimed(&card.id)
         && hub.store.card_withdraw(&card.id).unwrap_or(false)
     {
         close_entry(hub, &card, "expired");

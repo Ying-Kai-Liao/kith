@@ -8,10 +8,16 @@
         "mkdir": "kith/state"
       },
       {
+        "mkdir": "kith/no-update-repo/kernel"
+      },
+      {
         "write": "kith/agents/echo/role/agent.md",
         "text": "---\nname: echo\ndescription: test agent\n---\nYou echo.\n"
       }
     ],
+    "env": {
+      "KITH_SELF_ROOT": "{KITH_HOME}/no-update-repo/kernel"
+    },
     "run": [
       [
         "doctor",

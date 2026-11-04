@@ -55,16 +55,50 @@ pub fn try_cli(args: &[OsString]) -> Option<i32> {
     }
 }
 
+/// The variables `paths` reads, as this process has them. `var_os`: a variable that is not UTF-8 must not stop
+/// `kith paths`; one paths reads is skipped if it is.
+pub fn caller_env() -> serde_json::Map<String, Value> {
+    PATHS_VARS
+        .iter()
+        .filter_map(|k| Some(((*k).to_owned(), Value::String(std::env::var_os(k)?.into_string().ok()?))))
+        .collect()
+}
+
+/// One read row asked of the daemon by the host itself (the event filter's authority questions, M2-15). `Some(answer)`
+/// only when a daemon answered; no daemon, a refusal, a mismatch or a lost connection are all `None`, which the asker
+/// must read as "no" for anything that grants.
+pub fn ask(folders: &Paths, method: &str, params: &Value) -> Option<Value> {
+    match kith_core::reach(folders, method, params, true) {
+        kith_core::Reached::Answered(answer) => Some(answer),
+        _ => None,
+    }
+}
+
+/// A daemon started for a test of a caller that asks it (`ask`).
+#[cfg(test)]
+pub struct TestDaemon(kith_core::Daemon);
+
+#[cfg(test)]
+impl TestDaemon {
+    pub fn stop(self) {
+        self.0.stop();
+    }
+}
+
+/// Starts a daemon on `folders`, ready before it returns.
+#[cfg(test)]
+pub fn serve_for_test(folders: &Paths) -> TestDaemon {
+    let d = kith_core::Daemon::spawn(folders);
+    d.ready(std::time::Duration::from_secs(30)).expect("the daemon serves");
+    TestDaemon(d)
+}
+
 /// The caller's view of the environment, for the methods that read it: the daemon's own environment is not the one
 /// this process has (a hook or an agent run has its own `KITH_HOME`, `HOME`, `KITH_STATE` ...). `None` when the home or
 /// the kernel folder is not UTF-8: the daemon would be told another path than the caller has.
 fn caller_view(method: &str, mut params: Value, home: &std::path::Path) -> Option<Value> {
     if method == "paths" {
-        // var_os: a variable that is not UTF-8 must not stop `kith paths`; one paths reads is skipped if it is.
-        let env: serde_json::Map<String, Value> = PATHS_VARS
-            .iter()
-            .filter_map(|k| Some(((*k).to_owned(), Value::String(std::env::var_os(k)?.into_string().ok()?))))
-            .collect();
+        let env = caller_env();
         let object = params.as_object_mut().expect("parsed params are an object");
         if !object.contains_key("kernel") {
             let kernel: PathBuf = kernel::current_kernel().unwrap_or_else(|| home.join("kith/kernel"));
@@ -136,6 +170,57 @@ pub fn secrets_call(method: &str, params: &Value, wait: std::time::Duration) -> 
             }
             kith_core::Reached::Mismatch(note) => anyhow::bail!("the running core does not fit this host: {note}"),
             kith_core::Reached::Lost(why) => anyhow::bail!("the connection to the core ended: {why}"),
+        }
+    }
+}
+
+/// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7).
+const CORE_CALL_METHODS: &[&str] = &["terminal.open", "terminal.attach", "terminal.list"];
+
+/// `kith kernel core-call METHOD --params-stdin`: one owner-socket call, the JSON answer on stdout. 0 answered, 3 no daemon
+/// answers (nothing ran, the caller falls back), 4 refused, 5 lost after sending, 2 usage.
+pub fn core_call(method: &str, params_stdin: bool) -> i32 {
+    if !CORE_CALL_METHODS.contains(&method) {
+        eprintln!("core-call: {method} is not one of {}", CORE_CALL_METHODS.join(", "));
+        return 2;
+    }
+    if !params_stdin {
+        eprintln!("core-call: the params are read from stdin: pass --params-stdin");
+        return 2;
+    }
+    let mut text = String::new();
+    if std::io::Read::read_to_string(&mut std::io::stdin(), &mut text).is_err() {
+        eprintln!("core-call: params on stdin are not text");
+        return 2;
+    }
+    let params: Value =
+        if text.trim().is_empty() { json!({}) } else { serde_json::from_str(&text).unwrap_or(Value::Null) };
+    if !params.is_object() {
+        eprintln!("core-call: params must be a JSON object");
+        return 2;
+    }
+    let folders = kernel::folders(&kith_kernel::paths::process_home());
+    // Only a list is repeated when the connection breaks: an open or a ticket may have run.
+    match kith_core::reach(&folders, method, &params, method == "terminal.list") {
+        kith_core::Reached::Answered(answer) => {
+            println!("{answer}");
+            0
+        }
+        kith_core::Reached::Refused(e) => {
+            eprintln!("{e}");
+            4
+        }
+        kith_core::Reached::NoDaemon => {
+            eprintln!("no core daemon answers");
+            3
+        }
+        kith_core::Reached::Mismatch(note) => {
+            eprintln!("{note}");
+            3
+        }
+        kith_core::Reached::Lost(note) => {
+            eprintln!("{note}");
+            5
         }
     }
 }

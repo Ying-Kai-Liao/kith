@@ -66,6 +66,8 @@ pub(crate) struct Shared {
     /// The run socket (M0e) and its token table. The table is memory: a restart ends every token, and the runs that
     /// still want one are minted a new token later.
     run_server: Mutex<Option<runsock::Server>>,
+    /// The attach socket (M1-5): clients of held terminals.
+    attach_server: Mutex<Option<crate::attach::Server>>,
     runs: Arc<RunTokens>,
     socket: PathBuf,
     started: Instant,
@@ -113,6 +115,16 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        if method == "terminal.attach" {
+            let answer = self.terminals.attach_ticket(params)?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
+        if method == "terminal.list" {
+            let answer = self.terminals.list(params)?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         if let Some(answer) = self.runs.owner_call(method, params) {
             let answer = answer?;
             self.served.fetch_add(1, Ordering::SeqCst);
@@ -132,6 +144,17 @@ impl Shared {
             if crate::authority::call::serves(method) {
                 crate::call::check(kith_api::Principal::Owner, method, params)?;
                 let answer = self.with_core(|c| crate::authority::call::call(c, method, params))?;
+                self.served.fetch_add(1, Ordering::SeqCst);
+                return Ok(answer);
+            }
+        }
+        // The guest doors: start, mark live, end and the sweep are claim transactions (M2-14).
+        #[cfg(unix)]
+        {
+            if crate::doors::serves(method) {
+                crate::call::check(kith_api::Principal::Owner, method, params)?;
+                let answer = self
+                    .with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }
@@ -224,6 +247,7 @@ impl Daemon {
             changed: Condvar::new(),
             server: Mutex::new(None),
             run_server: Mutex::new(None),
+            attach_server: Mutex::new(None),
             runs: Arc::new(RunTokens::new()),
             socket: owner::endpoint(&layout),
             started: Instant::now(),
@@ -296,6 +320,14 @@ impl Daemon {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         if let Some(server) = run_server {
+            server.stop();
+        }
+        let attach_server = shared
+            .attach_server
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(server) = attach_server {
             server.stop();
         }
         let core = shared
@@ -387,6 +419,28 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
                 .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(server);
         }
         Err(e) => log::note(&shared.logs, &format!("daemon: no run socket: {e}")),
+    }
+    // Same for the attach socket: without it terminals still run, they just cannot be attached to.
+    match crate::attach::Server::bind(
+        layout,
+        shared.terminals.tickets.clone(),
+        shared.terminals.relay.clone(),
+        shared.logs.clone(),
+    ) {
+        Ok(server) => {
+            let mut slot = shared
+                .attach_server
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            // `stop` sets the flag before it looks in this slot, so a server put here after that is stopped here.
+            if shared.stopping() {
+                drop(slot);
+                server.stop();
+            } else {
+                *slot = Some(server);
+            }
+        }
+        Err(e) => log::note(&shared.logs, &format!("daemon: no attach socket: {e}")),
     }
     log::note(
         &shared.logs,

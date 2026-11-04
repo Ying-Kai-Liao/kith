@@ -31,19 +31,19 @@
 //!
 //! Tickets. 32 random bytes as hex; only their SHA-256 is kept, in memory, with the held process id and an expiry
 //! ([`TICKET_TTL`]). [`Terminals::redeem`] removes the entry on the first lookup whether or not it has expired, so a
-//! ticket works once and a replay finds nothing. M1-5's attach relay calls it. A ticket carries the role it allows
-//! ([`Role`]); `terminal.open` issues `owner`.
+//! ticket works once and a replay finds nothing. A ticket carries the role it allows
+//! ([`Role`]); `terminal.open` issues `owner`. The attach relay (`attach.rs`) redeems it.
 //!
-//! # Before M1-5 (who owns what, so it is not found out later)
-//! - Nobody acks a terminal's EXITED yet. The relay acks it after it has sent EXIT to the attached clients, and the
-//!   holder's output tail is gone with the ack: a client that attaches later to an ended terminal gets nothing, so the
-//!   relay (or the core's exit handling) must decide what an ended terminal keeps before it acks.
+//! # What M1-5 settled (the relay is `attach.rs`; its module docs have the details)
+//! - An ended terminal keeps its exit and the last 256 KiB of its output in the core's memory for ten minutes (sixteen
+//!   at most). A client that attaches to one gets ATTACHED, the output as the replay, then EXIT, and is closed. The relay
+//!   acks the holder's EXITED once it has sent EXIT to the attached clients and taken that tail.
 //! - `kill_on_lease_loss` is false for a terminal: it outlives its core on purpose. It MUST be true for any future guest
 //!   terminal (a person's or a bot guest's), whose process must not outlive the core that vouches for it.
 //!
 //! # Attach frames (the spec M1-5, the relay, and M1-6, the client, build to)
 //!
-//! One attach is one connection from a client to the relay (the owner socket's attach listener, M1-5). Frames use the
+//! One attach is one connection from a client to the relay (`attach.sock`, beside the owner socket). Frames use the
 //! holder's layout, `kith_holder::wire` (`[kind u8][id u32 LE][len u32 LE][payload]`), with `id` always 0: a connection
 //! is one terminal. Control payloads are JSON, terminal bytes are raw. Kinds below 100 go client to relay, 100 and up
 //! the other way ([`attach`] has the numbers).
@@ -63,7 +63,7 @@
 //! ```
 //!
 //! - Versions. `v` is 1 in ATTACH and ATTACHED; a relay that does not speak the client's `v` answers ERROR
-//!   `unsupported_version`. The largest payload the relay sends is [`attach::MAX_PAYLOAD`] bytes: OUTPUT (and the replay)
+//!   `unsupported_version`. The largest payload the relay sends is [`kith_holder::attach::MAX_PAYLOAD`] bytes: OUTPUT (and the replay)
 //!   are cut into chunks that fit, and a client must accept a payload that size. Unknown kinds: the client ignores
 //!   kinds of 100 and up it does not know (they are later additions); the relay answers an unknown client kind (below
 //!   100) with ERROR `unknown_kind` and closes.
@@ -74,7 +74,7 @@
 //!   `observer`s read only, any number, and never change the terminal's size.
 //! - Flow control. There is one connection between the core and the holder and one backlog on it (8 MB): a relay that
 //!   stopped reading would pause every engine, not just one. So the relay always drains the holder, whatever its
-//!   clients do. Each attach gets a bounded buffer ([`attach::CLIENT_BUFFER`]); a client that lets it overflow (the
+//!   clients do. Each attach gets a bounded buffer ([`kith_holder::attach::CLIENT_BUFFER`]); a client that lets it overflow (the
 //!   owner included) gets DETACHED `slow` and may attach again with a new ticket, which replays the holder's tail. An
 //!   engine never waits on a client. (There is no credit frame: a client that cannot keep up is cut, not waited for.)
 //! - The ticket is redeemed on ATTACH and only there; a refused ticket (used, expired, unknown) is ERROR with no
@@ -82,9 +82,6 @@
 //!   `terminal.attach` for a new ticket.
 //! - Busy. An EXIT with code 75 right after ATTACHED means busy: another writer has this session (the start stub's own
 //!   lock, held by a `--direct` run). The client says so in those words and does not retry.
-//!
-//! Not part of this PR: the relay and the client. Until M1-5 the supervisor discards the engine's output as it reads it
-//! (a core that never reads would let it pile up in memory); the holder keeps its own 1 MB tail for the first replay.
 //!
 //! Later (listed in the PR): a durable claim-id counter from core.db instead of the epoch; person and agent on the claim
 //! before guests; a timeout on the `ps` fallback of `process_start`; `prune_stale` of dead claims; an e2e run against
@@ -94,14 +91,15 @@ use std::collections::{BTreeMap, HashMap};
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use kith_holder::proto::{self, HeldId};
 use serde_json::{Value, json};
 
+use crate::attach::Relay;
 use crate::daemon::Shared;
 use crate::error::{Error, Result};
 use crate::holder_link::HolderConfig;
@@ -124,27 +122,10 @@ const BUSY_WAIT: Duration = Duration::from_millis(600);
 /// The stub's exit code for "a writer already holds this key" (core/stub).
 pub(crate) const STUB_BUSY: i32 = 75;
 
-/// The frame kinds of an attach connection (see the module docs).
-#[allow(dead_code)] // the relay (M1-5) and the client (M1-6) use them
-pub(crate) mod attach {
-    pub(crate) const ATTACH: u8 = 1;
-    pub(crate) const INPUT: u8 = 2;
-    pub(crate) const RESIZE: u8 = 3;
-    pub(crate) const DETACH: u8 = 4;
-    pub(crate) const ATTACHED: u8 = 101;
-    pub(crate) const OUTPUT: u8 = 102;
-    pub(crate) const EXIT: u8 = 103;
-    pub(crate) const DETACHED: u8 = 104;
-    pub(crate) const ERROR: u8 = 105;
-    /// The largest payload the relay sends in one frame; OUTPUT and the replay are cut to fit.
-    pub(crate) const MAX_PAYLOAD: usize = 64 * 1024;
-    /// What the relay buffers for one attached client before it cuts the client with DETACHED `slow`.
-    pub(crate) const CLIENT_BUFFER: usize = 1024 * 1024;
-}
-
 // --- the filter ----------------------------------------------------------------------------------------------------
 
-/// The names `serve/host/src/runauth.rs` scrubs for tokens and their sockets.
+/// The names `serve/host/src/runauth.rs` scrubs for tokens and their sockets (`KITH_RUN_*` and `HQ_RUN_*` are dropped by prefix:
+/// `kith_env_sync` mirrors every KITH_ name to its HQ_ spelling, so a run's outbox arrives as `HQ_RUN_OUTBOX` too).
 const SCRUBBED: [&str; 6] = [
     "KITH_RUN_TOKEN",
     "KITH_RUN_SOCKET",
@@ -157,7 +138,11 @@ const SCRUBBED: [&str; 6] = [
 /// The env a terminal is started with: the caller's, less what the module docs name.
 pub(crate) fn filter_env(env: &serde_json::Map<String, Value>) -> BTreeMap<String, String> {
     env.iter()
-        .filter(|(k, _)| !SCRUBBED.contains(&k.as_str()) && !k.starts_with("KITH_RUN_"))
+        .filter(|(k, _)| {
+            !SCRUBBED.contains(&k.as_str())
+                && !k.starts_with("KITH_RUN_")
+                && !k.starts_with("HQ_RUN_")
+        })
         .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
         .collect()
 }
@@ -166,13 +151,11 @@ pub(crate) fn filter_env(env: &serde_json::Map<String, Value>) -> BTreeMap<Strin
 
 /// What an attach may do. Ordered: an observer is lower than an owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-#[allow(dead_code)] // M1-5's relay reads it
 pub(crate) enum Role {
     Observer,
     Owner,
 }
 
-#[allow(dead_code)] // read by redeem, which the attach relay (M1-5) calls
 struct Entry {
     role: Role,
     held: HeldId,
@@ -183,7 +166,6 @@ struct Entry {
 
 /// What a good ticket was for.
 #[derive(Debug, PartialEq, Eq)]
-#[allow(dead_code)] // M1-5's relay reads it
 pub(crate) struct Redeemed {
     /// The most this ticket allows; the ATTACH may ask for this or lower.
     pub role: Role,
@@ -192,7 +174,6 @@ pub(crate) struct Redeemed {
     pub agent: String,
 }
 
-#[allow(dead_code)] // M1-5's relay calls it
 impl Redeemed {
     /// The role an ATTACH gets for the role it asked for and whether it asked to take over: the ticket's role or a
     /// lower one, and only an owner ticket may take over. `None` is ERROR `role_not_allowed`.
@@ -202,7 +183,6 @@ impl Redeemed {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-#[allow(dead_code)] // M1-5's relay reads it
 pub(crate) enum TicketRefused {
     /// Never issued, or already used (the two look the same, on purpose).
     Unknown,
@@ -276,12 +256,29 @@ impl Tickets {
 
     /// Uses the ticket up. A second call, an unknown string and an expired ticket are all refused; the first call
     /// removes the entry whatever it finds.
-    #[allow(dead_code)] // M1-5's relay calls it
     pub(crate) fn redeem(&self, ticket: &str) -> std::result::Result<Redeemed, TicketRefused> {
         self.redeem_at(Instant::now(), ticket)
     }
 
-    #[allow(dead_code)]
+    /// What the ticket is for, without using it up: the relay checks the cheap refusals (no such terminal, an owner
+    /// there already) before it burns a ticket on them. Unknown and expired look as they do to `redeem`.
+    pub(crate) fn peek(&self, ticket: &str) -> std::result::Result<Redeemed, TicketRefused> {
+        let map = self
+            .by_hash
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let entry = map.get(&hash(ticket)).ok_or(TicketRefused::Unknown)?;
+        if entry.expires <= Instant::now() {
+            return Err(TicketRefused::Expired);
+        }
+        Ok(Redeemed {
+            role: entry.role,
+            held: entry.held.clone(),
+            session: entry.session.clone(),
+            agent: entry.agent.clone(),
+        })
+    }
+
     fn redeem_at(
         &self,
         now: Instant,
@@ -332,6 +329,8 @@ pub(crate) enum Req {
 /// a request that sat in the queue past it (the link was down) is dropped, never run after its caller gave up.
 pub(crate) struct SpawnReq {
     pub spec: proto::Spawn,
+    /// The agent the terminal is for (the relay lists it).
+    pub agent: String,
     pub deadline: Instant,
     pub busy_wait: Duration,
     pub reply: SyncSender<Placed>,
@@ -346,7 +345,9 @@ pub(crate) struct Terminals {
     inbox: Mutex<Receiver<Req>>,
     stub: Mutex<Option<PathBuf>>,
     last_claim: AtomicU64,
-    pub(crate) tickets: Tickets,
+    pub(crate) tickets: Arc<Tickets>,
+    /// The attach relay: which held terminals there are and who is attached to them.
+    pub(crate) relay: Arc<Relay>,
     /// Tests: make handing the claim to the stub's pid fail.
     #[cfg(test)]
     pub(crate) fail_retarget: AtomicBool,
@@ -365,7 +366,8 @@ impl Terminals {
             inbox: Mutex::new(inbox),
             stub: Mutex::new(None),
             last_claim: AtomicU64::new(0),
-            tickets: Tickets::default(),
+            tickets: Arc::default(),
+            relay: Arc::new(Relay::new()),
             #[cfg(test)]
             fail_retarget: AtomicBool::new(false),
             #[cfg(test)]
@@ -417,7 +419,7 @@ impl Terminals {
         inbox.recv_timeout(wait).ok()
     }
 
-    #[allow(dead_code)] // M1-5's relay calls it
+    #[cfg(test)]
     pub(crate) fn redeem(&self, ticket: &str) -> std::result::Result<Redeemed, TicketRefused> {
         self.tickets.redeem(ticket)
     }
@@ -464,6 +466,75 @@ impl Terminals {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
         HolderConfig::find_stub(configured)
+    }
+
+    /// The `terminal.list` method: the held terminals the relay knows, with who is attached.
+    pub(crate) fn list(&self, params: &Value) -> Result<Value> {
+        let row = kith_api::method("terminal.list")
+            .ok_or_else(|| Error::NoSuchMethod("kith-core: no method terminal.list".into()))?;
+        kith_api::params::validate(row, params)
+            .map_err(|e| Error::BadParams(format!("kith-core: {e}")))?;
+        Ok(json!({
+            "link": if self.link_up.load(Ordering::SeqCst) { "up" } else { "down" },
+            "terminals": self.relay.list(),
+        }))
+    }
+
+    /// The `terminal.attach` method: a new single-use ticket for a held terminal that is running (or has ended and is
+    /// still kept for a late attach). `open` answers `busy` for a running session, so this is how a client comes back
+    /// after a detach, a cut (`slow`) or a lost link.
+    pub(crate) fn attach_ticket(&self, params: &Value) -> Result<Value> {
+        let row = kith_api::method("terminal.attach")
+            .ok_or_else(|| Error::NoSuchMethod("kith-core: no method terminal.attach".into()))?;
+        kith_api::params::validate(row, params)
+            .map_err(|e| Error::BadParams(format!("kith-core: {e}")))?;
+        let bad = |m: &str| Error::BadParams(format!("kith-core: terminal.attach: {m}"));
+        let role = match params.get("role").and_then(Value::as_str) {
+            None | Some("owner") => Role::Owner,
+            Some("observer") => Role::Observer,
+            Some(_) => return Err(bad("role is owner or observer")),
+        };
+        let held = match params.get("heldId") {
+            None | Some(Value::Null) => None,
+            Some(h) => Some(HeldId {
+                instance: h
+                    .get("instance")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| bad("heldId needs an instance and an id"))?
+                    .to_owned(),
+                id: h
+                    .get("id")
+                    .and_then(Value::as_u64)
+                    .and_then(|n| u32::try_from(n).ok())
+                    .ok_or_else(|| bad("heldId needs an instance and an id"))?,
+            }),
+        };
+        let session = params.get("session").and_then(Value::as_str);
+        if held.is_none() && session.is_none() {
+            return Err(bad("needs heldId or session"));
+        }
+        let Some(found) = self.relay.find(held.as_ref(), session) else {
+            return Ok(
+                json!({"status": "gone", "note": "no such held terminal (it ended and was forgotten, or was never opened here)"}),
+            );
+        };
+        let ticket = self.tickets.issue(
+            role,
+            found.held.clone(),
+            &found.session,
+            found.agent.as_deref().unwrap_or(""),
+        )?;
+        Ok(json!({
+            "status": "open",
+            "ticket": ticket,
+            "expires_in": TICKET_TTL.as_secs(),
+            "held_id": {"instance": found.held.instance, "id": found.held.id},
+            "session": found.session,
+            "agent": found.agent,
+            "cols": found.cols,
+            "rows": found.rows,
+            "ended": found.ended,
+        }))
     }
 
     /// The `terminal.open` method.
@@ -533,6 +604,16 @@ impl Terminals {
         }
         // From here every way out but the open one gives the claim back.
         let give_back = |pid: u32| claim::release(state, &req.session, pid);
+        // The app taking the session over holds `<sid>.takeover.claim` until it has imported it: no writer starts meanwhile
+        // (`kith-sessions claim_start` and `resolve` refuse the same way).
+        if claim::takeover_live(state, &req.session) {
+            give_back(me);
+            return Ok(json!({
+                "status": "busy",
+                "note": format!("session {} is being taken over in the app right now; try again in a moment", req.session),
+                "held_by": {"pid": 0, "kind": "takeover"},
+            }));
+        }
         let locks = layout.dir.join("locks");
         if let Err(e) = crate::perms::ensure_dir(&locks) {
             give_back(me);
@@ -572,6 +653,7 @@ impl Terminals {
         let (reply, answer) = mpsc::sync_channel(0);
         let sent = self.queue.send(Req::Spawn(SpawnReq {
             spec,
+            agent: req.agent.clone(),
             deadline: Instant::now() + SPAWN_WAIT,
             busy_wait: BUSY_WAIT,
             reply,
@@ -768,6 +850,28 @@ mod claim {
         threads::retarget(&ctx(state), sid, i64::from(from), i64::from(to), "terminal")
     }
 
+    /// A live `<sid>.takeover.claim`.
+    pub(super) fn takeover_live(state: &Path, sid: &str) -> bool {
+        let path = threads::claim_path(&threads::registry_dir(state), sid, true);
+        threads::read_claim(&path)
+            .as_ref()
+            .is_some_and(threads::Claim::is_live)
+    }
+
+    /// Takes the takeover claim for `pid` (what the host does while it imports a session). Tests only.
+    #[cfg(test)]
+    pub(super) fn take_takeover(state: &Path, sid: &str, pid: u32) {
+        let how = Take {
+            takeover: true,
+            ..Take::new("terminal")
+        };
+        assert!(
+            threads::take_claim(&ctx(state), sid, i64::from(pid), &how)
+                .expect("take_claim ran")
+                .is_ok()
+        );
+    }
+
     /// Gives the claim back if `pid` still holds it.
     pub(super) fn release(state: &Path, sid: &str, pid: u32) {
         threads::release_one(&ctx(state), sid, i64::from(pid), false);
@@ -776,4 +880,4 @@ mod claim {
 
 #[cfg(test)]
 #[path = "terminal_tests.rs"]
-mod tests;
+pub(crate) mod tests;

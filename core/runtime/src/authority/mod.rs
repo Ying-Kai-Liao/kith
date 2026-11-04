@@ -8,6 +8,8 @@
 //!
 //! The write half (M2-2) is `write.rs` (the verbs of `kith-auth`, over the auth.json shape), `store.rs` (one claim
 //! transaction each, the difference stored row by row) and `call.rs` (the `people.*` rows the daemon routes here).
+//! The person-level writes (M2-4: add, rename, remove, suspend/undo a person, the ids a removal retires) are
+//! `revoke.rs`.
 //!
 //! Nothing is switched. `kith-auth` and the host still decide from auth.json; only the daemon's `people.*` rows call this
 //! module, and no caller sends them yet (the CLI switch is M2-18, the import of auth.json M2-8).
@@ -21,6 +23,7 @@ use crate::error::{Error, Result};
 pub(crate) mod call;
 #[cfg(test)]
 mod load;
+mod revoke;
 mod store;
 #[cfg(test)]
 mod tests;
@@ -131,6 +134,31 @@ fn flag(r: &Row<'_>, i: usize) -> Result<Option<Value>> {
 /// A NULL column is a missing key.
 pub(crate) fn snapshot(conn: &Connection) -> Result<Value> {
     snapshot_with(conn, &mut || {})
+}
+
+/// The tables as the rules read them, inside a transaction the caller holds and writes in (the doors decide in the
+/// transaction that writes the row, so the answer and the write cannot be split by a revoke).
+pub(crate) fn tables_within(tx: &Connection) -> Result<Value> {
+    read_tables(tx, &mut || {})
+}
+
+/// `may` over tables already read (see [`tables_within`]): (allowed, why), a rule with no answer being an error.
+pub(crate) fn may_in(ctx: &Ctx, auth: &Value, person: &str, agent: &str) -> Result<(bool, String)> {
+    Rules::new(ctx, auth)
+        .may(person, agent, None, false)
+        .map_err(|d| refused(&d))
+}
+
+/// `resolve` over tables already read: what a run of `agent` for `person` gets (a bot's already cut to its owner's).
+pub(crate) fn resolve_in(
+    ctx: &Ctx,
+    auth: &Value,
+    agent: &str,
+    person: &str,
+) -> Result<Map<String, Value>> {
+    Rules::new(ctx, auth)
+        .resolve(agent, person, None, false)
+        .map_err(|d| refused(&d))
 }
 
 /// [`snapshot`], calling `between` after each table is read: a test writes there to prove the later tables are read

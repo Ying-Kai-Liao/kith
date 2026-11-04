@@ -24,9 +24,19 @@ mod authority;
 mod call;
 // Nothing calls the store but the daemon's cards rows and the tests: the host's callers switch in lane H, and the raise,
 // claim and close verbs get theirs there and in M2-12.
-#[allow(dead_code, reason = "first callers are M2-12 and lane H")]
+#[allow(dead_code, reason = "first callers are lane H")]
 mod cards;
 mod daemon;
+// Nothing calls the doors but the daemon's `doors.*` rows and the tests: the host's sweep and `kith_door.py` switch later.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "first callers are the host's door code after the switch"
+)]
+mod doors;
+// Held terminals start on Unix only for now; elsewhere the relay has nothing to relay.
+#[cfg_attr(not(unix), allow(dead_code))]
+mod attach;
 mod db;
 mod error;
 mod gate;
