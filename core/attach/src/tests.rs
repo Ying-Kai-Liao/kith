@@ -223,15 +223,15 @@ fn detached_says_why_in_one_line() {
         ("detach", 0, "detached; the agent keeps running"),
         (
             "taken_over",
-            1,
+            77,
             "detached: another client took over this terminal",
         ),
         (
             "slow",
-            1,
+            76,
             "detached: this client could not keep up with the output; attach again",
         ),
-        ("holder_lost", 1, "detached: the process holder is gone"),
+        ("holder_lost", 78, "detached: the process holder is gone"),
         ("refused", 1, "detached: the relay refused this attach"),
         ("later_addition", 1, "detached: later_addition"),
     ] {
