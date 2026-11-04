@@ -33,22 +33,8 @@ mod term_windows;
 #[cfg(windows)]
 use term_windows as term;
 
-/// The frame kinds (terminal.rs `mod attach`).
-// TODO(M1-5): switch to `kith_holder::attach` once it is on rust-rebuild.
-mod kind {
-    pub const ATTACH: u8 = 1;
-    pub const INPUT: u8 = 2;
-    pub const RESIZE: u8 = 3;
-    pub const DETACH: u8 = 4;
-    pub const ATTACHED: u8 = 101;
-    pub const OUTPUT: u8 = 102;
-    pub const EXIT: u8 = 103;
-    pub const DETACHED: u8 = 104;
-    pub const ERROR: u8 = 105;
-}
+use kith_holder::attach as kind;
 
-/// The wire version this client speaks.
-const VERSION: u8 = 1;
 /// The stub's "busy" exit code (a `--direct` writer holds the session).
 const BUSY: i32 = 75;
 const RESIZE_POLL: Duration = Duration::from_millis(100);
@@ -198,7 +184,7 @@ pub(crate) fn session(stream: Stream, io: Io, opts: &Opts) -> i32 {
     let writer: Writer = Arc::new(Mutex::new(stream));
 
     let start = size();
-    let mut hello = json!({"v": VERSION, "ticket": opts.ticket, "role": opts.role.as_str()});
+    let mut hello = json!({"v": kind::VERSION, "ticket": opts.ticket, "role": opts.role.as_str()});
     if let Some((cols, rows)) = start {
         hello["cols"] = json!(cols);
         hello["rows"] = json!(rows);
