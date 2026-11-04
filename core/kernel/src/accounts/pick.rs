@@ -2,7 +2,7 @@
 //! order the set (the pin, then the set by policy), the state file says which accounts are out, and the harness's own status
 //! command says which are signed out.
 
-use super::state::{Mark, usage_level};
+use super::state::{Mark, StateSource, usage_level};
 use super::{
     Ctx, Map, agent_harness, agent_md_of, check, fix, layout, parse, present, settings,
     static_order,
@@ -133,6 +133,27 @@ fn spread(ids: &[String], state: &Map, now: f64) -> Vec<String> {
             .then(ka.2.cmp(&kb.2))
     });
     order.into_iter().map(|n| ids[n].clone()).collect()
+}
+
+/// [`pick`] over a state source (the file by default, the core's database in the core): the same answer for the same state.
+pub fn pick_from(
+    ctx: &Ctx<'_>,
+    s: &Map,
+    agent: &str,
+    agent_md: Option<&Path>,
+    deep: bool,
+    now: f64,
+    src: &dyn StateSource,
+) -> Pick {
+    pick(
+        ctx,
+        s,
+        agent,
+        agent_md,
+        deep,
+        now,
+        &src.accounts(&ctx.machine),
+    )
 }
 
 /// An account that was left out of the candidates, and why.

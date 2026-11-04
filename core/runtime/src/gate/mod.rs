@@ -16,7 +16,9 @@
 //! What differs from the host, on purpose:
 //! - The rows survive a daemon restart, because a holder is a process that may outlive the daemon. A holder that gave
 //!   its pid is checked on every call (as `core.holder` does): a pid that is gone, or now has another start time, frees
-//!   its slot or its place in line.
+//!   its slot or its place in line. The process probes run before the write transaction opens, never inside it, and the
+//!   transaction frees a row only if it still names the pid and start time that were judged (see `proc.rs` for the
+//!   shared rule and the epoch start times).
 //! - The memory check stays out: it reads the Mac, not core.db, and moves with the host's reclaim task. The caller
 //!   passes `max`; the core never evicts, so a lowered `max` just stops new grants until enough holders release.
 //! - A cancelled park (the host's `Parked` dropped before it got its slot back) re-counts the turn at once there. Here
@@ -36,53 +38,9 @@ pub(crate) const INVITEE_SLOTS: i64 = 1;
 
 const MAX_KEY: &str = "max_running";
 
-/// What the gate asks the system about a holder's process. A parameter so tests can end a "process" without killing one.
-pub(crate) trait Liveness {
-    /// The start time of a pid, as `core.holder` records it; `None` when it cannot be read (gone, or no `ps`).
-    fn start(&self, pid: u32) -> Option<String>;
-    /// True only when the system says there is no such process. An error, a refusal or a missing tool is not "gone":
-    /// a failed probe must never free a live holder.
-    fn gone(&self, pid: u32) -> bool;
-}
+mod proc;
 
-/// The real system.
-pub(crate) struct System;
-
-impl Liveness for System {
-    fn start(&self, pid: u32) -> Option<String> {
-        crate::lock::process_start(pid)
-    }
-    fn gone(&self, pid: u32) -> bool {
-        pid_gone(pid)
-    }
-}
-
-/// `kill -0` answered "No such process" (ESRCH). Unsafe code is forbidden here, so no kill(2): the tool, by absolute path
-/// and in the C locale, so its words are the ones read. Where there is no such tool, nothing is ever gone.
-#[cfg(unix)]
-pub(crate) fn pid_gone(pid: u32) -> bool {
-    let kill = ["/bin/kill", "/usr/bin/kill"]
-        .into_iter()
-        .find(|p| std::path::Path::new(p).is_file());
-    let Some(kill) = kill else { return false };
-    let Ok(out) = std::process::Command::new(kill)
-        .env("LC_ALL", "C")
-        .args(["-s", "0", "--"])
-        .arg(pid.to_string())
-        .output()
-    else {
-        return false;
-    };
-    !out.status.success()
-        && String::from_utf8_lossy(&out.stderr)
-            .to_ascii_lowercase()
-            .contains("no such process")
-}
-
-#[cfg(not(unix))]
-pub(crate) fn pid_gone(_: u32) -> bool {
-    false
-}
+pub(crate) use proc::{Liveness, System, holder_alive, pid_gone};
 
 /// One request for a slot.
 pub(crate) struct Take<'a> {
@@ -151,42 +109,73 @@ fn stored_max(tx: &Transaction<'_>) -> Result<Option<i64>> {
         .optional()?)
 }
 
-/// Frees the slots and places in line whose process is gone or is another process now. One rule:
+/// What the probes found, read and judged with no lock held (a probe reads the system, and `core.db`'s write lock is
+/// shared with the conversation claims): holders whose process is gone or is another process now, and holders recorded
+/// with no start time whose start time reads now.
+#[derive(Default)]
+struct Seen {
+    /// `(holder, pid, started)` as the row was read.
+    dead: Vec<(String, i64, String)>,
+    /// `(holder, pid, start time to record)` for a row recorded with an empty one.
+    fill: Vec<(String, i64, String)>,
+}
+
+/// Looks at every holder that gave a pid. One rule ([`holder_alive`]):
 /// - the start time reads and equals the recorded one: alive;
 /// - it reads and differs: the pid was reused, dead;
-/// - it cannot be read (or none was recorded): dead only when the system says there is no such process. A failed `ps`
-///   must never free a live holder, so any other answer keeps the row.
-fn prune(tx: &Transaction<'_>, live: &dyn Liveness) -> Result<()> {
-    let mut dead: Vec<String> = Vec::new();
+/// - it cannot be read: dead only when the system says there is no such process. A failed probe must never free a live
+///   holder, so any other answer keeps the row.
+///
+/// A row recorded with no start time (one that could not be read at take) gets the first reading as its record, so it is
+/// no longer alive forever; rows with old `lstart` text keep that text and are freed only by ESRCH.
+fn probe_holders(core: &Core, live: &dyn Liveness) -> Result<Seen> {
+    let mut rows: Vec<(String, i64, String)> = Vec::new();
     for table in ["gate_slots", "gate_waiters"] {
-        let mut st = tx.prepare(&format!(
+        let mut st = core.conn().prepare(&format!(
             "SELECT holder, pid, started FROM {table} WHERE pid IS NOT NULL"
         ))?;
-        let rows = st.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, i64>(1)?,
-                r.get::<_, String>(2)?,
-            ))
-        })?;
-        for row in rows {
-            let (holder, pid, started) = row?;
-            let Ok(pid) = u32::try_from(pid) else {
-                continue;
-            };
-            let alive = match live.start(pid) {
-                Some(current) if !started.is_empty() => current == started,
-                Some(_) => true,
-                None => !live.gone(pid),
-            };
-            if !alive {
-                dead.push(holder);
+        let found = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        for row in found {
+            let row = row?;
+            if !rows.contains(&row) {
+                rows.push(row);
             }
         }
     }
-    for holder in dead {
-        tx.execute("DELETE FROM gate_slots WHERE holder = ?1", [&holder])?;
-        tx.execute("DELETE FROM gate_waiters WHERE holder = ?1", [&holder])?;
+    let mut seen = Seen::default();
+    for (holder, pid, started) in rows {
+        let Ok(p) = u32::try_from(pid) else { continue };
+        if !holder_alive(live, p, &started) {
+            seen.dead.push((holder, pid, started));
+        } else if started.is_empty()
+            && let Some(now) = live.start(p)
+        {
+            seen.fill.push((holder, pid, now));
+        }
+    }
+    Ok(seen)
+}
+
+/// Writes what [`probe_holders`] found, inside the transaction. A row is freed only if it still names the pid and start
+/// time that were judged: one taken again in between (another process under the same holder id) is left alone.
+fn settle(tx: &Transaction<'_>, seen: &Seen) -> Result<()> {
+    for (holder, pid, started) in &seen.dead {
+        for table in ["gate_slots", "gate_waiters"] {
+            tx.execute(
+                &format!("DELETE FROM {table} WHERE holder = ?1 AND pid = ?2 AND started = ?3"),
+                params![holder, pid, started],
+            )?;
+        }
+    }
+    for (holder, pid, now) in &seen.fill {
+        for table in ["gate_slots", "gate_waiters"] {
+            tx.execute(
+                &format!(
+                    "UPDATE {table} SET started = ?3 WHERE holder = ?1 AND pid = ?2 AND started = ''"
+                ),
+                params![holder, pid, now],
+            )?;
+        }
     }
     // A resume in line whose slot is gone has nothing to come back to.
     tx.execute(
@@ -303,8 +292,10 @@ pub(crate) fn take(core: &mut Core, t: &Take<'_>, live: &dyn Liveness) -> Result
             "kith-core: gate.take: max is 1 or more".into(),
         ));
     }
+    let seen = probe_holders(core, live)?;
+    let started = t.pid.and_then(|p| live.start(p)).unwrap_or_default();
     let tx = core.claim_tx()?;
-    prune(&tx, live)?;
+    settle(&tx, &seen)?;
     match t.max {
         Some(m) => set_max(&tx, m)?,
         None if stored_max(&tx)?.is_none() => {
@@ -315,7 +306,6 @@ pub(crate) fn take(core: &mut Core, t: &Take<'_>, live: &dyn Liveness) -> Result
         None => {}
     }
     if state_of(&tx, t.holder)? == State::Gone {
-        let started = t.pid.and_then(|p| live.start(p)).unwrap_or_default();
         // The back of the line: one past the largest, or the first.
         let ord = count(&tx, "SELECT COALESCE(MAX(ord), 0) + 1 FROM gate_waiters")?;
         tx.execute(
@@ -339,8 +329,9 @@ pub(crate) fn take(core: &mut Core, t: &Take<'_>, live: &dyn Liveness) -> Result
 
 /// Gives a slot (or a place in line) back. False when the holder held nothing.
 pub(crate) fn release(core: &mut Core, holder: &str, live: &dyn Liveness) -> Result<bool> {
+    let seen = probe_holders(core, live)?;
     let tx = core.claim_tx()?;
-    prune(&tx, live)?;
+    settle(&tx, &seen)?;
     let slots = tx.execute("DELETE FROM gate_slots WHERE holder = ?1", [holder])?;
     let queued = tx.execute("DELETE FROM gate_waiters WHERE holder = ?1", [holder])?;
     pump(&tx)?;
@@ -351,8 +342,9 @@ pub(crate) fn release(core: &mut Core, holder: &str, live: &dyn Liveness) -> Res
 /// The turn waits on another bot's reply: its slot is given up. Nested asks share one parking. False when the holder
 /// holds no slot (nothing is parked then).
 pub(crate) fn park(core: &mut Core, holder: &str, live: &dyn Liveness) -> Result<bool> {
+    let seen = probe_holders(core, live)?;
     let tx = core.claim_tx()?;
-    prune(&tx, live)?;
+    settle(&tx, &seen)?;
     let changed = tx.execute(
         "UPDATE gate_slots SET asks = asks + 1, state = 'parked' WHERE holder = ?1",
         [holder],
@@ -373,8 +365,9 @@ pub(crate) fn park(core: &mut Core, holder: &str, live: &dyn Liveness) -> Result
 /// One ask is back. The last one puts the turn in line again, ahead of turns that have not started. Unparking a holder
 /// with no ask out (a double unpark, an unknown holder) changes nothing.
 pub(crate) fn unpark(core: &mut Core, holder: &str, live: &dyn Liveness) -> Result<State> {
+    let seen = probe_holders(core, live)?;
     let tx = core.claim_tx()?;
-    prune(&tx, live)?;
+    settle(&tx, &seen)?;
     let asks: Option<i64> = tx
         .query_row(
             "SELECT asks FROM gate_slots WHERE holder = ?1",
@@ -415,8 +408,9 @@ pub(crate) fn unpark(core: &mut Core, holder: &str, live: &dyn Liveness) -> Resu
 
 /// Everything the gate holds, in the order the line is kept. Frees dead holders first, so it never shows one.
 pub(crate) fn list(core: &mut Core, live: &dyn Liveness) -> Result<Value> {
+    let seen = probe_holders(core, live)?;
     let tx = core.claim_tx()?;
-    prune(&tx, live)?;
+    settle(&tx, &seen)?;
     let max = stored_max(&tx)?;
     let mut slots = Vec::new();
     {

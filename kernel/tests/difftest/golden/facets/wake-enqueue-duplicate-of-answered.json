@@ -2,7 +2,7 @@
   "fakes": "",
   "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"duplicate\", \"session\": \"s1\", \"id\": \"done-1\"}\n{\"at\": \"<TS>\", \"event\": \"duplicate\", \"session\": \"s1\", \"id\": \"gone-1\"}\n",
   "state:home/.kith/sessions/queue/.lock": "",
-  "state:home/.kith/sessions/queue/answered.json": "{\n  \"done-1\": {\n    \"how\": \"answered\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<EPOCH>\"\n  },\n  \"gone-1\": {\n    \"how\": \"withdrawn\",\n    \"run\": null,\n    \"t\": \"<EPOCH>\"\n  }\n}\n",
+  "state:home/.kith/sessions/queue/answered.json": "{\n  \"done-1\": {\n    \"how\": \"answered\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<MASKED>\"\n  },\n  \"gone-1\": {\n    \"how\": \"withdrawn\",\n    \"run\": null,\n    \"t\": \"<MASKED>\"\n  }\n}\n",
   "state:home/.kith/sessions/waits/": "<empty dir>\n",
   "step0.exit": "0\n",
   "step0.stderr": "",

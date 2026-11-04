@@ -707,12 +707,12 @@ fn a_claim_whose_process_is_gone_is_dropped_and_an_unreadable_one_is_kept() {
         pid: Some(4242),
         until: T0 + 100_000,
     };
-    claim(&mut c, &a.id, &with_pid, T0, &Started("t1"))
+    claim(&mut c, &a.id, &with_pid, T0, &Started("e1"))
         .unwrap()
         .unwrap();
     // The same start time: alive. A failed probe: kept too.
     assert!(
-        claim(&mut c, &a.id, &hold("w2", T0 + 9), T0 + 1, &Started("t1"))
+        claim(&mut c, &a.id, &hold("w2", T0 + 9), T0 + 1, &Started("e1"))
             .unwrap()
             .is_none()
     );
@@ -724,7 +724,7 @@ fn a_claim_whose_process_is_gone_is_dropped_and_an_unreadable_one_is_kept() {
     assert_eq!(yes(&mut c, &a.id, T0 + 2), Answered::Claimed("w1".into()));
     // The pid has another start time now: reused, so the holder is dead and the card is free.
     assert!(matches!(
-        answer(&mut c, &reply(&a.id, true), T0 + 3, &Started("t2")).unwrap(),
+        answer(&mut c, &reply(&a.id, true), T0 + 3, &Started("e2")).unwrap(),
         Answered::Applied { .. }
     ));
 
@@ -1474,5 +1474,86 @@ fn a_yes_to_a_secret_card_is_refused_by_the_store_and_never_becomes_a_grant() {
     assert!(matches!(
         raise(&mut c, &ask("s1", "key2"), T0 + 3, &Nobody).unwrap(),
         Raised::New(_)
+    ));
+}
+
+/// Probes that try to take core.db's write lock from another connection: they fail if a claim transaction is open.
+struct LockFree(std::path::PathBuf, &'static str);
+
+impl LockFree {
+    fn check(&self) {
+        let other = rusqlite::Connection::open(&self.0).unwrap();
+        other.busy_timeout(std::time::Duration::ZERO).unwrap();
+        other
+            .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .expect("a probe ran while the write lock was held");
+    }
+}
+
+impl Liveness for LockFree {
+    fn start(&self, _: u32) -> Option<String> {
+        self.check();
+        Some(self.1.to_owned())
+    }
+    fn gone(&self, _: u32) -> bool {
+        self.check();
+        false
+    }
+}
+
+#[test]
+fn claims_are_probed_with_no_write_lock_held() {
+    let (_t, l, mut c) = core();
+    let a = new(&mut c, "s1", "a");
+    let live = LockFree(l.db.clone(), "e1000");
+    let with_pid = Claim {
+        holder: "w1",
+        pid: Some(4242),
+        until: T0 + 100_000,
+    };
+    claim(&mut c, &a.id, &with_pid, T0, &live).unwrap().unwrap();
+    // The claim is judged on each later call, outside the transaction.
+    assert!(
+        claim(&mut c, &a.id, &hold("w2", T0 + 9), T0 + 1, &live)
+            .unwrap()
+            .is_none()
+    );
+    sweep(&mut c, T0 + 2, &live).unwrap();
+}
+
+#[test]
+fn a_claim_with_old_lstart_text_is_kept_while_its_process_lives_and_freed_when_it_is_gone() {
+    let (_t, l, mut c) = core();
+    let a = new(&mut c, "s1", "a");
+    let with_pid = Claim {
+        holder: "w1",
+        pid: Some(4242),
+        until: T0 + 100_000,
+    };
+    claim(&mut c, &a.id, &with_pid, T0, &Nobody)
+        .unwrap()
+        .unwrap();
+    rusqlite::Connection::open(&l.db)
+        .unwrap()
+        .execute(
+            "UPDATE cards SET claim_started = 'Mon Nov  3 10:00:00 2026' WHERE id = ?1",
+            [&a.id],
+        )
+        .unwrap();
+    assert!(
+        claim(
+            &mut c,
+            &a.id,
+            &hold("w2", T0 + 9),
+            T0 + 1,
+            &Started("e5000")
+        )
+        .unwrap()
+        .is_none(),
+        "an epoch reading cannot be compared with old text: kept"
+    );
+    assert!(matches!(
+        answer(&mut c, &reply(&a.id, true), T0 + 2, &Gone).unwrap(),
+        Answered::Applied { .. }
     ));
 }

@@ -21,7 +21,7 @@
 //! The ask is bounded: at most [`MAX_ASKS`] blocking threads in flight (the thread keeps its permit until the ask
 //! returns, so a core that hangs cannot grow the pool), a request waits no longer than [`ASK_WAIT`] for its turn and its
 //! answer, and then fails closed. The owner never asks: the guard is for invited people only, and a core answer of
-//! "owner" is a no here. With an empty core.db (before the import, M2-8) every member is refused and `rederive` reads
+//! "owner" is a no here. With an empty core database (before the import, M2-8) every member is refused and `rederive` reads
 //! every open card of theirs as "no longer allowed": import first, then set the switch.
 //!
 //! Still on host data, not behind this seam: who a card names to answer it (`answerable_by` in `route`, stored when the
