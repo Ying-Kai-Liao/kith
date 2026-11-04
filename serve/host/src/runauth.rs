@@ -254,7 +254,7 @@ pub struct RunGrant {
     scope: TokenScope,
     /// Set when the core minted the token (`KITH_RUN_TOKENS_VIA_CORE`): the host's table holds nothing for it, binding
     /// and ending go to the core, and the run is told the core's socket.
-    core: Option<crate::core_front::CoreRun>,
+    core: Option<Box<crate::core_front::CoreRun>>,
 }
 
 impl RunGrant {
@@ -266,7 +266,7 @@ impl RunGrant {
     }
 
     /// A grant for a token the core minted. The host's table is not involved.
-    pub fn from_core(run: crate::core_front::CoreRun) -> Self {
+    pub fn from_core(run: Box<crate::core_front::CoreRun>) -> Self {
         Self {
             table: table().clone(),
             key: [0; 32],

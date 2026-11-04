@@ -24,6 +24,7 @@ fn yes(_: u32, _: u32) -> bool {
     true
 }
 
+#[allow(clippy::unnecessary_wraps)]
 fn started(_: u32) -> Option<String> {
     Some("t0".into())
 }

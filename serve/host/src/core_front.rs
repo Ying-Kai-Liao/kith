@@ -154,7 +154,7 @@ impl std::fmt::Debug for CoreRun {
 /// What asking the core to mint came to.
 #[derive(Debug)]
 pub enum Minted {
-    Run(CoreRun),
+    Run(Box<CoreRun>),
     /// The core answered and said no (a revoked person): the run gets no token, and the host's own table is NOT asked
     /// in its place.
     Refused,
@@ -183,9 +183,12 @@ pub fn mint_run_in(paths: &Paths, who: &RunWho<'_>) -> Minted {
         kith_core::Reached::Answered(a) => {
             let text = |k: &str| a.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_owned);
             match (text("runId"), text("token"), text("socket")) {
-                (Some(run_id), Some(token), Some(socket)) => {
-                    Minted::Run(CoreRun { run_id, token, socket: PathBuf::from(socket), paths: paths.clone() })
-                }
+                (Some(run_id), Some(token), Some(socket)) => Minted::Run(Box::new(CoreRun {
+                    run_id,
+                    token,
+                    socket: PathBuf::from(socket),
+                    paths: paths.clone(),
+                })),
                 _ => Minted::Unavailable,
             }
         }
