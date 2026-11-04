@@ -1258,3 +1258,149 @@ fn schedule_jobs_next_is_the_one_the_fire_uses() {
     let iv = every("iv", 300);
     assert!(TriggerRule.next(&iv, now).unwrap().is_some());
 }
+
+// ---- M4-4a: the follow-ups of the fire review
+
+#[test]
+fn a_pause_written_after_the_settle_is_seen_by_the_fire_even_when_the_hash_is_the_indexs() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("daily", "30 8 * * *")]));
+    r.tick(at(2026, 11, 3, 8, 0));
+    // The tick's read of the file, already indexed (the settle applied it).
+    let old = index(&r.p, Some("mel"));
+    let a = &old.agents[0];
+    // Then the pause lands in the file, before the fire's transaction.
+    r.jobs("mel", &json!([paused_daily()]));
+    let read = Read {
+        agent: &a.agent,
+        hash: &a.hash,
+        jobs: &a.jobs,
+        paths: Some(&r.p),
+    };
+    let slot = super::slot_of_ms(at(2026, 11, 3, 8, 30)).unwrap();
+    let seen = claims::revoke_epoch(&r.core, "kai").unwrap();
+    let out = fire(
+        &mut r.core,
+        &Fire {
+            read: &read,
+            job: "daily",
+            slot: Some(&slot),
+            missed: None,
+            now: at(2026, 11, 3, 8, 30),
+            mac: &r.mac,
+            person: "kai",
+            revoke_seen: seen,
+            advance_to: None,
+            ctx: &r.ctx,
+            after: &ok,
+        },
+    )
+    .unwrap();
+    assert_eq!(out, Outcome::Stale, "not fired over the pause");
+    assert_eq!(r.n("SELECT count(*) FROM turns"), 0);
+    assert_eq!(r.n("SELECT count(*) FROM sched_fires"), 0);
+    // The next tick reads the pause and decides on it.
+    r.tick(at(2026, 11, 3, 8, 30));
+    assert_eq!(r.outcomes("daily"), ["skipped:paused"]);
+}
+
+#[test]
+fn an_unfired_intervals_first_fire_does_not_move_when_another_job_in_the_file_changes() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([every("iv", 300), daily("other", "0 3 * * *")]),
+    );
+    r.tick(at(2026, 11, 3, 8, 0));
+    let first = r.n("SELECT first_seen FROM sched_jobs WHERE job = 'iv'");
+    assert_eq!(first, at(2026, 11, 3, 8, 0));
+    // Edit, then pause, the other job: the file is re-indexed each time.
+    r.jobs(
+        "mel",
+        &json!([every("iv", 300), daily("other", "0 4 * * *")]),
+    );
+    r.tick(at(2026, 11, 3, 8, 2));
+    r.jobs("mel", &json!([every("iv", 300), paused_daily()]));
+    r.tick(at(2026, 11, 3, 8, 3));
+    assert_eq!(
+        r.n("SELECT first_seen FROM sched_jobs WHERE job = 'iv'"),
+        first,
+        "an update leaves first_seen alone"
+    );
+    assert!(fired(&r.tick(at(2026, 11, 3, 8, 4))).is_empty());
+    assert_eq!(fired(&r.tick(at(2026, 11, 3, 8, 5))), ["iv"]);
+}
+
+#[test]
+fn a_job_that_fails_three_ticks_running_gets_an_error_row_and_the_watermark_moves() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([daily("a", "30 8 * * *"), daily("b", "30 8 * * *")]),
+    );
+    let before = at(2026, 11, 3, 8, 29);
+    r.set_wm(before);
+    // a fails at its enqueue every time; b (the second enqueue of the first tick) goes through.
+    let seen = Cell::new(0);
+    let run = |r: &mut Rig, now: i64| {
+        tick(&mut r.core, &r.p, &r.ctx, now, &|s| {
+            if s == Step::Enqueue {
+                seen.set(seen.get() + 1);
+                if seen.get() != 2 {
+                    return Err(Error::Io("injected".into()));
+                }
+            }
+            Ok(())
+        })
+        .unwrap()
+    };
+    assert_eq!(fired(&run(&mut r, at(2026, 11, 3, 8, 30))), ["b"]);
+    run(&mut r, at(2026, 11, 3, 8, 31));
+    assert_eq!(r.wm(), Some(before), "held for the first two ticks");
+    assert!(r.outcomes("a").is_empty());
+    let rep = run(&mut r, at(2026, 11, 3, 8, 32));
+    let rows = r.rows("a");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].1.starts_with("skipped:error: "), "{rows:?}");
+    assert!(rows[0].1.contains("injected"), "{rows:?}");
+    assert_eq!(
+        rep["watermark"],
+        json!(before),
+        "the tick that gave up still holds"
+    );
+    // The next tick finds a's slot decided and the watermark moves; b is not planned again.
+    let rep = run(&mut r, at(2026, 11, 3, 8, 33));
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 33)), "{rep}");
+    assert_eq!(r.outcomes("b"), ["fired"]);
+    // Fixed: the old slot does not come back as missed, and the next day fires again.
+    assert_eq!(
+        r.n("SELECT count(*) FROM sched_fires WHERE outcome LIKE 'skipped:missed%'"),
+        0
+    );
+    r.finish_all();
+    let rep = r.tick(at(2026, 11, 4, 8, 30));
+    assert_eq!(fired(&rep), ["a", "b"], "{rep}");
+}
+
+#[test]
+fn a_failure_that_stops_before_the_limit_starts_the_count_again() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("a", "30 8 * * *")]));
+    r.set_wm(at(2026, 11, 3, 8, 29));
+    let go = |r: &mut Rig, now: i64, yes: bool| {
+        tick(&mut r.core, &r.p, &r.ctx, now, &|s| {
+            if yes && s == Step::Enqueue {
+                return Err(Error::Io("injected".into()));
+            }
+            Ok(())
+        })
+        .unwrap()
+    };
+    go(&mut r, at(2026, 11, 3, 8, 30), true);
+    go(&mut r, at(2026, 11, 3, 8, 31), true);
+    assert_eq!(r.n("SELECT fail_count FROM sched_jobs WHERE job = 'a'"), 2);
+    // It goes through, so the run of failures is over.
+    assert_eq!(fired(&go(&mut r, at(2026, 11, 3, 8, 32), false)), ["a"]);
+    assert_eq!(r.n("SELECT fail_count FROM sched_jobs WHERE job = 'a'"), 0);
+    assert_eq!(r.outcomes("a"), ["fired"]);
+}
