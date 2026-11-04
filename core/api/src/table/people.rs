@@ -315,7 +315,7 @@ pub(super) const ROWS: &[Method] = &[
             sw(
                 "local",
                 &["--local"],
-                "The owner at the computer itself: every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
+                "Set for the owner at the computer itself (a loopback caller) and by two host paths that act for the owner (the auto-approval, the deny of a request whose person has no membership): every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
             ),
             KERNEL,
             HOME,
@@ -395,7 +395,7 @@ pub(super) const ROWS: &[Method] = &[
             sw(
                 "local",
                 &["--local"],
-                "The owner at the computer itself: every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
+                "Set for the owner at the computer itself (a loopback caller) and by two host paths that act for the owner (the auto-approval, the deny of a request whose person has no membership): every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
             ),
             KERNEL,
             HOME,
@@ -416,7 +416,7 @@ pub(super) const ROWS: &[Method] = &[
             sw(
                 "local",
                 &["--local"],
-                "The owner at the computer itself: every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
+                "Set for the owner at the computer itself (a loopback caller) and by two host paths that act for the owner (the auto-approval, the deny of a request whose person has no membership): every request, and the owner's own device too. Without it only members' requests are answered (what a remote device may do).",
             ),
             KERNEL,
             HOME,

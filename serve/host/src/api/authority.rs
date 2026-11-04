@@ -275,7 +275,8 @@ pub struct CoreDown(pub String);
 
 impl std::fmt::Display for CoreDown {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Kith's core isn't answering ({}), so nothing was changed.", self.0)
+        // Not "nothing was changed": a `setPersonAccess` that asked for several grants may have made the earlier ones.
+        write!(f, "Kith's core isn't answering ({}). Changes made before this point may stand.", self.0)
     }
 }
 

@@ -308,9 +308,14 @@ async fn people(hub: &Arc<Hub>) -> Result<Value> {
     // Read and mirror under the lock `setPersonAccess` takes, so an older list never overwrites a newer copy.
     let auth = {
         let _w = AUTH_WRITES.lock().await;
-        let auth = crate::remote::members::auth_people_now(&bin)
-            .await
-            .context("can't list people: kith-auth wasn't readable")?;
+        let auth = crate::remote::members::auth_people_now(&bin).await.map_err(|e| {
+            // A core that is down is not kith-auth being unreadable; say which it was.
+            if e.downcast_ref::<super::authority::CoreDown>().is_some() {
+                e.context("can't list people")
+            } else {
+                e.context("can't list people: kith-auth wasn't readable")
+            }
+        })?;
         crate::remote::members::mirror_agents(&hub.store, &auth);
         auth
     };

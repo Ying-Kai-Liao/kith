@@ -41,8 +41,9 @@
 //!   changes at the sync.
 //! - **"At the computer"** (closed in M2-17). Every owner-socket call is the same Unix user, so the core cannot tell the
 //!   owner's own terminal from the host answering for a remote device. It defaults to the narrow answer (members'
-//!   requests only); the caller says `local` when it is the owner at this computer (the host does, for a loopback
-//!   caller only).
+//!   requests only); the caller says `local` when it is the owner at this computer. The host sets it for a loopback
+//!   owner caller and on two paths of its own that act for the owner (the auto-approval and `deny_without_membership`,
+//!   which only ends members' requests).
 //!
 //! # Filing (M2-17)
 //!
@@ -359,17 +360,32 @@ pub(crate) fn reveal(db: &mut Core, id: &str, digits: &str) -> Result<()> {
 
 /// `people.fileRequest`: the host takes a request up (or has it again). A request the table knows is not filed twice: if
 /// the device has shown its code by now, only the code is added. So the host can say it on every state pull, and a core
-/// that was down when the request arrived gets it on the next pull.
+/// that was down when the request arrived gets it on the next pull. A known id filed with a different device key,
+/// person, platform, name or code is refused (the host logs the refusal), so whoever filed the row first does not get
+/// it kept as the host's.
 pub(super) fn file(
     core: &mut Core,
     c: &Ctx,
     req: &NewRequest<'_>,
     digits: Option<&str>,
 ) -> Result<Value> {
-    let known = load(core.conn(), req.id)?.is_some();
-    if !known {
+    let known = load(core.conn(), req.id)?;
+    if let Some(k) = &known {
+        let differs = k.device_key != req.device_key
+            || k.person.as_deref() != req.person
+            || k.platform != req.platform
+            || k.device_name != req.device_name
+            || matches!((&k.code, digits), (Some(have), Some(d)) if !d.is_empty() && have != d);
+        if differs {
+            return Err(refuse(format!(
+                "request {} is already known as a different request",
+                req.id
+            )));
+        }
+    } else {
         create(core, c, req)?;
     }
+    let known = known.is_some();
     if let Some(digits) = digits.filter(|d| !d.is_empty()) {
         let tx = core.claim_tx()?;
         tx.execute(

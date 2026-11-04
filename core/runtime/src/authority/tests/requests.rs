@@ -55,7 +55,7 @@ fn file(rig: &mut Rig, step: &Value, n: i64) -> Result<(), String> {
     Ok(())
 }
 
-/// A call as the owner at the computer makes it: `local` on (the host sends it for a loopback caller only). A call
+/// A call as the owner at the computer makes it: `local` on (the host sends it for a loopback owner caller, the auto-approval and the membership-gone deny). A call
 /// without it is the narrow answer, tested on its own.
 fn at_computer(rig: &mut Rig, method: &str, params: &Value) -> Result<Value, String> {
     let mut p = params.clone();
@@ -87,16 +87,26 @@ fn the_parity_script_gives_the_answers_the_host_gives() {
                     .unwrap_or_else(|e| panic!("{at}: {e}"));
             } else if let Some(p) = step["suspend"].as_str() {
                 at_computer(&mut rig, "people.suspend", &json!({ "id": p })).unwrap();
-            } else if let Some(p) = step["membership_gone"].as_str() {
+            } else if let Some(p) = step["undo"].as_str() {
+                at_computer(&mut rig, "people.undo", &json!({ "id": p })).unwrap();
+            } else if let Some(p) = step["membership_gone"].as_str().or(step["sync"].as_str()) {
                 // The cloud's event is the host's: it removes the membership and, on its next membership sync, denies
                 // the pending requests of a person with no membership (`cloud::deny_without_membership`), here through
-                // `people.deny`. The core cannot see the event itself.
-                let all = at_computer(&mut rig, "people.requests", &json!({})).unwrap();
-                for row in all["requests"].as_array().unwrap() {
-                    if row["personId"] == p {
-                        let id = row["requestId"].as_str().unwrap();
-                        at_computer(&mut rig, "people.deny", &json!({ "id": id })).unwrap();
-                    }
+                // `people.deny`. The core cannot see the event itself. After a suspension the sync does the same, and
+                // the list no longer shows those rows, so they are found in the table.
+                let waiting: Vec<String> = {
+                    let mut q = rig
+                        .core
+                        .conn()
+                        .prepare("SELECT id FROM access_requests WHERE person = ?1 AND status = 'pending'")
+                        .unwrap();
+                    q.query_map([p], |r| r.get(0))
+                        .unwrap()
+                        .map(Result::unwrap)
+                        .collect()
+                };
+                for id in waiting {
+                    at_computer(&mut rig, "people.deny", &json!({ "id": id })).unwrap();
                 }
             } else if let Some(id) = step["expire"].as_str() {
                 // the cloud stops listing it; here the clock passes its time
@@ -484,9 +494,26 @@ fn filing_by_the_host_is_idempotent_and_adds_the_code_when_it_comes() {
         at_computer(&mut rig, "people.requests", &json!({})).unwrap()["requests"][0]["code"],
         "654321"
     );
-    // the code of a request is not changed by a later call
-    shown["code"] = "000000".into();
-    rig.call("people.fileRequest", &shown).unwrap();
+    // a known id filed with anything different is refused, and the row stays as it was
+    for (field, other) in [
+        ("code", "000000"),
+        ("deviceKey", "T1RIRVI="),
+        ("person", "sasha"),
+        ("platform", "android"),
+        ("deviceName", "Other"),
+    ] {
+        let mut changed = shown.clone();
+        changed[field] = other.into();
+        assert!(
+            rig.call("people.fileRequest", &changed)
+                .unwrap_err()
+                .contains("already known as a different request"),
+            "{field}"
+        );
+    }
+    let mut no_person = shown.clone();
+    no_person["person"] = Value::Null;
+    assert!(rig.call("people.fileRequest", &no_person).is_err());
     assert_eq!(
         at_computer(&mut rig, "people.requests", &json!({})).unwrap()["requests"][0]["code"],
         "654321"
