@@ -112,7 +112,19 @@ fn opt(v: Option<&str>) -> Value {
 /// One row per account (the contract of `kith account list --json`, an array of); with an agent, `in_set`/`order` are that
 /// agent's static order (pin first) and `candidate` is its place in `pick`.
 pub fn rows(ctx: &Ctx<'_>, s: &Map, agent: &str, deep: bool, now: f64) -> Vec<Map> {
-    let state = state::read(&ctx.machine);
+    rows_from(ctx, s, agent, deep, now, &state::FileState)
+}
+
+/// [`rows`] over a state source (the file by default, the core's database in the core).
+pub fn rows_from(
+    ctx: &Ctx<'_>,
+    s: &Map,
+    agent: &str,
+    deep: bool,
+    now: f64,
+    src: &dyn state::StateSource,
+) -> Vec<Map> {
+    let state = src.accounts(&ctx.machine);
     let out: HashMap<String, Mark> = state::out_marks(&ctx.machine, &state, now);
     let (in_order, cands): (Vec<String>, Vec<String>) = if agent.is_empty() {
         (settings::accounts(s, "").0.unwrap_or_default(), vec![])
