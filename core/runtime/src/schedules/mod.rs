@@ -22,7 +22,7 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) use call::call_with;
 pub(crate) use call::{call, serves};
 
