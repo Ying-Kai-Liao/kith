@@ -203,3 +203,52 @@ fn a_claim_being_killed_is_still_the_writer_and_one_takeover_may_wait() {
     db.execute("UPDATE claims SET state = 'claimed' WHERE claim_id = 2", [])
         .expect("take-over proceeds");
 }
+
+#[test]
+fn a_version_80_database_with_a_report_row_migrates_and_keeps_the_pid_the_report_names() {
+    let (_t, m) = machine();
+    let l = Layout::new(&m);
+    let v80: Vec<_> = MIGRATIONS
+        .iter()
+        .copied()
+        .filter(|s| s.version <= 80)
+        .collect();
+    {
+        let c = start_with(&l, &v80).expect("v80 db");
+        assert_eq!(c.schema_version(), 80);
+        let db = c.conn();
+        conversation(db, "c1");
+        db.execute(
+            "INSERT INTO claims (claim_id, conversation, generation, kind, state, pid, pid_started, created_at)
+             VALUES (1, 'c1', 1, 'turn', 'running', 100, 's100', 1)",
+            [],
+        )
+        .expect("claim");
+        for (kind, body) in [("done", r#"{"pid":100}"#), ("busy", "not json")] {
+            db.execute(
+                "INSERT INTO reports (claim_id, kind, body, received_at) VALUES (1, ?1, ?2, 1)",
+                params![kind, body],
+            )
+            .expect("report");
+        }
+    }
+    let c = start_with(&l, MIGRATIONS).expect("migrates");
+    assert_eq!(c.migrated_from(), Some(80));
+    let db = c.conn();
+    let pid_of = |kind: &str| -> i64 {
+        db.query_row(
+            "SELECT pid FROM reports WHERE claim_id = 1 AND kind = ?1",
+            [kind],
+            |r| r.get(0),
+        )
+        .expect("report")
+    };
+    assert_eq!(pid_of("done"), 100);
+    assert_eq!(pid_of("busy"), 0);
+    let pid: i64 = db
+        .query_row("SELECT pid FROM claims WHERE claim_id = 1", [], |r| {
+            r.get(0)
+        })
+        .expect("claim pid");
+    assert_eq!(pid, 100);
+}

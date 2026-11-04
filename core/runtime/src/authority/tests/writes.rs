@@ -965,7 +965,7 @@ fn the_handler_takes_the_callers_view_of_where_the_agents_are() {
         "scratch is a built-in agent: only the owner runs it, it can't be given to sam"
     );
     // a method this module does not answer is not served
-    let e = call(&mut rig.core, "people.approve", &view(json!({"id": "r1"}))).unwrap_err();
+    let e = call(&mut rig.core, "people.rename", &view(json!({"id": "r1"}))).unwrap_err();
     assert!(matches!(e, Error::NotServed(_)), "{e}");
 }
 
@@ -1136,6 +1136,28 @@ fn norm(v: &Value) -> Value {
     v
 }
 
+/// The keys of each person in the order core.db reads them back. A line such as
+/// `bot-a: bot_of sam, name Sam` follows the key order of the row, and core.db keeps no file order: a person whose keys the
+/// model got in another order (a bot starts as `bot_of` alone, then a name is added) would print differently from the
+/// same person read out of core.db. The model is the file as a fresh read leaves it.
+fn in_core_order(mut v: Value) -> Value {
+    const PERSON: [&str; 8] = [
+        "name", "lang", "tz", "owner", "bot_of", "revoked", "was", "provider",
+    ];
+    fn sorted(row: &mut Value, order: &[&str]) {
+        if let Some(o) = row.as_object_mut() {
+            let rank = |k: &String| order.iter().position(|x| x == k).unwrap_or(order.len());
+            let mut kv: Vec<_> = std::mem::take(o).into_iter().collect();
+            kv.sort_by_key(|(k, _)| rank(k));
+            o.extend(kv);
+        }
+    }
+    if let Some(people) = v["people"].as_object_mut() {
+        people.values_mut().for_each(|p| sorted(p, &PERSON));
+    }
+    v
+}
+
 fn canon(a: &Value) -> Value {
     match a {
         Value::Array(xs) => Value::Array(xs.iter().map(canon).collect()),
@@ -1158,7 +1180,7 @@ fn step(rig: &mut Rig, model: &mut Value, op: &Op) -> Result<(), String> {
     if want.is_ok() {
         write::tables(&mut next);
         write::prune_invites(&mut next, &rig.c);
-        *model = next;
+        *model = in_core_order(next);
     }
     let have = store::run(&mut rig.core, &rig.c, |a| {
         write_op(op.method, &op.params, &rig.c, a, op.code)
@@ -1180,6 +1202,34 @@ fn step(rig: &mut Rig, model: &mut Value, op: &Op) -> Result<(), String> {
     Ok(())
 }
 
+/// The flake's minimal case, in two writes: a bot starts as `bot_of` alone, a name is added (model `bot_of, name`; core
+/// reads the same, the row had no name), and then a language: core.db now hands the row back as `name, bot_of`, so its
+/// line is `name Bo, lang en, bot_of sam` while the model's is `bot_of sam, name Bo, lang en`. Core's order is the
+/// defined one (a person's keys as a fresh read gives them; the file's order is gone once it is in core.db), so the model
+/// is put in it. Without the sort in `step` this fails.
+fn name_then_language_for_a_bot() -> Result<(), String> {
+    let auth = json!({"people": {"sam": {"owner": true}, "bot-a": {"bot_of": "sam"}}});
+    let mut rig = Rig::new(&auth);
+    let mut model = in_core_order(auth);
+    for params in [
+        json!({"id": "bot-a", "name": "Bo"}),
+        json!({"id": "bot-a", "lang": "en"}),
+    ] {
+        let op = Op {
+            method: "people.addPerson",
+            params,
+            code: "",
+        };
+        step(&mut rig, &mut model, &op)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_bot_given_a_name_then_a_language_lists_its_keys_in_core_db_order() {
+    name_then_language_for_a_bot().unwrap();
+}
+
 #[test]
 fn sequences_of_writes_leave_core_db_as_the_same_verbs_leave_the_file() {
     let rig = RefCell::new(Rig::new(&json!({})));
@@ -1197,7 +1247,7 @@ fn sequences_of_writes_leave_core_db_as_the_same_verbs_leave_the_file() {
             |(auth, ops)| {
                 let mut rig = rig.borrow_mut();
                 rig.reset(&auth);
-                let mut model = auth;
+                let mut model = in_core_order(auth);
                 for op in &ops {
                     step(&mut rig, &mut model, op).map_err(TestCaseError::fail)?;
                 }

@@ -1,0 +1,3 @@
+\* a revoke leaves P's open card and unused grant as they were (what the pickup at cards::raise would hand on)
+CardsOn = TRUE
+CardNoWithdraw = TRUE

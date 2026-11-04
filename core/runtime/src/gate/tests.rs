@@ -371,7 +371,7 @@ fn with_pid(holder: &str, max: i64, pid: u32) -> Take<'_> {
 fn the_crash_of_a_holder_frees_its_slot_on_the_next_take() {
     let (_t, _l, mut c) = core();
     let procs = Procs::default();
-    procs.start(100, "Mon Nov  3 10:00:00 2026");
+    procs.start(100, "e1000");
     let of = procs.clone();
     assert_eq!(
         take(&mut c, &with_pid("a", 1, 100), &of).unwrap(),
@@ -391,10 +391,10 @@ fn the_crash_of_a_holder_frees_its_slot_on_the_next_take() {
 fn a_reused_pid_is_another_process_and_does_not_keep_the_slot() {
     let (_t, _l, mut c) = core();
     let procs = Procs::default();
-    procs.start(100, "Mon Nov  3 10:00:00 2026");
+    procs.start(100, "e1000");
     let of = procs.clone();
     take(&mut c, &with_pid("a", 1, 100), &of).unwrap();
-    procs.start(100, "Tue Nov  4 09:00:00 2026");
+    procs.start(100, "e9000");
     assert_eq!(take(&mut c, &t("b", 1), &of).unwrap(), State::Granted);
 }
 
@@ -659,4 +659,164 @@ fn the_rows_are_in_the_table_for_the_owner_only() {
         assert!(row.allows(kith_api::Principal::Owner), "{name}");
         assert!(!row.allows(kith_api::Principal::RunToken), "{name}");
     }
+}
+
+/// Probes made while another connection tries to take core.db's write lock: every probe asserts it can.
+struct LockProbe {
+    db: std::path::PathBuf,
+    procs: Procs,
+    probes: AtomicUsize,
+    /// Run once at the first `gone` answer, before it returns (a row changing between the probe and the transaction).
+    between: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl LockProbe {
+    fn new(l: &Layout, procs: &Procs) -> Self {
+        Self {
+            db: l.db.clone(),
+            procs: procs.clone(),
+            probes: AtomicUsize::new(0),
+            between: Mutex::new(None),
+        }
+    }
+    fn write_lock_is_free(&self) {
+        self.probes.fetch_add(1, Ordering::SeqCst);
+        let other = rusqlite::Connection::open(&self.db).unwrap();
+        other.busy_timeout(std::time::Duration::ZERO).unwrap();
+        other
+            .execute_batch("BEGIN IMMEDIATE; ROLLBACK;")
+            .expect("a probe ran while the write lock was held");
+    }
+}
+
+impl Liveness for LockProbe {
+    fn start(&self, pid: u32) -> Option<String> {
+        self.write_lock_is_free();
+        Liveness::start(&self.procs, pid)
+    }
+    fn gone(&self, pid: u32) -> bool {
+        self.write_lock_is_free();
+        let gone = Liveness::gone(&self.procs, pid);
+        if gone && let Some(f) = self.between.lock().unwrap().take() {
+            f();
+        }
+        gone
+    }
+}
+
+#[test]
+fn no_probe_runs_while_the_write_lock_is_held() {
+    let (_t, l, mut c) = core();
+    let procs = Procs::default();
+    procs.start(100, "e1000");
+    procs.start(101, "e2000");
+    let probe = LockProbe::new(&l, &procs);
+    take(&mut c, &with_pid("a", 2, 100), &probe).unwrap();
+    take(&mut c, &with_pid("b", 2, 101), &probe).unwrap();
+    take(&mut c, &with_pid("w", 2, 100), &probe).unwrap();
+    let before = probe.probes.load(Ordering::SeqCst);
+    // Every entry point looks at both held rows and the waiter.
+    list(&mut c, &probe).unwrap();
+    park(&mut c, "a", &probe).unwrap();
+    unpark(&mut c, "a", &probe).unwrap();
+    release(&mut c, "w", &probe).unwrap();
+    procs.end(100);
+    assert!(take(&mut c, &t("z", 2), &probe).is_ok());
+    assert!(
+        probe.probes.load(Ordering::SeqCst) > before + 4,
+        "probes ran"
+    );
+}
+
+#[test]
+fn a_row_taken_again_between_the_probe_and_the_transaction_is_not_freed() {
+    let (_t, l, mut c) = core();
+    let procs = Procs::default();
+    procs.start(100, "e1000");
+    let probe = LockProbe::new(&l, &procs);
+    take(&mut c, &with_pid("a", 1, 100), &probe).unwrap();
+    procs.end(100);
+    // The probe finds pid 100 gone; before the transaction, "a" is taken again by a new process.
+    let db = l.db.clone();
+    *probe.between.lock().unwrap() = Some(Box::new(move || {
+        let other = rusqlite::Connection::open(db).unwrap();
+        other
+            .execute(
+                "UPDATE gate_slots SET pid = 200, started = 'e9000' WHERE holder = 'a'",
+                [],
+            )
+            .unwrap();
+    }));
+    let listed = list(&mut c, &probe).unwrap();
+    assert_eq!(listed["slots"][0]["holder"], json!("a"), "{listed}");
+    assert_eq!(listed["slots"][0]["pid"], json!(200));
+}
+
+#[test]
+fn old_lstart_text_never_frees_a_live_holder_and_a_dead_pid_still_frees_it() {
+    let (_t, l, mut c) = core();
+    let procs = Procs::default();
+    procs.start(100, "e5000");
+    take(&mut c, &with_pid("a", 1, 100), &procs).unwrap();
+    let other = rusqlite::Connection::open(&l.db).unwrap();
+    other
+        .execute(
+            "UPDATE gate_slots SET started = 'Mon Nov 3 10:00:00 2026' WHERE holder = 'a'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(
+        take(&mut c, &t("b", 1), &procs).unwrap(),
+        waiting(1),
+        "alive: an unknown start is not a reason to free"
+    );
+    procs.end(100);
+    assert_eq!(take(&mut c, &t("b", 1), &procs).unwrap(), State::Granted);
+}
+
+#[test]
+fn a_start_in_the_same_form_must_be_equal_to_be_the_same_process() {
+    let (_t, _l, mut c) = core();
+    let procs = Procs::default();
+    procs.start(100, "bAAA:1000");
+    take(&mut c, &with_pid("a", 1, 100), &procs).unwrap();
+    // A wall-clock step moves nothing in a boot stamp: still the holder.
+    assert_eq!(take(&mut c, &t("b", 1), &procs).unwrap(), waiting(1));
+    // Another tick in the same boot, or the same tick in another boot, is another process.
+    procs.start(100, "bAAA:1001");
+    assert_eq!(take(&mut c, &t("b", 1), &procs).unwrap(), State::Granted);
+}
+
+#[test]
+fn a_start_in_another_form_is_unknown_and_only_a_dead_pid_frees_it() {
+    for (recorded, now) in [("e1000", "bAAA:1"), ("bAAA:1", "e1000"), ("t1", "bAAA:1")] {
+        let (_t, _l, mut c) = core();
+        let procs = Procs::default();
+        procs.start(100, recorded);
+        take(&mut c, &with_pid("a", 1, 100), &procs).unwrap();
+        procs.start(100, now);
+        assert_eq!(
+            take(&mut c, &t("b", 1), &procs).unwrap(),
+            waiting(1),
+            "{recorded} vs {now}"
+        );
+        procs.end(100);
+        assert_eq!(take(&mut c, &t("b", 1), &procs).unwrap(), State::Granted);
+    }
+}
+
+#[test]
+fn a_holder_recorded_without_a_start_time_gets_one_and_a_reused_pid_then_frees_it() {
+    let (_t, _l, mut c) = core();
+    let procs = Procs::default();
+    // Not readable at take: recorded empty.
+    take(&mut c, &with_pid("a", 1, 100), &Nobody).unwrap();
+    procs.start(100, "e1000000");
+    assert_eq!(
+        list(&mut c, &procs).unwrap()["slots"][0]["holder"],
+        json!("a")
+    );
+    // The next look has a record to compare with: another start time is another process.
+    procs.start(100, "e5000000");
+    assert_eq!(take(&mut c, &t("b", 1), &procs).unwrap(), State::Granted);
 }

@@ -334,3 +334,26 @@ Track A is built on the `rust-rebuild` branch (user, 2026-11-03, overnight mode)
 - 2026-11-04: #744 M3-8a done: asks table (migration 100) + core/runtime asks module (transactional cap check/open, settle, cap-told, end, delegations view) + experimental ask.* rows + `live/ask/*.reg` import; kith-ask unchanged; part b (stop whole tree) and the switch remain.
 - 2026-11-04: #745 M3-7 done: the wake queue and waiters are in core.db (migration 90) with `wake.*` rows, an import of kith-wake's files and golden write parity; Python still writes. Switching, and `take` creating a turn through M3-2, are M3-10.
 - 2026-11-04: #747 M3-6 done: the core holds a pointer and hash per engine session (engine_sessions, versions 110-119); place-or-adopt, locator, hash, answered(), recent/pick/latest/resolve reading and the registry import are built and tested but not switched; copying to another account stays off.
+- 2026-11-04: #714 M2-8 `kith core-migrate --authority`: imports auth.json and Keychain items into core.db and the envelope in one transaction (backup first, re-hash before commit, idempotent). Left-behind keys are listed in the report.
+- 2026-11-04: #715 M2-4 person add/rename/remove, suspend and undo in the core, with retired ids; terminal.list row added beside terminal.open. Follow-up: a `kith_core::attach_endpoint` function if M1-6 needs one (would need a PUBLIC line).
+- 2026-11-04: #718 M2-12 key cards answered in the core: begin, commit (one claim_tx writes the envelope at most once) and provide via `cards.provide`. Not done: the Access card and handing the key to the agent, which need lane B's grants table.
+- 2026-11-04: #720 difftest: doctor-json no longer depends on the checkout's remote (flake fix).
+- 2026-11-04: #722 perms: a -wal/-shm deleted while its ACL is read is no longer judged "open to other accounts" on Windows (flake fix).
+- 2026-11-04: #723 M2-14 guest doors table and sweep in the core: start and sweep are one-row CAS; people.suspend, removePerson and removeBot sweep doors in the same transaction; doors.* rows.
+- 2026-11-04: #724 M2-13 core run tokens die with revoke; run.mint refuses revoked or removed people; the run socket re-checks the person. The host can mint through the core behind a switch that stays off. Switch gates are listed in the PR.
+- 2026-11-04: #725 M2-15 host event filter asks the core's authority behind an opt-in seam, with a parity test; new owner-only row people.may.
+- 2026-11-04: #727 M3-1 core.db schema for conversations, claims, turns and reports, lane reservations 90-109, conversation.* and claim.list stub rows. Value-list CHECKs only where the list cannot grow.
+- 2026-11-04: #728 M3-0b TLA+ model of the holder lease, run as the holder-lease verify skill. Each half of the fix (ping anchor, sleep-counting clock) fails alone. The variant RenewRestores = FALSE (core must re-hello) is an open point for M3-0c.
+- 2026-11-04: #729 M3-0a writer-lock and holder TLA+ models run in CI as a verify skill. Open finding left as a `fail` row; Q2 (idle warm process) is modelled as variant `killidle`.
+- 2026-11-04: #730 Windows: icacls output with no access list is judged unreadable (retried, then refused), not "open to other accounts" (flake fix).
+- 2026-11-04: #731 M3-3 `kith-stub --resident`: per-turn writer locks for a warm engine over a control channel (Unix fd, Windows named pipe). Also fixes the flaky inherited-fd tests.
+- 2026-11-04: #732 M3-0c holder lease code matches the lease model: ping round, anchored deadline, sleep-counting clock. Windows and Linux builds are left to CI.
+- 2026-11-04: #733 flaky authority writes proptest fixed (the model keeps keys in core.db order). One earlier failure in 20 runs is unexplained; a rarer flake is not ruled out.
+- 2026-11-04: #734 M3-0d conversation difftest cases (threads, delegation, accounts, kith-wake, kith-sessions) frozen as golden, including a new wake.json (83 cases) before M3 replaces the Python.
+- 2026-11-04: #735 batch red fix: the boundary check skips verification/, and the guest-helper no-wait check uses a sub-second clock (timing flake).
+- 2026-11-04: #737 golden replay uses machine-independent masks (flake fix: masked keys, `<KERNEL>` unquoted, dead pid for claim cases).
+- 2026-11-04: #739 M3-2 claim start protocol in kith-core (claim, redeem CAS, reports, reconcile, revoke, new holder) and the redeem write in the writer-lock model; per-step transactions via claim_tx.
+- 2026-11-04: #740 M2-16 host guard decisions go through the core authority seam; people.may also returns owner and preset. Follow-up: the openrpc drift test was not run for this PR.
+- 2026-11-04: #748 boundary: core.db mentions outside core/runtime reworded so the boundary check is green again.
+- 2026-11-04: #752 M2-11b revoke and remove withdraw the person's and their bots' open cards and unused once-grants in the same transaction, and a rename carries the cards. Follow-up on the same branch: #756.
+- 2026-11-04: #756 M2-11b follow-up: removeBot reads the bot's old ids before the row is dropped, so cards raised under those ids are withdrawn too.
