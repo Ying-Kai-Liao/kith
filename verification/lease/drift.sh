@@ -10,7 +10,7 @@ set -euo pipefail
 
 # The commit at which the model was confirmed to describe the files below. Since M3-0c the code is the `fixed` variant,
 # see the code-to-model table in the skill.
-SYNC=387c7b5a09ade3d45055024983ff15005e489f54
+SYNC=0cac896b9a556eaab4c3080ccea1e2141ecf1fb4
 
 FILES=(
   core/holder/src/holder.rs           # Lease, expire_lease, watch_lease, the PING and RENEW arms, the LEASE_LOST answer in spawn

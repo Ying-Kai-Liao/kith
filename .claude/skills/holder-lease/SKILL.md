@@ -127,7 +127,7 @@ restored, a hand sleeps with a guest, and a lease lapses while the hand sleeps (
 4. A pass can have lost the ability to fail: break the new check in a scratch edit and see `run.sh` fail.
 5. Only then set `SYNC` in `drift.sh` and the sync commit below.
 
-**Sync commit:** `SYNCSHA` (rust-rebuild branch work of M3-0c). The code in the covered files is the `fixed` design.
+**Sync commit:** `0cac896b9a556eaab4c3080ccea1e2141ecf1fb4` (M3-0c). The code in the covered files is the `fixed` design.
 
 ## Map of the folder
 
