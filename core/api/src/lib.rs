@@ -60,7 +60,7 @@ pub enum Principal {
     /// A running agent, with a run token.
     RunToken,
     /// The process that holds the relay connection (`kith serve`), proving the host secret. It reports what only that
-    /// process can know (the sync lease, runtime-design section 3); an owner terminal or an owner agent is not it.
+    /// process can know (the sync lease, runtime-design section 3); the documented owner routes (an owner terminal or an owner agent) are not it. This fences those routes; it is not a boundary against another process of the same OS user, which can read the secret file.
     Host,
 }
 

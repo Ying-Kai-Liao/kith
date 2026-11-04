@@ -43,6 +43,9 @@ pub fn find<S: AsRef<str>>(argv: &[S]) -> Option<(&'static Method, usize)> {
     for m in METHODS {
         for spelling in std::iter::once(m.cli.path).chain(m.cli.aliases.iter().copied()) {
             let n = spelling.len();
+            if n == 0 {
+                continue;
+            }
             let starts =
                 argv.len() >= n && spelling.iter().zip(argv).all(|(w, a)| *w == a.as_ref());
             let has_required = m

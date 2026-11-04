@@ -215,6 +215,38 @@ fn a_client_that_skips_the_handshake_or_gets_the_token_wrong_is_refused_and_runs
     );
 }
 
+/// The same two refusals as `the_owner_token_does_not_prove_the_host`, but from the daemon's side: a hand-written hello
+/// reaches the daemon's own checks, which the client library (it reads the host secret first) never tests.
+#[cfg(unix)]
+#[test]
+fn a_hello_naming_the_host_but_proving_the_owner_token_is_unauthorized_and_an_unknown_principal_is_a_protocol_error() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    let schema = kith_api::schema_hash();
+    let owner_token = std::fs::read_to_string(Layout::new(&m).token).expect("token");
+
+    let mut c = Raw::connect(&m);
+    c.send(1, "hello", &json!({"protocol": crate::owner::PROTOCOL, "version": "x", "schema": schema, "nonce": "cc", "principal": "host"}));
+    let hello = c.recv().expect("hello");
+    let server_nonce = hello["result"]["nonce"].as_str().expect("nonce").to_owned();
+    let mine = kith_holder::auth::proof(owner_token.trim().as_bytes(), "cli", "cc", &server_nonce, 0);
+    c.send(2, "auth", &json!({"proof": mine}));
+    let refusal = c.recv().expect("refusal");
+    assert_eq!(refusal["error"]["code"], -32003, "{refusal}");
+    assert_eq!(refusal["error"]["data"]["kind"], "unauthorized");
+    assert!(c.recv().is_none(), "and the connection is closed");
+
+    for who in ["root", "Host", ""] {
+        let mut c = Raw::connect(&m);
+        c.send(1, "hello", &json!({"protocol": crate::owner::PROTOCOL, "version": "x", "schema": schema, "nonce": "dd", "principal": who}));
+        let refusal = c.recv().expect("refusal");
+        assert_eq!(refusal["error"]["data"]["kind"], "protocol", "{who:?}: {refusal}");
+        assert!(c.recv().is_none(), "{who:?}: the connection is closed");
+    }
+    assert_eq!(d.served(), 0, "nothing ran");
+}
+
 #[test]
 fn a_token_that_is_not_the_daemons_is_not_a_daemon_to_talk_to() {
     let (_t, m) = machine();

@@ -5,7 +5,7 @@ pub(super) use crate::{Method, Param, Served, Stability};
 
 pub(super) const OWNER: &[Principal] = &[Principal::Owner];
 /// The host process that holds the relay connection, proving the host secret: the rows that report a fact only it can
-/// know (the sync lease). Not the owner, so a terminal or an owner agent cannot forge them.
+/// know (the sync lease). Not the owner, so the documented owner routes (a terminal, an owner agent) are refused; a same-OS-user process can still read the secret file.
 pub(super) const HOST: &[Principal] = &[Principal::Host];
 /// A row the owner may read and the host takes as part of its own flow.
 pub(super) const OWNER_HOST: &[Principal] = &[Principal::Owner, Principal::Host];
@@ -128,6 +128,12 @@ impl Method {
     }
     pub(super) const fn requires(mut self, r: &'static [&'static str]) -> Self {
         self.cli.requires = r;
+        self
+    }
+    /// A row no command line reaches: the CLI always connects as the owner, so a host-only row's verb could only be
+    /// refused. An empty path is how the table says so (`cli::find` skips it).
+    pub(super) const fn no_cli(mut self) -> Self {
+        self.cli.path = &[];
         self
     }
     pub(super) const fn principals(mut self, p: &'static [Principal]) -> Self {
