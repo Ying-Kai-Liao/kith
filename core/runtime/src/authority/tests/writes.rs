@@ -1252,7 +1252,10 @@ fn a_revoked_person_with_a_bot_made_owner_is_checked_the_same_by_both_readers() 
     let msg = write_op(op.method, &op.params, &rig.c, &mut model.clone(), "")
         .unwrap_err()
         .msg;
-    assert_eq!(msg, "sam's access was removed: undo first");
+    assert_eq!(
+        msg,
+        "sam's access was removed: kith-auth person sam --unrevoke first"
+    );
     readers_agree(&rig, &model).unwrap();
     same(&model, &rig.c).unwrap();
 }

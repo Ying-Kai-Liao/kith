@@ -196,7 +196,9 @@ pub(crate) fn person_set(
     }
     if owner && truthy(people(auth).get(pid).and_then(|p| p.get("revoked"))) {
         // the owner is checked before a removal, so an owner whose bots kept a row would let them in while cut_off says no
-        return die(format!("{pid}'s access was removed: undo first"));
+        return die(format!(
+            "{pid}'s access was removed: kith-auth person {pid} --unrevoke first"
+        ));
     }
     let known = people(auth).contains_key(pid);
     let canon = secrets::canonical(auth, pid);

@@ -89,7 +89,7 @@ member's door runs and the sweep does stop one; `NeverBotDoorRuns` and `NeverBot
 
 | Step in the code | Code | Model action |
 |---|---|---|
-| deny a revoked person before any row, `*` included | `kernel/bin/kith-auth` `may()` (calls `cut_off` right after the owner check) | `MayP` (guard of every start) |
+| deny a revoked person before any row, `*` included | `kernel/bin/kith-auth` `may()` (reads the person's own `revoked` flag; bots are cut through `may(parent)`). Assumes the owner is never revoked, kept by two writes: `revoke_person` refuses the owner, and `person`/`addPerson` refuses to promote a revoked person | `MayP` (guard of every start) |
 | a bot is allowed only on its own row and its owner's live may() | `kith-auth` `bot_may` (via `may(parent)`, so a revoked owner's bot is refused) | `MayB` |
 | set / clear the revoked state, rows untouched | `kith-auth` `cmd_person` -> `revoke_person` (`--local`: the host's writer) | local part of `AppRevoke`/`CliRevoke`, `CloudDeliver` |
 | the core's suspend and undo (M2-4): one `revoked` fact on the person in core.db, memberships, `helper_once`, bots and invites untouched; a repeat keeps the first moment; owner, bots and unknown people refused; the temp folders of the person and their bots go after the commit | `core/runtime/src/authority/revoke.rs` `person_suspend` (rows `people.suspend`, `people.undo`), `call.rs`; the readers `Authority::may/resolve/resolve_bot/cut_off` refuse before any row. Not yet the host's path (M2-18 switches it); the cloud record and sweep are lane H | local part of `AppRevoke`/`CliRevoke`, `CloudDeliver`; `MayP`/`MayB` |
