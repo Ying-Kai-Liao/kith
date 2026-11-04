@@ -1,0 +1,12 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"turn\", \"session\": \"acp:chat:t1\", \"run\": \"<ID12>\", \"ids\": [\"a\"]}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/d2f79c3600ebc29d67793b01456ce233.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"host\",\n  \"next\": \"<EPOCH>\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"at\": \"<TS>\",\n      \"id\": \"a\",\n      \"run\": \"<ID12>\",\n      \"text\": \"the answer is yes\",\n      \"why\": \"card\"\n    }\n  ],\n  \"room\": null,\n  \"session\": \"acp:chat:t1\",\n  \"tries\": 0,\n  \"turn\": {\n    \"at\": \"<TS>\",\n    \"pid\": 2147483000,\n    \"procStart\": null,\n    \"run\": \"<ID12>\",\n    \"sid\": null\n  },\n  \"v\": 1\n}\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agent\": \"coder\",\n  \"door\": \"host\",\n  \"ids\": [\n    \"a\"\n  ],\n  \"note\": \"[kith wake <ID12>] card: the answer is yes\",\n  \"person\": null,\n  \"requests\": [\n    {\n      \"id\": \"a\",\n      \"text\": \"the answer is yes\",\n      \"why\": \"card\"\n    }\n  ],\n  \"room\": null,\n  \"run\": \"<ID12>\",\n  \"session\": \"acp:chat:t1\"\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "[\n  {\n    \"agent\": \"coder\",\n    \"door\": \"host\",\n    \"next\": \"<EPOCH>\",\n    \"person\": null,\n    \"requests\": [\n      {\n        \"at\": \"<TS>\",\n        \"id\": \"a\",\n        \"run\": \"<ID12>\",\n        \"text\": \"the answer is yes\",\n        \"why\": \"card\"\n      }\n    ],\n    \"room\": null,\n    \"session\": \"acp:chat:t1\",\n    \"tries\": 0,\n    \"turn\": {\n      \"at\": \"<TS>\",\n      \"pid\": 2147483000,\n      \"procStart\": null,\n      \"run\": \"<ID12>\",\n      \"sid\": null\n    },\n    \"v\": 1\n  }\n]\n",
+  "step1.stderr": ""
+}

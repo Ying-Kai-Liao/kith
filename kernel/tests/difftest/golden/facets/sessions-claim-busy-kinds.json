@@ -1,0 +1,18 @@
+{
+  "fakes": "",
+  "state:home/.kith/live/terminal/a.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"oneshot\"}",
+  "state:home/.kith/live/terminal/a.claim.lock": "",
+  "state:home/.kith/live/terminal/b.claim": "{\"pid\": 1, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"app\"}",
+  "state:home/.kith/live/terminal/b.claim.lock": "",
+  "state:home/.kith/live/terminal/c.claim": "{\"pid\": 1}",
+  "state:home/.kith/live/terminal/c.claim.lock": "",
+  "step0.exit": "1\n",
+  "step0.stderr": "kith: that session is busy: held by oneshot (pid 1); try again in a moment\n",
+  "step0.stdout": "",
+  "step1.exit": "1\n",
+  "step1.stderr": "kith: that session is busy: held by app (pid 1); try again in a moment\n",
+  "step1.stdout": "",
+  "step2.exit": "1\n",
+  "step2.stderr": "kith: that session is busy: held by terminal (pid 1); try again in a moment\n",
+  "step2.stdout": ""
+}

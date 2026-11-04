@@ -531,6 +531,55 @@ pub(crate) fn person_suspend(
     Ok((vec![line], ids))
 }
 
+/// What a person-level write takes with it in the guest doors' table (M2-14), in the write's own transaction: a
+/// suspension, a removal and a bot's removal sweep the open doors of the ids they name (the person and their bots; never
+/// the owner, whom none of them can name), and a rename carries the doors to the new id. Undo does nothing: a swept
+/// door stays swept. The swept doors go into the answer under `doors`, for the caller to stop their boxes.
+pub(super) fn follow_in_doors(
+    conn: &rusqlite::Connection,
+    method: &str,
+    params: &Value,
+    said: &mut Value,
+    now_ms: f64,
+) -> crate::error::Result<()> {
+    #[allow(clippy::cast_possible_truncation)]
+    let now = now_ms as i64;
+    let ids: Vec<String> = match method {
+        "people.suspend" | "people.removePerson" if said.get("ids").is_some() => said["ids"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str().map(str::to_owned))
+            .collect(),
+        "people.removeBot" => params
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .into_iter()
+            .collect(),
+        "people.renamePerson" => {
+            if let (Some(old), Some(new)) = (
+                params.get("id").and_then(Value::as_str),
+                params.get("to").and_then(Value::as_str),
+            ) {
+                crate::doors::renamed(conn, old, new)?;
+            }
+            return Ok(());
+        }
+        _ => return Ok(()),
+    };
+    let why = if method == "people.removeBot" {
+        "its bot was removed"
+    } else if method == "people.removePerson" {
+        "its person was removed"
+    } else {
+        "its person was cut off"
+    };
+    let doors = crate::doors::sweep_ids(conn, &ids, why, now)?;
+    said["doors"] = Value::Array(doors.iter().map(crate::doors::Door::json).collect());
+    Ok(())
+}
+
 /// `person <id> --clear-temp`: the ids whose temp folders go (the person and their bots).
 pub(crate) fn temp_ids(auth: &Value, pid: &str) -> R<Vec<String>> {
     check_id(pid)?;

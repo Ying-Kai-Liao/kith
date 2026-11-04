@@ -17,15 +17,27 @@ pub(super) fn run<T>(
     c: &Ctx,
     f: impl FnOnce(&mut Value) -> std::result::Result<T, Die>,
 ) -> Result<T> {
+    run_with(core, c, f, |_, _| Ok(()))
+}
+
+/// [`run`], then `follow` in the same transaction with what the write said: what else the change must take with it
+/// (the doors of a person who was cut off) commits or fails together with it.
+pub(super) fn run_with<T>(
+    core: &mut Core,
+    c: &Ctx,
+    f: impl FnOnce(&mut Value) -> std::result::Result<T, Die>,
+    follow: impl FnOnce(&Connection, &mut T) -> Result<()>,
+) -> Result<T> {
     let tx = core.claim_tx()?;
     let before = read_tables(&tx, &mut || {})?;
     let mut after = before.clone();
     write::tables(&mut after);
-    let said = f(&mut after).map_err(|d| refusal(&d))?;
+    let mut said = f(&mut after).map_err(|d| refusal(&d))?;
     write::prune_invites(&mut after, c);
     let mut before = before;
     write::tables(&mut before);
     store(&tx, &before, &after)?;
+    follow(&tx, &mut said)?;
     tx.commit()?;
     Ok(said)
 }

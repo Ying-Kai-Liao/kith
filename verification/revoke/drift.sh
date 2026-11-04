@@ -31,6 +31,9 @@ FILES=(
   kernel/lib/kith_door.py                 # the guest door: run (lock, kith-auth door, claim, start = DoorStart), sweep (DoorSweep)
   serve/host/src/doors.rs                 # the host's door sweep: on cut_off, the bot-guest sweep and every 60 s (DoorSweep)
   core/runtime/src/authority/revoke.rs   # M2-4: person_suspend (the revoked fact, rows untouched), person_remove, person_rename
+  core/runtime/src/doors/mod.rs           # M2-14: the door table (start, mark_live, sweep, sweep_ids, end: DoorStart, DoorSweep)
+  core/runtime/src/doors/call.rs          # M2-14: the doors.* rows
+  core/runtime/src/migrations/doors/m0060_doors.rs  # M2-14: the doors table
   core/runtime/src/authority/mod.rs       # the readers: snapshot (revoked), may/resolve/cut_off over secrets
 )
 paths=()

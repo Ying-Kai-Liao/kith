@@ -1,0 +1,15 @@
+{
+  "fakes": "",
+  "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"failed\", \"session\": \"sid-f\", \"run\": \"<ID12>\", \"ids\": [\"a\"], \"why\": \"its deliverer died before the session saw it\"}\n",
+  "state:home/.kith/sessions/queue/.lock": "",
+  "state:home/.kith/sessions/queue/answered.json": "{\n  \"a\": {\n    \"how\": \"failed\",\n    \"run\": \"<ID12>\",\n    \"t\": \"<EPOCH>\"\n  }\n}\n",
+  "step0.exit": "1\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.json": "[]\n",
+  "step1.stderr": "",
+  "step2.exit": "0\n",
+  "step2.json": "{\n  \"id\": \"a\",\n  \"run\": \"<ID12>\",\n  \"state\": \"failed\"\n}\n",
+  "step2.stderr": ""
+}
