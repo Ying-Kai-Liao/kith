@@ -617,6 +617,7 @@ fn every_index_write_of_a_paused_job_cancels_what_waits_and_ends_an_unspawned_cl
             person: "kai",
             prompt: "late",
             deadline: None,
+            revoke_seen: 0,
         },
         40,
     )

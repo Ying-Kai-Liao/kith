@@ -31,7 +31,9 @@ use rusqlite::{Connection, OptionalExtension as _, Transaction, params};
 
 use super::CoreState;
 #[cfg(unix)]
-use crate::conversations::claims::{Claimed, NewClaim, cancel_fenced, claim_in};
+use crate::conversations::claims::{
+    Claimed, NewClaim, cancel_fenced, claim_checked_in, stopped_fence,
+};
 use crate::db::Core;
 #[cfg(unix)]
 use crate::error::Error;
@@ -274,6 +276,11 @@ pub(crate) fn claim_next(
         Next::Account(a) => a,
         Next::Exhausted(text) => {
             if let Some(t) = req.turn {
+                // A stopped ask's wake is cancelled, not failed: the fence is checked before the turn is marked.
+                if let Some(fence) = stopped_fence(core, t)? {
+                    cancel_fenced(core, req, &fence, now_ms);
+                    return Err(fence.refusal(req));
+                }
                 let tx = core.claim_tx()?;
                 tx.execute(
                     "UPDATE turns SET state = 'failed', finished_at = ?2
@@ -300,7 +307,7 @@ pub(crate) fn claim_next(
     let started = (|| {
         let generation = core.generation();
         let tx = core.claim_tx()?;
-        let claimed = claim_in(
+        let claimed = match claim_checked_in(
             &tx,
             generation,
             &NewClaim {
@@ -314,7 +321,10 @@ pub(crate) fn claim_next(
                 revoke_seen: req.revoke_seen,
             },
             now_ms,
-        )?;
+        )? {
+            Ok(claimed) => claimed,
+            Err(fence) => return Ok(Err(fence)),
+        };
         let fresh = transcripts::rows::get(&tx, req.conversation, &account)?.is_none();
         let session = transcripts::rows::start(
             &tx,
@@ -326,16 +336,20 @@ pub(crate) fn claim_next(
             now_ms / 1000,
         )?;
         tx.commit()?;
-        Ok(Started::Claimed {
+        Ok::<_, Error>(Ok(Started::Claimed {
             claimed,
             account: account.clone(),
             fresh,
             session: Box::new(session),
-        })
-    })();
-    if started.is_err() {
-        // Rolled back: a turn refused by the stopped-ask fence or the revoke epoch is cancelled in its own write.
-        let _ = cancel_fenced(core, req, now_ms);
+        }))
+    })()?;
+    match started {
+        Ok(started) => Ok(started),
+        Err(fence) => {
+            // Rolled back: a stopped ask's turn is cancelled in its own write. A revoked refusal is the claimer's stale
+            // epoch and leaves the turn queued.
+            cancel_fenced(core, req, &fence, now_ms);
+            Err(fence.refusal(req))
+        }
     }
-    started
 }

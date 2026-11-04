@@ -719,6 +719,7 @@ mod stop {
                 person: "kai",
                 prompt: "p",
                 deadline: None,
+                revoke_seen: 0,
             },
             2,
         )
