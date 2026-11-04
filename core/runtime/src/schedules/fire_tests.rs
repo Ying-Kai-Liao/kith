@@ -174,6 +174,7 @@ impl Rig {
             agent: &a.agent,
             hash: &a.hash,
             jobs: &a.jobs,
+            paths: Some(&self.p),
         };
         let def = a
             .jobs
@@ -288,15 +289,19 @@ fn a_failure_between_any_two_steps_leaves_nothing_and_the_slot_fires_on_the_next
         r.jobs("mel", &json!([daily("daily", "30 8 * * *")]));
         let before = at(2026, 11, 3, 8, 29);
         r.set_wm(before);
-        let e = tick(&mut r.core, &r.p, &r.ctx, at(2026, 11, 3, 8, 30), &|s| {
+        // The failure is the job's: the tick answers, with the error in `problems`.
+        let rep = tick(&mut r.core, &r.p, &r.ctx, at(2026, 11, 3, 8, 30), &|s| {
             if s == step {
                 Err(Error::Io("injected".into()))
             } else {
                 Ok(())
             }
         })
-        .unwrap_err();
-        assert!(e.to_string().contains("injected"), "{step:?}: {e}");
+        .unwrap();
+        assert!(
+            rep["problems"].to_string().contains("injected"),
+            "{step:?}: {rep}"
+        );
         for t in ["sched_fires", "turns", "conversations"] {
             assert_eq!(
                 r.n(&format!("SELECT count(*) FROM {t}")),
@@ -325,7 +330,7 @@ fn a_crash_between_two_jobs_keeps_the_first_whole_and_the_retry_fires_only_the_r
     );
     r.set_wm(at(2026, 11, 3, 8, 29));
     let seen = Cell::new(0);
-    let err = tick(&mut r.core, &r.p, &r.ctx, at(2026, 11, 3, 8, 30), &|s| {
+    let rep = tick(&mut r.core, &r.p, &r.ctx, at(2026, 11, 3, 8, 30), &|s| {
         if s == Step::Enqueue {
             seen.set(seen.get() + 1);
             if seen.get() == 2 {
@@ -333,8 +338,9 @@ fn a_crash_between_two_jobs_keeps_the_first_whole_and_the_retry_fires_only_the_r
             }
         }
         Ok(())
-    });
-    assert!(err.is_err());
+    })
+    .unwrap();
+    assert!(rep["problems"].to_string().contains("injected"), "{rep}");
     assert_eq!(
         r.n("SELECT count(*) FROM turns"),
         1,
@@ -1059,4 +1065,196 @@ fn new_york_fall_back_never_returns_a_time_at_or_before_after() {
         at(2026, 11, 1, 6, 10),
     );
     assert!(d > at(2026, 11, 1, 6, 10));
+}
+
+// ---- the architect's round on #762
+
+fn paused_daily() -> Value {
+    json!({"id": "daily", "cron": "30 8 * * *", "tz": "UTC", "task": "t", "paused": true})
+}
+
+#[test]
+fn a_stale_read_applied_after_a_fresh_one_never_unpauses_the_job() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("daily", "30 8 * * *")]));
+    r.tick(at(2026, 11, 3, 8, 0));
+    // A run-now reads v1 (active); kith-sched writes v2 (paused); a tick applies v2.
+    let old = index(&r.p, Some("mel"));
+    r.jobs("mel", &json!([paused_daily()]));
+    r.tick(at(2026, 11, 3, 8, 1));
+    let paused = |r: &Rig| r.n("SELECT paused FROM sched_jobs WHERE job = 'daily'");
+    assert_eq!(paused(&r), 1);
+    // The run-now's transaction now applies its v1 read: refused, nothing written.
+    let a = &old.agents[0];
+    let read = Read {
+        agent: &a.agent,
+        hash: &a.hash,
+        jobs: &a.jobs,
+        paths: Some(&r.p),
+    };
+    let slot = super::slot_of_ms(at(2026, 11, 3, 8, 30)).unwrap();
+    let seen = claims::revoke_epoch(&r.core, "kai").unwrap();
+    let out = fire(
+        &mut r.core,
+        &Fire {
+            read: &read,
+            job: "daily",
+            slot: Some(&slot),
+            missed: None,
+            now: at(2026, 11, 3, 8, 30),
+            mac: &r.mac,
+            person: "kai",
+            revoke_seen: seen,
+            advance_to: None,
+            ctx: &r.ctx,
+            after: &ok,
+        },
+    )
+    .unwrap();
+    assert_eq!(out, Outcome::Stale);
+    assert_eq!(paused(&r), 1, "still paused");
+    assert_eq!(r.n("SELECT count(*) FROM turns"), 0);
+    assert_eq!(r.n("SELECT count(*) FROM sched_fires"), 0);
+    // The retry reads the file again and finds the job paused.
+    let v = r.run_now("mel", "daily", "k1", at(2026, 11, 3, 8, 31));
+    assert_eq!(v["outcome"], "skipped:paused");
+    // And a removed job stays removed.
+    r.jobs("mel", &json!([]));
+    r.tick(at(2026, 11, 3, 8, 32));
+    assert_eq!(r.n("SELECT count(*) FROM sched_jobs"), 0);
+    let read = Read {
+        agent: &a.agent,
+        hash: &a.hash,
+        jobs: &a.jobs,
+        paths: Some(&r.p),
+    };
+    let out = fire(
+        &mut r.core,
+        &Fire {
+            read: &read,
+            job: "daily",
+            slot: Some(&slot),
+            missed: None,
+            now: at(2026, 11, 3, 8, 33),
+            mac: &r.mac,
+            person: "kai",
+            revoke_seen: seen,
+            advance_to: None,
+            ctx: &r.ctx,
+            after: &ok,
+        },
+    )
+    .unwrap();
+    assert_eq!(out, Outcome::Stale);
+    assert_eq!(r.n("SELECT count(*) FROM sched_jobs"), 0, "not revived");
+}
+
+fn every(id: &str, secs: u64) -> Value {
+    json!({"id": id, "trigger": {"type": "interval", "every": secs}, "task": format!("do {id}")})
+}
+
+#[test]
+fn a_five_minute_interval_fires_at_minute_five_and_leaves_rows() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([every("iv", 300)]));
+    // No fire yet: the first slot is the time the file was indexed plus the interval.
+    for m in 0..5 {
+        assert!(
+            fired(&r.tick(at(2026, 11, 3, 8, m))).is_empty(),
+            "minute {m}"
+        );
+    }
+    assert_eq!(fired(&r.tick(at(2026, 11, 3, 8, 5))), ["iv"]);
+    let rows = r.rows("iv");
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(rows[0].0.starts_with("2026-11-03T08:05"), "{rows:?}");
+    // The next one counts from that slot, not from the watermark.
+    r.finish_all();
+    for m in 6..10 {
+        assert!(
+            fired(&r.tick(at(2026, 11, 3, 8, m))).is_empty(),
+            "minute {m}"
+        );
+    }
+    assert_eq!(fired(&r.tick(at(2026, 11, 3, 8, 10))), ["iv"]);
+    assert_eq!(r.rows("iv").len(), 2);
+}
+
+#[test]
+fn an_agent_whose_file_cannot_be_read_is_planned_from_its_index_row() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("daily", "30 8 * * *")]));
+    r.tick(at(2026, 11, 3, 8, 0));
+    std::fs::write(r.p.agents.join("mel").join("jobs.json"), "{ not json").unwrap();
+    let rep = r.tick(at(2026, 11, 3, 8, 30));
+    assert!(
+        rep["problems"].to_string().contains("mel"),
+        "the problem is said: {rep}"
+    );
+    assert_eq!(fired(&rep), ["daily"], "the index decides");
+    assert_eq!(r.outcomes("daily"), ["fired"]);
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 30)));
+}
+
+#[test]
+fn one_failing_job_does_not_stop_the_others_or_move_the_watermark() {
+    let mut r = Rig::new();
+    r.jobs(
+        "mel",
+        &json!([daily("a", "30 8 * * *"), daily("b", "30 8 * * *")]),
+    );
+    let before = at(2026, 11, 3, 8, 29);
+    r.set_wm(before);
+    let seen = Cell::new(0);
+    let rep = tick(&mut r.core, &r.p, &r.ctx, at(2026, 11, 3, 8, 30), &|s| {
+        if s == Step::Enqueue {
+            seen.set(seen.get() + 1);
+            if seen.get() == 1 {
+                return Err(Error::Io("injected".into()));
+            }
+        }
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(fired(&rep), ["b"], "{rep}");
+    assert!(rep["problems"].to_string().contains("injected"));
+    assert_eq!(r.outcomes("a"), Vec::<String>::new(), "a left no half row");
+    assert_eq!(r.wm(), Some(before), "the failed slot is not passed");
+    // The next tick fires a and b is decided already.
+    assert_eq!(fired(&r.tick(at(2026, 11, 3, 8, 30))), ["a"]);
+    assert_eq!(r.wm(), Some(at(2026, 11, 3, 8, 30)));
+}
+
+#[test]
+fn the_daemon_path_ignores_a_callers_now() {
+    let mut r = Rig::new();
+    r.jobs("mel", &json!([daily("daily", "30 8 * * *")]));
+    let far = at(2099, 1, 1, 0, 0);
+    super::fire::call_write(&mut r.core, "schedule.tick", &json!({"now": far})).unwrap();
+    assert!(
+        r.wm().is_none_or(|w| w < far),
+        "a future `now` did not move the watermark"
+    );
+}
+
+#[test]
+fn schedule_jobs_next_is_the_one_the_fire_uses() {
+    use super::{Rule as _, TriggerRule};
+    let ny = json!({"id": "j", "cron": "30 8 * * *", "tz": "America/New_York", "task": "t"});
+    let now = at(2026, 11, 3, 0, 0);
+    let a = TriggerRule.next(&ny, now).unwrap();
+    let t = super::sync::trigger_of(&ny).unwrap();
+    assert_eq!(
+        a,
+        t.next_after(now).and_then(|n| {
+            use chrono::TimeZone as _;
+            chrono::Local
+                .timestamp_millis_opt(n)
+                .single()
+                .map(|d| d.format("%Y-%m-%dT%H:%M").to_string())
+        })
+    );
+    // A trigger object is read too (it was "bad cron: no cron" before).
+    let iv = every("iv", 300);
+    assert!(TriggerRule.next(&iv, now).unwrap().is_some());
 }

@@ -255,6 +255,23 @@ fn every_half_hour_across_the_fall_back_day() {
 }
 
 #[test]
+fn a_spec_firing_several_times_an_hour_steps_through_the_repeated_hour() {
+    // Asked from inside the repeated hour (06:00Z is 01:00 EST, the second pass), croner answers a time in the first
+    // pass; the next fire is the first real one after, 02:00 EST, not an hour later than that.
+    let t = cron("*/15 * * * *", "America/New_York");
+    assert_eq!(
+        t.next_after_in(ms("2026-11-01T06:00:00Z"), &Utc),
+        Some(ms("2026-11-01T07:00:00Z"))
+    );
+    // The daily case keeps its answer: the second 01:30 does not fire.
+    let t = cron("30 1 * * *", "America/New_York");
+    assert_eq!(
+        t.next_after_in(ms("2026-11-01T06:00:00Z"), &Utc),
+        Some(ms("2026-11-02T06:30:00Z"))
+    );
+}
+
+#[test]
 fn local_on_a_dst_zone_follows_that_zone() {
     // `Local` is whatever zone it is handed; a DST zone behaves as the IANA spelling does.
     let ny: Tz = "America/New_York".parse().unwrap();

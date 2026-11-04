@@ -83,15 +83,22 @@ impl CronSpec {
         };
         // An Err is "no occurrence" (a day that no month has): croner searches a bounded span.
         // croner can answer a time at or before `from` in the repeated hour of a fall-back (01:30 EDT asked from the
-        // second 01:00): a next time is never in the past, so keep asking from an hour later until it is after (the second pass of the hour does not fire again).
+        // second 01:00): a next time is never in the past, so ask again from croner's own answer until one is after
+        // `after`. Each pass moves on by at least a minute, so the repeated hour is crossed in at most 60 passes; the
+        // second pass of the hour does not fire again. (Stepping by whole hours skipped real slots of a spec that
+        // fires several times an hour.)
         let mut from = from;
-        for step in 1..=26_i64 {
-            let t = cron.find_next_occurrence(&from, false).ok()?;
-            if t.timestamp_millis() > after {
-                return Some(t.timestamp_millis());
+        let mut from_ms = after;
+        for _ in 0..200 {
+            let t = cron
+                .find_next_occurrence(&from, false)
+                .ok()?
+                .timestamp_millis();
+            if t > after {
+                return Some(t);
             }
-            from = DateTime::<Utc>::from_timestamp_millis(after + step * 3_600_000)?
-                .with_timezone(zone);
+            from_ms = t.max(from_ms + 60_000);
+            from = DateTime::<Utc>::from_timestamp_millis(from_ms)?.with_timezone(zone);
         }
         None
     }

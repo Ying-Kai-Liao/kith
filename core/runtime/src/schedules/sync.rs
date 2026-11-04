@@ -12,14 +12,103 @@ use rusqlite::{OptionalExtension as _, Transaction, params};
 use serde_json::Value;
 
 use crate::conversations::claims;
-use crate::error::Result;
-use kith_kernel::schedule::{Trigger, Zone};
+use crate::error::{Error, Result};
+use kith_kernel::paths::Paths;
 
-/// What a read of one agent's `jobs.json` found: the file's hash and its jobs.
+/// What a read of one agent's `jobs.json` found: the file's hash and its jobs. `paths` is where to look at the file again
+/// under the transaction (see [`sync_in`]); `None` for a read that is the index's own (the file could not be read).
 pub(super) struct Read<'a> {
     pub agent: &'a str,
     pub hash: &'a str,
     pub jobs: &'a [Value],
+    pub paths: Option<&'a Paths>,
+}
+
+impl Read<'_> {
+    /// Whether the file still has the hash this was read with, looked at again now under the shared `<agent>.jobs.lock`
+    /// (`kith-sched` writes under it). A file that cannot be read now is an error: the caller tries again.
+    fn is_current(&self) -> Result<bool> {
+        let Some(paths) = self.paths else {
+            return Ok(true);
+        };
+        let file = super::jobs_file(paths, self.agent);
+        match super::read_jobs(&paths.machine, self.agent, &file) {
+            Ok((hash, _)) => Ok(hash == self.hash),
+            Err(e) => Err(Error::Refused(format!(
+                "kith-core: schedule: {}: {e}; tried again next tick",
+                file.display()
+            ))),
+        }
+    }
+}
+
+/// What [`sync_in`] did.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Synced {
+    /// The index already had this hash.
+    Same,
+    /// The index was brought up to the read.
+    Applied,
+    /// The file is no longer what was read: nothing was written. Read again.
+    Stale,
+}
+
+/// An agent's index as the fire reads it when the file cannot be: its hash and job definitions, in job order. `None` when
+/// the agent was never indexed.
+pub(super) fn indexed(
+    conn: &rusqlite::Connection,
+    agent: &str,
+) -> Result<Option<(String, Vec<Value>)>> {
+    let hash: Option<String> = conn
+        .query_row(
+            "SELECT hash FROM sched_index WHERE agent = ?1",
+            [agent],
+            |r| r.get(0),
+        )
+        .optional()?;
+    let Some(hash) = hash else {
+        return Ok(None);
+    };
+    let mut st = conn.prepare("SELECT def FROM sched_jobs WHERE agent = ?1 ORDER BY job")?;
+    let defs = st
+        .query_map([agent], |r| r.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(Some((
+        hash,
+        defs.iter()
+            .filter_map(|d| serde_json::from_str(d).ok())
+            .collect(),
+    )))
+}
+
+/// The time the agent's file was last indexed (ms), the anchor of an interval that never fired.
+pub(super) fn indexed_at(conn: &rusqlite::Connection, agent: &str) -> Result<Option<i64>> {
+    Ok(conn
+        .query_row(
+            "SELECT at FROM sched_index WHERE agent = ?1",
+            [agent],
+            |r| r.get(0),
+        )
+        .optional()?)
+}
+
+/// The latest timed slot of the job with a row, whatever it decided (ms): where an interval counts from.
+pub(super) fn last_timed_slot(
+    conn: &rusqlite::Connection,
+    agent: &str,
+    job: &str,
+) -> Result<Option<i64>> {
+    // Timed slots are UTC text, so the latest sorts last; `manual:` and `event:` keys are not times.
+    let slot: Option<String> = conn
+        .query_row(
+            "SELECT slot FROM sched_fires WHERE agent = ?1 AND job = ?2
+               AND slot NOT LIKE 'manual:%' AND slot NOT LIKE 'event:%'
+             ORDER BY slot DESC LIMIT 1",
+            params![agent, job],
+            |r| r.get(0),
+        )
+        .optional()?;
+    Ok(slot.and_then(|s| super::ms_of_slot(&s)))
 }
 
 /// A job as the index holds it.
@@ -42,28 +131,7 @@ pub(super) fn is_paused(def: &Value) -> bool {
         .is_some_and(|p| !matches!(p, Value::Null | Value::Bool(false)))
 }
 
-/// The job's trigger: its `trigger` object when it has one, else the `cron` of a `kith-sched` job (follows the Mac unless
-/// the job names a `tz`).
-pub(super) fn trigger_of(def: &Value) -> std::result::Result<Trigger, String> {
-    let t = if let Some(t) = def.get("trigger") {
-        serde_json::from_value::<Trigger>(t.clone()).map_err(|e| format!("trigger: {e}"))?
-    } else {
-        let expr = def
-            .get("cron")
-            .and_then(Value::as_str)
-            .ok_or("no cron or trigger")?;
-        let tz = match def.get("tz").and_then(Value::as_str) {
-            Some(z) => Zone::parse(z).map_err(|e| e.0)?,
-            None => Zone::Local,
-        };
-        Trigger::Cron {
-            expr: expr.to_owned(),
-            tz,
-        }
-    };
-    t.validate().map_err(|e| e.0)?;
-    Ok(t)
-}
+pub(super) use super::trigger_of;
 
 /// The hash the index holds for the agent's file, if it was ever indexed.
 pub(super) fn hash_in(tx: &Transaction<'_>, agent: &str) -> Result<Option<String>> {
@@ -119,10 +187,15 @@ pub(super) fn cancel_in(
     claims::cancel_waiting_in(tx, &ids, why, now)
 }
 
-/// Brings the index up to the file just read. Nothing changes when the hash is the index's. Returns whether it re-indexed.
-pub(super) fn sync_in(tx: &Transaction<'_>, read: &Read<'_>, now: i64) -> Result<bool> {
+/// Brings the index up to the file just read. Nothing changes when the hash is the index's. "Differs" is not "newer": a
+/// read made before another one was applied must not put the index back, so the file is looked at again here, inside the
+/// transaction (the writes of core.db are one at a time), and a read that is no longer the file's is not applied.
+pub(super) fn sync_in(tx: &Transaction<'_>, read: &Read<'_>, now: i64) -> Result<Synced> {
     if hash_in(tx, read.agent)?.as_deref() == Some(read.hash) {
-        return Ok(false);
+        return Ok(Synced::Same);
+    }
+    if !read.is_current()? {
+        return Ok(Synced::Stale);
     }
     let mut keep = Vec::new();
     for def in read.jobs {
@@ -159,5 +232,5 @@ pub(super) fn sync_in(tx: &Transaction<'_>, read: &Read<'_>, now: i64) -> Result
          ON CONFLICT (agent) DO UPDATE SET hash = excluded.hash, at = excluded.at",
         params![read.agent, read.hash, now],
     )?;
-    Ok(true)
+    Ok(Synced::Applied)
 }

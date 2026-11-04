@@ -141,11 +141,12 @@ impl Ctx<'_> {
         }
         let mut next = Value::Null;
         if !paused {
+            let has_trigger = job.get("trigger").is_some();
             match job.get("cron").and_then(Value::as_str) {
-                None => {
+                None if !has_trigger => {
                     row.insert("error".into(), json!("bad cron: no cron"));
                 }
-                Some(c) => match self.rule.next(c, self.now) {
+                _ => match self.rule.next(job, self.now) {
                     Ok(Some(n)) => next = json!(n),
                     Ok(None) => {}
                     Err(RuleError::NotWired) => {

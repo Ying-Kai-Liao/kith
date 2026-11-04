@@ -36,10 +36,11 @@ pub(crate) use call::{call, serves};
 #[cfg(unix)]
 pub(crate) use fire::{call_write, serves_write};
 
-/// The cron rule `next` needs: when a job runs after `now_ms`, as the local minute `YYYY-MM-DDTHH:MM` that
-/// `kith-sched` prints, or `None` when it never does. The kernel's Trigger (M4-1) is the real one.
+/// The rule `next` needs: when a job runs after `now_ms`, as the local minute `YYYY-MM-DDTHH:MM` that `kith-sched`
+/// prints, or `None` when it never does. It gets the job's definition, so the zone and the trigger are the job's own.
+/// The kernel's Trigger (M4-1) is the real one.
 pub(crate) trait Rule {
-    fn next(&self, cron: &str, now_ms: i64) -> std::result::Result<Option<String>, RuleError>;
+    fn next(&self, job: &Value, now_ms: i64) -> std::result::Result<Option<String>, RuleError>;
 }
 
 /// Why a rule gave no time.
@@ -51,16 +52,35 @@ pub(crate) enum RuleError {
     Bad(String),
 }
 
-/// The kernel's Trigger (M4-1) as the rule `next` asks: a `kith-sched` job's `cron` is a cron trigger that follows the Mac.
+/// The job's trigger: its `trigger` object when it has one, else the `cron` of a `kith-sched` job (follows the Mac unless
+/// the job names a `tz`). The fire and `schedule.jobs` both ask it, so their `next` is the same.
+pub(crate) fn trigger_of(def: &Value) -> std::result::Result<Trigger, String> {
+    let t = if let Some(t) = def.get("trigger") {
+        serde_json::from_value::<Trigger>(t.clone()).map_err(|e| format!("trigger: {e}"))?
+    } else {
+        let expr = def
+            .get("cron")
+            .and_then(Value::as_str)
+            .ok_or("no cron or trigger")?;
+        let tz = match def.get("tz").and_then(Value::as_str) {
+            Some(z) => Zone::parse(z).map_err(|e| e.0)?,
+            None => Zone::Local,
+        };
+        Trigger::Cron {
+            expr: expr.to_owned(),
+            tz,
+        }
+    };
+    t.validate().map_err(|e| e.0)?;
+    Ok(t)
+}
+
+/// The kernel's Trigger (M4-1) as the rule `next` asks, built the way the fire builds it.
 pub(crate) struct TriggerRule;
 
 impl Rule for TriggerRule {
-    fn next(&self, cron: &str, now_ms: i64) -> std::result::Result<Option<String>, RuleError> {
-        let t = Trigger::Cron {
-            expr: cron.to_owned(),
-            tz: Zone::Local,
-        };
-        t.validate().map_err(|e| RuleError::Bad(e.0))?;
+    fn next(&self, job: &Value, now_ms: i64) -> std::result::Result<Option<String>, RuleError> {
+        let t = trigger_of(job).map_err(RuleError::Bad)?;
         Ok(t.next_after(now_ms).and_then(local_minute))
     }
 }
@@ -78,7 +98,7 @@ fn local_minute(ms: i64) -> Option<String> {
 pub(crate) struct NoRule;
 
 impl Rule for NoRule {
-    fn next(&self, _cron: &str, _now_ms: i64) -> std::result::Result<Option<String>, RuleError> {
+    fn next(&self, _job: &Value, _now_ms: i64) -> std::result::Result<Option<String>, RuleError> {
         Err(RuleError::NotWired)
     }
 }

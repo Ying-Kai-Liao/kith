@@ -19,8 +19,8 @@ use crate::tests::{machine, open_all, paths};
 struct Fixed;
 
 impl Rule for Fixed {
-    fn next(&self, cron: &str, _now: i64) -> Result<Option<String>, RuleError> {
-        match cron {
+    fn next(&self, job: &Value, _now: i64) -> Result<Option<String>, RuleError> {
+        match job.get("cron").and_then(Value::as_str).unwrap_or("") {
             "0 8 * * *" => Ok(Some("2026-11-05T08:00".into())),
             "*/5 * * * *" => Ok(Some("2026-11-04T12:05".into())),
             other => Err(RuleError::Bad(format!(
@@ -249,7 +249,10 @@ fn next_and_show_use_the_rule_and_the_run_history() {
         .is_err()
     );
     // NoRule is what the core wires until M4-1 merges.
-    assert_eq!(NoRule.next("0 8 * * *", 0), Err(RuleError::NotWired));
+    assert_eq!(
+        NoRule.next(&json!({"cron": "0 8 * * *"}), 0),
+        Err(RuleError::NotWired)
+    );
 }
 
 #[test]

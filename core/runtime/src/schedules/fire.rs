@@ -14,7 +14,9 @@
 //! 7. move the watermark (never backwards).
 //!
 //! Only the clock is read before the transaction, and the file of jobs, the person and the revoke epoch the caller needs
-//! to hand in (`Fire`). A failure anywhere rolls the whole thing back: nothing half-done is left for the next tick to
+//! to hand in (`Fire`). The file is looked at again inside the transaction, under the shared `<agent>.jobs.lock`, before
+//! the index is written from it: a read that is no longer the file's is not applied (`Outcome::Stale`, nothing written),
+//! so the index never goes back to an older file. A failure anywhere rolls the whole thing back: nothing half-done is left for the next tick to
 //! find, and the watermark has not moved, so the slot is tried again (its row either exists whole or not at all).
 //!
 //! Nothing wires this to a live tick while `kith-sched` owns `jobs.json` (I14): the rows `schedule.tick` and
@@ -26,8 +28,8 @@ use kith_kernel::secrets::{self, Ctx};
 use rusqlite::{OptionalExtension as _, Transaction, params};
 use serde_json::{Value, json};
 
-use super::sync::{self, Read};
-use super::{index, mac_id, ms_of_slot, slot_of_local, slot_of_ms};
+use super::sync::{self, Read, Synced};
+use super::{AgentJobs, index, mac_id, ms_of_slot, slot_of_local, slot_of_ms};
 use crate::authority;
 use crate::conversations::claims::{self, NewTurn};
 use crate::db::Core;
@@ -130,6 +132,8 @@ pub(super) enum Outcome {
     },
     /// Nothing to fire (a span that was only missed).
     Nothing,
+    /// The `jobs.json` read is no longer the file's: nothing was written, read again and retry.
+    Stale,
 }
 
 #[allow(clippy::unnecessary_wraps, reason = "the shape of `Fire::after`")]
@@ -238,7 +242,10 @@ pub(super) fn fire_in(tx: &Transaction<'_>, f: &Fire<'_>) -> Result<Outcome> {
     let agent = f.read.agent;
     // 1. What the decision reads.
     let seen = watermark_in(tx, f.mac)?;
-    sync::sync_in(tx, f.read, f.now)?;
+    if sync::sync_in(tx, f.read, f.now)? == Synced::Stale {
+        // Nothing was written yet: the caller drops the transaction and reads the file again.
+        return Ok(Outcome::Stale);
+    }
     if let Some(m) = f.missed {
         record_missed(tx, f, m)?;
     }
@@ -304,7 +311,8 @@ pub(super) fn fire_in(tx: &Transaction<'_>, f: &Fire<'_>) -> Result<Outcome> {
         match authority::may_in(f.ctx, &auth, &person, agent) {
             Ok((true, _)) => None,
             Ok((false, why)) => Some(format!("denied: {why}")),
-            Err(e) => Some(format!("denied: {e}")),
+            // A rule that could not answer is not a "no": the whole fire rolls back and a retry decides again.
+            Err(e) => return Err(e),
         }
     };
     if let Some(why) = refusal {
@@ -378,6 +386,9 @@ pub(super) fn fire_in(tx: &Transaction<'_>, f: &Fire<'_>) -> Result<Outcome> {
 pub(super) fn fire(core: &mut Core, f: &Fire<'_>) -> Result<Outcome> {
     let tx = core.claim_tx()?;
     let out = fire_in(&tx, f)?;
+    if out == Outcome::Stale {
+        return Ok(out);
+    }
     tx.commit()?;
     Ok(out)
 }
@@ -455,9 +466,84 @@ struct Work {
     revoke_seen: i64,
 }
 
+/// How often the file is read again when it changes under a fire (it is `kith-sched`'s to write, a few times a day).
+const READS: usize = 3;
+
+/// Brings one agent's index up to its file, reading the file again when it changed under the transaction. When the file
+/// cannot be read (or keeps changing), the agent is planned from its last index row: the index decides, so a due slot
+/// still gets its row. The problem, if any, is said in the report.
+fn settle(
+    core: &mut Core,
+    paths: &Paths,
+    mut a: AgentJobs,
+    now: i64,
+) -> Result<(AgentJobs, Option<String>)> {
+    let mut why = a.problem.take();
+    for _ in 0..READS {
+        if why.is_some() {
+            break;
+        }
+        let tx = core.claim_tx()?;
+        let read = Read {
+            agent: &a.agent,
+            hash: &a.hash,
+            jobs: &a.jobs,
+            paths: Some(paths),
+        };
+        match sync::sync_in(&tx, &read, now) {
+            Ok(Synced::Stale) => {
+                drop(tx);
+                a = index(paths, Some(&a.agent))
+                    .agents
+                    .pop()
+                    .unwrap_or_else(|| AgentJobs {
+                        agent: a.agent.clone(),
+                        jobs: Vec::new(),
+                        hash: String::new(),
+                        problem: Some("the agent is gone".into()),
+                    });
+                why = a.problem.take();
+            }
+            Ok(_) => {
+                tx.commit()?;
+                return Ok((a, None));
+            }
+            Err(e) => {
+                drop(tx);
+                why = Some(e.to_string());
+            }
+        }
+    }
+    let why = why.unwrap_or_else(|| "the jobs file kept changing while it was read".into());
+    (a.hash, a.jobs) = sync::indexed(core.conn(), &a.agent)?.unwrap_or_default();
+    Ok((a, Some(why)))
+}
+
+/// Where a trigger counts from: a cron from the watermark of this Mac; an interval from its job's last timed slot (any
+/// row, whatever it decided) or, for one that never had a slot, from the time the file was last indexed. The watermark
+/// moves a tick at a time, so an interval counted from it would never come due.
+fn counts_from(
+    conn: &rusqlite::Connection,
+    a: &str,
+    job: &str,
+    t: &Trigger,
+    wm: i64,
+) -> Result<i64> {
+    if !matches!(t, Trigger::Interval { .. }) {
+        return Ok(wm);
+    }
+    Ok(match sync::last_timed_slot(conn, a, job)? {
+        Some(s) => s,
+        None => sync::indexed_at(conn, a)?.unwrap_or(wm),
+    })
+}
+
 /// `schedule.tick`: every job that is due at `now`, fired as above, then the watermark moved (in the last fire's
 /// transaction, or alone when nothing was due). A crash between two fires leaves the watermark where it was; the next
 /// tick finds the decided slots by their keys and fires the rest.
+///
+/// One job's failure is that job's: it goes in `problems`, the other jobs go on, and the watermark does not move (so the
+/// failed slot is found again). An agent whose file cannot be read is planned from the index.
 pub(super) fn tick(
     core: &mut Core,
     paths: &Paths,
@@ -469,25 +555,30 @@ pub(super) fn tick(
     let nowf = floor_minute(now);
     // Like `kith-sched`: no tick before means the last minute only.
     let wm = watermark_in(core.conn(), &mac)?.unwrap_or(nowf - TICK_MS);
-    let idx = index(paths, None);
+    let mut agents = Vec::new();
+    let mut from_index: Vec<String> = Vec::new();
     let mut problems = Vec::new();
     let mut work: Vec<Work> = Vec::new();
-    for (ai, a) in idx.agents.iter().enumerate() {
-        if let Some(p) = &a.problem {
-            problems.push(json!({"agent": a.agent, "error": p}));
-            continue;
+    // Set when a due slot could not be given its row this tick: the watermark stays.
+    let mut blocked = false;
+    // The index follows the file even when no job is due, so a pause cancels at once.
+    for a in index(paths, None).agents {
+        let name = a.agent.clone();
+        match settle(core, paths, a, now) {
+            Ok((a, why)) => {
+                if let Some(p) = why {
+                    problems.push(json!({"agent": name, "error": p}));
+                    from_index.push(name);
+                }
+                agents.push(a);
+            }
+            Err(e) => {
+                problems.push(json!({"agent": name, "error": e.to_string()}));
+                blocked = true;
+            }
         }
-        let read = Read {
-            agent: &a.agent,
-            hash: &a.hash,
-            jobs: &a.jobs,
-        };
-        // The index follows the file even when no job is due, so a pause cancels at once.
-        {
-            let tx = core.claim_tx()?;
-            sync::sync_in(&tx, &read, now)?;
-            tx.commit()?;
-        }
+    }
+    for (ai, a) in agents.iter().enumerate() {
         for def in &a.jobs {
             let id = sync::job_id(def);
             let trigger = match sync::trigger_of(def) {
@@ -497,36 +588,55 @@ pub(super) fn tick(
                     continue;
                 }
             };
-            let p = plan(&trigger, wm, nowf);
+            let planned = counts_from(core.conn(), &a.agent, &id, &trigger, wm)
+                .map(|from| plan(&trigger, from, nowf));
+            let p = match planned {
+                Ok(p) => p,
+                Err(e) => {
+                    problems.push(json!({"agent": a.agent, "job": id, "error": e.to_string()}));
+                    blocked = true;
+                    continue;
+                }
+            };
             if p.fire.is_none() && p.missed.is_none() {
                 continue;
             }
-            let auth = authority::tables_within(core.conn())?;
-            let person = person_of(
-                def.get("person")
-                    .and_then(Value::as_str)
-                    .filter(|p| !p.is_empty()),
-                &auth,
-            );
-            // Before the may check, which is in the transaction.
-            let revoke_seen = claims::revoke_epoch(core, &person)?;
-            work.push(Work {
-                agent: ai,
-                job: id,
-                slot: p.fire.and_then(slot_of_ms),
-                missed: p.missed,
-                person,
-                revoke_seen,
+            let person_epoch = authority::tables_within(core.conn()).and_then(|auth| {
+                let person = person_of(
+                    def.get("person")
+                        .and_then(Value::as_str)
+                        .filter(|p| !p.is_empty()),
+                    &auth,
+                );
+                // Before the may check, which is in the transaction.
+                let seen = claims::revoke_epoch(core, &person)?;
+                Ok((person, seen))
             });
+            match person_epoch {
+                Ok((person, revoke_seen)) => work.push(Work {
+                    agent: ai,
+                    job: id,
+                    slot: p.fire.and_then(slot_of_ms),
+                    missed: p.missed,
+                    person,
+                    revoke_seen,
+                }),
+                Err(e) => {
+                    problems.push(json!({"agent": a.agent, "job": id, "error": e.to_string()}));
+                    blocked = true;
+                }
+            }
         }
     }
     let mut report = Vec::new();
     for (i, w) in work.iter().enumerate() {
-        let a = &idx.agents[w.agent];
+        let a = &agents[w.agent];
+        // An agent planned from its index has no file to compare with.
         let read = Read {
             agent: &a.agent,
             hash: &a.hash,
             jobs: &a.jobs,
+            paths: (!from_index.contains(&a.agent)).then_some(paths),
         };
         let last = i + 1 == work.len();
         let out = fire(
@@ -540,14 +650,25 @@ pub(super) fn tick(
                 mac: &mac,
                 person: &w.person,
                 revoke_seen: w.revoke_seen,
-                advance_to: last.then_some(nowf),
+                advance_to: (last && !blocked).then_some(nowf),
                 ctx,
                 after,
             },
-        )?;
-        report.push(outcome_json(&a.agent, &w.job, w.slot.as_deref(), &out));
+        );
+        match out {
+            Ok(Outcome::Stale) => {
+                // The file changed after it was read: the next tick reads it again.
+                problems.push(json!({"agent": a.agent, "job": w.job, "error": "the jobs file changed while it was being fired; tried again next tick"}));
+                blocked = true;
+            }
+            Ok(out) => report.push(outcome_json(&a.agent, &w.job, w.slot.as_deref(), &out)),
+            Err(e) => {
+                problems.push(json!({"agent": a.agent, "job": w.job, "error": e.to_string()}));
+                blocked = true;
+            }
+        }
     }
-    if work.is_empty() {
+    if work.is_empty() && !blocked {
         let tx = core.claim_tx()?;
         let seen = watermark_in(&tx, &mac)?;
         advance_in(&tx, &mac, nowf, seen, now)?;
@@ -582,6 +703,10 @@ fn outcome_json(agent: &str, job: &str, slot: Option<&str>, out: &Outcome) -> Va
             o["decided"] = json!(true);
         }
         Outcome::Nothing => o["outcome"] = json!("missed"),
+        Outcome::Stale => {
+            o["outcome"] = json!("stale");
+            o["retry"] = json!(true);
+        }
     }
     o
 }
@@ -590,6 +715,27 @@ fn outcome_json(agent: &str, job: &str, slot: Option<&str>, out: &Outcome) -> Va
 /// the caller's, so a retry names the same slot). Busy writes no key and answers `busy`; a key that was decided answers
 /// what was decided; a paused or revoked job writes the row and answers it final.
 pub(super) fn run_now(
+    core: &mut Core,
+    paths: &Paths,
+    ctx: &Ctx,
+    agent: &str,
+    job: &str,
+    key: &str,
+    now: i64,
+) -> Result<Value> {
+    // A file that changed between the read and the transaction is read again (same key, so a retry is the same slot).
+    for _ in 0..READS {
+        let v = run_now_once(core, paths, ctx, agent, job, key, now)?;
+        if v["outcome"] != json!("stale") {
+            return Ok(v);
+        }
+    }
+    Err(Error::Refused(format!(
+        "kith-core: schedule: {agent}'s jobs file kept changing; run {job:?} again with key {key:?}"
+    )))
+}
+
+fn run_now_once(
     core: &mut Core,
     paths: &Paths,
     ctx: &Ctx,
@@ -631,6 +777,7 @@ pub(super) fn run_now(
         agent: &a.agent,
         hash: &a.hash,
         jobs: &a.jobs,
+        paths: Some(paths),
     };
     let out = fire(
         core,
@@ -659,15 +806,14 @@ fn now_ms() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(0))
 }
 
-/// Answers `schedule.tick` and `schedule.runNow` over this core, as the caller's view of the folders sees them. `now` (ms)
-/// is the clock when the caller gives one (a test's, or a replay); else this machine's.
+/// Answers `schedule.tick` and `schedule.runNow` over this core, as the caller's view of the folders sees them, on this
+/// machine's clock: a `now` in the params is ignored (one call with a future one would move the watermark for good and
+/// fill `sched_fires` with rows the M4-5 switch then trusts). The core-level tests call [`tick`] and [`run_now`] with
+/// theirs.
 pub(crate) fn call_write(core: &mut Core, method: &str, params: &Value) -> Result<Value> {
     let ctx = authority::call::ctx_of(core, params)?;
     let (paths, _) = core.folders_for(params)?;
-    let now = params
-        .get("now")
-        .and_then(Value::as_i64)
-        .unwrap_or_else(now_ms);
+    let now = now_ms();
     let word = |k: &str| params.get(k).and_then(Value::as_str);
     match method {
         "schedule.tick" => tick(core, &paths, &ctx, now, &no_step),
