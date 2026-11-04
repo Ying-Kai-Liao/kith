@@ -117,25 +117,33 @@ pub(crate) fn engine_of(account: &str) -> &str {
     split_account(account).0
 }
 
-/// An account's Claude config dir: the main login's is `CLAUDE_CONFIG_DIR` or `~/.claude`, a named one is the
-/// accounts lane's `account_dir`. `None` for another engine, or a named account when the machine folder is unknown.
+/// An account's Claude config dir. A named one is the accounts lane's `account_dir`. The main login's is kith-kernel's own
+/// definition (`main_claude_paths`): `CLAUDE_CONFIG_DIR` when it is set and is not one of the accounts' own folders, else
+/// `~/.claude`. So the import must run with the owner's normal environment, and a run's `CLAUDE_CONFIG_DIR` that points
+/// into a named account is never taken for the main login. `None` for another engine, or a named account when the
+/// machine folder is unknown.
 pub(crate) fn config_dir(ctx: &Ctx<'_>, account: &str) -> Option<PathBuf> {
-    match split_account(account) {
-        ("claude", None) => Some(ctx.claude_dir()),
-        ("claude", Some(name)) => {
-            let machine = ctx.machine.clone()?;
-            let actx = accounts::Ctx {
-                machine,
-                agents: PathBuf::new(),
-                kernel: PathBuf::new(),
-                home: ctx.home.clone(),
-                claude_config_dir: None,
-                out: &Silent,
-            };
-            Some(accounts::account_dir(&actx, "claude", name))
-        }
-        _ => None,
+    let (harness, name) = split_account(account);
+    if harness != "claude" {
+        return None;
     }
+    let machine = match (name, ctx.machine.clone()) {
+        (_, Some(m)) => m,
+        (None, None) => return Some(ctx.claude_dir()),
+        (Some(_), None) => return None,
+    };
+    let actx = accounts::Ctx {
+        machine,
+        agents: PathBuf::new(),
+        kernel: PathBuf::new(),
+        home: ctx.home.clone(),
+        claude_config_dir: (ctx.env)("CLAUDE_CONFIG_DIR"),
+        out: &Silent,
+    };
+    Some(match name {
+        Some(n) => accounts::account_dir(&actx, "claude", n),
+        None => accounts::mirror::main_claude_paths(&actx).0,
+    })
 }
 
 /// How Claude names a project folder: every character that is not an ASCII letter or digit becomes `-`

@@ -3,7 +3,7 @@
   "state:home/.kith/sessions/log.jsonl": "{\"at\": \"<TS>\", \"event\": \"wait\", \"session\": \"s1\", \"wait\": \"<ID12>\", \"on\": \"at:<TS>\", \"until\": \"<TS>\"}\n",
   "state:home/.kith/sessions/queue/": "<empty dir>\n",
   "state:home/.kith/sessions/waits/.lock": "",
-  "state:home/.kith/sessions/waits/<ID12>.json": "{\n  \"agent\": \"coder\",\n  \"at\": \"<EPOCH>\",\n  \"checked\": \"<EPOCH>\",\n  \"created\": \"<EPOCH>\",\n  \"id\": \"<ID12>\",\n  \"kind\": \"at\",\n  \"note\": \"remember the thing\",\n  \"on\": \"at:<TS>\",\n  \"seen\": null,\n  \"session\": \"s1\",\n  \"until\": \"<EPOCH>\",\n  \"v\": 1,\n  \"why\": \"\"\n}\n",
+  "state:home/.kith/sessions/waits/<ID12>.json": "{\n  \"agent\": \"coder\",\n  \"at\": \"<MASKED>\",\n  \"checked\": \"<MASKED>\",\n  \"created\": \"<MASKED>\",\n  \"id\": \"<ID12>\",\n  \"kind\": \"at\",\n  \"note\": \"remember the thing\",\n  \"on\": \"at:<TS>\",\n  \"seen\": null,\n  \"session\": \"s1\",\n  \"until\": \"<MASKED>\",\n  \"v\": 1,\n  \"why\": \"\"\n}\n",
   "step0.exit": "0\n",
   "step0.stderr": "",
   "step0.stdout": "waiting <ID12>: this session gets a turn at <TS>; while a terminal holds it, the turn waits for the terminal to close\n",

@@ -701,6 +701,7 @@ impl Proc {
             code: Some(code as i32),
             signal: None,
             error: None,
+            lapsed: false,
         })
     }
 }

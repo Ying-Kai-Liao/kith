@@ -9,7 +9,8 @@
 //!   with an `import_log` row.
 //! - Idempotent: a conversation or engine session that is already there is left as it is (the core may have read the
 //!   transcript since), so a second run writes no row and no log line.
-//! - A record without `account` is the engine's default login (`claude`). A record whose `transcriptPath` is gone, or
+//! - A record without `account` is the engine's default login (`claude`); they are counted in the report. The main login's folder
+//!   follows `CLAUDE_CONFIG_DIR` (kith-kernel's definition), so run the import with the owner's normal environment. A record whose `transcriptPath` is gone, or
 //!   under an account folder that was removed, still gets its row, with no hash.
 //! - `conversations.transcript_ptr/hash` (m0080) are left empty: `engine_sessions` is the source.
 //! - Not wired into `kith migrate`'s default run yet (M3-10).
@@ -24,6 +25,7 @@ use sha2::{Digest as _, Sha256};
 use crate::db::MIGRATIONS;
 use crate::error::{Error, Result};
 use crate::layout::Layout;
+use crate::transcripts::hash::CHANGED;
 use crate::transcripts::rows::{self, EngineSession};
 use crate::transcripts::{DEFAULT_ACCOUNT, Located, SessionPtr, engine_of, hash_session, locate};
 
@@ -40,6 +42,8 @@ pub(crate) struct Report {
     pub changed: bool,
     pub imported: usize,
     pub unchanged: usize,
+    /// Records that named no account and were put under the default one (`claude`).
+    pub defaulted: usize,
     pub backup: Option<std::path::PathBuf>,
     pub lines: Vec<String>,
 }
@@ -49,6 +53,8 @@ struct Record {
     sid: String,
     agent: String,
     account: String,
+    /// The record named no account.
+    defaulted: bool,
     cwd: String,
     transcript_path: String,
 }
@@ -101,13 +107,18 @@ fn read_records(dir: &Path) -> (Vec<Record>, Vec<String>, String) {
             ));
             continue;
         }
-        let account = Some(text(&v, "account"))
-            .filter(|a| !a.is_empty())
-            .unwrap_or_else(|| DEFAULT_ACCOUNT.to_owned());
+        let given = text(&v, "account");
+        let defaulted = given.is_empty();
+        let account = if defaulted {
+            DEFAULT_ACCOUNT.to_owned()
+        } else {
+            given
+        };
         records.push(Record {
             sid,
             agent: text(&v, "agent"),
             account,
+            defaulted,
             cwd: text(&v, "cwd"),
             transcript_path: text(&v, "transcriptPath"),
         });
@@ -121,7 +132,8 @@ fn read_records(dir: &Path) -> (Vec<Record>, Vec<String>, String) {
 }
 
 /// The `engine_sessions` row a record stands for, hash computed now.
-fn session_of(ctx: &Ctx<'_>, r: &Record, now: i64) -> EngineSession {
+/// The second answer is true when the transcript kept changing while it was read, so no hash was taken.
+fn session_of(ctx: &Ctx<'_>, r: &Record, now: i64) -> (EngineSession, bool) {
     let engine = engine_of(&r.account).to_owned();
     let ptr = SessionPtr::from_text(&r.transcript_path).or_else(|| {
         match locate(ctx, &r.account, &r.sid) {
@@ -129,16 +141,18 @@ fn session_of(ctx: &Ctx<'_>, r: &Record, now: i64) -> EngineSession {
             Located::Missing | Located::NotHeld => None,
         }
     });
-    let digest = ptr
+    let read = ptr
         .as_ref()
         .filter(|_| engine == "claude")
-        .and_then(|p| hash_session(p).ok().flatten());
+        .map(hash_session);
+    let churned = matches!(&read, Some(Err(e)) if e.to_string() == CHANGED);
+    let digest = read.and_then(|r| r.ok().flatten());
     let pointer = match (&ptr, r.transcript_path.is_empty()) {
         (Some(p), _) => p.text(),
         (None, false) => r.transcript_path.clone(),
         (None, true) => String::new(),
     };
-    EngineSession {
+    let row = EngineSession {
         conversation: r.sid.clone(),
         account: r.account.clone(),
         engine,
@@ -150,7 +164,8 @@ fn session_of(ctx: &Ctx<'_>, r: &Record, now: i64) -> EngineSession {
             .map(|d| i64::try_from(d.size).unwrap_or(i64::MAX)),
         last_read_at: digest.as_ref().map(|_| now),
         hash: digest.map(|d| d.hash),
-    }
+    };
+    (row, churned)
 }
 
 fn has_tables(c: &Connection) -> bool {
@@ -212,12 +227,29 @@ pub(crate) fn run(layout: &Layout, ctx: &Ctx<'_>, opts: Options) -> Result<Repor
     let (records, skipped, sha) = read_records(&dir);
     rep.lines.extend(skipped);
     let now = now_secs();
+    rep.defaulted = records.iter().filter(|r| r.defaulted).count();
+    if rep.defaulted > 0 {
+        rep.lines.push(format!(
+            "{} record(s) name no account and are put under the default one ({DEFAULT_ACCOUNT})",
+            rep.defaulted
+        ));
+    }
+    let mut churned = Vec::new();
     let sessions: Vec<(String, EngineSession)> = records
         .iter()
-        .map(|r| (r.agent.clone(), session_of(ctx, r, now)))
+        .map(|r| {
+            let (row, changed) = session_of(ctx, r, now);
+            churned.push(changed);
+            (r.agent.clone(), row)
+        })
         .collect();
-    for (_, s) in &sessions {
-        if s.hash.is_none() && s.engine == "claude" {
+    for ((_, s), changed) in sessions.iter().zip(&churned) {
+        if *changed {
+            rep.lines.push(format!(
+                "{}: the transcript changed while it was read; imported without a hash",
+                s.session_id
+            ));
+        } else if s.hash.is_none() && s.engine == "claude" {
             rep.lines.push(format!(
                 "{}: no transcript found at {}; imported without a hash",
                 s.session_id,

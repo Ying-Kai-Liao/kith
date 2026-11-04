@@ -2,7 +2,7 @@
 //!
 //! The order is fixed: the main file first, then every regular file under the sidecar folder, sorted by its path relative
 //! to the folder (components joined with `/`, compared as bytes), whatever the OS lists first. Symlinks and anything
-//! that is not a regular file or folder are skipped, never followed. The hash is the SHA-256 of, for each file in that
+//! that is not a regular file or folder are skipped, never followed; so are `*.kith-tmp` files, a copy in progress. The hash is the SHA-256 of, for each file in that
 //! order, `name 0x00 length(u64, little endian) 0x00 SHA-256(content)`, where `name` is `<sid>.jsonl` or
 //! `<sid>/<relative path>`. Hashing a file's content first keeps a big transcript out of memory; the name and length
 //! keep a moved or split file from hashing the same. A missing sidecar folder is an empty one. A missing main file means
@@ -17,6 +17,9 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest as _, Sha256};
 
 use super::SessionPtr;
+
+/// The suffix of a file being copied into place (`place.rs`); never part of a session.
+pub(super) const TMP: &str = ".kith-tmp";
 
 /// A session's hash, its total size in bytes and how many files it covers.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,6 +70,9 @@ fn files_below(dir: &Path, rel: &str, out: &mut Vec<(String, PathBuf)>) -> std::
         } else {
             format!("{rel}/{name}")
         };
+        if rel.ends_with(TMP) {
+            continue;
+        }
         let kind = entry.file_type()?;
         if kind.is_dir() {
             files_below(&entry.path(), &rel, out)?;
@@ -95,8 +101,25 @@ pub(crate) fn session_files(ptr: &SessionPtr) -> std::io::Result<Option<Vec<(Str
 }
 
 /// The hash of the session at `ptr`; `None` when its main file is missing. An unreadable file is an error: the caller
-/// must not take a half-read tree for the engine's copy.
+/// must not take a half-read tree for the engine's copy. A file that vanishes while it is read (a writer rotating it) is
+/// tried once more; if it vanishes again the error says the copy changed while it was read.
 pub(crate) fn hash_session(ptr: &SessionPtr) -> std::io::Result<Option<Digest>> {
+    match hash_once(ptr) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => hash_once(ptr).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                std::io::Error::other(CHANGED)
+            } else {
+                e
+            }
+        }),
+        other => other,
+    }
+}
+
+/// The text of the error for a copy that kept changing under the read.
+pub(crate) const CHANGED: &str = "changed while reading";
+
+fn hash_once(ptr: &SessionPtr) -> std::io::Result<Option<Digest>> {
     let Some(files) = session_files(ptr)? else {
         return Ok(None);
     };

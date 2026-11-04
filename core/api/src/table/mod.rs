@@ -22,6 +22,7 @@
 
 use crate::{Method, TypeDef};
 
+mod accounts;
 mod build;
 mod cards;
 mod contract;
@@ -78,6 +79,8 @@ const PARTS: &[&[Method]] = &[
     // M3: conversations and their claims.
     conversations::ROWS,
     transcripts::ROWS,
+    // M3-9a: account state and `pick`, read only.
+    accounts::ROWS,
 ];
 
 const LEN: usize = {

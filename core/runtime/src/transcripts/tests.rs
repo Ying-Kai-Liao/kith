@@ -12,7 +12,7 @@ use kith_kernel::threads::Ctx;
 use rusqlite::Connection;
 use serde_json::{Value, json};
 
-use super::place::{Choice, decide, step};
+use super::place::{Choice, apply, decide, step};
 use super::read::{FsReader, TranscriptReader, latest, pick, recent, resolve_read};
 use super::{
     Located, SessionPtr, config_dir, engine_of, find_everywhere, hash_session, locate, slug,
@@ -413,6 +413,9 @@ const UNMAPPED: &[(&str, Option<usize>, &str)] = &[
     ),
 ];
 
+const MAPPED_CASES: usize = 11;
+const MAPPED_STEPS: usize = 15;
+
 fn run_line(w: &World, conn: &Connection, line: &[String]) -> (i32, String, String) {
     let ctx = w.ctx();
     let home = w.root.join("home").to_string_lossy().replace('\\', "/");
@@ -436,18 +439,13 @@ fn the_core_reads_the_golden_latest_pick_and_resolve_cases_as_kith_sessions_does
     let corpus: Vec<Value> =
         serde_json::from_slice(&std::fs::read(golden_dir().join("sessions.json")).unwrap())
             .unwrap();
-    let (mut ran, mut steps) = (0, 0);
+    let (mut mapped_cases, mut mapped_steps) = (0, 0);
     for case in &corpus {
         let name = case["name"].as_str().unwrap();
         if !["latest", "pick", "resolve"]
             .iter()
             .any(|v| name.starts_with(&format!("sessions-{v}")))
         {
-            continue;
-        }
-        // Without the import (Unix only) a registry record has nowhere to be read from.
-        let setup_text = case["setup"].to_string();
-        if !cfg!(unix) && setup_text.contains("live/terminal") && setup_text.contains(".json\"") {
             continue;
         }
         let w = World::new();
@@ -489,6 +487,7 @@ fn the_core_reads_the_golden_latest_pick_and_resolve_cases_as_kith_sessions_does
         )
         .unwrap();
         let norm = |s: &str| mask_uuids(&s.replace(&home, "<HOME>"));
+        let mut counted = false;
         for (i, line) in case["run"].as_array().unwrap().iter().enumerate() {
             let skip = UNMAPPED
                 .iter()
@@ -514,11 +513,13 @@ fn the_core_reads_the_golden_latest_pick_and_resolve_cases_as_kith_sessions_does
             if case["stderr"] != json!(false) {
                 assert_eq!(norm(&stderr), want("stderr"), "{name} step {i} stderr");
             }
-            steps += 1;
+            mapped_steps += 1;
+            counted = true;
         }
-        ran += 1;
+        mapped_cases += usize::from(counted);
     }
-    assert!(ran >= 12 && steps >= 13, "{ran} cases, {steps} steps");
+    // Exactly the cases and steps that map: every latest/pick/resolve line, less what UNMAPPED lists.
+    assert_eq!((mapped_cases, mapped_steps), (MAPPED_CASES, MAPPED_STEPS));
 }
 
 #[cfg(unix)]
@@ -595,6 +596,7 @@ mod import {
 
         let real = run(&layout, &ctx, Options::default()).unwrap();
         assert_eq!((real.imported, real.changed), (3, true), "{real:?}");
+        assert_eq!(real.defaulted, 2, "two records name no account");
         let core = open_all(&layout);
         let c = core.conn();
         let count = |t: &str| {
@@ -642,4 +644,98 @@ mod import {
             "read-only on the sources"
         );
     }
+}
+
+#[test]
+fn pick_takes_a_number_in_the_list_and_refuses_anything_else() {
+    let rows: Vec<_> = ["a", "b"]
+        .iter()
+        .map(|s| super::read::Recent {
+            session: (*s).to_owned(),
+            started: None,
+            via: None,
+            project: None,
+            text: String::new(),
+        })
+        .collect();
+    assert_eq!(pick("coder", &rows, "2\n"), Ok("b".to_owned()));
+    assert_eq!(pick("coder", &rows, " 1 "), Ok("a".to_owned()));
+    assert_eq!(
+        pick("coder", &rows, ""),
+        Err(String::new()),
+        "a cancel has no message"
+    );
+    for bad in ["0", "3", "x", "-1", "1.0"] {
+        assert_eq!(
+            pick("coder", &rows, bad),
+            Err(format!("no session {bad} in the list"))
+        );
+    }
+    assert!(
+        pick("coder", &[], "1")
+            .unwrap_err()
+            .starts_with("no coder sessions to resume")
+    );
+}
+
+#[test]
+fn a_place_is_refused_when_the_engine_copy_changed_after_the_decision() {
+    let w = World::new();
+    let ours = w.session(&w.root.join("store"), "p", SID);
+    let engine = w.session(&w.main(), "p", SID);
+    write(&ours.jsonl(), "ours\nnewer\n");
+    write(&engine.jsonl(), "ours\n");
+    let seen = hash_session(&engine).unwrap().unwrap().hash;
+    // The rule says place: the engine's copy is what was last read.
+    let mine = hash_session(&ours).unwrap().unwrap().hash;
+    assert_eq!(decide(Some(&seen), Some(&seen), Some(&mine)), Choice::Place);
+    // A writer appends between the decision and the copy.
+    write(&engine.jsonl(), "ours\nlive\n");
+    let o = apply(Choice::Place, &ours, &engine, Some(&seen)).unwrap();
+    assert_eq!(o.choice, Choice::Adopt, "falls back to adopt");
+    assert_eq!(
+        std::fs::read_to_string(engine.jsonl()).unwrap(),
+        "ours\nlive\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(ours.jsonl()).unwrap(),
+        "ours\nlive\n"
+    );
+    assert_eq!(o.engine, hash_session(&engine).unwrap());
+}
+
+#[test]
+fn a_copy_in_progress_is_not_part_of_the_hash() {
+    let w = World::new();
+    let p = w.session(&w.main(), "p", SID);
+    write(&p.jsonl(), "x\n");
+    write(&p.sidecar().join("a.txt"), "1");
+    let before = hash_session(&p).unwrap().unwrap();
+    write(&p.sidecar().join("a.txt.kith-tmp"), "half");
+    assert_eq!(hash_session(&p).unwrap().unwrap(), before);
+}
+
+#[test]
+fn the_main_login_follows_claude_config_dir_unless_it_is_an_accounts_own_folder() {
+    let w = World::new();
+    let elsewhere = w.root.join("elsewhere");
+    let env_main = elsewhere.to_string_lossy().into_owned();
+    let work = w
+        .root
+        .join("kith/machine/accounts/claude/work")
+        .to_string_lossy()
+        .into_owned();
+    let make = |val: String| {
+        let env = move |k: &str| (k == "CLAUDE_CONFIG_DIR").then(|| val.clone());
+        let env: &'static dyn Fn(&str) -> Option<String> = Box::leak(Box::new(env));
+        Ctx {
+            state: None,
+            machine: Some(w.root.join("kith/machine")),
+            home: w.root.join("home"),
+            env,
+        }
+    };
+    assert_eq!(config_dir(&make(env_main), "claude"), Some(elsewhere));
+    // A run on the work account has its folder in the variable; that is not the main login.
+    assert_eq!(config_dir(&make(work), "claude"), Some(w.main()));
 }

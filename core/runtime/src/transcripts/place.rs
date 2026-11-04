@@ -50,6 +50,10 @@ pub(crate) struct Outcome {
 
 /// Hashes both copies, applies [`decide`] and does the copy. `last_read` is the hash the table holds.
 /// An unreadable copy is an error before anything is copied.
+///
+/// The caller must hold the conversation's writer claim (M3-2) for the whole call: that is what keeps a core-started
+/// engine from writing the folder meanwhile. A writer that does not take the claim (a terminal session) is covered only
+/// as far as [`apply`] re-checking the engine's copy just before it overwrites it.
 pub(crate) fn step(
     ours: &SessionPtr,
     engine: &SessionPtr,
@@ -62,19 +66,57 @@ pub(crate) fn step(
         last_read,
         mine.as_ref().map(|d| d.hash.as_str()),
     );
-    match choice {
-        Choice::Place => copy_session(ours, engine)?,
-        Choice::Adopt => copy_session(engine, ours)?,
-        Choice::Nothing | Choice::InSync => {}
-    }
-    let engine_now = match choice {
-        Choice::Place => hash_session(engine)?,
-        _ => theirs,
-    };
-    Ok(Outcome {
+    apply(
         choice,
-        engine: engine_now,
-    })
+        ours,
+        engine,
+        theirs.as_ref().map(|d| d.hash.as_str()),
+    )
+}
+
+/// Does what [`decide`] said, given the hash of the engine's copy it was decided on (`seen`). A [`Choice::Place`] hashes
+/// the engine's copy again first: if it is no longer `seen`, something wrote it since the decision and the core's copy
+/// must not overwrite it, so the engine's copy is adopted instead. After an adopt the copy is hashed again and must be
+/// the engine's copy as it is now; the hash returned is the one to record as the last read.
+pub(crate) fn apply(
+    choice: Choice,
+    ours: &SessionPtr,
+    engine: &SessionPtr,
+    seen: Option<&str>,
+) -> std::io::Result<Outcome> {
+    let mut choice = choice;
+    if choice == Choice::Place {
+        let now = hash_session(engine)?;
+        // Gone since the decision is still safe to place over; anything else there is newer than what was decided on.
+        if now.is_some() && now.as_ref().map(|d| d.hash.as_str()) != seen {
+            choice = Choice::Adopt;
+        }
+    }
+    match choice {
+        Choice::Place => {
+            copy_session(ours, engine)?;
+            Ok(Outcome {
+                choice,
+                engine: hash_session(engine)?,
+            })
+        }
+        Choice::Adopt => {
+            copy_session(engine, ours)?;
+            let copied = hash_session(ours)?;
+            let now = hash_session(engine)?;
+            if copied != now {
+                return Err(std::io::Error::other(super::hash::CHANGED));
+            }
+            Ok(Outcome {
+                choice,
+                engine: now,
+            })
+        }
+        Choice::Nothing | Choice::InSync => Ok(Outcome {
+            choice,
+            engine: hash_session(engine)?,
+        }),
+    }
 }
 
 /// Makes `dst` hold exactly `src`'s files: each file is written whole beside its place and renamed over it, and sidecar
@@ -105,7 +147,7 @@ fn copy_file(from: &Path, to: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     let mut tmp = to.as_os_str().to_owned();
-    tmp.push(".kith-tmp");
+    tmp.push(super::hash::TMP);
     let tmp = PathBuf::from(tmp);
     std::fs::copy(from, &tmp)?;
     std::fs::rename(&tmp, to).inspect_err(|_| {
