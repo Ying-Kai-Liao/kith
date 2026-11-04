@@ -211,6 +211,35 @@ fn legacy_marks(path: &Path) -> Vec<(String, Map)> {
     out
 }
 
+/// The legacy kernel marks laid over `accts`: the later `out_until` wins. `None` when any entry is unreadable (the caller
+/// then changes nothing, as the Python's one `try`).
+fn merge_kernel_marks(accts: &mut Map, marks: Vec<(String, Map)>) -> Option<()> {
+    for (k, v) in marks {
+        let e = accts
+            .entry(k)
+            .or_insert_with(|| Value::Object(Map::new()))
+            .as_object_mut()?;
+        let until = pyfloat(v.get("out_until")?)?;
+        let have = e.get("out_until").map_or(Some(0.0), pyfloat)?;
+        if until > have {
+            let since = match v.get("since") {
+                Some(s) if truthy(Some(s)) => pyint(s)?,
+                _ => pyint(v.get("out_until")?)?,
+            };
+            e.insert(
+                "out_until".to_owned(),
+                Value::from(pyint(v.get("out_until")?)?),
+            );
+            e.insert(
+                "reason".to_owned(),
+                Value::String(reason_of(&v).chars().take(40).collect()),
+            );
+            e.insert("since".to_owned(), Value::from(since));
+        }
+    }
+    Some(())
+}
+
 /// `serve/kernel-backups-out.json` into the state file, once: the later `out_until` wins; the old file is renamed.
 fn import_kernel_marks(machine: &Path) {
     let old = legacy_files(machine).1;
@@ -221,34 +250,108 @@ fn import_kernel_marks(machine: &Path) {
         let _lock = lock(machine).ok()?;
         let marks = legacy_marks(&old);
         let (mut accts, _) = read_raw(machine);
-        for (k, v) in marks {
-            let e = accts
-                .entry(k)
-                .or_insert_with(|| Value::Object(Map::new()))
-                .as_object_mut()?;
-            let until = pyfloat(v.get("out_until")?)?;
-            let have = e.get("out_until").map_or(Some(0.0), pyfloat)?;
-            if until > have {
-                let since = match v.get("since") {
-                    Some(s) if truthy(Some(s)) => pyint(s)?,
-                    _ => pyint(v.get("out_until")?)?,
-                };
-                e.insert(
-                    "out_until".to_owned(),
-                    Value::from(pyint(v.get("out_until")?)?),
-                );
-                e.insert(
-                    "reason".to_owned(),
-                    Value::String(reason_of(&v).chars().take(40).collect()),
-                );
-                e.insert("since".to_owned(), Value::from(since));
-            }
-        }
+        merge_kernel_marks(&mut accts, marks)?;
         write_atomic(&state_file(machine), render(&accts).as_bytes(), 0o600).ok()?;
         let mut renamed = old.clone().into_os_string();
         renamed.push(".imported");
         std::fs::rename(&old, PathBuf::from(renamed)).ok()
     })();
+}
+
+/// What `kith migrate --accounts` sees of the state: the file's accounts with the legacy kernel marks laid over them in
+/// memory, as [`read`] would leave them, but nothing written, renamed or created.
+#[derive(Debug)]
+pub struct Snapshot {
+    /// `<machine>/accounts/state.json`, whether or not it exists.
+    pub file: PathBuf,
+    /// The bytes of `state.json` as read under the same hold as the accounts (None: no file).
+    pub bytes: Option<Vec<u8>>,
+    /// The accounts, as `read` returns them.
+    pub accounts: Map,
+    /// `state.json` exists but is not ours (unreadable, not an object, no `accounts` object): `read` sees it as empty.
+    pub not_ours: bool,
+    /// Top-level keys of `state.json` besides `version` and `accounts` (the core's import does not keep them).
+    pub extra_keys: Vec<String>,
+    /// `serve/kernel-backups-out.json` is there; `legacy_applied` says its marks were readable and laid over.
+    pub legacy_present: bool,
+    pub legacy_applied: bool,
+}
+
+/// [`Snapshot`] of the machine's state, read under a shared hold of `state.json.lock` (the lock the writers take, if it
+/// exists). The file is replaced by rename, so a read could never see a torn file; the hold keeps the file and the legacy
+/// merge consistent with a writer that is mid-update.
+pub fn snapshot(machine: &Path) -> Snapshot {
+    let mut lockname = state_file(machine).into_os_string();
+    lockname.push(".lock");
+    let held = std::fs::File::open(PathBuf::from(lockname)).ok();
+    if let Some(l) = &held {
+        let _ = fs2::FileExt::lock_shared(l);
+    }
+    let mut snap = Snapshot {
+        file: state_file(machine),
+        bytes: None,
+        accounts: Map::new(),
+        not_ours: false,
+        extra_keys: vec![],
+        legacy_present: false,
+        legacy_applied: false,
+    };
+    if let Ok(text) = std::fs::read(state_file(machine)) {
+        snap.bytes = Some(text.clone());
+        match serde_json::from_slice::<Value>(&text) {
+            Ok(Value::Object(mut d)) => {
+                snap.extra_keys = d
+                    .keys()
+                    .filter(|k| *k != "version" && *k != "accounts")
+                    .cloned()
+                    .collect();
+                if let Some(Value::Object(a)) = d.remove("accounts") {
+                    snap.accounts = a.into_iter().filter(|(_, v)| v.is_object()).collect();
+                } else {
+                    snap.not_ours = true;
+                }
+            }
+            _ => snap.not_ours = true,
+        }
+    }
+    let old = legacy_files(machine).1;
+    if old.exists() {
+        snap.legacy_present = true;
+        let marks = legacy_marks(&old);
+        let mut merged = snap.accounts.clone();
+        if merge_kernel_marks(&mut merged, marks).is_some() {
+            snap.accounts = merged;
+            snap.legacy_applied = true;
+        }
+    }
+    if let Some(l) = held {
+        let _ = fs2::FileExt::unlock(&l);
+    }
+    snap
+}
+
+/// Where the accounts' state is read from: `pick`, the statuses and the listing ask this and nothing else. The file is the
+/// default ([`FileState`], today's behaviour); the core supplies one over its database (`kith-core`, which this crate does not
+/// depend on). It answers the shape `state.json`'s `accounts` has (`{entry: {out_until, reason, since, cleared_at, usage,
+/// last_started, ...}}`), so every reader below it stays as it is.
+pub trait StateSource {
+    /// The accounts' state. `machine` is where the file source looks; another source may ignore it.
+    fn accounts(&self, machine: &Path) -> Map;
+}
+
+/// `<machine>/accounts/state.json` (the old kernel marks imported into it first): what every run reads today.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FileState;
+
+impl StateSource for FileState {
+    fn accounts(&self, machine: &Path) -> Map {
+        read(machine)
+    }
+}
+
+/// [`out_marks`] over a source: the host's own file still comes from `machine`.
+pub fn out_marks_from(src: &dyn StateSource, machine: &Path, now: f64) -> HashMap<String, Mark> {
+    out_marks(machine, &src.accounts(machine), now)
 }
 
 /// The state file's accounts (none when there is no file or it is corrupt), the old kernel marks imported first.

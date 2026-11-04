@@ -10,7 +10,7 @@ use super::model::Waiter;
 use super::outside::{Files, Outside, System, Transcripts};
 use super::queue::{self, New, refused};
 use super::waiters::{self, Ask, WAIT_TIMEOUT};
-use super::{read, write};
+use super::{read, write, write_after};
 use crate::db::Core;
 use crate::error::{Error, Result};
 
@@ -94,7 +94,7 @@ pub(crate) fn call_with(
         }
         "wake.withdraw" => {
             let session = need(params, "session")?;
-            let id = word(params, "id").filter(|s| !s.is_empty());
+            let id = word(params, "id");
             let n = write(core, now, |st| Ok(queue::withdraw(st, now, session, id)))?;
             Ok(json!({"count": n, "lines": [format!("withdrew {n}")]}))
         }
@@ -174,9 +174,10 @@ pub(crate) fn call_with(
 /// not call this until the switch; a test does. Returns how many waiters fired.
 pub(crate) fn tick(core: &mut Core, out: &dyn Outside, tr: &dyn Transcripts) -> Result<usize> {
     let now = out.now();
-    write(core, now, |st| {
+    // gh, ps and kill run on a copy outside the write lock; the result is written only if the rows did not move meanwhile.
+    write_after(core, now, |st| {
         let fired = waiters::poll(st, out, now);
         queue::recover_all(st, out, tr, now);
-        Ok(fired)
+        fired
     })
 }

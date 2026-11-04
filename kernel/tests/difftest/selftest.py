@@ -162,6 +162,25 @@ class SelfTest(unittest.TestCase):
         self.assertEqual(failed, ['mask'])
         self.assertIn('once masked', out.getvalue())
 
+    def test_mask_keys_mask_any_scalar_and_only_last_started_is_epoch(self):
+        # A pid is a number on one machine and null on another: a case's own mask key must give the same text for both.
+        with tempfile.TemporaryDirectory() as t:
+            n = D.Normalizer(Path(t), mask_keys=['pid'])
+        self.assertEqual(n.data({'pid': 1762160000, 'last_started': 1762160000, 'other': 1762160000}),
+                         {'pid': '<MASKED>', 'last_started': '<EPOCH>', 'other': 1762160000})
+        self.assertEqual(n.data({'pid': None})['pid'], '<MASKED>')
+        self.assertEqual(n.data({'pid': {'a': 1}}), {'pid': {'a': 1}})
+
+    def test_kernel_path_is_unquoted_whatever_the_checkout_path_is(self):
+        # A checkout path with a space is shlex-quoted into a command line; the record must read the same without one.
+        with tempfile.TemporaryDirectory() as t:
+            n = D.Normalizer(Path(t))
+        plain = f"api_helper='{D.KERNEL}/bin/kith-auth get --for echo'"
+        spaced = "api_helper=''\"'\"'" + f"{D.KERNEL}/bin/kith-auth" + "'\"'\"' get --for echo'"
+        want = "api_helper='<KERNEL>/bin/kith-auth get --for echo'"
+        self.assertEqual(n.text(plain), want)
+        self.assertEqual(n.text(spaced), want)
+
     def test_unswitched_golden_cases_are_skipped_out_loud_until_required(self):
         """A golden replay on the Rust program skips a case marked unswitched and says so; --require-switched runs it."""
         case = dict(CASE, unswitched='no Rust side yet')

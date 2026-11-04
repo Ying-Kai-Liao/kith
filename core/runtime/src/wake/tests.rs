@@ -226,7 +226,9 @@ fn a_request_leaves_the_queue_only_when_its_turn_ends() {
 }
 
 #[test]
-fn a_session_a_live_writer_holds_is_not_offered() {
+fn take_offers_a_session_a_live_writer_holds_and_back_held_pauses_it() {
+    // As the Python's take: the host asks the terminal's claim next and answers `back --held` (resume.rs). The hold is a
+    // parked `terminal_live` turn once take creates the turn through M3-2 (q217), not a silent skip here.
     let (t, _l, mut c) = core();
     let f = Fake::new(&t.path().join("state"));
     std::fs::create_dir_all(t.path().join("state/live/terminal")).unwrap();
@@ -236,16 +238,151 @@ fn a_session_a_live_writer_holds_is_not_offered() {
     )
     .unwrap();
     enqueue(&mut c, &f, "s1", "a", "host");
-    assert!(
-        row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap()["turn"].is_null(),
-        "W3: a terminal holds the session"
-    );
-    // The terminal lets go: now it is offered, and nothing was lost.
-    std::fs::remove_file(t.path().join("state/live/terminal/s1.claim")).unwrap();
+    let turn = row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap();
     assert_eq!(
-        row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap()["turn"]["ids"],
-        json!(["a"])
+        turn["turn"]["ids"],
+        json!(["a"]),
+        "offered despite the live writer"
     );
+    let run = turn["turn"]["run"].as_str().unwrap().to_owned();
+    let back = row(&mut c, &f, "wake.back", &json!({"run": run, "held": true})).unwrap();
+    assert_eq!(back["done"], true);
+    let st = state(&mut c);
+    assert_eq!(st.items["s1"].requests.len(), 1, "nothing was lost");
+    assert_eq!(st.items["s1"].tries, 0, "a held writer is not a failed try");
+    assert!(
+        st.items["s1"].next > f.now.get(),
+        "paused, so the next take does not offer it at once"
+    );
+    assert!(row(&mut c, &f, "wake.take", &json!({"holder": 1})).unwrap()["turn"].is_null());
+}
+
+fn answered_rows(c: &Core) -> i64 {
+    c.conn()
+        .query_row("SELECT count(*) FROM wake_answered", [], |r| r.get(0))
+        .unwrap()
+}
+
+#[test]
+fn an_answered_id_is_remembered_for_seven_days() {
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    assert_eq!(enqueue(&mut c, &f, "s1", "a", "run"), "queued");
+    row(
+        &mut c,
+        &f,
+        "wake.withdraw",
+        &json!({"session": "s1", "id": "a"}),
+    )
+    .unwrap();
+    assert_eq!(answered_rows(&c), 1);
+    // Six days on, the id is still a duplicate.
+    f.now.set(T0 + 6.0 * 86400.0);
+    assert_eq!(enqueue(&mut c, &f, "s1", "a", "run"), "duplicate");
+    assert_eq!(answered_rows(&c), 1);
+    // Eight days on, it is forgotten (the write that accepts it prunes the row) and queues as new.
+    f.now.set(T0 + 8.0 * 86400.0);
+    assert_eq!(enqueue(&mut c, &f, "s1", "a", "run"), "queued");
+    assert_eq!(answered_rows(&c), 0);
+}
+
+#[test]
+fn withdraw_with_an_empty_id_withdraws_nothing_but_still_unwaits() {
+    // The Python's `--id ''` is falsy: the waiters go, and no request matches the empty id.
+    let (t, _l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    enqueue(&mut c, &f, "s1", "a", "run");
+    row(
+        &mut c,
+        &f,
+        "wake.wait",
+        &json!({"on": "pid:1", "session": "s1", "agent": "coder"}),
+    )
+    .unwrap();
+    assert_eq!(state(&mut c).waiters.len(), 1);
+    let n = row(
+        &mut c,
+        &f,
+        "wake.withdraw",
+        &json!({"session": "s1", "id": ""}),
+    )
+    .unwrap();
+    assert_eq!(n["count"], 1, "only the waiter");
+    let st = state(&mut c);
+    assert!(st.waiters.is_empty());
+    assert_eq!(st.items["s1"].requests.len(), 1, "the request stays");
+}
+
+#[test]
+fn an_evaluation_outside_the_lock_starts_over_when_the_rows_moved() {
+    use super::write_after;
+    let (t, l, mut c) = core();
+    let f = Fake::new(&t.path().join("state"));
+    enqueue(&mut c, &f, "s1", "a", "run");
+    let mut seen = Vec::new();
+    write_after(&mut c, T0, |st| {
+        seen.push(st.items["s1"].tries);
+        if seen.len() == 1 {
+            // Another writer gets in while this one evaluates (no lock is held then).
+            let other = rusqlite::Connection::open(&l.db).unwrap();
+            other
+                .execute(
+                    "UPDATE wake_sessions SET tries = 3 WHERE session = 's1'",
+                    [],
+                )
+                .unwrap();
+        }
+        st.items.get_mut("s1").unwrap().next = 99.0;
+    })
+    .unwrap();
+    assert_eq!(seen, [0, 3], "the second look saw the other writer's rows");
+    let st = state(&mut c);
+    assert_eq!((st.items["s1"].tries, st.items["s1"].next), (3, 99.0));
+}
+
+/// The real process table: a pid is matched by its start time as well (a reused pid has another one).
+#[cfg(unix)]
+#[test]
+fn a_pid_is_matched_by_pid_and_start_time_on_the_real_system() {
+    use super::outside::System;
+    let t = tempfile::tempdir().unwrap();
+    let sys = System {
+        state: t.path().to_path_buf(),
+        gh: None,
+    };
+    let mut child = std::process::Command::new("sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = i64::from(child.id());
+    let start = sys.proc_start(pid).expect("the system gives a start time");
+    assert!(sys.alive(pid, Some(&start)), "alive with its true start");
+    assert!(sys.alive(pid, None), "no start recorded: the pid alone");
+    assert!(
+        !sys.alive(pid, Some("Mon Jan 1 00:00:00 1990")),
+        "the pid was reused: another start time"
+    );
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(!sys.alive(pid, Some(&start)), "exited");
+    assert!(!sys.alive(pid, None), "exited, no start");
+    // A terminal's claim file names a pid and the start it had; a stale start is not a live writer.
+    let live = t.path().join("live/terminal");
+    std::fs::create_dir_all(&live).unwrap();
+    let me = i64::from(std::process::id());
+    let mine = sys.proc_start(me).unwrap();
+    std::fs::write(
+        live.join("s1.claim"),
+        format!(r#"{{"pid": {me}, "procStart": "{mine}"}}"#),
+    )
+    .unwrap();
+    assert!(sys.writer_live("s1"));
+    std::fs::write(
+        live.join("s1.claim"),
+        format!(r#"{{"pid": {me}, "procStart": "Mon Jan 1 00:00:00 1990"}}"#),
+    )
+    .unwrap();
+    assert!(!sys.writer_live("s1"), "a stale procStart is a reused pid");
 }
 
 #[test]

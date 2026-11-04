@@ -16,11 +16,21 @@
 //!   (the caller then asks the daemon). Two embedded commands at once behave the same way: the second one finds the
 //!   lock held.
 
+// M3-9a: account state in core.db and the read-only `account.*` rows; nothing writes it but the import and the tests.
+#[allow(
+    dead_code,
+    reason = "the import and the rows are its callers; runs switch later"
+)]
+mod accounts;
 // Nothing outside the tests calls it until the host and the CLI are switched to core.db (M2-9 onward). Unix only for
 // now: the rules it reuses (`kith_kernel::secrets`) are.
 #[cfg(unix)]
 #[allow(dead_code)]
 mod authority;
+// The ask tree (M3-8a): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at M3-10.
+#[cfg(unix)]
+#[allow(dead_code, reason = "first callers are the switch of kith-ask (M3-10)")]
+mod asks;
 mod call;
 // Nothing calls the store but the daemon's cards rows and the tests: the host's callers switch in lane H, and the raise,
 // claim and close verbs get theirs there and in M2-12.

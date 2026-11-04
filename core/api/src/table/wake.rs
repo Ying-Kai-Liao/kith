@@ -88,7 +88,7 @@ pub(super) const ROWS: &[Method] = &[
     ),
     wake(
         "wake.take",
-        "The host starts a host-door turn: marks what a session is owed as carried by this holder and answers `turn` (the turn as `kith-wake take` prints it), or null when nothing is owed. Recovers turns whose holder died first (a turn whose marker is in its transcript is answered, one that is not is owed again). A session a live writer holds is not offered (W3). Creates no turn in the conversations lane yet.",
+        "The host starts a host-door turn: marks what a session is owed as carried by this holder and answers `turn` (the turn as `kith-wake take` prints it), or null when nothing is owed. Recovers turns whose holder died first (a turn whose marker is in its transcript is answered, one that is not is owed again). A session a live writer holds is still offered, as in the Python: the host answers `back --held`. Creates no turn in the conversations lane yet.",
         &[
             need("holder", "int", &["--holder"], "The holder's process id."),
             flag("session", "string", &["--session"], "Only this session."),

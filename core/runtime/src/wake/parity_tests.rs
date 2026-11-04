@@ -73,8 +73,9 @@ const INTENDED: &[(&str, &str)] = &[(
     "wake-deliver-not-owed-or-held-does-nothing",
     "q217: a message for a session a terminal holds queues until the session ends. The Python drain skips the session and \
      leaves its item owed; in the core the turn is created through the conversations lane and parks as `terminal_live`, never \
-     typed in. Here that is the conversations lane's (M3-2), and `deliver` is a process start: not replayed. (`take` keeps the \
-     queue's side of it: a session a live writer holds is not offered, see `a_session_a_live_writer_holds_is_not_offered`.)",
+     typed in. Here that is the conversations lane's (M3-2), and `deliver` is a process start: not replayed. (`take` does as the Python \
+     does: it offers the session and the host answers `back --held`, see \
+     `take_offers_a_session_a_live_writer_holds_and_back_held_pauses_it`; the parked turn comes with M3-2.)",
 )];
 
 fn golden_dir() -> PathBuf {
@@ -218,9 +219,6 @@ impl Norm {
     }
 
     fn value(&self, k: &str, x: &Value) -> Value {
-        if self.mask.contains(k) && x.is_number() {
-            return json!("<EPOCH>");
-        }
         if self.mask.contains(k) && !x.is_object() && !x.is_array() {
             return json!("<MASKED>");
         }
@@ -567,7 +565,7 @@ fn env_of(case: &Value) -> BTreeMap<String, String> {
 /// A case's frozen state files with the masks put back as values that mean the same to the import.
 fn unmask(text: &str) -> String {
     text.replace("\"<EPOCH>\"", "4000000000.0")
-        .replace("\"<MASKED>\"", "null")
+        .replace("\"<MASKED>\"", "4000000000.0")
         .replace("<TS>", "2026-01-01T00:00:00Z")
         .replace("<ID12>", "aaaaaaaaaaaa")
         .replace("<SHA>", &"a".repeat(40))
@@ -610,6 +608,124 @@ fn ids_of(core: &mut Core) -> BTreeSet<String> {
         .collect()
 }
 
+/// A process start time as `ps -o lstart=` prints it: the case's normalizer calls it `<PSTART>`.
+fn is_pstart(s: &str) -> bool {
+    let w: Vec<&str> = s.split_whitespace().collect();
+    let alpha = |x: &str| {
+        x.len() == 3
+            && x.starts_with(|c: char| c.is_ascii_uppercase())
+            && x[1..].bytes().all(|b| b.is_ascii_lowercase())
+    };
+    let digits = |x: &str, lo: usize, hi: usize| {
+        (lo..=hi).contains(&x.len()) && x.bytes().all(|b| b.is_ascii_digit())
+    };
+    w.len() == 5
+        && alpha(w[0])
+        && alpha(w[1])
+        && digits(w[2], 1, 2)
+        && w[3].len() == 8
+        && w[3].split(':').all(|p| digits(p, 2, 2))
+        && digits(w[4], 4, 4)
+}
+
+/// Both sides of a state comparison on one footing: a process start is `<PSTART>`, and `4000000000` and `4000000000.0`
+/// are the same number.
+fn canon(v: &Value) -> Value {
+    match v {
+        Value::Number(n) => json!(n.as_f64()),
+        Value::String(s) if is_pstart(s) => json!("<PSTART>"),
+        Value::Array(a) => Value::Array(a.iter().map(canon).collect()),
+        Value::Object(o) => Value::Object(o.iter().map(|(k, x)| (k.clone(), canon(x))).collect()),
+        other => other.clone(),
+    }
+}
+
+/// The state the replay ended in, as the Python would have written it, against the state files the Python ended with
+/// (queue items, `answered.json`, waiters): every field, under the case's masks, so `seen`, `checked`, `procStart` and the
+/// answered `how`/`run` are compared and not only what `ls` prints.
+fn compare_state(
+    core: &mut Core,
+    norm: &Norm,
+    facets: &Map<String, Value>,
+    pruned: bool,
+) -> Vec<String> {
+    let prefix = "state:home/.kith/sessions/";
+    let mut want_items = BTreeMap::new();
+    let mut want_waiters: Vec<Value> = Vec::new();
+    let mut want_answered = json!({});
+    for (k, v) in facets {
+        let Some(rel) = k.strip_prefix(prefix) else {
+            continue;
+        };
+        if !rel.ends_with(".json") {
+            continue;
+        }
+        let Ok(parsed) = serde_json::from_str::<Value>(v.as_str().unwrap_or_default()) else {
+            continue;
+        };
+        // A damaged file the Python left as it found it is not state (the import lists it as skipped).
+        if rel == "queue/answered.json" {
+            if parsed.is_object() {
+                want_answered = canon(&parsed);
+            }
+        } else if parsed.get("session").is_none() && parsed.get("id").is_none() {
+            // not an item or a waiter
+        } else if rel.starts_with("queue/") {
+            want_items.insert(rel.trim_start_matches("queue/").to_owned(), canon(&parsed));
+        } else if rel.starts_with("waits/") {
+            want_waiters.push(canon(&parsed));
+        }
+    }
+    let st = super::read(core, super::tests::T0, Clone::clone).unwrap();
+    let got_items: BTreeMap<String, Value> = st
+        .items
+        .values()
+        .map(|it| {
+            (
+                format!("{}.json", super::model::file_key(&it.session)),
+                canon(&norm.data(&it.to_json())),
+            )
+        })
+        .collect();
+    let mut got_waiters: Vec<Value> = st
+        .waiters
+        .values()
+        .map(|w| canon(&norm.data(&w.to_json())))
+        .collect();
+    let got_answered: Map<String, Value> = st
+        .answered
+        .iter()
+        .map(|(id, a)| (id.clone(), json!({"how": a.how, "t": a.t, "run": a.run})))
+        .collect();
+    let got_answered = canon(&norm.data(&Value::Object(got_answered)));
+    let by = |v: &Value| format!("{}{}", v["id"], v["on"]);
+    got_waiters.sort_by_key(by);
+    want_waiters.sort_by_key(by);
+    // The Python leaves an expired id in the file until a later write; the core forgets it on the write that sees it.
+    if pruned
+        && let (Some(want), Some(got)) = (want_answered.as_object_mut(), got_answered.as_object())
+    {
+        want.retain(|id, _| got.contains_key(id));
+    }
+    let mut diffs = Vec::new();
+    if got_items != want_items {
+        diffs.push(format!(
+            "final state: queue items {got_items:?} but the files hold {want_items:?}"
+        ));
+    }
+    if got_waiters != want_waiters {
+        diffs.push(format!(
+            "final state: waiters {got_waiters:?} but the files hold {want_waiters:?}"
+        ));
+    }
+    if got_answered != want_answered {
+        diffs.push(format!(
+            "final state: answered {got_answered} but the file holds {want_answered}"
+        ));
+    }
+    diffs
+}
+
 fn replay(case: &Value) -> Vec<String> {
     let name = case["name"].as_str().unwrap();
     let norm = Norm::of(case);
@@ -632,6 +748,13 @@ fn replay(case: &Value) -> Vec<String> {
         let out = step(&mut c, &f, &tr, &env, &argv);
         diffs.extend(compare(&norm, &facets, i, &out));
     }
+
+    diffs.extend(compare_state(
+        &mut c,
+        &norm,
+        &facets,
+        name.contains("expired"),
+    ));
 
     // Import fidelity: the state files the Python ended with, imported into a second core, print the same.
     let second = tempfile::tempdir().unwrap();

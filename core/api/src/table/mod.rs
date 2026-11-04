@@ -22,8 +22,10 @@
 
 use crate::{Method, TypeDef};
 
+mod accounts;
 mod build;
 mod cards;
+mod children;
 mod contract;
 mod conversations;
 mod doors;
@@ -79,6 +81,10 @@ const PARTS: &[&[Method]] = &[
     conversations::ROWS,
     // M3-7: the wake queue and the waiters.
     wake::ROWS,
+    // M3: delegation and children (the ask tree).
+    children::ROWS,
+    // M3-9a: account state and `pick`, read only.
+    accounts::ROWS,
 ];
 
 const LEN: usize = {

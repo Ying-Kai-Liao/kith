@@ -1,6 +1,6 @@
 {
   "fakes": "",
-  "state:home/.kith/live/terminal/abc-8.claim": "{\"pid\": 2, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
+  "state:home/.kith/live/terminal/abc-8.claim": "{\"pid\": 2147483000, \"procStart\": null, \"at\": \"<TS>\", \"kind\": \"terminal\"}",
   "state:home/.kith/live/terminal/abc-8.claim.lock": "",
   "state:home/other-claude/projects/-w/abc-8.jsonl": "{\"cwd\": \"<HOME>/work\"}\n",
   "state:home/work/": "<empty dir>\n",

@@ -4,7 +4,8 @@
 //! - Rule 13: an id that is queued, answered or withdrawn is dropped, whoever sends it again.
 //! - S5: requests for one session merge into one item and one turn.
 //! - W2: a request leaves the queue only when its turn ends (`commit`), never when the turn starts (`start_turn`).
-//! - W3: a turn starts only on a session nobody holds; what comes in meanwhile merges into the next turn.
+//! - W3: a turn starts only on a session nobody holds; what comes in meanwhile merges into the next turn. (`take` does not
+//!   check the hold: the host does and answers `back --held`; in the core the hold becomes a parked turn, M3-10.)
 //! - A turn whose holder died either reached the session (its marker is in the transcript: answered) or did not (owed
 //!   again): `recover`.
 //!
@@ -134,7 +135,12 @@ pub(crate) fn enqueue(st: &mut State, now: f64, n: &New<'_>) -> Result<Enqueued>
 /// `id` its waiters go too. A request a running turn already carries stays with that turn (it was delivered). Returns how
 /// many requests and waiters went.
 pub(crate) fn withdraw(st: &mut State, now: f64, session: &str, id: Option<&str>) -> usize {
-    let waits = if id.is_some() { 0 } else { unwait(st, session) };
+    // `--id ''` is falsy in the Python: its waiters go, and no request matches the empty id.
+    let waits = if id.is_some_and(|i| !i.is_empty()) {
+        0
+    } else {
+        unwait(st, session)
+    };
     let Some(it) = st.items.get_mut(session) else {
         return waits;
     };
@@ -358,8 +364,9 @@ pub(crate) fn recover_all(st: &mut State, out: &dyn Outside, tr: &dyn Transcript
     }
 }
 
-/// The host starts a host-door turn for `holder` (its own pid): the first owed session, or `session`. W3: a session a
-/// live writer holds is not offered; what it is owed waits.
+/// The host starts a host-door turn for `holder` (its own pid): the first owed session, or `session`. A session a live
+/// writer holds is still offered, as the Python does: the host asks the terminal's claim next and answers `back --held`.
+/// Once `take` creates the turn through the conversations lane, that hold is a parked `terminal_live` turn (q217).
 pub(crate) fn take(
     st: &mut State,
     out: &dyn Outside,
@@ -378,13 +385,6 @@ pub(crate) fn take(
             || it.next > now
             || it.requests.iter().all(|r| r.run.is_some())
         {
-            continue;
-        }
-        let held = sid
-            .filter(|x| !x.is_empty())
-            .map(str::to_owned)
-            .or_else(|| claude_session(it).then(|| it.session.clone()));
-        if held.is_some_and(|h| out.writer_live(&h)) {
             continue;
         }
         return Some(start_turn(st, out, &s, holder, sid, now));
