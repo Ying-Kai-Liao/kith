@@ -14,8 +14,12 @@ drift shows. Their origin (path, date) is in each file's header. `results4.md` i
 what M3-0a added. This skill is the only other documentation.
 
 State today: the stub's lock primitive exists (`core/stub/src/lib.rs`) and the core's claim transaction with the redeem
-exists (`core/runtime/src/conversations/claims.rs`, M3-2); what is missing is holding the lock across the engine's life
-and claim ids on the wire (M3-4, M3-5). A green run says the design holds; it does not say the code follows it.
+exists (`core/runtime/src/conversations/claims.rs`, M3-2). Since M3-4 the holder runs every Pipes engine under
+`kith-stub --resident` and relays the core's `take`/`release` for a turn to it (claim id on every frame; the holder acts
+only on the current claim or a take in flight; unacked answers are kept per claim and kind, a weaker answer never
+replacing a stronger; a dead stub ends its engine). What is still missing is the core side of the wire (M3-5). The
+holder's relay rules (in-flight take, report keeping) are bookkeeping on top of the modelled safety properties and are
+not in `Holder.tla`; model them at M3-5. A green run says the design holds; it does not say the code follows it.
 `drift.sh` lists the code that exists and tells you when it moves. `Holder.tla` was derived from the holder at 73a03656
 and, for the core's claim record (switch `RedeemWrite`), from `claims.rs` (M3-2); `WriterLock4.tla` models the design only.
 
