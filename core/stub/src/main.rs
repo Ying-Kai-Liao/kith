@@ -182,7 +182,11 @@ fn report(fd: Option<i32>, word: &str) {
 
 /// Where the run-token redeem goes (runtime-design section 4, step 3): after the lock is ours and before the
 /// engine starts. Nothing to do yet.
-fn redeem_run_token() {}
+///
+/// Resident mode runs it per take, before `locked` is answered; an `Err` there frees the lock and answers `error`.
+fn redeem_run_token() -> Result<(), String> {
+    Ok(())
+}
 
 /// The sidecar `w-<key>.holder` next to the lock file: who holds the lock, for doctor and "waiting for your
 /// terminal session". Two lines, `pid=<stub pid>` and `started=<OS start time of that pid>`, in the text the
@@ -203,6 +207,58 @@ fn write_holder(lock: &Lock) -> std::io::Result<()> {
     std::fs::rename(&tmp, &path)
 }
 
+/// The channel must be a socket whose peer is the same user: "owner-only" is checked here, not promised by the starter.
+#[cfg(unix)]
+fn check_unix_channel(fd: i32) -> Result<(), String> {
+    // SAFETY: fstat writes into st; fd was checked open.
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut st) } == -1 {
+        return Err(format!(
+            "--ctl-fd {fd}: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    if st.st_mode & libc::S_IFMT != libc::S_IFSOCK {
+        return Err(format!("--ctl-fd {fd} is not a socket"));
+    }
+    let uid = peer_uid(fd).map_err(|e| format!("--ctl-fd {fd}: peer credentials: {e}"))?;
+    // SAFETY: geteuid has no arguments.
+    if uid != unsafe { libc::geteuid() } {
+        return Err(format!("--ctl-fd {fd}: the peer is uid {uid}, not ours"));
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn peer_uid(fd: i32) -> std::io::Result<u32> {
+    // SAFETY: SO_PEERCRED fills a ucred of len bytes.
+    let mut cred: libc::ucred = unsafe { std::mem::zeroed() };
+    let mut len = size_of::<libc::ucred>() as libc::socklen_t;
+    let r = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&mut cred as *mut libc::ucred).cast(),
+            &mut len,
+        )
+    };
+    if r == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(cred.uid)
+}
+
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+fn peer_uid(fd: i32) -> std::io::Result<u32> {
+    let (mut uid, mut gid) = (0, 0);
+    // SAFETY: getpeereid writes two ids.
+    if unsafe { libc::getpeereid(fd, &mut uid, &mut gid) } == -1 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(uid)
+}
+
 /// Opens the control channel as a (reader, writer) pair, both ends closed on exec / not inheritable.
 fn open_ctl(ctl: &Ctl) -> Result<(std::fs::File, std::fs::File), String> {
     match ctl {
@@ -213,6 +269,7 @@ fn open_ctl(ctl: &Ctl) -> Result<(std::fs::File, std::fs::File), String> {
             if unsafe { libc::fcntl(*fd, libc::F_GETFD) } == -1 {
                 return Err(format!("--ctl-fd {fd} is not an open descriptor"));
             }
+            check_unix_channel(*fd)?;
             // SAFETY: the starter passed fd as an open descriptor for us; we own it from here.
             let file = unsafe { std::fs::File::from_raw_fd(*fd) };
             // Before the engine starts: the engine must never hold the channel (it could answer for the holder).
@@ -228,11 +285,24 @@ fn open_ctl(ctl: &Ctl) -> Result<(std::fs::File, std::fs::File), String> {
         }
         #[cfg(windows)]
         Ctl::Pipe(path) => {
+            // Only a local named pipe: a regular file or a remote \\host\pipe\x path is not the holder's channel.
+            if !path.starts_with(r"\\.\pipe\") {
+                return Err(format!(
+                    "--ctl-pipe {path:?} is not a local named pipe (\\\\.\\pipe\\...)"
+                ));
+            }
             let file = OpenOptions::new()
                 .read(true)
                 .write(true)
                 .open(path)
                 .map_err(|e| format!("cannot open {path:?}: {e}"))?;
+            // A squatter that created the name first would be served as the holder: its server must be our parent.
+            let (server, parent) = (windows::pipe_server_pid(&file), windows::parent_pid());
+            if server.is_none() || server != parent {
+                return Err(format!(
+                    "--ctl-pipe {path:?} is served by pid {server:?}, not by the parent {parent:?}"
+                ));
+            }
             let w = file.try_clone().map_err(|e| e.to_string())?;
             Ok((file, w))
         }
@@ -259,9 +329,11 @@ fn resident_main(args: Args) -> ExitCode {
             if let Err(e) = write_holder(lock) {
                 eprintln!("kith-stub: warning: holder record not written: {e}");
             }
+            // Per take, before `locked` is answered (runtime-design section 4, step 3): the lock is ours, the turn
+            // is not yet running.
+            redeem_run_token()
         })
     });
-    redeem_run_token();
     std::process::exit(run::run(&args.engine))
 }
 
@@ -308,7 +380,10 @@ fn main() -> ExitCode {
         // The record is a hint; the lock is the truth. Do not refuse to run over it.
         eprintln!("kith-stub: warning: holder record not written: {e}");
     }
-    redeem_run_token();
+    if let Err(e) = redeem_run_token() {
+        eprintln!("kith-stub: {e}");
+        return ExitCode::from(LOCK_ERROR);
+    }
     let code = run::run(&args.engine);
     drop(lock);
     // The engine's full code (Windows codes are 32 bits), not its low byte.

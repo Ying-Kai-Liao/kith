@@ -41,6 +41,19 @@ fn wait_until(what: &str, mut f: impl FnMut() -> bool) {
     }
 }
 
+/// What a starter's pre_exec does to hand the child `fd` as fd 9: dup2 is a no-op when fd is already 9 and would
+/// leave FD_CLOEXEC set, so clear the flag instead.
+unsafe fn pass_as_9(fd: i32) {
+    unsafe {
+        if fd == 9 {
+            let f = libc::fcntl(9, libc::F_GETFD);
+            libc::fcntl(9, libc::F_SETFD, f & !libc::FD_CLOEXEC);
+        } else {
+            libc::dup2(fd, 9);
+        }
+    }
+}
+
 /// The holder's end of the channel.
 struct Chan {
     w: UnixStream,
@@ -80,8 +93,7 @@ fn resident(dir: &Path, script: &str) -> (Child, Chan) {
         .stdout(Stdio::piped());
     unsafe {
         cmd.pre_exec(move || {
-            // dup2 clears close-on-exec on the new fd 9, as a starter that passes the fd would.
-            libc::dup2(their_fd, 9);
+            pass_as_9(their_fd);
             Ok(())
         });
     }
@@ -212,7 +224,7 @@ fn a_killed_holder_process_is_the_same_as_a_closed_channel() {
     holder.args(["-c", &script]).stdout(Stdio::piped());
     unsafe {
         holder.pre_exec(move || {
-            libc::dup2(their_fd, 9);
+            pass_as_9(their_fd);
             Ok(())
         });
     }
@@ -238,12 +250,14 @@ fn a_killed_holder_process_is_the_same_as_a_closed_channel() {
 #[test]
 fn an_escaped_engine_child_holds_nothing_after_engine_and_stub_exit() {
     let dir = scratch("escape");
+    // The sleeper starts after the take, as a tool forked mid-turn would, so it could inherit the lock fd.
     let (mut stub, mut c) = resident(
         &dir,
-        "nohup sleep 30 >/dev/null 2>&1 & echo $!; read x; true",
+        "read go; nohup sleep 30 >/dev/null 2>&1 & echo $!; read x; true",
     );
-    let sleeper: i32 = first_line(&mut stub).parse().unwrap();
     assert_eq!(c.say("take conv1 c1"), "locked c1");
+    stub.stdin.as_mut().unwrap().write_all(b"go\n").unwrap();
+    let sleeper: i32 = first_line(&mut stub).parse().unwrap();
     assert!(is_busy(&dir, "conv1"));
     drop(stub.stdin.take());
     assert_eq!(stub.wait().unwrap().code(), Some(0));
@@ -294,14 +308,20 @@ fn take_against_a_direct_one_shot_stub_is_busy_then_free() {
 fn flags_are_checked() {
     let dir = scratch("flags");
     let run = |args: &[&str]| {
-        Command::new(STUB)
-            .args(args)
+        let mut cmd = Command::new(STUB);
+        cmd.args(args)
             .arg("--lock-dir")
             .arg(&dir)
-            .args(["--", "true"])
-            .status()
-            .unwrap()
-            .code()
+            .args(["--", "true"]);
+        // Whatever the harness left open at 77 or 9 is not ours to rely on.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::close(77);
+                libc::close(9);
+                Ok(())
+            });
+        }
+        cmd.status().unwrap().code()
     };
     assert_eq!(run(&["--resident"]), Some(64));
     assert_eq!(run(&["--resident", "--ctl-fd", "2"]), Some(64));
@@ -323,4 +343,30 @@ fn sigterm_to_the_stub_reaches_the_engine() {
     assert_eq!(stub.wait().unwrap().code(), Some(128 + libc::SIGTERM));
     assert!(!alive(engine));
     assert!(!is_busy(&dir, "conv1"));
+}
+
+#[test]
+fn a_ctl_fd_that_is_not_a_socket_is_refused() {
+    let dir = scratch("notsock");
+    let mut fds = [0 as libc::c_int; 2];
+    assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+    let w = fds[1];
+    let mut cmd = Command::new(STUB);
+    cmd.args(["--resident", "--lock-dir"])
+        .arg(&dir)
+        .args(["--ctl-fd", "9", "--", "true"])
+        .stderr(Stdio::piped());
+    unsafe {
+        cmd.pre_exec(move || {
+            pass_as_9(w);
+            Ok(())
+        });
+    }
+    let out = cmd.output().unwrap();
+    unsafe {
+        libc::close(fds[0]);
+        libc::close(fds[1]);
+    }
+    assert_eq!(out.status.code(), Some(64));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("not a socket"));
 }

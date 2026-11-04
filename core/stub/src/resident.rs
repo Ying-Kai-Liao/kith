@@ -25,7 +25,23 @@
 //!   the lock stays. A repeated `release` after `released` is `not-held`.
 //! - Nothing is ever released because the channel closed. If the holder dies, the stub keeps every held lock
 //!   until the engine exits and then exits itself; a line cut off by the close is not acted on.
+//! - The channel must be owner-only, and the stub checks it: on Unix `--ctl-fd` is a socket whose peer is our uid; on
+//!   Windows `--ctl-pipe` is `\\.\pipe\...` and its server process is the stub's parent.
 //! - A garbled, unknown or over-long line is answered `error` and serving goes on. Lock files are never deleted.
+
+//!
+//! What the holder (M3-4) must do, because this design relies on it:
+//! - Keep no copy of the stub's end of the socketpair (close it after spawning), and give the stub no copy of its
+//!   own end. Otherwise a dead holder never produces EOF here, which is harmless for safety but hides the crash path.
+//! - After a holder crash mid-turn the lock stays until the engine exits (nothing here releases on close), so the
+//!   warm engine must exit on stdin EOF / holder death; otherwise that conversation is wedged for ever.
+//! - On Windows create the pipe with an owner-only DACL, `PIPE_REJECT_REMOTE_CLIENTS` and
+//!   `FILE_FLAG_FIRST_PIPE_INSTANCE`, one instance, and keep a listening instance (the stub does not retry on
+//!   `ERROR_PIPE_BUSY`).
+//! - Never retry a `take` after sending `release` for the same claim: the stub cannot know a claim is finished (that
+//!   is the redeem CAS).
+//!
+//! In `WriterLock4.tla`, `StubTake` / `StubRelease` are the take and release arms of `handle()` below.
 
 use std::io::{BufRead, Read, Write};
 use std::path::Path;
@@ -50,14 +66,14 @@ fn claim_ok(claim: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
 }
 
-/// Serves the channel until it closes (or a write to it fails). `on_taken` runs after each new lock is taken,
-/// e.g. to write the holder record. When the channel ends the held lock is kept for the life of the process
+/// Serves the channel until it closes (or a write to it fails). `on_taken` runs after each new lock is taken
+/// and before `locked` is answered (the holder record, the run-token redeem); an `Err` frees the lock and answers `error`. When the channel ends the held lock is kept for the life of the process
 /// (the caller exits only after the engine does), never dropped here.
 pub fn serve(
     folder: &Path,
     mut reader: impl BufRead,
     mut writer: impl Write,
-    on_taken: impl Fn(&Lock),
+    on_taken: impl Fn(&Lock) -> Result<(), String>,
 ) {
     let mut held: Option<Held> = None;
     let mut buf = Vec::new();
@@ -117,7 +133,7 @@ fn handle(
     folder: &Path,
     line: &[u8],
     held: &mut Option<Held>,
-    on_taken: &impl Fn(&Lock),
+    on_taken: &impl Fn(&Lock) -> Result<(), String>,
 ) -> String {
     let Ok(line) = std::str::from_utf8(line) else {
         return "error - not-utf8".into();
@@ -154,7 +170,10 @@ fn handle(
     }
     match take(folder, key) {
         Ok(Taken::Held(lock)) => {
-            on_taken(&lock);
+            // A failed hook (the run-token redeem) drops the lock again: never `locked` without it.
+            if let Err(e) = on_taken(&lock) {
+                return format!("error {claim} {}", one_line(&e));
+            }
             *held = Some(Held {
                 key: key.into(),
                 claim: claim.into(),
