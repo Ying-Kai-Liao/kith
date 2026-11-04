@@ -4,6 +4,11 @@ use crate::{Arg, Cli, Principal};
 pub(super) use crate::{Method, Param, Served, Stability};
 
 pub(super) const OWNER: &[Principal] = &[Principal::Owner];
+/// The host process that holds the relay connection, proving the host secret: the rows that report a fact only it can
+/// know (the sync lease). Not the owner, so a terminal or an owner agent cannot forge them.
+pub(super) const HOST: &[Principal] = &[Principal::Host];
+/// A row the owner may read and the host takes as part of its own flow.
+pub(super) const OWNER_HOST: &[Principal] = &[Principal::Owner, Principal::Host];
 /// A running agent holding a run token, on the run socket (M0e). It reaches nothing but the `run.*` rows marked so.
 pub(super) const RUN: &[Principal] = &[Principal::RunToken];
 

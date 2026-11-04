@@ -118,6 +118,7 @@ fn the_socket_the_token_and_the_folder_are_owner_only() {
     assert_eq!(mode(&l.dir), 0o700);
     assert_eq!(mode(&crate::owner::endpoint(&l)), 0o600);
     assert_eq!(mode(&l.token), 0o600);
+    assert_eq!(mode(&l.host_token), 0o600);
     // And the daemon refuses to run on a folder that is open to others (the same rule as core.db).
     drop(d);
     std::fs::set_permissions(&l.dir, std::fs::Permissions::from_mode(0o755)).expect("chmod");
@@ -917,4 +918,154 @@ fn a_sync_lease_left_held_by_a_dead_daemon_is_not_held_by_the_next_one() {
         other => panic!("{other:?}"),
     }
     drop(daemon);
+}
+
+const HOST_ROWS: [&str; 6] = [
+    "syncLease.link",
+    "syncLease.unlink",
+    "syncLease.changed",
+    "syncLease.drop",
+    "syncLease.pulled",
+    "syncLease.renew",
+];
+
+fn host(p: &Paths, method: &str, params: &Value) -> Reached {
+    crate::reach_as_host(p, method, params, false)
+}
+
+fn answered(r: Reached) -> Value {
+    match r {
+        Reached::Answered(v) => v,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_owner_token_alone_is_refused_every_host_row_and_the_host_secret_is_accepted() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    for name in HOST_ROWS {
+        let params = if name == "syncLease.pulled" {
+            json!({"mark": 0})
+        } else {
+            json!({})
+        };
+        match read(&p, name, &params) {
+            Reached::Refused(Error::NotAllowed(note)) => assert!(note.contains("owner"), "{note}"),
+            other => panic!("{name}: the owner got {other:?}"),
+        }
+    }
+    // Nothing ran: the owner could not make the lease held, nor switch the cloud on or off.
+    let s = answered(read(&p, "syncLease.status", &json!({})));
+    assert_eq!(
+        (s["cloud"].as_str(), s["held"].clone()),
+        (Some("unknown"), json!(false))
+    );
+    // The host runs the whole flow, and the owner reads the result.
+    assert_eq!(
+        answered(host(&p, "syncLease.link", &json!({})))["cloud"],
+        "linked"
+    );
+    let mark = answered(host(&p, "syncLease.mark", &json!({})))["mark"].clone();
+    assert_eq!(
+        answered(host(&p, "syncLease.renew", &json!({})))["renewed"],
+        false
+    );
+    let held = answered(host(&p, "syncLease.pulled", &json!({"mark": mark})));
+    assert_eq!(held["held"], true);
+    assert_eq!(
+        answered(host(&p, "syncLease.renew", &json!({})))["renewed"],
+        true
+    );
+    let s = answered(read(&p, "syncLease.status", &json!({})));
+    assert_eq!(
+        (s["cloud"].as_str(), s["held"].clone()),
+        (Some("linked"), json!(true))
+    );
+    answered(host(&p, "syncLease.changed", &json!({})));
+    assert_eq!(
+        answered(read(&p, "syncLease.status", &json!({})))["held"],
+        false
+    );
+    answered(host(&p, "syncLease.drop", &json!({})));
+    assert_eq!(
+        answered(host(&p, "syncLease.unlink", &json!({})))["cloud"],
+        "off"
+    );
+    // The owner can read the mark too (it is in the status already); it changes nothing.
+    assert!(matches!(
+        read(&p, "syncLease.mark", &json!({})),
+        Reached::Answered(_)
+    ));
+    drop(d);
+}
+
+#[test]
+fn the_host_connection_reaches_no_owner_row() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let d = serving(&p, quiet());
+    for (name, params) in [
+        ("syncLease.status", json!({})),
+        ("kernel.coreStatus", json!({})),
+        ("paths", json!({})),
+        ("terminal.list", json!({})),
+    ] {
+        match host(&p, name, &params) {
+            Reached::Refused(Error::NotAllowed(note)) => {
+                assert!(note.contains("host"), "{name}: {note}")
+            }
+            other => panic!("{name}: the host got {other:?}"),
+        }
+    }
+    drop(d);
+}
+
+#[test]
+fn the_owner_token_does_not_prove_the_host() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let d = serving(&p, quiet());
+    // Something that holds the owner token but not the host secret: here, the host's own file overwritten with it.
+    std::fs::copy(&l.token, &l.host_token).expect("copy");
+    assert!(matches!(
+        host(&p, "syncLease.link", &json!({})),
+        Reached::NoDaemon
+    ));
+    drop(d);
+}
+
+#[cfg(unix)]
+#[test]
+fn the_host_secret_is_owner_only_and_in_no_environment() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let l = Layout::new(&m);
+    let d = serving(&p, quiet());
+    let mode = std::fs::metadata(&l.host_token)
+        .expect("exists")
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600);
+    assert_eq!(l.host_token.parent(), Some(l.dir.as_path()));
+    let (owner, host_secret) = (
+        std::fs::read_to_string(&l.token).expect("owner token"),
+        std::fs::read_to_string(&l.host_token).expect("host secret"),
+    );
+    assert_ne!(owner.trim(), host_secret.trim());
+    // Neither the secret nor its path is in any variable this process (and so every child it starts from its own
+    // environment) has.
+    for (k, v) in std::env::vars() {
+        assert!(
+            !v.contains(host_secret.trim()),
+            "{k} carries the host secret"
+        );
+        assert!(!v.contains("host.token"), "{k} names the host secret file");
+    }
+    assert!(l.files().contains(&l.host_token));
+    drop(d);
 }

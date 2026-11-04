@@ -100,7 +100,8 @@ pub(super) const ROWS: &[Method] = &[
         &["sync-lease", "link"],
         Served::Core,
         Stability::Experimental,
-    ),
+    )
+    .principals(HOST),
     row(
         "syncLease.unlink",
         "The cloud is off on purpose: nothing waits on it, and any lease is gone.",
@@ -109,7 +110,8 @@ pub(super) const ROWS: &[Method] = &[
         &["sync-lease", "unlink"],
         Served::Core,
         Stability::Experimental,
-    ),
+    )
+    .principals(HOST),
     row(
         "syncLease.mark",
         "Where the cloud's changes stand. Take it before a pull reads the cloud's state, and give it back to `syncLease.pulled`.",
@@ -118,7 +120,8 @@ pub(super) const ROWS: &[Method] = &[
         &["sync-lease", "mark"],
         Served::Core,
         Stability::Experimental,
-    ),
+    )
+    .principals(OWNER_HOST),
     row(
         "syncLease.changed",
         "The cloud said its state changed: the lease ends at once, until a pull that started after this succeeds. Answers the new `mark`.",
@@ -127,7 +130,8 @@ pub(super) const ROWS: &[Method] = &[
         &["sync-lease", "changed"],
         Served::Core,
         Stability::Experimental,
-    ),
+    )
+    .principals(HOST),
     row(
         "syncLease.drop",
         "The connection to the cloud dropped or is being made: the lease ends. Dropping when nothing is held does nothing.",
@@ -136,7 +140,8 @@ pub(super) const ROWS: &[Method] = &[
         &["sync-lease", "drop"],
         Served::Core,
         Stability::Experimental,
-    ),
+    )
+    .principals(HOST),
     row(
         "syncLease.pulled",
         "A pull of the cloud's state succeeded. Answers `held: true` when the lease now runs, `held: false` when it does not: the cloud changed since the mark, the cloud is not linked, or the clock is behind its last reading.",
@@ -158,7 +163,8 @@ pub(super) const ROWS: &[Method] = &[
         &["sync-lease", "pulled"],
         Served::Core,
         Stability::Experimental,
-    ),
+    )
+    .principals(HOST),
     row(
         "syncLease.renew",
         "The relay was heard: runs a held lease out again. Answers `renewed: true`, or `renewed: false` when nothing is held to renew (never acquired, lost, expired or the clock is behind): only a pull acquires.",
@@ -172,5 +178,6 @@ pub(super) const ROWS: &[Method] = &[
         &["sync-lease", "renew"],
         Served::Core,
         Stability::Experimental,
-    ),
+    )
+    .principals(HOST),
 ];

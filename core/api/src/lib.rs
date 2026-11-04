@@ -59,14 +59,18 @@ pub enum Principal {
     Bot,
     /// A running agent, with a run token.
     RunToken,
+    /// The process that holds the relay connection (`kith serve`), proving the host secret. It reports what only that
+    /// process can know (the sync lease, runtime-design section 3); an owner terminal or an owner agent is not it.
+    Host,
 }
 
 impl Principal {
-    pub const ALL: [Principal; 4] = [
+    pub const ALL: [Principal; 5] = [
         Principal::Owner,
         Principal::Member,
         Principal::Bot,
         Principal::RunToken,
+        Principal::Host,
     ];
 
     /// The name the OpenRPC document uses.
@@ -76,6 +80,7 @@ impl Principal {
             Principal::Member => "member",
             Principal::Bot => "bot",
             Principal::RunToken => "run-token",
+            Principal::Host => "host",
         }
     }
 }
