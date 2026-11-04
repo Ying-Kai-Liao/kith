@@ -121,7 +121,7 @@ async fn with_the_switch_on_the_ticks_go_to_the_core_and_kith_auth_is_not_writte
     // Unticking takes the rows away in the core; kith-auth is still not written.
     let none = call(&r, "setPersonAccess", json!({"personId": "sam", "agents": {}})).await.unwrap();
     assert_eq!(none["person"]["agents"], json!({}));
-    assert!(core.rows().is_empty());
+    assert_eq!(core.rows(), Vec::<(String, String)>::new());
     assert!(r.allowed("sam", "house"));
 }
 

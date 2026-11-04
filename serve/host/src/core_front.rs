@@ -81,7 +81,10 @@ pub enum Answer {
     /// The core ran the rules and refused (its words, or a call that does not fit the method's row).
     Refused(String),
     /// Nothing answered, or the connection ended before an answer: `lost` says the call had gone out and may have run.
-    Down { why: String, lost: bool },
+    Down {
+        why: String,
+        lost: bool,
+    },
 }
 
 /// One call of the owner's to the daemon. `repeatable` is for reads; a write is never sent a second time.

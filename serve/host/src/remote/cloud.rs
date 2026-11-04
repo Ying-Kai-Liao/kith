@@ -1957,7 +1957,7 @@ mod tests {
         let err = decide_in_core(&hub, "req_web", true, true, true).await.unwrap_err();
         assert_eq!(err.to_string(), "A web browser can't be the owner's device.");
         assert!(denied("req_web"), "the cloud is told, as `settle` does");
-        assert!(hub.cloud.requests_json().is_empty());
+        assert_eq!(hub.cloud.requests_json(), Vec::<Value>::new());
         assert_eq!(ids_in_core(true).await, Vec::<String>::new());
     }
 
