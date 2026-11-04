@@ -1,0 +1,18 @@
+{
+  "fakes": "\nkith-ask --sweep\nkith-ask --sweep\nkith-ask --sweep\nkith-wake drain\nkith-wake drain\nkith-wake drain",
+  "state:home/.kith/sched/state.json": "{\n  \"pruned\": 1793700000.0,\n  \"tick\": \"2026-11-03@10:01\"\n}\n",
+  "state:kith/agents/echo/role/agent.md": "---\nname: echo\ndescription: test agent\nmodel: sonnet\n---\nYou echo.\n",
+  "state:kith/state/": "<empty dir>\n",
+  "step0.exit": "0\n",
+  "step0.stderr": "",
+  "step0.stdout": "",
+  "step1.exit": "0\n",
+  "step1.stderr": "",
+  "step1.stdout": "",
+  "step2.exit": "0\n",
+  "step2.stderr": "",
+  "step2.stdout": "",
+  "step3.exit": "0\n",
+  "step3.json": "{\n  \"agent\": null,\n  \"id\": null,\n  \"runs\": []\n}\n",
+  "step3.stderr": ""
+}

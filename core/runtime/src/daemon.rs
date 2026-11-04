@@ -249,7 +249,7 @@ impl Shared {
         #[cfg(unix)]
         {
             if crate::schedules::serves_write(method) {
-                crate::call::check(kith_api::Principal::Owner, method, params)?;
+                crate::call::check(Principal::Owner, method, params)?;
                 let answer = self.with_core(|c| crate::schedules::call_write(c, method, params))?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
