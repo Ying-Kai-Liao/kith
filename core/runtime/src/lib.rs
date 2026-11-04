@@ -16,11 +16,21 @@
 //!   (the caller then asks the daemon). Two embedded commands at once behave the same way: the second one finds the
 //!   lock held.
 
+// M3-9a: account state in core.db and the read-only `account.*` rows; nothing writes it but the import and the tests.
+#[allow(
+    dead_code,
+    reason = "the import and the rows are its callers; runs switch later"
+)]
+mod accounts;
 // Nothing outside the tests calls it until the host and the CLI are switched to core.db (M2-9 onward). Unix only for
 // now: the rules it reuses (`kith_kernel::secrets`) are.
 #[cfg(unix)]
 #[allow(dead_code)]
 mod authority;
+// The ask tree (M3-8a): nothing calls it but the daemon's `ask.*` rows and the tests; `kith-ask` switches at M3-10.
+#[cfg(unix)]
+#[allow(dead_code, reason = "first callers are the switch of kith-ask (M3-10)")]
+mod asks;
 mod call;
 // Nothing calls the store but the daemon's cards rows and the tests: the host's callers switch in lane H, and the raise,
 // claim and close verbs get theirs there and in M2-12.
@@ -53,9 +63,23 @@ mod owner;
 mod perms;
 mod runs;
 mod runsock;
+// The agents' jobs.json indexed with the run state in core.db (M4-2); the host switches to it at M4-5.
+#[allow(
+    dead_code,
+    reason = "first callers are M4-3 and M4-5; the rows are reached through Core::call"
+)]
+mod schedules;
 // Held terminals start on Unix only for now; elsewhere `terminal.open` answers `direct` and most of it is unused.
 #[cfg_attr(not(unix), allow(dead_code))]
 mod terminal;
+// Engine sessions held by the core (M3-6): built and tested, called by no start until the switch.
+// Unix only for now, like `authority`: it reads through `kith_kernel::threads`, which is.
+#[cfg(unix)]
+#[allow(
+    dead_code,
+    reason = "first callers are the start protocol after the switch"
+)]
+mod transcripts;
 // The claim path's read (`lease_held_for_non_owner`, `held_in`) and `restart` have no caller until M3 and the daemon start
 // wire them; the rows reach the rest.
 #[allow(dead_code)]
@@ -63,6 +87,10 @@ mod sync_lease;
 // The host vault calls `secrets.open|get|put` (M2-7); `delete` and `list` wait for kith-auth and rollback (M2-18).
 #[allow(dead_code, reason = "delete and list are M2-18's")]
 mod secrets;
+
+// The wake queue and waiters (M3-7): nothing calls them but the daemon's `wake.*` rows and the tests until the switch (M3-10).
+#[allow(dead_code, reason = "first callers are the switch of kith-wake, M3-10")]
+mod wake;
 
 #[cfg(test)]
 mod runs_props;
@@ -157,6 +185,15 @@ pub fn migrate_authority(
         &import::items::Keychain,
         &mut import::items::OsEnvelope::default(),
     )
+}
+
+/// `kith migrate --schedules`: copies `kith-sched`'s state files (the last tick and each job's last run) into core.db
+/// (see `import::schedules`). Idempotent, read-only on the sources, `--dry-run` writes nothing; jobs.json is not imported.
+// Crate-private until `kith migrate` runs it (M3-10) and the host switches (M4-5); only the tests call it.
+#[cfg(unix)]
+#[allow(dead_code, reason = "first caller is M3-10 / M4-5")]
+pub(crate) fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<AuthorityReport, Error> {
+    import::schedules::run(&Layout::new(&paths.machine), &paths.machine, dry_run)
 }
 
 /// Opens the core inside this process for one command.

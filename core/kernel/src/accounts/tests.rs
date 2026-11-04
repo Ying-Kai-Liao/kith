@@ -893,12 +893,12 @@ fn an_extra_claude_account_mirrors_the_main_login() {
         claude_config_dir: Some(dir.to_string_lossy().into_owned()),
         ..h.ctx(&fake)
     };
-    assert_eq!(mirror::main_claude_paths(&own).0, main);
+    assert_eq!(main_claude_paths(&own).0, main);
     let other = Ctx {
         claude_config_dir: Some("/elsewhere".to_owned()),
         ..h.ctx(&fake)
     };
-    assert_eq!(mirror::main_claude_paths(&other).0, Path::new("/elsewhere"));
+    assert_eq!(main_claude_paths(&other).0, Path::new("/elsewhere"));
 }
 
 #[test]

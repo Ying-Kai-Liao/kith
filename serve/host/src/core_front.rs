@@ -178,6 +178,108 @@ fn secrets_call_at(folders: &Paths, method: &str, params: &Value, wait: std::tim
     }
 }
 
+// --- run tokens (M2-13) -----------------------------------------------------------------------------------------------
+
+/// Set to `1` (or `true`) to have the host get a guest run's token from the core daemon (`run.mint` / `run.bind` /
+/// `run.end` on the owner socket) instead of its own table. Off by default: a token the core minted works on the core's
+/// run.sock, which a guest's sandbox does not allow yet, so a guest run holding one reads nothing. It is for the step
+/// that switches host.sock, and for trying the path on a machine where that does not matter.
+pub const RUN_TOKENS_VIA_CORE: &str = "KITH_RUN_TOKENS_VIA_CORE";
+
+/// Whether [`RUN_TOKENS_VIA_CORE`] is on.
+pub fn run_tokens_via_core() -> bool {
+    switch_is_on(std::env::var(RUN_TOKENS_VIA_CORE).ok().as_deref())
+}
+
+fn switch_is_on(value: Option<&str>) -> bool {
+    matches!(value, Some("1" | "true"))
+}
+
+/// What a run needs to be minted. An empty room or project is left out.
+pub struct RunWho<'a> {
+    pub person: &'a str,
+    pub agent: &'a str,
+    pub conversation: &'a str,
+    pub room: Option<&'a str>,
+    pub project: Option<&'a str>,
+}
+
+/// A run token the core minted. The token is shown once, here, and goes into the run's environment; Debug leaves it out.
+pub struct CoreRun {
+    pub run_id: String,
+    pub token: String,
+    /// The core's run socket, as the daemon says it.
+    pub socket: PathBuf,
+    paths: Paths,
+}
+
+impl std::fmt::Debug for CoreRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreRun").field("run_id", &self.run_id).finish_non_exhaustive()
+    }
+}
+
+/// What asking the core to mint came to.
+#[derive(Debug)]
+pub enum Minted {
+    Run(Box<CoreRun>),
+    /// The core answered and said no (a revoked person): the run gets no token, and the host's own table is NOT asked
+    /// in its place.
+    Refused,
+    /// No daemon answers, or it cannot mint (an older one, a connection that broke). With the switch on the caller
+    /// gives the run no token (the core is the authority); only with it off does the host mint in its own table.
+    Unavailable,
+}
+
+/// The folders of this process's view, for the run-token calls.
+pub fn process_folders() -> Paths {
+    kernel::folders(&kith_kernel::paths::process_home())
+}
+
+pub fn mint_run(who: &RunWho<'_>) -> Minted {
+    mint_run_in(&process_folders(), who)
+}
+
+pub fn mint_run_in(paths: &Paths, who: &RunWho<'_>) -> Minted {
+    let mut params = json!({"agent": who.agent, "person": who.person, "conversation": who.conversation});
+    for (k, v) in [("room", who.room), ("project", who.project)] {
+        if let Some(v) = v.filter(|v| !v.is_empty()) {
+            params[k] = json!(v);
+        }
+    }
+    // A mint is a write: never sent twice.
+    match kith_core::reach(paths, "run.mint", &params, false) {
+        kith_core::Reached::Answered(a) => {
+            let text = |k: &str| a.get(k).and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_owned);
+            match (text("runId"), text("token"), text("socket")) {
+                (Some(run_id), Some(token), Some(socket)) => Minted::Run(Box::new(CoreRun {
+                    run_id,
+                    token,
+                    socket: PathBuf::from(socket),
+                    paths: paths.clone(),
+                })),
+                _ => Minted::Unavailable,
+            }
+        }
+        kith_core::Reached::Refused(kith_core::Error::NotAllowed(_)) => Minted::Refused,
+        _ => Minted::Unavailable,
+    }
+}
+
+impl CoreRun {
+    /// Binds the run to the process it was started as. False when the core did not bind it (the token then resolves
+    /// for nobody).
+    pub fn bind(&self, pid: u32) -> bool {
+        let answer = kith_core::reach(&self.paths, "run.bind", &json!({"runId": self.run_id, "pid": pid}), false);
+        matches!(answer, kith_core::Reached::Answered(a) if a["bound"] == true)
+    }
+
+    /// Ends the run's token. Nothing to do when the core is gone: a restart ended it already.
+    pub fn end(&self) {
+        let _ = kith_core::reach(&self.paths, "run.end", &json!({"runId": self.run_id}), false);
+    }
+}
+
 /// The methods `kith kernel core-call` may reach: the held-terminal ones the bash `kith` needs (M1-7).
 const CORE_CALL_METHODS: &[&str] = &["terminal.open", "terminal.attach", "terminal.list"];
 
@@ -290,9 +392,78 @@ pub fn print_status(json: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn args(line: &str) -> Vec<OsString> {
         std::iter::once("kith serve").chain(line.split(' ')).map(OsString::from).collect()
+    }
+
+    #[test]
+    fn the_run_token_switch_is_off_unless_asked() {
+        for off in [None, Some(""), Some("0"), Some("yes"), Some("false")] {
+            assert!(!switch_is_on(off), "{off:?}");
+        }
+        assert!(switch_is_on(Some("1")) && switch_is_on(Some("true")));
+    }
+
+    /// A short folder: a Unix socket path holds about a hundred bytes.
+    #[cfg(unix)]
+    fn machine_paths(tag: &str) -> Paths {
+        let home = PathBuf::from("/tmp").join(format!("kcf-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("kith")).expect("home");
+        let home = home.canonicalize().expect("canonical");
+        let kith_home = home.join("kith");
+        let lookup = move |k: &str| (k == "KITH_HOME").then(|| kith_home.to_string_lossy().into_owned());
+        kith_kernel::paths::paths(&home, &home.join("kith/kernel"), &lookup)
+    }
+
+    #[cfg(unix)]
+    fn who(person: &str) -> RunWho<'_> {
+        RunWho { person, agent: "echo", conversation: "run:g:3:sam:t1", room: Some("g1"), project: None }
+    }
+
+    /// The host mints through a real core daemon, binds and ends there, is refused for a revoked person, and where no
+    /// daemon answers it says so (the caller then gives the run no token).
+    #[cfg(unix)]
+    #[test]
+    fn the_host_mints_through_a_real_daemon_and_falls_back_when_there_is_none() {
+        let paths = machine_paths("mint");
+        // Nothing listens yet.
+        assert!(matches!(mint_run_in(&paths, &who("sam")), Minted::Unavailable));
+
+        let daemon = kith_core::Daemon::spawn(&paths);
+        daemon.ready(std::time::Duration::from_secs(20)).expect("serving");
+        let owner = |method: &str, params: Value| match kith_core::reach(&paths, method, &params, false) {
+            kith_core::Reached::Answered(v) => v,
+            other => panic!("{method}: {other:?}"),
+        };
+        owner("people.addPerson", json!({"id": "sam"}));
+
+        let Minted::Run(run) = mint_run_in(&paths, &who("sam")) else { panic!("the daemon mints") };
+        assert!(run.socket.ends_with("run.sock"), "{:?}", run.socket);
+        assert!(run.socket.exists(), "the core's run socket is there");
+        assert_eq!(run.token.len(), 64);
+        assert!(!format!("{run:?}").contains(&run.token), "Debug keeps the token out");
+        let run_id = run.run_id.clone();
+        // A grant over it: the run's environment names the core's socket, bind goes to the core, drop ends the token.
+        let socket = run.socket.clone();
+        let grant = crate::runauth::RunGrant::from_core(run);
+        let env = grant.env(Path::new("/not/used"));
+        assert_eq!(env[1], (crate::runauth::SOCKET_ENV.to_owned(), socket.to_string_lossy().into_owned()));
+        grant.bind_pid(std::process::id());
+        drop(grant);
+        assert_eq!(owner("run.end", json!({"runId": run_id}))["ended"], false, "the grant ended it on drop");
+
+        // A revoked person gets no token, and that is not "no daemon".
+        owner("people.suspend", json!({"id": "sam"}));
+        assert!(matches!(mint_run_in(&paths, &who("sam")), Minted::Refused));
+        owner("people.undo", json!({"id": "sam"}));
+        assert!(matches!(mint_run_in(&paths, &who("sam")), Minted::Run(_)));
+
+        daemon.stop();
+        assert!(matches!(mint_run_in(&paths, &who("sam")), Minted::Unavailable), "a stopped daemon is unavailable");
+        let _ = std::fs::remove_dir_all(paths.home.parent().unwrap_or(&paths.home));
     }
 
     #[test]

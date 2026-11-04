@@ -345,7 +345,7 @@ fn a_core_that_does_not_answer_refuses_and_a_revoke_is_seen_at_once() {
     assert_eq!(rig.rt.block_on(roles::may_use_checked("sam", "house")), None);
     *authority::TEST_CORE.lock().unwrap() = None;
 
-    // A daemon that knows nobody (core.db empty before the import): members are refused.
+    // A daemon that knows nobody (the core's database empty before the import): members are refused.
     let blank = Tmp::new();
     let empty = Arc::new(CoreData::new(
         folders(&blank.path().join("machine")),

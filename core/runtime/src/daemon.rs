@@ -73,6 +73,7 @@ pub(crate) struct Shared {
     attach_server: Mutex<Option<crate::attach::Server>>,
     runs: Arc<RunTokens>,
     socket: PathBuf,
+    run_socket: PathBuf,
     started: Instant,
     pub(crate) terminals: Terminals,
     key_load: crate::secrets::KeyLoader,
@@ -161,6 +162,27 @@ impl Shared {
             self.served.fetch_add(1, Ordering::SeqCst);
             return Ok(answer);
         }
+        if method == "run.mint" {
+            // Minting is a claim on authority too: refuse a revoked person, inside the lock a revoke commits under,
+            // so a mint cannot slip in beside a suspension.
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let person = params
+                .get("person")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let mut answer = self.with_core(|c| {
+                crate::call::run_person_allowed(c.conn(), person, method)?;
+                self.runs.owner_call(method, params).unwrap_or_else(|| {
+                    Err(Error::NoSuchMethod("kith-core: no method run.mint".into()))
+                })
+            })?;
+            // Where the run asks, for a host that hands the path to the run.
+            if let Some(o) = answer.as_object_mut() {
+                o.insert("socket".into(), json!(self.run_socket.to_string_lossy()));
+            }
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
         if let Some(answer) = self.runs.owner_call(method, params) {
             let answer = answer?;
             self.served.fetch_add(1, Ordering::SeqCst);
@@ -179,7 +201,12 @@ impl Shared {
         {
             if crate::authority::call::serves(method) {
                 crate::call::check(kith_api::Principal::Owner, method, params)?;
-                let answer = self.with_core(|c| crate::authority::call::call(c, method, params))?;
+                // The tokens of a revoked or removed person end in the same locked call that committed it.
+                let answer = self.with_core(|c| {
+                    let answer = crate::authority::call::call(c, method, params)?;
+                    self.runs.after_authority_write(method, params, &answer);
+                    Ok(answer)
+                })?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }
@@ -191,6 +218,23 @@ impl Shared {
                 crate::call::check(kith_api::Principal::Owner, method, params)?;
                 let answer = self
                     .with_core(|c| crate::doors::call(c, method, params, &crate::gate::System))?;
+                self.served.fetch_add(1, Ordering::SeqCst);
+                return Ok(answer);
+            }
+        }
+        // The wake queue (M3-7): nothing calls these until kith-wake is switched; the daemon runs no drain and fires no waiter.
+        if crate::wake::serves(method) {
+            crate::call::check(kith_api::Principal::Owner, method, params)?;
+            let answer = self.with_core(|c| crate::wake::call(c, method, params))?;
+            self.served.fetch_add(1, Ordering::SeqCst);
+            return Ok(answer);
+        }
+        // The ask tree: open, settle and end are claim transactions (M3-8a).
+        #[cfg(unix)]
+        {
+            if crate::asks::serves(method) {
+                crate::call::check(kith_api::Principal::Owner, method, params)?;
+                let answer = self.with_core(|c| crate::asks::call(c, method, params))?;
                 self.served.fetch_add(1, Ordering::SeqCst);
                 return Ok(answer);
             }
@@ -286,6 +330,7 @@ impl Daemon {
             attach_server: Mutex::new(None),
             runs: Arc::new(RunTokens::new()),
             socket: owner::endpoint(&layout),
+            run_socket: runsock::endpoint(&layout),
             started: Instant::now(),
             terminals: Terminals::new(),
             key_load: cfg
@@ -450,8 +495,16 @@ fn run(shared: &Arc<Shared>, paths: &Paths, layout: &Layout, cfg: &Config) {
     }
     // The run socket is not the owner's way in: a daemon that cannot open it still serves the owner, and says so.
     let for_runs = shared.clone();
-    let run_handler: Arc<RunHandler> =
-        Arc::new(move |who, row, params| for_runs.with_core(|c| c.call_run(who, row, params)));
+    let run_handler: Arc<RunHandler> = Arc::new(move |who, row, params| {
+        for_runs.with_core(|c| {
+            // Under the lock an end or a revoke commits under: a run whose token is gone (ended, revoked, the
+            // person removed) is refused even if its request resolved a moment before.
+            if !for_runs.runs.is_live(&who.run_id) {
+                return Err(Error::NotAllowed("kith-core: this run has ended".into()));
+            }
+            c.call_run(who, row, params)
+        })
+    });
     match runsock::Server::bind(layout, shared.runs.clone(), run_handler) {
         Ok(server) => {
             *shared

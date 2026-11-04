@@ -20,13 +20,16 @@ use std::time::{Duration, Instant};
 mod clock;
 mod listing;
 mod mirror;
+pub use mirror::main_claude_paths;
 mod pick;
 mod pyjson;
 pub mod settings;
 mod state;
 
-pub use pick::Pick;
+pub use listing::rows_from;
+pub use pick::{Pick, Skipped, Status, pick_from};
 pub use settings::read_settings;
+pub use state::{FileState, Snapshot, StateSource, out_marks_from, snapshot};
 
 type Map = serde_json::Map<String, Value>;
 
@@ -840,8 +843,7 @@ pub fn main_env(
     if opts.state {
         let s = settings::read(ctx);
         let now = clock::now();
-        let state = state::read(&ctx.machine);
-        let picked = pick::pick(ctx, &s, agent, Some(agent_md), false, now, &state);
+        let picked = pick_from(ctx, &s, agent, Some(agent_md), false, now, &FileState);
         let mut cands = picked.candidates.clone();
         match opts.prefer {
             Some(p) if cands.iter().any(|c| c == p) && !picked.all_out => {
