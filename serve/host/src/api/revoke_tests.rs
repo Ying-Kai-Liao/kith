@@ -48,7 +48,8 @@ async fn a_revoke_goes_through_the_cloud_first_keeps_every_row_and_the_undo_give
     assert!(r.allowed("sam", "house") && r.allowed("sam", "money"));
 
     let out = call(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap();
-    assert_eq!(out, json!({"revoked": true, "everywhere": true}));
+    assert_eq!((&out["revoked"], &out["everywhere"]), (&json!(true), &json!(true)));
+    assert!(out["coreUpdated"].is_boolean(), "the answer says whether the core's copy took it");
     // The cloud is told before anything changes here (R6, R9); it cuts the membership itself, so this Mac does not.
     let revoke = posted(&r, "/v1/host/people/revoke").expect("the cloud was told");
     assert_eq!(r.posts()[revoke].1, json!({"userId": "user_sam"}));
@@ -126,7 +127,7 @@ async fn a_person_known_only_here_is_revoked_here_without_the_cloud() {
     r.auth(&["handle", "tom", "telegram", "42"]);
     r.hub.store.kv_set("test_cloud_url", "http://127.0.0.1:1").unwrap();
     let out = call(&r, "revokePerson", json!({"personId": "tom"})).await.unwrap();
-    assert_eq!(out, json!({"revoked": true, "everywhere": false}));
+    assert_eq!((&out["revoked"], &out["everywhere"]), (&json!(true), &json!(false)));
     assert!(!r.allowed("tom", "house"));
     call(&r, "unrevokePerson", json!({"personId": "tom"})).await.unwrap();
     assert!(r.allowed("tom", "house"));
@@ -391,4 +392,47 @@ async fn a_stamp_from_far_in_the_future_is_refused() {
     let mine = exchange_in(&r.hub, vec![future]).await.unwrap();
     assert!(r.allowed("tom", "house"), "not applied");
     assert!(mine.is_empty(), "and not kept, or it would win over every real change after it");
+}
+
+/// A stand-in for the kith program: `memory hook --help` answers, and `kernel core-call` is the core, which is down when
+/// `down` exists next to it and lost-answer (exit 5) when `lost` does.
+fn fake_core(r: &Rig) -> std::path::PathBuf {
+    let bin = r.dir.join("fakekith");
+    let dir = r.dir.display();
+    std::fs::write(
+        &bin,
+        format!(
+            "#!/bin/sh\nif [ \"$1 $2\" = \"memory hook\" ]; then echo 'usage: kith memory hook --phase'; exit 0; fi\n\
+             [ -e {dir}/down ] && {{ echo 'no core daemon answers' >&2; exit 3; }}\n\
+             [ -e {dir}/lost ] && {{ echo 'lost' >&2; exit 5; }}\n\
+             echo \"$3\" >> {dir}/calls; echo '{{}}'\n"
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&bin, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    bin
+}
+
+#[tokio::test]
+async fn the_answer_says_when_the_core_missed_the_change() {
+    let r = Rig::new().await;
+    joined(&r).await;
+    let bin = fake_core(&r);
+    crate::channels::hq::TEST_ENV.lock().unwrap().push(("KITH_BIN", bin));
+
+    let out = call(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap();
+    assert_eq!(out, json!({"revoked": true, "everywhere": true, "coreUpdated": true}));
+    assert!(std::fs::read_to_string(r.dir.join("calls")).unwrap().contains("people.suspend"));
+
+    // Core down: auth.json still has it, the call still succeeds, and the answer says the core's copy missed it.
+    std::fs::write(r.dir.join("down"), "").unwrap();
+    let out = call(&r, "unrevokePerson", json!({"personId": "sam"})).await.unwrap();
+    assert_eq!(out, json!({"revoked": false, "everywhere": true, "coreUpdated": false}));
+    assert_eq!(r.who("user_sam")["revoked"], false);
+    // A lost answer is the same to the owner: run it again.
+    std::fs::remove_file(r.dir.join("down")).unwrap();
+    std::fs::write(r.dir.join("lost"), "").unwrap();
+    let out = call(&r, "revokePerson", json!({"personId": "sam"})).await.unwrap();
+    assert_eq!(out["coreUpdated"], false);
+    assert_eq!(r.who("user_sam")["revoked"], true);
 }

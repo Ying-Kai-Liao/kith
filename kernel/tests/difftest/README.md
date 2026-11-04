@@ -117,11 +117,10 @@ changes. Re-record on purpose: `KITH_RECORD_ROUTINES_NEXT=1 cargo test -p kith-s
 Note that the host rejects the `@` macros (it needs five fields) while kith-sched accepts them; M4 has to decide, the fixture records both.
 The fixture lives in `fixtures/`, not `golden/`, because the golden loader reads every `golden/*.json` as a list of cases.
 
-Bugs included on the host side too: `30 1 * * *` in America/New_York, `next` after 2026-11-01T06:00Z (01:00 EST, the second
-pass of the repeated hour) answers 05:30Z, which is *before* `after` (croner picks the earlier, EDT, reading of 01:30). The
-runner stores `advance(due, now)` = `next(now)`, so a missed 05:30Z fire leaves a due time in the past: the `advance` row
-(due 05:30Z, now 06:10Z) shows it. M4's Trigger must never answer a time at or before `after`; record that as an intended
-difference, do not copy it.
+Bug included on the host side, fixed by #765 (main, `0f1d5968`): `30 1 * * *` in America/New_York, `next` after 2026-11-01T06:00Z
+(01:00 EST, the second pass of the repeated hour) used to answer 05:30Z, which is *before* `after` (croner picks the earlier, EDT,
+reading of 01:30), so a missed fire left a due time in the past. The host now answers 06:30Z (never at or before `after`); the
+fixture was re-recorded for that, and the `advance` row that showed the bug changed with it. M4's Trigger must keep the same rule.
 
 ## Per-command summary
 

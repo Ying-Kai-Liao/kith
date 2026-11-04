@@ -403,7 +403,7 @@ fn has_and_delete_never_touch_the_key_store() {
 }
 
 #[test]
-fn every_secrets_row_is_the_owners_alone() {
+fn every_secrets_row_is_the_owners_except_get_which_is_the_hosts_alone() {
     use serde_json::json;
     let rows: Vec<_> = kith_api::METHODS
         .iter()
@@ -411,10 +411,17 @@ fn every_secrets_row_is_the_owners_alone() {
         .collect();
     assert!(rows.len() >= 5, "the secrets rows are in the table");
     for row in rows {
+        // `get` is the only row that hands a value back, and the owner token (a file any process of the user reads)
+        // is not enough for it: the host's in-memory proof is (M2-10c).
+        let allowed = if row.name == "secrets.get" {
+            kith_api::Principal::Host
+        } else {
+            kith_api::Principal::Owner
+        };
         for who in kith_api::Principal::ALL {
             let answer = crate::call::check(who, row.name, &json!({"name": "a", "value": "v"}));
-            if who == kith_api::Principal::Owner {
-                // The params here do not fit every row; the owner is only never turned away for who it is.
+            if who == allowed {
+                // The params here do not fit every row; the principal is only never turned away for who it is.
                 assert!(
                     !matches!(answer, Err(crate::Error::NotAllowed(_))),
                     "{}: {answer:?}",

@@ -1171,3 +1171,46 @@ jobs:
             serve/host/target/debug/kith-stub
           if-no-files-found: error
           retention-days: 3
+
+  # Check mode also runs the host-kernel list check (the script only, no build, seconds): a host test that reads the
+  # kernel and is missing from scripts/ci/host-kernel-tests.txt fails by hand, not first on a batch run.
+  rust-check-host-kernel:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' }}
+    name: host-kernel-check (check mode)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: sh scripts/ci/host-kernel-tests.sh check
+
+  # Check mode with kith-serve in packages also runs its unit tests (host-test's `-E 'not kind(test)'`), scoped to that
+  # crate, on the requested os. Never Windows: kith-serve is not built there.
+  rust-check-host-test:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'check' && inputs.os != 'windows' && contains(inputs.packages, 'kith-serve') }}
+    name: host-test (${{ matrix.os }}, check mode)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(inputs.os == 'linux' && '["ubuntu-latest"]' || inputs.os == 'macos' && '["macos-latest"]' || '["ubuntu-latest","macos-latest"]') }}
+    defaults:
+      run:
+        working-directory: serve/host
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain
+        working-directory: serve
+        run: rustup show active-toolchain || rustup toolchain install
+      - name: Install system libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: serve/host
+          shared-key: rust-check-host-test-${{ matrix.os }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest@0.9.100
+      - name: Run the kith-serve unit tests
+        run: cargo nextest run --profile ci -p kith-serve -E 'not kind(test)'

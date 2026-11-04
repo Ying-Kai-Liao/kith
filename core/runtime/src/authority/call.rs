@@ -42,6 +42,7 @@ pub(crate) fn serves(method: &str) -> bool {
             | "people.requests"
             | "people.approve"
             | "people.deny"
+            | "people.fileRequest"
     )
 }
 
@@ -81,6 +82,12 @@ fn need<'a>(params: &'a Value, key: &str) -> std::result::Result<&'a str, Die> {
 
 fn switch(params: &Value, key: &str) -> bool {
     params.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// Whether an answer to an access request is limited to members' requests: unless the caller is the owner at the
+/// computer (`local`), and always when it says `members`.
+fn members_only(params: &Value) -> bool {
+    switch(params, "members") || !switch(params, "local")
 }
 
 /// The `key=value` settings the params carry, a key being there when the caller gave it (an empty value clears it).
@@ -164,17 +171,33 @@ pub(crate) fn call_in(
             })
         }
         // The device-pairing access requests (M2-3): a table of their own, not `store::run`'s auth.json-shaped write.
-        // `members` is the caller's say, and leaving it out means full owner power (the owner's own request too, with
-        // `screen`). Today the host refuses remote devices itself (`api/remote.rs`) before it asks. M2-17 must derive
-        // "at the computer" from the caller's connection, or default to the narrow answer (`members` on).
-        "people.requests" => requests::list(core, c, switch(params, "members")),
+        // Every call here is the owner's (one Unix user), so the core cannot tell the owner at the computer from the
+        // host answering for a remote device. It defaults to the narrow answer: members' requests only, unless the
+        // caller says `local` (M2-17).
+        "people.requests" => requests::list(core, c, members_only(params)),
         "people.approve" => {
             let id = need(params, "id").map_err(|d| store::refusal(&d))?;
-            requests::approve(core, c, id, switch(params, "members"))
+            requests::approve(core, c, id, members_only(params))
         }
         "people.deny" => {
             let id = need(params, "id").map_err(|d| store::refusal(&d))?;
-            requests::deny(core, c, id, switch(params, "members"))
+            requests::deny(core, c, id, members_only(params))
+        }
+        "people.fileRequest" => {
+            let id = need(params, "id").map_err(|d| store::refusal(&d))?;
+            let device_key = need(params, "deviceKey").map_err(|d| store::refusal(&d))?;
+            let int = |k: &str| params.get(k).and_then(Value::as_i64).unwrap_or_default();
+            let new = requests::NewRequest {
+                id,
+                device_key,
+                device_name: word(params, "deviceName").unwrap_or_default(),
+                platform: word(params, "platform").unwrap_or_default(),
+                email: word(params, "email").filter(|e| !e.is_empty()),
+                person: word(params, "person").filter(|p| !p.is_empty()),
+                created_at: int("createdAt"),
+                expires_at: int("expiresAt"),
+            };
+            requests::file(core, c, &new, word(params, "code"))
         }
         "people.invites" => store::read(core, |a| json!({ "rows": write::invites(a, c) })),
         "people.botsCap" if word(params, "amount").is_none() => {
