@@ -1,0 +1,10 @@
+{
+  "fakes": "",
+  "state:home/.kith/cost.db": "## req_session: CREATE INDEX req_session on req(session)\n## req_ts: CREATE INDEX req_ts on req(ts)\n## req: CREATE TABLE req (id text primary key, session text, ts text, project text, model text,\n        agent text, turn text, input int, output int, cache_read int, cache_write int, cost real)\n## runs: CREATE TABLE runs (session text primary key, agent text, version text, model text, effort text,\n        via text, project text, started text, person text, provider text, account text, account_id text)\n## seen: CREATE TABLE seen (path text primary key, size int)\n## hq_req: CREATE VIEW hq_req as\n        select req.*, case when req.agent like 'kith:%' then substr(req.agent, 6, instr(substr(req.agent, 6) || ':', ':') - 1)\n                           when req.agent like 'hq:%' then substr(req.agent, 4, instr(substr(req.agent, 4) || ':', ':') - 1)\n                           else runs.agent end as hq_agent,\n               case when req.agent like 'kith:%' or req.agent like 'hq:%' then null else runs.version end as version,\n               case when req.agent like 'kith:%' or req.agent like 'hq:%' then 'subagent' else runs.via end as via,\n               case when req.agent like 'kith:%' or req.agent like 'hq:%' then null else runs.effort end as effort,\n               runs.person as person\n        from req left join runs using (session)\n",
+  "step0.exit": "0\n",
+  "step0.json": "{\n  \"agents\": 0,\n  \"label\": \"November\",\n  \"own\": 0,\n  \"period\": \"month\",\n  \"prices\": \"api\",\n  \"rows\": [],\n  \"since\": \"2026-11-01@00:00\",\n  \"total\": 0\n}\n",
+  "step0.stderr": "",
+  "step1.exit": "0\n",
+  "step1.json": "{\n  \"agents\": 0,\n  \"label\": \"All time\",\n  \"own\": 0,\n  \"period\": \"all\",\n  \"prices\": \"api\",\n  \"rows\": [],\n  \"since\": \"0\",\n  \"total\": 0\n}\n",
+  "step1.stderr": ""
+}
