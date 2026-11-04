@@ -1136,30 +1136,13 @@ fn norm(v: &Value) -> Value {
     v
 }
 
-/// The keys of each person and each membership row in the order core.db reads them back. A line such as
-/// `bot-a: bot_of sam, name Sam` follows the key order of the row, and core.db keeps no file order: a row whose keys the
+/// The keys of each person in the order core.db reads them back. A line such as
+/// `bot-a: bot_of sam, name Sam` follows the key order of the row, and core.db keeps no file order: a person whose keys the
 /// model got in another order (a bot starts as `bot_of` alone, then a name is added) would print differently from the
-/// same row read out of core.db. The model is the file as a fresh read leaves it.
+/// same person read out of core.db. The model is the file as a fresh read leaves it.
 fn in_core_order(mut v: Value) -> Value {
     const PERSON: [&str; 8] = [
         "name", "lang", "tz", "owner", "bot_of", "revoked", "was", "provider",
-    ];
-    const ROW: [&str; 15] = [
-        "preset",
-        "mode",
-        "trusted",
-        "deny",
-        "model",
-        "env",
-        "helpers",
-        "budget",
-        "access",
-        "jobs",
-        "helper_once",
-        "access_by",
-        "access_since",
-        "",
-        "",
     ];
     fn sorted(row: &mut Value, order: &[&str]) {
         if let Some(o) = row.as_object_mut() {
@@ -1171,11 +1154,6 @@ fn in_core_order(mut v: Value) -> Value {
     }
     if let Some(people) = v["people"].as_object_mut() {
         people.values_mut().for_each(|p| sorted(p, &PERSON));
-    }
-    if let Some(members) = v["members"].as_object_mut() {
-        for rows in members.values_mut().filter_map(Value::as_object_mut) {
-            rows.values_mut().for_each(|r| sorted(r, &ROW));
-        }
     }
     v
 }
@@ -1222,6 +1200,34 @@ fn step(rig: &mut Rig, model: &mut Value, op: &Op) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// The flake's minimal case, in two writes: a bot starts as `bot_of` alone, a name is added (model `bot_of, name`; core
+/// reads the same, the row had no name), and then a language: core.db now hands the row back as `name, bot_of`, so its
+/// line is `name Bo, lang en, bot_of sam` while the model's is `bot_of sam, name Bo, lang en`. Core's order is the
+/// defined one (a person's keys as a fresh read gives them; the file's order is gone once it is in core.db), so the model
+/// is put in it. Without the sort in `step` this fails.
+fn name_then_language_for_a_bot() -> Result<(), String> {
+    let auth = json!({"people": {"sam": {"owner": true}, "bot-a": {"bot_of": "sam"}}});
+    let mut rig = Rig::new(&auth);
+    let mut model = in_core_order(auth);
+    for params in [
+        json!({"id": "bot-a", "name": "Bo"}),
+        json!({"id": "bot-a", "lang": "en"}),
+    ] {
+        let op = Op {
+            method: "people.addPerson",
+            params,
+            code: "",
+        };
+        step(&mut rig, &mut model, &op)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn a_bot_given_a_name_then_a_language_lists_its_keys_in_core_db_order() {
+    name_then_language_for_a_bot().unwrap();
 }
 
 #[test]
