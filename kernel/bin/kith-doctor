@@ -248,6 +248,12 @@ def people():
     if len(owners) != 1:
         bad(f'{len(owners)} owners in people ({", ".join(owners) or "none"}): kith auth person <you> owner')
     issues = 0
+    # data from before kith-auth refused it: may() checks owner first, so a revoked owner still gets through
+    for pid in owners:
+        if folks[pid].get('revoked'):
+            issues += 1
+            bad(f'people: {pid} is the owner and also revoked, and the owner check comes first, so the revoke does not hold: '
+                f'kith auth person {pid} --unrevoke (to keep them out, remove the person instead: kith auth person {pid} --rm)')
     for agent, rows in members.items():
         if agent not in known:
             issues += 1
