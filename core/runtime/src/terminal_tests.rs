@@ -667,12 +667,18 @@ echo $$ > "$lock/$key.pid"
     #[test]
     fn a_session_the_app_is_taking_over_is_busy_and_gives_the_claim_back() {
         let rig = Rig::new(RUNNING);
-        let mut other = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut other = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
         claim::take_takeover(&rig.m, "sess-t", other.id());
         let a = answered(open(&rig.m, "sess-t", &["sh", "-c", "cat"], &plain()));
         assert_eq!(a["status"], "busy", "{a}");
         assert!(a["note"].as_str().unwrap().contains("taken over"), "{a}");
-        assert!(!rig.claim_file("sess-t").exists(), "the claim it took is given back");
+        assert!(
+            !rig.claim_file("sess-t").exists(),
+            "the claim it took is given back"
+        );
         other.kill().unwrap();
         other.wait().unwrap();
     }

@@ -138,7 +138,11 @@ const SCRUBBED: [&str; 6] = [
 /// The env a terminal is started with: the caller's, less what the module docs name.
 pub(crate) fn filter_env(env: &serde_json::Map<String, Value>) -> BTreeMap<String, String> {
     env.iter()
-        .filter(|(k, _)| !SCRUBBED.contains(&k.as_str()) && !k.starts_with("KITH_RUN_") && !k.starts_with("HQ_RUN_"))
+        .filter(|(k, _)| {
+            !SCRUBBED.contains(&k.as_str())
+                && !k.starts_with("KITH_RUN_")
+                && !k.starts_with("HQ_RUN_")
+        })
         .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_owned())))
         .collect()
 }
@@ -849,14 +853,23 @@ mod claim {
     /// A live `<sid>.takeover.claim`.
     pub(super) fn takeover_live(state: &Path, sid: &str) -> bool {
         let path = threads::claim_path(&threads::registry_dir(state), sid, true);
-        threads::read_claim(&path).as_ref().is_some_and(threads::Claim::is_live)
+        threads::read_claim(&path)
+            .as_ref()
+            .is_some_and(threads::Claim::is_live)
     }
 
     /// Takes the takeover claim for `pid` (what the host does while it imports a session). Tests only.
     #[cfg(test)]
     pub(super) fn take_takeover(state: &Path, sid: &str, pid: u32) {
-        let how = Take { takeover: true, ..Take::new("terminal") };
-        assert!(threads::take_claim(&ctx(state), sid, i64::from(pid), &how).unwrap().is_ok());
+        let how = Take {
+            takeover: true,
+            ..Take::new("terminal")
+        };
+        assert!(
+            threads::take_claim(&ctx(state), sid, i64::from(pid), &how)
+                .unwrap()
+                .is_ok()
+        );
     }
 
     /// Gives the claim back if `pid` still holds it.

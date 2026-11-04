@@ -144,7 +144,10 @@ pub fn run(endpoint: &Path, opts: &Opts) -> i32 {
 fn detached_note(why: &str) -> (i32, String) {
     match why {
         "detach" => (0, "detached; the agent keeps running".into()),
-        "taken_over" => (77, "detached: another client took over this terminal".into()),
+        "taken_over" => (
+            77,
+            "detached: another client took over this terminal".into(),
+        ),
         "slow" => (
             76,
             "detached: this client could not keep up with the output; attach again".into(),
