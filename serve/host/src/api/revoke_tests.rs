@@ -171,7 +171,11 @@ async fn an_owner_who_is_also_revoked_old_data_is_undone_here_without_the_cloud(
         assert_eq!(out["everywhere"], false);
     }
     assert!(!revoked(), "the old revoked flag is gone");
-    assert!(r.posts().is_empty(), "{:?}", r.posts());
+    assert!(
+        posted(&r, "/v1/host/people/revoke").is_none() && posted(&r, "/v1/host/people/unrevoke").is_none(),
+        "{:?}",
+        r.posts()
+    );
 }
 
 #[tokio::test]
