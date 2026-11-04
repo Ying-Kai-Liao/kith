@@ -12,7 +12,7 @@ set -euo pipefail
 # (M4-3 does not exist yet): SYNC is the base the model was written against, and kith-sched is the only covered file
 # that exists. When M4-3 lands, the first reader replaces this with the M4-3 merge commit after checking the code
 # against the table in the skill.
-SYNC=__SYNC__
+SYNC=2f102cab4cdd352a651e041ff3fec61ef593601a
 
 FILES=(
   kernel/bin/kith-sched               # tick(): the catch-up window, the paused skip, the "still running" skip (the rule M4-3 replaces)

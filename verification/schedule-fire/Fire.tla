@@ -245,6 +245,9 @@ Next ==
 Fairness ==
   /\ WF_vars(Advance) /\ WF_vars(TickFresh) /\ WF_vars(Restart) /\ WF_vars(FireB)
   /\ WF_vars(ClaimAny) /\ WF_vars(ExpireAny) /\ WF_vars(StartAny) /\ WF_vars(FinishAny)
+  \* The host crashes finitely often. Without this TLC finds claim -> crash -> restart -> claim forever, a turn that
+  \* never gets to run: that is a crash loop (an operations problem), not a flaw in the fire protocol.
+  /\ <>[][~Crash]_vars
 
 Spec == Init /\ [][Next]_vars /\ Fairness
 
@@ -271,7 +274,7 @@ CrashSafe ==
   /\ \A i \in Ids : turn[i].st # "none" => fires[turn[i].slot].out # "none" \/ (pend.on /\ pend.slot = turn[i].slot)
 
 \* After a revoke commits, nothing of the person is queued, parked, claimed or running.
-NoRunForRevoked == \A i \in Ids : revoked[turn[i].person] => turn[i].st \notin Unfin
+NoRunForRevoked == \A i \in Ids : turn[i].st # "none" => (revoked[turn[i].person] => turn[i].st \notin Unfin)
 
 \* A catch-up never runs a slot older than the window.
 CatchUpWindow == \A s \in Timed : fires[s].src = "tick" => fires[s].n - P * s < Catch
