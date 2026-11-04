@@ -822,7 +822,7 @@ const DENY_QUEUE_KEY: &str = "core_deny_queue";
 /// The pull's end step: ends the queued ids in the core, then takes out of the queue only the ones it finished. It
 /// never stores its snapshot back, so a deny queued meanwhile survives. `between` runs after the read and before the
 /// write-back (a seam for the test of exactly that).
-async fn end_queued_in_core(hub: &Hub, between: impl std::future::Future<Output = ()>) {
+async fn end_queued_in_core(hub: &Hub, between: impl Future<Output = ()>) {
     let mut ended = take_deny_queue(hub);
     let held: Vec<String> = hub.cloud.requests.locked().iter().map(|r| r.id.clone()).collect();
     ended.retain(|id| !held.contains(id));
@@ -2458,7 +2458,7 @@ mod tests {
         hub.store.kv_set("test_cloud_url", &base).unwrap();
         add_member(&hub);
         let _rig = CoreRig::new().await;
-        hub.cloud.requests.locked().extend([waiting("req_a", 1, Some("sam"), 0), waiting("req_b", 2, Some("sam"), 1)]);
+        hub.cloud.requests.locked().push(waiting("req_a", 1, Some("sam"), 0));
 
         // On when filed, off when decided: the host store decides (`settle`) and the device is stored once. The
         // core's row is only a mirror; it stays pending there and is not what the person's access reads.
@@ -2475,6 +2475,7 @@ mod tests {
 
         // Off when filed (nothing is in the core), on when decided: the core refuses what it never saw, nothing is
         // stored, and the request waits; the next pull files it and the decision then goes through once.
+        hub.cloud.requests.locked().push(waiting("req_b", 2, Some("sam"), 1));
         hub.store.kv_set("test_core_authority", "1").unwrap();
         let err = decide_in_core(&hub, "req_b", true, true, true).await.unwrap_err();
         assert!(err.to_string().contains("unknown request"), "{err:#}");

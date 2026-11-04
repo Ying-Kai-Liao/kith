@@ -282,7 +282,10 @@ fn approving_twice_gives_the_same_answer_and_files_nothing_again() {
     let again = at_computer(&mut rig, "people.approve", &json!({"id": "r"})).unwrap();
     assert_eq!(first, again);
     assert_eq!(first["status"], "approved");
-    assert_eq!(requests::status_of(rig.core.conn(), "r").as_deref(), Some("approved"));
+    assert_eq!(
+        requests::status_of(rig.core.conn(), "r").as_deref(),
+        Some("approved")
+    );
     // Approving settles nothing else in the core: no member or grant is filed by either call.
     let people = at_computer(&mut rig, "people.requests", &json!({})).unwrap();
     assert_eq!(people, json!({"requests": []}));
