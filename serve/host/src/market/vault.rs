@@ -276,25 +276,10 @@ fn move_slot(store: &Store, slot: &str, key: Option<&Zeroizing<Vec<u8>>>) -> Res
         _ => bail!("The moved credential did not read back; the old record was left in place"),
     }
     if was_plaintext {
-        // A plaintext row must not stay plaintext in serve.db: sealed under the old key when it is at hand (a rollback
-        // still finds the value), else removed. Only now, after the envelope has answered with it.
-        match key {
-            Some(key) => store.kv_set(slot, &seal_old(key, slot, &value)?)?,
-            None => store.kv_delete(slot)?,
-        }
+        // A plaintext row must not stay plaintext in serve.db: removed, only now that the envelope has answered with it.
+        store.kv_delete(slot)?;
     }
     Ok(value)
-}
-
-/// An old-format record, the inverse of [`open_old`].
-fn seal_old(key: &[u8], slot: &str, value: &str) -> Result<String> {
-    let cipher = XChaCha20Poly1305::new_from_slice(key).map_err(|_| unavailable())?;
-    let mut nonce = [0; 24];
-    getrandom::fill(&mut nonce).map_err(|_| anyhow!("Could not make a nonce"))?;
-    let sealed = cipher
-        .encrypt(&XNonce::from(nonce), Payload { msg: value.as_bytes(), aad: slot.as_bytes() })
-        .map_err(|_| anyhow!("Could not seal the credential"))?;
-    Ok(format!("{PREFIX}{}", STANDARD.encode(nonce.into_iter().chain(sealed).collect::<Vec<u8>>())))
 }
 
 /// An old-format record: `vault:v1:` and base64 of a 24-byte nonce plus XChaCha20-Poly1305 ciphertext, slot as AD.
@@ -682,15 +667,12 @@ mod tests {
     }
 
     #[test]
-    fn plaintext_is_resealed_under_the_old_key_when_it_is_at_hand() {
+    fn plaintext_is_removed_once_the_envelope_has_it() {
         let (vault, link) = open_vault();
         let store = store_with(vault);
-        let key = Zeroizing::new(vec![5u8; 32]);
         store.kv_set("record", "private password").unwrap();
-        assert_eq!(move_slot(&store, "record", Some(&key)).unwrap(), "private password");
-        let row = store.kv_read("record").unwrap().unwrap();
-        assert!(row.starts_with(PREFIX), "still plaintext: {row}");
-        assert_eq!(open_old(&key, "record", &row).unwrap(), "private password");
+        assert_eq!(move_slot(&store, "record", None).unwrap(), "private password");
+        assert_eq!(store.kv_read("record").unwrap(), None);
         assert_eq!(link.values.locked().get("record").map(String::as_str), Some("private password"));
     }
 

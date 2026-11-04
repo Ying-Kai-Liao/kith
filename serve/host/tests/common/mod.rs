@@ -42,6 +42,37 @@ fn short_link(state: &str) -> String {
     state.to_owned()
 }
 
+fn key_account(home: &Path) -> String {
+    format!("test-{}", machine_state(home).display().to_string().replace('/', "-"))
+}
+
+/// The core's key store account each test host was given, by process id: `stop` removes the item, which otherwise stays
+/// in the login keychain of the machine that ran the tests.
+static KEY_ACCOUNTS: std::sync::Mutex<Vec<(u32, String)>> = std::sync::Mutex::new(Vec::new());
+
+fn forget_key_account(pid: u32) {
+    let account = {
+        let mut all = KEY_ACCOUNTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let Some(at) = all.iter().position(|(p, _)| *p == pid) else { return };
+        all.swap_remove(at).1
+    };
+    // Best effort; the service name is the core's (secrets/keystore.rs).
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("security")
+        .args(["delete-generic-password", "-s", "dev.kith.core.secrets", "-a", &account])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(target_os = "linux")]
+    let _ = Command::new("secret-tool")
+        .args(["clear", "service", "dev.kith.core.secrets", "account", &account])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let _ = account;
+}
+
 /// Runs `kith-serve serve` for `home` until it answers: the process and its base URL. A port
 /// picked here is only free for a moment; when something else takes it before the host binds, the
 /// host exits and this starts it again on another one.
@@ -82,10 +113,7 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 // registries live under it. An explicit folder inside the test's home.
                 .env("KITH_STATE", machine_state(home))
                 // Never Kai's real master key item: a debug core reads this account name instead (see core keystore.rs).
-                .env(
-                    "KITH_SECRETS_KEYSTORE_ACCOUNT",
-                    format!("test-{}", machine_state(home).display().to_string().replace('/', "-")),
-                )
+                .env("KITH_SECRETS_KEYSTORE_ACCOUNT", key_account(home))
                 .env("CLAUDE_CONFIG_DIR", home.join("claude-config"))
                 .env("KITH_SERVE_MAX_RUNNING_AGENTS", "64")
                 .env("KITH_SERVE_MIN_FREE_MEMORY_PERCENT", "0")
@@ -102,7 +130,12 @@ pub async fn serve_env(home: &Path, env: &[(&str, &str)]) -> (Child, String) {
                 if !env.iter().any(|(k, _)| *k == "KITH_SERVE_CHANNELS") {
                     assert_channels_off(&base).await;
                 }
-                return (child.0.take().unwrap(), base);
+                let child = child.0.take().unwrap();
+                KEY_ACCOUNTS
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push((child.id(), key_account(home)));
+                return (child, base);
             }
             assert!(Instant::now() < deadline, "host didn't start");
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -168,6 +201,12 @@ async fn assert_channels_off(base: &str) {
 /// children: a SIGKILL would orphan whatever it had running, such as a harness
 /// sign-in check (`cursor-agent status` then spins forever). Kills it after 5 s.
 pub fn stop(child: &mut Child) {
+    let pid = child.id();
+    stop_process(child);
+    forget_key_account(pid);
+}
+
+fn stop_process(child: &mut Child) {
     let _ = Command::new("kill").arg(child.id().to_string()).status();
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
