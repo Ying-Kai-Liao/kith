@@ -150,17 +150,26 @@ fn folders_from(answer: &Value) -> Option<Paths> {
 /// text says why. The rows are idempotent, so a lost connection is retried once inside `reach`.
 #[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
 pub fn secrets_call(method: &str, params: &Value, wait: std::time::Duration) -> anyhow::Result<Value> {
-    let folders = kernel::folders(&kith_kernel::paths::process_home());
+    secrets_call_at(&kernel::folders(&kith_kernel::paths::process_home()), method, params, wait)
+}
+
+#[cfg_attr(test, allow(dead_code, reason = "tests use the in-memory link"))]
+fn secrets_call_at(
+    folders: &Paths,
+    method: &str,
+    params: &Value,
+    wait: std::time::Duration,
+) -> anyhow::Result<Value> {
     let deadline = std::time::Instant::now() + wait;
     loop {
-        match kith_core::reach(&folders, method, params, true) {
+        match kith_core::reach(folders, method, params, true) {
             kith_core::Reached::Answered(answer) => return Ok(answer),
             kith_core::Reached::Refused(e) => anyhow::bail!("{e}"),
             kith_core::Reached::NoDaemon if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(200));
             }
             kith_core::Reached::NoDaemon => {
-                let status = kith_core::status(&folders);
+                let status = kith_core::status(folders);
                 let why = |k: &str| status["core"][k].as_str().unwrap_or("-").to_owned();
                 anyhow::bail!(
                     "the core is not running ({}: {}; kith doctor says more; secrets need it)",
@@ -312,6 +321,52 @@ mod tests {
         ] {
             assert_eq!(try_cli(&args(line)), None, "{line}");
         }
+    }
+
+    fn short_folders(tag: &str) -> Paths {
+        // A Unix socket path holds about a hundred bytes, so not the long per-user temp folder.
+        let p = PathBuf::from("/tmp").join(format!("kfs-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).expect("folder");
+        Paths {
+            home: p.clone(),
+            state: p.clone(),
+            agents: p.clone(),
+            home_real: p.clone(),
+            state_real: p.clone(),
+            agents_real: p.clone(),
+            machine: p.clone(),
+            secrets: p.clone(),
+            logs: p.clone(),
+            cache: p.clone(),
+            store: p,
+        }
+    }
+
+    /// The vault's own door to a real daemon: the rows that need no key answer, a refusal arrives as an error, and no
+    /// daemon is one fast error rather than a wait. (Rows that need the key are tested in the core with a stand-in key
+    /// store, as the host may not pick one.)
+    #[cfg(unix)]
+    #[test]
+    fn secrets_call_reaches_a_real_daemon_and_fails_fast_without_one() {
+        let folders = short_folders("sc");
+        let none = std::time::Instant::now();
+        let err = secrets_call_at(&folders, "secrets.has", &json!({"name": "a"}), std::time::Duration::ZERO)
+            .expect_err("no daemon yet");
+        assert!(format!("{err:#}").contains("core is not running"), "{err:#}");
+        assert!(none.elapsed() < std::time::Duration::from_secs(5));
+
+        let daemon = serve_for_test(&folders);
+        let wait = std::time::Duration::from_secs(5);
+        assert_eq!(secrets_call_at(&folders, "secrets.has", &json!({"name": "a"}), wait).expect("has")["has"], false);
+        assert_eq!(
+            secrets_call_at(&folders, "secrets.delete", &json!({"name": "a"}), wait).expect("delete")["deleted"],
+            false
+        );
+        let bad = secrets_call_at(&folders, "secrets.has", &json!({"name": ""}), wait);
+        assert!(bad.is_err(), "a bad name is refused: {bad:?}");
+        daemon.stop();
+        let _ = std::fs::remove_dir_all(&folders.home);
     }
 
     #[test]

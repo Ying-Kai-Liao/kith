@@ -225,14 +225,16 @@ fn os_tests_enabled() -> bool {
     std::env::var_os("KITH_TEST_OS_KEYSTORE").is_some_and(|v| v == "1")
 }
 
-fn exercise(store: &dyn KeyStore) {
+/// `replaces`: Linux's `secret-tool store` overwrites; macOS adds only and keeps the first item.
+fn exercise(store: &dyn KeyStore, replaces: bool) {
     assert!(store.get().expect("get empty").is_none());
     let key: Vec<u8> = (0u8..32).collect();
     store.add(&key).expect("set");
     assert_eq!(&store.get().expect("get").expect("there")[..], &key[..]);
     let other: Vec<u8> = (32u8..64).collect();
     store.add(&other).expect("replace");
-    assert_eq!(&store.get().expect("get").expect("there")[..], &other[..]);
+    let kept = if replaces { &other } else { &key };
+    assert_eq!(&store.get().expect("get").expect("there")[..], &kept[..]);
 }
 
 #[test]
@@ -246,7 +248,7 @@ fn os_store_macos_security_cli() {
         "master-key",
     );
     s.remove();
-    exercise(&s);
+    exercise(&s, false);
     s.remove();
 }
 
@@ -261,7 +263,7 @@ fn os_store_linux_secret_tool() {
         "master-key",
     );
     s.remove();
-    exercise(&s);
+    exercise(&s, true);
     s.remove();
 }
 
@@ -362,4 +364,70 @@ fn the_rows_refuse_without_the_key_and_keep_the_records() {
     }
     assert!(store.peek().is_none(), "no new key over existing records");
     assert_eq!(count(&c), 1);
+}
+
+#[test]
+fn has_and_delete_never_touch_the_key_store() {
+    use serde_json::json;
+    let c = db();
+    let store = MemoryKeyStore::default();
+    let s = slot(&store);
+    super::call(&c, &s, "secrets.put", &json!({"name": "a", "value": "one"})).expect("put");
+    // A locked key store (and then no key at all): the rows that need no key still answer, and mint nothing.
+    store.set_unreadable(true);
+    let fresh = slot(&store);
+    let call = |m: &str, p: serde_json::Value| super::call(&c, &fresh, m, &p);
+    assert_eq!(
+        call("secrets.has", json!({"name": "a"})).expect("has"),
+        json!({"has": true})
+    );
+    assert_eq!(
+        call("secrets.has", json!({"name": "b"})).expect("has"),
+        json!({"has": false})
+    );
+    assert!(
+        call("secrets.get", json!({"name": "a"})).is_err(),
+        "get does need the key"
+    );
+    assert_eq!(
+        call("secrets.delete", json!({"name": "a"})).expect("delete"),
+        json!({"deleted": true})
+    );
+    store.set_unreadable(false);
+    store.forget();
+    assert_eq!(
+        call("secrets.has", json!({"name": "a"})).expect("has"),
+        json!({"has": false})
+    );
+    assert!(store.peek().is_none(), "no row minted a key");
+}
+
+#[test]
+fn every_secrets_row_is_the_owners_alone() {
+    use serde_json::json;
+    let rows: Vec<_> = kith_api::METHODS
+        .iter()
+        .filter(|m| m.name.starts_with("secrets."))
+        .collect();
+    assert!(rows.len() >= 5, "the secrets rows are in the table");
+    for row in rows {
+        for who in kith_api::Principal::ALL {
+            let answer = crate::call::check(who, row.name, &json!({"name": "a", "value": "v"}));
+            if who == kith_api::Principal::Owner {
+                // The params here do not fit every row; the owner is only never turned away for who it is.
+                assert!(
+                    !matches!(answer, Err(crate::Error::NotAllowed(_))),
+                    "{}: {answer:?}",
+                    row.name
+                );
+            } else {
+                assert!(
+                    matches!(answer, Err(crate::Error::NotAllowed(_))),
+                    "{} for {}: {answer:?}",
+                    row.name,
+                    who.name()
+                );
+            }
+        }
+    }
 }

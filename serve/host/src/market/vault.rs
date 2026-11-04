@@ -107,7 +107,8 @@ impl Link for CoreLink {
     }
 
     fn has(&self, name: &str) -> Result<bool> {
-        Ok(Self::call("secrets.has", &json!({"name": name}), DAEMON_WAIT)?["has"] == true)
+        // One try: `has` runs on message paths, which must not wait for a core that is not there.
+        Ok(Self::call("secrets.has", &json!({"name": name}), Duration::ZERO)?["has"] == true)
     }
 
     fn delete(&self, name: &str) -> Result<bool> {

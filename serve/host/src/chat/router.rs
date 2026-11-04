@@ -4,7 +4,6 @@
 
 use crate::LockExt;
 use crate::market::vault;
-use crate::store::Store;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -13,6 +12,10 @@ use std::time::Duration;
 const SLOT: &str = "router";
 /// The saved key after its first read.
 static SAVED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// When the vault last said "no key saved" (or could not say): until then the answer is no, so a message does not
+/// ask the core every time. Cleared when a key is saved.
+static NONE_UNTIL: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+const NONE_FOR: Duration = Duration::from_secs(30);
 const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Narrow yes/no questions (Jev ignores negation inside a question); thresholds from probes on 2026-10-16.
@@ -110,7 +113,14 @@ impl Jev {
             if let Some(key) = SAVED.locked().clone() {
                 return Some(Self::from_key(key));
             }
-            if !vault::exists(&hub.store, SLOT).ok()? {
+            if NONE_UNTIL.locked().is_some_and(|until| std::time::Instant::now() < until) {
+                return None;
+            }
+            // `exists` is a socket call to the core: never on an async worker. Down core or nothing saved: no key.
+            let asked = hub.clone();
+            let saved = tokio::task::spawn_blocking(move || vault::exists(&asked.store, SLOT)).await.ok()?.unwrap_or(false);
+            if !saved {
+                *NONE_UNTIL.locked() = Some(std::time::Instant::now() + NONE_FOR);
                 return None;
             }
             vault::unlock(hub.clone()).await.ok()?;
@@ -215,6 +225,7 @@ pub async fn route(hub: &Arc<crate::hub::Hub>, task: &str, recent: &[String], la
 pub async fn set_key(hub: &Arc<crate::hub::Hub>, key: &str) -> Result<Value> {
     let key = key.trim();
     *SAVED.locked() = None;
+    *NONE_UNTIL.locked() = None;
     if key.is_empty() {
         vault::remove(&hub.store, SLOT)?;
     } else {
@@ -222,12 +233,15 @@ pub async fn set_key(hub: &Arc<crate::hub::Hub>, key: &str) -> Result<Value> {
         vault::write(&hub.store, SLOT, key)?;
         // Cleared again after the write: a read that began before it may have cached the old value meanwhile.
         *SAVED.locked() = None;
+        *NONE_UNTIL.locked() = None;
     }
-    status(&hub.store)
+    status(hub).await
 }
 
-pub fn status(store: &Store) -> Result<Value> {
-    let saved = vault::exists(store, SLOT)?;
+pub async fn status(hub: &Arc<crate::hub::Hub>) -> Result<Value> {
+    // A down core or key store reads as "not configured", not as an error: this is a status line, not a write.
+    let asked = hub.clone();
+    let saved = tokio::task::spawn_blocking(move || vault::exists(&asked.store, SLOT)).await?.unwrap_or(false);
     Ok(json!({"configured": saved || std::env::var("JEV_API_KEY").is_ok_and(|k| !k.is_empty())}))
 }
 
@@ -244,6 +258,10 @@ fn tail(s: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::Store;
+
+    /// SAVED and NONE_UNTIL are process-wide: the tests that touch them take turns.
+    static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn s(stop: f64, change: f64, add: f64, other: f64) -> Scores {
         Scores { stop, change, add, other, partial: 0.0 }
@@ -272,6 +290,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_key_removes_the_saved_one() {
+        let _turn = SERIAL.lock().await;
         let dir = std::env::temp_dir().join(format!("kith-router-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let store = Store::open(std::path::Path::new(":memory:")).unwrap();
@@ -282,6 +301,32 @@ mod tests {
         let status = set_key(&hub, "  ").await.unwrap();
         assert_eq!(status["configured"], json!(false));
         assert!(Jev::configured(&hub).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_down_core_reads_as_not_configured_and_is_asked_once_a_while() {
+        let _turn = SERIAL.lock().await;
+        *NONE_UNTIL.locked() = None;
+        *SAVED.locked() = None;
+        // Env keys are not set in tests; a refusing link stands for a core that is not running.
+        let (vault, link) = crate::market::vault::memory::open_vault();
+        *link.refuse.locked() = Some("the core is not running".into());
+        let dir = std::env::temp_dir().join(format!("kith-router-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        store.vault = vault;
+        let identity = crate::remote::identity::Identity::load_or_create(&dir).unwrap();
+        let hub = crate::hub::Hub::new(store, "router-down".into(), identity, "test".into(), 0);
+
+        assert_eq!(status(&hub).await.unwrap()["configured"], json!(false));
+        assert!(Jev::configured(&hub).await.is_none());
+        // The negative answer is kept: a key that appears now is not looked for until saved through `set_key` or the time is up.
+        link.refuse.locked().take();
+        link.values.locked().insert(SLOT.into(), "k".into());
+        assert!(Jev::configured(&hub).await.is_none());
+        *NONE_UNTIL.locked() = None;
+        assert!(Jev::configured(&hub).await.is_some());
+        *SAVED.locked() = None;
     }
 
     #[test]

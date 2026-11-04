@@ -949,9 +949,56 @@ fn a_stalled_key_store_holds_up_its_own_call_and_no_other_row() {
         begun.elapsed()
     );
     release.send(()).expect("release");
+    // Answered, or refused where this OS has no key store to build the envelope on (Windows): either way it came back.
+    let late = blocked.join().expect("thread");
+    assert!(
+        !matches!(late, Reached::NoDaemon | Reached::Mismatch(_)),
+        "{late:?}"
+    );
+    d.stop();
+}
+
+/// The envelope through a real daemon and the owner socket, with a stand-in for the OS key store (the host's vault is
+/// a client of exactly these calls). Unix only: Windows has no key store to build the envelope on yet.
+#[cfg(unix)]
+#[test]
+fn the_secrets_rows_round_trip_through_a_real_daemon() {
+    let (_t, m) = machine();
+    let p = paths(&m);
+    let loads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = loads.clone();
+    let cfg = Config {
+        key_load: Some(std::sync::Arc::new(move || {
+            seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Some(zeroize::Zeroizing::new(vec![9u8; 32])))
+        })),
+        ..quiet()
+    };
+    let d = serving(&p, cfg);
+    let ask = |method: &str, params: Value| match read(&p, method, &params) {
+        Reached::Answered(v) => v,
+        other => panic!("{method}: {other:?}"),
+    };
+    // `has` and `delete` need no key: nothing is read for them.
+    assert_eq!(ask("secrets.has", json!({"name": "a"})), json!({"has": false}));
+    assert_eq!(ask("secrets.delete", json!({"name": "a"})), json!({"deleted": false}));
+    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+    ask("secrets.put", json!({"name": "a", "value": "one"}));
+    assert_eq!(ask("secrets.has", json!({"name": "a"})), json!({"has": true}));
+    assert_eq!(
+        ask("secrets.get", json!({"name": "a"})),
+        json!({"found": true, "value": "one"})
+    );
+    assert_eq!(ask("secrets.get", json!({"name": "zz"})), json!({"found": false}));
+    assert_eq!(ask("secrets.delete", json!({"name": "a"})), json!({"deleted": true}));
+    assert_eq!(ask("secrets.has", json!({"name": "a"})), json!({"has": false}));
+    // The key was read until it was found, then kept.
+    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // A bad name is the caller's mistake, said as a refusal.
     assert!(matches!(
-        blocked.join().expect("thread"),
-        Reached::Answered(_)
+        read(&p, "secrets.put", &json!({"name": "", "value": "x"})),
+        Reached::Refused(_)
     ));
     d.stop();
 }
