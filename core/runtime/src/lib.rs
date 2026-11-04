@@ -81,8 +81,6 @@ pub use daemon::Daemon;
 pub use daemon::status;
 pub use db::Core;
 pub use error::Error;
-#[cfg(unix)]
-pub use import::schedules::Report as SchedulesReport;
 pub use owner::Reached;
 
 use kith_kernel::paths::Paths;
@@ -170,7 +168,7 @@ pub fn migrate_authority(
 /// `kith migrate --schedules`: copies `kith-sched`'s state files (the last tick and each job's last run) into core.db
 /// (see `import::schedules`). Idempotent, read-only on the sources, `--dry-run` writes nothing; jobs.json is not imported.
 #[cfg(unix)]
-pub fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<SchedulesReport, Error> {
+pub fn migrate_schedules(paths: &Paths, dry_run: bool) -> Result<AuthorityReport, Error> {
     import::schedules::run(&Layout::new(&paths.machine), &paths.machine, dry_run)
 }
 

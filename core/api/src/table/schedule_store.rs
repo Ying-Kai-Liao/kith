@@ -1,5 +1,5 @@
 //! M4-2 (the schedule store): the owner's view of the schedules, from the agents' `jobs.json` definitions joined with the
-//! run state in core.db (tables in `core/runtime/src/migrations/schedules/`). Experimental and owner only.
+//! run state in the core's database (tables in `core/runtime/src/migrations/schedules/`). Experimental and owner only.
 //!
 //! The reads are `Served::Core` so a test core answers them; the daemon runs nothing for them yet (the host and `kith
 //! schedule` keep `kith-sched` until M4-5). `schedule.jobs` is the store's listing: `schedule.list` is the existing

@@ -25,16 +25,8 @@ use crate::db::MIGRATIONS;
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 
-/// What the step did, one line each.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct Report {
-    pub dry_run: bool,
-    /// Whether core.db changed, or in a dry run would.
-    pub changed: bool,
-    /// The `VACUUM INTO` copy taken before the first write.
-    pub backup: Option<std::path::PathBuf>,
-    pub lines: Vec<String>,
-}
+/// What the step did is told in the authority step's report: its lines, whether anything changed, the backup.
+use crate::AuthorityReport as Report;
 
 struct Run {
     agent: String,
