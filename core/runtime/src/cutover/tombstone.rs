@@ -11,11 +11,25 @@ use serde_json::{Value, json};
 
 use crate::error::{Error, Result};
 
-pub(crate) fn is_tombstone(path: &Path) -> bool {
+fn note_of(path: &Path) -> Option<Value> {
     std::fs::read(path)
         .ok()
         .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-        .is_some_and(|v| v.get("kith_tombstone").is_some())
+        .filter(|v| v.get("kith_tombstone").is_some())
+}
+
+pub(crate) fn is_tombstone(path: &Path) -> bool {
+    note_of(path).is_some()
+}
+
+/// The module a tombstone at `path` names (`None`: not a tombstone).
+pub(crate) fn module_of(path: &Path) -> Option<String> {
+    note_of(path).map(|v| {
+        v.get("module")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    })
 }
 
 fn note(module: &str) -> String {
@@ -30,7 +44,7 @@ fn note(module: &str) -> String {
 
 /// Puts the tombstone at `path`. Idempotent: a path that already holds one is left alone. Returns the line to report.
 pub(crate) fn ensure(path: &Path, module: &str, now: i64) -> Result<String> {
-    if is_tombstone(path) {
+    if module_of(path).as_deref() == Some(module) {
         return Ok(format!("tombstone already at {}", path.display()));
     }
     let io = |e: std::io::Error| Error::Io(format!("cutover: {}: {e}", path.display()));

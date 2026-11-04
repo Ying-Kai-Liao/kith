@@ -13,6 +13,7 @@
 //! The router refuses `KITH_CORE=python` while the state is `switched` or `rolling-back` (a half-done rollback is still
 //! not the Python's to write).
 
+use std::fmt::Write as _;
 use std::path::PathBuf;
 
 use crate::error::{Error, Result};
@@ -106,11 +107,12 @@ pub(crate) fn write(layout: &Layout, module: &str, s: &Switch) -> Result<()> {
     perms::ensure_dir(&dir(layout))?;
     let mut text = format!("state={}\n", s.phase.word());
     if let Some(snap) = &s.snapshot {
-        text.push_str(&format!("snapshot={snap}\n"));
+        let _ = writeln!(text, "snapshot={snap}");
     }
-    text.push_str(&format!("at={}\n", s.at));
+    let _ = writeln!(text, "at={}", s.at);
     let tmp = p.with_extension("switch.tmp");
-    std::fs::write(&tmp, text).map_err(|e| Error::Io(format!("cutover: {}: {e}", tmp.display())))?;
+    std::fs::write(&tmp, text)
+        .map_err(|e| Error::Io(format!("cutover: {}: {e}", tmp.display())))?;
     perms::make_private(&tmp)?;
     std::fs::rename(&tmp, &p).map_err(|e| Error::Io(format!("cutover: {}: {e}", p.display())))
 }

@@ -41,7 +41,10 @@ mod cards;
 mod conversations;
 // The module-keyed cutover framework (M3-10a): `kith migrate step|status`, `kith rollback`. No module registered yet.
 #[cfg(unix)]
-#[allow(dead_code, reason = "lanes register their modules at their switch (M3-10b..g, M2-23)")]
+#[allow(
+    dead_code,
+    reason = "lanes register their modules at their switch (M3-10b..g, M2-23)"
+)]
 mod cutover;
 mod daemon;
 // Nothing calls the doors but the daemon's `doors.*` rows and the tests: the host's sweep and `kith_door.py` switch later.

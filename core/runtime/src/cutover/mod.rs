@@ -15,14 +15,18 @@
 //! # Operations (all idempotent, all under core.db's lifetime lock, so two shells or a daemon refuse instead of racing)
 //! - `step`: refuse unless dependencies are switched; `VACUUM INTO` snapshot (recorded, reused on resume); record
 //!   `stepping`; `import`; `same_answer` must be empty or the step fails and stays `stepping` (Python is still the writer;
-//!   re-run to resume, or roll back); record `switched`; put the tombstones. The tombstone comes AFTER the record so a
+//!   re-run to resume, or roll back); write the marker (`marker.rs`); record `switched`; put the tombstones. The tombstone comes AFTER the record so a
 //!   crash between them is repaired by running `step` again (the import cannot be re-run once its sources are gone, and
 //!   need not be).
 //! - `rollback`: refuse while a dependent is switched, or while a claim/take is live (any claim not ended, or the module's
 //!   `live`) unless `--force`; record `rolling-back` (still closed to Python); `restore_secrets`; `export_back`; every
 //!   tombstone must be gone; clear the record. A crash leaves `rolling-back`: re-run to finish. A `stepping` module has
 //!   nothing to export (nothing was tombstoned): the record is just cleared.
-//! - `status`, `check` (the same-answer on its own), [`may_serve`] (switched AND the check passes, with a warning text).
+//! - `status`; `check` (the pre-switch same-answer on its own, read-only, no lock, so it runs beside a daemon; on a switched
+//!   module it says the core is the only store); [`may_serve`] / the `cutover.mayServe` row (read-only): the gate, see
+//!   `same_answer.rs` (switch file + the marker `step` wrote in core.db + tombstones; a file can only deny). A `step` on a
+//!   module with no file whose every tombstone names it and whose marker is in core.db records `switched` again without
+//!   importing (a lost record). `restore_secrets` helpers (idempotent, never delete, split big values): `secrets_back.rs`.
 //!
 //! # State: one source of truth
 //! [`state`]: a file per module in the core folder, readable by bash, Python and Rust without core.db (see there for why not
@@ -37,13 +41,15 @@ use crate::db::{Core, MIGRATIONS};
 use crate::error::{Error, Result};
 use crate::layout::Layout;
 
+pub(crate) mod marker;
 pub(crate) mod same_answer;
+pub(crate) mod secrets_back;
 pub(crate) mod state;
-pub(crate) mod tombstone;
 #[cfg(test)]
 mod tests;
+pub(crate) mod tombstone;
 
-pub(crate) use same_answer::{Serve, may_serve};
+pub(crate) use same_answer::Guard;
 use state::{Phase, Switch};
 
 /// Where a module's files are.
@@ -77,8 +83,9 @@ pub(crate) trait Module {
     fn tombstones(&self, env: &Env) -> Vec<PathBuf>;
     /// Copies the sources into core.db; idempotent. `core` is `None` in a dry run (open nothing for writing).
     fn import(&self, env: &Env, core: Option<&mut Core>, opts: Opts) -> Result<Vec<String>>;
-    /// The differences between the core and the old store; empty = the same answer.
-    fn same_answer(&self, env: &Env, core: &Core) -> Result<Vec<String>>;
+    /// The import invariant: the differences between core.db and the sources; empty = the same answer. Meaningful before the
+    /// tombstone only (see `same_answer.rs`). Read-only, so it also runs while the daemon holds the core.
+    fn same_answer(&self, env: &Env, db: &rusqlite::Connection) -> Result<Vec<String>>;
     /// Writes the source files again from core.db (over the tombstones), keeping every revoke and key.
     fn export_back(&self, env: &Env, core: &mut Core) -> Result<Vec<String>>;
     /// Writes secrets back to the OS secret store. Runs before `export_back`.
@@ -88,6 +95,15 @@ pub(crate) trait Module {
     /// Reasons this module must not be rolled back right now (besides live claims), e.g. a running host.
     fn live(&self, _env: &Env, _core: &Core) -> Result<Vec<String>> {
         Ok(Vec::new())
+    }
+    /// The import's digest, stored in the marker (informational: which import this switch stands for). Default none.
+    fn digest(&self, _env: &Env, _db: &rusqlite::Connection) -> Result<String> {
+        Ok(String::new())
+    }
+    /// The old store's own fingerprint beyond its files' inode/size/mtime (a database's `data_version`, the vault), for
+    /// the opt-in guard: a changed fingerprint makes it re-run `same_answer`. Default none.
+    fn fingerprint(&self, _env: &Env, _db: &rusqlite::Connection) -> Result<String> {
+        Ok(String::new())
     }
     /// Whether a live conversation claim or take blocks this module's rollback (default yes).
     fn guards_claims(&self) -> bool {
@@ -115,7 +131,10 @@ fn find<'a>(reg: &'a [Box<dyn Module>], name: &str) -> Result<&'a dyn Module> {
             Error::BadParams(if known.is_empty() {
                 format!("cutover: no module \"{name}\" (no module has a cutover yet)")
             } else {
-                format!("cutover: no module \"{name}\" (known: {})", known.join(", "))
+                format!(
+                    "cutover: no module \"{name}\" (known: {})",
+                    known.join(", ")
+                )
             })
         })
 }
@@ -129,7 +148,12 @@ fn lock(env: &Env) -> Result<Core> {
     crate::start_with(&env.layout, MIGRATIONS)
 }
 
-pub(crate) fn step(reg: &[Box<dyn Module>], env: &Env, name: &str, opts: Opts) -> Result<Vec<String>> {
+pub(crate) fn step(
+    reg: &[Box<dyn Module>],
+    env: &Env,
+    name: &str,
+    opts: Opts,
+) -> Result<Vec<String>> {
     let m = find(reg, name)?;
     let cur = state::read(&env.layout, name)?;
     let mut lines = Vec::new();
@@ -155,7 +179,33 @@ pub(crate) fn step(reg: &[Box<dyn Module>], env: &Env, name: &str, opts: Opts) -
     }
     let mut core = lock(env)?;
     let mut snapshot = cur.as_ref().and_then(|s| s.snapshot.clone());
+    // A finished switch whose record was lost: every tombstone names this module and the core holds the marker. The
+    // sources are gone, so there is nothing to import; the record is written again and that is all.
+    if cur.is_none() {
+        let tombs = m.tombstones(env);
+        if let Some((at, _)) = marker::read(core.conn(), name).filter(|_| {
+            !tombs.is_empty()
+                && tombs
+                    .iter()
+                    .all(|p| tombstone::module_of(p).as_deref() == Some(name))
+        }) {
+            state::write(
+                &env.layout,
+                name,
+                &Switch {
+                    phase: Phase::Switched,
+                    snapshot: None,
+                    at,
+                },
+            )?;
+            return Ok(vec![format!(
+                "{name}: the switch had finished (tombstones in place, the core holds its marker); recorded as switched again, nothing imported"
+            )]);
+        }
+    }
     if cur.as_ref().is_none_or(|s| s.phase == Phase::Stepping) {
+        // One `at` for the whole step: the file's, and then the marker's.
+        let at = cur.as_ref().map_or_else(now_secs, |s| s.at);
         if snapshot.is_none() {
             let p = core.backup(&env.layout, &format!("cutover-{name}"))?;
             snapshot = Some(p.display().to_string());
@@ -167,11 +217,11 @@ pub(crate) fn step(reg: &[Box<dyn Module>], env: &Env, name: &str, opts: Opts) -
             &Switch {
                 phase: Phase::Stepping,
                 snapshot: snapshot.clone(),
-                at: now_secs(),
+                at,
             },
         )?;
         lines.extend(m.import(env, Some(&mut core), opts)?);
-        let c = same_answer::check(m, env, &core)?;
+        let c = same_answer::check(m, env, core.conn())?;
         if c.count > 0 {
             return Err(Error::Refused(format!(
                 "cutover: {name}: the core's answers differ from the old store's ({} difference(s): {}); NOT switched, Python still writes. Fix and re-run `kith migrate step {name}`, or `kith rollback {name}`",
@@ -180,13 +230,15 @@ pub(crate) fn step(reg: &[Box<dyn Module>], env: &Env, name: &str, opts: Opts) -
             )));
         }
         lines.push(format!("{name}: same answer as the old store"));
+        let digest = m.digest(env, core.conn())?;
+        marker::write(&mut core, name, at, &digest)?;
         state::write(
             &env.layout,
             name,
             &Switch {
                 phase: Phase::Switched,
                 snapshot,
-                at: now_secs(),
+                at,
             },
         )?;
     } else {
@@ -207,7 +259,9 @@ pub(crate) fn rollback(
 ) -> Result<Vec<String>> {
     let m = find(reg, name)?;
     let Some(cur) = state::read(&env.layout, name)? else {
-        return Ok(vec![format!("{name} is not switched: nothing to roll back")]);
+        return Ok(vec![format!(
+            "{name} is not switched: nothing to roll back"
+        )]);
     };
     for other in reg.iter().filter(|o| o.depends_on().contains(&name)) {
         if phase_of(env, other.name())?.is_some() {
@@ -244,7 +298,10 @@ pub(crate) fn rollback(
                 live.join("; ")
             )));
         }
-        lines.push(format!("--force: rolling back although {}", live.join("; ")));
+        lines.push(format!(
+            "--force: rolling back although {}",
+            live.join("; ")
+        ));
     }
     state::write(
         &env.layout,
@@ -264,8 +321,11 @@ pub(crate) fn rollback(
             )));
         }
     }
+    marker::clear(&mut core, name)?;
     state::clear(&env.layout, name)?;
-    lines.push(format!("{name}: rolled back; Python reads its own files again"));
+    lines.push(format!(
+        "{name}: rolled back; Python reads its own files again"
+    ));
     Ok(lines)
 }
 
@@ -287,14 +347,64 @@ pub(crate) fn status(reg: &[Box<dyn Module>], env: &Env) -> Result<Vec<String>> 
 /// The same-answer check on its own: one line per difference, or "same answer".
 pub(crate) fn check(reg: &[Box<dyn Module>], env: &Env, name: &str) -> Result<Vec<String>> {
     let m = find(reg, name)?;
-    let core = lock(env)?;
-    let c = same_answer::check(m, env, &core)?;
+    if phase_of(env, name)? == Some(Phase::Switched) {
+        return Ok(vec![format!(
+            "{name}: switched: the core is the only store"
+        )]);
+    }
+    // Read-only and without the lifetime lock, so it also answers while the daemon runs.
+    let db = rusqlite::Connection::open_with_flags(
+        &env.layout.db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .map_err(|e| Error::Io(format!("cutover: core.db cannot be read here: {e}")))?;
+    let c = same_answer::check(m, env, &db)?;
     if c.count == 0 {
         return Ok(vec![format!("{name}: same answer")]);
     }
     let mut out = vec![format!("{name}: {} difference(s)", c.count)];
     out.extend(c.first);
     Ok(out)
+}
+
+/// The env opt-in for a module: `KITH_CORE_<MODULE>=1` (dashes become underscores). Read here and nowhere else; it goes at
+/// M2-24.
+fn opt_in_env(name: &str) -> bool {
+    let var = format!("KITH_CORE_{}", name.to_ascii_uppercase().replace('-', "_"));
+    std::env::var(var).is_ok_and(|v| v == "1")
+}
+
+/// `cutover.mayServe`: the gate as a read-only row (see `same_answer::may_serve`).
+pub(crate) fn serve_json(
+    reg: &[Box<dyn Module>],
+    env: &Env,
+    db: &rusqlite::Connection,
+    name: &str,
+    opt_in: bool,
+    guard: &Guard,
+) -> Result<serde_json::Value> {
+    let m = find(reg, name)?;
+    let s = guard.may_serve(m, env, db, opt_in);
+    Ok(serde_json::json!({"ok": s.ok, "warning": s.warning}))
+}
+
+pub(crate) fn call_may_serve(core: &Core, params: &serde_json::Value) -> Result<serde_json::Value> {
+    static GUARD: std::sync::OnceLock<Guard> = std::sync::OnceLock::new();
+    let name = params
+        .get("module")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| Error::BadParams("cutover.mayServe: module is required".into()))?;
+    let machine = core.folders().map(|p| p.machine.clone()).ok_or_else(|| {
+        Error::NotServed("kith-core: this core was opened without its folders".into())
+    })?;
+    serve_json(
+        &registry(),
+        &Env::new(&machine),
+        core.conn(),
+        name,
+        opt_in_env(name),
+        GUARD.get_or_init(Guard::default),
+    )
 }
 
 /// `kith kernel cutover ...`: `step MODULE [--dry-run] [--force]`, `rollback MODULE [--force]`, `status`, `check MODULE`,

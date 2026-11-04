@@ -1822,6 +1822,99 @@
       }
     },
     {
+      "name": "kernel.cutover",
+      "summary": "The module-keyed cutover framework: `step MODULE [--dry-run]`, `rollback MODULE [--force]`, `status`, `check MODULE`, `modules`.",
+      "params": [
+        {
+          "name": "kernel",
+          "summary": "The kernel folder (default: the one this program finds).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "args",
+          "summary": "The verb and its arguments.",
+          "required": false,
+          "schema": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "kernel",
+          "cutover"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "kernel": {
+            "kind": "flag",
+            "spellings": [
+              "--kernel"
+            ]
+          },
+          "args": {
+            "kind": "rest"
+          }
+        }
+      }
+    },
+    {
+      "name": "cutover.mayServe",
+      "summary": "May the core serve this module now? Read-only gate over the cutover switch: `{ok, warning}`. `ok` needs the module's switch file, the marker `step` left in the core and its tombstones; an env opt-in changes nothing once the file exists. The host reaches the daemon as the owner, so Owner is the only principal; it writes nothing.",
+      "params": [
+        {
+          "name": "module",
+          "summary": "The cutover module (`kith migrate status` lists them).",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "cutover",
+          "may-serve"
+        ],
+        "aliases": [],
+        "formats": [],
+        "requires": [],
+        "args": {
+          "module": {
+            "kind": "positional"
+          }
+        }
+      }
+    },
+    {
       "name": "terminal.open",
       "summary": "Starts an agent's engine in a held terminal (the holder runs it under the start stub, so it outlives the window) and returns a single-use attach ticket; `direct` when the holder is not reachable, `busy` when another writer has the session.",
       "params": [

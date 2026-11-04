@@ -284,6 +284,15 @@ fn every_switched_verb_has_a_row() {
     }
 }
 
+/// M3-10a: the cutover verbs switch whole modules and roll them back, so only the owner may call them; never a host
+/// bridge, a run token or a guest.
+#[test]
+fn the_cutover_row_is_owner_only_and_experimental() {
+    let m = method("kernel.cutover").expect("kernel.cutover has a row");
+    assert_eq!(m.principals, &[Principal::Owner]);
+    assert_eq!(m.stability, Stability::Experimental);
+}
+
 #[test]
 fn the_openrpc_file_is_the_table() {
     let fresh = openrpc::render(&openrpc::generate());
