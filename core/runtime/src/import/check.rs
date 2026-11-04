@@ -138,6 +138,13 @@ fn agents(auth: &Value, ctx: &Ctx) -> Vec<String> {
             .flat_map(Map::keys)
             .cloned(),
     );
+    v.extend(
+        auth.get("agent_access")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flat_map(Map::keys)
+            .cloned(),
+    );
     dirs(&ctx.agents, &mut v);
     dirs(&ctx.kernel.join("agents"), &mut v);
     v.insert("scratch".to_owned());

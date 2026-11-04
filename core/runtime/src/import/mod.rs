@@ -10,8 +10,8 @@
 //! - The same-answer check (`check.rs`) runs first on a scratch copy and again on the real rows before they commit: for
 //!   every person x agent x via (and bots), `Authority` over core.db equals `Rules` over the original file; one
 //!   difference fails the step. It proves storage fidelity (Rust rules over the file vs Rust rules over core.db), not
-//!   parity with Python `kith-auth`: the Rust rules lack `agent_domains`/`guest_domains` (which is why `agent_access` is
-//!   refused), and `kernel/tests/difftest` is what holds the Rust rules to the Python.
+//!   parity with Python `kith-auth`: `kernel/tests/difftest` is what holds the Rust rules to the Python (guest domains
+//!   included).
 //! - Idempotent: when core.db already holds exactly what the file says (people in the same order too) and every Keychain
 //!   item has its record, no row, record, backup or log line is written. (Opening the core still bumps its generation, as
 //!   every open does.)
@@ -23,7 +23,7 @@
 //! Where the mapping and what is left behind are written: `authority.rs` (tables), `items.rs` (secrets).
 //!
 //! Later (not here): cards (PR #711), access requests (M2-3), the host vault rows of serve.db (the host moves them itself
-//! at M2-7), `agent_access` (the rules lack `agent_domains`), `profiles`/`grants`/`env` (kith-auth, M2-18), the cutover
+//! at M2-7), `profiles`/`grants`/`env` (kith-auth, M2-18), the cutover
 //! and the auth.json tombstone (M2-23). Also later: `--force` could un-revoke a person once core.db writes come first
 //! (before the cutover it should refuse to clear `revoked` unless the file agrees); a rotated Keychain value is never
 //! resealed; the first envelope put can mint the master key outside the transaction; every put error reads as "store
@@ -129,6 +129,7 @@ fn copy_out(src: &Connection) -> Result<Connection> {
         "presets",
         "invites",
         "retired",
+        "agent_access",
         "authority_settings",
     ] {
         let cols: Vec<String> = src
@@ -157,15 +158,21 @@ fn copy_out(src: &Connection) -> Result<Connection> {
 }
 
 fn is_empty(snapshot: &Value) -> bool {
-    ["people", "members", "presets", "invites", "retired"]
-        .iter()
-        .all(|t| {
-            snapshot
-                .get(t)
-                .and_then(Value::as_object)
-                .is_none_or(serde_json::Map::is_empty)
-        })
-        && snapshot.get("owner_bots_budget").is_none()
+    [
+        "people",
+        "members",
+        "presets",
+        "invites",
+        "retired",
+        "agent_access",
+    ]
+    .iter()
+    .all(|t| {
+        snapshot
+            .get(t)
+            .and_then(Value::as_object)
+            .is_none_or(serde_json::Map::is_empty)
+    }) && snapshot.get("owner_bots_budget").is_none()
 }
 
 #[derive(PartialEq, Eq, Debug)]
