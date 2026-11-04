@@ -35,6 +35,8 @@ mod check;
 pub(crate) mod items;
 #[cfg(test)]
 mod tests;
+#[allow(dead_code, reason = "wired into kith migrate by M3-10")]
+pub(crate) mod transcripts;
 
 use std::path::Path;
 

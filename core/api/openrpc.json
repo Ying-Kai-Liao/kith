@@ -7194,6 +7194,59 @@
         "requires": [],
         "args": {}
       }
+    },
+    {
+      "name": "conversation.transcript",
+      "summary": "The engine sessions a conversation has, one per account: the engine, its session id, the pointer to where the engine keeps it, the hash and size as of the last read, and whether the engine's copy is there now and has changed since. Refuses an id that is no conversation. Only Claude's sessions are held; another engine's row says `held: false`.",
+      "params": [
+        {
+          "name": "id",
+          "summary": "The conversation.",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "name": "account",
+          "summary": "Only this account's session (`claude`, `claude:work`).",
+          "required": false,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "result": {
+        "name": "result",
+        "schema": {}
+      },
+      "x-kith-principals": [
+        "owner"
+      ],
+      "x-kith-stability": "experimental",
+      "x-kith-served": "core",
+      "x-kith-cli": {
+        "path": [
+          "conversations",
+          "transcript"
+        ],
+        "aliases": [],
+        "formats": [
+          "--json"
+        ],
+        "requires": [],
+        "args": {
+          "id": {
+            "kind": "positional"
+          },
+          "account": {
+            "kind": "flag",
+            "spellings": [
+              "--account"
+            ]
+          }
+        }
+      }
     }
   ],
   "components": {

@@ -36,6 +36,7 @@ mod run_tokens;
 mod runs;
 mod secrets;
 mod switched;
+mod transcripts;
 
 /// Types the switched verbs add to the contract's.
 pub static EXTRA_TYPES: &[TypeDef] = &[
@@ -76,6 +77,7 @@ const PARTS: &[&[Method]] = &[
     import::ROWS,
     // M3: conversations and their claims.
     conversations::ROWS,
+    transcripts::ROWS,
 ];
 
 const LEN: usize = {

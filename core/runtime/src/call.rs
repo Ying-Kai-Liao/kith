@@ -24,6 +24,7 @@ impl Core {
         match row.name {
             "paths" => self.paths(params),
             "kernel.version" => parse(&kith_kernel::version_json()),
+            "conversation.transcript" => self.transcript(params),
             _ => Err(Error::NotServed(format!(
                 "kith-core: {method} is not answered in the core yet"
             ))),
