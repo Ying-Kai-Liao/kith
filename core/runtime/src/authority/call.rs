@@ -75,7 +75,7 @@ pub(crate) fn ctx_of(core: &Core, params: &Value) -> Result<Ctx> {
     let home = params
         .get("home")
         .and_then(Value::as_str)
-        .map_or_else(|| folders.home.clone(), PathBuf::from);
+        .map_or_else(kith_kernel::paths::process_home, PathBuf::from);
     Ok(Ctx {
         auth: folders.secrets.join("auth.json"),
         agents: folders.agents.clone(),

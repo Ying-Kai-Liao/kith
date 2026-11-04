@@ -317,3 +317,27 @@ fn bridge_held_reads_the_callers_serve_folder_not_the_machine_folder() {
         "KITH_SERVE_DIR wins"
     );
 }
+
+/// A call with `env` only (no `home`) falls back to the process's $HOME, never to the kith folder (`folders.home`),
+/// which holds no `.kith/serve` and so reads "never linked".
+#[test]
+fn a_call_without_a_home_resolves_the_serve_folder_from_the_process_home() {
+    let rig = rig();
+    let serve_of = |params: Value| match super::super::call::ctx_of(&rig.core, &params)
+        .unwrap()
+        .serve
+    {
+        kith_kernel::secrets::ServeDir::Fixed(d) => d,
+        other => panic!("unexpected {other:?}"),
+    };
+    let process_home = kith_kernel::paths::process_home();
+    assert_eq!(
+        serve_of(json!({"env": {}})),
+        process_home.join(".kith/serve")
+    );
+    let given = tempfile::tempdir().unwrap();
+    assert_eq!(
+        serve_of(json!({"env": {"KITH_SERVE_DIR": given.path()}})),
+        given.path()
+    );
+}
